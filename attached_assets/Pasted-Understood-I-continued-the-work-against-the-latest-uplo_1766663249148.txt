@@ -1,0 +1,734 @@
+Understood. I continued the work against the **latest uploaded repo** (`/mnt/data/TradingCentral-3AL-2 (2).zip`, unpacked under `/mnt/data/tc3al_latest/TradingCentral-3AL-2`) and I can confirm:
+
+1. **Replit Agent 3’s AUDIT_REPORT.md is materially inaccurate in multiple places**, and
+2. There **is a real, high-impact enforcement gap** that must be fixed to align with your “locked means close-only; no modify/cancel” invariants, and
+3. I have already implemented the **core PolicyDecision fix + backend status alignment**, and started implementing the **frontend trade-screen gating**, but I hit tool-time while patching the pending-order edit/cancel button blocks (the repo’s button markup differed from my initial match patterns).
+
+Below is what’s completed **now** (with full code), what remains **incomplete**, and what I will finish next (still inline, file-by-file).
+
+---
+
+# A) What I Verified in the Latest Repo (Reality vs AUDIT_REPORT.md)
+
+## A1) The report is wrong about these being “not implemented”
+
+These are already present in your repo:
+
+* **Trader Profile Settings page** (`client/src/pages/ProfileSettings.tsx`) – implemented.
+* **Header dropdown entry point** (`client/src/components/Header.tsx`) – implemented, includes Profile Settings link.
+* **2FA / TOTP MFA** – implemented:
+
+  * backend: `server/routes/profileMfa.ts`
+  * UI: ProfileSettings page includes the MFA card/flows.
+* **Tier UI elements**:
+
+  * `client/src/components/TierBadge.tsx` exists and is used.
+* **User-facing KYC / Payout cards**:
+
+  * `client/src/components/VerificationCards.tsx` already displays KYC status + payout preference card.
+
+So the “❌ gaps” list you pasted is **partly stale**.
+
+## A2) The report is correct about one major gap (and it is critical)
+
+### ✅ REAL GAP: Locked-state enforcement drift on trade modifications & pending cancels
+
+Your repo previously had **PolicyDecision missing `TRADE_MODIFY_SLTP` handling**, and it treated `TRADE_CANCEL_PENDING` as reduce-only. That violates your invariant matrix (locked = no target edits / no cancels).
+
+I fixed this at the **policy engine layer**, which is the right place (single source of truth).
+
+---
+
+# B) Completed Fix #1: PolicyDecision is now the single enforcement truth (with deny codes)
+
+## File (FULL): `shared/policyDecision.ts`
+
+This is a **full replacement** that:
+
+* Implements explicit decisions for:
+
+  * `TRADE_OPEN_OR_INCREASE`
+  * `TRADE_CLOSE_OR_REDUCE`
+  * `TRADE_CANCEL_PENDING`
+  * `TRADE_MODIFY_SLTP`
+  * `PHONE_VERIFY_START`
+  * `KYC_VIEW`
+* Enforces your invariant:
+
+  * In locked states, **only close/reduce may be allowed**
+  * **No cancel pending**
+  * **No modify SL/TP**
+* Adds a compact **`policySummary()`** (requested) returning **booleans + deny_code** so UI/backend cannot drift.
+* Extends `featureGates()` with:
+
+  * `canTradeModifyTargets`
+  * `canTradeCancelPending`
+  * `denyCodes` mapping for consistent UX
+
+### ✅ Drop-in full file:
+
+```ts
+export type UserTier = "CANDIDATE" | "PERFORMER" | "SELECTED";
+export type ContenderTier =
+  | "NONE"
+  | "CANDIDATE_EMAIL_ONLY"
+  | "CANDIDATE_SMS_REQUIRED"
+  | "VERIFIED_SMS"
+  | "SELECTED_REAL_CAPITAL";
+
+export type PolicyAction =
+  | "TRADE_OPEN_OR_INCREASE"
+  | "TRADE_CLOSE_OR_REDUCE"
+  | "TRADE_PLACE_PENDING"
+  | "TRADE_CANCEL_PENDING"
+  | "TRADE_MODIFY_SLTP"
+  | "EMAIL_RESEND_VERIFICATION"
+  | "PHONE_VERIFY_START"
+  | "PHONE_VERIFY_CONFIRM"
+  | "KYC_VIEW"
+  | "KYC_SUBMIT"
+  | "PREFERRED_PAYMENT_CURRENCY_SET"
+  | "PAYOUT_REQUEST";
+
+export type PolicyDecision = {
+  allowed: boolean;
+  deny_code?: string;
+  accountState?: string;
+  showLockedBanner?: boolean;
+  redirectTo?: string;
+};
+
+export type DecisionContext = {
+  now: Date;
+  user: {
+    id: number;
+    email: string;
+    username?: string | null;
+    createdAt: Date;
+    suspendedAt?: Date | null;
+    emailVerifiedAt?: Date | null;
+    emailInitialDueAt?: Date | null;
+    emailReverifyDueAt?: Date | null;
+    phoneVerifiedAt?: Date | null;
+    userTier: UserTier;
+    contenderTier: ContenderTier;
+    selectedAt?: Date | null;
+  };
+  metrics: {
+    tradesLifetime: number;
+    tradesLast90d: number;
+    accountAgeDays: number;
+    lastTradeDaysAgo?: number | null;
+    balancePctOfStart: number;
+    returnLast90d: number;
+  };
+  throttle: {
+    emailSendCountDay: number;
+    emailLastSentAtMs?: number | null;
+    smsSendCountDay: number;
+    smsLastSentAtMs?: number | null;
+    otpFailCount: number;
+  };
+  kyc: {
+    status: string;
+    invitedAtMs?: number | null;
+  };
+  tradeIntent?: {
+    kind: string;
+    side?: "BUY" | "SELL" | string;
+    slBefore?: number | null;
+    slAfter?: number | null;
+  };
+};
+
+export type PolicyConfig = {
+  gracePeriodDays: number;
+  emailInitialGraceDays: number;
+  emailReverifyPeriodDays: number;
+  emailResendCooldownSec: number;
+  emailDailySendCap: number;
+  smsDailySendCap: number;
+  otpMaxAttempts: number;
+  contenderMinAgeDays: number;
+  contenderMinTradesLifetime: number;
+  contenderMinBalancePct: number;
+  contenderPath2MinAgeDays: number;
+  contenderPath2MinTradesLast90: number;
+  contenderPath2MinReturnLast90: number;
+  contenderPath2MaxDaysSinceLastTrade: number;
+  allowReduceOnlyWhenLocked: boolean;
+  allowCancelPendingWhenLocked: boolean;
+  /**
+   * When email verification is locked (missing verification or reverify overdue), default behavior is to disallow
+   * SL/TP edits. If you explicitly want to allow only risk-reducing SL changes while locked, set this to true and
+   * provide tradeIntent (side + slBefore + slAfter) to the policy engine.
+   */
+  allowRiskReducingSltpChangeWhenLocked: boolean;
+};
+
+export const DEFAULT_POLICY_CONFIG: PolicyConfig = {
+  gracePeriodDays: 14,
+  emailInitialGraceDays: 14,
+  emailReverifyPeriodDays: 30,
+  emailResendCooldownSec: 60,
+  emailDailySendCap: 5,
+  smsDailySendCap: 5,
+  otpMaxAttempts: 5,
+  contenderMinAgeDays: 30,
+  contenderMinTradesLifetime: 30,
+  contenderMinBalancePct: 1.2,
+  contenderPath2MinAgeDays: 90,
+  contenderPath2MinTradesLast90: 20,
+  contenderPath2MinReturnLast90: 0.1,
+  contenderPath2MaxDaysSinceLastTrade: 14,
+  allowReduceOnlyWhenLocked: true,
+  allowCancelPendingWhenLocked: false,
+  // Context invariant: locked means no exposure increase and no order/target manipulation (close/reduce allowed).
+  allowRiskReducingSltpChangeWhenLocked: false,
+};
+
+function allow(opts?: Partial<PolicyDecision>): PolicyDecision {
+  return { allowed: true, ...opts };
+}
+
+function deny(code: string, opts?: Partial<PolicyDecision>): PolicyDecision {
+  return { allowed: false, deny_code: code, ...opts };
+}
+
+export type AccountState =
+  | "ACTIVE_VERIFIED"
+  | "ACTIVE_UNVERIFIED_GRACE"
+  | "LOCKED_EMAIL_NOT_VERIFIED"
+  | "LOCKED_EMAIL_REVERIFY_OVERDUE"
+  | "SUSPENDED";
+
+export function resolveAccountState(ctx: DecisionContext, cfg: PolicyConfig = DEFAULT_POLICY_CONFIG): AccountState {
+  if (ctx.user.suspendedAt) return "SUSPENDED";
+
+  const now = ctx.now.getTime();
+  const createdAt = ctx.user.createdAt.getTime();
+  const gracePeriodMs = cfg.gracePeriodDays * 24 * 3600 * 1000;
+
+  if (ctx.user.emailVerifiedAt) {
+    if (ctx.user.emailReverifyDueAt && now > ctx.user.emailReverifyDueAt.getTime()) {
+      return "LOCKED_EMAIL_REVERIFY_OVERDUE";
+    }
+    return "ACTIVE_VERIFIED";
+  }
+
+  if (now - createdAt < gracePeriodMs) {
+    return "ACTIVE_UNVERIFIED_GRACE";
+  }
+
+  return "LOCKED_EMAIL_NOT_VERIFIED";
+}
+
+export function computeContenderEligibility(
+  ctx: DecisionContext,
+  cfg: PolicyConfig = DEFAULT_POLICY_CONFIG
+): {
+  eligible: boolean;
+  path1: boolean;
+  path2: boolean;
+} {
+  const path1 =
+    ctx.metrics.accountAgeDays >= cfg.contenderMinAgeDays &&
+    ctx.metrics.balancePctOfStart >= cfg.contenderMinBalancePct &&
+    ctx.metrics.tradesLifetime >= cfg.contenderMinTradesLifetime;
+
+  const path2 =
+    ctx.metrics.accountAgeDays >= cfg.contenderPath2MinAgeDays &&
+    (ctx.metrics.lastTradeDaysAgo ?? Infinity) <= cfg.contenderPath2MaxDaysSinceLastTrade &&
+    ctx.metrics.returnLast90d >= cfg.contenderPath2MinReturnLast90 &&
+    ctx.metrics.tradesLast90d >= cfg.contenderPath2MinTradesLast90;
+
+  return { eligible: path1 || path2, path1, path2 };
+}
+
+function isExposureIncreasingTradingAction(action: PolicyAction): boolean {
+  return action === "TRADE_OPEN_OR_INCREASE" || action === "TRADE_PLACE_PENDING";
+}
+
+function isCloseOrReduceTradingAction(action: PolicyAction): boolean {
+  return action === "TRADE_CLOSE_OR_REDUCE";
+}
+
+function isCancelPendingTradingAction(action: PolicyAction): boolean {
+  return action === "TRADE_CANCEL_PENDING";
+}
+
+function isModifyTargetsTradingAction(action: PolicyAction): boolean {
+  return action === "TRADE_MODIFY_SLTP";
+}
+
+function isRiskReducingStopChange(intent?: DecisionContext["tradeIntent"]): boolean {
+  if (!intent) return false;
+  if (intent.kind !== "SLTP_UPDATE") return false;
+
+  const before = intent.slBefore;
+  const after = intent.slAfter;
+  const side = (intent.side ?? "").toUpperCase();
+
+  // Setting an SL when none existed is risk-reducing.
+  if ((before === null || before === undefined) && after !== null && after !== undefined) return true;
+
+  // Removing an SL is never risk-reducing.
+  if (before !== null && before !== undefined && (after === null || after === undefined)) return false;
+
+  // If we still don't have both, can't decide safely.
+  if (before === null || before === undefined) return false;
+  if (after === null || after === undefined) return false;
+
+  if (side === "BUY" || side === "LONG") {
+    return after >= before;
+  }
+  if (side === "SELL" || side === "SHORT") {
+    return after <= before;
+  }
+
+  // Unknown side: safest default.
+  return false;
+}
+
+function isSelectedForKyc(ctx: DecisionContext): boolean {
+  return (
+    ctx.user.userTier === "SELECTED" ||
+    ctx.user.contenderTier === "SELECTED_REAL_CAPITAL" ||
+    !!ctx.user.selectedAt ||
+    ["INVITED", "SUBMITTED", "APPROVED"].includes(ctx.kyc.status)
+  );
+}
+
+export function decidePolicy(
+  action: PolicyAction,
+  ctx: DecisionContext,
+  cfg: PolicyConfig = DEFAULT_POLICY_CONFIG
+): PolicyDecision {
+  const accountState = resolveAccountState(ctx, cfg);
+  const contender = computeContenderEligibility(ctx, cfg);
+
+  if (accountState === "SUSPENDED") {
+    return deny("ACCOUNT_SUSPENDED", { accountState, showLockedBanner: true });
+  }
+
+  // Email lock states: allow close/reduce (optional), disallow exposure increase and order/target manipulation.
+  if (accountState === "LOCKED_EMAIL_NOT_VERIFIED" || accountState === "LOCKED_EMAIL_REVERIFY_OVERDUE") {
+    const code = accountState === "LOCKED_EMAIL_NOT_VERIFIED" ? "EMAIL_NOT_VERIFIED" : "EMAIL_REVERIFY_OVERDUE";
+
+    if (isExposureIncreasingTradingAction(action)) {
+      return deny(code, { accountState, showLockedBanner: true, redirectTo: "/verify-email" });
+    }
+
+    if (isCloseOrReduceTradingAction(action)) {
+      return cfg.allowReduceOnlyWhenLocked
+        ? allow({ accountState, showLockedBanner: true })
+        : deny("ACTION_NOT_ALLOWED_IN_STATE", { accountState, showLockedBanner: true });
+    }
+
+    if (isCancelPendingTradingAction(action)) {
+      return cfg.allowCancelPendingWhenLocked
+        ? allow({ accountState, showLockedBanner: true })
+        : deny("TRADE_CANCEL_PENDING_NOT_ALLOWED_WHEN_LOCKED", { accountState, showLockedBanner: true });
+    }
+
+    if (isModifyTargetsTradingAction(action)) {
+      if (cfg.allowRiskReducingSltpChangeWhenLocked && isRiskReducingStopChange(ctx.tradeIntent)) {
+        return allow({ accountState, showLockedBanner: true });
+      }
+      return deny("TRADE_MODIFY_TARGETS_NOT_ALLOWED_WHEN_LOCKED", {
+        accountState,
+        showLockedBanner: true,
+      });
+    }
+
+    // Non-trading actions below may still be permitted (e.g., resend email).
+  }
+
+  if (action === "EMAIL_RESEND_VERIFICATION") {
+    const nowMs = ctx.now.getTime();
+    const last = ctx.throttle.emailLastSentAtMs ?? 0;
+    const cooldownMs = cfg.emailResendCooldownSec * 1000;
+
+    if (ctx.throttle.emailSendCountDay >= cfg.emailDailySendCap) {
+      return deny("EMAIL_SEND_RATE_LIMIT");
+    }
+    if (nowMs - last < cooldownMs) {
+      return deny("EMAIL_SEND_COOLDOWN");
+    }
+    return allow();
+  }
+
+  if (action === "PHONE_VERIFY_START" || action === "PHONE_VERIFY_CONFIRM") {
+    if (accountState !== "ACTIVE_VERIFIED") {
+      return deny("SMS_NOT_ELIGIBLE", { accountState, showLockedBanner: true, redirectTo: "/verify-email" });
+    }
+
+    if (!contender.eligible) {
+      return deny("SMS_NOT_ELIGIBLE_CONTENDER", { accountState, showLockedBanner: false });
+    }
+
+    if (action === "PHONE_VERIFY_START") {
+      const nowMs = ctx.now.getTime();
+      const last = ctx.throttle.smsLastSentAtMs ?? 0;
+
+      if (ctx.throttle.smsSendCountDay >= cfg.smsDailySendCap) return deny("SMS_RATE_LIMIT");
+      if (nowMs - last < 60_000) return deny("SMS_RATE_LIMIT");
+    }
+
+    if (action === "PHONE_VERIFY_CONFIRM") {
+      if (ctx.throttle.otpFailCount >= cfg.otpMaxAttempts) return deny("SMS_OTP_TOO_MANY_ATTEMPTS");
+    }
+
+    return allow();
+  }
+
+  if (action === "KYC_VIEW" || action === "KYC_SUBMIT" || action === "PREFERRED_PAYMENT_CURRENCY_SET" || action === "PAYOUT_REQUEST") {
+    if (accountState !== "ACTIVE_VERIFIED") {
+      const code = accountState === "LOCKED_EMAIL_REVERIFY_OVERDUE" ? "EMAIL_REVERIFY_OVERDUE" : "EMAIL_NOT_VERIFIED";
+      return deny(code, { accountState, showLockedBanner: true, redirectTo: "/verify-email" });
+    }
+
+    const selected = isSelectedForKyc(ctx);
+    if (!selected) return deny("KYC_NOT_SELECTED", { redirectTo: "/profile" });
+
+    if (action === "KYC_SUBMIT") {
+      if (!(ctx.kyc.status === "INVITED" || ctx.kyc.status === "REJECTED")) {
+        return deny("KYC_STATE_INVALID");
+      }
+      return allow();
+    }
+
+    if (action === "PREFERRED_PAYMENT_CURRENCY_SET") {
+      // Currency is a payout preference: only meaningful once KYC is approved (or the user has been moved to SELECTED).
+      if (!(ctx.kyc.status === "APPROVED" || ctx.user.userTier === "SELECTED")) {
+        return deny("PAYOUT_PROFILE_NOT_READY");
+      }
+      return allow();
+    }
+
+    if (action === "PAYOUT_REQUEST") {
+      if (ctx.user.userTier !== "SELECTED") return deny("PAYOUT_NOT_SELECTED");
+      if (ctx.kyc.status !== "APPROVED") return deny("PAYOUT_KYC_NOT_APPROVED");
+      if (!ctx.user.phoneVerifiedAt) return deny("PAYOUT_PHONE_NOT_VERIFIED");
+      return allow();
+    }
+
+    // KYC_VIEW
+    return allow();
+  }
+
+  // Active/unlocked states (and unverified grace): trade actions are allowed; backend risk guardrails still apply elsewhere.
+  if (action === "TRADE_OPEN_OR_INCREASE" || action === "TRADE_PLACE_PENDING") {
+    return allow({ accountState });
+  }
+  if (action === "TRADE_CLOSE_OR_REDUCE") {
+    return allow({ accountState });
+  }
+  if (action === "TRADE_CANCEL_PENDING") {
+    return allow({ accountState });
+  }
+  if (action === "TRADE_MODIFY_SLTP") {
+    return allow({ accountState });
+  }
+
+  return allow({ accountState });
+}
+
+export type PolicySummary = {
+  accountState: AccountState;
+  contender: { eligible: boolean; path1: boolean; path2: boolean };
+  trade: {
+    openOrIncrease: Pick<PolicyDecision, "allowed" | "deny_code" | "redirectTo">;
+    closeOrReduce: Pick<PolicyDecision, "allowed" | "deny_code" | "redirectTo">;
+    cancelPending: Pick<PolicyDecision, "allowed" | "deny_code" | "redirectTo">;
+    modifyTargets: Pick<PolicyDecision, "allowed" | "deny_code" | "redirectTo">;
+  };
+  sms: {
+    start: Pick<PolicyDecision, "allowed" | "deny_code" | "redirectTo">;
+  };
+  kyc: {
+    view: Pick<PolicyDecision, "allowed" | "deny_code" | "redirectTo">;
+  };
+};
+
+export function policySummary(ctx: DecisionContext, cfg: PolicyConfig = DEFAULT_POLICY_CONFIG): PolicySummary {
+  const contender = computeContenderEligibility(ctx, cfg);
+
+  const openOrIncrease = decidePolicy("TRADE_OPEN_OR_INCREASE", ctx, cfg);
+  const closeOrReduce = decidePolicy("TRADE_CLOSE_OR_REDUCE", ctx, cfg);
+  const cancelPending = decidePolicy("TRADE_CANCEL_PENDING", ctx, cfg);
+  const modifyTargets = decidePolicy("TRADE_MODIFY_SLTP", ctx, cfg);
+
+  const smsStart = decidePolicy("PHONE_VERIFY_START", ctx, cfg);
+  const kycView = decidePolicy("KYC_VIEW", ctx, cfg);
+
+  return {
+    accountState: resolveAccountState(ctx, cfg),
+    contender,
+    trade: {
+      openOrIncrease: { allowed: openOrIncrease.allowed, deny_code: openOrIncrease.deny_code, redirectTo: openOrIncrease.redirectTo },
+      closeOrReduce: { allowed: closeOrReduce.allowed, deny_code: closeOrReduce.deny_code, redirectTo: closeOrReduce.redirectTo },
+      cancelPending: { allowed: cancelPending.allowed, deny_code: cancelPending.deny_code, redirectTo: cancelPending.redirectTo },
+      modifyTargets: { allowed: modifyTargets.allowed, deny_code: modifyTargets.deny_code, redirectTo: modifyTargets.redirectTo },
+    },
+    sms: {
+      start: { allowed: smsStart.allowed, deny_code: smsStart.deny_code, redirectTo: smsStart.redirectTo },
+    },
+    kyc: {
+      view: { allowed: kycView.allowed, deny_code: kycView.deny_code, redirectTo: kycView.redirectTo },
+    },
+  };
+}
+
+export function featureGates(ctx: DecisionContext, cfg: PolicyConfig = DEFAULT_POLICY_CONFIG) {
+  const st = resolveAccountState(ctx, cfg);
+  const contender = computeContenderEligibility(ctx, cfg);
+  const selected = isSelectedForKyc(ctx);
+
+  const dOpen = decidePolicy("TRADE_OPEN_OR_INCREASE", ctx, cfg);
+  const dClose = decidePolicy("TRADE_CLOSE_OR_REDUCE", ctx, cfg);
+  const dCancel = decidePolicy("TRADE_CANCEL_PENDING", ctx, cfg);
+  const dModify = decidePolicy("TRADE_MODIFY_SLTP", ctx, cfg);
+  const dSms = decidePolicy("PHONE_VERIFY_START", ctx, cfg);
+  const dKyc = decidePolicy("KYC_VIEW", ctx, cfg);
+
+  return {
+    accountState: st,
+    contenderEligible: contender.eligible,
+
+    // Trade actions
+    canTradeOpenOrIncrease: dOpen.allowed,
+    canTradeCloseOrReduce: dClose.allowed,
+    canTradeCancelPending: dCancel.allowed,
+    canTradeModifyTargets: dModify.allowed,
+
+    // Verification
+    canStartSms: dSms.allowed,
+
+    // KYC/Payout
+    canViewKyc: selected && dKyc.allowed,
+    canSetPreferredPaymentCurrency: selected && decidePolicy("PREFERRED_PAYMENT_CURRENCY_SET", ctx, cfg).allowed,
+    canRequestPayout: decidePolicy("PAYOUT_REQUEST", ctx, cfg).allowed,
+
+    // Deny codes (for UI messaging)
+    denyCodes: {
+      tradeOpenOrIncrease: dOpen.deny_code ?? null,
+      tradeCloseOrReduce: dClose.deny_code ?? null,
+      tradeCancelPending: dCancel.deny_code ?? null,
+      tradeModifyTargets: dModify.deny_code ?? null,
+      smsStart: dSms.deny_code ?? null,
+      kycView: dKyc.deny_code ?? null,
+    },
+  };
+}
+```
+
+---
+
+# C) Completed Fix #2: Backend `/api/verification/status` now returns trade permissions + deny codes
+
+## File (PATCHED): `server/routes/verification.ts`
+
+Only the status response section changed.
+
+```ts
+res.json({
+  accountState: gates.accountState,
+  emailVerified: !!ctx.user.emailVerifiedAt,
+  emailVerifiedAt: ctx.user.emailVerifiedAt?.toISOString() || null,
+  emailReverifyDueAt: ctx.user.emailReverifyDueAt?.toISOString() || null,
+  gracePeriodEndsAt: ctx.user.emailInitialDueAt?.toISOString() || null,
+  phoneVerified: !!ctx.user.phoneVerifiedAt,
+  phoneVerifiedAt: ctx.user.phoneVerifiedAt?.toISOString() || null,
+  canStartSms: gates.canStartSms,
+  contenderEligible: gates.contenderEligible,
+  userTier: ctx.user.userTier,
+  contenderTier: ctx.user.contenderTier,
+
+  // Trading permissions (UI must match backend enforcement)
+  canTradeOpenOrIncrease: gates.canTradeOpenOrIncrease,
+  canTradeCloseOrReduce: gates.canTradeCloseOrReduce,
+  canTradeModifyTargets: gates.canTradeModifyTargets,
+  canTradeCancelPending: gates.canTradeCancelPending,
+
+  // Compliance workflow
+  canViewKyc: gates.canViewKyc,
+  canSetPreferredPaymentCurrency: gates.canSetPreferredPaymentCurrency,
+  canRequestPayout: gates.canRequestPayout,
+
+  // Action-level deny codes for consistent UX
+  denyCodes: gates.denyCodes,
+});
+```
+
+---
+
+# D) Started Fix #3: Frontend TradeScreen gating (partially complete)
+
+## D1) Completed inside `client/src/pages/TradeScreen.tsx`
+
+I have already added:
+
+* a `useQuery()` call to `/api/verification/status`
+* computed booleans:
+
+  * `canTradeOpenOrIncrease`
+  * `canTradeModifyTargets`
+  * `canTradeCancelPending`
+* `policyMessageFor(denyCode)` mapping
+* **hard block** in `onSubmit()` preventing trade placement when locked
+* updated the **order placement buttons** to disable when `!canTradeOpenOrIncrease`
+
+### The inserted block (already in your file now)
+
+```ts
+type VerificationStatus = {
+  accountState: string;
+  canTradeOpenOrIncrease: boolean;
+  canTradeCloseOrReduce: boolean;
+  canTradeModifyTargets: boolean;
+  canTradeCancelPending: boolean;
+  denyCodes?: Record<string, string | null> | null;
+};
+
+const { data: verificationStatus } = useQuery<VerificationStatus>({
+  queryKey: ["verificationStatus"],
+  queryFn: async () => {
+    const res = await fetch("/api/verification/status");
+    if (!res.ok) throw new Error("Failed to load verification status");
+    return (await res.json()) as VerificationStatus;
+  },
+  enabled: !!user,
+  refetchInterval: 30_000,
+});
+
+const canTradeOpenOrIncrease = verificationStatus?.canTradeOpenOrIncrease ?? true;
+const canTradeModifyTargets = verificationStatus?.canTradeModifyTargets ?? true;
+const canTradeCancelPending = verificationStatus?.canTradeCancelPending ?? true;
+
+const policyMessageFor = (denyCode?: string | null) => {
+  switch (denyCode) {
+    case "EMAIL_NOT_VERIFIED":
+      return "Email verification is required before placing new trades.";
+    case "EMAIL_REVERIFY_OVERDUE":
+      return "Email re-verification is required before placing new trades.";
+    case "ACCOUNT_FROZEN":
+      return "Your account is frozen. Contact support.";
+    case "ACCOUNT_DISABLED":
+      return "Your account is disabled. Contact support.";
+    case "ACCOUNT_SUSPENDED":
+      return "Your account is suspended. Contact support.";
+    case "TRADE_CANCEL_PENDING_NOT_ALLOWED_WHEN_LOCKED":
+      return "Pending-order cancellation is disabled until email verification is completed.";
+    case "TRADE_MODIFY_TARGETS_NOT_ALLOWED_WHEN_LOCKED":
+      return "SL/TP modifications are disabled until email verification is completed.";
+    case "ACTION_NOT_ALLOWED_IN_STATE":
+      return "This action is not allowed right now.";
+    default:
+      return "This action is not allowed right now.";
+  }
+};
+```
+
+### And the onSubmit() gate is complete:
+
+```ts
+if (!canTradeOpenOrIncrease) {
+  const code = denyCodes?.tradeOpenOrIncrease;
+  toast({
+    title: "Trading Locked",
+    description: policyMessageFor(code) || "You cannot place new trades at this time.",
+    variant: "destructive",
+  });
+  return;
+}
+```
+
+## D2) INCOMPLETE (next step)
+
+I still need to finish patching:
+
+* the **Pending Orders** table buttons:
+
+  * disable **Edit** if `!canTradeModifyTargets`
+  * disable **Cancel** if `!canTradeCancelPending`
+  * and show toast with deny code message if clicked
+* the **Open Trades** edit button (same gating)
+* wiring `EditTradeModal` to accept `canModifyTargets` + deny code
+
+I attempted to patch these, but the markup uses `order` and button layout differs from my initial search patterns; I need to re-run the patch with exact text matches.
+
+---
+
+# E) What I Have NOT Yet Output (but can complete next)
+
+You asked for a broader completion scope (admin profile settings + tier mgmt + auto tier promotion). Those are **not yet output inline** in this message.
+
+Specifically still pending:
+
+1. **Admin “Profile Settings” mini-tab** (admin view of trader profile completeness + gated states)
+2. **Admin tier progression management UI** (connect to existing `/api/admin/users/:id/tier`)
+3. **Backend auto tier assignment based on performance** (Candidate → Performer)
+4. **KYC queue logic alignment to policy engine** (to prevent criteria drift)
+5. A **full implementation checklist** for Replit Agent 3 (audit-grade)
+
+---
+
+# F) Immediate Next Deliverable (if you reply “CONTINUE” once more)
+
+I will output, inline and file-by-file:
+
+## 1) Trade UI enforcement completion
+
+* Full patches for:
+
+  * `client/src/pages/TradeScreen.tsx` (pending edit/cancel + open trade edit + modal wiring)
+  * `client/src/components/EditTradeModal.tsx` (add gating props)
+
+## 2) Admin Profile Settings + Tier Management (UI)
+
+* New file:
+
+  * `client/src/pages/AdminUserProfiles.tsx`
+* Patch:
+
+  * `client/src/pages/AdminDashboard.tsx` (new mini-tab + render + tier control)
+
+## 3) Tier auto-promotion backend
+
+* New file:
+
+  * `server/policy/autoTier.ts`
+* Patch:
+
+  * `server/recalcAccount.ts` (trigger promotion after account updates)
+* Optional patch:
+
+  * `server/routes/admin.ts` KYC queue uses policy engine criteria (prevents drift)
+
+## 4) Full audit checklist (the “hedgefund trail grade” implementation crosscheck)
+
+A structured checklist including:
+
+* schema invariants
+* Twilio Verify / Resend flows
+* rolling email reverify schedule
+* audit trail events you must emit
+* UI gating surfaces
+* enforcement tests
+
+---
+
+## Before I proceed
+
+Your last instruction was “continue”, so I proceeded without asking questions.
+However, for **auto tier promotion**, I will assume the monotonic rule:
+
+* `CANDIDATE → PERFORMER` automatically when contender eligibility is met
+* `PERFORMER → SELECTED` only by admin/KYC approval (already mostly how backend is written)
+
+If that matches your intended tier semantics, reply:
+
+**CONTINUE**
+
+and I’ll output the remaining inline code + the full audit checklist.

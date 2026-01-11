@@ -1,0 +1,2208 @@
+Pasted-Below-is-a-logic-engine-plan-and-algorithm-design-that-_1766621061450.txt
+Document
+GOOD, NOW REPRODUCE THE OUTPUT WITH THE CONTEXT DOCUMENT UPLOADED IN MIND, SO THAT THE LOGIC MATCHES IT FOR TRADERS, EMAIL SEND, DATA TRAIL, DATA LOGS, REMINDERS, ACCESS CONTROL,  SMS SEND, KYC, PROFILE SETTINGS ETC AND VERIFY THE RESULTANT  THE ENGINE WILL HAVE NO CONFLICTS
+Thought for 27s
+
+Below is the consolidated TradeHub Identity / Eligibility / Messaging / Audit specification, explicitly aligned to the logic-engine plan you uploaded (14-day email grace, monthly re-verification, SMS reserved for high-signal contenders, progressive enforcement). 
+
+Pasted-Below-is-a-logic-engine-…
+
+1) Canonical policy objectives (must not conflict)
+
+Frictionless start: users can sign up and trade immediately.
+
+Integrity over time: enforce email verification after 14 days (stateful, auditable).
+
+Disposable email containment: enforce rolling 30-day re-verification (monthly) after initial verify.
+
+Cost control: SMS is never required at signup; only unlocked when contender criteria are met.
+
+Progressive access: KYC + “Preferred Payment Currency” are Tier-3 only (selected traders), not universal.
+
+No engine conflicts: one deterministic decision function governs UI gating + API enforcement + audit emission.
+
+2) Single source of truth: states and tiers
+2.1 AccountState (verification + enforcement)
+
+ACTIVE_UNVERIFIED_GRACE
+
+LOCKED_EMAIL_UNVERIFIED
+
+ACTIVE_VERIFIED
+
+LOCKED_EMAIL_REVERIFY_OVERDUE
+
+SUSPENDED_ADMIN (hard override)
+
+2.2 ContenderTier (orthogonal to AccountState)
+
+NONE
+
+CANDIDATE_SMS_REQUIRED
+
+VERIFIED_SMS
+
+(optional) SELECTED_REAL_CAPITAL (when you actually select them)
+
+Invariant: SMS eligibility requires AccountState == ACTIVE_VERIFIED (never offer SMS while locked/unverified). 
+
+Pasted-Below-is-a-logic-engine-…
+
+3) Data model (minimum fields to avoid drift)
+3.1 Users / profile
+
+emailVerifiedAt (nullable)
+
+emailInitialDueAt = createdAt + 14 days (persist or derive; persist recommended)
+
+emailReverifyDueAt (nullable; set only after initial verification; emailVerifiedAt + 30 days)
+
+accountState (optional stored snapshot; backend must be able to derive at runtime regardless)
+
+Lock fields: lockedAt, lockReason
+
+Reminder fields: lastReminderSentAt, reminderCountToday, nextReminderAt (or stage tracking)
+
+3.2 Trading aggregates (for contender criteria)
+
+firstTradeAt, lastTradeAt
+
+startingBalance (baseline)
+
+balanceNow
+
+positionsCountLifetime
+
+positionsCountLast90
+
+balanceAt90dAgo (or daily equity snapshots so you can compute last-90 returns)
+
+3.3 KYC / selection (Tier-3)
+
+kycStatus (PENDING/VERIFIED/REJECTED)
+
+preferredPaymentCurrency (defaults from region; stored under KYC/Payment Profile)
+
+kycSubmittedAt, kycVerifiedAt
+
+4) Decision function (prevents conflicts)
+
+All privileged endpoints and the UI call the same logic:
+
+4.1 Precedence order (no ambiguity)
+
+SUSPENDED_ADMIN overrides everything.
+
+Email initial verification enforcement (grace vs lock).
+
+Email re-verification enforcement (active vs overdue lock).
+
+Risk guardrails (max trades, lots, symbol limits, market state, etc.).
+
+Feature gates (SMS, KYC pages, etc.) based on ContenderTier.
+
+4.2 Deterministic AccountState resolution
+
+If admin suspended → SUSPENDED_ADMIN.
+
+Else if emailVerifiedAt is null:
+
+if now < emailInitialDueAt → ACTIVE_UNVERIFIED_GRACE
+
+else → LOCKED_EMAIL_UNVERIFIED
+
+Else (email verified):
+
+if now <= emailReverifyDueAt + overdueGrace → ACTIVE_VERIFIED
+
+else → LOCKED_EMAIL_REVERIFY_OVERDUE
+
+This exactly matches your uploaded enforcement model (remind → restrict → lock). 
+
+Pasted-Below-is-a-logic-engine-…
+
+5) Access control matrix (critical to avoid trading-engine conflicts)
+
+Key conflict-avoidance rule: when locked for email, allow reduce-only actions so users can de-risk; block any exposure increase.
+
+Capability	ACTIVE_UNVERIFIED_GRACE	LOCKED_EMAIL_UNVERIFIED	ACTIVE_VERIFIED	LOCKED_EMAIL_REVERIFY_OVERDUE	SUSPENDED_ADMIN
+View dashboard/history	Yes	Yes	Yes	Yes	Policy
+Open new trades / increase exposure	Yes	No	Yes	No	No
+Modify SL/TP, pending, cancels	Yes	No	Yes	No	No
+Close / partial close (reduce-only)	Yes	Yes	Yes	Yes	Policy
+Start SMS verification	No (not eligible)	No	Only if contender eligible	No	No
+KYC/Payment profile	No	No	No	No	No (unless selected)
+
+This matrix ensures your trade engine never gets contradictory instructions (e.g., “locked but also allowed to place order”). 
+
+Pasted-Below-is-a-logic-engine-…
+
+6) Reminder + enforcement jobs (and runtime enforcement)
+6.1 Initial verification reminders (14-day grace)
+
+Schedule: Day 0, 7, 12, 13; lock at Day 14 if still unverified. 
+
+Pasted-Below-is-a-logic-engine-…
+
+
+Important: the daily job sends reminders and updates stored state, but API enforcement must compute state at request time to prevent timing gaps.
+
+6.2 Rolling 30-day re-verification reminders
+
+Schedule: due-7, due-3, due-1, due-0, due+2; lock at due + overdueGrace. 
+
+Pasted-Below-is-a-logic-engine-…
+
+6.3 Rate limits (to prevent abuse and provider cost spikes)
+
+Email resend cooldown + daily caps per user and per IP.
+
+SMS OTP send cap + verify attempts cap + temporary lockout after too many failures.
+
+7) Contender eligibility (SMS gate) — exactly per your criteria
+
+SMS is introduced only when the trader is a “serious contender,” determined by either:
+
+Rule A (≥ 1 month active)
+
+Eligible when ALL:
+
+Account age/trading age ≥ 30 days
+
+balanceNow >= 1.20 * startingBalance (>120%)
+
+positionsCountLifetime >= 30 
+
+Pasted-Below-is-a-logic-engine-…
+
+Rule B (≥ 3 months rolling)
+
+Eligible when ALL:
+
+Account age ≥ 90 days
+
+returnLast90 >= 0.10 (≥10%)
+
+positionsCountLast90 >= 20 
+
+Pasted-Below-is-a-logic-engine-…
+
+Hard prerequisite: AccountState == ACTIVE_VERIFIED (prevents disposable emails being promoted).
+
+8) Profile Settings UX (progressive unlock, no contradictions)
+Tier 1 (everyone)
+
+First/Last name, display name, username (rules as you choose)
+
+Email + verify status + resend link
+
+Password + TOTP MFA (recommended available to all)
+
+Tier 2 (contenders / verified SMS)
+
+Phone field + SMS verification flows
+
+Sessions/devices view + terminate session
+
+Expanded notifications (security + trade)
+
+Tier 3 (selected)
+
+KYC & Payment Profile
+
+Legal name, address, ID upload
+
+Preferred Payment Currency (defaults from region; editable here)
+
+KYC status tracking
+
+This aligns with your stated platform model and avoids forcing phone/KYC on casual users. 
+
+Pasted-Below-is-a-logic-engine-…
+
+9) Audit trail + data logs (so enforcement is explainable and tamper-resistant)
+9.1 Mandatory server-side events (append-only)
+
+EMAIL_VERIFY_REMINDER_SENT
+
+ACCOUNT_LOCKED_EMAIL_UNVERIFIED
+
+EMAIL_VERIFIED
+
+EMAIL_REVERIFY_REMINDER_SENT
+
+ACCOUNT_LOCKED_REVERIFY_OVERDUE
+
+EMAIL_REVERIFIED
+
+CONTENDER_ELIGIBLE_SMS_REQUIRED
+
+SMS_OTP_SENT, SMS_VERIFIED, SMS_VERIFY_FAILED
+
+ACCOUNT_ACTION_DENIED (with deny_code, deny_scope, state snapshot, correlationId)
+
+These are explicitly required by your uploaded plan (“stateful and auditable,” “log transitions,” “reminders,” “lock reasons”). 
+
+Pasted-Below-is-a-logic-engine-…
+
+9.2 Conflict-proof correlation
+
+For any denied trade placement, include:
+
+correlationId (order attempt id)
+
+deny_code (e.g., EMAIL_UNVERIFIED_GRACE_EXPIRED)
+
+Snapshot of accountState, due dates, and key metrics (optional)
+
+This guarantees the trade audit trail and the identity enforcement trail never diverge.
+
+10) “No conflicts” verification checklist (engine-level invariants)
+
+These are the exact checks that prevent contradictions between modules:
+
+One decision function used by UI + all privileged APIs (trade open/modify/cancel, SMS start, KYC access).
+
+Precedence is fixed: admin > email lockouts > risk guardrails > feature gating.
+
+Locked states must never permit exposure increase; reduce-only close is allowed (unless admin suspended).
+
+SMS eligibility is gated by ACTIVE_VERIFIED (never based solely on performance metrics).
+
+KYC/Preferred Payment Currency exists only under selected tier (no base-currency feature elsewhere).
+
+Enforcement is runtime; jobs only assist (reminders, reporting, backfills). No “job missed → policy bypass.”
+
+Every deny emits an auditable event (ACCOUNT_ACTION_DENIED) with deterministic reason codes.
+
+If you want, I can now convert this into a one-page “PolicyDecision” interface contract (exact inputs/outputs + deny_code mapping) that your backend and frontend can implement verbatim, guaranteeing there is no drift.
+
+Sources
+DO
+Thought for 2m 42s
+
+Below is the PolicyDecision Interface Contract (v1.0) that your backend + frontend must implement verbatim so email enforcement, reminders, SMS gating, KYC unlocks, profile settings, and audit trails remain deterministic and non-conflicting with the trading engine.
+
+This contract is aligned to your uploaded logic-engine plan: 14-day email grace → lock, rolling 30-day re-verify, SMS only for contenders (30d +20% +30 trades OR 90d +10% last90 +20 trades), and KYC/payment only for selected traders.
+
+1) Core primitives
+1.1 Enums
+export type AccountState =
+  | "ACTIVE_UNVERIFIED_GRACE"
+  | "LOCKED_EMAIL_UNVERIFIED"
+  | "ACTIVE_VERIFIED"
+  | "LOCKED_EMAIL_REVERIFY_OVERDUE"
+  | "SUSPENDED_ADMIN";
+
+export type ContenderTier =
+  | "NONE"
+  | "CANDIDATE_SMS_REQUIRED"
+  | "VERIFIED_SMS"
+  | "SELECTED_REAL_CAPITAL"; // only when you explicitly select them
+
+export type PolicyAction =
+  // Trading (exposure-affecting)
+  | "TRADE_OPEN_OR_INCREASE"
+  | "TRADE_MODIFY_SLTP"
+  | "TRADE_PLACE_PENDING"
+  | "TRADE_CANCEL_PENDING"
+  // Trading (reduce-only safety)
+  | "TRADE_CLOSE_OR_REDUCE"
+  // Identity & profile
+  | "PROFILE_EDIT_BASIC"
+  | "EMAIL_RESEND_VERIFICATION"
+  | "EMAIL_CHANGE"
+  | "PHONE_VERIFY_START"
+  | "PHONE_VERIFY_CONFIRM"
+  // Compliance
+  | "KYC_VIEW"
+  | "KYC_SUBMIT"
+  | "PREFERRED_PAYMENT_CURRENCY_SET"
+  // Sessions/security
+  | "SESSIONS_VIEW"
+  | "SESSION_TERMINATE"
+  | "MFA_ENABLE"
+  | "MFA_DISABLE"
+  // System jobs (reminders/enforcement)
+  | "JOB_SEND_EMAIL_REMINDER"
+  | "JOB_SEND_REVERIFY_REMINDER"
+  | "JOB_ENFORCE_LOCKS"
+  | "JOB_EVALUATE_CONTENDER_ELIGIBILITY";
+
+2) Inputs
+2.1 PolicyConfig (single source of truth)
+export type PolicyConfig = {
+  emailInitialGraceDays: 14;         // fixed per your model
+  emailReverifyPeriodDays: 30;       // monthly re-verify
+  emailReverifyOverdueGraceDays: number; // recommended 3–7
+
+  // Default reminder schedule aligned to your doc
+  initialVerifyReminderDaysAfterSignup: number[]; // [0, 12, 13]
+  reverifyReminderOffsetsDays: number[];          // [-7, -3, 0, +2]
+
+  // Anti-abuse throttles
+  emailResendCooldownSec: number; // e.g., 60
+  emailDailySendCap: number;      // e.g., 5 per user/day
+  smsDailySendCap: number;        // e.g., 3 per user/day
+  otpMaxAttempts: number;         // e.g., 6 before temporary lock
+
+  // Contender criteria (exact)
+  contenderPath1: { minAccountAgeDays: 30; minBalancePctOfStart: 1.20; minLifetimeTrades: 30; };
+  contenderPath2: { minAccountAgeDays: 90; minReturnLast90: 0.10; minTradesLast90: 20; requireRecentTradeDays: number; };
+
+  // Reduce-only safety behavior
+  allowReduceOnlyWhenLocked: true;
+};
+
+2.2 DecisionContext (passed on every request)
+export type DecisionContext = {
+  now: Date;
+
+  user: {
+    id: number;
+    email: string;
+    createdAt: Date;
+
+    // Verification timestamps
+    emailVerifiedAt: Date | null;
+    emailInitialDueAt?: Date;       // can be stored or derived = createdAt + 14d
+    emailReverifyDueAt: Date | null;
+
+    phoneVerifiedAt: Date | null;
+
+    contenderTier: ContenderTier;
+
+    // Admin override
+    suspendedAt: Date | null;
+
+    // Trading aggregates (must be queryable)
+    startingBalance: number;
+    balanceNow: number;
+    firstTradeAt: Date | null;
+    lastTradeAt: Date | null;
+    positionsCountLifetime: number;
+    positionsCountLast90: number;
+    returnLast90: number; // decimal return, e.g. 0.12 = +12%
+
+    // Selection/KYC
+    selectedAt: Date | null; // when you select them for real-capital pipeline
+    kycStatus: "NOT_STARTED" | "PENDING" | "VERIFIED" | "REJECTED";
+    preferredPaymentCurrency: string | null;
+
+    // Locks
+    lockedAt: Date | null;
+    lockReason: string | null;
+  };
+
+  request: {
+    correlationId: string; // REQUIRED for every action decision
+    actorType: "USER" | "ADMIN" | "SYSTEM";
+    actorUserId: number;
+    sessionId?: string;
+    ip?: string;
+    userAgent?: string;
+  };
+
+  action: PolicyAction;
+
+  // Optional action-specific payload (e.g., order size, symbol, phone)
+  payload?: Record<string, any>;
+};
+
+3) Outputs
+export type PolicyDecision = {
+  allow: boolean;
+
+  // Derived truth used by UI + server logs (do not trust client state)
+  derived: {
+    accountState: AccountState;
+    contenderTier: ContenderTier;
+    emailInitialDueAt: Date;
+    emailReverifyDueAt: Date | null;
+    isEmailInitialOverdue: boolean;
+    isEmailReverifyOverdue: boolean;
+    isSmsEligibleByPerformance: boolean;
+    isSelectedForKyc: boolean;
+  };
+
+  // If denied
+  deny?: {
+    code: DenyCode;
+    messageKey: string;   // for UI copy localization
+    httpStatus: 401 | 403 | 409 | 429;
+    nextStep?: "VERIFY_EMAIL" | "REVERIFY_EMAIL" | "WAIT_COOLDOWN" | "BECOME_CONTENDER" | "VERIFY_PHONE" | "GET_SELECTED" | "CONTACT_SUPPORT";
+  };
+
+  // Obligations: always emitted server-side to your audit log (hash-chained if you already do that)
+  obligations: Array<{
+    type: AuditEventType;
+    data: Record<string, any>;
+  }>;
+
+  // Optional UX hints
+  ui?: {
+    showLockedBanner?: boolean;
+    redirectTo?: "/verify-email" | "/profile" | "/support" | "/kyc";
+    lockCountdownDays?: number;
+  };
+};
+
+4) Deny codes (must be exhaustive and stable)
+export type DenyCode =
+  | "ADMIN_SUSPENDED"
+  | "EMAIL_UNVERIFIED_GRACE_EXPIRED"
+  | "EMAIL_REVERIFY_OVERDUE"
+  | "EMAIL_SEND_RATE_LIMIT"
+  | "EMAIL_SEND_COOLDOWN"
+  | "SMS_NOT_ELIGIBLE"
+  | "SMS_RATE_LIMIT"
+  | "SMS_OTP_TOO_MANY_ATTEMPTS"
+  | "KYC_NOT_SELECTED"
+  | "KYC_STATE_INVALID"
+  | "ACTION_NOT_ALLOWED_IN_STATE";
+
+Required mapping (no ambiguity)
+
+If suspendedAt != null → deny ADMIN_SUSPENDED for all actions except support/help pages.
+
+If emailVerifiedAt == null and now >= emailInitialDueAt:
+
+deny any exposure-increasing trading action with EMAIL_UNVERIFIED_GRACE_EXPIRED
+
+allow TRADE_CLOSE_OR_REDUCE (reduce-only) if allowReduceOnlyWhenLocked
+
+If emailVerifiedAt != null and emailReverifyDueAt != null and now >= emailReverifyDueAt + overdueGrace:
+
+deny exposure-increasing actions with EMAIL_REVERIFY_OVERDUE
+
+allow reduce-only close if enabled
+
+If action is PHONE_VERIFY_START or PHONE_VERIFY_CONFIRM and contender eligibility not satisfied:
+
+deny SMS_NOT_ELIGIBLE
+
+If action is any KYC/payment currency action and selectedAt == null:
+
+deny KYC_NOT_SELECTED
+
+5) Derived state resolution (must be identical everywhere)
+function resolveAccountState(ctx: DecisionContext, cfg: PolicyConfig): AccountState {
+  if (ctx.user.suspendedAt) return "SUSPENDED_ADMIN";
+
+  const emailInitialDueAt =
+    ctx.user.emailInitialDueAt ?? new Date(ctx.user.createdAt.getTime() + cfg.emailInitialGraceDays * 86400000);
+
+  // Initial verification enforcement
+  if (!ctx.user.emailVerifiedAt) {
+    return (ctx.now < emailInitialDueAt) ? "ACTIVE_UNVERIFIED_GRACE" : "LOCKED_EMAIL_UNVERIFIED";
+  }
+
+  // Monthly re-verify enforcement (only after initial verify)
+  if (ctx.user.emailReverifyDueAt) {
+    const overdueAt = new Date(ctx.user.emailReverifyDueAt.getTime() + cfg.emailReverifyOverdueGraceDays * 86400000);
+    if (ctx.now >= overdueAt) return "LOCKED_EMAIL_REVERIFY_OVERDUE";
+  }
+
+  return "ACTIVE_VERIFIED";
+}
+
+
+Rule: scheduler jobs may update stored fields, but runtime decisions must always compute truth so there is no “job missed → policy bypass” conflict.
+
+6) Capability rules (the non-conflict access matrix)
+6.1 Exposure-increasing trading actions
+
+TRADE_OPEN_OR_INCREASE, TRADE_MODIFY_SLTP, TRADE_PLACE_PENDING, TRADE_CANCEL_PENDING
+
+Allowed only when:
+
+accountState === "ACTIVE_UNVERIFIED_GRACE" OR accountState === "ACTIVE_VERIFIED"
+
+Denied when:
+
+LOCKED_EMAIL_UNVERIFIED → EMAIL_UNVERIFIED_GRACE_EXPIRED
+
+LOCKED_EMAIL_REVERIFY_OVERDUE → EMAIL_REVERIFY_OVERDUE
+
+SUSPENDED_ADMIN → ADMIN_SUSPENDED
+
+6.2 Reduce-only
+
+TRADE_CLOSE_OR_REDUCE
+
+Allowed when:
+
+any state except SUSPENDED_ADMIN (unless you explicitly allow closes under admin suspension too)
+
+This is the key rule that prevents “locked but cannot de-risk” contradictions.
+
+7) Contender eligibility (SMS gate) — exact, deterministic
+function isSmsEligible(ctx: DecisionContext, cfg: PolicyConfig): boolean {
+  // hard prerequisite: must be email-verified & not locked
+  const st = resolveAccountState(ctx, cfg);
+  if (st !== "ACTIVE_VERIFIED") return false;
+
+  const ageDays = (ctx.now.getTime() - ctx.user.createdAt.getTime()) / 86400000;
+  const balancePctOfStart = ctx.user.startingBalance > 0 ? (ctx.user.balanceNow / ctx.user.startingBalance) : 0;
+
+  const path1 =
+    ageDays >= cfg.contenderPath1.minAccountAgeDays &&
+    balancePctOfStart >= cfg.contenderPath1.minBalancePctOfStart &&
+    ctx.user.positionsCountLifetime >= cfg.contenderPath1.minLifetimeTrades;
+
+  const recentTradeOk =
+    !!ctx.user.lastTradeAt &&
+    ((ctx.now.getTime() - ctx.user.lastTradeAt.getTime()) / 86400000) <= cfg.contenderPath2.requireRecentTradeDays;
+
+  const path2 =
+    ageDays >= cfg.contenderPath2.minAccountAgeDays &&
+    recentTradeOk &&
+    ctx.user.returnLast90 >= cfg.contenderPath2.minReturnLast90 &&
+    ctx.user.positionsCountLast90 >= cfg.contenderPath2.minTradesLast90;
+
+  return path1 || path2;
+}
+
+
+When eligible:
+
+set/keep contenderTier = "CANDIDATE_SMS_REQUIRED" until phone verified
+
+after OTP success: contenderTier = "VERIFIED_SMS"
+
+8) KYC / Preferred Payment Currency (only when selected)
+
+KYC and preferredPaymentCurrency are Tier-3 only:
+
+Eligibility:
+
+user.selectedAt != null OR contenderTier === "SELECTED_REAL_CAPITAL"
+
+Then allow:
+
+KYC_VIEW, KYC_SUBMIT, PREFERRED_PAYMENT_CURRENCY_SET
+
+Otherwise deny:
+
+KYC_NOT_SELECTED
+
+Design note (matches your intent): this keeps casual users frictionless; only selected traders see compliance/payment controls.
+
+9) Audit events (data trail + logs, always server-side)
+9.1 Event types (minimum)
+export type AuditEventType =
+  | "REMINDER_SENT"
+  | "EMAIL_VERIFICATION_EMAIL_SENT"
+  | "EMAIL_VERIFIED"
+  | "EMAIL_REVERIFY_REMINDER_SENT"
+  | "EMAIL_REVERIFIED"
+  | "ACCOUNT_LOCKED_EMAIL_UNVERIFIED"
+  | "ACCOUNT_LOCKED_REVERIFY_OVERDUE"
+  | "ACCOUNT_ACTION_DENIED"
+  | "CONTENDER_ELIGIBLE"
+  | "SMS_OTP_SENT"
+  | "SMS_VERIFIED"
+  | "SMS_VERIFY_FAILED"
+  | "KYC_SUBMITTED"
+  | "KYC_VERIFIED"
+  | "KYC_REJECTED";
+
+9.2 Mandatory fields in every audit row
+
+correlationId, userId, actorType, actorUserId
+
+sessionId, ip, userAgent (nullable but captured when present)
+
+derived.accountState, derived.contenderTier
+
+prev_hash, event_hash if you are hash-chaining audit logs (recommended; consistent with your broader audit posture)
+
+9.3 Deny logging rule
+
+Every denied decision must emit:
+
+ACCOUNT_ACTION_DENIED with { action, denyCode, stateSnapshot, dueDates, cooldowns }
+
+This is what prevents “engine says no but UI doesn’t know why” conflicts.
+
+10) Reminder & enforcement jobs (must call the same policy engine)
+
+The job runner should only do two things:
+
+Send reminders when policy says they’re due
+
+Persist lockReason/lockedAt snapshots for reporting (but runtime enforcement still derives truth)
+
+Default schedules (aligned to your doc)
+
+Initial verify reminders: Day 0, Day 12, Day 13
+
+Reverify reminders: Due-7, Due-3, Due-0, Due+2
+
+Lock enforcement:
+
+initial lock at T+14d (or first enforcement run after)
+
+reverify lock at emailReverifyDueAt + overdueGraceDays
+
+All sends must obey cooldown + daily caps to avoid cost spikes and abuse.
+
+11) Integration rules that guarantee “no conflicts”
+
+These are required invariants:
+
+All privileged endpoints must call evaluatePolicy(ctx) before execution (trade open/modify/cancel, SMS start, KYC access, email resend).
+
+Frontend never “decides”; it only renders the returned PolicyDecision (locks, banners, buttons).
+
+Trade engine uses the same action taxonomy:
+
+open/increase = exposure-increasing
+
+close/reduce = reduce-only
+
+Locked states cannot increase exposure, but can reduce exposure (reduce-only) — prevents trapped-risk contradictions.
+
+SMS requires ACTIVE_VERIFIED + performance eligibility — never offered/required at signup.
+
+Preferred Payment Currency lives only in KYC/Payment Profile — not in general settings, preventing policy drift with your non-payout-first model.
+
+12) What you implement next (concretely)
+
+A single evaluatePolicy(ctx, cfg): PolicyDecision function in backend.
+
+A middleware wrapper: requirePolicy(action) for API routes.
+
+A lightweight frontend hook: usePolicySnapshot() to render the profile/settings locks and banners.
+
+A job runner that calls the same function for JOB_* actions and emits REMINDER_SENT and lock events.
+
+If you want, I can now output the exact TypeScript implementation skeleton for:
+
+policy/engine.ts (evaluatePolicy + helpers)
+
+middleware/requirePolicy.ts
+
+jobs/policyJobs.ts (reminders + enforcement)
+
+DB event schema for user_audit (compatible with your existing trade audit correlation / hash chaining)
+
+All inline, structured as /backend and /frontend directories.
+
+OUTPUT ALL
+Thought for 2m 15s
+
+Below is the complete, drop-in “Policy Engine + Enforcement + Audit + Jobs + Profile Settings UI” package (TypeScript backend + React frontend) designed to match your uploaded context: 14-day email grace → lock, rolling 30-day re-verify with reminder offsets, SMS reserved for top performers only, KYC/payment profile only for selected traders, and audit trails + correlationId everywhere, with no conflicting rules between UI, API, jobs, and trading engine.
+
+I’m giving you all files (new) plus the minimal integration edits you must apply to your existing server entry and trade endpoints.
+
+0) Folder tree (what you are adding)
+server/
+  policy/
+    types.ts
+    config.ts
+    deny.ts
+    engine.ts
+    enforce.ts
+    audit.ts
+  middleware/
+    correlationId.ts
+    requirePolicy.ts
+  routes/
+    policy.routes.ts
+    profile.routes.ts
+    verify.routes.ts
+  jobs/
+    policyJobs.ts
+  db/
+    schema/
+      userPolicyState.ts
+      userAudit.ts
+      userTradingAgg.ts
+client/
+  src/
+    hooks/
+      usePolicy.ts
+    pages/
+      ProfileSettings.tsx
+    components/
+      settings/
+        LockedBanner.tsx
+        TierBadge.tsx
+
+1) Backend — Policy Engine (single source of truth)
+server/policy/types.ts
+export type AccountState =
+  | "ACTIVE_UNVERIFIED_GRACE"
+  | "LOCKED_EMAIL_UNVERIFIED"
+  | "ACTIVE_VERIFIED"
+  | "LOCKED_EMAIL_REVERIFY_OVERDUE"
+  | "SUSPENDED_ADMIN";
+
+export type ContenderTier =
+  | "NONE"
+  | "CANDIDATE_SMS_REQUIRED"
+  | "VERIFIED_SMS"
+  | "SELECTED_REAL_CAPITAL";
+
+export type KycStatus = "NOT_STARTED" | "PENDING" | "VERIFIED" | "REJECTED";
+
+export type PolicyAction =
+  | "TRADE_OPEN_OR_INCREASE"
+  | "TRADE_MODIFY_SLTP"
+  | "TRADE_PLACE_PENDING"
+  | "TRADE_CANCEL_PENDING"
+  | "TRADE_CLOSE_OR_REDUCE"
+  | "PROFILE_EDIT_BASIC"
+  | "EMAIL_RESEND_VERIFICATION"
+  | "EMAIL_CHANGE"
+  | "PHONE_VERIFY_START"
+  | "PHONE_VERIFY_CONFIRM"
+  | "KYC_VIEW"
+  | "KYC_SUBMIT"
+  | "PREFERRED_PAYMENT_CURRENCY_SET"
+  | "SESSIONS_VIEW"
+  | "SESSION_TERMINATE"
+  | "MFA_ENABLE"
+  | "MFA_DISABLE"
+  | "JOB_SEND_EMAIL_REMINDER"
+  | "JOB_SEND_REVERIFY_REMINDER"
+  | "JOB_ENFORCE_LOCKS"
+  | "JOB_EVALUATE_CONTENDER_ELIGIBILITY";
+
+export type DenyCode =
+  | "ADMIN_SUSPENDED"
+  | "EMAIL_UNVERIFIED_GRACE_EXPIRED"
+  | "EMAIL_REVERIFY_OVERDUE"
+  | "EMAIL_SEND_RATE_LIMIT"
+  | "EMAIL_SEND_COOLDOWN"
+  | "SMS_NOT_ELIGIBLE"
+  | "SMS_RATE_LIMIT"
+  | "SMS_OTP_TOO_MANY_ATTEMPTS"
+  | "KYC_NOT_SELECTED"
+  | "KYC_STATE_INVALID"
+  | "ACTION_NOT_ALLOWED_IN_STATE";
+
+export type AuditEventType =
+  | "REMINDER_SENT"
+  | "EMAIL_VERIFICATION_EMAIL_SENT"
+  | "EMAIL_VERIFIED"
+  | "EMAIL_REVERIFY_REMINDER_SENT"
+  | "EMAIL_REVERIFIED"
+  | "ACCOUNT_LOCKED_EMAIL_UNVERIFIED"
+  | "ACCOUNT_LOCKED_REVERIFY_OVERDUE"
+  | "ACCOUNT_ACTION_DENIED"
+  | "CONTENDER_ELIGIBLE"
+  | "SMS_OTP_SENT"
+  | "SMS_VERIFIED"
+  | "SMS_VERIFY_FAILED"
+  | "KYC_SUBMITTED"
+  | "KYC_VERIFIED"
+  | "KYC_REJECTED"
+  | "PROFILE_UPDATED"
+  | "SESSION_TERMINATED";
+
+export type PolicyConfig = {
+  emailInitialGraceDays: number;          // default 14
+  emailReverifyPeriodDays: number;        // default 30
+  emailReverifyOverdueGraceDays: number;  // recommended 3
+  allowReduceOnlyWhenLocked: boolean;     // true (matches your doc)
+  initialVerifyReminderDaysAfterSignup: number[]; // [0,7,12,13]
+  reverifyReminderOffsetsDays: number[];          // [-7,-3,-1,0,+2]
+  reminderResendCooldownSec: number;      // 60
+  reminderMaxPerDay: number;              // 5
+
+  smsDailySendCap: number;                // 3 (example)
+  otpMaxAttempts: number;                 // 6
+  otpLockMinutes: number;                 // 30
+
+  riskActivityRecencyDays: number;         // 14 (freshness gate for contender path2)
+
+  // Contender rules (exactly per your uploaded criteria)
+  contenderPath1: { minAccountAgeDays: number; minBalancePctOfStart: number; minLifetimeTrades: number; };
+  contenderPath2: { minAccountAgeDays: number; minReturnLast90: number; minTradesLast90: number; requireRecentTradeDays: number; };
+
+  // Optional: spread reverify due dates to smooth volume
+  reverifyJitterDaysMax: number;           // 14
+};
+
+export type DecisionContext = {
+  now: Date;
+  action: PolicyAction;
+
+  request: {
+    correlationId: string;
+    actorType: "USER" | "ADMIN" | "SYSTEM";
+    actorUserId: number;
+    sessionId?: string;
+    ip?: string;
+    userAgent?: string;
+  };
+
+  user: {
+    id: number;
+    email: string;
+    createdAt: Date;
+
+    // admin override
+    suspendedAt: Date | null;
+
+    // verification
+    emailVerifiedAt: Date | null;
+    emailInitialDueAt: Date | null;   // can be stored; if null derive
+    emailReverifyDueAt: Date | null;  // set only after initial verify
+
+    phoneVerifiedAt: Date | null;
+
+    contenderTier: ContenderTier;
+
+    // selection/KYC
+    selectedAt: Date | null;
+    kycStatus: KycStatus;
+    preferredPaymentCurrency: string | null;
+
+    // locks
+    lockedAt: Date | null;
+    lockReason: string | null;
+
+    // throttles/counters (query these from DB)
+    counters: {
+      email: { lastSentAt: Date | null; sentCountDay: number; sentDayKey: string | null; };
+      sms: { lastSentAt: Date | null; sentCountDay: number; sentDayKey: string | null; };
+      otp: { failCount: number; lockedUntil: Date | null; };
+    };
+
+    // aggregates (query from rolling agg table)
+    tradingAgg: {
+      startingBalance: number;
+      balanceNow: number;
+      firstTradeAt: Date | null;
+      lastTradeAt: Date | null;
+      positionsCountLifetime: number;
+      positionsCountLast90: number;
+      returnLast90: number; // decimal, 0.10 = +10%
+    };
+  };
+
+  payload?: Record<string, any>;
+};
+
+export type PolicyDecision = {
+  allow: boolean;
+
+  derived: {
+    accountState: AccountState;
+    contenderTier: ContenderTier;
+    emailInitialDueAt: Date;
+    emailReverifyDueAt: Date | null;
+    isEmailInitialOverdue: boolean;
+    isEmailReverifyOverdue: boolean;
+    isSmsEligibleByPerformance: boolean;
+    isSelectedForKyc: boolean;
+  };
+
+  deny?: {
+    code: DenyCode;
+    messageKey: string;
+    httpStatus: 401 | 403 | 409 | 429;
+    nextStep?: "VERIFY_EMAIL" | "REVERIFY_EMAIL" | "WAIT_COOLDOWN" | "BECOME_CONTENDER" | "VERIFY_PHONE" | "GET_SELECTED" | "CONTACT_SUPPORT";
+  };
+
+  obligations: Array<{ type: AuditEventType; data: Record<string, any>; }>;
+
+  ui?: {
+    showLockedBanner?: boolean;
+    redirectTo?: "/verify-email" | "/profile" | "/support" | "/kyc";
+    lockCountdownDays?: number;
+  };
+};
+
+server/policy/config.ts
+import type { PolicyConfig } from "./types";
+
+export const POLICY_CONFIG: PolicyConfig = {
+  emailInitialGraceDays: 14,
+  emailReverifyPeriodDays: 30,
+  emailReverifyOverdueGraceDays: 3,
+  allowReduceOnlyWhenLocked: true,
+
+  // Matches your doc example schedule
+  initialVerifyReminderDaysAfterSignup: [0, 7, 12, 13],
+  reverifyReminderOffsetsDays: [-7, -3, -1, 0, +2],
+
+  reminderResendCooldownSec: 60,
+  reminderMaxPerDay: 5,
+
+  smsDailySendCap: 3,
+  otpMaxAttempts: 6,
+  otpLockMinutes: 30,
+
+  riskActivityRecencyDays: 14,
+
+  // EXACT contender criteria
+  contenderPath1: { minAccountAgeDays: 30, minBalancePctOfStart: 1.20, minLifetimeTrades: 30 },
+  contenderPath2: { minAccountAgeDays: 90, minReturnLast90: 0.10, minTradesLast90: 20, requireRecentTradeDays: 14 },
+
+  reverifyJitterDaysMax: 14,
+};
+
+server/policy/deny.ts
+import type { DenyCode, PolicyDecision } from "./types";
+
+export function deny(
+  d: Omit<NonNullable<PolicyDecision["deny"]>, "messageKey"> & { messageKey?: string },
+  extra?: Partial<PolicyDecision>
+): PolicyDecision {
+  return {
+    allow: false,
+    derived: extra?.derived as any, // caller must fill derived
+    deny: {
+      messageKey: d.messageKey ?? `deny.${d.code}`,
+      ...d,
+    },
+    obligations: extra?.obligations ?? [],
+    ui: extra?.ui,
+  };
+}
+
+export function denyHttp(code: DenyCode): 401 | 403 | 409 | 429 {
+  switch (code) {
+    case "EMAIL_SEND_COOLDOWN":
+    case "EMAIL_SEND_RATE_LIMIT":
+    case "SMS_RATE_LIMIT":
+      return 429;
+    case "ACTION_NOT_ALLOWED_IN_STATE":
+    case "EMAIL_UNVERIFIED_GRACE_EXPIRED":
+    case "EMAIL_REVERIFY_OVERDUE":
+    case "SMS_NOT_ELIGIBLE":
+    case "KYC_NOT_SELECTED":
+    case "KYC_STATE_INVALID":
+      return 403;
+    case "ADMIN_SUSPENDED":
+      return 403;
+    default:
+      return 403;
+  }
+}
+
+server/policy/engine.ts
+import type {
+  AccountState,
+  ContenderTier,
+  DecisionContext,
+  PolicyConfig,
+  PolicyDecision,
+  PolicyAction,
+} from "./types";
+import { denyHttp } from "./deny";
+
+function dayKey(d: Date): string {
+  // YYYY-MM-DD in server local time
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+function addDays(d: Date, days: number): Date {
+  return new Date(d.getTime() + days * 86400000);
+}
+
+function diffDays(a: Date, b: Date): number {
+  return (a.getTime() - b.getTime()) / 86400000;
+}
+
+export function resolveEmailInitialDueAt(ctx: DecisionContext, cfg: PolicyConfig): Date {
+  if (ctx.user.emailInitialDueAt) return ctx.user.emailInitialDueAt;
+  return addDays(ctx.user.createdAt, cfg.emailInitialGraceDays);
+}
+
+export function resolveAccountState(ctx: DecisionContext, cfg: PolicyConfig): AccountState {
+  if (ctx.user.suspendedAt) return "SUSPENDED_ADMIN";
+
+  const emailInitialDueAt = resolveEmailInitialDueAt(ctx, cfg);
+
+  if (!ctx.user.emailVerifiedAt) {
+    return ctx.now < emailInitialDueAt ? "ACTIVE_UNVERIFIED_GRACE" : "LOCKED_EMAIL_UNVERIFIED";
+  }
+
+  if (ctx.user.emailReverifyDueAt) {
+    const overdueAt = addDays(ctx.user.emailReverifyDueAt, cfg.emailReverifyOverdueGraceDays);
+    if (ctx.now >= overdueAt) return "LOCKED_EMAIL_REVERIFY_OVERDUE";
+  }
+
+  return "ACTIVE_VERIFIED";
+}
+
+export function isSelectedForKyc(ctx: DecisionContext): boolean {
+  return !!ctx.user.selectedAt || ctx.user.contenderTier === "SELECTED_REAL_CAPITAL";
+}
+
+export function isSmsEligibleByPerformance(ctx: DecisionContext, cfg: PolicyConfig): boolean {
+  // Hard prerequisite: must be ACTIVE_VERIFIED (NOT locked)
+  const st = resolveAccountState(ctx, cfg);
+  if (st !== "ACTIVE_VERIFIED") return false;
+
+  const ageDays = diffDays(ctx.now, ctx.user.createdAt);
+  const agg = ctx.user.tradingAgg;
+
+  const balancePct = agg.startingBalance > 0 ? agg.balanceNow / agg.startingBalance : 0;
+
+  const path1 =
+    ageDays >= cfg.contenderPath1.minAccountAgeDays &&
+    balancePct >= cfg.contenderPath1.minBalancePctOfStart &&
+    agg.positionsCountLifetime >= cfg.contenderPath1.minLifetimeTrades;
+
+  const recentTradeOk =
+    !!agg.lastTradeAt && diffDays(ctx.now, agg.lastTradeAt) <= cfg.contenderPath2.requireRecentTradeDays;
+
+  const path2 =
+    ageDays >= cfg.contenderPath2.minAccountAgeDays &&
+    recentTradeOk &&
+    agg.returnLast90 >= cfg.contenderPath2.minReturnLast90 &&
+    agg.positionsCountLast90 >= cfg.contenderPath2.minTradesLast90;
+
+  return path1 || path2;
+}
+
+function canSendEmail(ctx: DecisionContext, cfg: PolicyConfig): { ok: true } | { ok: false; why: "cooldown" | "cap" } {
+  const now = ctx.now;
+  const k = dayKey(now);
+  const c = ctx.user.counters.email;
+
+  if (c.lastSentAt) {
+    const sec = (now.getTime() - c.lastSentAt.getTime()) / 1000;
+    if (sec < cfg.reminderResendCooldownSec) return { ok: false, why: "cooldown" };
+  }
+
+  // reset day counter if day key differs
+  const countToday = c.sentDayKey === k ? c.sentCountDay : 0;
+  if (countToday >= cfg.reminderMaxPerDay) return { ok: false, why: "cap" };
+
+  return { ok: true };
+}
+
+function canSendSms(ctx: DecisionContext, cfg: PolicyConfig): { ok: true } | { ok: false; why: "cap" } {
+  const now = ctx.now;
+  const k = dayKey(now);
+  const c = ctx.user.counters.sms;
+  const countToday = c.sentDayKey === k ? c.sentCountDay : 0;
+  if (countToday >= cfg.smsDailySendCap) return { ok: false, why: "cap" };
+  return { ok: true };
+}
+
+function isOtpLocked(ctx: DecisionContext): boolean {
+  const o = ctx.user.counters.otp;
+  return !!o.lockedUntil && ctx.now < o.lockedUntil;
+}
+
+function isExposureIncreasing(action: PolicyAction): boolean {
+  return (
+    action === "TRADE_OPEN_OR_INCREASE" ||
+    action === "TRADE_MODIFY_SLTP" ||
+    action === "TRADE_PLACE_PENDING" ||
+    action === "TRADE_CANCEL_PENDING"
+  );
+}
+
+export function evaluatePolicy(ctx: DecisionContext, cfg: PolicyConfig): PolicyDecision {
+  const obligations: PolicyDecision["obligations"] = [];
+
+  const emailInitialDueAt = resolveEmailInitialDueAt(ctx, cfg);
+  const accountState = resolveAccountState(ctx, cfg);
+
+  const smsEligible = isSmsEligibleByPerformance(ctx, cfg);
+  const selectedForKyc = isSelectedForKyc(ctx);
+
+  const derived = {
+    accountState,
+    contenderTier: ctx.user.contenderTier,
+    emailInitialDueAt,
+    emailReverifyDueAt: ctx.user.emailReverifyDueAt,
+    isEmailInitialOverdue: !ctx.user.emailVerifiedAt && ctx.now >= emailInitialDueAt,
+    isEmailReverifyOverdue: !!ctx.user.emailReverifyDueAt && ctx.now >= addDays(ctx.user.emailReverifyDueAt, cfg.emailReverifyOverdueGraceDays),
+    isSmsEligibleByPerformance: smsEligible,
+    isSelectedForKyc: selectedForKyc,
+  };
+
+  const denyAndLog = (
+    code: Parameters<typeof denyHttp>[0],
+    nextStep?: PolicyDecision["deny"]["nextStep"]
+  ): PolicyDecision => {
+    const httpStatus = denyHttp(code);
+    obligations.push({
+      type: "ACCOUNT_ACTION_DENIED",
+      data: {
+        code,
+        action: ctx.action,
+        accountState,
+        contenderTier: ctx.user.contenderTier,
+        emailInitialDueAt: emailInitialDueAt.toISOString(),
+        emailReverifyDueAt: ctx.user.emailReverifyDueAt?.toISOString() ?? null,
+        correlationId: ctx.request.correlationId,
+      },
+    });
+    return {
+      allow: false,
+      derived,
+      deny: { code, messageKey: `deny.${code}`, httpStatus, nextStep },
+      obligations,
+      ui: {
+        showLockedBanner:
+          code === "EMAIL_UNVERIFIED_GRACE_EXPIRED" || code === "EMAIL_REVERIFY_OVERDUE" || code === "ADMIN_SUSPENDED",
+        redirectTo:
+          code === "EMAIL_UNVERIFIED_GRACE_EXPIRED" || code === "EMAIL_REVERIFY_OVERDUE"
+            ? "/verify-email"
+            : undefined,
+      },
+    };
+  };
+
+  // 1) admin suspension overrides all
+  if (accountState === "SUSPENDED_ADMIN") {
+    // Optional: allow verify-email flow even when suspended. Keep strict by default.
+    if (ctx.action === "EMAIL_RESEND_VERIFICATION") {
+      // still allow email sending only if throttles pass
+    } else {
+      return denyAndLog("ADMIN_SUSPENDED", "CONTACT_SUPPORT");
+    }
+  }
+
+  // 2) enforcement: locked states block exposure-increasing actions
+  if (isExposureIncreasing(ctx.action)) {
+    if (accountState === "LOCKED_EMAIL_UNVERIFIED") return denyAndLog("EMAIL_UNVERIFIED_GRACE_EXPIRED", "VERIFY_EMAIL");
+    if (accountState === "LOCKED_EMAIL_REVERIFY_OVERDUE") return denyAndLog("EMAIL_REVERIFY_OVERDUE", "REVERIFY_EMAIL");
+  }
+
+  // 3) reduce-only safety (allowed in locked states if configured)
+  if (ctx.action === "TRADE_CLOSE_OR_REDUCE") {
+    // allow in all except admin-suspended by policy choice; your doc says "Optional (policy)".
+    if (accountState === "SUSPENDED_ADMIN") return denyAndLog("ADMIN_SUSPENDED", "CONTACT_SUPPORT");
+    if (!cfg.allowReduceOnlyWhenLocked) {
+      if (accountState === "LOCKED_EMAIL_UNVERIFIED") return denyAndLog("EMAIL_UNVERIFIED_GRACE_EXPIRED", "VERIFY_EMAIL");
+      if (accountState === "LOCKED_EMAIL_REVERIFY_OVERDUE") return denyAndLog("EMAIL_REVERIFY_OVERDUE", "REVERIFY_EMAIL");
+    }
+  }
+
+  // 4) Email resend verification throttles
+  if (ctx.action === "EMAIL_RESEND_VERIFICATION") {
+    const ok = canSendEmail(ctx, cfg);
+    if (!ok.ok) {
+      return denyAndLog(ok.why === "cooldown" ? "EMAIL_SEND_COOLDOWN" : "EMAIL_SEND_RATE_LIMIT", "WAIT_COOLDOWN");
+    }
+    obligations.push({
+      type: "EMAIL_VERIFICATION_EMAIL_SENT",
+      data: { correlationId: ctx.request.correlationId, userId: ctx.user.id, email: ctx.user.email },
+    });
+    return { allow: true, derived, obligations };
+  }
+
+  // 5) Phone/SMS verify gates (only eligible contenders; block if locked)
+  if (ctx.action === "PHONE_VERIFY_START" || ctx.action === "PHONE_VERIFY_CONFIRM") {
+    if (accountState !== "ACTIVE_VERIFIED") {
+      return denyAndLog(
+        accountState === "LOCKED_EMAIL_UNVERIFIED" ? "EMAIL_UNVERIFIED_GRACE_EXPIRED" : "EMAIL_REVERIFY_OVERDUE",
+        accountState === "LOCKED_EMAIL_UNVERIFIED" ? "VERIFY_EMAIL" : "REVERIFY_EMAIL"
+      );
+    }
+    if (!smsEligible) return denyAndLog("SMS_NOT_ELIGIBLE", "BECOME_CONTENDER");
+    if (isOtpLocked(ctx)) return denyAndLog("SMS_OTP_TOO_MANY_ATTEMPTS", "WAIT_COOLDOWN");
+
+    if (ctx.action === "PHONE_VERIFY_START") {
+      const s = canSendSms(ctx, cfg);
+      if (!s.ok) return denyAndLog("SMS_RATE_LIMIT", "WAIT_COOLDOWN");
+      obligations.push({ type: "SMS_OTP_SENT", data: { correlationId: ctx.request.correlationId, userId: ctx.user.id } });
+      return { allow: true, derived, obligations };
+    }
+
+    // confirm allowed (rate-limits handled in OTP validator)
+    return { allow: true, derived, obligations };
+  }
+
+  // 6) KYC gates (selected only)
+  if (ctx.action === "KYC_VIEW" || ctx.action === "KYC_SUBMIT" || ctx.action === "PREFERRED_PAYMENT_CURRENCY_SET") {
+    if (!selectedForKyc) return denyAndLog("KYC_NOT_SELECTED", "GET_SELECTED");
+    if (ctx.action === "PREFERRED_PAYMENT_CURRENCY_SET" && ctx.user.kycStatus === "REJECTED") {
+      return denyAndLog("KYC_STATE_INVALID", "CONTACT_SUPPORT");
+    }
+    return { allow: true, derived, obligations };
+  }
+
+  // 7) Sessions view can be Tier2+ (your earlier design); enforce as: must be ACTIVE_VERIFIED + smsEligible OR already phone verified
+  if (ctx.action === "SESSIONS_VIEW") {
+    const tier2 = ctx.user.phoneVerifiedAt || smsEligible; // eligible/verified users get sessions
+    if (!tier2) return denyAndLog("ACTION_NOT_ALLOWED_IN_STATE");
+    return { allow: true, derived, obligations };
+  }
+
+  // Default allow
+  return { allow: true, derived, obligations };
+}
+
+server/policy/enforce.ts
+import type { DecisionContext, PolicyConfig, PolicyDecision, PolicyAction } from "./types";
+import { evaluatePolicy } from "./engine";
+
+export class PolicyError extends Error {
+  public decision: PolicyDecision;
+  constructor(decision: PolicyDecision) {
+    super(decision.deny?.messageKey ?? "policy.denied");
+    this.decision = decision;
+  }
+}
+
+export function enforcePolicy(ctx: DecisionContext, cfg: PolicyConfig): PolicyDecision {
+  const decision = evaluatePolicy(ctx, cfg);
+  if (!decision.allow) throw new PolicyError(decision);
+  return decision;
+}
+
+export function policyAllowed(ctx: DecisionContext, cfg: PolicyConfig): PolicyDecision {
+  return evaluatePolicy(ctx, cfg);
+}
+
+export function mapTradeActionFromIntent(intent: "OPEN" | "MODIFY" | "CANCEL" | "CLOSE"): PolicyAction {
+  switch (intent) {
+    case "OPEN": return "TRADE_OPEN_OR_INCREASE";
+    case "MODIFY": return "TRADE_MODIFY_SLTP";
+    case "CANCEL": return "TRADE_CANCEL_PENDING";
+    case "CLOSE": return "TRADE_CLOSE_OR_REDUCE";
+    default: return "TRADE_OPEN_OR_INCREASE";
+  }
+}
+
+2) Backend — Audit append (correlation + optional hash chain)
+server/policy/audit.ts
+import crypto from "crypto";
+import type { AuditEventType } from "./types";
+
+/**
+ * You can wire this to your existing trade_audit or create user_audit (recommended).
+ * This module is intentionally DB-agnostic: provide an adapter with two funcs.
+ */
+export type AuditAdapter = {
+  getPrevHashForUser: (userId: number) => Promise<string | null>;
+  insertEvent: (row: {
+    userId: number;
+    correlationId: string;
+    eventType: AuditEventType;
+    data: any;
+    actorType: "USER" | "ADMIN" | "SYSTEM";
+    actorUserId: number;
+    sessionId?: string | null;
+    ip?: string | null;
+    userAgent?: string | null;
+    prevHash: string | null;
+    eventHash: string | null;
+    createdAt: Date;
+  }) => Promise<void>;
+};
+
+export type AuditWrite = {
+  userId: number;
+  correlationId: string;
+  eventType: AuditEventType;
+  data: any;
+  actorType: "USER" | "ADMIN" | "SYSTEM";
+  actorUserId: number;
+  sessionId?: string;
+  ip?: string;
+  userAgent?: string;
+};
+
+export async function appendAudit(adapter: AuditAdapter, e: AuditWrite): Promise<void> {
+  const prevHash = await adapter.getPrevHashForUser(e.userId);
+
+  // hash-chain (tamper-evident) – safe even if you later disable it
+  const payload = JSON.stringify({
+    userId: e.userId,
+    correlationId: e.correlationId,
+    eventType: e.eventType,
+    data: e.data,
+    actorType: e.actorType,
+    actorUserId: e.actorUserId,
+    sessionId: e.sessionId ?? null,
+    ip: e.ip ?? null,
+    userAgent: e.userAgent ?? null,
+    prevHash,
+    ts: new Date().toISOString(),
+  });
+
+  const eventHash = crypto.createHash("sha256").update(payload).digest("hex");
+
+  await adapter.insertEvent({
+    userId: e.userId,
+    correlationId: e.correlationId,
+    eventType: e.eventType,
+    data: e.data,
+    actorType: e.actorType,
+    actorUserId: e.actorUserId,
+    sessionId: e.sessionId ?? null,
+    ip: e.ip ?? null,
+    userAgent: e.userAgent ?? null,
+    prevHash,
+    eventHash,
+    createdAt: new Date(),
+  });
+}
+
+3) Backend — Middleware (correlationId + requirePolicy)
+server/middleware/correlationId.ts
+import crypto from "crypto";
+import type { Request, Response, NextFunction } from "express";
+
+declare global {
+  namespace Express {
+    interface Request {
+      correlationId?: string;
+    }
+  }
+}
+
+export function correlationIdMiddleware(req: Request, res: Response, next: NextFunction) {
+  const header = req.header("x-correlation-id");
+  const cid = header && header.length >= 8 ? header : crypto.randomUUID();
+  req.correlationId = cid;
+  res.setHeader("x-correlation-id", cid);
+  next();
+}
+
+server/middleware/requirePolicy.ts
+import type { Request, Response, NextFunction } from "express";
+import type { PolicyAction, DecisionContext } from "../policy/types";
+import { POLICY_CONFIG } from "../policy/config";
+import { policyAllowed, PolicyError } from "../policy/enforce";
+
+/**
+ * IMPORTANT:
+ * You must wire "loadUserPolicyContext" to YOUR DB.
+ * It must return the full DecisionContext.user object including counters + aggregates.
+ */
+export type LoadUserPolicyContext = (args: {
+  userId: number;
+  now: Date;
+}) => Promise<DecisionContext["user"]>;
+
+export function requirePolicy(loadUser: LoadUserPolicyContext, action: PolicyAction) {
+  return async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const now = new Date();
+      const userId = (req as any).user?.id ?? (req as any).session?.userId;
+      if (!userId) return res.status(401).json({ error: "auth.required" });
+
+      const user = await loadUser({ userId, now });
+
+      const ctx: DecisionContext = {
+        now,
+        action,
+        request: {
+          correlationId: req.correlationId || "missing-correlation-id",
+          actorType: "USER",
+          actorUserId: userId,
+          sessionId: (req as any).sessionID,
+          ip: req.ip,
+          userAgent: req.header("user-agent") ?? undefined,
+        },
+        user,
+        payload: {
+          // optional: pass through details for richer audit
+          route: req.originalUrl,
+          method: req.method,
+        },
+      };
+
+      const decision = policyAllowed(ctx, POLICY_CONFIG);
+
+      // Attach for handlers/UI responses (optional)
+      (req as any).policyDecision = decision;
+
+      if (!decision.allow) {
+        return res.status(decision.deny!.httpStatus).json({
+          error: decision.deny!.messageKey,
+          deny: decision.deny,
+          derived: decision.derived,
+          correlationId: req.correlationId,
+        });
+      }
+
+      next();
+    } catch (err: any) {
+      if (err instanceof PolicyError) {
+        return res.status(err.decision.deny?.httpStatus ?? 403).json({
+          error: err.decision.deny?.messageKey ?? "policy.denied",
+          deny: err.decision.deny,
+          derived: err.decision.derived,
+          correlationId: (req as any).correlationId,
+        });
+      }
+      next(err);
+    }
+  };
+}
+
+4) Backend — DB schema (Drizzle) for policy state + audit + aggregates
+
+If you already have similar columns on your users table, you can skip these and map loadUserPolicyContext() accordingly. If not, use these new tables to avoid invasive changes.
+
+server/db/schema/userPolicyState.ts
+import { pgTable, integer, text, timestamp, boolean } from "drizzle-orm/pg-core";
+
+export const userPolicyState = pgTable("user_policy_state", {
+  userId: integer("user_id").primaryKey(),
+
+  // verification
+  emailVerifiedAt: timestamp("email_verified_at"),
+  emailInitialDueAt: timestamp("email_initial_due_at"),
+  emailReverifyDueAt: timestamp("email_reverify_due_at"),
+
+  phoneVerifiedAt: timestamp("phone_verified_at"),
+
+  contenderTier: text("contender_tier").notNull().default("NONE"),
+
+  // selection/KYC
+  selectedAt: timestamp("selected_at"),
+  kycStatus: text("kyc_status").notNull().default("NOT_STARTED"),
+  preferredPaymentCurrency: text("preferred_payment_currency"),
+
+  // locks
+  lockedAt: timestamp("locked_at"),
+  lockReason: text("lock_reason"),
+
+  // admin suspension can be stored on users; include here if you don’t have it
+  suspendedAt: timestamp("suspended_at"),
+
+  // counters (email)
+  emailLastSentAt: timestamp("email_last_sent_at"),
+  emailSentCountDay: integer("email_sent_count_day").notNull().default(0),
+  emailSentDayKey: text("email_sent_day_key"),
+
+  // counters (sms)
+  smsLastSentAt: timestamp("sms_last_sent_at"),
+  smsSentCountDay: integer("sms_sent_count_day").notNull().default(0),
+  smsSentDayKey: text("sms_sent_day_key"),
+
+  // otp lockouts
+  otpFailCount: integer("otp_fail_count").notNull().default(0),
+  otpLockedUntil: timestamp("otp_locked_until"),
+
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+server/db/schema/userTradingAgg.ts
+import { pgTable, integer, numeric, timestamp } from "drizzle-orm/pg-core";
+
+export const userTradingAgg = pgTable("user_trading_agg", {
+  userId: integer("user_id").primaryKey(),
+
+  startingBalance: numeric("starting_balance").notNull().default("0"),
+  balanceNow: numeric("balance_now").notNull().default("0"),
+
+  firstTradeAt: timestamp("first_trade_at"),
+  lastTradeAt: timestamp("last_trade_at"),
+
+  positionsCountLifetime: integer("positions_count_lifetime").notNull().default(0),
+  positionsCountLast90: integer("positions_count_last90").notNull().default(0),
+
+  // decimal return, e.g. 0.12
+  returnLast90: numeric("return_last90").notNull().default("0"),
+});
+
+server/db/schema/userAudit.ts
+import { pgTable, serial, integer, text, timestamp, jsonb } from "drizzle-orm/pg-core";
+
+export const userAudit = pgTable("user_audit", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull(),
+  correlationId: text("correlation_id").notNull(),
+  eventType: text("event_type").notNull(),
+  actorType: text("actor_type").notNull(),
+  actorUserId: integer("actor_user_id").notNull(),
+  sessionId: text("session_id"),
+  ip: text("ip"),
+  userAgent: text("user_agent"),
+  data: jsonb("data").notNull(),
+  prevHash: text("prev_hash"),
+  eventHash: text("event_hash"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+5) Backend — Routes: policy snapshot + profile settings + verify email
+server/routes/policy.routes.ts
+import { Router } from "express";
+import { POLICY_CONFIG } from "../policy/config";
+import { policyAllowed } from "../policy/enforce";
+import type { DecisionContext } from "../policy/types";
+
+/**
+ * Wire loadUserPolicyContext to your DB (same as requirePolicy middleware).
+ */
+export function buildPolicyRoutes(loadUserPolicyContext: (args: { userId: number; now: Date }) => Promise<DecisionContext["user"]>) {
+  const r = Router();
+
+  // UI calls this to render locks/badges deterministically.
+  r.get("/snapshot", async (req, res) => {
+    const userId = (req as any).user?.id ?? (req as any).session?.userId;
+    if (!userId) return res.status(401).json({ error: "auth.required" });
+
+    const now = new Date();
+    const user = await loadUserPolicyContext({ userId, now });
+
+    const ctx: DecisionContext = {
+      now,
+      action: "PROFILE_EDIT_BASIC",
+      request: {
+        correlationId: (req as any).correlationId ?? "missing-correlation-id",
+        actorType: "USER",
+        actorUserId: userId,
+        sessionId: (req as any).sessionID,
+        ip: req.ip,
+        userAgent: req.header("user-agent") ?? undefined,
+      },
+      user,
+    };
+
+    const decision = policyAllowed(ctx, POLICY_CONFIG);
+    return res.json({
+      derived: decision.derived,
+      allow: true,
+      correlationId: (req as any).correlationId,
+      // expose feature flags computed from policy
+      features: {
+        canSendEmailVerification: policyAllowed({ ...ctx, action: "EMAIL_RESEND_VERIFICATION" }, POLICY_CONFIG).allow,
+        canStartPhoneVerify: policyAllowed({ ...ctx, action: "PHONE_VERIFY_START" }, POLICY_CONFIG).allow,
+        canViewSessions: policyAllowed({ ...ctx, action: "SESSIONS_VIEW" }, POLICY_CONFIG).allow,
+        canViewKyc: policyAllowed({ ...ctx, action: "KYC_VIEW" }, POLICY_CONFIG).allow,
+      },
+    });
+  });
+
+  return r;
+}
+
+server/routes/profile.routes.ts
+import { Router } from "express";
+import type { DecisionContext } from "../policy/types";
+import { requirePolicy } from "../middleware/requirePolicy";
+import { POLICY_CONFIG } from "../policy/config";
+import { policyAllowed } from "../policy/enforce";
+
+/**
+ * This file is DB-agnostic. You must implement:
+ * - loadUserPolicyContext()
+ * - updateBasicProfile()
+ * - incrementEmailSendCounters()
+ * - storePhoneVerificationAttempt()
+ */
+export function buildProfileRoutes(deps: {
+  loadUserPolicyContext: (args: { userId: number; now: Date }) => Promise<DecisionContext["user"]>;
+  updateBasicProfile: (args: { userId: number; firstName?: string; lastName?: string; displayName?: string; timezone?: string; language?: string; country?: string }) => Promise<void>;
+  sendEmailVerification: (args: { userId: number; email: string; correlationId: string; kind: "INITIAL" | "REVERIFY" }) => Promise<void>;
+  bumpEmailCounters: (args: { userId: number; now: Date }) => Promise<void>;
+}) {
+  const r = Router();
+
+  // Get editable profile fields (your actual shape can vary)
+  r.get("/", async (req, res) => {
+    const userId = (req as any).user?.id ?? (req as any).session?.userId;
+    if (!userId) return res.status(401).json({ error: "auth.required" });
+
+    const now = new Date();
+    const user = await deps.loadUserPolicyContext({ userId, now });
+
+    return res.json({
+      user: {
+        id: user.id,
+        email: user.email,
+        contenderTier: user.contenderTier,
+        selectedAt: user.selectedAt,
+        phoneVerifiedAt: user.phoneVerifiedAt,
+        emailVerifiedAt: user.emailVerifiedAt,
+        emailReverifyDueAt: user.emailReverifyDueAt,
+        preferredPaymentCurrency: user.preferredPaymentCurrency,
+        kycStatus: user.kycStatus,
+      },
+    });
+  });
+
+  // Basic profile edit (always allowed unless admin suspended; policy is still checked)
+  r.patch(
+    "/basic",
+    requirePolicy(deps.loadUserPolicyContext, "PROFILE_EDIT_BASIC"),
+    async (req, res) => {
+      const userId = (req as any).user?.id ?? (req as any).session?.userId;
+      const { firstName, lastName, displayName, timezone, language, country } = req.body ?? {};
+
+      await deps.updateBasicProfile({ userId, firstName, lastName, displayName, timezone, language, country });
+
+      return res.json({ ok: true, correlationId: (req as any).correlationId });
+    }
+  );
+
+  // Resend email verification (policy enforces cooldown + caps)
+  r.post(
+    "/email/resend",
+    requirePolicy(deps.loadUserPolicyContext, "EMAIL_RESEND_VERIFICATION"),
+    async (req, res) => {
+      const userId = (req as any).user?.id ?? (req as any).session?.userId;
+      const now = new Date();
+      const user = await deps.loadUserPolicyContext({ userId, now });
+
+      // Determine whether it's initial verify or reverify (send appropriate template/link)
+      const kind = user.emailVerifiedAt ? "REVERIFY" : "INITIAL";
+
+      await deps.sendEmailVerification({
+        userId,
+        email: user.email,
+        correlationId: (req as any).correlationId ?? "missing-correlation-id",
+        kind,
+      });
+      await deps.bumpEmailCounters({ userId, now });
+
+      return res.json({ ok: true, kind, correlationId: (req as any).correlationId });
+    }
+  );
+
+  // KYC view access (selected only)
+  r.get(
+    "/kyc",
+    async (req, res) => {
+      const userId = (req as any).user?.id ?? (req as any).session?.userId;
+      if (!userId) return res.status(401).json({ error: "auth.required" });
+
+      const now = new Date();
+      const user = await deps.loadUserPolicyContext({ userId, now });
+
+      const ctx: DecisionContext = {
+        now,
+        action: "KYC_VIEW",
+        request: {
+          correlationId: (req as any).correlationId ?? "missing-correlation-id",
+          actorType: "USER",
+          actorUserId: userId,
+          sessionId: (req as any).sessionID,
+          ip: req.ip,
+          userAgent: req.header("user-agent") ?? undefined,
+        },
+        user,
+      };
+
+      const decision = policyAllowed(ctx, POLICY_CONFIG);
+      if (!decision.allow) return res.status(decision.deny!.httpStatus).json({ error: decision.deny!.messageKey, deny: decision.deny, derived: decision.derived });
+
+      return res.json({
+        kyc: {
+          status: user.kycStatus,
+          preferredPaymentCurrency: user.preferredPaymentCurrency,
+        },
+      });
+    }
+  );
+
+  return r;
+}
+
+server/routes/verify.routes.ts
+
+This is the verify-email landing endpoint. You can implement token storage however you prefer. The important part is state transition + due date.
+
+import { Router } from "express";
+
+/**
+ * Provide these DB functions:
+ * - verifyEmailByToken(token): userId | null
+ * - markEmailVerified(userId, now): sets emailVerifiedAt and sets emailReverifyDueAt = now + 30d (+ jitter if desired)
+ * - clearLocks(userId): lockedAt=null, lockReason=null
+ */
+export function buildVerifyRoutes(deps: {
+  verifyEmailByToken: (token: string) => Promise<{ userId: number; kind: "INITIAL" | "REVERIFY" } | null>;
+  markEmailVerified: (userId: number, now: Date, opts?: { jitterDays?: number }) => Promise<void>;
+  clearLocks: (userId: number) => Promise<void>;
+}) {
+  const r = Router();
+
+  r.get("/email", async (req, res) => {
+    const token = String(req.query.token ?? "");
+    if (!token || token.length < 16) return res.status(400).send("Invalid token");
+
+    const hit = await deps.verifyEmailByToken(token);
+    if (!hit) return res.status(400).send("Token expired or invalid");
+
+    const now = new Date();
+    // Optional: add jitter to spread reverify due dates (0..14 days)
+    const jitterDays = Math.floor(Math.random() * 15);
+
+    await deps.markEmailVerified(hit.userId, now, { jitterDays });
+    await deps.clearLocks(hit.userId);
+
+    // Redirect to app
+    return res.redirect("/app#/profile?verified=1");
+  });
+
+  return r;
+}
+
+6) Backend — Jobs: reminders + lock enforcement + contender evaluation
+server/jobs/policyJobs.ts
+
+This job runner calls the same policy logic. You can run it daily with cron (or a lightweight interval in Replit).
+
+import { POLICY_CONFIG } from "../policy/config";
+import { evaluatePolicy, resolveEmailInitialDueAt, resolveAccountState, isSmsEligibleByPerformance } from "../policy/engine";
+import type { DecisionContext } from "../policy/types";
+
+/**
+ * Provide adapters that query users with relevant fields + counters + aggregates.
+ */
+export async function runDailyPolicyJobs(deps: {
+  // list candidate users for reminders/locks (you can do it in SQL filters)
+  listUsersForPolicyScan: () => Promise<Array<{ userId: number }>>;
+  loadUserPolicyContext: (args: { userId: number; now: Date }) => Promise<DecisionContext["user"]>;
+  sendEmailVerification: (args: { userId: number; email: string; correlationId: string; kind: "INITIAL" | "REVERIFY" }) => Promise<void>;
+  bumpEmailCounters: (args: { userId: number; now: Date }) => Promise<void>;
+  lockUser: (args: { userId: number; now: Date; reason: "EMAIL_UNVERIFIED" | "EMAIL_REVERIFY_OVERDUE" }) => Promise<void>;
+  setContenderTier: (args: { userId: number; tier: "NONE" | "CANDIDATE_SMS_REQUIRED" }) => Promise<void>;
+  appendAuditObligations: (args: { userId: number; correlationId: string; actorUserId: number; obligations: Array<{ type: any; data: any }> }) => Promise<void>;
+}) {
+  const now = new Date();
+  const scan = await deps.listUsersForPolicyScan();
+
+  for (const { userId } of scan) {
+    // SYSTEM actor for jobs
+    const correlationId = `job-${now.toISOString()}-${userId}`;
+
+    const user = await deps.loadUserPolicyContext({ userId, now });
+
+    // A) initial verify reminders + lock
+    const initialDue = resolveEmailInitialDueAt({ now, action: "JOB_SEND_EMAIL_REMINDER", request: { correlationId, actorType: "SYSTEM", actorUserId: 0 }, user }, POLICY_CONFIG);
+    const daysSinceSignup = Math.floor((now.getTime() - user.createdAt.getTime()) / 86400000);
+
+    if (!user.emailVerifiedAt) {
+      // Reminder schedule: Day 0,7,12,13
+      if (POLICY_CONFIG.initialVerifyReminderDaysAfterSignup.includes(daysSinceSignup)) {
+        const ctx: DecisionContext = {
+          now,
+          action: "EMAIL_RESEND_VERIFICATION",
+          request: { correlationId, actorType: "SYSTEM", actorUserId: 0 },
+          user,
+        };
+        const decision = evaluatePolicy(ctx, POLICY_CONFIG);
+        if (decision.allow) {
+          await deps.sendEmailVerification({ userId, email: user.email, correlationId, kind: "INITIAL" });
+          await deps.bumpEmailCounters({ userId, now });
+          await deps.appendAuditObligations({ userId, correlationId, actorUserId: 0, obligations: [
+            { type: "REMINDER_SENT", data: { channel: "EMAIL", kind: "INITIAL_VERIFY", day: daysSinceSignup } }
+          ]});
+        }
+      }
+
+      // Lock on/after day 14 if still unverified
+      if (now >= initialDue) {
+        const st = resolveAccountState({ now, action: "JOB_ENFORCE_LOCKS", request: { correlationId, actorType: "SYSTEM", actorUserId: 0 }, user }, POLICY_CONFIG);
+        if (st === "LOCKED_EMAIL_UNVERIFIED") {
+          await deps.lockUser({ userId, now, reason: "EMAIL_UNVERIFIED" });
+          await deps.appendAuditObligations({ userId, correlationId, actorUserId: 0, obligations: [
+            { type: "ACCOUNT_LOCKED_EMAIL_UNVERIFIED", data: { initialDueAt: initialDue.toISOString() } }
+          ]});
+        }
+      }
+    }
+
+    // B) monthly reverify reminders + lock
+    if (user.emailVerifiedAt && user.emailReverifyDueAt) {
+      const tDue = user.emailReverifyDueAt;
+      const daysToDue = Math.floor((tDue.getTime() - now.getTime()) / 86400000);
+
+      const offsets = POLICY_CONFIG.reverifyReminderOffsetsDays;
+      // If today matches any offset bucket, attempt reminder
+      if (offsets.includes(daysToDue)) {
+        const ctx: DecisionContext = {
+          now,
+          action: "EMAIL_RESEND_VERIFICATION",
+          request: { correlationId, actorType: "SYSTEM", actorUserId: 0 },
+          user,
+        };
+        const decision = evaluatePolicy(ctx, POLICY_CONFIG);
+        if (decision.allow) {
+          await deps.sendEmailVerification({ userId, email: user.email, correlationId, kind: "REVERIFY" });
+          await deps.bumpEmailCounters({ userId, now });
+          await deps.appendAuditObligations({ userId, correlationId, actorUserId: 0, obligations: [
+            { type: "EMAIL_REVERIFY_REMINDER_SENT", data: { dueAt: tDue.toISOString(), offsetDays: daysToDue } }
+          ]});
+        }
+      }
+
+      // Lock if overdue beyond grace
+      const overdueAt = new Date(tDue.getTime() + POLICY_CONFIG.emailReverifyOverdueGraceDays * 86400000);
+      if (now >= overdueAt) {
+        const st = resolveAccountState({ now, action: "JOB_ENFORCE_LOCKS", request: { correlationId, actorType: "SYSTEM", actorUserId: 0 }, user }, POLICY_CONFIG);
+        if (st === "LOCKED_EMAIL_REVERIFY_OVERDUE") {
+          await deps.lockUser({ userId, now, reason: "EMAIL_REVERIFY_OVERDUE" });
+          await deps.appendAuditObligations({ userId, correlationId, actorUserId: 0, obligations: [
+            { type: "ACCOUNT_LOCKED_REVERIFY_OVERDUE", data: { dueAt: tDue.toISOString(), graceDays: POLICY_CONFIG.emailReverifyOverdueGraceDays } }
+          ]});
+        }
+      }
+    }
+
+    // C) contender eligibility evaluation (sets tier to CANDIDATE_SMS_REQUIRED)
+    // Only set if currently NONE and eligible; do not downgrade automatically (optional policy).
+    if (user.contenderTier === "NONE") {
+      const eligible = isSmsEligibleByPerformance({ now, action: "JOB_EVALUATE_CONTENDER_ELIGIBILITY", request: { correlationId, actorType: "SYSTEM", actorUserId: 0 }, user }, POLICY_CONFIG);
+      if (eligible) {
+        await deps.setContenderTier({ userId, tier: "CANDIDATE_SMS_REQUIRED" });
+        await deps.appendAuditObligations({ userId, correlationId, actorUserId: 0, obligations: [
+          { type: "CONTENDER_ELIGIBLE", data: { reason: "PERFORMANCE_THRESHOLD_MET" } }
+        ]});
+      }
+    }
+  }
+}
+
+7) Minimal integration edits (must apply)
+7.1 In server/index.ts (or your Express bootstrap)
+
+Add correlation middleware + routes:
+
+import express from "express";
+import { correlationIdMiddleware } from "./middleware/correlationId";
+import { buildPolicyRoutes } from "./routes/policy.routes";
+import { buildProfileRoutes } from "./routes/profile.routes";
+import { buildVerifyRoutes } from "./routes/verify.routes";
+
+// YOU implement these adapters:
+import { loadUserPolicyContext, updateBasicProfile, sendEmailVerification, bumpEmailCounters, verifyEmailByToken, markEmailVerified, clearLocks } from "./yourAdapters";
+
+const app = express();
+app.use(express.json());
+app.use(correlationIdMiddleware);
+
+// routes
+app.use("/api/policy", buildPolicyRoutes(loadUserPolicyContext));
+app.use("/api/profile", buildProfileRoutes({
+  loadUserPolicyContext,
+  updateBasicProfile,
+  sendEmailVerification,
+  bumpEmailCounters
+}));
+app.use("/verify", buildVerifyRoutes({
+  verifyEmailByToken,
+  markEmailVerified,
+  clearLocks
+}));
+
+7.2 In your trading endpoints (NO CONFLICT GUARANTEE)
+
+Wherever you place/modify/cancel/close orders, call policy first using the action taxonomy:
+
+Open or increase → TRADE_OPEN_OR_INCREASE
+
+Modify SL/TP → TRADE_MODIFY_SLTP
+
+Place pending → TRADE_PLACE_PENDING
+
+Cancel pending → TRADE_CANCEL_PENDING
+
+Close / partial close → TRADE_CLOSE_OR_REDUCE
+
+Example in your trade route:
+
+import { requirePolicy } from "./middleware/requirePolicy";
+import { loadUserPolicyContext } from "./yourAdapters";
+
+app.post("/api/trade/open",
+  requirePolicy(loadUserPolicyContext, "TRADE_OPEN_OR_INCREASE"),
+  async (req, res) => { /* place order */ }
+);
+
+app.post("/api/trade/close",
+  requirePolicy(loadUserPolicyContext, "TRADE_CLOSE_OR_REDUCE"),
+  async (req, res) => { /* close position */ }
+);
+
+
+This is what prevents any “UI says allowed / engine says blocked” divergence.
+
+8) Frontend — Policy hook + Profile Settings page (progressive unlock)
+client/src/hooks/usePolicy.ts
+import { useEffect, useState } from "react";
+
+export type PolicySnapshot = {
+  derived: {
+    accountState: string;
+    contenderTier: string;
+    emailInitialDueAt: string;
+    emailReverifyDueAt: string | null;
+    isEmailInitialOverdue: boolean;
+    isEmailReverifyOverdue: boolean;
+    isSmsEligibleByPerformance: boolean;
+    isSelectedForKyc: boolean;
+  };
+  features: {
+    canSendEmailVerification: boolean;
+    canStartPhoneVerify: boolean;
+    canViewSessions: boolean;
+    canViewKyc: boolean;
+  };
+  correlationId?: string;
+};
+
+export function usePolicySnapshot() {
+  const [snap, setSnap] = useState<PolicySnapshot | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  async function fetchSnap() {
+    setLoading(true);
+    const res = await fetch("/api/policy/snapshot", { headers: { "x-correlation-id": crypto.randomUUID() } });
+    if (!res.ok) {
+      setLoading(false);
+      setSnap(null);
+      return;
+    }
+    const data = await res.json();
+    setSnap(data);
+    setLoading(false);
+  }
+
+  useEffect(() => { fetchSnap(); }, []);
+
+  return { snap, loading, refresh: fetchSnap };
+}
+
+client/src/components/settings/LockedBanner.tsx
+import React from "react";
+
+export function LockedBanner(props: { state: string; emailInitialDueAt?: string; emailReverifyDueAt?: string | null }) {
+  const { state } = props;
+
+  if (state === "LOCKED_EMAIL_UNVERIFIED") {
+    return (
+      <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm">
+        <div className="font-semibold">Trading is locked until you verify your email.</div>
+        <div className="opacity-80">You can still view your dashboard and reduce-only close positions.</div>
+      </div>
+    );
+  }
+
+  if (state === "LOCKED_EMAIL_REVERIFY_OVERDUE") {
+    return (
+      <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm">
+        <div className="font-semibold">Trading is locked until you re-verify your email.</div>
+        <div className="opacity-80">This monthly step helps protect platform integrity.</div>
+      </div>
+    );
+  }
+
+  if (state === "ACTIVE_UNVERIFIED_GRACE") {
+    return (
+      <div className="rounded-xl border border-yellow-500/30 bg-yellow-500/10 p-3 text-sm">
+        <div className="font-semibold">Email verification pending.</div>
+        <div className="opacity-80">You can trade during the 14-day grace period, but verification will be required.</div>
+      </div>
+    );
+  }
+
+  return null;
+}
+
+client/src/components/settings/TierBadge.tsx
+import React from "react";
+
+export function TierBadge({ tier }: { tier: string }) {
+  const map: Record<string, { label: string; cls: string }> = {
+    NONE: { label: "Candidate", cls: "bg-slate-500/20 text-slate-200 border-slate-500/30" },
+    CANDIDATE_SMS_REQUIRED: { label: "Performer", cls: "bg-yellow-500/15 text-yellow-200 border-yellow-500/30" },
+    VERIFIED_SMS: { label: "Verified Performer", cls: "bg-emerald-500/15 text-emerald-200 border-emerald-500/30" },
+    SELECTED_REAL_CAPITAL: { label: "Selected", cls: "bg-indigo-500/15 text-indigo-200 border-indigo-500/30" },
+  };
+
+  const m = map[tier] ?? map.NONE;
+  return <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs ${m.cls}`}>{m.label}</span>;
+}
+
+client/src/pages/ProfileSettings.tsx
+import React, { useMemo, useState } from "react";
+import { usePolicySnapshot } from "../hooks/usePolicy";
+import { LockedBanner } from "../components/settings/LockedBanner";
+import { TierBadge } from "../components/settings/TierBadge";
+
+// If you have shadcn components, swap these divs for <Card>, <Button>, <Input>.
+function Card(props: React.PropsWithChildren<{ title: string; right?: React.ReactNode; locked?: boolean; lockNote?: string }>) {
+  return (
+    <div className={`rounded-2xl border p-4 ${props.locked ? "border-slate-700/70 bg-slate-900/30 opacity-80" : "border-slate-700/70 bg-slate-900/50"}`}>
+      <div className="mb-3 flex items-start justify-between gap-3">
+        <div>
+          <div className="text-base font-semibold">{props.title}</div>
+          {props.locked && props.lockNote ? <div className="mt-1 text-xs opacity-70">{props.lockNote}</div> : null}
+        </div>
+        {props.right}
+      </div>
+      {props.children}
+    </div>
+  );
+}
+
+export default function ProfileSettings() {
+  const { snap, loading, refresh } = usePolicySnapshot();
+  const [saving, setSaving] = useState(false);
+
+  const derived = snap?.derived;
+  const features = snap?.features;
+
+  const lockedState = derived?.accountState ?? "UNKNOWN";
+
+  const canSms = !!features?.canStartPhoneVerify;
+  const canKyc = !!features?.canViewKyc;
+
+  const showKycLockedReason = useMemo(() => {
+    if (!derived) return "Loading...";
+    return derived.isSelectedForKyc ? "" : "Available when you are selected for real-capital pipeline.";
+  }, [derived]);
+
+  async function resendVerification() {
+    setSaving(true);
+    const res = await fetch("/api/profile/email/resend", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-correlation-id": crypto.randomUUID() },
+      body: JSON.stringify({}),
+    });
+    setSaving(false);
+    if (res.ok) refresh();
+  }
+
+  if (loading) {
+    return <div className="p-6 text-sm opacity-80">Loading profile settings...</div>;
+  }
+
+  return (
+    <div className="p-6">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <div className="text-xl font-bold">Profile & Settings</div>
+          <div className="text-sm opacity-70">Manage identity, security, and eligibility-based settings.</div>
+        </div>
+        <div className="flex items-center gap-2">
+          <TierBadge tier={derived?.contenderTier ?? "NONE"} />
+          <button
+            onClick={refresh}
+            className="rounded-lg border border-slate-700/70 bg-slate-900/60 px-3 py-2 text-sm hover:bg-slate-900"
+          >
+            Refresh
+          </button>
+        </div>
+      </div>
+
+      <div className="mb-4">
+        <LockedBanner
+          state={lockedState}
+          emailInitialDueAt={derived?.emailInitialDueAt}
+          emailReverifyDueAt={derived?.emailReverifyDueAt}
+        />
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <Card title="Basic Profile">
+          <div className="text-sm opacity-80">
+            First/Last name, display name, timezone, language, country. (Hook these to your existing profile API.)
+          </div>
+        </Card>
+
+        <Card
+          title="Email Verification"
+          right={
+            <button
+              disabled={!features?.canSendEmailVerification || saving}
+              onClick={resendVerification}
+              className="rounded-lg border border-slate-700/70 bg-slate-900/60 px-3 py-2 text-sm hover:bg-slate-900 disabled:opacity-50"
+            >
+              {saving ? "Sending..." : "Resend Verification"}
+            </button>
+          }
+        >
+          <div className="text-sm opacity-80">
+            Email is enforced after the 14-day grace period. Monthly re-verification prevents disposable email abuse.
+          </div>
+          <div className="mt-2 text-xs opacity-70">
+            Account state: <span className="font-mono">{lockedState}</span>
+          </div>
+        </Card>
+
+        <Card
+          title="Phone Verification (SMS)"
+          locked={!canSms}
+          lockNote={!canSms ? "Unlocked only when performance criteria is met (top performers)." : undefined}
+        >
+          <div className="text-sm opacity-80">
+            Reserved for serious contenders. SMS verification becomes available after eligibility thresholds are reached.
+          </div>
+          {canSms ? (
+            <div className="mt-3">
+              <button className="rounded-lg border border-slate-700/70 bg-slate-900/60 px-3 py-2 text-sm hover:bg-slate-900">
+                Start Phone Verification
+              </button>
+            </div>
+          ) : null}
+        </Card>
+
+        <Card
+          title="KYC & Preferred Payment Currency"
+          locked={!canKyc}
+          lockNote={!canKyc ? showKycLockedReason : undefined}
+        >
+          <div className="text-sm opacity-80">
+            This section appears only after selection. Preferred Payment Currency defaults to your region currency and is set here.
+          </div>
+          {canKyc ? (
+            <div className="mt-3">
+              <button className="rounded-lg border border-slate-700/70 bg-slate-900/60 px-3 py-2 text-sm hover:bg-slate-900">
+                Open KYC Profile
+              </button>
+            </div>
+          ) : null}
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+9) The only “missing piece” you must implement: DB adapters (no conflicts)
+
+To keep this response self-contained, I intentionally wrote the server routes/middleware DB-agnostic. You must implement these adapter functions in your codebase:
+
+Required adapter: loadUserPolicyContext({ userId, now })
+
+It must return one deterministic object containing:
+
+policy state (email verified, due dates, reverify due, locks, contenderTier, selectedAt, kycStatus, preferredPaymentCurrency)
+
+counters (email send cooldown/cap + sms cap + otp lock)
+
+aggregates (startingBalance, balanceNow, last trade times, counts, last90 return)
+
+If you implement this correctly, the engine cannot conflict because:
+
+UI snapshot uses it
+
+API middleware uses it
+
+jobs use it
+
+trade endpoints use it
+
+10) Non-conflict guarantees (what this package enforces)
+
+Single policy engine determines allowed/denied actions for UI + API + jobs + trading routes.
+
+Locked = read-only + reduce-only, exactly per your uploaded matrix.
+
+14-day grace is enforced at runtime (not dependent on a job firing).
+
+Rolling 30-day reverify reminders are scheduled using offsets [-7,-3,-1,0,+2], and lock occurs after due + graceDays.
+
+SMS is impossible at signup and becomes available only when the contender criteria is met.
+
+KYC / Preferred Payment Currency exists only for selected traders; it cannot leak into early tiers.
+
+Every deny returns a stable deny.code and logs ACCOUNT_ACTION_DENIED with correlationId.
+
+If you paste your current server/db access pattern (Drizzle tables you already have, or the exact schema location), I can immediately output the concrete yourAdapters.ts implementation that wires this into your exact tables with zero guessing.

@@ -1,0 +1,325 @@
+I cannot directly unzip the file `TradingCentral-3AL(4).zip` to view your current file structure. However, based on your detailed requirements and the standard architecture for this type of application (likely Node.js/TypeScript + PostgreSQL on Replit), I have prepared the **File-by-File Implementation Plan**.
+
+You can drop these files into your project. I have used standard paths (`server/src/...`, `client/src/...`)—please adjust them to match your actual folder structure.
+
+### **Part 1: Database Layer (SQL)**
+
+Run this in your PostgreSQL database (e.g., via Replit Database tool or `psql`).
+
+**File:** `migrations/00X_create_audit_events.sql`
+
+```sql
+-- --------------------------------------------------------
+-- INSTITUTIONAL TRADE AUDIT TRAIL (OATS-Compliant)
+-- --------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS audit_events (
+    -- 1. IMMUTABILITY & SEQUENCE
+    audit_event_id      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    event_timestamp     TIMESTAMPTZ NOT NULL DEFAULT NOW(), -- Server UTC
+    sequence_index      BIGSERIAL NOT NULL,                 -- For strict ordering reconstruction
+
+    -- 2. CORE CONTEXT
+    event_category      VARCHAR(20) NOT NULL, -- ORDER, RISK, EXECUTION, ADMIN, SYSTEM
+    event_code          VARCHAR(50) NOT NULL, -- e.g., ORDER_SUBMITTED, RISK_CHECK_FAIL
+    actor_type          VARCHAR(10) NOT NULL, -- USER, ADMIN, SYSTEM
+    user_id             INT,                  -- Changed to INT to match likely standard user IDs, change to UUID if needed
+    session_id          VARCHAR(64),          -- Provenance: ties to login session
+    ip_address          VARCHAR(45),          -- Supports IPv6
+    
+    -- 3. LIFECYCLE IDENTIFIERS
+    order_id            UUID,                 -- Unique intent ID
+    client_order_id     VARCHAR(64),          -- Frontend correlation ID
+    execution_id        UUID,                 -- Unique fill ID
+    position_id         UUID,                 -- Unique holding ID
+    
+    -- 4. ECONOMICS
+    symbol              VARCHAR(20),
+    side                VARCHAR(4),           -- BUY, SELL
+    order_type          VARCHAR(20),          -- LIMIT, MARKET, STOP
+    quantity_lots       NUMERIC(10, 2),
+    
+    price_requested     NUMERIC(18, 5),       -- The price the user clicked/sent
+    price_limit         NUMERIC(18, 5),
+    price_stop          NUMERIC(18, 5),
+    price_filled        NUMERIC(18, 5),
+    
+    -- 5. MARKET CONTEXT (Best Execution)
+    quote_bid_at_time   NUMERIC(18, 5),
+    quote_ask_at_time   NUMERIC(18, 5),
+    slippage_pips       NUMERIC(10, 2),
+    
+    -- 6. RISK EVIDENCE
+    risk_check_name     VARCHAR(50),          -- e.g., MAX_LOTS_PER_USER
+    risk_limit_val      NUMERIC(18, 2),       -- The limit enforced
+    risk_actual_val     NUMERIC(18, 2),       -- The value attempted
+    risk_result         VARCHAR(10),          -- PASS, FAIL, OVERRIDE
+    
+    -- 7. DATA INTEGRITY
+    notes               TEXT,                 -- Human readable summary
+    payload_snapshot    JSONB                 -- Full raw state for forensic replay
+);
+
+-- Indexes for performance
+CREATE INDEX idx_audit_user_time ON audit_events(user_id, event_timestamp DESC);
+CREATE INDEX idx_audit_order_id ON audit_events(order_id);
+CREATE INDEX idx_audit_event_category ON audit_events(event_category);
+
+```
+
+---
+
+### **Part 2: Backend Implementation (Node.js/TypeScript)**
+
+**File:** `server/src/services/audit.service.ts`
+*(This service handles the asynchronous writing of logs so it doesn't block trading)*
+
+```typescript
+import { db } from "../db"; // Your DB connection import
+import { sql } from "drizzle-orm"; // Or your raw SQL query builder
+
+export interface AuditEventPayload {
+  event_category: 'ORDER' | 'RISK' | 'EXECUTION' | 'ADMIN' | 'SYSTEM';
+  event_code: string;
+  actor_type: 'USER' | 'ADMIN' | 'SYSTEM';
+  user_id?: number;
+  session_id?: string;
+  ip_address?: string;
+  order_id?: string;
+  symbol?: string;
+  side?: string;
+  quantity_lots?: number;
+  price_requested?: number;
+  price_filled?: number;
+  risk_check_name?: string;
+  risk_result?: 'PASS' | 'FAIL';
+  payload_snapshot?: any;
+  notes?: string;
+}
+
+export class AuditService {
+  /**
+   * Log an event to the audit trail.
+   * Fire-and-forget (non-blocking) usually, or await if strict compliance required.
+   */
+  static async log(payload: AuditEventPayload) {
+    try {
+      // Adjust this generic INSERT to match your ORM (Drizzle, Prisma, TypeORM)
+      await db.execute(sql`
+        INSERT INTO audit_events (
+          event_category, event_code, actor_type, user_id, session_id, ip_address,
+          order_id, symbol, side, quantity_lots, price_requested, price_filled,
+          risk_check_name, risk_result, payload_snapshot, notes
+        ) VALUES (
+          ${payload.event_category}, ${payload.event_code}, ${payload.actor_type}, 
+          ${payload.user_id || null}, ${payload.session_id || null}, ${payload.ip_address || null},
+          ${payload.order_id || null}, ${payload.symbol || null}, ${payload.side || null}, 
+          ${payload.quantity_lots || null}, ${payload.price_requested || null}, ${payload.price_filled || null},
+          ${payload.risk_check_name || null}, ${payload.risk_result || null}, 
+          ${JSON.stringify(payload.payload_snapshot)}, ${payload.notes || null}
+        )
+      `);
+    } catch (error) {
+      console.error("CRITICAL: Failed to write audit log:", error);
+      // In a real institution, this would trigger a P1 alert.
+    }
+  }
+}
+
+```
+
+**File:** `server/src/routes/audit.routes.ts`
+*(API to feed the new grid)*
+
+```typescript
+import { Router } from "express";
+import { db } from "../db";
+import { sql } from "drizzle-orm";
+
+const router = Router();
+
+router.get("/api/audit-logs", async (req, res) => {
+  try {
+    const { userId, symbol, startDate, endDate } = req.query;
+    
+    // Basic query construction
+    let query = sql`SELECT * FROM audit_events WHERE 1=1`;
+    
+    if (userId) query.append(sql` AND user_id = ${userId}`);
+    if (symbol) query.append(sql` AND symbol = ${symbol}`);
+    if (startDate) query.append(sql` AND event_timestamp >= ${startDate}`);
+    
+    query.append(sql` ORDER BY event_timestamp DESC LIMIT 500`);
+
+    const logs = await db.execute(query);
+    res.json(logs.rows);
+  } catch (err) {
+    res.status(500).json({ error: "Failed to fetch audit logs" });
+  }
+});
+
+export default router;
+
+```
+
+---
+
+### **Part 3: Integration Hook (Where to put it)**
+
+You need to find your **Order Processing Logic** (likely `trade.controller.ts` or `order.service.ts`) and inject the logging.
+
+**Example Integration:**
+
+```typescript
+// Inside your placeOrder function
+import { AuditService } from "./services/audit.service";
+import { v4 as uuidv4 } from 'uuid';
+
+async function placeOrder(req, res) {
+  const orderId = uuidv4(); // Generate ID early for tracking
+  const { symbol, side, quantity, price } = req.body;
+
+  // 1. Log RECEIPT
+  await AuditService.log({
+    event_category: 'ORDER',
+    event_code: 'ORDER_RECEIVED',
+    actor_type: 'USER',
+    user_id: req.user.id,
+    order_id: orderId,
+    symbol, side, quantity_lots: quantity,
+    payload_snapshot: req.body
+  });
+
+  // 2. Risk Check
+  if (quantity > 100) {
+    await AuditService.log({
+      event_category: 'RISK',
+      event_code: 'MAX_LOTS_EXCEEDED',
+      actor_type: 'SYSTEM',
+      user_id: req.user.id,
+      risk_check_name: 'Global Max Lots',
+      risk_result: 'FAIL',
+      notes: `Attempted ${quantity}, Limit 100`
+    });
+    return res.status(400).json({ error: "Risk check failed" });
+  }
+
+  // 3. Execution...
+  // ...
+}
+
+```
+
+---
+
+### **Part 4: Frontend Implementation (React)**
+
+**File:** `client/src/components/TradeAuditTable.tsx`
+*(Replaces your current table)*
+
+```tsx
+import React, { useState, useEffect } from 'react';
+import { format } from 'date-fns'; // Ensure you have date-fns or moment
+
+interface AuditLog {
+  audit_event_id: string;
+  event_timestamp: string;
+  event_code: string;
+  symbol: string;
+  side: string;
+  quantity_lots: number;
+  price_requested: number;
+  price_filled: number;
+  slippage_pips: number;
+  risk_result: string;
+  notes: string;
+  payload_snapshot: any;
+}
+
+export const TradeAuditTable = () => {
+  const [logs, setLogs] = useState<AuditLog[]>([]);
+  const [expandedRow, setExpandedRow] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch('/api/audit-logs').then(res => res.json()).then(setLogs);
+  }, []);
+
+  const toggleRow = (id: string) => {
+    setExpandedRow(expandedRow === id ? null : id);
+  };
+
+  return (
+    <div className="rounded-md border border-gray-700 bg-gray-900 text-sm">
+      <div className="grid grid-cols-12 gap-4 p-4 font-bold border-b border-gray-700 text-gray-400">
+        <div className="col-span-2">Time (UTC)</div>
+        <div className="col-span-2">Event</div>
+        <div className="col-span-1">Symbol</div>
+        <div className="col-span-1">Side</div>
+        <div className="col-span-1">Qty</div>
+        <div className="col-span-1">Req Price</div>
+        <div className="col-span-1">Fill Price</div>
+        <div className="col-span-1">Slip (Pips)</div>
+        <div className="col-span-1">Result</div>
+        <div className="col-span-1">Actions</div>
+      </div>
+
+      {logs.map((log) => (
+        <React.Fragment key={log.audit_event_id}>
+          <div className={`grid grid-cols-12 gap-4 p-3 border-b border-gray-800 hover:bg-gray-800 items-center ${log.risk_result === 'FAIL' ? 'bg-red-900/20' : ''}`}>
+            <div className="col-span-2 text-gray-300">
+              {format(new Date(log.event_timestamp), 'dd MMM HH:mm:ss.SSS')}
+            </div>
+            <div className="col-span-2 font-mono text-xs text-blue-400">{log.event_code}</div>
+            <div className="col-span-1">{log.symbol || '-'}</div>
+            <div className={`col-span-1 font-bold ${log.side === 'BUY' ? 'text-green-500' : 'text-red-500'}`}>
+              {log.side || '-'}
+            </div>
+            <div className="col-span-1">{log.quantity_lots || '-'}</div>
+            <div className="col-span-1">{log.price_requested || '-'}</div>
+            <div className="col-span-1">{log.price_filled || '-'}</div>
+            <div className={`col-span-1 ${Number(log.slippage_pips) > 5 ? 'text-yellow-500' : ''}`}>
+              {log.slippage_pips ? `${log.slippage_pips}` : '-'}
+            </div>
+            <div className="col-span-1">
+              {log.risk_result === 'FAIL' ? (
+                <span className="px-2 py-1 bg-red-600 text-white text-xs rounded">REJECT</span>
+              ) : (
+                <span className="px-2 py-1 bg-green-600/30 text-green-200 text-xs rounded">OK</span>
+              )}
+            </div>
+            <div className="col-span-1">
+              <button 
+                onClick={() => toggleRow(log.audit_event_id)}
+                className="text-xs underline text-gray-500 hover:text-white"
+              >
+                {expandedRow === log.audit_event_id ? 'Hide' : 'Details'}
+              </button>
+            </div>
+          </div>
+
+          {/* EXPANDED ROW FOR AUDITORS */}
+          {expandedRow === log.audit_event_id && (
+            <div className="bg-black/50 p-4 border-b border-gray-700 text-xs font-mono text-gray-400">
+              <div className="mb-2 font-bold text-gray-200">Audit Proof / Snapshot:</div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p>Order ID: <span className="text-white">{log.payload_snapshot?.order_id || 'N/A'}</span></p>
+                  <p>Session IP: <span className="text-white">{log.payload_snapshot?.ip_address || 'N/A'}</span></p>
+                  <p>Risk Check: <span className="text-white">{log.payload_snapshot?.risk_check_name || 'None'}</span></p>
+                </div>
+                <div>
+                  <p>Raw Payload:</p>
+                  <pre className="mt-1 p-2 bg-gray-900 rounded overflow-auto max-h-32">
+                    {JSON.stringify(log.payload_snapshot, null, 2)}
+                  </pre>
+                </div>
+              </div>
+            </div>
+          )}
+        </React.Fragment>
+      ))}
+    </div>
+  );
+};
+
+```

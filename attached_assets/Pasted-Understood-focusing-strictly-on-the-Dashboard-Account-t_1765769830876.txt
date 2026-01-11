@@ -1,0 +1,142 @@
+Understood — focusing strictly on the **Dashboard → Account tab** logic (not trades #102/#104).
+
+## What the screenshot is telling us
+
+1. **“Member Since” shows “–”**
+   That is not a UI problem. Your backend **does not return `createdAt`** in the `/api/auth/current-user` response, so `AccountScreen.tsx` has nothing to render.
+
+2. **Balance and Equity are identical ($1,180,190.30)**
+   That can be valid *if there are no OPEN positions* (floating P/L = 0).
+   If you *do* have OPEN positions and still see balance==equity, then your account-recalc logic is likely **falling back to openPrice** because it can’t fetch a quote row (so unrealized P/L becomes 0 by construction). This is explicitly coded in `server/recalcAccount.ts`.
+
+## Critical mapping/field bugs in the Account tab
+
+### A) Floating P/L is wired to the wrong field name (UI will show $0.00 or blank)
+
+* **Backend** returns:
+
+```ts
+floatingPnl: equity - balance
+```
+
+in `server/routes.ts` (`/api/account/summary`)
+
+* **Account tab frontend** expects:
+
+```ts
+floatingPL
+```
+
+in `client/src/pages/AccountScreen.tsx`
+
+So `summary?.floatingPL` is **undefined**, and your Floating P/L card will be wrong even when equity ≠ balance.
+
+**Fix (recommended): standardize on `floatingPnl` everywhere.**
+In `client/src/pages/AccountScreen.tsx`:
+
+* Change the type:
+
+```ts
+floatingPnl: number;
+```
+
+* Change the render usage:
+
+```tsx
+{formatCurrency(summary?.floatingPnl)}
+```
+
+(Replace every `floatingPL` reference.)
+
+### B) Account tab is not using your “real-time” account summary hook
+
+You already have a correct hook:
+
+* `client/src/hooks/use-account-summary.tsx`
+  It polls every 2s and uses the correct `floatingPnl` field.
+
+But `AccountScreen.tsx` **re-implements** its own query (no refetch interval, and it uses the wrong field name). This creates two different “truth sources” for the same data.
+
+**Fix (recommended): use the existing hook inside AccountScreen**
+Replace the local `useQuery<AccountSummary>` in `AccountScreen.tsx` with:
+
+```ts
+const { summary, isLoading } = useAccountSummary();
+```
+
+…and delete the locally-declared `AccountSummary` type in that file (or import the interface from the hook file to avoid drift).
+
+### C) “Member Since” is always blank because `createdAt` is never returned
+
+`AccountScreen.tsx` renders:
+
+```tsx
+user?.createdAt ? new Date(user.createdAt).toLocaleDateString() : "-"
+```
+
+But `/api/auth/current-user` returns **no `createdAt`** in both the “recalc success” and fallback JSON blocks.
+
+**Fix (backend): add `createdAt` to `/api/auth/current-user` response**
+In `server/routes.ts` under `app.get("/api/auth/current-user", ...)`, include:
+
+```ts
+createdAt: updatedUser.createdAt
+```
+
+and in the fallback:
+
+```ts
+createdAt: user.createdAt
+```
+
+## Floating P/L formula/logic check (Account tab)
+
+### What you have now
+
+* `server/recalcAccount.ts` computes:
+
+  * `floatingProfit = Σ unrealizedPnl(openTrades, currentPrice)`
+  * `equity = balance + floatingProfit`
+* `/api/account/summary` returns:
+
+  * `floatingPnl = equity - balance`
+
+That structure is correct (MetaTrader-style), **provided currentPrice is valid**.
+
+### The main operational risk
+
+If the quotes table is missing, stale, or symbol-mismatched, `recalcAccount.ts` explicitly falls back to:
+
+```ts
+priceCache.set(symbol, trade.openPrice)
+```
+
+which forces **unrealized P/L = 0** and therefore **equity == balance** even with open positions.
+
+If you’re seeing that symptom, the bug is not the formula — it’s **quote availability/consistency** at recalc time.
+
+## “Next to Leaderboard” / top balance display issue (what you’re likely noticing)
+
+In `client/src/pages/Dashboard.tsx`, the top bar shows:
+
+```tsx
+Balance: ${user.balance}
+```
+
+That value comes from `/api/auth/current-user` and is:
+
+* a **string**
+* not formatted
+* potentially stale if you don’t refresh auth state after key actions (you do invalidate it in some mutations, but it’s still a separate data source than `/api/account/summary`)
+
+If you want that header to reflect “professional platform” semantics, you should decide whether it should show:
+
+* **Balance** (realized-only), or
+* **Equity** (balance + floating)
+
+Then wire it to **one** source consistently (ideally `/api/account/summary` if you want live).
+
+---
+
+If you want, next step (still backend/logic-focused) is I’ll trace the full data lineage for account metrics:
+**quotes ingestion → quotes table → recalcAccount → users.equity/freeMargin/usedMargin → /api/account/summary → AccountScreen render**, and point out the exact failure modes (stale quote, missing bid/ask, symbol mismatch, race conditions) plus hardening measures.

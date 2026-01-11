@@ -1,0 +1,159 @@
+persist across modal opens
+
+Apply this in client/src/components/EditTradeModal.tsx to persist the last-used preset via localStorage across modal opens (and page refreshes).
+
+1) Add a storage key + lazy-load state from localStorage
+
+Replace your current preset state:
+
+const [lastPresetPoints, setLastPresetPoints] = useState<number>(10);
+
+
+With this (same component scope):
+
+  const PRESET_STORAGE_KEY = "tc3al:lastPresetPoints";
+
+  const [lastPresetPoints, setLastPresetPoints] = useState<number>(() => {
+    try {
+      const raw = window.localStorage.getItem(PRESET_STORAGE_KEY);
+      const n = raw ? Number(raw) : 10;
+
+      // Only allow the supported presets; fallback to 10 otherwise
+      const allowed = [10, 50, 100, 150, 200];
+      return allowed.includes(n) ? n : 10;
+    } catch {
+      return 10;
+    }
+  });
+
+2) Persist on change (useEffect)
+
+Add this useEffect anywhere inside the component (below your state declarations is ideal):
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(PRESET_STORAGE_KEY, String(lastPresetPoints));
+    } catch {
+      // ignore storage failures (private mode / blocked storage)
+    }
+  }, [lastPresetPoints]);
+
+3) No other changes required
+
+Your dropdown items that already do:
+
+onSelect={() => {
+  setLastPresetPoints(p);
+  autoFixTargets(p);
+}}
+
+
+will now automatically persist the selection and restore it on the next modal open.
+
+If you also want the preset to be per-symbol (e.g., remember different presets for XAUUSD vs GBPJPY), tell me and I’ll switch the key to include trade.symbol/trade.symbolId without changing any UI.
+
+per symbol as suggested
+Thought for 23s
+
+Below is a per-symbol persistence implementation for your TP/SL preset dropdown in client/src/components/EditTradeModal.tsx, using localStorage keys that vary by symbol (or symbolId).
+
+It is designed to avoid the common bug where the “save” effect overwrites the newly selected symbol’s stored preset before the “load” effect applies it.
+
+1) Update React imports
+
+At the top of EditTradeModal.tsx, ensure you import useMemo and useRef:
+
+import { useEffect, useMemo, useRef, useState } from "react";
+
+
+(If you already import useEffect/useState, just expand the list.)
+
+2) Replace your current persistence logic with per-symbol key + guarded hydrate/save
+
+Inside the component body, replace the prior global-key state/effects with the following block.
+
+Add this block near the top of the component (after you have access to trade)
+  const AUTO_FIX_PRESETS = [10, 50, 100, 150, 200] as const;
+
+  const getSymbolStorageKey = (t: any) => {
+    // Prefer stable numeric id if available; fallback to symbol string; otherwise global.
+    const sid = t?.symbolId ?? t?.symbol_id;
+    const sym = t?.symbol ?? t?.symbolName ?? t?.symbol_code;
+
+    if (sid !== null && sid !== undefined && sid !== "") return `sid-${sid}`;
+    if (sym) return `sym-${String(sym).toUpperCase()}`;
+    return "global";
+  };
+
+  const presetStorageKey = useMemo(() => {
+    const symbolKey = getSymbolStorageKey(trade);
+    return `tc3al:lastPresetPoints:${symbolKey}`;
+  }, [trade?.symbolId, trade?.symbol]);
+
+  const skipNextSaveRef = useRef(false);
+
+  const [lastPresetPoints, setLastPresetPoints] = useState<number>(10);
+
+3) Load preset whenever the symbol changes (hydrate)
+
+Add this useEffect (place it before the save effect):
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    try {
+      const raw = window.localStorage.getItem(presetStorageKey);
+      const n = raw ? Number(raw) : 10;
+
+      const allowed = [...AUTO_FIX_PRESETS] as unknown as number[];
+      const value = allowed.includes(n) ? n : 10;
+
+      // Prevent the subsequent save effect from writing the old value into the new symbol key.
+      skipNextSaveRef.current = true;
+      setLastPresetPoints(value);
+    } catch {
+      // If storage is blocked, fail gracefully.
+      skipNextSaveRef.current = true;
+      setLastPresetPoints(10);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [presetStorageKey]);
+
+4) Save preset whenever it changes (per-symbol)
+
+Add this useEffect (after the hydrate effect):
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    // Skip the first save right after we hydrate from storage for a new symbol.
+    if (skipNextSaveRef.current) {
+      skipNextSaveRef.current = false;
+      return;
+    }
+
+    try {
+      window.localStorage.setItem(presetStorageKey, String(lastPresetPoints));
+    } catch {
+      // ignore storage failures
+    }
+  }, [lastPresetPoints, presetStorageKey]);
+
+5) Ensure your dropdown selection sets state (no change if already done)
+
+Your dropdown item handler should already look like this; keep it:
+
+onSelect={() => {
+  setLastPresetPoints(p);
+  autoFixTargets(p);
+}}
+
+Result
+
+If you last used ±150 on GBPUSD, the dropdown will reopen as ±150 for GBPUSD.
+
+If you switch to USDJPY, it will load and display the last used preset for USDJPY (e.g., ±50), independently.
+
+No “overwrite on symbol change” race condition.
+
+If you want the key to be strictly by symbolId (and never by symbol string), tell me what your trade object shape guarantees; I’ll lock it down to a single canonical field.

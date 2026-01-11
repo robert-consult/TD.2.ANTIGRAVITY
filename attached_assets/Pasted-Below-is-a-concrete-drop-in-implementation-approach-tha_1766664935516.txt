@@ -1,0 +1,983 @@
+Below is a concrete, “drop-in” implementation approach that makes those two Profile Settings cards **actually populate** from a durable **login/session trail**, and upgrades **Country + Timezone** to a **city-aware, IANA-correct (“gold standard”)** dataset.
+
+Key packages used (all actively used for these exact problems):
+
+* `@vvo/tzdb` for an up-to-date, grouped IANA timezone list with **major cities** (ideal for timezone pickers). ([GitHub][1])
+* `geoip-lite` for offline IP → country/region/city (+ lat/lon) lookup. ([npm][2])
+* `@photostructure/tz-lookup` for offline lat/lon → IANA timezone inference (better maintained fork; Node usage returns `"America/New_York"`). ([GitHub][3])
+
+---
+
+## 1) Install dependencies
+
+```bash
+npm i @vvo/tzdb geoip-lite @photostructure/tz-lookup
+```
+
+Optional but recommended (better device labels):
+
+```bash
+npm i ua-parser-js
+```
+
+---
+
+## 2) DB schema (Drizzle / SQLite): sessions + immutable security trail + user regional prefs
+
+### `shared/schema.ts` — add these tables
+
+> Keep your existing tables untouched; this adds purpose-built security/session primitives.
+
+```ts
+// shared/schema.ts
+import { sqliteTable, text, integer, real, index, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { users } from "./schema"; // adjust import if users is in same file
+
+// 1) One row per authenticated session (drives "Active Sessions" + session duration)
+export const userSessions = sqliteTable(
+  "userSessions",
+  {
+    id: text("id").primaryKey(), // uuid
+    userId: integer("user_id").notNull().references(() => users.id),
+    createdAt: integer("created_at").notNull(),     // ms epoch
+    lastSeenAt: integer("last_seen_at").notNull(),  // ms epoch
+    endedAt: integer("ended_at"),                   // ms epoch nullable
+
+    ip: text("ip").notNull(),
+    userAgent: text("user_agent").notNull(),
+
+    countryCode: text("country_code"),
+    region: text("region"),
+    city: text("city"),
+    latitude: real("latitude"),
+    longitude: real("longitude"),
+    inferredTz: text("inferred_tz"), // derived from geo (not user preference)
+
+    revokedAt: integer("revoked_at"),
+    revokedByUserId: integer("revoked_by_user_id"),
+    revokeReason: text("revoke_reason"),
+  },
+  (t) => ({
+    userIdIdx: index("idx_userSessions_userId").on(t.userId),
+    endedAtIdx: index("idx_userSessions_endedAt").on(t.endedAt),
+    lastSeenIdx: index("idx_userSessions_lastSeenAt").on(t.lastSeenAt),
+  })
+);
+
+// 2) Append-only security events (drives "Recent Login Activity" and audit exports)
+//    Includes hash chaining for tamper-evidence (hedge-fund grade expectation).
+export const securityEvents = sqliteTable(
+  "securityEvents",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    userId: integer("user_id").notNull().references(() => users.id),
+    sessionId: text("session_id"), // nullable for events like LOGIN_FAILED
+    eventType: text("event_type").notNull(), // LOGIN_SUCCESS | LOGIN_FAILED | LOGOUT | SESSION_REVOKED | ...
+    eventAt: integer("event_at").notNull(),  // ms epoch
+
+    ip: text("ip"),
+    userAgent: text("user_agent"),
+
+    countryCode: text("country_code"),
+    region: text("region"),
+    city: text("city"),
+
+    note: text("note"),
+    metaJson: text("meta_json"),
+
+    prevHash: text("prev_hash"),
+    eventHash: text("event_hash"),
+  },
+  (t) => ({
+    userTimeIdx: index("idx_securityEvents_user_time").on(t.userId, t.eventAt),
+    sessionIdx: index("idx_securityEvents_session").on(t.sessionId),
+  })
+);
+
+// 3) User Regional Preferences (drives your "Regional Preferences" card)
+export const userPreferences = sqliteTable(
+  "userPreferences",
+  {
+    userId: integer("user_id").primaryKey().references(() => users.id),
+
+    // user-selected
+    countryCode: text("country_code"),
+    timezone: text("timezone"), // store IANA name (e.g., "America/Chicago")
+    cityLabel: text("city_label"), // user-facing city label (optional)
+    language: text("language"), // e.g., "en"
+
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (t) => ({
+    uniqUser: uniqueIndex("ux_userPreferences_userId").on(t.userId),
+  })
+);
+```
+
+Run:
+
+```bash
+npm run db:push
+```
+
+---
+
+## 3) Backend: session creation, touch (lastSeen), logout, revoke, and “recent login activity” endpoints
+
+### A) Create helper: `server/security/sessionTrail.ts`
+
+```ts
+// server/security/sessionTrail.ts
+import crypto from "crypto";
+import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { db } from "../db"; // adjust to your db export path
+import { securityEvents, userSessions } from "../../shared/schema";
+
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const geoip = require("geoip-lite");
+
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const tzlookup: (lat: number, lon: number) => string = require("@photostructure/tz-lookup");
+
+export type GeoContext = {
+  countryCode?: string;
+  region?: string;
+  city?: string;
+  latitude?: number;
+  longitude?: number;
+  inferredTz?: string;
+};
+
+export function getClientIp(req: any): string {
+  // Prefer X-Forwarded-For (Replit/Proxy) then fallback
+  const xff = req.headers?.["x-forwarded-for"];
+  if (typeof xff === "string" && xff.length > 0) return xff.split(",")[0].trim();
+  if (Array.isArray(xff) && xff.length > 0) return String(xff[0]).split(",")[0].trim();
+  return req.ip || req.socket?.remoteAddress || "0.0.0.0";
+}
+
+export function getUserAgent(req: any): string {
+  return String(req.headers?.["user-agent"] || "unknown");
+}
+
+export function buildGeoContext(ip: string): GeoContext {
+  // geoip-lite will return null for private/local ranges; that’s fine.
+  const g = geoip.lookup(ip);
+  if (!g) return {};
+
+  const latitude = Array.isArray(g.ll) ? Number(g.ll[0]) : undefined;
+  const longitude = Array.isArray(g.ll) ? Number(g.ll[1]) : undefined;
+
+  let inferredTz: string | undefined;
+  if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
+    try {
+      inferredTz = tzlookup(latitude!, longitude!);
+    } catch {
+      inferredTz = undefined;
+    }
+  }
+
+  return {
+    countryCode: g.country,
+    region: g.region,
+    city: g.city,
+    latitude,
+    longitude,
+    inferredTz,
+  };
+}
+
+function sha256(input: string): string {
+  return crypto.createHash("sha256").update(input).digest("hex");
+}
+
+export function appendSecurityEvent(args: {
+  userId: number;
+  sessionId?: string | null;
+  eventType: string;
+  ip?: string | null;
+  userAgent?: string | null;
+  geo?: GeoContext;
+  note?: string | null;
+  meta?: any;
+  eventAt?: number;
+}): void {
+  const eventAt = args.eventAt ?? Date.now();
+  const metaJson = args.meta ? JSON.stringify(args.meta) : null;
+
+  // Per-user hash chain (tamper-evident):
+  const last = db
+    .select({ eventHash: securityEvents.eventHash })
+    .from(securityEvents)
+    .where(eq(securityEvents.userId, args.userId))
+    .orderBy(desc(securityEvents.id))
+    .limit(1)
+    .all();
+
+  const prevHash = last?.[0]?.eventHash || null;
+
+  const material = [
+    prevHash || "",
+    String(args.userId),
+    String(args.sessionId || ""),
+    args.eventType,
+    String(eventAt),
+    String(args.ip || ""),
+    String(args.userAgent || ""),
+    String(args.geo?.countryCode || ""),
+    String(args.geo?.region || ""),
+    String(args.geo?.city || ""),
+    String(metaJson || ""),
+    String(args.note || ""),
+  ].join("|");
+
+  const eventHash = sha256(material);
+
+  db.insert(securityEvents).values({
+    userId: args.userId,
+    sessionId: args.sessionId || null,
+    eventType: args.eventType,
+    eventAt,
+    ip: args.ip || null,
+    userAgent: args.userAgent || null,
+    countryCode: args.geo?.countryCode || null,
+    region: args.geo?.region || null,
+    city: args.geo?.city || null,
+    note: args.note || null,
+    metaJson,
+    prevHash,
+    eventHash,
+  }).run();
+}
+
+export function createUserSession(args: { userId: number; ip: string; userAgent: string }) {
+  const id = crypto.randomUUID();
+  const now = Date.now();
+  const geo = buildGeoContext(args.ip);
+
+  db.insert(userSessions).values({
+    id,
+    userId: args.userId,
+    createdAt: now,
+    lastSeenAt: now,
+    endedAt: null,
+
+    ip: args.ip,
+    userAgent: args.userAgent,
+
+    countryCode: geo.countryCode || null,
+    region: geo.region || null,
+    city: geo.city || null,
+    latitude: geo.latitude ?? null,
+    longitude: geo.longitude ?? null,
+    inferredTz: geo.inferredTz || null,
+
+    revokedAt: null,
+    revokedByUserId: null,
+    revokeReason: null,
+  }).run();
+
+  appendSecurityEvent({
+    userId: args.userId,
+    sessionId: id,
+    eventType: "LOGIN_SUCCESS",
+    ip: args.ip,
+    userAgent: args.userAgent,
+    geo,
+  });
+
+  return { sessionId: id, geo };
+}
+
+export function touchSession(args: { sessionId: string }) {
+  db.update(userSessions)
+    .set({ lastSeenAt: Date.now() })
+    .where(and(eq(userSessions.id, args.sessionId), isNull(userSessions.endedAt)))
+    .run();
+}
+
+export function endSession(args: { userId: number; sessionId: string; ip?: string; userAgent?: string }) {
+  const now = Date.now();
+  db.update(userSessions)
+    .set({ endedAt: now, lastSeenAt: now })
+    .where(and(eq(userSessions.id, args.sessionId), eq(userSessions.userId, args.userId)))
+    .run();
+
+  appendSecurityEvent({
+    userId: args.userId,
+    sessionId: args.sessionId,
+    eventType: "LOGOUT",
+    ip: args.ip || null,
+    userAgent: args.userAgent || null,
+  });
+}
+
+export function revokeSession(args: { actorUserId: number; targetUserId: number; sessionId: string; reason?: string }) {
+  const now = Date.now();
+
+  db.update(userSessions)
+    .set({
+      revokedAt: now,
+      revokedByUserId: args.actorUserId,
+      revokeReason: args.reason || "revoked",
+      endedAt: now,
+      lastSeenAt: now,
+    })
+    .where(and(eq(userSessions.id, args.sessionId), eq(userSessions.userId, args.targetUserId)))
+    .run();
+
+  appendSecurityEvent({
+    userId: args.targetUserId,
+    sessionId: args.sessionId,
+    eventType: "SESSION_REVOKED",
+    note: args.reason || "revoked",
+    meta: { revokedBy: args.actorUserId },
+  });
+}
+
+export function getRecentLoginActivity(args: { userId: number; limit: number }) {
+  // Pull from securityEvents for true “trail”
+  return db
+    .select({
+      id: securityEvents.id,
+      eventType: securityEvents.eventType,
+      eventAt: securityEvents.eventAt,
+      ip: securityEvents.ip,
+      userAgent: securityEvents.userAgent,
+      countryCode: securityEvents.countryCode,
+      region: securityEvents.region,
+      city: securityEvents.city,
+      sessionId: securityEvents.sessionId,
+    })
+    .from(securityEvents)
+    .where(eq(securityEvents.userId, args.userId))
+    .orderBy(desc(securityEvents.eventAt))
+    .limit(args.limit)
+    .all();
+}
+
+export function getActiveSessions(args: { userId: number; limit: number }) {
+  return db
+    .select({
+      id: userSessions.id,
+      createdAt: userSessions.createdAt,
+      lastSeenAt: userSessions.lastSeenAt,
+      ip: userSessions.ip,
+      userAgent: userSessions.userAgent,
+      countryCode: userSessions.countryCode,
+      region: userSessions.region,
+      city: userSessions.city,
+      inferredTz: userSessions.inferredTz,
+      revokedAt: userSessions.revokedAt,
+    })
+    .from(userSessions)
+    .where(and(eq(userSessions.userId, args.userId), isNull(userSessions.endedAt)))
+    .orderBy(desc(userSessions.lastSeenAt))
+    .limit(args.limit)
+    .all();
+}
+
+export function getSessionDurationMs(session: { createdAt: number; endedAt?: number | null }) {
+  if (!session.endedAt) return null;
+  return Math.max(0, session.endedAt - session.createdAt);
+}
+```
+
+### B) “Me” routes: `server/routes/me.ts`
+
+```ts
+// server/routes/me.ts
+import type { Express, Request, Response } from "express";
+import { db } from "../db"; // adjust
+import { userPreferences } from "../../shared/schema";
+import { eq } from "drizzle-orm";
+import { getActiveSessions, getRecentLoginActivity, revokeSession } from "../security/sessionTrail";
+
+function requireAuth(req: any, res: Response): { userId: number; sessionId?: string } | null {
+  // IMPORTANT: adapt to your existing auth shape.
+  // Common pattern in your codebase: req.user?.id (or req.userId)
+  const userId = req.user?.id ?? req.userId;
+  if (!userId) {
+    res.status(401).json({ error: "unauthorized" });
+    return null;
+  }
+  const sessionId = req.user?.sessionId ?? req.sessionId; // if you embed it in JWT/ctx
+  return { userId: Number(userId), sessionId };
+}
+
+export function registerMeRoutes(app: Express) {
+  app.get("/api/me/login-activity", (req: Request, res: Response) => {
+    const auth = requireAuth(req as any, res);
+    if (!auth) return;
+
+    const limit = Math.min(50, Math.max(1, Number(req.query.limit || 10)));
+    const rows = getRecentLoginActivity({ userId: auth.userId, limit });
+    res.json({ rows });
+  });
+
+  app.get("/api/me/sessions", (req: Request, res: Response) => {
+    const auth = requireAuth(req as any, res);
+    if (!auth) return;
+
+    const limit = Math.min(50, Math.max(1, Number(req.query.limit || 10)));
+    const rows = getActiveSessions({ userId: auth.userId, limit });
+    res.json({ rows });
+  });
+
+  app.post("/api/me/sessions/:sessionId/revoke", (req: Request, res: Response) => {
+    const auth = requireAuth(req as any, res);
+    if (!auth) return;
+
+    const sessionId = String(req.params.sessionId);
+    const reason = String((req.body as any)?.reason || "User revoked session");
+
+    // Self-revoke only (admin routes should exist separately)
+    revokeSession({ actorUserId: auth.userId, targetUserId: auth.userId, sessionId, reason });
+    res.json({ ok: true });
+  });
+
+  app.get("/api/me/preferences", (req: Request, res: Response) => {
+    const auth = requireAuth(req as any, res);
+    if (!auth) return;
+
+    const pref = db.select().from(userPreferences).where(eq(userPreferences.userId, auth.userId)).limit(1).all()[0];
+    res.json({ pref: pref || null });
+  });
+
+  app.put("/api/me/preferences", (req: Request, res: Response) => {
+    const auth = requireAuth(req as any, res);
+    if (!auth) return;
+
+    const body = (req.body || {}) as any;
+    const now = Date.now();
+
+    const values = {
+      userId: auth.userId,
+      countryCode: body.countryCode || null,
+      timezone: body.timezone || null, // IANA name
+      cityLabel: body.cityLabel || null,
+      language: body.language || null,
+      updatedAt: now,
+    };
+
+    // upsert in SQLite:
+    const existing = db.select({ userId: userPreferences.userId }).from(userPreferences).where(eq(userPreferences.userId, auth.userId)).limit(1).all()[0];
+
+    if (existing) {
+      db.update(userPreferences).set(values).where(eq(userPreferences.userId, auth.userId)).run();
+    } else {
+      db.insert(userPreferences).values(values).run();
+    }
+
+    res.json({ ok: true, pref: values });
+  });
+}
+```
+
+### C) Timezone meta endpoint (city-aware) using `@vvo/tzdb`
+
+Create `server/routes/meta.ts`:
+
+```ts
+// server/routes/meta.ts
+import type { Express, Request, Response } from "express";
+import { getTimeZones } from "@vvo/tzdb";
+
+type TzOption = {
+  name: string;            // IANA
+  alternativeName: string; // e.g. "Central European Time"
+  countryCode: string;
+  countryName: string;
+  mainCities: string[];
+  rawOffsetInMinutes: number;
+  abbreviation: string;
+  rawFormat: string;       // already nicely formatted
+};
+
+export function registerMetaRoutes(app: Express) {
+  app.get("/api/meta/timezones", (req: Request, res: Response) => {
+    const includeUtc = String(req.query.includeUtc || "0") === "1";
+    const tzs = getTimeZones({ includeUtc }) as TzOption[];
+
+    // Group by country for a “Country -> City/Timezone” UX
+    const byCountry: Record<string, { countryCode: string; countryName: string; timezones: any[] }> = {};
+
+    for (const t of tzs) {
+      const key = t.countryCode || "ZZ";
+      if (!byCountry[key]) {
+        byCountry[key] = {
+          countryCode: t.countryCode || "ZZ",
+          countryName: t.countryName || (t.name === "UTC" ? "UTC" : "Other"),
+          timezones: [],
+        };
+      }
+
+      // Build a label that is city-forward:
+      const city = t.mainCities?.[0] ? ` — ${t.mainCities[0]}` : "";
+      const label = `${t.rawFormat}${city ? "" : ""}`;
+
+      byCountry[key].timezones.push({
+        name: t.name,
+        label, // includes offset + alt name + city list inside rawFormat
+        alternativeName: t.alternativeName,
+        mainCities: t.mainCities || [],
+        rawOffsetInMinutes: t.rawOffsetInMinutes,
+        abbreviation: t.abbreviation,
+      });
+    }
+
+    const countries = Object.values(byCountry).sort((a, b) => a.countryName.localeCompare(b.countryName));
+    for (const c of countries) {
+      c.timezones.sort((a, b) => a.label.localeCompare(b.label));
+    }
+
+    res.json({ generatedAt: Date.now(), countries });
+  });
+}
+```
+
+### D) Wire routes into `server/index.ts`
+
+In `server/index.ts` (your backend entrypoint per prior threads), add:
+
+```ts
+import { registerMeRoutes } from "./routes/me";
+import { registerMetaRoutes } from "./routes/meta";
+
+// after app creation:
+app.set("trust proxy", true); // ensures IP works behind proxies
+
+registerMeRoutes(app);
+registerMetaRoutes(app);
+```
+
+---
+
+## 4) Critical integration point: create a session on LOGIN, close on LOGOUT, touch on authenticated requests
+
+### A) In your existing login handler
+
+Where you validate credentials and issue token/session:
+
+```ts
+import { createUserSession, getClientIp, getUserAgent } from "./security/sessionTrail";
+
+// inside POST /api/auth/login (or equivalent), AFTER password validation:
+const ip = getClientIp(req);
+const userAgent = getUserAgent(req);
+const { sessionId } = createUserSession({ userId: user.id, ip, userAgent });
+
+// embed sessionId into your auth context:
+// Option 1 (recommended): include in JWT payload as sessionId
+// Option 2: set httpOnly cookie "sid" = sessionId (if you use cookie auth)
+```
+
+### B) On logout
+
+```ts
+import { endSession, getClientIp, getUserAgent } from "./security/sessionTrail";
+
+const ip = getClientIp(req);
+const userAgent = getUserAgent(req);
+endSession({ userId: req.user.id, sessionId: req.user.sessionId, ip, userAgent });
+```
+
+### C) Touch session on every authenticated request (rate-limited)
+
+In your auth middleware (the same one that sets `req.user`):
+
+```ts
+import { touchSession } from "./security/sessionTrail";
+
+const sid = req.user?.sessionId;
+if (sid) {
+  // Optional: only touch if > 60s since last touch (store last touch on req/app locals)
+  touchSession({ sessionId: sid });
+}
+```
+
+This is what makes “Active Sessions” actually mean “active”.
+
+---
+
+## 5) Frontend: populate the two cards + add Country/Timezone (city-aware) selector
+
+### A) Add API types: `client/src/lib/profileApi.ts`
+
+```ts
+// client/src/lib/profileApi.ts
+export type LoginActivityRow = {
+  id: number;
+  eventType: string;
+  eventAt: number;
+  ip?: string | null;
+  userAgent?: string | null;
+  countryCode?: string | null;
+  region?: string | null;
+  city?: string | null;
+  sessionId?: string | null;
+};
+
+export type ActiveSessionRow = {
+  id: string;
+  createdAt: number;
+  lastSeenAt: number;
+  ip: string;
+  userAgent: string;
+  countryCode?: string | null;
+  region?: string | null;
+  city?: string | null;
+  inferredTz?: string | null;
+  revokedAt?: number | null;
+};
+
+export type UserPref = {
+  userId: number;
+  countryCode?: string | null;
+  timezone?: string | null;
+  cityLabel?: string | null;
+  language?: string | null;
+  updatedAt: number;
+};
+
+export type CountryTzMeta = {
+  generatedAt: number;
+  countries: Array<{
+    countryCode: string;
+    countryName: string;
+    timezones: Array<{
+      name: string;
+      label: string;
+      alternativeName: string;
+      mainCities: string[];
+      rawOffsetInMinutes: number;
+      abbreviation: string;
+    }>;
+  }>;
+};
+
+async function json<T>(url: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(url, {
+    ...init,
+    headers: { "Content-Type": "application/json", ...(init?.headers || {}) },
+  });
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  return res.json() as Promise<T>;
+}
+
+export const profileApi = {
+  getLoginActivity: (limit = 10) => json<{ rows: LoginActivityRow[] }>(`/api/me/login-activity?limit=${limit}`),
+  getActiveSessions: (limit = 10) => json<{ rows: ActiveSessionRow[] }>(`/api/me/sessions?limit=${limit}`),
+  revokeSession: (sessionId: string, reason?: string) =>
+    json<{ ok: boolean }>(`/api/me/sessions/${encodeURIComponent(sessionId)}/revoke`, {
+      method: "POST",
+      body: JSON.stringify({ reason }),
+    }),
+
+  getPreferences: () => json<{ pref: UserPref | null }>(`/api/me/preferences`),
+  savePreferences: (pref: Partial<UserPref>) =>
+    json<{ ok: boolean; pref: UserPref }>(`/api/me/preferences`, { method: "PUT", body: JSON.stringify(pref) }),
+
+  getTimezonesMeta: () => json<CountryTzMeta>(`/api/meta/timezones?includeUtc=1`),
+};
+```
+
+### B) Cards component: `client/src/components/profile/SecurityAndRegionalCards.tsx`
+
+```tsx
+// client/src/components/profile/SecurityAndRegionalCards.tsx
+import React from "react";
+import { profileApi, ActiveSessionRow, LoginActivityRow, CountryTzMeta } from "@/lib/profileApi";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Input } from "@/components/ui/input";
+
+function fmt(ts: number) {
+  return new Date(ts).toLocaleString();
+}
+function fmtLocation(row: { city?: string | null; region?: string | null; countryCode?: string | null }) {
+  const parts = [row.city, row.region, row.countryCode].filter(Boolean);
+  return parts.length ? parts.join(", ") : "Unknown location";
+}
+function shortUA(ua?: string | null) {
+  if (!ua) return "Unknown device";
+  if (ua.length <= 70) return ua;
+  return ua.slice(0, 67) + "...";
+}
+
+export function SecurityAndRegionalCards() {
+  const [loginRows, setLoginRows] = React.useState<LoginActivityRow[] | null>(null);
+  const [sessions, setSessions] = React.useState<ActiveSessionRow[] | null>(null);
+
+  const [meta, setMeta] = React.useState<CountryTzMeta | null>(null);
+  const [countryCode, setCountryCode] = React.useState<string>("");
+  const [timezone, setTimezone] = React.useState<string>("");
+  const [cityLabel, setCityLabel] = React.useState<string>("");
+  const [language, setLanguage] = React.useState<string>("en");
+
+  const [saving, setSaving] = React.useState(false);
+
+  React.useEffect(() => {
+    (async () => {
+      const [a, b, m, p] = await Promise.all([
+        profileApi.getLoginActivity(12).catch(() => ({ rows: [] })),
+        profileApi.getActiveSessions(10).catch(() => ({ rows: [] })),
+        profileApi.getTimezonesMeta().catch(() => null),
+        profileApi.getPreferences().catch(() => ({ pref: null })),
+      ]);
+
+      setLoginRows(a.rows);
+      setSessions(b.rows);
+      setMeta(m);
+
+      // Defaults: saved pref > browser
+      const browserTz = Intl.DateTimeFormat().resolvedOptions().timeZone || "";
+      const browserLang = navigator.language?.split("-")?.[0] || "en";
+
+      setCountryCode(p.pref?.countryCode || "");
+      setTimezone(p.pref?.timezone || browserTz);
+      setCityLabel(p.pref?.cityLabel || "");
+      setLanguage(p.pref?.language || browserLang);
+    })();
+  }, []);
+
+  const selectedCountry = meta?.countries.find((c) => c.countryCode === countryCode);
+  const tzOptions = selectedCountry?.timezones || meta?.countries.find((c) => c.countryName === "UTC")?.timezones || [];
+
+  const savePrefs = async () => {
+    setSaving(true);
+    try {
+      await profileApi.savePreferences({
+        countryCode: countryCode || null,
+        timezone: timezone || null,
+        cityLabel: cityLabel || null,
+        language: language || null,
+      } as any);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Recent Login Activity */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Recent Login Activity</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {!loginRows ? (
+            <div className="text-muted-foreground">Loading…</div>
+          ) : loginRows.length === 0 ? (
+            <div className="text-muted-foreground">No login history available</div>
+          ) : (
+            <div className="space-y-3">
+              {loginRows.slice(0, 12).map((r) => (
+                <div key={r.id} className="flex items-start justify-between gap-4 border-b pb-3 last:border-b-0 last:pb-0">
+                  <div className="min-w-0">
+                    <div className="font-medium">
+                      {r.eventType.replaceAll("_", " ")}
+                      {r.ip ? <span className="text-muted-foreground"> · {r.ip}</span> : null}
+                    </div>
+                    <div className="text-sm text-muted-foreground">
+                      {fmt(r.eventAt)} · {fmtLocation(r)} · {shortUA(r.userAgent)}
+                    </div>
+                  </div>
+                  {r.sessionId ? (
+                    <div className="text-xs text-muted-foreground whitespace-nowrap">SID {r.sessionId.slice(0, 8)}…</div>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Active Sessions */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Active Sessions</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {!sessions ? (
+            <div className="text-muted-foreground">Loading…</div>
+          ) : sessions.length === 0 ? (
+            <div className="text-muted-foreground">No active sessions</div>
+          ) : (
+            <div className="space-y-3">
+              {sessions.map((s) => (
+                <div key={s.id} className="flex items-start justify-between gap-4 border-b pb-3 last:border-b-0 last:pb-0">
+                  <div className="min-w-0">
+                    <div className="font-medium">
+                      {s.ip} <span className="text-muted-foreground">· last seen {fmt(s.lastSeenAt)}</span>
+                    </div>
+                    <div className="text-sm text-muted-foreground">
+                      Started {fmt(s.createdAt)} · {fmtLocation(s)} · {shortUA(s.userAgent)}
+                      {s.inferredTz ? <span> · inferred {s.inferredTz}</span> : null}
+                    </div>
+                  </div>
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    onClick={async () => {
+                      await profileApi.revokeSession(s.id, "User revoked from Profile Settings");
+                      const next = await profileApi.getActiveSessions(10).catch(() => ({ rows: [] }));
+                      setSessions(next.rows);
+                      const nextLog = await profileApi.getLoginActivity(12).catch(() => ({ rows: [] }));
+                      setLoginRows(nextLog.rows);
+                    }}
+                  >
+                    Revoke
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Regional Preferences */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Regional Preferences</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-5">
+          {/* Country */}
+          <div className="space-y-2">
+            <div className="text-sm font-medium">Country / Region</div>
+            <Select value={countryCode} onValueChange={setCountryCode}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select country" />
+              </SelectTrigger>
+              <SelectContent className="max-h-[320px]">
+                {(meta?.countries || []).map((c) => (
+                  <SelectItem key={c.countryCode} value={c.countryCode}>
+                    {c.countryName} ({c.countryCode})
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Timezone (IANA) with city-aware labels */}
+          <div className="space-y-2">
+            <div className="text-sm font-medium">Timezone</div>
+            <Select value={timezone} onValueChange={setTimezone}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select timezone" />
+              </SelectTrigger>
+              <SelectContent className="max-h-[320px]">
+                {tzOptions.map((t) => (
+                  <SelectItem key={t.name} value={t.name}>
+                    {t.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            {timezone ? (
+              <div className="text-xs text-muted-foreground">
+                Stored as IANA: <span className="font-mono">{timezone}</span>
+              </div>
+            ) : null}
+          </div>
+
+          {/* City label (optional – for display/searching/report headers) */}
+          <div className="space-y-2">
+            <div className="text-sm font-medium">City label (optional)</div>
+            <Input value={cityLabel} onChange={(e) => setCityLabel(e.target.value)} placeholder="e.g., Chicago, Nairobi, London" />
+            <div className="text-xs text-muted-foreground">
+              This does not change your IANA timezone; it is a user-facing label for reports/exports.
+            </div>
+          </div>
+
+          {/* Language */}
+          <div className="space-y-2">
+            <div className="text-sm font-medium">Language</div>
+            <Select value={language} onValueChange={setLanguage}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select language" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="en">English</SelectItem>
+                <SelectItem value="es">Spanish</SelectItem>
+                <SelectItem value="fr">French</SelectItem>
+                <SelectItem value="sw">Swahili</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <Button onClick={savePrefs} disabled={saving}>
+              {saving ? "Saving…" : "Save Preferences"}
+            </Button>
+            <div className="text-xs text-muted-foreground">
+              Tip: default timezone is auto-detected via browser if not set.
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+```
+
+### C) Render it in your Profile Settings page
+
+Wherever that screenshot page lives (your “User Profile Settings”), import and place:
+
+```tsx
+import { SecurityAndRegionalCards } from "@/components/profile/SecurityAndRegionalCards";
+
+export default function ProfileSettingsPage() {
+  return (
+    <div className="space-y-6">
+      {/* existing profile settings UI */}
+      <SecurityAndRegionalCards />
+    </div>
+  );
+}
+```
+
+---
+
+## 6) What this fixes (Definition of Done)
+
+1. **Recent Login Activity** card populates from `securityEvents` (append-only audit trail), including:
+
+* event type (LOGIN_SUCCESS / LOGOUT / SESSION_REVOKED)
+* timestamp
+* IP + user-agent
+* geo fields (city/region/country) when available
+* tamper-evident hash chain per user
+
+2. **Active Sessions** card populates from `userSessions` (one row per session), including:
+
+* lastSeenAt (kept warm by auth middleware)
+* started time + location + inferred tz
+* a real “Revoke” button that terminates the session and writes a trail event
+
+3. **Regional Preferences** uses `@vvo/tzdb` so timezone options are:
+
+* **IANA correct**
+* grouped
+* include **major cities** and offsets suitable for “gold standard” pickers ([GitHub][1])
+
+4. IP → location is offline via `geoip-lite` and inferred timezone from lat/lon using `@photostructure/tz-lookup` ([npm][2])
+
+---
+
+## 7) Notes to align with your other threads (timeline/export/admin reuse)
+
+* Your **Admin → Login History** mini-tab and **User Timeline export** should reuse the same primitives:
+
+  * `securityEvents` for immutable login/logout trail rows
+  * `userSessions` for session duration and active sessions
+* Exports can now cleanly add: `login_ip`, `login_city`, `login_country`, `user_agent`, `session_id`, `logout_time`, `session_length_ms`.
+
+If you want, I can provide the **admin endpoints** (`/api/admin/users/:id/login-activity`, `/api/admin/users/:id/sessions`) as direct mirrors of the `/api/me/*` routes above (same output shapes), so your admin tabs and user timeline become trivial to wire.
+
+[1]: https://github.com/vvo/tzdb?utm_source=chatgpt.com "vvo/tzdb: 🕰 Simplified, grouped and always up to date list ..."
+[2]: https://www.npmjs.com/package/geoip-lite?activeTab=readme&utm_source=chatgpt.com "geoip-lite"
+[3]: https://github.com/photostructure/tz-lookup "GitHub - photostructure/tz-lookup: JavaScript Library for Timezone Lookup by Location"

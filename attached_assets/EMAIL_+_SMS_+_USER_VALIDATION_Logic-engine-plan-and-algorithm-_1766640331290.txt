@@ -1,0 +1,4909 @@
+Below is a logic-engine plan and algorithm design that matches your intent: frictionless signup, delayed email verification with a trading grace period, periodic re-verification to reduce disposable emails, and SMS reserved only for high-signal candidates.
+
+1) Objectives and principles
+Core intent
+
+Minimize signup friction: allow immediate account creation and platform access.
+
+Maintain integrity over time: enforce email verification after a 2-week trading grace window.
+
+Reduce “temporary email” abuse: require monthly re-verification so throwaway emails naturally expire.
+
+Spend on SMS only where it matters: SMS verification is a “serious contender” gate, not a default.
+
+Operational principles
+
+Make enforcement stateful and auditable (clear account status, timestamps, and reasons).
+
+Use progressive enforcement: remind → restrict → lock.
+
+Keep user messaging predictable: exact dates, countdown, what actions are blocked.
+
+2) Data model (conceptual fields)
+User / Account status fields
+
+emailVerifiedAt (nullable)
+
+emailVerificationDueAt (computed/derived)
+
+For first verification: createdAt + 14 days
+
+emailReverifyDueAt (nullable; only after initial verify)
+
+emailVerifiedAt + 30 days (or calendar month policy)
+
+accountState (enum):
+
+ACTIVE_UNVERIFIED_GRACE
+
+ACTIVE_VERIFIED
+
+LOCKED_EMAIL_UNVERIFIED
+
+LOCKED_EMAIL_REVERIFY_OVERDUE
+
+(optional) SUSPENDED_ADMIN, etc.
+
+lockReason (enum/text) and lockedAt
+
+lastReminderSentAt, reminderCount, nextReminderAt
+
+Trading activity aggregates (rolling metrics)
+
+Maintain these as continuously updated, queryable aggregates:
+
+firstTradeAt, lastTradeAt
+
+accountAgeDays
+
+activeDaysLast90 (optional)
+
+positionsCountLifetime
+
+positionsCountLast90
+
+startingBalance (constant baseline for “start”)
+
+balanceNow
+
+balancePctOfStart = balanceNow / startingBalance
+
+balanceAt90dAgo (or computed)
+
+returnLast90 = (balanceNow - balanceAt90dAgo) / balanceAt90dAgo
+
+Contender / verification pipeline
+
+contenderEligibleAt (nullable)
+
+contenderTier (enum):
+
+NONE
+
+CANDIDATE_EMAIL_ONLY
+
+CANDIDATE_SMS_REQUIRED
+
+VERIFIED_SMS
+
+smsVerifiedAt (nullable)
+
+smsVerificationAttempts, smsLastSentAt
+
+3) State machine and enforcement rules
+A) Signup and initial email verification grace period
+
+On signup:
+
+Set accountState = ACTIVE_UNVERIFIED_GRACE
+
+Set emailVerificationDueAt = createdAt + 14 days
+
+Allow trading during grace period.
+
+Reminder policy during grace window (example):
+
+Day 0: “Verify any time; you have 14 days before lockout.”
+
+Day 7: reminder
+
+Day 12: reminder
+
+Day 13: reminder (more urgent)
+
+Day 14: if still unverified → lock
+
+Lockout rule at day 14:
+
+If emailVerifiedAt is null AND now ≥ emailVerificationDueAt:
+
+accountState = LOCKED_EMAIL_UNVERIFIED
+
+Restrict all trading actions (and optionally restrict logins or withdrawals depending on policy)
+
+Only allow: view-only + verify-email flow
+
+Unlock rule:
+
+When email verified:
+
+emailVerifiedAt = now
+
+accountState = ACTIVE_VERIFIED
+
+Set emailReverifyDueAt = now + 30 days (monthly)
+
+B) Monthly re-verification to deter temporary emails
+
+Goal: If someone used a throwaway email, they will eventually lose access once they cannot re-verify.
+
+Reverify cadence (policy choice):
+
+Rolling 30 days (simplest): emailReverifyDueAt = emailVerifiedAt + 30 days
+
+Or “once per calendar month” (more complex but predictable).
+
+Reverify reminder window (example):
+
+7 days before due: reminder
+
+3 days before due: reminder
+
+On due: “Verify today to keep trading uninterrupted.”
+
+3 days overdue: final warning
+
+7 days overdue: lock (or lock exactly on due date if you want strictness)
+
+Lockout rule:
+
+If now > emailReverifyDueAt + graceOverduePeriod:
+
+accountState = LOCKED_EMAIL_REVERIFY_OVERDUE
+
+Unlock rule:
+
+When re-verified:
+
+Update emailVerifiedAt = now (or separate emailReverifiedAt)
+
+Set next emailReverifyDueAt = now + 30 days
+
+Restore ACTIVE_VERIFIED
+
+4) Contender eligibility logic for SMS (your criteria)
+
+SMS is not for signup; it is a promotion gate once the trader shows seriousness.
+
+Eligibility Path 1: “1+ month active” criteria
+
+A user becomes an SMS candidate if ALL are true:
+
+accountAgeDays >= 30 (or “has traded for more than a month”: interpret as firstTradeAt <= now - 30 days AND has activity)
+
+balancePctOfStart >= 1.20 (balance > 120% of starting balance)
+
+positionsCountLifetime >= 30
+
+When satisfied:
+
+Set contenderTier = CANDIDATE_SMS_REQUIRED
+
+Set contenderEligibleAt = now
+
+Trigger SMS verification invite (in-app prompt + email)
+
+Eligibility Path 2: “3+ months active” rolling performance criteria
+
+If the account has been active > 3 months:
+
+Evaluate on a rolling 90-day window.
+
+User becomes SMS candidate if ALL are true:
+
+accountAgeDays >= 90 AND lastTradeAt within recent activity threshold (e.g., last 14 days) to avoid stale accounts
+
+returnLast90 >= 0.10 (≥10% return over last 90 days baseline)
+
+positionsCountLast90 >= 20
+
+When satisfied:
+
+Set contenderTier = CANDIDATE_SMS_REQUIRED
+
+Important dependency rule (recommended)
+
+SMS eligibility should require:
+
+Email currently verified and not overdue (accountState == ACTIVE_VERIFIED)
+This prevents promoting users who are still using unverified/temporary emails.
+
+5) Evaluation schedule (how and when rules run)
+Event-driven checks (recommended)
+
+Run rules on:
+
+Signup completion
+
+Each login (cheap checks, mainly state/lock)
+
+Each trade open / close (update aggregates and re-check contender criteria)
+
+A daily scheduler job (enforcement + reminders + overdue locks)
+
+Daily scheduler responsibilities
+
+Email verification reminders + lockouts
+
+Monthly reverify reminders + lockouts
+
+Contender re-evaluation for all users (or only those near thresholds)
+
+Audit logging: record transitions
+
+6) User experience flow (what the user sees)
+New user
+
+Signs up instantly → can trade.
+
+Banner: “Verify email within 14 days to keep trading.”
+
+Approaching 14 days unverified
+
+More prominent warnings, countdown, one-click resend link.
+
+Lockout
+
+Login allowed (or limited), but trading actions blocked.
+
+Clear call-to-action: “Verify email to unlock.”
+
+Monthly re-verification
+
+Non-invasive reminders.
+
+If overdue, escalate to stronger warnings and then lock.
+
+Contender
+
+When eligible: “You’re a serious contender. Verify phone to proceed to selection pipeline.”
+
+SMS is introduced as a privilege gate, not a burden for everyone.
+
+7) Edge cases and abuse controls (design-level)
+Prevent email spamming / resend abuse
+
+Resend cooldown (e.g., 60 seconds)
+
+Daily cap (e.g., 5 emails/day per user)
+
+IP-based throttles
+
+Prevent evasion
+
+If locked for email verification, block:
+
+opening new trades
+
+adding payment methods (if applicable)
+
+applying for selection / challenges
+
+Keep read-only access for transparency
+
+Metrics and auditability
+
+Log state transitions:
+
+EVENT: EMAIL_VERIFY_REMINDER_SENT
+
+EVENT: ACCOUNT_LOCKED_EMAIL_UNVERIFIED
+
+EVENT: EMAIL_VERIFIED
+
+EVENT: EMAIL_REVERIFY_OVERDUE_LOCK
+
+EVENT: CONTENDER_ELIGIBLE_SMS_REQUIRED
+
+EVENT: SMS_VERIFIED
+
+8) Summary of the algorithm in plain steps
+
+Signup → Grace State
+
+Account active immediately
+
+Email verification due in 14 days
+
+During grace
+
+Periodic reminders
+
+Day 14
+
+If still unverified → lock trading until verified
+
+After initial verification
+
+Set monthly reverify due date
+
+Monthly cycle
+
+Remind → if overdue beyond grace → lock until reverified
+
+Contender evaluation
+
+After 30 days + >20% gain + ≥30 trades → SMS candidate
+
+After 90 days + ≥10% last-90-days return + ≥20 last-90-days trades → SMS candidate
+
+Require email verified to proceed
+
+SMS verification
+
+Only for candidates; not for general signup
+
+If you want, I can also translate this into: (a) a clear state-transition table, and (b) a requirements checklist that your backend engine and admin dashboard must satisfy to implement this cleanly.
+
+DO
+Thought for 8s
+
+Below are (a) a state-transition table for your verification and contender pipeline, and (b) a requirements checklist (backend, UX, admin, audit, scheduling) to implement it cleanly.
+
+A) State-transition table (email verification + monthly re-verification + contender SMS)
+1) Account / Verification State Definitions
+
+ACTIVE_UNVERIFIED_GRACE
+User is allowed to trade. Email is not verified yet. Grace countdown is running (14 days).
+
+LOCKED_EMAIL_UNVERIFIED
+Trading blocked until initial email verification.
+
+ACTIVE_VERIFIED
+Email verified and user can trade. Monthly re-verification countdown is running.
+
+LOCKED_EMAIL_REVERIFY_OVERDUE
+Trading blocked until monthly re-verification is completed.
+
+SUSPENDED_ADMIN (optional but strongly recommended)
+Admin override suspension (compliance/support).
+
+2) Contender Tier Definitions (orthogonal to account state)
+
+NONE
+
+CANDIDATE_SMS_REQUIRED
+
+VERIFIED_SMS
+
+3) Transition Table
+From State	Trigger / Event	Guard Condition (Must be true)	Actions (Side Effects)	To State
+(none)	SIGNUP_CREATED	Always	Set emailVerificationDueAt = createdAt + 14d; initialize reminders schedule; set contenderTier=NONE	ACTIVE_UNVERIFIED_GRACE
+ACTIVE_UNVERIFIED_GRACE	LOGIN / APP_LOAD	now < emailVerificationDueAt	Show banner + countdown; optionally send reminder if nextReminderAt reached	ACTIVE_UNVERIFIED_GRACE
+ACTIVE_UNVERIFIED_GRACE	DAILY_ENFORCEMENT_JOB	now < emailVerificationDueAt	If reminder window reached and within rate limits: send reminder; update nextReminderAt	ACTIVE_UNVERIFIED_GRACE
+ACTIVE_UNVERIFIED_GRACE	DAILY_ENFORCEMENT_JOB	now ≥ emailVerificationDueAt AND emailVerifiedAt is null	Lock trading; set lockedAt; set lockReason=EMAIL_UNVERIFIED	LOCKED_EMAIL_UNVERIFIED
+ACTIVE_UNVERIFIED_GRACE	EMAIL_VERIFY_SUCCESS	Token valid, not expired, not used	Set emailVerifiedAt=now; clear lockedAt; set emailReverifyDueAt = now + 30d; reset reminder counters	ACTIVE_VERIFIED
+LOCKED_EMAIL_UNVERIFIED	LOGIN / APP_LOAD	Always	Restrict to verify-only flows; show lock reason + “Verify to unlock”	LOCKED_EMAIL_UNVERIFIED
+LOCKED_EMAIL_UNVERIFIED	EMAIL_VERIFY_SUCCESS	Token valid	Same as above	ACTIVE_VERIFIED
+ACTIVE_VERIFIED	LOGIN / APP_LOAD	now < emailReverifyDueAt	Normal access; if within reverify warning window show banner	ACTIVE_VERIFIED
+ACTIVE_VERIFIED	DAILY_ENFORCEMENT_JOB	now approaching emailReverifyDueAt	Send reverify reminders (rate-limited)	ACTIVE_VERIFIED
+ACTIVE_VERIFIED	DAILY_ENFORCEMENT_JOB	now ≥ emailReverifyDueAt + overdueGrace	Lock trading; set lockReason=EMAIL_REVERIFY_OVERDUE	LOCKED_EMAIL_REVERIFY_OVERDUE
+LOCKED_EMAIL_REVERIFY_OVERDUE	EMAIL_REVERIFY_SUCCESS	Token valid	Set emailVerifiedAt=now (or emailReverifiedAt); set next emailReverifyDueAt=now+30d; clear lock	ACTIVE_VERIFIED
+ANY (except SUSPENDED_ADMIN)	ADMIN_SUSPEND	Admin privilege	Set accountState=SUSPENDED_ADMIN; persist reason code + notes	SUSPENDED_ADMIN
+SUSPENDED_ADMIN	ADMIN_REINSTATE	Admin privilege	Return to prior computed state (see note below)	ACTIVE_VERIFIED or ACTIVE_UNVERIFIED_GRACE or locked state
+ANY	CONTENDER_EVAL (event-driven or daily)	Meets criteria and email is verified + not overdue	Set contenderTier=CANDIDATE_SMS_REQUIRED; set contenderEligibleAt=now; prompt user for SMS verification	(no state change; tier change)
+ANY	SMS_VERIFY_SUCCESS	OTP valid	Set smsVerifiedAt=now; set contenderTier=VERIFIED_SMS	(no state change; tier change)
+
+Admin reinstatement note: when admin unsuspends, compute the correct state using current timestamps:
+
+If emailVerifiedAt is null and now < emailVerificationDueAt → ACTIVE_UNVERIFIED_GRACE
+
+If emailVerifiedAt is null and now ≥ due → LOCKED_EMAIL_UNVERIFIED
+
+If verified and now < emailReverifyDueAt → ACTIVE_VERIFIED
+
+If verified and overdue → LOCKED_EMAIL_REVERIFY_OVERDUE
+
+B) Contender eligibility algorithm (your exact intent)
+1) Global prerequisite (recommended)
+
+To avoid promoting disposable-email users:
+
+Require accountState == ACTIVE_VERIFIED (not locked, not overdue) before allowing SMS contender gating.
+
+2) Eligibility Rule Set A (1+ month track record)
+
+Mark as CANDIDATE_SMS_REQUIRED when ALL are true:
+
+Age / Activity: “has traded for more than a month”
+
+Practical definition: firstTradeAt <= now - 30 days AND positionsCountLifetime > 0 AND (optional) lastTradeAt within last 14 days
+
+Performance: balanceNow >= 1.20 * startingBalance (≥ +20% vs start)
+
+Activity: positionsCountLifetime >= 30
+
+3) Eligibility Rule Set B (3+ months rolling evaluation)
+
+If account is active > 3 months, evaluate a rolling last-90-days window and mark candidate when ALL are true:
+
+Age: accountAgeDays >= 90
+
+Rolling performance: returnLast90 >= 0.10 (≥ +10% over last 90 days baseline)
+
+Baseline definition: balanceAt90dAgo captured daily (or computed from daily equity snapshots)
+
+returnLast90 = (balanceNow - balanceAt90dAgo) / balanceAt90dAgo
+
+Rolling activity: positionsCountLast90 >= 20
+
+4) Tier behavior after eligibility
+
+When the user becomes eligible: show “Phone verify to enter selection pipeline.”
+
+If SMS verified: they can be moved into “selection-ready” workflows (KYC, payout profile, advanced features, etc.) without forcing SMS on casual users.
+
+C) Requirements checklist (implementation-grade)
+1) Backend: persistence and derived fields
+
+User fields
+
+emailVerifiedAt (nullable)
+
+emailVerificationDueAt (createdAt + 14d)
+
+emailReverifyDueAt (set only after initial verify; now + 30d)
+
+accountState, lockedAt, lockReason
+
+Reminder controls: nextReminderAt, reminderCount, lastReminderSentAt
+
+Token store
+
+Verification tokens stored as hashed values
+
+Fields: tokenHash, type (VERIFY / REVERIFY / RESET), expiresAt, usedAt, createdAt, userId, requestIp, userAgent
+
+Tokens must be single-use and idempotent
+
+Trading aggregates
+
+startingBalance, balanceNow
+
+firstTradeAt, lastTradeAt
+
+positionsCountLifetime
+
+positionsCountLast90
+
+balanceAt90dAgo (via daily snapshots) or equivalent equity history
+
+2) Scheduler / jobs (daily + event-driven)
+
+Daily enforcement job
+
+Send reminders (respect rate limits)
+
+Transition grace → lock at day 14 if unverified
+
+Transition verified → lock if reverify overdue beyond overdueGrace
+
+Event-driven updates
+
+On trade open/close: update aggregates; run contender checks
+
+On login: lightweight evaluation for banners + lock gating
+
+3) Rate limiting and abuse controls
+
+Verification email resend:
+
+Cooldown (e.g., 60s) + daily cap (e.g., 5/day/user) + IP throttles
+
+Password reset email:
+
+Similar caps + additional IP/device checks
+
+Optional hardening:
+
+Disposable email detection (nice-to-have), but your monthly reverify already reduces this
+
+4) UX gating rules (what actions are blocked)
+
+Define a centralized “permission gate” used by all trade endpoints and UI actions:
+
+If accountState is LOCKED_* → block:
+
+open trade, close trade (you decide whether to allow forced close), modify SL/TP, create pending orders
+
+Allow:
+
+login, view-only dashboards, verification flows, support links
+
+5) UX surfaces (trader-facing)
+
+Persistent banner showing:
+
+“Verify within X days/hours” countdown (grace)
+
+“Re-verify by DATE” for monthly cycle
+
+Lock screen:
+
+exact reason + call-to-action button
+
+resend verification link (respect cooldown)
+
+Contender prompt:
+
+“You’ve met eligibility. Phone verify to proceed.”
+
+6) Admin dashboard requirements
+
+User status panel showing:
+
+accountState, lock reason, due dates, last reminder, email verified at, reverify due at
+
+Actions:
+
+Force-send verification email (still rate-limited or admin-bypass logged)
+
+Manual lock/unlock with reason codes
+
+View verification history (token events)
+
+Contender panel:
+
+show eligibility criteria satisfaction (checkbox style)
+
+show contenderTier and smsVerifiedAt
+
+7) Audit trail (non-negotiable for hedge-fund posture)
+
+Log every transition and verification attempt:
+
+REMINDER_SENT (with channel, template, ip/user-agent)
+
+ACCOUNT_LOCKED_EMAIL_UNVERIFIED
+
+EMAIL_VERIFIED
+
+EMAIL_REVERIFY_REMINDER_SENT
+
+ACCOUNT_LOCKED_REVERIFY_OVERDUE
+
+EMAIL_REVERIFIED
+
+CONTENDER_ELIGIBLE
+
+SMS_OTP_SENT / SMS_VERIFIED / SMS_FAILED
+
+8) Configuration knobs (so you can tune without redeploy)
+
+emailGraceDays (default 14)
+
+reverifyPeriodDays (default 30)
+
+reverifyOverdueGraceDays (e.g., 3–7)
+
+Reminder schedule timings
+
+Contender thresholds:
+
+Month rule: days, +20%, ≥30 lifetime trades
+
+90-day rule: +10% last90, ≥20 last90 trades
+
+Activity recency window (optional but recommended)
+
+D) Flow summary (end-to-end)
+
+Signup: instant access → 14-day countdown starts
+
+Unverified at day 14: trading lock until verified
+
+After verify: monthly reverify due set; reminders start near due date
+
+Overdue reverify: trading lock until reverified
+
+Contender checks: triggered by trades + daily job
+
+Eligible contenders: SMS verification prompt only for those users
+
+SMS verified: unlock “serious contender” pipeline features (selection, KYC/payout profile steps, etc.)
+
+If you want the next refinement, I can turn the above into a one-page “engine spec” with: exact reminder timings, exact UI copy rules, and a strict definition of whether “lockout” blocks closing positions (risk-safe default is: allow close/reduce-only even when locked).
+
+DO
+
+Below is a tighter, implementation-ready one-page engine spec for your “frictionless signup → delayed email verification → monthly re-verification → SMS only for serious contenders” model. No code; this is the algorithm + flow contract your backend/UI can implement consistently.
+
+TradeHub Verification & Contender Engine Spec (v1)
+0) Definitions and configuration knobs
+Time constants (configurable)
+
+EMAIL_INITIAL_GRACE_DAYS = 14
+
+EMAIL_REVERIFY_PERIOD_DAYS = 30 (rolling)
+
+EMAIL_REVERIFY_OVERDUE_GRACE_DAYS = 3 (recommended: 3; can be 0 for strict)
+
+REMINDER_RESEND_COOLDOWN_SECONDS = 60
+
+REMINDER_MAX_PER_DAY = 5 (per user, per channel)
+
+RISK_ACTIVITY_RECENCY_DAYS = 14 (used for contender eligibility freshness)
+
+Contender thresholds (configurable)
+
+Rule A (30-day track record):
+
+MIN_ACCOUNT_AGE_DAYS_A = 30
+
+MIN_BALANCE_PCT_OF_START_A = 1.20 (≥ +20%)
+
+MIN_TRADES_LIFETIME_A = 30
+
+Rule B (90-day rolling):
+
+MIN_ACCOUNT_AGE_DAYS_B = 90
+
+MIN_RETURN_LAST90_B = 0.10 (≥ +10% over last 90 days)
+
+MIN_TRADES_LAST90_B = 20
+
+1) Core account states (email lifecycle)
+State enum
+
+ACTIVE_UNVERIFIED_GRACE
+
+LOCKED_EMAIL_UNVERIFIED
+
+ACTIVE_VERIFIED
+
+LOCKED_EMAIL_REVERIFY_OVERDUE
+
+SUSPENDED_ADMIN (admin override)
+
+Required timestamps / fields
+
+createdAt
+
+emailVerifiedAt (nullable)
+
+emailInitialDueAt = createdAt + 14d
+
+emailReverifyDueAt (nullable; set after first verify; rolling 30d cadence)
+
+lockedAt, lockReason (nullable)
+
+reminderCounters (last sent timestamps + count by day)
+
+2) Permissions matrix (what “lockout” actually means)
+
+To protect users and platform integrity, use a “read-only + reduce-only” default.
+
+Capability	ACTIVE_*	LOCKED_EMAIL_UNVERIFIED	LOCKED_EMAIL_REVERIFY_OVERDUE	SUSPENDED_ADMIN
+Log in / view dashboard	Yes	Yes	Yes	Optional (policy)
+Open new trades	Yes	No	No	No
+Modify SL/TP / pending orders	Yes	No	No	No
+Close positions (reduce-only)	Yes	Yes (reduce-only)	Yes (reduce-only)	Optional (policy)
+Withdraw / payout actions	Only if enabled	No	No	No
+Verify email / reverify	N/A	Yes	Yes	Yes
+SMS verification	Only if eligible	Block if locked	Block if locked	Block
+
+Reduce-only definition: allow actions that strictly reduce risk exposure (close or partially close), but do not allow creating or increasing exposure.
+
+3) Reminder and enforcement schedule
+A) Initial email verification reminders (14-day countdown)
+
+Reminder triggers (send only if unverified and within caps):
+
+T+0 (signup): immediate “Verify anytime” email + in-app banner
+
+T+7 days: reminder
+
+T+12 days: reminder
+
+T+13 days: reminder (urgent)
+
+T+14 days: enforce lock if still unverified
+
+Lock enforcement moment: at the first daily enforcement run after emailInitialDueAt (or exact timestamp, if you run a minute scheduler).
+
+B) Monthly re-verification reminders (rolling 30 days)
+
+Activated only after first verification.
+
+Reminder triggers (if verified, not locked, and due approaching):
+
+Due - 7 days
+
+Due - 3 days
+
+Due - 1 day
+
+Due day
+
+Due + 2 days (still within overdue grace; final warning)
+
+Lock condition: if now ≥ emailReverifyDueAt + EMAIL_REVERIFY_OVERDUE_GRACE_DAYS.
+
+4) State transitions (deterministic rules)
+On signup
+
+Set state = ACTIVE_UNVERIFIED_GRACE
+
+Set emailInitialDueAt = createdAt + 14d
+
+Trigger EMAIL_VERIFY_SEND (initial)
+
+On email verify success (first time)
+
+Set emailVerifiedAt = now
+
+Set emailReverifyDueAt = now + 30d
+
+Clear any lock fields
+
+Set state = ACTIVE_VERIFIED
+
+On daily enforcement job
+
+Initial verification enforcement
+
+If emailVerifiedAt is null and now ≥ emailInitialDueAt:
+
+state = LOCKED_EMAIL_UNVERIFIED
+
+lockReason = EMAIL_UNVERIFIED
+
+Re-verify enforcement
+
+If emailVerifiedAt not null and now ≥ emailReverifyDueAt + overdueGrace:
+
+state = LOCKED_EMAIL_REVERIFY_OVERDUE
+
+lockReason = EMAIL_REVERIFY_OVERDUE
+
+On re-verify success
+
+Update emailVerifiedAt = now (or separate emailReverifiedAt)
+
+Set emailReverifyDueAt = now + 30d
+
+Clear lock fields
+
+Set state = ACTIVE_VERIFIED
+
+Admin override
+
+SUSPENDED_ADMIN supersedes all other states until reinstated.
+
+On reinstatement, recompute the appropriate state from timestamps (unverified grace vs locked vs verified).
+
+5) Contender eligibility engine (SMS gating)
+
+SMS verification is allowed only if:
+
+state == ACTIVE_VERIFIED (not locked, not overdue)
+
+Meets Rule A or Rule B
+
+Optional: lastTradeAt >= now - RISK_ACTIVITY_RECENCY_DAYS (prevents dormant accounts qualifying)
+
+Rule A: 30+ days + strong growth + high activity
+
+Eligible if ALL:
+
+accountAgeDays >= 30 (or firstTradeAt <= now - 30d)
+
+balanceNow >= 1.20 * startingBalance
+
+positionsCountLifetime >= 30
+
+Rule B: 90+ days rolling 3-month performance
+
+Eligible if ALL:
+
+accountAgeDays >= 90
+
+returnLast90 >= 0.10 (baseline: balanceAt90dAgo)
+
+positionsCountLast90 >= 20
+
+Tier state (separate from account state)
+
+contenderTier = NONE | CANDIDATE_SMS_REQUIRED | VERIFIED_SMS
+
+Triggers
+
+Evaluate contender rules:
+
+On every trade close (preferred; reduces compute)
+
+Nightly batch scan (safety net)
+
+When eligibility first becomes true:
+
+Set CANDIDATE_SMS_REQUIRED
+
+Present UI prompt to verify phone
+
+On SMS success:
+
+Set VERIFIED_SMS
+
+Unlock “serious contender” features (your “arduous features” / selection pipeline)
+
+6) UX copy rules (exact content logic)
+A) Unverified grace banner (in-app)
+
+Show whenever state == ACTIVE_UNVERIFIED_GRACE:
+
+Title: “Verify your email to keep trading”
+
+Body: “You can trade now. Verify within {daysLeft} days (by {dueDate}) to avoid a trading lock.”
+
+Buttons:
+
+“Send verification email”
+
+“I already verified” (re-check endpoint)
+
+Footer note (small): “We periodically re-verify to protect account integrity.”
+
+B) Locked screen (unverified initial)
+
+When LOCKED_EMAIL_UNVERIFIED:
+
+Title: “Trading locked: email not verified”
+
+Body: “Your 14-day verification window ended on {dueDate}. Verify your email to unlock trading.”
+
+Buttons:
+
+“Send verification email”
+
+“Enter verification code / open link” (deep link handler)
+
+Allow navigation to positions view (reduce-only close permitted).
+
+C) Re-verify due banner
+
+When ACTIVE_VERIFIED and within 7 days of due:
+
+Title: “Monthly email re-verification required”
+
+Body: “Please re-verify by {reverifyDueDate} to keep trading uninterrupted.”
+
+Buttons:
+
+“Send re-verification email”
+
+“Remind me later” (sets nextReminderAt, not more than 1/day)
+
+D) Locked screen (reverify overdue)
+
+When LOCKED_EMAIL_REVERIFY_OVERDUE:
+
+Title: “Trading locked: re-verification overdue”
+
+Body: “Re-verification was due on {reverifyDueDate}. Re-verify now to unlock trading.”
+
+Buttons: same as above.
+
+Reduce-only close permitted.
+
+E) Contender prompt
+
+When contenderTier == CANDIDATE_SMS_REQUIRED:
+
+Title: “You’re eligible for selection”
+
+Body: “Verify your phone to proceed to the serious contender pipeline.”
+
+Buttons:
+
+“Verify phone”
+
+“Not now”
+
+Note: show why eligible (Rule A or B indicators).
+
+7) Audit events (minimum required)
+
+Emit an immutable audit entry for each:
+
+EMAIL_VERIFY_SENT (type: initial/reverify, channel, timestamp)
+
+EMAIL_VERIFY_SUCCESS / EMAIL_VERIFY_FAIL (reason)
+
+ACCOUNT_LOCKED (reason: initial_unverified / reverify_overdue / admin)
+
+ACCOUNT_UNLOCKED (reason: verify_success / reverify_success / admin)
+
+REMINDER_SENT (which reminder stage)
+
+CONTENDER_ELIGIBLE (rule: A/B; snapshot metrics)
+
+SMS_OTP_SENT, SMS_VERIFY_SUCCESS, SMS_VERIFY_FAIL
+
+8) Edge-case handling (explicit rules)
+
+If locked, user can still close positions reduce-only (recommended default).
+
+If email changes: immediately set emailVerifiedAt = null, restart 14-day grace (or require immediate verify), and clear contender/SMS tier until verified.
+
+Token resend abuse: enforce cooldown + daily caps.
+
+Disposable emails: you are relying primarily on monthly re-verification; optionally add a risk score flag, but not required for v1.
+
+9) Daily job checklist (single pass)
+
+For each user:
+
+Compute derived due dates (if needed)
+
+If unverified:
+
+send reminders at milestones (0/7/12/13)
+
+lock at day 14
+
+If verified:
+
+send reverify reminders (-7/-3/-1/0/+2)
+
+lock at due + overdueGrace
+
+Evaluate contender (optional nightly)
+
+Record audit events for anything emitted or transitioned
+
+If you want the next “DO” iteration, I can produce a compact truth-table (inputs → resulting state and allowed actions) and a single unified decision function spec so your backend and frontend enforce identical logic with no drift.
+
+DO
+
+Below are (a) a compact truth-table that deterministically maps user facts → account state and allowed actions, and (b) a single unified decision-function spec (inputs/outputs/priority order) so backend and frontend never drift.
+
+A) Truth-table (facts → state → allowed actions)
+A1) Canonical precedence (highest wins)
+
+When multiple conditions apply, resolve in this order:
+
+ADMIN SUSPEND (hard override)
+
+EMAIL UNVERIFIED (initial grace vs initial lock)
+
+EMAIL REVERIFY OVERDUE (verified but overdue)
+
+Otherwise VERIFIED ACTIVE
+
+This precedence ensures: admin always wins; unverified initial lock is not confused with reverify; and lock status is always unambiguous.
+
+A2) State truth-table
+
+Inputs (facts):
+
+adminSuspended (T/F)
+
+emailVerified (T/F)
+
+now < emailInitialDueAt (T/F) // only meaningful if not verified
+
+now <= emailReverifyDueAt + overdueGrace (T/F) // only meaningful if verified and reverifyDueAt exists
+
+adminSuspended	emailVerified	now < initialDue	now <= reverifyDue+grace	Resulting accountState
+T	*	*	*	SUSPENDED_ADMIN
+F	F	T	*	ACTIVE_UNVERIFIED_GRACE
+F	F	F	*	LOCKED_EMAIL_UNVERIFIED
+F	T	*	T	ACTIVE_VERIFIED
+F	T	*	F	LOCKED_EMAIL_REVERIFY_OVERDUE
+
+Notes
+
+If emailVerified = T but emailReverifyDueAt is null, treat as ACTIVE_VERIFIED and set/repair due date in the next daily job.
+
+If emailVerified = F, ignore reverify columns entirely.
+
+A3) Permissions truth-table (state → allowed actions)
+
+Define action set:
+
+VIEW_DASHBOARD
+
+OPEN_TRADE
+
+INCREASE_EXPOSURE (new trades, add to position, place pending, increase lots)
+
+MODIFY_ORDERS (edit SL/TP, modify pending, cancel pending)
+
+CLOSE_REDUCE_ONLY (close or partial close that reduces exposure)
+
+WITHDRAW_OR_PAYOUT_ACTIONS
+
+EMAIL_VERIFY_FLOW (send/resend link, submit token)
+
+SMS_VERIFY_FLOW
+
+accountState	VIEW_DASHBOARD	OPEN_TRADE / INCREASE_EXPOSURE	MODIFY_ORDERS	CLOSE_REDUCE_ONLY	WITHDRAW/PAYOUT	EMAIL_VERIFY_FLOW
+ACTIVE_UNVERIFIED_GRACE	Yes	Yes	Yes	Yes	Policy-based (recommended: No until verified)	Yes
+ACTIVE_VERIFIED	Yes	Yes	Yes	Yes	Policy-based	Yes (for reverify)
+LOCKED_EMAIL_UNVERIFIED	Yes (view-only)	No	No	Yes	No	Yes
+LOCKED_EMAIL_REVERIFY_OVERDUE	Yes (view-only)	No	No	Yes	No	Yes
+SUSPENDED_ADMIN	Optional (policy)	No	No	Optional (policy)	No	Optional (policy)
+
+SMS_VERIFY_FLOW gating (overlay rule, independent of table):
+
+Allowed only when:
+
+accountState == ACTIVE_VERIFIED
+
+and contenderTier == CANDIDATE_SMS_REQUIRED
+
+Otherwise: show “Not eligible yet” or “Verify email first”.
+
+B) Unified decision-function spec (single source of truth)
+
+This is the “contract” your backend uses to allow/deny requests and your frontend uses to render banners/buttons consistently.
+
+B1) Inputs (minimum required)
+Account & verification
+
+createdAt
+
+adminSuspended (and adminSuspendReason)
+
+emailVerifiedAt (nullable)
+
+emailInitialDueAt (or compute from createdAt + 14d)
+
+emailReverifyDueAt (nullable)
+
+now (server time)
+
+Trading aggregates (for contender)
+
+startingBalance
+
+balanceNow
+
+firstTradeAt (nullable)
+
+lastTradeAt (nullable)
+
+positionsCountLifetime
+
+positionsCountLast90
+
+balanceAt90dAgo (or daily equity snapshot reference)
+
+Config (knobs)
+
+EMAIL_INITIAL_GRACE_DAYS
+
+EMAIL_REVERIFY_PERIOD_DAYS
+
+EMAIL_REVERIFY_OVERDUE_GRACE_DAYS
+
+RISK_ACTIVITY_RECENCY_DAYS
+
+Contender thresholds (Rule A and B)
+
+B2) Outputs (what the function returns)
+
+Return a single structured decision object:
+
+Account decision
+
+accountState (enum)
+
+lockReason (enum or null)
+
+lockUntil (optional; for UI copy)
+
+dates:
+
+emailInitialDueAt
+
+emailReverifyDueAt
+
+daysLeftInitial (if in grace)
+
+daysLeftReverify (if approaching due)
+
+daysOverdueReverify (if overdue)
+
+Permissions
+
+canView
+
+canTradeOpen
+
+canModifyOrders
+
+canCloseReduceOnly
+
+canWithdraw
+
+canStartEmailVerify
+
+canStartSmsVerify
+
+UX directives (frontend consumes)
+
+bannerType (none / initial_grace / reverify_due / locked_unverified / locked_reverify_overdue / admin_suspended)
+
+primaryCTA (resend_verify / reverify / verify_now / contact_support / sms_verify)
+
+countdownText (pre-built string or structured fields)
+
+Contender decision
+
+contenderTier (NONE / CANDIDATE_SMS_REQUIRED / VERIFIED_SMS)
+
+contenderEligibility:
+
+eligible (T/F)
+
+ruleMatched (A / B / null)
+
+why (list of met/unmet checks for UI transparency)
+
+B3) Deterministic algorithm (priority-ordered)
+Step 1: Normalize / derive dates
+
+If emailInitialDueAt missing: set emailInitialDueAt = createdAt + EMAIL_INITIAL_GRACE_DAYS.
+
+Define emailVerified = (emailVerifiedAt != null).
+
+If emailVerified and emailReverifyDueAt missing: set a “repair flag” and treat as due = emailVerifiedAt + EMAIL_REVERIFY_PERIOD_DAYS for decisioning (and persist via daily job).
+
+Step 2: Resolve accountState (single pass)
+
+Apply precedence:
+
+If adminSuspended == true
+
+accountState = SUSPENDED_ADMIN
+
+lockReason = ADMIN_SUSPEND
+
+Skip to Step 4 (permissions); contender eligibility irrelevant.
+
+Else if emailVerified == false
+
+If now < emailInitialDueAt:
+
+accountState = ACTIVE_UNVERIFIED_GRACE
+
+Else:
+
+accountState = LOCKED_EMAIL_UNVERIFIED
+
+lockReason = EMAIL_UNVERIFIED
+
+Else (emailVerified == true)
+
+Compute reverifyOverdueCutoff = emailReverifyDueAt + EMAIL_REVERIFY_OVERDUE_GRACE_DAYS
+
+If now <= reverifyOverdueCutoff:
+
+accountState = ACTIVE_VERIFIED
+
+Else:
+
+accountState = LOCKED_EMAIL_REVERIFY_OVERDUE
+
+lockReason = EMAIL_REVERIFY_OVERDUE
+
+Step 3: Compute permissions from state
+
+Use the table in Section A3, plus these overlays:
+
+If locked for email:
+
+enforce reduce-only close allowed
+
+block all exposure-increasing actions
+
+Withdrawals:
+
+recommended rule: require ACTIVE_VERIFIED and not overdue, plus SMS/KYC if you later add it
+
+Step 4: Compute contender eligibility (only if ACTIVE_VERIFIED)
+
+If accountState != ACTIVE_VERIFIED:
+
+eligible = false, ruleMatched = null, contenderTier unchanged (or NONE), canStartSmsVerify = false.
+
+If accountState == ACTIVE_VERIFIED, evaluate:
+
+Common optional “freshness” guard (recommended):
+
+isRecentlyActive = (lastTradeAt != null && lastTradeAt >= now - RISK_ACTIVITY_RECENCY_DAYS)
+
+If you enforce it: eligibility requires isRecentlyActive == true
+
+Rule A evaluation
+
+ageOK_A = (firstTradeAt != null && firstTradeAt <= now - 30 days) OR accountAgeDays >= 30
+
+balanceOK_A = (balanceNow >= startingBalance * 1.20)
+
+tradesOK_A = (positionsCountLifetime >= 30)
+
+Eligible under A if all true (and freshness if enabled)
+
+Rule B evaluation
+
+ageOK_B = accountAgeDays >= 90
+
+returnLast90 = (balanceNow - balanceAt90dAgo) / balanceAt90dAgo (guard: balanceAt90dAgo > 0)
+
+returnOK_B = returnLast90 >= 0.10
+
+tradesOK_B = positionsCountLast90 >= 20
+
+Eligible under B if all true (and freshness if enabled)
+
+Rule selection precedence (if both true)
+
+Prefer Rule B for 90-day accounts because it is more robust (rolling performance), otherwise Rule A.
+
+Output ruleMatched = B if eligibleB else A if eligibleA else null.
+
+Tier update policy
+
+If eligible == true and smsVerifiedAt is null:
+
+contenderTier = CANDIDATE_SMS_REQUIRED
+
+If smsVerifiedAt != null:
+
+contenderTier = VERIFIED_SMS
+
+Else:
+
+contenderTier = NONE (or keep existing if you want sticky tiers)
+
+Step 5: Set SMS permission
+
+canStartSmsVerify = (accountState == ACTIVE_VERIFIED && contenderTier == CANDIDATE_SMS_REQUIRED)
+
+Step 6: Generate banner + CTA (frontend contract)
+
+Deterministic mapping:
+
+If accountState == ACTIVE_UNVERIFIED_GRACE: banner initial_grace, CTA resend_verify, show {daysLeftInitial, dueDate}
+
+If LOCKED_EMAIL_UNVERIFIED: banner locked_unverified, CTA verify_now
+
+If ACTIVE_VERIFIED and now within 7 days of emailReverifyDueAt: banner reverify_due, CTA reverify
+
+If LOCKED_EMAIL_REVERIFY_OVERDUE: banner locked_reverify_overdue, CTA reverify
+
+If SUSPENDED_ADMIN: banner admin_suspended, CTA contact_support
+
+Separately, if contenderTier == CANDIDATE_SMS_REQUIRED and no other higher-priority banner is active, show an additional “secondary banner/prompt” for SMS.
+
+C) Quick “inputs → outputs” examples (sanity checks)
+
+New user day 3, unverified
+
+Facts: emailVerified=false, now < initialDue
+
+Output: ACTIVE_UNVERIFIED_GRACE, full trading allowed, banner shows “11 days left”.
+
+New user day 16, unverified
+
+Facts: emailVerified=false, now >= initialDue
+
+Output: LOCKED_EMAIL_UNVERIFIED, open/modify blocked, reduce-only close allowed.
+
+Verified user, reverify due in 2 days
+
+Facts: emailVerified=true, now < reverifyDue
+
+Output: ACTIVE_VERIFIED, banner “reverify due”, trading still allowed.
+
+Verified user, reverify overdue by 5 days, grace=3
+
+Facts: now > due+3
+
+Output: LOCKED_EMAIL_REVERIFY_OVERDUE, trading blocked (except reduce-only).
+
+Eligible contender but email not verified
+
+Facts: meets Rule A metrics but ACTIVE_UNVERIFIED_GRACE
+
+Output: contender eligibility computed as false (gated), SMS not offered.
+
+If you want the next step, I can produce a single-page “deny reasons catalog” (every trading endpoint returns one of a small set of deterministic reason codes like LOCK_EMAIL_UNVERIFIED, LOCK_REVERIFY_OVERDUE, ADMIN_SUSPEND, NOT_SMS_ELIGIBLE), so your UI copy and audit logs remain consistent and low-maintenance.
+
+DO
+
+Below is the Deny Reasons Catalog you can standardize across backend endpoints, UI messaging, audit logs, and analytics. This makes enforcement consistent, debuggable, and “institutional-grade” (clear reason codes, deterministic remediation steps, and clean reporting).
+
+Deny Reasons Catalog (TradeHub Policy Engine)
+1) Design goals
+
+Deterministic: every blocked action returns a single primary reason code.
+
+Action-aware: the code reflects why this action is blocked (not just general state).
+
+Remediation-ready: each code maps to exactly one user-facing CTA path.
+
+Auditable: every deny can be logged as a structured audit event with minimal ambiguity.
+
+2) Core structure (what the backend returns)
+
+Every blocked request returns:
+
+deny_code (enum string)
+
+deny_scope (TRADE_OPEN | ORDER_MODIFY | ORDER_CANCEL | WITHDRAW | SMS_VERIFY | EMAIL_VERIFY_RESEND | etc.)
+
+state_snapshot:
+
+account_state
+
+lock_reason
+
+email_initial_due_at
+
+email_reverify_due_at
+
+contender_tier
+
+cta:
+
+cta_type (VERIFY_EMAIL | REVERIFY_EMAIL | CONTACT_SUPPORT | TRY_LATER | UPGRADE_ELIGIBILITY)
+
+cta_deadline (optional)
+
+message_key (for UI i18n; UI uses templates, not backend prose)
+
+3) Reason codes (canonical list)
+A) Admin / Compliance overrides (highest priority)
+
+ADMIN_SUSPENDED
+
+Meaning: account is suspended by admin/compliance.
+
+Blocks: everything except optional view-only.
+
+CTA: CONTACT_SUPPORT
+
+Audit event: ACCOUNT_ACTION_DENIED with deny_code=ADMIN_SUSPENDED
+
+ADMIN_RESTRICTED_FEATURE
+
+Meaning: admin has restricted a specific feature for the account (e.g., trading disabled but viewing allowed).
+
+Blocks: specific deny_scope only.
+
+CTA: CONTACT_SUPPORT
+
+B) Email verification lifecycle blocks
+
+EMAIL_UNVERIFIED_GRACE_EXPIRED
+
+Meaning: initial 14-day window ended and user never verified email.
+
+Blocks: open trade, increase exposure, modify orders, withdrawals.
+
+Allows: reduce-only close, verification flows.
+
+CTA: VERIFY_EMAIL (show due date that passed)
+
+EMAIL_REVERIFY_OVERDUE
+
+Meaning: monthly re-verification is overdue beyond configured grace.
+
+Blocks: open trade, increase exposure, modify orders, withdrawals.
+
+Allows: reduce-only close, reverify flows.
+
+CTA: REVERIFY_EMAIL
+
+EMAIL_VERIFICATION_REQUIRED_FOR_ACTION
+
+Meaning: email not verified yet but user is still inside grace window; this action is restricted anyway by policy (example: withdrawals).
+
+Blocks: withdrawals, contender pipeline steps, sensitive settings.
+
+CTA: VERIFY_EMAIL
+
+Note: use this to keep frictionless trading while blocking high-risk flows.
+
+EMAIL_CHANGE_REQUIRES_REVERIFY
+
+Meaning: user changed email; they must verify the new address before continuing.
+
+Blocks: open/modify/increase exposure (policy choice), contender steps.
+
+CTA: VERIFY_EMAIL
+
+C) Token / verification flow errors (not “denies” of trading per se, but standardize)
+
+VERIFY_TOKEN_INVALID
+
+VERIFY_TOKEN_EXPIRED
+
+VERIFY_TOKEN_ALREADY_USED
+
+VERIFY_RATE_LIMITED
+
+VERIFY_RESEND_COOLDOWN
+
+VERIFY_RESEND_DAILY_LIMIT_REACHED
+
+CTA: TRY_LATER or RESEND_VERIFY depending on case
+
+These should not be used as trade denies unless the user is currently locked and attempting to unlock.
+
+D) SMS / contender gating blocks
+
+SMS_NOT_ELIGIBLE_YET
+
+Meaning: user does not meet contender criteria (Rule A/B).
+
+Blocks: SMS verification flow start.
+
+CTA: UPGRADE_ELIGIBILITY (show checklist: age/performance/trades)
+
+SMS_REQUIRES_EMAIL_VERIFIED
+
+Meaning: user meets contender metrics but email status not ACTIVE_VERIFIED.
+
+Blocks: SMS verification.
+
+CTA: VERIFY_EMAIL or REVERIFY_EMAIL depending on state
+
+SMS_RATE_LIMITED
+
+Meaning: too many OTP sends/attempts in a time window.
+
+CTA: TRY_LATER
+
+Audit: include attempt counters
+
+SMS_OTP_INVALID
+
+SMS_OTP_EXPIRED
+
+SMS_OTP_TOO_MANY_ATTEMPTS
+
+CTA: TRY_AGAIN (if allowed) or TRY_LATER / support escalation
+
+E) Risk / trading-engine denies (separate but consistent)
+
+Even though your prompt here is verification-focused, your platform already uses risk guardrails. Keep them in the same catalog for consistency:
+
+RISK_MAX_CONCURRENT_TRADES_EXCEEDED
+
+RISK_MAX_CONCURRENT_PER_SYMBOL_EXCEEDED
+
+RISK_MAX_TOTAL_LOTS_EXCEEDED
+
+RISK_PROFILE_RESTRICTS_INSTRUMENT
+
+RISK_MARKET_CLOSED_OR_UNAVAILABLE
+
+RISK_PRICE_STALE
+
+CTA: ADJUST_ORDER or TRY_LATER or show config limits
+
+F) General security / integrity denies
+
+SECURITY_SUSPICIOUS_ACTIVITY
+
+SECURITY_DEVICE_CHANGE_REQUIRES_STEP_UP
+
+SECURITY_IP_REPUTATION_BLOCK
+
+CTA: CONTACT_SUPPORT or COMPLETE_STEP_UP (future: passkey/TOTP)
+
+4) Mapping table: account state → default deny codes
+accountState	Deny when opening trade	Deny when modifying orders	Deny when withdrawing	Deny when starting SMS
+ACTIVE_UNVERIFIED_GRACE	(allow)	(allow)	EMAIL_VERIFICATION_REQUIRED_FOR_ACTION	SMS_REQUIRES_EMAIL_VERIFIED
+LOCKED_EMAIL_UNVERIFIED	EMAIL_UNVERIFIED_GRACE_EXPIRED	EMAIL_UNVERIFIED_GRACE_EXPIRED	EMAIL_UNVERIFIED_GRACE_EXPIRED	SMS_REQUIRES_EMAIL_VERIFIED
+ACTIVE_VERIFIED	(allow)	(allow)	(allow or policy-based)	SMS_NOT_ELIGIBLE_YET or allow
+LOCKED_EMAIL_REVERIFY_OVERDUE	EMAIL_REVERIFY_OVERDUE	EMAIL_REVERIFY_OVERDUE	EMAIL_REVERIFY_OVERDUE	SMS_REQUIRES_EMAIL_VERIFIED
+SUSPENDED_ADMIN	ADMIN_SUSPENDED	ADMIN_SUSPENDED	ADMIN_SUSPENDED	ADMIN_SUSPENDED
+5) UI message keys + CTAs (standardized)
+
+For each deny code, define:
+
+message_key: stable identifier used in UI copy tables
+
+cta_type: what button to show
+
+cta_route: where it goes (verify email modal, support, etc.)
+
+Examples:
+
+EMAIL_UNVERIFIED_GRACE_EXPIRED
+
+message_key = "deny.email_unverified_grace_expired"
+
+UI text template:
+
+Title: “Trading locked: email not verified”
+
+Body: “Your verification window ended on {email_initial_due_at}. Verify to unlock.”
+
+CTA: VERIFY_EMAIL → open verify modal + resend link
+
+EMAIL_REVERIFY_OVERDUE
+
+message_key = "deny.email_reverify_overdue"
+
+CTA: REVERIFY_EMAIL
+
+SMS_NOT_ELIGIBLE_YET
+
+message_key = "deny.sms_not_eligible_yet"
+
+CTA: UPGRADE_ELIGIBILITY
+
+Secondary UI: show checklist with unmet items:
+
+Age threshold
+
+Return threshold
+
+Trade count threshold
+
+Recent activity threshold (if enabled)
+
+VERIFY_RESEND_COOLDOWN
+
+message_key = "deny.verify_resend_cooldown"
+
+CTA: TRY_LATER with countdown seconds
+
+6) Audit logging standard (one event, consistent fields)
+
+Emit one audit event whenever a deny occurs on a privileged action:
+
+Event name: ACCOUNT_ACTION_DENIED
+
+Fields:
+
+userId, sessionId, ip, userAgent
+
+actionScope (TRADE_OPEN / ORDER_MODIFY / WITHDRAW / SMS_VERIFY_START)
+
+deny_code
+
+account_state
+
+lock_reason
+
+relevantDueDates (initialDueAt, reverifyDueAt)
+
+contenderTier
+
+metricsSnapshot (optional): balancePctStart, positionsLifetime, positionsLast90, returnLast90
+
+correlationId (tie to attempted orderId if present)
+
+This gives you clean compliance exports and simple analytics.
+
+7) Minimal set you can implement first (MVP)
+
+If you want to keep v1 very lean, implement just these codes first:
+
+ADMIN_SUSPENDED
+
+EMAIL_UNVERIFIED_GRACE_EXPIRED
+
+EMAIL_REVERIFY_OVERDUE
+
+EMAIL_VERIFICATION_REQUIRED_FOR_ACTION
+
+SMS_NOT_ELIGIBLE_YET
+
+SMS_REQUIRES_EMAIL_VERIFIED
+
+VERIFY_TOKEN_INVALID, VERIFY_TOKEN_EXPIRED, VERIFY_RATE_LIMITED
+
+SMS_RATE_LIMITED, SMS_OTP_INVALID
+
+Everything else can be appended without breaking consumers because clients rely on deny_code + cta_type.
+
+If you want one more “DO,” I can provide a message-copy matrix (exact titles/bodies for each message_key in trader tone vs compliance tone) and a banner arbitration rule (which banner wins when multiple apply: e.g., locked state always overrides contender prompts).
+
+DO
+
+Below is (a) the message-copy matrix for each message_key (two tones: Trader-friendly vs Compliance/Institutional), and (b) a deterministic banner arbitration rule so the UI never shows conflicting prompts.
+
+A) Message-copy matrix (message_key → title/body/CTA)
+A1) Conventions
+
+Variables you will interpolate:
+
+{initialDueDate} (email initial due date)
+
+{reverifyDueDate} (email reverify due date)
+
+{daysLeft} (integer)
+
+{daysOverdue} (integer)
+
+{cooldownSeconds} (integer)
+
+{supportChannel} (e.g., “Support chat” / “Email support”)
+
+CTA types:
+
+VERIFY_EMAIL, REVERIFY_EMAIL, RESEND_EMAIL, TRY_LATER, CONTACT_SUPPORT, UPGRADE_ELIGIBILITY, VERIFY_PHONE
+
+A2) Email lifecycle messages
+1) banner.initial_grace
+
+Trader tone
+
+Title: Verify your email to keep trading
+
+Body: You can trade now. Please verify within {daysLeft} days (by {initialDueDate}) to avoid a trading lock.
+
+Primary CTA: RESEND_EMAIL (label: Send verification email)
+
+Secondary CTA: (optional) “I already verified” (re-check)
+
+Compliance tone
+
+Title: Email verification required
+
+Body: Continued trading requires a verified email address. Verify by {initialDueDate} to prevent account trading restrictions.
+
+Primary CTA: VERIFY_EMAIL (label: Verify email)
+
+2) lock.email_unverified_grace_expired
+
+Trader tone
+
+Title: Trading locked: email not verified
+
+Body: Your 14-day window ended on {initialDueDate}. Verify your email to unlock trading. You can still close positions to reduce risk.
+
+Primary CTA: VERIFY_EMAIL (label: Verify email)
+
+Secondary CTA: RESEND_EMAIL (label: Resend link)
+
+Compliance tone
+
+Title: Trading restricted: email verification incomplete
+
+Body: Email verification was required by {initialDueDate}. Trading is restricted until verification is completed. Risk-reducing closures may remain available.
+
+Primary CTA: VERIFY_EMAIL
+
+3) banner.reverify_due
+
+Trader tone
+
+Title: Monthly email re-verification due soon
+
+Body: Please re-verify by {reverifyDueDate} to keep trading uninterrupted.
+
+Primary CTA: REVERIFY_EMAIL (label: Re-verify email)
+
+Secondary CTA: (optional) “Remind me tomorrow”
+
+Compliance tone
+
+Title: Periodic re-verification required
+
+Body: To maintain account integrity, re-verification is required by {reverifyDueDate}. Failure to comply may restrict trading.
+
+Primary CTA: REVERIFY_EMAIL
+
+4) lock.email_reverify_overdue
+
+Trader tone
+
+Title: Trading locked: re-verification overdue
+
+Body: Re-verification was due on {reverifyDueDate} ({daysOverdue} days ago). Re-verify now to unlock trading. You can still close positions to reduce risk.
+
+Primary CTA: REVERIFY_EMAIL (label: Re-verify now)
+
+Secondary CTA: RESEND_EMAIL (label: Resend link)
+
+Compliance tone
+
+Title: Trading restricted: re-verification overdue
+
+Body: Re-verification was due on {reverifyDueDate}. Trading is restricted until re-verification is completed. Risk-reducing closures may remain available.
+
+Primary CTA: REVERIFY_EMAIL
+
+5) deny.email_verification_required_for_action
+
+(Used for sensitive actions while still in initial grace, e.g., withdrawals, contender pipeline)
+Trader tone
+
+Title: Verify email to continue
+
+Body: This action requires a verified email. Verify now to proceed.
+
+Primary CTA: VERIFY_EMAIL
+
+Compliance tone
+
+Title: Action requires verified email
+
+Body: Verification is required before completing this action.
+
+Primary CTA: VERIFY_EMAIL
+
+A3) Verification flow errors (token/resend)
+6) deny.verify_token_invalid
+
+Trader tone
+
+Title: That link doesn’t work
+
+Body: The verification link is invalid. Please request a new one.
+
+Primary CTA: RESEND_EMAIL
+
+Compliance tone
+
+Title: Invalid verification token
+
+Body: The token is invalid. Request a new verification email.
+
+Primary CTA: RESEND_EMAIL
+
+7) deny.verify_token_expired
+
+Trader tone
+
+Title: Link expired
+
+Body: That verification link expired. Send a new one to continue.
+
+Primary CTA: RESEND_EMAIL
+
+Compliance tone
+
+Title: Verification token expired
+
+Body: The token has expired. Request a new token.
+
+Primary CTA: RESEND_EMAIL
+
+8) deny.verify_resend_cooldown
+
+Trader tone
+
+Title: Please wait a moment
+
+Body: You can resend a verification email in {cooldownSeconds} seconds.
+
+Primary CTA: TRY_LATER
+
+Compliance tone
+
+Title: Resend rate limited
+
+Body: Please wait {cooldownSeconds} seconds before retrying.
+
+Primary CTA: TRY_LATER
+
+9) deny.verify_resend_daily_limit
+
+Trader tone
+
+Title: Too many requests today
+
+Body: You’ve hit today’s resend limit. Try again tomorrow or contact support.
+
+Primary CTA: CONTACT_SUPPORT
+
+Secondary CTA: TRY_LATER
+
+Compliance tone
+
+Title: Daily limit reached
+
+Body: Resend requests exceeded the daily limit. Contact support if needed.
+
+Primary CTA: CONTACT_SUPPORT
+
+A4) SMS contender gating
+10) prompt.sms_contender_eligible
+
+Trader tone
+
+Title: You’re eligible for selection
+
+Body: Verify your phone to proceed to the serious contender pipeline.
+
+Primary CTA: VERIFY_PHONE
+
+Compliance tone
+
+Title: Additional verification required
+
+Body: Phone verification is required to proceed to the selection process.
+
+Primary CTA: VERIFY_PHONE
+
+11) deny.sms_requires_email_verified
+
+Trader tone
+
+Title: Verify email first
+
+Body: Phone verification is available after your email is verified and up to date.
+
+Primary CTA: VERIFY_EMAIL or REVERIFY_EMAIL (based on state)
+
+Compliance tone
+
+Title: Prerequisite verification required
+
+Body: Email verification must be completed before phone verification.
+
+Primary CTA: VERIFY_EMAIL/REVERIFY_EMAIL
+
+12) deny.sms_not_eligible_yet
+
+Trader tone
+
+Title: Not eligible yet
+
+Body: Keep trading and meeting the criteria. We’ll notify you when you qualify.
+
+Primary CTA: UPGRADE_ELIGIBILITY (label: View criteria)
+
+Compliance tone
+
+Title: Eligibility criteria not met
+
+Body: This step is available only after eligibility thresholds are met.
+
+Primary CTA: UPGRADE_ELIGIBILITY
+
+13) deny.sms_rate_limited
+
+Trader tone
+
+Title: Too many attempts
+
+Body: Please wait before requesting another code.
+
+Primary CTA: TRY_LATER
+
+Compliance tone
+
+Title: SMS verification rate limited
+
+Body: Attempts exceeded the allowed limit. Retry later.
+
+Primary CTA: TRY_LATER
+
+14) deny.sms_otp_invalid
+
+Trader tone
+
+Title: Incorrect code
+
+Body: That code isn’t correct. Try again.
+
+Primary CTA: TRY_AGAIN
+
+Compliance tone
+
+Title: Invalid OTP
+
+Body: The one-time code is invalid. Retry.
+
+Primary CTA: TRY_AGAIN
+
+15) deny.sms_otp_expired
+
+Trader tone
+
+Title: Code expired
+
+Body: Request a new code to continue.
+
+Primary CTA: VERIFY_PHONE (send new OTP)
+
+Compliance tone
+
+Title: OTP expired
+
+Body: The code has expired. Request a new OTP.
+
+Primary CTA: VERIFY_PHONE
+
+A5) Admin restriction messages
+16) lock.admin_suspended
+
+Trader tone
+
+Title: Account restricted
+
+Body: Your account has been temporarily restricted. Please contact {supportChannel}.
+
+Primary CTA: CONTACT_SUPPORT
+
+Compliance tone
+
+Title: Account suspended
+
+Body: This account is suspended pending review. Contact {supportChannel} for next steps.
+
+Primary CTA: CONTACT_SUPPORT
+
+B) Banner arbitration rule (deterministic UI precedence)
+B1) Problem you are solving
+
+A user can simultaneously have:
+
+an email grace banner,
+
+a reverify due banner,
+
+a contender SMS prompt,
+
+and possibly a lock screen.
+
+You need one rule that ensures the highest-risk item always dominates the UI.
+
+B2) Arbitration policy (single winner + optional secondary prompt)
+Step 1: Choose the primary banner/screen by priority
+
+Return exactly one primary UI state from the highest applicable rule:
+
+Admin suspension
+
+If accountState == SUSPENDED_ADMIN
+
+Primary: lock.admin_suspended
+
+No secondary prompts.
+
+Locked (email)
+
+If accountState == LOCKED_EMAIL_UNVERIFIED
+
+Primary: lock.email_unverified_grace_expired
+
+No contender prompt (blocked anyway).
+
+Locked (reverify overdue)
+
+If accountState == LOCKED_EMAIL_REVERIFY_OVERDUE
+
+Primary: lock.email_reverify_overdue
+
+No contender prompt.
+
+Reverify due soon
+
+If accountState == ACTIVE_VERIFIED AND now is within reverifyBannerWindow (recommended 7 days)
+
+Primary: banner.reverify_due
+
+Initial grace countdown
+
+If accountState == ACTIVE_UNVERIFIED_GRACE
+
+Primary: banner.initial_grace
+
+No banner
+
+Otherwise none.
+
+Step 2: Decide if a secondary “contender” prompt can appear
+
+Show contender prompt only if:
+
+accountState == ACTIVE_VERIFIED
+
+AND primary banner is either none or banner.reverify_due (optional: allow alongside reverify due)
+
+AND contenderTier == CANDIDATE_SMS_REQUIRED
+
+If you want an even simpler rule: allow contender prompt only when no primary banner exists.
+
+B3) Where each UI element appears
+
+Lock screens replace trade controls entirely (hard gating UI).
+
+Primary banner appears at top of dashboard and trade screen.
+
+Contender prompt appears as:
+
+a “card” on account page + optional modal once per session, not a persistent banner.
+
+C) Eligibility checklist UI (UPGRADE_ELIGIBILITY details)
+
+When user hits “View criteria,” show one of two panels depending on account age:
+
+Panel for 30-day rule (Rule A)
+
+Account age ≥ 30 days: Yes/No
+
+Balance ≥ 120% of start: Yes/No
+
+Lifetime trades ≥ 30: Yes/No
+
+Recently active (last trade within 14 days): Yes/No (if enabled)
+
+Panel for 90-day rule (Rule B)
+
+Account age ≥ 90 days: Yes/No
+
+Return last 90 days ≥ 10%: Yes/No
+
+Trades last 90 days ≥ 20: Yes/No
+
+Recently active: Yes/No (if enabled)
+
+If you want one more “DO,” I can provide the exact banner window definitions (e.g., when “due soon” begins, how often “Remind me later” can postpone, and the per-session modal rules) and a concise event taxonomy tying each message_key display to analytics events (impressions, clicks, conversions).
+
+DO
+Thought for 13s
+
+Below are (a) exact banner window definitions (including escalation), (b) “Remind me later” / snooze rules and per-session modal rules, and (c) a tight event taxonomy that ties every message_key display to analytics and audit events.
+
+1) Banner windows and escalation rules
+1.1 Initial email verification (post-signup, 14-day grace)
+
+Applies when: accountState == ACTIVE_UNVERIFIED_GRACE
+
+Banner visibility
+
+Show banner.initial_grace on:
+
+Dashboard (persistent)
+
+Trade screen (persistent)
+
+Account/Profile (persistent)
+
+Banner is always visible during grace, but severity escalates as due date approaches.
+
+Severity levels (UI styling + copy intensity)
+
+INFO: daysLeft >= 8
+
+Copy: “Verify within {daysLeft} days…”
+
+WARNING: daysLeft between 3 and 7
+
+Copy adds: “Avoid lockout.”
+
+CRITICAL: daysLeft <= 2
+
+Copy adds: “Lockout starts on {initialDueDate}.”
+
+Reminder email schedule (initial)
+
+Send reminders only if emailVerifiedAt == null and under caps:
+
+Immediately on signup (T+0)
+
+T+7 days
+
+T+12 days
+
+T+13 days
+
+Optional: T+14 at lock moment (informational “locked” email)
+
+Lock enforcement moment
+
+Effective when now >= emailInitialDueAt.
+
+Trading endpoints must compute state at request time (do not rely only on a daily job).
+
+Daily job (or hourly) can set the stored lock state for reporting, but enforcement is always runtime.
+
+1.2 Monthly re-verification (rolling 30-day cadence)
+
+Applies when: accountState == ACTIVE_VERIFIED and emailReverifyDueAt exists.
+
+“Due soon” banner window
+
+Show banner.reverify_due when:
+
+0 <= (emailReverifyDueAt - now) <= 7 days
+
+Escalation:
+
+WARNING: due in 7–3 days
+
+CRITICAL: due in 2–0 days
+
+Overdue grace window
+
+Overdue grace: EMAIL_REVERIFY_OVERDUE_GRACE_DAYS = 3
+
+Show overdue warning (still not locked) when:
+
+0 < (now - emailReverifyDueAt) <= 3 days
+
+Recommended: keep a banner variant (same banner.reverify_due but marked “overdue”) or a dedicated key, depending on your UI preference.
+
+Lock enforcement
+
+Lock when:
+
+now > emailReverifyDueAt + 3 days
+
+Primary UI becomes lock.email_reverify_overdue.
+
+Reduce-only closes remain allowed.
+
+Reminder email schedule (reverify)
+
+Send reminders under caps:
+
+Due - 7 days
+
+Due - 3 days
+
+Due - 1 day
+
+Due day
+
+Due + 2 days (within grace; final warning)
+
+Optional: Due + 4 days (informational “locked” email) if you lock at +3
+
+Reverify early behavior (recommended)
+
+If user re-verifies early (before due date):
+
+Set emailVerifiedAt = now
+
+Reset emailReverifyDueAt = now + 30 days
+This reduces “calendar confusion” and makes the cycle predictable.
+
+2) “Remind me later” / Snooze rules and modal rules
+2.1 Snooze rules (only for banners, not locks)
+
+Snooze is permitted only when:
+
+Account is not locked (no snooze on lock screens)
+
+Banner is non-critical OR you explicitly allow it in critical
+
+Snooze behavior
+
+Snooze duration: 24 hours
+
+Data fields:
+
+bannerSnoozeUntil (timestamp)
+
+bannerSnoozeCountWindow (e.g., rolling 7 days)
+
+Snooze cap:
+
+Max 2 snoozes per 7 days per banner type (initial grace vs reverify)
+
+Override rule:
+
+If daysLeft <= 2 (initial grace) or due in <= 1 day (reverify), ignore snooze and show the banner anyway.
+
+Snooze arbitration
+
+If both banners could show (rare but possible if logic is misconfigured), apply your primary banner arbitration (locks > reverify due > initial grace). Snooze applies only to the winning banner.
+
+2.2 Per-session modal rules (contender + optional escalations)
+A) Contender SMS modal (prompt.sms_contender_eligible)
+
+Show as a modal only if all are true:
+
+accountState == ACTIVE_VERIFIED
+
+contenderTier == CANDIDATE_SMS_REQUIRED
+
+User has not dismissed it too recently
+
+Frequency controls
+
+Once per session (session = auth sessionId)
+
+And additionally: not more than once per 7 days (persist smsPromptLastShownAt)
+
+If dismissed: allow re-show after 7 days or when eligibility transitions from false→true again (freshly earned)
+
+Placement
+
+Modal once; persistent “card” remains on Account page until SMS verified.
+
+B) Lock screens
+
+Never modal. Hard-gate page/screen with a single primary CTA.
+
+C) Critical escalations (optional)
+
+You can optionally show a single modal in the last 24 hours before lockout:
+
+Initial grace: when daysLeft == 1 (or < 24 hours)
+
+Reverify: when due in < 24 hours
+Rules:
+
+Show at most once per 24 hours.
+
+Do not show if user already clicked “Send verification email” in the last 24 hours.
+
+3) Event taxonomy (analytics + audit alignment)
+
+You want two layers:
+
+Policy/Audit events (authoritative, server-side)
+
+Product analytics events (UI interactions, can be client-side but ideally also mirrored server-side for high-trust flows)
+
+3.1 Common event envelope (all events)
+
+Every event should include:
+
+event_name
+
+timestamp
+
+userId
+
+sessionId
+
+ip (server-side)
+
+userAgent (server-side)
+
+correlationId (ties a request to audits; for trading attempts, use order correlationId)
+
+accountState at time of event
+
+contenderTier at time of event
+
+message_key (if UI-related)
+
+channel (email/sms/in_app)
+
+environment (prod/stage)
+
+3.2 Policy/Audit events (server authoritative)
+State transitions
+
+ACCOUNT_STATE_CHANGED
+
+Fields: from_state, to_state, reason (EMAIL_UNVERIFIED, EMAIL_REVERIFY_OVERDUE, ADMIN_SUSPEND, ADMIN_REINSTATE)
+
+Email lifecycle
+
+EMAIL_VERIFICATION_SENT
+
+Fields: type (INITIAL/REVERIFY/RESET), providerMessageId, rateLimitApplied (T/F)
+
+EMAIL_VERIFICATION_CONFIRMED
+
+Fields: type, tokenAgeSeconds
+
+EMAIL_VERIFICATION_FAILED
+
+Fields: failure_code (TOKEN_INVALID/TOKEN_EXPIRED/TOKEN_USED/RATE_LIMIT)
+
+Lock/unlock
+
+ACCOUNT_LOCKED
+
+Fields: lockReason, lockedAt, dueDate
+
+ACCOUNT_UNLOCKED
+
+Fields: unlockReason (VERIFY_SUCCESS/REVERIFY_SUCCESS/ADMIN)
+
+Denies (from your catalog)
+
+ACCOUNT_ACTION_DENIED
+
+Fields: deny_code, deny_scope (TRADE_OPEN/ORDER_MODIFY/WITHDRAW/SMS_VERIFY_START), details (optional metrics snapshot)
+
+Contender engine
+
+CONTENDER_ELIGIBILITY_EVALUATED
+
+Fields: eligible (T/F), ruleMatched (A/B/null), plus key metrics
+
+CONTENDER_ELIGIBLE
+
+Emitted only on false→true transition
+
+SMS_VERIFICATION_SENT
+
+Fields: providerMessageId, rateLimitApplied
+
+SMS_VERIFICATION_CONFIRMED
+
+SMS_VERIFICATION_FAILED
+
+Fields: failure_code (OTP_INVALID/OTP_EXPIRED/RATE_LIMIT/TOO_MANY_ATTEMPTS)
+
+3.3 Product analytics events (UI + funnel)
+Banner impressions
+
+UI_BANNER_IMPRESSION
+
+Fields: message_key, severity (INFO/WARNING/CRITICAL), screen (dashboard/trade/account), daysLeft/daysOverdue
+
+Banner interactions
+
+UI_BANNER_CTA_CLICKED
+
+Fields: message_key, cta_type (VERIFY_EMAIL/REVERIFY_EMAIL/RESEND_EMAIL/CONTACT_SUPPORT), screen
+
+Snooze
+
+UI_BANNER_SNOOZED
+
+Fields: message_key, snooze_hours (24), snooze_count_window
+
+Lock screen
+
+UI_LOCKSCREEN_VIEWED
+
+Fields: message_key, lockReason
+
+UI_LOCKSCREEN_CTA_CLICKED
+
+Contender modal
+
+UI_MODAL_IMPRESSION
+
+Fields: message_key="prompt.sms_contender_eligible", ruleMatched
+
+UI_MODAL_DISMISSED
+
+UI_MODAL_CTA_CLICKED (VERIFY_PHONE)
+
+Conversion events (funnel anchors)
+
+FUNNEL_EMAIL_VERIFICATION_COMPLETED
+
+FUNNEL_EMAIL_REVERIFY_COMPLETED
+
+FUNNEL_SMS_VERIFICATION_COMPLETED
+
+These funnel anchors should be emitted server-side as well (mirrored) so reporting is consistent even if client events drop.
+
+4) Banner arbitration with analytics (tie-break + instrumentation)
+
+When you compute primary UI:
+
+Choose the primary message_key (locks > reverify due > initial grace > none).
+
+Emit one UI_BANNER_IMPRESSION per page load for the primary banner only.
+
+If contender modal is eligible and shown, emit UI_MODAL_IMPRESSION separately (but only if no lock screen is active).
+
+This guarantees clean dashboards: impressions are not double-counted and prompts do not compete.
+
+If you want the next “DO,” I can turn this into a compact funnel KPI spec (exact metrics you should track weekly: verification completion rate within 14 days, lockout rate, reverify churn, SMS eligibility rate, SMS completion rate, selection conversion) and the SQL-like dimensional model you’d need in analytics to report it cleanly.
+
+DO
+
+Below is (a) a compact funnel KPI spec (definitions, numerators/denominators, time windows, segments), and (b) a practical analytics dimensional model (star schema + fact tables) that will let you report this cleanly without brittle logic.
+
+1) Funnel KPI spec
+1.1 Primary weekly KPIs (core health)
+
+These are the metrics you should review weekly (with daily monitoring).
+
+K1) Signup volume
+
+Definition: Count of new accounts created.
+
+Numerator: SIGNUP_CREATED events.
+
+Dims: country, device, acquisition source (if available), email domain type, cohort week.
+
+K2) Email verification completion rate (within grace)
+
+Definition: % of signups that verify email within 14 days.
+
+Denominator: signups in cohort.
+
+Numerator: those signups with EMAIL_VERIFICATION_CONFIRMED(type=INITIAL) timestamp ≤ createdAt + 14 days.
+
+Report windows: within 24h / 7d / 14d.
+
+K3) Lockout rate (initial unverified)
+
+Definition: % of signups that reach lock due to unverified email.
+
+Denominator: signups in cohort.
+
+Numerator: ACCOUNT_LOCKED(lockReason=EMAIL_UNVERIFIED) within 14–21 days of signup (gives late job margin).
+
+Segment: “traded at least once before lock” vs “never traded”.
+
+K4) Unlock rate after lockout
+
+Definition: % of initially locked users who verify and unlock.
+
+Denominator: users with ACCOUNT_LOCKED(EMAIL_UNVERIFIED).
+
+Numerator: those with ACCOUNT_UNLOCKED(unlockReason=VERIFY_SUCCESS) within N days of lock (e.g., 7, 30).
+
+Latency KPI: median time from lock → unlock.
+
+K5) Monthly re-verification compliance rate
+
+Definition: % of verified users who complete re-verification by due+grace.
+
+Denominator: users with an active reverify cycle due in the period.
+
+Numerator: EMAIL_VERIFICATION_CONFIRMED(type=REVERIFY) timestamp ≤ emailReverifyDueAt + overdueGrace.
+
+Also track: overdue lock rate for reverify.
+
+K6) Reverify churn impact (behavioral)
+
+Definition: activity drop and retention impact caused by reverify requirements.
+
+Method: compare trading activity in the 14 days before due vs 14 days after due, split by:
+
+reverified on time
+
+overdue but reverified later
+
+locked and never reverified
+
+Outputs: change in active traders %, change in avg trades/user, change in P&L distribution (if tracked).
+
+1.2 Serious contender pipeline KPIs (selection efficiency)
+K7) Contender eligibility rate
+
+Definition: % of verified active users who become eligible for SMS (Rule A or B).
+
+Denominator: ACTIVE_VERIFIED users with at least one trade.
+
+Numerator: CONTENDER_ELIGIBLE (false→true transition).
+
+Segment by: rule matched (A vs B), country, device, account age bucket.
+
+K8) SMS verification completion rate (among eligible)
+
+Denominator: users with CONTENDER_ELIGIBLE.
+
+Numerator: SMS_VERIFICATION_CONFIRMED.
+
+Latency KPI: median time from eligible → SMS verified.
+
+K9) SMS friction / failure rates
+
+Metrics:
+
+OTP send success rate (SMS_VERIFICATION_SENT vs failures)
+
+OTP verify success rate (CONFIRMED / attempts)
+
+Rate-limited users % (SMS_RATE_LIMITED)
+
+Segment by: country/carrier region, device type, time of day.
+
+K10) Selection conversion (downstream, when you add it)
+
+Denominator: VERIFIED_SMS.
+
+Numerator: “selected to manage capital” (future event).
+
+Also: time-to-selection, performance distribution at selection.
+
+1.3 Abuse and deliverability KPIs (cost + integrity)
+K11) Email deliverability proxy
+
+If you track provider callbacks: delivered / bounced / complained.
+
+If not: use proxy: verification click-through rate by domain/country and resend frequency.
+
+K12) Verification resend pressure
+
+Definition: average verification sends per user per cycle.
+
+Red flags: high resend rate + low verification completion = likely deliverability issues or disposable emails.
+
+K13) Disposable email containment effectiveness
+
+Proxy: % of accounts that pass initial verify but fail monthly reverify by 60 days.
+
+Segment: email domain type (free provider vs custom domain vs suspected disposable if you maintain a list).
+
+K14) Deny-rate monitoring (policy enforcement)
+
+Definition: action denies per 1,000 sessions, by deny_code.
+
+Focus deny codes:
+
+EMAIL_UNVERIFIED_GRACE_EXPIRED
+
+EMAIL_REVERIFY_OVERDUE
+
+SMS_NOT_ELIGIBLE_YET
+
+VERIFY_RATE_LIMITED, SMS_RATE_LIMITED
+
+2) KPI computation conventions (so reports don’t drift)
+2.1 Cohorting
+
+Primary cohort: signup week (America/Chicago).
+
+Secondary cohorts: first-trade week; first-verify week.
+
+2.2 “Active trader” definition (pick one, be consistent)
+
+Recommended:
+
+Active trader = at least one position closed in last 14 days OR at least one open position now.
+
+2.3 Event truth source
+
+KPI truth should be server-side events for:
+
+verification confirmed/failed
+
+lock/unlock
+
+contender eligibility transitions
+
+Client-side events only for UI impressions/clicks.
+
+3) Analytics dimensional model (star schema)
+
+This design supports:
+
+time-based funnels (cohort + conversion latency),
+
+state-based reporting (grace vs locked),
+
+segmentation (country, device, email domain),
+
+compliance exports (audit-consistent).
+
+3.1 Core dimensions
+dim_user
+
+user_key (surrogate)
+
+user_id (source)
+
+created_at
+
+country, region, timezone
+
+email_domain, email_domain_type (free/custom/disposable/unknown)
+
+signup_source (utm/source if present)
+
+starting_balance
+
+is_admin_test_account flag
+
+dim_date
+
+date_key
+
+calendar fields (day/week/month/quarter/year)
+
+week_start_date (Mon or Sun; pick one)
+
+dim_session
+
+session_key
+
+session_id
+
+session_start_at, session_end_at (if you track)
+
+ip_hash (store hashed)
+
+user_agent_hash, device_type, browser, os
+
+dim_message
+
+message_key (e.g., banner.initial_grace)
+
+message_family (BANNER/LOCK/MODAL/DENY)
+
+severity_default
+
+dim_channel
+
+channel_key
+
+channel (email/sms/in_app)
+
+dim_action_scope
+
+scope_key
+
+deny_scope (TRADE_OPEN/ORDER_MODIFY/WITHDRAW/SMS_VERIFY_START/etc.)
+
+dim_reason_code
+
+reason_key
+
+deny_code / lock_reason / failure_code
+
+category (EMAIL_LOCK / SMS / RATE_LIMIT / ADMIN / RISK)
+
+3.2 Fact tables (recommended set)
+F1) fact_event (immutable append-only)
+
+This is your raw atomic event store (server-authoritative + select client events).
+
+Keys: event_id, timestamp, user_key, session_key, date_key
+
+Fields:
+
+event_name
+
+message_key (nullable)
+
+channel_key (nullable)
+
+scope_key (nullable)
+
+reason_key (nullable)
+
+account_state (snapshot)
+
+contender_tier (snapshot)
+
+correlation_id (order correlation / request id)
+
+metrics snapshot (optional): balance_now, pct_of_start, return_last90, trades_lifetime, trades_last90
+
+Use this for maximum flexibility, but don’t compute KPIs directly from raw events once you scale—use derived facts below.
+
+F2) fact_verification_cycle (cycle-based, best for funnels)
+
+One row per user per verification cycle.
+
+Keys: user_key, cycle_id, cycle_type (INITIAL/REVERIFY)
+
+Dates:
+
+cycle_start_at
+
+due_at
+
+completed_at (nullable)
+
+locked_at (nullable)
+
+unlocked_at (nullable)
+
+Measures:
+
+completed_on_time (boolean; completed_at ≤ due_at + grace)
+
+time_to_complete_seconds
+
+sends_count
+
+fails_count
+
+resend_rate_limited_count
+
+Why this matters: it makes “completion within 14 days” and “monthly compliance” trivial and consistent.
+
+F3) fact_account_state_daily (daily snapshot)
+
+One row per user per day.
+
+Keys: user_key, date_key
+
+Fields:
+
+account_state
+
+lock_reason (nullable)
+
+email_verified_flag
+
+days_to_initial_due (if unverified)
+
+days_to_reverify_due / days_since_reverify_due (if verified)
+
+contender_tier
+
+Measures:
+
+is_active_trader_14d (boolean; computed)
+
+sessions_1d, trades_closed_1d, trades_opened_1d (if you have trade facts)
+
+This supports trend charts without heavy event scanning.
+
+F4) fact_contender_status (transition-based)
+
+One row per user per contender eligibility episode.
+
+Keys: user_key, episode_id
+
+Fields:
+
+eligible_at
+
+rule_matched (A/B)
+
+sms_verified_at (nullable)
+
+eligibility_metrics_snapshot (pct_of_start, trades, return_last90)
+
+Measures:
+
+time_to_sms_verify_seconds
+
+F5) fact_action_denial (optional, for fast deny analytics)
+
+One row per denied request (already in fact_event, but materializing improves performance).
+
+Keys: event_id, user_key, date_key, scope_key, reason_key
+
+Fields:
+
+account_state
+
+correlation_id
+
+4) KPI-to-table mapping (so implementation is unambiguous)
+
+K2 Email verification within 14 days
+Use fact_verification_cycle where cycle_type=INITIAL; compute completed_on_time.
+
+K3 Initial lockout rate
+From same table: locked_at is not null and completed_at is null or completed_at > due+grace.
+
+K5 Reverify compliance
+cycle_type=REVERIFY; completed_on_time.
+
+K7 Contender eligibility rate
+From fact_contender_status (eligible episodes) ÷ verified active population from fact_account_state_daily.
+
+K8 SMS completion rate
+sms_verified_at is not null ÷ eligible episodes.
+
+K14 Deny-rate
+fact_action_denial grouped by deny_code per 1,000 sessions (dim_session) or per 1,000 active users.
+
+5) Dashboard pack (what to build first)
+5.1 Verification Funnel Dashboard
+
+Signup cohorts (weekly) → verified within 24h/7d/14d → locked → unlocked
+
+Time-to-verify distribution (p50/p90)
+
+Resend counts & rate-limit counts
+
+Breakdowns: country, email domain type, device
+
+5.2 Reverify Compliance Dashboard
+
+Reverify due population → completed on time → overdue → locked → recovered
+
+Reverify churn: active traders lost due to overdue
+
+Overdue days distribution
+
+5.3 Contender Pipeline Dashboard
+
+Eligible (A vs B) → SMS verified → selection-ready (future)
+
+SMS failure reasons and rate limits by country
+
+5.4 Policy Denies Dashboard
+
+Denies per 1,000 sessions by deny_code
+
+Top screens/actions causing denies
+
+Trend alerts (spikes indicate deliverability or UX issues)
+
+6) Alerting thresholds (practical, early-warning)
+
+Set alerts on weekly rolling averages:
+
+Email verify within 14 days drops below X% (you choose baseline; start with alert at -20% relative change)
+
+Initial lockout rate rises above baseline by +30%
+
+Reverify lockouts exceed Y% of due population
+
+Resend rate-limited events spike (deliverability or bot activity)
+
+SMS rate-limited events spike by country (carrier issues or abuse)
+
+If you want the next “DO,” I can provide a minimal ETL/DBT model outline (source tables → staging → facts/dims) and the exact data quality tests (uniqueness, not-null, cycle integrity, state validity) that prevent reporting drift.
+
+DO
+Thought for 9s
+
+Below is a minimal, implementation-ready ETL/DBT outline (source → staging → marts) plus a concrete set of data quality tests that prevents reporting drift for your verification + contender pipeline.
+
+1) Source tables and required columns
+
+You will get the cleanest analytics if you treat server-side events as the primary truth source, and use user/session/trade tables as enrichments.
+
+1.1 Required raw sources
+raw.audit_event (append-only, server authoritative)
+
+Minimum columns:
+
+event_id (unique)
+
+event_ts_utc (timestamp)
+
+user_id (nullable for pre-auth events)
+
+session_id (nullable)
+
+event_name (string)
+
+payload_json (json)
+
+ip_hash, user_agent_hash (optional but recommended)
+
+correlation_id (nullable)
+
+Expected event_names include:
+
+SIGNUP_CREATED
+
+EMAIL_VERIFICATION_SENT, EMAIL_VERIFICATION_CONFIRMED, EMAIL_VERIFICATION_FAILED
+
+ACCOUNT_LOCKED, ACCOUNT_UNLOCKED, ACCOUNT_STATE_CHANGED
+
+CONTENDER_ELIGIBILITY_EVALUATED, CONTENDER_ELIGIBLE
+
+SMS_VERIFICATION_SENT, SMS_VERIFICATION_CONFIRMED, SMS_VERIFICATION_FAILED
+
+ACCOUNT_ACTION_DENIED
+
+raw.users
+
+user_id, created_at_utc, country, email_domain, starting_balance
+
+email_verified_at_utc (nullable)
+
+email_initial_due_at_utc (nullable; else derive)
+
+email_reverify_due_at_utc (nullable; else derive)
+
+admin_suspended_flag, admin_suspend_reason
+
+raw.sessions (optional but useful)
+
+session_id, user_id, session_start_utc, session_end_utc
+
+device_type, browser, os, ip_hash, user_agent_hash
+
+raw.trades (or positions)
+
+trade_id, user_id, open_ts_utc, close_ts_utc (nullable), symbol
+
+lots, pnl, status
+
+raw.equity_snapshots_daily
+
+user_id, snapshot_date (date), equity_end_of_day
+
+2) DBT project structure
+
+Recommended dbt folder layout:
+
+models/
+  staging/
+    stg_audit_event.sql
+    stg_users.sql
+    stg_sessions.sql
+    stg_trades.sql
+    stg_equity_snapshots_daily.sql
+
+  intermediate/
+    int_event_enriched.sql
+    int_user_metrics_daily.sql
+    int_verification_events.sql
+    int_sms_events.sql
+    int_denials.sql
+
+  marts/
+    dims/
+      dim_user.sql
+      dim_session.sql
+      dim_date.sql
+      dim_reason_code.sql
+      dim_message.sql
+      dim_channel.sql
+      dim_action_scope.sql
+
+    facts/
+      fct_event.sql
+      fct_verification_cycle.sql
+      fct_account_state_daily.sql
+      fct_contender_status.sql
+      fct_action_denial.sql
+
+tests/
+  schema.yml
+  custom/
+    test_cycle_integrity.sql
+    test_no_overlapping_cycles.sql
+    test_state_validity.sql
+
+3) Staging models (clean, standardize, dedupe)
+3.1 stg_audit_event.sql
+
+Responsibilities:
+
+Cast timestamps
+
+Normalize event_name casing
+
+Extract common fields from payload_json into columns (deny_code, deny_scope, message_key, lock_reason, cycle_type, failure_code, rule_matched)
+
+Deduplicate by event_id (or (event_ts_utc, user_id, event_name, correlation_id) if needed)
+
+Skeleton:
+
+-- models/staging/stg_audit_event.sql
+with src as (
+  select
+    event_id,
+    cast(event_ts_utc as timestamp) as event_ts_utc,
+    user_id,
+    session_id,
+    upper(event_name) as event_name,
+    payload_json,
+    correlation_id,
+    ip_hash,
+    user_agent_hash
+  from {{ source('raw', 'audit_event') }}
+),
+
+parsed as (
+  select
+    event_id,
+    event_ts_utc,
+    user_id,
+    session_id,
+    event_name,
+    correlation_id,
+    ip_hash,
+    user_agent_hash,
+
+    -- commonly used extracted fields (adjust JSON syntax for your warehouse)
+    payload_json:deny_code::string as deny_code,
+    payload_json:deny_scope::string as deny_scope,
+    payload_json:message_key::string as message_key,
+    payload_json:lock_reason::string as lock_reason,
+    payload_json:cycle_type::string as cycle_type,          -- INITIAL/REVERIFY/RESET
+    payload_json:failure_code::string as failure_code,
+    payload_json:rule_matched::string as rule_matched,      -- A/B
+    payload_json:channel::string as channel
+  from src
+)
+
+select * from parsed;
+
+3.2 stg_users.sql
+
+Standardize timestamps
+
+Derive due dates when missing:
+
+email_initial_due_at_utc = created_at_utc + interval '14 day' if null
+
+If verified and reverify due is null: email_reverify_due_at_utc = email_verified_at_utc + interval '30 day'
+
+4) Intermediate models (business logic assembly)
+4.1 int_event_enriched.sql
+
+Join staged events to users/sessions for consistent snapshot dims:
+
+Add account_state snapshot if you store it in payload; otherwise derive from user fields at event_ts_utc (harder). Recommended: store state snapshot in event payload at emit time.
+
+4.2 int_user_metrics_daily.sql
+
+Compute daily aggregates needed by contender logic and account state daily facts:
+
+lifetime trades up to date
+
+trades last 90 days
+
+equity_end_of_day
+
+balance_at_90d_ago (self-join on snapshot_date = current_date - 90)
+
+4.3 int_verification_events.sql
+
+Filter and normalize verification-related events:
+
+EMAIL_VERIFICATION_SENT/CONFIRMED/FAILED
+
+separate cycle_type (INITIAL vs REVERIFY) using payload or inference
+
+4.4 int_denials.sql
+
+Filter ACCOUNT_ACTION_DENIED events and normalize deny_code/scope.
+
+5) Mart models (dims + facts)
+5.1 Dimensions
+dim_user.sql
+
+One row per user
+
+Add derived fields (email_domain_type) if you maintain a classification
+
+Surrogate key recommended: user_key = hash(user_id)
+
+dim_session.sql
+
+One row per session; join to users (relationship test)
+
+dim_reason_code.sql
+
+Static seed table recommended (deny_code / lock_reason / failure_code)
+
+Enforce accepted_values via relationships to this dim
+
+dim_message.sql
+
+Static seed table of message_key metadata (family, severity_default)
+
+5.2 Facts
+fct_event.sql (append-only)
+
+One row per event_id from stg_audit_event
+
+Enriched with user_key/session_key/date_key
+
+Partition by event_date for performance
+
+fct_verification_cycle.sql (cycle-based)
+
+Goal: one row per user per cycle for INITIAL and for each REVERIFY cycle.
+
+INITIAL cycle:
+
+cycle_start_at = created_at_utc
+
+due_at = created_at_utc + 14d
+
+completed_at = first EMAIL_VERIFICATION_CONFIRMED(type=INITIAL)
+
+locked_at = first ACCOUNT_LOCKED(lockReason=EMAIL_UNVERIFIED) if any
+
+completed_on_time = completed_at <= due_at
+
+REVERIFY cycles (rolling 30d):
+Best practice: build cycles from the user’s due schedule and/or explicit events:
+
+Each time you confirm reverify (or initial verify), open a new cycle:
+
+cycle_start_at = verified_at
+
+due_at = cycle_start_at + 30d
+
+Attach:
+
+completed_at = first EMAIL_VERIFICATION_CONFIRMED(type=REVERIFY) after cycle_start_at
+
+locked_at = first ACCOUNT_LOCKED(lockReason=EMAIL_REVERIFY_OVERDUE) after due_at
+
+This is easiest if your backend emits a REVERIFY_CYCLE_STARTED event whenever it sets a new due date. If not, you can derive from verified timestamps + confirmation events, but it is more fragile.
+
+fct_account_state_daily.sql
+
+Daily snapshot per user:
+
+account_state (derived from users + rules at the day boundary)
+
+days until due / overdue
+
+contender_tier (from user or contender fact)
+
+activity flags: active_trader_14d
+
+fct_contender_status.sql
+
+One row per eligibility “episode”:
+
+eligible_at (from CONTENDER_ELIGIBLE transition event)
+
+rule_matched (A/B)
+
+sms_verified_at (first SMS confirmed after eligible_at)
+
+fct_action_denial.sql
+
+One row per denial event with:
+
+deny_code
+
+deny_scope
+
+account_state snapshot
+
+correlation_id
+
+6) Incremental strategy (so it scales)
+6.1 Incremental models
+
+stg_audit_event, fct_event, fct_action_denial: incremental by event_ts_utc
+
+fct_account_state_daily: incremental by date_key (daily partitions)
+
+int_user_metrics_daily: incremental by snapshot_date
+
+6.2 Unique keys
+
+Facts:
+
+fct_event: unique event_id
+
+fct_action_denial: unique event_id
+
+fct_account_state_daily: unique (user_key, date_key)
+
+fct_verification_cycle: unique (user_key, cycle_id, cycle_type)
+
+7) Data quality tests (dbt schema + custom)
+7.1 Standard tests (schema.yml)
+Uniqueness + not null
+
+stg_audit_event.event_id unique + not_null
+
+dim_user.user_id unique + not_null
+
+fct_event.event_id unique + not_null
+
+fct_account_state_daily (user_key,date_key) unique + not_null
+
+Relationships
+
+fct_event.user_key → dim_user.user_key
+
+fct_event.session_key → dim_session.session_key (nullable allowed)
+
+fct_action_denial.reason_key → dim_reason_code.reason_key
+
+fct_event.message_key → dim_message.message_key (nullable allowed)
+
+Accepted values
+
+account_state accepted_values:
+
+ACTIVE_UNVERIFIED_GRACE
+
+LOCKED_EMAIL_UNVERIFIED
+
+ACTIVE_VERIFIED
+
+LOCKED_EMAIL_REVERIFY_OVERDUE
+
+SUSPENDED_ADMIN
+
+cycle_type accepted_values: INITIAL, REVERIFY, RESET
+
+rule_matched accepted_values: A, B
+
+Freshness
+
+raw.audit_event freshness:
+
+warn if last event > 2 hours old
+
+error if > 24 hours old (adjust to your ops)
+
+7.2 Critical custom tests (must-have)
+T1) Cycle integrity
+
+Ensures cycles are time-consistent.
+
+Rules:
+
+due_at >= cycle_start_at
+
+If completed_at not null: completed_at >= cycle_start_at
+
+If locked_at not null: locked_at >= due_at (or >= due_at + grace depending on lock definition)
+
+completed_on_time equals (completed_at <= due_at + grace) when completed_at exists
+
+Custom test skeleton:
+
+-- tests/custom/test_cycle_integrity.sql
+select *
+from {{ ref('fct_verification_cycle') }}
+where
+  due_at < cycle_start_at
+  or (completed_at is not null and completed_at < cycle_start_at)
+  or (locked_at is not null and locked_at < due_at);
+
+T2) No overlapping cycles per user + cycle_type
+
+Prevents double-counting in funnel.
+
+Rule: for same (user_key, cycle_type) cycles must not overlap:
+
+next.cycle_start_at >= current.due_at (or >= current.cycle_start_at if using event-defined boundaries)
+
+Skeleton:
+
+-- tests/custom/test_no_overlapping_cycles.sql
+with ordered as (
+  select
+    user_key,
+    cycle_type,
+    cycle_start_at,
+    due_at,
+    lead(cycle_start_at) over (partition by user_key, cycle_type order by cycle_start_at) as next_start
+  from {{ ref('fct_verification_cycle') }}
+)
+select *
+from ordered
+where next_start is not null and next_start < due_at;
+
+T3) State validity vs timestamps
+
+Ensures daily state aligns with derived rules.
+
+Examples:
+
+If account_state = ACTIVE_UNVERIFIED_GRACE then email_verified_flag = false and days_to_initial_due >= 0
+
+If account_state = LOCKED_EMAIL_UNVERIFIED then email_verified_flag = false and days_to_initial_due < 0
+
+If account_state = LOCKED_EMAIL_REVERIFY_OVERDUE then email_verified_flag = true and days_since_reverify_due > overdueGrace
+
+Skeleton:
+
+-- tests/custom/test_state_validity.sql
+select *
+from {{ ref('fct_account_state_daily') }}
+where
+  (account_state = 'ACTIVE_UNVERIFIED_GRACE' and (email_verified_flag = true or days_to_initial_due < 0))
+  or (account_state = 'LOCKED_EMAIL_UNVERIFIED' and (email_verified_flag = true or days_to_initial_due >= 0))
+  or (account_state = 'LOCKED_EMAIL_REVERIFY_OVERDUE' and (email_verified_flag = false or days_since_reverify_due <= {{ var('EMAIL_REVERIFY_OVERDUE_GRACE_DAYS', 3) }}));
+
+T4) Deny code whitelist (catalog enforcement)
+
+Ensure no unknown deny codes appear:
+
+fct_action_denial.deny_code must exist in dim_reason_code
+
+This is a relationships test if you model deny_code as a key.
+
+T5) “Future timestamp” guard
+
+No event or completion timestamp should be in the future (beyond small clock skew, e.g., 5 minutes).
+
+8) Practical additions that reduce brittleness
+8.1 Emit cycle-start events from backend (highly recommended)
+
+Add server events:
+
+INITIAL_VERIFY_CYCLE_STARTED
+
+REVERIFY_CYCLE_STARTED
+When you set due_at, emit it. This turns fct_verification_cycle into a clean event-sourced construct and avoids inference bugs.
+
+8.2 Store account_state snapshot in each audit event
+
+At event emission time, include:
+
+account_state
+
+email_initial_due_at
+
+email_reverify_due_at
+
+contender_tier
+This makes downstream joins deterministic and avoids “as-of joins” that are expensive and error-prone.
+
+If you want the next “DO,” I can provide a concise dbt schema.yml for these models (including tests configuration) and a seed file spec for dim_reason_code and dim_message so your deny catalog and UI messaging stay synchronized across releases.
+
+DO
+
+Below is (a) a concise dbt schema.yml covering the key models and tests, and (b) the seed file specs (including suggested columns and sample rows) for dim_reason_code and dim_message so your deny catalog and UI messaging remain synchronized.
+
+A) dbt schema.yml (models + tests)
+
+Assumptions: dbt-core + dbt-utils available. If you don’t use dbt-utils, remove those tests and keep the built-ins.
+
+version: 2
+
+sources:
+  - name: raw
+    tables:
+      - name: audit_event
+        freshness:
+          warn_after: {count: 2, period: hour}
+          error_after: {count: 24, period: hour}
+        loaded_at_field: event_ts_utc
+        columns:
+          - name: event_id
+            tests: [not_null, unique]
+          - name: event_ts_utc
+            tests: [not_null]
+          - name: event_name
+            tests: [not_null]
+      - name: users
+        columns:
+          - name: user_id
+            tests: [not_null, unique]
+          - name: created_at_utc
+            tests: [not_null]
+      - name: sessions
+        columns:
+          - name: session_id
+            tests: [unique]
+      - name: trades
+        columns:
+          - name: trade_id
+            tests: [unique]
+      - name: equity_snapshots_daily
+        columns:
+          - name: user_id
+            tests: [not_null]
+          - name: snapshot_date
+            tests: [not_null]
+
+models:
+
+  # --------------------
+  # STAGING
+  # --------------------
+  - name: stg_audit_event
+    description: "Normalized server-authoritative audit events; extracts key fields from payload_json."
+    columns:
+      - name: event_id
+        tests: [not_null, unique]
+      - name: event_ts_utc
+        tests: [not_null]
+      - name: user_id
+        description: "Nullable for pre-auth events."
+      - name: event_name
+        tests: [not_null]
+      - name: deny_code
+        description: "Nullable; extracted from payload for denial events."
+      - name: message_key
+        description: "Nullable; extracted for UI banner/modal events."
+
+  - name: stg_users
+    description: "Users with derived due dates (initial + reverify) when missing."
+    columns:
+      - name: user_id
+        tests: [not_null, unique]
+      - name: created_at_utc
+        tests: [not_null]
+      - name: email_initial_due_at_utc
+        tests: [not_null]
+
+  - name: stg_sessions
+    columns:
+      - name: session_id
+        tests: [unique]
+
+  - name: stg_trades
+    columns:
+      - name: trade_id
+        tests: [unique]
+      - name: user_id
+        tests:
+          - relationships:
+              to: ref('stg_users')
+              field: user_id
+
+  - name: stg_equity_snapshots_daily
+    columns:
+      - name: user_id
+        tests:
+          - relationships:
+              to: ref('stg_users')
+              field: user_id
+      - name: snapshot_date
+        tests: [not_null]
+
+  # --------------------
+  # DIMENSIONS
+  # --------------------
+  - name: dim_user
+    columns:
+      - name: user_key
+        tests: [not_null, unique]
+      - name: user_id
+        tests: [not_null, unique]
+
+  - name: dim_session
+    columns:
+      - name: session_key
+        tests: [not_null, unique]
+      - name: session_id
+        tests: [unique]
+
+  - name: dim_date
+    columns:
+      - name: date_key
+        tests: [not_null, unique]
+
+  - name: dim_message
+    description: "Seeded message catalog keyed by message_key."
+    columns:
+      - name: message_key
+        tests: [not_null, unique]
+      - name: message_family
+        tests:
+          - accepted_values:
+              values: ['BANNER','LOCK','MODAL','DENY']
+      - name: severity_default
+        tests:
+          - accepted_values:
+              values: ['INFO','WARNING','CRITICAL','NONE']
+
+  - name: dim_reason_code
+    description: "Seeded reason catalog keyed by reason_code."
+    columns:
+      - name: reason_code
+        tests: [not_null, unique]
+      - name: category
+        tests:
+          - accepted_values:
+              values: ['ADMIN','EMAIL','SMS','RATE_LIMIT','RISK','SECURITY','GENERAL']
+
+  - name: dim_channel
+    columns:
+      - name: channel
+        tests:
+          - accepted_values:
+              values: ['email','sms','in_app','push','unknown']
+
+  - name: dim_action_scope
+    columns:
+      - name: deny_scope
+        tests: [not_null, unique]
+
+  # --------------------
+  # FACTS
+  # --------------------
+  - name: fct_event
+    description: "Append-only fact table: one row per audit_event, enriched with surrogate keys."
+    columns:
+      - name: event_id
+        tests: [not_null, unique]
+      - name: user_key
+        tests:
+          - relationships:
+              to: ref('dim_user')
+              field: user_key
+      - name: session_key
+        tests:
+          - relationships:
+              to: ref('dim_session')
+              field: session_key
+              # allow null sessions
+              config:
+                where: "session_key is not null"
+      - name: date_key
+        tests:
+          - relationships:
+              to: ref('dim_date')
+              field: date_key
+      - name: message_key
+        tests:
+          - relationships:
+              to: ref('dim_message')
+              field: message_key
+              config:
+                where: "message_key is not null"
+      - name: reason_code
+        tests:
+          - relationships:
+              to: ref('dim_reason_code')
+              field: reason_code
+              config:
+                where: "reason_code is not null"
+
+  - name: fct_verification_cycle
+    description: "One row per user per verification cycle (INITIAL + REVERIFY)."
+    columns:
+      - name: cycle_id
+        tests: [not_null]
+      - name: user_key
+        tests:
+          - relationships:
+              to: ref('dim_user')
+              field: user_key
+      - name: cycle_type
+        tests:
+          - accepted_values:
+              values: ['INITIAL','REVERIFY']
+      - name: cycle_start_at
+        tests: [not_null]
+      - name: due_at
+        tests: [not_null]
+
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: ['user_key','cycle_id','cycle_type']
+
+  - name: fct_account_state_daily
+    description: "Daily snapshot per user: derived state + due/overdue counters + activity flags."
+    columns:
+      - name: user_key
+        tests:
+          - relationships:
+              to: ref('dim_user')
+              field: user_key
+      - name: date_key
+        tests:
+          - relationships:
+              to: ref('dim_date')
+              field: date_key
+      - name: account_state
+        tests:
+          - accepted_values:
+              values:
+                - 'ACTIVE_UNVERIFIED_GRACE'
+                - 'LOCKED_EMAIL_UNVERIFIED'
+                - 'ACTIVE_VERIFIED'
+                - 'LOCKED_EMAIL_REVERIFY_OVERDUE'
+                - 'SUSPENDED_ADMIN'
+
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: ['user_key','date_key']
+
+  - name: fct_contender_status
+    description: "One row per contender eligibility episode (false→true) and downstream SMS verification."
+    columns:
+      - name: episode_id
+        tests: [not_null]
+      - name: user_key
+        tests:
+          - relationships:
+              to: ref('dim_user')
+              field: user_key
+      - name: rule_matched
+        tests:
+          - accepted_values:
+              values: ['A','B']
+              config:
+                where: "rule_matched is not null"
+
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: ['user_key','episode_id']
+
+  - name: fct_action_denial
+    description: "Materialized subset of denial events for fast deny analytics."
+    columns:
+      - name: event_id
+        tests:
+          - relationships:
+              to: ref('fct_event')
+              field: event_id
+      - name: reason_code
+        tests:
+          - relationships:
+              to: ref('dim_reason_code')
+              field: reason_code
+      - name: deny_scope
+        tests:
+          - relationships:
+              to: ref('dim_action_scope')
+              field: deny_scope
+
+tests:
+  - name: test_cycle_integrity
+    description: "due_at >= cycle_start_at; completion/lock timestamps consistent."
+  - name: test_no_overlapping_cycles
+    description: "No overlapping cycles per user + cycle_type."
+  - name: test_state_validity
+    description: "Daily account_state aligns with derived due/overdue counters and verification flags."
+  - name: test_no_future_timestamps
+    description: "Events and completion timestamps not in the future beyond allowed clock skew."
+
+B) Seed file specs
+B1) seeds/dim_reason_code.csv (deny/lock/failure catalog)
+
+Purpose: single authoritative list of reason codes used across backend and analytics.
+Primary key: reason_code
+
+Columns
+
+reason_code (string, unique)
+
+category (ADMIN | EMAIL | SMS | RATE_LIMIT | RISK | SECURITY | GENERAL)
+
+severity (INFO | WARNING | CRITICAL)
+
+default_cta_type (VERIFY_EMAIL | REVERIFY_EMAIL | VERIFY_PHONE | CONTACT_SUPPORT | TRY_LATER | UPGRADE_ELIGIBILITY | NONE)
+
+default_message_key (links to dim_message.message_key)
+
+description (human readable)
+
+Sample rows (extend as needed)
+reason_code,category,severity,default_cta_type,default_message_key,description
+ADMIN_SUSPENDED,ADMIN,CRITICAL,CONTACT_SUPPORT,lock.admin_suspended,Account suspended by admin/compliance
+EMAIL_UNVERIFIED_GRACE_EXPIRED,EMAIL,CRITICAL,VERIFY_EMAIL,lock.email_unverified_grace_expired,Initial email verification grace expired; trading locked
+EMAIL_REVERIFY_OVERDUE,EMAIL,CRITICAL,REVERIFY_EMAIL,lock.email_reverify_overdue,Monthly re-verification overdue beyond grace; trading locked
+EMAIL_VERIFICATION_REQUIRED_FOR_ACTION,EMAIL,WARNING,VERIFY_EMAIL,deny.email_verification_required_for_action,Action requires verified email even within grace window
+VERIFY_TOKEN_INVALID,EMAIL,WARNING,RESEND_EMAIL,deny.verify_token_invalid,Verification token invalid
+VERIFY_TOKEN_EXPIRED,EMAIL,WARNING,RESEND_EMAIL,deny.verify_token_expired,Verification token expired
+VERIFY_RESEND_COOLDOWN,RATE_LIMIT,INFO,TRY_LATER,deny.verify_resend_cooldown,Resend cooldown active
+VERIFY_RESEND_DAILY_LIMIT_REACHED,RATE_LIMIT,WARNING,CONTACT_SUPPORT,deny.verify_resend_daily_limit,Daily resend limit reached
+SMS_REQUIRES_EMAIL_VERIFIED,SMS,WARNING,VERIFY_EMAIL,deny.sms_requires_email_verified,SMS verification requires email verified and not overdue
+SMS_NOT_ELIGIBLE_YET,SMS,INFO,UPGRADE_ELIGIBILITY,deny.sms_not_eligible_yet,User not yet eligible for contender SMS verification
+SMS_RATE_LIMITED,RATE_LIMIT,INFO,TRY_LATER,deny.sms_rate_limited,SMS OTP rate limited
+SMS_OTP_INVALID,SMS,INFO,TRY_AGAIN,deny.sms_otp_invalid,SMS OTP invalid
+SMS_OTP_EXPIRED,SMS,INFO,VERIFY_PHONE,deny.sms_otp_expired,SMS OTP expired; request new
+RISK_MAX_TOTAL_LOTS_EXCEEDED,RISK,CRITICAL,ADJUST_ORDER,deny.risk_max_total_lots_exceeded,Max total concurrent lots exceeded
+SECURITY_SUSPICIOUS_ACTIVITY,SECURITY,CRITICAL,CONTACT_SUPPORT,deny.security_suspicious_activity,Suspicious activity detected; restricted pending review
+
+
+Note: include your risk deny codes in this same seed so reporting stays unified.
+
+B2) seeds/dim_message.csv (UI messaging catalog)
+
+Purpose: keep message keys stable across releases; enables reporting and A/B changes while maintaining keys.
+Primary key: message_key
+
+Columns
+
+message_key (unique)
+
+message_family (BANNER | LOCK | MODAL | DENY)
+
+severity_default (NONE | INFO | WARNING | CRITICAL)
+
+primary_cta_type (same enumeration used above)
+
+secondary_cta_type (nullable)
+
+title_trader (string)
+
+body_trader (string)
+
+title_compliance (string)
+
+body_compliance (string)
+
+Sample rows
+message_key,message_family,severity_default,primary_cta_type,secondary_cta_type,title_trader,body_trader,title_compliance,body_compliance
+banner.initial_grace,BANNER,INFO,RESEND_EMAIL,,Verify your email to keep trading,"You can trade now. Please verify within {daysLeft} days (by {initialDueDate}) to avoid a trading lock.",Email verification required,"Continued trading requires a verified email address. Verify by {initialDueDate} to prevent account trading restrictions."
+lock.email_unverified_grace_expired,LOCK,CRITICAL,VERIFY_EMAIL,RESEND_EMAIL,Trading locked: email not verified,"Your 14-day window ended on {initialDueDate}. Verify your email to unlock trading. You can still close positions to reduce risk.",Trading restricted: email verification incomplete,"Email verification was required by {initialDueDate}. Trading is restricted until verification is completed."
+banner.reverify_due,BANNER,WARNING,REVERIFY_EMAIL,,Monthly email re-verification due soon,"Please re-verify by {reverifyDueDate} to keep trading uninterrupted.",Periodic re-verification required,"To maintain account integrity, re-verification is required by {reverifyDueDate}. Failure to comply may restrict trading."
+lock.email_reverify_overdue,LOCK,CRITICAL,REVERIFY_EMAIL,RESEND_EMAIL,Trading locked: re-verification overdue,"Re-verification was due on {reverifyDueDate} ({daysOverdue} days ago). Re-verify now to unlock trading. You can still close positions to reduce risk.",Trading restricted: re-verification overdue,"Re-verification was due on {reverifyDueDate}. Trading is restricted until re-verification is completed."
+deny.email_verification_required_for_action,DENY,WARNING,VERIFY_EMAIL,,Verify email to continue,"This action requires a verified email. Verify now to proceed.",Action requires verified email,"Verification is required before completing this action."
+deny.verify_token_invalid,DENY,WARNING,RESEND_EMAIL,,That link doesn’t work,"The verification link is invalid. Please request a new one.",Invalid verification token,"The token is invalid. Request a new verification email."
+deny.verify_token_expired,DENY,WARNING,RESEND_EMAIL,,Link expired,"That verification link expired. Send a new one to continue.",Verification token expired,"The token has expired. Request a new token."
+deny.verify_resend_cooldown,DENY,INFO,TRY_LATER,,Please wait a moment,"You can resend a verification email in {cooldownSeconds} seconds.",Resend rate limited,"Please wait {cooldownSeconds} seconds before retrying."
+deny.verify_resend_daily_limit,DENY,WARNING,CONTACT_SUPPORT,TRY_LATER,Too many requests today,"You’ve hit today’s resend limit. Try again tomorrow or contact support.",Daily limit reached,"Resend requests exceeded the daily limit. Contact support if needed."
+prompt.sms_contender_eligible,MODAL,INFO,VERIFY_PHONE,,You’re eligible for selection,"Verify your phone to proceed to the serious contender pipeline.",Additional verification required,"Phone verification is required to proceed to the selection process."
+deny.sms_requires_email_verified,DENY,WARNING,VERIFY_EMAIL,,Verify email first,"Phone verification is available after your email is verified and up to date.",Prerequisite verification required,"Email verification must be completed before phone verification."
+deny.sms_not_eligible_yet,DENY,INFO,UPGRADE_ELIGIBILITY,,Not eligible yet,"Keep trading and meeting the criteria. We’ll notify you when you qualify.",Eligibility criteria not met,"This step is available only after eligibility thresholds are met."
+deny.sms_rate_limited,DENY,INFO,TRY_LATER,,Too many attempts,"Please wait before requesting another code.",SMS verification rate limited,"Attempts exceeded the allowed limit. Retry later."
+deny.sms_otp_invalid,DENY,INFO,TRY_AGAIN,,Incorrect code,"That code isn’t correct. Try again.",Invalid OTP,"The one-time code is invalid. Retry."
+deny.sms_otp_expired,DENY,INFO,VERIFY_PHONE,,Code expired,"Request a new code to continue.",OTP expired,"The code has expired. Request a new OTP."
+lock.admin_suspended,LOCK,CRITICAL,CONTACT_SUPPORT,,Account restricted,"Your account has been temporarily restricted. Please contact {supportChannel}.",Account suspended,"This account is suspended pending review. Contact {supportChannel} for next steps."
+
+C) How these seeds stay aligned with backend
+
+To prevent drift:
+
+Backend must emit only deny_code values that exist in dim_reason_code.
+
+Backend (or UI) maps deny_code → default_message_key (from seed) so messaging is stable.
+
+Any new deny condition requires:
+
+add new reason_code row
+
+add message_key row (if new message)
+
+deploy backend change
+
+D) Minimal additional seed: dim_action_scope.csv (recommended)
+
+This lets you constrain deny_scope values and keep dashboards consistent.
+
+Columns:
+
+deny_scope (PK)
+
+description
+
+Example values:
+
+TRADE_OPEN
+
+ORDER_MODIFY
+
+ORDER_CANCEL
+
+WITHDRAW
+
+SMS_VERIFY_START
+
+EMAIL_VERIFY_RESEND
+
+If you want the next “DO,” I can provide the release governance checklist (what must be updated when you add/change a policy) and a migration playbook (how to introduce monthly re-verification without disrupting existing users, including backfilling due dates and phased enforcement).
+
+DO
+1) Release governance checklist
+
+Use this checklist any time you add/change a policy (verification, lockouts, contender gating, rate limits, etc.). The goal is “no silent drift” between backend, UI, analytics, and ops.
+
+A. Policy definition and change control
+
+Policy spec updated (single source of truth):
+
+thresholds, time windows, overdue grace, snooze rules
+
+precedence rules (admin > locked > due banners > contender prompts)
+
+reduce-only behavior when locked
+
+Reason codes catalog updated
+
+add/modify deny_code, lock_reason, failure_code
+
+confirm each has a remediation CTA
+
+Message catalog updated
+
+message_key entries exist for any new banner/lock/modal/deny
+
+titles/bodies for trader vs compliance tone
+
+Config knobs defined and defaulted
+
+EMAIL_INITIAL_GRACE_DAYS, EMAIL_REVERIFY_PERIOD_DAYS, EMAIL_REVERIFY_OVERDUE_GRACE_DAYS
+
+resend cooldowns and daily limits
+
+contender thresholds (Rule A/B)
+
+Feature flags declared
+
+ff_email_grace_enforcement
+
+ff_monthly_reverify_enforcement
+
+ff_sms_contender_gate
+
+ff_reduce_only_when_locked
+
+B. Engineering implementation readiness
+
+DB migration reviewed
+
+new columns are nullable by default
+
+sensible indexes (by user_id, due dates, state)
+
+backfill plan written (see Section 2)
+
+Runtime enforcement points identified
+
+trade-open, order-modify, withdraw/payout, contender/SMS-start endpoints
+
+UI uses the same decision object as backend (no duplicate logic)
+
+Eventing/Audit readiness
+
+emits ACCOUNT_STATE_CHANGED, ACCOUNT_LOCKED, ACCOUNT_UNLOCKED
+
+emits ACCOUNT_ACTION_DENIED with deny_code + deny_scope + snapshot fields
+
+emits verification send/confirm/fail events with cycle_type
+
+Rate limits and abuse controls
+
+resend cooldown and daily caps enforced server-side
+
+SMS OTP send/verify attempt limits defined and tested
+
+C. QA and validation gates
+
+Test plan includes “state matrix”
+
+new user day 1/day 13/day 15 unverified
+
+verified user due soon / overdue within grace / overdue beyond grace
+
+locked user reduce-only close permitted
+
+contender eligibility A/B true/false combinations
+
+Data tests pass
+
+no unknown deny_code values
+
+cycles are not overlapping
+
+state validity tests pass (due/overdue consistent)
+
+Canary validation
+
+internal accounts or staff cohort first
+
+measure verification completion, lockouts, resend rates, deny rates
+
+D. Operational readiness
+
+Support scripts prepared
+
+“Why am I locked?” templates (initial vs reverify)
+
+“I didn’t receive email” troubleshooting steps
+
+admin override path (suspend/unlock/resend)
+
+Admin dashboard fields present
+
+account_state, due dates, last verification time, lock reason
+
+resend actions (logged) and manual override (logged)
+
+Monitoring and alerts configured
+
+spikes in EMAIL_UNVERIFIED_GRACE_EXPIRED, EMAIL_REVERIFY_OVERDUE
+
+resend rate-limit spikes (deliverability or bots)
+
+SMS rate-limit spikes by country
+
+E. Rollout and rollback
+
+Rollout plan documented
+
+phased flags + cohorts + dates
+
+Rollback plan documented
+
+disable enforcement flags without schema rollback
+
+keep view-only banners active if enforcement is off
+
+Post-release review scheduled
+
+24h + 7d checkpoints with KPI pack
+
+2) Migration playbook for introducing monthly re-verification without disrupting existing users
+
+This assumes you already have users in the platform and want to introduce:
+
+“verify post-signup with 14-day trading grace”
+
+“monthly re-verification”
+
+“SMS only for contenders”
+
+Phase 0 — Inventory and policy decisions
+
+Before touching production, decide these two critical migration policies:
+
+P0.1 Existing unverified users: avoid immediate lock
+
+If there are accounts older than 14 days that never verified, your new rule would lock them instantly.
+
+Migration must create a fresh grace window for them.
+
+Recommended policy
+
+For any existing user with emailVerifiedAt = null, set:
+
+emailInitialDueAt = now + 14 days (not createdAt + 14)
+
+accountState = ACTIVE_UNVERIFIED_GRACE until that due date
+
+P0.2 Existing verified users: start reverify cycle gently
+
+If you don’t have a reliable “last verified” timestamp, do not retroactively declare them overdue.
+
+Start everyone with a fresh cycle.
+
+Recommended policy
+
+For any existing user with emailVerifiedAt != null, set:
+
+emailReverifyDueAt = now + 30 days (or staggered rollout by cohort)
+
+accountState = ACTIVE_VERIFIED
+
+This prevents a surprise lockout wave.
+
+Phase 1 — Schema and non-enforcing logic (dark launch)
+
+Goal: ship the plumbing without restricting users.
+
+Add columns (nullable) and seeds:
+
+emailInitialDueAt, emailReverifyDueAt, accountState, lockReason, reminder counters
+
+deny/message seeds in analytics
+
+Deploy decision engine but set enforcement flags OFF:
+
+UI can display banners, but no trade endpoint blocks yet
+
+Emit events (audit + analytics) for visibility:
+
+ACCOUNT_STATE_CHANGED (computed), banner impressions, resend clicks
+
+Validate deliverability
+
+SES domain setup, SPF/DKIM/DMARC in place
+
+monitor bounce/complaint if available
+
+Exit criteria
+
+events are flowing
+
+banners render correctly
+
+resend limits work
+
+no unexpected deny spikes (since enforcement is off)
+
+Phase 2 — Backfill and due-date initialization
+
+Goal: populate due dates/states for all existing users safely.
+
+Backfill rules (recommended):
+
+2.1 For users with no emailVerifiedAt
+
+Set emailInitialDueAt = now + 14 days
+
+Set accountState = ACTIVE_UNVERIFIED_GRACE
+
+Optionally send a one-time “verify within 14 days to keep trading” email
+
+2.2 For users with emailVerifiedAt present
+
+Set emailReverifyDueAt = now + 30 days
+
+Set accountState = ACTIVE_VERIFIED
+
+2.3 For users in weird/unknown states
+
+If data is inconsistent (e.g., verifiedAt exists but due missing), repair:
+
+compute reverifyDueAt = now + 30 (migration-safe)
+
+If admin suspended, preserve SUSPENDED_ADMIN
+
+Staggering option (recommended at scale)
+
+To avoid everyone re-verifying on the same day, randomize due dates:
+
+set emailReverifyDueAt = now + 30 days + jitter(0–14 days)
+This spreads load and support tickets.
+
+Exit criteria
+
+100% of users have the right due date field populated for their cohort
+
+no users are accidentally “overdue” at migration time
+
+Phase 3 — Enforce initial email verification (new users first)
+
+Goal: begin restrictions for the lowest-risk segment.
+
+Turn ON ff_email_grace_enforcement for new signups only
+
+lock at due date if unverified
+
+reduce-only closing allowed
+
+Keep existing users still in banner-only mode for 1–2 weeks (optional)
+
+Monitor:
+
+verify completion rate within 14d
+
+lockout rate
+
+resend and rate-limit volume
+
+support ticket volume
+
+Exit criteria
+
+stable KPIs and support load
+
+no deliverability red flags
+
+Phase 4 — Enforce initial email verification for existing unverified users
+
+Goal: finish the initial verification rollout without shock.
+
+Turn ON enforcement for the backfilled unverified cohort
+
+Your “two-week from migration” due date will start triggering lockouts
+
+Monitor:
+
+how many unlock after lock
+
+time-to-verify
+
+deny_code spikes
+
+Operational safeguard
+
+If lockouts spike unexpectedly, increase grace window temporarily (config only) rather than disabling the whole feature.
+
+Phase 5 — Introduce monthly re-verification (soft → hard)
+
+Goal: avoid surprise lockouts.
+
+5.1 Soft launch
+
+Turn ON ff_monthly_reverify_enforcement in banner-only mode
+
+show due soon banners
+
+send reminder emails
+
+do not lock yet
+
+Run for at least one cycle window (e.g., 2–4 weeks) to establish baseline.
+
+5.2 Hard enforcement
+
+Turn ON locking beyond overdue grace (e.g., 3 days)
+
+Keep reduce-only close allowed
+
+Use staggered due dates to avoid synchronized lockouts
+
+Exit criteria
+
+reverify compliance rate acceptable
+
+overdue lock rate acceptable
+
+minimal churn impact on active traders
+
+Phase 6 — Enable SMS contender gating (tight scope)
+
+Goal: keep SMS spend low and signal high.
+
+Turn ON ff_sms_contender_gate
+
+Enforce prerequisites:
+
+must be ACTIVE_VERIFIED and not overdue
+
+meet Rule A or Rule B
+
+Trigger SMS prompts only:
+
+once per session
+
+not more than once per 7 days if dismissed
+
+Monitor:
+
+eligibility rate (A/B mix)
+
+SMS completion rate by country
+
+OTP failures/rate limiting
+
+3) Rollback playbook (no downtime, no schema rollback)
+
+If you see unacceptable breakage:
+
+Immediate (minutes)
+
+Disable enforcement flags:
+
+trading endpoints stop blocking due to verification
+
+keep banners on (optional) for transparency
+
+Short-term (hours)
+
+Adjust due dates forward to relieve load:
+
+push emailInitialDueAt out by +7 days for impacted segment
+
+push emailReverifyDueAt out by +14 days for everyone (if needed)
+
+Increase overdue grace temporarily
+
+Root-cause actions (days)
+
+Deliverability fixes (SPF/DKIM/DMARC, template changes)
+
+Rate-limit tuning (cooldowns, caps)
+
+UI clarity improvements (copy, CTA prominence)
+
+4) Communication plan (reduces support load dramatically)
+
+In-app banners are your primary channel.
+
+Add a single “policy explainer” link:
+
+“Why do we re-verify monthly?” (integrity + serious trader selection)
+
+For reverify: send reminders with exact due date, and remind that trading is uninterrupted if they comply.
+
+If you want another “DO,” specify whether you want monthly re-verification to be rolling 30 days (recommended) or calendar-month based; I will then produce the precise due-date computation and the “jitter” strategy tuned to your expected user growth.
+
+ROLLING 30 DAYS
+
+Understood. Here is the rolling 30-day spec with precise due-date computation, cycle rules, jitter strategy, and enforcement timing so implementation is deterministic and scalable.
+
+1) Rolling 30-day re-verification rule (canonical)
+Key timestamps
+
+emailVerifiedAt: the last time the email was successfully verified (initial or reverify).
+
+emailReverifyDueAt: next due date for re-verification.
+
+Due date computation
+
+Whenever a user completes a verification that should start/renew the cycle:
+
+Set
+
+emailVerifiedAt = now
+
+emailReverifyDueAt = now + 30 days
+
+This applies to:
+
+initial email verification success
+
+monthly re-verification success
+
+(optional) email address change verification success
+
+Overdue enforcement cutoff
+
+reverifyOverdueCutoff = emailReverifyDueAt + EMAIL_REVERIFY_OVERDUE_GRACE_DAYS
+
+Lock when now > reverifyOverdueCutoff
+
+Recommended default:
+
+EMAIL_REVERIFY_OVERDUE_GRACE_DAYS = 3
+
+2) What happens if user re-verifies early
+
+If user re-verifies before the due date:
+
+Reset the cycle from the moment they re-verify
+
+new emailReverifyDueAt = now + 30 days
+
+This is the simplest and most user-comprehensible behavior:
+
+it rewards early compliance
+
+it prevents “calendar arithmetic” confusion
+
+it avoids tricky partial-rollover logic
+
+3) Reminder windows (rolling, exact schedule)
+
+Let t_due = emailReverifyDueAt.
+
+Send reminders (subject to resend caps) at these offsets from t_due:
+
+t_due - 7 days
+
+t_due - 3 days
+
+t_due - 1 day
+
+t_due (same day)
+
+t_due + 2 days (still within grace; final warning)
+
+Banner window:
+
+show banner.reverify_due whenever t_due - now <= 7 days OR now > t_due but not yet locked.
+
+Escalation:
+
+WARNING when due in 7–3 days
+
+CRITICAL when due in 2–0 days
+
+CRITICAL overdue when 0 < now - t_due <= grace
+
+Lock screen:
+
+show lock.email_reverify_overdue when now > t_due + grace
+
+4) Data model fields (minimum)
+
+Per user:
+
+emailVerifiedAt (timestamp, nullable)
+
+emailReverifyDueAt (timestamp, nullable)
+
+accountState (derived or stored)
+
+reminder control fields (optional but recommended):
+
+reverifyReminderStage (enum/int: NONE, D7, D3, D1, D0, P2)
+
+reverifyLastReminderSentAt
+
+reverifyNextReminderAt
+
+reverifyReminderSendsToday (for per-day cap)
+
+5) Jitter strategy (to avoid synchronized load)
+
+Rolling 30 days naturally spreads load over time, but migration and major campaigns can still align many users.
+
+When jitter is used
+
+Use jitter only when initializing due dates in bulk (migration/backfill), not on normal verify cycles.
+
+Jitter target
+
+Spread due dates across a window so daily reminder and lock volumes are smooth.
+
+Recommended:
+
+jitterDays = uniform integer in [0, 14]
+
+Set initial reverify due:
+
+emailReverifyDueAt = now + 30 days + jitterDays
+
+This creates a 15-day spread.
+
+Why 0–14 days is a good default
+
+wide enough to flatten operational load
+
+narrow enough that “monthly” still feels like monthly
+
+minimizes support confusion (users are not asked at wildly different cadences)
+
+Optional stratified jitter (more controlled)
+
+Instead of uniform random, you can allocate users evenly per day bucket:
+
+bucket = hash(userId) mod 15
+
+jitterDays = bucket
+
+This yields deterministic, evenly distributed due dates and prevents randomness-based clustering.
+
+6) Migration initialization (rolling 30-day)
+
+For existing verified users during rollout:
+
+If they have emailVerifiedAt reliably:
+
+Set emailReverifyDueAt = emailVerifiedAt + 30 days
+
+But to prevent immediate overdue lockouts, enforce this guard:
+
+if computed due is in the past: set to now + 30 + jitterDays
+
+If they do not have reliable emailVerifiedAt:
+
+Set emailVerifiedAt = now (or leave as-is)
+
+Set emailReverifyDueAt = now + 30 + jitterDays
+
+For existing unverified users:
+
+do not start reverify cycle
+
+start initial verify grace using emailInitialDueAt = now + 14 days (migration-safe)
+
+7) Runtime enforcement rules (single decision function)
+
+When any privileged action occurs (trade open/modify/withdraw/SMS-start):
+
+If admin suspended → deny.
+
+If email not verified:
+
+if now < initialDue → allow trading (grace)
+
+else lock.
+
+If email verified:
+
+if now <= reverifyDue + grace → allow
+
+else lock (reverify overdue)
+
+This ensures “rolling 30 days” is enforced consistently without depending on scheduled jobs.
+
+8) Cycle analytics implications (clean funnels)
+
+With rolling cycles, your fct_verification_cycle is simple:
+
+Cycle starts at each emailVerifiedAt
+
+Cycle due is cycle_start_at + 30 days
+
+Completion is next EMAIL_VERIFICATION_CONFIRMED(type=REVERIFY) after cycle start (or simply the verify event that resets it)
+
+Lock is first ACCOUNT_LOCKED(EMAIL_REVERIFY_OVERDUE) after due+grace
+
+Recommendation for robustness:
+
+emit REVERIFY_CYCLE_STARTED event whenever you set a new emailReverifyDueAt.
+
+makes cycle table exact and avoids inference.
+
+9) User-facing clarity (reduce support load)
+
+With rolling cycles:
+
+Always show “Next re-verification due on {date}”
+
+If user re-verifies early, immediately update to “Next due on {newDate}”
+
+Do not reference “calendar month,” only “every 30 days.”
+
+If you want to proceed, the next best deliverable is a single policy configuration block (all knobs in one place, including jitter mode: random vs hash-bucket) and a migration runbook with exact steps for backfilling emailReverifyDueAt safely under rolling cycles.
+
+PROCEED
+Thought for 6s
+
+Below are the two deliverables to proceed with a rolling 30-day re-verification model:
+
+a single policy configuration block (all knobs in one place), and
+
+a production-safe migration runbook (exact steps to backfill emailReverifyDueAt and roll out enforcement without disrupting existing users).
+
+1) Policy configuration block (rolling 30 days)
+
+Use this as the single “source of truth” for backend enforcement, UI messaging, jobs, and analytics. Format is YAML-style for readability (you can store as JSON/config table).
+
+policy:
+  timezone_display: "America/Chicago"      # display only; backend enforcement uses UTC timestamps
+  time_source: "server_utc"               # authoritative clock
+
+email_verification:
+  initial:
+    grace_days: 14
+    enforcement:
+      enabled: true                        # gate trading actions when grace expires
+    reminders:
+      schedule_days_after_signup: [0, 7, 12, 13]   # send at these day marks if still unverified
+      banner:
+        enabled: true
+        always_show_during_grace: true
+        severity:
+          info_if_days_left_gte: 8
+          warning_if_days_left_between: [3, 7]
+          critical_if_days_left_lte: 2
+
+  reverify:
+    cadence_days: 30                       # rolling cycle: dueAt = verifiedAt + 30d
+    overdue_grace_days: 3                  # lock when now > dueAt + grace
+    enforcement:
+      enabled: true
+    reminders:
+      schedule_days_before_due: [7, 3, 1, 0]       # due-day included
+      schedule_days_after_due_within_grace: [2]    # final warning while still not locked
+      banner:
+        enabled: true
+        show_if_days_to_due_lte: 7
+        show_if_overdue_and_not_locked: true
+        severity:
+          warning_if_days_to_due_between: [3, 7]
+          critical_if_days_to_due_lte: 2
+          critical_if_overdue: true
+
+rate_limits:
+  email_resend:
+    cooldown_seconds: 60
+    max_sends_per_user_per_day: 5
+    max_sends_per_ip_per_day: 50           # tune based on your traffic; prevents abuse
+  sms_otp:
+    max_sends_per_user_per_day: 5
+    cooldown_seconds: 60
+    max_verify_attempts_per_otp: 5
+    lockout_minutes_after_too_many_attempts: 30
+
+permissions:
+  when_locked_email:
+    trade_open: false
+    order_modify: false
+    pending_cancel: false
+    withdraw: false
+    close_reduce_only: true                # recommended default
+  when_unverified_in_grace:
+    trade_open: true
+    order_modify: true
+    withdraw: false                        # recommended: sensitive actions require verified email
+
+contender_sms_gate:
+  enabled: true
+  prerequisites:
+    require_account_state: "ACTIVE_VERIFIED"
+    require_not_overdue_reverify: true
+    require_recent_activity: true
+    recent_activity_days: 14
+  rule_A:                                  # 1+ month track record
+    min_account_age_days: 30
+    min_balance_pct_of_start: 1.20
+    min_lifetime_positions: 30
+  rule_B:                                  # 3+ months rolling evaluation (last 90 days)
+    min_account_age_days: 90
+    min_return_last90: 0.10
+    min_positions_last90: 20
+  prompt_controls:
+    modal_once_per_session: true
+    modal_cooldown_days_after_dismiss: 7
+    persistent_account_card_until_sms_verified: true
+
+jitter:
+  # Used ONLY for migration/backfill initialization (not for normal verify cycles).
+  enabled_for_migration: true
+  mode: "hash_bucket"                      # "hash_bucket" recommended over random for even distribution
+  bucket_count: 15                         # yields jitterDays in [0..14]
+  apply_to:
+    reverify_due_initialization: true
+  rule:
+    reverify_due_at = now_utc + 30d + jitterDays
+
+feature_flags:
+  ff_email_initial_enforcement: true
+  ff_email_reverify_enforcement: true
+  ff_sms_contender_gate: true
+  ff_reduce_only_when_locked: true
+
+analytics:
+  emit_state_snapshot_in_each_event: true
+  emit_cycle_started_events:
+    initial: true                          # INITIAL_VERIFY_CYCLE_STARTED
+    reverify: true                         # REVERIFY_CYCLE_STARTED
+
+
+Key decisions embedded above:
+
+Rolling cadence: emailReverifyDueAt = now + 30 days whenever re-verified (early resets the cycle).
+
+Migration jitter: deterministic hash_bucket to spread load and avoid synchronized due dates.
+
+Reduce-only allowed while locked: avoids trapping users in risk.
+
+2) Migration runbook (rolling 30 days + jitter)
+
+This is written to be safe, idempotent, and reversible via feature flags—no downtime required.
+
+Phase 0 — Pre-migration checks (no data changes)
+
+Confirm you have:
+
+authoritative server-side events (or can add them now)
+
+reliable createdAt for all users
+
+some notion of emailVerifiedAt (nullable is fine)
+
+Confirm email sending is operational (SES or equivalent) and domain auth is live (SPF/DKIM/DMARC).
+
+Decide the enforcement posture for withdrawals:
+
+recommended: require verified email (even within initial grace)
+
+Go/No-Go criteria
+
+event pipeline is healthy
+
+reminder rate limits are configured
+
+admin dashboard can view: state, due dates, last verify
+
+Phase 1 — Schema deployment (backwards compatible)
+
+Add (nullable) columns if missing:
+
+emailInitialDueAt
+
+emailReverifyDueAt
+
+emailVerifiedAt (if not already present)
+
+accountState (optional stored snapshot; can be derived)
+
+reminder counters (optional)
+
+Add indexes:
+
+(emailInitialDueAt) and (emailReverifyDueAt) for reminder jobs and reporting
+
+(user_id) obviously
+
+Deploy seeds:
+
+dim_reason_code, dim_message, dim_action_scope
+
+Do not enable enforcement yet unless you are only enforcing for new signups.
+
+Phase 2 — “Dark launch” decision engine (no lockouts)
+
+Deploy the policy decision function used by:
+
+trade open
+
+order modify/cancel
+
+withdraw
+
+SMS start
+
+Set feature flags:
+
+ff_email_initial_enforcement = false
+
+ff_email_reverify_enforcement = false
+
+banners/reminders may be on (optional)
+
+Validate
+
+The UI shows correct banners for a test cohort without blocking actions.
+
+The backend returns deterministic deny_code for test denies (but you’re not enforcing yet).
+
+Phase 3 — Backfill due dates safely (core migration step)
+
+This is the most important phase. The objective is:
+
+nobody becomes immediately overdue/locked due to migration
+
+reverify due dates are staggered via jitter
+
+3.1 Define deterministic jitter (hash-bucket)
+
+bucket = hash(user_id) mod 15
+
+jitterDays = bucket (0–14)
+
+This guarantees even distribution and repeatability.
+
+3.2 Backfill rules (idempotent)
+
+Backfill in batches (e.g., 10k users per job run) to avoid DB spikes.
+
+A) Existing users with emailVerifiedAt IS NULL
+
+Set:
+
+emailInitialDueAt = now_utc + 14 days if null
+
+Do not set emailReverifyDueAt.
+
+Optional: mark computed state as ACTIVE_UNVERIFIED_GRACE.
+
+B) Existing users with emailVerifiedAt IS NOT NULL
+
+Set:
+
+emailReverifyDueAt = now_utc + 30 days + jitterDays if null
+
+Do not modify emailVerifiedAt.
+
+C) Guard against “past due”
+If you already have emailReverifyDueAt populated but it is in the past:
+
+set emailReverifyDueAt = now_utc + 30 days + jitterDays (migration-safe)
+
+do not lock during migration; you’re resetting the schedule intentionally
+
+D) Admin suspended
+
+Preserve admin suspend state; do not alter due dates unless you explicitly want to.
+
+3.3 Emit cycle-start events (recommended)
+
+As part of the backfill job, emit:
+
+INITIAL_VERIFY_CYCLE_STARTED for unverified users (due = now+14)
+
+REVERIFY_CYCLE_STARTED for verified users (due = now+30+jitter)
+
+This makes downstream analytics exact and reduces future inference errors.
+
+Validation queries (conceptual)
+
+0 users have emailInitialDueAt null
+
+all verified users have emailReverifyDueAt non-null and > now
+
+distribution of emailReverifyDueAt across the next 45 days is smooth (no spikes)
+
+Phase 4 — Enforce initial email verification (new users first)
+
+Turn ON:
+
+ff_email_initial_enforcement = true for new signups only
+
+Keep existing users still non-enforcing for ~1–2 weeks (optional safeguard).
+
+Monitor:
+
+verify within 14 days rate
+
+lockout rate
+
+resend volume and rate-limit events
+
+Go criteria
+
+deliverability stable
+
+support load manageable
+
+Phase 5 — Enforce initial email verification for existing unverified users
+
+At this point, existing unverified users have a fresh 14-day window from backfill time.
+
+Turn ON:
+
+ff_email_initial_enforcement = true for everyone
+
+Monitor lockouts; ensure reduce-only close works.
+
+Phase 6 — Reverify rollout (soft → hard)
+6.1 Soft mode (recommended 2–4 weeks)
+
+ff_email_reverify_enforcement = false
+
+Enable banners + reminder emails only.
+
+6.2 Hard mode
+
+Turn ON ff_email_reverify_enforcement = true
+
+Lock only when now > due + 3 days
+
+Keep reduce-only close allowed
+
+Because you jittered due dates, reverify load will be naturally spread.
+
+Phase 7 — SMS contender gating
+
+Enable:
+
+ff_sms_contender_gate = true
+Enforce:
+
+only ACTIVE_VERIFIED and not overdue
+
+Rule A / Rule B thresholds
+
+prompt frequency controls (once per session, 7-day cooldown after dismiss)
+
+Rollback plan (no schema rollback required)
+
+If anything goes wrong:
+
+Disable enforcement flags immediately:
+
+ff_email_initial_enforcement = false
+
+ff_email_reverify_enforcement = false
+
+Keep banners on (optional) to reduce confusion, or disable if misleading.
+
+If you need to relieve pressure:
+
+push due dates forward (configurable job) by +7 to +14 days.
+
+Implementation note for rolling 30 days
+
+After migration, do not apply jitter on ongoing cycles. From that point forward:
+
+whenever the user verifies (initial or reverify): emailReverifyDueAt = now + 30 days
+
+That keeps the model clean and predictable.
+
+If you confirm you want hash-bucket jitter (recommended) versus random jitter, I can provide the exact “bucketization” decision (hash function choice, mod value, and how to keep it stable across languages) so your backend, ETL, and any scripts compute the same jitter deterministically.
+
+RECOMMENDED
+
+Proceeding with the recommended approach: deterministic hash-bucket jitter. Below is an implementation-grade spec that keeps the jitter stable across languages and systems, plus operational notes so your backend, migration scripts, and analytics all compute the same value.
+
+1) Deterministic jitter spec (hash-bucket)
+Goal
+
+When initializing emailReverifyDueAt in bulk (migration/backfill), distribute due dates evenly across 15 buckets (0–14 days) in a way that is:
+
+deterministic (same user always maps to same bucket)
+
+uniform enough (no clustering)
+
+stable across platforms (Node/TS, Python, SQL)
+
+Canonical definition
+
+bucket_count = 15
+
+jitterDays = hash_to_uint32("reverify-v1|" + user_id) mod bucket_count
+
+emailReverifyDueAt = now_utc + 30 days + jitterDays
+
+Important: include the "reverify-v1|" prefix (“salt”) so the mapping remains stable even if you later reuse hashing elsewhere.
+
+2) Hash function choice (recommended): CRC32 (fast, ubiquitous)
+Why CRC32
+
+widely available in Node, Python, and many SQL engines
+
+simple and fast for bulk updates
+
+deterministic across languages when implemented correctly on bytes
+
+Canonical CRC32 procedure
+
+Build the input string exactly:
+
+s = "reverify-v1|" + user_id
+
+Encode as UTF-8 bytes.
+
+Compute CRC32 on bytes.
+
+Convert to unsigned 32-bit integer.
+
+jitterDays = crc32_uint32 % 15
+
+3) Cross-language compatibility rules (non-negotiable)
+
+To prevent drift:
+
+User ID must be canonicalized
+
+Use the exact stored user_id string, no trimming, no casing changes.
+
+If user_id is numeric in some systems, cast to string without locale formatting.
+
+Prefix must match exactly
+
+"reverify-v1|" (same casing, same delimiter).
+
+Encoding must be UTF-8
+
+Unsigned handling
+
+Some languages return signed ints; force to uint32 before modulo.
+
+4) Reference implementations (short and exact)
+4.1 Node/TypeScript (recommended for your stack)
+
+Use a CRC32 library (many exist). The key is to treat it as unsigned.
+
+Logic (conceptual, not tied to a specific package):
+
+crc = crc32(Buffer.from("reverify-v1|" + userId, "utf8"))
+
+u32 = crc >>> 0
+
+jitterDays = u32 % 15
+
+4.2 Python
+
+Python’s zlib.crc32 is standard.
+
+u32 = zlib.crc32(data) & 0xffffffff
+
+jitterDays = u32 % 15
+
+4.3 SQL (options)
+
+SQL support varies; three patterns:
+
+Option A: Database has CRC32 built-in (ideal)
+
+jitterDays = CRC32(CONCAT('reverify-v1|', user_id)) % 15
+
+Option B: Database supports MD5 but not CRC32
+Use MD5 and take a subset of hex as int (stable but slightly more work):
+
+hashHex = MD5('reverify-v1|' || user_id)
+
+u32 = hex_to_int(substr(hashHex, 1, 8))
+
+jitterDays = u32 % 15
+
+This is stable across most warehouses. If you want this route, I will tailor it to your exact DB.
+
+5) Migration/backfill application rules (exact)
+5.1 When to apply jitter
+
+Apply jitter ONLY when initializing due dates during migration/backfill:
+
+for verified users with emailReverifyDueAt IS NULL OR emailReverifyDueAt < now
+
+Do NOT apply jitter on normal cycles after verification.
+
+5.2 Backfill algorithm (verified users)
+
+For each verified user:
+
+jitterDays = hash_to_uint32("reverify-v1|" + user_id) % 15
+
+emailReverifyDueAt = now_utc + 30 days + jitterDays
+
+5.3 Backfill algorithm (unverified users)
+
+Do not set emailReverifyDueAt. Only set:
+
+emailInitialDueAt = now_utc + 14 days
+
+6) Validation: distribution and sanity checks
+6.1 Bucket distribution check (expected)
+
+If you have N users, each bucket should have ~N/15 users.
+
+Flag if any bucket deviates by >15–20% from expected (early sign of non-canonical user_id input or a bad hash implementation).
+
+6.2 Due date horizon check
+
+After backfill, for verified users:
+
+Minimum due date ≈ now + 30 days
+
+Maximum due date ≈ now + 44 days
+
+6.3 Drift check across systems
+
+Pick a sample of 20 user IDs and compute jitterDays in:
+
+backend (Node/TS)
+
+analytics pipeline (Python/dbt)
+They must match exactly.
+
+7) Future-proofing: versioning the salt
+
+You used "reverify-v1|". If you ever want to change bucket count or hashing:
+
+create "reverify-v2|" and migrate explicitly
+
+never silently change v1 behavior, or existing users’ due dates will shift unexpectedly
+
+8) Operational note: “now_utc” consistency
+
+For migration, “now_utc” should be the job start timestamp, not per-row evaluation, to keep reporting tidy (and avoid micro-differences across batches). Use:
+
+job_started_at_utc as the reference.
+
+If you tell me your database engine (Postgres, MySQL, etc.) and whether the migration will be executed via Node script or pure SQL, I will provide the exact SQL or script-level pseudocode that implements this CRC32 bucketing with correct unsigned behavior.

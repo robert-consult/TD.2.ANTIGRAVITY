@@ -1,0 +1,202 @@
+Understood. You confirmed **YES/YES** and additionally you want **all adjustments to be controllable from the backend via the Trade Settings tab**, with enforcement across **OPEN + PENDING**. I began implementing this wiring in your actual repo (unpacked from `TradingCentral-3AL(1).zip`) and here is what is **already in place**, what is **verified**, and what is **still incomplete** so we can finish cleanly inline.
+
+---
+
+# What I Verified in Your Codebase (Key Findings)
+
+## 1) Trade Settings UI (AdminDashboard)
+
+In `client/src/pages/AdminDashboard.tsx`:
+
+* Only “Default Risk Parameters” were wired to `/api/admin/global-settings`.
+* “Market Hours”, “Trade Auto-Close Settings”, and “Loss Limit Controls” were **UI-only placeholders** (`defaultValue` / `defaultChecked`) and **did not affect backend or engine**.
+
+## 2) Backend Risk & Engine Logic Was Not Fully Controlled by Admin Settings
+
+### `server/risk.ts`
+
+Hardcoded values:
+
+* 5 max trades per user (OPEN only)
+* 3 max trades per instrument (OPEN only)
+* 10% daily loss, 20% lifetime loss (hardcoded)
+
+### `server/routes.ts` (trade creation)
+
+* Already had a **max concurrent lots** check that sums **OPEN + PENDING**, but it used **user_settings.maxConcurrentLots** only, not global settings.
+* Margin/leverage uses `users.leverage` (wrong source compared to admin settings).
+
+### `server/engine/orderEngine.ts`
+
+* Uses **users.leverage** (ignores user_settings and global settings default leverage)
+* Checks max concurrent trades using OPEN only
+* Per-instrument cap hardcoded = 3 (OPEN only)
+* Lots cap is OPEN only at fill-time (not OPEN+PENDING)
+
+### `server/cron/autoClose.ts`
+
+Hardcoded:
+
+* 4 days
+* every 60 minutes
+* always enabled
+
+---
+
+# What I Implemented Already (Confirmed Changes in Repo)
+
+## A) Schema Enhancements: Global Settings Supports Entire Trade Settings Tab
+
+✅ `shared/schema.ts` now includes in `global_settings`:
+
+**Market Hours**
+
+* `marketOpenTime` (text, default “09:00”)
+* `marketCloseTime` (text, default “17:00”)
+* `allowWeekendTrading` (boolean)
+
+**Auto Close**
+
+* `enableAutoClose`
+* `autoCloseAfterDays`
+* `autoCloseCheckFrequencyMinutes`
+
+**Loss Limits**
+
+* `enableLossLimits`
+* `dailyLossLimitPct`
+* `lifetimeLossLimitPct`
+
+✅ Also added `users.isDisabled` boolean for lifetime-loss disable enforcement.
+
+## B) Runtime DB Migration Support
+
+✅ `server/db/ensureSchema.ts` now:
+
+* Ensures `global_settings` table includes all new columns (create + alter backfill)
+* Adds new export `ensureUsersColumns()` which ensures users table has `is_disabled`
+
+✅ `server/index.ts` updated to call `ensureUsersColumns()` on boot (so DB auto-migrates).
+
+That means: **Admin Trade Settings values can be persisted safely without breaking existing DBs**.
+
+---
+
+# What Is Still Incomplete (Not Yet Delivered Inline)
+
+The remaining work is exactly what you asked for: **tie UI → backend → trading/risk engine**, OPEN+PENDING enforcement, and backend adjustability.
+
+### 1) Platform Trading Hours Helper (INCOMPLETE)
+
+I started creating a new helper module:
+
+* `server/services/platformTradingHours.ts`
+
+…but it did not finish writing correctly (tool time cut off mid-write).
+This file must implement:
+
+* Parse HH:MM
+* Determine whether platform trading is open (UTC interpretation)
+* Weekend allowance logic
+* Overnight windows (open > close)
+
+This is required so:
+
+* `/api/trades` blocks new orders outside admin-set trading hours
+* `orderEngine.ts` defers fills outside hours
+* (Optional) auto close can still close even outside platform hours (risk-reduction)
+
+### 2) Admin Routes Must Return/Save All Trade Settings (NOT YET UPDATED)
+
+`server/routes/admin.ts` currently GET/PUT only the original 5 fields.
+It must be extended to include all new schema fields (market hours, auto-close, loss limits).
+
+### 3) AdminDashboard UI Must Bind All Inputs to Saved Global Settings (NOT YET UPDATED)
+
+`client/src/pages/AdminDashboard.tsx` needs:
+
+* Market Hours inputs bound to global_settings
+* Auto-close controls bound to global_settings
+* Loss limit controls bound to global_settings
+* The existing “Save Changes” button should submit **all** values (no UI change)
+
+### 4) Risk Middleware Must Enforce Settings Dynamically (NOT YET UPDATED)
+
+`server/risk.ts` must be rewritten to:
+
+* Load global settings (and optional user settings overrides)
+* Enforce:
+
+  * maxTradesPerUser (OPEN + PENDING)
+  * maxTradesPerInstrument (OPEN + PENDING)
+  * maxConcurrentLots (OPEN + PENDING lots)
+  * loss limits only if enabled
+  * lifetime loss disables account via `users.isDisabled`
+  * platform market hours for *new exposure* only (trade placement)
+
+### 5) Trade Placement Must Use Effective Leverage + Global Defaults (NOT YET UPDATED)
+
+`server/routes.ts` must:
+
+* Use leverage = user_settings.leverage → else global_settings.defaultLeverage
+* Use maxConcurrentLots = user_settings.maxConcurrentLots → else global_settings.maxConcurrentLots
+* Enforce maxPositionSize from global settings
+
+### 6) Order Engine Must Enforce Guardrails at Fill-Time (NOT YET UPDATED)
+
+`server/engine/orderEngine.ts` must:
+
+* Respect platform trading hours before filling pending orders
+* Use effective leverage
+* Enforce OPEN+PENDING caps in a way that cannot be bypassed if admin changes settings mid-stream
+  (cancel pending orders if they violate new caps)
+
+### 7) AutoClose Must Use Admin Settings (NOT YET UPDATED)
+
+`server/cron/autoClose.ts` must:
+
+* Respect enableAutoClose
+* Use autoCloseAfterDays
+* Use autoCloseCheckFrequencyMinutes via a dynamic scheduler (setTimeout recursion)
+
+### 8) recalcAccount Must Use Effective Leverage (NOT YET UPDATED)
+
+`server/recalcAccount.ts` currently uses `users.leverage`, which is not controlled by Trade Settings tab.
+It must use effective leverage.
+
+---
+
+# What You Will Get Next (All Inline Code)
+
+In the next response, I will provide **all code inline**, file-by-file, as copy/paste blocks (no patch download required):
+
+1. `server/services/platformTradingHours.ts` (complete)
+2. `server/routes/admin.ts` (expanded GET/PUT)
+3. `client/src/pages/AdminDashboard.tsx` (bind all inputs + save)
+4. `server/risk.ts` (OPEN+PENDING enforcement + lots cap + loss limits + trading hours)
+5. `server/routes.ts` (effective leverage + global defaults + position size guardrail)
+6. `server/engine/orderEngine.ts` (fill-time enforcement + platform hours)
+7. `server/cron/autoClose.ts` (admin-controlled scheduler)
+8. `server/recalcAccount.ts` (effective leverage)
+
+---
+
+# One Note About “Backend Control for Adjustments”
+
+You said: “YES/YES BUT WITH CONTROL FROM BACKEND FOR ADJUSTMENTS.”
+
+That is exactly how this will work:
+
+* Admin adjusts Trade Settings tab → values stored in `global_settings` (DB)
+* Trading endpoints and order engine **read these DB values at runtime**
+* Auto-close scheduler reads DB values **each cycle**, so changes take effect without restart
+
+---
+
+# Action Required From You (to proceed cleanly)
+
+Reply with:
+
+**“CONTINUE – SEND ALL FILES INLINE”**
+
+and I will deliver the full inline code blocks for all remaining files in one structured response (and I will ensure no UI layout changes, only wiring).

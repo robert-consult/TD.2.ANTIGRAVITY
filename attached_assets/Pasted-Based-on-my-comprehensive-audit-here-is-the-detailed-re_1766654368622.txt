@@ -1,0 +1,163 @@
+Based on my comprehensive audit, here is the detailed report comparing the implementation against the checklist:
+
+IMPLEMENTATION AUDIT REPORT
+Summary
+Section	Status	Done	Partial	Not Done
+A. Global Invariants	⚠️ CRITICAL	2	1	3
+B. Email Validation (Initial)	❌ NOT DONE	3	0	12
+C. Email Rolling Revalidation	❌ NOT DONE	1	0	7
+D. SMS Validation (Twilio)	❌ NOT DONE	1	0	15
+E. KYC Requests	⚠️ PARTIAL	4	2	9
+F. Tiered Matching	⚠️ PARTIAL	6	1	5
+G. Profile Settings	⚠️ PARTIAL	10	2	10
+H. Admin Mini-tabs	⚠️ PARTIAL	3	1	7
+A. GLOBAL INVARIANTS AND NON-NEGOTIABLES
+A1) Single-source-of-truth gating
+Item	Status	Notes
+shared/policyDecision.ts exists	✅ DONE	Complete with decidePolicy, resolveAccountState, featureGates
+Server routes import policyDecision	❌ NOT DONE	CRITICAL: No server routes call decidePolicy()
+Frontend uses policy gating	⚠️ PARTIAL	TierBadge exists but policy gates not integrated
+/api/profile/me returns gating fields	❌ NOT DONE	Endpoint doesn't exist
+A2) Server-side enforcement
+Item	Status	Notes
+Trade open/increase calls decidePolicy	❌ NOT DONE	Goes directly to risk middleware
+Pending placement calls decidePolicy	❌ NOT DONE	No policy check
+SL/TP modify calls decidePolicy	❌ NOT DONE	No policy check
+Reduce-only actions allowed per policy	⚠️ PARTIAL	Works but no policy integration
+A3) Additions-only rule
+Item	Status	Notes
+No existing tabs removed	✅ DONE	
+No existing mini-tabs removed	✅ DONE	
+New tables added safely	✅ DONE	Schema has all required tables
+B. EMAIL VALIDATION (INITIAL)
+B1) Required user states
+Item	Status	Notes
+user_verification table exists	✅ DONE	Has emailVerifiedAt, emailReverifyDueAt, throttle fields
+State model in policy	✅ DONE	ACTIVE_VERIFIED, LOCKED_EMAIL_NOT_VERIFIED, etc.
+New signup creates verification record	❌ NOT DONE	No signup flow integration
+B2) Initial verification flow (Resend)
+Item	Status	Notes
+POST /api/.../email/resend endpoint	❌ NOT DONE	Endpoint does not exist
+Enforces EMAIL_RESEND_VERIFICATION	❌ NOT DONE	
+Resend API integration	❌ NOT DONE	No RESEND_API_KEY secret
+Signed token with expiry	⚠️ PARTIAL	email_verification_tokens table exists but no endpoint
+Verify endpoint exists	❌ NOT DONE	
+Audit event EMAIL_VERIFIED	❌ NOT DONE	
+B3) Enforcement behavior
+Item	Status	Notes
+LOCKED state denies trades with 403	❌ NOT DONE	Trade routes don't check policy
+UI displays lock banner	❌ NOT DONE	
+B4) Anti-abuse throttles
+Item	Status	Notes
+Cooldown enforced	❌ NOT DONE	
+Daily cap enforced	❌ NOT DONE	
+emailLastResendAt stored	✅ DONE	Schema column exists
+emailResendCountDay stored	✅ DONE	Schema column exists
+B5) Audit trail coverage
+Item	Status	Notes
+EMAIL_VERIFICATION_SENT	❌ NOT DONE	
+EMAIL_VERIFIED	❌ NOT DONE	
+identity_audit table exists	✅ DONE	Has hash chain (prevHash, eventHash)
+C. EMAIL ROLLING REVALIDATION
+Item	Status	Notes
+emailReverifyDueAt schema field	✅ DONE	In user_verification
+Evaluated on every request	❌ NOT DONE	Not integrated
+Overdue grace handling	❌ NOT DONE	
+Reverify endpoint	❌ NOT DONE	
+EMAIL_REVERIFY events	❌ NOT DONE	
+D. SMS VALIDATION (TWILIO)
+D1-D4) Full SMS Flow
+Item	Status	Notes
+Schema fields exist	✅ DONE	smsSendCountDay, smsVerifyFailCount, etc.
+TWILIO_ACCOUNT_SID secret	❌ NOT DONE	Secret does not exist
+TWILIO_AUTH_TOKEN secret	❌ NOT DONE	
+TWILIO_VERIFY_SERVICE_SID secret	❌ NOT DONE	
+POST /api/sms/verify/start	❌ NOT DONE	Endpoint does not exist
+POST /api/sms/verify/confirm	❌ NOT DONE	
+Policy gating (contender eligibility)	❌ NOT DONE	
+Rate limiting	❌ NOT DONE	
+SMS audit events	❌ NOT DONE	
+E. KYC REQUESTS
+E1) Schema
+Item	Status	Notes
+user_kyc_profiles table	✅ DONE	Has status, invitedAt, submittedAt, reviewedAt
+Status enum	✅ DONE	NOT_STARTED/INVITED/SUBMITTED/APPROVED/REJECTED
+E2) Eligibility gating
+Item	Status	Notes
+Policy enforces KYC_VIEW, KYC_SUBMIT	✅ DONE	In policyDecision.ts
+Deny returns KYC_NOT_SELECTED	✅ DONE	
+E3) Admin workflow endpoints
+Item	Status	Notes
+GET /api/admin/kyc-queue	⚠️ PARTIAL	Endpoint exists as /api/admin/kyc-queue
+POST /api/admin/kyc/invite	❌ NOT DONE	
+POST /api/admin/kyc/review	❌ NOT DONE	
+KYC audit events	❌ NOT DONE	
+E4) Trader-facing KYC display
+Item	Status	Notes
+KYC card in Profile Settings	❌ NOT DONE	
+Status display with policy gates	❌ NOT DONE	
+F. TIERED MATCHING (CANDIDATE/PERFORMER/SELECTED)
+F1) Schema
+Item	Status	Notes
+users.userTier exists	✅ DONE	With CANDIDATE default
+user_verification.contenderTier	✅ DONE	NONE/CANDIDATE_EMAIL_ONLY/etc.
+F2) Tier assignment logic
+Item	Status	Notes
+Contender eligibility function	✅ DONE	computeContenderEligibility in policyDecision.ts
+Path1 criteria (30d+120%+30trades)	✅ DONE	
+Path2 criteria (90d+10%+20trades)	✅ DONE	
+Backend stores contender tier	❌ NOT DONE	No endpoint updates this
+Admin tier promotion endpoint	❌ NOT DONE	
+TIER_CHANGED audit event	❌ NOT DONE	
+F3) Frontend tier display
+Item	Status	Notes
+TierBadge component	✅ DONE	client/src/components/TierBadge.tsx
+Header shows tier badge	❌ NOT DONE	Header.tsx lacks tier badge
+Admin user list shows tier	⚠️ PARTIAL	AdminDashboard has some tier visibility
+G. PROFILE SETTINGS
+G1) Page exists
+Item	Status	Notes
+Route /profile exists	✅ DONE	
+Header dropdown has Profile Settings	✅ DONE	
+Header dropdown has Logout	✅ DONE	
+G2) Profile Settings cards
+Item	Status	Notes
+Identity Card (email, username)	✅ DONE	
+Email Verification Card	❌ NOT DONE	No email verification UI
+SMS/Phone Card (gated)	❌ NOT DONE	No SMS verification UI
+KYC Status Card (gated)	❌ NOT DONE	
+Payout Profile Card (gated)	❌ NOT DONE	
+Security Card	✅ DONE	Has 2FA enable/disable
+Sessions list	✅ DONE	Active sessions displayed
+Login history	✅ DONE	
+Tier badge/progress	⚠️ PARTIAL	TierBadge imported but display unclear
+G3) Admin Profile Settings view
+Item	Status	Notes
+UserProfileSettings.tsx (admin)	❌ NOT DONE	Page doesn't exist
+Shows verification state	❌ NOT DONE	
+Shows KYC status	❌ NOT DONE	
+G4) Tier progression management
+Item	Status	Notes
+Admin can change userTier	❌ NOT DONE	
+TIER_CHANGED audit event	❌ NOT DONE	
+H. ADMIN DASHBOARD MINI-TABS
+H1) UI wiring
+Item	Status	Notes
+AdminAuditTrail.tsx page	❌ NOT DONE	Inline in AdminDashboard, not separate
+KycQueue.tsx page	❌ NOT DONE	Inline, not separate
+UserProfileSettings.tsx (admin)	❌ NOT DONE	
+Mini-tab buttons in AdminDashboard	⚠️ PARTIAL	Has audit/kyc data but not as separate tabs
+Bulk action bar hidden on new tabs	❌ NOT DONE	
+H2) Backend endpoints
+Item	Status	Notes
+GET /api/admin/audit-trail	✅ DONE	
+GET /api/admin/identity-audit	✅ DONE	With categories and verify-chain
+GET /api/admin/user-profiles	❌ NOT DONE	
+CRITICAL GAPS REQUIRING IMMEDIATE ACTION
+Server-side policy enforcement - Trade routes bypass policyDecision entirely
+Email verification (Resend) - No endpoints, no integration, no secrets
+SMS verification (Twilio) - No endpoints, no integration, no secrets
+Profile Settings missing cards - Email, SMS, KYC, Payout cards not implemented
+Admin KYC endpoints - Only queue listing, no invite/review actions
+Tier management - No admin tier promotion endpoint
+Would you like me to proceed with implementing these missing featu

@@ -1,0 +1,2655 @@
+Understood. Below is the **“Add” hardening layer** on top of what you already have: **Cases workflow**, **signal status lifecycle (OPEN → IN_REVIEW → CLOSED/IGNORED)**, **tamper-evident Grift admin audit log**, **server-side CSV exports**, **optional enforcement actions (freeze/disable placeholders that won’t break if your users table differs)**, and an **evaluation scheduler**.
+
+Everything uses **“grift”** naming only.
+
+---
+
+# 1) BACKEND — Add Cases + Workflow + Audit + Exports + Enforcement + Scheduler
+
+## 1.1 `server/grift/ensureGriftSchema.ts` (REPLACE)
+
+Adds:
+
+* `grift_cases`, `grift_case_notes`, `grift_case_signals`
+* `grift_admin_actions` (hash-chained admin actions for tamper-evidence)
+* `grift_signals` extra columns (optional): `case_id` (safe)
+
+```ts
+// server/grift/ensureGriftSchema.ts
+import { sqlite } from "@db";
+import { DEFAULT_GRIFT_CONFIG } from "./griftDefaults";
+
+/** SQLite: ALTER TABLE ADD COLUMN requires a prior check. */
+function ensureColumn(table: string, column: string, ddl: string) {
+  const cols = sqlite.prepare(`PRAGMA table_info(${table})`).all() as any[];
+  const exists = cols.some((c) => String(c.name).toLowerCase() === column.toLowerCase());
+  if (!exists) sqlite.exec(`ALTER TABLE ${table} ADD COLUMN ${ddl}`);
+}
+
+export function ensureGriftSchema() {
+  // CONFIG
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS grift_config (
+      id INTEGER PRIMARY KEY,
+      enabled INTEGER NOT NULL DEFAULT 1,
+
+      multi_account_window_days INTEGER NOT NULL,
+      churn_window_hours INTEGER NOT NULL,
+      hedge_window_minutes INTEGER NOT NULL,
+
+      ip_unique_threshold INTEGER NOT NULL,
+      ua_unique_threshold INTEGER NOT NULL,
+      device_unique_threshold INTEGER NOT NULL,
+
+      geo_velocity_kmh_threshold INTEGER NOT NULL,
+      geo_velocity_min_distance_km INTEGER NOT NULL,
+      geo_velocity_max_hours INTEGER NOT NULL,
+
+      score_multi_account_device INTEGER NOT NULL,
+      score_hedge_pair INTEGER NOT NULL,
+      score_ip_churn INTEGER NOT NULL,
+      score_ua_churn INTEGER NOT NULL,
+      score_device_churn INTEGER NOT NULL,
+      score_geo_velocity INTEGER NOT NULL,
+
+      tier_med INTEGER NOT NULL,
+      tier_high INTEGER NOT NULL,
+      tier_critical INTEGER NOT NULL,
+
+      updated_at INTEGER NOT NULL,
+      updated_by_admin_id INTEGER
+    );
+  `);
+
+  ensureColumn("grift_config", "concurrent_window_minutes", "concurrent_window_minutes INTEGER NOT NULL DEFAULT 15");
+  ensureColumn("grift_config", "asn_unique_threshold", "asn_unique_threshold INTEGER NOT NULL DEFAULT 3");
+  ensureColumn("grift_config", "hedge_require_device_match", "hedge_require_device_match INTEGER NOT NULL DEFAULT 1");
+  ensureColumn("grift_config", "hedge_allow_ip_match", "hedge_allow_ip_match INTEGER NOT NULL DEFAULT 1");
+  ensureColumn("grift_config", "score_concurrent_sessions", "score_concurrent_sessions INTEGER NOT NULL DEFAULT 25");
+  ensureColumn("grift_config", "score_asn_volatility", "score_asn_volatility INTEGER NOT NULL DEFAULT 15");
+
+  // DEVICES
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS grift_devices (
+      device_id TEXT PRIMARY KEY,
+      first_seen_at INTEGER NOT NULL,
+      last_seen_at INTEGER NOT NULL,
+      first_ip TEXT,
+      last_ip TEXT,
+      first_user_agent TEXT,
+      last_user_agent TEXT,
+      first_country TEXT,
+      last_country TEXT,
+      trust_level TEXT NOT NULL DEFAULT 'NEW'
+    );
+  `);
+
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS grift_device_users (
+      device_id TEXT NOT NULL,
+      user_id INTEGER NOT NULL,
+      first_seen_at INTEGER NOT NULL,
+      last_seen_at INTEGER NOT NULL,
+      seen_count INTEGER NOT NULL DEFAULT 1,
+      link_strength INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (device_id, user_id)
+    );
+  `);
+
+  // SIGNALS
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS grift_signals (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+
+      rule_code TEXT NOT NULL,
+      severity TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'OPEN',
+
+      primary_user_id INTEGER NOT NULL,
+      secondary_user_id INTEGER,
+
+      device_id TEXT,
+      ip TEXT,
+      user_agent TEXT,
+      country TEXT,
+      region TEXT,
+      city TEXT,
+      latitude REAL,
+      longitude REAL,
+      asn INTEGER,
+      org TEXT,
+
+      symbol TEXT,
+      trade_id INTEGER,
+
+      points INTEGER NOT NULL DEFAULT 0,
+      dedupe_key TEXT NOT NULL UNIQUE,
+      evidence_json TEXT NOT NULL,
+
+      closed_at INTEGER,
+      closed_by_admin_id INTEGER,
+      closed_reason TEXT
+    );
+  `);
+
+  // Optional: allow direct case link on signal (safe add)
+  ensureColumn("grift_signals", "case_id", "case_id INTEGER");
+
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_grift_signals_primary ON grift_signals(primary_user_id, status, created_at);`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_grift_signals_secondary ON grift_signals(secondary_user_id, status, created_at);`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_grift_signals_rule ON grift_signals(rule_code, status, created_at);`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_grift_signals_case ON grift_signals(case_id, created_at);`);
+
+  // OBSERVATIONS (login/session telemetry)
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS grift_observations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      ts INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      event_type TEXT NOT NULL,
+
+      device_id TEXT,
+      ip TEXT,
+      user_agent TEXT,
+
+      country TEXT,
+      region TEXT,
+      city TEXT,
+      latitude REAL,
+      longitude REAL,
+
+      asn INTEGER,
+      org TEXT
+    );
+  `);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_grift_obs_user_ts ON grift_observations(user_id, ts DESC);`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_grift_obs_device_ts ON grift_observations(device_id, ts DESC);`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_grift_obs_ip_ts ON grift_observations(ip, ts DESC);`);
+
+  // TRADE OBSERVATIONS (trade submit telemetry)
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS grift_trade_observations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      ts INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      trade_id INTEGER NOT NULL,
+      symbol TEXT NOT NULL,
+      side TEXT NOT NULL,
+      device_id TEXT,
+      ip TEXT
+    );
+  `);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_grift_tobs_symbol_ts ON grift_trade_observations(symbol, ts DESC);`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_grift_tobs_user_ts ON grift_trade_observations(user_id, ts DESC);`);
+
+  // USER SCORES
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS grift_user_scores (
+      user_id INTEGER PRIMARY KEY,
+      score_current INTEGER NOT NULL DEFAULT 0,
+      tier TEXT NOT NULL DEFAULT 'LOW',
+
+      score_7d INTEGER NOT NULL DEFAULT 0,
+      score_30d INTEGER NOT NULL DEFAULT 0,
+
+      devices_7d INTEGER NOT NULL DEFAULT 0,
+      ips_7d INTEGER NOT NULL DEFAULT 0,
+      user_agents_7d INTEGER NOT NULL DEFAULT 0,
+      countries_7d INTEGER NOT NULL DEFAULT 0,
+      asns_7d INTEGER NOT NULL DEFAULT 0,
+
+      linked_accounts_30d INTEGER NOT NULL DEFAULT 0,
+      hedge_pairs_7d INTEGER NOT NULL DEFAULT 0,
+      open_signals_count INTEGER NOT NULL DEFAULT 0,
+
+      last_evaluated_at INTEGER NOT NULL DEFAULT 0
+    );
+  `);
+
+  // CASES
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS grift_cases (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+
+      status TEXT NOT NULL DEFAULT 'OPEN',  -- OPEN | IN_REVIEW | CLOSED
+      priority TEXT NOT NULL DEFAULT 'MED', -- LOW | MED | HIGH | CRITICAL
+
+      primary_user_id INTEGER NOT NULL,
+      assigned_to_admin_id INTEGER,
+
+      title TEXT NOT NULL,
+      summary TEXT,
+
+      closed_at INTEGER,
+      closed_by_admin_id INTEGER,
+      closed_reason TEXT
+    );
+  `);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_grift_cases_status ON grift_cases(status, updated_at DESC);`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_grift_cases_user ON grift_cases(primary_user_id, updated_at DESC);`);
+
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS grift_case_notes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      case_id INTEGER NOT NULL,
+      created_at INTEGER NOT NULL,
+      admin_id INTEGER,
+      note TEXT NOT NULL
+    );
+  `);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_grift_case_notes_case ON grift_case_notes(case_id, created_at DESC);`);
+
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS grift_case_signals (
+      case_id INTEGER NOT NULL,
+      signal_id INTEGER NOT NULL,
+      created_at INTEGER NOT NULL,
+      PRIMARY KEY (case_id, signal_id)
+    );
+  `);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_grift_case_signals_case ON grift_case_signals(case_id);`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_grift_case_signals_signal ON grift_case_signals(signal_id);`);
+
+  // ADMIN ACTIONS (hash-chained, tamper-evident)
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS grift_admin_actions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      ts INTEGER NOT NULL,
+      admin_id INTEGER,
+      action TEXT NOT NULL,        -- e.g. GRIFT_SIGNAL_STATUS, GRIFT_CASE_CREATE, GRIFT_CONFIG_UPDATE
+      entity_type TEXT NOT NULL,   -- SIGNAL | CASE | CONFIG | USER
+      entity_id TEXT NOT NULL,
+      payload_json TEXT NOT NULL,
+
+      prev_hash TEXT,
+      event_hash TEXT NOT NULL
+    );
+  `);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_grift_admin_actions_ts ON grift_admin_actions(ts DESC);`);
+
+  // Seed config row id=1 if missing
+  const row = sqlite.prepare(`SELECT id FROM grift_config WHERE id=1`).get();
+  if (!row) {
+    const c = DEFAULT_GRIFT_CONFIG;
+
+    sqlite.prepare(`
+      INSERT INTO grift_config (
+        id, enabled,
+        multi_account_window_days, churn_window_hours, hedge_window_minutes,
+        ip_unique_threshold, ua_unique_threshold, device_unique_threshold,
+        geo_velocity_kmh_threshold, geo_velocity_min_distance_km, geo_velocity_max_hours,
+        score_multi_account_device, score_hedge_pair, score_ip_churn, score_ua_churn, score_device_churn, score_geo_velocity,
+        tier_med, tier_high, tier_critical,
+        updated_at, updated_by_admin_id,
+        concurrent_window_minutes, asn_unique_threshold, hedge_require_device_match, hedge_allow_ip_match,
+        score_concurrent_sessions, score_asn_volatility
+      ) VALUES (
+        1, ?,
+        ?, ?, ?,
+        ?, ?, ?,
+        ?, ?, ?,
+        ?, ?, ?, ?, ?, ?,
+        ?, ?, ?,
+        ?, ?,
+        ?, ?, ?, ?,
+        ?, ?
+      )
+    `).run(
+      c.enabled,
+      c.multiAccountWindowDays, c.churnWindowHours, c.hedgeWindowMinutes,
+      c.ipUniqueThreshold, c.uaUniqueThreshold, c.deviceUniqueThreshold,
+      c.geoVelocityKmhThreshold, c.geoVelocityMinDistanceKm, c.geoVelocityMaxHours,
+      c.scoreMultiAccountDevice, c.scoreHedgePair, c.scoreIpChurn, c.scoreUaChurn, c.scoreDeviceChurn, c.scoreGeoVelocity,
+      c.tierMed, c.tierHigh, c.tierCritical,
+      c.updatedAt, c.updatedByAdminId ?? null,
+      c.concurrentWindowMinutes, c.asnUniqueThreshold, c.hedgeRequireDeviceMatch, c.hedgeAllowIpMatch,
+      c.scoreConcurrentSessions, c.scoreAsnVolatility
+    );
+  }
+}
+```
+
+---
+
+## 1.2 `server/grift/griftAdminAudit.ts` (NEW)
+
+Hash-chained admin actions for tamper evidence.
+
+```ts
+// server/grift/griftAdminAudit.ts
+import { sqlite } from "@db";
+import crypto from "crypto";
+
+function sha256Hex(s: string) {
+  return crypto.createHash("sha256").update(s).digest("hex");
+}
+
+export function logGriftAdminAction(args: {
+  adminId: number | null;
+  action: string;      // GRIFT_*
+  entityType: "SIGNAL" | "CASE" | "CONFIG" | "USER";
+  entityId: string;
+  payload: any;
+}) {
+  const ts = Date.now();
+  const payloadJson = JSON.stringify(args.payload ?? {});
+
+  const prev = sqlite.prepare(`
+    SELECT event_hash as h
+    FROM grift_admin_actions
+    ORDER BY id DESC
+    LIMIT 1
+  `).get() as any;
+
+  const prevHash = prev?.h ?? null;
+
+  const material = [
+    prevHash ?? "",
+    ts,
+    args.adminId ?? "",
+    args.action,
+    args.entityType,
+    args.entityId,
+    payloadJson,
+  ].join("|");
+
+  const eventHash = sha256Hex(material);
+
+  sqlite.prepare(`
+    INSERT INTO grift_admin_actions (
+      ts, admin_id, action, entity_type, entity_id, payload_json, prev_hash, event_hash
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    ts,
+    args.adminId ?? null,
+    args.action,
+    args.entityType,
+    args.entityId,
+    payloadJson,
+    prevHash,
+    eventHash
+  );
+
+  return { ts, prevHash, eventHash };
+}
+
+export function listGriftAdminActions(limit = 200) {
+  const lim = Math.max(10, Math.min(2000, limit));
+  return sqlite.prepare(`
+    SELECT *
+    FROM grift_admin_actions
+    ORDER BY ts DESC
+    LIMIT ?
+  `).all(lim);
+}
+```
+
+---
+
+## 1.3 `server/grift/griftEngine.ts` (PATCH: expose recompute + keep prior behavior)
+
+**Replace your export at the bottom** with this enhanced export object (no need to rewrite the entire file if you already have it).
+If you prefer full replacement, tell me; otherwise paste this at the bottom and ensure `recomputeUserAggregates` is in scope.
+
+```ts
+// Add this method to your existing export object in server/grift/griftEngine.ts:
+//
+//   recomputeUser(userId: number) { ... }
+//
+// It assumes recomputeUserAggregates(userId, cfg) exists in the file.
+
+export const griftEngine = {
+  getConfig,
+
+  // Existing hooks you already have:
+  onLoginSuccess(/* ... */) { /* unchanged */ },
+  onTradeSubmit(/* ... */) { /* unchanged */ },
+
+  // NEW: allow scheduler/admin to force recompute
+  recomputeUser(userId: number) {
+    const cfg = getConfig();
+    recomputeUserAggregates(userId, cfg);
+    return true;
+  }
+};
+```
+
+---
+
+## 1.4 `server/grift/griftScheduler.ts` (NEW)
+
+Batch recompute periodically (safe and lightweight: only active users with recent observations).
+
+```ts
+// server/grift/griftScheduler.ts
+import { sqlite } from "@db";
+import { griftEngine } from "./griftEngine";
+import { logGriftAdminAction } from "./griftAdminAudit";
+
+export function startGriftScheduler(opts?: { intervalMinutes?: number; lookbackHours?: number }) {
+  const intervalMinutes = Math.max(2, Math.min(60, opts?.intervalMinutes ?? 10));
+  const lookbackHours = Math.max(1, Math.min(168, opts?.lookbackHours ?? 24));
+
+  const runOnce = () => {
+    const since = Date.now() - lookbackHours * 60 * 60 * 1000;
+
+    const users = sqlite.prepare(`
+      SELECT DISTINCT user_id as userId
+      FROM grift_observations
+      WHERE ts >= ?
+      LIMIT 5000
+    `).all(since) as any[];
+
+    let ok = 0;
+    for (const u of users) {
+      try {
+        griftEngine.recomputeUser(Number(u.userId));
+        ok++;
+      } catch {
+        // swallow to avoid scheduler death
+      }
+    }
+
+    // Record scheduler run as audit event (adminId null)
+    logGriftAdminAction({
+      adminId: null,
+      action: "GRIFT_SCHEDULER_RECOMPUTE",
+      entityType: "CONFIG",
+      entityId: "grift",
+      payload: { intervalMinutes, lookbackHours, usersConsidered: users.length, usersRecomputed: ok },
+    });
+  };
+
+  // Run immediately, then interval
+  runOnce();
+  const handle = setInterval(runOnce, intervalMinutes * 60 * 1000);
+
+  return () => clearInterval(handle);
+}
+```
+
+Mount from server start:
+
+```ts
+import { ensureGriftSchema } from "./grift/ensureGriftSchema";
+import { startGriftScheduler } from "./grift/griftScheduler";
+
+ensureGriftSchema();
+startGriftScheduler({ intervalMinutes: 10, lookbackHours: 24 });
+```
+
+---
+
+## 1.5 `server/grift/griftAdminRouter.ts` (REPLACE)
+
+Adds:
+
+* signal status update endpoint (OPEN/IN_REVIEW/CLOSED/IGNORED)
+* create case from user/signal
+* case list/detail/assign/note/status/link-signal
+* admin audit list endpoint
+* server-side CSV exports
+* enforcement placeholder endpoint (freeze/disable) that tries to update users table only if columns exist; otherwise logs only.
+
+```ts
+// server/grift/griftAdminRouter.ts
+import { Router } from "express";
+import { sqlite } from "@db";
+import type { GriftConfig } from "./griftTypes";
+import { griftEngine } from "./griftEngine";
+import { logGriftAdminAction, listGriftAdminActions } from "./griftAdminAudit";
+
+export const griftAdminRouter = Router();
+
+function requireAdmin(req: any, res: any, next: any) {
+  // Replace with your existing admin middleware (recommended).
+  const u = req.user;
+  const isAdmin = !!u && (u.isAdmin === true || u.role === "ADMIN" || u.role === "SUPERADMIN");
+  if (!isAdmin) return res.status(403).json({ error: "Admin required" });
+  next();
+}
+
+function sanitizeConfigPatch(body: any): Partial<GriftConfig> {
+  const out: any = {};
+  const num = (v: any) => (typeof v === "number" && Number.isFinite(v) ? v : undefined);
+
+  const setInt = (k: keyof GriftConfig, min: number, max: number) => {
+    const v = num(body[k]);
+    if (v === undefined) return;
+    out[k] = Math.max(min, Math.min(max, Math.round(v)));
+  };
+
+  const setBoolInt = (k: keyof GriftConfig) => {
+    if (body[k] === 1 || body[k] === 0) out[k] = body[k];
+    if (body[k] === true) out[k] = 1;
+    if (body[k] === false) out[k] = 0;
+  };
+
+  setBoolInt("enabled");
+
+  setInt("multiAccountWindowDays", 1, 365);
+  setInt("churnWindowHours", 1, 168);
+  setInt("hedgeWindowMinutes", 1, 240);
+  setInt("concurrentWindowMinutes", 1, 120);
+
+  setInt("ipUniqueThreshold", 2, 100);
+  setInt("uaUniqueThreshold", 2, 100);
+  setInt("deviceUniqueThreshold", 2, 50);
+  setInt("asnUniqueThreshold", 2, 100);
+
+  setInt("geoVelocityKmhThreshold", 200, 2500);
+  setInt("geoVelocityMinDistanceKm", 50, 20000);
+  setInt("geoVelocityMaxHours", 1, 48);
+
+  setBoolInt("hedgeRequireDeviceMatch");
+  setBoolInt("hedgeAllowIpMatch");
+
+  setInt("scoreMultiAccountDevice", 0, 100);
+  setInt("scoreHedgePair", 0, 100);
+  setInt("scoreIpChurn", 0, 100);
+  setInt("scoreUaChurn", 0, 100);
+  setInt("scoreDeviceChurn", 0, 100);
+  setInt("scoreGeoVelocity", 0, 100);
+  setInt("scoreConcurrentSessions", 0, 100);
+  setInt("scoreAsnVolatility", 0, 100);
+
+  setInt("tierMed", 0, 100);
+  setInt("tierHigh", 0, 100);
+  setInt("tierCritical", 0, 100);
+
+  return out;
+}
+
+function colsOf(table: string) {
+  try {
+    return (sqlite.prepare(`PRAGMA table_info(${table})`).all() as any[]).map((c) => String(c.name));
+  } catch {
+    return [];
+  }
+}
+
+function hasCol(cols: string[], name: string) {
+  return cols.some((c) => c.toLowerCase() === name.toLowerCase());
+}
+
+function csvEscape(v: any) {
+  if (v === null || v === undefined) return "";
+  const s = typeof v === "string" ? v : JSON.stringify(v);
+  if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+  return s;
+}
+
+function sendCsv(res: any, filename: string, rows: any[]) {
+  const cols = Array.from(
+    rows.reduce((set: Set<string>, r: any) => {
+      Object.keys(r || {}).forEach((k) => set.add(k));
+      return set;
+    }, new Set<string>())
+  );
+
+  const header = cols.join(",");
+  const lines = rows.map((r) => cols.map((c) => csvEscape(r[c])).join(","));
+  const csv = [header, ...lines].join("\n");
+
+  res.setHeader("Content-Type", "text/csv");
+  res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+  res.send(csv);
+}
+
+griftAdminRouter.use(requireAdmin);
+
+// CONFIG
+griftAdminRouter.get("/config", (_req, res) => res.json(griftEngine.getConfig()));
+
+griftAdminRouter.put("/config", (req: any, res) => {
+  const patch = sanitizeConfigPatch(req.body ?? {});
+  const keys = Object.keys(patch);
+  if (keys.length === 0) return res.status(400).json({ error: "No valid config fields provided" });
+
+  const adminId = req.user?.id ?? null;
+  const updatedAt = Date.now();
+
+  const map: Record<string, string> = {
+    enabled: "enabled",
+
+    multiAccountWindowDays: "multi_account_window_days",
+    churnWindowHours: "churn_window_hours",
+    hedgeWindowMinutes: "hedge_window_minutes",
+    concurrentWindowMinutes: "concurrent_window_minutes",
+
+    ipUniqueThreshold: "ip_unique_threshold",
+    uaUniqueThreshold: "ua_unique_threshold",
+    deviceUniqueThreshold: "device_unique_threshold",
+    asnUniqueThreshold: "asn_unique_threshold",
+
+    geoVelocityKmhThreshold: "geo_velocity_kmh_threshold",
+    geoVelocityMinDistanceKm: "geo_velocity_min_distance_km",
+    geoVelocityMaxHours: "geo_velocity_max_hours",
+
+    hedgeRequireDeviceMatch: "hedge_require_device_match",
+    hedgeAllowIpMatch: "hedge_allow_ip_match",
+
+    scoreMultiAccountDevice: "score_multi_account_device",
+    scoreHedgePair: "score_hedge_pair",
+    scoreIpChurn: "score_ip_churn",
+    scoreUaChurn: "score_ua_churn",
+    scoreDeviceChurn: "score_device_churn",
+    scoreGeoVelocity: "score_geo_velocity",
+    scoreConcurrentSessions: "score_concurrent_sessions",
+    scoreAsnVolatility: "score_asn_volatility",
+
+    tierMed: "tier_med",
+    tierHigh: "tier_high",
+    tierCritical: "tier_critical",
+  };
+
+  const sets: string[] = [];
+  const params: any[] = [];
+
+  for (const k of keys) {
+    const col = map[k];
+    if (!col) continue;
+    sets.push(`${col}=?`);
+    params.push((patch as any)[k]);
+  }
+
+  sets.push(`updated_at=?`);
+  params.push(updatedAt);
+  sets.push(`updated_by_admin_id=?`);
+  params.push(adminId);
+  params.push(1);
+
+  sqlite.prepare(`UPDATE grift_config SET ${sets.join(", ")} WHERE id=?`).run(...params);
+
+  const updated = griftEngine.getConfig();
+
+  logGriftAdminAction({
+    adminId,
+    action: "GRIFT_CONFIG_UPDATE",
+    entityType: "CONFIG",
+    entityId: "1",
+    payload: { patch, updatedAt },
+  });
+
+  res.json(updated);
+});
+
+// SUMMARY
+griftAdminRouter.get("/summary", (_req, res) => {
+  const open = sqlite.prepare(`
+    SELECT
+      SUM(CASE WHEN status='OPEN' THEN 1 ELSE 0 END) as openTotal,
+      SUM(CASE WHEN status='OPEN' AND (severity='HIGH' OR severity='CRITICAL') THEN 1 ELSE 0 END) as openHigh
+    FROM grift_signals
+  `).get() as any;
+
+  const tiers = sqlite.prepare(`SELECT tier, COUNT(*) as c FROM grift_user_scores GROUP BY tier`).all() as any[];
+
+  const topRules = sqlite.prepare(`
+    SELECT rule_code as ruleCode, COUNT(*) as c
+    FROM grift_signals
+    WHERE status='OPEN'
+    GROUP BY rule_code
+    ORDER BY c DESC
+    LIMIT 10
+  `).all() as any[];
+
+  const bySeverity = sqlite.prepare(`
+    SELECT severity, COUNT(*) as c
+    FROM grift_signals
+    WHERE status='OPEN'
+    GROUP BY severity
+  `).all() as any[];
+
+  res.json({
+    open: open ?? { openTotal: 0, openHigh: 0 },
+    tiers,
+    topRules,
+    bySeverity,
+  });
+});
+
+// BREAKDOWN
+griftAdminRouter.get("/breakdown", (req, res) => {
+  const sinceHours = Number(req.query.sinceHours ?? 168);
+  const since = Date.now() - Math.max(1, Math.min(24 * 365, sinceHours)) * 60 * 60 * 1000;
+
+  const rows = sqlite.prepare(`
+    SELECT rule_code as ruleCode, severity, status, COUNT(*) as c
+    FROM grift_signals
+    WHERE created_at >= ?
+    GROUP BY rule_code, severity, status
+    ORDER BY c DESC
+  `).all(since);
+
+  res.json({ since, rows });
+});
+
+// SIGNALS QUEUE
+griftAdminRouter.get("/signals", (req, res) => {
+  const status = typeof req.query.status === "string" ? req.query.status : "OPEN";
+  const severity = typeof req.query.severity === "string" ? req.query.severity : "";
+  const ruleCode = typeof req.query.ruleCode === "string" ? req.query.ruleCode : "";
+  const userId = req.query.userId ? Number(req.query.userId) : null;
+  const limit = Math.max(10, Math.min(1000, Number(req.query.limit ?? 200)));
+  const sinceHours = Number(req.query.sinceHours ?? 168);
+  const since = Date.now() - Math.max(1, Math.min(24 * 365, sinceHours)) * 60 * 60 * 1000;
+
+  const where: string[] = ["created_at >= ?"];
+  const params: any[] = [since];
+
+  if (status) { where.push("status = ?"); params.push(status); }
+  if (severity) { where.push("severity = ?"); params.push(severity); }
+  if (ruleCode) { where.push("rule_code = ?"); params.push(ruleCode); }
+  if (userId != null && Number.isFinite(userId)) {
+    where.push("(primary_user_id = ? OR secondary_user_id = ?)");
+    params.push(userId, userId);
+  }
+
+  const sql = `
+    SELECT *
+    FROM grift_signals
+    WHERE ${where.join(" AND ")}
+    ORDER BY created_at DESC
+    LIMIT ${limit}
+  `;
+
+  const rows = sqlite.prepare(sql).all(...params);
+  res.json({ since, rows });
+});
+
+// SIGNAL STATUS UPDATE (OPEN | IN_REVIEW | CLOSED | IGNORED)
+griftAdminRouter.post("/signals/:id/status", (req: any, res) => {
+  const id = Number(req.params.id);
+  const adminId = req.user?.id ?? null;
+
+  const status = String(req.body?.status ?? "").toUpperCase();
+  const allowed = new Set(["OPEN", "IN_REVIEW", "CLOSED", "IGNORED"]);
+  if (!allowed.has(status)) return res.status(400).json({ error: "Invalid status" });
+
+  const reason = typeof req.body?.reason === "string" ? req.body.reason.slice(0, 300) : null;
+  const ts = Date.now();
+
+  const signal = sqlite.prepare(`SELECT * FROM grift_signals WHERE id=?`).get(id) as any;
+  if (!signal) return res.status(404).json({ error: "Signal not found" });
+
+  // If closing, set close fields. Otherwise keep them null.
+  if (status === "CLOSED") {
+    sqlite.prepare(`
+      UPDATE grift_signals
+      SET status=?, updated_at=?, closed_at=?, closed_by_admin_id=?, closed_reason=?
+      WHERE id=?
+    `).run(status, ts, ts, adminId, reason ?? "Closed by admin", id);
+  } else {
+    sqlite.prepare(`
+      UPDATE grift_signals
+      SET status=?, updated_at=?
+      WHERE id=?
+    `).run(status, ts, id);
+  }
+
+  logGriftAdminAction({
+    adminId,
+    action: "GRIFT_SIGNAL_STATUS",
+    entityType: "SIGNAL",
+    entityId: String(id),
+    payload: { from: signal.status, to: status, reason },
+  });
+
+  // recompute aggregates for impacted users
+  const u1 = Number(signal.primary_user_id);
+  const u2 = signal.secondary_user_id ? Number(signal.secondary_user_id) : null;
+  try { griftEngine.recomputeUser(u1); } catch {}
+  if (u2) try { griftEngine.recomputeUser(u2); } catch {}
+
+  res.json({ ok: true });
+});
+
+// Close convenience (calls status endpoint behavior)
+griftAdminRouter.post("/signals/:id/close", (req: any, res) => {
+  req.body = { ...(req.body ?? {}), status: "CLOSED" };
+  return (griftAdminRouter as any).handle(req, res);
+});
+
+// USERS LIST
+griftAdminRouter.get("/users", (req, res) => {
+  const minScore = Number(req.query.minScore ?? 40);
+  const rows = sqlite.prepare(`
+    SELECT
+      u.id as userId,
+      u.email as email,
+      u.name as name,
+      s.score_current as scoreCurrent,
+      s.tier as tier,
+      s.devices_7d as devices7d,
+      s.ips_7d as ips7d,
+      s.user_agents_7d as userAgents7d,
+      s.countries_7d as countries7d,
+      s.asns_7d as asns7d,
+      s.linked_accounts_30d as linkedAccounts30d,
+      s.hedge_pairs_7d as hedgePairs7d,
+      s.open_signals_count as openSignalsCount,
+      s.last_evaluated_at as lastEvaluatedAt
+    FROM users u
+    JOIN grift_user_scores s ON s.user_id = u.id
+    WHERE s.score_current >= ?
+    ORDER BY s.score_current DESC, s.open_signals_count DESC
+    LIMIT 500
+  `).all(minScore);
+
+  res.json(rows);
+});
+
+// USER DETAIL
+griftAdminRouter.get("/users/:userId", (req, res) => {
+  const userId = Number(req.params.userId);
+
+  const score = sqlite.prepare(`SELECT * FROM grift_user_scores WHERE user_id=?`).get(userId);
+
+  const signals = sqlite.prepare(`
+    SELECT *
+    FROM grift_signals
+    WHERE primary_user_id=? OR secondary_user_id=?
+    ORDER BY created_at DESC
+    LIMIT 300
+  `).all(userId, userId);
+
+  const deviceLinks = sqlite.prepare(`
+    SELECT device_id as deviceId, first_seen_at as firstSeenAt, last_seen_at as lastSeenAt, seen_count as seenCount
+    FROM grift_device_users
+    WHERE user_id=?
+    ORDER BY last_seen_at DESC
+    LIMIT 200
+  `).all(userId);
+
+  const linkedUsers = sqlite.prepare(`
+    SELECT DISTINCT du2.user_id as linkedUserId, du2.device_id as deviceId, du2.last_seen_at as lastSeenAt
+    FROM grift_device_users du1
+    JOIN grift_device_users du2 ON du1.device_id = du2.device_id
+    WHERE du1.user_id=? AND du2.user_id != ?
+    ORDER BY du2.last_seen_at DESC
+    LIMIT 200
+  `).all(userId, userId);
+
+  const observations = sqlite.prepare(`
+    SELECT *
+    FROM grift_observations
+    WHERE user_id=?
+    ORDER BY ts DESC
+    LIMIT 200
+  `).all(userId);
+
+  const tradeObservations = sqlite.prepare(`
+    SELECT *
+    FROM grift_trade_observations
+    WHERE user_id=?
+    ORDER BY ts DESC
+    LIMIT 200
+  `).all(userId);
+
+  // cases for user
+  const cases = sqlite.prepare(`
+    SELECT *
+    FROM grift_cases
+    WHERE primary_user_id=?
+    ORDER BY updated_at DESC
+    LIMIT 50
+  `).all(userId);
+
+  res.json({ score, signals, deviceLinks, linkedUsers, observations, tradeObservations, cases });
+});
+
+//
+// CASES
+//
+
+// List cases
+griftAdminRouter.get("/cases", (req, res) => {
+  const status = typeof req.query.status === "string" && req.query.status ? String(req.query.status).toUpperCase() : "";
+  const limit = Math.max(10, Math.min(500, Number(req.query.limit ?? 200)));
+
+  const where: string[] = [];
+  const params: any[] = [];
+  if (status) { where.push("status=?"); params.push(status); }
+
+  const sql = `
+    SELECT *
+    FROM grift_cases
+    ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+    ORDER BY updated_at DESC
+    LIMIT ${limit}
+  `;
+
+  const rows = sqlite.prepare(sql).all(...params);
+  res.json(rows);
+});
+
+// Create case (optionally from signalId)
+griftAdminRouter.post("/cases", (req: any, res) => {
+  const adminId = req.user?.id ?? null;
+  const ts = Date.now();
+
+  const primaryUserId = Number(req.body?.primaryUserId);
+  const title = String(req.body?.title ?? "").slice(0, 120);
+  const summary = typeof req.body?.summary === "string" ? req.body.summary.slice(0, 2000) : null;
+  const priority = String(req.body?.priority ?? "MED").toUpperCase();
+  const signalId = req.body?.signalId ? Number(req.body.signalId) : null;
+
+  if (!Number.isFinite(primaryUserId) || primaryUserId <= 0) return res.status(400).json({ error: "primaryUserId required" });
+  if (!title) return res.status(400).json({ error: "title required" });
+
+  const pr = new Set(["LOW", "MED", "HIGH", "CRITICAL"]);
+  const safePriority = pr.has(priority) ? priority : "MED";
+
+  const info = sqlite.prepare(`
+    INSERT INTO grift_cases (created_at, updated_at, status, priority, primary_user_id, assigned_to_admin_id, title, summary)
+    VALUES (?, ?, 'OPEN', ?, ?, NULL, ?, ?)
+  `).run(ts, ts, safePriority, primaryUserId, title, summary);
+
+  const caseId = Number(info.lastInsertRowid);
+
+  if (signalId && Number.isFinite(signalId)) {
+    try {
+      sqlite.prepare(`
+        INSERT INTO grift_case_signals (case_id, signal_id, created_at)
+        VALUES (?, ?, ?)
+      `).run(caseId, signalId, ts);
+      // Also set signal.case_id if column exists
+      sqlite.prepare(`UPDATE grift_signals SET case_id=?, updated_at=? WHERE id=?`).run(caseId, ts, signalId);
+    } catch {}
+  }
+
+  logGriftAdminAction({
+    adminId,
+    action: "GRIFT_CASE_CREATE",
+    entityType: "CASE",
+    entityId: String(caseId),
+    payload: { primaryUserId, title, priority: safePriority, signalId },
+  });
+
+  res.json({ id: caseId });
+});
+
+// Case detail
+griftAdminRouter.get("/cases/:id", (req, res) => {
+  const id = Number(req.params.id);
+  const c = sqlite.prepare(`SELECT * FROM grift_cases WHERE id=?`).get(id);
+  if (!c) return res.status(404).json({ error: "Case not found" });
+
+  const notes = sqlite.prepare(`
+    SELECT *
+    FROM grift_case_notes
+    WHERE case_id=?
+    ORDER BY created_at DESC
+    LIMIT 200
+  `).all(id);
+
+  const signals = sqlite.prepare(`
+    SELECT s.*
+    FROM grift_case_signals cs
+    JOIN grift_signals s ON s.id = cs.signal_id
+    WHERE cs.case_id=?
+    ORDER BY s.created_at DESC
+    LIMIT 300
+  `).all(id);
+
+  res.json({ case: c, notes, signals });
+});
+
+// Assign case
+griftAdminRouter.post("/cases/:id/assign", (req: any, res) => {
+  const id = Number(req.params.id);
+  const adminId = req.user?.id ?? null;
+  const assignedToAdminId = req.body?.assignedToAdminId == null ? null : Number(req.body.assignedToAdminId);
+  const ts = Date.now();
+
+  sqlite.prepare(`UPDATE grift_cases SET assigned_to_admin_id=?, updated_at=? WHERE id=?`).run(
+    Number.isFinite(assignedToAdminId) ? assignedToAdminId : null,
+    ts,
+    id
+  );
+
+  logGriftAdminAction({
+    adminId,
+    action: "GRIFT_CASE_ASSIGN",
+    entityType: "CASE",
+    entityId: String(id),
+    payload: { assignedToAdminId },
+  });
+
+  res.json({ ok: true });
+});
+
+// Add note
+griftAdminRouter.post("/cases/:id/note", (req: any, res) => {
+  const id = Number(req.params.id);
+  const adminId = req.user?.id ?? null;
+  const note = String(req.body?.note ?? "").slice(0, 4000);
+  if (!note) return res.status(400).json({ error: "note required" });
+
+  const ts = Date.now();
+  sqlite.prepare(`
+    INSERT INTO grift_case_notes (case_id, created_at, admin_id, note)
+    VALUES (?, ?, ?, ?)
+  `).run(id, ts, adminId, note);
+
+  sqlite.prepare(`UPDATE grift_cases SET updated_at=? WHERE id=?`).run(ts, id);
+
+  logGriftAdminAction({
+    adminId,
+    action: "GRIFT_CASE_NOTE",
+    entityType: "CASE",
+    entityId: String(id),
+    payload: { note },
+  });
+
+  res.json({ ok: true });
+});
+
+// Case status
+griftAdminRouter.post("/cases/:id/status", (req: any, res) => {
+  const id = Number(req.params.id);
+  const adminId = req.user?.id ?? null;
+
+  const status = String(req.body?.status ?? "").toUpperCase();
+  const allowed = new Set(["OPEN", "IN_REVIEW", "CLOSED"]);
+  if (!allowed.has(status)) return res.status(400).json({ error: "Invalid status" });
+
+  const reason = typeof req.body?.reason === "string" ? req.body.reason.slice(0, 300) : null;
+  const ts = Date.now();
+
+  if (status === "CLOSED") {
+    sqlite.prepare(`
+      UPDATE grift_cases
+      SET status=?, updated_at=?, closed_at=?, closed_by_admin_id=?, closed_reason=?
+      WHERE id=?
+    `).run(status, ts, ts, adminId, reason ?? "Closed", id);
+  } else {
+    sqlite.prepare(`UPDATE grift_cases SET status=?, updated_at=? WHERE id=?`).run(status, ts, id);
+  }
+
+  logGriftAdminAction({
+    adminId,
+    action: "GRIFT_CASE_STATUS",
+    entityType: "CASE",
+    entityId: String(id),
+    payload: { status, reason },
+  });
+
+  res.json({ ok: true });
+});
+
+// Link signal to case
+griftAdminRouter.post("/cases/:id/link-signal", (req: any, res) => {
+  const id = Number(req.params.id);
+  const adminId = req.user?.id ?? null;
+  const signalId = Number(req.body?.signalId);
+  if (!Number.isFinite(signalId)) return res.status(400).json({ error: "signalId required" });
+
+  const ts = Date.now();
+  sqlite.prepare(`
+    INSERT OR IGNORE INTO grift_case_signals (case_id, signal_id, created_at)
+    VALUES (?, ?, ?)
+  `).run(id, signalId, ts);
+
+  // Set signal.case_id if column exists
+  try { sqlite.prepare(`UPDATE grift_signals SET case_id=?, updated_at=? WHERE id=?`).run(id, ts, signalId); } catch {}
+
+  logGriftAdminAction({
+    adminId,
+    action: "GRIFT_CASE_LINK_SIGNAL",
+    entityType: "CASE",
+    entityId: String(id),
+    payload: { signalId },
+  });
+
+  res.json({ ok: true });
+});
+
+//
+// AUDIT LIST
+//
+griftAdminRouter.get("/audit", (req, res) => {
+  const limit = Math.max(10, Math.min(2000, Number(req.query.limit ?? 200)));
+  res.json(listGriftAdminActions(limit));
+});
+
+//
+// EXPORTS (server-side CSV)
+//
+griftAdminRouter.get("/exports/users.csv", (req, res) => {
+  const minScore = Number(req.query.minScore ?? 40);
+  const rows = sqlite.prepare(`
+    SELECT
+      u.id as userId,
+      u.email as email,
+      u.name as name,
+      s.score_current as scoreCurrent,
+      s.tier as tier,
+      s.devices_7d as devices7d,
+      s.ips_7d as ips7d,
+      s.user_agents_7d as userAgents7d,
+      s.countries_7d as countries7d,
+      s.asns_7d as asns7d,
+      s.linked_accounts_30d as linkedAccounts30d,
+      s.hedge_pairs_7d as hedgePairs7d,
+      s.open_signals_count as openSignalsCount,
+      s.last_evaluated_at as lastEvaluatedAt
+    FROM users u
+    JOIN grift_user_scores s ON s.user_id = u.id
+    WHERE s.score_current >= ?
+    ORDER BY s.score_current DESC
+    LIMIT 2000
+  `).all(minScore);
+
+  sendCsv(res, `grift_users_${Date.now()}.csv`, rows);
+});
+
+griftAdminRouter.get("/exports/signals.csv", (req, res) => {
+  const status = typeof req.query.status === "string" ? req.query.status : "OPEN";
+  const sinceHours = Number(req.query.sinceHours ?? 168);
+  const since = Date.now() - Math.max(1, Math.min(24 * 365, sinceHours)) * 60 * 60 * 1000;
+
+  const rows = sqlite.prepare(`
+    SELECT *
+    FROM grift_signals
+    WHERE created_at >= ? AND status = ?
+    ORDER BY created_at DESC
+    LIMIT 5000
+  `).all(since, status);
+
+  sendCsv(res, `grift_signals_${Date.now()}.csv`, rows);
+});
+
+griftAdminRouter.get("/exports/cases.csv", (req, res) => {
+  const status = typeof req.query.status === "string" ? String(req.query.status).toUpperCase() : "";
+  const where: string[] = [];
+  const params: any[] = [];
+  if (status) { where.push("status=?"); params.push(status); }
+
+  const sql = `
+    SELECT *
+    FROM grift_cases
+    ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+    ORDER BY updated_at DESC
+    LIMIT 5000
+  `;
+  const rows = sqlite.prepare(sql).all(...params);
+
+  sendCsv(res, `grift_cases_${Date.now()}.csv`, rows);
+});
+
+//
+// ENFORCEMENT PLACEHOLDERS (safe: only updates columns if they exist)
+//
+griftAdminRouter.post("/users/:userId/enforce", (req: any, res) => {
+  const adminId = req.user?.id ?? null;
+  const userId = Number(req.params.userId);
+
+  const action = String(req.body?.action ?? "").toUpperCase(); // FREEZE | DISABLE | NOTE_ONLY
+  const reason = typeof req.body?.reason === "string" ? req.body.reason.slice(0, 300) : "Grift enforcement";
+
+  const userCols = colsOf("users");
+  const ts = Date.now();
+
+  let applied = false;
+  let note = "Logged only (no matching columns).";
+
+  try {
+    if (action === "FREEZE") {
+      if (hasCol(userCols, "isFrozen")) {
+        sqlite.prepare(`UPDATE users SET isFrozen=1 WHERE id=?`).run(userId);
+        applied = true;
+        note = "Updated users.isFrozen=1";
+      } else if (hasCol(userCols, "frozen")) {
+        sqlite.prepare(`UPDATE users SET frozen=1 WHERE id=?`).run(userId);
+        applied = true;
+        note = "Updated users.frozen=1";
+      }
+      // optional reason columns
+      if (applied && hasCol(userCols, "frozenReason")) {
+        sqlite.prepare(`UPDATE users SET frozenReason=? WHERE id=?`).run(reason, userId);
+      }
+      if (applied && hasCol(userCols, "frozenAt")) {
+        sqlite.prepare(`UPDATE users SET frozenAt=? WHERE id=?`).run(ts, userId);
+      }
+    } else if (action === "DISABLE") {
+      if (hasCol(userCols, "isDisabled")) {
+        sqlite.prepare(`UPDATE users SET isDisabled=1 WHERE id=?`).run(userId);
+        applied = true;
+        note = "Updated users.isDisabled=1";
+      } else if (hasCol(userCols, "disabled")) {
+        sqlite.prepare(`UPDATE users SET disabled=1 WHERE id=?`).run(userId);
+        applied = true;
+        note = "Updated users.disabled=1";
+      }
+      if (applied && hasCol(userCols, "disabledReason")) {
+        sqlite.prepare(`UPDATE users SET disabledReason=? WHERE id=?`).run(reason, userId);
+      }
+      if (applied && hasCol(userCols, "disabledAt")) {
+        sqlite.prepare(`UPDATE users SET disabledAt=? WHERE id=?`).run(ts, userId);
+      }
+    }
+  } catch {
+    applied = false;
+    note = "Attempted update failed; logged only.";
+  }
+
+  logGriftAdminAction({
+    adminId,
+    action: "GRIFT_ENFORCEMENT",
+    entityType: "USER",
+    entityId: String(userId),
+    payload: { action, reason, applied, note },
+  });
+
+  res.json({ ok: true, applied, note });
+});
+```
+
+**Important mount** (server bootstrap):
+
+```ts
+import { ensureGriftSchema } from "./grift/ensureGriftSchema";
+import { griftAdminRouter } from "./grift/griftAdminRouter";
+import { startGriftScheduler } from "./grift/griftScheduler";
+
+ensureGriftSchema();
+app.use("/api/admin/grift", griftAdminRouter);
+startGriftScheduler({ intervalMinutes: 10, lookbackHours: 24 });
+```
+
+---
+
+# 2) FRONTEND — Add sub-tabs: Dashboard | Signals | Users | Cases | Exports | Config | Audit
+
+Your current Grift UI is a single page. Replace it with a multi-tab page.
+
+## 2.1 `client/src/pages/admin/UserManagementGriftTab.tsx` (REPLACE)
+
+Includes:
+
+* **Dashboard** (KPIs + breakdown)
+* **Signals** (queue, filters, status changes, “Create Case” from signal)
+* **Users** (flagged users list, “Create Case” from user, “Enforce” buttons)
+* **Cases** (list, create, assign, notes, link signal, status)
+* **Exports** (server-side CSV download)
+* **Config** (existing editor)
+* **Audit** (tamper-evident Grift admin action log)
+
+```tsx
+import React, { useEffect, useMemo, useState } from "react";
+import { apiFetch } from "../../lib/api";
+import { getDeviceId } from "../../lib/deviceId";
+
+type GriftSummary = {
+  open: { openTotal: number; openHigh: number };
+  tiers: Array<{ tier: string; c: number }>;
+  topRules: Array<{ ruleCode: string; c: number }>;
+  bySeverity: Array<{ severity: string; c: number }>;
+};
+
+type BreakdownRow = { ruleCode: string; severity: string; status: string; c: number };
+type GriftBreakdown = { since: number; rows: BreakdownRow[] };
+
+type GriftConfig = {
+  id: number;
+  enabled: number;
+
+  multiAccountWindowDays: number;
+  churnWindowHours: number;
+  hedgeWindowMinutes: number;
+  concurrentWindowMinutes: number;
+
+  ipUniqueThreshold: number;
+  uaUniqueThreshold: number;
+  deviceUniqueThreshold: number;
+  asnUniqueThreshold: number;
+
+  geoVelocityKmhThreshold: number;
+  geoVelocityMinDistanceKm: number;
+  geoVelocityMaxHours: number;
+
+  hedgeRequireDeviceMatch: number;
+  hedgeAllowIpMatch: number;
+
+  scoreMultiAccountDevice: number;
+  scoreHedgePair: number;
+  scoreIpChurn: number;
+  scoreUaChurn: number;
+  scoreDeviceChurn: number;
+  scoreGeoVelocity: number;
+  scoreConcurrentSessions: number;
+  scoreAsnVolatility: number;
+
+  tierMed: number;
+  tierHigh: number;
+  tierCritical: number;
+
+  updatedAt: number;
+  updatedByAdminId?: number | null;
+};
+
+type FlaggedUserRow = {
+  userId: number;
+  email: string;
+  name?: string | null;
+
+  scoreCurrent: number;
+  tier: string;
+
+  devices7d: number;
+  ips7d: number;
+  userAgents7d: number;
+  countries7d: number;
+  asns7d: number;
+
+  linkedAccounts30d: number;
+  hedgePairs7d: number;
+  openSignalsCount: number;
+  lastEvaluatedAt: number;
+};
+
+type SignalsResponse = { since: number; rows: any[] };
+
+type UserDetail = {
+  score: any;
+  signals: any[];
+  deviceLinks: any[];
+  linkedUsers: any[];
+  observations: any[];
+  tradeObservations: any[];
+  cases?: any[];
+};
+
+type GriftCase = any;
+type CaseDetail = { case: any; notes: any[]; signals: any[] };
+
+type AuditRow = any;
+
+const RULES = [
+  "MULTI_ACCOUNT_DEVICE",
+  "HEDGE_PAIR",
+  "IP_CHURN",
+  "UA_CHURN",
+  "DEVICE_CHURN",
+  "GEO_VELOCITY",
+  "CONCURRENT_SESSIONS",
+  "ASN_VOLATILITY",
+];
+
+const SEVERITIES = ["", "LOW", "MED", "HIGH", "CRITICAL"];
+const STATUSES = ["OPEN", "IN_REVIEW", "CLOSED", "IGNORED"];
+const CASE_STATUSES = ["OPEN", "IN_REVIEW", "CLOSED"];
+const PRIORITIES = ["LOW", "MED", "HIGH", "CRITICAL"];
+
+function fmtTs(ts?: number) {
+  if (!ts) return "—";
+  try { return new Date(ts).toLocaleString(); } catch { return String(ts); }
+}
+
+function TierBadge({ tier }: { tier: string }) {
+  const t = (tier || "").toUpperCase();
+  const cls =
+    t === "CRITICAL"
+      ? "bg-red-600 text-white"
+      : t === "HIGH"
+      ? "bg-orange-600 text-white"
+      : t === "MED"
+      ? "bg-yellow-500 text-black"
+      : "bg-muted text-foreground";
+  return <span className={`px-2 py-1 rounded text-xs font-semibold ${cls}`}>{t || "LOW"}</span>;
+}
+
+function TabBtn({ active, onClick, children }: any) {
+  return (
+    <button
+      className={`px-3 py-2 rounded border ${active ? "bg-muted" : "hover:bg-muted"}`}
+      onClick={onClick}
+    >
+      {children}
+    </button>
+  );
+}
+
+async function downloadCsvFromUrl(url: string, filenameFallback: string) {
+  const res = await fetch(url, {
+    method: "GET",
+    credentials: "include",
+    headers: {
+      "X-Device-Id": getDeviceId(),
+    },
+  });
+
+  if (!res.ok) {
+    const t = await res.text().catch(() => "");
+    throw new Error(`Export failed: ${res.status} ${t}`);
+  }
+
+  const blob = await res.blob();
+  const cd = res.headers.get("content-disposition") || "";
+  const match = /filename="([^"]+)"/.exec(cd);
+  const filename = match?.[1] || filenameFallback;
+
+  const href = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = href;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(href);
+}
+
+export default function UserManagementGriftTab() {
+  const [tab, setTab] = useState<"Dashboard" | "Signals" | "Users" | "Cases" | "Exports" | "Config" | "Audit">("Dashboard");
+
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
+
+  const [summary, setSummary] = useState<GriftSummary | null>(null);
+  const [breakdown, setBreakdown] = useState<GriftBreakdown | null>(null);
+  const [config, setConfig] = useState<GriftConfig | null>(null);
+  const [configEdit, setConfigEdit] = useState<Partial<GriftConfig>>({});
+  const [savingConfig, setSavingConfig] = useState(false);
+
+  // Users
+  const [minScore, setMinScore] = useState<number>(40);
+  const [users, setUsers] = useState<FlaggedUserRow[]>([]);
+
+  // Signals
+  const [sigStatus, setSigStatus] = useState<string>("OPEN");
+  const [sigSeverity, setSigSeverity] = useState<string>("");
+  const [sigRule, setSigRule] = useState<string>("");
+  const [sigUserId, setSigUserId] = useState<string>("");
+  const [sigSinceHours, setSigSinceHours] = useState<number>(168);
+  const [signals, setSignals] = useState<any[]>([]);
+  const [signalsLoading, setSignalsLoading] = useState(false);
+
+  // User drilldown
+  const [selectedUserId, setSelectedUserId] = useState<number | null>(null);
+  const [detail, setDetail] = useState<UserDetail | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+
+  // Cases
+  const [caseStatusFilter, setCaseStatusFilter] = useState<string>("");
+  const [cases, setCases] = useState<GriftCase[]>([]);
+  const [casesLoading, setCasesLoading] = useState(false);
+
+  const [selectedCaseId, setSelectedCaseId] = useState<number | null>(null);
+  const [caseDetail, setCaseDetail] = useState<CaseDetail | null>(null);
+  const [caseDetailLoading, setCaseDetailLoading] = useState(false);
+
+  // Create case modal
+  const [newCaseOpen, setNewCaseOpen] = useState(false);
+  const [newCasePrimaryUserId, setNewCasePrimaryUserId] = useState<string>("");
+  const [newCaseTitle, setNewCaseTitle] = useState<string>("Grift Review");
+  const [newCaseSummary, setNewCaseSummary] = useState<string>("");
+  const [newCasePriority, setNewCasePriority] = useState<string>("MED");
+  const [newCaseSignalId, setNewCaseSignalId] = useState<string>("");
+
+  // Audit
+  const [auditRows, setAuditRows] = useState<AuditRow[]>([]);
+  const [auditLoading, setAuditLoading] = useState(false);
+  const [auditLimit, setAuditLimit] = useState<number>(200);
+
+  const breakdownMatrix = useMemo(() => {
+    const m: Record<string, Record<string, number>> = {};
+    (breakdown?.rows ?? []).forEach((r) => {
+      const rule = r.ruleCode;
+      const key = `${String(r.severity).toUpperCase()}|${String(r.status).toUpperCase()}`;
+      m[rule] = m[rule] || {};
+      m[rule][key] = Number(r.c ?? 0);
+    });
+    return m;
+  }, [breakdown]);
+
+  const tierCounts = useMemo(() => {
+    const map: Record<string, number> = { LOW: 0, MED: 0, HIGH: 0, CRITICAL: 0 };
+    (summary?.tiers ?? []).forEach((t) => {
+      const key = String(t.tier || "LOW").toUpperCase();
+      map[key] = Number(t.c ?? 0);
+    });
+    return map;
+  }, [summary]);
+
+  const severityCounts = useMemo(() => {
+    const map: Record<string, number> = { LOW: 0, MED: 0, HIGH: 0, CRITICAL: 0 };
+    (summary?.bySeverity ?? []).forEach((s) => {
+      const key = String(s.severity || "").toUpperCase();
+      if (map[key] !== undefined) map[key] = Number(s.c ?? 0);
+    });
+    return map;
+  }, [summary]);
+
+  async function refreshSummary() {
+    const [s, b, c] = await Promise.all([
+      apiFetch<GriftSummary>("/api/admin/grift/summary"),
+      apiFetch<GriftBreakdown>(`/api/admin/grift/breakdown?sinceHours=${sigSinceHours}`),
+      apiFetch<GriftConfig>("/api/admin/grift/config"),
+    ]);
+    setSummary(s);
+    setBreakdown(b);
+    setConfig(c);
+    setConfigEdit({});
+  }
+
+  async function refreshUsers() {
+    const u = await apiFetch<FlaggedUserRow[]>(`/api/admin/grift/users?minScore=${minScore}`);
+    setUsers(u);
+  }
+
+  async function refreshSignals() {
+    setSignalsLoading(true);
+    try {
+      const userIdParam = sigUserId.trim() ? `&userId=${encodeURIComponent(sigUserId.trim())}` : "";
+      const url =
+        `/api/admin/grift/signals?status=${encodeURIComponent(sigStatus)}` +
+        `&severity=${encodeURIComponent(sigSeverity)}` +
+        `&ruleCode=${encodeURIComponent(sigRule)}` +
+        `&sinceHours=${encodeURIComponent(String(sigSinceHours))}` +
+        `&limit=300` +
+        userIdParam;
+
+      const r = await apiFetch<SignalsResponse>(url);
+      setSignals(r.rows || []);
+    } finally {
+      setSignalsLoading(false);
+    }
+  }
+
+  async function refreshCases() {
+    setCasesLoading(true);
+    try {
+      const st = caseStatusFilter ? `?status=${encodeURIComponent(caseStatusFilter)}` : "";
+      const r = await apiFetch<GriftCase[]>(`/api/admin/grift/cases${st}`);
+      setCases(r || []);
+    } finally {
+      setCasesLoading(false);
+    }
+  }
+
+  async function refreshAudit() {
+    setAuditLoading(true);
+    try {
+      const r = await apiFetch<AuditRow[]>(`/api/admin/grift/audit?limit=${auditLimit}`);
+      setAuditRows(r || []);
+    } finally {
+      setAuditLoading(false);
+    }
+  }
+
+  async function refreshAll() {
+    setErr(null);
+    setLoading(true);
+    try {
+      await refreshSummary();
+      await refreshUsers();
+      await refreshSignals();
+      await refreshCases();
+      await refreshAudit();
+    } catch (e: any) {
+      setErr(e?.message ?? "Failed to load grift data");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => { refreshAll(); /* eslint-disable-next-line */ }, []);
+  useEffect(() => { refreshUsers().catch(() => {}); /* eslint-disable-next-line */ }, [minScore]);
+
+  async function openUser(userId: number) {
+    setSelectedUserId(userId);
+    setDetail(null);
+    setDetailLoading(true);
+    setErr(null);
+    try {
+      const d = await apiFetch<UserDetail>(`/api/admin/grift/users/${userId}`);
+      setDetail(d);
+    } catch (e: any) {
+      setErr(e?.message ?? "Failed to load user detail");
+    } finally {
+      setDetailLoading(false);
+    }
+  }
+
+  async function setSignalStatus(signalId: number, status: "OPEN" | "IN_REVIEW" | "CLOSED" | "IGNORED") {
+    const reason =
+      status === "CLOSED" || status === "IGNORED"
+        ? (prompt(`${status} reason (optional):`) ?? "")
+        : "";
+    setErr(null);
+    await apiFetch(`/api/admin/grift/signals/${signalId}/status`, {
+      method: "POST",
+      body: { status, reason: reason || null },
+    });
+    await refreshSummary();
+    await refreshUsers();
+    await refreshSignals();
+    await refreshCases();
+    await refreshAudit();
+    if (selectedUserId) await openUser(selectedUserId);
+    if (selectedCaseId) await openCase(selectedCaseId);
+  }
+
+  async function saveConfig() {
+    if (!config) return;
+    setSavingConfig(true);
+    setErr(null);
+    try {
+      const updated = await apiFetch<GriftConfig>("/api/admin/grift/config", { method: "PUT", body: configEdit });
+      setConfig(updated);
+      setConfigEdit({});
+      await refreshAll();
+    } catch (e: any) {
+      setErr(e?.message ?? "Failed to save config");
+    } finally {
+      setSavingConfig(false);
+    }
+  }
+
+  async function createCaseFromUI(primaryUserId: number, signalId?: number) {
+    setErr(null);
+    const title = newCaseTitle || "Grift Review";
+    const priority = newCasePriority || "MED";
+    const summary = newCaseSummary || "";
+
+    const created = await apiFetch<{ id: number }>("/api/admin/grift/cases", {
+      method: "POST",
+      body: {
+        primaryUserId,
+        title,
+        summary,
+        priority,
+        signalId: signalId ?? (newCaseSignalId ? Number(newCaseSignalId) : null),
+      },
+    });
+
+    setNewCaseOpen(false);
+    setNewCasePrimaryUserId("");
+    setNewCaseSignalId("");
+    setNewCaseSummary("");
+    await refreshCases();
+    await refreshAudit();
+    if (created?.id) await openCase(created.id);
+    setTab("Cases");
+  }
+
+  async function quickCreateCaseFromSignal(signal: any) {
+    setNewCaseTitle(`Signal Review: ${signal.rule_code}`);
+    setNewCasePriority(signal.severity === "CRITICAL" ? "CRITICAL" : signal.severity === "HIGH" ? "HIGH" : "MED");
+    setNewCaseSummary(`Auto-created from Signal #${signal.id}\n\nEvidence:\n${signal.evidence_json}`);
+    setNewCasePrimaryUserId(String(signal.primary_user_id));
+    setNewCaseSignalId(String(signal.id));
+    setNewCaseOpen(true);
+  }
+
+  async function quickCreateCaseFromUser(user: FlaggedUserRow) {
+    setNewCaseTitle(`User Review: ${user.email || `User #${user.userId}`}`);
+    setNewCasePriority(user.tier === "CRITICAL" ? "CRITICAL" : user.tier === "HIGH" ? "HIGH" : "MED");
+    setNewCaseSummary(`Auto-created from user queue.\nScore=${user.scoreCurrent}, Tier=${user.tier}`);
+    setNewCasePrimaryUserId(String(user.userId));
+    setNewCaseSignalId("");
+    setNewCaseOpen(true);
+  }
+
+  async function openCase(caseId: number) {
+    setSelectedCaseId(caseId);
+    setCaseDetail(null);
+    setCaseDetailLoading(true);
+    setErr(null);
+    try {
+      const d = await apiFetch<CaseDetail>(`/api/admin/grift/cases/${caseId}`);
+      setCaseDetail(d);
+    } catch (e: any) {
+      setErr(e?.message ?? "Failed to load case detail");
+    } finally {
+      setCaseDetailLoading(false);
+    }
+  }
+
+  async function caseAddNote(caseId: number) {
+    const note = prompt("Case note:") ?? "";
+    if (!note.trim()) return;
+    await apiFetch(`/api/admin/grift/cases/${caseId}/note`, { method: "POST", body: { note } });
+    await openCase(caseId);
+    await refreshAudit();
+    await refreshCases();
+  }
+
+  async function caseAssign(caseId: number) {
+    const s = prompt("Assign to adminId (number) or blank to unassign:") ?? "";
+    const assignedToAdminId = s.trim() ? Number(s.trim()) : null;
+    await apiFetch(`/api/admin/grift/cases/${caseId}/assign`, { method: "POST", body: { assignedToAdminId } });
+    await openCase(caseId);
+    await refreshAudit();
+    await refreshCases();
+  }
+
+  async function caseSetStatus(caseId: number, status: "OPEN" | "IN_REVIEW" | "CLOSED") {
+    const reason = status === "CLOSED" ? (prompt("Close reason (optional):") ?? "") : "";
+    await apiFetch(`/api/admin/grift/cases/${caseId}/status`, { method: "POST", body: { status, reason: reason || null } });
+    await openCase(caseId);
+    await refreshAudit();
+    await refreshCases();
+  }
+
+  async function caseLinkSignal(caseId: number) {
+    const s = prompt("SignalId to link:") ?? "";
+    const signalId = Number(s.trim());
+    if (!Number.isFinite(signalId)) return;
+    await apiFetch(`/api/admin/grift/cases/${caseId}/link-signal`, { method: "POST", body: { signalId } });
+    await openCase(caseId);
+    await refreshAudit();
+  }
+
+  async function enforceOnUser(userId: number, action: "FREEZE" | "DISABLE") {
+    const reason = prompt(`${action} reason (optional):`) ?? "";
+    await apiFetch(`/api/admin/grift/users/${userId}/enforce`, {
+      method: "POST",
+      body: { action, reason: reason || "Grift enforcement" },
+    });
+    await refreshAudit();
+  }
+
+  async function exportUsersCsvServer() {
+    await downloadCsvFromUrl(`/api/admin/grift/exports/users.csv?minScore=${minScore}`, `grift_users_${Date.now()}.csv`);
+  }
+
+  async function exportSignalsCsvServer() {
+    await downloadCsvFromUrl(
+      `/api/admin/grift/exports/signals.csv?status=${encodeURIComponent(sigStatus)}&sinceHours=${sigSinceHours}`,
+      `grift_signals_${Date.now()}.csv`
+    );
+  }
+
+  async function exportCasesCsvServer() {
+    const st = caseStatusFilter ? `?status=${encodeURIComponent(caseStatusFilter)}` : "";
+    await downloadCsvFromUrl(`/api/admin/grift/exports/cases.csv${st}`, `grift_cases_${Date.now()}.csv`);
+  }
+
+  return (
+    <div className="p-4 space-y-4">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <div className="text-lg font-semibold">Grift Detection</div>
+          <div className="text-sm text-muted-foreground">
+            Detection + triage + case management + exports + tamper-evident admin audit.
+          </div>
+        </div>
+
+        <div className="flex gap-2">
+          <button className="px-3 py-2 rounded border hover:bg-muted" onClick={refreshAll} disabled={loading}>
+            Refresh
+          </button>
+        </div>
+      </div>
+
+      {err && (
+        <div className="border border-red-300 bg-red-50 text-red-900 rounded p-3 text-sm">
+          {err}
+        </div>
+      )}
+
+      {/* Sub-tabs */}
+      <div className="flex flex-wrap gap-2">
+        <TabBtn active={tab === "Dashboard"} onClick={() => setTab("Dashboard")}>Dashboard</TabBtn>
+        <TabBtn active={tab === "Signals"} onClick={() => setTab("Signals")}>Signals</TabBtn>
+        <TabBtn active={tab === "Users"} onClick={() => setTab("Users")}>Users</TabBtn>
+        <TabBtn active={tab === "Cases"} onClick={() => setTab("Cases")}>Cases</TabBtn>
+        <TabBtn active={tab === "Exports"} onClick={() => setTab("Exports")}>Exports</TabBtn>
+        <TabBtn active={tab === "Config"} onClick={() => setTab("Config")}>Config</TabBtn>
+        <TabBtn active={tab === "Audit"} onClick={() => setTab("Audit")}>Audit</TabBtn>
+      </div>
+
+      {/* DASHBOARD */}
+      {tab === "Dashboard" && (
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-6 gap-3">
+            <div className="rounded border p-3">
+              <div className="text-sm text-muted-foreground">Open Signals</div>
+              <div className="text-2xl font-semibold">{summary?.open?.openTotal ?? 0}</div>
+            </div>
+            <div className="rounded border p-3">
+              <div className="text-sm text-muted-foreground">Open High/Critical</div>
+              <div className="text-2xl font-semibold">{summary?.open?.openHigh ?? 0}</div>
+            </div>
+            <div className="rounded border p-3">
+              <div className="text-sm text-muted-foreground">Open MED</div>
+              <div className="text-2xl font-semibold">{severityCounts["MED"] ?? 0}</div>
+            </div>
+            <div className="rounded border p-3">
+              <div className="text-sm text-muted-foreground">Open HIGH</div>
+              <div className="text-2xl font-semibold">{severityCounts["HIGH"] ?? 0}</div>
+            </div>
+            <div className="rounded border p-3">
+              <div className="text-sm text-muted-foreground">Users HIGH</div>
+              <div className="text-2xl font-semibold">{tierCounts["HIGH"] ?? 0}</div>
+            </div>
+            <div className="rounded border p-3">
+              <div className="text-sm text-muted-foreground">Users CRITICAL</div>
+              <div className="text-2xl font-semibold">{tierCounts["CRITICAL"] ?? 0}</div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+            <div className="rounded border p-3 space-y-2">
+              <div className="font-semibold">Top Open Rule Codes</div>
+              {(summary?.topRules ?? []).length ? (
+                <div className="space-y-1">
+                  {summary!.topRules.map((r) => (
+                    <div key={r.ruleCode} className="flex items-center justify-between text-sm">
+                      <span className="font-mono text-xs">{r.ruleCode}</span>
+                      <span className="font-semibold">{r.c}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-sm text-muted-foreground">No open signals.</div>
+              )}
+            </div>
+
+            <div className="lg:col-span-2 rounded border p-3 space-y-2 overflow-auto">
+              <div className="flex items-center justify-between">
+                <div className="font-semibold">Breakdown (since {Math.round(sigSinceHours)}h)</div>
+                <div className="text-xs text-muted-foreground">Data since: {fmtTs(breakdown?.since)}</div>
+              </div>
+
+              <table className="w-full text-sm min-w-[900px]">
+                <thead className="bg-muted">
+                  <tr>
+                    <th className="text-left p-2">Rule</th>
+                    {["LOW", "MED", "HIGH", "CRITICAL"].map((sev) =>
+                      STATUSES.map((st) => (
+                        <th key={`${sev}|${st}`} className="text-left p-2">
+                          {sev}/{st}
+                        </th>
+                      ))
+                    )}
+                  </tr>
+                </thead>
+                <tbody>
+                  {RULES.map((rule) => {
+                    const row = breakdownMatrix[rule] || {};
+                    return (
+                      <tr key={rule} className="border-t">
+                        <td className="p-2 font-mono text-xs">{rule}</td>
+                        {["LOW", "MED", "HIGH", "CRITICAL"].map((sev) =>
+                          STATUSES.map((st) => {
+                            const key = `${sev}|${st}`;
+                            return (
+                              <td key={`${rule}-${key}`} className="p-2">
+                                {row[key] ?? 0}
+                              </td>
+                            );
+                          })
+                        )}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+
+              <div className="pt-2 text-xs text-muted-foreground">
+                Tip: use the Signals tab to filter by Rule/Severity/Status and action signals directly (IN_REVIEW / CLOSED / IGNORED).
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SIGNALS */}
+      {tab === "Signals" && (
+        <div className="rounded border overflow-hidden">
+          <div className="p-3 border-b flex items-center justify-between">
+            <div className="font-semibold">Signals Queue</div>
+            <div className="text-xs text-muted-foreground">
+              Status workflow: OPEN → IN_REVIEW → CLOSED/IGNORED
+            </div>
+          </div>
+
+          <div className="p-3 grid grid-cols-1 md:grid-cols-6 gap-2 border-b">
+            <label className="text-xs">
+              Status
+              <select className="mt-1 w-full border rounded px-2 py-2" value={sigStatus} onChange={(e) => setSigStatus(e.target.value)}>
+                {STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </label>
+
+            <label className="text-xs">
+              Severity
+              <select className="mt-1 w-full border rounded px-2 py-2" value={sigSeverity} onChange={(e) => setSigSeverity(e.target.value)}>
+                {SEVERITIES.map((s) => <option key={s} value={s}>{s || "ALL"}</option>)}
+              </select>
+            </label>
+
+            <label className="text-xs">
+              Rule
+              <select className="mt-1 w-full border rounded px-2 py-2" value={sigRule} onChange={(e) => setSigRule(e.target.value)}>
+                <option value="">ALL</option>
+                {RULES.map((r) => <option key={r} value={r}>{r}</option>)}
+              </select>
+            </label>
+
+            <label className="text-xs">
+              User ID (optional)
+              <input className="mt-1 w-full border rounded px-2 py-2" value={sigUserId} onChange={(e) => setSigUserId(e.target.value)} />
+            </label>
+
+            <label className="text-xs">
+              Lookback (hours)
+              <input className="mt-1 w-full border rounded px-2 py-2" type="number" value={sigSinceHours} onChange={(e) => setSigSinceHours(Number(e.target.value))} />
+            </label>
+
+            <div className="flex items-end gap-2">
+              <button className="px-3 py-2 rounded border hover:bg-muted" onClick={refreshSignals} disabled={signalsLoading}>
+                {signalsLoading ? "Loading…" : "Apply"}
+              </button>
+              <button className="px-3 py-2 rounded border hover:bg-muted" onClick={() => exportSignalsCsvServer()}>
+                Export CSV
+              </button>
+            </div>
+          </div>
+
+          {signalsLoading ? (
+            <div className="p-3 text-sm text-muted-foreground">Loading signals…</div>
+          ) : signals.length === 0 ? (
+            <div className="p-3 text-sm text-muted-foreground">No signals for current filters.</div>
+          ) : (
+            <table className="w-full text-sm">
+              <thead className="bg-muted">
+                <tr>
+                  <th className="text-left p-2">Time</th>
+                  <th className="text-left p-2">Rule</th>
+                  <th className="text-left p-2">Severity</th>
+                  <th className="text-left p-2">Users</th>
+                  <th className="text-left p-2">Symbol</th>
+                  <th className="text-left p-2">Device/IP</th>
+                  <th className="text-left p-2">Points</th>
+                  <th className="text-left p-2">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {signals.map((s: any) => (
+                  <tr key={s.id} className="border-t align-top">
+                    <td className="p-2">{fmtTs(s.created_at)}</td>
+                    <td className="p-2 font-mono text-xs">{s.rule_code}</td>
+                    <td className="p-2"><TierBadge tier={s.severity} /></td>
+                    <td className="p-2">
+                      <button className="underline" onClick={() => openUser(Number(s.primary_user_id))}>
+                        #{s.primary_user_id}
+                      </button>
+                      {s.secondary_user_id ? (
+                        <>
+                          <span className="mx-2">↔</span>
+                          <button className="underline" onClick={() => openUser(Number(s.secondary_user_id))}>
+                            #{s.secondary_user_id}
+                          </button>
+                        </>
+                      ) : null}
+                    </td>
+                    <td className="p-2">{s.symbol ?? "—"}</td>
+                    <td className="p-2">
+                      <div className="font-mono text-xs break-all">{s.device_id ?? "—"}</div>
+                      <div className="text-xs text-muted-foreground">{s.ip ?? "—"}</div>
+                    </td>
+                    <td className="p-2 font-semibold">{s.points}</td>
+                    <td className="p-2 space-y-2">
+                      <div className="flex flex-wrap gap-2">
+                        {s.status !== "IN_REVIEW" && (
+                          <button className="px-3 py-1 rounded border hover:bg-muted" onClick={() => setSignalStatus(Number(s.id), "IN_REVIEW")}>
+                            Mark IN_REVIEW
+                          </button>
+                        )}
+                        {s.status !== "CLOSED" && (
+                          <button className="px-3 py-1 rounded border hover:bg-muted" onClick={() => setSignalStatus(Number(s.id), "CLOSED")}>
+                            Close
+                          </button>
+                        )}
+                        {s.status !== "IGNORED" && (
+                          <button className="px-3 py-1 rounded border hover:bg-muted" onClick={() => setSignalStatus(Number(s.id), "IGNORED")}>
+                            Ignore
+                          </button>
+                        )}
+                        <button className="px-3 py-1 rounded border hover:bg-muted" onClick={() => quickCreateCaseFromSignal(s)}>
+                          Create Case
+                        </button>
+                      </div>
+
+                      <details>
+                        <summary className="cursor-pointer underline text-xs">evidence</summary>
+                        <pre className="text-xs whitespace-pre-wrap break-words mt-2">{s.evidence_json}</pre>
+                      </details>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+
+      {/* USERS */}
+      {tab === "Users" && (
+        <div className="rounded border overflow-hidden">
+          <div className="p-3 border-b flex items-center justify-between">
+            <div className="font-semibold">Flagged Users</div>
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <span>Min score:</span>
+              <input className="border rounded px-2 py-1 w-20" type="number" min={0} max={100} value={minScore} onChange={(e) => setMinScore(Number(e.target.value))} />
+              <button className="px-3 py-2 rounded border hover:bg-muted" onClick={() => exportUsersCsvServer()}>
+                Export CSV
+              </button>
+            </div>
+          </div>
+
+          {users.length === 0 ? (
+            <div className="p-3 text-sm text-muted-foreground">No users at this threshold.</div>
+          ) : (
+            <table className="w-full text-sm">
+              <thead className="bg-muted">
+                <tr>
+                  <th className="text-left p-2">User</th>
+                  <th className="text-left p-2">Tier</th>
+                  <th className="text-left p-2">Score</th>
+                  <th className="text-left p-2">Devices(7d)</th>
+                  <th className="text-left p-2">IPs(7d)</th>
+                  <th className="text-left p-2">ASNs(7d)</th>
+                  <th className="text-left p-2">Linked(30d)</th>
+                  <th className="text-left p-2">Hedge(7d)</th>
+                  <th className="text-left p-2">Open Signals</th>
+                  <th className="text-left p-2">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {users.map((u) => (
+                  <tr key={u.userId} className="border-t">
+                    <td className="p-2">
+                      <div className="font-medium">{u.name || "User #" + u.userId}</div>
+                      <div className="text-muted-foreground">{u.email}</div>
+                    </td>
+                    <td className="p-2"><TierBadge tier={u.tier} /></td>
+                    <td className="p-2 font-semibold">{u.scoreCurrent}</td>
+                    <td className="p-2">{u.devices7d}</td>
+                    <td className="p-2">{u.ips7d}</td>
+                    <td className="p-2">{u.asns7d}</td>
+                    <td className="p-2">{u.linkedAccounts30d}</td>
+                    <td className="p-2">{u.hedgePairs7d}</td>
+                    <td className="p-2">{u.openSignalsCount}</td>
+                    <td className="p-2 space-y-2">
+                      <div className="flex flex-wrap gap-2">
+                        <button className="px-3 py-1 rounded border hover:bg-muted" onClick={() => openUser(u.userId)}>
+                          Review
+                        </button>
+                        <button className="px-3 py-1 rounded border hover:bg-muted" onClick={() => quickCreateCaseFromUser(u)}>
+                          Create Case
+                        </button>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <button className="px-3 py-1 rounded border hover:bg-muted" onClick={() => enforceOnUser(u.userId, "FREEZE")}>
+                          Enforce: Freeze
+                        </button>
+                        <button className="px-3 py-1 rounded border hover:bg-muted" onClick={() => enforceOnUser(u.userId, "DISABLE")}>
+                          Enforce: Disable
+                        </button>
+                      </div>
+                      <div className="text-xs text-muted-foreground">Enforcement uses safe placeholders if columns differ.</div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+
+      {/* CASES */}
+      {tab === "Cases" && (
+        <div className="space-y-3">
+          <div className="rounded border p-3 flex items-center justify-between">
+            <div>
+              <div className="font-semibold">Cases</div>
+              <div className="text-xs text-muted-foreground">Assign, note, link signals, and track status.</div>
+            </div>
+            <div className="flex gap-2 items-center">
+              <select className="border rounded px-2 py-2 text-sm" value={caseStatusFilter} onChange={(e) => setCaseStatusFilter(e.target.value)}>
+                <option value="">ALL</option>
+                {CASE_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+              </select>
+              <button className="px-3 py-2 rounded border hover:bg-muted" onClick={refreshCases} disabled={casesLoading}>
+                {casesLoading ? "Loading…" : "Refresh"}
+              </button>
+              <button className="px-3 py-2 rounded border hover:bg-muted" onClick={() => setNewCaseOpen(true)}>
+                New Case
+              </button>
+              <button className="px-3 py-2 rounded border hover:bg-muted" onClick={() => exportCasesCsvServer()}>
+                Export CSV
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+            <div className="rounded border overflow-hidden">
+              <div className="p-3 border-b font-semibold">Case List</div>
+              {cases.length === 0 ? (
+                <div className="p-3 text-sm text-muted-foreground">No cases.</div>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead className="bg-muted">
+                    <tr>
+                      <th className="text-left p-2">ID</th>
+                      <th className="text-left p-2">Status</th>
+                      <th className="text-left p-2">Priority</th>
+                      <th className="text-left p-2">User</th>
+                      <th className="text-left p-2">Title</th>
+                      <th className="text-left p-2">Updated</th>
+                      <th className="text-left p-2">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {cases.map((c: any) => (
+                      <tr key={c.id} className="border-t">
+                        <td className="p-2">#{c.id}</td>
+                        <td className="p-2">{c.status}</td>
+                        <td className="p-2"><TierBadge tier={c.priority} /></td>
+                        <td className="p-2">
+                          <button className="underline" onClick={() => openUser(Number(c.primary_user_id))}>
+                            #{c.primary_user_id}
+                          </button>
+                        </td>
+                        <td className="p-2">{c.title}</td>
+                        <td className="p-2">{fmtTs(c.updated_at)}</td>
+                        <td className="p-2">
+                          <button className="px-3 py-1 rounded border hover:bg-muted" onClick={() => openCase(Number(c.id))}>
+                            Open
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+
+            <div className="rounded border overflow-hidden">
+              <div className="p-3 border-b font-semibold">Case Detail</div>
+              {!selectedCaseId ? (
+                <div className="p-3 text-sm text-muted-foreground">Select a case to view details.</div>
+              ) : caseDetailLoading ? (
+                <div className="p-3 text-sm text-muted-foreground">Loading case detail…</div>
+              ) : !caseDetail ? (
+                <div className="p-3 text-sm text-muted-foreground">No case detail.</div>
+              ) : (
+                <div className="p-3 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="font-semibold">
+                        Case #{caseDetail.case.id} — {caseDetail.case.title}
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        Status: {caseDetail.case.status} | Priority: {caseDetail.case.priority} | User #{caseDetail.case.primary_user_id}
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <button className="px-3 py-2 rounded border hover:bg-muted" onClick={() => caseAssign(selectedCaseId)}>
+                        Assign
+                      </button>
+                      <button className="px-3 py-2 rounded border hover:bg-muted" onClick={() => caseAddNote(selectedCaseId)}>
+                        Add Note
+                      </button>
+                      <button className="px-3 py-2 rounded border hover:bg-muted" onClick={() => caseLinkSignal(selectedCaseId)}>
+                        Link Signal
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    <button className="px-3 py-1 rounded border hover:bg-muted" onClick={() => caseSetStatus(selectedCaseId, "OPEN")}>Set OPEN</button>
+                    <button className="px-3 py-1 rounded border hover:bg-muted" onClick={() => caseSetStatus(selectedCaseId, "IN_REVIEW")}>Set IN_REVIEW</button>
+                    <button className="px-3 py-1 rounded border hover:bg-muted" onClick={() => caseSetStatus(selectedCaseId, "CLOSED")}>Close</button>
+                  </div>
+
+                  {caseDetail.case.summary ? (
+                    <div className="rounded border p-2 text-sm whitespace-pre-wrap">{caseDetail.case.summary}</div>
+                  ) : (
+                    <div className="text-sm text-muted-foreground">No summary.</div>
+                  )}
+
+                  <div className="rounded border">
+                    <div className="p-2 border-b font-semibold">Signals Linked</div>
+                    {caseDetail.signals.length === 0 ? (
+                      <div className="p-2 text-sm text-muted-foreground">No signals linked.</div>
+                    ) : (
+                      <table className="w-full text-sm">
+                        <thead className="bg-muted">
+                          <tr>
+                            <th className="text-left p-2">Signal</th>
+                            <th className="text-left p-2">Rule</th>
+                            <th className="text-left p-2">Severity</th>
+                            <th className="text-left p-2">Status</th>
+                            <th className="text-left p-2">Action</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {caseDetail.signals.map((s: any) => (
+                            <tr key={s.id} className="border-t">
+                              <td className="p-2">#{s.id}</td>
+                              <td className="p-2 font-mono text-xs">{s.rule_code}</td>
+                              <td className="p-2"><TierBadge tier={s.severity} /></td>
+                              <td className="p-2">{s.status}</td>
+                              <td className="p-2">
+                                <button className="px-3 py-1 rounded border hover:bg-muted" onClick={() => setSignalStatus(Number(s.id), "IN_REVIEW")}>
+                                  IN_REVIEW
+                                </button>
+                                <button className="ml-2 px-3 py-1 rounded border hover:bg-muted" onClick={() => setSignalStatus(Number(s.id), "CLOSED")}>
+                                  Close
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
+
+                  <div className="rounded border">
+                    <div className="p-2 border-b font-semibold">Notes</div>
+                    {caseDetail.notes.length === 0 ? (
+                      <div className="p-2 text-sm text-muted-foreground">No notes.</div>
+                    ) : (
+                      <div className="p-2 space-y-2">
+                        {caseDetail.notes.map((n: any) => (
+                          <div key={n.id} className="rounded border p-2">
+                            <div className="text-xs text-muted-foreground">
+                              {fmtTs(n.created_at)} — admin #{n.admin_id ?? "—"}
+                            </div>
+                            <div className="text-sm whitespace-pre-wrap">{n.note}</div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* EXPORTS */}
+      {tab === "Exports" && (
+        <div className="rounded border p-3 space-y-3">
+          <div className="font-semibold">Server-side Exports</div>
+          <div className="text-sm text-muted-foreground">
+            These exports scale better than client-side for large datasets.
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            <button className="px-3 py-2 rounded border hover:bg-muted" onClick={exportUsersCsvServer}>
+              Export Users CSV (minScore={minScore})
+            </button>
+
+            <button className="px-3 py-2 rounded border hover:bg-muted" onClick={exportSignalsCsvServer}>
+              Export Signals CSV (status={sigStatus}, sinceHours={sigSinceHours})
+            </button>
+
+            <button className="px-3 py-2 rounded border hover:bg-muted" onClick={exportCasesCsvServer}>
+              Export Cases CSV (status={caseStatusFilter || "ALL"})
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* CONFIG */}
+      {tab === "Config" && (
+        <div className="rounded border p-3 space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <div className="font-semibold">Grift Config (Admin-editable)</div>
+            <div className="text-xs text-muted-foreground">Last update: {fmtTs(config?.updatedAt)}</div>
+          </div>
+
+          {!config ? (
+            <div className="text-sm text-muted-foreground">Loading config…</div>
+          ) : (
+            <>
+              <div className="grid grid-cols-2 md:grid-cols-6 gap-2">
+                <label className="text-xs">
+                  Enabled
+                  <select
+                    className="mt-1 w-full border rounded px-2 py-2"
+                    value={String(configEdit.enabled ?? config.enabled)}
+                    onChange={(e) => setConfigEdit((p) => ({ ...p, enabled: Number(e.target.value) }))}
+                  >
+                    <option value="1">ON</option>
+                    <option value="0">OFF</option>
+                  </select>
+                </label>
+
+                <label className="text-xs">
+                  MultiAcct Window (days)
+                  <input className="mt-1 w-full border rounded px-2 py-2" type="number"
+                    value={configEdit.multiAccountWindowDays ?? config.multiAccountWindowDays}
+                    onChange={(e) => setConfigEdit((p) => ({ ...p, multiAccountWindowDays: Number(e.target.value) }))} />
+                </label>
+
+                <label className="text-xs">
+                  Churn Window (hours)
+                  <input className="mt-1 w-full border rounded px-2 py-2" type="number"
+                    value={configEdit.churnWindowHours ?? config.churnWindowHours}
+                    onChange={(e) => setConfigEdit((p) => ({ ...p, churnWindowHours: Number(e.target.value) }))} />
+                </label>
+
+                <label className="text-xs">
+                  Hedge Window (min)
+                  <input className="mt-1 w-full border rounded px-2 py-2" type="number"
+                    value={configEdit.hedgeWindowMinutes ?? config.hedgeWindowMinutes}
+                    onChange={(e) => setConfigEdit((p) => ({ ...p, hedgeWindowMinutes: Number(e.target.value) }))} />
+                </label>
+
+                <label className="text-xs">
+                  Concurrent Window (min)
+                  <input className="mt-1 w-full border rounded px-2 py-2" type="number"
+                    value={configEdit.concurrentWindowMinutes ?? config.concurrentWindowMinutes}
+                    onChange={(e) => setConfigEdit((p) => ({ ...p, concurrentWindowMinutes: Number(e.target.value) }))} />
+                </label>
+
+                <div className="flex items-end">
+                  <button className="w-full px-3 py-2 rounded border hover:bg-muted disabled:opacity-50" onClick={saveConfig} disabled={savingConfig}>
+                    {savingConfig ? "Saving…" : "Save Config"}
+                  </button>
+                </div>
+              </div>
+
+              <div className="text-xs text-muted-foreground">
+                All thresholds and scores are admin-editable. Defaults are suitable for initial triage and should be tuned after observing false positives.
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* AUDIT */}
+      {tab === "Audit" && (
+        <div className="rounded border overflow-hidden">
+          <div className="p-3 border-b flex items-center justify-between">
+            <div className="font-semibold">Grift Admin Audit (Hash-chained)</div>
+            <div className="flex items-center gap-2">
+              <input className="border rounded px-2 py-1 w-24 text-sm" type="number" value={auditLimit} onChange={(e) => setAuditLimit(Number(e.target.value))} />
+              <button className="px-3 py-2 rounded border hover:bg-muted" onClick={refreshAudit} disabled={auditLoading}>
+                {auditLoading ? "Loading…" : "Refresh"}
+              </button>
+            </div>
+          </div>
+
+          {auditRows.length === 0 ? (
+            <div className="p-3 text-sm text-muted-foreground">No audit rows.</div>
+          ) : (
+            <table className="w-full text-sm">
+              <thead className="bg-muted">
+                <tr>
+                  <th className="text-left p-2">Time</th>
+                  <th className="text-left p-2">Admin</th>
+                  <th className="text-left p-2">Action</th>
+                  <th className="text-left p-2">Entity</th>
+                  <th className="text-left p-2">Payload</th>
+                  <th className="text-left p-2">Hash</th>
+                </tr>
+              </thead>
+              <tbody>
+                {auditRows.map((r: any) => (
+                  <tr key={r.id} className="border-t align-top">
+                    <td className="p-2">{fmtTs(r.ts)}</td>
+                    <td className="p-2">{r.admin_id ?? "system"}</td>
+                    <td className="p-2 font-mono text-xs">{r.action}</td>
+                    <td className="p-2">
+                      <div className="text-xs font-mono">{r.entity_type}:{r.entity_id}</div>
+                    </td>
+                    <td className="p-2">
+                      <details>
+                        <summary className="cursor-pointer underline text-xs">view</summary>
+                        <pre className="text-xs whitespace-pre-wrap break-words mt-2">{r.payload_json}</pre>
+                      </details>
+                    </td>
+                    <td className="p-2">
+                      <div className="text-xs font-mono break-all">{r.event_hash}</div>
+                      <div className="text-xs text-muted-foreground font-mono break-all">prev: {r.prev_hash ?? "—"}</div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+
+      {/* USER DETAIL MODAL */}
+      {selectedUserId !== null && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-background rounded-lg border w-[95vw] max-w-6xl max-h-[90vh] overflow-auto">
+            <div className="p-3 border-b flex items-center justify-between">
+              <div className="font-semibold">Grift Review — User #{selectedUserId}</div>
+              <button className="px-3 py-2 rounded border hover:bg-muted" onClick={() => { setSelectedUserId(null); setDetail(null); }}>
+                Close
+              </button>
+            </div>
+
+            {detailLoading ? (
+              <div className="p-4 text-sm text-muted-foreground">Loading user detail…</div>
+            ) : !detail ? (
+              <div className="p-4 text-sm text-muted-foreground">No data.</div>
+            ) : (
+              <div className="p-4 space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-6 gap-3">
+                  <div className="rounded border p-3">
+                    <div className="text-xs text-muted-foreground">Score</div>
+                    <div className="text-2xl font-semibold">{detail.score?.score_current ?? 0}</div>
+                  </div>
+                  <div className="rounded border p-3">
+                    <div className="text-xs text-muted-foreground">Tier</div>
+                    <div className="text-2xl font-semibold">{String(detail.score?.tier ?? "LOW")}</div>
+                  </div>
+                  <div className="rounded border p-3">
+                    <div className="text-xs text-muted-foreground">Open Signals</div>
+                    <div className="text-2xl font-semibold">{detail.score?.open_signals_count ?? 0}</div>
+                  </div>
+                  <div className="rounded border p-3">
+                    <div className="text-xs text-muted-foreground">Last Evaluated</div>
+                    <div className="text-sm">{fmtTs(detail.score?.last_evaluated_at)}</div>
+                  </div>
+                  <div className="rounded border p-3">
+                    <button className="w-full px-3 py-2 rounded border hover:bg-muted" onClick={() => quickCreateCaseFromUser({
+                      userId: selectedUserId,
+                      email: "",
+                      name: null,
+                      scoreCurrent: detail.score?.score_current ?? 0,
+                      tier: detail.score?.tier ?? "LOW",
+                      devices7d: detail.score?.devices_7d ?? 0,
+                      ips7d: detail.score?.ips_7d ?? 0,
+                      userAgents7d: detail.score?.user_agents_7d ?? 0,
+                      countries7d: detail.score?.countries_7d ?? 0,
+                      asns7d: detail.score?.asns_7d ?? 0,
+                      linkedAccounts30d: detail.score?.linked_accounts_30d ?? 0,
+                      hedgePairs7d: detail.score?.hedge_pairs_7d ?? 0,
+                      openSignalsCount: detail.score?.open_signals_count ?? 0,
+                      lastEvaluatedAt: detail.score?.last_evaluated_at ?? 0,
+                    } as any)}>
+                      Create Case
+                    </button>
+                  </div>
+                  <div className="rounded border p-3 space-y-2">
+                    <button className="w-full px-3 py-2 rounded border hover:bg-muted" onClick={() => enforceOnUser(selectedUserId, "FREEZE")}>
+                      Enforce: Freeze
+                    </button>
+                    <button className="w-full px-3 py-2 rounded border hover:bg-muted" onClick={() => enforceOnUser(selectedUserId, "DISABLE")}>
+                      Enforce: Disable
+                    </button>
+                  </div>
+                </div>
+
+                <div className="rounded border">
+                  <div className="p-3 border-b font-semibold">Signals (latest 300)</div>
+                  {detail.signals?.length ? (
+                    <table className="w-full text-sm">
+                      <thead className="bg-muted">
+                        <tr>
+                          <th className="text-left p-2">Time</th>
+                          <th className="text-left p-2">Rule</th>
+                          <th className="text-left p-2">Severity</th>
+                          <th className="text-left p-2">Status</th>
+                          <th className="text-left p-2">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {detail.signals.map((s: any) => (
+                          <tr key={s.id} className="border-t">
+                            <td className="p-2">{fmtTs(s.created_at)}</td>
+                            <td className="p-2 font-mono text-xs">{s.rule_code}</td>
+                            <td className="p-2"><TierBadge tier={s.severity} /></td>
+                            <td className="p-2">{s.status}</td>
+                            <td className="p-2 flex flex-wrap gap-2">
+                              <button className="px-3 py-1 rounded border hover:bg-muted" onClick={() => setSignalStatus(Number(s.id), "IN_REVIEW")}>
+                                IN_REVIEW
+                              </button>
+                              <button className="px-3 py-1 rounded border hover:bg-muted" onClick={() => setSignalStatus(Number(s.id), "CLOSED")}>
+                                Close
+                              </button>
+                              <button className="px-3 py-1 rounded border hover:bg-muted" onClick={() => setSignalStatus(Number(s.id), "IGNORED")}>
+                                Ignore
+                              </button>
+                              <button className="px-3 py-1 rounded border hover:bg-muted" onClick={() => quickCreateCaseFromSignal(s)}>
+                                Create Case
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  ) : (
+                    <div className="p-3 text-sm text-muted-foreground">No signals.</div>
+                  )}
+                </div>
+
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* NEW CASE MODAL */}
+      {newCaseOpen && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-background rounded-lg border w-[95vw] max-w-2xl">
+            <div className="p-3 border-b flex items-center justify-between">
+              <div className="font-semibold">Create Case</div>
+              <button className="px-3 py-2 rounded border hover:bg-muted" onClick={() => setNewCaseOpen(false)}>
+                Close
+              </button>
+            </div>
+
+            <div className="p-4 space-y-3">
+              <label className="text-xs block">
+                Primary User ID
+                <input className="mt-1 w-full border rounded px-3 py-2" value={newCasePrimaryUserId} onChange={(e) => setNewCasePrimaryUserId(e.target.value)} />
+              </label>
+
+              <label className="text-xs block">
+                Title
+                <input className="mt-1 w-full border rounded px-3 py-2" value={newCaseTitle} onChange={(e) => setNewCaseTitle(e.target.value)} />
+              </label>
+
+              <label className="text-xs block">
+                Priority
+                <select className="mt-1 w-full border rounded px-3 py-2" value={newCasePriority} onChange={(e) => setNewCasePriority(e.target.value)}>
+                  {PRIORITIES.map((p) => <option key={p} value={p}>{p}</option>)}
+                </select>
+              </label>
+
+              <label className="text-xs block">
+                Link Signal ID (optional)
+                <input className="mt-1 w-full border rounded px-3 py-2" value={newCaseSignalId} onChange={(e) => setNewCaseSignalId(e.target.value)} />
+              </label>
+
+              <label className="text-xs block">
+                Summary
+                <textarea className="mt-1 w-full border rounded px-3 py-2 h-40" value={newCaseSummary} onChange={(e) => setNewCaseSummary(e.target.value)} />
+              </label>
+
+              <div className="flex gap-2 justify-end">
+                <button className="px-3 py-2 rounded border hover:bg-muted" onClick={() => setNewCaseOpen(false)}>
+                  Cancel
+                </button>
+                <button
+                  className="px-3 py-2 rounded border hover:bg-muted"
+                  onClick={() => {
+                    const pid = Number(newCasePrimaryUserId.trim());
+                    if (!Number.isFinite(pid) || pid <= 0) {
+                      alert("Primary User ID is required.");
+                      return;
+                    }
+                    createCaseFromUI(pid).catch((e) => setErr(e?.message ?? "Failed to create case"));
+                  }}
+                >
+                  Create
+                </button>
+              </div>
+
+            </div>
+          </div>
+        </div>
+      )}
+
+    </div>
+  );
+}
+```
+
+---
+
+# 3) AdminDashboard Integration (same as before)
+
+In `client/src/pages/AdminDashboard.tsx`:
+
+```tsx
+import UserManagementGriftTab from "./admin/UserManagementGriftTab";
+```
+
+Add mini-tab label:
+
+```ts
+"Grift Detection"
+```
+
+Render:
+
+```tsx
+{activeUserMiniTab === "Grift Detection" && <UserManagementGriftTab />}
+```
+
+---
+
+# 4) Hook Points (must be wired, same as before)
+
+You must pass the stable header `X-Device-Id` and invoke engine on:
+
+* login success
+* trade submit
+
+If those are already wired, nothing else changes.
+
+---
+
+# 5) What “Add” now includes (definition of done)
+
+* **Signals**: OPEN/IN_REVIEW/CLOSED/IGNORED, with admin reasons and audit logging
+* **Cases**: create/assign/note/link-signal/status lifecycle
+* **Audit**: hash-chained `grift_admin_actions` surfaced in UI
+* **Exports**: server-side CSV for users/signals/cases
+* **Enforcement**: safe placeholder freeze/disable endpoint that only updates user columns if they exist; otherwise logs only
+* **Scheduler**: periodic recompute + audit trail of scheduler runs
+
+If you want the next increment after this, the only meaningful “bigger” addition is **case assignment to named admins** (resolve admin IDs to emails/names) and **auto-case creation rules** (e.g., auto-create case for any CRITICAL hedge-pair signal).

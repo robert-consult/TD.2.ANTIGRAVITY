@@ -1,0 +1,168 @@
+### **Audit Checklist: Fraud Detection & Integrity System**
+
+This item-by-item checklist is designed for **Replit Agent 3** to verify the implementation of the Fraud Detection System. It covers database schema, backend logic, API endpoints, and frontend integration.
+
+---
+
+### **1. Database Schema Audit**
+
+**Objective:** Verify all tables and columns are correctly defined in `shared/schema.ts` and migrations ran successfully via `server/db/ensureSchema.ts`.
+
+#### **A. User Identity Columns**
+
+* [ ] **`userSessions` Table:** Verify the existence of the following columns:
+* `deviceFp` (TEXT)
+* `deviceInstallId` (TEXT)
+* `clientTz` (TEXT)
+* `clientLang` (TEXT)
+
+
+* [ ] **`userLoginHistory` Table:** Verify the existence of the following columns:
+* `deviceFp` (TEXT)
+* `deviceInstallId` (TEXT)
+* `clientTz` (TEXT)
+* `clientLang` (TEXT)
+
+
+* [ ] **Indices:** Confirm SQL indices exist for `device_fp` and `device_install_id` on both tables for performance.
+
+#### **B. Fraud Detection Tables**
+
+* [ ] **`fraud_identity_links` Table:**
+* Verify columns: `id`, `link_type`, `link_key`, `user_id`, `first_seen_at`, `last_seen_at`, `seen_count`, `last_ip`, `last_user_agent`.
+* Confirm **UNIQUE constraint** on `(link_type, link_key, user_id)`.
+
+
+* [ ] **`fraud_alerts` Table:**
+* Verify columns: `id`, `dedupe_key`, `user_id`, `severity`, `category`, `status`, `score`, `title`, `details_json`.
+* Confirm **UNIQUE constraint** on `dedupe_key`.
+
+
+* [ ] **`fraud_user_risk` Table:**
+* Verify columns: `user_id` (Primary Key), `risk_score`, `risk_level`, `reasons_json`, `metrics_json`, `open_alerts_count`, `last_evaluated_at`.
+
+
+
+#### **C. Schema Initialization (`server/db/ensureSchema.ts`)**
+
+* [ ] Verify `ensureUserSessionIdentityColumns` function exists and is exported.
+* [ ] Verify `ensureLoginHistoryIdentityColumns` function exists and is exported.
+* [ ] Verify `ensureFraudDetectionTables` function exists and is exported.
+* [ ] **Server Startup:** Check `server/index.ts` to confirm these functions are imported and called in the startup sequence (before route registration).
+
+---
+
+### **2. Session Logic & Security Audit**
+
+**Objective:** Verify that `server/security/sessionTrail.ts` correctly handles identity data.
+
+* [ ] **Header Constants:** Verify definition of `HEADER_DEVICE_FP`, `HEADER_DEVICE_INSTALL`, `HEADER_CLIENT_TZ`, `HEADER_CLIENT_LANG`.
+* [ ] **Identity Extraction:** Verify `getClientIdentity(req)` correctly extracts and sanitizes headers.
+* [ ] **`createUserSession`:**
+* Confirm signature accepts `identity?: ClientIdentityContext`.
+* Verify `db.insert` includes identity fields for both `userSessions` and `userLoginHistory`.
+* Confirm `isCurrent` defaults to `true`.
+
+
+* [ ] **`recordLoginAttempt`:**
+* Confirm signature accepts `identity`.
+* Verify failed login attempts log device identity data.
+
+
+* [ ] **`touchSession`:**
+* Confirm it accepts an optional context object.
+* Verify it updates identity fields (like `clientTz` or `deviceFp`) if provided, to track churn.
+
+
+* [ ] **`endSession` (Soft Delete):**
+* Verify it sets `isCurrent = false` instead of deleting the row.
+* Verify it updates `userLoginHistory` with `logoutAt` and `sessionLengthSec`.
+
+
+* [ ] **Query Filter:** Verify `getActiveSessions` adds the filter `.where(eq(userSessions.isCurrent, true))` to exclude soft-deleted sessions.
+
+---
+
+### **3. Fraud Service Logic Audit (`server/services/fraudDetection.ts`)**
+
+**Objective:** specific business logic implementation.
+
+* [ ] **`onIdentityEvent` Handler:**
+* Verify logic creates/updates links for `DEVICE_INSTALL`, `DEVICE_FP`, and `IP`.
+* Verify it triggers `upsertAlert` if multiple users share a `DEVICE_INSTALL` ID (High Severity).
+
+
+* [ ] **`onTradeOpened` Handler:**
+* Verify it looks up linked users (via shared device/install ID).
+* Verify logic checks for **Hedging**: Open trades on the *same symbol* with *opposite directions* (BUY vs SELL) across linked accounts.
+* Verify it triggers a `CRITICAL` alert if hedging is detected.
+
+
+* [ ] **Risk Scoring (`computeUserMetrics` / `recomputeUserRisk`):**
+* Verify queries for 24h and 7d churn (IP counts, Device counts).
+* Verify scoring logic sums up alert scores and churn penalties.
+* Verify `fraudUserRisk` table is updated via upsert.
+
+
+
+---
+
+### **4. API Endpoints Audit**
+
+**Objective:** Verify server routes.
+
+#### **A. Admin Fraud Routes (`server/routes/adminFraud.ts`)**
+
+* [ ] **Route Definition:** Verify `adminFraudRouter` is defined and exported.
+* [ ] **Security:** Confirm all routes use `requireAdmin` middleware.
+* [ ] **Endpoints:**
+* `GET /users`: Calls `listFraudUsers`.
+* `GET /users/:userId/alerts`: Fetches rows from `fraudAlerts`.
+* `POST /scan/:userId`: Manually triggers `onIdentityEvent` or recompute logic.
+
+
+
+#### **B. Integration in `server/routes.ts**`
+
+* [ ] Verify import: `import { adminFraudRouter } ...`
+* [ ] Verify registration: `app.use("/api/admin/fraud", adminFraudRouter)`.
+* [ ] **Auth Routes:** In `POST /login` and `POST /register`, confirm `createUserSession` is passed `identity: getClientIdentity(req)`.
+* [ ] **Trade Routes:** In `POST /trades`, confirm `onTradeOpened` is called (async/non-blocking) after the trade is successfully created.
+
+---
+
+### **5. Frontend Integration Audit**
+
+**Objective:** Verify client-side data collection.
+
+* [ ] **Identity Logic (`client/src/lib/identity.ts`):**
+* Verify `getDeviceInstallId` checks `localStorage` and generates/persists a UUID if missing.
+* Verify `getDeviceFingerprint` creates a hash from canvas/navigator properties.
+
+
+* [ ] **Axios Interceptor (`client/src/main.tsx`):**
+* Verify an interceptor is registered before app mount.
+* Confirm headers `x-device-fp` and `x-device-install-id` are attached to every request.
+
+
+* [ ] **Admin Dashboard (`client/src/pages/AdminDashboard.tsx`):**
+* Verify a new "Fraud" tab or button is present.
+* Verify the table renders correctly using data fetched from `/api/admin/fraud/users`.
+
+
+
+---
+
+### **6. Runtime & Compilation Check**
+
+* [ ] **Type Check:** Run `npm run typecheck` (or `tsc --noEmit`) to confirm no TypeScript errors in the new files.
+* [ ] **Server Startup:** Run `npm run dev` and verify console logs show:
+* "User sessions identity columns ensured"
+* "Fraud detection tables ensured"
+
+
+* [ ] **Functional Test:**
+1. Log in.
+2. Check SQLite database (`user_sessions` table) to confirm `device_fp` is populated.
+3. Simulate a shared device login (e.g., use the same browser/localStorage context for a second user).
+4. Verify a "Shared Device Install" alert appears in the `fraud_alerts` table.

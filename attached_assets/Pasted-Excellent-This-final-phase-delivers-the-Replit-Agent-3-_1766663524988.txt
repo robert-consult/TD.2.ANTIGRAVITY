@@ -1,0 +1,173 @@
+Excellent. This final phase delivers the **Replit Agent 3 QA/Test Plan**—a reproducible checklist + ready-to-run test commands verifying that the whole enforcement loop (UI ↔ backend ↔ DB ↔ PolicyDecision) behaves exactly as designed.
+
+---
+
+## 1.  Test Environment Preparation
+
+| Step | Command                                                       | Purpose                            |
+| ---- | ------------------------------------------------------------- | ---------------------------------- |
+| 1    | `npm run db:push`                                             | Ensure schema & migrations current |
+| 2    | `npm run seed:test` *(if exists)*                             | Populate test users/trades         |
+| 3    | `npm run dev`                                                 | Start backend (port 3000)          |
+| 4    | `npm run audit:policy -- --db trading_app.db --userId 1`      | Baseline schema/policy audit       |
+| 5    | Copy session cookie from browser DevTools → use in curl tests | Authenticated API calls            |
+
+---
+
+## 2.  Policy Engine Endpoint Matrix
+
+### 2.1 Locked-State Trading
+
+| Case | Precondition                                    | Command                                                       | Expected                                                              |
+| ---- | ----------------------------------------------- | ------------------------------------------------------------- | --------------------------------------------------------------------- |
+| A    | user.emailVerifiedAt = NULL, created > 14 d ago | `curl -XPOST -b "$CK" http://localhost:3000/api/trades/place` | HTTP 403 + `deny_code="EMAIL_NOT_VERIFIED"`                           |
+| B    | same user, try cancel pending                   | `curl -XPOST -b "$CK" /api/trades/123/cancel`                 | HTTP 403 + `deny_code="TRADE_CANCEL_PENDING_NOT_ALLOWED_WHEN_LOCKED"` |
+| C    | same user, try modify SL/TP                     | `curl -XPUT -b "$CK" /api/trades/123/targets`                 | HTTP 403 + `deny_code="TRADE_MODIFY_TARGETS_NOT_ALLOWED_WHEN_LOCKED"` |
+| D    | same user, try close trade                      | `curl -XPOST -b "$CK" /api/trades/123/close`                  | HTTP 200 OK                                                           |
+
+---
+
+### 2.2 Email Resend Throttles
+
+```bash
+for i in {1..5}; do
+  curl -XPOST -b "$CK" http://localhost:3000/api/verification/email/send
+done
+```
+
+**Expected:**
+Requests #1–3 = 200 OK,
+Request #4+ = 429 or 403 with `deny_code="EMAIL_SEND_RATE_LIMIT"`.
+
+---
+
+### 2.3 SMS Start / Confirm
+
+```bash
+curl -XPOST -b "$CK" /api/sms/verify/start -d '{"phone":"+15555550123"}'
+curl -XPOST -b "$CK" /api/sms/verify/confirm -d '{"phone":"+15555550123","code":"000000"}'
+```
+
+**Expected:**
+If daily cap exceeded → 403 `SMS_RATE_LIMIT`;
+otherwise → 200 OK and audit event `SMS_OTP_SENT`.
+
+---
+
+### 2.4 KYC / Payout Gating
+
+| Action                              | Command                                                                    | Expect                         |
+| ----------------------------------- | -------------------------------------------------------------------------- | ------------------------------ |
+| View KYC (uninvited)                | `curl -b "$CK" /api/profile/kyc`                                           | 403 `KYC_NOT_SELECTED`         |
+| View KYC (invited)                  | admin invites → retry → 200 OK                                             |                                |
+| Set payout currency before approval | `curl -XPUT -b "$CK" /api/profile/payout/currency -d '{"currency":"USD"}'` | 403 `PAYOUT_PROFILE_NOT_READY` |
+| After KYC approved                  | same command → 200 OK                                                      |                                |
+
+---
+
+### 2.5 Auto-Tier Promotion
+
+Simulate eligibility:
+
+```sql
+UPDATE users SET tradesLifetime=50, accountAgeDays=45, balancePctOfStart=1.3 WHERE id=1;
+```
+
+Then run:
+
+```bash
+node server/policy/autoTier.js  # or trigger recalcAccount
+```
+
+**Expected:**
+Log `[autoTier] Promoted user 1 to PERFORMER` and DB userTier = "PERFORMER".
+
+---
+
+### 2.6 Audit Trail Verification
+
+```bash
+sqlite3 trading_app.db "SELECT event_type, user_id, note FROM identity_audit ORDER BY at DESC LIMIT 10;"
+```
+
+**Expected event types:**
+`EMAIL_SEND`, `EMAIL_VERIFIED`, `SMS_OTP_SENT`, `SMS_VERIFY_SUCCESS`, `KYC_INVITED`, `KYC_APPROVED`, `TIER_PROMOTED`.
+
+---
+
+## 3.  Front-End Validation Steps
+
+| Component                                  | Expected Behaviour                                                                                               |
+| ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------- |
+| **Trade Screen**                           | “Place Order” button disabled when locked (email not verified or reverify overdue); tool-tip = deny_code message |
+| **Edit Trade Modal**                       | Inputs disabled if `canModifyTargets=false`; save button shows toast message                                     |
+| **Pending Orders Table**                   | Edit/Cancel buttons disabled if policy denies                                                                    |
+| **Profile Settings page**                  | KYC card hidden unless `canViewKyc`; Payout card hidden unless `canSetPreferredPaymentCurrency`                  |
+| **Admin Dashboard → Profile Settings tab** | Lists userTier, contenderTier, KYC status, verified flags, currency; Promote button works                        |
+| **Audit Trail tab**                        | Displays identity_audit records; verify latest actions visible                                                   |
+
+---
+
+## 4.  Integration Smoke Tests
+
+| Area                    | Curl / Query                                               | Expect                                                                 |
+| ----------------------- | ---------------------------------------------------------- | ---------------------------------------------------------------------- |
+| Policy summary endpoint | `curl -b "$CK" /api/verification/status`                   | JSON fields: `canTradeOpenOrIncrease`, `denyCodes.tradeOpenOrIncrease` |
+| Email cooldown interval | resend within 60 sec                                       | 403 `EMAIL_SEND_COOLDOWN`                                              |
+| Twilio env validation   | unset env → start server                                   | log `TWILIO_* missing` and startup warn not fail                       |
+| Resend env validation   | unset RESEND_API_KEY                                       | warn and skip send attempt                                             |
+| Tier promotion loop     | user becomes eligible → after recalcAccount → tier updated | DB reflects PERFORMER                                                  |
+
+---
+
+## 5.  Regression Guard (Automated JS Harness)
+
+Optional Node script for continuous verification:
+
+```js
+import fetch from "node-fetch";
+import assert from "node:assert";
+
+const CK = process.env.TEST_COOKIE;
+
+async function test(endpoint, expectCode) {
+  const res = await fetch(`http://localhost:3000${endpoint}`, {
+    method: "POST",
+    headers: { Cookie: CK },
+  });
+  const js = await res.json().catch(() => ({}));
+  assert.strictEqual(res.status, expectCode, `${endpoint} expected ${expectCode}, got ${res.status}`);
+  console.log("✓", endpoint, expectCode, js.deny_code || "");
+}
+
+await test("/api/trades/place", 403);
+await test("/api/trades/123/cancel", 403);
+await test("/api/trades/123/close", 200);
+await test("/api/profile/kyc", 403);
+```
+
+Add to `package.json`:
+
+```json
+"scripts": { "test:policy": "node tests/policyRegression.js" }
+```
+
+---
+
+## 6.  Pass Criteria Summary
+
+| Category              | Pass Condition                                                       |
+| --------------------- | -------------------------------------------------------------------- |
+| Locked Accounts       | All new/modify/cancel trades denied; close only allowed              |
+| Email/SMS Rate Limits | Deny codes EMAIL_SEND_RATE_LIMIT / SMS_RATE_LIMIT appear as expected |
+| KYC/Payout Gating     | Uninvited users → 403; Invited/Approved → 200                        |
+| Auto-Tier             | Eligible users auto-promoted; others unchanged                       |
+| Audit Trail           | Each major event recorded within identity_audit                      |
+| UI Sync               | Every deny_code visible on toast matches backend JSON                |
+
+---
+
+With these steps, Replit Agent 3 can run the entire suite autonomously and deliver a binary **PASS/FAIL compliance report** for each enforcement layer.
+
+If you’d like, I can now generate a **stand-alone `tests/policyRegression.js`** script including login simulation and automatic report summary (ready for Replit CI).
+Reply **`GENERATE TEST SCRIPT`** to output that next.

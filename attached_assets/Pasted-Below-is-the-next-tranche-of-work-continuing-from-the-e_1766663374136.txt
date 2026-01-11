@@ -1,0 +1,747 @@
+Below is the “next tranche” of work, continuing from the earlier audit and using the ZIP + attached context docs as ground truth. I am being explicit about what is **actually missing / conflicting** in the codebase you uploaded (because several items in Agent 3’s report are already implemented in this ZIP), and I’m giving **direct, line-by-line implementation patches** (server + client) to close the real remaining gaps.
+
+I am also explicit about what I could not finish inside this response due to tool-time limits: **I started patching `shared/policyDecision.ts` using the attached policy module, but I did not fully complete the ContenderTier insertion + top-level redirect fields edits in-tool.** I provide the final correct file content below so your Replit agent can paste it in directly (that is the safest way).
+
+---
+
+# 0) What’s already implemented in your ZIP (so we don’t “fix” what isn’t broken)
+
+In the ZIP you uploaded, these exist and are already mostly correct:
+
+* `server/routes/verification.ts` has email send + verify endpoints and Twilio Verify endpoints.
+* `server/middleware/requirePolicy.ts` exists and **is used** on trade routes (e.g., `TRADE_OPEN_OR_INCREASE`, `TRADE_MODIFY_SLTP`, etc.).
+* Profile Settings UI already includes verification cards (`client/src/components/VerificationCards.tsx`).
+* Admin KYC queue + invite/review endpoints **exist** in `server/routes/admin.ts`.
+* Tier badge is already in `client/src/components/Header.tsx`.
+
+So the real gaps are **different** from the audit text Agent 3 reported.
+
+---
+
+# 1) Real CRITICAL gaps vs your context docs (14d grace + monthly reverify + contender SMS)
+
+These are the real gaps based on your context docs + your actual code:
+
+## Gap A — Email verification link is broken in the UI (no `/verify-email` page/route)
+
+Your backend emails link to:
+
+`{APP_URL}/verify-email?token=...`
+
+But the client app has **no route/page** that consumes the token and calls `/api/verification/email/verify`.
+
+**Result:** users can’t actually verify via the email link.
+
+## Gap B — Signup does NOT create a `user_verification` row
+
+`/api/auth/register` creates the user but does not insert into `user_verification`.
+
+**Result:** policy context builder still works (it handles missing row), but you lose statefulness and consistent throttles/tier fields.
+
+## Gap C — `shared/policyDecision.ts` is out of alignment with:
+
+* existing middleware expectations (`decision.redirectTo`, `decision.showLockedBanner`)
+* existing verification routes expecting `SMS_NOT_ELIGIBLE_TIER`
+* schema contender tier enum includes `CANDIDATE_EMAIL_ONLY` but policy union doesn’t
+* `TRADE_MODIFY_SLTP` currently falls through “allowed” when locked because it isn’t handled correctly in older versions
+
+**Result:** drift + wrong deny codes + potential trade-modify loopholes in locked states.
+
+## Gap D — Policy enforcement missing on Profile endpoints
+
+`/api/profile/kyc`, `/api/profile/payout`, `/api/profile/payout/currency` do not use `requirePolicy(...)` in the server routes.
+UI hides them, but per your “non-negotiables,” the server must enforce too.
+
+## Gap E — “Backend stores contender tier” is not persisted when eligibility is met
+
+Your policy can *compute* contender eligibility, but nothing updates `user_verification.contender_tier` to `CANDIDATE_SMS_REQUIRED` when criteria become true.
+
+**Result:** you can’t build a durable funnel/audit trail of “became eligible.”
+
+---
+
+# 2) REQUIRED PATCHES — copy/paste ready code (server + client)
+
+## 2.1 Add `/verify-email` page and route (fix Gap A)
+
+### **Create** `client/src/pages/VerifyEmail.tsx`
+
+```tsx
+import { useEffect, useMemo, useState } from "react";
+import { Link, useLocation } from "wouter";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+
+function getTokenFromUrl(): string | null {
+  const url = new URL(window.location.href);
+  return url.searchParams.get("token");
+}
+
+export default function VerifyEmail() {
+  const [, setLocation] = useLocation();
+  const token = useMemo(() => getTokenFromUrl(), []);
+  const [status, setStatus] = useState<"idle" | "verifying" | "success" | "error">("idle");
+  const [message, setMessage] = useState<string>("");
+
+  useEffect(() => {
+    const run = async () => {
+      if (!token) {
+        setStatus("error");
+        setMessage("Missing verification token.");
+        return;
+      }
+
+      setStatus("verifying");
+      try {
+        const res = await fetch("/api/verification/email/verify", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ token }),
+          credentials: "include",
+        });
+
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          setStatus("error");
+          setMessage(data?.message || "Verification failed. The token may be expired or already used.");
+          return;
+        }
+
+        setStatus("success");
+        setMessage("Your email has been verified successfully.");
+      } catch (e: any) {
+        setStatus("error");
+        setMessage(e?.message || "Verification failed due to a network error.");
+      }
+    };
+
+    run();
+  }, [token]);
+
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-neutral-900 p-4">
+      <Card className="w-full max-w-md bg-neutral-800 border-gray-700">
+        <CardHeader>
+          <CardTitle>Email Verification</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {status === "verifying" && (
+            <div className="text-sm text-gray-300">Verifying your email…</div>
+          )}
+
+          {status === "success" && (
+            <>
+              <div className="text-sm text-green-400">{message}</div>
+              <div className="flex gap-2">
+                <Button onClick={() => setLocation("/")}>Go to Dashboard</Button>
+                <Link href="/profile" className="text-sm text-gray-300 underline self-center">
+                  Profile Settings
+                </Link>
+              </div>
+            </>
+          )}
+
+          {status === "error" && (
+            <>
+              <div className="text-sm text-red-400">{message}</div>
+              <div className="flex gap-2">
+                <Button variant="outline" onClick={() => setLocation("/profile")}>
+                  Open Profile Settings
+                </Button>
+                <Button variant="ghost" onClick={() => setLocation("/")}>
+                  Home
+                </Button>
+              </div>
+            </>
+          )}
+
+          {status === "idle" && (
+            <div className="text-sm text-gray-300">Waiting for token…</div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+```
+
+### **Update** `client/src/App.tsx` to add the route
+
+Add import near other imports:
+
+```tsx
+import VerifyEmail from "@/pages/VerifyEmail";
+```
+
+Add a route inside `<Switch>`:
+
+```tsx
+<Route path="/verify-email" component={VerifyEmail} />
+```
+
+---
+
+## 2.2 Insert `user_verification` row on registration (fix Gap B)
+
+### **Update** `server/routes.ts` — registration handler
+
+At the top import list, ensure `userVerification` is included:
+
+```ts
+import { loginSchema, insertTradeSchema, tradeAudit, globalSettings, userKycProfiles, userPayoutProfiles, userVerification } from "@shared/schema";
+```
+
+Inside `/api/auth/register`, immediately after `storage.createUser(...)`, add:
+
+```ts
+// Ensure user_verification row exists (stateful enforcement + throttles)
+try {
+  await db.insert(userVerification).values({
+    userId: user.id,
+    contenderTier: "NONE",
+    smsEnabled: false,
+  }).onConflictDoNothing();
+} catch (e) {
+  console.error("Failed to initialize user_verification:", e);
+}
+```
+
+This uses the schema defaults for resend counters etc.
+
+---
+
+## 2.3 Enforce policy on profile endpoints (fix Gap D)
+
+### **Update** these endpoints in `server/routes.ts`
+
+#### KYC profile (view)
+
+Change:
+
+```ts
+app.get("/api/profile/kyc", ensureAuth, async (req, res) => {
+```
+
+to:
+
+```ts
+app.get("/api/profile/kyc", ensureAuth, requirePolicy("KYC_VIEW"), async (req, res) => {
+```
+
+#### Payout profile (view)
+
+Change:
+
+```ts
+app.get("/api/profile/payout", ensureAuth, async (req, res) => {
+```
+
+to:
+
+```ts
+app.get("/api/profile/payout", ensureAuth, requirePolicy("PREFERRED_PAYMENT_CURRENCY_SET"), async (req, res) => {
+```
+
+(If you want view-only separate from set, we can add a `PAYOUT_VIEW` action; for now, this matches your “selected-only payout settings” rule.)
+
+#### Payout currency update (set)
+
+Change:
+
+```ts
+app.put("/api/profile/payout/currency", ensureAuth, async (req, res) => {
+```
+
+to:
+
+```ts
+app.put("/api/profile/payout/currency", ensureAuth, requirePolicy("PREFERRED_PAYMENT_CURRENCY_SET"), async (req, res) => {
+```
+
+---
+
+## 2.4 Persist contender tier when eligibility is reached (fix Gap E)
+
+The simplest robust place: `GET /api/verification/status`, because it runs frequently and already has a full policy context.
+
+### **Update** `server/routes/verification.ts` inside `router.get("/status"... )`
+
+Immediately after:
+
+```ts
+const ctx = await buildDecisionContext({ userId, nowMs: Date.now() });
+const gates = featureGates(ctx);
+```
+
+Add:
+
+```ts
+// Persist contender tier when eligibility becomes true (durable funnel state)
+try {
+  const eligibleNow = !!gates.contenderEligible;
+  const currentTier = ctx.user.contenderTier;
+
+  if (eligibleNow && (currentTier === "NONE" || currentTier === "CANDIDATE_EMAIL_ONLY")) {
+    await db.update(userVerification)
+      .set({
+        contenderTier: "CANDIDATE_SMS_REQUIRED",
+        contenderEligibleAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(userVerification.userId, userId));
+
+    appendIdentityAudit({
+      userId,
+      email: ctx.user.email,
+      username: ctx.user.username ?? undefined,
+      category: "SMS",
+      type: "CONTENDER_ELIGIBLE_SMS_REQUIRED",
+      title: "Contender eligible for SMS verification",
+      description: `Eligibility met. Promoted contenderTier to CANDIDATE_SMS_REQUIRED.`,
+      ip: req.ip || (req.headers["x-forwarded-for"] as string),
+      userAgent: req.headers["user-agent"],
+    });
+  }
+} catch (e) {
+  console.error("Failed to persist contenderTier:", e);
+}
+```
+
+This makes contender state durable and auditable, exactly as your context docs require.
+
+---
+
+## 2.5 Fix `shared/policyDecision.ts` drift (fix Gap C)
+
+### Why you must replace the file
+
+In your ZIP, `shared/policyDecision.ts` is not aligned with:
+
+* schema contenderTier enum (`CANDIDATE_EMAIL_ONLY`)
+* middleware expecting `decision.redirectTo` and `decision.showLockedBanner`
+* verification routes expecting deny code `SMS_NOT_ELIGIBLE_TIER`
+* strong locked-state behavior for trade modification (`TRADE_MODIFY_SLTP`)
+
+### **REPLACE** `shared/policyDecision.ts` completely with this version
+
+This is directly based on your attached “drift-proof PolicyDecision module” asset, but **patched for your repo’s expectations**:
+
+* Includes `CANDIDATE_EMAIL_ONLY`
+* Uses deny codes already referenced in `requirePolicy.ts` and `verification.ts`
+* Adds **top-level** `showLockedBanner` and `redirectTo` fields (and keeps `ui` optional if you want)
+* Explicitly handles `TRADE_MODIFY_SLTP` while locked
+* Uses overdue grace for reverify (`emailReverifyOverdueGraceDays`)
+
+```ts
+// shared/policyDecision.ts
+// Single source of truth for eligibility + gating decisions.
+// Import this from BOTH server and client to avoid drift.
+
+export type AccountState =
+  | "ACTIVE_UNVERIFIED_GRACE"
+  | "LOCKED_EMAIL_UNVERIFIED"
+  | "ACTIVE_VERIFIED"
+  | "LOCKED_EMAIL_REVERIFY_OVERDUE"
+  | "SUSPENDED_ADMIN";
+
+export type ContenderTier =
+  | "NONE"
+  | "CANDIDATE_EMAIL_ONLY"
+  | "CANDIDATE_SMS_REQUIRED"
+  | "VERIFIED_SMS"
+  | "SELECTED_REAL_CAPITAL";
+
+export type UserTier = "CANDIDATE" | "PERFORMER" | "SELECTED";
+
+export type PolicyAction =
+  | "TRADE_OPEN_OR_INCREASE"
+  | "TRADE_MODIFY_SLTP"
+  | "TRADE_PLACE_PENDING"
+  | "TRADE_CANCEL_PENDING"
+  | "TRADE_CLOSE_OR_REDUCE"
+  | "PROFILE_EDIT_BASIC"
+  | "EMAIL_RESEND_VERIFICATION"
+  | "EMAIL_CHANGE"
+  | "PHONE_VERIFY_START"
+  | "PHONE_VERIFY_CONFIRM"
+  | "KYC_VIEW"
+  | "KYC_SUBMIT"
+  | "PREFERRED_PAYMENT_CURRENCY_SET"
+  | "SESSIONS_VIEW"
+  | "SESSION_TERMINATE"
+  | "MFA_ENABLE"
+  | "MFA_DISABLE"
+  | "JOB_ENFORCE_LOCKS"
+  | "JOB_EVALUATE_CONTENDER_ELIGIBILITY";
+
+export type DenyCode =
+  | "ACCOUNT_SUSPENDED"
+  | "EMAIL_NOT_VERIFIED"
+  | "EMAIL_REVERIFY_OVERDUE"
+  | "EMAIL_SEND_RATE_LIMIT"
+  | "EMAIL_SEND_COOLDOWN"
+  | "SMS_NOT_ELIGIBLE_TIER"
+  | "SMS_RATE_LIMIT"
+  | "SMS_OTP_TOO_MANY_ATTEMPTS"
+  | "KYC_NOT_SELECTED"
+  | "KYC_STATE_INVALID"
+  | "ACTION_NOT_ALLOWED_IN_STATE";
+
+export type PolicyConfig = {
+  emailInitialGraceDays: number;         // 14
+  emailReverifyPeriodDays: number;       // 30
+  emailReverifyOverdueGraceDays: number; // recommended 3–7 (use 5 default)
+
+  emailResendCooldownSec: number; // 60
+  emailDailySendCap: number;      // 5
+  smsDailySendCap: number;        // 3
+  otpMaxAttempts: number;         // 6
+
+  contenderPath1: {
+    minAccountAgeDays: number;     // 30
+    minBalancePctOfStart: number;  // 1.2
+    minTradesLifetime: number;     // 30
+  };
+  contenderPath2: {
+    minAccountAgeDays: number;     // 90
+    lastTradeWithinDays: number;   // 14
+    minReturnLast90d: number;      // 0.10
+    minTradesLast90d: number;      // 20
+  };
+
+  allowReduceOnlyWhenLocked: boolean;
+  allowCancelPendingWhenLocked: boolean;
+  allowRiskReducingSltpChangeWhenLocked: boolean;
+};
+
+export const DEFAULT_POLICY_CONFIG: PolicyConfig = {
+  emailInitialGraceDays: 14,
+  emailReverifyPeriodDays: 30,
+  emailReverifyOverdueGraceDays: 5,
+
+  emailResendCooldownSec: 60,
+  emailDailySendCap: 5,
+  smsDailySendCap: 3,
+  otpMaxAttempts: 6,
+
+  contenderPath1: {
+    minAccountAgeDays: 30,
+    minBalancePctOfStart: 1.2,
+    minTradesLifetime: 30,
+  },
+  contenderPath2: {
+    minAccountAgeDays: 90,
+    lastTradeWithinDays: 14,
+    minReturnLast90d: 0.10,
+    minTradesLast90d: 20,
+  },
+
+  allowReduceOnlyWhenLocked: true,
+  allowCancelPendingWhenLocked: true,
+  allowRiskReducingSltpChangeWhenLocked: false, // safest default per your matrix (locked => no SL/TP edits)
+};
+
+export type DecisionContext = {
+  now: Date;
+
+  user: {
+    id: number;
+    email: string;
+    username?: string | null;
+    createdAt: Date;
+
+    suspendedAt?: Date | null;
+
+    emailVerifiedAt: Date | null;
+    emailInitialDueAt: Date;
+    emailReverifyDueAt: Date | null;
+    phoneVerifiedAt: Date | null;
+
+    userTier: UserTier;
+    contenderTier: ContenderTier;
+
+    selectedAt?: Date | null;
+  };
+
+  metrics: {
+    tradesLifetime: number;
+    tradesLast90d: number;
+    accountAgeDays: number;
+    lastTradeDaysAgo: number | null;
+
+    balancePctOfStart: number;
+    returnLast90d: number;
+  };
+
+  throttle: {
+    emailSendCountDay: number;
+    emailLastSentAtMs: number | null;
+
+    smsSendCountDay: number;
+    smsLastSentAtMs: number | null;
+
+    otpFailCount: number;
+  };
+
+  kyc: {
+    status: "NOT_STARTED" | "INVITED" | "SUBMITTED" | "APPROVED" | "REJECTED";
+    invitedAtMs: number | null;
+  };
+
+  tradeIntent?: {
+    kind: "OPEN_OR_INCREASE" | "CLOSE_OR_REDUCE" | "PLACE_PENDING" | "CANCEL_PENDING" | "MODIFY_SLTP";
+    side?: "BUY" | "SELL";
+    slBefore?: number | null;
+    slAfter?: number | null;
+  };
+};
+
+export type PolicyDecision = {
+  action: PolicyAction;
+  allowed: boolean;
+  deny_code?: DenyCode;
+
+  accountState: AccountState;
+  contenderEligible: boolean;
+  contenderPath: "PATH1" | "PATH2" | null;
+
+  // IMPORTANT: top-level fields (required by your server middleware + verification routes)
+  showLockedBanner?: boolean;
+  redirectTo?: "/verify-email" | "/profile" | "/support" | "/kyc";
+};
+
+export function resolveAccountState(ctx: DecisionContext, cfg: PolicyConfig): AccountState {
+  if (ctx.user.suspendedAt) return "SUSPENDED_ADMIN";
+
+  if (!ctx.user.emailVerifiedAt) {
+    return (ctx.now < ctx.user.emailInitialDueAt)
+      ? "ACTIVE_UNVERIFIED_GRACE"
+      : "LOCKED_EMAIL_UNVERIFIED";
+  }
+
+  if (ctx.user.emailReverifyDueAt) {
+    const overdueAt = new Date(ctx.user.emailReverifyDueAt.getTime() + cfg.emailReverifyOverdueGraceDays * 86400000);
+    if (ctx.now >= overdueAt) return "LOCKED_EMAIL_REVERIFY_OVERDUE";
+  }
+
+  return "ACTIVE_VERIFIED";
+}
+
+export function computeContenderEligibility(ctx: DecisionContext, cfg: PolicyConfig): {
+  eligible: boolean;
+  path: "PATH1" | "PATH2" | null;
+} {
+  const state = resolveAccountState(ctx, cfg);
+  if (state !== "ACTIVE_VERIFIED") return { eligible: false, path: null };
+
+  const m = ctx.metrics;
+
+  const path1 =
+    m.accountAgeDays >= cfg.contenderPath1.minAccountAgeDays &&
+    m.balancePctOfStart >= cfg.contenderPath1.minBalancePctOfStart &&
+    m.tradesLifetime >= cfg.contenderPath1.minTradesLifetime;
+
+  const path2 =
+    m.accountAgeDays >= cfg.contenderPath2.minAccountAgeDays &&
+    (m.lastTradeDaysAgo ?? 999999) <= cfg.contenderPath2.lastTradeWithinDays &&
+    m.returnLast90d >= cfg.contenderPath2.minReturnLast90d &&
+    m.tradesLast90d >= cfg.contenderPath2.minTradesLast90d;
+
+  if (path1) return { eligible: true, path: "PATH1" };
+  if (path2) return { eligible: true, path: "PATH2" };
+  return { eligible: false, path: null };
+}
+
+function isExposureIncreasingTradingAction(action: PolicyAction): boolean {
+  return action === "TRADE_OPEN_OR_INCREASE" || action === "TRADE_PLACE_PENDING";
+}
+
+function isReduceOnlyTradingAction(action: PolicyAction): boolean {
+  return action === "TRADE_CLOSE_OR_REDUCE" || action === "TRADE_CANCEL_PENDING";
+}
+
+export function decidePolicy(
+  action: PolicyAction,
+  ctx: DecisionContext,
+  cfg: PolicyConfig = DEFAULT_POLICY_CONFIG
+): PolicyDecision {
+  const accountState = resolveAccountState(ctx, cfg);
+  const contender = computeContenderEligibility(ctx, cfg);
+
+  const deny = (deny_code: DenyCode, redirectTo?: PolicyDecision["redirectTo"], showLockedBanner?: boolean): PolicyDecision => ({
+    action,
+    allowed: false,
+    deny_code,
+    accountState,
+    contenderEligible: contender.eligible,
+    contenderPath: contender.path,
+    redirectTo,
+    showLockedBanner,
+  });
+
+  const allow = (): PolicyDecision => ({
+    action,
+    allowed: true,
+    accountState,
+    contenderEligible: contender.eligible,
+    contenderPath: contender.path,
+  });
+
+  if (accountState === "SUSPENDED_ADMIN") {
+    return deny("ACCOUNT_SUSPENDED", "/support", true);
+  }
+
+  if (accountState === "LOCKED_EMAIL_UNVERIFIED") {
+    if (isExposureIncreasingTradingAction(action) || action === "TRADE_MODIFY_SLTP") {
+      return deny("EMAIL_NOT_VERIFIED", "/verify-email", true);
+    }
+    if (isReduceOnlyTradingAction(action)) {
+      if (action === "TRADE_CANCEL_PENDING" && !cfg.allowCancelPendingWhenLocked) {
+        return deny("ACTION_NOT_ALLOWED_IN_STATE", "/verify-email", true);
+      }
+      return cfg.allowReduceOnlyWhenLocked ? allow() : deny("ACTION_NOT_ALLOWED_IN_STATE", "/verify-email", true);
+    }
+  }
+
+  if (accountState === "LOCKED_EMAIL_REVERIFY_OVERDUE") {
+    if (isExposureIncreasingTradingAction(action) || action === "TRADE_MODIFY_SLTP") {
+      return deny("EMAIL_REVERIFY_OVERDUE", "/verify-email", true);
+    }
+    if (isReduceOnlyTradingAction(action)) {
+      if (action === "TRADE_CANCEL_PENDING" && !cfg.allowCancelPendingWhenLocked) {
+        return deny("ACTION_NOT_ALLOWED_IN_STATE", "/verify-email", true);
+      }
+      return cfg.allowReduceOnlyWhenLocked ? allow() : deny("ACTION_NOT_ALLOWED_IN_STATE", "/verify-email", true);
+    }
+  }
+
+  if (action === "EMAIL_RESEND_VERIFICATION") {
+    const nowMs = ctx.now.getTime();
+    const last = ctx.throttle.emailLastSentAtMs ?? 0;
+    const cooldownMs = cfg.emailResendCooldownSec * 1000;
+
+    if (ctx.throttle.emailSendCountDay >= cfg.emailDailySendCap) return deny("EMAIL_SEND_RATE_LIMIT");
+    if (nowMs - last < cooldownMs) return deny("EMAIL_SEND_COOLDOWN");
+    return allow();
+  }
+
+  if (action === "PHONE_VERIFY_START" || action === "PHONE_VERIFY_CONFIRM") {
+    if (accountState !== "ACTIVE_VERIFIED") return deny("SMS_NOT_ELIGIBLE_TIER", "/verify-email", true);
+
+    const eligible =
+      contender.eligible ||
+      ctx.user.contenderTier === "CANDIDATE_SMS_REQUIRED" ||
+      ctx.user.contenderTier === "VERIFIED_SMS" ||
+      ctx.user.contenderTier === "SELECTED_REAL_CAPITAL" ||
+      ctx.user.userTier === "PERFORMER" ||
+      ctx.user.userTier === "SELECTED";
+
+    if (!eligible) return deny("SMS_NOT_ELIGIBLE_TIER");
+
+    if (action === "PHONE_VERIFY_START") {
+      const nowMs = ctx.now.getTime();
+      const last = ctx.throttle.smsLastSentAtMs ?? 0;
+      if (ctx.throttle.smsSendCountDay >= cfg.smsDailySendCap) return deny("SMS_RATE_LIMIT");
+      if (nowMs - last < 60_000) return deny("SMS_RATE_LIMIT");
+    }
+
+    if (action === "PHONE_VERIFY_CONFIRM") {
+      if (ctx.throttle.otpFailCount >= cfg.otpMaxAttempts) return deny("SMS_OTP_TOO_MANY_ATTEMPTS");
+    }
+
+    return allow();
+  }
+
+  if (action === "KYC_VIEW" || action === "KYC_SUBMIT" || action === "PREFERRED_PAYMENT_CURRENCY_SET") {
+    const selected =
+      ctx.user.userTier === "SELECTED" ||
+      ctx.user.contenderTier === "SELECTED_REAL_CAPITAL" ||
+      !!ctx.user.selectedAt ||
+      ["INVITED", "SUBMITTED", "APPROVED"].includes(ctx.kyc.status);
+
+    if (!selected) return deny("KYC_NOT_SELECTED", "/profile");
+
+    if (action === "KYC_SUBMIT") {
+      if (!(ctx.kyc.status === "INVITED" || ctx.kyc.status === "REJECTED")) {
+        return deny("KYC_STATE_INVALID");
+      }
+    }
+
+    return allow();
+  }
+
+  // Default trade permissions
+  if (action === "TRADE_OPEN_OR_INCREASE" || action === "TRADE_PLACE_PENDING") return allow();
+  if (action === "TRADE_CLOSE_OR_REDUCE" || action === "TRADE_CANCEL_PENDING") return allow();
+  if (action === "TRADE_MODIFY_SLTP") return allow(); // active states; locked handled above
+
+  return allow();
+}
+
+export function featureGates(ctx: DecisionContext, cfg: PolicyConfig = DEFAULT_POLICY_CONFIG) {
+  const st = resolveAccountState(ctx, cfg);
+  const contender = computeContenderEligibility(ctx, cfg);
+
+  const selected =
+    ctx.user.userTier === "SELECTED" ||
+    ctx.user.contenderTier === "SELECTED_REAL_CAPITAL" ||
+    !!ctx.user.selectedAt ||
+    ["INVITED", "SUBMITTED", "APPROVED"].includes(ctx.kyc.status);
+
+  const canRequestPayout = selected && ctx.kyc.status === "APPROVED";
+
+  return {
+    accountState: st,
+    contenderEligible: contender.eligible,
+    canTradeOpenOrIncrease: decidePolicy("TRADE_OPEN_OR_INCREASE", ctx, cfg).allowed,
+    canTradeCloseOrReduce: decidePolicy("TRADE_CLOSE_OR_REDUCE", ctx, cfg).allowed,
+    canStartSms: decidePolicy("PHONE_VERIFY_START", ctx, cfg).allowed,
+    canViewKyc: selected && decidePolicy("KYC_VIEW", ctx, cfg).allowed,
+    canSetPreferredPaymentCurrency: selected && decidePolicy("PREFERRED_PAYMENT_CURRENCY_SET", ctx, cfg).allowed,
+    canRequestPayout,
+  };
+}
+```
+
+**Important:** this replacement is the cleanest way to remove drift. It matches your existing `requirePolicy.ts` + `verification.ts` expectations.
+
+---
+
+# 3) What I started but did NOT finish inside tool-time (being transparent)
+
+I began doing in-repo patching of `shared/policyDecision.ts` using the attached asset extraction. I successfully updated deny codes and config types, but I did not complete:
+
+* inserting `CANDIDATE_EMAIL_ONLY` into `ContenderTier` inside the extracted file
+* adding `showLockedBanner` / `redirectTo` top-level fields
+
+To avoid partial edits causing runtime drift, I’m explicitly recommending **full file replacement** with the correct final version above.
+
+---
+
+# 4) Optional but recommended next step (if you want it in the next “Continue”)
+
+Per your context docs, the remaining “engine completeness” items are:
+
+1. **Daily reminder/enforcement cron** (`node-cron` is installed)
+
+   * send reminders Day 0/7/12/13, due-7/3/1/0, overdue+2
+   * write hash-chained identity audit events: `EMAIL_VERIFY_REMINDER_SENT`, `EMAIL_REVERIFY_REMINDER_SENT`, etc.
+   * you may want to add reminder throttle columns to `user_verification` (safe additions)
+
+2. **Admin User Profile Settings page + tier change endpoints**
+
+   * your backend admin routes are strong; the missing part is a dedicated per-user profile settings view and tier promotion endpoint + audit event `TIER_CHANGED`.
+
+If you reply “Continue” again, I will produce the **full admin endpoint + UI patch set** in the same copy/paste style.
+
+---
+
+## Deliverable summary (what you can hand to Agent 3 right now)
+
+✅ Add VerifyEmail UI page + route
+✅ Insert `user_verification` row on register
+✅ Enforce policy on `/api/profile/kyc` and `/api/profile/payout*` endpoints
+✅ Persist contender tier promotion in `/api/verification/status` + audit event
+✅ Replace `shared/policyDecision.ts` with drift-proof version aligned to your repo
+
+If you want, I can also provide the exact diff for `server/middleware/requirePolicy.ts` messaging to match the deny codes, but with the file replacement above, it should already align with your current checks.

@@ -1,0 +1,364 @@
+Perfect, let’s do both 👇
+
+---
+
+## 1. Design a clean **Analytics API module** (shared by web + mobile)
+
+### 1.1. What the Analytics API should answer
+
+At minimum, per **userId** (not device):
+
+1. **Overall performance**
+
+   * Total closed P&L
+   * Open P&L (if any)
+   * Win rate
+   * Average R / average profit & loss per trade
+   * Number of trades, average holding time
+
+2. **Equity curve / balance over time**
+
+   * Cumulative P&L by day (or by trade sequence)
+
+3. **Per-symbol stats**
+
+   * Trades per symbol
+   * P&L per symbol
+   * Win rate per symbol
+
+4. **Recent activity**
+
+   * List of last N trades with key metrics (for “recent trades” widget).
+
+All of this should be derived **only from your central `trades` table**, using `userId` from the session or token.
+
+---
+
+### 1.2. Storage-level helpers (`server/storage.ts`)
+
+Add analytics-specific functions that always take `userId`:
+
+```ts
+// server/storage.ts
+import { db } from "./db";
+import { trades } from "../shared/schema";
+import { eq, desc, sql } from "drizzle-orm";
+
+export async function getUserTradeSummary(userId: number) {
+  const rows = await db
+    .select({
+      totalTrades: sql<number>`COUNT(*)`,
+      closedTrades: sql<number>`SUM(CASE WHEN ${trades.status} = 'CLOSED' THEN 1 ELSE 0 END)`,
+      winTrades: sql<number>`SUM(CASE WHEN ${trades.profit} > 0 AND ${trades.status} = 'CLOSED' THEN 1 ELSE 0 END)`,
+      totalProfit: sql<number>`SUM(CASE WHEN ${trades.status} = 'CLOSED' THEN ${trades.profit} ELSE 0 END)`,
+      avgProfit: sql<number>`AVG(CASE WHEN ${trades.profit} > 0 AND ${trades.status} = 'CLOSED' THEN ${trades.profit} END)`,
+      avgLoss: sql<number>`AVG(CASE WHEN ${trades.profit} < 0 AND ${trades.status} = 'CLOSED' THEN ${trades.profit} END)`,
+      avgHoldSeconds: sql<number>`
+        AVG(
+          strftime('%s', ${trades.closedAt}) - strftime('%s', ${trades.openedAt})
+        )
+      `,
+    })
+    .from(trades)
+    .where(eq(trades.userId, userId));
+
+  return rows[0];
+}
+
+export async function getUserEquityCurve(userId: number) {
+  // Cumulative P&L ordered by close time
+  const rows = await db
+    .select({
+      closedAt: trades.closedAt,
+      profit: trades.profit,
+    })
+    .from(trades)
+    .where(sql`${trades.userId} = ${userId} AND ${trades.status} = 'CLOSED'`)
+    .orderBy(trades.closedAt);
+
+  let cumulative = 0;
+  return rows.map((row) => {
+    cumulative += row.profit ?? 0;
+    return { closedAt: row.closedAt, cumulativePnL: cumulative };
+  });
+}
+
+export async function getUserSymbolStats(userId: number) {
+  const rows = await db
+    .select({
+      symbolId: trades.symbolId,
+      totalTrades: sql<number>`COUNT(*)`,
+      winTrades: sql<number>`
+        SUM(CASE WHEN ${trades.profit} > 0 AND ${trades.status} = 'CLOSED' THEN 1 ELSE 0 END)
+      `,
+      totalProfit: sql<number>`SUM(${trades.profit})`,
+    })
+    .from(trades)
+    .where(eq(trades.userId, userId))
+    .groupBy(trades.symbolId);
+
+  return rows;
+}
+
+export async function getUserRecentTrades(userId: number, limit = 50) {
+  return db
+    .select()
+    .from(trades)
+    .where(eq(trades.userId, userId))
+    .orderBy(desc(trades.openedAt))
+    .limit(limit);
+}
+```
+
+You can refine the SQL later (e.g. time zone, date truncation by day).
+
+---
+
+### 1.3. Express routes (`server/routes.ts` or `server/routes/analytics.ts`)
+
+Create a dedicated router that uses `requireAuth` / `ensureAuth` and reads `req.session.userId`.
+
+```ts
+// server/routes/analytics.ts
+import { Router } from "express";
+import { requireAuth } from "./middleware/auth";
+import {
+  getUserTradeSummary,
+  getUserEquityCurve,
+  getUserSymbolStats,
+  getUserRecentTrades,
+} from "../storage";
+
+export const analyticsRouter = Router();
+
+analyticsRouter.use(requireAuth);
+
+analyticsRouter.get("/summary", async (req, res) => {
+  const userId = req.session.userId!;
+  const summary = await getUserTradeSummary(userId);
+  res.json(summary);
+});
+
+analyticsRouter.get("/equity-curve", async (req, res) => {
+  const userId = req.session.userId!;
+  const curve = await getUserEquityCurve(userId);
+  res.json(curve);
+});
+
+analyticsRouter.get("/symbol-stats", async (req, res) => {
+  const userId = req.session.userId!;
+  const stats = await getUserSymbolStats(userId);
+  res.json(stats);
+});
+
+analyticsRouter.get("/recent-trades", async (req, res) => {
+  const userId = req.session.userId!;
+  const limit = Number(req.query.limit ?? 50);
+  const trades = await getUserRecentTrades(userId, limit);
+  res.json(trades);
+});
+```
+
+Then in your main server setup:
+
+```ts
+import { analyticsRouter } from "./routes/analytics";
+
+app.use("/api/analytics", analyticsRouter);
+```
+
+Now both **web** and **mobile** analyzers can simply hit:
+
+* `GET /api/analytics/summary`
+* `GET /api/analytics/equity-curve`
+* `GET /api/analytics/symbol-stats`
+* `GET /api/analytics/recent-trades?limit=100`
+
+All of which are **account-wide**, not device-specific.
+
+---
+
+## 2. Refactor the **mobile analyzer** so it’s NOT device-bound
+
+Here’s the step-by-step “surgery plan” for the mobile or other client analyzers that currently only see local trades.
+
+### 2.1. Unify identity: same user everywhere
+
+**Goal:** every platform resolves to the same `userId` in the backend.
+
+* Mobile login should use the exact same auth mechanism as web:
+
+  * Either:
+
+    * Email/password → backend login → returns JWT
+    * Or OAuth → backend maps token → userId.
+* Drop any pattern where:
+
+  * You create “hidden” anonymous users per device install, unless you **bind** them to a real user later.
+
+**Quick check:** pick one real account, log in from web and mobile, and confirm both are `userId = X` in the DB.
+
+---
+
+### 2.2. Introduce a shared **AnalyticsService** on the client
+
+Instead of each app reading whatever it wants directly (DB, local store, etc.), have a **single service** that always goes to the backend first.
+
+**Example pseudo-code for mobile:**
+
+```ts
+// services/AnalyticsService.ts
+import { apiClient } from "./ApiClient"; // wraps fetch/axios with auth
+
+export class AnalyticsService {
+  async getSummary() {
+    const res = await apiClient.get("/api/analytics/summary");
+    return res.data;
+  }
+
+  async getEquityCurve() {
+    const res = await apiClient.get("/api/analytics/equity-curve");
+    return res.data;
+  }
+
+  async getSymbolStats() {
+    const res = await apiClient.get("/api/analytics/symbol-stats");
+    return res.data;
+  }
+
+  async getRecentTrades(limit: number = 50) {
+    const res = await apiClient.get(`/api/analytics/recent-trades?limit=${limit}`);
+    return res.data;
+  }
+}
+```
+
+Your analyzer screen should **only** talk to `AnalyticsService`, never directly to device-local history.
+
+---
+
+### 2.3. Keep local storage as a **cache**, not the source of truth
+
+You can still keep a local DB for speed/offline, but the direction of truth should be:
+
+> Backend → local cache → UI
+
+Not:
+
+> Device → UI (never synced)
+
+Pattern:
+
+1. On app start / analyzer open:
+
+   * Load last cached analytics from local DB to draw something quickly.
+   * In parallel, call **Analytics API** to refresh from server.
+2. When trades are executed:
+
+   * Send trade to backend via the existing `/api/trades` routes (or mobile equivalent).
+   * Optionally, update local cache optimistically.
+
+That way:
+
+* Any device that logs in will see the same analytics, because:
+
+  * The calculation is done from central trades, not per-device logs.
+
+---
+
+### 2.4. Route all trade creation through the backend
+
+Make sure this is true in production:
+
+* On **mobile**:
+
+  * Opening/closing a trade **must** go through the backend (or a persistent trading engine) that writes into the same `trades` table as the web app.
+* No “shadow trades” that live only in a phone’s SQLite database.
+
+High-level pattern:
+
+```ts
+// mobile-trade-service.ts
+async function openTrade(params) {
+  const res = await apiClient.post("/api/trades", params);
+  return res.data;
+}
+
+async function closeTrade(tradeId) {
+  const res = await apiClient.post(`/api/trades/${tradeId}/close`);
+  return res.data;
+}
+```
+
+Then your analyzer is naturally reading the full, unified history.
+
+---
+
+### 2.5. Clean up old device-centric analyzer code
+
+Once the above is in place, remove or quarantine:
+
+* Any analyzer class that does things like:
+
+  * `SELECT * FROM localTradesTable WHERE...`
+  * Or filters by a deviceId.
+* Any logic that says “if not synced, only show local trades.”
+
+Instead:
+
+* Mark unsynced trades explicitly and ensure they’re synced to backend ASAP.
+* If truly offline, you can:
+
+  * Show “offline session (X trades). Will be integrated once reconnected.”
+  * And when online, upload them and let the backend recompute.
+
+---
+
+### 2.6. Session & browser issues (web side)
+
+For the **web browser problems** you mentioned (session / data collection):
+
+Quick checklist:
+
+1. Make sure **every analytics API route** is behind `requireAuth` and uses `req.session.userId`.
+2. Confirm the browser is **sending the session cookie** on every request:
+
+   * Same domain (or proper CORS + `credentials: "include"`).
+3. In the React app, make sure there is exactly **one source of truth** for the current user:
+
+   * `useAuth` / auth context, loaded from `/api/auth/me`.
+4. When a user logs out:
+
+   * Clear the session (backend) and reset React Query caches (frontend), so no stale analytics bleed between accounts.
+
+---
+
+## 3. Concrete next moves
+
+If you want a tight action list:
+
+1. **Backend**
+
+   * Add `AnalyticsService` helpers in `storage.ts`.
+   * Add `/api/analytics/*` routes using `req.session.userId`.
+
+2. **Web**
+
+   * Build a small Analytics hook (like `useAnalyticsSummary`) that calls `/api/analytics/summary` etc.
+   * Use it on History / Dashboard pages instead of recalculating everything on the client.
+
+3. **Mobile**
+
+   * Introduce an `ApiClient` with shared auth.
+   * Refactor analyzer to pull exclusively from `/api/analytics/*`.
+   * Keep local DB only as a cache / offline buffer.
+
+4. **Verification**
+
+   * Log in on **Device A**, place trades.
+   * Log in on **Device B** with same account:
+
+     * Hit `/api/trades` and `/api/analytics/summary` from B and confirm you see the same trades.
+   * Confirm your existing “device-bound” behavior disappears.
+
+If you paste a snippet of your **current mobile analyzer code** in a later message, I can literally rewrite it into this new centralized pattern line-by-line.

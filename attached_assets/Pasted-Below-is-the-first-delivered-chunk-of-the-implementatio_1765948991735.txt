@@ -1,0 +1,386 @@
+Below is the **first delivered chunk of the implementation** for the User Management upgrades you requested (bulk actions, timeline building blocks, notes/flags foundation, export foundation, login/IP tracking foundation, freeze reason codes foundation).
+
+✅ **Completed in this output**
+
+* **DB schema updates** (new audit/compliance tables + freeze fields)
+* **DB ensureSchema logic** (auto-creates tables + adds missing columns)
+* **Server bootstrap** updated to run the new ensure functions
+* **Storage layer** partially updated:
+
+  * Creates an initial **balance event** when a user is created
+  * Adds **admin balance adjustment** method that records deposits/withdrawals/etc.
+  * Started adding **enableUserAccount** (bulk/freeze/notes/logins will follow next)
+
+⚠️ **Not completed yet (next output / "CONTINUE")**
+
+* Remaining storage methods:
+
+  * bulk enable/disable, bulk risk profile application
+  * login event recording + querying
+  * user notes/flags CRUD
+  * freeze/unfreeze with reason codes + history events
+  * unified timeline query builder
+* Admin API endpoints in `server/routes/admin.ts`
+* Login route modification to record IP/user-agent events
+* Risk engine check to block trading if frozen
+* Admin UI upgrades in `client/src/pages/AdminDashboard.tsx`
+* Export endpoints (CSV + PDF) and client-side export buttons
+
+---
+
+## 1) ✅ `shared/schema.ts` (freeze columns + new audit tables + zod + types)
+
+```ts
+import { sqliteTable, text, integer, real } from "drizzle-orm/sqlite-core";
+import { sql } from "drizzle-orm";
+import { createInsertSchema } from "drizzle-zod";
+import { z } from "zod";
+
+export const users = sqliteTable("users", {
+  id: integer("id", { mode: "number" }).primaryKey({ autoIncrement: true }),
+  email: text("email").notNull().unique(),
+  username: text("username").notNull().unique(),
+  passwordHash: text("password_hash").notNull(),
+  balance: text("balance").notNull().default("1000000.00"),
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .notNull()
+    .default(sql`(strftime('%s', 'now'))`),
+  isAdmin: integer("is_admin", { mode: "boolean" }).notNull().default(false),
+  isDisabled: integer("is_disabled", { mode: "boolean" }).notNull().default(false),
+
+  // ✅ New: Account freeze controls (admin)
+  isFrozen: integer("is_frozen", { mode: "boolean" }).notNull().default(false),
+  freezeReasonCode: text("freeze_reason_code"),
+  freezeReasonText: text("freeze_reason_text"),
+  frozenAt: integer("frozen_at", { mode: "timestamp" }),
+  frozenUntil: integer("frozen_until", { mode: "timestamp" }),
+  frozenByAdminId: integer("frozen_by_admin_id", { mode: "number" }),
+});
+
+// ✅ New: Login history & IP tracking
+export const userLoginEvents = sqliteTable("login_events", {
+  id: integer("id", { mode: "number" }).primaryKey({ autoIncrement: true }),
+  userId: integer("user_id", { mode: "number" }),
+  username: text("username"),
+  ip: text("ip").notNull(),
+  userAgent: text("user_agent"),
+  success: integer("success", { mode: "boolean" }).notNull().default(false),
+  failureReason: text("failure_reason"),
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .notNull()
+    .default(sql`(strftime('%s', 'now'))`),
+});
+
+// ✅ New: User notes / flags
+export const userAdminNotes = sqliteTable("user_admin_notes", {
+  id: integer("id", { mode: "number" }).primaryKey({ autoIncrement: true }),
+  userId: integer("user_id", { mode: "number" }).notNull(),
+  adminUserId: integer("admin_user_id", { mode: "number" }),
+  type: text("type").notNull().default("NOTE"), // NOTE | FLAG
+  severity: text("severity").notNull().default("INFO"), // INFO | WARN | HIGH
+  flagCode: text("flag_code"),
+  content: text("content").notNull(),
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .notNull()
+    .default(sql`(strftime('%s', 'now'))`),
+  isResolved: integer("is_resolved", { mode: "boolean" }).notNull().default(false),
+  resolvedAt: integer("resolved_at", { mode: "timestamp" }),
+  resolvedByAdminId: integer("resolved_by_admin_id", { mode: "number" }),
+});
+
+// ✅ New: Deposit/withdrawal/balance adjustment history
+export const userBalanceEvents = sqliteTable("user_balance_events", {
+  id: integer("id", { mode: "number" }).primaryKey({ autoIncrement: true }),
+  userId: integer("user_id", { mode: "number" }).notNull(),
+  adminUserId: integer("admin_user_id", { mode: "number" }),
+  type: text("type").notNull().default("ADJUSTMENT"), // DEPOSIT | WITHDRAWAL | ADJUSTMENT | OPENING_BALANCE
+  amount: real("amount").notNull().default(0),
+  previousBalance: real("previous_balance").notNull().default(0),
+  newBalance: real("new_balance").notNull().default(0),
+  note: text("note"),
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .notNull()
+    .default(sql`(strftime('%s', 'now'))`),
+});
+
+// ✅ New: Freeze/unfreeze history w/ reason codes
+export const userFreezeEvents = sqliteTable("user_freeze_events", {
+  id: integer("id", { mode: "number" }).primaryKey({ autoIncrement: true }),
+  userId: integer("user_id", { mode: "number" }).notNull(),
+  adminUserId: integer("admin_user_id", { mode: "number" }),
+  action: text("action").notNull(), // FREEZE | UNFREEZE
+  reasonCode: text("reason_code"),
+  reasonText: text("reason_text"),
+  until: integer("until", { mode: "timestamp" }),
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .notNull()
+    .default(sql`(strftime('%s', 'now'))`),
+});
+
+// --- existing tables below unchanged ---
+// symbolConfigs, userSettings, trades, quotes, globalSettings, tradeAudit, etc...
+
+export const insertUserSchema = createInsertSchema(users);
+export const insertUserSettingsSchema = createInsertSchema(userSettings);
+export const insertTradeSchema = createInsertSchema(trades);
+export const insertSymbolConfigSchema = createInsertSchema(symbolConfigs);
+export const insertQuoteSchema = createInsertSchema(quotes);
+export const insertGlobalSettingsSchema = createInsertSchema(globalSettings);
+
+// ✅ Insert schemas for new tables
+export const insertUserLoginEventSchema = createInsertSchema(userLoginEvents);
+export const insertUserAdminNoteSchema = createInsertSchema(userAdminNotes);
+export const insertUserBalanceEventSchema = createInsertSchema(userBalanceEvents);
+export const insertUserFreezeEventSchema = createInsertSchema(userFreezeEvents);
+
+export type User = typeof users.$inferSelect;
+export type InsertUser = typeof users.$inferInsert;
+export type UserSettings = typeof userSettings.$inferSelect;
+export type InsertUserSettings = typeof userSettings.$inferInsert;
+export type Trade = typeof trades.$inferSelect;
+export type InsertTrade = typeof trades.$inferInsert;
+export type SymbolConfig = typeof symbolConfigs.$inferSelect;
+export type InsertSymbolConfig = typeof symbolConfigs.$inferInsert;
+export type Quote = typeof quotes.$inferSelect;
+export type InsertQuote = typeof quotes.$inferInsert;
+export type GlobalSettings = typeof globalSettings.$inferSelect;
+export type TradeAudit = typeof tradeAudit.$inferSelect;
+
+// ✅ new types
+export type UserLoginEvent = typeof userLoginEvents.$inferSelect;
+export type UserAdminNote = typeof userAdminNotes.$inferSelect;
+export type UserBalanceEvent = typeof userBalanceEvents.$inferSelect;
+export type UserFreezeEvent = typeof userFreezeEvents.$inferSelect;
+```
+
+---
+
+## 2) ✅ `server/db/ensureSchema.ts` (auto-add freeze columns + create audit tables)
+
+```ts
+import { db } from "@db";
+import { sql } from "drizzle-orm";
+import { getDb } from "./sqlite";
+
+// ...existing functions...
+
+export function ensureUserAccountControlColumns() {
+  const db = getDb();
+  try {
+    const cols = db.prepare(`PRAGMA table_info(users)`).all().map((c: any) => c.name);
+    const add = (col: string, ddl: string) => { if (!cols.includes(col)) db.exec(ddl); };
+
+    add("is_frozen", "ALTER TABLE users ADD COLUMN is_frozen INTEGER NOT NULL DEFAULT 0");
+    add("freeze_reason_code", "ALTER TABLE users ADD COLUMN freeze_reason_code TEXT");
+    add("freeze_reason_text", "ALTER TABLE users ADD COLUMN freeze_reason_text TEXT");
+    add("frozen_at", "ALTER TABLE users ADD COLUMN frozen_at INTEGER");
+    add("frozen_until", "ALTER TABLE users ADD COLUMN frozen_until INTEGER");
+    add("frozen_by_admin_id", "ALTER TABLE users ADD COLUMN frozen_by_admin_id INTEGER");
+  } catch (err) {
+    console.error("ensureUserAccountControlColumns failed:", err);
+  } finally {
+    db.close();
+  }
+}
+
+export function ensureUserAuditTables() {
+  const db = getDb();
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS login_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER,
+        username TEXT,
+        ip TEXT NOT NULL,
+        user_agent TEXT,
+        success INTEGER NOT NULL DEFAULT 0,
+        failure_reason TEXT,
+        created_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_login_events_user_id ON login_events(user_id);
+      CREATE INDEX IF NOT EXISTS idx_login_events_created_at ON login_events(created_at);
+
+      CREATE TABLE IF NOT EXISTS user_admin_notes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        admin_user_id INTEGER,
+        type TEXT NOT NULL DEFAULT 'NOTE',
+        severity TEXT NOT NULL DEFAULT 'INFO',
+        flag_code TEXT,
+        content TEXT NOT NULL,
+        created_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+        is_resolved INTEGER NOT NULL DEFAULT 0,
+        resolved_at INTEGER,
+        resolved_by_admin_id INTEGER
+      );
+      CREATE INDEX IF NOT EXISTS idx_user_admin_notes_user_id ON user_admin_notes(user_id);
+      CREATE INDEX IF NOT EXISTS idx_user_admin_notes_created_at ON user_admin_notes(created_at);
+
+      CREATE TABLE IF NOT EXISTS user_balance_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        admin_user_id INTEGER,
+        type TEXT NOT NULL DEFAULT 'ADJUSTMENT',
+        amount REAL NOT NULL DEFAULT 0,
+        previous_balance REAL NOT NULL DEFAULT 0,
+        new_balance REAL NOT NULL DEFAULT 0,
+        note TEXT,
+        created_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_user_balance_events_user_id ON user_balance_events(user_id);
+      CREATE INDEX IF NOT EXISTS idx_user_balance_events_created_at ON user_balance_events(created_at);
+
+      CREATE TABLE IF NOT EXISTS user_freeze_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        admin_user_id INTEGER,
+        action TEXT NOT NULL,
+        reason_code TEXT,
+        reason_text TEXT,
+        until INTEGER,
+        created_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_user_freeze_events_user_id ON user_freeze_events(user_id);
+      CREATE INDEX IF NOT EXISTS idx_user_freeze_events_created_at ON user_freeze_events(created_at);
+    `);
+  } catch (err) {
+    console.error("ensureUserAuditTables failed:", err);
+  } finally {
+    db.close();
+  }
+}
+```
+
+---
+
+## 3) ✅ `server/index.ts` (run new ensure functions at startup)
+
+```ts
+import {
+  ensureTradeCloseAuditColumns,
+  ensureQuotesColumns,
+  ensureTradeAuditTable,
+  ensureUserAccountControlColumns,
+  ensureUserAuditTables,
+  ensureUserSettingsColumns,
+  ensureGlobalSettingsTable,
+  ensureUsersColumns,
+} from "./db/ensureSchema";
+
+// ...
+
+ensureUsersColumns();
+ensureUserAccountControlColumns();
+ensureUserAuditTables();
+ensureUserSettingsColumns();
+ensureTradeAuditTable();
+ensureGlobalSettingsTable();
+ensureQuotesColumns();
+ensureTradeCloseAuditColumns();
+```
+
+---
+
+## 4) ✅ `server/storage.ts` (initial balance event + admin balance event writer + started enableUserAccount)
+
+### A) Create opening balance event on user creation
+
+```ts
+// inside createUser(...)
+const startingBalance = parseFloat(user.balance || "0");
+await db.insert(userBalanceEvents).values({
+  userId: user.id,
+  adminUserId: null,
+  type: "OPENING_BALANCE",
+  amount: startingBalance,
+  previousBalance: 0,
+  newBalance: startingBalance,
+  note: "Account created",
+});
+```
+
+### B) Admin balance adjustment that creates deposit/withdrawal history
+
+```ts
+async adjustUserBalanceAdmin(params: {
+  userId: number;
+  newBalance: string;
+  adminUserId: number | null;
+  type: "DEPOSIT" | "WITHDRAWAL" | "ADJUSTMENT";
+  note?: string;
+}): Promise<User> {
+  const user = await this.getUser(params.userId);
+  if (!user) throw new Error("User not found");
+
+  const prev = parseFloat(user.balance || "0");
+  const next = parseFloat(params.newBalance || "0");
+  const amount = next - prev;
+
+  const [updatedUser] = await db
+    .update(users)
+    .set({ balance: params.newBalance })
+    .where(eq(users.id, params.userId))
+    .returning();
+
+  await db.insert(userBalanceEvents).values({
+    userId: params.userId,
+    adminUserId: params.adminUserId,
+    type: params.type,
+    amount,
+    previousBalance: prev,
+    newBalance: next,
+    note: params.note || null,
+  });
+
+  return updatedUser;
+},
+```
+
+### C) Started implementing enableUserAccount (more admin methods next)
+
+```ts
+async enableUserAccount(userId: number): Promise<User> {
+  const [updatedUser] = await db
+    .update(users)
+    .set({ isDisabled: false })
+    .where(eq(users.id, userId))
+    .returning();
+  return updatedUser;
+},
+```
+
+---
+
+# Next Step (you can reply: **CONTINUE**)
+
+In the next output, I will deliver the remaining implementation to complete your feature list:
+
+✅ Backend:
+
+* Bulk enable/disable route + storage
+* Bulk risk profile apply route + storage
+* Notes/flags endpoints + storage
+* Login events recording from `/api/auth/login` including IP + user-agent
+* Login history retrieval endpoints
+* Freeze/unfreeze endpoint w reason codes + until date + history events
+* Timeline endpoint that merges trades + deposits/withdrawals + notes/flags + logins + freeze events (sorted)
+
+✅ Logic engine:
+
+* Risk enforcement: deny trade placement when frozen (and optionally deny withdrawals/exports)
+
+✅ Frontend:
+
+* User table multi-select + bulk action bar
+* Apply risk profile modal
+* User activity timeline modal (visual, chronological)
+* Notes/flags UI
+* Login/IP audit UI
+* Freeze controls + reason code input
+* Export buttons (CSV + PDF)
+
+If you want the timeline to be **visual** (like a real timeline component), tell me whether you prefer:
+
+1. Simple stacked chronological list
+2. Vertical timeline with markers (dot/line UI)
+3. Tabs: Trades | Funding | Security | Notes | Freezes

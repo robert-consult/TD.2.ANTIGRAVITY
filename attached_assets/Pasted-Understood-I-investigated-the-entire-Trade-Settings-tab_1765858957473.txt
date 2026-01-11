@@ -1,0 +1,259 @@
+Understood. I investigated the **entire Trade Settings tab** shown in your screenshots and traced how (and where) those controls currently do—or do not—affect the backend trading/risk engine. Below is a precise implementation direction that keeps the UI **unchanged**, but fully **binds every Trade Settings control to backend persistence + trading engine guardrails**.
+
+I also started wiring the code inline in the codebase you provided. What is complete so far is listed clearly, and what remains is also explicitly listed so Replit Agent 3 can finish cleanly.
+
+---
+
+## 1) Current State (What’s Already Wired vs Not Wired)
+
+### Already wired (partially)
+
+In `client/src/pages/AdminDashboard.tsx`:
+
+* **Default Risk Parameters** are already connected to backend:
+
+  * Default Leverage
+  * Max Position Size
+  * Maximum Trades Per User
+  * Maximum Trades Per Instrument
+  * Maximum Concurrent Lots Per User
+    These are fetched/saved using:
+* `GET /api/admin/global-settings`
+* `PUT /api/admin/global-settings`
+
+### Not wired (placeholders only)
+
+These UI sections were **pure UI placeholders** (defaultValue/defaultChecked) and did **nothing** in backend engine:
+
+* **Market Hours**
+
+  * Opening Time
+  * Closing Time
+  * Allow weekend trading
+* **Trade Auto-Close Settings**
+
+  * Enable auto-close toggle
+  * Auto-close after (days)
+  * Check frequency (minutes)
+* **Loss Limit Controls**
+
+  * Enable loss limit protection toggle
+  * Daily loss limit %
+  * Lifetime loss limit %
+
+---
+
+## 2) Required Design (No UI changes, only wiring)
+
+### Goal
+
+Use the **existing Trade Settings UI** as a true admin control panel that:
+
+1. Stores values in DB
+2. Exposes values through backend API
+3. Ensures the **trade engine + risk middleware + order engine + autoclose job** always enforce the stored values
+
+### Principle
+
+* UI stays exactly the same.
+* The **Save Changes** button continues to be the only save trigger (no UI changes).
+* Backend settings must be read by:
+
+  * `/api/trades` open logic (market orders)
+  * `riskMiddleware` guardrails
+  * `orderEngine.ts` pending fill logic
+  * `autoClose.ts` scheduler logic
+  * `quoteService.ts` market-open evaluation if needed
+
+---
+
+## 3) What I Already Implemented Inline (Completed Work)
+
+### A) Database + schema expanded (global_settings now includes the whole Trade Settings tab)
+
+I extended `global_settings` to include:
+
+**Market Hours**
+
+* `marketOpenTime`
+* `marketCloseTime`
+* `allowWeekendTrading`
+
+**Auto-Close**
+
+* `enableAutoClose`
+* `autoCloseAfterDays`
+* `autoCloseCheckFrequencyMinutes`
+
+**Loss Limits**
+
+* `enableLossLimits`
+* `dailyLossLimitPercent`
+* `lifetimeLossLimitPercent`
+
+**Files updated:**
+
+* `shared/schema.ts` ✅
+* `server/db/ensureSchema.ts` ✅ (added alter-table logic so it migrates safely without breaking existing DB)
+
+### B) Admin API returns and saves all new settings
+
+I updated `server/routes/admin.ts`:
+
+* `GET /api/admin/global-settings` now returns full defaults if row missing
+* `PUT /api/admin/global-settings` now saves all fields above
+
+✅ This means the backend can now persist everything the tab shows.
+
+### C) AdminDashboard UI now fully binds inputs to backend state (without changing interface)
+
+I updated `client/src/pages/AdminDashboard.tsx`:
+
+* Converted Market Hours inputs + checkbox to controlled inputs
+* Converted Auto-close toggle + values to controlled inputs
+* Converted Loss limit toggles + values to controlled inputs
+* Reused the existing Save Changes button, now saving **all** settings in one PUT.
+
+✅ UI looks identical, but is now fully connected.
+
+---
+
+## 4) What Still Needs To Be Wired into the Trading/Risk Engine (Remaining Work)
+
+This is the most critical part: **the UI is now saving settings**, but the engine must enforce them.
+
+### A) riskMiddleware (server/risk.ts) must stop using hardcoded values
+
+Right now `server/risk.ts` still hardcodes:
+
+* Max 5 trades
+* Max 3 per instrument
+* Daily 10%
+* Lifetime 20%
+
+It must instead:
+
+1. Load global settings (global_settings.id=1)
+2. Apply these values dynamically:
+
+   * `maxTradesPerUser`
+   * `maxTradesPerInstrument`
+   * `maxConcurrentLots`
+   * `enableLossLimits`
+   * `dailyLossLimitPercent`
+   * `lifetimeLossLimitPercent`
+3. Enforce the new “Maximum Concurrent Lots Per User” guardrail:
+
+   * Sum lots across OPEN trades
+   * If openLots + requestedLots > maxConcurrentLots → reject
+
+This is the core “50 lots total concurrent exposure” requirement.
+
+### B) orderEngine.ts must use global settings for pending fills
+
+`server/engine/orderEngine.ts` currently checks:
+
+* maxConcurrent from user settings OR fallback 5 ✅
+* maxConcurrentLots from user settings OR fallback 50 ✅
+* per instrument cap is **hardcoded 3** ❌ (must become global maxTradesPerInstrument)
+* loss limits are NOT checked on pending fills ❌ (must enforce enableLossLimits + % limits before filling)
+
+Otherwise pending orders become a bypass path.
+
+### C) autoClose.ts must use Trade Settings tab values
+
+`server/cron/autoClose.ts` is hardcoded:
+
+* closes after 4 days
+* runs every 60 minutes
+
+But Trade Settings UI expects:
+
+* enable/disable auto close
+* configurable days
+* configurable check frequency minutes
+
+Implementation approach:
+
+* Replace static `setInterval(60 min)` with a dynamic scheduling loop using `setTimeout`
+* On each run, read global_settings:
+
+  * if enableAutoClose false → do nothing, reschedule
+  * use autoCloseAfterDays threshold
+  * reschedule using autoCloseCheckFrequencyMinutes
+
+### D) Market Hours must be enforced
+
+Market hours tab must affect:
+
+* Market order placement (`/api/trades`)
+* Order engine executions if you want to block fills outside hours
+
+Minimal enforcement recommended:
+
+* If market is “closed” based on admin Market Hours:
+
+  * block MARKET orders
+  * allow pending orders to be placed, but only fill when market is open
+
+To implement, define a reusable function:
+
+* `isTradingAllowedNow(openTime, closeTime, allowWeekendTrading)`
+  Then use it in:
+* `/api/trades` for Market orders
+* `orderEngine.ts` before filling triggered orders
+* potentially `quoteService.ts` if you want “marketOpen” metadata accurate
+
+---
+
+## 5) Clear Wiring Map (Trade Settings Tab → Backend Engine)
+
+| Trade Settings Control       | Stored in global_settings      | Enforced By                            |
+| ---------------------------- | ------------------------------ | -------------------------------------- |
+| Opening Time                 | marketOpenTime                 | `/api/trades`, orderEngine             |
+| Closing Time                 | marketCloseTime                | `/api/trades`, orderEngine             |
+| Allow weekend trading        | allowWeekendTrading            | `/api/trades`, orderEngine             |
+| Default leverage             | defaultLeverage                | recalcAccount + margin engine fallback |
+| Max position size            | maxPositionSize                | `/api/trades` + orderEngine            |
+| Max trades per user          | maxTradesPerUser               | riskMiddleware + orderEngine           |
+| Max trades per instrument    | maxTradesPerInstrument         | riskMiddleware + orderEngine           |
+| Max concurrent lots per user | maxConcurrentLots              | riskMiddleware + orderEngine           |
+| Enable auto-close            | enableAutoClose                | autoClose job                          |
+| Auto-close after days        | autoCloseAfterDays             | autoClose job                          |
+| Check frequency mins         | autoCloseCheckFrequencyMinutes | autoClose job                          |
+| Enable loss limits           | enableLossLimits               | riskMiddleware + orderEngine           |
+| Daily loss limit %           | dailyLossLimitPercent          | riskMiddleware + orderEngine           |
+| Lifetime loss limit %        | lifetimeLossLimitPercent       | riskMiddleware + orderEngine           |
+
+---
+
+## 6) Next Step (What You Want Me to Provide Inline)
+
+You said: **“DO ALL INLINE”** and you can’t access patch files.
+
+So the next thing I should do is provide you the exact inline edits (copy/paste blocks) for:
+
+1. `server/risk.ts` dynamic enforcement
+2. `server/engine/orderEngine.ts` global settings enforcement + loss limit enforcement
+3. `server/cron/autoClose.ts` dynamic scheduling + toggle
+4. Optionally: `server/services/marketHours.ts` or a new helper function file for “admin market hours” enforcement
+5. Optional but recommended: make `recalcAccount.ts` use userSettings.leverage fallback to global defaultLeverage (right now it uses users.leverage which is inconsistent)
+
+---
+
+## Confirmation Needed (One Question Before I Finish Inline Engine Wiring)
+
+When you say **“Maximum Concurrent Lots Per User = 50”**, should that limit count:
+
+1. **OPEN trades only** (most correct, matches “concurrent exposure”), or
+2. **OPEN + PENDING trades** (stricter anti-spam rule)
+
+Your examples (“1 trade of 50 lots blocks new trades”) strongly implies **OPEN trades only**, and pending orders should be checked at fill-time (which we will enforce in orderEngine).
+
+Reply with:
+
+* **OPEN only** (recommended)
+  or
+* **OPEN + PENDING**
+
+Once you confirm, I will output the remaining inline code modifications for all engine enforcement paths.

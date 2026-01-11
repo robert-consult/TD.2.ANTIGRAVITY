@@ -1,0 +1,1504 @@
+Understood. “Add” here = **complete the missing detection engine + add Pair/Network analytics + add session-concurrency telemetry + surface everything in Admin Grift UI** (while keeping admin-tunable defaults and using **grift** naming only).
+
+Below are **drop-in backend + frontend additions**.
+
+---
+
+# A) BACKEND — Add missing engine logic + telemetry ping + pairs/networks endpoints
+
+## A1) `server/grift/griftTypes.ts` (NEW)
+
+```ts
+// server/grift/griftTypes.ts
+export type GriftSeverity = "LOW" | "MED" | "HIGH" | "CRITICAL";
+export type GriftSignalStatus = "OPEN" | "IN_REVIEW" | "CLOSED" | "IGNORED";
+
+export type GriftConfig = {
+  id: number;
+  enabled: number;
+
+  multiAccountWindowDays: number;
+  churnWindowHours: number;
+  hedgeWindowMinutes: number;
+  concurrentWindowMinutes: number;
+
+  ipUniqueThreshold: number;
+  uaUniqueThreshold: number;
+  deviceUniqueThreshold: number;
+  asnUniqueThreshold: number;
+
+  geoVelocityKmhThreshold: number;
+  geoVelocityMinDistanceKm: number;
+  geoVelocityMaxHours: number;
+
+  hedgeRequireDeviceMatch: number;
+  hedgeAllowIpMatch: number;
+
+  scoreMultiAccountDevice: number;
+  scoreHedgePair: number;
+  scoreIpChurn: number;
+  scoreUaChurn: number;
+  scoreDeviceChurn: number;
+  scoreGeoVelocity: number;
+  scoreConcurrentSessions: number;
+  scoreAsnVolatility: number;
+
+  tierMed: number;
+  tierHigh: number;
+  tierCritical: number;
+
+  updatedAt: number;
+  updatedByAdminId?: number | null;
+};
+```
+
+---
+
+## A2) `server/grift/griftDefaults.ts` (NEW)
+
+```ts
+// server/grift/griftDefaults.ts
+import type { GriftConfig } from "./griftTypes";
+
+export const DEFAULT_GRIFT_CONFIG: GriftConfig & { updatedByAdminId?: number | null } = {
+  id: 1,
+  enabled: 1,
+
+  multiAccountWindowDays: 30,
+  churnWindowHours: 6,
+  hedgeWindowMinutes: 15,
+  concurrentWindowMinutes: 15,
+
+  ipUniqueThreshold: 4,
+  uaUniqueThreshold: 3,
+  deviceUniqueThreshold: 2,
+  asnUniqueThreshold: 3,
+
+  geoVelocityKmhThreshold: 1200,
+  geoVelocityMinDistanceKm: 200,
+  geoVelocityMaxHours: 6,
+
+  hedgeRequireDeviceMatch: 1,
+  hedgeAllowIpMatch: 1,
+
+  scoreMultiAccountDevice: 35,
+  scoreHedgePair: 45,
+  scoreIpChurn: 18,
+  scoreUaChurn: 12,
+  scoreDeviceChurn: 20,
+  scoreGeoVelocity: 30,
+  scoreConcurrentSessions: 25,
+  scoreAsnVolatility: 15,
+
+  tierMed: 40,
+  tierHigh: 65,
+  tierCritical: 85,
+
+  updatedAt: Date.now(),
+  updatedByAdminId: null,
+};
+```
+
+---
+
+## A3) `server/grift/griftGeo.ts` (NEW)
+
+```ts
+// server/grift/griftGeo.ts
+export function haversineKm(a: { lat: number; lon: number }, b: { lat: number; lon: number }) {
+  const R = 6371;
+  const dLat = ((b.lat - a.lat) * Math.PI) / 180;
+  const dLon = ((b.lon - a.lon) * Math.PI) / 180;
+  const lat1 = (a.lat * Math.PI) / 180;
+  const lat2 = (b.lat * Math.PI) / 180;
+
+  const s =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.sin(dLon / 2) * Math.sin(dLon / 2) * Math.cos(lat1) * Math.cos(lat2);
+
+  const c = 2 * Math.atan2(Math.sqrt(s), Math.sqrt(1 - s));
+  return R * c;
+}
+
+export function kmh(distanceKm: number, deltaMs: number) {
+  const hours = deltaMs / (1000 * 60 * 60);
+  if (hours <= 0) return Infinity;
+  return distanceKm / hours;
+}
+```
+
+---
+
+## A4) `server/grift/griftEngine.ts` (FULL REPLACEMENT)
+
+This is the missing “real” detection logic (multi-account device, churn, geo-velocity, hedge pairs, concurrent sessions, ASN volatility), plus user-score aggregation.
+
+```ts
+// server/grift/griftEngine.ts
+import { sqlite } from "@db";
+import type { GriftConfig, GriftSeverity, GriftSignalStatus } from "./griftTypes";
+import { haversineKm, kmh } from "./griftGeo";
+
+function now() { return Date.now(); }
+
+function pick<T>(v: T | undefined | null, fallback: T) {
+  return v === undefined || v === null ? fallback : v;
+}
+
+function parseIntSafe(v: any): number | null {
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.trunc(n) : null;
+}
+
+function parseFloatSafe(v: any): number | null {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function header(req: any, key: string): string | null {
+  const v = req?.headers?.[key.toLowerCase()];
+  if (typeof v === "string") return v;
+  if (Array.isArray(v) && typeof v[0] === "string") return v[0];
+  return null;
+}
+
+function getClientIp(req: any): string | null {
+  const cf = header(req, "cf-connecting-ip");
+  if (cf) return cf;
+
+  const xff = header(req, "x-forwarded-for");
+  if (xff) return xff.split(",")[0].trim();
+
+  const xrip = header(req, "x-real-ip");
+  if (xrip) return xrip;
+
+  const ra = req?.socket?.remoteAddress;
+  return typeof ra === "string" ? ra : null;
+}
+
+function getAsn(req: any): number | null {
+  const cfAsn = header(req, "cf-asn");
+  if (cfAsn) return parseIntSafe(cfAsn);
+
+  const vx = header(req, "x-vercel-ip-asn");
+  if (vx) return parseIntSafe(vx);
+
+  return null;
+}
+
+function getOrg(req: any): string | null {
+  const cfOrg = header(req, "cf-organization") || header(req, "cf-as-organization");
+  if (cfOrg) return cfOrg;
+  const vx = header(req, "x-vercel-ip-as-org");
+  if (vx) return vx;
+  return null;
+}
+
+function getGeoFromHeaders(req: any) {
+  // Best-effort; many hosts only provide country.
+  const country =
+    header(req, "cf-ipcountry") ||
+    header(req, "x-vercel-ip-country") ||
+    header(req, "x-country") ||
+    null;
+
+  const region =
+    header(req, "x-vercel-ip-country-region") ||
+    header(req, "x-region") ||
+    null;
+
+  const city =
+    header(req, "x-vercel-ip-city") ||
+    header(req, "x-city") ||
+    null;
+
+  return { country, region, city };
+}
+
+function severityFromPoints(points: number): GriftSeverity {
+  if (points >= 85) return "CRITICAL";
+  if (points >= 65) return "HIGH";
+  if (points >= 40) return "MED";
+  return "LOW";
+}
+
+function tierFromScore(score: number, cfg: GriftConfig) {
+  if (score >= cfg.tierCritical) return "CRITICAL";
+  if (score >= cfg.tierHigh) return "HIGH";
+  if (score >= cfg.tierMed) return "MED";
+  return "LOW";
+}
+
+function timeBucket(ts: number, bucketMinutes: number) {
+  const ms = Math.max(1, bucketMinutes) * 60 * 1000;
+  return Math.floor(ts / ms);
+}
+
+function stablePairKey(a: number, b: number) {
+  const u1 = Math.min(a, b);
+  const u2 = Math.max(a, b);
+  return `${u1}:${u2}`;
+}
+
+function insertObservation(args: {
+  ts: number;
+  userId: number;
+  eventType: string;
+  deviceId: string | null;
+  ip: string | null;
+  userAgent: string | null;
+  country: string | null;
+  region: string | null;
+  city: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  asn: number | null;
+  org: string | null;
+}) {
+  sqlite.prepare(`
+    INSERT INTO grift_observations (
+      ts, user_id, event_type, device_id, ip, user_agent,
+      country, region, city, latitude, longitude,
+      asn, org
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    args.ts,
+    args.userId,
+    args.eventType,
+    args.deviceId,
+    args.ip,
+    args.userAgent,
+    args.country,
+    args.region,
+    args.city,
+    args.latitude,
+    args.longitude,
+    args.asn,
+    args.org
+  );
+}
+
+function upsertDevice(deviceId: string, meta: { ip: string | null; ua: string | null; country: string | null }) {
+  const ts = now();
+  const row = sqlite.prepare(`SELECT device_id FROM grift_devices WHERE device_id=?`).get(deviceId) as any;
+
+  if (!row) {
+    sqlite.prepare(`
+      INSERT INTO grift_devices (
+        device_id, first_seen_at, last_seen_at,
+        first_ip, last_ip,
+        first_user_agent, last_user_agent,
+        first_country, last_country,
+        trust_level
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'NEW')
+    `).run(
+      deviceId,
+      ts,
+      ts,
+      meta.ip,
+      meta.ip,
+      meta.ua,
+      meta.ua,
+      meta.country,
+      meta.country
+    );
+  } else {
+    sqlite.prepare(`
+      UPDATE grift_devices
+      SET last_seen_at=?,
+          last_ip=?,
+          last_user_agent=?,
+          last_country=?
+      WHERE device_id=?
+    `).run(ts, meta.ip, meta.ua, meta.country, deviceId);
+  }
+}
+
+function upsertDeviceUser(deviceId: string, userId: number) {
+  const ts = now();
+  const row = sqlite.prepare(`
+    SELECT device_id, user_id, seen_count
+    FROM grift_device_users
+    WHERE device_id=? AND user_id=?
+  `).get(deviceId, userId) as any;
+
+  if (!row) {
+    sqlite.prepare(`
+      INSERT INTO grift_device_users (
+        device_id, user_id, first_seen_at, last_seen_at, seen_count, link_strength
+      ) VALUES (?, ?, ?, ?, 1, 0)
+    `).run(deviceId, userId, ts, ts);
+  } else {
+    sqlite.prepare(`
+      UPDATE grift_device_users
+      SET last_seen_at=?, seen_count=seen_count+1
+      WHERE device_id=? AND user_id=?
+    `).run(ts, deviceId, userId);
+  }
+}
+
+function insertTradeObs(args: { ts: number; userId: number; tradeId: number; symbol: string; side: string; deviceId: string | null; ip: string | null }) {
+  sqlite.prepare(`
+    INSERT INTO grift_trade_observations (ts, user_id, trade_id, symbol, side, device_id, ip)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(args.ts, args.userId, args.tradeId, args.symbol, args.side, args.deviceId, args.ip);
+}
+
+function createSignal(args: {
+  ts: number;
+  ruleCode: string;
+  primaryUserId: number;
+  secondaryUserId?: number | null;
+  deviceId?: string | null;
+  ip?: string | null;
+  userAgent?: string | null;
+  country?: string | null;
+  region?: string | null;
+  city?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  asn?: number | null;
+  org?: string | null;
+  symbol?: string | null;
+  tradeId?: number | null;
+  points: number;
+  evidence: any;
+  status?: GriftSignalStatus;
+  bucketMinutes: number;
+}) {
+  const severity = severityFromPoints(args.points);
+  const st: GriftSignalStatus = args.status ?? "OPEN";
+
+  const b = timeBucket(args.ts, args.bucketMinutes);
+
+  const dedupeKey = [
+    args.ruleCode,
+    args.primaryUserId,
+    args.secondaryUserId ?? "",
+    args.deviceId ?? "",
+    args.ip ?? "",
+    args.symbol ?? "",
+    b,
+  ].join("|");
+
+  const evidenceJson = JSON.stringify(args.evidence ?? {});
+  const updatedAt = args.ts;
+
+  try {
+    const info = sqlite.prepare(`
+      INSERT INTO grift_signals (
+        created_at, updated_at,
+        rule_code, severity, status,
+        primary_user_id, secondary_user_id,
+        device_id, ip, user_agent,
+        country, region, city, latitude, longitude,
+        asn, org,
+        symbol, trade_id,
+        points, dedupe_key, evidence_json
+      ) VALUES (
+        ?, ?,
+        ?, ?, ?,
+        ?, ?,
+        ?, ?, ?,
+        ?, ?, ?, ?, ?,
+        ?, ?,
+        ?, ?,
+        ?, ?, ?
+      )
+    `).run(
+      args.ts, updatedAt,
+      args.ruleCode, severity, st,
+      args.primaryUserId, args.secondaryUserId ?? null,
+      args.deviceId ?? null, args.ip ?? null, args.userAgent ?? null,
+      args.country ?? null, args.region ?? null, args.city ?? null,
+      args.latitude ?? null, args.longitude ?? null,
+      args.asn ?? null, args.org ?? null,
+      args.symbol ?? null, args.tradeId ?? null,
+      args.points, dedupeKey, evidenceJson
+    );
+
+    return { created: true, id: Number(info.lastInsertRowid), dedupeKey };
+  } catch {
+    // If dedupe hit, we still update updated_at/evidence/points (but do not reopen status)
+    sqlite.prepare(`
+      UPDATE grift_signals
+      SET updated_at=?, points=?, evidence_json=?
+      WHERE dedupe_key=?
+    `).run(updatedAt, args.points, evidenceJson, dedupeKey);
+
+    const row = sqlite.prepare(`SELECT id FROM grift_signals WHERE dedupe_key=?`).get(dedupeKey) as any;
+    return { created: false, id: row?.id ? Number(row.id) : null, dedupeKey };
+  }
+}
+
+export function getConfig(): GriftConfig {
+  const row = sqlite.prepare(`SELECT * FROM grift_config WHERE id=1`).get() as any;
+  if (!row) {
+    // ensureGriftSchema should seed; but stay safe
+    throw new Error("grift_config missing (ensureGriftSchema not executed)");
+  }
+
+  return {
+    id: 1,
+    enabled: Number(row.enabled),
+
+    multiAccountWindowDays: Number(row.multi_account_window_days),
+    churnWindowHours: Number(row.churn_window_hours),
+    hedgeWindowMinutes: Number(row.hedge_window_minutes),
+    concurrentWindowMinutes: Number(row.concurrent_window_minutes ?? 15),
+
+    ipUniqueThreshold: Number(row.ip_unique_threshold),
+    uaUniqueThreshold: Number(row.ua_unique_threshold),
+    deviceUniqueThreshold: Number(row.device_unique_threshold),
+    asnUniqueThreshold: Number(row.asn_unique_threshold ?? 3),
+
+    geoVelocityKmhThreshold: Number(row.geo_velocity_kmh_threshold),
+    geoVelocityMinDistanceKm: Number(row.geo_velocity_min_distance_km),
+    geoVelocityMaxHours: Number(row.geo_velocity_max_hours),
+
+    hedgeRequireDeviceMatch: Number(row.hedge_require_device_match ?? 1),
+    hedgeAllowIpMatch: Number(row.hedge_allow_ip_match ?? 1),
+
+    scoreMultiAccountDevice: Number(row.score_multi_account_device),
+    scoreHedgePair: Number(row.score_hedge_pair),
+    scoreIpChurn: Number(row.score_ip_churn),
+    scoreUaChurn: Number(row.score_ua_churn),
+    scoreDeviceChurn: Number(row.score_device_churn),
+    scoreGeoVelocity: Number(row.score_geo_velocity),
+    scoreConcurrentSessions: Number(row.score_concurrent_sessions ?? 25),
+    scoreAsnVolatility: Number(row.score_asn_volatility ?? 15),
+
+    tierMed: Number(row.tier_med),
+    tierHigh: Number(row.tier_high),
+    tierCritical: Number(row.tier_critical),
+
+    updatedAt: Number(row.updated_at),
+    updatedByAdminId: row.updated_by_admin_id ?? null,
+  };
+}
+
+// ------- DETECTORS -------
+
+function detectMultiAccountDevice(userId: number, deviceId: string, cfg: GriftConfig) {
+  const since = now() - cfg.multiAccountWindowDays * 24 * 60 * 60 * 1000;
+
+  const rows = sqlite.prepare(`
+    SELECT user_id as userId, last_seen_at as lastSeenAt, seen_count as seenCount
+    FROM grift_device_users
+    WHERE device_id=? AND last_seen_at >= ?
+    ORDER BY last_seen_at DESC
+  `).all(deviceId, since) as any[];
+
+  const distinctUsers = Array.from(new Set(rows.map((r) => Number(r.userId))));
+  if (distinctUsers.length <= 1) return;
+
+  const other = distinctUsers.find((u) => u !== userId) ?? null;
+
+  createSignal({
+    ts: now(),
+    ruleCode: "MULTI_ACCOUNT_DEVICE",
+    primaryUserId: userId,
+    secondaryUserId: other,
+    deviceId,
+    points: cfg.scoreMultiAccountDevice,
+    bucketMinutes: cfg.multiAccountWindowDays * 24 * 60, // day-window dedupe
+    evidence: {
+      deviceId,
+      windowDays: cfg.multiAccountWindowDays,
+      users: rows,
+      distinctUsers,
+    },
+  });
+}
+
+function detectChurn(userId: number, cfg: GriftConfig) {
+  const since = now() - cfg.churnWindowHours * 60 * 60 * 1000;
+
+  const obs = sqlite.prepare(`
+    SELECT ts, ip, user_agent as ua, device_id as deviceId, country, asn
+    FROM grift_observations
+    WHERE user_id=? AND ts >= ?
+    ORDER BY ts DESC
+    LIMIT 500
+  `).all(userId, since) as any[];
+
+  const uniq = (arr: any[]) => Array.from(new Set(arr.filter(Boolean).map(String)));
+
+  const ips = uniq(obs.map((o) => o.ip));
+  const uas = uniq(obs.map((o) => o.ua));
+  const devices = uniq(obs.map((o) => o.deviceId));
+  const countries = uniq(obs.map((o) => o.country));
+  const asns = Array.from(new Set(obs.map((o) => (o.asn == null ? null : Number(o.asn))).filter((x) => x != null)));
+
+  if (ips.length >= cfg.ipUniqueThreshold) {
+    createSignal({
+      ts: now(),
+      ruleCode: "IP_CHURN",
+      primaryUserId: userId,
+      ip: ips[0] ?? null,
+      points: cfg.scoreIpChurn,
+      bucketMinutes: cfg.churnWindowHours * 60,
+      evidence: { windowHours: cfg.churnWindowHours, uniqueIps: ips, count: ips.length, recent: obs.slice(0, 50) },
+    });
+  }
+
+  if (uas.length >= cfg.uaUniqueThreshold) {
+    createSignal({
+      ts: now(),
+      ruleCode: "UA_CHURN",
+      primaryUserId: userId,
+      userAgent: uas[0] ?? null,
+      points: cfg.scoreUaChurn,
+      bucketMinutes: cfg.churnWindowHours * 60,
+      evidence: { windowHours: cfg.churnWindowHours, uniqueUserAgents: uas, count: uas.length, recent: obs.slice(0, 50) },
+    });
+  }
+
+  if (devices.length >= cfg.deviceUniqueThreshold) {
+    createSignal({
+      ts: now(),
+      ruleCode: "DEVICE_CHURN",
+      primaryUserId: userId,
+      deviceId: devices[0] ?? null,
+      points: cfg.scoreDeviceChurn,
+      bucketMinutes: cfg.churnWindowHours * 60,
+      evidence: { windowHours: cfg.churnWindowHours, uniqueDevices: devices, count: devices.length, recent: obs.slice(0, 50) },
+    });
+  }
+
+  if (asns.length >= cfg.asnUniqueThreshold) {
+    createSignal({
+      ts: now(),
+      ruleCode: "ASN_VOLATILITY",
+      primaryUserId: userId,
+      asn: asns[0] ?? null,
+      points: cfg.scoreAsnVolatility,
+      bucketMinutes: cfg.churnWindowHours * 60,
+      evidence: { windowHours: cfg.churnWindowHours, uniqueAsns: asns, count: asns.length, recent: obs.slice(0, 50) },
+    });
+  }
+
+  // Countries changing can be a leading indicator, but we keep it as evidence only (no separate rule)
+  if (countries.length >= 2) {
+    // Optional: fold into IP_CHURN evidence already. Keeping as is (no extra signal).
+  }
+}
+
+function detectGeoVelocity(userId: number, cfg: GriftConfig) {
+  const since = now() - cfg.geoVelocityMaxHours * 60 * 60 * 1000;
+
+  const obs = sqlite.prepare(`
+    SELECT ts, latitude as lat, longitude as lon, country, city, ip
+    FROM grift_observations
+    WHERE user_id=? AND ts >= ?
+      AND latitude IS NOT NULL AND longitude IS NOT NULL
+    ORDER BY ts DESC
+    LIMIT 50
+  `).all(userId, since) as any[];
+
+  if (obs.length < 2) return;
+
+  // Find max velocity pair among consecutive points in time order
+  const sorted = [...obs].sort((a, b) => Number(a.ts) - Number(b.ts));
+  let best: any = null;
+
+  for (let i = 1; i < sorted.length; i++) {
+    const a = sorted[i - 1];
+    const b = sorted[i];
+    const d = haversineKm({ lat: Number(a.lat), lon: Number(a.lon) }, { lat: Number(b.lat), lon: Number(b.lon) });
+    const v = kmh(d, Number(b.ts) - Number(a.ts));
+
+    if (!best || v > best.v) best = { a, b, d, v };
+  }
+
+  if (!best) return;
+
+  if (best.d >= cfg.geoVelocityMinDistanceKm && best.v >= cfg.geoVelocityKmhThreshold) {
+    createSignal({
+      ts: now(),
+      ruleCode: "GEO_VELOCITY",
+      primaryUserId: userId,
+      ip: best.b.ip ?? null,
+      latitude: Number(best.b.lat),
+      longitude: Number(best.b.lon),
+      country: best.b.country ?? null,
+      city: best.b.city ?? null,
+      points: cfg.scoreGeoVelocity,
+      bucketMinutes: cfg.geoVelocityMaxHours * 60,
+      evidence: {
+        thresholdKmh: cfg.geoVelocityKmhThreshold,
+        minDistanceKm: cfg.geoVelocityMinDistanceKm,
+        maxHours: cfg.geoVelocityMaxHours,
+        distanceKm: best.d,
+        velocityKmh: best.v,
+        from: best.a,
+        to: best.b,
+      },
+    });
+  }
+}
+
+function detectConcurrentSessions(userId: number, cfg: GriftConfig) {
+  const since = now() - cfg.concurrentWindowMinutes * 60 * 1000;
+
+  const obs = sqlite.prepare(`
+    SELECT ts, device_id as deviceId, ip
+    FROM grift_observations
+    WHERE user_id=? AND ts >= ?
+    ORDER BY ts DESC
+    LIMIT 300
+  `).all(userId, since) as any[];
+
+  // Distinct session “contexts” = device + ip (ip optional)
+  const keys = new Set<string>();
+  for (const o of obs) {
+    const d = o.deviceId ? String(o.deviceId) : "";
+    const ip = o.ip ? String(o.ip) : "";
+    if (!d && !ip) continue;
+    keys.add(`${d}|${ip}`);
+  }
+
+  if (keys.size >= 2) {
+    createSignal({
+      ts: now(),
+      ruleCode: "CONCURRENT_SESSIONS",
+      primaryUserId: userId,
+      deviceId: obs[0]?.deviceId ?? null,
+      ip: obs[0]?.ip ?? null,
+      points: cfg.scoreConcurrentSessions,
+      bucketMinutes: cfg.concurrentWindowMinutes,
+      evidence: {
+        windowMinutes: cfg.concurrentWindowMinutes,
+        distinctContexts: Array.from(keys),
+        sample: obs.slice(0, 50),
+      },
+    });
+  }
+}
+
+function detectHedgePairOnTrade(args: {
+  userId: number;
+  tradeId: number;
+  symbol: string;
+  side: string;
+  deviceId: string | null;
+  ip: string | null;
+  cfg: GriftConfig;
+}) {
+  const { userId, tradeId, symbol, side, deviceId, ip, cfg } = args;
+  const since = now() - cfg.hedgeWindowMinutes * 60 * 1000;
+
+  // Look for opposite side, other user, same symbol, within window
+  const rows = sqlite.prepare(`
+    SELECT ts, user_id as userId, trade_id as tradeId, side, device_id as deviceId, ip
+    FROM grift_trade_observations
+    WHERE symbol=? AND ts >= ?
+      AND user_id != ?
+    ORDER BY ts DESC
+    LIMIT 200
+  `).all(symbol, since, userId) as any[];
+
+  const opposite = (s: string) => (String(s).toUpperCase() === "BUY" ? "SELL" : "BUY");
+
+  const opp = opposite(side);
+  const candidates = rows.filter((r) => String(r.side).toUpperCase() === opp);
+
+  const filtered = candidates.filter((r) => {
+    if (cfg.hedgeRequireDeviceMatch === 1) {
+      if (!deviceId) return false;
+      return String(r.deviceId || "") === String(deviceId);
+    }
+    if (cfg.hedgeAllowIpMatch === 1 && ip) {
+      return String(r.ip || "") === String(ip);
+    }
+    return true;
+  });
+
+  if (filtered.length === 0) return;
+
+  // Take best (most recent) match
+  const hit = filtered[0];
+  const otherUserId = Number(hit.userId);
+
+  createSignal({
+    ts: now(),
+    ruleCode: "HEDGE_PAIR",
+    primaryUserId: userId,
+    secondaryUserId: otherUserId,
+    deviceId: pick(deviceId, null),
+    ip: pick(ip, null),
+    symbol,
+    tradeId,
+    points: cfg.scoreHedgePair,
+    bucketMinutes: cfg.hedgeWindowMinutes,
+    evidence: {
+      windowMinutes: cfg.hedgeWindowMinutes,
+      symbol,
+      thisTrade: { userId, tradeId, side, deviceId, ip },
+      matchedTrade: hit,
+      requireDeviceMatch: cfg.hedgeRequireDeviceMatch === 1,
+      allowIpMatch: cfg.hedgeAllowIpMatch === 1,
+    },
+  });
+}
+
+// ------- AGGREGATION -------
+
+export function recomputeUserAggregates(userId: number, cfg: GriftConfig) {
+  const ts = now();
+
+  // Open signals affecting user
+  const openSignals = sqlite.prepare(`
+    SELECT id, points, created_at
+    FROM grift_signals
+    WHERE status='OPEN' AND (primary_user_id=? OR secondary_user_id=?)
+    ORDER BY created_at DESC
+  `).all(userId, userId) as any[];
+
+  const openPointsSum = Math.min(100, openSignals.reduce((s, r) => s + Number(r.points || 0), 0));
+  const scoreCurrent = openPointsSum;
+
+  const since7d = ts - 7 * 24 * 60 * 60 * 1000;
+  const since30d = ts - 30 * 24 * 60 * 60 * 1000;
+
+  const score7d = sqlite.prepare(`
+    SELECT COALESCE(SUM(points), 0) as s
+    FROM grift_signals
+    WHERE created_at >= ? AND (primary_user_id=? OR secondary_user_id=?)
+  `).get(since7d, userId, userId) as any;
+
+  const score30d = sqlite.prepare(`
+    SELECT COALESCE(SUM(points), 0) as s
+    FROM grift_signals
+    WHERE created_at >= ? AND (primary_user_id=? OR secondary_user_id=?)
+  `).get(since30d, userId, userId) as any;
+
+  const obs7d = sqlite.prepare(`
+    SELECT device_id as deviceId, ip, user_agent as ua, country, asn
+    FROM grift_observations
+    WHERE user_id=? AND ts >= ?
+  `).all(userId, since7d) as any[];
+
+  const uniq = (arr: any[]) => Array.from(new Set(arr.filter(Boolean).map(String)));
+  const devices7d = uniq(obs7d.map((o) => o.deviceId)).length;
+  const ips7d = uniq(obs7d.map((o) => o.ip)).length;
+  const uas7d = uniq(obs7d.map((o) => o.ua)).length;
+  const countries7d = uniq(obs7d.map((o) => o.country)).length;
+  const asns7d = Array.from(new Set(obs7d.map((o) => (o.asn == null ? null : Number(o.asn))).filter((x) => x != null))).length;
+
+  // Linked accounts via shared device (30d)
+  const linked = sqlite.prepare(`
+    SELECT COUNT(DISTINCT du2.user_id) as c
+    FROM grift_device_users du1
+    JOIN grift_device_users du2 ON du1.device_id = du2.device_id
+    WHERE du1.user_id=? AND du2.user_id != ?
+      AND du1.last_seen_at >= ? AND du2.last_seen_at >= ?
+  `).get(userId, userId, since30d, since30d) as any;
+
+  // Hedge pairs (7d)
+  const hedgePairs = sqlite.prepare(`
+    SELECT COUNT(DISTINCT CASE
+      WHEN primary_user_id=? THEN secondary_user_id
+      ELSE primary_user_id
+    END) as c
+    FROM grift_signals
+    WHERE rule_code='HEDGE_PAIR'
+      AND created_at >= ?
+      AND secondary_user_id IS NOT NULL
+      AND (primary_user_id=? OR secondary_user_id=?)
+  `).get(userId, since7d, userId, userId) as any;
+
+  const openCount = openSignals.length;
+  const tier = tierFromScore(scoreCurrent, cfg);
+
+  sqlite.prepare(`
+    INSERT INTO grift_user_scores (
+      user_id, score_current, tier,
+      score_7d, score_30d,
+      devices_7d, ips_7d, user_agents_7d, countries_7d, asns_7d,
+      linked_accounts_30d, hedge_pairs_7d,
+      open_signals_count, last_evaluated_at
+    ) VALUES (
+      ?, ?, ?,
+      ?, ?,
+      ?, ?, ?, ?, ?,
+      ?, ?,
+      ?, ?
+    )
+    ON CONFLICT(user_id) DO UPDATE SET
+      score_current=excluded.score_current,
+      tier=excluded.tier,
+      score_7d=excluded.score_7d,
+      score_30d=excluded.score_30d,
+      devices_7d=excluded.devices_7d,
+      ips_7d=excluded.ips_7d,
+      user_agents_7d=excluded.user_agents_7d,
+      countries_7d=excluded.countries_7d,
+      asns_7d=excluded.asns_7d,
+      linked_accounts_30d=excluded.linked_accounts_30d,
+      hedge_pairs_7d=excluded.hedge_pairs_7d,
+      open_signals_count=excluded.open_signals_count,
+      last_evaluated_at=excluded.last_evaluated_at
+  `).run(
+    userId, scoreCurrent, tier,
+    Number(score7d?.s ?? 0), Number(score30d?.s ?? 0),
+    devices7d, ips7d, uas7d, countries7d, asns7d,
+    Number(linked?.c ?? 0), Number(hedgePairs?.c ?? 0),
+    openCount, ts
+  );
+}
+
+// ------- PUBLIC HOOKS -------
+
+function collectContext(req: any, body?: any) {
+  const ip = getClientIp(req);
+  const ua = header(req, "user-agent");
+  const deviceId = header(req, "x-device-id");
+
+  const { country, region, city } = getGeoFromHeaders(req);
+
+  // Allow client-provided coordinates from ping if present (best-effort; not trusted as sole evidence)
+  const lat = parseFloatSafe(body?.latitude);
+  const lon = parseFloatSafe(body?.longitude);
+
+  const asn = getAsn(req);
+  const org = getOrg(req);
+
+  return {
+    ip,
+    ua,
+    deviceId,
+    country,
+    region,
+    city,
+    latitude: lat,
+    longitude: lon,
+    asn,
+    org,
+  };
+}
+
+function runDetectorsForUser(userId: number, cfg: GriftConfig, deviceId: string | null) {
+  detectChurn(userId, cfg);
+  detectGeoVelocity(userId, cfg);
+  detectConcurrentSessions(userId, cfg);
+  if (deviceId) detectMultiAccountDevice(userId, deviceId, cfg);
+  recomputeUserAggregates(userId, cfg);
+}
+
+export const griftEngine = {
+  getConfig,
+
+  onLoginSuccess(req: any, userId: number) {
+    const cfg = getConfig();
+    if (cfg.enabled !== 1) return;
+
+    const ts = now();
+    const ctx = collectContext(req);
+
+    insertObservation({
+      ts,
+      userId,
+      eventType: "LOGIN_SUCCESS",
+      deviceId: ctx.deviceId,
+      ip: ctx.ip,
+      userAgent: ctx.ua,
+      country: ctx.country,
+      region: ctx.region,
+      city: ctx.city,
+      latitude: ctx.latitude,
+      longitude: ctx.longitude,
+      asn: ctx.asn,
+      org: ctx.org,
+    });
+
+    if (ctx.deviceId) {
+      upsertDevice(ctx.deviceId, { ip: ctx.ip, ua: ctx.ua, country: ctx.country });
+      upsertDeviceUser(ctx.deviceId, userId);
+    }
+
+    runDetectorsForUser(userId, cfg, ctx.deviceId);
+  },
+
+  onSessionPing(req: any, userId: number, body?: any) {
+    const cfg = getConfig();
+    if (cfg.enabled !== 1) return;
+
+    const ts = now();
+    const ctx = collectContext(req, body);
+
+    insertObservation({
+      ts,
+      userId,
+      eventType: "SESSION_PING",
+      deviceId: ctx.deviceId,
+      ip: ctx.ip,
+      userAgent: ctx.ua,
+      country: ctx.country,
+      region: ctx.region,
+      city: ctx.city,
+      latitude: ctx.latitude,
+      longitude: ctx.longitude,
+      asn: ctx.asn,
+      org: ctx.org,
+    });
+
+    if (ctx.deviceId) {
+      upsertDevice(ctx.deviceId, { ip: ctx.ip, ua: ctx.ua, country: ctx.country });
+      upsertDeviceUser(ctx.deviceId, userId);
+    }
+
+    // Concurrency is best detected from ping volume
+    runDetectorsForUser(userId, cfg, ctx.deviceId);
+  },
+
+  onTradeSubmit(req: any, userId: number, tradeId: number, symbol: string, side: "BUY" | "SELL") {
+    const cfg = getConfig();
+    if (cfg.enabled !== 1) return;
+
+    const ts = now();
+    const ctx = collectContext(req);
+
+    insertTradeObs({
+      ts,
+      userId,
+      tradeId,
+      symbol,
+      side,
+      deviceId: ctx.deviceId,
+      ip: ctx.ip,
+    });
+
+    // Also treat trade submit as observation
+    insertObservation({
+      ts,
+      userId,
+      eventType: "TRADE_SUBMIT",
+      deviceId: ctx.deviceId,
+      ip: ctx.ip,
+      userAgent: ctx.ua,
+      country: ctx.country,
+      region: ctx.region,
+      city: ctx.city,
+      latitude: ctx.latitude,
+      longitude: ctx.longitude,
+      asn: ctx.asn,
+      org: ctx.org,
+    });
+
+    if (ctx.deviceId) {
+      upsertDevice(ctx.deviceId, { ip: ctx.ip, ua: ctx.ua, country: ctx.country });
+      upsertDeviceUser(ctx.deviceId, userId);
+      detectMultiAccountDevice(userId, ctx.deviceId, cfg);
+    }
+
+    detectHedgePairOnTrade({
+      userId,
+      tradeId,
+      symbol,
+      side,
+      deviceId: ctx.deviceId,
+      ip: ctx.ip,
+      cfg,
+    });
+
+    runDetectorsForUser(userId, cfg, ctx.deviceId);
+  },
+
+  recomputeUser(userId: number) {
+    const cfg = getConfig();
+    runDetectorsForUser(userId, cfg, null);
+    return true;
+  },
+};
+```
+
+---
+
+## A5) `server/grift/griftPublicRouter.ts` (NEW)
+
+Adds `/api/grift/ping` to support concurrent-session detection and “location keeps changing” telemetry.
+
+```ts
+// server/grift/griftPublicRouter.ts
+import { Router } from "express";
+import { griftEngine } from "./griftEngine";
+
+export const griftPublicRouter = Router();
+
+function requireAuth(req: any, res: any, next: any) {
+  if (!req.user?.id) return res.status(401).json({ error: "Auth required" });
+  next();
+}
+
+griftPublicRouter.use(requireAuth);
+
+griftPublicRouter.post("/ping", (req: any, res) => {
+  const userId = Number(req.user.id);
+  griftEngine.onSessionPing(req, userId, req.body ?? {});
+  res.json({ ok: true });
+});
+```
+
+Mount in server:
+
+```ts
+import { griftPublicRouter } from "./grift/griftPublicRouter";
+app.use("/api/grift", griftPublicRouter);
+```
+
+---
+
+## A6) PATCH `server/grift/griftAdminRouter.ts` — add Pairs + Networks endpoints (ADD THESE ROUTES)
+
+Paste near other endpoints:
+
+```ts
+// --- PAIRS (aggregated) ---
+griftAdminRouter.get("/pairs", (req, res) => {
+  const sinceHours = Number(req.query.sinceHours ?? 168);
+  const since = Date.now() - Math.max(1, Math.min(24 * 365, sinceHours)) * 60 * 60 * 1000;
+  const limit = Math.max(10, Math.min(500, Number(req.query.limit ?? 200)));
+
+  const rows = sqlite.prepare(`
+    SELECT
+      CASE WHEN primary_user_id < secondary_user_id THEN primary_user_id ELSE secondary_user_id END as u1,
+      CASE WHEN primary_user_id < secondary_user_id THEN secondary_user_id ELSE primary_user_id END as u2,
+      COUNT(*) as signalCount,
+      COALESCE(SUM(points), 0) as pointsSum,
+      MAX(created_at) as lastSeenAt,
+      GROUP_CONCAT(DISTINCT rule_code) as rules
+    FROM grift_signals
+    WHERE created_at >= ?
+      AND secondary_user_id IS NOT NULL
+      AND (rule_code='HEDGE_PAIR' OR rule_code='MULTI_ACCOUNT_DEVICE')
+    GROUP BY u1, u2
+    ORDER BY pointsSum DESC, signalCount DESC, lastSeenAt DESC
+    LIMIT ?
+  `).all(since, limit);
+
+  res.json({ since, rows });
+});
+
+// --- NETWORKS (shared devices / shared IPs) ---
+griftAdminRouter.get("/networks", (req, res) => {
+  const sinceHours = Number(req.query.sinceHours ?? 168);
+  const since = Date.now() - Math.max(1, Math.min(24 * 365, sinceHours)) * 60 * 60 * 1000;
+
+  const devices = sqlite.prepare(`
+    SELECT
+      du.device_id as deviceId,
+      COUNT(DISTINCT du.user_id) as usersCount,
+      MAX(du.last_seen_at) as lastSeenAt,
+      GROUP_CONCAT(DISTINCT du.user_id) as userIds
+    FROM grift_device_users du
+    WHERE du.last_seen_at >= ?
+    GROUP BY du.device_id
+    HAVING COUNT(DISTINCT du.user_id) > 1
+    ORDER BY usersCount DESC, lastSeenAt DESC
+    LIMIT 200
+  `).all(since);
+
+  const ips = sqlite.prepare(`
+    SELECT
+      o.ip as ip,
+      COUNT(DISTINCT o.user_id) as usersCount,
+      MAX(o.ts) as lastSeenAt,
+      GROUP_CONCAT(DISTINCT o.user_id) as userIds
+    FROM grift_observations o
+    WHERE o.ts >= ?
+      AND o.ip IS NOT NULL AND o.ip != ''
+    GROUP BY o.ip
+    HAVING COUNT(DISTINCT o.user_id) > 1
+    ORDER BY usersCount DESC, lastSeenAt DESC
+    LIMIT 200
+  `).all(since);
+
+  res.json({ since, devices, ips });
+});
+```
+
+---
+
+## A7) Hook the engine into your existing login + trade submit paths (ADD SNIPPETS)
+
+### Login success (where you already set session / req.user)
+
+```ts
+import { griftEngine } from "./grift/griftEngine";
+
+// After successful login:
+griftEngine.onLoginSuccess(req, user.id);
+```
+
+### Trade submit (where you accept a new order/trade)
+
+```ts
+import { griftEngine } from "./grift/griftEngine";
+
+// After trade created (trade.id exists):
+griftEngine.onTradeSubmit(req, userId, trade.id, trade.symbol, trade.side); // side: "BUY"|"SELL"
+```
+
+---
+
+# B) FRONTEND — Add “Pairs” + “Networks” dashboards and enable session ping
+
+## B1) `client/src/pages/admin/grift/GriftPairsPanel.tsx` (NEW)
+
+```tsx
+import React, { useEffect, useState } from "react";
+import { apiFetch } from "../../../lib/api";
+
+function fmtTs(ts?: number) {
+  if (!ts) return "—";
+  try { return new Date(ts).toLocaleString(); } catch { return String(ts); }
+}
+
+export default function GriftPairsPanel({ onOpenUser }: { onOpenUser: (userId: number) => void }) {
+  const [sinceHours, setSinceHours] = useState(168);
+  const [rows, setRows] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  async function load() {
+    setLoading(true);
+    try {
+      const r = await apiFetch<{ since: number; rows: any[] }>(
+        `/api/admin/grift/pairs?sinceHours=${encodeURIComponent(String(sinceHours))}&limit=200`
+      );
+      setRows(r.rows || []);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => { load().catch(() => {}); /* eslint-disable-next-line */ }, [sinceHours]);
+
+  return (
+    <div className="rounded border overflow-hidden">
+      <div className="p-3 border-b flex items-center justify-between">
+        <div className="font-semibold">Pairs</div>
+        <div className="flex items-center gap-2 text-sm">
+          <span className="text-muted-foreground">Lookback (hours)</span>
+          <input className="border rounded px-2 py-1 w-24" type="number" value={sinceHours} onChange={(e) => setSinceHours(Number(e.target.value))} />
+          <button className="px-3 py-2 rounded border hover:bg-muted" onClick={load} disabled={loading}>
+            {loading ? "Loading…" : "Refresh"}
+          </button>
+        </div>
+      </div>
+
+      {rows.length === 0 ? (
+        <div className="p-3 text-sm text-muted-foreground">No pairs found.</div>
+      ) : (
+        <table className="w-full text-sm">
+          <thead className="bg-muted">
+            <tr>
+              <th className="text-left p-2">Users</th>
+              <th className="text-left p-2">Signals</th>
+              <th className="text-left p-2">Points Sum</th>
+              <th className="text-left p-2">Rules</th>
+              <th className="text-left p-2">Last Seen</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r, i) => (
+              <tr key={i} className="border-t">
+                <td className="p-2">
+                  <button className="underline" onClick={() => onOpenUser(Number(r.u1))}>#{r.u1}</button>
+                  <span className="mx-2">↔</span>
+                  <button className="underline" onClick={() => onOpenUser(Number(r.u2))}>#{r.u2}</button>
+                </td>
+                <td className="p-2">{r.signalCount}</td>
+                <td className="p-2 font-semibold">{r.pointsSum}</td>
+                <td className="p-2 font-mono text-xs">{r.rules || "—"}</td>
+                <td className="p-2">{fmtTs(r.lastSeenAt)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+```
+
+---
+
+## B2) `client/src/pages/admin/grift/GriftNetworksPanel.tsx` (NEW)
+
+```tsx
+import React, { useEffect, useState } from "react";
+import { apiFetch } from "../../../lib/api";
+
+function fmtTs(ts?: number) {
+  if (!ts) return "—";
+  try { return new Date(ts).toLocaleString(); } catch { return String(ts); }
+}
+
+function parseUserIds(s: any): number[] {
+  if (!s) return [];
+  return String(s)
+    .split(",")
+    .map((x) => Number(x.trim()))
+    .filter((n) => Number.isFinite(n));
+}
+
+export default function GriftNetworksPanel({ onOpenUser }: { onOpenUser: (userId: number) => void }) {
+  const [sinceHours, setSinceHours] = useState(168);
+  const [devices, setDevices] = useState<any[]>([]);
+  const [ips, setIps] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  async function load() {
+    setLoading(true);
+    try {
+      const r = await apiFetch<{ since: number; devices: any[]; ips: any[] }>(
+        `/api/admin/grift/networks?sinceHours=${encodeURIComponent(String(sinceHours))}`
+      );
+      setDevices(r.devices || []);
+      setIps(r.ips || []);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => { load().catch(() => {}); /* eslint-disable-next-line */ }, [sinceHours]);
+
+  return (
+    <div className="space-y-3">
+      <div className="rounded border p-3 flex items-center justify-between">
+        <div>
+          <div className="font-semibold">Networks</div>
+          <div className="text-xs text-muted-foreground">Shared devices and shared IPs (multi-user intersections).</div>
+        </div>
+        <div className="flex items-center gap-2 text-sm">
+          <span className="text-muted-foreground">Lookback (hours)</span>
+          <input className="border rounded px-2 py-1 w-24" type="number" value={sinceHours} onChange={(e) => setSinceHours(Number(e.target.value))} />
+          <button className="px-3 py-2 rounded border hover:bg-muted" onClick={load} disabled={loading}>
+            {loading ? "Loading…" : "Refresh"}
+          </button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+        <div className="rounded border overflow-hidden">
+          <div className="p-3 border-b font-semibold">Shared Devices</div>
+          {devices.length === 0 ? (
+            <div className="p-3 text-sm text-muted-foreground">No shared devices.</div>
+          ) : (
+            <table className="w-full text-sm">
+              <thead className="bg-muted">
+                <tr>
+                  <th className="text-left p-2">Device</th>
+                  <th className="text-left p-2">Users</th>
+                  <th className="text-left p-2">Last Seen</th>
+                </tr>
+              </thead>
+              <tbody>
+                {devices.map((d, i) => {
+                  const ids = parseUserIds(d.userIds);
+                  return (
+                    <tr key={i} className="border-t align-top">
+                      <td className="p-2 font-mono text-xs break-all">{d.deviceId}</td>
+                      <td className="p-2">
+                        <div className="text-sm font-semibold">{d.usersCount}</div>
+                        <div className="text-xs text-muted-foreground flex flex-wrap gap-2 mt-1">
+                          {ids.slice(0, 12).map((id) => (
+                            <button key={id} className="underline" onClick={() => onOpenUser(id)}>
+                              #{id}
+                            </button>
+                          ))}
+                          {ids.length > 12 ? <span>…</span> : null}
+                        </div>
+                      </td>
+                      <td className="p-2">{fmtTs(d.lastSeenAt)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+
+        <div className="rounded border overflow-hidden">
+          <div className="p-3 border-b font-semibold">Shared IPs</div>
+          {ips.length === 0 ? (
+            <div className="p-3 text-sm text-muted-foreground">No shared IPs.</div>
+          ) : (
+            <table className="w-full text-sm">
+              <thead className="bg-muted">
+                <tr>
+                  <th className="text-left p-2">IP</th>
+                  <th className="text-left p-2">Users</th>
+                  <th className="text-left p-2">Last Seen</th>
+                </tr>
+              </thead>
+              <tbody>
+                {ips.map((d, i) => {
+                  const ids = parseUserIds(d.userIds);
+                  return (
+                    <tr key={i} className="border-t align-top">
+                      <td className="p-2 font-mono text-xs break-all">{d.ip}</td>
+                      <td className="p-2">
+                        <div className="text-sm font-semibold">{d.usersCount}</div>
+                        <div className="text-xs text-muted-foreground flex flex-wrap gap-2 mt-1">
+                          {ids.slice(0, 12).map((id) => (
+                            <button key={id} className="underline" onClick={() => onOpenUser(id)}>
+                              #{id}
+                            </button>
+                          ))}
+                          {ids.length > 12 ? <span>…</span> : null}
+                        </div>
+                      </td>
+                      <td className="p-2">{fmtTs(d.lastSeenAt)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+```
+
+---
+
+## B3) PATCH `client/src/pages/admin/UserManagementGriftTab.tsx` — add new sub-tabs and render panels
+
+**Minimal patch instructions** (no need to replace the whole file again):
+
+1. Add imports at top:
+
+```tsx
+import GriftPairsPanel from "./grift/GriftPairsPanel";
+import GriftNetworksPanel from "./grift/GriftNetworksPanel";
+```
+
+2. Extend tab union:
+
+```tsx
+const [tab, setTab] = useState<
+  "Dashboard" | "Signals" | "Users" | "Pairs" | "Networks" | "Cases" | "Exports" | "Config" | "Audit"
+>("Dashboard");
+```
+
+3. Add two Tab buttons near the others:
+
+```tsx
+<TabBtn active={tab === "Pairs"} onClick={() => setTab("Pairs")}>Pairs</TabBtn>
+<TabBtn active={tab === "Networks"} onClick={() => setTab("Networks")}>Networks</TabBtn>
+```
+
+4. Add render blocks:
+
+```tsx
+{tab === "Pairs" && (
+  <GriftPairsPanel onOpenUser={(id) => openUser(id)} />
+)}
+
+{tab === "Networks" && (
+  <GriftNetworksPanel onOpenUser={(id) => openUser(id)} />
+)}
+```
+
+That’s it.
+
+---
+
+## B4) Add session ping (client) so “concurrent sessions” and “location changing” are detectable
+
+### `client/src/lib/griftPing.ts` (NEW)
+
+```ts
+// client/src/lib/griftPing.ts
+import { getDeviceId } from "./deviceId";
+
+export function startGriftPing(opts?: { intervalMs?: number }) {
+  const intervalMs = Math.max(30_000, Math.min(5 * 60_000, opts?.intervalMs ?? 60_000));
+
+  let stopped = false;
+  let timer: any = null;
+
+  const send = async () => {
+    try {
+      // optional: if you store auth state, gate here; otherwise the server returns 401 safely.
+      await fetch("/api/grift/ping", {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Device-Id": getDeviceId(),
+        },
+        body: JSON.stringify({}),
+      });
+    } catch {
+      // ignore
+    }
+  };
+
+  const loop = async () => {
+    if (stopped) return;
+    await send();
+    if (stopped) return;
+    timer = setTimeout(loop, intervalMs);
+  };
+
+  loop();
+
+  return () => {
+    stopped = true;
+    if (timer) clearTimeout(timer);
+  };
+}
+```
+
+### Call it once after login (example placement)
+
+In your top-level app component (where you know the user is logged in), add:
+
+```tsx
+import { useEffect } from "react";
+import { startGriftPing } from "./lib/griftPing";
+
+useEffect(() => {
+  const stop = startGriftPing({ intervalMs: 60_000 });
+  return () => stop();
+}, []);
+```
+
+If you have an auth store, you can start/stop based on `isAuthed`.
+
+---
+
+# C) Server Mount Checklist (do this once)
+
+In `server/index.ts` (or your main express bootstrap):
+
+```ts
+import { ensureGriftSchema } from "./grift/ensureGriftSchema";
+import { griftAdminRouter } from "./grift/griftAdminRouter";
+import { griftPublicRouter } from "./grift/griftPublicRouter";
+import { startGriftScheduler } from "./grift/griftScheduler";
+
+ensureGriftSchema();
+
+app.use("/api/grift", griftPublicRouter);
+app.use("/api/admin/grift", griftAdminRouter);
+
+startGriftScheduler({ intervalMinutes: 10, lookbackHours: 24 });
+```
+
+---
+
+# What this “Add” delivers (net-new)
+
+* Fully implemented **rule engine** (not placeholders): multi-account device, IP/UA/device churn, ASN volatility, geo-velocity, hedge-pair, concurrent sessions
+* **Session ping telemetry** to make “different devices/locations active” detectable (beyond just logins)
+* **Pairs dashboard** (who is paired with whom)
+* **Networks dashboard** (shared devices + shared IPs across users)
+* Still compatible with your existing **Cases / Audit / Exports / Config / Enforcement placeholders** from the prior step
+
+If you issue “Add” again after this, the next meaningful increment is: **auto-case creation policies** (e.g., auto-create case for any CRITICAL hedge-pair) + **hard enforcement gates** (block trade placement when tier ≥ HIGH, etc.), but I have not applied those automatically here to avoid unintended behavior changes.

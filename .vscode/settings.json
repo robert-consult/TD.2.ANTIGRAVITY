@@ -1,0 +1,5 @@
+{
+    "chatgpt.openOnStartup": true,
+    "chatgpt.commentCodeLensEnabled": true,
+    "remote.WSL.debug": true
+}

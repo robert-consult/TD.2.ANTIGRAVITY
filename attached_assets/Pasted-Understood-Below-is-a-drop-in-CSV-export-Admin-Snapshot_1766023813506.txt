@@ -1,0 +1,569 @@
+Understood. Below is a **drop-in CSV export + Admin Snapshot export** implementation that matches your audited stack:
+
+* Backend: TypeScript, Express, `server/index.ts`, `server/routes.ts`, `server/routes/admin.ts`
+* Frontend: wouter, `client/src/App.tsx`
+* Exports:
+
+  * **User**: Journal CSV, Insights CSV
+  * **Admin**: User snapshot JSON + CSV (profile + risk (best-effort) + trade summary + insights + journal)
+
+I’m writing this to be **schema-tolerant**: if certain optional tables don’t exist (risk settings), the snapshot will still work and will return partials.
+
+---
+
+# 1) Backend — CSV Utilities
+
+## `server/utils/csv.ts`
+
+```ts
+export type CsvHeader = { key: string; label: string };
+
+function escapeCsvValue(v: unknown): string {
+  if (v === null || v === undefined) return "";
+  const s = typeof v === "string" ? v : JSON.stringify(v);
+  // Escape quotes by doubling; wrap if contains delimiter/newline/quote
+  const mustWrap = /[",\n\r]/.test(s);
+  const escaped = s.replace(/"/g, '""');
+  return mustWrap ? `"${escaped}"` : escaped;
+}
+
+export function toCsv(headers: CsvHeader[], rows: Record<string, any>[]): string {
+  const headLine = headers.map(h => escapeCsvValue(h.label)).join(",");
+  const lines = rows.map(r => headers.map(h => escapeCsvValue(r[h.key])).join(","));
+  return [headLine, ...lines].join("\n") + "\n";
+}
+
+export function sendCsv(res: any, filename: string, csv: string) {
+  res.setHeader("Content-Type", "text/csv; charset=utf-8");
+  res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+  res.status(200).send(csv);
+}
+```
+
+---
+
+# 2) Backend — Safe DB helper (optional but recommended)
+
+## `server/utils/tryQuery.ts`
+
+```ts
+import db from "../db";
+
+export async function tryQuery<T = any>(sql: string, params: any[] = []): Promise<{ rows: T[] } | null> {
+  try {
+    return await db.query<T>(sql, params);
+  } catch (e: any) {
+    // Useful for missing relations/columns during schema variance
+    return null;
+  }
+}
+```
+
+---
+
+# 3) Backend — User Exports Routes (Journal + Insights CSV)
+
+## `server/routes/exports.ts`
+
+```ts
+import { Router } from "express";
+import { toCsv, sendCsv } from "../utils/csv";
+import { computeInsights } from "../services/insights";
+import db from "../db";
+
+const exportsR = Router();
+
+/**
+ * GET /journal/export.csv
+ * Exports last 200 journal entries for the authenticated user.
+ */
+exportsR.get("/journal/export.csv", async (req, res) => {
+  const q = await db.query(
+    `
+    SELECT id, trade_id, note, mood, tags, attachment_url, created_at, updated_at
+    FROM trader_journal
+    WHERE user_id = $1
+    ORDER BY created_at DESC
+    LIMIT 200
+    `,
+    [req.user!.id]
+  );
+
+  const headers = [
+    { key: "id", label: "id" },
+    { key: "trade_id", label: "trade_id" },
+    { key: "note", label: "note" },
+    { key: "mood", label: "mood" },
+    { key: "tags", label: "tags" },
+    { key: "attachment_url", label: "attachment_url" },
+    { key: "created_at", label: "created_at" },
+    { key: "updated_at", label: "updated_at" }
+  ];
+
+  const rows = q.rows.map((r: any) => ({
+    ...r,
+    tags: Array.isArray(r.tags) ? r.tags.join("|") : (r.tags ?? "")
+  }));
+
+  const csv = toCsv(headers, rows);
+  sendCsv(res, `trader_journal_user_${req.user!.id}.csv`, csv);
+});
+
+/**
+ * GET /insights/export.csv?since_days=30
+ * Produces a flat table: section, key, rank, pnl, trades, win_rate
+ */
+exportsR.get("/insights/export.csv", async (req, res) => {
+  const sinceDays = req.query.since_days ? Number(req.query.since_days) : 30;
+  const insights = await computeInsights(req.user!.id, sinceDays);
+
+  const headers = [
+    { key: "window_days", label: "window_days" },
+    { key: "section", label: "section" },
+    { key: "key", label: "key" },
+    { key: "rank", label: "rank" },
+    { key: "pnl", label: "pnl" },
+    { key: "trades", label: "trades" },
+    { key: "win_rate", label: "win_rate" }
+  ];
+
+  const flat = (sectionName: string, ranked: any[]) =>
+    ranked.map((x, idx) => ({
+      window_days: insights.window_days,
+      section: sectionName,
+      key: x.key,
+      rank: idx + 1,
+      pnl: x.pnl,
+      trades: x.trades,
+      win_rate: x.win_rate
+    }));
+
+  const rows = [
+    // Summary row as section=totals
+    {
+      window_days: insights.window_days,
+      section: "totals",
+      key: "ALL",
+      rank: 1,
+      pnl: insights.totals.pnl,
+      trades: insights.totals.trades,
+      win_rate: insights.totals.win_rate
+    },
+    ...flat("instruments", insights.instruments.ranked || []),
+    ...flat("directions", insights.directions.ranked || []),
+    ...flat("hours", insights.hours.ranked || []),
+    ...flat("hold_time", insights.hold_time.ranked || [])
+  ];
+
+  const csv = toCsv(headers, rows);
+  sendCsv(res, `trader_insights_user_${req.user!.id}_${sinceDays}d.csv`, csv);
+});
+
+export default exportsR;
+```
+
+### Wire user exports into `server/routes.ts`
+
+```ts
+import { Router } from "express";
+import journal from "./routes/journal";
+import insights from "./routes/insights";
+import exportsR from "./routes/exports";
+
+const routes = Router();
+
+routes.use(journal);
+routes.use(insights);
+routes.use(exportsR);
+
+export default routes;
+```
+
+---
+
+# 4) Backend — Admin Snapshot Export (JSON + CSV)
+
+This is designed for allocator-grade “one click snapshot”.
+
+## Add to `server/routes/admin.ts` (append near bottom)
+
+```ts
+import { toCsv, sendCsv } from "../utils/csv";
+import { tryQuery } from "../utils/tryQuery";
+import { computeInsights } from "../services/insights";
+
+// ...
+
+/**
+ * GET /admin/users/:id/snapshot?since_days=30
+ * JSON snapshot: user profile + trade totals + insights + last 200 journal entries + (best-effort) risk settings.
+ */
+admin.get("/users/:id/snapshot", adminGuard, async (req, res) => {
+  const userId = Number(req.params.id);
+  const sinceDays = req.query.since_days ? Number(req.query.since_days) : 30;
+
+  const userQ = await db.query(
+    `SELECT id, username, email, role, status, created_at
+     FROM users WHERE id = $1`,
+    [userId]
+  );
+  if (!userQ.rows.length) return res.status(404).json({ error: "User not found" });
+
+  // Best-effort risk settings (adapt these queries to your actual schema later)
+  const riskA = await tryQuery(
+    `SELECT * FROM user_risk_settings WHERE user_id = $1`,
+    [userId]
+  );
+  const riskB = await tryQuery(
+    `SELECT * FROM user_settings WHERE user_id = $1`,
+    [userId]
+  );
+  const risk = (riskA?.rows?.[0] ?? riskB?.rows?.[0] ?? null);
+
+  // Trade totals (windowed)
+  const whereTime = sinceDays ? `AND entry_time >= NOW() - INTERVAL '${sinceDays} days'` : "";
+  const totalsQ = await db.query(
+    `
+    SELECT
+      COUNT(*)::int AS trades,
+      SUM(profit)::float AS pnl,
+      AVG(profit)::float AS avg_pnl,
+      AVG(EXTRACT(EPOCH FROM (exit_time - entry_time))/60)::float AS avg_hold_minutes,
+      (SUM(CASE WHEN profit > 0 THEN 1 ELSE 0 END)::float / NULLIF(COUNT(*),0))::float AS win_rate
+    FROM trades
+    WHERE user_id = $1
+      AND exit_time IS NOT NULL
+      AND entry_time IS NOT NULL
+      ${whereTime}
+    `,
+    [userId]
+  );
+
+  const journalQ = await db.query(
+    `
+    SELECT id, trade_id, note, mood, tags, attachment_url, created_at, updated_at
+    FROM trader_journal
+    WHERE user_id = $1
+    ORDER BY created_at DESC
+    LIMIT 200
+    `,
+    [userId]
+  );
+
+  const insights = await computeInsights(userId, sinceDays);
+
+  // Audit event
+  await logAdminAction({
+    adminId: req.user!.id,
+    userId,
+    actionType: "USER_SNAPSHOT_VIEW",
+    req,
+    metadata: auditMeta(req, { since_days: sinceDays })
+  });
+
+  res.json({
+    user: userQ.rows[0],
+    since_days: sinceDays,
+    risk_settings: risk,
+    trade_totals: totalsQ.rows[0] || null,
+    insights,
+    journal: journalQ.rows
+  });
+});
+
+/**
+ * GET /admin/users/:id/snapshot.csv?since_days=30
+ * CSV format: "sectioned flat rows" for easy compliance ingestion.
+ */
+admin.get("/users/:id/snapshot.csv", adminGuard, async (req, res) => {
+  const userId = Number(req.params.id);
+  const sinceDays = req.query.since_days ? Number(req.query.since_days) : 30;
+
+  const snapRes = await db.query(
+    `SELECT id, username, email, role, status, created_at FROM users WHERE id=$1`,
+    [userId]
+  );
+  if (!snapRes.rows.length) return res.status(404).json({ error: "User not found" });
+  const user = snapRes.rows[0];
+
+  const riskA = await tryQuery(`SELECT * FROM user_risk_settings WHERE user_id = $1`, [userId]);
+  const riskB = await tryQuery(`SELECT * FROM user_settings WHERE user_id = $1`, [userId]);
+  const risk = (riskA?.rows?.[0] ?? riskB?.rows?.[0] ?? null);
+
+  const whereTime = sinceDays ? `AND entry_time >= NOW() - INTERVAL '${sinceDays} days'` : "";
+  const totalsQ = await db.query(
+    `
+    SELECT
+      COUNT(*)::int AS trades,
+      SUM(profit)::float AS pnl,
+      AVG(profit)::float AS avg_pnl,
+      AVG(EXTRACT(EPOCH FROM (exit_time - entry_time))/60)::float AS avg_hold_minutes,
+      (SUM(CASE WHEN profit > 0 THEN 1 ELSE 0 END)::float / NULLIF(COUNT(*),0))::float AS win_rate
+    FROM trades
+    WHERE user_id = $1
+      AND exit_time IS NOT NULL
+      AND entry_time IS NOT NULL
+      ${whereTime}
+    `,
+    [userId]
+  );
+
+  const journalQ = await db.query(
+    `
+    SELECT id, trade_id, note, mood, tags, attachment_url, created_at, updated_at
+    FROM trader_journal
+    WHERE user_id = $1
+    ORDER BY created_at DESC
+    LIMIT 200
+    `,
+    [userId]
+  );
+
+  const insights = await computeInsights(userId, sinceDays);
+
+  const headers = [
+    { key: "user_id", label: "user_id" },
+    { key: "since_days", label: "since_days" },
+    { key: "section", label: "section" },
+    { key: "key", label: "key" },
+    { key: "value", label: "value" },
+    { key: "pnl", label: "pnl" },
+    { key: "trades", label: "trades" },
+    { key: "win_rate", label: "win_rate" },
+    { key: "rank", label: "rank" },
+    { key: "note", label: "note" },
+    { key: "created_at", label: "created_at" }
+  ];
+
+  const rows: Record<string, any>[] = [];
+
+  // User profile (key-value rows)
+  for (const k of ["username", "email", "role", "status", "created_at"]) {
+    rows.push({
+      user_id: user.id,
+      since_days: sinceDays,
+      section: "user",
+      key: k,
+      value: (user as any)[k],
+      pnl: "",
+      trades: "",
+      win_rate: "",
+      rank: "",
+      note: "",
+      created_at: ""
+    });
+  }
+
+  // Risk settings (key-value rows)
+  if (risk) {
+    for (const [k, v] of Object.entries(risk)) {
+      rows.push({
+        user_id: user.id,
+        since_days: sinceDays,
+        section: "risk_settings",
+        key: k,
+        value: v,
+        pnl: "",
+        trades: "",
+        win_rate: "",
+        rank: "",
+        note: "",
+        created_at: ""
+      });
+    }
+  } else {
+    rows.push({
+      user_id: user.id,
+      since_days: sinceDays,
+      section: "risk_settings",
+      key: "status",
+      value: "not_found_in_known_tables",
+      pnl: "",
+      trades: "",
+      win_rate: "",
+      rank: "",
+      note: "",
+      created_at: ""
+    });
+  }
+
+  // Trade totals
+  const t = totalsQ.rows[0] || {};
+  for (const k of ["trades", "pnl", "avg_pnl", "avg_hold_minutes", "win_rate"]) {
+    rows.push({
+      user_id: user.id,
+      since_days: sinceDays,
+      section: "trade_totals",
+      key: k,
+      value: (t as any)[k] ?? "",
+      pnl: "",
+      trades: "",
+      win_rate: "",
+      rank: "",
+      note: "",
+      created_at: ""
+    });
+  }
+
+  // Insights ranked rows
+  const addRanked = (section: string, ranked: any[]) => {
+    (ranked || []).forEach((x, idx) => {
+      rows.push({
+        user_id: user.id,
+        since_days: sinceDays,
+        section: `insights_${section}`,
+        key: x.key,
+        value: "",
+        pnl: x.pnl,
+        trades: x.trades,
+        win_rate: x.win_rate,
+        rank: idx + 1,
+        note: "",
+        created_at: ""
+      });
+    });
+  };
+  addRanked("instruments", insights.instruments.ranked);
+  addRanked("directions", insights.directions.ranked);
+  addRanked("hours", insights.hours.ranked);
+  addRanked("hold_time", insights.hold_time.ranked);
+
+  // Journal entries (note rows)
+  for (const j of journalQ.rows as any[]) {
+    rows.push({
+      user_id: user.id,
+      since_days: sinceDays,
+      section: "journal",
+      key: j.id,
+      value: "",
+      pnl: "",
+      trades: "",
+      win_rate: "",
+      rank: "",
+      note: j.note,
+      created_at: j.created_at
+    });
+  }
+
+  // Audit event
+  await logAdminAction({
+    adminId: req.user!.id,
+    userId,
+    actionType: "USER_SNAPSHOT_EXPORT_CSV",
+    req,
+    metadata: auditMeta(req, { since_days: sinceDays })
+  });
+
+  const csv = toCsv(headers, rows);
+  sendCsv(res, `user_snapshot_${userId}_${sinceDays}d.csv`, csv);
+});
+```
+
+---
+
+# 5) Frontend — CSV Download Helper (wouter-compatible)
+
+Because downloads need the **Authorization** header, do this client-side:
+
+## `client/src/lib/download.ts`
+
+```ts
+import api from "./api";
+
+export async function downloadWithAuth(url: string, filename: string) {
+  const res = await api.get(url, { responseType: "blob" });
+  const blob = new Blob([res.data], { type: "text/csv;charset=utf-8" });
+
+  const a = document.createElement("a");
+  const objectUrl = window.URL.createObjectURL(blob);
+  a.href = objectUrl;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  window.URL.revokeObjectURL(objectUrl);
+}
+```
+
+---
+
+# 6) Frontend — Add Export Buttons
+
+## 6.1 Trader Journal page button
+
+In `client/src/pages/TraderJournal.tsx`, add imports + button:
+
+```tsx
+import { downloadWithAuth } from "../lib/download";
+```
+
+Add this near the top of the page UI:
+
+```tsx
+<button
+  onClick={() => downloadWithAuth("/journal/export.csv", "trader_journal.csv")}
+  style={{ marginBottom: 12 }}
+>
+  Export Journal CSV
+</button>
+```
+
+---
+
+## 6.2 Trader Insights card button
+
+In `client/src/components/account/TraderInsightsCard.tsx`:
+
+```tsx
+import { downloadWithAuth } from "../../lib/download";
+```
+
+Add beside Refresh:
+
+```tsx
+<button onClick={() => downloadWithAuth(`/insights/export.csv?since_days=${sinceDays}`, `trader_insights_${sinceDays}d.csv`)}>
+  Export CSV
+</button>
+```
+
+---
+
+## 6.3 Admin View-As Tab: add Snapshot CSV download (optional but recommended)
+
+In `client/src/components/admin/ViewAsTab.tsx`, import:
+
+```tsx
+import { downloadWithAuth } from "../../lib/download";
+```
+
+Add a button (enabled when selected):
+
+```tsx
+<button
+  disabled={!selected}
+  onClick={() => downloadWithAuth(`/admin/users/${selected!.id}/snapshot.csv?since_days=30`, `user_snapshot_${selected!.id}_30d.csv`)}
+  style={{ marginTop: 8, marginLeft: 8 }}
+>
+  Download Snapshot CSV (30d)
+</button>
+```
+
+---
+
+# 7) Summary of new endpoints
+
+### User (authenticated)
+
+* `GET /journal/export.csv`
+* `GET /insights/export.csv?since_days=7|30|90`
+
+### Admin (adminGuard)
+
+* `GET /admin/users/:id/snapshot?since_days=...` (JSON)
+* `GET /admin/users/:id/snapshot.csv?since_days=...` (CSV)
+
+All admin snapshot accesses are **audit-logged**.
+
+---
+
+If you want the snapshot to include **login history / IPs / session lengths** (which you asked for elsewhere), say “include sessions in snapshot,” and I’ll extend the snapshot export to pull from your session/audit tables and export them in the same sectioned CSV format.

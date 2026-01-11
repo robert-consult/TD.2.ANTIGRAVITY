@@ -1,0 +1,468 @@
+Below is the **deep-context implementation + audit checklist** for Replit Agent 3 to investigate the repo and produce a **Done / Partial / Missing** report for the entire “dynamic compliance-first signup flow + legal docs system” scope from this conversation thread (including the attached plan).
+
+Use this as the **ground-truth requirements list**. For each item, Agent 3 should record:
+
+* **Status:** Done / Partial / Missing
+* **Evidence:** file path(s), function name(s), route(s), DB schema proof, screenshot(s)
+* **Notes/Risks:** gaps, security concerns, edge cases
+
+---
+
+# A) Scope Summary (What “complete” means)
+
+The platform must provide:
+
+1. **Signup flow** driven by the user’s **Country selection** that simultaneously triggers:
+
+   * **Phone Validation Engine** (prefix, formatting, strict validation, E.164 storage)
+   * **Legal Terms Assembly Engine** (Global Master + jurisdiction addendum via Country → Region → ROW fallback)
+
+2. **Tamper-evident Legal Acceptance capture** at signup:
+
+   * Stores the **exact combined text** presented + its **SHA-256 hash**
+   * Stores provenance metadata: timestamp, country/region, user agent, IP, session id (where available)
+   * Supports later verification (recompute SHA, diff vs current active terms)
+
+3. **Admin “System Config” legal tooling**:
+
+   * **Legal Docs**: manage versions per target; mark one version as “ACTIVE” via explicit targets table
+   * **Legal Acceptances**: search, open detail, resolve doc links, deep-link to exact doc versions, diff vs current active
+   * **Legal Coverage**: coverage grid for targets + one-click “Set Active → Latest”
+   * **Gate toggle**: backend-controlled switch to enforce onboarding only where coverage is OK
+
+4. **Replaceability / upgradability**:
+
+   * Admin can upload new versions and re-point “active” without code changes
+   * Supports country/region additions over time
+
+---
+
+# B) System Inventory (Expected Building Blocks)
+
+## B1) Database / Drizzle tables (minimum required)
+
+**Must exist:**
+
+* `legalDocuments`
+
+  * `docSet` (e.g., `DOC1`)
+  * `docType` (`GLOBAL_MASTER` / `ADDENDUM`)
+  * `jurisdictionType` (`DEFAULT` / `COUNTRY` / `REGION`)
+  * `jurisdictionKey` (e.g., `GLOBAL`, `ROW`, `KE`, `SE_ASIA`)
+  * `version`, `sha256`, `content`, `createdAt`
+* `legalDocTargets` (explicit active doc pointer per target)
+
+  * unique on (`docSet`, `docType`, `jurisdictionType`, `jurisdictionKey`)
+  * `activeDocId`, `updatedAt`, `updatedByAdminUserId?`, `note?`
+* `legalAcceptances`
+
+  * user link (`userId` or `emailAtAcceptance`)
+  * `countryIso2`, `regionKey?`
+  * `acceptedAt`
+  * **snapshot fields**:
+
+    * `combinedText` (exact combined terms shown)
+    * `combinedSha256` (SHA-256 of combinedText)
+    * ideally store `globalDocId`, `addendumDocId` (doc ids used)
+* `systemConfig`
+
+  * `key`, `value`, `updatedAt`
+
+**Should exist (recommended):**
+
+* Admin audit log for config changes (reuse existing `adminActions` if present)
+* Provenance columns on acceptances: `ip`, `userAgent`, `sessionId`, `actorType`
+
+---
+
+## B2) Backend API endpoints (minimum required)
+
+### Public (signup)
+
+* `GET /api/legal/doc1/availability?countryIso2=XX&regionKey=...`
+* `GET /api/legal/doc1/resolve?countryIso2=XX&regionKey=...`
+* **(Must exist to complete flow)** `POST /api/legal/doc1/accept` (or equivalent)
+
+  * saves acceptance row + provenance + hash + doc ids
+
+### Admin
+
+* System config:
+
+  * `GET /api/admin/system-config/get?key=legal.coverage.enforce`
+  * `POST /api/admin/system-config/set { key, value }`
+* Targets:
+
+  * `GET /api/admin/legal-docs/targets/get?...`
+  * `GET /api/admin/legal-docs/targets/list?...`
+  * `POST /api/admin/legal-docs/targets/set-active { target..., activeDocId }`
+* Coverage:
+
+  * `GET /api/admin/legal-docs/coverage?docSet=DOC1&expectedIso2=...&expectedRegions=...`
+* Acceptances:
+
+  * list/search endpoint (filters by date, email, country, userId)
+  * `GET /api/admin/legal-acceptances/:id`
+  * `POST /api/admin/legal-acceptances/resolve-doc-links` (or equivalent)
+  * `GET /api/admin/legal-acceptances/:id/diff-current`
+* Legal docs browsing endpoints (your Legal Docs UI depends on them):
+
+  * list versions by target
+  * fetch doc content by id
+
+---
+
+## B3) Frontend pages / components (minimum required)
+
+### Signup UI (Trader selection platform)
+
+* Country selector (ISO-3166)
+* Phone input that reconfigures on country change (prefix, formatting, validation)
+* Terms link/modal:
+
+  * before country selection: Global only (or disabled)
+  * after selection: shows assembled (Global + resolved addendum)
+* Checkbox “I accept” gating signup submit
+* Calls `availability` first; disables Continue when unavailable
+* Calls `resolve` before acceptance; renders the exact combined doc; captures acceptance
+
+### Admin dashboard (System Config minitabs)
+
+* `Legal Docs`
+* `Legal Acceptances`
+* `Legal Coverage`
+
+### Admin deep linking / navigation bus
+
+* Event bus: `admin:navigate` + localStorage prefill keys
+* `Legal Acceptances → Legal Docs` deep link (open exact doc version)
+* `Legal Docs → back to Acceptance` return link
+
+---
+
+# C) Audit Checklist (Agent 3 should fill this out)
+
+## C1) DB Schema & Migrations
+
+1. [ ] **legalDocuments exists** with correct columns (docSet/docType/jurisdictionType/jurisdictionKey/version/sha256/content/createdAt)
+
+   * Evidence: `shared/schema.ts` + DB inspector output
+2. [ ] **legalDocTargets exists** with unique constraint on (docSet, docType, jurisdictionType, jurisdictionKey)
+
+   * Evidence: schema + `PRAGMA index_list('legal_doc_targets');`
+3. [ ] **legalAcceptances exists** and stores **combinedText** + **combinedSha256** + jurisdiction fields
+
+   * Evidence: schema + sample row screenshot
+4. [ ] **systemConfig exists** and supports key/value toggles
+5. [ ] Migration path works (`npm run db:push` or equivalent) without data loss/constraint errors
+6. [ ] Indexing sanity: `legalDocuments` searchable by target fields; `legalDocTargets.activeDocId` indexed
+7. [ ] Data retention: docs are append-only (no destructive overwrites) OR overwrites are logged
+
+---
+
+## C2) Coverage Gate Toggle (Backend-controlled)
+
+8. [ ] Config key `legal.coverage.enforce` is read from DB in resolver layer
+9. [ ] Admin can toggle it via backend endpoints and UI control
+10. [ ] When **ENFORCED=TRUE**, `resolve`/`availability` block for missing active targets (409/available=false)
+11. [ ] When **ENFORCED=FALSE**, resolver uses active targets when present; otherwise falls back to latest docs and returns warnings
+
+---
+
+## C3) Legal Terms Assembly Engine (Algorithm correctness)
+
+12. [ ] Resolver implements precedence correctly:
+
+* Addendum resolution: **COUNTRY → REGION → DEFAULT/ROW**
+
+13. [ ] Global master resolution is deterministic:
+
+* `DOC1 / GLOBAL_MASTER / DEFAULT / GLOBAL`
+
+14. [ ] Deterministic “active doc” behavior:
+
+* uses `legalDocTargets.activeDocId` when present
+
+15. [ ] Safe fallback behavior when not enforced:
+
+* latest doc fallback per target (documented and visible as warnings)
+
+16. [ ] Combined assembly uses a stable delimiter (e.g., `\n\n`)
+17. [ ] Resolver returns doc ids, versions, sha256 of individual docs + combined sha (for audit chain)
+
+**Edge Cases**
+18. [ ] Country has explicit addendum: uses it
+19. [ ] Country missing addendum but has region mapping: uses region addendum
+20. [ ] Country missing both: uses ROW default
+21. [ ] Missing global doc: blocks if enforced; otherwise clearly fails/returns unavailable
+22. [ ] Region mapping is centralized (config/map) not hard-coded across multiple files
+
+---
+
+## C4) Phone Validation Engine (Required from attached plan)
+
+23. [ ] Phone engine exists and is triggered by **country selection**
+24. [ ] Uses `libphonenumber-js` (recommended) OR equivalent robust library (not hand-rolled regex for many countries)
+25. [ ] UI updates on country change:
+
+* prefix (e.g., +254)
+* placeholder/mask
+* validation logic
+
+26. [ ] Stores phone as **E.164** (`phone_e164`)
+27. [ ] Backend validates phone matches selected country (server-side validation, not UI-only)
+28. [ ] Backend captures phone verification status fields if you use SMS verification later
+
+---
+
+## C5) Signup Flow State Machine (UX & gating)
+
+29. [ ] Initial state:
+
+* Country unset
+* Phone disabled or generic
+* Submit disabled
+* Terms link generic/global-only or disabled
+
+30. [ ] On country select:
+
+* phone engine runs
+* legal availability check runs
+* terms assembly for preview runs (or on demand)
+
+31. [ ] `SignupAvailabilityGate` (or equivalent) integrated:
+
+* disables Continue when unavailable
+
+32. [ ] Terms modal shows **exact assembled contract** that will be hashed and stored
+33. [ ] Checkbox “I accept” is required to proceed
+34. [ ] Before acceptance submission, client has retrieved `combinedText` from server (do not assemble only client-side)
+35. [ ] After submit, backend creates acceptance row with:
+
+* combinedText
+* combinedSha256
+* doc ids used
+* timestamp
+* countryIso2/regionKey
+* ip/userAgent/sessionId (where available)
+
+---
+
+## C6) Hashing / Tamper Evidence
+
+36. [ ] SHA-256 computed server-side for combinedText
+37. [ ] Acceptance row stores `combinedSha256` and `combinedText` (snapshot)
+38. [ ] Admin detail view recomputes SHA and displays mismatch if any
+39. [ ] “Diff vs Current” endpoint:
+
+* compares accepted snapshot vs current active combined
+* returns diff text + stats (+/-/=)
+
+40. [ ] Diff uses line-based algorithm (Myers or similar) and is stable on large documents
+41. [ ] Admin UI shows diff modal with:
+
+* accepted metadata
+* current global/addendum active metadata
+* copy diff button
+
+42. [ ] “Open Current Global/Addendum” and “Open Accepted Global/Addendum” links work
+
+---
+
+## C7) Admin Legal Docs (Versioning + Active Targets)
+
+43. [ ] Legal Docs screen can select:
+
+* docSet
+* docType
+* jurisdictionType
+* jurisdictionKey
+
+44. [ ] Lists versions for that target with version/sha/createdAt
+45. [ ] Shows ACTIVE docId for that target and marks active version
+46. [ ] “Set Active” calls `/targets/set-active` and updates UI immediately
+47. [ ] Prevents setting activeDocId that doesn’t match the target fields (server-side validation)
+48. [ ] Supports uploading/creating new docs without code changes (admin workflow defined)
+
+---
+
+## C8) Admin Legal Acceptances (Search + Resolve + Deep Links)
+
+49. [ ] Legal Acceptances minitab exists and is wired in AdminDashboard
+50. [ ] Filtering supports:
+
+* date range
+* country
+* email contains
+* userId
+
+51. [ ] Acceptance detail modal includes:
+
+* snapshot sha (stored)
+* recomputed sha
+
+52. [ ] Resolve “doc links” function identifies the best matching global/addendum docs for a given acceptance
+53. [ ] “Go Docs (Global/Addendum)” deep-link sets prefill and switches minitab automatically
+54. [ ] Auto-open acceptance detail from deep-link back navigation works
+
+---
+
+## C9) Admin Legal Coverage (Coverage grid + one-click remediation)
+
+55. [ ] Legal Coverage minitab exists
+56. [ ] Coverage endpoint returns:
+
+* core targets (global + ROW)
+* country list coverage
+* region list coverage
+* summary stats
+
+57. [ ] Coverage status correctly classified:
+
+* OK / MISSING_DOC / MISSING_TARGET / BROKEN_TARGET
+
+58. [ ] UI can supply expected ISO2 + expected regionKey lists
+59. [ ] “Set Active → Latest” button exists and remediates MISSING_TARGET/BROKEN_TARGET when latest doc exists
+60. [ ] Gate toggle UI exists:
+
+* shows ENFORCED/OFF
+* toggles backend config key `legal.coverage.enforce`
+
+---
+
+## C10) Deep Link Event Bus + Persistence
+
+61. [ ] `admin:navigate` event bus implemented once at AdminDashboard root
+62. [ ] LocalStorage prefill keys implemented:
+
+* `adminLegalDocs_prefill_v2`
+* `adminLegalAcceptances_prefill_v2`
+
+63. [ ] Deep-link works in both directions:
+
+* Acceptances → Docs opens correct version
+* Docs → Acceptances opens correct acceptance
+
+64. [ ] No stale prefill loops (prefill is “read once” and cleared)
+
+---
+
+## C11) Security / Permissions / Abuse Resistance
+
+65. [ ] Public endpoints do not leak admin-only information
+66. [ ] Admin endpoints require admin auth middleware
+67. [ ] Rate-limiting or basic abuse protection (recommended) for resolve endpoints
+68. [ ] XSS safety: document text is rendered safely (preformatted text, not raw HTML injection)
+69. [ ] Input validation for:
+
+* countryIso2 (2 letters)
+* regionKey
+* doc ids numeric
+
+70. [ ] Audit trail for admin actions (recommended):
+
+* setting active targets
+* changing `legal.coverage.enforce`
+* uploading/editing docs
+
+---
+
+# D) Manual Test Script (Agent 3 should execute)
+
+## D1) Admin Setup
+
+1. In Admin → Legal Docs:
+
+   * Create/import `DOC1 GLOBAL_MASTER DEFAULT/GLOBAL`
+   * Create/import `DOC1 ADDENDUM DEFAULT/ROW`
+   * Create/import at least one country addendum (e.g., `COUNTRY/KE`)
+2. Set ACTIVE targets for each above.
+3. In Legal Coverage, confirm core targets are **OK** and country shows expected status.
+
+## D2) Gate OFF behavior
+
+4. Set `legal.coverage.enforce=false`
+5. Signup: choose a country with no docs/targets:
+
+   * Availability should return **available=false** if truly missing content, OR “limited” with warnings if fallbacks exist
+6. Signup: choose KE:
+
+   * Availability: available=true
+   * Resolve returns both docs + combinedSha
+
+## D3) Gate ON behavior
+
+7. Set `legal.coverage.enforce=true`
+8. Signup: choose a country without coverage:
+
+   * Availability: **Not Available**
+   * Resolve: blocked (409)
+9. Signup: choose KE:
+
+   * proceeds normally
+
+## D4) Acceptance & audit
+
+10. Complete signup acceptance for KE
+11. Admin → Legal Acceptances:
+
+* find record
+* open detail
+* SHA recompute matches stored
+
+12. Admin → “Diff vs Current”:
+
+* should show mostly equal if no changes
+
+13. Change active addendum to a new version
+14. Diff vs Current now shows +/− changes
+
+---
+
+# E) SQL Verification Queries (SQLite)
+
+Agent 3 should run these (or equivalent through drizzle):
+
+```sql
+-- Targets coverage
+SELECT doc_set, doc_type, jurisdiction_type, jurisdiction_key, active_doc_id, updated_at
+FROM legal_doc_targets
+ORDER BY updated_at DESC;
+
+-- Latest docs per target (sanity)
+SELECT doc_set, doc_type, jurisdiction_type, jurisdiction_key, MAX(created_at) AS latest_created_at
+FROM legal_documents
+GROUP BY doc_set, doc_type, jurisdiction_type, jurisdiction_key;
+
+-- Acceptance integrity sampling
+SELECT id, user_id, email_at_acceptance, country_iso2, region_key, accepted_at,
+       LENGTH(combined_text) AS combined_len, combined_sha256
+FROM legal_acceptances
+ORDER BY accepted_at DESC
+LIMIT 25;
+```
+
+---
+
+# F) Common Failure Patterns to Check
+
+* Gate toggle exists in UI but backend key is never read in resolver
+* Resolver uses “latest created” even when targets exist (non-deterministic)
+* Acceptance stores only doc ids and hash, but **not** combinedText snapshot (weak evidence)
+* UI assembles combined text client-side without server canonicalization (risk of mismatch)
+* Deep link doesn’t actually switch minitabs (listener missing at AdminDashboard root)
+* Coverage uses hard-coded country list and ignores discovered keys
+* Phone validation is UI-only; backend accepts invalid phone or wrong country mapping
+
+---
+
+# G) Agent 3 Deliverable Format (what you should request back)
+
+Agent 3 should return:
+
+1. A checklist table: **Requirement ID → Status → Evidence → Notes**
+2. A list of **blocking gaps** (anything preventing compliant onboarding)
+3. A list of **non-blocking gaps** (UX polish, nice-to-have)
+4. A patch plan: files to change, endpoints to add, migrations to run
+
+If you want, I can also provide a **fillable report template** (markdown) that Agent 3 can paste back with each item pre-numbered and status fields ready to complete.

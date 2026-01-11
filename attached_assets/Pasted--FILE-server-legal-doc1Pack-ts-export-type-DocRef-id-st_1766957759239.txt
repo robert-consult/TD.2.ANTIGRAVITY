@@ -1,0 +1,100 @@
+// FILE: /server/legal/doc1Pack.ts
+export type DocRef = {
+  id: string;
+  version: string;
+  path: string;
+};
+
+export const DOC1_GLOBAL: DocRef = {
+  id: "DOC1_GLOBAL",
+  version: "1.0",
+  path: "server/legal/doc1/DOC1_GLOBAL_v1.0.txt",
+};
+
+export const DEFAULT_ADDENDUM: DocRef = {
+  id: "ADD-ROW",
+  version: "1.0",
+  path: "server/legal/doc1/addenda/ADD-ROW_v1.0.txt",
+};
+
+// Dedicated country addenda (priority list)
+export const COUNTRY_ADDENDA: Record<string, DocRef> = {
+  US: { id: "ADD-US", version: "1.0", path: "server/legal/doc1/addenda/ADD-US_v1.0.txt" },
+  AE: { id: "ADD-AE", version: "1.0", path: "server/legal/doc1/addenda/ADD-AE_v1.0.txt" },
+  IN: { id: "ADD-IN", version: "1.0", path: "server/legal/doc1/addenda/ADD-IN_v1.0.txt" },
+  KE: { id: "ADD-KE", version: "1.0", path: "server/legal/doc1/addenda/ADD-KE_v1.0.txt" },
+  NG: { id: "ADD-NG", version: "1.0", path: "server/legal/doc1/addenda/ADD-NG_v1.0.txt" },
+  BD: { id: "ADD-BD", version: "1.0", path: "server/legal/doc1/addenda/ADD-BD_v1.0.txt" },
+  TH: { id: "ADD-TH", version: "1.0", path: "server/legal/doc1/addenda/ADD-TH_v1.0.txt" },
+  PH: { id: "ADD-PH", version: "1.0", path: "server/legal/doc1/addenda/ADD-PH_v1.0.txt" },
+  SG: { id: "ADD-SG", version: "1.0", path: "server/legal/doc1/addenda/ADD-SG_v1.0.txt" },
+  HK: { id: "ADD-HK", version: "1.0", path: "server/legal/doc1/addenda/ADD-HK_v1.0.txt" },
+  CN: { id: "ADD-CN", version: "1.0", path: "server/legal/doc1/addenda/ADD-CN_v1.0.txt" },
+  BR: { id: "ADD-BR", version: "1.0", path: "server/legal/doc1/addenda/ADD-BR_v1.0.txt" },
+  AR: { id: "ADD-AR", version: "1.0", path: "server/legal/doc1/addenda/ADD-AR_v1.0.txt" },
+  CO: { id: "ADD-CO", version: "1.0", path: "server/legal/doc1/addenda/ADD-CO_v1.0.txt" },
+  MX: { id: "ADD-MX", version: "1.0", path: "server/legal/doc1/addenda/ADD-MX_v1.0.txt" },
+  ET: { id: "ADD-ET", version: "1.0", path: "server/legal/doc1/addenda/ADD-ET_v1.0.txt" },
+  GH: { id: "ADD-GH", version: "1.0", path: "server/legal/doc1/addenda/ADD-GH_v1.0.txt" },
+  AO: { id: "ADD-AO", version: "1.0", path: "server/legal/doc1/addenda/ADD-AO_v1.0.txt" },
+  ZA: { id: "ADD-ZA", version: "1.0", path: "server/legal/doc1/addenda/ADD-ZA_v1.0.txt" },
+  UG: { id: "ADD-UG", version: "1.0", path: "server/legal/doc1/addenda/ADD-UG_v1.0.txt" },
+  TZ: { id: "ADD-TZ", version: "1.0", path: "server/legal/doc1/addenda/ADD-TZ_v1.0.txt" },
+  RU: { id: "ADD-RU", version: "1.0", path: "server/legal/doc1/addenda/ADD-RU_v1.0.txt" },
+  UA: { id: "ADD-UA", version: "1.0", path: "server/legal/doc1/addenda/ADD-UA_v1.0.txt" },
+  GB: { id: "ADD-UK", version: "1.0", path: "server/legal/doc1/addenda/ADD-UK_v1.0.txt" }
+};
+
+// Regional addenda docs
+export const REGION_ADDENDA: Record<string, DocRef> = {
+  WEST_EUROPE: { id: "ADD-WEST_EUROPE", version: "1.0", path: "server/legal/doc1/addenda/ADD-WEST_EUROPE_v1.0.txt" },
+  EAST_EUROPE: { id: "ADD-EAST_EUROPE", version: "1.0", path: "server/legal/doc1/addenda/ADD-EAST_EUROPE_v1.0.txt" },
+  SE_ASIA: { id: "ADD-SE_ASIA", version: "1.0", path: "server/legal/doc1/addenda/ADD-SE_ASIA_v1.0.txt" },
+  MIDDLE_EAST: { id: "ADD-MIDDLE_EAST", version: "1.0", path: "server/legal/doc1/addenda/ADD-MIDDLE_EAST_v1.0.txt" },
+  NORTH_AFRICA: { id: "ADD-NORTH_AFRICA", version: "1.0", path: "server/legal/doc1/addenda/ADD-NORTH_AFRICA_v1.0.txt" },
+  WEST_AFRICA: { id: "ADD-WEST_AFRICA", version: "1.0", path: "server/legal/doc1/addenda/ADD-WEST_AFRICA_v1.0.txt" },
+  EAST_AFRICA: { id: "ADD-EAST_AFRICA", version: "1.0", path: "server/legal/doc1/addenda/ADD-EAST_AFRICA_v1.0.txt" },
+  SOUTHERN_AFRICA: { id: "ADD-SOUTHERN_AFRICA", version: "1.0", path: "server/legal/doc1/addenda/ADD-SOUTHERN_AFRICA_v1.0.txt" },
+  CENTRAL_AFRICA: { id: "ADD-CENTRAL_AFRICA", version: "1.0", path: "server/legal/doc1/addenda/ADD-CENTRAL_AFRICA_v1.0.txt" },
+  SOUTH_AMERICA: { id: "ADD-SOUTH_AMERICA", version: "1.0", path: "server/legal/doc1/addenda/ADD-SOUTH_AMERICA_v1.0.txt" },
+  CENTRAL_AMERICA: { id: "ADD-CENTRAL_AMERICA", version: "1.0", path: "server/legal/doc1/addenda/ADD-CENTRAL_AMERICA_v1.0.txt" },
+  NORTH_AMERICA: { id: "ADD-NORTH_AMERICA", version: "1.0", path: "server/legal/doc1/addenda/ADD-NORTH_AMERICA_v1.0.txt" },
+  CENTRAL_ASIA: { id: "ADD-CENTRAL_ASIA", version: "1.0", path: "server/legal/doc1/addenda/ADD-CENTRAL_ASIA_v1.0.txt" },
+  JAPAN: { id: "ADD-JAPAN", version: "1.0", path: "server/legal/doc1/addenda/ADD-JAPAN_v1.0.txt" },
+  SOUTH_KOREA: { id: "ADD-SOUTH_KOREA", version: "1.0", path: "server/legal/doc1/addenda/ADD-SOUTH_KOREA_v1.0.txt" },
+  PAKISTAN: { id: "ADD-PAKISTAN", version: "1.0", path: "server/legal/doc1/addenda/ADD-PAKISTAN_v1.0.txt" },
+  AUSTRALASIA: { id: "ADD-AUSTRALASIA", version: "1.0", path: "server/legal/doc1/addenda/ADD-AUSTRALASIA_v1.0.txt" },
+  PACIFIC_ISLANDS: { id: "ADD-PACIFIC_ISLANDS", version: "1.0", path: "server/legal/doc1/addenda/ADD-PACIFIC_ISLANDS_v1.0.txt" },
+  INDIAN_OCEAN_ISLANDS: { id: "ADD-INDIAN_OCEAN_ISLANDS", version: "1.0", path: "server/legal/doc1/addenda/ADD-INDIAN_OCEAN_ISLANDS_v1.0.txt" },
+};
+
+export type RegionRule = { regionKey: string; iso2: string[] };
+
+// Order matters (first match wins)
+export const REGION_RULES_IN_ORDER: RegionRule[] = [
+  { regionKey: "MIDDLE_EAST", iso2: ["BH","IQ","IR","IL","JO","KW","LB","OM","PS","QA","SA","SY","TR","YE"] },
+  { regionKey: "NORTH_AFRICA", iso2: ["DZ","EG","LY","MA","SD","SS","TN","EH"] },
+  { regionKey: "WEST_AFRICA", iso2: ["BJ","BF","CV","CI","GM","GN","GW","LR","ML","MR","NE","SH","SL","SN","TG"] },
+  { regionKey: "EAST_AFRICA", iso2: ["BI","DJ","ER","KM","MG","MW","MZ","RE","RW","SC","SO","YT","ZM","ZW"] },
+  { regionKey: "SOUTHERN_AFRICA", iso2: ["BW","LS","NA","SZ"] },
+  { regionKey: "CENTRAL_AFRICA", iso2: ["CF","CG","CD","CM","GQ","GA","ST","TD"] },
+
+  { regionKey: "SE_ASIA", iso2: ["BN","KH","ID","LA","MM","MY","TL","VN"] },
+
+  { regionKey: "JAPAN", iso2: ["JP"] },
+  { regionKey: "SOUTH_KOREA", iso2: ["KR"] },
+  { regionKey: "PAKISTAN", iso2: ["PK"] },
+
+  { regionKey: "WEST_EUROPE", iso2: ["AT","BE","CH","DE","DK","ES","FI","FR","IE","IS","IT","LI","LU","MC","NL","NO","PT","SE"] },
+  { regionKey: "EAST_EUROPE", iso2: ["AL","BA","BG","BY","CZ","EE","GR","HR","HU","LT","LV","MD","ME","MK","PL","RO","RS","SI","SK","XK"] },
+
+  { regionKey: "NORTH_AMERICA", iso2: ["CA","GL","PM","BM"] },
+  { regionKey: "CENTRAL_AMERICA", iso2: ["BZ","CR","GT","HN","NI","PA","SV"] },
+  { regionKey: "SOUTH_AMERICA", iso2: ["BO","CL","EC","GF","GY","PE","PY","SR","UY","VE"] },
+
+  { regionKey: "CENTRAL_ASIA", iso2: ["KZ","KG","TJ","TM","UZ","AF"] },
+
+  { regionKey: "AUSTRALASIA", iso2: ["AU","NZ"] },
+  { regionKey: "PACIFIC_ISLANDS", iso2: ["FJ","FM","KI","MH","NR","NU","PF","PG","PW","SB","TO","TV","VU","WS","CK"] },
+  { regionKey: "INDIAN_OCEAN_ISLANDS", iso2: ["MU","MV","IO"] },
+];

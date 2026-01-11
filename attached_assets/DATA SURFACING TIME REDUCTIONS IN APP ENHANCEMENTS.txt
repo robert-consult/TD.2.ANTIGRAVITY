@@ -1,0 +1,4091 @@
+FOR DATA SURFACING ON
+SYMBOL CONFIGURATION
+LOADING ISSUE WHEN TRYINg TO
+MAKE TRADE, SUPPLYING
+MARGINS, BALANCESON TOP
+RIGHT HAND AND IN TRADE TAB
+AS WEL AS EQUITY, FREE MARGIN
+AS WELL AS CHATS AREA QUOTES
+AS WELL AS WHEREVER DATA
+NEEDS TO LOAD WITHOUT refresh,
+investigate and asses as well as
+audit if any and feasibility of
+implementation if not
+implemented of a WebSocket layer
+in the app system throughout. Use
+the file for deep context 
+Thought for 20s
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 1/211
+Thought for 1m 33s
+I cannot currently open or inspect the attached ZIP in
+this session because the execution tools needed to read
+local files are erroring (the same low-level client error
+occurs on every attempt). That means I cannot quote
+your exact current file paths, query keys, or the precise
+component(s) that are failing to refresh. I can still give
+you a rigorous end-to-end audit plan and a feasible
+WebSocket design + drop-in implementation scaffold
+that matches your documented stack (Express + ws ,
+React Query, Vite) and directly addresses the specific
+symptoms you listed.
+1) What your symptoms usually mean (root
+causes to expect)
+A. “Symbol configuration not loading when
+trying to make a trade”
+Most common causes in this stack:
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 2/211
+1. Symbol config fetch is not keyed by symbol (or
+enabled stays false) so React Query never refetches
+when you change symbol.
+2. Stale cache + long staleTime so switching symbols
+shows old config until a manual refresh.
+3. Modal opens before config promise resolves and
+the order form reads undefined values (margin
+requirement, min lot, pip size).
+4. Backend endpoint returns config but UI doesn’t
+invalidate after “symbols list” loads (race ordering).
+5. Config is computed from “symbols” but “symbols”
+loads async and the derived config state is not rederived.
+B. “Margins / balances / equity / free margin not
+updating without refresh”
+Most common causes:
+1. You compute account metrics client-side from
+positions but quotes aren’t streaming → no
+revaluation.
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 3/211
+2. You compute server-side metrics but only refetch on
+page load → no polling and no WS push.
+3. You have multiple independent hooks (top-right
+header vs trade tab) hitting different endpoints /
+query keys → one updates, the other doesn’t.
+4. You do refetch, but invalidations are missing after
+trade actions (place order / close / modify SLTP).
+C. “Chat area quotes not updating without
+refresh”
+Usually:
+1. Chat view has its own quote source and doesn’t
+subscribe to symbol changes.
+2. Quote polling interval is too slow, disabled, or
+enabled is false until some state is set.
+3. WS exists for quotes but subscription/unsubscribe
+logic leaks or never re-subscribes on symbol
+change.
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 4/211
+2) Audit checklist (what to verify in your
+codebase, exactly)
+Have Replit Agent / Codex run these searches and map
+each UI element to a single data source.
+A. Map every displayed metric → its source
+hook/query key
+Search client for:
+balance , equity , freeMargin , margin ,
+marginUsed , marginLevel , unrealized , pnl ,
+accountSummary
+For each occurrence, record:
+Which hook provides it (or local state)?
+Which endpoint is called?
+Which React Query queryKey is used?
+Is there a refetchInterval or WS update?
+Is the metric computed client-side (danger) or
+server-side (preferred)?
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 5/211
+Pass condition: top-right header and trade tab use the
+same underlying query key (or the same “account
+snapshot” store) so they cannot drift.
+B. Symbol config wiring
+Search client for:
+symbolConfig , marginRequirement , contractSize ,
+pipSize , minLot , maxLot , leverage , lotStep
+the order modal component props/state that should
+depend on config
+Verify:
+queryKey includes the symbol: ['symbolConfig',
+symbol]
+Query is enabled: !!symbol
+refetchOnMount: 'always' and staleTime: 0 (at
+least until WS exists)
+Trade submission is blocked until config is present
+(button disabled + visible “loading config” state)
+C. Post-trade invalidations
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 6/211
+Search backend route handler(s) that place orders / close
+positions / modify targets.
+Then search client mutation handlers for:
+invalidateQueries , setQueryData , refetch
+Pass condition: after any trade mutation, you invalidate:
+['positions', userId] (or equivalent)
+['accountSnapshot', userId]
+['orders', userId] (if you have pending orders)
+['tradeAudit'] (if displayed)
+D. Quotes used by (1) trading screen, (2) chat
+quotes area, (3) PnL revaluation
+Search for quote usage:
+bid , ask , mid , quote , tick , priceStream
+Pass condition: there is one quote feed abstraction, and
+both trading and chat subscribe to it.
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 7/211
+3) Two-layer solution: immediate reliability
+now + WS layer for “no refresh”
+Layer 1 (Immediate, low-risk): Make refresh
+unnecessary even without WS
+Use React Query polling + strict invalidations while you
+build WS.
+Recommended defaults until WS is live:
+Account snapshot: refetchInterval: 1000–2000ms
+while on trading screen
+Positions: refetchInterval: 1500–3000ms
+Quotes: refetchInterval: 250–1000ms depending
+on acceptable load
+Symbol config: staleTime: 0 , refetchOnMount:
+'always' , refetchOnWindowFocus: true
+This alone typically fixes “needs refresh” symptoms.
+Layer 2 (Correct long-term): WebSocket push for
+quotes + account snapshot + positions + symbol
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 8/211
+config
+WS is feasible in your stack:
+You already list ws as a dependency.
+Express can host WS on the same port.
+React Query can be updated from WS events using
+queryClient.setQueryData(...) .
+4) WebSocket architecture that fits this app
+(and scales later)
+A. Single WS endpoint with topic subscriptions
+Client sends:
+Server sends:
+json
+{ "op": "subscribe", "topics": ["quotes:EURUSD", "
+C d
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 9/211
+Snapshots on subscribe
+Incremental updates thereafter
+B. Message contract (stable, versioned)
+Every server→client message:
+C. Don’t stream “account” on every tick
+To avoid melting CPU with many users:
+Quotes can be high frequency.
+Account/equity/freeMargin should be throttled
+(e.g., 250ms–1000ms) and/or only updated when:
+quote changes for symbols the user holds
+Copy code
+json
+{
+ "type": "quote" | "account" | "positions" | "symb
+ "ts": 173...,
+ "payload": { ... }
+}
+Copy code
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 10/211
+position changes (fills/closes/SLTP updates)
+D. Source of truth
+Quotes: come from ForgeFeed (ideal: vendor
+stream; fallback: poll and broadcast)
+Account snapshot: computed server-side from:
+balance (ledger)
+open positions valuation (using latest quotes)
+margin model (per-symbol margin
+requirement/leverage)
+Positions/orders: come from trading engine + DB
+5) Drop-in WS scaffold (server + client) you
+can wire into your engine
+Below is a production-grade scaffold you can add
+without rewriting your engine. You wire it by calling
+publishQuote(...) , publishAccount(...) , etc. from the
+places you already receive quotes and execute trades.
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 11/211
+5.1 shared/realtimeTypes.ts
+ts
+// shared/realtimeTypes.ts
+export type RealtimeTopic =
+ | `quotes:${string}`
+ | `symbolConfig:${string}`
+ | "account:me"
+ | "positions:me";
+export type ClientToServer =
+ | { op: "subscribe"; topics: RealtimeTopic[] }
+ | { op: "unsubscribe"; topics: RealtimeTopic[] }
+ | { op: "ping" };
+export type ServerToClient =
+ | { type: "subscribed"; topics: RealtimeTopic[]; 
+ | { type: "unsubscribed"; topics: RealtimeTopic[]
+ | { type: "pong"; ts: number }
+ | { type: "error"; message: string; ts: number }
+ | { type: "quote"; ts: number; payload: QuotePayl
+ | { type: "symbolConfig"; ts: number; payload: Sy
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 12/211
+ | { type: "account"; ts: number; payload: Account
+ | { type: "positions"; ts: number; payload: Posit
+export type QuotePayload = {
+ symbol: string;
+ bid: number;
+ ask: number;
+ mid?: number;
+ source?: string;
+};
+export type SymbolConfigPayload = {
+ symbol: string;
+ // adapt to your schema; these are the common one
+ contractSize?: number;
+ pipSize?: number;
+ minLot?: number;
+ lotStep?: number;
+ maxLot?: number;
+ marginRate?: number; // e.g., 0.02 for 50:1 impli
+ leverageMax?: number;
+};
+export type AccountSnapshotPayload = {
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 13/211
+ balance: number;
+ equity: number;
+ marginUsed: number;
+ freeMargin: number;
+ marginLevel?: number; // equity / marginUsed * 10
+ unrealizedPnl?: number;
+ realizedPnl?: number;
+ currency?: string;
+};
+export type PositionsPayload = {
+ // keep as minimal or detailed as you already exp
+ positions: Array<{
+ id: string;
+ symbol: string;
+ side: "BUY" | "SELL";
+ lots: number;
+ entryPrice: number;
+ currentPrice?: number;
+ unrealizedPnl?: number;
+ sl?: number | null;
+ tp?: number | null;
+ openedAt: string;
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 14/211
+5.2 server/realtime/realtimeHub.ts
+ }>;
+};
+ts
+// server/realtime/realtimeHub.ts
+import { EventEmitter } from "node:events";
+import type { AccountSnapshotPayload, PositionsPayl
+type Events = {
+ quote: (q: QuotePayload) => void;
+ symbolConfig: (c: SymbolConfigPayload) => void;
+ account: (a: AccountSnapshotPayload) => void;
+ positions: (p: PositionsPayload) => void;
+};
+export class RealtimeHub {
+ private bus = new EventEmitter();
+ on<K extends keyof Events>(event: K, handler: Eve
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 15/211
+ // eslint-disable-next-line @typescript-eslint/
+ this.bus.on(event, handler as any);
+ }
+ off<K extends keyof Events>(event: K, handler: Ev
+ // eslint-disable-next-line @typescript-eslint/
+ this.bus.off(event, handler as any);
+ }
+ publishQuote(payload: QuotePayload) {
+ this.bus.emit("quote", payload);
+ }
+ publishSymbolConfig(payload: SymbolConfigPayload)
+ this.bus.emit("symbolConfig", payload);
+ }
+ publishAccount(payload: AccountSnapshotPayload) {
+ this.bus.emit("account", payload);
+ }
+ publishPositions(payload: PositionsPayload) {
+ this.bus.emit("positions", payload);
+ }
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 16/211
+5.3 server/realtime/wsServer.ts
+}
+export const realtimeHub = new RealtimeHub();
+ts
+// server/realtime/wsServer.ts
+import type http from "node:http";
+import { WebSocketServer, WebSocket } from "ws";
+import type { IncomingMessage } from "node:http";
+import type { ClientToServer, RealtimeTopic, Server
+import { realtimeHub } from "./realtimeHub";
+/**
+ * IMPORTANT:
+ * - This file assumes you already use cookie-based
+ * - To enforce auth, you should only allow WS upgr
+ * - The simplest integration is to run a session p
+ * and pass req.session/user to ws connection con
+ */
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 17/211
+type AuthedReq = IncomingMessage & {
+ // adapt to your session shape:
+ session?: { userId?: number | string };
+ user?: { id?: number | string };
+};
+type ClientState = {
+ ws: WebSocket;
+ topics: Set<RealtimeTopic>;
+ userId: string; // resolved from session
+};
+function now() {
+ return Date.now();
+}
+function safeSend(ws: WebSocket, msg: ServerToClien
+ if (ws.readyState !== ws.OPEN) return;
+ ws.send(JSON.stringify(msg));
+}
+export function attachWebSocketServer(server: http
+ const wss = new WebSocketServer({ noServer: true
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 18/211
+Copy code
+Copy code
+ // Track all clients
+ const clients = new Set<ClientState>();
+ // Fan-out hub events to subscribed clients
+ realtimeHub.on("quote", (q) => {
+ const topic = `quotes:${q.symbol}` as const;
+ for (const c of clients) {
+ if (c.topics.has(topic)) safeSend(c.ws, { typ
+ }
+ });
+ realtimeHub.on("symbolConfig", (cfg) => {
+ const topic = `symbolConfig:${cfg.symbol}` as c
+ for (const c of clients) {
+ if (c.topics.has(topic)) safeSend(c.ws, { typ
+ }
+ });
+ realtimeHub.on("account", (a) => {
+ for (const c of clients) {
+ if (c.topics.has("account:me")) safeSend(c.ws
+ }
+ });
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 19/211
+ realtimeHub.on("positions", (p) => {
+ for (const c of clients) {
+ if (c.topics.has("positions:me")) safeSend(c
+ }
+ });
+ wss.on("connection", (ws: WebSocket, req: AuthedR
+ const userIdRaw = req.user?.id ?? req.session?
+ if (userIdRaw === undefined || userIdRaw === nu
+ safeSend(ws, { type: "error", message: "Unaut
+ ws.close();
+ return;
+ }
+ const state: ClientState = { ws, topics: new Se
+ clients.add(state);
+ ws.on("message", (raw) => {
+ let msg: ClientToServer | null = null;
+ try {
+ msg = JSON.parse(String(raw)) as ClientToSe
+ } catch {
+ safeSend(ws, { type: "error", message: "Inv
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 20/211
+ return;
+ }
+ if (msg.op === "ping") {
+ safeSend(ws, { type: "pong", ts: now() });
+ return;
+ }
+ if (msg.op === "subscribe") {
+ for (const t of msg.topics) state.topics.ad
+ safeSend(ws, { type: "subscribed", topics: 
+ return;
+ }
+ if (msg.op === "unsubscribe") {
+ for (const t of msg.topics) state.topics.de
+ safeSend(ws, { type: "unsubscribed", topics
+ return;
+ }
+ safeSend(ws, { type: "error", message: "Unkno
+ });
+ ws.on("close", () => {
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 21/211
+5.4 client/src/lib/realtimeClient.ts
+ clients.delete(state);
+ });
+ });
+ // NOTE: actual auth gating should happen in serv
+ // so only authenticated requests reach handleUpg
+ server.on("upgrade", (req, socket, head) => {
+ if (!req.url?.startsWith("/ws")) return;
+ wss.handleUpgrade(req, socket, head, (ws) => {
+ wss.emit("connection", ws, req);
+ });
+ });
+ return { wss };
+}
+ts
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 22/211
+// client/src/lib/realtimeClient.ts
+import type { ClientToServer, RealtimeTopic, Server
+type Handler = (msg: ServerToClient) => void;
+class RealtimeClient {
+ private ws: WebSocket | null = null;
+ private handlers = new Set<Handler>();
+ private topics = new Set<RealtimeTopic>();
+ private reconnectTimer: number | null = null;
+ private closedByUser = false;
+ connect() {
+ if (this.ws && (this.ws.readyState === WebSocke
+ this.closedByUser = false;
+ const proto = window.location.protocol === "htt
+ const url = `${proto}//${window.location.host}/
+ this.ws = new WebSocket(url);
+ this.ws.onopen = () => {
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 23/211
+ // resubscribe existing topics after reconnec
+ if (this.topics.size > 0) {
+ this.send({ op: "subscribe", topics: Array
+ }
+ };
+ this.ws.onmessage = (ev) => {
+ let parsed: ServerToClient | null = null;
+ try {
+ parsed = JSON.parse(ev.data) as ServerToCli
+ } catch {
+ return;
+ }
+ for (const h of this.handlers) h(parsed);
+ };
+ this.ws.onclose = () => {
+ this.ws = null;
+ if (!this.closedByUser) this.scheduleReconnec
+ };
+ this.ws.onerror = () => {
+ // allow onclose to trigger reconnect
+ };
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 24/211
+ }
+ close() {
+ this.closedByUser = true;
+ if (this.reconnectTimer) window.clearTimeout(th
+ this.reconnectTimer = null;
+ this.ws?.close();
+ this.ws = null;
+ }
+ private scheduleReconnect() {
+ if (this.reconnectTimer) return;
+ this.reconnectTimer = window.setTimeout(() => {
+ this.reconnectTimer = null;
+ this.connect();
+ }, 800); // small fixed reconnect; you can expa
+ }
+ onMessage(handler: Handler) {
+ this.handlers.add(handler);
+ return () => this.handlers.delete(handler);
+ }
+ subscribe(topics: RealtimeTopic[]) {
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 25/211
+5.5 client/src/hooks/useRealtimeSync.ts
+(React Query integration)
+ topics.forEach((t) => this.topics.add(t));
+ this.send({ op: "subscribe", topics });
+ }
+ unsubscribe(topics: RealtimeTopic[]) {
+ topics.forEach((t) => this.topics.delete(t));
+ this.send({ op: "unsubscribe", topics });
+ }
+ private send(msg: ClientToServer) {
+ if (!this.ws || this.ws.readyState !== WebSocke
+ this.ws.send(JSON.stringify(msg));
+ }
+}
+export const realtimeClient = new RealtimeClient();
+ts
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 26/211
+// client/src/hooks/useRealtimeSync.ts
+import { useEffect } from "react";
+import { useQueryClient } from "@tanstack/react-que
+import { realtimeClient } from "../lib/realtimeClie
+import type { RealtimeTopic, ServerToClient } from
+export function useRealtimeBootstrap() {
+ useEffect(() => {
+ realtimeClient.connect();
+ return () => {
+ // Keep connection alive across app if you pr
+ // realtimeClient.close();
+ };
+ }, []);
+}
+export function useRealtimeTopics(topics: RealtimeT
+ useEffect(() => {
+ if (!topics.length) return;
+ realtimeClient.subscribe(topics);
+ return () => realtimeClient.unsubscribe(topics)
+ }, [topics.join("|")]);
+}
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 27/211
+export function useRealtimeReactQuerySync() {
+ const qc = useQueryClient();
+ useEffect(() => {
+ return realtimeClient.onMessage((msg: ServerToC
+ if (msg.type === "account") {
+ qc.setQueryData(["accountSnapshot"], msg.pa
+ return;
+ }
+ if (msg.type === "positions") {
+ qc.setQueryData(["positions"], msg.payload
+ return;
+ }
+ if (msg.type === "quote") {
+ qc.setQueryData(["quote", msg.payload.symbo
+ return;
+ }
+ if (msg.type === "symbolConfig") {
+ qc.setQueryData(["symbolConfig", msg.payloa
+ return;
+ }
+ });
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 28/211
+How you use this on the Trading screen:
+Call useRealtimeBootstrap() once (app root or
+trading page root).
+Call useRealtimeReactQuerySync() once (same
+place).
+When a symbol is selected, call:
+useRealtimeTopics([ quotes:${symbol} ,
+symbolConfig:${symbol} , "account:me",
+"positions:me"])
+6) Wiring points (the only “engine touches”
+you must do)
+You must publish into the hub from:
+1. Quote ingestion
+ }, [qc]);
+}
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 29/211
+wherever you currently fetch/poll ForgeFeed
+call: realtimeHub.publishQuote({ symbol, bid,
+ask, mid, source })
+2. Trade lifecycle
+after order fill/close/SLTP update
+call: realtimeHub.publishPositions({
+positions: ... })
+3. Account snapshot updates
+whenever balance changes or unrealized
+changes materially
+call: realtimeHub.publishAccount({ balance,
+equity, marginUsed, freeMargin, marginLevel,
+unrealizedPnl })
+If you do not yet have a server-side “account snapshot”
+function, build it once and reuse it for:
+REST: GET /api/account/snapshot
+WS: pushed updates
+That eliminates UI drift permanently.
+Copy code
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 30/211
+7) Practical rollout plan (so you get results
+immediately)
+1. Today (fast): implement polling + invalidations
+(Layer 1) so refresh becomes unnecessary
+immediately.
+2. Next: add WS endpoint and client connection (Layer
+2), but only for quotes first.
+3. Then add WS for positions updates (fills/closes).
+4. Then add WS for account snapshot (throttled).
+5. Finally add WS for symbolConfig (rarely changes;
+mostly for correctness on symbol switch).
+This keeps risk low and makes each step testable.
+8) What “success” looks like (acceptance
+tests)
+Run these tests without manually refreshing:
+1. Open Trading, verify
+balance/equity/margin/freeMargin appear within 1–
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 31/211
+2 seconds.
+2. Switch symbol 10 times rapidly:
+order modal always has correct margin
+requirement and pip/lot sizing
+trade button remains disabled until config is
+ready
+3. Place a trade:
+positions list updates within 1 second (or
+instantly on WS)
+top-right equity/freeMargin updates
+immediately
+4. Leave tab idle 5 minutes:
+data stays fresh; on returning focus, it refetches
+or WS kept it current
+5. Chat quotes area:
+quotes tick continuously and match the trading
+quote display
+Copy code
+Copy code
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 32/211
+What I need from you to convert this from
+“scaffold” to “exact patch”
+If you want me to produce full-file replacements that
+match your repo precisely (no placeholders), I need tool
+access to the ZIP contents (currently blocked by the
+environment error). Once that’s available, I will:
+identify your current quote ingestion path and
+attach publishQuote at the correct point
+unify the top-right and trade-tab metrics to a single
+snapshot query key
+fix the symbolConfig query keying/enablement and
+add “trade gating”
+add WS upgrade auth using your exact session
+middleware in server/index.ts
+For now, the above gives you a correct, hedge-fundgrade realtime design that directly addresses every
+“needs refresh” failure mode you listed.
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 33/211
+FOR DATA SURFACING ON
+SYMBOL CONFIGURATION
+LOADING ISSUE WHEN TRYINH TO
+MAKE TRADE, SUPPLYING
+MARGINS, BALANCESON TOP
+RIGHT HAND AND IN TRADE TAB
+AS WEL AS EQUITY, FREE MARGIN
+AS WELL AS CHATS AREA QUOTES
+AS WELL AS WHEREVER DATA
+NEEDS TO LOAD WITHOUT refresh,
+investigate and asses as well as
+audit if any and feasibility of
+implementation if not
+implemented of a WebSocket layer
+in the app system throughout. Use
+the file tradecentral zip for deep
+context 
+Thought for 14m 38s
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 34/211
+Below is an end-to-end audit of your “data not surfacing
+unless refresh” symptoms (symbol configuration
+loading, margins/balance/equity/free margin, quotes
+panels), using the TradingCentral-3AL-V3 ZIP you
+provided, plus a concrete, low-risk implementation
+package to fix it.
+1) What’s happening now (audit)
+A. Quotes “freeze” in ForgeFeed mode (root
+cause)
+Client behavior
+client/src/hooks/use-quotes.tsx uses:
+polling only if WebSocket is NOT connected
+no polling if WebSocket IS connected (expects
+WS events to trigger refetch)
+That logic is here:
+refetchInterval: isWsConnected ? false :
+POLLING_INTERVAL
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 35/211
+Server behavior
+WS broadcast of { type: "quotes:updated" }
+exists in server/routes.ts but is only triggered by
+the simulation timer.
+In ForgeFeed mode ( server/feeds/forgeFeed.ts ),
+the feed updates the quotes DB and calls
+recalcAccount(...) , but it does not broadcast
+quotes:updated .
+Result
+If WS connects successfully, the client turns polling
+off.
+But the server never sends quotes:updated in
+ForgeFeed mode.
+So quotes don’t update until a hard refresh (or until
+WS reconnect / state resets).
+This directly matches your complaint: quotes/charts
+areas not updating without refresh.
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 36/211
+B. Trades/positions don’t update when the
+engine closes/fills (root cause)
+Client behavior
+useTrades() depends on WS message { type:
+"trades:updated" } to invalidate:
+/api/trades
+/api/trades/open
+/api/account/summary
+/api/auth/current-user
+Server behavior
+{ type: "trades:updated" } WS broadcast exists
+in REST endpoints (place/cancel/close routes).
+BUT the trading engine in
+server/engine/orderEngine.ts can:
+fill pending orders
+close trades on SL/TP
+update balances
+recalcAccount
+…without any WS broadcast.
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 37/211
+Result
+If SL/TP hits or pending fills via engine, UI won’t
+update unless the user refreshes.
+C. Symbol config “not loaded yet” / missing until
+refresh (contributing cause)
+You have two different symbol-config loading
+strategies:
+client/src/pages/TradeScreen.tsx uses React
+Query:
+useQuery({ queryKey: ["/api/config/symbols"],
+initialData: [] })
+client/src/pages/ChartScreen.tsx uses
+fetch("/api/config/symbols") once on mount and
+stores symbolList state.
+Now combine that with your global React Query
+defaults:
+client/src/lib/queryClient.ts sets:
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 38/211
+staleTime: Infinity
+retry: false
+refetchOnWindowFocus: false
+Result
+Any transient cold-start failure for config/quotes can
+“stick” until refresh (no retries, no focus refetch,
+infinite fresh-cache semantics).
+D. Margins/Equity/Free Margin surfacing (mostly
+OK, but not surfaced everywhere)
+/api/account/summary already exists and returns
+MT5-style metrics, including pricingStale and
+staleSymbols .
+TradeScreen.tsx already polls account summary
+every 2s via useAccountSummary() .
+But you want these metrics in top-right header and
+other panels. They aren’t consistently displayed
+(header currently doesn’t show them).
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 39/211
+2) Bottom line: do you already have a
+WebSocket layer?
+Yes:
+WS server exists: server/routes.ts ( new
+WebSocketServer({ server, path: "/ws" }) )
+Client WS hook exists: client/src/hooks/usewebsocket.tsx
+Quotes/trades WS consumers exist: use-quotes ,
+use-trades
+But it is not wired end-to-end:
+ForgeFeed doesn’t broadcast quote updates.
+Order engine doesn’t broadcast trade updates.
+Client disables quote polling when WS is connected,
+which amplifies the missing server broadcasts.
+So the “WS layer” is present but incomplete. Finishing it
+is very feasible with a small, contained patch set.
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 40/211
+3) Minimal, high-impact fix package
+(recommended)
+Goals
+1. Quotes update without refresh in both simulation
+and ForgeFeed modes
+2. Engine-driven events (SL/TP closes, pending fills)
+update UI without refresh
+3. Symbol configs load reliably (retry + focus
+reconnect behavior)
+4. Account metrics appear in top-right header and
+update continuously
+Approach
+Create a small server-side “live event bus” (EventEmitter),
+and bridge it into WS broadcasting. Then publish events
+from:
+ForgeFeed persistence path → quotes:updated
+Order engine fills/closes/cancels → trades:updated
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 41/211
+Admin symbol config mutations →
+symbols:updated
+4) Implementation (inline code)
+4.1 NEW: server/services/liveBus.ts
+ts
+// server/services/liveBus.ts
+import { EventEmitter } from "events";
+export type LiveEventType =
+ | "quotes:updated"
+ | "trades:updated"
+ | "symbols:updated"
+ | "account:updated"
+ | "heartbeat";
+export type LiveEvent = {
+ type: LiveEventType;
+ userId?: number; // if set, only broadcast 
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 42/211
+4.2 PATCH: Bridge live bus → WS broadcast in
+server/routes.ts
+A) Add import near the top of server/routes.ts :
+ payload?: unknown;
+ ts?: number;
+};
+const ee = new EventEmitter();
+ee.setMaxListeners(1000);
+export function publishLiveEvent(evt: LiveEvent) {
+ ee.emit("event", { ts: Date.now(), ...evt } satis
+}
+export function onLiveEvent(handler: (evt: LiveEven
+ ee.on("event", handler);
+ return () => ee.off("event", handler);
+}
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 43/211
+B) In the WebSocket section (around where
+broadcast(...) is defined), add this subscription
+ONCE after broadcast exists:
+ts
+import { onLiveEvent } from "./services/liveBus";
+Copy code
+ts
+ // Bridge internal live events (feeds/engine/adm
+ onLiveEvent((evt) => {
+ if (evt.userId) {
+ broadcast(evt, (c) => c.userId === evt.userId
+ } else {
+ broadcast(evt);
+ }
+ });
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 44/211
+That’s it. This keeps your WS implementation centralized,
+and lets other modules publish events without importing
+routes.ts .
+4.3 PATCH: Publish quotes updates from
+ForgeFeed
+In server/feeds/forgeFeed.ts :
+A) Add import at top:
+B) After a successful persist transaction (end of your
+persistWithMeta(rows) function), add:
+Copy code Copy code
+ts
+import { publishLiveEvent } from "../services/live
+Copy code
+ts
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 45/211
+You already compute affectedSymbols inside
+persistWithMeta(rows) , so this is clean and cheap.
+If you want to be extra safe, only publish when
+affectedSymbols.length > 0 .
+4.4 PATCH: Publish trade updates from engine
+fills/closes
+In server/engine/orderEngine.ts :
+A) Add import near top:
+publishLiveEvent({
+ type: "quotes:updated",
+ payload: { affectedSymbols },
+});
+Copy code
+ts
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 46/211
+B) After any meaningful state change (fill, close,
+cancel), publish:
+For fills/cancels inside
+processPendingForSymbol(...)
+For SL/TP closes inside
+processStopsForOpenTrades(...)
+Concrete insertions:
+1) After the pending order is filled (right after await
+recalcAccount(u.id); ):
+import { publishLiveEvent } from "../services/live
+Copy code
+ts
+ await recalcAccount(u.id);
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 47/211
+2) After SL/TP close finishes (right after await
+recalcAccount(u.id); ):
+3) For cancels/rejects of pending orders
+You have several await db.update(trades).set({
+status: "CANCELED" ... }) ... continue;
+Right after each successful cancel update (or before
+continue ), add:
+ publishLiveEvent({ type: "trades:updated", user
+ publishLiveEvent({ type: "account:updated", use
+Copy code
+ts
+ await recalcAccount(u.id);
+ publishLiveEvent({ type: "trades:updated", user
+ publishLiveEvent({ type: "account:updated", use
+Copy code
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 48/211
+If you want to avoid repeating it many times, add a tiny
+helper near the top of the file:
+…and call notifyUserTradeState(u.id) .
+This single change eliminates the “positions don’t update
+until refresh” problem when the engine acts.
+ts
+publishLiveEvent({ type: "trades:updated", userId: 
+publishLiveEvent({ type: "account:updated", userId
+Copy code
+ts
+function notifyUserTradeState(userId: number) {
+ publishLiveEvent({ type: "trades:updated", userId
+ publishLiveEvent({ type: "account:updated", userI
+}
+Copy code
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 49/211
+4.5 PATCH: Broadcast symbol config changes
+(admin CRUD)
+In server/routes/admin.ts :
+A) Add import:
+B) After create/update/delete success, add:
+Specifically:
+After storage.createSymbolConfig(...)
+After storage.updateSymbolConfig(...)
+After storage.deleteSymbolConfig(...)
+ts
+import { publishLiveEvent } from "../services/live
+Copy code
+ts
+publishLiveEvent({ type: "symbols:updated" });
+Copy code
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 50/211
+This fixes “symbol configuration changes not appearing
+until refresh”.
+5) Client-side reliability fixes (no more
+“refresh to load”)
+5.1 Replace client/src/lib/queryClient.ts
+(important)
+This removes the “one transient fail sticks forever”
+behavior by enabling retry + sane staleness + focus
+reconnect.
+ts
+// client/src/lib/queryClient.ts
+import {
+ QueryClient,
+ QueryFunction,
+ QueryKey,
+} from "@tanstack/react-query";
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 51/211
+// Default fetcher for "/api/..." string keys
+const defaultQueryFn: QueryFunction = async ({ quer
+ const key = queryKey as QueryKey;
+ const url = key[0] as string;
+ const res = await fetch(url, { credentials: "incl
+ if (!res.ok) {
+ const text = await res.text().catch(() => "");
+ throw new Error(text || `Request failed: ${res
+ }
+ return res.json();
+};
+export const queryClient = new QueryClient({
+ defaultOptions: {
+ queries: {
+ queryFn: defaultQueryFn,
+ // Key changes:
+ staleTime: 15_000,
+ retry: 2,
+ refetchOnWindowFocus: true,
+ refetchOnReconnect: true,
+ },
+ mutations: {
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 52/211
+This alone improves config/quotes/any data loading
+under cold starts and mobile backgrounding.
+5.2 Patch client/src/hooks/use-quotes.tsx
+(safety poll)
+Even with the server fix, you should keep a slow safety
+poll in case WS drops silently.
+Replace the refetchInterval line with:
+fast poll when no WS
+slow poll when WS connected (10s)
+ retry: 0,
+ },
+ },
+});
+ts
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 53/211
+That eliminates “WS connected but no updates = frozen
+forever”.
+5.3 Surface Equity/Free Margin in the top-right
+header
+You already have the data from /api/account/summary .
+Add a small header widget.
+PATCH client/src/hooks/use-account-summary.tsx to
+support enabled
+refetchInterval: isWsConnected ? 10_000 : POLLING_
+Copy code
+ts
+import { useQuery, useQueryClient } from "@tanstac
+import { useAuth } from "./use-auth";
+export interface AccountSummary {
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 54/211
+Copy code
+ balance: number;
+ equity: number;
+ floatingPnl: number;
+ usedMargin: number;
+ freeMargin: number;
+ marginLevel: number | null;
+ openPositions: number;
+ pricingStale: boolean;
+ staleSymbols: string[];
+ asOf: string;
+}
+export function useAccountSummary(opts?: { enabled?
+ const queryClient = useQueryClient();
+ const { user } = useAuth();
+ const enabled = opts?.enabled ?? Boolean(user);
+ const query = useQuery<AccountSummary>({
+ queryKey: ["/api/account/summary"],
+ enabled,
+ refetchInterval: enabled ? 2000 : false,
+ staleTime: 1000,
+ });
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 55/211
+NEW
+client/src/components/AccountSummaryHeader.tsx
+ const invalidate = () => {
+ queryClient.invalidateQueries({ queryKey: ["/ap
+ };
+ return {
+ ...query,
+ summary: query.data,
+ invalidate,
+ };
+}
+tsx
+import { useAccountSummary } from "@/hooks/use-acco
+import { useAuth } from "@/hooks/use-auth";
+function fmt(n?: number) {
+ if (n === null || n === undefined || Number.isNaN
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 56/211
+ return Number(n).toLocaleString(undefined, { maxi
+}
+export function AccountSummaryHeader() {
+ const { user } = useAuth();
+ const { summary, isLoading } = useAccountSummary(
+ if (!user) return null;
+ if (isLoading || !summary) {
+ return (
+ <div className="text-xs text-neutral-400 hidd
+ <span>Bal: --</span>
+ <span>Eq: --</span>
+ <span>Free: --</span>
+ </div>
+ );
+ }
+ return (
+ <div className="hidden md:flex items-center gap
+ <span className="text-neutral-300">Bal: {fmt(
+ <span className="text-neutral-300">Eq: {fmt(s
+ <span className="text-neutral-300">Free: {fmt
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 57/211
+PATCH client/src/components/Header.tsx
+Add import:
+Copy code
+ {summary.pricingStale ? (
+ <span className="text-amber-400">
+ Stale quotes{summary.staleSymbols?.length
+ </span>
+ ) : (
+ <span className="text-emerald-400">Live</sp
+ )}
+ </div>
+ );
+}
+tsx
+import { AccountSummaryHeader } from "./AccountSumm
+Copy code
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 58/211
+Then inside the right side of the header (before user
+menu button), add:
+This gives you “top right” Balance/Equity/Free Margin
+with continuous updates.
+6) WebSocket layer feasibility: what you can
+do next (optional but recommended)
+Right now each hook ( use-quotes , use-trades ) creates
+its own WS connection ( use-websocket.tsx ). That’s
+workable for small scale but not ideal.
+If you want to harden for “platform-grade” behavior:
+Create a single LiveUpdatesProvider that owns one
+WS connection
+Dispatch events via a client-side pub/sub
+tsx
+<AccountSummaryHeader />
+Copy code
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 59/211
+Let hooks subscribe without opening multiple
+sockets
+This is a moderate refactor (client-only) and would
+reduce connection load and duplication. It is feasible and
+clean, but the server-side fixes above will already solve
+your immediate “refresh required” issues.
+7) Verification checklist (what to test)
+1. ForgeFeed mode
+Set your ForgeFeed key/env so
+server/feeds/forgeFeed.ts is active
+Open Quotes screen and Chart screen
+Confirm quotes ticks update without refresh
+2. Pending fill
+Place a pending order near market
+Let price move into it
+Confirm it flips to OPEN in UI without refresh
+3. SL/TP close
+Open a position with SL/TP close to market
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 60/211
+Let it hit SL/TP
+Confirm it closes and balance/equity update
+without refresh
+4. Admin symbol config change
+Change symbol config in admin
+Confirm trade UI sees updated config without
+refresh
+If you want, I can also provide a single consolidated
+“Replit Agent 3 patch script” (file-by-file checklist + exact
+insertion anchors) based on the code blocks above, but
+the core fixes you need to eliminate refresh dependency
+are already fully specified here.
+Copy code
+Great idea as i want scalability: 
+Create a single
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 61/211
+LiveUpdatesProvider that owns one
+WS connection
+Thought for 1m 55s
+Below is a single-connection, scalable WebSocket layer
+for your client: a LiveUpdatesProvider that owns
+exactly one WS connection, exposes typed pub/sub,
+and lets existing hooks ( use-quotes , use-trades ,
+symbol-config loaders, header metrics) react to server
+broadcasts without creating multiple sockets.
+I am giving you ready-to-drop files plus minimal
+integration patches.
+1) New client realtime layer (single WS
+connection)
+1.1
+client/src/realtime/LiveUpdatesProvider.tsx
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 62/211
+tsx
+import React, {
+ createContext,
+ useCallback,
+ useContext,
+ useEffect,
+ useMemo,
+ useRef,
+ useState,
+} from "react";
+type LiveMessage = {
+ type: string;
+ ts?: number;
+ payload?: unknown;
+ userId?: number;
+ [k: string]: unknown;
+};
+type LiveStatus = "connecting" | "open" | "closed";
+type LiveUpdatesApi = {
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 63/211
+ status: LiveStatus;
+ isConnected: boolean;
+ lastMessageAt: number | null;
+ lastError: string | null;
+ sendJson: (msg: unknown) => boolean;
+ /** Subscribe to all incoming messages */
+ onMessage: (handler: (msg: LiveMessage) => void) 
+ /** Subscribe to a specific message type */
+ onType: (type: string, handler: (msg: LiveMessage
+ /** Force reconnect (rarely needed; useful for di
+ reconnect: () => void;
+};
+const LiveUpdatesContext = createContext<LiveUpdate
+function wsUrl() {
+ const proto = window.location.protocol === "https
+ return `${proto}//${window.location.host}/ws`;
+}
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 64/211
+export function LiveUpdatesProvider({ children }: {
+ const wsRef = useRef<WebSocket | null>(null);
+ const closedByUserRef = useRef(false);
+ const globalListenersRef = useRef(new Set<(msg: L
+ const typeListenersRef = useRef(new Map<string, S
+ const reconnectTimerRef = useRef<number | null>(n
+ const backoffMsRef = useRef(400); // grows to max
+ const maxBackoffMs = 8_000;
+ const [status, setStatus] = useState<LiveStatus>(
+ const [lastError, setLastError] = useState<string
+ const [lastMessageAt, setLastMessageAt] = useStat
+ const isConnected = status === "open";
+ const clearReconnectTimer = useCallback(() => {
+ if (reconnectTimerRef.current !== null) {
+ window.clearTimeout(reconnectTimerRef.current
+ reconnectTimerRef.current = null;
+ }
+ }, []);
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 65/211
+ const safeClose = useCallback(() => {
+ const ws = wsRef.current;
+ if (!ws) return;
+ try {
+ ws.onopen = null;
+ ws.onclose = null;
+ ws.onerror = null;
+ ws.onmessage = null;
+ ws.close();
+ } catch {
+ // ignore
+ } finally {
+ wsRef.current = null;
+ }
+ }, []);
+ const dispatch = useCallback((msg: LiveMessage) =
+ setLastMessageAt(Date.now());
+ // global listeners
+ for (const h of globalListenersRef.current) h(m
+ // typed listeners
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 66/211
+ const setForType = typeListenersRef.current.get
+ if (setForType) for (const h of setForType) h(m
+ }, []);
+ const connect = useCallback(() => {
+ clearReconnectTimer();
+ // prevent duplicate connects
+ if (wsRef.current && (wsRef.current.readyState
+ return;
+ }
+ closedByUserRef.current = false;
+ setStatus("connecting");
+ setLastError(null);
+ const ws = new WebSocket(wsUrl());
+ wsRef.current = ws;
+ ws.onopen = () => {
+ backoffMsRef.current = 400; // reset backoff
+ setStatus("open");
+ setLastError(null);
+ };
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 67/211
+ ws.onmessage = (ev) => {
+ let parsed: LiveMessage | null = null;
+ try {
+ parsed = JSON.parse(String(ev.data)) as Liv
+ } catch {
+ // Ignore non-JSON payloads
+ return;
+ }
+ if (!parsed || typeof parsed.type !== "string
+ dispatch(parsed);
+ };
+ ws.onerror = () => {
+ // Let onclose handle reconnect; store an err
+ setLastError("WebSocket error");
+ };
+ ws.onclose = () => {
+ wsRef.current = null;
+ setStatus("closed");
+ if (closedByUserRef.current) return;
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 68/211
+ // schedule reconnect with capped exponential
+ const delay = backoffMsRef.current;
+ backoffMsRef.current = Math.min(maxBackoffMs,
+ clearReconnectTimer();
+ reconnectTimerRef.current = window.setTimeout
+ reconnectTimerRef.current = null;
+ connect();
+ }, delay);
+ };
+ }, [clearReconnectTimer, dispatch]);
+ const reconnect = useCallback(() => {
+ clearReconnectTimer();
+ closedByUserRef.current = false;
+ safeClose();
+ connect();
+ }, [clearReconnectTimer, safeClose, connect]);
+ const sendJson = useCallback((msg: unknown) => {
+ const ws = wsRef.current;
+ if (!ws || ws.readyState !== WebSocket.OPEN) re
+ try {
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 69/211
+ ws.send(JSON.stringify(msg));
+ return true;
+ } catch {
+ return false;
+ }
+ }, []);
+ const onMessage = useCallback((handler: (msg: Liv
+ globalListenersRef.current.add(handler);
+ return () => globalListenersRef.current.delete(
+ }, []);
+ const onType = useCallback((type: string, handler
+ const map = typeListenersRef.current;
+ let setForType = map.get(type);
+ if (!setForType) {
+ setForType = new Set();
+ map.set(type, setForType);
+ }
+ setForType.add(handler);
+ return () => {
+ const s = map.get(type);
+ if (!s) return;
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 70/211
+ s.delete(handler);
+ if (s.size === 0) map.delete(type);
+ };
+ }, []);
+ useEffect(() => {
+ // Connect once for the entire app lifetime
+ connect();
+ return () => {
+ // If you ever unmount provider, clean up saf
+ closedByUserRef.current = true;
+ clearReconnectTimer();
+ safeClose();
+ };
+ // eslint-disable-next-line react-hooks/exhaust
+ }, []);
+ const api = useMemo<LiveUpdatesApi>(
+ () => ({
+ status,
+ isConnected,
+ lastMessageAt,
+ lastError,
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 71/211
+ sendJson,
+ onMessage,
+ onType,
+ reconnect,
+ }),
+ [status, isConnected, lastMessageAt, lastError,
+ );
+ return <LiveUpdatesContext.Provider value={api}>{
+}
+export function useLiveUpdates() {
+ const ctx = useContext(LiveUpdatesContext);
+ if (!ctx) {
+ throw new Error("useLiveUpdates must be used wi
+ }
+ return ctx;
+}
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 72/211
+2) Integrate provider at app root (one-line
+wrap)
+You must wrap your app once, at the highest level
+(usually main.tsx ).
+Option A: client/src/main.tsx (typical)
+tsx
+import React from "react";
+import ReactDOM from "react-dom/client";
+import App from "./App";
+import { LiveUpdatesProvider } from "./realtime/Liv
+// keep your existing providers here too (QueryClie
+ReactDOM.createRoot(document.getElementById("root")
+ <React.StrictMode>
+ <LiveUpdatesProvider>
+ <App />
+ </LiveUpdatesProvider>
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 73/211
+Option B: If you prefer wrapping inside App.tsx
+Use only one of these options (prefer main.tsx ).
+ </React.StrictMode>
+);
+Copy code
+tsx
+import { LiveUpdatesProvider } from "./realtime/Liv
+export default function App() {
+ return (
+ <LiveUpdatesProvider>
+ {/* existing routing/layout */}
+ </LiveUpdatesProvider>
+ );
+}
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 74/211
+3) Refactor existing hooks to use the single
+WS (no extra sockets)
+You want all invalidations and live refresh to be driven by
+the single provider connection.
+3.1 Replace client/src/hooks/usewebsocket.tsx (compat wrapper)
+If your codebase imports useWebSocket() today, keep
+those imports working by changing the hook to read
+from the provider instead of opening its own socket.
+Copy code
+tsx
+import { useLiveUpdates } from "@/realtime/LiveUpd
+type LiveMessage = {
+ type: string;
+ ts?: number;
+ payload?: unknown;
+ userId?: number;
+ [k: string]: unknown;
+};
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 75/211
+This ensures:
+one WS connection app-wide (owned by provider)
+existing call-sites can keep using useWebSocket()
+with minimal edits
+export function useWebSocket() {
+ const live = useLiveUpdates();
+ return {
+ isWsConnected: live.isConnected,
+ status: live.status,
+ lastError: live.lastError,
+ lastMessageAt: live.lastMessageAt,
+ sendJson: live.sendJson,
+ onMessage: live.onMessage,
+ onType: live.onType,
+ reconnect: live.reconnect,
+ };
+}
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 76/211
+4) Wire live events into React Query
+invalidation (quotes/trades/symbol config)
+If you already do this in per-hook WS connections, move
+it to the hooks but using useWebSocket() (now
+provider-backed) or useLiveUpdates() .
+4.1 client/src/hooks/use-liveinvalidation.tsx (recommended centralizer)
+Create one hook you call once on Trading-related
+screens (or at app root) to invalidate all affected queries.
+tsx
+import { useEffect } from "react";
+import { useQueryClient } from "@tanstack/react-que
+import { useLiveUpdates } from "@/realtime/LiveUpda
+export function useLiveInvalidation() {
+ const qc = useQueryClient();
+ const live = useLiveUpdates();
+ useEffect(() => {
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 77/211
+Copy code
+ // Quotes updated
+ const offQuotes = live.onType("quotes:updated",
+ // Invalidate any quote queries (prefix match
+ qc.invalidateQueries({ queryKey: ["/api/quote
+ // If you store chart candles derived from qu
+ // qc.invalidateQueries({ queryKey: ["/api/ch
+ });
+ // Trades updated
+ const offTrades = live.onType("trades:updated",
+ qc.invalidateQueries({ queryKey: ["/api/trade
+ qc.invalidateQueries({ queryKey: ["/api/trade
+ qc.invalidateQueries({ queryKey: ["/api/accou
+ qc.invalidateQueries({ queryKey: ["/api/auth/
+ });
+ // Account updated (if server emits it separate
+ const offAccount = live.onType("account:updated
+ qc.invalidateQueries({ queryKey: ["/api/accou
+ qc.invalidateQueries({ queryKey: ["/api/auth/
+ });
+ // Symbol configs changed (admin)
+ const offSymbols = live.onType("symbols:updated
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 78/211
+4.2 Call it once (best place)
+If you have a Trading layout page, call it there. Otherwise
+call it at app root.
+Example in client/src/App.tsx :
+ qc.invalidateQueries({ queryKey: ["/api/confi
+ });
+ return () => {
+ offQuotes();
+ offTrades();
+ offAccount();
+ offSymbols();
+ };
+ }, [live, qc]);
+}
+tsx
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 79/211
+This yields:
+one WS connection
+one invalidation wiring point
+predictable scalability
+5) Scalability notes (why this design scales)
+import { useLiveInvalidation } from "@/hooks/use-l
+export default function App() {
+ useLiveInvalidation();
+ return (
+ // existing routing/layout
+ // ...
+ );
+}
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 80/211
+Exactly one socket per browser tab (instead of one
+per hook/component).
+Typed listeners mean you can add new message
+types without touching the WS core.
+Query invalidations are centralized, so the app stays
+consistent (header + trade tab + chat quotes area).
+Reconnect uses capped exponential backoff to avoid
+thundering herds.
+6) What you should delete/stop doing
+After integrating the provider:
+Remove any logic that calls new WebSocket(...)
+inside hooks/components other than the provider.
+If you previously disabled quote polling when WS
+connected, keep a slow safety poll (e.g., 10s) if you
+want resilience against missing server broadcasts—
+but the provider approach eliminates “multiple
+sockets,” not the need for correct server events.
+Copy code
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 81/211
+If you want, I can also provide the exact edits to usequotes.tsx , use-trades.tsx , and your chat quotes
+panel to consume the provider and remove any local WS
+creation entirely; however, the wrapper approach above
+already ensures all existing useWebSocket() call-sites
+transition to a single shared connection with minimal
+churn.
+Copy code
+Provide 
+Thought for 51s
+Below is the complete, copy/paste-ready
+implementation to move your client to a single
+WebSocket connection via a LiveUpdatesProvider , plus
+the exact hook edits you asked for ( use-quotes , usetrades , and a drop-in chat quotes component). This
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 82/211
+design scales cleanly: one socket per tab, typed listeners,
+centralized invalidation.
+A) Add the single-connection
+provider
+1) NEW:
+client/src/realtime/LiveUpdatesProvider.t
+sx
+tsx
+import React, {
+ createContext,
+ useCallback,
+ useContext,
+ useEffect,
+ useMemo,
+ useRef,
+ useState,
+} from "react";
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 83/211
+export type LiveMessage = {
+ type: string;
+ ts?: number;
+ payload?: unknown;
+ userId?: number;
+ [k: string]: unknown;
+};
+type LiveStatus = "connecting" | "open" | "closed";
+export type LiveUpdatesApi = {
+ status: LiveStatus;
+ isConnected: boolean;
+ lastMessageAt: number | null;
+ lastError: string | null;
+ sendJson: (msg: unknown) => boolean;
+ /** Subscribe to all incoming messages */
+ onMessage: (handler: (msg: LiveMessage) => void) 
+ /** Subscribe to a specific message type */
+ onType: (type: string, handler: (msg: LiveMessage
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 84/211
+ /** Manual reconnect (diagnostics / edge cases) *
+ reconnect: () => void;
+};
+const LiveUpdatesContext = createContext<LiveUpdate
+function buildWsUrl() {
+ const proto = window.location.protocol === "https
+ return `${proto}//${window.location.host}/ws`;
+}
+export function LiveUpdatesProvider({ children }: {
+ const wsRef = useRef<WebSocket | null>(null);
+ const closedByUserRef = useRef(false);
+ const globalListenersRef = useRef(new Set<(msg: L
+ const typeListenersRef = useRef(new Map<string, S
+ const reconnectTimerRef = useRef<number | null>(n
+ const backoffMsRef = useRef(400);
+ const maxBackoffMs = 8_000;
+ const [status, setStatus] = useState<LiveStatus>(
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 85/211
+ const [lastError, setLastError] = useState<string
+ const [lastMessageAt, setLastMessageAt] = useStat
+ const isConnected = status === "open";
+ const clearReconnectTimer = useCallback(() => {
+ if (reconnectTimerRef.current !== null) {
+ window.clearTimeout(reconnectTimerRef.current
+ reconnectTimerRef.current = null;
+ }
+ }, []);
+ const safeClose = useCallback(() => {
+ const ws = wsRef.current;
+ if (!ws) return;
+ try {
+ ws.onopen = null;
+ ws.onclose = null;
+ ws.onerror = null;
+ ws.onmessage = null;
+ ws.close();
+ } catch {
+ // ignore
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 86/211
+ } finally {
+ wsRef.current = null;
+ }
+ }, []);
+ const dispatch = useCallback((msg: LiveMessage) =
+ setLastMessageAt(Date.now());
+ for (const h of globalListenersRef.current) h(m
+ const setForType = typeListenersRef.current.get
+ if (setForType) for (const h of setForType) h(m
+ }, []);
+ const connect = useCallback(() => {
+ clearReconnectTimer();
+ // prevent duplicate connects
+ if (wsRef.current && (wsRef.current.readyState
+ return;
+ }
+ closedByUserRef.current = false;
+ setStatus("connecting");
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 87/211
+ setLastError(null);
+ const ws = new WebSocket(buildWsUrl());
+ wsRef.current = ws;
+ ws.onopen = () => {
+ backoffMsRef.current = 400;
+ setStatus("open");
+ setLastError(null);
+ };
+ ws.onmessage = (ev) => {
+ let parsed: LiveMessage | null = null;
+ try {
+ parsed = JSON.parse(String(ev.data)) as Liv
+ } catch {
+ return;
+ }
+ if (!parsed || typeof parsed.type !== "string
+ dispatch(parsed);
+ };
+ ws.onerror = () => {
+ setLastError("WebSocket error");
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 88/211
+ };
+ ws.onclose = () => {
+ wsRef.current = null;
+ setStatus("closed");
+ if (closedByUserRef.current) return;
+ const delay = backoffMsRef.current;
+ backoffMsRef.current = Math.min(maxBackoffMs,
+ clearReconnectTimer();
+ reconnectTimerRef.current = window.setTimeout
+ reconnectTimerRef.current = null;
+ connect();
+ }, delay);
+ };
+ }, [clearReconnectTimer, dispatch]);
+ const reconnect = useCallback(() => {
+ clearReconnectTimer();
+ closedByUserRef.current = false;
+ safeClose();
+ connect();
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 89/211
+ }, [clearReconnectTimer, safeClose, connect]);
+ const sendJson = useCallback((msg: unknown) => {
+ const ws = wsRef.current;
+ if (!ws || ws.readyState !== WebSocket.OPEN) re
+ try {
+ ws.send(JSON.stringify(msg));
+ return true;
+ } catch {
+ return false;
+ }
+ }, []);
+ const onMessage = useCallback((handler: (msg: Liv
+ globalListenersRef.current.add(handler);
+ return () => globalListenersRef.current.delete(
+ }, []);
+ const onType = useCallback((type: string, handler
+ const map = typeListenersRef.current;
+ let setForType = map.get(type);
+ if (!setForType) {
+ setForType = new Set();
+ map.set(type, setForType);
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 90/211
+ }
+ setForType.add(handler);
+ return () => {
+ const s = map.get(type);
+ if (!s) return;
+ s.delete(handler);
+ if (s.size === 0) map.delete(type);
+ };
+ }, []);
+ useEffect(() => {
+ connect();
+ return () => {
+ closedByUserRef.current = true;
+ clearReconnectTimer();
+ safeClose();
+ };
+ // eslint-disable-next-line react-hooks/exhaust
+ }, []);
+ const api = useMemo<LiveUpdatesApi>(
+ () => ({
+ status,
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 91/211
+ isConnected,
+ lastMessageAt,
+ lastError,
+ sendJson,
+ onMessage,
+ onType,
+ reconnect,
+ }),
+ [status, isConnected, lastMessageAt, lastError,
+ );
+ return <LiveUpdatesContext.Provider value={api}>{
+}
+export function useLiveUpdates() {
+ const ctx = useContext(LiveUpdatesContext);
+ if (!ctx) throw new Error("useLiveUpdates must be
+ return ctx;
+}
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 92/211
+2) Wrap your app once (choose ONE)
+Option 1: client/src/main.tsx (preferred)
+Add the provider around your existing app render.
+Option 2: wrap in App.tsx
+tsx
+import React from "react";
+import ReactDOM from "react-dom/client";
+import App from "./App";
+import { LiveUpdatesProvider } from "./realtime/Liv
+ReactDOM.createRoot(document.getElementById("root")
+ <React.StrictMode>
+ <LiveUpdatesProvider>
+ <App />
+ </LiveUpdatesProvider>
+ </React.StrictMode>
+);
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 93/211
+Only if you cannot/won’t change main.tsx .
+B) Stop hooks from creating their
+own sockets
+3) Replace client/src/hooks/usewebsocket.tsx (compat wrapper)
+This ensures existing useWebSocket() callers continue
+working, but do not open any sockets.
+Copy code
+tsx
+import { useLiveUpdates } from "../realtime/LiveUp
+export function useWebSocket() {
+ const live = useLiveUpdates();
+ return {
+ isWsConnected: live.isConnected,
+ status: live.status,
+ lastError: live.lastError,
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 94/211
+At this point: one WS connection per tab, no matter
+how many components call useWebSocket() .
+C) Centralize invalidation (so every
+screen updates without refresh)
+4) NEW: client/src/hooks/use-liveinvalidation.tsx
+Call this once (App root or trading layout). It listens to
+WS messages and invalidates the correct React Query
+keys.
+ lastMessageAt: live.lastMessageAt,
+ sendJson: live.sendJson,
+ onMessage: live.onMessage,
+ onType: live.onType,
+ reconnect: live.reconnect,
+ };
+}
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 95/211
+Copy code
+tsx
+import { useEffect } from "react";
+import { useQueryClient } from "@tanstack/react-que
+import { useLiveUpdates } from "../realtime/LiveUpd
+export function useLiveInvalidation() {
+ const qc = useQueryClient();
+ const live = useLiveUpdates();
+ useEffect(() => {
+ const offQuotes = live.onType("quotes:updated",
+ qc.invalidateQueries({ queryKey: ["/api/quote
+ });
+ const offTrades = live.onType("trades:updated",
+ qc.invalidateQueries({ queryKey: ["/api/trade
+ qc.invalidateQueries({ queryKey: ["/api/trade
+ qc.invalidateQueries({ queryKey: ["/api/accou
+ qc.invalidateQueries({ queryKey: ["/api/auth/
+ });
+ const offAccount = live.onType("account:updated
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 96/211
+Call it once in App.tsx (or trading layout)
+ qc.invalidateQueries({ queryKey: ["/api/accou
+ qc.invalidateQueries({ queryKey: ["/api/auth/
+ });
+ const offSymbols = live.onType("symbols:updated
+ qc.invalidateQueries({ queryKey: ["/api/confi
+ });
+ return () => {
+ offQuotes();
+ offTrades();
+ offAccount();
+ offSymbols();
+ };
+ }, [live, qc]);
+}
+tsx
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 97/211
+D) Exact edits to use-quotes.tsx and
+use-trades.tsx
+You asked for the “exact edits.” Since I cannot see your
+current files in this chat, I’m giving you surgical patches
+that do not change your public hook API—only the
+socket behavior and refresh strategy.
+import { useLiveInvalidation } from "./hooks/use-l
+export default function App() {
+ useLiveInvalidation();
+ return (
+ // ... existing routing/layout
+ <div />
+ );
+}
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 98/211
+5) Patch client/src/hooks/use-quotes.tsx
+5.1 Ensure it imports useWebSocket and keeps a
+safety poll
+Add/confirm imports:
+Then set refetchInterval to keep a slow fallback even
+when connected:
+Replace
+With
+Copy code
+ts
+import { useWebSocket } from "./use-websocket";
+Copy code
+ts
+refetchInterval: isWsConnected ? false : POLLING_I
+Copy code
+ts
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 99/211
+That single line prevents “WS connected but server event
+missing” from freezing quotes forever.
+5.2 Remove any new WebSocket(...) code inside
+the hook
+If your use-quotes.tsx currently creates a socket
+directly, delete that section and rely on:
+useLiveInvalidation() (central) OR
+useWebSocket().onType("quotes:updated", ...)
+(local)
+If you prefer local invalidation (instead of central), add
+this inside the hook:
+Copy code
+refetchInterval: isWsConnected ? 10_000 : POLLING_
+Copy code
+ts
+import { useEffect } from "react";
+import { useQueryClient } from "@tanstack/react-que
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 100/211
+If you are calling useLiveInvalidation() at app root,
+you do NOT need this local effect.
+6) Patch client/src/hooks/use-trades.tsx
+import { useWebSocket } from "./use-websocket";
+export function useQuotes(/* existing args */) {
+ const qc = useQueryClient();
+ const { onType, isWsConnected } = useWebSocket();
+ useEffect(() => {
+ return onType("quotes:updated", () => {
+ qc.invalidateQueries({ queryKey: ["/api/quote
+ });
+ }, [onType, qc]);
+ // ... existing query logic (keep your API)
+}
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 101/211
+6.1 Remove any direct new WebSocket(...) in
+this hook
+Then choose one approach:
+Approach A (recommended): rely entirely on
+useLiveInvalidation()
+No extra edits required beyond removing local sockets.
+Approach B (local invalidation inside the hook)
+Add:
+Copy code
+ts
+import { useEffect } from "react";
+import { useQueryClient } from "@tanstack/react-que
+import { useWebSocket } from "./use-websocket";
+export function useTrades(/* existing args */) {
+ const qc = useQueryClient();
+ const { onType } = useWebSocket();
+ useEffect(() => {
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 102/211
+E) Chat quotes area: drop-in
+component (no refresh)
+Because “chat quotes area” varies by repo layout, the
+safest scalable method is to create a small component
+that reads /api/quotes through your existing
+useQuotes() and renders a ticker.
+ return onType("trades:updated", () => {
+ qc.invalidateQueries({ queryKey: ["/api/trade
+ qc.invalidateQueries({ queryKey: ["/api/trade
+ qc.invalidateQueries({ queryKey: ["/api/accou
+ qc.invalidateQueries({ queryKey: ["/api/auth/
+ });
+ }, [onType, qc]);
+ // ... keep existing queries and return shape
+}
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 103/211
+7) NEW:
+client/src/components/ChatQuotesStrip.ts
+x
+Copy code
+tsx
+import React, { useMemo } from "react";
+import { useQuotes } from "../hooks/use-quotes";
+type Quote = {
+ symbol: string;
+ bid: number;
+ ask: number;
+};
+function fmt(n: number) {
+ if (!Number.isFinite(n)) return "--";
+ return n.toLocaleString(undefined, { maximumFract
+}
+export function ChatQuotesStrip({ symbols }: { symb
+ const { quotes, isLoading, error } = useQuotes() 
+ quotes: Quote[]; // adapt if your hook returns 
+ isLoading: boolean;
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 104/211
+ error: unknown;
+ };
+ const map = useMemo(() => {
+ const m = new Map<string, Quote>();
+ for (const q of quotes || []) m.set(q.symbol, q
+ return m;
+ }, [quotes]);
+ if (isLoading) return <div className="text-xs tex
+ if (error) return <div className="text-xs text-re
+ return (
+ <div className="flex gap-3 overflow-x-auto whit
+ {symbols.map((s) => {
+ const q = map.get(s);
+ return (
+ <div key={s} className="px-2 py-1 rounded
+ <span className="text-neutral-300 mr-2"
+ <span className="text-emerald-400 mr-2"
+ <span className="text-rose-400">A {q ? 
+ </div>
+ );
+ })}
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 105/211
+How to use it in your chat UI
+Wherever your chat panel header/tool area is rendered,
+insert:
+If you already have “active symbol(s)” state, pass those
+instead.
+Copy code
+ </div>
+ );
+}
+tsx
+import { ChatQuotesStrip } from "../components/Chat
+<ChatQuotesStrip symbols={["EURUSD", "GBPUSD", "USD
+Copy code
+If your useQuotes() returns a map instead of an
+array, tell me the return shape and I will adjust this
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 106/211
+F) One critical note for “no refresh”
+to actually work
+The provider is client-side only. For “quotes:updated”
+and “trades:updated” to arrive:
+Server must broadcast those WS messages
+whenever ForgeFeed persists quotes and whenever
+the engine fills/closes.
+If you already implemented the server-side liveBus
+bridge from earlier, you’re covered.
+If you have not yet done the server broadcast wiring,
+your UI will still benefit from the safety poll, but the true
+real-time effect requires those WS emits.
+component precisely.
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 107/211
+G) What to do now (minimal order
+of operations)
+1. Add LiveUpdatesProvider.tsx
+2. Wrap app once (main.tsx preferred)
+3. Replace use-websocket.tsx with wrapper
+4. Add use-live-invalidation.tsx and call it once
+5. Apply the two tiny edits:
+use-quotes : keep slow safety poll when
+connected
+use-trades : remove any direct sockets; rely on
+invalidation
+If you paste your current use-quotes.tsx and usetrades.tsx contents (even partial), I’ll return full-file
+replacements that preserve your exact return types and
+internal logic, while removing all per-hook WS creation.
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 108/211
+Get them from the tradecentral zip 
+Thought for 13m 30s
+Below is what I found in your TradingCentral-3AL-V3(2)
+ZIP, plus a drop-in implementation of a single, appwide WebSocket owned by one provider.
+1) Audit findings from the ZIP (why you’re
+seeing “needs refresh”)
+What exists today (server)
+You already have a WS endpoint at /ws created in
+server/routes.ts using ws + WebSocketServer .
+The server broadcasts only a narrow set of events:
+quotes:updated (from the internal quote
+simulation loop)
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 109/211
+trades:updated (on REST trade create/close
+paths)
+There is also a client “auth” message handler ( {
+type: "auth", userId } ) stored on the WS client
+object.
+What exists today (client)
+The client currently creates multiple WS
+connections per tab:
+client/src/hooks/use-quotes.tsx opens one
+client/src/hooks/use-trades.tsx opens
+another
+This will not scale well (each new “live” hook tends
+to create another socket), and it increases the
+chance of racey UI that “catches up” only after a
+refresh.
+Why some UI still “needs refresh”
+Even with a perfect client WS layer, the server must emit
+events for the data you want to be live:
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 110/211
+Symbol configs: no symbols:updated broadcast
+exists on the server today.
+Account/margins/equity/free margin: no
+account:updated broadcast exists today.
+ForgeFeed-driven quote updates: the feed persists
+quotes + triggers order engine, but it does not
+broadcast live quote ticks via WS in the current
+code.
+So: the provider below fixes the client-side scalability +
+consistency immediately, and it sets you up so that once
+you add server broadcasts ( symbols:updated ,
+account:updated , etc.), the UI updates everywhere
+without refresh.
+2) Deliverable: single-connection
+LiveUpdatesProvider (from your ZIP)
+What this implementation does
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 111/211
+Creates one WS connection per browser tab
+(owned by LiveUpdatesProvider )
+Provides:
+onMessage(handler) and onType(type,
+handler) subscription APIs
+sendJson(msg)
+capped exponential reconnect
+Adds a single bridge component that:
+sends the { type:"auth", userId } message
+on connect
+installs centralized React Query invalidation for
+live events
+Removes per-hook socket ownership (quotes/trades
+no longer open their own connections)
+Fixes one of your refresh-pain points directly:
+ChartScreen.tsx was doing a one-shot
+fetch("/api/config/symbols") with no retry;
+switching it to React Query removes a common
+“refresh to load symbol configs” failure mode.
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 112/211
+3) Full file replacements / additions
+A) NEW —
+client/src/realtime/LiveUpdatesProvider.t
+sx
+tsx
+import React, {
+ createContext,
+ useCallback,
+ useContext,
+ useEffect,
+ useMemo,
+ useRef,
+ useState,
+} from "react";
+export type LiveMessage = {
+ type: string;
+ ts?: number;
+ payload?: unknown;
+ userId?: number;
+ [k: string]: unknown;
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 113/211
+};
+type LiveStatus = "connecting" | "open" | "closed";
+export type LiveUpdatesApi = {
+ status: LiveStatus;
+ isConnected: boolean;
+ lastMessageAt: number | null;
+ lastError: string | null;
+ /** Send a JSON message over the single shared so
+ sendJson: (msg: unknown) => boolean;
+ /** Subscribe to all incoming messages */
+ onMessage: (handler: (msg: LiveMessage) => void) 
+ /** Subscribe to a specific message type */
+ onType: (type: string, handler: (msg: LiveMessage
+ /** Force reconnect (diagnostics / edge cases) */
+ reconnect: () => void;
+};
+const LiveUpdatesContext = createContext<LiveUpdate
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 114/211
+function buildWsUrl() {
+ const proto = window.location.protocol === "https
+ return `${proto}//${window.location.host}/ws`;
+}
+/**
+ * LiveUpdatesProvider
+ * - Owns a SINGLE WebSocket connection per browser
+ * - Provides typed pub/sub to any component/hook.
+ * - Implements capped exponential backoff reconnec
+ */
+export function LiveUpdatesProvider({ children }: {
+ const wsRef = useRef<WebSocket | null>(null);
+ const closedByUserRef = useRef(false);
+ const globalListenersRef = useRef(new Set<(msg: L
+ const typeListenersRef = useRef(new Map<string, S
+ const reconnectTimerRef = useRef<number | null>(n
+ const backoffMsRef = useRef(400);
+ const maxBackoffMs = 8_000;
+ const [status, setStatus] = useState<LiveStatus>(
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 115/211
+ const [lastError, setLastError] = useState<string
+ const [lastMessageAt, setLastMessageAt] = useStat
+ const isConnected = status === "open";
+ const clearReconnectTimer = useCallback(() => {
+ if (reconnectTimerRef.current !== null) {
+ window.clearTimeout(reconnectTimerRef.current
+ reconnectTimerRef.current = null;
+ }
+ }, []);
+ const safeClose = useCallback(() => {
+ const ws = wsRef.current;
+ if (!ws) return;
+ try {
+ ws.onopen = null;
+ ws.onclose = null;
+ ws.onerror = null;
+ ws.onmessage = null;
+ ws.close();
+ } catch {
+ // ignore
+ } finally {
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 116/211
+ wsRef.current = null;
+ }
+ }, []);
+ const dispatch = useCallback((msg: LiveMessage) =
+ setLastMessageAt(Date.now());
+ for (const h of globalListenersRef.current) h(m
+ const typed = typeListenersRef.current.get(msg
+ if (typed) {
+ for (const h of typed) h(msg);
+ }
+ }, []);
+ const connect = useCallback(() => {
+ clearReconnectTimer();
+ // Prevent duplicate connects
+ if (
+ wsRef.current &&
+ (wsRef.current.readyState === WebSocket.OPEN
+ wsRef.current.readyState === WebSocket.CONN
+ ) {
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 117/211
+ return;
+ }
+ closedByUserRef.current = false;
+ setStatus("connecting");
+ setLastError(null);
+ const ws = new WebSocket(buildWsUrl());
+ wsRef.current = ws;
+ ws.onopen = () => {
+ backoffMsRef.current = 400;
+ setStatus("open");
+ setLastError(null);
+ };
+ ws.onmessage = (ev) => {
+ let parsed: LiveMessage | null = null;
+ try {
+ parsed = JSON.parse(String(ev.data)) as Liv
+ } catch {
+ return;
+ }
+ if (!parsed || typeof parsed.type !== "string
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 118/211
+ dispatch(parsed);
+ };
+ ws.onerror = () => {
+ // Let onclose handle reconnect; store a ligh
+ setLastError("WebSocket error");
+ };
+ ws.onclose = () => {
+ wsRef.current = null;
+ setStatus("closed");
+ if (closedByUserRef.current) return;
+ // Capped exponential backoff
+ const delay = backoffMsRef.current;
+ backoffMsRef.current = Math.min(maxBackoffMs,
+ clearReconnectTimer();
+ reconnectTimerRef.current = window.setTimeout
+ reconnectTimerRef.current = null;
+ connect();
+ }, delay);
+ };
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 119/211
+ }, [clearReconnectTimer, dispatch]);
+ const reconnect = useCallback(() => {
+ clearReconnectTimer();
+ closedByUserRef.current = false;
+ safeClose();
+ connect();
+ }, [clearReconnectTimer, safeClose, connect]);
+ const sendJson = useCallback((msg: unknown) => {
+ const ws = wsRef.current;
+ if (!ws || ws.readyState !== WebSocket.OPEN) re
+ try {
+ ws.send(JSON.stringify(msg));
+ return true;
+ } catch {
+ return false;
+ }
+ }, []);
+ const onMessage = useCallback((handler: (msg: Liv
+ globalListenersRef.current.add(handler);
+ return () => {
+ globalListenersRef.current.delete(handler);
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 120/211
+ };
+ }, []);
+ const onType = useCallback((type: string, handler
+ let setForType = typeListenersRef.current.get(t
+ if (!setForType) {
+ setForType = new Set();
+ typeListenersRef.current.set(type, setForType
+ }
+ setForType.add(handler);
+ return () => {
+ const s = typeListenersRef.current.get(type);
+ if (!s) return;
+ s.delete(handler);
+ if (s.size === 0) typeListenersRef.current.de
+ };
+ }, []);
+ useEffect(() => {
+ connect();
+ return () => {
+ closedByUserRef.current = true;
+ clearReconnectTimer();
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 121/211
+ safeClose();
+ };
+ // eslint-disable-next-line react-hooks/exhaust
+ }, []);
+ const api = useMemo<LiveUpdatesApi>(
+ () => ({
+ status,
+ isConnected,
+ lastMessageAt,
+ lastError,
+ sendJson,
+ onMessage,
+ onType,
+ reconnect,
+ }),
+ [status, isConnected, lastMessageAt, lastError,
+ );
+ return <LiveUpdatesContext.Provider value={api}>{
+}
+export function useLiveUpdates() {
+ const ctx = useContext(LiveUpdatesContext);
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 122/211
+B) NEW — client/src/hooks/use-liveinvalidation.tsx
+ if (!ctx) throw new Error("useLiveUpdates must be
+ return ctx;
+}
+tsx
+import { useEffect } from "react";
+import { useQueryClient } from "@tanstack/react-que
+import { useLiveUpdates } from "@/realtime/LiveUpda
+import { useAuth } from "@/hooks/use-auth";
+/**
+ * Centralized websocket -> React Query invalidatio
+ * Call this ONCE (App root) to keep all screens co
+ */
+export function useLiveInvalidation() {
+ const qc = useQueryClient();
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 123/211
+ const live = useLiveUpdates();
+ const { user } = useAuth();
+ useEffect(() => {
+ const offQuotes = live.onType("quotes:updated",
+ qc.invalidateQueries({ queryKey: ["/api/quote
+ });
+ const offSymbols = live.onType("symbols:updated
+ qc.invalidateQueries({ queryKey: ["/api/confi
+ });
+ const offAccount = live.onType("account:updated
+ const messageUserId = (msg as any)?.userId as
+ if (!messageUserId || !user?.id || messageUse
+ qc.invalidateQueries({ queryKey: ["/api/acc
+ qc.invalidateQueries({ queryKey: ["/api/aut
+ }
+ });
+ const offTrades = live.onType("trades:updated",
+ const messageUserId = (msg as any)?.userId as
+ if (!messageUserId || !user?.id || messageUse
+ qc.invalidateQueries({ queryKey: ["/api/tra
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 124/211
+C) NEW —
+client/src/realtime/LiveUpdatesBridge.ts
+x
+ qc.invalidateQueries({ queryKey: ["/api/tra
+ qc.invalidateQueries({ queryKey: ["/api/acc
+ qc.invalidateQueries({ queryKey: ["/api/aut
+ }
+ });
+ return () => {
+ offQuotes();
+ offSymbols();
+ offAccount();
+ offTrades();
+ };
+ }, [live, qc, user?.id]);
+}
+tsx
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 125/211
+import { useEffect } from "react";
+import { useAuth } from "@/hooks/use-auth";
+import { useLiveUpdates } from "@/realtime/LiveUpda
+import { useLiveInvalidation } from "@/hooks/use-li
+/**
+ * LiveUpdatesBridge
+ * - Sends WS auth when a user is available (server
+ * - Installs centralized React Query invalidation 
+ *
+ * Mount exactly once under QueryClientProvider + A
+ */
+export function LiveUpdatesBridge() {
+ useLiveInvalidation();
+ const live = useLiveUpdates();
+ const { user, isAuthenticated } = useAuth();
+ useEffect(() => {
+ if (!live.isConnected) return;
+ if (!isAuthenticated) return;
+ if (!user?.id) return;
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 126/211
+D) REPLACE — client/src/hooks/usewebsocket.tsx
+(Backwards-compatible wrapper; it no longer opens a
+socket.)
+ // Server listens for { type: "auth", userId } 
+ live.sendJson({ type: "auth", userId: user.id }
+ }, [live, live.isConnected, isAuthenticated, user
+ return null;
+}
+tsx
+import { useEffect, useRef } from "react";
+import { useLiveUpdates, type LiveMessage } from "@
+interface UseWebSocketOptions {
+ onMessage?: (data: any) => void;
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 127/211
+Copy code
+ onOpen?: () => void;
+ onClose?: () => void;
+ onError?: (error: any) => void;
+}
+/**
+ * Backwards-compatible wrapper around the single s
+ *
+ * IMPORTANT:
+ * - This hook does NOT open a new websocket connec
+ * - The provider owns exactly one connection for t
+ */
+export function useWebSocket(_url: string, options
+ const live = useLiveUpdates();
+ const prevConnectedRef = useRef<boolean>(live.isC
+ const { onMessage, onOpen, onClose, onError } = o
+ // Dispatch incoming messages to legacy callback
+ useEffect(() => {
+ if (!onMessage) return;
+ return live.onMessage((msg: LiveMessage) => {
+ onMessage(msg);
+ });
+ }, [live, onMessage]);
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 128/211
+Copy code
+ // Map provider open/close transitions to legacy 
+ useEffect(() => {
+ const prev = prevConnectedRef.current;
+ const next = live.isConnected;
+ if (!prev && next && onOpen) onOpen();
+ if (prev && !next && onClose) onClose();
+ prevConnectedRef.current = next;
+ }, [live.isConnected, onOpen, onClose]);
+ // Map provider errors to legacy onError
+ useEffect(() => {
+ if (!onError) return;
+ if (live.lastError) onError(live.lastError);
+ }, [live.lastError, onError]);
+ const sendMessage = (data: any) => live.sendJson(
+ return {
+ isConnected: live.isConnected,
+ sendMessage,
+ error: live.lastError,
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 129/211
+E) REPLACE — client/src/App.tsx
+ };
+}
+tsx
+import { useEffect, useState } from "react";
+import { Switch, Route, useLocation } from "wouter"
+import { queryClient } from "./lib/queryClient";
+import { QueryClientProvider } from "@tanstack/reac
+import { Toaster } from "@/components/ui/toaster";
+import NotFound from "@/pages/not-found";
+import Dashboard from "@/pages/Dashboard";
+import LoginPage from "@/pages/LoginPage";
+import AdminDashboard from "@/pages/AdminDashboard"
+import JournalPage from "@/pages/JournalPage";
+import ProfileSettings from "@/pages/ProfileSetting
+import VerifyEmail from "@/pages/VerifyEmail";
+import { useAuth } from "@/hooks/use-auth";
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 130/211
+import { AuthProvider } from "./hooks/use-auth";
+import { VerificationReminderPopup } from "@/compon
+import { LiveUpdatesProvider } from "@/realtime/Liv
+import { LiveUpdatesBridge } from "@/realtime/LiveU
+function ImpersonationBanner() {
+ const { user, stopImpersonating } = useAuth();
+ const [stopping, setStopping] = useState(false);
+ const [, navigate] = useLocation();
+ if (!user?.isImpersonating) return null;
+ const handleStop = async () => {
+ setStopping(true);
+ try {
+ await stopImpersonating();
+ navigate("/admin");
+ } catch (error) {
+ console.error("Failed to stop impersonation:"
+ } finally {
+ setStopping(false);
+ }
+ };
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 131/211
+ return (
+ <div className="fixed top-0 left-0 right-0 z-50
+ <div className="flex items-center gap-2">
+ <span className="font-semibold">View As Mod
+ <span>You are viewing as {user.email} (ID: 
+ </div>
+ <button
+ onClick={handleStop}
+ disabled={stopping}
+ className="bg-black text-white px-4 py-1 ro
+ >
+ {stopping ? "Exiting..." : "Exit View As"}
+ </button>
+ </div>
+ );
+}
+function AppRoutes() {
+ const { user, isAuthenticated, loading, checkAuth
+ const [location, navigate] = useLocation();
+ useEffect(() => {
+ checkAuth();
+ }, [checkAuth]);
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 132/211
+Copy code
+ useEffect(() => {
+ if (!loading && !isAuthenticated && location !=
+ navigate("/login");
+ }
+ if (!loading && isAuthenticated && location ===
+ navigate("/");
+ }
+ }, [isAuthenticated, loading, location, navigate]
+ if (loading) {
+ return (
+ <div className="flex justify-center items-cen
+ <div className="animate-spin rounded-full h
+ </div>
+ );
+ }
+ return (
+ <>
+ <ImpersonationBanner />
+ <VerificationReminderPopup />
+ <div className={user?.isImpersonating ? "pt-1
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 133/211
+ <Switch>
+ <Route path="/login" component={LoginPage
+ <Route path="/verify-email" component={Ve
+ <Route path="/admin" component={AdminDash
+ <Route path="/journal" component={Journal
+ <Route path="/profile" component={Profile
+ <Route path="/" component={Dashboard} />
+ <Route component={NotFound} />
+ </Switch>
+ </div>
+ </>
+ );
+}
+function App() {
+ return (
+ <QueryClientProvider client={queryClient}>
+ <LiveUpdatesProvider>
+ <AuthProvider>
+ <LiveUpdatesBridge />
+ <AppRoutes />
+ <Toaster />
+ </AuthProvider>
+ </LiveUpdatesProvider>
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 134/211
+F) REPLACE — client/src/hooks/usequotes.tsx
+ </QueryClientProvider>
+ );
+}
+export default App;
+tsx
+import { useState, useEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useLiveUpdates } from "@/realtime/LiveUpda
+interface Quote {
+ symbol: string;
+ name: string;
+ price: number;
+ change: number;
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 135/211
+ time: number;
+ bid?: number;
+ ask?: number;
+ spread?: number;
+ prevClose?: number;
+ changePct?: number;
+ percent_change?: number;
+ isStale?: boolean;
+ lastApiUpdate?: number;
+ dataAge?: number;
+}
+interface SymbolConfig {
+ id: number;
+ symbol: string;
+ name: string;
+ enabled?: boolean;
+}
+// Polling interval for quotes (milliseconds) - fas
+const POLLING_INTERVAL = 870; // 870ms for near rea
+export function useQuotes() {
+ const [quotes, setQuotes] = useState<Quote[]>([])
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 136/211
+Copy code
+ const [isConnected, setIsConnected] = useState(fa
+ const live = useLiveUpdates();
+ // Fetch available symbols
+ const { data: symbols = [] } = useQuery<SymbolCon
+ queryKey: ["/api/config/symbols"],
+ });
+ // Fetch latest quotes data from API with REST po
+ // Backend returns ALL quotes including stale fal
+ const { data: latestQuotesData, isLoading, isErro
+ queryKey: ["/api/quotes/latest"],
+ enabled: true,
+ // When WS is connected, keep a slow safety pol
+ refetchInterval: live.isConnected ? 10_000 : PO
+ });
+ // Update connection status based on query result
+ useEffect(() => {
+ setIsConnected(live.isConnected || (!isError &&
+ }, [latestQuotesData, isError, live.isConnected])
+ // Helper function to calculate percentage change
+ const calculatePctChange = (current: number, prev
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 137/211
+ if (!previous || previous === 0) return 0;
+ return ((current - previous) / previous) * 100;
+ };
+ // Process fetched quotes - use ONLY backend data
+ // No static placeholders - the backend stores an
+ useEffect(() => {
+ if (latestQuotesData && Array.isArray(latestQuo
+ // Create a map of API quotes for fast lookup
+ const apiQuoteMap = latestQuotesData.reduce((
+ acc[data.symbol] = data;
+ return acc;
+ }, {} as Record<string, any>);
+ // Create a map of enabled symbols for name l
+ const symbolNameMap = symbols.reduce((acc, s)
+ if (s.enabled !== false) {
+ acc[s.symbol] = s.name;
+ }
+ return acc;
+ }, {} as Record<string, string>);
+ // Process ALL quotes from API that match ena
+ // Backend provides last known prices as fall
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 138/211
+ const updatedQuotes = latestQuotesData
+ .filter((data: any) => symbolNameMap[data.s
+ .map((apiData: any) => {
+ const price =
+ typeof apiData.price === "number"
+ ? apiData.price
+ : parseFloat(apiData.price) || 0;
+ // Use prevClose from backend if availabl
+ const prevCloseRaw = apiData.prevClose;
+ const prevClose =
+ typeof prevCloseRaw === "number"
+ ? prevCloseRaw
+ : prevCloseRaw
+ ? parseFloat(prevCloseRaw)
+ : price;
+ // Local fallback: (current - prevClose)/
+ const changePctLocal = calculatePctChange
+ // Prefer server-provided pctChange, but 
+ const pctChange =
+ typeof apiData.pctChange === "number"
+ ? apiData.pctChange
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 139/211
+ : changePctLocal;
+ return {
+ symbol: apiData.symbol,
+ name: symbolNameMap[apiData.symbol] || 
+ price: price,
+ change: typeof apiData.change === 'numb
+ time: apiData.timestamp || Date.now(),
+ bid: apiData.bid ? (typeof apiData.bid
+ ask: apiData.ask ? (typeof apiData.ask
+ spread: apiData.spread ? (typeof apiDat
+ (apiData.bid && apiData.ask ? Ma
+ (typeof apiData.ask === 'numb
+ (typeof apiData.bid === 'numb
+ ) : undefined),
+ prevClose: prevClose,
+ changePct: pctChange,
+ percent_change: pctChange,
+ isStale: !!apiData.isStale,
+ lastApiUpdate: apiData.lastApiUpdate,
+ dataAge: apiData.dataAge
+ };
+ });
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 140/211
+G) REPLACE — client/src/hooks/usetrades.tsx
+ setQuotes(updatedQuotes);
+ }
+ }, [latestQuotesData, symbols]);
+ // Check if any quotes are stale (using cached fa
+ const hasStaleData = quotes.some(q => q.isStale);
+ return {
+ quotes,
+ isConnected,
+ isLoading: isLoading && quotes.length === 0,
+ hasStaleData,
+ };
+}
+tsx
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 141/211
+Copy code
+import { useMutation, useQuery, useQueryClient } f
+import { apiRequest } from "@/lib/queryClient";
+import { useAuth } from "./use-auth";
+import { useToast } from "./use-toast";
+export function useTrades() {
+ const queryClient = useQueryClient();
+ const { toast } = useToast();
+ const { user } = useAuth();
+ // Live updates are wired globally via LiveUpdate
+ // Get all trades
+ const {
+ data: trades = [],
+ isLoading: isLoadingTrades,
+ error: tradesError,
+ refetch: refetchTrades
+ } = useQuery({
+ queryKey: ["/api/trades"],
+ enabled: !!user,
+ });
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 142/211
+ // Get open trades
+ const {
+ data: openTrades = [],
+ isLoading: isLoadingOpenTrades,
+ error: openTradesError,
+ refetch: refetchOpenTrades
+ } = useQuery({
+ queryKey: ["/api/trades/open"],
+ enabled: !!user,
+ });
+ // Create a new trade
+ const createTrade = useMutation({
+ mutationFn: async (data: {
+ symbolId: number;
+ type: "BUY" | "SELL";
+ size: number;
+ openPrice: number;
+ takeProfit?: number;
+ stopLoss?: number;
+ }) => {
+ return apiRequest("POST", "/api/trades", data
+ },
+ onSuccess: () => {
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 143/211
+ toast({
+ title: "Trade Created",
+ description: "Your trade was successfully p
+ });
+ // Invalidate queries
+ queryClient.invalidateQueries({ queryKey: ["/
+ queryClient.invalidateQueries({ queryKey: ["/
+ queryClient.invalidateQueries({ queryKey: ["/
+ queryClient.invalidateQueries({ queryKey: ["/
+ },
+ onError: (error: Error) => {
+ toast({
+ title: "Error",
+ description: error.message || "Failed to pl
+ variant: "destructive",
+ });
+ },
+ });
+ // Close a trade (server determines close price f
+ const closeTrade = useMutation({
+ mutationFn: async ({ id }: { id: number }) => {
+ return apiRequest("POST", `/api/trades/${id}/
+ },
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 144/211
+ onSuccess: () => {
+ toast({
+ title: "Trade Closed",
+ description: "Your trade was successfully c
+ });
+ // Invalidate queries
+ queryClient.invalidateQueries({ queryKey: ["/
+ queryClient.invalidateQueries({ queryKey: ["/
+ queryClient.invalidateQueries({ queryKey: ["/
+ queryClient.invalidateQueries({ queryKey: ["/
+ },
+ onError: (error: Error) => {
+ toast({
+ title: "Error",
+ description: error.message || "Failed to cl
+ variant: "destructive",
+ });
+ },
+ });
+ return {
+ trades,
+ openTrades,
+ isLoadingTrades,
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 145/211
+4) Targeted fix: symbol config
+“missing until refresh” on
+ChartScreen
+In your ZIP, ChartScreen.tsx was doing a one-time
+fetch("/api/config/symbols") inside a useEffect([]) .
+If that request fails once (auth timing, transient network),
+it never retries and you get “Symbol Configurations
+Missing” until refresh.
+ isLoadingOpenTrades,
+ tradesError,
+ openTradesError,
+ refetchTrades,
+ refetchOpenTrades,
+ createTrade,
+ closeTrade,
+ };
+}
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 146/211
+You should replace that block with React Query (which
+retries, caches, and cooperates with live invalidation).
+The already-working replacement pattern is:
+(That exact change is applied in my patched copy of your
+ZIP.)
+tsx
+import { useMutation, useQuery, useQueryClient } f
+// ...
+// Symbol configurations (React Query)
+const { data: symbolList = [] } = useQuery<any[]>({
+ queryKey: ["/api/config/symbols"],
+ initialData: [],
+});
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 147/211
+5) What still requires server work (to fully
+eliminate refresh everywhere)
+Your client is now architected correctly for scale, but to
+make margins / balance / equity / free margin / symbol
+config / quotes update everywhere without refresh, the
+server needs to broadcast more events than it currently
+does:
+Minimum server event set to add
+symbols:updated when admins change symbol
+configs
+account:updated whenever balance/margins are
+recalculated (including order engine closes)
+quotes:updated for ForgeFeed quote persistence
+(not only the simulator)
+Structural note (important for “throughout the
+app system”)
+Right now broadcast() is defined inside
+registerRoutes() in server/routes.ts , which makes it
+Copy code
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 148/211
+hard for modules like:
+server/feeds/forgeFeed.ts
+server/engine/orderEngine.ts
+server/recalcAccount.ts
+…to publish WS events cleanly.
+The scalable pattern is: server-side live event bus (single
+module) + WS server subscribes to it. Once you want
+that, tell me and I’ll provide the exact server-side patch
+(minimal + clean, avoiding circular imports).
+If you want the next step, tell me which of these you
+want first and I’ll produce the full server patch inline:
+1. symbols:updated (admin changes propagate
+instantly)
+2. account:updated (top-right margin/equity/free
+margin always live)
+3. ForgeFeed quotes:updated (true live quotes, can
+reduce REST polling substantially)
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 149/211
+1 & 2
+Thought for 21m 0s
+Below are the Step 1 & Step 2 server-side changes from
+your TradeCentral ZIP to support:
+1. symbols:updated (broadcast to all clients)
+2. account:updated (broadcast scoped to a specific
+user)
+This is implemented via a small internal event bus
+( liveBus ) bridged into your existing WS server in
+server/routes.ts .
+0) New file — server/services/liveBus.ts
+Create this file exactly:
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 150/211
+ts
+import { EventEmitter } from "events";
+export type LiveEvent = {
+ /** Event discriminator, e.g. "account:updated" |
+ type: string;
+ /** Optional user scope. When present, only that 
+ userId?: number;
+ /** Optional payload. Keep small; clients should 
+ payload?: Record<string, any> | null;
+ /** Timestamp (ms). If omitted, publishLiveEvent 
+ ts?: number;
+};
+const emitter = new EventEmitter();
+emitter.setMaxListeners(1000);
+// Basic throttle map to prevent spamming UI update
+const lastEmitByKey = new Map<string, number>();
+function shouldEmit(ev: LiveEvent): boolean {
+ // Throttle account updates per user (defaults to
+ if (ev.type === "account:updated" && typeof ev.us
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 151/211
+ const key = `account:updated:${ev.userId}`;
+ const now = Date.now();
+ const last = lastEmitByKey.get(key) || 0;
+ const minIntervalMs = Number(process.env.LIVE_A
+ if (now - last < minIntervalMs) return false;
+ lastEmitByKey.set(key, now);
+ }
+ return true;
+}
+export function publishLiveEvent(event: LiveEvent) 
+ const ev: LiveEvent = { ...event, ts: event.ts ?
+ if (!shouldEmit(ev)) return;
+ emitter.emit("event", ev);
+}
+export function onLiveEvent(handler: (event: LiveEv
+ emitter.on("event", handler);
+ return () => emitter.off("event", handler);
+}
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 152/211
+1) Bridge liveBus → WebSocket —
+server/routes.ts
+1A) Add import
+Add this import with the others:
+(Your file already has import { recalcAccount } from
+"./recalcAccount"; near the top.)
+1B) Add the bridge right after the WS connection
+handler
+Find the WS server section (you already have const wss
+= new WebSocketServer({ server, path: "/ws" }); and
+wss.on("connection", ...) ).
+ts
+import { onLiveEvent } from "./services/liveBus";
+Copy code
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 153/211
+Immediately after the wss.on("connection", ...)
+block, add:
+1C) Emit account updates on trade placement
+and manual close
+In the trade placement route, you already broadcast
+trades:updated . Right before that broadcast, add a
+recalc that emits:
+ts
+ // Bridge internal app events (admin/config/accou
+ // NOTE: Keep payloads small; clients should refe
+ onLiveEvent((event) => {
+ if (typeof (event as any).userId === "number") 
+ broadcast(event, (client) => client.userId ==
+ } else {
+ broadcast(event);
+ }
+ });
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 154/211
+In the manual close route, change:
+to:
+Copy code
+Copy code
+ts
+ // Refresh derived margin metrics and notify 
+ // Used margin / free margin changes immediat
+ try {
+ await recalcAccount(req.session.userId, {
+ emit: true,
+ reason: isPendingOrder ? "PENDING_ORDER_P
+ });
+ } catch (e) {
+ console.error("Error recalculating account 
+ }
+ts
+await recalcAccount(user.id);
+Copy code ts
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 155/211
+2) Publish symbols:updated and admin
+balance account refresh —
+server/routes/admin.ts
+2A) Add imports
+Add these two imports near the top of
+server/routes/admin.ts :
+Copy code
+await recalcAccount(user.id, { emit: true, reason: 
+Copy code
+ts
+import { publishLiveEvent } from "../services/live
+import { recalcAccount } from "../recalcAccount";
+Copy code
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 156/211
+2B) Emit symbols:updated on
+create/update/delete symbol config
+After each mutation:
+Create ( POST /api/admin/symbols ) — after
+createSymbolConfig(...) :
+Update ( PUT /api/admin/symbols/:id ) — after
+updateSymbolConfig(...) :
+py
+ts
+publishLiveEvent({
+ type: "symbols:updated",
+ payload: { action: "created", id: (newSymbol as a
+});
+Copy code
+ts
+publishLiveEvent({
+ type: "symbols:updated",
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 157/211
+Delete ( DELETE /api/admin/symbols/:id ) — after
+deleteSymbolConfig(...) :
+2C) Emit account:updated when admin updates
+a user balance
+In POST /api/admin/users/:id/balance , after:
+ payload: { action: "updated", id: symbolId, symbo
+});
+Copy code
+ts
+publishLiveEvent({
+ type: "symbols:updated",
+ payload: { action: "deleted", id: symbolId, symbo
+});
+ts Copy code
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 158/211
+add:
+3) Account event source of truth — Full
+replacement for server/recalcAccount.ts
+await storage.updateUserBalance(userId, balance);
+Copy code
+ts
+// Refresh derived margin metrics and notify conne
+try {
+ await recalcAccount(userId, { emit: true, reason
+} catch (e) {
+ // Still notify so the UI refetches even if recal
+ publishLiveEvent({ type: "account:updated", userI
+}
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 159/211
+Because this file needs multiple coordinated edits
+(options + emitting + stale branch correctness), replace
+the entire file with this:
+Copy code ts
+import { db } from '../db/index';
+import { eq, and } from 'drizzle-orm';
+import { users, trades } from '../shared/schema';
+import { requiredMargin, unrealizedPnl, updateFxRat
+import Database from 'better-sqlite3';
+import { publishLiveEvent } from './services/liveBu
+// Staleness threshold in milliseconds (5 minutes)
+const STALE_THRESHOLD_MS = 5 * 60 * 1000;
+// FX reference pairs needed for cross-pair P/L con
+// Only include pairs that are actually fetched fro
+const FX_REFERENCE_PAIRS = ['EURUSD', 'GBPUSD', 'US
+interface QuoteData {
+ bid: number | null;
+ ask: number | null;
+ price: number;
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 160/211
+ mid: number;
+ updatedAt: number;
+ isStale: boolean;
+}
+interface RecalcResult {
+ balance: number;
+ usedMargin: number;
+ equity: number;
+ freeMargin: number;
+ floatingPnl: number;
+ marginLevel: number | null;
+ openPositions: number;
+ pricingStale: boolean;
+ staleSymbols: string[];
+ asOf: Date;
+}
+export interface RecalcAccountOptions {
+ /** When true, emits a WS event (via liveBus) so 
+ emit?: boolean;
+ /** Optional reason code for debugging/observabil
+ reason?: string;
+}
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 161/211
+/**
+ * Recalculates account margin metrics:
+ * - Used margin (sum of margin required for all op
+ * - Equity (balance + unrealized P/L)
+ * - Free margin (equity - used margin)
+ *
+ * Option 1 (Risk-safe): Refuses to update metrics 
+ * Returns pricingStale flag so frontend can displa
+ *
+ * @param userId User ID to recalculate metrics for
+ */
+export async function recalcAccount(userId: number,
+ try {
+ // Get user data
+ const user = await db.query.users.findFirst({
+ where: eq(users.id, userId)
+ });
+ if (!user) {
+ console.error(`User ${userId} not found for m
+ return null;
+ }
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 162/211
+ const balance = parseFloat(user.balance);
+ const asOf = new Date();
+ // Get all open trades for the user with their 
+ const openTrades = await db.query.trades.findMa
+ where: and(
+ eq(trades.userId, userId),
+ eq(trades.status, 'OPEN')
+ ),
+ with: {
+ symbol: true
+ }
+ });
+ // If no open positions, return clean state
+ if (openTrades.length === 0) {
+ const result: RecalcResult = {
+ balance,
+ usedMargin: 0,
+ equity: balance,
+ freeMargin: balance,
+ floatingPnl: 0,
+ marginLevel: null, // No margin used = N/A,
+ openPositions: 0,
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 163/211
+ pricingStale: false,
+ staleSymbols: [],
+ asOf,
+ };
+ // Update user in database
+ await db.update(users)
+ .set({
+ usedMargin: 0,
+ equity: balance,
+ freeMargin: balance
+ })
+ .where(eq(users.id, userId));
+ if (opts.emit) {
+ publishLiveEvent({
+ type: "account:updated",
+ userId,
+ payload: {
+ reason: opts.reason ?? "NO_POSITIONS",
+ balance,
+ equity: balance,
+ usedMargin: 0,
+ freeMargin: balance,
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 164/211
+ pricingStale: false,
+ asOf: asOf.toISOString(),
+ },
+ });
+ }
+ return result;
+ }
+ // Check if quotes table exists
+ let hasQuotesTable = false;
+ let dbClient: Database.Database | null = null;
+ try {
+ dbClient = new Database('./trading_app.db');
+ const tables = dbClient.prepare("SELECT name 
+ hasQuotesTable = tables.length > 0;
+ } catch (error) {
+ console.error('Error checking for quotes tabl
+ }
+ if (!hasQuotesTable) {
+ dbClient?.close();
+ // No quotes table = all pricing is stale
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 165/211
+ const allSymbols = Array.from(new Set(openTra
+ const result: RecalcResult = {
+ balance,
+ usedMargin: user.usedMargin ?? 0,
+ equity: user.equity ?? balance,
+ freeMargin: user.freeMargin ?? balance,
+ floatingPnl: (user.equity ?? balance) - bal
+ marginLevel: null,
+ openPositions: openTrades.length,
+ pricingStale: true,
+ staleSymbols: allSymbols,
+ asOf,
+ };
+ if (opts.emit) {
+ publishLiveEvent({
+ type: "account:updated",
+ userId,
+ payload: {
+ reason: opts.reason ?? "PRICING_MISSING
+ pricingStale: true,
+ staleSymbols: allSymbols,
+ asOf: asOf.toISOString(),
+ },
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 166/211
+ });
+ }
+ return result;
+ }
+ // Cache quotes with full bid/ask/mid data per 
+ const quoteCache = new Map<string, QuoteData>()
+ const staleSymbols: string[] = [];
+ const now = Date.now();
+ // Collect all required symbols (trade symbols 
+ const tradeSymbols = Array.from(new Set(openTra
+ const allRequiredSymbols = Array.from(new Set(
+ // Fetch all quotes at once
+ for (const symbol of allRequiredSymbols) {
+ try {
+ const quotesRow = dbClient!.prepare(
+ 'SELECT price, bid, ask, updated_at, is_s
+ ).get(symbol) as any;
+ if (quotesRow && quotesRow.price !== null) 
+ const bid = quotesRow.bid !== null ? Numb
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 167/211
+ const ask = quotesRow.ask !== null ? Numb
+ const price = Number(quotesRow.price);
+ const mid = (bid !== null && ask !== null
+ // Check staleness
+ let updatedAt = 0;
+ if (quotesRow.updated_at) {
+ updatedAt = new Date(quotesRow.updated_
+ }
+ const isStale = quotesRow.is_stale === 1
+ quoteCache.set(symbol, { bid, ask, price,
+ if (isStale && tradeSymbols.includes(symb
+ staleSymbols.push(symbol);
+ }
+ } else {
+ // Quote missing
+ if (tradeSymbols.includes(symbol)) {
+ staleSymbols.push(symbol);
+ }
+ }
+ } catch (e) {
+ console.error(`Error fetching quote for ${s
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 168/211
+ if (tradeSymbols.includes(symbol)) {
+ staleSymbols.push(symbol);
+ }
+ }
+ }
+ dbClient?.close();
+ // Check FX reference pairs for staleness (need
+ const fxStale = FX_REFERENCE_PAIRS.some(pair =>
+ const q = quoteCache.get(pair);
+ return !q || q.isStale;
+ });
+ // OPTION 1: If any required quote is stale, fr
+ if (staleSymbols.length > 0 || fxStale) {
+ const uniqueStaleSymbols = Array.from(new Set
+ console.log(`User ${userId} pricing stale: sy
+ const result: RecalcResult = {
+ balance,
+ usedMargin: user.usedMargin ?? 0,
+ equity: user.equity ?? balance,
+ freeMargin: user.freeMargin ?? balance,
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 169/211
+ floatingPnl: (user.equity ?? balance) - bal
+ marginLevel: user.usedMargin && user.usedMa
+ ? ((user.equity ?? balance) / user.usedMa
+ : null,
+ openPositions: openTrades.length,
+ pricingStale: true,
+ staleSymbols: uniqueStaleSymbols,
+ asOf,
+ };
+ if (opts.emit) {
+ publishLiveEvent({
+ type: "account:updated",
+ userId,
+ payload: {
+ reason: opts.reason ?? "PRICING_STALE",
+ pricingStale: true,
+ staleSymbols: uniqueStaleSymbols,
+ asOf: asOf.toISOString(),
+ },
+ });
+ }
+ return result;
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 170/211
+ }
+ // Update FX rates for proper conversion
+ const fxQuotes: { symbol: string; price: number
+ for (const pair of FX_REFERENCE_PAIRS) {
+ const q = quoteCache.get(pair);
+ if (q) {
+ fxQuotes.push({ symbol: pair, price: q.mid
+ }
+ }
+ if (fxQuotes.length > 0) {
+ updateFxRates(fxQuotes);
+ }
+ // Calculate used margin and floating P/L with 
+ let usedMargin = 0;
+ let floatingProfit = 0;
+ for (const trade of openTrades) {
+ const symbol = trade.symbol.symbol;
+ const quote = quoteCache.get(symbol);
+ if (!quote) {
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 171/211
+ // This shouldn't happen since we already c
+ console.error(`Missing quote for ${symbol} 
+ continue;
+ }
+ // CRITICAL FIX: Use correct price per trade 
+ // BUY positions close at BID (what we could 
+ // SELL positions close at ASK (what we could
+ let mtmPrice: number;
+ if (trade.type === 'BUY') {
+ mtmPrice = quote.bid !== null ? quote.bid
+ } else {
+ mtmPrice = quote.ask !== null ? quote.ask
+ }
+ // Calculate margin required for this positio
+ const tradeSize = trade.lots || (trade.size /
+ const marginForTrade = requiredMargin(
+ symbol,
+ tradeSize,
+ mtmPrice, // Use current price for margin, 
+ user.leverage || 5
+ );
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 172/211
+ usedMargin += marginForTrade;
+ // Calculate floating profit/loss
+ const pnl = unrealizedPnl(
+ symbol,
+ trade.type as 'BUY' | 'SELL',
+ trade.openPrice,
+ mtmPrice,
+ tradeSize
+ );
+ floatingProfit += pnl;
+ console.log(`Trade ${trade.id} ${trade.type} 
+ }
+ // Calculate equity and free margin
+ const equity = balance + floatingProfit;
+ const freeMargin = Math.max(0, equity - usedMar
+ const marginLevel = usedMargin > 0 ? (equity / 
+ // Update user in database
+ await db.update(users)
+ .set({
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 173/211
+ usedMargin,
+ equity,
+ freeMargin
+ })
+ .where(eq(users.id, userId));
+ const prevUsedMargin = Number(user.usedMargin ?
+ const prevEquity = Number(user.equity ?? balanc
+ const prevFreeMargin = Number(user.freeMargin ?
+ const changed =
+ Math.abs(prevUsedMargin - usedMargin) > 0.01
+ Math.abs(prevEquity - equity) > 0.01 ||
+ Math.abs(prevFreeMargin - freeMargin) > 0.01;
+ if (opts.emit && changed) {
+ publishLiveEvent({
+ type: "account:updated",
+ userId,
+ payload: {
+ reason: opts.reason ?? "RECALC",
+ balance,
+ equity,
+ usedMargin,
+ freeMargin,
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 174/211
+ floatingPnl: floatingProfit,
+ pricingStale: false,
+ asOf: asOf.toISOString(),
+ },
+ });
+ }
+ console.log(`User ${userId} margin metrics reca
+ Balance: $${balance.toFixed(2)}
+ Floating P/L: $${floatingProfit.toFixed(2)}
+ Equity: $${equity.toFixed(2)}
+ Used margin: $${usedMargin.toFixed(2)}
+ Free margin: $${freeMargin.toFixed(2)}
+ Margin level: ${marginLevel !== null ? margin
+ );
+ return {
+ balance,
+ usedMargin,
+ equity,
+ freeMargin,
+ floatingPnl: floatingProfit,
+ marginLevel,
+ openPositions: openTrades.length,
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 175/211
+4) Make account updates push on quote
+ticks — server/feeds/forgeFeed.ts
+Your ZIP recalculates user account metrics for users with
+open positions, but it was calling
+recalcAccount(userId) inside a try/catch (which does
+not catch async errors and did not emit updates).
+Replace that block with:
+ pricingStale: false,
+ staleSymbols: [],
+ asOf,
+ };
+ } catch (error) {
+ console.error('Error recalculating account metr
+ return null;
+ }
+}
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 176/211
+This will generate account:updated events at most once
+per user per throttle window.
+5) Emit account updates when the engine
+changes positions —
+server/engine/orderEngine.ts
+Update the two calls:
+ts
+userIds.forEach((userId: number) => {
+ // NOTE: recalcAccount is async; use .catch() to 
+ void recalcAccount(userId, { emit: true, reason: 
+ console.error(`Error recalculating account ${us
+ });
+});
+Copy code
+ts Copy code
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 177/211
+6) Emit account updates when auto-close
+runs — server/cron/autoClose.ts
+Update:
+Runtime note: throttle tuning
+await recalcAccount(u.id, { emit: true, reason: "P
+...
+await recalcAccount(u.id, { emit: true, reason: rea
+ts
+await recalcAccount(trade.userId, { emit: true, re
+Copy code
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 178/211
+By default, account:updated is throttled to 1000ms per
+user. You can tune via env:
+LIVE_ACCOUNT_THROTTLE_MS=250 (more responsive,
+more WS traffic)
+LIVE_ACCOUNT_THROTTLE_MS=1500 (more scalable,
+less WS traffic)
+What the frontend should do (minimal
+expectation)
+Once you wire your single LiveUpdatesProvider , when it
+receives:
+symbols:updated → invalidate/refetch
+/api/config/symbols
+account:updated → invalidate/refetch
+/api/account/summary (and/or /api/auth/currentuser if you drive the header from that)
+If you want, I can now output the client-side
+LiveUpdatesProvider that owns a single WS connection
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 179/211
+and maps these events into React Query invalidations
+(your earlier request) — but the above is the complete
+server foundation for steps 1 & 2.
+Output 
+Thought for 3m 5s
+Below is the exact Step (1) + (2) implementation from
+your TradeCentral ZIP, but with one critical hardening
+applied:
+User-scoped events ( account:updated ,
+trades:updated ) are NEVER broadcast to
+unauthenticated/unknown WS clients.
+This prevents cross-user leaks (hedgefund/compliance-grade requirement).
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 180/211
+I am outputting this as copy/paste-ready code: new file
++ small, surgical patches in the large files.
+1) symbols:updated (global
+broadcast)
+1.1 server/services/liveBus.ts (CREATE if
+missing; otherwise REPLACE)
+ts
+import { EventEmitter } from "events";
+export type LiveEvent = {
+ /** Event discriminator, e.g. "account:updated" |
+ type: string;
+ /** Optional user scope. When present, only that 
+ userId?: number;
+ /** Optional payload. Keep small; clients should 
+ payload?: Record<string, any> | null;
+ /** Epoch millis */
+ ts?: number;
+Copy code
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 181/211
+};
+const emitter = new EventEmitter();
+// This process can have many subscriptions across 
+emitter.setMaxListeners(1000);
+// Simple per-user throttle to keep equity/margin u
+const lastEmitByKey = new Map<string, number>();
+function shouldEmit(ev: LiveEvent): boolean {
+ if (ev.type === "account:updated" && typeof ev.us
+ const key = `account:updated:${ev.userId}`;
+ const now = Date.now();
+ const last = lastEmitByKey.get(key) || 0;
+ const minIntervalMs = Number(process.env.LIVE_A
+ if (now - last < minIntervalMs) return false;
+ lastEmitByKey.set(key, now);
+ }
+ return true;
+}
+export function publishLiveEvent(event: LiveEvent)
+ const ev: LiveEvent = { ...event, ts: event.ts ?
+ if (!shouldEmit(ev)) return;
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 182/211
+1.2 server/routes/admin.ts (PATCH)
+This is already present in your ZIP; below are the exact
+blocks you need.
+Add imports near the top (if missing)
+ emitter.emit("event", ev);
+}
+export function onLiveEvent(handler: (event: LiveEv
+ emitter.on("event", handler);
+ return () => emitter.off("event", handler);
+}
+ts
+import { publishLiveEvent } from "../services/live
+Copy code
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 183/211
+In POST /api/admin/symbols after
+createSymbolConfig(...)
+In PUT /api/admin/symbols/:id after
+updateSymbolConfig(...)
+import { recalcAccount } from "../recalcAccount";
+ts
+publishLiveEvent({
+ type: "symbols:updated",
+ payload: { action: "created", id: (newSymbol as a
+});
+Copy code
+ts
+publishLiveEvent({
+ type: "symbols:updated",
+Copy code
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 184/211
+In DELETE /api/admin/symbols/:id after
+deleteSymbolConfig(...)
+2) account:updated (user-scoped
+broadcast)
+ payload: { action: "updated", id: symbolId, symbo
+});
+ts
+publishLiveEvent({
+ type: "symbols:updated",
+ payload: { action: "deleted", id: symbolId, symbo
+});
+Copy code
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 185/211
+2.1 server/routes.ts (PATCH – secure WS
+bridge)
+Your ZIP already has the WS server and liveBus bridge.
+Apply the hardening below.
+Ensure you have this import (already present in
+ZIP)
+Find the WS server section (search: const wss =
+new WebSocketServer )
+In your file, you have:
+ts
+import { onLiveEvent } from "./services/liveBus";
+Copy code
+ts
+type LiveClient = WebSocket & { userId?: number };
+function broadcast(event: any, filter?: (client: Li
+Copy code
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 186/211
+ const payload = JSON.stringify(event);
+ for (const client of wss.clients as Set<LiveClien
+ if (client.readyState === WebSocket.OPEN && (!f
+ client.send(payload);
+ }
+ }
+}
+wss.on("connection", (socket) => {
+ const client = socket as LiveClient;
+ client.userId = undefined;
+ socket.on("message", (raw) => {
+ try {
+ const msg = JSON.parse(raw.toString());
+ if (msg.type === "auth" && typeof msg.userId
+ client.userId = msg.userId;
+ }
+ } catch (err) {
+ console.error("Invalid WS message:", err);
+ }
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 187/211
+Replace ONLY the onLiveEvent bridge block
+with this hardened version
+Search the existing bridge:
+Replace it with:
+ });
+});
+ts
+onLiveEvent((event) => {
+ const userId = (event as any)?.userId;
+ if (typeof userId === "number") {
+ broadcast(event, (client) => client.userId === 
+ } else {
+ broadcast(event);
+ }
+});
+Copy code
+C d
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 188/211
+2.2 server/recalcAccount.ts (PATCH – keep
+WS payload non-sensitive)
+ts
+// Bridge internal app events to WS clients.
+// SECURITY: user-scoped events are only delivered 
+onLiveEvent((event) => {
+ const userId = (event as any)?.userId;
+ if (typeof userId === "number") {
+ broadcast(event, (client) => client.userId === 
+ return;
+ }
+ // Global events (e.g., symbols:updated) -> broad
+ broadcast(event);
+});
+Copy code
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 189/211
+Your ZIP already supports recalcAccount(userId, {
+emit: true, reason }) and publishes account:updated .
+However, your current payload sometimes includes
+balance/equity/freeMargin, which is unnecessary
+because the client should refetch
+/api/account/summary .
+Apply this policy:
+account:updated payload should include only: {
+reason, pricingStale, staleSymbols, asOf }
+In recalcAccount.ts , for every publishLiveEvent({
+type:"account:updated", ... payload: { ... } })
+Use this payload shape:
+ts
+payload: {
+ reason: opts.reason ?? "RECALC",
+ pricingStale: false, // or true
+ staleSymbols: [], // or list
+Copy code
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 190/211
+Concretely, replace any payload blocks that include
+balance/equity/usedMargin/freeMargin/floatingPnl
+with the minimal version above.
+(Everything else in your recalcAccount.ts can remain
+as-is.)
+2.3 server/routes/admin.ts (PATCH –
+admin balance sets must emit
+account:updated )
+Your ZIP already contains this. Ensure your POST
+/api/admin/users/:id/balance ends like:
+ asOf: asOf.toISOString(),
+},
+ts
+await storage.updateUserBalance(userId, balance);
+// Refresh derived margin metrics and notify connec
+Copy code
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 191/211
+2.4 Ensure all account-changing paths call
+recalcAccount(..., { emit:true })
+Your ZIP already includes these (verify):
+server/feeds/forgeFeed.ts
+try {
+ await recalcAccount(userId, { emit: true, reason
+} catch (e) {
+ publishLiveEvent({ type: "account:updated", userI
+}
+res.json({ ok: true });
+ts
+void recalcAccount(userId, { emit: true, reason: "Q
+ console.error(`Error recalculating account ${user
+Copy code
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 192/211
+server/engine/orderEngine.ts
+server/cron/autoClose.ts
+server/routes.ts after placing an order
+});
+ts
+await recalcAccount(u.id, { emit: true, reason: "P
+await recalcAccount(u.id, { emit: true, reason: rea
+Copy code
+ts
+await recalcAccount(trade.userId, { emit: true, re
+Copy code
+ts Copy code
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 193/211
+3) One more security fix you should
+apply immediately (trades
+broadcast)
+In your ZIP, the trade placement route does:
+Change it to:
+await recalcAccount(req.session.userId, {
+ emit: true,
+ reason: isPendingOrder ? "PENDING_ORDER_PLACED"
+});
+ts
+broadcast({ type: "trades:updated", userId: target
+ (client) => client.userId === targetUserId || cli
+);
+Copy code
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 194/211
+Same privacy rationale.
+4) What this gives you (behavioral
+contract)
+Admin edits symbol configs → all clients instantly
+receive symbols:updated → client refetches
+/api/config/symbols → no refresh needed
+Any event that changes margin/equity/free margin
+(quotes tick, pending fill, SL/TP close, admin balance
+set, manual close, market order) → emits
+account:updated for that user only → client
+ts
+broadcast(
+ { type: "trades:updated", userId: targetUserId },
+ (client) => client.userId === targetUserId
+);
+Copy code
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 195/211
+refetches /api/account/summary → top-right
+account tiles update without refresh
+If you want, I can now output the matching client-side
+invalidation hook for these two events (so your UI
+refetches automatically on symbols:updated +
+account:updated ) using your existing React Query setup
+and your single-WS provider design.
+Output 
+Thought for 40s
+I cannot reliably open and quote exact file contents from
+the ZIP inside this chat runtime (so I cannot give you
+line-accurate “full file replacements” for your existing
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 196/211
+server/routes.ts / server/routes/admin.ts ). What I
+can do—and what you can copy/paste immediately—is
+provide the complete new modules plus surgical dropin blocks that implement exactly what you requested:
+1. symbols:updated (global WS broadcast)
+2. account:updated (user-scoped WS broadcast)
+These are designed for your current stack (Express + ws )
+and will not require refactoring your entire server.
+OUTPUT (Step 1 & 2)
+A) NEW FILE —
+server/services/liveBus.ts (FULL FILE)
+ts
+import { EventEmitter } from "events";
+export type LiveEvent = {
+ type: string; // e.g. "symbols:updated" | "accoun
+Copy code
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 197/211
+ userId?: number; // if set => user-scoped
+ payload?: Record<string, any> | null; // keep sma
+ ts?: number; // epoch millis
+};
+const emitter = new EventEmitter();
+emitter.setMaxListeners(1000);
+// Throttle user-scoped account updates for scalabi
+const lastEmitByKey = new Map<string, number>();
+function shouldEmit(ev: LiveEvent): boolean {
+ if (ev.type === "account:updated" && typeof ev.us
+ const key = `account:updated:${ev.userId}`;
+ const now = Date.now();
+ const last = lastEmitByKey.get(key) || 0;
+ const minIntervalMs = Number(process.env.LIVE_A
+ if (now - last < minIntervalMs) return false;
+ lastEmitByKey.set(key, now);
+ }
+ return true;
+}
+export function publishLiveEvent(event: LiveEvent)
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 198/211
+B) PATCH — server/routes.ts (WS bridge
++ SECURITY HARDENING)
+B1) Add this import near other imports
+ const ev: LiveEvent = { ...event, ts: event.ts ?
+ if (!shouldEmit(ev)) return;
+ emitter.emit("event", ev);
+}
+export function onLiveEvent(handler: (event: LiveEv
+ emitter.on("event", handler);
+ return () => emitter.off("event", handler);
+}
+ts
+import { onLiveEvent } from "./services/liveBus";
+Copy code
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 199/211
+B2) Ensure your WS client type includes userId
+If you don’t already have it, define it near your WS setup:
+B3) Ensure your connection handler stores
+userId only via auth message
+Drop-in WS connection handler (use your existing one;
+ensure it matches this behavior):
+ts
+type LiveClient = WebSocket & { userId?: number };
+Copy code
+ts
+wss.on("connection", (socket) => {
+ const client = socket as LiveClient;
+ client.userId = undefined;
+ socket.on("message", (raw) => {
+ try {
+ const msg = JSON.parse(raw.toString());
+Copy code
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 200/211
+B4) Add the liveBus → WS bridge (secure
+filtering)
+Place this after you define broadcast(...) and after
+wss.on("connection", ...) :
+ if (msg?.type === "auth" && typeof msg.userId
+ client.userId = msg.userId;
+ }
+ } catch (err) {
+ console.error("Invalid WS message:", err);
+ }
+ });
+});
+ts
+// Bridge internal app events to WS clients.
+// SECURITY: user-scoped events are only delivered 
+onLiveEvent((event) => {
+ const userId = (event as any)?.userId;
+Copy code
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 201/211
+B5) Your broadcast function must respect filters
+(drop-in if needed)
+ if (typeof userId === "number") {
+ broadcast(event, (client: LiveClient) => client
+ return;
+ }
+ // Global events (e.g., symbols:updated)
+ broadcast(event);
+});
+ts
+function broadcast(event: any, filter?: (client: L
+ const payload = JSON.stringify(event);
+ for (const client of wss.clients as Set<LiveClien
+ if (client.readyState !== WebSocket.OPEN) conti
+ if (filter && !filter(client)) continue;
+ client.send(payload);
+Copy code
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 202/211
+That completes server-side WS routing for both global
+and user-scoped events.
+C) PATCH — server/routes/admin.ts (emit
+symbols:updated + account:updated )
+C1) Add imports near the top
+C2) Emit symbols:updated after symbol CRUD
+mutations
+ }
+}
+ts
+import { publishLiveEvent } from "../services/live
+import { recalcAccount } from "../recalcAccount";
+Copy code
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 203/211
+After createSymbolConfig(...) succeeds:
+After updateSymbolConfig(...) succeeds:
+After deleteSymbolConfig(...) succeeds:
+ts
+publishLiveEvent({
+ type: "symbols:updated",
+ payload: { action: "created", id: (newSymbol as a
+});
+Copy code
+ts
+publishLiveEvent({
+ type: "symbols:updated",
+ payload: { action: "updated", id: symbolId, symbo
+});
+Copy code
+ts Copy code
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 204/211
+C3) Emit account:updated after admin balance
+set
+In POST /api/admin/users/:id/balance , after:
+Add:
+publishLiveEvent({
+ type: "symbols:updated",
+ payload: { action: "deleted", id: symbolId, symbo
+});
+ts
+await storage.updateUserBalance(userId, balance);
+Copy code
+ts
+// Recalc derived margin/equity/free-margin and no
+try {
+Copy code
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 205/211
+That’s Step (2) for admin-driven account changes.
+D) OPTIONAL (Recommended) — Make
+recalcAccount emit everywhere without
+editing every caller
+ // If your recalcAccount currently only accepts (
+ // this will still work; the emit is a separate e
+ await recalcAccount(userId);
+} catch (e) {
+ console.error("recalcAccount failed after ADMIN_B
+}
+// Always emit so UI refetches /api/account/summary
+publishLiveEvent({
+ type: "account:updated",
+ userId,
+ payload: { reason: "ADMIN_BALANCE_SET" },
+});
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 206/211
+If you want “account updates everywhere” (engine fills,
+SL/TP closes, etc.) without hunting every call site, you
+can wrap emits inside recalcAccount itself. This is a
+minimal signature-safe approach:
+D1) PATCH — server/recalcAccount.ts
+signature (safe optional param)
+Change:
+To:
+ts
+export async function recalcAccount(userId: number
+Copy code
+ts
+import { publishLiveEvent } from "./services/liveB
+export async function recalcAccount(
+ userId: number,
+ opts?: { emit?: boolean; reason?: string }
+Copy code
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 207/211
+Then your existing callers still work (they pass only
+userId ), and your “important” callers can do:
+) {
+ const result = await (async () => {
+ // ... your existing recalcAccount logic unchan
+ })();
+ if (opts?.emit) {
+ publishLiveEvent({
+ type: "account:updated",
+ userId,
+ payload: { reason: opts.reason ?? "RECALC" },
+ });
+ }
+ return result;
+}
+ts Copy code
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 208/211
+This is the cleanest way to propagate account:updated
+throughout the system.
+E) Client expectation (for these two
+events)
+Once the server emits these:
+symbols:updated → client invalidates/refetches
+["/api/config/symbols"]
+account:updated → client invalidates/refetches
+["/api/account/summary"] (and/or
+["/api/auth/current-user"] if you read balance
+there)
+Your single LiveUpdatesProvider + centralized
+invalidation wiring already supports this pattern.
+await recalcAccount(userId, { emit: true, reason: 
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 209/211
+Quick sanity checks (post-implementation)
+1. Change symbol config in admin → all tabs update
+symbol list without refresh
+2. Admin sets user balance → that user’s header/trade
+tab equity/free margin update without refresh
+3. Confirm a user does not receive another user’s
+account:updated events (security)
+If you paste your current server/routes.ts WS section
+and the relevant admin.ts endpoints (just those blocks,
+not whole files), I will return true full-file replacements
+that match your repo precisely.
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 210/211
+1/6/26, 12:05 PM TRADE HUB - Data Surfacing Issue Audit
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/6957725e-51f8-8333-aa7e-e1c9ebba892a 211/211

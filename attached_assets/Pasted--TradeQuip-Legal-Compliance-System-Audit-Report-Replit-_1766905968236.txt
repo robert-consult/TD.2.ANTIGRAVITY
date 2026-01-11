@@ -1,0 +1,493 @@
+# TradeQuip — Legal Compliance System Audit Report (Replit Agent 3)
+
+**Audit Date:** YYYY-MM-DD  
+**Repo / Branch:** (e.g., main / feature-legal-compliance)  
+**Auditor:** Replit Agent 3  
+**Environment:** Local / Replit / Staging / Prod  
+**DB Engine:** SQLite (better-sqlite3) + Drizzle ORM  
+**Objective:** Verify full implementation of the dynamic compliance-first signup flow + legal docs system, including gates, targets, audit trail, and admin controls.
+
+---
+
+## 0) Executive Summary
+
+### 0.1 Overall Status
+- **Go/No-Go for enforcing gate (`legal.coverage.enforce=true`)**: ✅ GO / ❌ NO-GO
+- **Core onboarding safety**: ✅ / ⚠️ / ❌
+- **Admin legal operations readiness**: ✅ / ⚠️ / ❌
+- **Tamper-evidence readiness**: ✅ / ⚠️ / ❌
+
+### 0.2 Blocking Gaps (must fix before enforcement)
+1. 
+2. 
+3. 
+
+### 0.3 Non-Blocking Gaps (fix soon)
+1. 
+2. 
+3. 
+
+### 0.4 Evidence Index
+- Screenshots: (links or filenames)
+- SQL outputs: (links or snippets)
+- Routes tested: (list)
+- Files inspected: (list)
+
+---
+
+## 1) DB Schema & Migrations
+
+> For each item: **Status** (Done/Partial/Missing), **Evidence** (file paths + SQL/PRAGMA), **Notes/Risks**.
+
+### 1.1 legalDocuments table
+**[1] legalDocuments exists with required columns**
+- Status: 
+- Evidence:
+  - File(s): `shared/schema.ts` (line refs)
+  - SQL: `PRAGMA table_info('legal_documents');`
+- Notes/Risks:
+
+**[2] legalDocuments searchable by target fields**
+- Status:
+- Evidence:
+  - Indexes: `PRAGMA index_list('legal_documents');`
+- Notes/Risks:
+
+### 1.2 legalDocTargets table
+**[3] legalDocTargets exists and unique constraint on (docSet, docType, jurisdictionType, jurisdictionKey)**
+- Status:
+- Evidence:
+  - File(s): `shared/schema.ts`
+  - SQL: `PRAGMA table_info('legal_doc_targets');`
+  - SQL: `PRAGMA index_list('legal_doc_targets');`
+- Notes/Risks:
+
+**[4] legalDocTargets has index on activeDocId**
+- Status:
+- Evidence:
+- Notes/Risks:
+
+### 1.3 legalAcceptances table
+**[5] legalAcceptances exists and stores combinedText + combinedSha256 + jurisdiction**
+- Status:
+- Evidence:
+  - File(s): `shared/schema.ts`
+  - SQL: `PRAGMA table_info('legal_acceptances');`
+  - Sample row: `SELECT id, country_iso2, region_key, LENGTH(combined_text), combined_sha256 FROM legal_acceptances ORDER BY id DESC LIMIT 3;`
+- Notes/Risks:
+
+**[6] legalAcceptances stores provenance fields (ip/userAgent/sessionId)**
+- Status:
+- Evidence:
+- Notes/Risks:
+
+### 1.4 systemConfig table
+**[7] systemConfig exists and supports key/value toggles**
+- Status:
+- Evidence:
+  - File(s): `shared/schema.ts`
+  - SQL: `PRAGMA table_info('system_config');`
+- Notes/Risks:
+
+### 1.5 Migration / push
+**[8] Migrations run successfully without constraint errors**
+- Status:
+- Evidence:
+  - Command(s): `npm run db:push` output
+- Notes/Risks:
+
+---
+
+## 2) Coverage Gate Toggle (Backend-controlled)
+
+**[9] Config key `legal.coverage.enforce` is read from DB in resolver**
+- Status:
+- Evidence:
+  - File(s): `server/legal/coverageGate.ts`, `server/routes/legalDoc1Resolve.ts`
+- Notes/Risks:
+
+**[10] Admin endpoints exist for system config get/set**
+- Status:
+- Evidence:
+  - Routes: `GET /api/admin/system-config/get?key=legal.coverage.enforce`
+  - Routes: `POST /api/admin/system-config/set`
+  - File(s): `server/routes/adminSystemConfig.ts`
+- Notes/Risks:
+
+**[11] Enforcement ON blocks missing active targets (availability/resolve)**
+- Status:
+- Evidence:
+  - Test case(s):
+    - `legal.coverage.enforce=true`
+    - Request: `/api/legal/doc1/availability?countryIso2=XX`
+    - Response: `available=false` and reason code
+- Notes/Risks:
+
+**[12] Enforcement OFF allows fallback-latest with warnings**
+- Status:
+- Evidence:
+- Notes/Risks:
+
+---
+
+## 3) Legal Terms Assembly Engine (Algorithm)
+
+**[13] Addendum precedence: COUNTRY → REGION → DEFAULT/ROW**
+- Status:
+- Evidence:
+  - File(s): `server/legal/coverageGate.ts` (function)
+  - Tests: multiple countries
+- Notes/Risks:
+
+**[14] Global master deterministic: DOC1/GLOBAL_MASTER/DEFAULT/GLOBAL**
+- Status:
+- Evidence:
+- Notes/Risks:
+
+**[15] Uses legalDocTargets.activeDocId when present**
+- Status:
+- Evidence:
+- Notes/Risks:
+
+**[16] Fallback-latest only when gate OFF**
+- Status:
+- Evidence:
+- Notes/Risks:
+
+**[17] Combined assembly uses stable delimiter**
+- Status:
+- Evidence:
+  - Delimiter string:
+- Notes/Risks:
+
+**[18] Resolver returns doc ids/versions/sha and combinedSha**
+- Status:
+- Evidence:
+  - Endpoint: `/api/legal/doc1/resolve`
+  - Sample response:
+- Notes/Risks:
+
+### Edge cases
+**[19] Country addendum exists → used**
+- Status:
+- Evidence:
+- Notes/Risks:
+
+**[20] Country missing but region exists → used**
+- Status:
+- Evidence:
+- Notes/Risks:
+
+**[21] Country and region missing → ROW used**
+- Status:
+- Evidence:
+- Notes/Risks:
+
+**[22] Missing global blocks if enforced**
+- Status:
+- Evidence:
+- Notes/Risks:
+
+---
+
+## 4) Phone Validation Engine (Signup coupling)
+
+**[23] Phone validation triggers on country selection**
+- Status:
+- Evidence:
+  - Signup page file(s):
+- Notes/Risks:
+
+**[24] Uses robust library (libphonenumber-js or equivalent)**
+- Status:
+- Evidence:
+  - package.json dependency:
+  - Usage file(s):
+- Notes/Risks:
+
+**[25] UI updates prefix/mask/validation on change**
+- Status:
+- Evidence:
+- Notes/Risks:
+
+**[26] Stores phone as E.164**
+- Status:
+- Evidence:
+  - DB column:
+  - API payload:
+- Notes/Risks:
+
+**[27] Backend validates phone against selected country**
+- Status:
+- Evidence:
+- Notes/Risks:
+
+---
+
+## 5) Signup Flow State Machine (UX & gating)
+
+**[28] Initial state blocks submit until country + acceptance**
+- Status:
+- Evidence:
+- Notes/Risks:
+
+**[29] On country select, availability check runs and gates Continue**
+- Status:
+- Evidence:
+  - Component: `SignupAvailabilityGate`
+  - Endpoint hit: `/api/legal/doc1/availability`
+- Notes/Risks:
+
+**[30] Terms modal renders exact server-provided combinedText**
+- Status:
+- Evidence:
+  - Endpoint hit: `/api/legal/doc1/resolve`
+  - Rendering method:
+- Notes/Risks:
+
+**[31] Acceptance checkbox gates signup submit**
+- Status:
+- Evidence:
+- Notes/Risks:
+
+**[32] Submission creates legal_acceptances row with snapshot + hash**
+- Status:
+- Evidence:
+  - Endpoint: `/api/legal/doc1/accept` (or equivalent)
+  - SQL: latest acceptance row
+- Notes/Risks:
+
+---
+
+## 6) Hashing / Tamper Evidence
+
+**[33] SHA-256 computed server-side**
+- Status:
+- Evidence:
+- Notes/Risks:
+
+**[34] Acceptance stores combinedSha256 + combinedText**
+- Status:
+- Evidence:
+- Notes/Risks:
+
+**[35] Admin recomputes SHA and flags mismatch**
+- Status:
+- Evidence:
+- Notes/Risks:
+
+**[36] Diff vs Current endpoint exists**
+- Status:
+- Evidence:
+  - Route: `GET /api/admin/legal-acceptances/:id/diff-current`
+  - File(s):
+- Notes/Risks:
+
+**[37] Diff algorithm stable (Myers line diff)**
+- Status:
+- Evidence:
+  - File: `server/legal/diffUtils.ts`
+- Notes/Risks:
+
+**[38] Admin UI diff modal: metadata + copy diff**
+- Status:
+- Evidence:
+  - Page: Admin Legal Acceptances
+- Notes/Risks:
+
+---
+
+## 7) Admin Legal Docs (Versioning + Active Targets)
+
+**[39] Legal Docs UI exists and selects target (docSet/docType/jType/jKey)**
+- Status:
+- Evidence:
+- Notes/Risks:
+
+**[40] Lists versions per target**
+- Status:
+- Evidence:
+- Notes/Risks:
+
+**[41] Shows ACTIVE doc and allows Set Active**
+- Status:
+- Evidence:
+  - Endpoint: `/api/admin/legal-docs/targets/set-active`
+- Notes/Risks:
+
+**[42] Server rejects setting active doc that doesn’t match target**
+- Status:
+- Evidence:
+  - Negative test:
+- Notes/Risks:
+
+---
+
+## 8) Admin Legal Acceptances (Search + Resolve + Deep Links)
+
+**[43] Legal Acceptances minitab exists**
+- Status:
+- Evidence:
+- Notes/Risks:
+
+**[44] Filters supported (date range/country/email/userId)**
+- Status:
+- Evidence:
+- Notes/Risks:
+
+**[45] Resolve doc links function exists**
+- Status:
+- Evidence:
+- Notes/Risks:
+
+**[46] Deep-link Acceptances → Docs opens exact version**
+- Status:
+- Evidence:
+  - localStorage prefill key used:
+  - admin:navigate fired:
+- Notes/Risks:
+
+**[47] Deep-link Docs → Acceptance returns and auto-opens detail**
+- Status:
+- Evidence:
+- Notes/Risks:
+
+---
+
+## 9) Admin Legal Coverage (Coverage grid + remediation)
+
+**[48] Legal Coverage minitab exists**
+- Status:
+- Evidence:
+- Notes/Risks:
+
+**[49] Coverage endpoint returns core + countries + regions + summary**
+- Status:
+- Evidence:
+  - Route: `/api/admin/legal-docs/coverage`
+- Notes/Risks:
+
+**[50] Correct status classification (OK/MISSING_DOC/MISSING_TARGET/BROKEN_TARGET)**
+- Status:
+- Evidence:
+- Notes/Risks:
+
+**[51] One-click Set Active → Latest works**
+- Status:
+- Evidence:
+- Notes/Risks:
+
+**[52] Gate toggle UI exists and updates systemConfig**
+- Status:
+- Evidence:
+- Notes/Risks:
+
+---
+
+## 10) Deep Link Event Bus + Persistence
+
+**[53] admin:navigate listener exists at AdminDashboard root**
+- Status:
+- Evidence:
+  - File:
+- Notes/Risks:
+
+**[54] Prefill keys exist and are read-once**
+- Status:
+- Evidence:
+  - Keys:
+- Notes/Risks:
+
+**[55] No navigation loops / stale prefill**
+- Status:
+- Evidence:
+- Notes/Risks:
+
+---
+
+## 11) Security / Abuse Resistance
+
+**[56] Admin endpoints protected by requireAdmin**
+- Status:
+- Evidence:
+- Notes/Risks:
+
+**[57] Public endpoints do not leak admin-only data**
+- Status:
+- Evidence:
+- Notes/Risks:
+
+**[58] Document rendering avoids XSS (no raw HTML injection)**
+- Status:
+- Evidence:
+- Notes/Risks:
+
+**[59] Input validation: countryIso2, regionKey, docId numeric**
+- Status:
+- Evidence:
+- Notes/Risks:
+
+**[60] Admin actions are audited (config changes, set-active, doc uploads)**
+- Status:
+- Evidence:
+- Notes/Risks:
+
+---
+
+## 12) Manual Test Log
+
+### 12.1 Admin Setup
+- Created/Imported:
+  - DOC1 GLOBAL_MASTER DEFAULT/GLOBAL: ✅/❌
+  - DOC1 ADDENDUM DEFAULT/ROW: ✅/❌
+  - DOC1 ADDENDUM COUNTRY/KE (example): ✅/❌
+- Set active targets: ✅/❌
+- Coverage results screenshot: (link)
+
+### 12.2 Gate OFF tests
+- `legal.coverage.enforce=false`: ✅/❌
+- Unsupported country availability response: (paste)
+- Supported country availability response: (paste)
+
+### 12.3 Gate ON tests
+- `legal.coverage.enforce=true`: ✅/❌
+- Unsupported country blocked (expected): ✅/❌
+- Supported country allowed (expected): ✅/❌
+
+### 12.4 Acceptance & Diff
+- Completed acceptance for KE: ✅/❌
+- SHA matches: ✅/❌
+- Diff vs current shows expected: ✅/❌
+- After changing active doc, diff shows changes: ✅/❌
+
+---
+
+## 13) Patch Plan (if gaps found)
+
+### 13.1 Blocking Fixes (Priority 0)
+1. 
+2. 
+3. 
+
+### 13.2 Non-Blocking Fixes (Priority 1)
+1. 
+2. 
+3. 
+
+### 13.3 Files to Modify / Add
+- 
+- 
+
+### 13.4 Migrations / DB Actions
+- 
+
+---
+
+## 14) Sign-off
+
+**Recommendation:**  
+- Enforce gate now? ✅ Yes / ❌ No  
+- If No, conditions to reach Yes:
+  1.
+  2.
+  3.

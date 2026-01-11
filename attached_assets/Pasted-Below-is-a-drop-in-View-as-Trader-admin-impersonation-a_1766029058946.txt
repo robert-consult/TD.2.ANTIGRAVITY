@@ -1,0 +1,573 @@
+Below is a **drop-in “View as Trader” (admin impersonation)** architecture + file structure + implementation code that is consistent with your existing AdminDashboard patterns (React Query + axios + admin user-management actions/mini-tabs) and adds the missing hedge-fund-grade controls: **explicit actor vs effective user**, **sessionized audit trail**, **clear UI banner**, and **hard admin-only enforcement**. 
+
+---
+
+## Target behavior and pass criteria
+
+Your “View as Trader” must satisfy these invariants (the “tests” you care about operationally):
+
+1. **Admin-only:** non-admins cannot start/stop impersonation (403).
+2. **Effective identity switch:** once started, the platform behaves exactly as if logged in as the trader (effective user = trader).
+3. **Actor preserved:** every write (trade open/close, deposit/withdraw, settings change, etc.) stores:
+
+   * `effectiveUserId` (the trader) and
+   * `actorUserId` (the admin who impersonated).
+4. **Auditable session:** impersonation has a session row with start/stop timestamps, IP, user-agent; actions can reference `impersonationSessionId`.
+5. **Obvious UI state:** global banner “Viewing as Trader X (Admin Y)” + “Stop impersonation”.
+6. **Risk gates still apply:** if the trader is frozen/disabled, the impersonated session should see the same blocks the trader would see.
+
+---
+
+## Architecture (clean separation: Actor vs Effective User)
+
+### Token / session claims
+
+Use a single auth context derived from either:
+
+* **httpOnly cookie token** (recommended), or
+* `Authorization: Bearer <token>` header.
+
+Token claims:
+
+* `sub` = real logged-in user (admin)
+* `role` = `ADMIN`
+* `actAs` = trader userId (optional; when present → impersonating)
+* `impSessionId` = UUID of the impersonation session (optional)
+
+### Request context (every request)
+
+Middleware derives:
+
+```ts
+actorUserId      = token.sub
+effectiveUserId  = token.actAs ?? token.sub
+isImpersonating  = !!token.actAs
+impSessionId     = token.impSessionId ?? null
+```
+
+Then **all business logic uses `effectiveUserId`** to fetch balances/positions/limits, but **all writes also store `actorUserId`** for audit.
+
+---
+
+## Drop-in file structure
+
+```
+/backend
+  /src
+    /auth
+      jwt.ts
+      types.ts
+    /middleware
+      authContext.ts
+      requireAdmin.ts
+    /db
+      schema.impersonation.ts
+    /routes
+      auth.me.ts
+      admin.impersonation.ts
+    /audit
+      audit.ts
+  /migrations
+    20251217_0001_impersonation.sql
+
+/frontend
+  /src
+    /api
+      impersonation.ts
+      me.ts
+    /components
+      ImpersonationBanner.tsx
+    /pages
+      AdminDashboard.tsx   (small patch: add “View as Trader” button)
+    App.tsx (or your top-level layout file: mount banner)
+```
+
+---
+
+# BACKEND — code (inline, ready to drop)
+
+## `/backend/src/auth/types.ts`
+
+```ts
+export type Role = "TRADER" | "ADMIN";
+
+export interface AuthClaims {
+  sub: number;              // actor (real logged in user)
+  role: Role;
+  actAs?: number;           // effective user (impersonated trader)
+  impSessionId?: string;    // impersonation session UUID
+  iat?: number;
+  exp?: number;
+}
+
+export interface AuthContext {
+  actorUserId: number;
+  role: Role;
+  effectiveUserId: number;
+  isImpersonating: boolean;
+  impersonatedUserId: number | null;
+  impersonationSessionId: string | null;
+}
+```
+
+## `/backend/src/auth/jwt.ts`
+
+```ts
+import jwt from "jsonwebtoken";
+import type { AuthClaims } from "./types";
+
+const JWT_SECRET = process.env.JWT_SECRET || "dev-secret-change-me";
+const DEFAULT_TTL_SEC = Number(process.env.JWT_TTL_SEC || 60 * 60 * 6); // 6h
+
+export function signClaims(claims: AuthClaims, ttlSec: number = DEFAULT_TTL_SEC) {
+  return jwt.sign(claims, JWT_SECRET, { expiresIn: ttlSec });
+}
+
+export function verifyToken(token: string): AuthClaims {
+  return jwt.verify(token, JWT_SECRET) as AuthClaims;
+}
+```
+
+## `/backend/src/middleware/authContext.ts`
+
+```ts
+import type { Request, Response, NextFunction } from "express";
+import { verifyToken } from "../auth/jwt";
+import type { AuthContext, AuthClaims } from "../auth/types";
+
+declare global {
+  namespace Express {
+    interface Request {
+      auth?: AuthContext;
+      authClaims?: AuthClaims;
+    }
+  }
+}
+
+function extractToken(req: Request): string | null {
+  // Prefer httpOnly cookie (recommended)
+  const cookieName = process.env.AUTH_COOKIE_NAME || "auth_token";
+  const fromCookie = (req as any).cookies?.[cookieName];
+  if (fromCookie) return fromCookie;
+
+  // Fallback: Authorization header
+  const h = req.headers.authorization;
+  if (h && h.toLowerCase().startsWith("bearer ")) return h.slice(7).trim();
+
+  return null;
+}
+
+export function authContext(req: Request, res: Response, next: NextFunction) {
+  const token = extractToken(req);
+  if (!token) return res.status(401).json({ message: "Unauthorized" });
+
+  try {
+    const claims = verifyToken(token);
+    req.authClaims = claims;
+
+    const actorUserId = claims.sub;
+    const effectiveUserId = claims.actAs ?? claims.sub;
+
+    req.auth = {
+      actorUserId,
+      role: claims.role,
+      effectiveUserId,
+      isImpersonating: typeof claims.actAs === "number",
+      impersonatedUserId: typeof claims.actAs === "number" ? claims.actAs : null,
+      impersonationSessionId: claims.impSessionId ?? null,
+    };
+
+    return next();
+  } catch {
+    return res.status(401).json({ message: "Unauthorized" });
+  }
+}
+```
+
+## `/backend/src/middleware/requireAdmin.ts`
+
+```ts
+import type { Request, Response, NextFunction } from "express";
+
+export function requireAdmin(req: Request, res: Response, next: NextFunction) {
+  if (!req.auth) return res.status(401).json({ message: "Unauthorized" });
+  if (req.auth.role !== "ADMIN") return res.status(403).json({ message: "Forbidden" });
+  return next();
+}
+```
+
+## `/backend/src/db/schema.impersonation.ts` (Drizzle-style; adapt if you’re not using Drizzle)
+
+```ts
+import { pgTable, uuid, integer, timestamp, text } from "drizzle-orm/pg-core";
+
+export const adminImpersonationSessions = pgTable("admin_impersonation_sessions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  adminUserId: integer("admin_user_id").notNull(),
+  traderUserId: integer("trader_user_id").notNull(),
+  startIp: text("start_ip"),
+  userAgent: text("user_agent"),
+  startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+  endedAt: timestamp("ended_at", { withTimezone: true }),
+});
+```
+
+## `/backend/src/audit/audit.ts`
+
+```ts
+// Minimal audit helper. If you already have a timeline/audit table, route into it here.
+export async function auditEvent(event: {
+  type: string;
+  actorUserId: number;
+  effectiveUserId: number;
+  impersonationSessionId?: string | null;
+  metadata?: any;
+}) {
+  // Replace with DB insert into your audit table if you have one.
+  // Keep as a single chokepoint to guarantee consistent audit logging.
+  console.log("[AUDIT]", JSON.stringify({ ...event, ts: new Date().toISOString() }));
+}
+```
+
+## `/backend/src/routes/admin.impersonation.ts`
+
+```ts
+import type { Router, Request, Response } from "express";
+import { signClaims } from "../auth/jwt";
+import { authContext } from "../middleware/authContext";
+import { requireAdmin } from "../middleware/requireAdmin";
+import { auditEvent } from "../audit/audit";
+
+// You MUST adapt these two functions to your DB layer:
+async function getUserById(userId: number) {
+  // return { id, email, username, isAdmin, isDisabled, isFrozen } or null
+  throw new Error("Implement getUserById(userId) using your DB");
+}
+
+async function createImpersonationSession(input: {
+  adminUserId: number;
+  traderUserId: number;
+  ip: string | null;
+  userAgent: string | null;
+}): Promise<{ id: string }> {
+  // insert into admin_impersonation_sessions and return { id }
+  throw new Error("Implement createImpersonationSession using your DB");
+}
+
+async function endImpersonationSession(sessionId: string) {
+  // update ended_at
+  return;
+}
+
+function setAuthCookie(res: Response, token: string) {
+  const cookieName = process.env.AUTH_COOKIE_NAME || "auth_token";
+  const secure = process.env.NODE_ENV === "production";
+  res.cookie(cookieName, token, {
+    httpOnly: true,
+    sameSite: "lax",
+    secure,
+    path: "/",
+  });
+}
+
+export function mountAdminImpersonationRoutes(router: Router) {
+  // Start impersonation
+  router.post(
+    "/api/admin/impersonation/start",
+    authContext,
+    requireAdmin,
+    async (req: Request, res: Response) => {
+      const { traderUserId } = req.body as { traderUserId: number };
+      if (!traderUserId || typeof traderUserId !== "number") {
+        return res.status(400).json({ message: "traderUserId is required" });
+      }
+
+      const adminId = req.auth!.actorUserId;
+
+      const trader = await getUserById(traderUserId);
+      if (!trader) return res.status(404).json({ message: "Trader not found" });
+      if (trader.isAdmin) return res.status(400).json({ message: "Cannot impersonate another admin" });
+
+      const session = await createImpersonationSession({
+        adminUserId: adminId,
+        traderUserId,
+        ip: (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.ip || null,
+        userAgent: req.headers["user-agent"] || null,
+      });
+
+      const newToken = signClaims({
+        sub: adminId,
+        role: "ADMIN",
+        actAs: traderUserId,
+        impSessionId: session.id,
+      });
+
+      // cookie-mode (preferred)
+      setAuthCookie(res, newToken);
+
+      await auditEvent({
+        type: "IMPERSONATION_START",
+        actorUserId: adminId,
+        effectiveUserId: traderUserId,
+        impersonationSessionId: session.id,
+        metadata: { traderUserId },
+      });
+
+      return res.json({
+        ok: true,
+        impersonationSessionId: session.id,
+        trader: { id: trader.id, email: trader.email, username: trader.username },
+      });
+    }
+  );
+
+  // Stop impersonation
+  router.post(
+    "/api/admin/impersonation/stop",
+    authContext,
+    requireAdmin,
+    async (req: Request, res: Response) => {
+      const adminId = req.auth!.actorUserId;
+      const sessionId = req.auth!.impersonationSessionId;
+
+      if (sessionId) await endImpersonationSession(sessionId);
+
+      const newToken = signClaims({
+        sub: adminId,
+        role: "ADMIN",
+        // no actAs
+      });
+
+      setAuthCookie(res, newToken);
+
+      await auditEvent({
+        type: "IMPERSONATION_STOP",
+        actorUserId: adminId,
+        effectiveUserId: adminId,
+        impersonationSessionId: sessionId,
+      });
+
+      return res.json({ ok: true });
+    }
+  );
+}
+```
+
+## `/backend/src/routes/auth.me.ts`
+
+```ts
+import type { Router, Request, Response } from "express";
+import { authContext } from "../middleware/authContext";
+
+// Adapt to your DB:
+async function getUserById(userId: number) {
+  throw new Error("Implement getUserById(userId) using your DB");
+}
+
+export function mountAuthMeRoute(router: Router) {
+  router.get("/api/auth/me", authContext, async (req: Request, res: Response) => {
+    const actor = await getUserById(req.auth!.actorUserId);
+    const effective = await getUserById(req.auth!.effectiveUserId);
+
+    return res.json({
+      actor: actor ? { id: actor.id, email: actor.email, username: actor.username, role: req.auth!.role } : null,
+      effective: effective ? { id: effective.id, email: effective.email, username: effective.username } : null,
+      isImpersonating: req.auth!.isImpersonating,
+      impersonationSessionId: req.auth!.impersonationSessionId,
+    });
+  });
+}
+```
+
+## Trade engine wiring (the crucial part)
+
+Wherever you currently do “who is the user” in trading routes/services, switch to:
+
+```ts
+const { actorUserId, effectiveUserId, impersonationSessionId } = req.auth!;
+```
+
+Then:
+
+* fetch positions/balance/settings using `effectiveUserId`
+* insert trade rows with `userId = effectiveUserId` **and** `actorUserId = actorUserId` (and `impersonationSessionId` if you add it)
+
+Example pattern (drop into your trade-open handler):
+
+```ts
+// inside POST /api/trades/open
+const { actorUserId, effectiveUserId, impersonationSessionId } = req.auth!;
+
+// ...risk checks use effectiveUserId...
+
+await db.insert(trades).values({
+  userId: effectiveUserId,
+  actorUserId,                 // new column
+  impersonationSessionId,       // optional new column
+  // ...
+});
+```
+
+---
+
+## `/backend/migrations/20251217_0001_impersonation.sql`
+
+```sql
+CREATE TABLE IF NOT EXISTS admin_impersonation_sessions (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  admin_user_id integer NOT NULL,
+  trader_user_id integer NOT NULL,
+  start_ip text,
+  user_agent text,
+  started_at timestamptz NOT NULL DEFAULT now(),
+  ended_at timestamptz
+);
+
+-- Optional but strongly recommended for hedge-fund auditability:
+-- Add actor + session columns to trades (adjust table name/columns to your schema)
+-- ALTER TABLE trades ADD COLUMN IF NOT EXISTS actor_user_id integer;
+-- ALTER TABLE trades ADD COLUMN IF NOT EXISTS impersonation_session_id uuid;
+```
+
+---
+
+# FRONTEND — code (inline, ready to drop)
+
+## `/frontend/src/api/me.ts`
+
+```ts
+import axios from "axios";
+
+export type MeResponse = {
+  actor: { id: number; email: string; username: string; role: "ADMIN" | "TRADER" } | null;
+  effective: { id: number; email: string; username: string } | null;
+  isImpersonating: boolean;
+  impersonationSessionId: string | null;
+};
+
+export async function fetchMe(): Promise<MeResponse> {
+  const r = await axios.get("/api/auth/me");
+  return r.data;
+}
+```
+
+## `/frontend/src/api/impersonation.ts`
+
+```ts
+import axios from "axios";
+
+export async function startImpersonation(traderUserId: number) {
+  const r = await axios.post("/api/admin/impersonation/start", { traderUserId });
+  return r.data as { ok: boolean; impersonationSessionId: string; trader: { id: number; email: string; username: string } };
+}
+
+export async function stopImpersonation() {
+  const r = await axios.post("/api/admin/impersonation/stop");
+  return r.data as { ok: boolean };
+}
+```
+
+## `/frontend/src/components/ImpersonationBanner.tsx`
+
+```tsx
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { fetchMe } from "@/api/me";
+import { stopImpersonation } from "@/api/impersonation";
+import { Button } from "@/components/ui/button";
+
+export default function ImpersonationBanner() {
+  const qc = useQueryClient();
+  const { data } = useQuery({
+    queryKey: ["/api/auth/me"],
+    queryFn: fetchMe,
+    refetchInterval: 15000,
+  });
+
+  if (!data?.isImpersonating) return null;
+
+  const actor = data.actor;
+  const effective = data.effective;
+
+  return (
+    <div className="w-full sticky top-0 z-50 border-b border-amber-500/40 bg-amber-950/40 backdrop-blur">
+      <div className="max-w-7xl mx-auto px-4 py-2 flex items-center justify-between gap-3">
+        <div className="text-sm">
+          <span className="font-semibold text-amber-300">Impersonation Active:</span>{" "}
+          <span className="text-gray-200">
+            Viewing as <span className="font-semibold">{effective?.email || effective?.username || "Trader"}</span>
+          </span>
+          <span className="text-gray-400"> — Actor: {actor?.email || actor?.username || "Admin"}</span>
+        </div>
+
+        <Button
+          size="sm"
+          className="bg-amber-600 hover:bg-amber-700"
+          onClick={async () => {
+            await stopImpersonation();
+            await qc.invalidateQueries({ queryKey: ["/api/auth/me"] });
+            // return to admin landing (adjust route if needed)
+            window.location.href = "/admin";
+          }}
+        >
+          Stop
+        </Button>
+      </div>
+    </div>
+  );
+}
+```
+
+## Mount the banner globally (e.g., `/frontend/src/App.tsx`)
+
+Place it at the top of your app shell so it shows everywhere:
+
+```tsx
+import ImpersonationBanner from "@/components/ImpersonationBanner";
+
+// inside your App/layout render:
+<>
+  <ImpersonationBanner />
+  {/* the rest of your routes/layout */}
+</>
+```
+
+## Patch AdminDashboard to add “View as Trader”
+
+In your existing AdminDashboard file (the one that already renders user rows/actions), add:
+
+```tsx
+import { startImpersonation } from "@/api/impersonation";
+```
+
+Then inside the per-user Actions cell, add a button:
+
+```tsx
+<Button
+  size="sm"
+  variant="outline"
+  className="bg-neutral-700 hover:bg-neutral-600"
+  onClick={async () => {
+    await startImpersonation(user.id);
+    // Go to trader experience route (adjust to your actual trader route)
+    window.location.href = "/trade";
+  }}
+>
+  View as Trader
+</Button>
+```
+
+This fits your current AdminDashboard interaction model (axios + mutations + row actions + mini-tabs). 
+
+---
+
+## Implementation notes (the tweaks that prevent failures)
+
+* **Never “overwrite identity” in DB reads/writes implicitly.** Always compute `effectiveUserId` once in middleware and pass explicitly.
+* **Prohibit admin→admin impersonation** (prevents privilege confusion and circular blame).
+* **Short TTL tokens** for impersonation if you want tighter control (e.g., 30 minutes).
+* **Stop impersonation on logout** by clearing cookie; keep it deterministic.
+* **Audit on both boundaries** (start + stop), and include `impersonationSessionId` in downstream audit/trade rows.
+
+---
+
+If you paste (or re-upload) the current backend auth/trade route files, I can convert the two “IMPLEMENT THIS” placeholders (`getUserById`, `createImpersonationSession`) into exact code matching your DB layer and wire the `effectiveUserId/actorUserId` into your specific trade-open/close services without guesswork.

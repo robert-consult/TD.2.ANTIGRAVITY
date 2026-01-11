@@ -1,0 +1,93 @@
+Here is a clean, low-friction way to place **audit trails, signup tracking, KYC completion visibility, and user analytics** into your *existing* Admin Dashboard without bloating it.
+
+## 1) Use the existing top-level tabs (minimal restructuring)
+
+### A) **User Management** (operational view + per-user drilldowns)
+
+Add **one new sub-tab** and **one new per-user action**:
+
+* **New sub-tab:** **KYC Queue**
+
+  * Purpose: pipeline management for “selected for real capital”
+  * Columns: *Selected At, KYC Status, Missing Items, Last Update, Reviewer, SLA Age*
+  * Actions: *Request Info, Approve, Reject, Escalate, View Docs*
+
+* **New row action button:** **Audit**
+
+  * Opens a right-side drawer with **User Audit Timeline** (identity + security + gating events)
+  * Shows: *Signup, email reminders sent, email verified/re-verified, contender eligibility achieved, SMS enabled/verified, selected-for-KYC, KYC submitted/verified/rejected, admin actions*
+
+Why here: admins already “start with the user,” so KYC and identity events belong in the user’s operational context.
+
+---
+
+### B) **Trade Audit** (expand into an “Audit Hub” via sub-tabs)
+
+Keep “Trade Audit” but make it a single destination for *all* tamper-evident trails:
+
+Add sub-tabs:
+
+* **Orders/Trades** (what you have today)
+* **User Identity & Access** (signups, verifications, lock/unlock, password resets, session events)
+* **Admin Actions** (freeze/disable, risk profile changes, leverage changes, manual adjustments)
+* **KYC Audit** (status changes + reviewer notes + document references)
+* **Exports & Integrity** (export manifests, hash chains, evidence bundles)
+
+Why here: it prevents scattering audit logs across “Data” and “User Management,” and gives institutions a clear “records & controls” section.
+
+---
+
+### C) **Data** (rename internally to Analytics; keep label if you want)
+
+Use this tab for **aggregated analytics**, not event logs.
+
+Sub-tabs:
+
+* **Growth / Signup Funnel**
+
+  * Signup → email verified → active trader → contender → selected → KYC submitted → KYC verified
+* **User Health**
+
+  * DAU/WAU, retention cohorts, churn reasons, time-to-first-trade, time-to-verification
+* **Risk & Platform**
+
+  * rule violations, lock rates, leverage distribution, concentration, max-lot blockers, margin calls simulation counts
+* **Operational Metrics**
+
+  * email/SMS send volumes, deliverability/failed sends, reminder conversions
+
+Why here: Data tab becomes “dashboard KPIs” while Trade Audit remains “forensic detail.”
+
+---
+
+## 2) Small UI placements that work with your current screen
+
+### Top-row buttons (right side near Export CSV/JSONL)
+
+Add:
+
+* **Compliance Export** (bundled: user audit + trade audit + admin actions + manifests)
+* **KYC Queue** shortcut (badge with pending count)
+
+### Columns dropdown (per-table)
+
+Add toggles for audit-relevant columns:
+
+* *Email Verified, Reverify Due, Contender Tier, SMS Verified, Selected, KYC Status, Last Login IP, Lock Reason*
+
+---
+
+## 3) What NOT to do (to avoid conflicts and confusion)
+
+* Don’t put “audit logs” inside **Data** (Data should be aggregated analytics only).
+* Don’t mix **Trade Audit** with **User Timeline** in one stream by default—keep separate streams, unify only via correlationId search.
+
+---
+
+## 4) Practical “simple” target state
+
+* **User Management** = “who + what actions can I take”
+* **Trade Audit** = “proof / evidence / immutable record”
+* **Data** = “how is the platform performing”
+
+If you want, I can propose the exact **sub-tab names, table columns, and the per-user audit drawer layout** sized to your current UI grid so it stays visually consistent.

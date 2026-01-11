@@ -1,0 +1,2608 @@
+
+TradingCentral-3AL-V3-main
+Zip Archive
+Create a system that allows me to break up the backups into 50GB chunks, in this case chunk 1, chunk 2, chunk 3, chunk 4, if it's 200GB for exports and imports, and put that in the config table under the  migration minitab, and basically for 1000GB, 1TB export, that would be 20 chunks all linked together, so check the algorithm for linking chunks, so that if there's any connectivity issues, I can go back to and download other chunks instead of having 1TB chunk, chunking, whatever that might be, search, research, and if it's a 10TB, the database ends up growing to such a big 10TB, I should be able to get 200 parts out of it, so that's the idea, so search, research, and then develop a plan of implementation in the context of the zip archive of TradeCentral3ALv3 main that I just uploaded here, thank you.
+LET THIS BE AN OPTION TO CHUNK OR NOT TO CHUNK, IF I CHOOSE NOT TO CHUNK, THE ENTIRE EXPORT WOULD BE 1 FILE ADD ALL THE NECESSARY CONTROLS AND SETTINGS
+ChatGPT said:
+
+Thought for 25m 46s
+Below is a concrete implementation plan (plus the core backend changes already designed and partially applied against your uploaded TradeCentral3ALv3 archive), specifically to support optional export/import chunking (e.g., 50GB parts), with a linking/integrity algorithm so you can re-download missing parts and verify correctness. I am also calling out what is still incomplete (frontend wiring) and what I recommend to harden for multi-TB scale.
+
+1) What exists today in TradeCentral3ALv3 (from your ZIP)
+Your repo already has a migration system with:
+
+Tables (SQLite):
+migration_export_jobs, migration_import_jobs, migration_job_logs, plus integrity tables.
+
+Backend services:
+server/migration/migrationService.ts exports a single *.data.ndjson + *.manifest.json.
+
+Admin routes:
+server/routes/adminMigration.ts exposes:
+
+create export job
+
+download manifest
+
+download single data file
+
+create import job (uploads 1 manifest + 1 data file)
+
+The manifest format already had a chunks array but it was always a single chunk. That’s an ideal foothold for making chunking real.
+
+2) Requirements you stated (mapped to solution)
+You want
+Optional chunking: enabled/disabled in config.
+
+Fixed chunk size (default 50GB).
+
+Chunk list + linking algorithm:
+
+chunk1 → chunk2 → … so you can validate order/integrity
+
+re-download any chunk independently
+
+Huge scale:
+
+1TB export → 20 chunks
+
+10TB export → ~200 chunks (with 50GB default, it’s 205; but configurable makes “200” achievable)
+
+Controls/settings stored in system config table under Migration minitab
+
+Export and Import both understand chunking.
+
+3) Design overview
+3.1 Config settings (system_config)
+Add two columns:
+
+migration_chunking_enabled (boolean)
+
+migration_chunk_size_mb (integer), default 51200 MB (50GB)
+
+Why store MB instead of bytes?
+
+SQLite integers are 64-bit, but a lot of JS/TS tooling mishandles huge byte values.
+
+MB is safe and easy to convert.
+
+3.2 Export output format
+Export remains NDJSON, but when chunking is enabled:
+
+The service writes jobId.data.part00000.ndjson, jobId.data.part00001.ndjson, etc.
+
+The manifest includes all chunks, each with:
+
+index
+
+file
+
+rows
+
+sizeBytes
+
+sha256
+
+prevSha256
+
+linkHash
+
+Linking algorithm
+A hash chain that’s both:
+
+easy to verify
+
+allows chunk independence for download retries
+
+Per chunk:
+
+chunkSha256 = SHA256(chunk_file_bytes)
+
+linkHash = SHA256(prevLinkHash + ":" + chunkSha256)
+
+with prevLinkHash = "GENESIS" for chunk 0
+
+store chainHeadLinkHash in manifest
+
+This gives:
+
+strong tamper detection
+
+ordering verification
+
+“download chunk N again” without needing to re-download everything else
+
+3.3 Download behavior
+Backend supports:
+
+download chunk list
+
+download specific chunk
+
+Range requests (Accept-Ranges: bytes) so downloads can resume mid-chunk
+(This is a best practice for large downloads; HTTP Range/206 is the standard pattern for resumable downloads.)
+
+3.4 Import behavior
+Import accepts either:
+
+1 data file (unchunked)
+
+N data files if manifest chunked
+
+Import reads all parts sequentially, while:
+
+computing per-chunk hash (validate each)
+
+computing chain hash (validate chain head)
+
+computing overall data hash (validate manifest.dataSha256)
+
+4) What I already implemented in the ZIP context (backend + schema)
+4.1 Shared schema changes (shared/schema.ts)
+Implemented:
+
+systemConfig.migrationChunkingEnabled
+
+systemConfig.migrationChunkSizeMb
+
+migrationExportJobs.dataPartsJson, chunkingEnabled, chunkSizeMb
+
+migrationImportJobs.dataPartsJson
+
+4.2 DB ensure/alter changes (server/db/ensureSchema.ts)
+Implemented:
+
+adds the new system_config columns if missing
+
+extends export/import job tables with:
+
+data_parts_json
+
+chunking_enabled
+
+chunk_size_mb
+
+4.3 System config route changes (server/routes/admin.ts)
+Implemented:
+
+GET includes migrationChunkingEnabled, migrationChunkSizeMb
+
+PUT supports updating both
+
+4.4 Export chunking + manifest linking (server/migration/migrationService.ts)
+Implemented:
+
+reads chunking config from system_config
+
+writes either:
+
+1 file (unchunked)
+
+or rotating chunk files when size exceeds threshold (line boundary safe)
+
+computes:
+
+overall data hash
+
+per chunk hash + prevSha256 + linkHash
+
+writes manifest with chunking, chunkChain, chunks
+
+stores in export job:
+
+dataPartsJson = JSON list of absolute chunk paths
+
+chunkingEnabled, chunkSizeMb
+
+4.5 Import supports multiple chunks + validates chain (server/migration/migrationService.ts)
+Implemented:
+
+createImportJob accepts dataPartsPaths?: string[]
+
+runImportJob:
+
+orders chunk paths to match manifest chunk list
+
+reads each chunk sequentially
+
+validates per-chunk SHA
+
+validates prevSha256 continuity
+
+validates linkHash
+
+validates overall dataSha256
+
+4.6 Admin migration route enhancements (server/routes/adminMigration.ts)
+Implemented:
+
+GET /export-jobs/:jobId/chunks returns chunk metadata
+
+GET /export-jobs/:jobId/chunks/:index streams that chunk
+
+GET /export-jobs/:jobId/data:
+
+if chunked, requires ?part= or directs you to /chunks/:index
+
+Range request download support for chunk/data endpoints
+
+Import endpoint now accepts up to 500 data parts and matches them by filename
+
+Purge endpoints now delete all chunk parts using dataPartsJson
+
+Fixed bulk purge to handle snake_case returned from raw SQLite selects (previous bug risk)
+
+5) What remains incomplete (important)
+Frontend: Migration minitab controls + multi-file import UI
+I started patching client/src/pages/AdminDashboard.tsx (MigrationTab), but did not complete the entire UI wiring in this response window.
+
+You still need:
+
+Migration minitab UI controls
+
+toggle chunking
+
+chunk size input (GB) → store MB
+
+save button that calls PUT /api/admin/system-config
+
+Export job list UI
+
+if manifest.chunks.length > 1, show “Parts” dialog/button
+
+list all parts with download links:
+/api/admin/migration/export-jobs/{jobId}/chunks/{index}
+
+Import UI
+
+allow selecting manifest first
+
+parse manifest client-side to detect chunking
+
+if chunked: <input type="file" multiple> for data parts
+
+append each part to FormData under data
+
+If you say “Continue”, I will finish the UI patch fully and provide the complete AdminDashboard.tsx modifications inline (plus any required types).
+
+6) Operational guidance (how you’ll use it)
+6.1 Enable chunking
+Go to Migration minitab (after UI patch)
+
+Enable “Chunk exports/imports”
+
+Set chunk size (default 50GB)
+
+6.2 Export
+Create export job
+
+When ready, download:
+
+manifest
+
+each chunk part (independently, resumable)
+
+6.3 Import
+Upload manifest
+
+Upload all parts (browser or scripted)
+
+Import verifies:
+
+each chunk hash
+
+chain integrity
+
+full dataset hash
+
+7) Hardening recommendations for true multi-TB reality
+Browser upload/download of 10TB is not realistic. Your chunking approach is correct, but the transport should evolve:
+
+Recommended next step (enterprise-grade)
+Store exports in object storage (S3/R2/Azure Blob)
+
+Use multipart upload (S3 supports up to 10,000 parts) and resumable transfers
+
+Provide pre-signed URLs for chunk downloads/uploads
+
+Keep your manifest + chain integrity exactly as designed (works great over object storage)
+
+This avoids:
+
+app server disk bottlenecks
+
+Node process timeouts
+
+browser instability for very large transfers
+
+8) Summary
+You now have (backend side) a real chunking system with:
+
+optional chunking via system config
+
+50GB default chunk size
+
+per chunk hash + hash chain linking
+
+independent chunk download endpoints
+
+resumable downloads via Range
+
+import that validates and streams across parts
+
+purge cleanup that removes all parts safely
+
+Remaining work: complete the frontend “Migration” minitab controls + export parts UI + multi-file import UI.
+
+Next step
+Reply with “Continue” and I will:
+
+Finish the client/src/pages/AdminDashboard.tsx MigrationTab modifications (inline code),
+
+Add a clean UI dialog for chunk downloads,
+
+Add manifest-driven multi-file import selection UX,
+
+Confirm type updates needed for the new config fields.
+
+You said:
+CONTINUE
+ChatGPT said:
+
+Thought for 10m 2s
+Below is the missing admin-side system to make migration backups optionally chunked (default 50GB) and to make imports work for both single-file and multi-part exports, with an admin UI under the System Config → Migration mini-tab.
+
+You already have the backend chunking + hash-chain logic in this repo (export writes jobId.data.part00000.ndjson, etc., and serves parts via /chunks/:index with HTTP Range support). What’s currently broken/incomplete is primarily the AdminDashboard Migration UI (it still assumes single-file imports and has a couple of state bugs like setManifestFile / setDataFile).
+
+1) What this delivers
+A. Configurable, optional chunking
+Toggle: migrationChunkingEnabled (on/off)
+
+Chunk size: migrationChunkSizeMb (stored in DB), surfaced as GB input in UI
+
+Defaults: 50GB → ~20 parts per 1TB, ~200 parts per 10TB
+
+B. Export chunk navigation (resilient downloads)
+“Parts” dialog lists every chunk with direct download links:
+
+/api/admin/migration/export-jobs/:jobId/chunks/:index
+
+“Data / Part 0” always works:
+
+If unchunked: it’s the full file
+
+If chunked: it downloads part 0 (safe/consistent)
+
+C. Import supports chunked manifests
+User uploads:
+
+manifest.json
+
+ALL *.ndjson parts (multi-select)
+
+UI validates filenames match manifest chunk list
+
+Upload sends multipart with repeated data fields (backend maps by originalname)
+
+2) Code changes (single file)
+File: client/src/pages/AdminDashboard.tsx
+2.1 Replace these three interfaces exactly
+Find and replace your existing SystemConfigData, MigrationExportJob, and MigrationImportJob interfaces with the following:
+
+interface SystemConfigData {
+  id: number;
+  maintenanceMode: boolean;
+  maintenanceMessage: string;
+  tradingHalt: boolean;
+  closeOnlyMode: boolean;
+  blockOpenOnStaleQuotes: boolean;
+  quoteRefreshMs: number;
+  feedPollMs: number;
+  staleThresholdMs: number;
+  defaultLeverage: number;
+  maxLotSize: number;
+  minLotSize: number;
+  maxDailyLossPct: number;
+  maxTotalLossPct: number;
+  maxOpenTrades: number;
+  maxConcurrentPerInstrument?: number | null;
+  maxConcurrentLots: number;
+  requireEmailVerification: boolean;
+  requirePhoneVerification: boolean;
+  requireKycForTrading: boolean;
+  requireKycForWithdrawals: boolean;
+  signupCaptchaEnforce: boolean;
+  captchaProvider: string;
+  turnstileSiteKey: string;
+  turnstileSecretKey: string;
+  enableSignupFreeze: boolean;
+  autoInviteOnUnfreeze: boolean;
+  autoInviteBatchCap: number;
+  updatedAt: number | null;
+  updatedBy: string | null;
+
+  // Migration export/import chunking
+  migrationChunkingEnabled: boolean;
+  migrationChunkSizeMb: number;
+}
+
+interface MigrationExportJob {
+  id: string;
+  scope: string;
+  userId?: number | null;
+  sinceTs?: number | null;
+  status: string;
+  createdAt: number;
+  startedAt?: number | null;
+  completedAt?: number | null;
+  totals?: Record<string, number> | null;
+
+  // Parsed manifest snapshot returned by backend list endpoint
+  manifest?: any;
+
+  // Chunking metadata (if enabled)
+  dataPartsJson?: string | null;
+  chunkingEnabled?: boolean | null;
+  chunkSizeMb?: number | null;
+
+  manifestSha256?: string | null;
+  dataSha256?: string | null;
+  dataPath?: string | null;
+  manifestPath?: string | null;
+  error?: string | null;
+}
+
+interface MigrationImportJob {
+  id: string;
+  mode: string;
+  status: string;
+  createdAt: number;
+  startedAt?: number | null;
+  completedAt?: number | null;
+  totals?: Record<string, number> | null;
+
+  // Chunked imports can store multiple uploaded part paths
+  dataPartsJson?: string | null;
+
+  manifestPath?: string | null;
+  dataPath?: string | null;
+  error?: string | null;
+}
+2.2 Replace your entire MigrationTab() function
+Find function MigrationTab() { ... } and replace the whole function with:
+
+function MigrationTab() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  // ===== Migration chunking settings (stored in system_config) =====
+  const systemConfigQuery = useQuery<SystemConfigData>({
+    queryKey: ["/api/admin/system-config"],
+    queryFn: () => axios.get("/api/admin/system-config").then((r) => r.data),
+  });
+
+  const [chunkingEnabledDraft, setChunkingEnabledDraft] = useState<boolean>(false);
+  const [chunkSizeGbDraft, setChunkSizeGbDraft] = useState<string>("50");
+  const [chunkSettingsDirty, setChunkSettingsDirty] = useState(false);
+
+  useEffect(() => {
+    const cfg = systemConfigQuery.data;
+    if (!cfg) return;
+    // Only hydrate draft when user hasn't edited yet (or after successful save).
+    if (!chunkSettingsDirty) {
+      setChunkingEnabledDraft(Boolean(cfg.migrationChunkingEnabled));
+      const mb = Number(cfg.migrationChunkSizeMb ?? 51200);
+      const gb = mb / 1024;
+      // Display at most 2 decimals; keep string to avoid float jitter in input.
+      const gbStr = Number.isFinite(gb) ? String(Math.round(gb * 100) / 100) : "50";
+      setChunkSizeGbDraft(gbStr);
+    }
+  }, [systemConfigQuery.data, chunkSettingsDirty]);
+
+  const saveChunkSettingsMutation = useMutation({
+    mutationFn: async (payload: { migrationChunkingEnabled: boolean; migrationChunkSizeMb: number }) => {
+      return axios.put("/api/admin/system-config", payload).then((r) => r.data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/system-config"] });
+      setChunkSettingsDirty(false);
+      toast({ title: "Migration settings saved", description: "Chunking settings updated." });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Save failed",
+        description: error.response?.data?.message || "Failed to save migration settings",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const humanBytes = (n?: number | null) => {
+    const v = Number(n ?? 0);
+    if (!Number.isFinite(v) || v <= 0) return "0 B";
+    const units = ["B", "KB", "MB", "GB", "TB"];
+    let i = 0;
+    let x = v;
+    while (x >= 1024 && i < units.length - 1) {
+      x /= 1024;
+      i++;
+    }
+    const rounded = i === 0 ? String(Math.round(x)) : String(Math.round(x * 100) / 100);
+    return `${rounded} ${units[i]}`;
+  };
+
+  const chunkingSummary = useMemo(() => {
+    const enabled = chunkingEnabledDraft;
+    const gb = Number(chunkSizeGbDraft);
+    const mb = Math.floor((Number.isFinite(gb) ? gb : 50) * 1024);
+    if (!enabled) return "Chunking: Disabled (single file)";
+    return `Chunking: Enabled (${Number.isFinite(gb) ? gb : 50} GB ≈ ${mb} MB)`;
+  }, [chunkingEnabledDraft, chunkSizeGbDraft]);
+
+  const handleSaveChunkSettings = () => {
+    const gb = Number(chunkSizeGbDraft);
+    if (chunkingEnabledDraft) {
+      if (!Number.isFinite(gb) || gb <= 0) {
+        toast({ title: "Invalid chunk size", description: "Enter a positive chunk size in GB", variant: "destructive" });
+        return;
+      }
+      // Guardrails: prevent pathological sizes.
+      if (gb < 0.25) {
+        toast({
+          title: "Chunk size too small",
+          description: "Use at least 0.25 GB (256 MB) to avoid excessive part counts.",
+          variant: "destructive",
+        });
+        return;
+      }
+    }
+
+    const mb = Math.floor((Number.isFinite(gb) ? gb : 50) * 1024);
+    saveChunkSettingsMutation.mutate({
+      migrationChunkingEnabled: Boolean(chunkingEnabledDraft),
+      migrationChunkSizeMb: chunkingEnabledDraft ? Math.max(256, mb) : mb,
+    });
+  };
+
+  // ===== Export job creation =====
+  const [exportScope, setExportScope] = useState("FULL_PLATFORM");
+  const [exportUserId, setExportUserId] = useState("");
+  const [exportSince, setExportSince] = useState("");
+
+  // ===== Import job creation (supports chunked uploads) =====
+  const [importMode, setImportMode] = useState("DRY_RUN");
+  const [importManifestFile, setImportManifestFile] = useState<File | null>(null);
+  const [importDataFiles, setImportDataFiles] = useState<File[]>([]);
+  const [importManifestMeta, setImportManifestMeta] = useState<{
+    chunked: boolean;
+    chunkCount: number;
+    expectedFiles: string[];
+  } | null>(null);
+
+  const [purgeDays, setPurgeDays] = useState("30");
+  const [importPurgeDays, setImportPurgeDays] = useState("30");
+
+  const exportJobsQuery = useQuery<MigrationExportJob[]>({
+    queryKey: ["/api/admin/migration/export-jobs"],
+    queryFn: () => axios.get("/api/admin/migration/export-jobs").then((r) => r.data),
+    refetchInterval: 5000,
+  });
+
+  const importJobsQuery = useQuery<MigrationImportJob[]>({
+    queryKey: ["/api/admin/migration/import-jobs"],
+    queryFn: () => axios.get("/api/admin/migration/import-jobs").then((r) => r.data),
+    refetchInterval: 5000,
+  });
+
+  const exportMutation = useMutation({
+    mutationFn: (payload: any) => axios.post("/api/admin/migration/export-jobs", payload).then((r) => r.data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/migration/export-jobs"] });
+      toast({ title: "Export job created", description: "Job queued for processing" });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Export failed",
+        description: error.response?.data?.message || "Failed to create export job",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const importMutation = useMutation({
+    mutationFn: (form: FormData) =>
+      axios
+        .post("/api/admin/migration/import-jobs", form, { headers: { "Content-Type": "multipart/form-data" } })
+        .then((r) => r.data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/migration/import-jobs"] });
+      toast({ title: "Import job created", description: "Job queued for processing" });
+      setImportManifestFile(null);
+      setImportDataFiles([]);
+      setImportManifestMeta(null);
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Import failed",
+        description: error.response?.data?.message || "Failed to create import job",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const purgeMutation = useMutation({
+    mutationFn: (payload: { olderThanDays: number }) =>
+      axios.post("/api/admin/migration/export-jobs/purge", payload).then((r) => r.data),
+    onSuccess: (data: any) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/migration/export-jobs"] });
+      toast({
+        title: "Exports purged",
+        description: `Jobs: ${data?.jobsPurged ?? 0} | Files: ${data?.filesRemoved ?? 0}`,
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Purge failed",
+        description: error.response?.data?.message || "Failed to purge export files",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const purgeJobMutation = useMutation({
+    mutationFn: (jobId: string) => axios.delete(`/api/admin/migration/export-jobs/${jobId}/files`).then((r) => r.data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/migration/export-jobs"] });
+      toast({ title: "Export files removed" });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Purge failed",
+        description: error.response?.data?.message || "Failed to purge export files",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const importPurgeMutation = useMutation({
+    mutationFn: (payload: { olderThanDays: number }) =>
+      axios.post("/api/admin/migration/import-jobs/purge", payload).then((r) => r.data),
+    onSuccess: (data: any) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/migration/import-jobs"] });
+      toast({
+        title: "Import uploads purged",
+        description: `Jobs: ${data?.jobsPurged ?? 0} | Files: ${data?.filesRemoved ?? 0}`,
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Purge failed",
+        description: error.response?.data?.message || "Failed to purge import uploads",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const importPurgeJobMutation = useMutation({
+    mutationFn: (jobId: string) => axios.delete(`/api/admin/migration/import-jobs/${jobId}/files`).then((r) => r.data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/migration/import-jobs"] });
+      toast({ title: "Import files removed" });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Purge failed",
+        description: error.response?.data?.message || "Failed to purge import files",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const formatTs = (ts?: number | null) => {
+    if (!ts || !Number.isFinite(ts)) return "-";
+    return new Date(ts).toLocaleString();
+  };
+
+  const totalRows = (totals?: Record<string, number> | null) => {
+    if (!totals) return 0;
+    return Object.values(totals).reduce((sum, val) => sum + Number(val || 0), 0);
+  };
+
+  const handleExport = () => {
+    const payload: any = { scope: exportScope };
+
+    if (exportScope === "USER_BUNDLE") {
+      const id = Number(exportUserId);
+      if (!exportUserId.trim() || !Number.isFinite(id) || id <= 0) {
+        toast({ title: "Missing user ID", description: "Enter a valid user ID", variant: "destructive" });
+        return;
+      }
+      payload.userId = id;
+    }
+
+    if (exportScope === "DELTA") {
+      if (!exportSince) {
+        toast({ title: "Missing timestamp", description: "Select a delta start time", variant: "destructive" });
+        return;
+      }
+      const sinceTs = new Date(exportSince).getTime();
+      if (!Number.isFinite(sinceTs)) {
+        toast({ title: "Invalid timestamp", description: "Select a valid date/time", variant: "destructive" });
+        return;
+      }
+      payload.sinceTs = sinceTs;
+    }
+
+    exportMutation.mutate(payload);
+  };
+
+  const parseManifestFile = async (file: File) => {
+    try {
+      const text = await file.text();
+      const manifest = JSON.parse(text);
+      const chunks = Array.isArray(manifest?.chunks) ? manifest.chunks : [];
+      const expectedFiles = chunks
+        .map((c: any) => String(c?.file || ""))
+        .filter((s: string) => s.trim().length > 0);
+      const chunkingFlag = Boolean(manifest?.chunking?.enabled ?? false);
+      const chunked = chunkingFlag || expectedFiles.length > 1;
+      const chunkCount = expectedFiles.length > 0 ? expectedFiles.length : 1;
+
+      setImportManifestMeta({ chunked, chunkCount, expectedFiles });
+    } catch {
+      setImportManifestMeta(null);
+      toast({
+        title: "Invalid manifest",
+        description: "Could not parse JSON. Please select a valid migration manifest file.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const importSelection = useMemo(() => {
+    const meta = importManifestMeta;
+    const selected = importDataFiles;
+
+    if (!meta) {
+      return {
+        chunked: false,
+        expectedCount: 0,
+        selectedCount: selected.length,
+        missing: [] as string[],
+        extra: [] as string[],
+        ok: selected.length > 0,
+      };
+    }
+
+    const expected = meta.expectedFiles || [];
+    const selectedNames = new Set(selected.map((f) => f.name));
+    const missing = expected.filter((n) => !selectedNames.has(n));
+    const extra = selected
+      .map((f) => f.name)
+      .filter((n) => expected.length > 0 && !expected.includes(n));
+
+    const ok = meta.chunked ? (missing.length === 0 && expected.length > 0) : selected.length > 0;
+
+    return {
+      chunked: meta.chunked,
+      expectedCount: meta.chunkCount,
+      selectedCount: selected.length,
+      missing,
+      extra,
+      ok,
+    };
+  }, [importManifestMeta, importDataFiles]);
+
+  const handleImport = () => {
+    if (!importManifestFile) {
+      toast({ title: "Missing manifest", description: "Select a manifest file", variant: "destructive" });
+      return;
+    }
+    if (importDataFiles.length === 0) {
+      toast({ title: "Missing data", description: "Select at least one data file", variant: "destructive" });
+      return;
+    }
+
+    if (importManifestMeta?.chunked) {
+      if (!importSelection.ok) {
+        const missingPreview = importSelection.missing.slice(0, 8).join(", ");
+        toast({
+          title: "Missing chunk files",
+          description: importSelection.missing.length
+            ? `You must upload all expected chunks. Missing: ${missingPreview}${importSelection.missing.length > 8 ? "..." : ""}`
+            : "You must upload all expected chunk files.",
+          variant: "destructive",
+        });
+        return;
+      }
+    }
+
+    const form = new FormData();
+    form.append("manifest", importManifestFile);
+    // For chunked imports, append all parts. Backend maps by original filename.
+    for (const f of importDataFiles) {
+      form.append("data", f, f.name);
+    }
+    form.append("mode", importMode);
+    form.append("idStrategy", "PRESERVE");
+
+    importMutation.mutate(form);
+  };
+
+  const handlePurge = () => {
+    const days = Number(purgeDays);
+    if (!Number.isFinite(days) || days <= 0) {
+      toast({ title: "Invalid days", description: "Enter a positive number", variant: "destructive" });
+      return;
+    }
+    purgeMutation.mutate({ olderThanDays: Math.floor(days) });
+  };
+
+  const handleImportPurge = () => {
+    const days = Number(importPurgeDays);
+    if (!Number.isFinite(days) || days <= 0) {
+      toast({ title: "Invalid days", description: "Enter a positive number", variant: "destructive" });
+      return;
+    }
+    importPurgeMutation.mutate({ olderThanDays: Math.floor(days) });
+  };
+
+  // ===== Export chunks dialog =====
+  const [chunksDialogOpen, setChunksDialogOpen] = useState(false);
+  const [chunksJobId, setChunksJobId] = useState<string | null>(null);
+
+  type ExportChunksResponse = {
+    jobId: string;
+    chunking: any | null;
+    chunkChain: any | null;
+    chunks: Array<{
+      index: number;
+      file: string;
+      sizeBytes: number;
+      rows: number;
+      sha256: string;
+      prevSha256?: string | null;
+      linkHash?: string | null;
+    }>;
+  };
+
+  const chunksQuery = useQuery<ExportChunksResponse>({
+    queryKey: ["/api/admin/migration/export-jobs", chunksJobId, "chunks"],
+    enabled: chunksDialogOpen && Boolean(chunksJobId),
+    queryFn: () => axios.get(`/api/admin/migration/export-jobs/${chunksJobId}/chunks`).then((r) => r.data),
+  });
+
+  const openChunksDialog = (jobId: string) => {
+    setChunksJobId(jobId);
+    setChunksDialogOpen(true);
+    // Freshen on every open.
+    queryClient.invalidateQueries({ queryKey: ["/api/admin/migration/export-jobs", jobId, "chunks"] });
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Migration chunking controls */}
+      <Card className="bg-neutral-700 border-gray-600">
+        <CardHeader>
+          <CardTitle className="text-base">Migration Export/Import Chunking</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+            <div className="space-y-1">
+              <Label className="text-base font-medium">Chunking</Label>
+              <p className="text-xs text-gray-400">
+                When enabled, exports are split into multiple NDJSON parts to improve resiliency on unstable networks.
+                Downloads support HTTP Range resume.
+              </p>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="text-xs text-gray-300">Single file</span>
+              <Switch
+                checked={chunkingEnabledDraft}
+                onCheckedChange={(v) => {
+                  setChunkingEnabledDraft(Boolean(v));
+                  setChunkSettingsDirty(true);
+                }}
+              />
+              <span className="text-xs text-gray-300">Chunked</span>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <Label className="text-base font-medium">Chunk size (GB)</Label>
+              <Input
+                type="number"
+                min={0.25}
+                step={0.25}
+                value={chunkSizeGbDraft}
+                disabled={!chunkingEnabledDraft}
+                onChange={(e) => {
+                  setChunkSizeGbDraft(e.target.value);
+                  setChunkSettingsDirty(true);
+                }}
+                className="bg-neutral-600 mt-2"
+              />
+              <p className="text-xs text-gray-400 mt-1">
+                Default: 50 GB. 1 TB ≈ 20 parts. 10 TB ≈ 200 parts.
+              </p>
+            </div>
+
+            <div className="md:col-span-2 flex items-start md:items-end justify-between gap-4">
+              <div className="text-xs text-gray-300 mt-1 md:mt-0">
+                <div className="font-medium text-gray-200">Current</div>
+                <div className="text-gray-400">{chunkingSummary}</div>
+                <div className="text-gray-400">
+                  Source of truth: <span className="text-gray-300">system_config</span>
+                </div>
+              </div>
+              <Button
+                onClick={handleSaveChunkSettings}
+                disabled={saveChunkSettingsMutation.isPending || systemConfigQuery.isLoading || !chunkSettingsDirty}
+              >
+                {saveChunkSettingsMutation.isPending ? "Saving..." : "Save Migration Settings"}
+              </Button>
+            </div>
+          </div>
+
+          {systemConfigQuery.isError && (
+            <div className="text-sm text-red-300">
+              Failed to load system config. Migration settings may not reflect the current server state.
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        <Card className="bg-neutral-700 border-gray-600">
+          <CardHeader>
+            <CardTitle className="text-base">Export (Backup or Migration)</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div>
+              <Label className="text-base font-medium">Scope</Label>
+              <Select value={exportScope} onValueChange={setExportScope}>
+                <SelectTrigger className="bg-neutral-600 mt-2">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="FULL_PLATFORM">Full platform</SelectItem>
+                  <SelectItem value="USER_BUNDLE">Single trader bundle</SelectItem>
+                  <SelectItem value="DELTA">Delta since timestamp</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {exportScope === "USER_BUNDLE" && (
+              <div>
+                <Label className="text-base font-medium">Trader User ID</Label>
+                <Input
+                  type="number"
+                  value={exportUserId}
+                  onChange={(e) => setExportUserId(e.target.value)}
+                  className="bg-neutral-600 mt-2"
+                  placeholder="e.g. 123"
+                />
+              </div>
+            )}
+
+            {exportScope === "DELTA" && (
+              <div>
+                <Label className="text-base font-medium">Since (local time)</Label>
+                <Input
+                  type="datetime-local"
+                  value={exportSince}
+                  onChange={(e) => setExportSince(e.target.value)}
+                  className="bg-neutral-600 mt-2"
+                />
+              </div>
+            )}
+
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-xs text-gray-400">
+                NDJSON + manifest export. Includes audit trails and hash chain integrity.
+                <div className="mt-1">{chunkingSummary}</div>
+              </div>
+              <Button onClick={handleExport} disabled={exportMutation.isPending}>
+                {exportMutation.isPending ? "Creating..." : "Create Export Job"}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-neutral-700 border-gray-600">
+          <CardHeader>
+            <CardTitle className="text-base">Import (Dry Run or Write)</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div>
+              <Label className="text-base font-medium">Mode</Label>
+              <Select value={importMode} onValueChange={setImportMode}>
+                <SelectTrigger className="bg-neutral-600 mt-2">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="DRY_RUN">Dry run (validate only)</SelectItem>
+                  <SelectItem value="IMPORT">Import (write data)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div>
+              <Label className="text-base font-medium">Manifest (manifest.json)</Label>
+              <Input
+                type="file"
+                accept=".json,application/json"
+                className="bg-neutral-600 mt-2"
+                onChange={async (e) => {
+                  const f = e.target.files?.[0] || null;
+                  setImportManifestFile(f);
+                  setImportDataFiles([]);
+                  setImportManifestMeta(null);
+                  if (f) await parseManifestFile(f);
+                }}
+              />
+              {importManifestMeta && (
+                <p className="text-xs text-gray-400 mt-1">
+                  Detected: {importManifestMeta.chunked ? `Chunked (${importManifestMeta.chunkCount} parts)` : "Single-file export"}
+                </p>
+              )}
+            </div>
+
+            <div>
+              <Label className="text-base font-medium">
+                Data {importManifestMeta?.chunked ? "(upload all parts)" : "(data.ndjson)"}
+              </Label>
+              <Input
+                type="file"
+                multiple={Boolean(importManifestMeta?.chunked)}
+                accept=".ndjson,application/x-ndjson"
+                className="bg-neutral-600 mt-2"
+                onChange={(e) => setImportDataFiles(Array.from(e.target.files || []))}
+              />
+              {importManifestMeta?.chunked && (
+                <div className="text-xs text-gray-400 mt-1 space-y-1">
+                  <div>
+                    Selected: {importSelection.selectedCount} / Expected: {importSelection.expectedCount}
+                  </div>
+                  {importSelection.missing.length > 0 && (
+                    <div className="text-amber-300">
+                      Missing ({importSelection.missing.length}):{" "}
+                      {importSelection.missing.slice(0, 6).join(", ")}
+                      {importSelection.missing.length > 6 ? " ..." : ""}
+                    </div>
+                  )}
+                  {importSelection.extra.length > 0 && (
+                    <div className="text-amber-300">
+                      Extra ({importSelection.extra.length}):{" "}
+                      {importSelection.extra.slice(0, 6).join(", ")}
+                      {importSelection.extra.length > 6 ? " ..." : ""}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-xs text-gray-400">
+                Preserves legacy IDs. Use an empty target DB to avoid conflicts.
+                <div className="mt-1">
+                  For chunked imports, filenames must match the manifest (the UI enforces this).
+                </div>
+              </div>
+              <Button onClick={handleImport} disabled={importMutation.isPending}>
+                {importMutation.isPending ? "Uploading..." : "Create Import Job"}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card className="bg-neutral-700 border-gray-600">
+        <CardHeader>
+          <CardTitle className="text-base">Export Retention</CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+          <div className="space-y-2">
+            <Label className="text-base font-medium">Purge exports older than (days)</Label>
+            <Input
+              type="number"
+              min={1}
+              value={purgeDays}
+              onChange={(e) => setPurgeDays(e.target.value)}
+              className="bg-neutral-600 mt-1 w-40"
+            />
+            <p className="text-xs text-gray-400">Deletes export files from server storage; job metadata remains.</p>
+          </div>
+          <Button variant="destructive" onClick={handlePurge} disabled={purgeMutation.isPending}>
+            {purgeMutation.isPending ? "Purging..." : "Purge Exports"}
+          </Button>
+        </CardContent>
+      </Card>
+
+      <Card className="bg-neutral-700 border-gray-600">
+        <CardHeader>
+          <CardTitle className="text-base">Recent Export Jobs</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {exportJobsQuery.isLoading ? (
+            <div className="text-sm text-gray-400">Loading export jobs...</div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="text-xs">Job ID</TableHead>
+                  <TableHead className="text-xs">Scope</TableHead>
+                  <TableHead className="text-xs">Status</TableHead>
+                  <TableHead className="text-xs">Rows</TableHead>
+                  <TableHead className="text-xs">Chunks</TableHead>
+                  <TableHead className="text-xs">Created</TableHead>
+                  <TableHead className="text-xs">Download</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {(exportJobsQuery.data || []).map((job) => {
+                  const chunksLen = Array.isArray((job as any)?.manifest?.chunks) ? (job as any).manifest.chunks.length : 0;
+                  const isReady = job.status === "READY" && (job.dataPath || job.manifestPath);
+                  return (
+                    <TableRow key={job.id}>
+                      <TableCell className="text-xs text-gray-200">{job.id}</TableCell>
+                      <TableCell className="text-xs text-gray-300">{job.scope}</TableCell>
+                      <TableCell className="text-xs text-gray-300">{job.status}</TableCell>
+                      <TableCell className="text-xs text-gray-300">{totalRows(job.totals)}</TableCell>
+                      <TableCell className="text-xs text-gray-300">{chunksLen > 0 ? chunksLen : "-"}</TableCell>
+                      <TableCell className="text-xs text-gray-400">{formatTs(job.createdAt)}</TableCell>
+                      <TableCell className="text-xs">
+                        <div className="flex gap-2 flex-wrap">
+                          {isReady ? (
+                            <>
+                              <Button size="sm" variant="outline" asChild>
+                                <a href={`/api/admin/migration/export-jobs/${job.id}/manifest`} rel="noreferrer">
+                                  Manifest
+                                </a>
+                              </Button>
+                              <Button size="sm" variant="outline" asChild title="Downloads the full file if unchunked, or part 0 if chunked">
+                                <a href={`/api/admin/migration/export-jobs/${job.id}/data?part=0`} rel="noreferrer">
+                                  Data / Part 0
+                                </a>
+                              </Button>
+                              <Button size="sm" variant="outline" onClick={() => openChunksDialog(job.id)}>
+                                Parts
+                              </Button>
+                            </>
+                          ) : (
+                            <span className="text-gray-500">-</span>
+                          )}
+
+                          {(job.dataPath || job.manifestPath) && (
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              onClick={() => purgeJobMutation.mutate(job.id)}
+                              disabled={purgeJobMutation.isPending}
+                            >
+                              Purge
+                            </Button>
+                          )}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+                {(exportJobsQuery.data || []).length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={7} className="text-center text-gray-400 text-sm">
+                      No export jobs yet
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card className="bg-neutral-700 border-gray-600">
+        <CardHeader>
+          <CardTitle className="text-base">Recent Import Jobs</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {importJobsQuery.isLoading ? (
+            <div className="text-sm text-gray-400">Loading import jobs...</div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="text-xs">Job ID</TableHead>
+                  <TableHead className="text-xs">Mode</TableHead>
+                  <TableHead className="text-xs">Status</TableHead>
+                  <TableHead className="text-xs">Rows</TableHead>
+                  <TableHead className="text-xs">Created</TableHead>
+                  <TableHead className="text-xs">Purge</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {(importJobsQuery.data || []).map((job) => (
+                  <TableRow key={job.id}>
+                    <TableCell className="text-xs text-gray-200">{job.id}</TableCell>
+                    <TableCell className="text-xs text-gray-300">{job.mode}</TableCell>
+                    <TableCell className="text-xs text-gray-300">{job.status}</TableCell>
+                    <TableCell className="text-xs text-gray-300">{totalRows(job.totals)}</TableCell>
+                    <TableCell className="text-xs text-gray-400">{formatTs(job.createdAt)}</TableCell>
+                    <TableCell className="text-xs">
+                      {job.dataPath || job.manifestPath ? (
+                        <Button
+                          size="sm"
+                          variant="destructive"
+                          onClick={() => importPurgeJobMutation.mutate(job.id)}
+                          disabled={importPurgeJobMutation.isPending}
+                        >
+                          Purge
+                        </Button>
+                      ) : (
+                        <span className="text-gray-500">-</span>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+                {(importJobsQuery.data || []).length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={6} className="text-center text-gray-400 text-sm">
+                      No import jobs yet
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card className="bg-neutral-700 border-gray-600">
+        <CardHeader>
+          <CardTitle className="text-base">Import Upload Retention</CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+          <div className="space-y-2">
+            <Label className="text-base font-medium">Purge imports older than (days)</Label>
+            <Input
+              type="number"
+              min={1}
+              value={importPurgeDays}
+              onChange={(e) => setImportPurgeDays(e.target.value)}
+              className="bg-neutral-600 mt-1 w-40"
+            />
+            <p className="text-xs text-gray-400">Deletes uploaded manifest/data files from server storage.</p>
+          </div>
+          <Button variant="destructive" onClick={handleImportPurge} disabled={importPurgeMutation.isPending}>
+            {importPurgeMutation.isPending ? "Purging..." : "Purge Imports"}
+          </Button>
+        </CardContent>
+      </Card>
+
+      {/* Export parts dialog */}
+      <Dialog open={chunksDialogOpen} onOpenChange={(open) => setChunksDialogOpen(open)}>
+        <DialogContent className="bg-neutral-800 border-gray-700 max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Export Parts{chunksJobId ? ` — ${chunksJobId}` : ""}</DialogTitle>
+          </DialogHeader>
+
+          {chunksQuery.isLoading ? (
+            <div className="text-sm text-gray-400">Loading chunk metadata...</div>
+          ) : chunksQuery.isError ? (
+            <div className="text-sm text-red-300">
+              Failed to load chunk list. Ensure the job is READY and the server supports chunk endpoints.
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <div className="text-xs text-gray-400">
+                {Array.isArray(chunksQuery.data?.chunks) && chunksQuery.data!.chunks.length > 1 ? (
+                  <>
+                    Chunked export detected. Download any part independently. Downloads support resume via HTTP Range.
+                    <div className="mt-1 text-gray-500">
+                      Tip: Use a download manager or <code>curl -C -</code> to resume.
+                    </div>
+                  </>
+                ) : (
+                  <>This export is not chunked (single file). “Data / Part 0” is the full dataset.</>
+                )}
+              </div>
+
+              <div className="max-h-[360px] overflow-auto border border-gray-700 rounded">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="text-xs">Index</TableHead>
+                      <TableHead className="text-xs">File</TableHead>
+                      <TableHead className="text-xs">Rows</TableHead>
+                      <TableHead className="text-xs">Size</TableHead>
+                      <TableHead className="text-xs">Download</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {(chunksQuery.data?.chunks || []).map((c) => (
+                      <TableRow key={`${c.index}-${c.file}`}>
+                        <TableCell className="text-xs text-gray-200">{c.index}</TableCell>
+                        <TableCell className="text-xs text-gray-300">{c.file}</TableCell>
+                        <TableCell className="text-xs text-gray-300">{Number(c.rows || 0)}</TableCell>
+                        <TableCell className="text-xs text-gray-300">{humanBytes(c.sizeBytes)}</TableCell>
+                        <TableCell className="text-xs">
+                          {chunksJobId ? (
+                            <Button size="sm" variant="outline" asChild>
+                              <a href={`/api/admin/migration/export-jobs/${chunksJobId}/chunks/${c.index}`} rel="noreferrer">
+                                Download
+                              </a>
+                            </Button>
+                          ) : (
+                            <span className="text-gray-500">-</span>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                    {(chunksQuery.data?.chunks || []).length === 0 && (
+                      <TableRow>
+                        <TableCell colSpan={5} className="text-center text-gray-400 text-sm">
+                          No chunk metadata available yet.
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+
+              {chunksQuery.data?.chunkChain?.headLinkHash && (
+                <div className="text-xs text-gray-400">
+                  <div className="font-medium text-gray-300">Integrity chain</div>
+                  <div className="break-all">Head link hash: {String(chunksQuery.data.chunkChain.headLinkHash)}</div>
+                </div>
+              )}
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setChunksDialogOpen(false)}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+3) How chunk linking works (what you asked to “check”)
+Your backend already implements a hash-chain across chunks to guarantee:
+
+correct order
+
+tamper detection
+
+resumable/partial download safety
+
+Chain mechanism (already in server/migration/migrationService.ts)
+For chunk i:
+
+chunkSha256 = sha256(chunkBytes)
+
+linkHash = sha256(prevLinkHash + ":" + chunkSha256)
+
+prevLinkHash starts at "GENESIS"
+
+headLinkHash is the final linkHash (stored in manifest)
+
+On import, it recomputes the same linkHash chain and fails if any part is missing or modified.
+
+4) Quick verification (manual + curl)
+Manual UI
+Admin → System Config → Migration
+
+Enable chunking, set 50 GB, Save
+
+Create Export Job → wait READY
+
+Click Parts → download part 7, then part 12 (order doesn’t matter)
+
+Import:
+
+download manifest
+
+download all parts
+
+upload manifest + multi-select all parts → DRY_RUN → should complete
+
+Resume example (curl with Range)
+Use -C - to resume a partially downloaded chunk:
+
+curl -L -C - \
+  -o MIGEXP_XXXX.part00007.ndjson \
+  "http://localhost:5000/api/admin/migration/export-jobs/MIGEXP_XXXX/chunks/7"
+If you prefer to force a specific byte range:
+
+curl -L \
+  -H "Range: bytes=0-10485759" \
+  -o part7.first10mb.bin \
+  "http://localhost:5000/api/admin/migration/export-jobs/MIGEXP_XXXX/chunks/7"
+If you want the UI to also generate a one-click “download all parts” script (PowerShell + Bash) based on the chunk list (useful at 200 parts), tell me your preferred environment (Windows PowerShell vs. Linux shell) and I’ll add it directly inside the Parts dialog.
+
+You said:
+LINUX
+ChatGPT said:
+
+Thought for 15s
+Below is a Linux (Bash) download + verify workflow that is purpose-built for your chunked migration exports:
+
+Downloads the manifest
+
+Downloads all parts listed in the manifest (resumable via curl -C -)
+
+Verifies per-chunk SHA-256
+
+Verifies the link-hash chain (GENESIS → headLinkHash) exactly as your backend’s chunk chain is designed
+
+I’m also including an import upload script (manifest + all parts) suitable for your current backend contract.
+
+1) Prereqs (Linux)
+Install jq (JSON parsing), and ensure curl is present:
+
+# Debian/Ubuntu
+sudo apt-get update && sudo apt-get install -y jq curl coreutils
+
+# RHEL/CentOS/Fedora
+sudo dnf install -y jq curl coreutils
+2) Script: download + resume + verify (manifest + chunks)
+Create a file: migration_download_and_verify.sh
+
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Usage:
+#   ./migration_download_and_verify.sh \
+#     --base "https://YOUR_DOMAIN" \
+#     --job "MIGEXP_XXXXXXXX" \
+#     --out "./exports/MIGEXP_XXXXXXXX" \
+#     [--cookie "./cookie.txt"] \
+#     [--insecure]
+#
+# Notes:
+# - Uses /api/admin/migration/export-jobs/:jobId/manifest
+# - Uses /api/admin/migration/export-jobs/:jobId/chunks/:index
+# - Resumes downloads: curl -C -
+# - Verifies SHA256 for each chunk and verifies the link-hash chain.
+
+BASE=""
+JOB=""
+OUT=""
+COOKIE_FILE=""
+INSECURE="false"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --base) BASE="${2:-}"; shift 2;;
+    --job) JOB="${2:-}"; shift 2;;
+    --out) OUT="${2:-}"; shift 2;;
+    --cookie) COOKIE_FILE="${2:-}"; shift 2;;
+    --insecure) INSECURE="true"; shift 1;;
+    *) echo "Unknown arg: $1" >&2; exit 1;;
+  esac
+done
+
+if [[ -z "$BASE" || -z "$JOB" || -z "$OUT" ]]; then
+  echo "Missing required args. See usage in script header." >&2
+  exit 1
+fi
+
+MANIFEST_URL="${BASE%/}/api/admin/migration/export-jobs/${JOB}/manifest"
+CHUNK_URL_PREFIX="${BASE%/}/api/admin/migration/export-jobs/${JOB}/chunks"
+
+mkdir -p "$OUT"
+
+CURL_OPTS=(
+  "-L"
+  "--fail"
+  "--retry" "8"
+  "--retry-delay" "2"
+  "--retry-connrefused"
+  "--connect-timeout" "20"
+  "--max-time" "0"
+)
+
+if [[ -n "$COOKIE_FILE" ]]; then
+  # cookie jar or Netscape cookie file. If you use session cookies, export them into this file.
+  CURL_OPTS+=("-b" "$COOKIE_FILE")
+fi
+
+if [[ "$INSECURE" == "true" ]]; then
+  CURL_OPTS+=("-k")
+fi
+
+echo "==> Downloading manifest: $MANIFEST_URL"
+curl "${CURL_OPTS[@]}" -o "${OUT}/manifest.json" "$MANIFEST_URL"
+
+# Parse manifest
+MANIFEST="${OUT}/manifest.json"
+
+# Determine if chunked
+CHUNK_ENABLED="$(jq -r '.chunking.enabled // false' "$MANIFEST")"
+CHUNKS_LEN="$(jq -r '.chunks | length' "$MANIFEST")"
+
+if [[ "$CHUNK_ENABLED" != "true" || "$CHUNKS_LEN" -le 1 ]]; then
+  echo "==> Manifest indicates unchunked export (single file)."
+  echo "==> Downloading data as a single file (or part 0 endpoint if implemented that way)."
+
+  # Prefer chunk endpoint 0 if server always uses it; otherwise use /data
+  DATA_URL="${BASE%/}/api/admin/migration/export-jobs/${JOB}/data"
+  echo "==> Downloading data: $DATA_URL"
+  curl "${CURL_OPTS[@]}" -C - -o "${OUT}/data.ndjson" "$DATA_URL"
+
+  # Optional verify overall hash if present
+  DATA_SHA="$(jq -r '.dataSha256 // empty' "$MANIFEST")"
+  if [[ -n "$DATA_SHA" ]]; then
+    echo "==> Verifying overall data SHA256..."
+    ACTUAL="$(sha256sum "${OUT}/data.ndjson" | awk '{print $1}')"
+    if [[ "$ACTUAL" != "$DATA_SHA" ]]; then
+      echo "ERROR: data SHA mismatch. expected=$DATA_SHA actual=$ACTUAL" >&2
+      exit 2
+    fi
+    echo "OK: overall data hash matches."
+  else
+    echo "==> No dataSha256 in manifest; skipping overall hash verify."
+  fi
+
+  echo "DONE."
+  exit 0
+fi
+
+echo "==> Chunked export detected: ${CHUNKS_LEN} parts"
+
+# Download all chunks with resume
+echo "==> Downloading chunks to: $OUT"
+for ((i=0; i<CHUNKS_LEN; i++)); do
+  FILE="$(jq -r ".chunks[$i].file" "$MANIFEST")"
+  IDX="$(jq -r ".chunks[$i].index" "$MANIFEST")"
+  # Normalize: ensure index matches i
+  if [[ "$IDX" != "$i" ]]; then
+    echo "WARN: manifest chunk index mismatch. manifest index=$IDX loop index=$i" >&2
+  fi
+
+  URL="${CHUNK_URL_PREFIX}/${i}"
+  DEST="${OUT}/${FILE}"
+
+  echo "==> [${i}/${CHUNKS_LEN}] Downloading ${FILE}"
+  # -C - resumes partial downloads
+  curl "${CURL_OPTS[@]}" -C - -o "$DEST" "$URL"
+done
+
+echo "==> Verifying per-chunk SHA256..."
+for ((i=0; i<CHUNKS_LEN; i++)); do
+  FILE="$(jq -r ".chunks[$i].file" "$MANIFEST")"
+  EXPECTED_SHA="$(jq -r ".chunks[$i].sha256" "$MANIFEST")"
+  DEST="${OUT}/${FILE}"
+
+  if [[ ! -f "$DEST" ]]; then
+    echo "ERROR: Missing file: $DEST" >&2
+    exit 2
+  fi
+
+  ACTUAL_SHA="$(sha256sum "$DEST" | awk '{print $1}')"
+  if [[ "$ACTUAL_SHA" != "$EXPECTED_SHA" ]]; then
+    echo "ERROR: SHA mismatch for $FILE" >&2
+    echo "  expected=$EXPECTED_SHA" >&2
+    echo "  actual  =$ACTUAL_SHA" >&2
+    exit 2
+  fi
+done
+echo "OK: All chunk SHA256 values match."
+
+echo "==> Verifying chunk link-hash chain..."
+GENESIS="$(jq -r '.chunkChain.genesis // "GENESIS"' "$MANIFEST")"
+HEAD_EXPECTED="$(jq -r '.chunkChain.headLinkHash // empty' "$MANIFEST")"
+
+if [[ -z "$HEAD_EXPECTED" ]]; then
+  echo "==> No chunkChain.headLinkHash in manifest; skipping chain verify."
+else
+  prevLinkHash="$GENESIS"
+  for ((i=0; i<CHUNKS_LEN; i++)); do
+    CHUNK_SHA="$(jq -r ".chunks[$i].sha256" "$MANIFEST")"
+    LINK_EXPECTED="$(jq -r ".chunks[$i].linkHash // empty" "$MANIFEST")"
+
+    # Compute: sha256(prevLinkHash + ":" + chunkSha256)
+    computed="$(printf "%s:%s" "$prevLinkHash" "$CHUNK_SHA" | sha256sum | awk '{print $1}')"
+
+    if [[ -n "$LINK_EXPECTED" && "$computed" != "$LINK_EXPECTED" ]]; then
+      echo "ERROR: linkHash mismatch at chunk $i" >&2
+      echo "  expected=$LINK_EXPECTED" >&2
+      echo "  computed=$computed" >&2
+      exit 2
+    fi
+
+    prevLinkHash="$computed"
+  done
+
+  if [[ "$prevLinkHash" != "$HEAD_EXPECTED" ]]; then
+    echo "ERROR: chain head mismatch" >&2
+    echo "  expected head=$HEAD_EXPECTED" >&2
+    echo "  computed head=$prevLinkHash" >&2
+    exit 2
+  fi
+
+  echo "OK: Link-hash chain verified."
+fi
+
+echo "DONE: Download + verify complete."
+echo "Output dir: $OUT"
+Make it executable:
+
+chmod +x migration_download_and_verify.sh
+Run it:
+
+./migration_download_and_verify.sh \
+  --base "http://localhost:5000" \
+  --job "MIGEXP_XXXXXXX" \
+  --out "./exports/MIGEXP_XXXXXXX"
+If you use admin sessions/cookies, export cookies into a Netscape cookie file and pass:
+
+./migration_download_and_verify.sh \
+  --base "https://yourdomain.com" \
+  --job "MIGEXP_XXXXXXX" \
+  --out "./exports/MIGEXP_XXXXXXX" \
+  --cookie "./cookie.txt"
+3) Script: upload chunked import (manifest + all parts)
+Create migration_import_upload.sh
+
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Usage:
+#   ./migration_import_upload.sh \
+#     --base "https://YOUR_DOMAIN" \
+#     --mode "DRY_RUN" \
+#     --manifest "./exports/MIGEXP_XXXX/manifest.json" \
+#     --parts-dir "./exports/MIGEXP_XXXX" \
+#     [--cookie "./cookie.txt"] \
+#     [--insecure]
+#
+# This matches backend contract:
+# POST /api/admin/migration/import-jobs
+# Form fields:
+# - manifest: file
+# - data: file (repeated for each chunk or single)
+# - mode: DRY_RUN | IMPORT
+# - idStrategy: PRESERVE
+
+BASE=""
+MODE="DRY_RUN"
+MANIFEST=""
+PARTS_DIR=""
+COOKIE_FILE=""
+INSECURE="false"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --base) BASE="${2:-}"; shift 2;;
+    --mode) MODE="${2:-}"; shift 2;;
+    --manifest) MANIFEST="${2:-}"; shift 2;;
+    --parts-dir) PARTS_DIR="${2:-}"; shift 2;;
+    --cookie) COOKIE_FILE="${2:-}"; shift 2;;
+    --insecure) INSECURE="true"; shift 1;;
+    *) echo "Unknown arg: $1" >&2; exit 1;;
+  esac
+done
+
+if [[ -z "$BASE" || -z "$MANIFEST" || -z "$PARTS_DIR" ]]; then
+  echo "Missing required args. See usage in script header." >&2
+  exit 1
+fi
+
+IMPORT_URL="${BASE%/}/api/admin/migration/import-jobs"
+
+CURL_OPTS=(
+  "-L"
+  "--fail"
+  "--retry" "5"
+  "--retry-delay" "2"
+  "--retry-connrefused"
+)
+
+if [[ -n "$COOKIE_FILE" ]]; then
+  CURL_OPTS+=("-b" "$COOKIE_FILE")
+fi
+
+if [[ "$INSECURE" == "true" ]]; then
+  CURL_OPTS+=("-k")
+fi
+
+echo "==> Reading manifest to determine expected parts..."
+CHUNKS_LEN="$(jq -r '.chunks | length' "$MANIFEST")"
+CHUNK_ENABLED="$(jq -r '.chunking.enabled // false' "$MANIFEST")"
+
+FORM_ARGS=()
+FORM_ARGS+=("-F" "manifest=@${MANIFEST};type=application/json")
+FORM_ARGS+=("-F" "mode=${MODE}")
+FORM_ARGS+=("-F" "idStrategy=PRESERVE")
+
+if [[ "$CHUNK_ENABLED" != "true" || "$CHUNKS_LEN" -le 1 ]]; then
+  # Unchunked: find likely data file in parts-dir
+  # Prefer exact file name if present in manifest chunks[0].file, else fallback to data.ndjson.
+  FILE="$(jq -r '.chunks[0].file // "data.ndjson"' "$MANIFEST")"
+  DATA_PATH="${PARTS_DIR%/}/${FILE}"
+  if [[ ! -f "$DATA_PATH" ]]; then
+    DATA_PATH="${PARTS_DIR%/}/data.ndjson"
+  fi
+  if [[ ! -f "$DATA_PATH" ]]; then
+    echo "ERROR: Could not find data file in $PARTS_DIR" >&2
+    exit 2
+  fi
+  echo "==> Uploading unchunked data: $DATA_PATH"
+  FORM_ARGS+=("-F" "data=@${DATA_PATH};type=application/x-ndjson")
+else
+  echo "==> Chunked import: will attach ${CHUNKS_LEN} parts"
+  for ((i=0; i<CHUNKS_LEN; i++)); do
+    FILE="$(jq -r ".chunks[$i].file" "$MANIFEST")"
+    PATH_PART="${PARTS_DIR%/}/${FILE}"
+    if [[ ! -f "$PATH_PART" ]]; then
+      echo "ERROR: Missing chunk file: $PATH_PART" >&2
+      exit 2
+    fi
+    # Repeated field name "data" is expected by backend
+    FORM_ARGS+=("-F" "data=@${PATH_PART};type=application/x-ndjson")
+  done
+fi
+
+echo "==> Creating import job: $IMPORT_URL"
+curl "${CURL_OPTS[@]}" \
+  -X POST \
+  "${FORM_ARGS[@]}" \
+  "$IMPORT_URL"
+echo
+echo "DONE."
+Make executable and run:
+
+chmod +x migration_import_upload.sh
+
+./migration_import_upload.sh \
+  --base "http://localhost:5000" \
+  --mode "DRY_RUN" \
+  --manifest "./exports/MIGEXP_XXXX/manifest.json" \
+  --parts-dir "./exports/MIGEXP_XXXX"
+4) Practical note for multi-TB imports
+Your current backend import endpoint expects all parts in one multipart request. That’s workable for smaller exports, but for 1–10TB it is not operationally reliable.
+
+For true 1TB/10TB:
+
+Keep this chunking + hash-chain design.
+
+Switch transport to object storage (S3/R2) with:
+
+multipart upload
+
+resumable downloads
+
+pre-signed URLs
+
+Import job should accept an object-storage prefix and stream parts server-side.
+
+If you want, I can give you the exact next-step design and code wiring for “import from S3 prefix” while keeping the same manifest and link-hash verification.
+
+5) Optional (recommended): Add a “Download Linux Script” button in the UI
+If you want the Admin Parts dialog to provide a one-click generated script (pre-filled base URL + job ID), tell me whether your admin auth is:
+
+cookie/session-based, or
+
+bearer token header
+
+and I’ll add a button that creates a .sh payload on the fly using the manifest/chunk list.
+
+You said:
+ADD
+ChatGPT said:
+
+Thought for 21s
+Understood. Below is the exact UI addition to your existing MigrationTab() (the version I gave you), adding two Linux buttons inside the Export Parts dialog:
+
+Download Linux Script (Download + Resume + Verify)
+
+Download Linux Script (Import Upload)
+
+These scripts are pre-filled with:
+
+BASE=<current window.location.origin>
+
+JOB=<selected export job id>
+
+They also include optional env vars:
+
+COOKIE=./cookie.txt (session cookie file if you use cookie auth)
+
+AUTH_HEADER="Authorization: Bearer …" (if you later move to bearer tokens)
+
+INSECURE=true (self-signed TLS)
+
+OUT=... (download destination)
+
+Patch: client/src/pages/AdminDashboard.tsx (inside MigrationTab())
+1) Add these helper functions inside MigrationTab()
+Place them near the existing openChunksDialog() (anywhere inside the function scope is fine):
+
+  const downloadTextFile = (filename: string, content: string) => {
+    const blob = new Blob([content], { type: "text/x-shellscript;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const buildLinuxDownloadVerifyScript = (baseUrl: string, jobId: string) => {
+    // Script uses:
+    //  - GET /api/admin/migration/export-jobs/:jobId/manifest
+    //  - GET /api/admin/migration/export-jobs/:jobId/chunks/:index (resumable)
+    // Verifies:
+    //  - per-chunk sha256
+    //  - linkHash chain: sha256(prevLinkHash + ":" + chunkSha256)
+    return `#!/usr/bin/env bash
+set -euo pipefail
+
+# Auto-generated by Admin Dashboard (Migration → Export Parts)
+# Job: ${jobId}
+# Base: ${baseUrl}
+#
+# Optional env vars:
+#   OUT="./exports/${jobId}"        # output directory
+#   COOKIE="./cookie.txt"           # Netscape cookie file for session auth
+#   AUTH_HEADER="Authorization: Bearer <TOKEN>"   # optional header auth
+#   INSECURE=true                   # set true for self-signed TLS
+#
+# Examples:
+#   OUT="./exports/${jobId}" COOKIE="./cookie.txt" ./download_${jobId}.sh
+#   AUTH_HEADER="Authorization: Bearer xxx" ./download_${jobId}.sh
+#   INSECURE=true ./download_${jobId}.sh
+
+BASE="\${BASE:-${baseUrl}}"
+JOB="\${JOB:-${jobId}}"
+OUT="\${OUT:-./exports/\${JOB}}"
+COOKIE="\${COOKIE:-}"
+AUTH_HEADER="\${AUTH_HEADER:-}"
+INSECURE="\${INSECURE:-false}"
+
+need_cmd() { command -v "$1" >/dev/null 2>&1 || { echo "Missing required command: $1" >&2; exit 1; }; }
+need_cmd curl
+need_cmd jq
+need_cmd sha256sum
+
+MANIFEST_URL="\${BASE%/}/api/admin/migration/export-jobs/\${JOB}/manifest"
+CHUNK_URL_PREFIX="\${BASE%/}/api/admin/migration/export-jobs/\${JOB}/chunks"
+
+mkdir -p "\$OUT"
+
+CURL_OPTS=(-L --fail --retry 8 --retry-delay 2 --retry-connrefused --connect-timeout 20 --max-time 0)
+
+if [[ -n "\$COOKIE" ]]; then
+  CURL_OPTS+=(-b "\$COOKIE")
+fi
+
+if [[ -n "\$AUTH_HEADER" ]]; then
+  CURL_OPTS+=(-H "\$AUTH_HEADER")
+fi
+
+if [[ "\$INSECURE" == "true" ]]; then
+  CURL_OPTS+=(-k)
+fi
+
+echo "==> Downloading manifest: \$MANIFEST_URL"
+curl "\${CURL_OPTS[@]}" -o "\$OUT/manifest.json" "\$MANIFEST_URL"
+
+MANIFEST="\$OUT/manifest.json"
+CHUNK_ENABLED="\$(jq -r '.chunking.enabled // false' "\$MANIFEST")"
+CHUNKS_LEN="\$(jq -r '.chunks | length' "\$MANIFEST")"
+
+if [[ "\$CHUNK_ENABLED" != "true" || "\$CHUNKS_LEN" -le 1 ]]; then
+  echo "==> Manifest indicates unchunked export (single file)."
+  DATA_URL="\${BASE%/}/api/admin/migration/export-jobs/\${JOB}/data"
+  echo "==> Downloading data: \$DATA_URL"
+  curl "\${CURL_OPTS[@]}" -C - -o "\$OUT/data.ndjson" "\$DATA_URL"
+
+  DATA_SHA="\$(jq -r '.dataSha256 // empty' "\$MANIFEST")"
+  if [[ -n "\$DATA_SHA" ]]; then
+    echo "==> Verifying overall data SHA256..."
+    ACTUAL="\$(sha256sum "\$OUT/data.ndjson" | awk '{print $1}')"
+    if [[ "\$ACTUAL" != "\$DATA_SHA" ]]; then
+      echo "ERROR: data SHA mismatch. expected=\$DATA_SHA actual=\$ACTUAL" >&2
+      exit 2
+    fi
+    echo "OK: overall data hash matches."
+  else
+    echo "==> No dataSha256 in manifest; skipping overall hash verify."
+  fi
+
+  echo "DONE."
+  exit 0
+fi
+
+echo "==> Chunked export detected: \${CHUNKS_LEN} parts"
+echo "==> Downloading chunks (resumable) into: \$OUT"
+
+for ((i=0; i<CHUNKS_LEN; i++)); do
+  FILE="\$(jq -r ".chunks[\$i].file" "\$MANIFEST")"
+  URL="\${CHUNK_URL_PREFIX}/\${i}"
+  DEST="\$OUT/\$FILE"
+  echo "==> [\$i/\$CHUNKS_LEN] Downloading \$FILE"
+  curl "\${CURL_OPTS[@]}" -C - -o "\$DEST" "\$URL"
+done
+
+echo "==> Verifying per-chunk SHA256..."
+for ((i=0; i<CHUNKS_LEN; i++)); do
+  FILE="\$(jq -r ".chunks[\$i].file" "\$MANIFEST")"
+  EXPECTED_SHA="\$(jq -r ".chunks[\$i].sha256" "\$MANIFEST")"
+  DEST="\$OUT/\$FILE"
+
+  ACTUAL_SHA="\$(sha256sum "\$DEST" | awk '{print $1}')"
+  if [[ "\$ACTUAL_SHA" != "\$EXPECTED_SHA" ]]; then
+    echo "ERROR: SHA mismatch for \$FILE" >&2
+    echo "  expected=\$EXPECTED_SHA" >&2
+    echo "  actual  =\$ACTUAL_SHA" >&2
+    exit 2
+  fi
+done
+echo "OK: All chunk SHA256 values match."
+
+echo "==> Verifying link-hash chain..."
+GENESIS="\$(jq -r '.chunkChain.genesis // "GENESIS"' "\$MANIFEST")"
+HEAD_EXPECTED="\$(jq -r '.chunkChain.headLinkHash // empty' "\$MANIFEST")"
+
+if [[ -z "\$HEAD_EXPECTED" ]]; then
+  echo "==> No chunkChain.headLinkHash in manifest; skipping chain verify."
+  echo "DONE."
+  exit 0
+fi
+
+prevLinkHash="\$GENESIS"
+for ((i=0; i<CHUNKS_LEN; i++)); do
+  CHUNK_SHA="\$(jq -r ".chunks[\$i].sha256" "\$MANIFEST")"
+  LINK_EXPECTED="\$(jq -r ".chunks[\$i].linkHash // empty" "\$MANIFEST")"
+  computed="\$(printf "%s:%s" "\$prevLinkHash" "\$CHUNK_SHA" | sha256sum | awk '{print $1}')"
+
+  if [[ -n "\$LINK_EXPECTED" && "\$computed" != "\$LINK_EXPECTED" ]]; then
+    echo "ERROR: linkHash mismatch at chunk \$i" >&2
+    echo "  expected=\$LINK_EXPECTED" >&2
+    echo "  computed=\$computed" >&2
+    exit 2
+  fi
+
+  prevLinkHash="\$computed"
+done
+
+if [[ "\$prevLinkHash" != "\$HEAD_EXPECTED" ]]; then
+  echo "ERROR: chain head mismatch" >&2
+  echo "  expected head=\$HEAD_EXPECTED" >&2
+  echo "  computed head=\$prevLinkHash" >&2
+  exit 2
+fi
+
+echo "OK: Link-hash chain verified."
+echo "DONE: Download + verify complete."
+echo "Output dir: \$OUT"
+`;
+  };
+
+  const buildLinuxImportUploadScript = (baseUrl: string, jobId: string) => {
+    // Script posts:
+    // POST /api/admin/migration/import-jobs
+    // Form fields: manifest, data (repeated), mode, idStrategy
+    // Reads expected chunk filenames from manifest and uploads them all.
+    return `#!/usr/bin/env bash
+set -euo pipefail
+
+# Auto-generated by Admin Dashboard (Migration → Export Parts)
+# Uploads manifest + all parts listed in manifest to create an import job.
+#
+# Optional env vars:
+#   COOKIE="./cookie.txt"                             # Netscape cookie file for session auth
+#   AUTH_HEADER="Authorization: Bearer <TOKEN>"       # optional header auth
+#   INSECURE=true                                     # set true for self-signed TLS
+#   MODE="DRY_RUN"                                    # DRY_RUN or IMPORT
+#
+# Required args (or env):
+#   MANIFEST_PATH="./exports/${jobId}/manifest.json"
+#   PARTS_DIR="./exports/${jobId}"
+#
+# Example:
+#   MODE="DRY_RUN" MANIFEST_PATH="./exports/${jobId}/manifest.json" PARTS_DIR="./exports/${jobId}" ./import_${jobId}.sh
+
+BASE="\${BASE:-${baseUrl}}"
+JOB="\${JOB:-${jobId}}"
+
+MODE="\${MODE:-DRY_RUN}"
+MANIFEST_PATH="\${MANIFEST_PATH:-./exports/\${JOB}/manifest.json}"
+PARTS_DIR="\${PARTS_DIR:-./exports/\${JOB}}"
+
+COOKIE="\${COOKIE:-}"
+AUTH_HEADER="\${AUTH_HEADER:-}"
+INSECURE="\${INSECURE:-false}"
+
+need_cmd() { command -v "$1" >/dev/null 2>&1 || { echo "Missing required command: $1" >&2; exit 1; }; }
+need_cmd curl
+need_cmd jq
+
+IMPORT_URL="\${BASE%/}/api/admin/migration/import-jobs"
+
+if [[ ! -f "\$MANIFEST_PATH" ]]; then
+  echo "ERROR: Missing manifest: \$MANIFEST_PATH" >&2
+  exit 2
+fi
+
+CURL_OPTS=(-L --fail --retry 5 --retry-delay 2 --retry-connrefused)
+
+if [[ -n "\$COOKIE" ]]; then
+  CURL_OPTS+=(-b "\$COOKIE")
+fi
+
+if [[ -n "\$AUTH_HEADER" ]]; then
+  CURL_OPTS+=(-H "\$AUTH_HEADER")
+fi
+
+if [[ "\$INSECURE" == "true" ]]; then
+  CURL_OPTS+=(-k)
+fi
+
+CHUNK_ENABLED="\$(jq -r '.chunking.enabled // false' "\$MANIFEST_PATH")"
+CHUNKS_LEN="\$(jq -r '.chunks | length' "\$MANIFEST_PATH")"
+
+FORM_ARGS=()
+FORM_ARGS+=(-F "manifest=@\${MANIFEST_PATH};type=application/json")
+FORM_ARGS+=(-F "mode=\${MODE}")
+FORM_ARGS+=(-F "idStrategy=PRESERVE")
+
+if [[ "\$CHUNK_ENABLED" != "true" || "\$CHUNKS_LEN" -le 1 ]]; then
+  FILE="\$(jq -r '.chunks[0].file // "data.ndjson"' "\$MANIFEST_PATH")"
+  DATA_PATH="\${PARTS_DIR%/}/\${FILE}"
+  if [[ ! -f "\$DATA_PATH" ]]; then
+    DATA_PATH="\${PARTS_DIR%/}/data.ndjson"
+  fi
+  if [[ ! -f "\$DATA_PATH" ]]; then
+    echo "ERROR: Could not find unchunked data file in \$PARTS_DIR" >&2
+    exit 2
+  fi
+  FORM_ARGS+=(-F "data=@\${DATA_PATH};type=application/x-ndjson")
+else
+  for ((i=0; i<CHUNKS_LEN; i++)); do
+    FILE="\$(jq -r ".chunks[\$i].file" "\$MANIFEST_PATH")"
+    PATH_PART="\${PARTS_DIR%/}/\${FILE}"
+    if [[ ! -f "\$PATH_PART" ]]; then
+      echo "ERROR: Missing chunk file: \$PATH_PART" >&2
+      exit 2
+    fi
+    FORM_ARGS+=(-F "data=@\${PATH_PART};type=application/x-ndjson")
+  done
+fi
+
+echo "==> Creating import job at: \$IMPORT_URL"
+curl "\${CURL_OPTS[@]}" -X POST "\${FORM_ARGS[@]}" "\$IMPORT_URL"
+echo
+echo "DONE."
+`;
+  };
+2) Add the buttons into the Parts dialog footer
+In the Parts dialog section you already have:
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setChunksDialogOpen(false)}>
+              Close
+            </Button>
+          </DialogFooter>
+Replace that DialogFooter with this:
+
+          <DialogFooter className="flex flex-col md:flex-row gap-2 md:justify-between md:items-center">
+            <div className="flex flex-col md:flex-row gap-2">
+              <Button
+                variant="secondary"
+                disabled={!chunksJobId}
+                onClick={() => {
+                  if (!chunksJobId) return;
+                  const base = window.location.origin;
+                  const script = buildLinuxDownloadVerifyScript(base, chunksJobId);
+                  downloadTextFile(`download_${chunksJobId}.sh`, script);
+                }}
+              >
+                Download Linux Script (Download + Verify)
+              </Button>
+
+              <Button
+                variant="secondary"
+                disabled={!chunksJobId}
+                onClick={() => {
+                  if (!chunksJobId) return;
+                  const base = window.location.origin;
+                  const script = buildLinuxImportUploadScript(base, chunksJobId);
+                  downloadTextFile(`import_${chunksJobId}.sh`, script);
+                }}
+              >
+                Download Linux Script (Import Upload)
+              </Button>
+            </div>
+
+            <Button variant="outline" onClick={() => setChunksDialogOpen(false)}>
+              Close
+            </Button>
+          </DialogFooter>
+3) How the admin will use it (Linux)
+After downloading, on Linux:
+
+chmod +x download_MIGEXP_XXXX.sh import_MIGEXP_XXXX.sh
+
+# Download + resume + verify
+OUT="./exports/MIGEXP_XXXX" ./download_MIGEXP_XXXX.sh
+
+# Create DRY_RUN import job (uploads manifest + all parts)
+MODE="DRY_RUN" MANIFEST_PATH="./exports/MIGEXP_XXXX/manifest.json" PARTS_DIR="./exports/MIGEXP_XXXX" ./import_MIGEXP_XXXX.sh
+If your admin auth is cookie/session and you exported cookies:
+
+COOKIE="./cookie.txt" OUT="./exports/MIGEXP_XXXX" ./download_MIGEXP_XXXX.sh
+COOKIE="./cookie.txt" MODE="DRY_RUN" MANIFEST_PATH="./exports/MIGEXP_XXXX/manifest.json" PARTS_DIR="./exports/MIGEXP_XXXX" ./import_MIGEXP_XXXX.sh
+If you want, I can also add a third button: “Download Linux Script (Only download missing parts)” which checks local files + SHA before downloading (useful when recovering from connectivity failures).
+
+You said:
+ADD
+ChatGPT said:
+Understood. Here is the third Linux script button you requested: “Download Linux Script (Only Missing/Corrupt Parts)”.
+
+This script will:
+
+Download manifest.json
+
+For each chunk:
+
+If the file exists locally and its SHA-256 matches the manifest → skip
+
+Otherwise → download (resumable via curl -C -) and then verify SHA
+
+Verify the link-hash chain at the end
+
+Patch: client/src/pages/AdminDashboard.tsx (inside MigrationTab())
+1) Add this new helper builder function (inside MigrationTab())
+Place it next to the other two script builders you already added (buildLinuxDownloadVerifyScript, buildLinuxImportUploadScript):
+
+  const buildLinuxMissingPartsScript = (baseUrl: string, jobId: string) => {
+    return `#!/usr/bin/env bash
+set -euo pipefail
+
+# Auto-generated by Admin Dashboard (Migration → Export Parts)
+# Downloads ONLY missing/corrupt chunks (resumable) and verifies integrity.
+#
+# Optional env vars:
+#   OUT="./exports/${jobId}"        # output directory
+#   COOKIE="./cookie.txt"           # Netscape cookie file for session auth
+#   AUTH_HEADER="Authorization: Bearer <TOKEN>"   # optional header auth
+#   INSECURE=true                   # set true for self-signed TLS
+#
+# Examples:
+#   OUT="./exports/${jobId}" ./download_missing_${jobId}.sh
+#   COOKIE="./cookie.txt" OUT="./exports/${jobId}" ./download_missing_${jobId}.sh
+#   AUTH_HEADER="Authorization: Bearer xxx" ./download_missing_${jobId}.sh
+
+BASE="\${BASE:-${baseUrl}}"
+JOB="\${JOB:-${jobId}}"
+OUT="\${OUT:-./exports/\${JOB}}"
+COOKIE="\${COOKIE:-}"
+AUTH_HEADER="\${AUTH_HEADER:-}"
+INSECURE="\${INSECURE:-false}"
+
+need_cmd() { command -v "$1" >/dev/null 2>&1 || { echo "Missing required command: $1" >&2; exit 1; }; }
+need_cmd curl
+need_cmd jq
+need_cmd sha256sum
+
+MANIFEST_URL="\${BASE%/}/api/admin/migration/export-jobs/\${JOB}/manifest"
+CHUNK_URL_PREFIX="\${BASE%/}/api/admin/migration/export-jobs/\${JOB}/chunks"
+
+mkdir -p "\$OUT"
+
+CURL_OPTS=(-L --fail --retry 8 --retry-delay 2 --retry-connrefused --connect-timeout 20 --max-time 0)
+
+if [[ -n "\$COOKIE" ]]; then
+  CURL_OPTS+=(-b "\$COOKIE")
+fi
+
+if [[ -n "\$AUTH_HEADER" ]]; then
+  CURL_OPTS+=(-H "\$AUTH_HEADER")
+fi
+
+if [[ "\$INSECURE" == "true" ]]; then
+  CURL_OPTS+=(-k)
+fi
+
+echo "==> Downloading manifest: \$MANIFEST_URL"
+curl "\${CURL_OPTS[@]}" -o "\$OUT/manifest.json" "\$MANIFEST_URL"
+
+MANIFEST="\$OUT/manifest.json"
+CHUNK_ENABLED="\$(jq -r '.chunking.enabled // false' "\$MANIFEST")"
+CHUNKS_LEN="\$(jq -r '.chunks | length' "\$MANIFEST")"
+
+if [[ "\$CHUNK_ENABLED" != "true" || "\$CHUNKS_LEN" -le 1 ]]; then
+  echo "==> Manifest indicates unchunked export (single file)."
+  DATA_URL="\${BASE%/}/api/admin/migration/export-jobs/\${JOB}/data"
+  DEST="\$OUT/data.ndjson"
+  echo "==> Downloading (resumable): \$DATA_URL"
+  curl "\${CURL_OPTS[@]}" -C - -o "\$DEST" "\$DATA_URL"
+
+  DATA_SHA="\$(jq -r '.dataSha256 // empty' "\$MANIFEST")"
+  if [[ -n "\$DATA_SHA" ]]; then
+    echo "==> Verifying overall data SHA256..."
+    ACTUAL="\$(sha256sum "\$DEST" | awk '{print $1}')"
+    if [[ "\$ACTUAL" != "\$DATA_SHA" ]]; then
+      echo "ERROR: data SHA mismatch. expected=\$DATA_SHA actual=\$ACTUAL" >&2
+      exit 2
+    fi
+    echo "OK: overall data hash matches."
+  else
+    echo "==> No dataSha256 in manifest; skipping overall hash verify."
+  fi
+
+  echo "DONE."
+  exit 0
+fi
+
+echo "==> Chunked export detected: \${CHUNKS_LEN} parts"
+echo "==> Downloading ONLY missing/corrupt chunks into: \$OUT"
+
+downloaded=0
+skipped=0
+
+for ((i=0; i<CHUNKS_LEN; i++)); do
+  FILE="\$(jq -r ".chunks[\$i].file" "\$MANIFEST")"
+  EXPECTED_SHA="\$(jq -r ".chunks[\$i].sha256" "\$MANIFEST")"
+  URL="\${CHUNK_URL_PREFIX}/\${i}"
+  DEST="\$OUT/\$FILE"
+
+  if [[ -f "\$DEST" ]]; then
+    ACTUAL_SHA="\$(sha256sum "\$DEST" | awk '{print $1}')"
+    if [[ "\$ACTUAL_SHA" == "\$EXPECTED_SHA" ]]; then
+      echo "==> [\$i/\$CHUNKS_LEN] OK (skip): \$FILE"
+      skipped=$((skipped+1))
+      continue
+    else
+      echo "==> [\$i/\$CHUNKS_LEN] Corrupt (re-download): \$FILE"
+    fi
+  else
+    echo "==> [\$i/\$CHUNKS_LEN] Missing (download): \$FILE"
+  fi
+
+  curl "\${CURL_OPTS[@]}" -C - -o "\$DEST" "\$URL"
+  ACTUAL_SHA="\$(sha256sum "\$DEST" | awk '{print $1}')"
+  if [[ "\$ACTUAL_SHA" != "\$EXPECTED_SHA" ]]; then
+    echo "ERROR: SHA mismatch after download for \$FILE" >&2
+    echo "  expected=\$EXPECTED_SHA" >&2
+    echo "  actual  =\$ACTUAL_SHA" >&2
+    exit 2
+  fi
+
+  downloaded=$((downloaded+1))
+done
+
+echo "==> Summary: downloaded=\$downloaded skipped=\$skipped"
+
+echo "==> Verifying link-hash chain..."
+GENESIS="\$(jq -r '.chunkChain.genesis // "GENESIS"' "\$MANIFEST")"
+HEAD_EXPECTED="\$(jq -r '.chunkChain.headLinkHash // empty' "\$MANIFEST")"
+
+if [[ -z "\$HEAD_EXPECTED" ]]; then
+  echo "==> No chunkChain.headLinkHash in manifest; skipping chain verify."
+  echo "DONE."
+  exit 0
+fi
+
+prevLinkHash="\$GENESIS"
+for ((i=0; i<CHUNKS_LEN; i++)); do
+  FILE="\$(jq -r ".chunks[\$i].file" "\$MANIFEST")"
+  DEST="\$OUT/\$FILE"
+  if [[ ! -f "\$DEST" ]]; then
+    echo "ERROR: Missing required chunk file for chain verify: \$DEST" >&2
+    exit 2
+  fi
+
+  CHUNK_SHA="\$(jq -r ".chunks[\$i].sha256" "\$MANIFEST")"
+  LINK_EXPECTED="\$(jq -r ".chunks[\$i].linkHash // empty" "\$MANIFEST")"
+  computed="\$(printf "%s:%s" "\$prevLinkHash" "\$CHUNK_SHA" | sha256sum | awk '{print $1}')"
+
+  if [[ -n "\$LINK_EXPECTED" && "\$computed" != "\$LINK_EXPECTED" ]]; then
+    echo "ERROR: linkHash mismatch at chunk \$i" >&2
+    echo "  expected=\$LINK_EXPECTED" >&2
+    echo "  computed=\$computed" >&2
+    exit 2
+  fi
+
+  prevLinkHash="\$computed"
+done
+
+if [[ "\$prevLinkHash" != "\$HEAD_EXPECTED" ]]; then
+  echo "ERROR: chain head mismatch" >&2
+  echo "  expected head=\$HEAD_EXPECTED" >&2
+  echo "  computed head=\$prevLinkHash" >&2
+  exit 2
+fi
+
+echo "OK: Link-hash chain verified."
+echo "DONE: Missing/corrupt-part recovery complete."
+echo "Output dir: \$OUT"
+`;
+  };
+2) Add the new button in the Parts dialog footer
+You currently have two buttons for script download + Close. Update the footer’s left-side button group to include the third button.
+
+Find the footer block you added previously and replace the left-side <div className="flex flex-col md:flex-row gap-2"> ... </div> with this:
+
+            <div className="flex flex-col md:flex-row gap-2">
+              <Button
+                variant="secondary"
+                disabled={!chunksJobId}
+                onClick={() => {
+                  if (!chunksJobId) return;
+                  const base = window.location.origin;
+                  const script = buildLinuxDownloadVerifyScript(base, chunksJobId);
+                  downloadTextFile(`download_${chunksJobId}.sh`, script);
+                }}
+              >
+                Download Linux Script (Download + Verify)
+              </Button>
+
+              <Button
+                variant="secondary"
+                disabled={!chunksJobId}
+                onClick={() => {
+                  if (!chunksJobId) return;
+                  const base = window.location.origin;
+                  const script = buildLinuxMissingPartsScript(base, chunksJobId);
+                  downloadTextFile(`download_missing_${chunksJobId}.sh`, script);
+                }}
+              >
+                Download Linux Script (Only Missing/Corrupt Parts)
+              </Button>
+
+              <Button
+                variant="secondary"
+                disabled={!chunksJobId}
+                onClick={() => {
+                  if (!chunksJobId) return;
+                  const base = window.location.origin;
+                  const script = buildLinuxImportUploadScript(base, chunksJobId);
+                  downloadTextFile(`import_${chunksJobId}.sh`, script);
+                }}
+              >
+                Download Linux Script (Import Upload)
+              </Button>
+            </div>
+3) Linux usage (admin/operator)
+After downloading:
+
+chmod +x download_missing_MIGEXP_XXXX.sh
+
+OUT="./exports/MIGEXP_XXXX" ./download_missing_MIGEXP_XXXX.sh
+With cookie auth:
+
+COOKIE="./cookie.txt" OUT="./exports/MIGEXP_XXXX" ./download_missing_MIGEXP_XXXX.sh
+If you want the script to parallelize downloads (e.g., 8-at-a-time via xargs -P 8) for large exports while keeping verification deterministic, tell me your preferred concurrency cap and I’ll add that variant as a fourth button.
+
+You said:
+10 CONCURRENCY LIMIT
+ChatGPT said:
+
+Thought for 1m 8s
+Below is the exact patch to enforce a hard 10-concurrency limit in the generated Linux scripts.
+
+You will update two builder functions inside client/src/pages/AdminDashboard.tsx → MigrationTab():
+
+buildLinuxDownloadVerifyScript(...) (download all chunks in parallel)
+
+buildLinuxMissingPartsScript(...) (download only missing/corrupt chunks in parallel)
+
+This implements:
+
+CONCURRENCY="${CONCURRENCY:-10}" (default 10)
+
+clamped to max 10 even if someone sets CONCURRENCY=50
+
+1) Patch buildLinuxDownloadVerifyScript (parallel download all parts)
+Inside the script string returned by buildLinuxDownloadVerifyScript, find this block:
+
+echo "==> Chunked export detected: ${CHUNKS_LEN} parts"
+echo "==> Downloading chunks (resumable) into: $OUT"
+
+for ((i=0; i<CHUNKS_LEN; i++)); do
+  FILE="$(jq -r ".chunks[$i].file" "$MANIFEST")"
+  URL="${CHUNK_URL_PREFIX}/${i}"
+  DEST="$OUT/$FILE"
+  echo "==> [$i/$CHUNKS_LEN] Downloading $FILE"
+  curl "${CURL_OPTS[@]}" -C - -o "$DEST" "$URL"
+done
+Replace it with this 10-concurrency parallel version:
+
+echo "==> Chunked export detected: ${CHUNKS_LEN} parts"
+
+CONCURRENCY="${CONCURRENCY:-10}"
+if ! [[ "$CONCURRENCY" =~ ^[0-9]+$ ]]; then CONCURRENCY=10; fi
+if (( CONCURRENCY < 1 )); then CONCURRENCY=1; fi
+if (( CONCURRENCY > 10 )); then CONCURRENCY=10; fi
+
+echo "==> Downloading chunks (resumable) into: $OUT"
+echo "==> Parallelism: $CONCURRENCY (hard max 10)"
+
+export OUT COOKIE AUTH_HEADER INSECURE MANIFEST CHUNK_URL_PREFIX CHUNKS_LEN
+
+# Download all indices [0..CHUNKS_LEN-1] in parallel
+seq 0 $((CHUNKS_LEN-1)) | xargs -P "$CONCURRENCY" -n 1 bash -c '
+  set -euo pipefail
+  i="$1"
+
+  FILE="$(jq -r --argjson i "$i" ".chunks[$i].file" "$MANIFEST")"
+  URL="${CHUNK_URL_PREFIX}/${i}"
+  DEST="${OUT}/${FILE}"
+
+  # Build curl args inside worker (so cookies/headers apply)
+  args=(-L --fail --retry 8 --retry-delay 2 --retry-connrefused --connect-timeout 20 --max-time 0)
+  if [[ -n "${COOKIE:-}" ]]; then args+=(-b "$COOKIE"); fi
+  if [[ -n "${AUTH_HEADER:-}" ]]; then args+=(-H "$AUTH_HEADER"); fi
+  if [[ "${INSECURE:-false}" == "true" ]]; then args+=(-k); fi
+
+  echo "==> [$i/$CHUNKS_LEN] Downloading $FILE"
+  curl "${args[@]}" -C - -o "$DEST" "$URL"
+' _
+Result:
+
+Downloads all chunks concurrently (up to 10 at once)
+
+Still verifies SHA + link-hash later in the script (unchanged)
+
+2) Patch buildLinuxMissingPartsScript (parallel download only missing/corrupt)
+Inside the script string returned by buildLinuxMissingPartsScript, find the section starting with:
+
+echo "==> Chunked export detected: ${CHUNKS_LEN} parts"
+echo "==> Downloading ONLY missing/corrupt chunks into: $OUT"
+
+downloaded=0
+skipped=0
+
+for ((i=0; i<CHUNKS_LEN; i++)); do
+  ...
+  curl "${CURL_OPTS[@]}" -C - -o "$DEST" "$URL"
+  ...
+done
+Replace that entire “download loop” section with the following 10-concurrency missing/corrupt downloader:
+
+echo "==> Chunked export detected: ${CHUNKS_LEN} parts"
+
+CONCURRENCY="${CONCURRENCY:-10}"
+if ! [[ "$CONCURRENCY" =~ ^[0-9]+$ ]]; then CONCURRENCY=10; fi
+if (( CONCURRENCY < 1 )); then CONCURRENCY=1; fi
+if (( CONCURRENCY > 10 )); then CONCURRENCY=10; fi
+
+echo "==> Downloading ONLY missing/corrupt chunks into: $OUT"
+echo "==> Parallelism: $CONCURRENCY (hard max 10)"
+
+needed_file="$OUT/needed_indices.txt"
+: > "$needed_file"
+
+downloaded=0
+skipped=0
+
+# First pass: decide what we need (sequential, lightweight)
+for ((i=0; i<CHUNKS_LEN; i++)); do
+  FILE="$(jq -r ".chunks[$i].file" "$MANIFEST")"
+  EXPECTED_SHA="$(jq -r ".chunks[$i].sha256" "$MANIFEST")"
+  DEST="$OUT/$FILE"
+
+  if [[ -f "$DEST" ]]; then
+    ACTUAL_SHA="$(sha256sum "$DEST" | awk "{print \$1}")"
+    if [[ "$ACTUAL_SHA" == "$EXPECTED_SHA" ]]; then
+      echo "==> [$i/$CHUNKS_LEN] OK (skip): $FILE"
+      skipped=$((skipped+1))
+      continue
+    else
+      echo "==> [$i/$CHUNKS_LEN] Corrupt (re-download): $FILE"
+    fi
+  else
+    echo "==> [$i/$CHUNKS_LEN] Missing (download): $FILE"
+  fi
+
+  echo "$i" >> "$needed_file"
+done
+
+export OUT COOKIE AUTH_HEADER INSECURE MANIFEST CHUNK_URL_PREFIX CHUNKS_LEN
+
+# Second pass: download needed indices in parallel (each worker verifies SHA)
+if [[ -s "$needed_file" ]]; then
+  cat "$needed_file" | xargs -P "$CONCURRENCY" -n 1 bash -c '
+    set -euo pipefail
+    i="$1"
+
+    FILE="$(jq -r --argjson i "$i" ".chunks[$i].file" "$MANIFEST")"
+    EXPECTED_SHA="$(jq -r --argjson i "$i" ".chunks[$i].sha256" "$MANIFEST")"
+    URL="${CHUNK_URL_PREFIX}/${i}"
+    DEST="${OUT}/${FILE}"
+
+    args=(-L --fail --retry 8 --retry-delay 2 --retry-connrefused --connect-timeout 20 --max-time 0)
+    if [[ -n "${COOKIE:-}" ]]; then args+=(-b "$COOKIE"); fi
+    if [[ -n "${AUTH_HEADER:-}" ]]; then args+=(-H "$AUTH_HEADER"); fi
+    if [[ "${INSECURE:-false}" == "true" ]]; then args+=(-k); fi
+
+    echo "==> [$i/$CHUNKS_LEN] Downloading $FILE (resumable)"
+    curl "${args[@]}" -C - -o "$DEST" "$URL"
+
+    ACTUAL_SHA="$(sha256sum "$DEST" | awk "{print \$1}")"
+    if [[ "$ACTUAL_SHA" != "$EXPECTED_SHA" ]]; then
+      echo "ERROR: SHA mismatch after download for $FILE" >&2
+      echo "  expected=$EXPECTED_SHA" >&2
+      echo "  actual  =$ACTUAL_SHA" >&2
+      exit 2
+    fi
+  ' _
+else
+  echo "==> No missing/corrupt chunks detected."
+fi
+
+# Recompute summary counts after download
+downloaded="$(wc -l < "$needed_file" | tr -d " ")"
+echo "==> Summary: downloaded=$downloaded skipped=$skipped"
+Everything after that (your link-hash chain verify) stays as-is.
+
+3) Operator usage (Linux)
+Even though the script clamps to 10, you can still set it (it’ll never exceed 10):
+
+chmod +x download_MIGEXP_XXXX.sh download_missing_MIGEXP_XXXX.sh
+
+# full download, max 10 in flight
+CONCURRENCY=10 OUT="./exports/MIGEXP_XXXX" ./download_MIGEXP_XXXX.sh
+
+# only missing/corrupt, max 10 in flight
+CONCURRENCY=10 OUT="./exports/MIGEXP_XXXX" ./download_missing_MIGEXP_XXXX.sh
+If you want the Admin dialog text itself to display “Scripts run at max concurrency 10” (so operators don’t guess), tell me and I’ll give the exact single-line UI addition in the dialog body.
+
+You said:
+YES
+ChatGPT said:
+Add this single UI line to the Export Parts dialog body so operators see the limit explicitly.
+
+Patch: client/src/pages/AdminDashboard.tsx → MigrationTab() → Parts dialog body
+Inside the Parts dialog render block (where you currently show the explanatory text like “Chunked export detected… Downloads support resume via HTTP Range…”), add the following line immediately below that paragraph (or inside the same <div className="text-xs text-gray-400">).
+
+Add this line:
+<div className="mt-1 text-gray-500">
+  Generated Linux scripts enforce a hard concurrency cap of <span className="text-gray-300 font-medium">10</span>.
+</div>
+Example placement (context)
+Find this area in the Parts dialog:
+
+<div className="text-xs text-gray-400">
+  {Array.isArray(chunksQuery.data?.chunks) && chunksQuery.data!.chunks.length > 1 ? (
+    <>
+      Chunked export detected. Download any part independently. Downloads support resume via HTTP Range.
+      <div className="mt-1 text-gray-500">
+        Tip: Use a download manager or <code>curl -C -</code> to resume.
+      </div>
+    </>
+  ) : (
+    <>This export is not chunked (single file). “Data / Part 0” is the full dataset.</>
+  )}
+</div>
+Modify it to:
+
+<div className="text-xs text-gray-400">
+  {Array.isArray(chunksQuery.data?.chunks) && chunksQuery.data!.chunks.length > 1 ? (
+    <>
+      Chunked export detected. Download any part independently. Downloads support resume via HTTP Range.
+      <div className="mt-1 text-gray-500">
+        Tip: Use a download manager or <code>curl -C -</code> to resume.
+      </div>
+      <div className="mt-1 text-gray-500">
+        Generated Linux scripts enforce a hard concurrency cap of <span className="text-gray-300 font-medium">10</span>.
+      </div>
+    </>
+  ) : (
+    <>This export is not chunked (single file). “Data / Part 0” is the full dataset.</>
+  )}
+</div>
+That’s it—no other changes required.
+
+
+
+

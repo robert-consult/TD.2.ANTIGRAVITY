@@ -1,0 +1,514 @@
+Here’s exactly what to change, nothing extra.
+
+---
+
+## 1. Files to delete in the **non-working** app (`TradingCentral-2`)
+
+From the root of `TradingCentral-2/` delete this folder and its files:
+
+```text
+client/src/modules/tradingview/
+    TradingViewChart.tsx
+    constants.ts
+    index.ts
+```
+
+So the entire `client/src/modules/tradingview` directory goes away.
+
+Do **not** touch any other files.
+
+---
+
+## 2. File to replace (use the working app version **as is**)
+
+In the non-working app, replace:
+
+```text
+TradingCentral-2/client/src/pages/ChartScreen.tsx
+```
+
+with this exact file content from the **working** app:
+
+```tsx
+import { useQuotes } from "@/hooks/use-quotes";
+import { useState, useEffect, useRef } from "react";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { toast } from "@/hooks/use-toast";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { apiRequest } from "@/lib/queryClient";
+
+// Declare TradingView type for TypeScript
+declare global {
+  interface Window {
+    TradingView?: any;
+    tradingViewWidgetConfig?: Record<string, any>;
+  }
+}
+
+interface ChartScreenProps {
+  selectedSymbol: string;
+}
+
+type ChartPeriod = "1H" | "1D" | "1W" | "1M";
+
+// Map our symbols to TradingView symbols
+const tradingViewSymbolMap: Record<string, string> = {
+  "USDJPY": "CMCMARKETS:USDJPY",
+  "EURUSD": "CMCMARKETS:EURUSD",
+  "GBPUSD": "CMCMARKETS:GBPUSD",
+  "AUDUSD": "CMCMARKETS:AUDUSD",
+};
+
+// Map our periods to TradingView intervals
+const periodIntervalMap: Record<ChartPeriod, string> = {
+  "1H": "5",
+  "1D": "30",
+  "1W": "240",
+  "1M": "D",
+};
+
+export default function ChartScreen({ selectedSymbol }: ChartScreenProps) {
+  const { quotes, isLoading } = useQuotes();
+  const [activePeriod, setActivePeriod] = useState<ChartPeriod>("1D");
+
+  const currentQuote = quotes?.find(q => q.symbol === selectedSymbol);
+
+  // Chart refs and state
+  const chartContainerRef = useRef<HTMLDivElement | null>(null);
+  const widgetInstanceRef = useRef<any>(null);
+  const [tradingViewLoaded, setTradingViewLoaded] = useState(false);
+
+  const queryClient = useQueryClient();
+
+  // Trade controls
+  const [lots, setLots] = useState<number>(1);
+  const [currentTradeType, setCurrentTradeType] = useState<"BUY" | "SELL">("BUY");
+
+  // Load TradingView script once
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    // If TradingView script already exists, just mark as loaded
+    if (window.TradingView) {
+      setTradingViewLoaded(true);
+      return;
+    }
+
+    // If script tag already present, wait for it to load
+    const existingScript = document.getElementById("tradingview-script");
+    if (existingScript) {
+      existingScript.addEventListener("load", () => setTradingViewLoaded(true), { once: true });
+      return;
+    }
+
+    // Otherwise, create script tag
+    const script = document.createElement("script");
+    script.id = "tradingview-script";
+    script.type = "text/javascript";
+    script.src = "https://s3.tradingview.com/tv.js";
+    script.async = true;
+
+    script.onload = () => {
+      setTradingViewLoaded(true);
+    };
+
+    script.onerror = (err) => {
+      console.error("Failed to load TradingView script:", err);
+      toast({
+        title: "Chart Error",
+        description: "Failed to load charting library. Please refresh the page.",
+        variant: "destructive",
+      });
+    };
+
+    document.head.appendChild(script);
+
+    return () => {
+      script.onload = null;
+      script.onerror = null;
+    };
+  }, []);
+
+  // Initialize / update TradingView widget whenever symbol/period changes
+  useEffect(() => {
+    if (!tradingViewLoaded || !chartContainerRef.current || typeof window === "undefined") return;
+
+    if (!window.TradingView) {
+      console.warn("TradingView global object is not available yet");
+      return;
+    }
+
+    const container = chartContainerRef.current;
+    const containerId = container.id || "tradingview_chart";
+
+    if (!container.id) {
+      container.id = containerId;
+    }
+
+    // If a widget instance already exists, remove it
+    if (widgetInstanceRef.current && typeof widgetInstanceRef.current.remove === "function") {
+      try {
+        widgetInstanceRef.current.remove();
+      } catch (err) {
+        console.warn("Error removing existing TradingView widget:", err);
+      }
+      widgetInstanceRef.current = null;
+    }
+
+    const tvSymbol = tradingViewSymbolMap[selectedSymbol] || `CMCMARKETS:${selectedSymbol}`;
+    const interval = periodIntervalMap[activePeriod] || "D";
+
+    try {
+      widgetInstanceRef.current = new window.TradingView.widget({
+        autosize: true,
+        symbol: tvSymbol,
+        interval,
+        timezone: "Etc/UTC",
+        theme: "dark",
+        style: "1",
+        locale: "en",
+        enable_publishing: false,
+        allow_symbol_change: true,
+        container_id: containerId,
+        hide_top_toolbar: false,
+        hide_side_toolbar: false,
+        withdateranges: true,
+        studies: [
+          "RSI@tv-basicstudies",
+          "MASimple@tv-basicstudies"
+        ],
+        backgroundColor: "#121212",
+        toolbar_bg: "#121212",
+      });
+    } catch (err) {
+      console.error("Error creating TradingView widget:", err);
+      toast({
+        title: "Chart Error",
+        description: "Unable to initialize chart. Please try refreshing.",
+        variant: "destructive",
+      });
+    }
+
+    return () => {
+      if (widgetInstanceRef.current && typeof widgetInstanceRef.current.remove === "function") {
+        try {
+          widgetInstanceRef.current.remove();
+        } catch (err) {
+          console.warn("Error cleaning up TradingView widget:", err);
+        }
+        widgetInstanceRef.current = null;
+      }
+    };
+  }, [selectedSymbol, activePeriod, tradingViewLoaded, toast]);
+
+  const executeTrade = useMutation({
+    mutationFn: async (data: {
+      symbol: string;
+      type: "BUY" | "SELL";
+      orderType: string;
+      lots: number;
+      openPrice: number;
+      symbolId: number;
+    }) => {
+      return apiRequest("POST", "/api/trades", data);
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["/api/trades"] });
+      await queryClient.invalidateQueries({ queryKey: ["/api/trades/open"] });
+      await queryClient.invalidateQueries({ queryKey: ["/api/auth/current-user"] });
+
+      toast({
+        title: "Trade Executed",
+        description: "Your trade has been placed successfully.",
+      });
+    },
+    onError: (error: any) => {
+      console.error("Trade execution error:", error);
+      toast({
+        title: "Trade Failed",
+        description: error.message || "Failed to execute trade. Please try again.",
+        variant: "destructive",
+      });
+    }
+  });
+
+  // Get the symbol ID for the selected symbol
+  const [symbolList, setSymbolList] = useState<any[]>([]);
+
+  // Fetch symbol configurations
+  useEffect(() => {
+    const fetchSymbols = async () => {
+      try {
+        const response = await fetch("/api/config/symbols", {
+          credentials: "include",
+        });
+
+        if (!response.ok) {
+          throw new Error("Failed to fetch symbol configurations");
+        }
+
+        const data = await response.json();
+        setSymbolList(data);
+      } catch (error: any) {
+        console.error("Error fetching symbol configurations:", error);
+      }
+    };
+
+    fetchSymbols();
+  }, []);
+
+  const getSymbolId = (symbol: string): number | null => {
+    const symbolEntry = symbolList.find((s) => s.symbol === symbol);
+    return symbolEntry ? symbolEntry.id : null;
+  };
+
+  const handleTrade = async (action: "buy" | "sell") => {
+    if (!symbolList.length) {
+      toast({
+        title: "Symbol Configurations Missing",
+        description:
+          "Symbol configurations are not loaded yet. Please wait a moment and try again.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const symbolId = getSymbolId(selectedSymbol);
+    if (!symbolId) {
+      toast({
+        title: "Symbol Not Found",
+        description:
+          "Could not find configuration for the selected symbol. Please contact support.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (!lots || lots <= 0) {
+      toast({
+        title: "Invalid Lot Size",
+        description: "Please enter a valid lot size greater than 0.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Get current price from quotes
+    if (!currentQuote || !currentQuote.bid || !currentQuote.ask) {
+      toast({
+        title: "Trade Error",
+        description: "Current price is not available",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Use the correct price based on trade type
+    const tradeType = action.toUpperCase() as "BUY" | "SELL";
+    setCurrentTradeType(tradeType);
+    const openPrice = tradeType === "BUY" ? currentQuote.ask : currentQuote.bid;
+
+    try {
+      executeTrade.mutate({
+        symbol: selectedSymbol,
+        type: tradeType,
+        orderType: "MARKET",
+        lots: Number(lots),
+        openPrice,
+        symbolId,
+      });
+    } catch (error: any) {
+      console.error("Error executing trade:", error);
+      toast({
+        title: "Trade Error",
+        description: "Failed to execute trade. Please try again.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const isJpyPair = selectedSymbol.includes("JPY");
+  const pricePrecision = isJpyPair ? 2 : 4;
+  const pipMultiplier = isJpyPair ? 100 : 10000;
+
+  return (
+    <div className="h-full flex flex-col bg-[#0F0F0F]">
+      {/* Top bar with title and quote information */}
+      <div className="border-b border-neutral-800 px-4 py-2 flex items-center justify-between">
+        <div>
+          <h1 className="text-sm font-semibold text-white md:text-base">
+            Chart: {selectedSymbol}
+          </h1>
+          <p className="text-xs text-gray-400">
+            Interactive TradingView chart with advanced tools
+          </p>
+        </div>
+
+        {/* Current Quote Summary */}
+        <div className="text-xs md:text-sm text-right text-gray-300">
+          {isLoading ? (
+            <div className="flex items-center gap-2">
+              <Skeleton className="h-4 w-24 bg-neutral-700" />
+              <Skeleton className="h-4 w-24 bg-neutral-700" />
+            </div>
+          ) : currentQuote ? (
+            <div className="space-y-0.5">
+              <div className="flex gap-4 items-center justify-end">
+                <span className="text-gray-400">Bid:</span>
+                <span className="font-mono text-danger-500 font-medium">
+                  {currentQuote.bid.toFixed(pricePrecision)}
+                </span>
+                <span className="text-gray-400">Ask:</span>
+                <span className="font-mono text-success-500 font-medium">
+                  {currentQuote.ask.toFixed(pricePrecision)}
+                </span>
+              </div>
+              <div className="flex gap-4 items-center justify-end">
+                <span className="text-gray-400">Spread:</span>
+                <span className="font-mono text-white">
+                  {((currentQuote.ask - currentQuote.bid) * pipMultiplier).toFixed(1)} pips
+                </span>
+              </div>
+            </div>
+          ) : (
+            <span className="text-gray-500">No market data</span>
+          )}
+        </div>
+      </div>
+
+      {/* Main content area */}
+      <div className="flex-1 flex flex-col lg:flex-row">
+        {/* Chart area */}
+        <div className="flex-1 min-h-0 relative bg-neutral-900">
+          {/* TradingView Chart Container */}
+          <div className="h-full w-full overflow-hidden">
+            {!tradingViewLoaded ? (
+              <div className="flex items-center justify-center h-[55vh] md:h-[70vh] lg:h-full">
+                <div className="flex flex-col items-center gap-3">
+                  <div className="h-10 w-10 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+                  <p className="text-sm text-gray-400">Loading chart...</p>
+                </div>
+              </div>
+            ) : (
+              <div
+                ref={chartContainerRef}
+                id="tradingview_chart"
+                className="w-full h-[55vh] md:h-[70vh] lg:h-full bg-[#121212]"
+              />
+            )}
+          </div>
+
+          {/* Chart overlays */}
+          {currentQuote && (
+            <div className="absolute top-4 right-4 bg-black bg-opacity-75 rounded p-2 border border-gray-800">
+              <div className="grid grid-cols-2 gap-2 text-sm">
+                <span className="text-gray-400">Bid:</span>
+                <span className="font-mono text-danger-500 font-medium text-right">
+                  {currentQuote.bid.toFixed(pricePrecision)}
+                </span>
+                <span className="text-gray-400">Ask:</span>
+                <span className="font-mono text-success-500 font-medium text-right">
+                  {currentQuote.ask.toFixed(pricePrecision)}
+                </span>
+                <span className="text-gray-400">Spread:</span>
+                <span className="font-mono text-white text-right">
+                  {((currentQuote.ask - currentQuote.bid) * pipMultiplier).toFixed(1)} pips
+                </span>
+              </div>
+            </div>
+          )}
+
+          {/* Chart period controls overlay */}
+          <div className="absolute bottom-3 left-3 bg-black bg-opacity-80 rounded-full px-3 py-1.5 flex items-center gap-1">
+            {(["1D", "1H", "1W", "1M"] as ChartPeriod[]).map((period) => (
+              <button
+                key={period}
+                onClick={() => setActivePeriod(period)}
+                className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${
+                  activePeriod === period
+                    ? "bg-blue-500 text-white"
+                    : "bg-transparent text-gray-300 hover:bg-white/10"
+                }`}
+              >
+                {period}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Trade panel */}
+        <div className="w-full lg:w-80 border-t border-neutral-800 lg:border-t-0 lg:border-l bg-[#111111] p-4 space-y-4">
+          <div>
+            <h2 className="text-sm font-semibold text-white mb-1">Quick Trade</h2>
+            <p className="text-xs text-gray-400">Market order at current bid/ask price.</p>
+          </div>
+
+          <div className="flex space-x-3">
+            <Button
+              className={`flex-1 font-bold ${
+                currentTradeType === "SELL"
+                  ? "bg-red-600 hover:bg-red-700"
+                  : "bg-red-500 hover:bg-red-600"
+              } text-white`}
+              onClick={() => handleTrade("sell")}
+              disabled={executeTrade.isPending}
+            >
+              {executeTrade.isPending && currentTradeType === "SELL" ? (
+                <span className="animate-pulse">Processing...</span>
+              ) : currentQuote && currentQuote.bid ? (
+                `SELL @ ${currentQuote.bid.toFixed(selectedSymbol.includes("JPY") ? 2 : 5)}`
+              ) : (
+                "SELL"
+              )}
+            </Button>
+
+            <div className="flex items-center space-x-2">
+              <span className="font-bold text-gray-400">LOTS</span>
+              <Select
+                value={lots.toString()}
+                onValueChange={(value) => setLots(Number(value))}
+                disabled={executeTrade.isPending}
+              >
+                <SelectTrigger className="w-16 bg-neutral-800 border-gray-700">
+                  <SelectValue placeholder="1" />
+                </SelectTrigger>
+                <SelectContent className="max-h-[calc(5*2.25rem)] overflow-y-auto w-16 bg-neutral-900 border-gray-700">
+                  {Array.from({ length: 50 }, (_, i) => i + 1).map((lot) => (
+                    <SelectItem
+                      key={lot}
+                      value={lot.toString()}
+                      className="text-white hover:bg-neutral-800"
+                    >
+                      {lot}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <Button
+              className={`flex-1 font-bold ${
+                currentTradeType === "BUY"
+                  ? "bg-lime-600 hover:bg-lime-700"
+                  : "bg-lime-500 hover:bg-lime-600"
+              } text-white`}
+              onClick={() => handleTrade("buy")}
+              disabled={executeTrade.isPending}
+            >
+              {executeTrade.isPending && currentTradeType === "BUY" ? (
+                <span className="animate-pulse">Processing...</span>
+              ) : currentQuote && currentQuote.ask ? (
+                `BUY @ ${currentQuote.ask.toFixed(selectedSymbol.includes("JPY") ? 2 : 5)}`
+              ) : (
+                "BUY"
+              )}
+            </Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+```

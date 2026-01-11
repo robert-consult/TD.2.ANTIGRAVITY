@@ -1,0 +1,580 @@
+Below is a **drop-in upgrade** that makes the **minimum TP/SL distance = 20 points** and keeps it **consistent everywhere** you listed: **place order (market + pending), pending orders, Edit TP/SL modal, auto-fix presets, active positions, and popup warnings/toasts**.
+
+---
+
+## 1) Frontend — `client/src/components/EditTradeModal.tsx`
+
+### What this fixes/implements
+
+* **Minimum rule changed from 10 → 20 points** (messages + validation).
+* **Presets are a drop-up**: **±20, ±50, ±100, ±150, ±200**.
+* **Preset persists per symbol** via `localStorage`.
+* **Preset auto-applies on modal open** (so the fields match the preset immediately across modal opens).
+
+**Replace the entire file with:**
+
+```tsx
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from "@/components/ui/dropdown-menu";
+import { useForm } from "react-hook-form";
+import { z } from "zod";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useToast } from "@/hooks/use-toast";
+import { useQuotes } from "@/hooks/use-quotes";
+import { Check, ChevronUp } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+
+const schema = z.object({
+  takeProfit: z.union([z.number(), z.nan()]).nullable().optional(),
+  stopLoss: z.union([z.number(), z.nan()]).nullable().optional(),
+});
+
+type FormValues = z.infer<typeof schema>;
+
+interface EditTradeModalProps {
+  trade: any;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}
+
+// Platform rule: minimum TP/SL distance from reference price (points)
+const MIN_POINTS = 20;
+
+export function EditTradeModal({ trade, open, onOpenChange }: EditTradeModalProps) {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const { quotes } = useQuotes();
+  const [validationMessages, setValidationMessages] = useState<{ tp?: string; sl?: string }>({});
+
+  // --- Symbol extraction (robust across shapes) ---
+  const tradeSymbol = useMemo(() => {
+    if (!trade) return "";
+    if (typeof trade.symbol === "string") return trade.symbol;
+    if (typeof trade.symbol === "object" && trade.symbol?.symbol) return trade.symbol.symbol;
+    if (trade.symbolName) return trade.symbolName;
+    if (trade.symbol_code) return trade.symbol_code;
+    return "";
+  }, [trade]);
+
+  const isJpyPair = tradeSymbol.toUpperCase().includes("JPY");
+  const pipSize = isJpyPair ? 0.01 : 0.0001;
+  const minDistance = MIN_POINTS * pipSize;
+  const tolerance = pipSize * 0.01; // small float tolerance
+
+  // --- Per-symbol preset persistence ---
+  const AUTO_FIX_PRESETS = useMemo(() => [20, 50, 100, 150, 200] as const, []);
+
+  const symbolStorageKey = useMemo(() => {
+    const sid = trade?.symbolId ?? trade?.symbol_id;
+    if (sid !== null && sid !== undefined && sid !== "") return `sid-${sid}`;
+    if (tradeSymbol) return `sym-${String(tradeSymbol).toUpperCase()}`;
+    return "global";
+  }, [trade?.symbolId, tradeSymbol]);
+
+  const presetStorageKey = useMemo(() => {
+    return `tc3al:lastPresetPoints:${symbolStorageKey}`;
+  }, [symbolStorageKey]);
+
+  const skipNextSaveRef = useRef(false);
+  const applyOnOpenRef = useRef(false);
+
+  const [lastPresetPoints, setLastPresetPoints] = useState<number>(20);
+
+  // Load preset when symbol changes
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    try {
+      const raw = window.localStorage.getItem(presetStorageKey);
+      const n = raw ? Number(raw) : 20;
+      const allowed = AUTO_FIX_PRESETS as unknown as number[];
+      const value = allowed.includes(n) ? n : 20;
+
+      // Prevent save effect from overwriting the newly-selected symbol key
+      skipNextSaveRef.current = true;
+      setLastPresetPoints(value);
+
+      if (open) applyOnOpenRef.current = true;
+    } catch {
+      skipNextSaveRef.current = true;
+      setLastPresetPoints(20);
+      if (open) applyOnOpenRef.current = true;
+    }
+  }, [presetStorageKey, AUTO_FIX_PRESETS, open]);
+
+  // Save preset per symbol
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (skipNextSaveRef.current) {
+      skipNextSaveRef.current = false;
+      return;
+    }
+    try {
+      window.localStorage.setItem(presetStorageKey, String(lastPresetPoints));
+    } catch {
+      // ignore storage failures
+    }
+  }, [lastPresetPoints, presetStorageKey]);
+
+  // --- Quote helpers ---
+  const getCurrentQuote = () => {
+    const q = quotes?.find((x: any) => x?.symbol === tradeSymbol);
+    return q || null;
+  };
+
+  const getCurrentPrice = () => {
+    const q: any = getCurrentQuote();
+    // prefer mid, then price, then compute from bid/ask
+    const mid = q?.mid ?? q?.price;
+    if (typeof mid === "number" && !Number.isNaN(mid)) return mid;
+    if (typeof q?.bid === "number" && typeof q?.ask === "number") return (q.bid + q.ask) / 2;
+    return trade?.openPrice || 0;
+  };
+
+  // For pending orders, use the execution price based on order type.
+  // For active trades, use current market (mid) price.
+  const getReferencePrice = () => {
+    if (trade?.status === "PENDING") {
+      const ot = String(trade?.orderType ?? "").toLowerCase();
+      if (ot === "limit" && trade?.limitPrice) return trade.limitPrice;
+      if (ot === "stop" && trade?.stopPrice) return trade.stopPrice;
+      return trade?.openPrice || 0;
+    }
+    return getCurrentPrice();
+  };
+
+  const referencePrice = getReferencePrice();
+  const priceLabel = trade?.status === "PENDING" ? "order price" : "current price";
+
+  const form = useForm<FormValues>({
+    resolver: zodResolver(schema),
+    defaultValues: {
+      takeProfit: trade?.takeProfit || undefined,
+      stopLoss: trade?.stopLoss || undefined,
+    },
+  });
+
+  // Keep form in sync when opening or changing trade
+  useEffect(() => {
+    if (!open) return;
+
+    form.reset({
+      takeProfit: trade?.takeProfit || undefined,
+      stopLoss: trade?.stopLoss || undefined,
+    });
+
+    // Mark that we should apply preset once we have lastPresetPoints for this symbol
+    applyOnOpenRef.current = true;
+
+    // Clear stale validation from any prior edit
+    setValidationMessages({});
+  }, [open, trade?.id]);
+
+  // Validation function for TP/SL placement
+  const validateTPSL = (takeProfit: number | null, stopLoss: number | null) => {
+    const messages: { tp?: string; sl?: string } = {};
+
+    const deltaText = isJpyPair ? "0.20" : "0.0020";
+    const ptsText = `${MIN_POINTS} points`;
+
+    if (trade?.type === "BUY") {
+      // BUY: SL below, TP above
+      if (stopLoss !== null && stopLoss > referencePrice - minDistance + tolerance) {
+        messages.sl = `Stop Loss must be at least ${deltaText} (${ptsText}) below ${priceLabel} of ${referencePrice.toFixed(isJpyPair ? 2 : 4)}`;
+      }
+      if (takeProfit !== null && takeProfit < referencePrice + minDistance - tolerance) {
+        messages.tp = `Take Profit must be at least ${deltaText} (${ptsText}) above ${priceLabel} of ${referencePrice.toFixed(isJpyPair ? 2 : 4)}`;
+      }
+    } else if (trade?.type === "SELL") {
+      // SELL: SL above, TP below
+      if (stopLoss !== null && stopLoss < referencePrice + minDistance - tolerance) {
+        messages.sl = `Stop Loss must be at least ${deltaText} (${ptsText}) above ${priceLabel} of ${referencePrice.toFixed(isJpyPair ? 2 : 4)}`;
+      }
+      if (takeProfit !== null && takeProfit > referencePrice - minDistance + tolerance) {
+        messages.tp = `Take Profit must be at least ${deltaText} (${ptsText}) below ${priceLabel} of ${referencePrice.toFixed(isJpyPair ? 2 : 4)}`;
+      }
+    }
+
+    setValidationMessages(messages);
+    return Object.keys(messages).length === 0;
+  };
+
+  // Apply preset (always sets both TP and SL)
+  const applyPreset = (points: number) => {
+    const dist = Math.max(points * pipSize, minDistance);
+
+    const tp = trade?.type === "BUY" ? referencePrice + dist : referencePrice - dist;
+    const sl = trade?.type === "BUY" ? referencePrice - dist : referencePrice + dist;
+
+    form.setValue("takeProfit", Number(tp.toFixed(isJpyPair ? 2 : 4)) as any, { shouldDirty: true });
+    form.setValue("stopLoss", Number(sl.toFixed(isJpyPair ? 2 : 4)) as any, { shouldDirty: true });
+
+    validateTPSL(tp, sl);
+  };
+
+  // Ensure presets apply automatically when the popup loads
+  useEffect(() => {
+    if (!open) return;
+    if (!applyOnOpenRef.current) return;
+    if (!referencePrice || referencePrice <= 0) return;
+
+    applyPreset(lastPresetPoints);
+    applyOnOpenRef.current = false;
+  }, [open, lastPresetPoints, referencePrice]);
+
+  const updateTargets = useMutation({
+    mutationFn: async (data: FormValues) => {
+      const tp = typeof data.takeProfit === "number" && !Number.isNaN(data.takeProfit) ? data.takeProfit : null;
+      const sl = typeof data.stopLoss === "number" && !Number.isNaN(data.stopLoss) ? data.stopLoss : null;
+
+      // Validate before submitting
+      if (!validateTPSL(tp, sl)) {
+        throw new Error("Please correct the Take Profit and Stop Loss values according to the validation messages.");
+      }
+
+      const response = await fetch(`/api/trades/${trade.id}/targets`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ takeProfit: tp, stopLoss: sl }),
+      });
+
+      if (!response.ok) {
+        throw new Error(await response.text());
+      }
+
+      return response.json();
+    },
+    onSuccess: () => {
+      toast({
+        title: "Success",
+        description: "Trade targets updated successfully",
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/trades/open"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/trades/pending"] });
+      onOpenChange(false);
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to update trade targets",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleSubmit = (data: FormValues) => {
+    const tp = typeof data.takeProfit === "number" && !Number.isNaN(data.takeProfit) ? data.takeProfit : null;
+    const sl = typeof data.stopLoss === "number" && !Number.isNaN(data.stopLoss) ? data.stopLoss : null;
+
+    if (validateTPSL(tp, sl)) {
+      updateTargets.mutate(data);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Edit Take Profit & Stop Loss</DialogTitle>
+          <DialogDescription>
+            {trade?.status === "PENDING" ? "Order price" : "Current price"}: {referencePrice.toFixed(isJpyPair ? 2 : 4)} | Trade: {trade?.type} {trade?.lots} lots {tradeSymbol}
+          </DialogDescription>
+        </DialogHeader>
+
+        <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="takeProfit">Take Profit</Label>
+              <Input
+                id="takeProfit"
+                type="number"
+                step="0.00001"
+                placeholder={`${trade?.status === "PENDING" ? "Order" : "Current"}: ${referencePrice.toFixed(isJpyPair ? 2 : 4)}`}
+                className="placeholder:text-gray-400"
+                {...form.register("takeProfit", {
+                  valueAsNumber: true,
+                  onChange: (e) => {
+                    const value = parseFloat(e.target.value);
+                    const tp = Number.isFinite(value) ? value : null;
+                    const slVal = form.getValues("stopLoss");
+                    const sl = typeof slVal === "number" && Number.isFinite(slVal) ? slVal : null;
+                    validateTPSL(tp, sl);
+                  },
+                })}
+              />
+              {validationMessages.tp && <p className="text-sm text-red-500 mt-1">{validationMessages.tp}</p>}
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="stopLoss">Stop Loss</Label>
+              <Input
+                id="stopLoss"
+                type="number"
+                step="0.00001"
+                placeholder={`${trade?.status === "PENDING" ? "Order" : "Current"}: ${referencePrice.toFixed(isJpyPair ? 2 : 4)}`}
+                className="placeholder:text-gray-400"
+                {...form.register("stopLoss", {
+                  valueAsNumber: true,
+                  onChange: (e) => {
+                    const value = parseFloat(e.target.value);
+                    const sl = Number.isFinite(value) ? value : null;
+                    const tpVal = form.getValues("takeProfit");
+                    const tp = typeof tpVal === "number" && Number.isFinite(tpVal) ? tpVal : null;
+                    validateTPSL(tp, sl);
+                  },
+                })}
+              />
+              {validationMessages.sl && <p className="text-sm text-red-500 mt-1">{validationMessages.sl}</p>}
+            </div>
+          </div>
+
+          {/* Quick presets (drop-up) */}
+          <div className="rounded-md border border-white/10 bg-white/5 p-3 flex items-center justify-between gap-3">
+            <div className="text-sm text-gray-200">
+              Quick presets: set TP/SL relative to the <span className="font-medium">{priceLabel}</span>.
+            </div>
+
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button type="button" variant="secondary" className="gap-2">
+                  Presets (±{lastPresetPoints})
+                  <ChevronUp className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent side="top" align="end" className="w-44">
+                {(AUTO_FIX_PRESETS as unknown as number[]).map((p) => (
+                  <DropdownMenuItem
+                    key={p}
+                    onSelect={() => {
+                      setLastPresetPoints(p);
+                      applyPreset(p);
+                    }}
+                    className="flex items-center justify-between"
+                  >
+                    <span>±{p}</span>
+                    {lastPresetPoints === p ? <Check className="h-4 w-4 opacity-90" /> : <span className="h-4 w-4" />}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+
+          {/* Trading Rules Info */}
+          <div className="bg-gray-50 dark:bg-gray-800 p-3 rounded-md text-sm">
+            <p className="font-medium mb-1 text-gray-900 dark:text-gray-100">Trading Rules:</p>
+            {trade?.type === "BUY" ? (
+              <>
+                <p className="text-green-600 dark:text-green-400">• Take Profit must be above {priceLabel} by {MIN_POINTS}+ points</p>
+                <p className="text-red-600 dark:text-red-400">• Stop Loss must be below {priceLabel} by {MIN_POINTS}+ points</p>
+              </>
+            ) : (
+              <>
+                <p className="text-green-600 dark:text-green-400">• Take Profit must be below {priceLabel} by {MIN_POINTS}+ points</p>
+                <p className="text-red-600 dark:text-red-400">• Stop Loss must be above {priceLabel} by {MIN_POINTS}+ points</p>
+              </>
+            )}
+          </div>
+
+          <div className="flex gap-2 pt-4">
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)} className="flex-1">
+              Cancel
+            </Button>
+            <Button type="submit" disabled={updateTargets.isPending || Object.keys(validationMessages).length > 0} className="flex-1">
+              {updateTargets.isPending ? "Saving..." : "Save Changes"}
+            </Button>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+```
+
+---
+
+## 2) Frontend — `client/src/pages/TradeScreen.tsx`
+
+This is the “place order / pending order auto-suggest” logic. Update the pending auto-suggest distances from **10 → 20**.
+
+Find the effect that says `// Auto-suggest entry/TP/SL prices for pending orders ...` and ensure it matches:
+
+```tsx
+// Auto-suggest entry/TP/SL prices for pending orders (20 points from market)
+useEffect(() => {
+  if (orderType === "Market" || !askPrice || !bidPrice) return;
+  const pip = selectedSymbol.includes("JPY") ? 0.01 : 0.0001;
+  const decimals = selectedSymbol.includes("JPY") ? 3 : 5;
+
+  if (orderType === "Limit" && autoEntry) {
+    const price = pendingSide === "BUY" ? (askPrice - 20 * pip) : (bidPrice + 20 * pip);
+    form.setValue("limitPrice", price.toFixed(decimals));
+  }
+  if (orderType === "Stop" && autoEntry) {
+    const price = pendingSide === "BUY" ? (askPrice + 20 * pip) : (bidPrice - 20 * pip);
+    form.setValue("stopPrice", price.toFixed(decimals));
+  }
+
+  const entryStr = orderType === "Limit" ? form.getValues("limitPrice") : form.getValues("stopPrice");
+  const entry = parseFloat(entryStr || "0");
+  if (entry > 0) {
+    if (autoTp) {
+      const tp = pendingSide === "BUY" ? entry + 20 * pip : entry - 20 * pip;
+      form.setValue("takeProfit", tp.toFixed(decimals));
+    }
+    if (autoSl) {
+      const sl = pendingSide === "BUY" ? entry - 20 * pip : entry + 20 * pip;
+      form.setValue("stopLoss", sl.toFixed(decimals));
+    }
+  }
+}, [askPrice, bidPrice, orderType, pendingSide, autoEntry, autoTp, autoSl, selectedSymbol, form]);
+```
+
+---
+
+## 3) Backend — `server/routes.ts`
+
+### A) Pending order placement validation (Limit/Stop) → **20 points**
+
+In the “MT5-style … placement validation” section, ensure:
+
+* `minDist = 20 * pip`
+* reject strings say **20 points**
+* `riskLimit.minDistPips: 20`
+
+### B) **Market order** TP/SL validation added (so place-order is consistent)
+
+Immediately after the pending validation block, add this:
+
+```ts
+// TP/SL validation for Market orders (same 20-point rule)
+if (!isPendingOrder) {
+  const pip = symbolConfig.symbol.includes("JPY") ? 0.01 : 0.0001;
+  const minDist = 20 * pip;
+  const tolerance = pip * 0.01;
+
+  const tp = req.body.takeProfit ? parseFloat(String(req.body.takeProfit)) : null;
+  const sl = req.body.stopLoss ? parseFloat(String(req.body.stopLoss)) : null;
+
+  const intendedEntry = entryPrice;
+
+  if (data.type === "BUY") {
+    if (tp !== null && tp < intendedEntry + minDist - tolerance) {
+      await writeDecisionReject("BUY_TP_TOO_CLOSE", { minDistPips: 20, intendedEntry }, { tp });
+      return res.status(400).json({ message: `BUY TP must be at least 20 points above entry. Minimum: ${(intendedEntry + minDist).toFixed(5)}` });
+    }
+    if (sl !== null && sl > intendedEntry - minDist + tolerance) {
+      await writeDecisionReject("BUY_SL_TOO_CLOSE", { minDistPips: 20, intendedEntry }, { sl });
+      return res.status(400).json({ message: `BUY SL must be at least 20 points below entry. Maximum: ${(intendedEntry - minDist).toFixed(5)}` });
+    }
+  } else {
+    if (tp !== null && tp > intendedEntry - minDist + tolerance) {
+      await writeDecisionReject("SELL_TP_TOO_CLOSE", { minDistPips: 20, intendedEntry }, { tp });
+      return res.status(400).json({ message: `SELL TP must be at least 20 points below entry. Maximum: ${(intendedEntry - minDist).toFixed(5)}` });
+    }
+    if (sl !== null && sl < intendedEntry + minDist - tolerance) {
+      await writeDecisionReject("SELL_SL_TOO_CLOSE", { minDistPips: 20, intendedEntry }, { sl });
+      return res.status(400).json({ message: `SELL SL must be at least 20 points above entry. Minimum: ${(intendedEntry + minDist).toFixed(5)}` });
+    }
+  }
+}
+```
+
+### C) Targets update endpoint `/api/trades/:id/targets` now enforces **20 points** too
+
+Inside that endpoint (before `updateTradeTargets(...)`) add the min-distance enforcement. Your final block should look like this (key parts):
+
+```ts
+// Store previous values for audit
+const prevTp = trade.takeProfit ? parseFloat(String(trade.takeProfit)) : null;
+const prevSl = trade.stopLoss ? parseFloat(String(trade.stopLoss)) : null;
+
+// Parse inputs (accept numeric or null)
+const tp = takeProfit === null || takeProfit === undefined || takeProfit === '' ? null : parseFloat(String(takeProfit));
+const sl = stopLoss === null || stopLoss === undefined || stopLoss === '' ? null : parseFloat(String(stopLoss));
+
+// Enforce 20-point minimum distance for TP/SL updates (consistent across place-order + edits)
+const symbolStr = (trade as any)?.symbol?.symbol ?? (trade as any)?.symbolName ?? (trade as any)?.symbol ?? '';
+const isJpy = String(symbolStr).toUpperCase().includes('JPY');
+const pip = isJpy ? 0.01 : 0.0001;
+const minDist = 20 * pip;
+const tol = pip * 0.01;
+const deltaText = isJpy ? '0.20' : '0.0020';
+const decimals = isJpy ? 2 : 4;
+
+let refPrice = trade.openPrice ? parseFloat(String(trade.openPrice)) : 0;
+let priceLabel = 'current price';
+
+if (trade.status === 'PENDING') {
+  priceLabel = 'order price';
+  const ot = String(trade.orderType ?? '').toLowerCase();
+  if (ot === 'limit' && trade.limitPrice) refPrice = parseFloat(String(trade.limitPrice));
+  else if (ot === 'stop' && trade.stopPrice) refPrice = parseFloat(String(trade.stopPrice));
+} else {
+  try {
+    const quotesResponse = await axios.get(`http://localhost:5000/api/quotes/latest`);
+    const latestQuotes = quotesResponse.data;
+    const q = latestQuotes.find((x: any) => x?.symbol === symbolStr);
+    if (q) {
+      const mid = (q.mid ?? q.price);
+      if (typeof mid === 'number' && !Number.isNaN(mid)) refPrice = mid;
+      else if (typeof q.bid === 'number' && typeof q.ask === 'number') refPrice = (q.bid + q.ask) / 2;
+    }
+  } catch (e) {
+    // fall back to openPrice
+  }
+}
+
+// Validate relative placement based on side
+if (trade.type === 'BUY') {
+  if (sl !== null && sl > (refPrice - minDist + tol)) {
+    return res.status(400).json({
+      message: `Stop Loss must be at least ${deltaText} (20 points) below ${priceLabel} of ${refPrice.toFixed(decimals)}`,
+    });
+  }
+  if (tp !== null && tp < (refPrice + minDist - tol)) {
+    return res.status(400).json({
+      message: `Take Profit must be at least ${deltaText} (20 points) above ${priceLabel} of ${refPrice.toFixed(decimals)}`,
+    });
+  }
+} else if (trade.type === 'SELL') {
+  if (sl !== null && sl < (refPrice + minDist - tol)) {
+    return res.status(400).json({
+      message: `Stop Loss must be at least ${deltaText} (20 points) above ${priceLabel} of ${refPrice.toFixed(decimals)}`,
+    });
+  }
+  if (tp !== null && tp > (refPrice - minDist + tol)) {
+    return res.status(400).json({
+      message: `Take Profit must be at least ${deltaText} (20 points) below ${priceLabel} of ${refPrice.toFixed(decimals)}`,
+    });
+  }
+}
+
+const updatedTrade = await storage.updateTradeTargets(tradeId, tp, sl);
+```
+
+---
+
+## Quick verification checklist (so Replit Agent 3 can confirm)
+
+1. **Place Order (Market)** with TP/SL within 20 points → **server rejects** with **20 points** message.
+2. **Place Pending (Limit/Stop)** too close to bid/ask → **server rejects** with **20 points** message.
+3. **Edit TP/SL modal** opens → fields immediately shift to **last preset** and rule text says **20+ points**.
+4. Change preset on GBPUSD to ±150, close modal, reopen GBPUSD → **still ±150** and auto-applied.
+5. Open USDJPY → independent preset is stored and auto-applied.
+
+If you want the next step, I can apply the same “single source of truth” approach by centralizing the **MIN_POINTS=20** into a shared constant (front+back) to prevent drift during future changes.

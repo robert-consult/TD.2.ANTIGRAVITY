@@ -1,0 +1,265 @@
+Below is the **deep-link hint + auto-prefill** for your **Legal Docs** minitab, plus **“Go to Legal Docs”** buttons in **Legal Acceptances**.
+
+Implementation approach (robust, minimal coupling):
+
+* Clicking **Go Docs (Global/Addendum)** stores a **prefill payload** in `localStorage` and dispatches a non-breaking navigation event.
+* **AdminLegalDocs** reads the prefill **once**, auto-selects the target, loads versions, and auto-opens the selected document.
+
+---
+
+# A) Add shared helper: Deep-link prefill (frontend)
+
+## 1) Create `client/src/lib/adminDeepLink.ts`
+
+```ts
+// FILE: /client/src/lib/adminDeepLink.ts
+export const ADMIN_LEGAL_DOCS_PREFILL_KEY = "adminLegalDocs_prefill_v1";
+
+export type LegalDocsPrefill = {
+  docSet: string;
+  docType: "GLOBAL_MASTER" | "ADDENDUM";
+  jurisdictionType: "DEFAULT" | "COUNTRY" | "REGION";
+  jurisdictionKey: string;
+  openDocumentId?: number | null;
+};
+
+export function setLegalDocsPrefill(prefill: LegalDocsPrefill) {
+  try {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(ADMIN_LEGAL_DOCS_PREFILL_KEY, JSON.stringify(prefill));
+  } catch {
+    // ignore
+  }
+}
+
+export function getLegalDocsPrefillOnce(): LegalDocsPrefill | null {
+  try {
+    if (typeof window === "undefined") return null;
+    const raw = window.localStorage.getItem(ADMIN_LEGAL_DOCS_PREFILL_KEY);
+    if (!raw) return null;
+    window.localStorage.removeItem(ADMIN_LEGAL_DOCS_PREFILL_KEY);
+    const parsed = JSON.parse(raw);
+    if (!parsed?.docSet || !parsed?.docType || !parsed?.jurisdictionType || !parsed?.jurisdictionKey) return null;
+    return parsed as LegalDocsPrefill;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Optional: fire a global event. If AdminDashboard listens, it can switch tabs automatically.
+ * This is non-breaking if no listener exists.
+ */
+export function dispatchAdminNavigate(detail: any) {
+  try {
+    if (typeof window === "undefined") return;
+    window.dispatchEvent(new CustomEvent("admin:navigate", { detail }));
+  } catch {
+    // ignore
+  }
+}
+```
+
+---
+
+# B) Make Legal Docs minitab auto-prefill + auto-open doc
+
+## 2) Patch `client/src/pages/AdminLegalDocs.tsx`
+
+### 2.1 Add imports at the top
+
+```tsx
+import { getLegalDocsPrefillOnce } from "../lib/adminDeepLink";
+```
+
+### 2.2 Add prefill read once (near top of component)
+
+Right after `export default function AdminLegalDocs() {`, add:
+
+```tsx
+  const prefill = useMemo(() => getLegalDocsPrefillOnce(), []);
+```
+
+### 2.3 Initialize your target state from prefill
+
+Replace your existing initial states:
+
+```tsx
+  const [docSet, setDocSet] = useState("DOC1");
+  const [docType, setDocType] = useState<Target["docType"]>("GLOBAL_MASTER");
+  const [jurisdictionType, setJurisdictionType] = useState<Target["jurisdictionType"]>("DEFAULT");
+  const [jurisdictionKey, setJurisdictionKey] = useState("GLOBAL");
+```
+
+with:
+
+```tsx
+  const [docSet, setDocSet] = useState(prefill?.docSet ?? "DOC1");
+  const [docType, setDocType] = useState<Target["docType"]>(prefill?.docType ?? "GLOBAL_MASTER");
+  const [jurisdictionType, setJurisdictionType] = useState<Target["jurisdictionType"]>(prefill?.jurisdictionType ?? "DEFAULT");
+  const [jurisdictionKey, setJurisdictionKey] = useState(prefill?.jurisdictionKey ?? "GLOBAL");
+```
+
+### 2.4 Track doc auto-open id
+
+Add state:
+
+```tsx
+  const [prefillOpenDocId, setPrefillOpenDocId] = useState<number | null>(
+    prefill?.openDocumentId != null ? Number(prefill.openDocumentId) : null
+  );
+```
+
+### 2.5 Auto-open the doc after versions load
+
+Add this effect (below your `useEffect(() => { loadVersions(); }, [...])`):
+
+```tsx
+  useEffect(() => {
+    if (!prefillOpenDocId) return;
+    if (!versions?.length) return;
+
+    const found = versions.find((v: any) => Number(v.id) === Number(prefillOpenDocId));
+    if (!found) {
+      // If the doc id isn't in this target's versions, just stop silently
+      setPrefillOpenDocId(null);
+      return;
+    }
+
+    // Select and load it
+    setSelectedDocId(prefillOpenDocId);
+    loadDocContent(prefillOpenDocId).catch(() => {});
+    setPrefillOpenDocId(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [versions, prefillOpenDocId]);
+```
+
+That’s it: Legal Docs will now open preselected target + doc.
+
+---
+
+# C) Add “Go to Legal Docs” buttons to Legal Acceptances
+
+## 3) Patch `client/src/pages/AdminLegalAcceptances.tsx`
+
+### 3.1 Add imports at the top
+
+```tsx
+import { dispatchAdminNavigate, setLegalDocsPrefill } from "../lib/adminDeepLink";
+```
+
+### 3.2 Add a helper function inside the component
+
+Place inside `AdminLegalAcceptances()` (near other helpers):
+
+```tsx
+  function goToLegalDocsForBest(best: any) {
+    if (!best?.id) return;
+
+    // Prefill Legal Docs selector and open the specific doc id
+    setLegalDocsPrefill({
+      docSet: String(best.docSet || "DOC1"),
+      docType: best.docType,
+      jurisdictionType: best.jurisdictionType,
+      jurisdictionKey: String(best.jurisdictionKey || ""),
+      openDocumentId: Number(best.id),
+    });
+
+    // Optional: if AdminDashboard listens, it can switch tabs automatically.
+    dispatchAdminNavigate({
+      topTab: "System Config",
+      systemConfigTab: "legalDocs",
+    });
+
+    // Safe fallback
+    alert("Prefilled Legal Docs. Open: System Config → Legal Docs.");
+  }
+```
+
+### 3.3 Add buttons in the table actions (per row)
+
+In the table action cell where you currently render `View`, `Open Global`, `Open Addendum`, add:
+
+```tsx
+                    {resolved[r.id]?.global?.best?.id && (
+                      <button
+                        style={btnSmall}
+                        onClick={() => goToLegalDocsForBest(resolved[r.id].global.best)}
+                        title="Prefill Legal Docs and open Global doc"
+                      >
+                        Go Docs (Global)
+                      </button>
+                    )}
+                    {resolved[r.id]?.addendum?.best?.id && (
+                      <button
+                        style={btnSmall}
+                        onClick={() => goToLegalDocsForBest(resolved[r.id].addendum.best)}
+                        title="Prefill Legal Docs and open Addendum doc"
+                      >
+                        Go Docs (Addendum)
+                      </button>
+                    )}
+```
+
+### 3.4 Add buttons in the detail modal (optional but recommended)
+
+Inside the “Resolved Legal Docs (by SHA)” section, you can add:
+
+```tsx
+            {resolved?.[detail.id]?.global?.best?.id && (
+              <button style={btnSmall} onClick={() => goToLegalDocsForBest(resolved[detail.id].global.best)}>
+                Go Docs (Global)
+              </button>
+            )}
+            {resolved?.[detail.id]?.addendum?.best?.id && (
+              <button style={btnSmall} onClick={() => goToLegalDocsForBest(resolved[detail.id].addendum.best)}>
+                Go Docs (Addendum)
+              </button>
+            )}
+```
+
+---
+
+# D) Optional: make AdminDashboard auto-switch tabs (event listener)
+
+If you want the “admin:navigate” event to actually switch tabs automatically, add a listener in your AdminDashboard root component.
+
+## 4) Add this to `client/src/pages/AdminDashboard.tsx`
+
+This is a **pattern**—adapt the setter names to your current state variables.
+
+```tsx
+// FILE: /client/src/pages/AdminDashboard.tsx
+import React, { useEffect } from "react";
+
+// inside AdminDashboard component:
+useEffect(() => {
+  const handler = (ev: any) => {
+    const d = ev?.detail || {};
+
+    // Example: if your dashboard has top-level tab state + system config sub-tab state
+    // Replace these setter names with your actual ones.
+    if (d.topTab) {
+      // setActiveTopTab(d.topTab);
+    }
+    if (d.systemConfigTab) {
+      // setActiveSystemConfigTab(d.systemConfigTab);
+    }
+  };
+
+  window.addEventListener("admin:navigate", handler as any);
+  return () => window.removeEventListener("admin:navigate", handler as any);
+}, []);
+```
+
+If you do not add this listener, everything still works—admins just manually click **System Config → Legal Docs** after the alert.
+
+---
+
+## What you get
+
+* Acceptances tab can now **resolve** and **deep-link** to the exact doc/version in Legal Docs.
+* Legal Docs tab becomes your **live legal operations console** for switching targets, rolling docs, and inspecting versions.
+* This is forward-compatible with frequent legal updates: no redeploy required, full auditability preserved.
+
+If you want, the next upgrade is: in Legal Docs, add a **“Back to Acceptances”** button that returns to the previously viewed acceptance id (same prefill mechanism in reverse).

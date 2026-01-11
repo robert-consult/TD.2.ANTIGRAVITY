@@ -1,0 +1,930 @@
+## 1) Audit of Replit Agent 3’s proposal (fit vs. your constraints)
+
+**What fits well (keep):**
+
+* Adding **new mini-tabs inside “User Management”** is consistent with your “additions only” constraint and matches the current layout pattern (All/Active/Disabled/Frozen/Online/Login History already exist).
+* Positioning **Audit Trail** and **KYC Queue** **after “Login History”** is correct and low-risk.
+* Treating **Trade Audit** as the **forensic/immutable evidence hub** is directionally right.
+
+**What I would adjust (to align with your platform model + avoid conflicts):**
+
+* **Remove “Profile Settings” as a User Management mini-tab.**
+  “Profile Settings” belongs to the **top-right user menu** (where `testa@testa.com` sits), not the admin user-list workflow. In admin, you already have **Edit / Timeline / Notes** per user; a “Profile Settings” mini-tab becomes redundant and blurs “trader self-service” vs “admin oversight.”
+* **Data tab:** avoid transforming it into mini-tabs *right now* (because that’s closer to restructuring). Instead: **append** a “Compliance & Growth Analytics” card section **below** the existing Data content (pure additive; no re-layout risk).
+* **KYC Queue semantics:** it must explicitly reflect your model: **KYC + phone verification are step-up/gated** and only activated once a trader meets your eligibility criteria for “real capital candidate.” This should be explicit in UI labels and logic.
+
+## 2) Where to add what (simple outline, additive-only)
+
+### A) User Management (add 2 mini-tabs; do not touch existing mini-tabs)
+
+Add after **Login History**:
+
+1. **Audit Trail**
+
+   * Unified feed: **Signups (from `users.createdAt`) + Login events + Admin actions + Export manifests**
+   * Filters: user/email search, event type.
+2. **KYC / Funding Queue**
+
+   * “Candidate shortlist” derived from **vw_trader_stats** (profit%, win rate, total trades, recency)
+   * Buttons can be stubbed until the KYC schema/workflow exists.
+
+### B) Data tab (add a new section below existing AdminData)
+
+* Add **Compliance & Growth Analytics** cards:
+
+  * Signups last 7/30 days
+  * Failed logins last 7 days
+  * Admin actions last 7 days
+  * Active traders (from `vw_trader_stats` recency)
+
+### C) Trade Audit tab (optional later; still additive)
+
+* Add collapsible cards **below** the existing trade audit table:
+
+  * **Admin actions** (freeze/disable/risk profile changes)
+  * **Export integrity** (audit_export_manifest hashes)
+
+---
+
+## 3) Profile Settings (top-right menu) — prop-grade, low-friction standard (research-backed)
+
+For the **trader-facing profile settings**, prop/fintech-grade patterns converge on:
+
+* **Progressive disclosure / risk-based step-up:** don’t force phone/KYC at signup; only request when needed (fits your model). Plaid’s onboarding overview explicitly describes KYC as a later verification step after signup in many fintech flows.
+* **Security-first “Privacy & Security” section:** 2FA with backup codes is standard in trading products. TradingView explicitly guides enabling 2FA in account settings and emphasizes saving backup codes.
+* **Account activity log:** exchanges commonly expose a security/audit event list (login success/fail, password changes, API key events). Deribit’s account settings reference event types like login success/fail and security-key/API-key actions.
+* **KYC requirements are jurisdiction- and capability-dependent:** if you later integrate a payments/KYC provider, required fields vary by region and account capabilities (Stripe Connect documents this directly).
+
+**Minimum sections for your Profile Settings page (trader self-service):**
+
+1. **Account**
+
+   * Email (verified status indicator)
+   * Username (usually immutable or limited changes)
+   * Display name (can map to your existing `users.name`)
+2. **Contact**
+
+   * Phone (locked behind eligibility if you want; otherwise “optional until invited to funding”)
+   * Preferred contact method (Email/SMS if enabled)
+3. **Security**
+
+   * Change password
+   * 2FA (Authenticator app first; SMS only if you choose)
+   * Active sessions / recent logins (read-only)
+4. **Notifications**
+
+   * Trade fills, margin alerts, rule-violation alerts, weekly summary
+5. **Verification & Payout Profile (GATED)**
+
+   * Legal first/last name, DOB, address, docs upload
+   * **Preferred Payment Currency** (your wording) defaulted to region; only appears once the user is in the funding pipeline
+
+---
+
+# 4) Ready-to-drop React + TypeScript stubs (place in `/client/src/pages/`)
+
+## 4.1 `client/src/pages/AdminAuditTrail.tsx`
+
+```tsx
+import { useMemo, useState } from "react";
+import axios from "axios";
+import { useQuery } from "@tanstack/react-query";
+
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+
+type FullUser = {
+  id: number;
+  email: string;
+  username: string;
+  name?: string | null;
+  phone?: string | null;
+  isAdmin: boolean;
+  isDisabled?: boolean;
+  isFrozen?: boolean;
+  createdAt?: number | null; // unix seconds in this app
+};
+
+type AdminActionRow = {
+  id: number;
+  adminId: number | null;
+  userId: number | null;
+  actionType: string;
+  reasonCode?: string | null;
+  reasonText?: string | null;
+  ip?: string | null;
+  userAgent?: string | null;
+  createdAt: number; // unix seconds
+  metadata?: any;
+};
+
+type LoginHistoryRow = {
+  id: number;
+  userId: number | null;
+  email: string | null;
+  username: string | null;
+  ipAddress: string | null;
+  userAgent: string | null;
+  success: boolean;
+  failureReason: string | null;
+  createdAt: number; // unix seconds
+};
+
+type ExportManifestRow = {
+  id: number;
+  exported_at_utc_ms: number;
+  export_type: string;
+  row_count: number;
+  sha256_manifest: string;
+  sha256_payload: string;
+  note?: string | null;
+};
+
+type FeedKind = "SIGNUP" | "LOGIN" | "ADMIN_ACTION" | "EXPORT";
+
+type FeedItem = {
+  id: string;
+  kind: FeedKind;
+  tsMs: number;
+  userEmail?: string | null;
+  actorEmail?: string | null;
+  ip?: string | null;
+  title: string;
+  note?: string | null;
+  severity: "INFO" | "WARN";
+};
+
+function toMsFromUnixSeconds(v: any): number | null {
+  if (v == null) return null;
+  if (v instanceof Date) return v.getTime();
+  const n = Number(v);
+  if (!Number.isFinite(n)) return null;
+  // heuristic: app stores seconds for most createdAt
+  return n > 10_000_000_000 ? n : n * 1000;
+}
+
+function fmt(tsMs: number): string {
+  try {
+    return new Date(tsMs).toLocaleString();
+  } catch {
+    return String(tsMs);
+  }
+}
+
+export default function AdminAuditTrail() {
+  const [q, setQ] = useState("");
+  const [kind, setKind] = useState<FeedKind | "ALL">("ALL");
+  const limit = 250;
+
+  const usersQ = useQuery<FullUser[]>({
+    queryKey: ["/api/admin/users/full"],
+    queryFn: () => axios.get("/api/admin/users/full").then(r => r.data),
+  });
+
+  const actionsQ = useQuery<AdminActionRow[]>({
+    queryKey: ["/api/admin/audit-log", limit],
+    queryFn: () => axios.get(`/api/admin/audit-log?limit=${limit}`).then(r => r.data),
+  });
+
+  const loginsQ = useQuery<LoginHistoryRow[]>({
+    queryKey: ["/api/admin/login-history", limit],
+    queryFn: () => axios.get(`/api/admin/login-history?limit=${limit}`).then(r => r.data),
+  });
+
+  const manifestsQ = useQuery<ExportManifestRow[]>({
+    queryKey: ["/api/admin/export-manifests", 100],
+    queryFn: () => axios.get(`/api/admin/export-manifests?limit=100`).then(r => r.data),
+  });
+
+  const isLoading = usersQ.isLoading || actionsQ.isLoading || loginsQ.isLoading || manifestsQ.isLoading;
+
+  const feed = useMemo<FeedItem[]>(() => {
+    const users = usersQ.data ?? [];
+    const actions = actionsQ.data ?? [];
+    const logins = loginsQ.data ?? [];
+    const manifests = manifestsQ.data ?? [];
+
+    const byId = new Map<number, FullUser>();
+    for (const u of users) byId.set(u.id, u);
+
+    const items: FeedItem[] = [];
+
+    // Signups (derived from users.createdAt)
+    for (const u of users) {
+      const ms = toMsFromUnixSeconds(u.createdAt);
+      if (!ms) continue;
+      items.push({
+        id: `signup:${u.id}:${ms}`,
+        kind: "SIGNUP",
+        tsMs: ms,
+        userEmail: u.email,
+        actorEmail: null,
+        ip: null,
+        title: "User signup",
+        note: `@${u.username}`,
+        severity: "INFO",
+      });
+    }
+
+    // Login events
+    for (const l of logins) {
+      const ms = toMsFromUnixSeconds(l.createdAt) ?? Date.now();
+      items.push({
+        id: `login:${l.id}`,
+        kind: "LOGIN",
+        tsMs: ms,
+        userEmail: l.email ?? (l.userId ? byId.get(l.userId)?.email : null) ?? null,
+        actorEmail: null,
+        ip: l.ipAddress,
+        title: l.success ? "Login success" : "Login failed",
+        note: l.success ? null : (l.failureReason ?? "Unknown failure"),
+        severity: l.success ? "INFO" : "WARN",
+      });
+    }
+
+    // Admin actions
+    for (const a of actions) {
+      const ms = toMsFromUnixSeconds(a.createdAt) ?? Date.now();
+      const targetEmail =
+        (a.userId ? byId.get(a.userId)?.email : null) ?? null;
+      const actorEmail =
+        (a.adminId ? byId.get(a.adminId)?.email : null) ?? null;
+
+      items.push({
+        id: `admin:${a.id}`,
+        kind: "ADMIN_ACTION",
+        tsMs: ms,
+        userEmail: targetEmail,
+        actorEmail,
+        ip: a.ip ?? null,
+        title: a.actionType,
+        note: [a.reasonCode, a.reasonText].filter(Boolean).join(" • ") || null,
+        severity: "WARN",
+      });
+    }
+
+    // Export manifests (tamper-evidence / integrity)
+    for (const m of manifests) {
+      items.push({
+        id: `export:${m.id}`,
+        kind: "EXPORT",
+        tsMs: Number(m.exported_at_utc_ms) || Date.now(),
+        userEmail: null,
+        actorEmail: null,
+        ip: null,
+        title: `Export manifest: ${m.export_type}`,
+        note: `rows=${m.row_count}`,
+        severity: "INFO",
+      });
+    }
+
+    items.sort((a, b) => b.tsMs - a.tsMs);
+    return items;
+  }, [usersQ.data, actionsQ.data, loginsQ.data, manifestsQ.data]);
+
+  const filtered = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    return feed.filter(it => {
+      if (kind !== "ALL" && it.kind !== kind) return false;
+      if (!needle) return true;
+
+      const hay = [
+        it.title,
+        it.note ?? "",
+        it.userEmail ?? "",
+        it.actorEmail ?? "",
+        it.ip ?? "",
+      ].join(" ").toLowerCase();
+
+      return hay.includes(needle);
+    });
+  }, [feed, q, kind]);
+
+  return (
+    <div className="space-y-4">
+      <Card className="bg-neutral-800 border-gray-700">
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle className="text-white">Audit Trail</CardTitle>
+          <div className="flex items-center gap-2">
+            <Badge variant="outline" className="border-gray-600 text-gray-200">
+              {filtered.length} events
+            </Badge>
+            <Button
+              variant="outline"
+              className="border-gray-600 text-gray-200 hover:bg-neutral-700"
+              onClick={() => {
+                usersQ.refetch();
+                actionsQ.refetch();
+                loginsQ.refetch();
+                manifestsQ.refetch();
+              }}
+              disabled={isLoading}
+            >
+              Refresh
+            </Button>
+          </div>
+        </CardHeader>
+
+        <CardContent className="space-y-3">
+          <div className="flex flex-col md:flex-row md:items-center gap-2">
+            <Input
+              className="bg-neutral-700 border-gray-600 text-white placeholder:text-gray-400"
+              placeholder="Search email / IP / action / reason…"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+            />
+            <div className="flex items-center gap-2">
+              <Button
+                variant={kind === "ALL" ? "default" : "outline"}
+                className={kind === "ALL" ? "" : "border-gray-600 text-gray-200 hover:bg-neutral-700"}
+                onClick={() => setKind("ALL")}
+              >
+                All
+              </Button>
+              <Button
+                variant={kind === "SIGNUP" ? "default" : "outline"}
+                className={kind === "SIGNUP" ? "" : "border-gray-600 text-gray-200 hover:bg-neutral-700"}
+                onClick={() => setKind("SIGNUP")}
+              >
+                Signups
+              </Button>
+              <Button
+                variant={kind === "LOGIN" ? "default" : "outline"}
+                className={kind === "LOGIN" ? "" : "border-gray-600 text-gray-200 hover:bg-neutral-700"}
+                onClick={() => setKind("LOGIN")}
+              >
+                Logins
+              </Button>
+              <Button
+                variant={kind === "ADMIN_ACTION" ? "default" : "outline"}
+                className={kind === "ADMIN_ACTION" ? "" : "border-gray-600 text-gray-200 hover:bg-neutral-700"}
+                onClick={() => setKind("ADMIN_ACTION")}
+              >
+                Admin
+              </Button>
+              <Button
+                variant={kind === "EXPORT" ? "default" : "outline"}
+                className={kind === "EXPORT" ? "" : "border-gray-600 text-gray-200 hover:bg-neutral-700"}
+                onClick={() => setKind("EXPORT")}
+              >
+                Exports
+              </Button>
+            </div>
+          </div>
+
+          <div className="rounded-md border border-gray-700 overflow-hidden">
+            <Table>
+              <TableHeader>
+                <TableRow className="border-gray-700 hover:bg-neutral-800">
+                  <TableHead className="text-gray-300">Time</TableHead>
+                  <TableHead className="text-gray-300">Type</TableHead>
+                  <TableHead className="text-gray-300">User</TableHead>
+                  <TableHead className="text-gray-300">Actor</TableHead>
+                  <TableHead className="text-gray-300">IP</TableHead>
+                  <TableHead className="text-gray-300">Note</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filtered.slice(0, 500).map((it) => (
+                  <TableRow key={it.id} className="border-gray-700 hover:bg-neutral-800">
+                    <TableCell className="text-gray-200">{fmt(it.tsMs)}</TableCell>
+                    <TableCell className="text-gray-200">
+                      <Badge
+                        variant="outline"
+                        className={
+                          it.severity === "WARN"
+                            ? "border-yellow-600 text-yellow-200"
+                            : "border-gray-600 text-gray-200"
+                        }
+                      >
+                        {it.kind}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-gray-200">{it.userEmail ?? "-"}</TableCell>
+                    <TableCell className="text-gray-200">{it.actorEmail ?? "-"}</TableCell>
+                    <TableCell className="text-gray-200">{it.ip ?? "-"}</TableCell>
+                    <TableCell className="text-gray-200">{it.title}{it.note ? ` • ${it.note}` : ""}</TableCell>
+                  </TableRow>
+                ))}
+
+                {!isLoading && filtered.length === 0 && (
+                  <TableRow className="border-gray-700">
+                    <TableCell colSpan={6} className="text-gray-400">
+                      No events found for the current filter.
+                    </TableCell>
+                  </TableRow>
+                )}
+
+                {isLoading && (
+                  <TableRow className="border-gray-700">
+                    <TableCell colSpan={6} className="text-gray-400">
+                      Loading…
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </div>
+
+          <div className="text-xs text-gray-400">
+            Note: “Signups” are derived from <code>users.createdAt</code>. KYC/phone verification events will appear here once those workflows/tables are added.
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+```
+
+## 4.2 `client/src/pages/KycQueue.tsx`
+
+```tsx
+import { useMemo, useState } from "react";
+import axios from "axios";
+import { useQuery } from "@tanstack/react-query";
+
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+
+type TraderStatsRow = {
+  user_id: number;
+  username: string;
+  email: string;
+  total_trades: number;
+  win_rate: number;
+  profit: number;
+  profit_percent: number;
+  avg_hold_time: number; // hours
+  last_trade_date: number; // unix seconds
+};
+
+type FullUser = {
+  id: number;
+  email: string;
+  username: string;
+  name?: string | null;
+  phone?: string | null;
+  createdAt?: number | null; // unix seconds
+  isDisabled?: boolean;
+  isFrozen?: boolean;
+};
+
+function daysSince(unixSeconds?: number | null): number | null {
+  if (!unixSeconds) return null;
+  const ms = unixSeconds * 1000;
+  const d = (Date.now() - ms) / (1000 * 60 * 60 * 24);
+  return Number.isFinite(d) ? Math.floor(d) : null;
+}
+
+export default function KycQueue() {
+  // Adjustable eligibility thresholds (UI-only; backend enforcement comes later)
+  const [minTrades, setMinTrades] = useState(30);
+  const [minProfitPct, setMinProfitPct] = useState(5);
+  const [minWinRate, setMinWinRate] = useState(45);
+  const [search, setSearch] = useState("");
+
+  const statsQ = useQuery<TraderStatsRow[]>({
+    queryKey: ["/api/admin/trader-stats", 30],
+    queryFn: () => axios.get("/api/admin/trader-stats?days=30").then(r => r.data),
+  });
+
+  const usersQ = useQuery<FullUser[]>({
+    queryKey: ["/api/admin/users/full"],
+    queryFn: () => axios.get("/api/admin/users/full").then(r => r.data),
+  });
+
+  const candidates = useMemo(() => {
+    const stats = statsQ.data ?? [];
+    const users = usersQ.data ?? [];
+    const byId = new Map<number, FullUser>();
+    for (const u of users) byId.set(u.id, u);
+
+    const needle = search.trim().toLowerCase();
+
+    return stats
+      .map(s => {
+        const u = byId.get(s.user_id);
+        const signupDays = daysSince(u?.createdAt ?? null);
+        const eligible =
+          s.total_trades >= minTrades &&
+          s.profit_percent >= minProfitPct &&
+          s.win_rate >= minWinRate &&
+          !(u?.isDisabled) &&
+          !(u?.isFrozen);
+
+        return {
+          ...s,
+          signupDays,
+          name: u?.name ?? null,
+          phone: u?.phone ?? null,
+          isDisabled: u?.isDisabled ?? false,
+          isFrozen: u?.isFrozen ?? false,
+          eligible,
+        };
+      })
+      .filter(row => {
+        if (!needle) return true;
+        const hay = [
+          row.email,
+          row.username,
+          row.name ?? "",
+          String(row.user_id),
+        ].join(" ").toLowerCase();
+        return hay.includes(needle);
+      })
+      // show eligible first, then by profit%
+      .sort((a, b) => {
+        if (a.eligible !== b.eligible) return a.eligible ? -1 : 1;
+        return (b.profit_percent ?? 0) - (a.profit_percent ?? 0);
+      });
+  }, [statsQ.data, usersQ.data, minTrades, minProfitPct, minWinRate, search]);
+
+  const eligibleCount = candidates.filter(c => c.eligible).length;
+
+  return (
+    <div className="space-y-4">
+      <Card className="bg-neutral-800 border-gray-700">
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle className="text-white">KYC / Funding Queue</CardTitle>
+          <div className="flex items-center gap-2">
+            <Badge variant="outline" className="border-gray-600 text-gray-200">
+              Eligible: {eligibleCount}
+            </Badge>
+            <Badge variant="outline" className="border-gray-600 text-gray-200">
+              Total: {candidates.length}
+            </Badge>
+          </div>
+        </CardHeader>
+
+        <CardContent className="space-y-3">
+          <div className="text-sm text-gray-300">
+            This queue is intentionally <span className="font-semibold">step-up gated</span>: traders can use the platform freely; only top performers get invited into KYC/phone verification and the “real capital” pipeline.
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
+            <div>
+              <div className="text-xs text-gray-400 mb-1">Min trades</div>
+              <Input
+                className="bg-neutral-700 border-gray-600 text-white"
+                type="number"
+                value={minTrades}
+                onChange={(e) => setMinTrades(Number(e.target.value || 0))}
+              />
+            </div>
+            <div>
+              <div className="text-xs text-gray-400 mb-1">Min profit %</div>
+              <Input
+                className="bg-neutral-700 border-gray-600 text-white"
+                type="number"
+                value={minProfitPct}
+                onChange={(e) => setMinProfitPct(Number(e.target.value || 0))}
+              />
+            </div>
+            <div>
+              <div className="text-xs text-gray-400 mb-1">Min win rate %</div>
+              <Input
+                className="bg-neutral-700 border-gray-600 text-white"
+                type="number"
+                value={minWinRate}
+                onChange={(e) => setMinWinRate(Number(e.target.value || 0))}
+              />
+            </div>
+            <div>
+              <div className="text-xs text-gray-400 mb-1">Search</div>
+              <Input
+                className="bg-neutral-700 border-gray-600 text-white placeholder:text-gray-400"
+                placeholder="email / username / id…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+            </div>
+          </div>
+
+          <div className="rounded-md border border-gray-700 overflow-hidden">
+            <Table>
+              <TableHeader>
+                <TableRow className="border-gray-700 hover:bg-neutral-800">
+                  <TableHead className="text-gray-300">User</TableHead>
+                  <TableHead className="text-gray-300">Trades</TableHead>
+                  <TableHead className="text-gray-300">Win %</TableHead>
+                  <TableHead className="text-gray-300">Profit %</TableHead>
+                  <TableHead className="text-gray-300">Avg hold (h)</TableHead>
+                  <TableHead className="text-gray-300">Signup age</TableHead>
+                  <TableHead className="text-gray-300">Status</TableHead>
+                  <TableHead className="text-gray-300">Action</TableHead>
+                </TableRow>
+              </TableHeader>
+
+              <TableBody>
+                {(statsQ.isLoading || usersQ.isLoading) && (
+                  <TableRow className="border-gray-700">
+                    <TableCell colSpan={8} className="text-gray-400">Loading…</TableCell>
+                  </TableRow>
+                )}
+
+                {!statsQ.isLoading && !usersQ.isLoading && candidates.length === 0 && (
+                  <TableRow className="border-gray-700">
+                    <TableCell colSpan={8} className="text-gray-400">No traders match the current filters.</TableCell>
+                  </TableRow>
+                )}
+
+                {candidates.slice(0, 250).map(row => (
+                  <TableRow key={row.user_id} className="border-gray-700 hover:bg-neutral-800">
+                    <TableCell className="text-gray-200">
+                      <div className="font-medium">{row.email}</div>
+                      <div className="text-xs text-gray-400">@{row.username}</div>
+                    </TableCell>
+                    <TableCell className="text-gray-200">{row.total_trades}</TableCell>
+                    <TableCell className="text-gray-200">{row.win_rate}%</TableCell>
+                    <TableCell className="text-gray-200">{row.profit_percent}%</TableCell>
+                    <TableCell className="text-gray-200">{row.avg_hold_time}</TableCell>
+                    <TableCell className="text-gray-200">{row.signupDays != null ? `${row.signupDays}d` : "-"}</TableCell>
+                    <TableCell className="text-gray-200">
+                      {row.isDisabled ? (
+                        <Badge variant="outline" className="border-red-600 text-red-200">DISABLED</Badge>
+                      ) : row.isFrozen ? (
+                        <Badge variant="outline" className="border-blue-600 text-blue-200">FROZEN</Badge>
+                      ) : row.eligible ? (
+                        <Badge variant="outline" className="border-green-600 text-green-200">ELIGIBLE</Badge>
+                      ) : (
+                        <Badge variant="outline" className="border-gray-600 text-gray-200">WATCH</Badge>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-gray-200">
+                      <Button
+                        variant="outline"
+                        className="border-gray-600 text-gray-200 hover:bg-neutral-700"
+                        disabled={!row.eligible}
+                        title="Stub: wire this to your future KYC case creation + phone verification gating"
+                        onClick={() => {
+                          // Intentionally a stub to avoid schema conflicts.
+                          // Future: POST /api/admin/kyc/cases { userId }
+                          alert("Stub: create KYC case / invite flow (not yet implemented).");
+                        }}
+                      >
+                        Invite to KYC
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+
+          <div className="text-xs text-gray-400">
+            Implementation note: the “Invite to KYC” action should only become real once you add KYC-case storage + phone verification workflow. Until then, this is a safe UI-only shortlist derived from <code>vw_trader_stats</code>.
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+```
+
+## 4.3 `client/src/pages/AdminComplianceAnalytics.tsx`
+
+```tsx
+import { useMemo } from "react";
+import axios from "axios";
+import { useQuery } from "@tanstack/react-query";
+
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+
+type FullUser = {
+  id: number;
+  email: string;
+  username: string;
+  createdAt?: number | null; // unix seconds
+};
+
+type LoginHistoryRow = {
+  id: number;
+  success: boolean;
+  createdAt: number; // unix seconds
+};
+
+type AdminActionRow = {
+  id: number;
+  createdAt: number; // unix seconds
+};
+
+function withinDays(unixSeconds: number, days: number): boolean {
+  const cutoffMs = Date.now() - days * 24 * 60 * 60 * 1000;
+  return unixSeconds * 1000 >= cutoffMs;
+}
+
+export default function AdminComplianceAnalytics() {
+  const usersQ = useQuery<FullUser[]>({
+    queryKey: ["/api/admin/users/full"],
+    queryFn: () => axios.get("/api/admin/users/full").then(r => r.data),
+  });
+
+  const loginsQ = useQuery<LoginHistoryRow[]>({
+    queryKey: ["/api/admin/login-history", 500],
+    queryFn: () => axios.get("/api/admin/login-history?limit=500").then(r => r.data),
+  });
+
+  const actionsQ = useQuery<AdminActionRow[]>({
+    queryKey: ["/api/admin/audit-log", 500],
+    queryFn: () => axios.get("/api/admin/audit-log?limit=500").then(r => r.data),
+  });
+
+  const stats = useMemo(() => {
+    const users = usersQ.data ?? [];
+    const logins = loginsQ.data ?? [];
+    const actions = actionsQ.data ?? [];
+
+    const totalUsers = users.length;
+
+    const signups7 = users.filter(u => u.createdAt && withinDays(u.createdAt, 7)).length;
+    const signups30 = users.filter(u => u.createdAt && withinDays(u.createdAt, 30)).length;
+
+    const failedLogins7 = logins.filter(l => !l.success && withinDays(l.createdAt, 7)).length;
+    const logins7 = logins.filter(l => withinDays(l.createdAt, 7)).length;
+
+    const adminActions7 = actions.filter(a => withinDays(a.createdAt, 7)).length;
+
+    return { totalUsers, signups7, signups30, failedLogins7, logins7, adminActions7 };
+  }, [usersQ.data, loginsQ.data, actionsQ.data]);
+
+  return (
+    <Card className="bg-neutral-800 border-gray-700">
+      <CardHeader className="flex flex-row items-center justify-between">
+        <CardTitle className="text-white">Compliance & Growth Analytics (Additive)</CardTitle>
+        <Badge variant="outline" className="border-gray-600 text-gray-200">
+          Rolling windows
+        </Badge>
+      </CardHeader>
+      <CardContent>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <Card className="bg-neutral-900 border-gray-700">
+            <CardHeader>
+              <div className="text-gray-400 text-xs">Total users</div>
+              <div className="text-white text-2xl font-semibold">{stats.totalUsers}</div>
+            </CardHeader>
+          </Card>
+
+          <Card className="bg-neutral-900 border-gray-700">
+            <CardHeader>
+              <div className="text-gray-400 text-xs">Signups (7d / 30d)</div>
+              <div className="text-white text-2xl font-semibold">
+                {stats.signups7} <span className="text-gray-400 text-sm font-normal">/ {stats.signups30}</span>
+              </div>
+            </CardHeader>
+          </Card>
+
+          <Card className="bg-neutral-900 border-gray-700">
+            <CardHeader>
+              <div className="text-gray-400 text-xs">Login attempts (7d)</div>
+              <div className="text-white text-2xl font-semibold">{stats.logins7}</div>
+            </CardHeader>
+          </Card>
+
+          <Card className="bg-neutral-900 border-gray-700">
+            <CardHeader>
+              <div className="text-gray-400 text-xs">Failed logins (7d)</div>
+              <div className="text-white text-2xl font-semibold">{stats.failedLogins7}</div>
+            </CardHeader>
+          </Card>
+
+          <Card className="bg-neutral-900 border-gray-700">
+            <CardHeader>
+              <div className="text-gray-400 text-xs">Admin actions (7d)</div>
+              <div className="text-white text-2xl font-semibold">{stats.adminActions7}</div>
+            </CardHeader>
+          </Card>
+
+          <Card className="bg-neutral-900 border-gray-700">
+            <CardHeader>
+              <div className="text-gray-400 text-xs">Next step</div>
+              <div className="text-gray-300 text-sm">
+                Add KYC-case statuses + phone verification events to extend these metrics without changing tab structure.
+              </div>
+            </CardHeader>
+          </Card>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+```
+
+---
+
+# 5) Minimal AdminDashboard patch (additive-only)
+
+Apply these edits in `client/src/pages/AdminDashboard.tsx`:
+
+## 5.1 Add imports near the top
+
+```tsx
+import AdminAuditTrail from "@/pages/AdminAuditTrail";
+import KycQueue from "@/pages/KycQueue";
+import AdminComplianceAnalytics from "@/pages/AdminComplianceAnalytics";
+```
+
+## 5.2 Extend the `userFilterTab` union
+
+Find:
+
+```tsx
+const [userFilterTab, setUserFilterTab] = useState<"all" | "active" | "disabled" | "frozen" | "online" | "logins">("all");
+```
+
+Replace with:
+
+```tsx
+const [userFilterTab, setUserFilterTab] = useState<
+  "all" | "active" | "disabled" | "frozen" | "online" | "logins" | "auditTrail" | "kycQueue"
+>("all");
+```
+
+## 5.3 Add two mini-tab buttons after “Login History”
+
+Locate the mini-tab button row (you already have All/Active/Disabled/Frozen/Online/Login History). Immediately after the Login History button, add:
+
+```tsx
+<button
+  className={`px-3 py-1.5 rounded text-sm transition ${userFilterTab === "auditTrail" ? "bg-slate-600 text-white" : "text-gray-300 hover:bg-neutral-600"}`}
+  onClick={() => setUserFilterTab("auditTrail")}
+>
+  Audit Trail
+</button>
+
+<button
+  className={`px-3 py-1.5 rounded text-sm transition ${userFilterTab === "kycQueue" ? "bg-emerald-700 text-white" : "text-gray-300 hover:bg-neutral-600"}`}
+  onClick={() => setUserFilterTab("kycQueue")}
+>
+  KYC / Funding Queue
+</button>
+```
+
+## 5.4 Hide bulk-actions row for the new mini-tabs
+
+Find:
+
+```tsx
+{userFilterTab !== "logins" && userFilterTab !== "online" && selectedUserIds.length > 0 && (
+```
+
+Replace with:
+
+```tsx
+{userFilterTab !== "logins" && userFilterTab !== "online" && userFilterTab !== "auditTrail" && userFilterTab !== "kycQueue" && selectedUserIds.length > 0 && (
+```
+
+## 5.5 Add rendering branches for the new mini-tabs
+
+Find the section that currently does:
+
+* online view
+* else if logins view
+* else user table view
+
+Change the conditional chain to include:
+
+```tsx
+{userFilterTab === "online" ? (
+  // existing online view
+) : userFilterTab === "logins" ? (
+  // existing login history view
+) : userFilterTab === "auditTrail" ? (
+  <AdminAuditTrail />
+) : userFilterTab === "kycQueue" ? (
+  <KycQueue />
+) : (
+  // existing user table view (All/Active/Disabled/Frozen)
+)}
+```
+
+## 5.6 Append analytics cards under the existing Data tab (no changes to AdminData.tsx)
+
+Find:
+
+```tsx
+<TabsContent value="data" className="p-0">
+  <AdminData />
+</TabsContent>
+```
+
+Replace with:
+
+```tsx
+<TabsContent value="data" className="p-0">
+  <AdminData />
+  <div className="px-6 pb-6">
+    <AdminComplianceAnalytics />
+  </div>
+</TabsContent>
+```
+
+---
+
+If you want, the next step is to wire **KYC Queue → real KYC workflow** without schema conflicts by introducing a single new table (e.g., `kyc_cases`) plus audit events (write to your existing audit tables). That keeps the UI above intact and turns the “Invite to KYC” stub into a real pipeline.

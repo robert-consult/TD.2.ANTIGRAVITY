@@ -1,0 +1,579 @@
+Below adds an **onboarding jurisdiction coverage gate** that you can **turn on/off from the backend (Admin → System Config)**.
+
+What it does when **ENFORCED**:
+
+* Blocks signup/legal-doc resolution for a country/region **unless**:
+
+  * `DOC1 / GLOBAL_MASTER / DEFAULT / GLOBAL` has an **active target** set and that active doc exists, and
+  * the resolved addendum target (COUNTRY → REGION → DEFAULT/ROW) has an **active target** set and that active doc exists.
+
+When **NOT enforced**:
+
+* Never blocks; resolves by **active target** where present; otherwise **falls back to latest** doc for that target (and returns warnings).
+
+This is the correct operational posture: you can run globally while you are still filling gaps, then flip enforcement on when ready.
+
+---
+
+## 1) Backend: System Config get/set (Admin toggle)
+
+### 1.1 `server/routes/adminSystemConfig.ts` (NEW FILE)
+
+```ts
+// FILE: /server/routes/adminSystemConfig.ts
+import { Router } from "express";
+import { and, eq } from "drizzle-orm";
+import { db } from "../db";
+import { requireAdmin } from "../middleware/requireAdmin";
+import { systemConfig } from "../../shared/schema";
+
+export const adminSystemConfigRouter = Router();
+adminSystemConfigRouter.use(requireAdmin);
+
+function normKey(x: any) {
+  return String(x || "").trim();
+}
+
+// GET /api/admin/system-config/get?key=legal.coverage.enforce
+adminSystemConfigRouter.get("/get", (req, res) => {
+  try {
+    const key = normKey(req.query.key);
+    if (!key) return res.status(400).json({ ok: false, error: "key is required" });
+
+    const row = db.select().from(systemConfig).where(eq(systemConfig.key, key)).get();
+    return res.json({ ok: true, row: row || null });
+  } catch (e: any) {
+    return res.status(400).json({ ok: false, error: e?.message || "Failed to get config." });
+  }
+});
+
+// POST /api/admin/system-config/set
+// body: { key: string, value: string }
+adminSystemConfigRouter.post("/set", (req, res) => {
+  try {
+    const key = normKey(req.body?.key);
+    const value = req.body?.value == null ? "" : String(req.body.value);
+
+    if (!key) return res.status(400).json({ ok: false, error: "key is required" });
+
+    const now = Date.now();
+
+    db.insert(systemConfig)
+      .values({
+        key,
+        value,
+        updatedAt: new Date(now) as any,
+      } as any)
+      .onConflictDoUpdate({
+        target: [systemConfig.key],
+        set: { value, updatedAt: new Date(now) as any },
+      })
+      .run();
+
+    const saved = db.select().from(systemConfig).where(eq(systemConfig.key, key)).get();
+    return res.json({ ok: true, row: saved });
+  } catch (e: any) {
+    return res.status(400).json({ ok: false, error: e?.message || "Failed to set config." });
+  }
+});
+```
+
+### 1.2 Mount in `server/index.ts`
+
+```ts
+// FILE: /server/index.ts
+import { adminSystemConfigRouter } from "./routes/adminSystemConfig";
+
+// ...
+app.use("/api/admin/system-config", adminSystemConfigRouter);
+```
+
+---
+
+## 2) Backend: Coverage gate resolver (targets-first with fallback when off)
+
+### 2.1 `server/legal/coverageGate.ts` (NEW FILE)
+
+```ts
+// FILE: /server/legal/coverageGate.ts
+import { and, desc, eq } from "drizzle-orm";
+import { db } from "../db";
+import { legalDocuments, legalDocTargets } from "../../shared/schema";
+
+export const CONFIG_KEYS = {
+  LEGAL_COVERAGE_ENFORCE: "legal.coverage.enforce",
+};
+
+type TargetKey = {
+  docSet: string;
+  docType: "GLOBAL_MASTER" | "ADDENDUM";
+  jurisdictionType: "DEFAULT" | "COUNTRY" | "REGION";
+  jurisdictionKey: string;
+};
+
+type Doc = {
+  id: number;
+  docSet: string;
+  docType: string;
+  jurisdictionType: string;
+  jurisdictionKey: string;
+  version: string;
+  sha256: string;
+  content: string;
+  createdAt: any;
+};
+
+type ResolveResult = {
+  ok: boolean;
+  enforce: boolean;
+  blocked?: boolean;
+  reason?: string;
+
+  selected: {
+    globalTarget: TargetKey;
+    addendumTarget: TargetKey;
+  };
+
+  current: {
+    global: { mode: "ACTIVE_TARGET" | "FALLBACK_LATEST" | "MISSING"; doc: Doc | null; activeDocId?: number | null };
+    addendum: { mode: "ACTIVE_TARGET" | "FALLBACK_LATEST" | "MISSING"; doc: Doc | null; activeDocId?: number | null };
+  };
+
+  warnings: string[];
+};
+
+function normIso2(x: any) {
+  return String(x || "").trim().toUpperCase();
+}
+
+function normRegion(x: any) {
+  const s = String(x || "").trim();
+  return s || null;
+}
+
+function getActiveDocForTarget(target: TargetKey): { activeDocId: number | null; doc: Doc | null } {
+  const t = db
+    .select()
+    .from(legalDocTargets)
+    .where(
+      and(
+        eq(legalDocTargets.docSet, target.docSet),
+        eq(legalDocTargets.docType, target.docType),
+        eq(legalDocTargets.jurisdictionType, target.jurisdictionType),
+        eq(legalDocTargets.jurisdictionKey, target.jurisdictionKey)
+      ) as any
+    )
+    .get();
+
+  if (!t) return { activeDocId: null, doc: null };
+
+  const doc = db
+    .select({
+      id: legalDocuments.id,
+      docSet: legalDocuments.docSet,
+      docType: legalDocuments.docType,
+      jurisdictionType: legalDocuments.jurisdictionType,
+      jurisdictionKey: legalDocuments.jurisdictionKey,
+      version: legalDocuments.version,
+      sha256: legalDocuments.sha256,
+      content: legalDocuments.content,
+      createdAt: legalDocuments.createdAt,
+    })
+    .from(legalDocuments)
+    .where(eq(legalDocuments.id, t.activeDocId))
+    .get() as any;
+
+  return { activeDocId: Number(t.activeDocId), doc: doc || null };
+}
+
+function getLatestDocForTarget(target: TargetKey): Doc | null {
+  const doc = db
+    .select({
+      id: legalDocuments.id,
+      docSet: legalDocuments.docSet,
+      docType: legalDocuments.docType,
+      jurisdictionType: legalDocuments.jurisdictionType,
+      jurisdictionKey: legalDocuments.jurisdictionKey,
+      version: legalDocuments.version,
+      sha256: legalDocuments.sha256,
+      content: legalDocuments.content,
+      createdAt: legalDocuments.createdAt,
+    })
+    .from(legalDocuments)
+    .where(
+      and(
+        eq(legalDocuments.docSet, target.docSet),
+        eq(legalDocuments.docType, target.docType),
+        eq(legalDocuments.jurisdictionType, target.jurisdictionType),
+        eq(legalDocuments.jurisdictionKey, target.jurisdictionKey)
+      ) as any
+    )
+    .orderBy(desc(legalDocuments.createdAt))
+    .limit(1)
+    .get() as any;
+
+  return doc || null;
+}
+
+export function resolveDoc1ByJurisdiction(args: {
+  countryIso2: string;
+  regionKey?: string | null;
+  enforce: boolean;
+}): ResolveResult {
+  const ISO2 = normIso2(args.countryIso2);
+  const RK = normRegion(args.regionKey);
+
+  const warnings: string[] = [];
+
+  // Global is always DEFAULT/GLOBAL for DOC1
+  const globalTarget: TargetKey = {
+    docSet: "DOC1",
+    docType: "GLOBAL_MASTER",
+    jurisdictionType: "DEFAULT",
+    jurisdictionKey: "GLOBAL",
+  };
+
+  // Addendum precedence: COUNTRY -> REGION -> DEFAULT/ROW
+  const addendumTargets: TargetKey[] = [
+    ISO2
+      ? { docSet: "DOC1", docType: "ADDENDUM", jurisdictionType: "COUNTRY", jurisdictionKey: ISO2 }
+      : null,
+    RK
+      ? { docSet: "DOC1", docType: "ADDENDUM", jurisdictionType: "REGION", jurisdictionKey: RK }
+      : null,
+    { docSet: "DOC1", docType: "ADDENDUM", jurisdictionType: "DEFAULT", jurisdictionKey: "ROW" },
+  ].filter(Boolean) as any[];
+
+  // Resolve GLOBAL
+  const gActive = getActiveDocForTarget(globalTarget);
+  let globalMode: ResolveResult["current"]["global"]["mode"] = "ACTIVE_TARGET";
+  let globalDoc: Doc | null = gActive.doc;
+
+  if (!globalDoc) {
+    if (args.enforce) {
+      return {
+        ok: true,
+        enforce: true,
+        blocked: true,
+        reason: "GLOBAL_MASTER_ACTIVE_TARGET_MISSING",
+        selected: { globalTarget, addendumTarget: addendumTargets[0] },
+        current: {
+          global: { mode: "MISSING", doc: null, activeDocId: gActive.activeDocId },
+          addendum: { mode: "MISSING", doc: null },
+        },
+        warnings: [],
+      };
+    }
+
+    const latest = getLatestDocForTarget(globalTarget);
+    if (latest) {
+      globalMode = "FALLBACK_LATEST";
+      globalDoc = latest;
+      warnings.push("GLOBAL_MASTER missing active target; using latest doc fallback.");
+    } else {
+      globalMode = "MISSING";
+      globalDoc = null;
+      warnings.push("GLOBAL_MASTER missing both active target and any doc content.");
+    }
+  }
+
+  // Resolve ADDENDUM by precedence
+  let chosenAddendumTarget: TargetKey = addendumTargets[addendumTargets.length - 1];
+  let addMode: ResolveResult["current"]["addendum"]["mode"] = "MISSING";
+  let addDoc: Doc | null = null;
+  let addActiveDocId: number | null = null;
+
+  for (const t of addendumTargets) {
+    const aActive = getActiveDocForTarget(t);
+    if (aActive.doc) {
+      chosenAddendumTarget = t;
+      addMode = "ACTIVE_TARGET";
+      addDoc = aActive.doc;
+      addActiveDocId = aActive.activeDocId;
+      break;
+    }
+
+    // If enforce is ON, we do not skip to fallback-latest; we require an active target on the first *resolved* target
+    // But we also allow precedence: if COUNTRY target is absent, we may proceed to REGION, then DEFAULT/ROW.
+    // Meaning: you must have an active target for whichever target resolves (COUNTRY if present, else REGION if present, else DEFAULT/ROW).
+    if (args.enforce) {
+      // Continue to next precedence target, but do not use latest fallback.
+      continue;
+    }
+
+    // Not enforced: can fallback to latest for this target if any docs exist
+    const latest = getLatestDocForTarget(t);
+    if (latest) {
+      chosenAddendumTarget = t;
+      addMode = "FALLBACK_LATEST";
+      addDoc = latest;
+      warnings.push(`ADDENDUM ${t.jurisdictionType}/${t.jurisdictionKey} missing active target; using latest doc fallback.`);
+      break;
+    }
+  }
+
+  if (!addDoc) {
+    if (args.enforce) {
+      return {
+        ok: true,
+        enforce: true,
+        blocked: true,
+        reason: "ADDENDUM_ACTIVE_TARGET_MISSING_FOR_RESOLVED_TARGET",
+        selected: { globalTarget, addendumTarget: chosenAddendumTarget },
+        current: {
+          global: { mode: globalMode, doc: globalDoc, activeDocId: gActive.activeDocId },
+          addendum: { mode: "MISSING", doc: null, activeDocId: null },
+        },
+        warnings: [],
+      };
+    }
+
+    warnings.push("ADDENDUM missing active targets and no docs found in fallback search.");
+  }
+
+  return {
+    ok: true,
+    enforce: args.enforce,
+    selected: { globalTarget, addendumTarget: chosenAddendumTarget },
+    current: {
+      global: { mode: globalMode, doc: globalDoc, activeDocId: gActive.activeDocId },
+      addendum: { mode: addMode, doc: addDoc, activeDocId: addActiveDocId },
+    },
+    warnings,
+  };
+}
+```
+
+---
+
+## 3) Backend: Public resolver endpoint for signup (the gate)
+
+This is the clean integration point for your signup embed + renderer engine.
+
+### 3.1 `server/routes/legalDoc1Resolve.ts` (NEW FILE)
+
+```ts
+// FILE: /server/routes/legalDoc1Resolve.ts
+import { Router } from "express";
+import { eq } from "drizzle-orm";
+import { db } from "../db";
+import { systemConfig } from "../../shared/schema";
+import { resolveDoc1ByJurisdiction, CONFIG_KEYS } from "../legal/coverageGate";
+import crypto from "crypto";
+
+export const legalDoc1ResolveRouter = Router();
+
+function getBoolConfig(key: string, defaultValue: boolean) {
+  const row = db.select().from(systemConfig).where(eq(systemConfig.key, key)).get() as any;
+  if (!row || row.value == null) return defaultValue;
+  const v = String(row.value).trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(v)) return true;
+  if (["0", "false", "no", "off"].includes(v)) return false;
+  return defaultValue;
+}
+
+function sha256Hex(s: string) {
+  return crypto.createHash("sha256").update(s, "utf8").digest("hex");
+}
+
+// GET /api/legal/doc1/resolve?countryIso2=KE&regionKey=EAST_AFRICA
+legalDoc1ResolveRouter.get("/resolve", (req, res) => {
+  try {
+    const countryIso2 = String(req.query.countryIso2 || "").trim().toUpperCase();
+    const regionKey = req.query.regionKey != null ? String(req.query.regionKey).trim() : null;
+
+    if (!countryIso2 || countryIso2.length !== 2) {
+      return res.status(400).json({ ok: false, error: "countryIso2 must be 2-letter ISO code." });
+    }
+
+    const enforce = getBoolConfig(CONFIG_KEYS.LEGAL_COVERAGE_ENFORCE, false);
+
+    const resolved = resolveDoc1ByJurisdiction({
+      countryIso2,
+      regionKey,
+      enforce,
+    });
+
+    if (resolved.blocked) {
+      return res.status(409).json({
+        ok: false,
+        code: "LEGAL_COVERAGE_BLOCKED",
+        reason: resolved.reason,
+        enforce: true,
+        selected: resolved.selected,
+        remediation: "Admin must set active targets (System Config → Legal Docs / Legal Coverage) for GLOBAL_MASTER DEFAULT/GLOBAL and resolved ADDENDUM target.",
+      });
+    }
+
+    const globalText = String(resolved.current.global.doc?.content || "");
+    const addendumText = String(resolved.current.addendum.doc?.content || "");
+
+    const DELIM = "\n\n";
+    const combinedText = [globalText, addendumText].filter(Boolean).join(DELIM);
+    const combinedSha256 = sha256Hex(combinedText);
+
+    return res.json({
+      ok: true,
+      enforce,
+      selected: resolved.selected,
+      current: {
+        global: resolved.current.global.doc
+          ? {
+              id: resolved.current.global.doc.id,
+              version: resolved.current.global.doc.version,
+              sha256: resolved.current.global.doc.sha256,
+              mode: resolved.current.global.mode,
+              jurisdiction: `${resolved.current.global.doc.jurisdictionType}/${resolved.current.global.doc.jurisdictionKey}`,
+            }
+          : null,
+        addendum: resolved.current.addendum.doc
+          ? {
+              id: resolved.current.addendum.doc.id,
+              version: resolved.current.addendum.doc.version,
+              sha256: resolved.current.addendum.doc.sha256,
+              mode: resolved.current.addendum.mode,
+              jurisdiction: `${resolved.current.addendum.doc.jurisdictionType}/${resolved.current.addendum.doc.jurisdictionKey}`,
+            }
+          : null,
+        delimiter: DELIM,
+        combinedSha256,
+      },
+      docs: {
+        globalText,
+        addendumText,
+        combinedText,
+      },
+      warnings: resolved.warnings,
+    });
+  } catch (e: any) {
+    return res.status(400).json({ ok: false, error: e?.message || "Resolve failed." });
+  }
+});
+```
+
+### 3.2 Mount in `server/index.ts`
+
+```ts
+// FILE: /server/index.ts
+import { legalDoc1ResolveRouter } from "./routes/legalDoc1Resolve";
+
+// ...
+app.use("/api/legal/doc1", legalDoc1ResolveRouter);
+```
+
+---
+
+## 4) Frontend: Add toggle controls to “Legal Coverage” minitab
+
+Update the coverage minitab so you can turn enforcement on/off from backend UI.
+
+### Patch `client/src/pages/AdminLegalCoverage.tsx`
+
+#### 4.1 Add state + load functions (inside component)
+
+Add these near the top:
+
+```tsx
+  const [enforceGate, setEnforceGate] = useState<boolean>(false);
+  const [enforceLoading, setEnforceLoading] = useState(false);
+
+  async function loadEnforceGate() {
+    setEnforceLoading(true);
+    try {
+      const res = await fetch(`/api/admin/system-config/get?key=legal.coverage.enforce`);
+      const j = await res.json();
+      if (!j?.ok) throw new Error(j?.error || "Failed to load gate config.");
+      const v = String(j.row?.value ?? "false").trim().toLowerCase();
+      setEnforceGate(["1", "true", "yes", "on"].includes(v));
+    } catch {
+      setEnforceGate(false);
+    } finally {
+      setEnforceLoading(false);
+    }
+  }
+
+  async function setEnforceGateValue(next: boolean) {
+    setEnforceLoading(true);
+    try {
+      const res = await fetch(`/api/admin/system-config/set`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ key: "legal.coverage.enforce", value: next ? "true" : "false" }),
+      });
+      const j = await res.json();
+      if (!j?.ok) throw new Error(j?.error || "Failed to set gate config.");
+      setEnforceGate(next);
+    } catch (e: any) {
+      alert(e?.message || "Failed to set gate config.");
+    } finally {
+      setEnforceLoading(false);
+    }
+  }
+```
+
+#### 4.2 Call on mount
+
+Add to your existing `useEffect` that loads coverage, or add a new one:
+
+```tsx
+  useEffect(() => {
+    loadEnforceGate().catch(() => {});
+  }, []);
+```
+
+#### 4.3 Add UI controls (near the top header actions)
+
+In the header area (where you have Refresh), add:
+
+```tsx
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <span style={{ fontSize: 12, opacity: 0.75 }}>
+            Gate:{" "}
+            <strong>{enforceLoading ? "…" : (enforceGate ? "ENFORCED" : "OFF")}</strong>
+          </span>
+          <button
+            style={btn}
+            disabled={enforceLoading}
+            onClick={() => setEnforceGateValue(!enforceGate)}
+            title="When enforced, signup/legal resolution is blocked unless active targets exist for the resolved jurisdiction."
+          >
+            {enforceLoading ? "Saving..." : (enforceGate ? "Disable Gate" : "Enable Gate")}
+          </button>
+          <button style={btn} onClick={load} disabled={loading}>
+            {loading ? "Refreshing..." : "Refresh"}
+          </button>
+        </div>
+```
+
+---
+
+## 5) How you integrate this into signup (now or later)
+
+Your signup embed/renderer engine should call:
+
+* `GET /api/legal/doc1/resolve?countryIso2=XX&regionKey=...`
+
+If it gets:
+
+* `409` with `code: LEGAL_COVERAGE_BLOCKED` → show user a clean message:
+
+  * “We are not yet available in your jurisdiction. Please check back later.”
+
+This gives you a controlled rollout by country/region.
+
+---
+
+## 6) Operational checklist (what you must set before enforcing)
+
+Before you flip `legal.coverage.enforce = true`, ensure targets are set in **Legal Docs** (or Coverage panel “Set Active → Latest”):
+
+* `DOC1 / GLOBAL_MASTER / DEFAULT / GLOBAL` → active doc id set
+* `DOC1 / ADDENDUM / DEFAULT / ROW` → active doc id set
+* For any priority country you want to onboard:
+
+  * `DOC1 / ADDENDUM / COUNTRY / {ISO2}` → active doc id set
+  * or, if you use regions for that onboarding, set `REGION/{regionKey}`.
+
+Once those are covered, enforcement is safe.
+
+If you want, next step is to add a **“Signup Availability”** check on the public site that calls this resolver and returns a simple green/red status for the selected jurisdiction (same gate logic, no doc payload).

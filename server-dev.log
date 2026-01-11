@@ -1,0 +1,2056 @@
+
+> rest-express@1.0.0 dev
+> tsx server/index.ts
+
+1Forge API Key present: false
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+Dynamic symbol set updated: AUDUSD, EURJPY, EURUSD, GBPJPY, GBPUSD, NGAS, US30, USDJPY, WTI, XAUUSD
+Environment validation complete:
+  - LEGAL_TERMS_HMAC_SECRET: configured
+  - RESEND_API_KEY: MISSING
+  - TWILIO_ACCOUNT_SID: MISSING
+  - TWILIO_AUTH_TOKEN: MISSING
+  - TWILIO_MESSAGING_SERVICE_SID: MISSING
+  - TWILIO_FROM_NUMBER: MISSING
+  - 1Forge API Key: MISSING
+Trade audit table ensured
+Institutional audit columns ensured
+Order intent audit table ensured
+Global settings table ensured
+System config table ensured
+User login history table ensured
+Login history session columns ensured
+User account events table ensured
+User admin notes table ensured
+Trader journal table ensured
+Admin actions table ensured
+User sessions table ensured
+User sessions identity columns ensured
+User sessions geo columns ensured
+Login history identity columns ensured
+Login history geo columns ensured
+Trades provenance columns ensured
+Audit export manifest table ensured
+User tier columns ensured
+User verification table ensured
+Verification throttle columns ensured
+User verification policy columns ensured
+Email verification tokens table ensured
+SMS OTP tokens table ensured
+User equity daily table ensured
+User MFA table ensured
+User KYC profiles table ensured
+User payout profiles table ensured
+Identity audit table ensured
+Session revocation columns ensured
+Grift config table ensured with defaults
+Grift devices table ensured
+Grift device users table ensured
+Grift signals table ensured
+Grift identity links table ensured
+Grift alerts table ensured
+Grift user risk table ensured
+Grift enforcement log table ensured
+Grift linked account edges table ensured
+Grift observations table ensured
+Grift trade observations table ensured
+Grift cases tables ensured
+Grift admin actions table ensured
+Grift user scores table ensured
+Grift user enforcements table ensured
+Auth events table ensured
+Grift detection schema ensured
+Tiered access schema ensured
+Legal compliance schema ensured
+Signup fingerprint schema ensured
+9:52:31 PM [express] Schema audit columns verified (institutional-grade)
+9:52:32 PM [express] Auto-close scheduled to run every 60 minutes
+9:52:32 PM [express] Price feed and auto-close services initialized
+Creating admin data views...
+Admin data views created successfully
+Database admin views setup complete
+9:52:32 PM [express] Admin data views and tables initialized successfully
+Loaded 12 reference prices from database
+9:52:32 PM [express] Price quotes initialized
+Ready to track percentage changes with reference prices
+[Grift Scheduler] Periodic risk evaluation scheduled (hourly)
+9:52:32 PM [express] Grift detection scheduler initialized
+[Verification Reminders] Starting cron job
+9:52:32 PM [express] Verification reminder cron initialized
+Price quotes initialized
+[Simulation] No FORGE_KEY found - starting simulated price updates
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+9:52:32 PM [express] serving on port 5000
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+9:56:31 PM [express] POST /api/auth/login 400 in 6ms :: {"message":"Invalid input data","errors":[{"…
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+9:57:18 PM [express] POST /api/auth/login 200 in 271ms :: {"id":8,"email":"admin@local.test","userna…
+9:57:18 PM [express] GET /api/config/symbols 200 in 17ms :: [{"id":4,"symbol":"AUDUSD","name":"Austr…
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+9:58:02 PM [express] POST /api/auth/login 200 in 236ms :: {"id":8,"email":"admin@local.test","userna…
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+9:58:02 PM [express] GET /api/config/symbols 200 in 12ms :: [{"id":4,"symbol":"AUDUSD","name":"Austr…
+9:58:02 PM [express] POST /api/trades 403 in 41ms :: {"message":"deny.EMAIL_UNVERIFIED_GRACE_EXPIRED…
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+9:59:28 PM [express] POST /api/auth/login 200 in 166ms :: {"id":8,"email":"admin@local.test","userna…
+9:59:28 PM [express] GET /api/config/symbols 200 in 13ms :: [{"id":4,"symbol":"AUDUSD","name":"Austr…
+Updated reference price for EURUSD: 1.0939595205105401
+Updated reference price for USDJPY: 144.86826720572216
+Updated reference price for GBPUSD: 1.2501
+Updated reference price for AUDUSD: 0.6530035124772543
+Updated reference price for USDCAD: 1.39371440546025
+Updated reference price for NZDUSD: 0.5967512383473695
+Updated reference price for XAUUSD: 4317.758203587118
+Updated reference price for US30: 1.0259117421173019
+Updated reference price for WTI: 0.989075825252954
+Updated reference price for NGAS: 1.0050488338989005
+Updated reference price for GBPJPY: 184.21100466006646
+Updated reference price for EURJPY: 158.46229951121163
+Updated 12 reference prices
+9:59:29 PM [express] GET /api/quotes/latest 200 in 133ms :: [{"symbol":"EURUSD","bid":1.093859520510…
+9:59:29 PM [express] POST /api/trades 201 in 320ms :: {"id":185,"userId":8,"symbolId":2,"type":"BUY"…
+9:59:29 PM [express] PATCH /api/trades/185/targets 200 in 54ms :: {"id":185,"userId":8,"symbolId":2,…
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+9:59:29 PM [express] GET /api/quotes/latest 200 in 5ms :: [{"symbol":"EURUSD","bid":1.09437772260487…
+User 8 pricing stale: symbols= fxStale=true
+9:59:29 PM [express] POST /api/trades 201 in 132ms :: {"id":186,"userId":8,"symbolId":2,"type":"BUY"…
+9:59:29 PM [express] GET /api/quotes/latest 200 in 6ms :: [{"symbol":"EURUSD","bid":1.09437772260487…
+User 8 pricing stale: symbols= fxStale=true
+9:59:29 PM [express] POST /api/trades 201 in 119ms :: {"id":187,"userId":8,"symbolId":2,"type":"SELL…
+9:59:29 PM [express] PATCH /api/trades/187/cancel 200 in 57ms :: {"id":187,"userId":8,"symbolId":2,"…
+9:59:29 PM [express] GET /api/quotes/latest 200 in 4ms :: [{"symbol":"EURUSD","bid":1.09437772260487…
+User 8 pricing stale: symbols= fxStale=true
+9:59:30 PM [express] POST /api/trades 201 in 136ms :: {"id":188,"userId":8,"symbolId":2,"type":"BUY"…
+9:59:30 PM [express] GET /api/admin/global-settings 200 in 12ms :: {"id":1,"defaultLeverage":50,"max…
+9:59:30 PM [express] Auto-close scheduled to run every 0.1 minutes
+9:59:30 PM [express] PUT /api/admin/global-settings 200 in 24ms :: {"id":1,"defaultLeverage":50,"max…
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+9:59:36 PM [express] Running auto-close check for trades > 0 days old
+9:59:36 PM [express] Found 12 trades to auto-close
+User 18 pricing stale: symbols=GBPJPY,AUDUSD fxStale=true
+9:59:36 PM [express] Auto-closed trade=169 reason=MAX_HOLD_TIME profit=-18569.84 symbol=GBPJPY stale=true
+User 18 pricing stale: symbols=AUDUSD fxStale=true
+9:59:36 PM [express] Auto-closed trade=170 reason=MAX_HOLD_TIME profit=-18547.75 symbol=GBPJPY stale=true
+9:59:36 PM [express] Auto-closed trade=172 reason=MAX_HOLD_TIME profit=-1849.38 symbol=AUDUSD stale=true
+9:59:36 PM [express] Auto-closed trade=174 reason=MAX_HOLD_TIME profit=-7861.35 symbol=USDJPY stale=true
+User 23 pricing stale: symbols=USDJPY,GBPJPY fxStale=true
+9:59:36 PM [express] Auto-closed trade=177 reason=MAX_HOLD_TIME profit=-7960.75 symbol=USDJPY stale=true
+User 23 pricing stale: symbols=GBPJPY fxStale=true
+9:59:36 PM [express] Auto-closed trade=179 reason=MAX_HOLD_TIME profit=-7972.48 symbol=USDJPY stale=true
+9:59:36 PM [express] Auto-closed trade=180 reason=MAX_HOLD_TIME profit=18600.21 symbol=GBPJPY stale=true
+9:59:36 PM [express] Auto-closed trade=181 reason=MAX_HOLD_TIME profit=-156894.97 symbol=GBPUSD stale=true
+User 31 pricing stale: symbols=USDJPY fxStale=true
+9:59:36 PM [express] Auto-closed trade=182 reason=MAX_HOLD_TIME profit=-7852.38 symbol=USDJPY stale=true
+9:59:36 PM [express] Auto-closed trade=183 reason=MAX_HOLD_TIME profit=78289.13 symbol=USDJPY stale=true
+User 8 pricing stale: symbols=GBPUSD fxStale=true
+9:59:36 PM [express] Auto-closed trade=185 reason=MAX_HOLD_TIME profit=2088.25 symbol=GBPUSD stale=true
+9:59:37 PM [express] Auto-closed trade=188 reason=MAX_HOLD_TIME profit=2088.25 symbol=GBPUSD stale=true
+9:59:37 PM [express] Auto-close job completed successfully
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+9:59:42 PM [express] Running auto-close check for trades > 0 days old
+9:59:42 PM [express] No trades need auto-closing
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+9:59:48 PM [express] Running auto-close check for trades > 0 days old
+9:59:48 PM [express] No trades need auto-closing
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+9:59:54 PM [express] Running auto-close check for trades > 0 days old
+9:59:54 PM [express] No trades need auto-closing
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Grift Scheduler] Running periodic risk re-evaluation...
+[Grift Scheduler] Recomputed aggregates for 15 users
+10:00:00 PM [express] Running auto-close check for trades > 0 days old
+10:00:00 PM [express] No trades need auto-closing
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+10:00:06 PM [express] Running auto-close check for trades > 0 days old
+10:00:06 PM [express] No trades need auto-closing
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+10:00:12 PM [express] Running auto-close check for trades > 0 days old
+10:00:12 PM [express] No trades need auto-closing
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+10:00:18 PM [express] Running auto-close check for trades > 0 days old
+10:00:18 PM [express] No trades need auto-closing
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+10:00:24 PM [express] Running auto-close check for trades > 0 days old
+10:00:24 PM [express] No trades need auto-closing
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+10:00:25 PM [express] POST /api/auth/login 200 in 166ms :: {"id":8,"email":"admin@local.test","userna…
+10:00:25 PM [express] Auto-close scheduled to run every 60 minutes
+10:00:25 PM [express] PUT /api/admin/global-settings 200 in 25ms :: {"id":1,"defaultLeverage":50,"max…
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+10:01:18 PM [express] POST /api/auth/login 200 in 172ms :: {"id":8,"email":"admin@local.test","userna…
+10:01:18 PM [express] GET /api/config/symbols 200 in 12ms :: [{"id":4,"symbol":"AUDUSD","name":"Austr…
+10:01:18 PM [express] GET /api/quotes/latest 200 in 7ms :: [{"symbol":"EURUSD","bid":1.09450182474938…
+User 8 pricing stale: symbols= fxStale=true
+10:01:18 PM [express] POST /api/trades 201 in 151ms :: {"id":189,"userId":8,"symbolId":2,"type":"BUY"…
+10:01:18 PM [express] PATCH /api/trades/189/targets 200 in 59ms :: {"id":189,"userId":8,"symbolId":2,…
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+10:02:19 PM [express] POST /api/auth/login 200 in 243ms :: {"id":8,"email":"admin@local.test","userna…
+10:02:19 PM [express] GET /api/admin/trade-audit 200 in 19ms :: [{"id":133,"tradeId":189,"eventType":…
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+10:06:06 PM [express] POST /api/auth/login 200 in 193ms :: {"id":8,"email":"admin@local.test","userna…
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+10:06:06 PM [express] POST /api/trades/186/close 200 in 77ms :: {"id":186,"userId":8,"symbolId":2,"ty…
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata

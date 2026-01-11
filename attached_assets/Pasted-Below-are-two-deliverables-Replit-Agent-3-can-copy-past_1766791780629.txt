@@ -1,0 +1,421 @@
+Below are two deliverables Replit Agent 3 can copy/paste and run immediately:
+
+1. **A single SQLite verification script** that audits: tables, columns, indices, seed config, signal dedupe uniqueness, relationship integrity, rule coverage, and surfacing readiness.
+
+2. **A deterministic smoke-test script (curl + UI click-path)** that forces each detector to fire (multi-account device, hedge-pair, churn, concurrent sessions, geo velocity) and then validates the admin dashboards (Users/Pairs/Networks/Signals) show the expected records.
+
+---
+
+## 1) SQLite verification script (single file)
+
+Save as: `grift_verify.sql` and run via `sqlite3 trading_app.db < grift_verify.sql`
+
+```sql
+-- grift_verify.sql
+-- Purpose: Deep audit of Grift subsystem schema + integrity + readiness
+-- Usage: sqlite3 trading_app.db < grift_verify.sql
+
+.headers on
+.mode column
+.nullvalue NULL
+
+SELECT '=== 0) DB + SQLite Info ===' AS section;
+SELECT sqlite_version() AS sqlite_version;
+
+SELECT '=== 1) Table Existence (grift_*) ===' AS section;
+SELECT name, type
+FROM sqlite_master
+WHERE type IN ('table','index','trigger','view')
+  AND name LIKE 'grift_%'
+ORDER BY type, name;
+
+SELECT '=== 1.1) Ensure no legacy fraud naming in DB objects ===' AS section;
+SELECT name, type
+FROM sqlite_master
+WHERE lower(name) LIKE '%fraud%';
+
+SELECT '=== 2) Required Tables Presence Check ===' AS section;
+WITH required(name) AS (
+  VALUES
+    ('grift_config'),
+    ('grift_observations'),
+    ('grift_trade_observations'),
+    ('grift_devices'),
+    ('grift_device_users'),
+    ('grift_signals'),
+    ('grift_cases'),
+    ('grift_case_links'),
+    ('grift_user_scores'),
+    ('grift_actions_audit')
+)
+SELECT r.name AS required_table,
+       CASE WHEN m.name IS NULL THEN 'MISSING' ELSE 'OK' END AS status
+FROM required r
+LEFT JOIN sqlite_master m
+  ON m.type='table' AND m.name=r.name
+ORDER BY status DESC, required_table;
+
+SELECT '=== 3) Table Column Introspection ===' AS section;
+
+SELECT '--- grift_config columns ---' AS sub;
+PRAGMA table_info(grift_config);
+
+SELECT '--- grift_signals columns ---' AS sub;
+PRAGMA table_info(grift_signals);
+
+SELECT '--- grift_observations columns ---' AS sub;
+PRAGMA table_info(grift_observations);
+
+SELECT '--- grift_trade_observations columns ---' AS sub;
+PRAGMA table_info(grift_trade_observations);
+
+SELECT '--- grift_device_users columns ---' AS sub;
+PRAGMA table_info(grift_device_users);
+
+SELECT '--- grift_user_scores columns ---' AS sub;
+PRAGMA table_info(grift_user_scores);
+
+SELECT '--- grift_actions_audit columns ---' AS sub;
+PRAGMA table_info(grift_actions_audit);
+
+SELECT '=== 4) Indices (performance + dedupe) ===' AS section;
+
+SELECT '--- grift_signals indices ---' AS sub;
+PRAGMA index_list(grift_signals);
+
+SELECT '--- grift_observations indices ---' AS sub;
+PRAGMA index_list(grift_observations);
+
+SELECT '--- grift_trade_observations indices ---' AS sub;
+PRAGMA index_list(grift_trade_observations);
+
+SELECT '--- grift_device_users indices ---' AS sub;
+PRAGMA index_list(grift_device_users);
+
+SELECT '--- grift_user_scores indices ---' AS sub;
+PRAGMA index_list(grift_user_scores);
+
+SELECT '=== 4.1) Verify UNIQUE dedupe_key exists on grift_signals ===' AS section;
+-- This checks if any index has unique=1 and references dedupe_key (best-effort)
+WITH idx AS (
+  SELECT il.name AS index_name, il."unique" AS is_unique
+  FROM pragma_index_list('grift_signals') il
+),
+cols AS (
+  SELECT i.index_name, i.is_unique, ic.name AS col
+  FROM idx i
+  JOIN pragma_index_info(i.index_name) ic
+)
+SELECT index_name,
+       MAX(is_unique) AS is_unique,
+       GROUP_CONCAT(col) AS cols
+FROM cols
+GROUP BY index_name
+HAVING lower(GROUP_CONCAT(col)) LIKE '%dedupe_key%';
+
+SELECT '=== 5) Seed Config Check ===' AS section;
+SELECT *
+FROM grift_config
+WHERE id=1;
+
+SELECT '=== 5.1) Config Updated Fields Present ===' AS section;
+-- If columns missing, this query will fail; that is itself a FAIL indicator.
+SELECT updated_at, updated_by_admin_id
+FROM grift_config
+WHERE id=1;
+
+SELECT '=== 6) Basic Write Activity (should not be empty after usage) ===' AS section;
+SELECT 'grift_observations' AS table_name, COUNT(*) AS row_count FROM grift_observations
+UNION ALL SELECT 'grift_trade_observations', COUNT(*) FROM grift_trade_observations
+UNION ALL SELECT 'grift_device_users', COUNT(*) FROM grift_device_users
+UNION ALL SELECT 'grift_signals', COUNT(*) FROM grift_signals
+UNION ALL SELECT 'grift_user_scores', COUNT(*) FROM grift_user_scores
+UNION ALL SELECT 'grift_actions_audit', COUNT(*) FROM grift_actions_audit
+ORDER BY table_name;
+
+SELECT '=== 7) Observations Coverage by Event Type ===' AS section;
+SELECT event_type, COUNT(*) AS c
+FROM grift_observations
+GROUP BY event_type
+ORDER BY c DESC;
+
+SELECT '=== 8) Signals Coverage by Rule Code / Severity / Status ===' AS section;
+SELECT rule_code, severity, status, COUNT(*) AS c
+FROM grift_signals
+GROUP BY rule_code, severity, status
+ORDER BY c DESC, rule_code;
+
+SELECT '=== 8.1) Dedupe Sanity: any duplicate dedupe_keys? (must be zero) ===' AS section;
+SELECT dedupe_key, COUNT(*) AS c
+FROM grift_signals
+GROUP BY dedupe_key
+HAVING COUNT(*) > 1
+ORDER BY c DESC;
+
+SELECT '=== 9) Integrity: signals reference valid users ===' AS section;
+-- Replace "users" table name if your schema differs.
+SELECT s.id, s.rule_code, s.primary_user_id, s.secondary_user_id
+FROM grift_signals s
+LEFT JOIN users u1 ON u1.id = s.primary_user_id
+LEFT JOIN users u2 ON u2.id = s.secondary_user_id
+WHERE u1.id IS NULL
+   OR (s.secondary_user_id IS NOT NULL AND u2.id IS NULL)
+LIMIT 100;
+
+SELECT '=== 10) Integrity: signals reference valid trades when trade_id present ===' AS section;
+-- Replace "trades" table name if your schema differs.
+SELECT s.id, s.rule_code, s.trade_id
+FROM grift_signals s
+LEFT JOIN trades t ON t.id = s.trade_id
+WHERE s.trade_id IS NOT NULL AND t.id IS NULL
+LIMIT 100;
+
+SELECT '=== 11) Network Findings: shared devices (multi-user) ===' AS section;
+SELECT device_id, COUNT(DISTINCT user_id) AS users, MAX(last_seen_at) AS last_seen_at
+FROM grift_device_users
+GROUP BY device_id
+HAVING users > 1
+ORDER BY users DESC, last_seen_at DESC
+LIMIT 50;
+
+SELECT '=== 12) Network Findings: shared IPs (multi-user) ===' AS section;
+SELECT ip, COUNT(DISTINCT user_id) AS users, MAX(ts) AS last_seen_at
+FROM grift_observations
+WHERE ip IS NOT NULL AND ip != ''
+GROUP BY ip
+HAVING users > 1
+ORDER BY users DESC, last_seen_at DESC
+LIMIT 50;
+
+SELECT '=== 13) Top User Risk (grift_user_scores ranking) ===' AS section;
+SELECT user_id, score_current, tier, open_signals_count,
+       devices_7d, ips_7d, user_agents_7d, countries_7d, asns_7d,
+       linked_accounts_30d, hedge_pairs_7d,
+       last_evaluated_at
+FROM grift_user_scores
+ORDER BY score_current DESC, open_signals_count DESC
+LIMIT 25;
+
+SELECT '=== 14) Explain Plan Spot-Check (admin queries should be indexed) ===' AS section;
+-- If this shows full table scans on large tables, add indices.
+EXPLAIN QUERY PLAN
+SELECT *
+FROM grift_observations
+WHERE user_id = 1
+ORDER BY ts DESC
+LIMIT 100;
+
+EXPLAIN QUERY PLAN
+SELECT *
+FROM grift_signals
+WHERE primary_user_id = 1 OR secondary_user_id = 1
+ORDER BY created_at DESC
+LIMIT 100;
+
+SELECT '=== 15) End ===' AS section;
+```
+
+**How Agent 3 should interpret results**
+
+* Any “MISSING” in required tables = **FAIL**.
+* Any duplicates in `dedupe_key` query = **FAIL** (dedupe index absent/broken).
+* Integrity queries returning rows = **FAIL** (broken relationships).
+* Explain plans showing table scans on high-volume tables = **PERF FAIL** (must add indices).
+
+---
+
+## 2) Deterministic smoke-test (curl + admin UI click-path)
+
+This forces the system to generate evidence so dashboards can be validated.
+
+### 2.1 Prerequisites
+
+* Two test users exist: `userA`, `userB`
+* Admin user exists
+* Server running locally (or replit URL)
+* You know how to obtain session cookies after login (your auth flow)
+
+If your app is cookie-session based, do this pattern:
+
+#### Step 1: Login as User A and store cookie jar
+
+```bash
+# Adjust endpoint/body to your login route
+curl -c cookiesA.txt -X POST "http://localhost:3000/api/auth/login" \
+  -H "Content-Type: application/json" \
+  -H "X-Device-Id: DEVICE_SHARED_001" \
+  -d '{"email":"userA@test.com","password":"Password123!"}'
+```
+
+#### Step 2: Send pings for User A
+
+```bash
+curl -b cookiesA.txt -X POST "http://localhost:3000/api/grift/ping" \
+  -H "Content-Type: application/json" \
+  -H "X-Device-Id: DEVICE_SHARED_001" \
+  -d '{}'
+```
+
+#### Step 3: Login as User B on same device (multi-account device trigger)
+
+```bash
+curl -c cookiesB.txt -X POST "http://localhost:3000/api/auth/login" \
+  -H "Content-Type: application/json" \
+  -H "X-Device-Id: DEVICE_SHARED_001" \
+  -d '{"email":"userB@test.com","password":"Password123!"}'
+```
+
+#### Step 4: Ping as User B (reinforces shared-device link)
+
+```bash
+curl -b cookiesB.txt -X POST "http://localhost:3000/api/grift/ping" \
+  -H "Content-Type: application/json" \
+  -H "X-Device-Id: DEVICE_SHARED_001" \
+  -d '{}'
+```
+
+**Expected DB result:** `MULTI_ACCOUNT_DEVICE` appears; shared device in networks.
+
+---
+
+### 2.2 Hedge-pair trigger (A BUY, B SELL same symbol within window)
+
+#### User A places BUY
+
+```bash
+curl -b cookiesA.txt -X POST "http://localhost:3000/api/trades" \
+  -H "Content-Type: application/json" \
+  -H "X-Device-Id: DEVICE_SHARED_001" \
+  -d '{"symbol":"XAUUSD","side":"BUY","lots":1,"orderType":"MARKET"}'
+```
+
+#### User B places SELL
+
+```bash
+curl -b cookiesB.txt -X POST "http://localhost:3000/api/trades" \
+  -H "Content-Type: application/json" \
+  -H "X-Device-Id: DEVICE_SHARED_001" \
+  -d '{"symbol":"XAUUSD","side":"SELL","lots":1,"orderType":"MARKET"}'
+```
+
+**Expected DB result:** `HEDGE_PAIR` signal with symbol and both user IDs.
+
+---
+
+### 2.3 Concurrent sessions trigger (same user, two devices, same time window)
+
+#### Login User A in parallel with a second “device”
+
+```bash
+curl -c cookiesA2.txt -X POST "http://localhost:3000/api/auth/login" \
+  -H "Content-Type: application/json" \
+  -H "X-Device-Id: DEVICE_A_SECOND_002" \
+  -d '{"email":"userA@test.com","password":"Password123!"}'
+```
+
+#### Ping from both sessions within the concurrent window
+
+```bash
+curl -b cookiesA.txt -X POST "http://localhost:3000/api/grift/ping" \
+  -H "Content-Type: application/json" \
+  -H "X-Device-Id: DEVICE_SHARED_001" \
+  -d '{}'
+
+curl -b cookiesA2.txt -X POST "http://localhost:3000/api/grift/ping" \
+  -H "Content-Type: application/json" \
+  -H "X-Device-Id: DEVICE_A_SECOND_002" \
+  -d '{}'
+```
+
+**Expected DB result:** `CONCURRENT_SESSIONS` for user A.
+
+---
+
+### 2.4 Churn triggers (IP/UA/ASN) in dev
+
+If you are behind a single local IP, simulate churn by sending fake forwarded-for + different user-agent:
+
+```bash
+curl -b cookiesA.txt -X POST "http://localhost:3000/api/grift/ping" \
+  -H "Content-Type: application/json" \
+  -H "X-Device-Id: DEVICE_SHARED_001" \
+  -H "X-Forwarded-For: 1.1.1.1" \
+  -H "User-Agent: UA_TEST_1" \
+  -d '{}'
+
+curl -b cookiesA.txt -X POST "http://localhost:3000/api/grift/ping" \
+  -H "Content-Type: application/json" \
+  -H "X-Device-Id: DEVICE_SHARED_001" \
+  -H "X-Forwarded-For: 8.8.8.8" \
+  -H "User-Agent: UA_TEST_2" \
+  -d '{}'
+```
+
+Repeat enough times to exceed configured thresholds.
+
+**Expected DB result:** `IP_CHURN` and `UA_CHURN` signals.
+
+---
+
+### 2.5 Geo velocity trigger (only if your ping accepts coords)
+
+```bash
+curl -b cookiesA.txt -X POST "http://localhost:3000/api/grift/ping" \
+  -H "Content-Type: application/json" \
+  -H "X-Device-Id: DEVICE_SHARED_001" \
+  -d '{"latitude":39.7392,"longitude":-104.9903}'
+
+curl -b cookiesA.txt -X POST "http://localhost:3000/api/grift/ping" \
+  -H "Content-Type: application/json" \
+  -H "X-Device-Id: DEVICE_SHARED_001" \
+  -d '{"latitude":51.5072,"longitude":-0.1276}'
+```
+
+**Expected DB result:** `GEO_VELOCITY` if thresholds are exceeded.
+
+---
+
+## 2.6 Admin UI click-path verification (what to check on-screen)
+
+1. Admin Dashboard → User Management → mini-tab **Grift**
+2. Grift sub-tab **Users**
+
+   * Confirm users appear with non-zero `score_current`
+   * Confirm tiers show expected (MED/HIGH/CRITICAL based on config)
+3. Grift sub-tab **Signals**
+
+   * Filter `rule_code=HEDGE_PAIR`, verify record exists for XAUUSD
+   * Filter `rule_code=MULTI_ACCOUNT_DEVICE`, verify shared device match
+4. Grift sub-tab **Pairs**
+
+   * Confirm A↔B appears, with rule list containing `HEDGE_PAIR` and/or `MULTI_ACCOUNT_DEVICE`
+5. Grift sub-tab **Networks**
+
+   * Shared Devices: `DEVICE_SHARED_001` shows multiple user ids
+   * Shared IPs: if simulated, shows multiple user ids
+6. Grift sub-tab **Config**
+
+   * Edit a threshold (e.g., `ip_unique_threshold`) and save
+   * Confirm `updated_at` changes and actions audit logs it
+7. Grift sub-tab **Audit**
+
+   * Confirm config update audit entry exists
+
+---
+
+## 3) What Agent 3 must return after running this
+
+* Attach the output of `grift_verify.sql`
+* Provide screenshots of:
+
+  * Users tab ranking
+  * Signals list showing at least 3 different rule codes
+  * Pairs + Networks tabs populated
+  * Config saved + Audit entry shown
+* Provide any FAIL/PARTIAL items with:
+
+  * file path
+  * root cause
+  * patch list (exact edits)
+
+If you want the same verification packaged as a **Node script using better-sqlite3** (so Agent 3 can run `npm run grift:verify` and get a structured PASS/FAIL report), say “Provide Node verifier” and I will output it inline.

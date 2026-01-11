@@ -1,0 +1,313 @@
+Below is a **copy/paste audit report template** Replit Agent 3 should use to validate the **Slider CAPTCHA**, **Phone (country-aware)**, and **Render Engine fallback (COUNTRY → REGION → GLOBAL)** implementation end-to-end.
+
+---
+
+# TRADE HUB — Compliance Systems Audit Report Template
+
+**Scope:** Signup Slider CAPTCHA + Phone Capture + Legal Render Engine Resolution
+**Auditor:** Replit Agent 3
+**Environment:** (Dev / Staging / Prod)
+**Repo / Branch:**
+**Commit SHA:**
+**Audit Date (UTC):**
+**Tester Device(s):** (Desktop / Mobile viewport sizes)
+**Browser(s):**
+**DB Engine:** SQLite (better-sqlite3)
+**Notes:** (Anything unusual about environment, seed data, config toggles)
+
+---
+
+## 1) Executive Summary
+
+### 1.1 Outcome
+
+* **Overall status:** ✅ PASS / ⚠️ PASS WITH FINDINGS / ❌ FAIL
+* **Highest severity finding:** P0 / P1 / P2 / P3
+* **Release recommendation:** GO / NO-GO / GO WITH CONDITIONS
+
+### 1.2 Top Findings (max 10)
+
+| # | Area          | Severity | Title | One-line impact | Evidence Link(s) |
+| - | ------------- | -------- | ----- | --------------- | ---------------- |
+| 1 | CAPTCHA       | P0       |       |                 |                  |
+| 2 | Phone         | P1       |       |                 |                  |
+| 3 | Render Engine | P0       |       |                 |                  |
+
+### 1.3 Risk Rating
+
+* **Compliance risk:** Low / Medium / High
+* **Bypass risk:** Low / Medium / High
+* **Operational risk:** Low / Medium / High
+
+---
+
+## 2) Configuration Snapshot
+
+### 2.1 System Config Values (capture actual values used during test)
+
+| Config Key                   | Expected   | Actual | Status | Notes |
+| ---------------------------- | ---------- | ------ | ------ | ----- |
+| `signupCaptchaEnforce`       | true/false |        | ✅/⚠️/❌ |       |
+| `captchaProvider`            | SLIDER     |        | ✅/⚠️/❌ |       |
+| `legalCoverageEnforce`       | true/false |        | ✅/⚠️/❌ |       |
+| `restrictedCountriesEnabled` | true/false |        | ✅/⚠️/❌ |       |
+| Token TTL (if any)           | e.g., 2h   |        | ✅/⚠️/❌ |       |
+
+### 2.2 Env Vars Present
+
+| Env Var                   | Required     | Present | Notes |
+| ------------------------- | ------------ | ------- | ----- |
+| `LEGAL_TERMS_HMAC_SECRET` | Yes          | Yes/No  |       |
+| Any captcha secrets       | N/A (slider) |         |       |
+
+---
+
+## 3) Findings Register (Master Table)
+
+> Use this table for every issue found. Each row must include file and evidence.
+
+| Finding ID | Area     | Severity | Status (DONE/PARTIAL/MISSING) | Title | Expected Behavior | Actual Behavior | Root Cause Hypothesis | File(s) / Line(s) | Evidence (Screenshots / Logs) | Recommended Fix |
+| ---------- | -------- | -------- | ----------------------------- | ----- | ----------------- | --------------- | --------------------- | ----------------- | ----------------------------- | --------------- |
+| CAP-001    | CAPTCHA  | P0       |                               |       |                   |                 |                       |                   |                               |                 |
+| PHN-001    | Phone    | P1       |                               |       |                   |                 |                       |                   |                               |                 |
+| RNG-001    | Render   | P0       |                               |       |                   |                 |                       |                   |                               |                 |
+| LEG-001    | Legal UI | P2       |                               |       |                   |                 |                       |                   |                               |                 |
+
+**Severity scale**
+
+* **P0:** System bypassable or legal compliance broken; must fix before deploy
+* **P1:** Major functional gap; likely blocks intended usage
+* **P2:** Noticeable bug / incorrect UX / incomplete telemetry
+* **P3:** Cosmetic or improvement suggestion
+
+---
+
+# 4) CAPTCHA AUDIT (Slider, session-bound)
+
+## 4.1 UI Presence & Gating
+
+| Check ID  | Requirement                            | Status | Evidence | Notes |
+| --------- | -------------------------------------- | ------ | -------- | ----- |
+| CAP-UI-01 | Slider CAPTCHA visible on signup       |        |          |       |
+| CAP-UI-02 | Register blocked until slider verified |        |          |       |
+| CAP-UI-03 | Reset on country change / tab switch   |        |          |       |
+| CAP-UI-04 | Clear error if mismatch/expired        |        |          |       |
+
+**File references to verify**
+
+* `client/src/pages/LoginPage.tsx`
+* `client/src/components/SliderCaptcha.tsx`
+
+## 4.2 Client→Server Handshake
+
+| Check ID   | Requirement                                                  | Status | Evidence | Notes |
+| ---------- | ------------------------------------------------------------ | ------ | -------- | ----- |
+| CAP-API-01 | `GET /api/captcha/slider/start` called and returns captchaId |        |          |       |
+| CAP-API-02 | `POST /api/captcha/slider/complete` called with captchaId    |        |          |       |
+| CAP-API-03 | Server sets `session.sliderCaptchaVerified=true`             |        |          |       |
+| CAP-API-04 | Expiry enforced (e.g., 15 min)                               |        |          |       |
+
+**File references to verify**
+
+* `server/routes/sliderCaptcha.ts` (or mounted router)
+* `server/routes.ts` (mount)
+* session middleware config
+
+## 4.3 Server-side Enforcement
+
+| Check ID   | Requirement                                                  | Status | Evidence | Notes |
+| ---------- | ------------------------------------------------------------ | ------ | -------- | ----- |
+| CAP-SRV-01 | `/api/auth/register` rejects if captcha not verified         |        |          |       |
+| CAP-SRV-02 | captcha is session-bound (cannot spoof w/o session)          |        |          |       |
+| CAP-SRV-03 | Verification resets or is single-use after successful signup |        |          |       |
+
+## 4.4 Audit Logging / Telemetry
+
+| Check ID   | Requirement                           | Status | Evidence | Notes |
+| ---------- | ------------------------------------- | ------ | -------- | ----- |
+| CAP-LOG-01 | CAPTCHA_ISSUED audit event recorded   |        |          |       |
+| CAP-LOG-02 | CAPTCHA_VERIFIED audit event recorded |        |          |       |
+| CAP-LOG-03 | IP + User-Agent captured              |        |          |       |
+
+---
+
+# 5) PHONE SYSTEM AUDIT (Country-aware prefix + formatter + deferred verification)
+
+## 5.1 UI Behavior
+
+| Check ID  | Requirement                                            | Status | Evidence | Notes |
+| --------- | ------------------------------------------------------ | ------ | -------- | ----- |
+| PHN-UI-01 | Phone field appears only after selecting country       |        |          |       |
+| PHN-UI-02 | Country selection drives calling code prefix           |        |          |       |
+| PHN-UI-03 | Auto-format-as-you-type works                          |        |          |       |
+| PHN-UI-04 | Invalid phone shows inline error                       |        |          |       |
+| PHN-UI-05 | Changing country resets or revalidates phone correctly |        |          |       |
+
+**File references**
+
+* `client/src/pages/LoginPage.tsx`
+* phone input component file, if present
+
+## 5.2 Validation & Normalization
+
+| Check ID   | Requirement                                          | Status | Evidence | Notes |
+| ---------- | ---------------------------------------------------- | ------ | -------- | ----- |
+| PHN-VAL-01 | Uses `libphonenumber-js` (no hand-rolled regex only) |        |          |       |
+| PHN-VAL-02 | Produces E.164 (e.g., +614xxxxxxxx)                  |        |          |       |
+| PHN-VAL-03 | Rejects invalid lengths/patterns per country         |        |          |       |
+
+## 5.3 Backend Receipt & Storage
+
+| Check ID   | Requirement                                       | Status | Evidence | Notes |
+| ---------- | ------------------------------------------------- | ------ | -------- | ----- |
+| PHN-SRV-01 | Register payload includes countryIso2 + phoneE164 |        |          |       |
+| PHN-SRV-02 | Server validates E.164                            |        |          |       |
+| PHN-SRV-03 | Stored in profile settings area as “unverified”   |        |          |       |
+| PHN-SRV-04 | Phone is editable later in Profile Settings       |        |          |       |
+
+**Expected per your requirement**
+
+* Phone is captured now, **verified later**, only after SMS conditions are met.
+
+---
+
+# 6) RENDER ENGINE AUDIT (COUNTRY → REGION → GLOBAL)
+
+## 6.1 Resolution Order Validation
+
+| Check ID   | Requirement                          | Status | Evidence | Notes |
+| ---------- | ------------------------------------ | ------ | -------- | ----- |
+| RNG-ORD-01 | Country addendum checked first       |        |          |       |
+| RNG-ORD-02 | Region addendum checked second       |        |          |       |
+| RNG-ORD-03 | Global fallback only if both missing |        |          |       |
+
+**API Evidence (copy response JSON snippets here)**
+
+* `/api/legal/doc1/resolve?country=AU` response:
+
+```json
+{
+  "countryIso2": "AU",
+  "scopeKey": "COUNTRY/AU | REGION/AUSTRALASIA | DEFAULT/ROW",
+  "global": { "id": 0, "version": "", "sha256": "" },
+  "addendum": { "id": 0, "version": "", "sha256": "" },
+  "combinedSha256": "",
+  "token": ""
+}
+```
+
+## 6.2 Region Mapping Coverage
+
+| Check ID   | Requirement                                                                               | Status | Evidence | Notes |
+| ---------- | ----------------------------------------------------------------------------------------- | ------ | -------- | ----- |
+| RNG-REG-01 | AU maps to correct regionKey                                                              |        |          |       |
+| RNG-REG-02 | All priority countries map correctly (TH, PH, GH, ET, RU, UA, MX, AR, CO, CN, ID, MY, VN) |        |          |       |
+| RNG-REG-03 | Unknown country safely falls back                                                         |        |          |       |
+
+## 6.3 Token Integrity & Signup Verification
+
+| Check ID   | Requirement                                    | Status | Evidence | Notes |
+| ---------- | ---------------------------------------------- | ------ | -------- | ----- |
+| RNG-TOK-01 | Render endpoint issues signed token            |        |          |       |
+| RNG-TOK-02 | Register endpoint verifies token signature     |        |          |       |
+| RNG-TOK-03 | Register recomputes and matches combinedSha256 |        |          |       |
+| RNG-TOK-04 | Token TTL enforced (reject expired)            |        |          |       |
+
+---
+
+# 7) End-to-End Flow Tests
+
+## 7.1 Happy path (AU example)
+
+**Steps**
+
+1. Select country = AU
+2. Phone field appears; type phone; see prefix formatting
+3. Resolve terms → shows correct scope label (country/region/global)
+4. Scroll terms → accept checkbox
+5. Slide captcha → verified
+6. Register → success
+7. Profile Settings shows phone unverified
+
+**Expected results**
+
+* User created
+* `users.countryIso2` stored
+* phone stored as unverified
+* legal acceptance row written
+
+**Actual results**
+
+* (fill)
+
+## 7.2 Negative tests (bypass resistance)
+
+| Test                                            | Expected                   | Actual | Status | Evidence |
+| ----------------------------------------------- | -------------------------- | ------ | ------ | -------- |
+| Register without captcha verification           | 400/blocked                |        |        |          |
+| Register without phone                          | blocked                    |        |        |          |
+| Register with invalid phone format              | blocked                    |        |        |          |
+| Register with tampered token                    | blocked                    |        |        |          |
+| Register with expired token                     | blocked                    |        |        |          |
+| Addendum changes after resolve, before register | blocked / requires refresh |        |        |          |
+
+---
+
+# 8) Database Verification Queries (SQLite)
+
+> Copy output into the Evidence column.
+
+```sql
+-- Confirm captcha session is not stored in DB (expected: session cookie only)
+-- (skip if you don't store sessions in DB)
+
+-- Phone stored
+SELECT id, email, country_iso2, region_key, phone
+FROM users
+ORDER BY id DESC
+LIMIT 5;
+
+-- Legal acceptances written
+SELECT id, ledger_seq, user_id, country_iso2, region_key, combined_sha256, accepted_at
+FROM legal_acceptances
+ORDER BY ledger_seq DESC
+LIMIT 10;
+
+-- Pointers and active docs
+SELECT doc_set, doc_type, jurisdiction_type, jurisdiction_key, active_document_id
+FROM legal_doc_pointers
+WHERE doc_set='DOC1'
+ORDER BY jurisdiction_type, jurisdiction_key;
+
+-- Docs inventory (to prove addendum exists/missing)
+SELECT id, doc_set, doc_type, jurisdiction_type, jurisdiction_key, version, sha256
+FROM legal_documents
+WHERE doc_set='DOC1'
+ORDER BY id DESC
+LIMIT 50;
+```
+
+---
+
+# 9) Fix Plan Summary (for items not done)
+
+For each P0/P1, fill:
+
+| Finding ID | Fix Owner | Fix File(s) | Fix Summary | ETA | Risk |
+| ---------- | --------- | ----------- | ----------- | --- | ---- |
+| CAP-001    | Agent 3   |             |             |     |      |
+| PHN-001    | Agent 3   |             |             |     |      |
+| RNG-001    | Agent 3   |             |             |     |      |
+
+---
+
+# 10) Final Sign-off
+
+* **Auditor:**
+* **Date:**
+* **Approved for deploy:** Yes / No
+* **Conditions:** (If “Yes with conditions,” list them)
+
+---
+
+If you want, I can also generate a **second version** of this template as a strict “checkbox-only worksheet” that Agent 3 can fill faster, plus an “evidence bundle naming convention” so screenshots/log files stay organized.

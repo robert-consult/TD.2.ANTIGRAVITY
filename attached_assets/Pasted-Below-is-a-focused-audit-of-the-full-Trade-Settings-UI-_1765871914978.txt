@@ -1,0 +1,386 @@
+Below is a focused audit of the full “Trade Settings UI → API → DB → enforcement” path, the gaps I found that could prevent changes from persisting/taking effect reliably, and the concrete code changes to harden persistence and ensure updated defaults are actually applied across the system.
+
+---
+
+## 1) End-to-end audit: does Trade Settings UI persist and apply changes?
+
+### ✅ UI → API
+
+* **AdminDashboard.tsx** posts Trade Settings to:
+
+  * `PUT /api/admin/global-settings` (global defaults)
+  * `PUT /api/admin/users/:id/settings` (per-user overrides)
+* The UI already **invalidates and refetches** the `globalSettings` query after save, which is correct.
+
+### ✅ API → DB
+
+* Global settings are stored in **`global_settings`** (single row, typically `id=1`).
+* Per-user settings are stored in **`user_settings`**.
+
+### ✅ DB → Enforcement
+
+The runtime enforcement happens in two key places:
+
+* `server/risk.ts` middleware (**primary enforcement**)
+* `server/routes.ts` trade placement handler (contains extra lot enforcement)
+
+Both read from DB at request-time (no in-memory cache), so **once the DB is updated, changes take effect immediately** for new trade requests.
+
+---
+
+## 2) Problems found (these can break persistence / cause confusing defaults)
+
+### Issue A — Inconsistent “defaults” across schema / API / enforcement
+
+I found multiple conflicting defaults:
+
+* `shared/schema.ts` had:
+
+  * `maxTradesPerUser` default **10**
+  * `maxTradesPerInstrument` default **5**
+* But your intended behavior (and the rest of your enforcement logic) is:
+
+  * **5 total concurrent trades**
+  * **3 per instrument**
+* Also, `server/engine/orderEngine.ts` used fallback **10**, which can diverge from risk middleware defaults.
+
+**Impact:** Fresh installs or missing-row scenarios can “snap back” to different values than you set/expect.
+
+---
+
+### Issue B — `GET /api/admin/global-settings` did not guarantee a persisted row
+
+If the table exists but has no row, the GET route returned an in-memory default **without inserting it**.
+
+**Impact:** You could “see defaults” in UI, but nothing is actually persisted, and enforcement may behave differently until an explicit PUT happens.
+
+---
+
+### Issue C — PUT parsing used `Number(x) || default`
+
+This pattern silently breaks legitimate values and can “undo” updates:
+
+* `Number(0) || 50` becomes `50`
+* string booleans like `"false"` become truthy via `Boolean("false") === true`
+
+**Impact:** Admin changes can appear saved, but normalize incorrectly and lead to unexpected enforcement.
+
+---
+
+## 3) Fixes implemented (to ensure persistence + immediate effect)
+
+### ✅ Fix 1 — Normalize defaults everywhere to 5 / 3
+
+* `shared/schema.ts`
+* Admin UI initial state
+* Order engine fallback
+* Risk middleware default response for market hours/weekend behavior
+
+### ✅ Fix 2 — Ensure GET creates a durable global settings row
+
+If missing, insert a default row (`id=1`) and return it.
+
+### ✅ Fix 3 — Harden PUT parsing
+
+* Proper numeric parsing (`undefined` if invalid)
+* Proper boolean parsing for `"true"/"false"` strings
+* Validate `HH:MM` format and bounds
+
+---
+
+# 4) Code patches (inline)
+
+## A) `shared/schema.ts` — Align global defaults to 5/3
+
+```diff
+ export const globalSettings = sqliteTable("global_settings", {
+   id: integer("id").primaryKey(),
+   maxPositionSize: integer("max_position_size").default(100000),
+-  maxTradesPerUser: integer("max_trades_per_user").default(10),
+-  maxTradesPerInstrument: integer("max_trades_per_instrument").default(5),
++  maxTradesPerUser: integer("max_trades_per_user").default(5),
++  maxTradesPerInstrument: integer("max_trades_per_instrument").default(3),
+   maxConcurrentLots: integer("max_concurrent_lots").default(50),
+   defaultLeverage: integer("default_leverage").default(50),
+   allowWeekendTrading: integer("allow_weekend_trading", { mode: "boolean" }).default(true),
+   marketOpenTime: text("market_open_time").default("09:00"),
+   marketCloseTime: text("market_close_time").default("17:00"),
+   ...
+ });
+```
+
+---
+
+## B) `client/src/pages/AdminDashboard.tsx` — UI initial defaults match enforcement
+
+```diff
+ const [riskParams, setRiskParams] = useState({
+   maxPositionSize: 100000,
+-  maxTradesPerUser: 10,
+-  maxTradesPerInstrument: 5,
++  maxTradesPerUser: 5,
++  maxTradesPerInstrument: 3,
+   maxConcurrentLots: 50,
+   defaultLeverage: 50,
+   allowWeekendTrading: false,
+   marketOpenTime: "09:00",
+   marketCloseTime: "17:00",
+ });
+```
+
+---
+
+## C) `server/engine/orderEngine.ts` — fallback consistent with risk middleware
+
+```diff
+ return {
+-  maxTradesPerUser: gs?.maxTradesPerUser ?? 10,
++  maxTradesPerUser: gs?.maxTradesPerUser ?? 5,
+   maxTradesPerInstrument: gs?.maxTradesPerInstrument ?? 3,
+   maxConcurrentLots: gs?.maxConcurrentLots ?? 50,
+ };
+```
+
+---
+
+## D) `server/routes/admin.ts` — GET creates row, PUT parses safely
+
+### 1) GET `/api/admin/global-settings` ensures row exists
+
+```diff
+ app.get("/api/admin/global-settings", requireAdmin, async (req, res) => {
+   try {
+     let settings = await db.query.globalSettings.findFirst({
+       where: eq(globalSettings.id, 1),
+     });
+
+-    if (!settings) {
+-      return res.json({
+-        id: 1,
+-        maxPositionSize: 100000,
+-        maxTradesPerUser: 5,
+-        maxTradesPerInstrument: 3,
+-        maxConcurrentLots: 50,
+-        defaultLeverage: 50,
+-        allowWeekendTrading: false,
+-        marketOpenTime: "09:00",
+-        marketCloseTime: "17:00",
+-        enableAutoClose: true,
+-        autoCloseAfterDays: 4,
+-        autoCloseCheckFrequencyMinutes: 60,
+-        enableLossLimits: true,
+-        dailyLossLimitPct: 10,
+-        lifetimeLossLimitPct: 20,
+-      });
+-    }
+
++    if (!settings) {
++      await db.insert(globalSettings).values({
++        id: 1,
++        maxPositionSize: 100000,
++        maxTradesPerUser: 5,
++        maxTradesPerInstrument: 3,
++        maxConcurrentLots: 50,
++        defaultLeverage: 50,
++        allowWeekendTrading: false,
++        marketOpenTime: "09:00",
++        marketCloseTime: "17:00",
++        enableAutoClose: true,
++        autoCloseAfterDays: 4,
++        autoCloseCheckFrequencyMinutes: 60,
++        enableLossLimits: true,
++        dailyLossLimitPct: 10,
++        lifetimeLossLimitPct: 20,
++        updatedAt: new Date(),
++      });
++
++      settings = await db.query.globalSettings.findFirst({
++        where: eq(globalSettings.id, 1),
++      });
++    }
+
+     res.json(settings);
+   } catch (error) {
+     console.error("Error fetching global settings:", error);
+     res.status(500).json({ message: "Failed to fetch global settings" });
+   }
+ });
+```
+
+### 2) PUT `/api/admin/global-settings` with safe parsing (no `||` fallbacks)
+
+```diff
+ app.put("/api/admin/global-settings", requireAdmin, async (req, res) => {
+   try {
++    const parseNum = (v: any): number | undefined => {
++      if (v === null || v === undefined || v === "") return undefined;
++      const n = typeof v === "number" ? v : Number(v);
++      return Number.isFinite(n) ? n : undefined;
++    };
++
++    const parseBool = (v: any): boolean | undefined => {
++      if (v === null || v === undefined) return undefined;
++      if (typeof v === "boolean") return v;
++      if (typeof v === "string") {
++        const s = v.trim().toLowerCase();
++        if (s === "true") return true;
++        if (s === "false") return false;
++      }
++      return undefined;
++    };
++
++    const parseTime = (v: any): string | undefined => {
++      if (v === null || v === undefined || v === "") return undefined;
++      const s = String(v).trim();
++      const m = /^(\d{2}):(\d{2})$/.exec(s);
++      if (!m) return undefined;
++      const hh = Number(m[1]);
++      const mm = Number(m[2]);
++      if (hh < 0 || hh > 23 || mm < 0 || mm > 59) return undefined;
++      return `${m[1]}:${m[2]}`;
++    };
++
++    const body = req.body ?? {};
++
++    const next = {
++      defaultLeverage: parseNum(body.defaultLeverage),
++      maxPositionSize: parseNum(body.maxPositionSize),
++      maxTradesPerUser: parseNum(body.maxTradesPerUser),
++      maxTradesPerInstrument: parseNum(body.maxTradesPerInstrument),
++      maxConcurrentLots: parseNum(body.maxConcurrentLots),
++      marketOpenTime: parseTime(body.marketOpenTime),
++      marketCloseTime: parseTime(body.marketCloseTime),
++      allowWeekendTrading: parseBool(body.allowWeekendTrading),
++      enableAutoClose: parseBool(body.enableAutoClose),
++      autoCloseAfterDays: parseNum(body.autoCloseAfterDays),
++      autoCloseCheckFrequencyMinutes: parseNum(body.autoCloseCheckFrequencyMinutes),
++      enableLossLimits: parseBool(body.enableLossLimits),
++      dailyLossLimitPct: parseNum(body.dailyLossLimitPct),
++      lifetimeLossLimitPct: parseNum(body.lifetimeLossLimitPct),
++    };
++
+     const existing = await db.query.globalSettings.findFirst({
+       where: eq(globalSettings.id, 1),
+     });
+
+     if (existing) {
+       await db.update(globalSettings)
+         .set({
+-          defaultLeverage: defaultLeverage !== undefined ? Number(defaultLeverage) : existing.defaultLeverage,
++          defaultLeverage: next.defaultLeverage ?? existing.defaultLeverage,
+           maxPositionSize: next.maxPositionSize ?? existing.maxPositionSize,
+           maxTradesPerUser: next.maxTradesPerUser ?? existing.maxTradesPerUser,
+           maxTradesPerInstrument: next.maxTradesPerInstrument ?? existing.maxTradesPerInstrument,
+           maxConcurrentLots: next.maxConcurrentLots ?? existing.maxConcurrentLots,
+           marketOpenTime: next.marketOpenTime ?? existing.marketOpenTime,
+           marketCloseTime: next.marketCloseTime ?? existing.marketCloseTime,
+           allowWeekendTrading: next.allowWeekendTrading ?? existing.allowWeekendTrading,
+           enableAutoClose: next.enableAutoClose ?? existing.enableAutoClose,
+           autoCloseAfterDays: next.autoCloseAfterDays ?? existing.autoCloseAfterDays,
+           autoCloseCheckFrequencyMinutes: next.autoCloseCheckFrequencyMinutes ?? existing.autoCloseCheckFrequencyMinutes,
+           enableLossLimits: next.enableLossLimits ?? existing.enableLossLimits,
+           dailyLossLimitPct: next.dailyLossLimitPct ?? existing.dailyLossLimitPct,
+           lifetimeLossLimitPct: next.lifetimeLossLimitPct ?? existing.lifetimeLossLimitPct,
+           updatedAt: new Date(),
+         })
+         .where(eq(globalSettings.id, 1));
+     } else {
+       await db.insert(globalSettings).values({
+         id: 1,
+-        defaultLeverage: Number(defaultLeverage) || 50,
++        defaultLeverage: next.defaultLeverage ?? 50,
+         maxPositionSize: next.maxPositionSize ?? 100000,
+         maxTradesPerUser: next.maxTradesPerUser ?? 5,
+         maxTradesPerInstrument: next.maxTradesPerInstrument ?? 3,
+         maxConcurrentLots: next.maxConcurrentLots ?? 50,
+         marketOpenTime: next.marketOpenTime ?? "09:00",
+         marketCloseTime: next.marketCloseTime ?? "17:00",
+         allowWeekendTrading: next.allowWeekendTrading ?? false,
+         enableAutoClose: next.enableAutoClose ?? true,
+         autoCloseAfterDays: next.autoCloseAfterDays ?? 4,
+         autoCloseCheckFrequencyMinutes: next.autoCloseCheckFrequencyMinutes ?? 60,
+         enableLossLimits: next.enableLossLimits ?? true,
+         dailyLossLimitPct: next.dailyLossLimitPct ?? 10,
+         lifetimeLossLimitPct: next.lifetimeLossLimitPct ?? 20,
+         updatedAt: new Date(),
+       });
+     }
+
+     const updated = await db.query.globalSettings.findFirst({
+       where: eq(globalSettings.id, 1),
+     });
+
+     res.json(updated);
+   } catch (error) {
+     console.error("Error updating global settings:", error);
+     res.status(500).json({ message: "Failed to update global settings" });
+   }
+ });
+```
+
+---
+
+## E) `server/risk.ts` — ensure fallback defaults match UI and your intended behavior
+
+If your `risk.ts` still had a `maxTradesPerUser: 10` fallback and “00:00–23:59 weekend allowed” fallback responses, align them:
+
+```diff
+ const DEFAULTS = {
+-  maxTradesPerUser: 10,
++  maxTradesPerUser: 5,
+   maxTradesPerInstrument: 3,
+   maxConcurrentLots: 50,
+ };
+
+ return res.json({
+   ...
+-  marketOpenTime: gs?.marketOpenTime ?? "00:00",
+-  marketCloseTime: gs?.marketCloseTime ?? "23:59",
+-  allowWeekendTrading: gs?.allowWeekendTrading ?? true,
++  marketOpenTime: gs?.marketOpenTime ?? "09:00",
++  marketCloseTime: gs?.marketCloseTime ?? "17:00",
++  allowWeekendTrading: gs?.allowWeekendTrading ?? false,
+ });
+```
+
+---
+
+# 5) Verification checklist (what to test to confirm persistence)
+
+### A) Global defaults persistence
+
+1. Open **Admin → Trade Settings**
+2. Change:
+
+   * Max trades per user = `6`
+   * Max trades per instrument = `2`
+   * Max concurrent lots = `40`
+3. Save
+4. Hard refresh the browser
+5. Confirm values remain (proves DB persistence)
+6. Place new trades and confirm enforcement matches new limits
+
+### B) Per-user overrides persistence
+
+1. Open a user’s settings in admin
+2. Set per-user `maxConcurrentLots` to something lower than global (e.g., 10)
+3. Refresh and re-open user settings
+4. Place trades as that user and confirm enforcement is stricter than global
+
+---
+
+## 6) What is still optional / not fully addressed
+
+* **If you intend per-user limits to *increase* beyond global** (i.e., global is default not a cap), then risk middleware and routes should be consistent about that policy.
+
+  * Today: `server/routes.ts` caps user lots at global via `Math.min(...)`
+  * If you want “user can exceed global,” that should be changed deliberately.
+* If you want, I can provide a single consistent policy implementation (either “global is hard cap” or “global is default only”) across:
+
+  * `risk.ts`
+  * `routes.ts`
+  * `orderEngine.ts`
+
+---
+
+If you confirm whether **global limits are intended as hard caps** (typical) or **defaults that can be exceeded per-user**, I will provide the final consistency patch across the remaining enforcement surfaces (risk middleware + trade route + engine) so the behavior is guaranteed and uniform.

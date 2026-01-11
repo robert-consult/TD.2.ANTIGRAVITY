@@ -1,0 +1,73 @@
+ DONE vs NOT DONE vs PARTIAL audit table:
+
+GRIFT DETECTION SYSTEM AUDIT
+Component	Status	Details
+PHASE 1: TELEMETRY CAPTURE		
+Client deviceId generation (localStorage UUID)	✅ DONE	client/src/lib/identity.ts exists
+X-Device-Id header injection	✅ DONE	queryClient.ts interceptor sends headers
+AuditContext middleware	❌ NOT DONE	No dedicated AuditContext builder per request
+auth_events table (append-only logs)	❌ NOT DONE	Table not created
+auth_sessions table (structured sessions)	⚠️ PARTIAL	user_sessions exists but lacks full schema
+Trade placement deviceId capture	⚠️ PARTIAL	lastActorDeviceId column exists but not fully wired
+PHASE 2: DB SCHEMA ENFORCEMENT		
+grift_config table with defaults	✅ DONE	Created with seeded defaults
+grift_devices table	✅ DONE	Created in ensureSchema
+grift_device_users table	✅ DONE	Created in ensureSchema
+grift_signals table	✅ DONE	Created with dedupe_key support
+grift_user_risk / grift_user_scores	⚠️ PARTIAL	grift_user_risk exists, but missing full user_integrity_scores fields
+grift_linked_account_edges	✅ DONE	Created
+grift_observations table (login telemetry)	❌ NOT DONE	Not created
+grift_trade_observations table	❌ NOT DONE	Not created
+grift_cases workflow tables	❌ NOT DONE	Not created
+grift_case_notes table	❌ NOT DONE	Not created
+grift_case_signals table	❌ NOT DONE	Not created
+grift_admin_actions (tamper-evident)	❌ NOT DONE	Not created
+PHASE 3: DETECTION ENGINE RULES		
+R1: MULTI_ACCOUNT_DEVICE detection	⚠️ PARTIAL	Device linking exists, but score calculation incomplete
+R2: COORDINATED_HEDGE detection	✅ DONE	onTradeOpened() checks opposite positions
+R3: SHARED_IPASN_CLUSTER	❌ NOT DONE	No ASN clustering logic
+R4: DEVICE_CHURN detection	❌ NOT DONE	Not implemented
+R5: IMPOSSIBLE_TRAVEL (GEO_VELOCITY)	✅ DONE	haversine formula implemented
+R6: CONCURRENT_FAR_SESSIONS	❌ NOT DONE	Not implemented
+R7: ASN_VOLATILITY	❌ NOT DONE	Not implemented
+R8: UA_CHANGE_IN_SESSION	❌ NOT DONE	Not implemented
+R9: Multi-account laddering	❌ NOT DONE	Not implemented
+IP_CHURN detection	❌ NOT DONE	Not implemented
+UA_CHURN detection	❌ NOT DONE	Not implemented
+RISK SCORING & AGGREGATION		
+Config-driven score weights	✅ DONE	All scores in grift_config
+Risk tier calculation (LOW/MED/HIGH/CRITICAL)	✅ DONE	evaluateUserRisk() exists
+Score mitigations (MFA/KYC bonuses)	❌ NOT DONE	No mitigation deductions
+Rolling aggregates (7d/30d)	❌ NOT DONE	Not computed
+PHASE 4: ADMIN ENDPOINTS		
+GET /api/admin/grift/summary	✅ DONE	Returns counts
+GET /api/admin/grift/config	✅ DONE	Returns config
+PUT /api/admin/grift/config	✅ DONE	Updates config
+GET /api/admin/grift/alerts	✅ DONE	Lists alerts
+GET /api/admin/grift/flagged-users	✅ DONE	Lists high-risk users
+GET /api/admin/users/:id/grift-profile	✅ DONE	User drilldown
+GET /api/admin/grift/signals	✅ DONE	Lists signals
+POST /api/admin/grift/signals/:id/close	✅ DONE	Closes signal
+Cases workflow endpoints	❌ NOT DONE	No case CRUD
+CSV export endpoints	❌ NOT DONE	No export functionality
+Enforcement actions (freeze/disable)	❌ NOT DONE	No enforcement hooks
+Pairs/Networks analytics	❌ NOT DONE	No analytics endpoints
+PHASE 5: UI INTEGRATION		
+Grift Detection mini-tab	✅ DONE	In AdminDashboard
+Summary KPI cards	✅ DONE	Shows alerts/tiers
+Flagged users table	✅ DONE	Clickable rows
+User drilldown dialog	✅ DONE	Shows signals/devices/IPs
+Linked account navigation	✅ DONE	Clickable badges
+Config editor panel	❌ NOT DONE	Config display only, no editing UI
+Cases management panel	❌ NOT DONE	No cases UI
+Signal lifecycle controls (IN_REVIEW)	❌ NOT DONE	Only OPEN/CLOSED
+HARDENING LAYER		
+Signal status lifecycle (OPEN→IN_REVIEW→CLOSED/IGNORED)	❌ NOT DONE	Only OPEN/RESOLVED
+Tamper-evident admin audit (hash-chained)	❌ NOT DONE	Not implemented
+Evaluation scheduler (cron)	❌ NOT DONE	No scheduled re-evaluation
+Server-side CSV exports	❌ NOT DONE	Not implemented
+Summary Counts:
+✅ DONE: 21 items
+⚠️ PARTIAL: 5 items
+❌ NOT DONE: 26 items
+The current implementation covers the basic foundation (config, devices, signals, alerts UI) but is missing:

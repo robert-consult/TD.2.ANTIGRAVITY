@@ -1,0 +1,725 @@
+Below is a **hedge-fund-grade implementation checklist** for Replit Agent 3 to audit (and close gaps) across **email verification (Resend)**, **SMS verification (Twilio Verify)**, **tiered gating**, **Profile Settings UX**, **sessions/devices termination**, **login-activity trails**, **KYC queue + audit trail dashboards**, and **full app i18n (French/Spanish/Portuguese/Arabic/Hindi)**.
+
+I built this by cross-walking (a) your uploaded logic specs (14-day email grace, rolling re-verify, SMS only for high-signal contenders, KYC/payout invite-only) and (b) the current codebase you uploaded (`TradingCentral-3AL-2`) including `shared/policyDecision.ts`, `server/routes/verification.ts`, `server/security/sessionTrail.ts`, and `client/src/pages/ProfileSettings.tsx`.
+
+---
+
+## 0) “Non-Negotiables” (acceptance criteria)
+
+Agent 3 should treat these as **release-blocking**:
+
+1. **Email enforcement is deterministic** (no drift):
+
+   * **Grace**: unverified users can trade for 14 days from signup.
+   * **Lock**: after day 14, exposure-increasing actions are blocked until verified.
+   * **Re-verify**: after verification, rolling 30-day re-verification required; overdue eventually locks.
+   * **Single source of truth**: `resolveAccountState()` in `shared/policyDecision.ts` controls UI + API gating.
+
+2. **SMS is never required at signup**:
+
+   * Only unlocked when contender criteria are met and email is currently in good standing.
+
+3. **All state changes are auditable**:
+
+   * Every verification / lock / unlock / OTP / KYC event emits a hash-chained record in `identity_audit`.
+
+4. **Profile Settings actually surfaces real trails**:
+
+   * “Recent Login Activity” pulls from the login trail tables (not dummy data).
+   * “Active Sessions” lists sessions and supports terminating other devices.
+
+5. **Timezones are shown in UTC/GMT standard format**:
+
+   * Display format: `(UTC±HH:MM) Region/City · city1, city2…` (not raw `-11:00 …`).
+   * Country list is canonical and searchable.
+
+6. **Full trader-facing UI is multilingual**:
+
+   * Entire trader UX (buttons, labels, toasts, validation messages, email/SMS templates) switches language based on selected preference.
+   * Priority languages: **fr, es, pt, ar, hi**; Arabic uses **RTL**.
+
+---
+
+## 1) Data Model Checklist (tables, columns, invariants)
+
+### 1.1 `users` (core profile + preferences)
+
+**File:** `shared/schema.ts` (top section)
+
+Verify columns exist and are used end-to-end:
+
+* [ ] `firstName`, `lastName`, `username`, `email`
+* [ ] `timezone`, `language`, `country`
+* [ ] `userTier` (CANDIDATE / PERFORMER / SELECTED)
+* [ ] Equity / startingEquity fields used for contender eligibility
+
+**Invariant**
+
+* [ ] UI reads/writes `timezone/language/country` via `/api/profile/preferences` and persists to `users`.
+
+### 1.2 `user_verification` (identity enforcement state)
+
+**File:** `shared/schema.ts` around `userVerification`
+
+Confirm columns exist and are updated by real flows:
+
+* [ ] `emailVerifiedAt`
+* [ ] `emailVerificationTokenHash`
+* [ ] `emailLastResendAt`, `emailResendCountDay`, `emailResendDayStart`
+* [ ] `emailReverifyDueAt`
+* [ ] `smsVerifiedAt`
+* [ ] `smsOtpFailCount`, `smsOtpLockedUntil`
+* [ ] `smsLastSendAt`, `smsSendCountDay`, `smsSendDayStart`
+* [ ] `contenderTier` (NONE / CANDIDATE_SMS_REQUIRED / VERIFIED_SMS / SELECTED_REAL_CAPITAL)
+
+**Invariant**
+
+* [ ] Token stored hashed only; raw token never stored.
+* [ ] Email reverify due date is set on verification and refreshed on re-verification.
+
+### 1.3 `user_sessions` (device/session control)
+
+**File:** `shared/schema.ts` `userSessions`
+
+Verify:
+
+* [ ] `sessionId` (string), `userId`
+* [ ] `createdAt`, `lastSeenAt`, `endedAt`
+* [ ] `ip`, `userAgent`
+* [ ] `isCurrent` derived at query time (not stored)
+
+**Invariant**
+
+* [ ] Every successful login creates a user session row.
+* [ ] Any authenticated request updates `lastSeenAt`.
+
+### 1.4 `user_login_history` (recent login activity)
+
+**File:** `shared/schema.ts` `userLoginHistory`
+
+Verify:
+
+* [ ] `eventAt`, `success`, `ip`, `userAgent`, `sessionId`
+* [ ] Stored for successes and failures (for “attempt trail”).
+
+### 1.5 `identity_audit` (tamper-evident hash chain)
+
+**File:** `shared/schema.ts` `identityAudit`
+
+Verify:
+
+* [ ] `prevHash` / `eventHash` are chained per insert.
+* [ ] Category/type taxonomy covers EMAIL/SMS/MFA/KYC/LOGIN/ADMIN.
+
+**Invariant**
+
+* [ ] All critical identity events write a row here (even if also written elsewhere).
+
+### 1.6 KYC & payout tables (invite-only)
+
+**File:** `shared/schema.ts` `userKycProfiles`, `userPayoutProfiles`
+
+Verify:
+
+* [ ] KYC: `invitedAt`, `submittedAt`, `reviewedAt`, `status`, rejection reason
+* [ ] Payout: preferred currency, method, etc.
+* [ ] Only SELECTED tier can view/submit.
+
+---
+
+## 2) Single Source of Truth: Policy / Gating Checklist
+
+### 2.1 Decision engine is the only authority
+
+**Files**
+
+* `shared/policyDecision.ts` (resolve state + allow/deny)
+* `server/policy/buildDecisionContext.ts` (collects context from DB)
+* `server/middleware/policy.ts` (enforces `requirePolicy(...)`)
+
+Checklist:
+
+* [ ] `resolveAccountState()` correctly maps:
+
+  * Unverified within 14 days → grace
+  * Unverified after 14 days → EMAIL_LOCK
+  * Verified but overdue reverify beyond grace → REVERIFY_LOCK
+* [ ] Trade endpoints enforce policies:
+
+  * `/api/trades` requires `TRADE_OPEN_OR_INCREASE`
+  * `/api/trades/:id/close` requires `TRADE_CLOSE_OR_REDUCE`
+  * `/api/trades/:id/targets` requires `TRADE_MODIFY_SLTP`
+  * `/api/trades/:id/cancel` requires `TRADE_CANCEL_PENDING`
+* [ ] Identity endpoints enforce:
+
+  * SMS start/confirm gated by contender eligibility and account state
+  * KYC view gated by tier
+
+### 2.2 Contender eligibility matches your spec
+
+**Files**
+
+* `server/policy/buildDecisionContext.ts`
+* `shared/policyDecision.ts` (criteria thresholds)
+
+Checklist:
+
+* [ ] Rule A (≥30 days): equity ≥ 1.20× starting AND lifetime positions ≥ 30
+* [ ] Rule B (≥90 days): return last 90 ≥ 10% AND positions last 90 ≥ 20
+* [ ] Hard prereq: email must be ACTIVE_VERIFIED (not locked)
+
+---
+
+## 3) Email Verification (Resend) — Deep Audit Checklist
+
+### 3.1 Signup must kick off verification (your requirement)
+
+**Current reality (in repo):**
+
+* Register endpoint creates `user_verification` row but does **not** automatically send email.
+
+Checklist:
+
+* [ ] On successful `/api/auth/register`, system triggers email verification send:
+
+  * Option A (recommended): server sends immediately inside register handler
+  * Option B: client calls `/api/verification/email/send` right after register success
+* [ ] New account lands in grace window but has a verification countdown visible.
+
+### 3.2 Email send endpoint must actually send via Resend
+
+**File:** `server/routes/verification.ts`
+Current: `sendVerificationEmail()` is a console log stub.
+
+Checklist:
+
+* [ ] Replace stub with Resend integration (real send)
+* [ ] `RESEND_API_KEY` and sender domain are configurable via env
+* [ ] Link uses canonical `APP_BASE_URL` and correct route `/verify-email?token=...`
+* [ ] Email template supports localization (`language`) and includes expiry messaging
+
+### 3.3 Rate limits and abuse controls
+
+**File:** `server/routes/verification.ts`
+
+Checklist:
+
+* [ ] Per-user cooldown (e.g., 60s) enforced (`emailLastResendAt`)
+* [ ] Per-user daily cap enforced (`emailResendCountDay`)
+* [ ] Per-IP rolling cap enforced (memory or DB)
+* [ ] All send attempts logged to `identity_audit` (success/fail)
+
+### 3.4 Verify endpoint correctness
+
+**File:** `server/routes/verification.ts`
+
+Checklist:
+
+* [ ] Token hash compare uses constant-time compare (or acceptable equivalent)
+* [ ] On success:
+
+  * set `emailVerifiedAt = now`
+  * set `emailReverifyDueAt = now + 30d`
+  * clear `emailVerificationTokenHash`
+  * emit `identity_audit` EMAIL_VERIFIED
+* [ ] On failure:
+
+  * emit `identity_audit` EMAIL_VERIFY_FAILED (optional but recommended)
+
+### 3.5 Re-verification lifecycle
+
+**File:** `shared/policyDecision.ts`
+
+Checklist:
+
+* [ ] Account locks when reverify overdue beyond configured grace
+* [ ] UI displays “Reverify due in X days” and blocks exposure-increase when locked
+* [ ] Endpoint supports “reverify” by issuing a new token and refreshing `emailReverifyDueAt` only after successful verify
+
+### 3.6 Reminder engine (currently missing)
+
+Your uploaded spec expects reminders (day 7/12/13, due-7/due-3 etc).
+
+Checklist:
+
+* [ ] Add a daily job (cron) that:
+
+  * selects users approaching due dates
+  * sends localized reminder emails
+  * logs reminder events in `identity_audit`
+* [ ] Daily reminders are rate-limited (per user/day) to prevent spam.
+
+---
+
+## 4) SMS Verification (Twilio Verify) — Deep Audit Checklist
+
+### 4.1 SMS is contender-only
+
+**File:** `server/routes/verification.ts` + policy engine
+
+Checklist:
+
+* [ ] `/api/verification/sms/start` checks:
+
+  * contenderEligible == true
+  * accountState == ACTIVE_VERIFIED
+  * phone format sanity
+* [ ] Users not eligible receive a deterministic policy denial message (with deny code).
+
+### 4.2 Twilio Verify integration integrity
+
+**File:** `server/routes/verification.ts`
+
+Checklist:
+
+* [ ] Uses env vars:
+
+  * `TWILIO_ACCOUNT_SID`
+  * `TWILIO_AUTH_TOKEN`
+  * `TWILIO_VERIFY_SERVICE_SID`
+* [ ] Handles errors deterministically and logs:
+
+  * OTP send success/fail → `identity_audit`
+  * Verify success/fail → `identity_audit`
+
+### 4.3 SMS rate limits & lockouts
+
+Checklist:
+
+* [ ] Per-user daily send cap enforced (`smsSendCountDay`)
+* [ ] Per-user cooldown enforced (`smsLastSendAt`)
+* [ ] Fail counter increments and locks until time (`smsOtpLockedUntil`)
+* [ ] Lock event writes audit row.
+
+---
+
+## 5) Profile Settings UX — What must exist and how it ties to backend
+
+### 5.1 Required profile fields & flows
+
+**Trader profile must support:**
+
+* [ ] First name, last name, display/username update (with uniqueness rules)
+* [ ] Email change flow:
+
+  * [ ] Changing email sets email to “unverified”
+  * [ ] Issues a new verification token
+  * [ ] Locks after 14 days if never verified
+* [ ] Phone + verification state (contender-only)
+* [ ] Timezone, language, country
+* [ ] Password change
+* [ ] MFA (TOTP) enable/disable + recovery codes
+
+### 5.2 Sessions/devices: list + terminate
+
+**Files**
+
+* UI: `client/src/pages/ProfileSettings.tsx`
+* API: `server/routes/meSessions.ts` (and legacy `/api/profile/sessions`)
+
+Checklist:
+
+* [ ] UI shows:
+
+  * current session (badge “Current”)
+  * other active sessions (each with “Terminate”)
+  * “Log out all other devices” button
+* [ ] Termination calls:
+
+  * `DELETE /api/me/sessions/:sessionId`
+  * `POST /api/me/sessions/logout-others`
+* [ ] Terminations emit audit rows: LOGIN/SESSION_TERMINATED
+
+**Common failure to detect**
+
+* If UI is wired to `/api/me/sessions` but server is only populating legacy session table, you will see “static” sessions.
+
+  * Agent should confirm session creation and `touchSession()` are invoked on every authenticated request.
+
+### 5.3 Login activity must populate from trail tables
+
+**File:** `client/src/pages/ProfileSettings.tsx` + `server/security/sessionTrail.ts`
+
+Checklist:
+
+* [ ] “Recent Login Activity” pulls from `/api/profile/login-history`
+* [ ] Backend returns consistent JSON fields that UI renders correctly (see bug below)
+* [ ] Shows:
+
+  * login time
+  * IP
+  * device/user agent summary
+  * success/failure label
+  * (recommended) sessionId link and session length if available
+
+---
+
+## 6) Concrete bug: “Invalid Date” and missing login history (must fix)
+
+Your screenshot (“Last active: Invalid Date”) is consistent with a real mismatch in the current repo:
+
+* Backend `/api/profile/login-history` returns objects with **`eventAt`** (Date/ISO).
+* UI renders **`login.createdAt * 1000`**, which will be `undefined * 1000` → invalid date.
+
+### Patch (client): fix login history rendering
+
+**File:** `client/src/pages/ProfileSettings.tsx`
+Replace the login history timestamp logic with robust parsing:
+
+```tsx
+// Replace any usage like: new Date(login.createdAt * 1000)
+// with:
+
+function parseAnyDate(v: any): Date | null {
+  if (!v) return null;
+  if (v instanceof Date) return isNaN(v.getTime()) ? null : v;
+  if (typeof v === "number") {
+    const ms = v > 0 && v < 1e12 ? v * 1000 : v;
+    const d = new Date(ms);
+    return isNaN(d.getTime()) ? null : d;
+  }
+  if (typeof v === "string") {
+    const d = new Date(v);
+    return isNaN(d.getTime()) ? null : d;
+  }
+  return null;
+}
+
+// In render:
+const at = parseAnyDate((login as any).eventAt ?? (login as any).createdAt ?? (login as any).at);
+const atLabel = at ? at.toLocaleString() : "Unknown";
+```
+
+### Patch (server alternative): normalize login history response
+
+**File:** `server/routes.ts` `/api/profile/login-history`
+
+```ts
+app.get("/api/profile/login-history", ensureAuth, async (req, res) => {
+  const rows = await getRecentLoginActivity(req.session.userId!, 10);
+  res.json(rows.map(r => ({
+    ...r,
+    // normalize to ms epoch for UI simplicity
+    eventAtMs: r.eventAt ? new Date(r.eventAt).getTime() : null,
+  })));
+});
+```
+
+Agent should pick **one** approach and standardize.
+
+---
+
+## 7) Timezones + Countries — “Gold standard” UTC/GMT display + deep city context
+
+### 7.1 Backend list format
+
+**File:** `server/routes/meta.ts` + `server/utils/tzOffset.ts`
+
+Checklist:
+
+* [ ] Timezone label format includes **UTC prefix**:
+
+  * `UTC+03:00 · Africa/Nairobi · Nairobi, Mombasa…`
+* [ ] Uses IANA tz ids as stable keys
+* [ ] Supports search endpoint (`/api/meta/timezones/search`)
+
+### 7.2 UI must be searchable and must not regress to “-11:00 …”
+
+**File:** `client/src/pages/ProfileSettings.tsx`
+
+Checklist:
+
+* [ ] Replace non-searchable dropdown with a searchable combobox (recommended)
+* [ ] Ensure displayed label includes `UTC±` prefix
+* [ ] Persist selected tz id to `users.timezone`
+
+---
+
+## 8) Resend integration (required) — minimal production-grade drop-in
+
+**File:** `server/routes/verification.ts` (replace console-stub)
+
+1. Install:
+
+```bash
+npm i resend
+```
+
+2. Add env:
+
+* `RESEND_API_KEY`
+* `RESEND_FROM` (e.g. `no-reply@yourdomain.com`)
+* `APP_BASE_URL` (e.g. `https://yourapp.com`)
+
+3. Replace `sendVerificationEmail()`:
+
+```ts
+import { Resend } from "resend";
+
+const resend = new Resend(process.env.RESEND_API_KEY || "");
+
+async function sendVerificationEmail(email: string, token: string, opts?: { language?: string }) {
+  const baseUrl = process.env.APP_BASE_URL || "http://localhost:5000";
+  const from = process.env.RESEND_FROM || "no-reply@example.com";
+  const link = `${baseUrl}/verify-email?token=${encodeURIComponent(token)}`;
+
+  // Minimal localization hook (wire into full i18n later)
+  const lang = (opts?.language || "en").toLowerCase();
+  const subject =
+    lang === "fr" ? "Vérifiez votre e-mail" :
+    lang === "es" ? "Verifica tu correo" :
+    lang === "pt" ? "Verifique seu e-mail" :
+    lang === "ar" ? "تحقق من بريدك الإلكتروني" :
+    lang === "hi" ? "अपने ईमेल की पुष्टि करें" :
+    "Verify your email";
+
+  const html = `
+    <div style="font-family:system-ui,Segoe UI,Roboto,Arial;line-height:1.4">
+      <h2>${subject}</h2>
+      <p>Click the button below to verify your email.</p>
+      <p style="margin:24px 0">
+        <a href="${link}" style="background:#2563eb;color:#fff;padding:10px 14px;border-radius:8px;text-decoration:none">
+          Verify Email
+        </a>
+      </p>
+      <p style="color:#6b7280;font-size:12px">If you did not request this, you can ignore this email.</p>
+    </div>
+  `;
+
+  if (!process.env.RESEND_API_KEY) {
+    console.warn("RESEND_API_KEY missing; cannot send verification email.");
+    return false;
+  }
+
+  try {
+    const resp = await resend.emails.send({ from, to: email, subject, html });
+    return !!resp?.data?.id;
+  } catch (e) {
+    console.error("Resend send failed:", e);
+    return false;
+  }
+}
+```
+
+**Audit requirement**
+
+* [ ] Agent ensures language is pulled from `users.language` when calling send.
+
+---
+
+## 9) Full App Internationalization (Trader-Facing) — Implementation Checklist
+
+### 9.1 Standard approach (recommended)
+
+Use `i18next` + `react-i18next` with:
+
+* JSON resource bundles per language
+* key-based translations
+* parameter interpolation
+* pluralization
+* RTL support for Arabic
+
+Install:
+
+```bash
+npm i i18next react-i18next i18next-browser-languagedetector
+```
+
+### 9.2 Bootstrapping (client)
+
+Create `client/src/i18n.ts`:
+
+```ts
+import i18n from "i18next";
+import { initReactI18next } from "react-i18next";
+import LanguageDetector from "i18next-browser-languagedetector";
+
+import en from "./locales/en.json";
+import fr from "./locales/fr.json";
+import es from "./locales/es.json";
+import pt from "./locales/pt.json";
+import ar from "./locales/ar.json";
+import hi from "./locales/hi.json";
+
+export const SUPPORTED_LANGS = ["en","fr","es","pt","ar","hi"] as const;
+
+i18n
+  .use(LanguageDetector)
+  .use(initReactI18next)
+  .init({
+    resources: {
+      en: { translation: en },
+      fr: { translation: fr },
+      es: { translation: es },
+      pt: { translation: pt },
+      ar: { translation: ar },
+      hi: { translation: hi },
+    },
+    fallbackLng: "en",
+    supportedLngs: SUPPORTED_LANGS as unknown as string[],
+    interpolation: { escapeValue: false },
+    detection: {
+      // Prefer server/user profile setting (store in localStorage on login)
+      order: ["localStorage", "navigator"],
+      caches: ["localStorage"],
+    },
+  });
+
+export default i18n;
+```
+
+In `client/src/main.tsx` (or entry), import it once:
+
+```ts
+import "./i18n";
+```
+
+### 9.3 Direction switching (Arabic RTL)
+
+On language change:
+
+* [ ] set `document.documentElement.dir = (lang === "ar" ? "rtl" : "ltr")`
+* [ ] set `document.documentElement.lang = lang`
+
+### 9.4 “Everything trader-facing translates”
+
+Agent checklist to eliminate partial i18n:
+
+* [ ] All buttons/labels in trading UI use `t("...")` (not hardcoded strings)
+* [ ] Toast text uses `t()` keys
+* [ ] Form validation errors map from **error codes** → localized messages
+* [ ] Policy denies return `{ code, params }` and UI formats via translations
+* [ ] Email templates localized using `users.language`
+* [ ] SMS templates localized (Twilio Verify has limited templating; if needed, move OTP messaging to custom SMS sending instead of Verify templates)
+
+### 9.5 Backend: language preference as source of truth
+
+Checklist:
+
+* [ ] `/api/profile/preferences` updates `users.language`
+* [ ] On login, backend returns language and UI caches it to localStorage
+* [ ] Server includes `x-user-language` header (optional) to simplify front-end sync
+
+---
+
+## 10) Admin Dashboard: Audit Trail + KYC Queue + “progressive confirmations”
+
+### 10.1 KYC queue correctness
+
+**Files**
+
+* `server/routes/admin.ts` (`/api/admin/kyc-queue`, invite/approve/reject)
+* `client/src/pages/AdminDashboard.tsx` KYC Queue view
+
+Checklist:
+
+* [ ] Queue is built from `user_kyc_profiles` status (INVITED/SUBMITTED/REJECTED/APPROVED)
+* [ ] Admin actions:
+
+  * Invite to KYC
+  * Approve/Reject with reason
+* [ ] Every action emits identity_audit:
+
+  * `KYC_INVITED`, `KYC_APPROVED`, `KYC_REJECTED`
+
+### 10.2 Audit Trail dashboard correctness
+
+Checklist:
+
+* [ ] Admin can filter identity audit by:
+
+  * category/type
+  * user
+  * date range
+  * actor admin id
+* [ ] Export includes eventHash/prevHash for tamper evidence
+
+### 10.3 Progressive confirmations (the pipeline)
+
+Agent verifies UI and backend represent the pipeline you specified:
+
+* Stage 1: email verify (grace then lock)
+* Stage 2: contender SMS verify (only if eligible)
+* Stage 3: KYC invite-only for selected traders
+* Stage 4: payout settings only after KYC approval
+
+---
+
+## 11) “UI vs Implemented” — Known gaps Agent 3 should explicitly test for
+
+These are the most likely reasons you’re seeing the issues in screenshots:
+
+1. **Login activity card shows empty or “Invalid Date”**
+
+   * Cause: `eventAt` vs `createdAt` mismatch (fix above)
+   * Test: login, refresh profile settings, verify last login renders valid timestamp
+
+2. **Sessions appear “static” / can’t terminate other devices**
+
+   * Cause: either:
+
+     * second device session never created (login path not calling `createUserSession()`), or
+     * UI is pointed to `/api/me/sessions` but sessions are written/read from legacy endpoints inconsistently, or
+     * `touchSession()` not firing on API calls
+   * Test: login on two browsers, ensure two rows appear and termination works
+
+3. **Timezones not shown in UTC±HH:MM standard**
+
+   * Cause: UI using a non-standard label field or older dataset
+   * Test: ensure backend `/api/meta/timezones` returns labels prefixed with `UTC`
+
+4. **Email verification emails never arrive**
+
+   * Cause: send function is stubbed (console log)
+   * Fix: Resend integration above
+
+5. **No reminders are being sent**
+
+   * Cause: no scheduled job exists
+   * Fix: add daily reminder worker/cron
+
+6. **KYC “Start KYC Process” button does nothing**
+
+   * Cause: UI button not wired to a route/form
+   * Fix: implement KYC form flow + submission endpoint
+
+---
+
+## 12) Audit Queries (SQLite) Agent 3 should run after testing
+
+Use these to prove the system is actually writing trails:
+
+```sql
+-- Email verification state
+SELECT * FROM user_verification WHERE user_id = ?;
+
+-- Login history (recent)
+SELECT * FROM user_login_history WHERE user_id = ? ORDER BY event_at DESC LIMIT 20;
+
+-- Sessions (active)
+SELECT * FROM user_sessions WHERE user_id = ? ORDER BY last_seen_at DESC;
+
+-- Tamper-evident audit
+SELECT id, at, category, type, prev_hash, event_hash
+FROM identity_audit
+WHERE user_id = ?
+ORDER BY id DESC
+LIMIT 50;
+
+-- KYC
+SELECT * FROM user_kyc_profiles WHERE user_id = ?;
+
+-- Payout
+SELECT * FROM user_payout_profiles WHERE user_id = ?;
+```
+
+---
+
+# If you want the “next step” output
+
+If you want, I can produce a **single consolidated “Agent 3 execution pack”** (still inline) that includes:
+
+1. a **file-by-file checklist** (every relevant file in `/server`, `/shared`, `/client`), and
+2. a **copy/paste patch set** for the top gaps (Resend send, login history date fix, timezone label normalization, i18n scaffolding, and KYC start flow wiring).
+
+You can also tell me whether you want the i18n resources generated as **starter JSON bundles** for fr/es/pt/ar/hi for the major UI surfaces (Trade ticket, Positions, Orders, Account/Profile, Admin notices).

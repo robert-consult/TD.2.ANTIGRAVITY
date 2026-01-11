@@ -1,0 +1,556 @@
+You can use Resend as the **delivery layer** for your email-verification workflow (double opt-in). Resend does **not** “verify” an email address by itself; it reliably **sends** the verification message. The verification logic (token issuance, expiry, replay protection, audit trail, and marking `emailVerified`) lives in your backend.
+
+## 0) Security action (do this first)
+
+You pasted a live-looking Resend API key. Resend explicitly recommends **never hard-coding or sharing keys**, and to **rotate** if exposed. ([Resend][1])
+Action:
+
+* Revoke/rotate that key in the Resend dashboard.
+* Move the new key to **Replit Secrets / environment variables** (never in client code). ([Resend][1])
+
+## 1) Resend + Replit setup (what Replit Agent 3 should do)
+
+### A. Verify a sending domain (production requirement)
+
+Resend’s own docs: to “get the most out of” sending, you should **verify your domain**, and Resend requires you own it. ([Resend][2])
+Domain verification involves SPF + DKIM, and DMARC is recommended. ([Resend][3])
+Also, Resend recommends using a **subdomain** (e.g., `mail.yourdomain.com`) to isolate sending reputation. ([Resend][3])
+
+### B. Create a “Sending access” API key (least privilege)
+
+Resend API keys support **Full access** vs **Sending access**, and Sending access can be restricted to a domain. ([Resend][4])
+For your app: create a **Sending access** key restricted to your verified domain.
+
+### C. Put secrets in Replit Secrets
+
+Replit Secrets are exposed to the app as environment variables, encrypted at rest, and avoid hard-coding keys. ([Replit Docs][5])
+Resend’s Replit guidance also calls out: add a custom domain + add API key + set `from` to your custom domain. ([Resend][6])
+
+Add these secrets (names are important for predictable code):
+
+* `RESEND_API_KEY` = your new key
+* `EMAIL_FROM` = e.g. `Trading Central <no-reply@mail.yourdomain.com>`
+* `APP_PUBLIC_URL` = e.g. `https://your-app.replit.app` (or your custom domain)
+* `EMAIL_VERIFY_TOKEN_SECRET` = random 32+ char secret (used to HMAC tokens at rest)
+
+Resend’s Node SDK quickstart is exactly `npm install resend` and `import { Resend } from 'resend'`. ([Resend][2])
+
+---
+
+## 2) Backend implementation (drop-in TypeScript, Drizzle/SQLite)
+
+Below is a **complete, production-grade** verification flow:
+
+* Random token → stored as **HMAC hash** (no plaintext tokens in DB)
+* One active token per user/purpose (optional invalidation shown)
+* Expiry, replay protection, resend throttling
+* Writes a **security audit trail** event each step (requested/ sent / verified / failed)
+
+### 2.1 `shared/schema.ts` additions (Drizzle / SQLite)
+
+Add these tables/columns (adapt the `users` table name if yours differs):
+
+```ts
+// shared/schema.ts (additions)
+import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
+import { users } from "./schema"; // adjust if your users table is already in this file
+
+export const emailVerificationTokens = sqliteTable("emailVerificationTokens", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+
+  userId: integer("userId").notNull().references(() => users.id),
+  email: text("email").notNull(),
+
+  // Store only a hash/HMAC of the token
+  tokenHmac: text("tokenHmac").notNull(),
+
+  purpose: text("purpose").notNull(), // "VERIFY_EMAIL" | "CHANGE_EMAIL"
+  status: text("status").notNull().default("PENDING"), // PENDING|CONSUMED|REVOKED|EXPIRED
+
+  createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull(),
+  expiresAt: integer("expiresAt", { mode: "timestamp_ms" }).notNull(),
+  consumedAt: integer("consumedAt", { mode: "timestamp_ms" }),
+
+  // provenance (hedge-fund-grade trail)
+  requestIp: text("requestIp"),
+  userAgent: text("userAgent"),
+  sessionId: text("sessionId"),
+  correlationId: text("correlationId"),
+
+  // provider metadata
+  provider: text("provider").notNull().default("resend"),
+  providerMessageId: text("providerMessageId"),
+});
+
+export const securityAudit = sqliteTable("securityAudit", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull(),
+
+  userId: integer("userId"),
+  actorType: text("actorType").notNull(), // USER|ADMIN|SYSTEM
+  eventType: text("eventType").notNull(), // EMAIL_VERIFY_REQUESTED, EMAIL_VERIFY_SENT, ...
+
+  ip: text("ip"),
+  userAgent: text("userAgent"),
+  sessionId: text("sessionId"),
+  correlationId: text("correlationId"),
+
+  // JSON string (SQLite)
+  metadataJson: text("metadataJson"),
+
+  // tamper-evident chain (optional but recommended)
+  prevHash: text("prevHash"),
+  eventHash: text("eventHash"),
+});
+
+// Users table: add fields (edit your existing users table definition)
+export const usersEmailVerificationColumns = {
+  emailVerified: integer("emailVerified", { mode: "boolean" }).notNull().default(false),
+  emailVerifiedAt: integer("emailVerifiedAt", { mode: "timestamp_ms" }),
+  emailVerificationSentAt: integer("emailVerificationSentAt", { mode: "timestamp_ms" }),
+  emailReverifyDueAt: integer("emailReverifyDueAt", { mode: "timestamp_ms" }),
+};
+```
+
+Notes:
+
+* If your `users` table is already defined, add the `emailVerified`, `emailVerifiedAt`, `emailVerificationSentAt`, `emailReverifyDueAt` columns directly inside it.
+* If you already have an audit-log table pattern, keep your standard but ensure you capture the fields above.
+
+---
+
+### 2.2 Resend client + email template
+
+```ts
+// server/services/email/resendClient.ts
+import { Resend } from "resend";
+
+const apiKey = process.env.RESEND_API_KEY;
+if (!apiKey) throw new Error("Missing RESEND_API_KEY");
+
+export const resend = new Resend(apiKey);
+
+export function getEmailFrom(): string {
+  const from = process.env.EMAIL_FROM;
+  if (!from) throw new Error("Missing EMAIL_FROM");
+  return from;
+}
+```
+
+```ts
+// server/services/email/templates/verifyEmail.ts
+export function renderVerifyEmailHtml(opts: {
+  appName: string;
+  verifyUrl: string;
+  supportEmail?: string;
+}): string {
+  const { appName, verifyUrl, supportEmail } = opts;
+
+  return `
+  <div style="font-family: ui-sans-serif, system-ui, -apple-system; line-height: 1.5;">
+    <h2>${escapeHtml(appName)} — Verify your email</h2>
+    <p>Click the button below to verify your email address.</p>
+    <p style="margin: 24px 0;">
+      <a href="${escapeAttr(verifyUrl)}"
+         style="background:#111827;color:#fff;text-decoration:none;padding:10px 14px;border-radius:8px;display:inline-block;">
+        Verify email
+      </a>
+    </p>
+    <p>If you did not create an account, you can ignore this email.</p>
+    ${supportEmail ? `<p>Support: ${escapeHtml(supportEmail)}</p>` : ""}
+  </div>
+  `;
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, (c) => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c] as string));
+}
+function escapeAttr(s: string): string {
+  return escapeHtml(s);
+}
+```
+
+Resend’s Node example uses `resend.emails.send({ from, to: [...] })`. ([Resend][2])
+
+---
+
+### 2.3 Token + audit utilities
+
+```ts
+// server/services/security/audit.ts
+import crypto from "crypto";
+import { db } from "../../db"; // adjust path
+import { securityAudit } from "../../shared/schema"; // adjust path
+import { desc, eq } from "drizzle-orm";
+
+type AuditEvent = {
+  userId?: number | null;
+  actorType: "USER" | "ADMIN" | "SYSTEM";
+  eventType: string;
+  ip?: string | null;
+  userAgent?: string | null;
+  sessionId?: string | null;
+  correlationId?: string | null;
+  metadata?: Record<string, unknown>;
+};
+
+function sha256Hex(input: string): string {
+  return crypto.createHash("sha256").update(input).digest("hex");
+}
+
+export async function appendSecurityAudit(evt: AuditEvent) {
+  const createdAt = Date.now();
+  const metadataJson = evt.metadata ? JSON.stringify(evt.metadata) : null;
+
+  // Global chain (simple + effective)
+  const last = await db.select().from(securityAudit).orderBy(desc(securityAudit.id)).limit(1);
+  const prevHash = last[0]?.eventHash ?? null;
+
+  const canonical = JSON.stringify({
+    createdAt,
+    userId: evt.userId ?? null,
+    actorType: evt.actorType,
+    eventType: evt.eventType,
+    ip: evt.ip ?? null,
+    userAgent: evt.userAgent ?? null,
+    sessionId: evt.sessionId ?? null,
+    correlationId: evt.correlationId ?? null,
+    metadataJson,
+    prevHash,
+  });
+
+  const eventHash = sha256Hex(canonical);
+
+  await db.insert(securityAudit).values({
+    createdAt,
+    userId: evt.userId ?? null,
+    actorType: evt.actorType,
+    eventType: evt.eventType,
+    ip: evt.ip ?? null,
+    userAgent: evt.userAgent ?? null,
+    sessionId: evt.sessionId ?? null,
+    correlationId: evt.correlationId ?? null,
+    metadataJson,
+    prevHash,
+    eventHash,
+  });
+}
+```
+
+```ts
+// server/services/auth/emailVerification.ts
+import crypto from "crypto";
+import { db } from "../../db"; // adjust path
+import { emailVerificationTokens, users } from "../../shared/schema"; // adjust path
+import { and, desc, eq, gt, isNull } from "drizzle-orm";
+import { appendSecurityAudit } from "../security/audit";
+import { resend, getEmailFrom } from "../email/resendClient";
+import { renderVerifyEmailHtml } from "../email/templates/verifyEmail";
+
+type ReqContext = {
+  ip?: string | null;
+  userAgent?: string | null;
+  sessionId?: string | null;
+};
+
+const TOKEN_TTL_MS = 60 * 60 * 1000; // 1 hour (adjust)
+const RESEND_MIN_INTERVAL_MS = 60 * 1000; // 60s throttle
+const APP_NAME = "Trading Central";
+
+function hmacToken(token: string): string {
+  const secret = process.env.EMAIL_VERIFY_TOKEN_SECRET;
+  if (!secret) throw new Error("Missing EMAIL_VERIFY_TOKEN_SECRET");
+  return crypto.createHmac("sha256", secret).update(token).digest("hex");
+}
+
+function newCorrelationId(): string {
+  return crypto.randomUUID();
+}
+
+export async function requestEmailVerification(userId: number, ctx: ReqContext) {
+  // Load user
+  const u = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+  if (!u[0]) throw new Error("User not found");
+
+  const email = u[0].email;
+  const alreadyVerified = !!u[0].emailVerified;
+  if (alreadyVerified) return { ok: true, skipped: true };
+
+  // Throttle resend
+  if (u[0].emailVerificationSentAt && Date.now() - u[0].emailVerificationSentAt < RESEND_MIN_INTERVAL_MS) {
+    return { ok: true, throttled: true };
+  }
+
+  const correlationId = newCorrelationId();
+
+  await appendSecurityAudit({
+    userId,
+    actorType: "USER",
+    eventType: "EMAIL_VERIFY_REQUESTED",
+    ip: ctx.ip,
+    userAgent: ctx.userAgent,
+    sessionId: ctx.sessionId,
+    correlationId,
+    metadata: { email },
+  });
+
+  // Invalidate older pending tokens for this user/purpose (prevents multi-live tokens)
+  await db
+    .update(emailVerificationTokens)
+    .set({ status: "REVOKED" })
+    .where(and(
+      eq(emailVerificationTokens.userId, userId),
+      eq(emailVerificationTokens.purpose, "VERIFY_EMAIL"),
+      eq(emailVerificationTokens.status, "PENDING")
+    ));
+
+  // Create token
+  const rawToken = crypto.randomBytes(32).toString("base64url");
+  const tokenHmac = hmacToken(rawToken);
+  const now = Date.now();
+  const expiresAt = now + TOKEN_TTL_MS;
+
+  await db.insert(emailVerificationTokens).values({
+    userId,
+    email,
+    tokenHmac,
+    purpose: "VERIFY_EMAIL",
+    status: "PENDING",
+    createdAt: now,
+    expiresAt,
+    requestIp: ctx.ip ?? null,
+    userAgent: ctx.userAgent ?? null,
+    sessionId: ctx.sessionId ?? null,
+    correlationId,
+    provider: "resend",
+  });
+
+  const appUrl = process.env.APP_PUBLIC_URL;
+  if (!appUrl) throw new Error("Missing APP_PUBLIC_URL");
+
+  const verifyUrl = `${appUrl.replace(/\/+$/,"")}/api/auth/email/verify?token=${encodeURIComponent(rawToken)}`;
+
+  const html = renderVerifyEmailHtml({
+    appName: APP_NAME,
+    verifyUrl,
+  });
+
+  const { data, error } = await resend.emails.send({
+    from: getEmailFrom(),
+    to: [email],
+    subject: `${APP_NAME}: Verify your email`,
+    html,
+  });
+
+  if (error) {
+    await appendSecurityAudit({
+      userId,
+      actorType: "SYSTEM",
+      eventType: "EMAIL_VERIFY_SEND_FAILED",
+      ip: ctx.ip,
+      userAgent: ctx.userAgent,
+      sessionId: ctx.sessionId,
+      correlationId,
+      metadata: { email, error },
+    });
+    throw new Error("Failed to send verification email");
+  }
+
+  // Persist provider message id + sent timestamp
+  await db.update(users).set({ emailVerificationSentAt: now }).where(eq(users.id, userId));
+
+  await db
+    .update(emailVerificationTokens)
+    .set({ providerMessageId: data?.id ?? null })
+    .where(and(
+      eq(emailVerificationTokens.userId, userId),
+      eq(emailVerificationTokens.correlationId, correlationId),
+      eq(emailVerificationTokens.purpose, "VERIFY_EMAIL")
+    ));
+
+  await appendSecurityAudit({
+    userId,
+    actorType: "SYSTEM",
+    eventType: "EMAIL_VERIFY_SENT",
+    ip: ctx.ip,
+    userAgent: ctx.userAgent,
+    sessionId: ctx.sessionId,
+    correlationId,
+    metadata: { email, providerMessageId: data?.id ?? null },
+  });
+
+  return { ok: true };
+}
+
+export async function verifyEmailByToken(rawToken: string, ctx: ReqContext) {
+  const tokenHmac = hmacToken(rawToken);
+  const now = Date.now();
+
+  const rows = await db
+    .select()
+    .from(emailVerificationTokens)
+    .where(and(
+      eq(emailVerificationTokens.tokenHmac, tokenHmac),
+      eq(emailVerificationTokens.purpose, "VERIFY_EMAIL"),
+      eq(emailVerificationTokens.status, "PENDING"),
+      gt(emailVerificationTokens.expiresAt, now),
+      isNull(emailVerificationTokens.consumedAt)
+    ))
+    .orderBy(desc(emailVerificationTokens.id))
+    .limit(1);
+
+  const t = rows[0];
+  if (!t) {
+    await appendSecurityAudit({
+      actorType: "SYSTEM",
+      eventType: "EMAIL_VERIFY_TOKEN_INVALID_OR_EXPIRED",
+      ip: ctx.ip,
+      userAgent: ctx.userAgent,
+      sessionId: ctx.sessionId,
+      correlationId: null,
+      metadata: { reason: "not_found_or_expired" },
+    });
+    return { ok: false };
+  }
+
+  // Mark verified + consume token (ideally in a transaction)
+  await db.update(users).set({
+    emailVerified: true,
+    emailVerifiedAt: now,
+    // Optional rolling revalidation: 180d from now
+    emailReverifyDueAt: now + 180 * 24 * 60 * 60 * 1000,
+  }).where(eq(users.id, t.userId));
+
+  await db.update(emailVerificationTokens).set({
+    status: "CONSUMED",
+    consumedAt: now,
+  }).where(eq(emailVerificationTokens.id, t.id));
+
+  await appendSecurityAudit({
+    userId: t.userId,
+    actorType: "USER",
+    eventType: "EMAIL_VERIFIED",
+    ip: ctx.ip,
+    userAgent: ctx.userAgent,
+    sessionId: ctx.sessionId,
+    correlationId: t.correlationId ?? null,
+    metadata: { email: t.email, tokenId: t.id },
+  });
+
+  return { ok: true };
+}
+```
+
+---
+
+### 2.4 Express routes (server)
+
+```ts
+// server/routes/authEmailVerify.ts
+import type { Request, Response } from "express";
+import { requestEmailVerification, verifyEmailByToken } from "../services/auth/emailVerification";
+
+// Extract provenance (works behind proxies too)
+function getReqContext(req: Request) {
+  const xfwd = (req.headers["x-forwarded-for"] as string | undefined) ?? "";
+  const ip = xfwd.split(",")[0]?.trim() || req.ip || null;
+  const userAgent = (req.headers["user-agent"] as string | undefined) ?? null;
+  const sessionId = (req as any).sessionID ?? null; // adjust if you use a different session system
+  return { ip, userAgent, sessionId };
+}
+
+// Requires auth middleware that sets req.user.id
+export async function postRequestEmailVerify(req: Request, res: Response) {
+  const userId = (req as any).user?.id;
+  if (!userId) return res.status(401).json({ ok: false });
+
+  const result = await requestEmailVerification(userId, getReqContext(req));
+  return res.json(result);
+}
+
+// Public endpoint hit by email link
+export async function getVerifyEmail(req: Request, res: Response) {
+  const token = String(req.query.token || "");
+  if (!token) return res.status(400).send("Missing token");
+
+  const result = await verifyEmailByToken(token, getReqContext(req));
+
+  // Option A: plain response
+  // return res.status(result.ok ? 200 : 400).json(result);
+
+  // Option B: redirect to client success/fail screen
+  const appUrl = (process.env.APP_PUBLIC_URL || "").replace(/\/+$/,"");
+  if (appUrl) {
+    return res.redirect(`${appUrl}/verify-email?status=${result.ok ? "success" : "failed"}`);
+  }
+  return res.status(result.ok ? 200 : 400).send(result.ok ? "Email verified" : "Invalid or expired link");
+}
+```
+
+In your `server/index.ts`, mount:
+
+```ts
+import { postRequestEmailVerify, getVerifyEmail } from "./routes/authEmailVerify";
+
+app.post("/api/auth/email/verify/request", postRequestEmailVerify);
+app.get("/api/auth/email/verify", getVerifyEmail);
+```
+
+---
+
+## 3) Key Resend-specific notes for your agent
+
+1. **Do not send from the browser.** Keep Resend API calls server-side. Resend explicitly warns against exposing keys in client-side code and recommends env vars. ([Resend][1])
+2. **Use a verified domain** for production sending, and preferably a subdomain. ([Resend][3])
+3. **Use least-privilege API keys** (Sending access, domain-restricted). ([Resend][4])
+4. Resend’s Node SDK expects `to: ['recipient@...']` in examples; use array form. ([Resend][2])
+5. If you are still in early testing: Resend’s Replit guidance highlights that without a custom domain you’re limited in who you can send to; add the domain and set `from` accordingly. ([Resend][6])
+
+---
+
+## 4) Rolling revalidation (policy you can enforce)
+
+For a trading platform, a practical policy is:
+
+* `emailVerified` required to **trade live**, **request withdrawals**, **change password**, **change payout details**.
+* `emailReverifyDueAt` set (e.g. 180 days). If `Date.now() > emailReverifyDueAt`, require a new verification before high-risk actions.
+* Trigger reverify immediately on:
+
+  * email change
+  * suspicious login (new country/ASN/device)
+  * repeated failed logins
+  * KYC tier upgrade request
+
+All of those should write `securityAudit` events (already supported above).
+
+---
+
+## 5) Your original snippet (corrected + secured)
+
+Your sample is structurally right, but do not hardcode the key and use `to: [email]`:
+
+```ts
+import { Resend } from "resend";
+
+const resend = new Resend(process.env.RESEND_API_KEY!);
+
+await resend.emails.send({
+  from: process.env.EMAIL_FROM!,           // e.g. "Trading Central <no-reply@mail.yourdomain.com>"
+  to: ["robert.muchiri.m@gmail.com"],
+  subject: "Hello World",
+  html: "<p>Congrats on sending your <strong>first email</strong>!</p>",
+});
+```
+
+This matches Resend’s Node SDK pattern. ([Resend][2])
+
+---
+
+If you paste (or upload) your current `server/index.ts` auth routes and the existing `users` table definition from `shared/schema.ts`, I can give you an exact, line-by-line patch that fits your project’s current file structure without guesswork.
+
+[1]: https://resend.com/docs/knowledge-base/how-to-handle-api-keys "How to Handle API Keys - Resend"
+[2]: https://resend.com/docs/send-with-nodejs "Send emails with Node.js - Resend"
+[3]: https://resend.com/docs/dashboard/domains/introduction "Managing Domains - Resend"
+[4]: https://resend.com/docs/dashboard/api-keys/introduction "Introduction - Resend"
+[5]: https://docs.replit.com/replit-workspace/workspace-features/secrets?utm_source=chatgpt.com "Secrets"
+[6]: https://resend.com/docs/knowledge-base/replit-integration?utm_source=chatgpt.com "Send emails with Replit and Resend"

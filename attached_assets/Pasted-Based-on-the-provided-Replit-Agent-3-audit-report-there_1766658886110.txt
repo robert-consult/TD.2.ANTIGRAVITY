@@ -1,0 +1,216 @@
+Based on the provided **Replit Agent 3** audit report, there are several **material internal inconsistencies** and **policy drift risks** relative to your gating invariants (email grace → lock; rolling reverify; SMS only when contender-eligible; KYC invite-based; single PolicyDecision source of truth). These issues mean the report’s **“✅ PASS” conclusion is not reliable** without a targeted re-audit and corrections. 
+
+---
+
+## 1) Critical failures (must be corrected)
+
+### A) **Contender tier enum drift (“CONTENDER” is not a valid contenderTier)**
+
+The report asserts `PERFORMER` maps to `contenderTier = "CONTENDER"` and that demotion to PERFORMER sets `contenderTier = "CONTENDER"`. 
+
+Your context spec defines contenderTier values as **NONE / CANDIDATE_SMS_REQUIRED / VERIFIED_SMS** (optionally SELECTED_REAL_CAPITAL), and tier updates are algorithmic (eligibility ⇒ CANDIDATE_SMS_REQUIRED; SMS verified ⇒ VERIFIED_SMS). There is **no “CONTENDER” contenderTier state**. 
+
+**Impact**
+
+* UI/back-end gating can silently diverge (feature appears unlocked/locked incorrectly).
+* PolicyDecision can deny/allow incorrectly if it expects one enum set while DB stores another.
+
+**Required correction**
+
+* Keep **userTier** (CANDIDATE / PERFORMER / SELECTED) separate from **contenderTier** (NONE / CANDIDATE_SMS_REQUIRED / VERIFIED_SMS / SELECTED_REAL_CAPITAL).
+* Remove any assignment of contenderTier = `"CONTENDER"`. Use:
+
+  * contenderTier = NONE by default
+  * contenderTier = CANDIDATE_SMS_REQUIRED only when eligibility rules pass
+  * contenderTier = VERIFIED_SMS only after SMS verified
+
+---
+
+### B) **KYC status model drift (PENDING/INVITED vs SUBMITTED/APPROVED etc.)**
+
+The report defines `user_kyc_profiles.status` as **NOT_STARTED, INVITED, PENDING, APPROVED, REJECTED**, and describes user submission as “PENDING.” 
+
+Your earlier UI plan and stubs used **SUBMITTED** (not PENDING), and your policy/tier context references KYC gating in a way that expects consistent, stable status semantics. 
+
+**Impact**
+
+* Frontend cards (KYC Status / Payout) can display wrong states.
+* Admin queue filters/reviews can mismatch actual statuses stored.
+* PolicyDecision can deny KYC view/submit incorrectly.
+
+**Required correction**
+
+* Choose one canonical enum set and apply it everywhere (DB, API, UI, PolicyDecision).
+* If you keep INVITED, then the typical minimal set is:
+
+  * NOT_STARTED → INVITED → SUBMITTED → APPROVED/REJECTED
+    (or NOT_STARTED → INVITED → PENDING → APPROVED/REJECTED, but then UI must use PENDING everywhere)
+
+---
+
+### C) **KYC gating contradicts your “invite-based” invariant**
+
+The report says `KYC_VIEW` and `KYC_SUBMIT` check only that user is `SELECTED` tier. 
+
+Your model explicitly requires KYC to be **invite-based** (selected/eligible does not automatically mean KYC is visible unless invited). 
+
+**Impact**
+
+* Selected traders could see KYC without being invited (policy drift).
+* UI/back-end can diverge if UI hides KYC while API allows it (or vice versa).
+
+**Required correction**
+PolicyDecision for KYC must require **both**:
+
+* `userTier === SELECTED` **and**
+* `kycStatus in {INVITED, SUBMITTED/PENDING, APPROVED}` (or `kycInvitedAt != null`)
+
+---
+
+### D) **Endpoint naming drift (kyc-queue vs kyc/queue)**
+
+The report claims Admin KYC queue is `GET /api/admin/kyc-queue` (and also has `/api/admin/kyc/pending`). 
+
+Your earlier consolidated plan referenced `/api/admin/kyc/queue` and the UI stubs you provided use `/api/admin/kyc/queue`. This mismatch will break wiring unless normalized. 
+
+**Required correction**
+
+* Pick one route family and enforce consistency across:
+
+  * client pages
+  * server routes
+  * documentation
+  * tests
+
+---
+
+## 2) High-risk “PASS” assertions that are not actually evidenced
+
+### A) External secrets “✅ Configured” cannot be concluded from code alone
+
+The report claims Resend and Twilio secrets are configured. 
+
+Unless the agent can demonstrate those secrets exist in the deployment environment, the only defensible claim is: **“code reads these env vars; deployment requires secrets to be set.”**
+
+**Re-audit requirement**
+
+* Confirm the server **fails fast** (clear error) when missing `RESEND_API_KEY` / Twilio vars.
+* Confirm the Replit Secrets actually contain the values (agent must verify in workspace settings).
+
+---
+
+### B) Audit event taxonomy is incomplete vs hedge-fund-grade trail requirements
+
+The report lists only `SMS_VERIFY_FAILED` for SMS events and a small subset overall. 
+
+Your context requires a fuller minimum set (OTP sent, verify success/fail, reminders, account locked/unlocked, contender eligible, etc.). 
+
+**Required correction**
+
+* Expand identity_audit emission to include, at minimum:
+
+  * SMS_OTP_SENT, SMS_VERIFY_SUCCESS, SMS_VERIFY_FAIL
+  * ACCOUNT_LOCKED (reason), ACCOUNT_UNLOCKED (reason)
+  * REMINDER_SENT (stage)
+  * CONTENDER_ELIGIBLE (rule matched + snapshot metrics)
+
+---
+
+## 3) Admin vs Trader Profile Settings (your requirement) — likely incomplete in the report
+
+The report lists a trader `ProfileSettings` page and components/cards. 
+
+It lists admin “User Profiles” as a mini-tab, but does **not** explicitly confirm a dedicated admin profile settings view with:
+
+* gated KYC/payout visibility,
+* invite actions,
+* verification state inspection,
+* tier override controls,
+* and audit trail linkage. 
+
+**Required correction**
+
+* Ensure both exist:
+
+  1. **Trader Profile Settings** (self-service + gated cards)
+  2. **Admin Profile Settings View** (read/controls, invite/review paths, forensic fields)
+
+---
+
+## 4) Redirected re-audit (what Agent 3 must redo, with “evidence artifacts”)
+
+Below is the **re-audit directive** I would give Agent 3. It is designed to prevent “looks implemented” claims and force proof that UI/API/jobs/trade engine share the same PolicyDecision invariants.
+
+### Re-audit deliverables (non-negotiable)
+
+For each item below, provide:
+
+* file path
+* the relevant code excerpt (or exact line range)
+* and a brief explanation of why it matches the invariant.
+
+#### 1) Canonical enums (single source of truth)
+
+* Show the **exact TypeScript union** (or Zod schema) for:
+
+  * AccountState
+  * UserTier
+  * ContenderTier
+  * KycStatus
+* Confirm DB check constraints (if any) align.
+
+**Must eliminate** `contenderTier="CONTENDER"` drift. 
+
+#### 2) PolicyDecision is the only gate
+
+Demonstrate these three calls exist and are used:
+
+* `PolicyDecision(action=TRADE_*)` on all exposure-increasing trade endpoints
+* `PolicyDecision(action=PHONE_VERIFY_START/CONFIRM)` on Twilio verify endpoints
+* `PolicyDecision(action=KYC_VIEW)` on any KYC/profile endpoints
+
+Your policy spec requires reduce-only behavior in locked states and strict SMS gating by ACTIVE_VERIFIED + eligibility. 
+
+#### 3) KYC is invite-based (not just SELECTED)
+
+Show PolicyDecision logic that checks:
+
+* `userTier === SELECTED`
+* and `kycStatus` (or `kycInvitedAt`) indicates invite/submission
+
+Report currently claims only “selected tier” check. 
+
+#### 4) Endpoint consistency proof
+
+Provide a route map that shows the actual registered routes for:
+
+* admin audit trail
+* admin kyc queue
+* admin tier set
+* profile/me
+* verification endpoints
+
+And prove the client calls match the server routes (no `kyc-queue` vs `kyc/queue` mismatches). 
+
+#### 5) Audit trail completeness
+
+List all emitted `identity_audit` event types and show where they are written.
+Must include the minimum set described above (OTP sent/success, reminders, lock/unlock, contender eligible). 
+
+#### 6) Environment verification (Resend/Twilio)
+
+Replace “✅ Configured” with verified evidence:
+
+* server startup validation checks for required env vars
+* a test call (or mocked call) path showing success/failure behavior
+
+Report currently over-asserts. 
+
+---
+
+## 5) Summary judgment on the report
+
+* The report includes useful structure (tabs, endpoints, tables), but it contains **hard policy drift** (contenderTier “CONTENDER”), **status drift** (KYC enum), **gating drift** (KYC = selected-only), and **endpoint drift** (kyc-queue naming), and it overstates environment configuration as verified. 
+* Until those are corrected and re-audited with evidence, the platform remains at risk of UI/backend drift and compliance-trail incompleteness.
+
+If you paste (or re-upload) the latest TradeCentral zip that Agent 3 audited, I will produce a **concrete “diff-style” correction plan** (file-by-file) that resolves the enum/gating mismatches and aligns everything to a single PolicyDecision module (trade actions + SMS start + KYC view) with stable deny codes.

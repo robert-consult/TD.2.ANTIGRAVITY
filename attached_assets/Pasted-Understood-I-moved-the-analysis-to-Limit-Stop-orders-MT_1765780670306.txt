@@ -1,0 +1,292 @@
+Understood. I moved the analysis to **Limit/Stop orders (MT5-style)** and the **Trade tab UI behavior** exactly as you requested. Below is what I’ve confirmed in your current codebase, what is “broken/non-MT5,” and the specific MT5-standard logic you should enforce (backend + UI). I also started implementing the required changes in the working copy of your package, but I did not finish writing all patches before tool time ended—so I’m being explicit about what is complete vs. incomplete.
+
+---
+
+# A) MT5 / Professional Logic — Limit & Stop Orders (Reference Standard)
+
+## 1) MT5-style trigger conditions (must be bid/ask-aware)
+
+Use **Ask** for BUY triggers and fills; **Bid** for SELL triggers and fills.
+
+### LIMIT orders
+
+* **BUY LIMIT**: triggers when **ASK ≤ limitPrice**
+* **SELL LIMIT**: triggers when **BID ≥ limitPrice**
+
+### STOP orders
+
+* **BUY STOP**: triggers when **ASK ≥ stopPrice**
+* **SELL STOP**: triggers when **BID ≤ stopPrice**
+
+This is critical: you cannot use “mid price” for triggers or fills and still claim MT5-like behavior.
+
+---
+
+## 2) MT5-style validation at placement (“wrong side” rejection)
+
+These must be enforced at order placement:
+
+### LIMIT placement rules
+
+* **BUY LIMIT** must be **below current ASK**
+* **SELL LIMIT** must be **above current BID**
+
+### STOP placement rules
+
+* **BUY STOP** must be **above current ASK**
+* **SELL STOP** must be **below current BID**
+
+If user tries to place a BUY LIMIT above ASK, MT5 would treat it as either invalid or “marketable”—in your platform, it must be rejected as invalid (unless you deliberately auto-convert to market, which I do not recommend for risk correctness).
+
+---
+
+## 3) Minimum distance requirement (“10 points from market”)
+
+You asked for **10 points**.
+
+Professional platforms implement this as a broker **StopLevel / FreezeLevel** rule. Your system currently has no such validation.
+
+So you need:
+
+* A computed **point size** per symbol (FX: pip/point logic; CFDs: tick size).
+* Enforce: entry price must be at least **10 points away** in the correct direction.
+
+Examples:
+
+* BUY LIMIT: `limitPrice ≤ ASK - 10*point`
+* SELL STOP: `stopPrice ≤ BID - 10*point`, etc.
+
+---
+
+## 4) SL/TP correctness rules (also MT5-aligned)
+
+When SL/TP is set (at placement or after):
+
+* BUY:
+
+  * SL must be **below entry**
+  * TP must be **above entry**
+* SELL:
+
+  * SL must be **above entry**
+  * TP must be **below entry**
+    Optionally also enforce min distance (10 points).
+
+---
+
+# B) Current Implementation Critique (What’s broken vs. MT5)
+
+## 1) There is **no pending execution engine**
+
+In the code you uploaded:
+
+* `/api/trades` sets `status = PENDING` for Limit/Stop (via `storage.createTrade`)
+* BUT there is **no backend process** that:
+
+  * checks quotes,
+  * triggers pending orders,
+  * flips `PENDING → OPEN`,
+  * sets `executedAt` and real `openPrice`.
+
+Result:
+
+* Limit/Stop orders are effectively “dead records” that never fill.
+
+This is **not professional platform behavior**.
+
+---
+
+## 2) Order placement logic is not MT5-correct (server-side)
+
+### File: `server/routes.ts` → `POST /api/trades`
+
+Your server:
+
+* fetches a quote
+* calculates `entryPrice = ask for BUY / bid for SELL`
+* writes that into `openPrice` **even for Limit/Stop**
+
+That defeats the meaning of pending orders and creates incorrect “openPrice semantics.”
+
+For pending orders:
+
+* `openPrice` should represent **requested price** OR be nullable until execution (best practice is nullable openPrice + separate requested price fields).
+* Actual entry should be set at execution time using bid/ask.
+
+---
+
+## 3) UI logic is not MT5-like for Limit/Stop
+
+### File: `client/src/pages/TradeScreen.tsx`
+
+Your UI:
+
+* Always shows the same **BUY / SELL submit buttons**
+* For Limit/Stop the user still “buys/sells” using those market-style buttons
+* LimitPrice and StopPrice inputs are just generic fields with a placeholder = current price, not MT5-style suggested pricing.
+
+You specifically requested:
+
+* Limit/Stop mini-tabs should be **“Place Order: BUY LIMIT @ price”** etc.
+* Not generic BUY/SELL market buttons.
+
+That is not currently implemented.
+
+---
+
+## 4) “10 points suggestion” + “tracks market” is not implemented
+
+Your current placeholders for TP/SL are ±1% from current price (not 10 points) and do not track in a disciplined “MT5-style pending order UI” way.
+
+You want:
+
+* Suggested entry for pending orders = **10 points away**
+* Suggested TP/SL = also **10 points away**
+* While the user hasn’t edited the field, the suggestion should **track live market changes** (i.e., update as quotes move).
+
+That behavior does not exist today.
+
+---
+
+# C) What I started implementing (but did not fully complete yet)
+
+I created a working copy and began patching:
+
+## 1) TradeScreen: remove dependency on `openPrice` for pending orders
+
+Currently `onSubmit` constructs:
+
+```ts
+tradeRequest.openPrice = openPrice
+```
+
+I began changing this so:
+
+* client sends ONLY:
+
+  * `orderType`
+  * `type (BUY/SELL)`
+  * `limitPrice` OR `stopPrice`
+  * optional `takeProfit`, `stopLoss`
+* server computes authoritative prices.
+
+## 2) TradeScreen UI: replace BUY/SELL buttons with “Place Pending Order” button
+
+Plan (MT5-like):
+
+* If `orderType === Market`: keep your BUY/SELL buttons
+* If `orderType === Limit`:
+
+  * show mini-tabs: **BUY LIMIT / SELL LIMIT**
+  * show one button: **Place BUY LIMIT @ {limitPrice}** or **Place SELL LIMIT @ {limitPrice}**
+* If `orderType === Stop`:
+
+  * mini-tabs: **BUY STOP / SELL STOP**
+  * button: **Place BUY STOP @ {stopPrice}** etc.
+
+## 3) Auto-suggest 10-point pricing + track market
+
+I began implementing state logic to:
+
+* compute point size (initially using your existing pip logic: JPY vs non-JPY)
+* auto-fill:
+
+  * limit/stop price = market ± 10 points depending on pending type
+  * TP/SL = entry ± 10 points based on direction
+* update these values on quote movement **until the user edits the field**.
+
+This requires:
+
+* an “auto-follow” flag per field (entry, TP, SL)
+* onChange handlers that disable auto-follow when user types
+
+This is partially implemented in the working patch, but not finalized/validated.
+
+---
+
+# D) Backend changes required (MT5 correctness) — not yet implemented in your package
+
+To make Limit/Stop behave like MT5, you must implement:
+
+## 1) Correct placement validation in `POST /api/trades`
+
+* Enforce the “correct side” rules
+* Enforce the **10-point distance**
+* If quote is stale/missing: reject (you already selected Option 1)
+
+## 2) Pending execution engine (required)
+
+Either:
+
+* integrate into your quote feed loop (`forgeFeed.persist`) after quote updates
+  OR
+* create a cron/worker that checks pending orders against latest bid/ask.
+
+At execution:
+
+* PENDING → OPEN
+* set `executedAt`
+* set `openPrice = bid/ask fill price`
+* re-check margin at execution time (professional systems do)
+* apply stale quote blocking
+
+Without this, pending orders will never fill and history will not be professional.
+
+---
+
+# E) Market orders: leave alone unless broken (one issue)
+
+You said leave Market orders alone unless broken. Market entry logic (bid/ask spread) is broadly fine.
+
+However, one directly-related issue exists:
+
+* You previously had a path where the client could send a close price.
+* In the patch bundle you already accepted earlier, I removed this from the client (`closeTrade.mutate({id})`).
+
+That is the only “market-adjacent” issue I consider “broken” for risk posture.
+
+---
+
+# What is incomplete right now (explicit)
+
+I have NOT yet finished writing and packaging a complete patch that includes:
+
+1. the full TradeScreen UI transformation (mini-tabs + place-order button labels),
+2. the full 10-point auto-suggestion + tracking behavior,
+3. the backend validation rules for pending orders,
+4. the pending execution engine.
+
+I did complete the analysis and identified exactly where to change and why, and I began implementing the UI and request-shape changes.
+
+---
+
+# Next immediate step (what I will do in the next message)
+
+I will produce a **single consolidated patch zip** that includes:
+
+1. **TradeScreen.tsx**
+
+   * Market: keep BUY/SELL
+   * Limit/Stop: mini-tabs + “Place BUY LIMIT @ …” / “Place SELL STOP @ …”
+   * auto-suggest 10 points + tracking (entry + TP/SL)
+
+2. **server/routes.ts**
+
+   * pending order placement validation (MT5 rules)
+   * remove reliance on client `openPrice`
+   * stale quote blocking (Option 1)
+
+3. **pending execution engine**
+
+   * fill logic using bid/ask triggers
+   * PENDING → OPEN transitions recorded correctly
+
+If you want, I will also add TP/SL trigger execution (because otherwise TP/SL fields are “cosmetic only,” which is non-professional).
+
+---
+
+If you want me to treat “10 points” as:
+
+* **10 pips** (your current code’s pipFactor approach), or
+* **10 MT5 points** (1 pip in 5-digit pricing),
+  I can implement either, but I will default to the interpretation consistent with your current system’s pipFactor unless you instruct otherwise.

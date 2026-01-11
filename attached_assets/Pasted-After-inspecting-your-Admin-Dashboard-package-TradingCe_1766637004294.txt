@@ -1,0 +1,118 @@
+After inspecting your **Admin Dashboard** package (`TradingCentral-3AL-2.zip`), here’s how to extend it *without touching or renaming* existing tabs or mini-tabs.
+
+---
+
+## 1) Where to place additions
+
+### A. **User Management → new mini-tabs**
+
+Add two new mini-tabs under the existing *All / Active / Disabled / Frozen / Online / Login History* group:
+
+| New mini-tab    | Purpose                                                                                                              | Core components                                                                                                                     |
+| --------------- | -------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| **Audit Trail** | Lists all user-specific compliance and policy events (email verify, locks, SMS, contender promotion, admin actions). | Table with filters (event type, date range, actor). Include “Export CSV” and “View Correlated Trade Events” (links to Trade Audit). |
+| **KYC Queue**   | Shows only users who have reached contender tier and entered the KYC step.                                           | Card list view with **status chips** (Pending / Approved / Rejected / Needs Info), reviewer column, and “Open KYC Profile” action.  |
+
+These live logically between “Login History” and your existing “Data / System Config” tabs. They reuse `AdminDashboard.tsx` layout; each can be a new `<MiniTab label="Audit Trail" />` and `<MiniTab label="KYC Queue" />`.
+
+---
+
+### B. **Trade Audit → extend existing Audit area**
+
+Do **not** rename it; just add sub-sections via collapsible cards:
+
+1. **User Identity Events** – filter by `category='EMAIL' or 'SMS'` from `userAudit` table.
+2. **Admin Actions** – sourced from `adminActions`.
+3. **System Hash-Chain Integrity** – view entries from `auditExportManifest` with SHA-256 hashes and verification status.
+
+This makes Trade Audit a complete “Audit Hub” while still keeping trade-event focus.
+
+---
+
+### C. **Data tab → new mini-tabs**
+
+Keep current analytics intact; add new mini-tabs for aggregated intelligence:
+
+| Mini-tab                    | Content                                                                             |
+| --------------------------- | ----------------------------------------------------------------------------------- |
+| **Signup Funnel**           | Charts showing signup → verified → contender → KYC stages (uses aggregated events). |
+| **Verification Compliance** | Pie/line charts for verification within 14 days, overdue reverify, and lock counts. |
+| **User Activity Analytics** | Heatmap of login frequency, DAU/WAU, active traders vs locked/unverified.           |
+| **SMS / KYC Conversion**    | Bar charts for contender eligible → SMS verified → KYC completed.                   |
+
+Use your existing card component style (`CardHeader + CardContent`) for uniformity.
+
+---
+
+### D. **System Config → optional read-only panels**
+
+Add informational cards (no new tabs):
+
+* **Policy Configuration Snapshot** – read-only YAML-like dump of current grace/reverify/SMS thresholds (pulled from `systemConfig` table).
+* **Reminder Schedule Preview** – shows when next reminder jobs will run.
+
+These integrate with existing systemConfig sub-tabs.
+
+---
+
+## 2) Backend linkage
+
+Each new mini-tab has a clear data source already in your Drizzle schema:
+
+| Feature                    | Table(s)                                                |
+| -------------------------- | ------------------------------------------------------- |
+| Audit Trail                | `userAudit`, `tradeAudit`, `adminActions`               |
+| KYC Queue                  | `users` (with contenderTier / KYCStatus), `userProfile` |
+| Signup Funnel & Compliance | `userAudit` + derived aggregates                        |
+| SMS / KYC Conversion       | `userAudit` + `userPolicyState`                         |
+
+You don’t need new tables; just extend queries.
+
+---
+
+## 3) Suggested component structure (frontend)
+
+```
+client/src/pages/AdminDashboard.tsx
+  ├── MiniTab: "Audit Trail" → components/AdminAuditTrail.tsx
+  ├── MiniTab: "KYC Queue" → components/KycQueue.tsx
+  ├── MiniTab: "Signup Funnel" → components/SignupFunnelChart.tsx
+  ├── MiniTab: "Verification Compliance" → components/VerificationCompliance.tsx
+  ├── MiniTab: "User Analytics" → components/UserAnalytics.tsx
+```
+
+Each component uses:
+
+```tsx
+<Card>
+  <CardHeader>Title</CardHeader>
+  <CardContent>
+     <Table or ChartJS view />
+  </CardContent>
+</Card>
+```
+
+Re-use existing `useAuditData()` or `useFetch("/api/admin/...")` hooks.
+
+---
+
+## 4) UI cohesion notes
+
+* Maintain existing top nav and CSS variables; new cards adopt current `bg-card` and `text-secondary`.
+* Use compact responsive grids (2 cols desktop, 1 col mobile).
+* Keep “Export CSV” button styling identical to existing audit export.
+
+---
+
+## 5) Summary (no conflicts)
+
+| Area            | Action                                                                                                   | Changes              |
+| --------------- | -------------------------------------------------------------------------------------------------------- | -------------------- |
+| User Management | Add **Audit Trail**, **KYC Queue** mini-tabs                                                             | New components only  |
+| Trade Audit     | Add collapsible subsections                                                                              | Extend layout        |
+| Data            | Add **Signup Funnel**, **Verification Compliance**, **User Analytics**, **SMS/KYC Conversion** mini-tabs | New charts only      |
+| System Config   | Add read-only cards                                                                                      | No structural change |
+
+All additions use existing Drizzle tables and fit your SQLite backend cleanly—no schema or routing conflicts.
+
+If you want, I can now produce the **inline React + TypeScript component stubs** (`AdminAuditTrail.tsx`, `KycQueue.tsx`, etc.) ready to drop into your `/client/src/pages` for Replit integration. Would you like me to generate those next?

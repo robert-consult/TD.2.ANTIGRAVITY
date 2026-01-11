@@ -1,0 +1,442 @@
+Below is a **deep implementation + commit-audit checklist** Replit Agent 3 can use to verify that **all P1/P2 fixes** (Slider CAPTCHA session-binding, phone capture/enforcement, legal “wrong year” fix, public config wiring) were **fully committed**, wired end-to-end, and are **actually effective at runtime**.
+
+Use this as a **“Done vs Not Done vs Partial”** audit sheet. It is organized by **Repo Layer** (DB → Server → Client → Admin → Tests) and includes **what to check**, **where**, **how to prove**, and **failure signatures**.
+
+---
+
+# Replit Agent 3 — Deep Audit Implementation Checklist (CAPTCHA + Phone + Legal Date)
+
+## A. Git / Commit Integrity (No false positives)
+
+1. **Branch & HEAD sanity**
+
+   * Verify current branch is correct (e.g., `main` or target feature branch).
+   * `git status` must be clean (no uncommitted diffs).
+   * `git log -5 --oneline` includes commits referencing:
+
+     * slider captcha / captcha routes
+     * signup phone enforce
+     * signup-config/public-config
+     * legal docs date fix (UI)
+
+2. **Search for key strings**
+
+   * Repo-wide search must find:
+
+     * `captchaSlider` (session object)
+     * `/api/captcha/slider/start`
+     * `/api/captcha/slider/complete`
+     * `signup_phone_enforce`
+     * `/api/auth/signup-config`
+     * `createdAt < 1e12` or similar ms/seconds normalization
+
+3. **No dead code**
+
+   * Confirm no “duplicate” captcha logic exists (e.g., both inline slider endpoints and separate router) causing split behavior.
+   * Confirm exactly one effective implementation path is active in `server/routes.ts`.
+
+---
+
+## B. Database / Schema / Migration (P2 phone toggle + persistence)
+
+### B1. `system_config` schema is updated
+
+**Expectation**
+
+* Column exists: `signup_phone_enforce` INTEGER NOT NULL DEFAULT 0
+* (And existing captcha config columns still exist: `signup_captcha_enforce`, `captcha_provider`)
+
+**Audit steps**
+
+1. Check Drizzle schema file:
+
+   * `shared/schema.ts`
+
+     * `systemConfig.signupPhoneEnforce` exists with default false.
+2. Check migration/ensure script:
+
+   * `server/db/ensureSchema.ts` (or your actual ensure file)
+
+     * Adds column if missing: `ALTER TABLE system_config ADD COLUMN signup_phone_enforce...`
+3. Verify physical DB:
+
+   * In SQLite:
+
+     * `PRAGMA table_info(system_config);`
+     * `SELECT signup_phone_enforce, signup_captcha_enforce, captcha_provider FROM system_config WHERE id=1;`
+
+**Failure signatures**
+
+* Signup config endpoint returns `signupPhoneEnforce: false` even after admin toggle → schema not present or not persisted.
+* Insert/update to system_config fails → missing column.
+
+### B2. Users table supports phone capture (if required)
+
+**Expectation**
+
+* `users.phone` exists and holds E.164 (e.g., `+14155552671`) OR a dedicated profile/verification table is used.
+
+**Audit steps**
+
+* Confirm phone storage column:
+
+  * `shared/schema.ts` users has `phone` (text) or equivalent.
+* Confirm register endpoint writes normalized phone.
+* Verify DB:
+
+  * Create test account with phone, check `SELECT phone FROM users WHERE email=...`
+
+**Failure signatures**
+
+* Phone accepted in UI but not stored; or stored raw without normalization.
+
+---
+
+## C. Server — CAPTCHA P1: Session-bound enforcement (must be un-bypassable)
+
+### C1. Slider endpoints exist and are mounted
+
+**Expectation**
+
+* Backend responds to:
+
+  * `POST /api/captcha/slider/start`
+  * `POST /api/captcha/slider/complete`
+  * `POST /api/captcha/slider/reset` (optional but expected)
+* These endpoints write session state (e.g., `req.session.captchaSlider`)
+
+**Where**
+
+* Either:
+
+  * `server/routes/captchaSlider.ts` + mounted in `server/routes.ts`, OR
+  * inline in `server/routes.ts`
+
+**Audit steps**
+
+1. Check route registration in `server/routes.ts`:
+
+   * Look for `app.post("/api/captcha/slider/start"...`
+   * or `app.use("/api/captcha", captchaSliderRouter)`
+2. Confirm express-session typing includes `captchaSlider`.
+3. Runtime proof:
+
+   * Call start endpoint, confirm response includes `captchaId`.
+   * Ensure session cookie set and subsequent complete call works only with same session.
+
+**Failure signatures**
+
+* `404` on slider endpoints.
+* Start works but complete always returns mismatch (cookie/session not persisted).
+
+### C2. Slider complete writes server-verified timestamp
+
+**Expectation**
+
+* `req.session.captchaSlider.verifiedAtMs` is set on complete.
+* There is TTL enforcement (issue TTL, verify TTL).
+
+**Audit steps**
+
+* Code inspection:
+
+  * In `/complete`, confirm checks:
+
+    * captchaId matches session
+    * issue age < TTL
+    * writes verifiedAtMs
+* Runtime proof:
+
+  * Start → complete → register should succeed.
+  * Start → wait beyond TTL → complete fails with `CAPTCHA_EXPIRED`.
+
+**Failure signatures**
+
+* UI slider completes but register still fails `CAPTCHA_REQUIRED` → session not being marked verified or consumed early.
+
+### C3. Register endpoint blocks when slider not verified (P1 must be server enforced)
+
+**Expectation**
+
+* In `/api/auth/register`, when:
+
+  * `signup_captcha_enforce=1` AND `captcha_provider='SLIDER'`
+  * then register must reject unless session has verified slider state.
+* Must not rely on any client boolean.
+
+**Audit steps**
+
+1. Inspect `/api/auth/register`:
+
+   * There is a branch:
+
+     * If provider is SLIDER → require verified slider state.
+     * Else → verify token (turnstile/hcaptcha).
+2. Runtime bypass test:
+
+   * With enforce on + provider SLIDER, attempt register without calling slider complete:
+
+     * Expect HTTP 400 with `CAPTCHA_REQUIRED` (or equivalent).
+   * Try sending fake `captchaToken`:
+
+     * Must still fail if provider SLIDER.
+
+**Failure signatures**
+
+* Register succeeds without slider completion → critical security bug (client-only gating).
+
+### C4. Audit logging exists for slider issuance and verification
+
+**Expectation**
+
+* Events recorded (either identityAudit / auth_events / adminActions):
+
+  * `CAPTCHA_ISSUED`, `CAPTCHA_VERIFIED`, and optionally `CAPTCHA_EXPIRED`, `CAPTCHA_RESET`
+
+**Audit steps**
+
+* Confirm calls to audit logger inside `/start` and `/complete`.
+* Verify DB:
+
+  * `SELECT * FROM identity_audit WHERE type LIKE 'CAPTCHA_%' ORDER BY created_at DESC LIMIT 20;`
+
+**Failure signatures**
+
+* No audit rows; or category/type mismatched.
+
+---
+
+## D. Server — P2 Phone enforcement + normalization (must be enforced server-side)
+
+### D1. Register enforces phone when `signup_phone_enforce=1`
+
+**Expectation**
+
+* In `/api/auth/register`:
+
+  * Reads config value
+  * If enabled: phone missing → rejects with `PHONE_REQUIRED`
+  * If phone provided: validates with libphonenumber and stores E.164 or rejects `PHONE_INVALID`
+
+**Audit steps**
+
+1. Inspect register handler:
+
+   * Must normalize:
+
+     * `parsePhoneNumberFromString(phone, countryIso2)`
+     * `isValid()`
+     * store `parsed.number` (E.164)
+2. Runtime tests:
+
+   * Set `signup_phone_enforce=1`
+   * Attempt register without phone → must fail.
+   * Attempt register with invalid phone → must fail.
+   * Attempt register with valid phone → must succeed and phone stored normalized.
+
+**Failure signatures**
+
+* Enforce toggled but server accepts missing phone.
+* Phone required in UI but server doesn’t enforce (or vice versa).
+
+---
+
+## E. Server — Signup Config endpoint wiring
+
+### E1. `/api/auth/signup-config` returns correct flags
+
+**Expectation**
+
+* Output includes:
+
+  * `captcha.enforceSignupCaptcha`
+  * `captcha.provider`
+  * `signupPhoneEnforce`
+
+**Audit steps**
+
+* Inspect endpoint implementation.
+* Runtime:
+
+  * curl `GET /api/auth/signup-config`
+  * verify values reflect DB system_config.
+
+**Failure signatures**
+
+* Provider returns TURNSTILE always (hardcoded).
+* signupPhoneEnforce missing from JSON (client can’t enforce).
+
+---
+
+## F. Client — LoginPage.tsx integration must match server contract
+
+### F1. Slider CAPTCHA handshake is server-confirmed
+
+**Expectation**
+
+* When provider=SLIDER and enforce=true:
+
+  * On entering Register tab (and/or on country selection), client calls:
+
+    * `POST /api/captcha/slider/start`
+  * On slider completion, client calls:
+
+    * `POST /api/captcha/slider/complete { captchaId }`
+  * UI must only mark CAPTCHA passed if `/complete` returned ok.
+
+**Audit steps**
+
+* Inspect `client/src/pages/LoginPage.tsx`:
+
+  * Existence of:
+
+    * `startSliderCaptcha()`
+    * `completeSliderCaptcha()`
+    * state: `sliderCaptchaId`, `sliderServerVerified`, `sliderVerifying`
+  * Slider widget triggers complete call.
+* Runtime:
+
+  * Open register, observe network calls.
+  * Attempt register without completing slider should be blocked client-side and server-side.
+
+**Failure signatures**
+
+* No network calls; slider is purely local.
+* Slider UI passes but server rejects `CAPTCHA_REQUIRED`.
+
+### F2. Phone input required logic matches server
+
+**Expectation**
+
+* If `signupPhoneEnforce=true`, UI indicates required and blocks submit unless valid.
+
+**Audit steps**
+
+* Inspect `LoginPage.tsx`:
+
+  * `phoneRequired` derived from config.
+  * gating: `if phoneRequired && (!phoneValid || !phone) return`.
+* Inspect phone component:
+
+  * E.164 normalization + validity indicates `phoneValid`.
+* Runtime:
+
+  * Toggle enforce on, refresh page: phone shows required and blocks submit.
+
+**Failure signatures**
+
+* UI requires phone but server doesn’t (or vice versa).
+* Phone shows required but user can submit with empty.
+
+---
+
+## G. Admin / System Config UI (must allow toggling without code edits)
+
+### G1. Admin tab includes toggles
+
+**Expectation**
+
+* Admin UI includes:
+
+  * `signupCaptchaEnforce`
+  * `captchaProvider` select includes SLIDER
+  * `signupPhoneEnforce`
+
+**Audit steps**
+
+* Inspect Admin system config page (or tab) component.
+* Confirm backend route updates system_config column for all three.
+* Runtime:
+
+  * Change values, refresh `/api/auth/signup-config` and confirm changes persist.
+
+**Failure signatures**
+
+* UI toggles don’t persist; values revert on refresh.
+
+---
+
+## H. Legal Docs “Wrong Year” fix (timestamp normalization)
+
+### H1. Admin Legal Docs uses ms normalization
+
+**Expectation**
+
+* Wherever `createdAt`/`updatedAt` is displayed:
+
+  * if value < 1e12 it is seconds → multiply by 1000.
+
+**Audit steps**
+
+* Inspect file:
+
+  * `client/src/pages/AdminLegalDocs.tsx` (or equivalent)
+  * search: `createdAt < 1e12`
+* Runtime:
+
+  * Row with old seconds timestamp displays correct year (not 1970).
+
+**Failure signatures**
+
+* Still shows 1970/incorrect year.
+
+---
+
+## I. End-to-End Functional Test Script (manual, 10 minutes)
+
+**Preconditions**
+
+* Use Admin UI to set:
+
+  * `signupCaptchaEnforce = ON`
+  * `captchaProvider = SLIDER`
+  * `signupPhoneEnforce = ON`
+* Confirm `/api/auth/signup-config` reflects these.
+
+**Scenario 1 — Expected failure (no captcha)**
+
+1. Open Register tab.
+2. Do NOT slide captcha; fill user fields; try submit.
+3. Must fail:
+
+   * UI blocks OR server returns `CAPTCHA_REQUIRED`.
+
+**Scenario 2 — Expected failure (no phone)**
+
+1. Slide captcha and complete server verification.
+2. Leave phone empty, submit.
+3. Must fail with `PHONE_REQUIRED`.
+
+**Scenario 3 — Expected success**
+
+1. Slide captcha and complete.
+2. Enter valid phone for country.
+3. Submit.
+4. Must succeed and create user.
+5. DB check: `users.phone` is E.164.
+
+**Scenario 4 — Attempt bypass**
+
+1. Force-call register endpoint with Postman, without calling slider complete.
+2. Must fail regardless of what client sends.
+
+---
+
+# “Done / Partial / Missing” Recording Template
+
+Use this exact rubric per item:
+
+* **DONE**: Verified by code inspection + runtime proof
+* **PARTIAL**: Code present but missing mounting / missing persistence / missing enforcement
+* **MISSING**: No references or endpoints missing
+
+For each line item, Agent 3 should record:
+
+* File path(s)
+* Key lines / symbol names
+* Runtime proof (curl / UI behavior)
+* Remaining work if partial
+
+---
+
+If you want, I can also produce a **single runnable CLI test script** (curl-based) that asserts all required behaviors (start/complete/expiry/register fail/success) and prints PASS/FAIL per step—without needing Postman.

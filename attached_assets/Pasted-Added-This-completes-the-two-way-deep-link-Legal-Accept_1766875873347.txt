@@ -1,0 +1,342 @@
+Added. This completes the **two-way deep link**:
+
+* **Legal Acceptances → Legal Docs** (prefill target + auto-open exact version)
+* **Legal Docs → Back to Acceptances** (auto-open the acceptance detail modal)
+* **AdminDashboard auto-tab switching** via a single, stable event bus (no alerts required)
+
+Everything below is copy/paste.
+
+---
+
+## 1) Upgrade the deep-link bus to support return navigation
+
+### `client/src/lib/adminDeepLink.ts` (REPLACE FILE)
+
+```ts
+// FILE: /client/src/lib/adminDeepLink.ts
+
+export const ADMIN_LEGAL_DOCS_PREFILL_KEY = "adminLegalDocs_prefill_v2";
+export const ADMIN_LEGAL_ACCEPTANCES_PREFILL_KEY = "adminLegalAcceptances_prefill_v2";
+
+export type AdminNavigateRequest = {
+  // use stable keys (no spaces) so you can map consistently
+  topTabKey?: "userManagement" | "viewAsTrader" | "tradeSettings" | "instruments" | "data" | "tradeAudit" | "systemConfig";
+  systemConfigTabKey?: string; // e.g., "legalDocs" | "legalAcceptances" | "migration" etc.
+  userManagementTabKey?: string;
+};
+
+export type LegalDocsPrefill = {
+  docSet: string;
+  docType: "GLOBAL_MASTER" | "ADDENDUM";
+  jurisdictionType: "DEFAULT" | "COUNTRY" | "REGION";
+  jurisdictionKey: string;
+  openDocumentId?: number | null;
+
+  // return path (so Legal Docs can show "Back" button)
+  returnTo?: {
+    kind: "LEGAL_ACCEPTANCE";
+    acceptanceId: number;
+  } | null;
+};
+
+export type LegalAcceptancesPrefill = {
+  // Optional filter prefill
+  countryIso2?: string | null;
+  emailContains?: string | null;
+  userId?: number | null;
+  fromMs?: number | null;
+  toMs?: number | null;
+
+  // Auto-open
+  openAcceptanceId?: number | null;
+};
+
+export function setLegalDocsPrefill(prefill: LegalDocsPrefill) {
+  try {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(ADMIN_LEGAL_DOCS_PREFILL_KEY, JSON.stringify(prefill));
+  } catch {
+    // ignore
+  }
+}
+
+export function getLegalDocsPrefillOnce(): LegalDocsPrefill | null {
+  try {
+    if (typeof window === "undefined") return null;
+    const raw = window.localStorage.getItem(ADMIN_LEGAL_DOCS_PREFILL_KEY);
+    if (!raw) return null;
+    window.localStorage.removeItem(ADMIN_LEGAL_DOCS_PREFILL_KEY);
+    const parsed = JSON.parse(raw);
+    if (!parsed?.docSet || !parsed?.docType || !parsed?.jurisdictionType || !parsed?.jurisdictionKey) return null;
+    return parsed as LegalDocsPrefill;
+  } catch {
+    return null;
+  }
+}
+
+export function setLegalAcceptancesPrefill(prefill: LegalAcceptancesPrefill) {
+  try {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(ADMIN_LEGAL_ACCEPTANCES_PREFILL_KEY, JSON.stringify(prefill));
+  } catch {
+    // ignore
+  }
+}
+
+export function getLegalAcceptancesPrefillOnce(): LegalAcceptancesPrefill | null {
+  try {
+    if (typeof window === "undefined") return null;
+    const raw = window.localStorage.getItem(ADMIN_LEGAL_ACCEPTANCES_PREFILL_KEY);
+    if (!raw) return null;
+    window.localStorage.removeItem(ADMIN_LEGAL_ACCEPTANCES_PREFILL_KEY);
+    return JSON.parse(raw) as LegalAcceptancesPrefill;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Event bus. Safe if no listener exists.
+ */
+export function dispatchAdminNavigate(detail: AdminNavigateRequest) {
+  try {
+    if (typeof window === "undefined") return;
+    window.dispatchEvent(new CustomEvent("admin:navigate", { detail }));
+  } catch {
+    // ignore
+  }
+}
+```
+
+---
+
+## 2) Update Legal Acceptances: accept prefill + “Go to Legal Docs” sets returnTo + auto-open acceptance detail
+
+### `client/src/pages/AdminLegalAcceptances.tsx` (PATCH)
+
+#### 2.1 Add imports at top
+
+```tsx
+import { dispatchAdminNavigate, setLegalDocsPrefill, getLegalAcceptancesPrefillOnce } from "../lib/adminDeepLink";
+```
+
+#### 2.2 Add prefill read near top of component
+
+Right after `export default function AdminLegalAcceptances() {`:
+
+```tsx
+  const acceptPrefill = useMemo(() => getLegalAcceptancesPrefillOnce(), []);
+  const [prefillOpenAcceptanceId, setPrefillOpenAcceptanceId] = useState<number | null>(
+    acceptPrefill?.openAcceptanceId != null ? Number(acceptPrefill.openAcceptanceId) : null
+  );
+```
+
+#### 2.3 Initialize filter state from prefill (replace your current initial states)
+
+Replace:
+
+```tsx
+  const [countryIso2, setCountryIso2] = useState("");
+  const [email, setEmail] = useState("");
+  const [userId, setUserId] = useState("");
+
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
+```
+
+with:
+
+```tsx
+  const [countryIso2, setCountryIso2] = useState((acceptPrefill?.countryIso2 || "")?.toUpperCase());
+  const [email, setEmail] = useState(acceptPrefill?.emailContains || "");
+  const [userId, setUserId] = useState(acceptPrefill?.userId != null ? String(acceptPrefill.userId) : "");
+
+  const [fromDate, setFromDate] = useState(() => {
+    if (!acceptPrefill?.fromMs) return "";
+    const d = new Date(Number(acceptPrefill.fromMs));
+    return isNaN(d.getTime()) ? "" : d.toISOString().slice(0, 10);
+  });
+  const [toDate, setToDate] = useState(() => {
+    if (!acceptPrefill?.toMs) return "";
+    const d = new Date(Number(acceptPrefill.toMs));
+    return isNaN(d.getTime()) ? "" : d.toISOString().slice(0, 10);
+  });
+```
+
+#### 2.4 Add auto-open detail logic (after your `load()` / list effect is fine)
+
+Add this effect:
+
+```tsx
+  useEffect(() => {
+    if (!prefillOpenAcceptanceId) return;
+
+    // If the row is present on the page, open it.
+    const hit = rows.find((r) => Number(r.id) === Number(prefillOpenAcceptanceId));
+    if (hit) {
+      openDetail(hit.id);
+      setPrefillOpenAcceptanceId(null);
+      return;
+    }
+
+    // Otherwise, fetch by id directly and open modal.
+    (async () => {
+      try {
+        const res = await fetch(`/api/admin/legal-acceptances/${prefillOpenAcceptanceId}`);
+        const data = await res.json();
+        if (data?.ok && data.row) {
+          setDetail(data.row);
+          setDetailOpen(true);
+        }
+      } catch {
+        // ignore
+      } finally {
+        setPrefillOpenAcceptanceId(null);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows, prefillOpenAcceptanceId]);
+```
+
+#### 2.5 Update your `goToLegalDocsForBest` to include returnTo and real tab switching (replace your existing helper)
+
+```tsx
+  function goToLegalDocsForBest(acceptanceId: number, best: any) {
+    if (!best?.id) return;
+
+    setLegalDocsPrefill({
+      docSet: String(best.docSet || "DOC1"),
+      docType: best.docType,
+      jurisdictionType: best.jurisdictionType,
+      jurisdictionKey: String(best.jurisdictionKey || ""),
+      openDocumentId: Number(best.id),
+      returnTo: { kind: "LEGAL_ACCEPTANCE", acceptanceId: Number(acceptanceId) },
+    });
+
+    dispatchAdminNavigate({
+      topTabKey: "systemConfig",
+      systemConfigTabKey: "legalDocs",
+    });
+  }
+```
+
+#### 2.6 Update the “Go Docs” button calls
+
+Where you render the buttons, change:
+
+```tsx
+onClick={() => goToLegalDocsForBest(resolved[r.id].global.best)}
+```
+
+to:
+
+```tsx
+onClick={() => goToLegalDocsForBest(r.id, resolved[r.id].global.best)}
+```
+
+and same for Addendum.
+
+Also in the detail modal, same pattern: pass `detail.id` as the first arg.
+
+---
+
+## 3) Update Legal Docs: show Back button and navigate back to Legal Acceptances + auto-open acceptance
+
+### `client/src/pages/AdminLegalDocs.tsx` (PATCH)
+
+#### 3.1 Add imports
+
+```tsx
+import { getLegalDocsPrefillOnce, setLegalAcceptancesPrefill, dispatchAdminNavigate } from "../lib/adminDeepLink";
+```
+
+#### 3.2 Keep the prefill you already added, but preserve returnTo in state
+
+Right after you create `prefill`:
+
+```tsx
+  const [returnTo, setReturnTo] = useState(prefill?.returnTo ?? null);
+```
+
+#### 3.3 Add a Back button in the header area (where you show page title/actions)
+
+Add this button near your other header actions:
+
+```tsx
+  {returnTo?.kind === "LEGAL_ACCEPTANCE" && (
+    <button
+      style={btn}
+      onClick={() => {
+        setLegalAcceptancesPrefill({ openAcceptanceId: Number(returnTo.acceptanceId) });
+        dispatchAdminNavigate({ topTabKey: "systemConfig", systemConfigTabKey: "legalAcceptances" });
+      }}
+      title="Return to the acceptance record that deep-linked you here"
+    >
+      Back to Acceptance
+    </button>
+  )}
+```
+
+This will:
+
+* Switch to **System Config → Legal Acceptances**
+* Auto-open the acceptance detail modal
+
+---
+
+## 4) Make AdminDashboard actually switch tabs automatically (no longer “optional”)
+
+You need exactly one listener where your AdminDashboard state exists.
+
+### `client/src/pages/AdminDashboard.tsx` (ADD THIS EFFECT)
+
+Inside your AdminDashboard component, add:
+
+```tsx
+useEffect(() => {
+  const handler = (ev: any) => {
+    const d = ev?.detail || {};
+
+    // Map to YOUR existing state setters:
+    // Example variable names below – replace with your real ones.
+    if (d.topTabKey) {
+      // setActiveTopTab(d.topTabKey);
+    }
+    if (d.systemConfigTabKey) {
+      // setActiveSystemConfigTab(d.systemConfigTabKey);
+    }
+    if (d.userManagementTabKey) {
+      // setActiveUserManagementTab(d.userManagementTabKey);
+    }
+  };
+
+  window.addEventListener("admin:navigate", handler as any);
+  return () => window.removeEventListener("admin:navigate", handler as any);
+}, []);
+```
+
+### Required mapping convention
+
+* Your **System Config** minitabs must include:
+
+  * `legalDocs`
+  * `legalAcceptances`
+
+If your keys differ, keep your UI keys as-is and just map in the listener.
+
+---
+
+## 5) Resulting operator workflow
+
+1. Admin opens **Legal Acceptances**, clicks **Resolve Doc Links**
+2. Clicks **Go Docs (Global/Addendum)**:
+
+   * Legal Docs minitab opens, exact version opens automatically
+   * Header shows **Back to Acceptance**
+3. Clicking **Back to Acceptance**:
+
+   * Returns to acceptances and auto-opens the acceptance detail record
+
+This is the clean admin loop you want for legal operations (updates, disputes, audits).
+
+If you want, next upgrade is a **“Diff against current active doc”** button from the acceptance detail modal (to show what changed since that user accepted).

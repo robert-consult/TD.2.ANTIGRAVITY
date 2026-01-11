@@ -1,0 +1,2378 @@
+import { useState, type ComponentProps } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { apiRequest } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
+import { 
+  AlertTriangle, 
+  Users, 
+  Link2, 
+  Activity, 
+  Fingerprint,
+  Shield, 
+  Download, 
+  Settings, 
+  FileText, 
+  ChevronDown, 
+  ChevronRight,
+  RefreshCw,
+  CheckCircle,
+  XCircle,
+  Clock,
+  Network,
+  Briefcase,
+  CheckCheck,
+  AlertCircle
+} from "lucide-react";
+
+const GRIFT_REFRESH_COLOR_HEX = "#2b7f8e";
+const GRIFT_REFRESH_COLOR_HOVER_HEX = "#256c79";
+const GRIFT_REFRESH_BUTTON_CLASS =
+  "border-[color:var(--grift-refresh)] bg-[color:var(--grift-refresh)] text-white hover:bg-[color:var(--grift-refresh-hover)] hover:border-[color:var(--grift-refresh-hover)] focus-visible:ring-2 focus-visible:ring-[color:var(--grift-refresh)]/40";
+
+function GriftRefreshButton({
+  className,
+  ...props
+}: Omit<ComponentProps<typeof Button>, "variant" | "size">) {
+  return (
+    <Button
+      {...props}
+      variant="outline"
+      size="sm"
+      style={{
+        ...(props.style ?? {}),
+        ["--grift-refresh" as any]: GRIFT_REFRESH_COLOR_HEX,
+        ["--grift-refresh-hover" as any]: GRIFT_REFRESH_COLOR_HOVER_HEX,
+      }}
+      className={[GRIFT_REFRESH_BUTTON_CLASS, className].filter(Boolean).join(" ")}
+    />
+  );
+}
+
+interface GriftOverview {
+  openSignalsCount: number;
+  hedgePairs7d: number;
+  linkedAccounts30d: number;
+  geoVelocityHits7d: number;
+  concurrentSessionsHits7d: number;
+  ipChurnHits7d: number;
+  uaChurnHits7d: number;
+  deviceChurnHits7d: number;
+  tierCounts: Record<string, number>;
+  topUsersByScore: Array<{
+    user_id: number;
+    score_current: number;
+    tier: string;
+    username: string;
+    email: string;
+  }>;
+}
+
+interface GriftSignal {
+  id: number;
+  rule_code: string;
+  severity: string;
+  user_id: number;
+  related_user_id?: number;
+  points: number;
+  status: string;
+  created_at: number;
+  closed_at?: number;
+  evidence_json?: string;
+  username?: string;
+  email?: string;
+  device_id?: string | null;
+  device_install_id?: string | null;
+  device_fp?: string | null;
+  client_tz?: string | null;
+  client_lang?: string | null;
+  ip?: string | null;
+  user_agent?: string | null;
+  geo_country?: string | null;
+  geo_region?: string | null;
+  geo_city?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  asn?: number | null;
+  org?: string | null;
+  symbol?: string | null;
+  trade_id?: number | null;
+}
+
+interface FlaggedUser {
+  user_id: number;
+  username: string;
+  email: string;
+  total_score: number;
+  last_7d_score: number;
+  last_30d_score: number;
+  tier: string;
+  open_signal_count: number;
+  last_evaluated_at: number;
+}
+
+interface HedgePair {
+  id: number;
+  userId: number;
+  relatedUserId: number;
+  userUsername: string;
+  userEmail: string;
+  relatedUsername: string;
+  relatedEmail: string;
+  symbol: string | null;
+  evidence: Record<string, unknown>;
+  createdAt: number;
+  status: string;
+  points: number;
+  severity: string;
+}
+
+interface NetworkData {
+  totalEdges: number;
+  clusterCount: number;
+  clusters: Array<{
+    size: number;
+    userIds: number[];
+  }>;
+}
+
+interface IdentityLinkSummary {
+  link_type: string;
+  link_value: string;
+  user_count: number;
+  last_seen_at: number;
+}
+
+interface IdentityLinksResponse {
+  links: IdentityLinkSummary[];
+  minUsers: number;
+  limit: number;
+}
+
+interface IdentityLinkUser {
+  id: number;
+  username: string | null;
+  email: string | null;
+  last_seen_at: number;
+}
+
+interface IdentityLinkUsersResponse {
+  linkType: string;
+  linkValue: string;
+  users: IdentityLinkUser[];
+}
+
+interface UserIdentityLinkRow {
+  link_type: string;
+  link_value: string;
+  first_seen_at: number;
+  last_seen_at: number;
+  occurrence_count: number;
+  metadata_json: string | null;
+  user_count: number;
+}
+
+interface UserIdentityLinksResponse {
+  userId: number;
+  links: UserIdentityLinkRow[];
+}
+
+interface GriftCase {
+  id: number;
+  title: string;
+  status: string;
+  priority: string;
+  created_by_admin_id: number;
+  assigned_admin_id?: number;
+  created_at: number;
+  updated_at: number;
+  closed_at?: number;
+  resolution?: string;
+}
+
+interface GriftConfig {
+  enabled: number | boolean;
+  multiAccountWindowDays: number;
+  churnWindowHours: number;
+  hedgeWindowMinutes: number;
+  concurrentWindowMinutes: number;
+  ipUniqueThreshold: number;
+  uaUniqueThreshold: number;
+  deviceUniqueThreshold: number;
+  asnUniqueThreshold: number;
+  tierMed: number;
+  tierHigh: number;
+  tierCritical: number;
+  scoreMultiAccountDevice: number;
+  scoreMultiAccountFingerprint: number;
+  scoreHedgePair: number;
+  scoreIpChurn: number;
+  scoreUaChurn: number;
+  scoreDeviceChurn: number;
+  scoreGeoVelocity: number;
+  scoreConcurrentSessions: number;
+  geoVelocityKmhThreshold: number;
+  geoVelocityMinDistanceKm: number;
+  geoVelocityMaxHours: number;
+  hedgeRequireDeviceMatch: number | boolean;
+  hedgeAllowIpMatch: number | boolean;
+  scoreAsnVolatility: number;
+  scoreSharedIpAsnCluster: number;
+  scoreMultiAccountLaddering: number;
+  clusterMinUsersForIpAsn: number;
+  ladderingWindowDays: number;
+  ladderingMinSequence: number;
+  mitigationMfa: number;
+  mitigationKycApproved: number;
+  enforcementFreezeThreshold: number;
+  enforcementDisableThreshold: number;
+  enforcementAutoFreeze: number | boolean;
+  enforcementAutoDisable: number | boolean;
+  retentionObservationsDays: number;
+  retentionTradeObservationsDays: number;
+  retentionAuthEventsDays: number;
+  retentionIpAsnCacheDays: number;
+  [key: string]: number | boolean;
+}
+
+interface AuditLogEntry {
+  id: number;
+  admin_id: number;
+  action: string;
+  target_type: string;
+  target_id: number;
+  details_json?: string;
+  created_at: number;
+  prev_hash?: string;
+  hash?: string;
+}
+
+interface KycQueueItem {
+  userId: number;
+  email: string;
+  username: string;
+  status: string;
+  invitedAt: number | null;
+  submittedAt: number | null;
+  documentType: string | null;
+  invitedByAdminId: number | null;
+  inviteNote: string | null;
+}
+
+interface AuditVerifyResult {
+  valid: boolean;
+  totalEntries: number;
+  brokenAt?: number;
+  message?: string;
+}
+
+interface DbFileStat {
+  path: string;
+  exists: boolean;
+  size: number;
+  mtimeMs: number | null;
+}
+
+interface DbMaintenanceStats {
+  paths: { dbPath: string; walPath: string; shmPath: string };
+  files: { db: DbFileStat; wal: DbFileStat; shm: DbFileStat };
+  pragmas: {
+    pageSize: number;
+    pageCount: number;
+    freelistCount: number;
+    journalMode: string;
+    autoVacuum: number;
+    walAutoCheckpoint: number;
+  };
+  derived: {
+    dbBytesLogical: number;
+    reclaimableBytes: number;
+    reclaimablePercent: number;
+    totalOnDiskBytes: number;
+  };
+  generatedAt: number;
+}
+
+function getTierColor(tier: string) {
+  switch (tier?.toUpperCase()) {
+    case "CRITICAL": return "bg-red-600 text-white";
+    case "HIGH": return "bg-orange-500 text-white";
+    case "MED": case "MEDIUM": return "bg-amber-500 text-black";
+    case "LOW": return "bg-green-600 text-white";
+    default: return "bg-gray-500 text-white";
+  }
+}
+
+function getSeverityColor(severity: string) {
+  switch (severity?.toUpperCase()) {
+    case "CRITICAL": return "bg-red-600";
+    case "HIGH": return "bg-orange-500";
+    case "MEDIUM": case "MED": return "bg-amber-500";
+    case "LOW": return "bg-green-600";
+    default: return "bg-gray-500";
+  }
+}
+
+function getStatusColor(status: string) {
+  switch (status?.toUpperCase()) {
+    case "OPEN": return "bg-blue-500";
+    case "CLOSED": return "bg-green-600";
+    case "IGNORED": return "bg-gray-500";
+    case "IN_REVIEW": return "bg-amber-500";
+    default: return "bg-gray-500";
+  }
+}
+
+function formatTimestamp(ts: number) {
+  if (!ts) return "N/A";
+  try {
+    return new Date(ts).toLocaleString();
+  } catch {
+    return String(ts);
+  }
+}
+
+function formatBytes(bytes: number) {
+  const n = Number(bytes);
+  if (!Number.isFinite(n) || n <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let value = n;
+  let idx = 0;
+  while (value >= 1024 && idx < units.length - 1) {
+    value /= 1024;
+    idx += 1;
+  }
+  const digits = idx === 0 ? 0 : idx === 1 ? 1 : 2;
+  return `${value.toFixed(digits)} ${units[idx]}`;
+}
+
+function parseJson(raw?: string) {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+function DashboardTab() {
+  const { data, isLoading, refetch } = useQuery<GriftOverview>({
+    queryKey: ["/api/admin/grift/overview"],
+  });
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-40">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary"></div>
+      </div>
+    );
+  }
+
+  const overview = data || {
+    openSignalsCount: 0,
+    hedgePairs7d: 0,
+    linkedAccounts30d: 0,
+    geoVelocityHits7d: 0,
+    concurrentSessionsHits7d: 0,
+    ipChurnHits7d: 0,
+    uaChurnHits7d: 0,
+    deviceChurnHits7d: 0,
+    tierCounts: { LOW: 0, MED: 0, HIGH: 0, CRITICAL: 0 },
+    topUsersByScore: [],
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <h3 className="text-lg font-semibold">Grift Detection Overview</h3>
+        <GriftRefreshButton onClick={() => refetch()}>
+          <RefreshCw className="h-4 w-4 mr-2" />
+          Refresh
+        </GriftRefreshButton>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <Card className="bg-neutral-800 border-neutral-700">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-gray-400">Open Signals</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-3xl font-bold text-blue-400">{overview.openSignalsCount}</div>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-neutral-800 border-neutral-700">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-gray-400">Hedge Pairs (7d)</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-3xl font-bold text-amber-400">{overview.hedgePairs7d}</div>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-neutral-800 border-neutral-700">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-gray-400">Linked Accounts (30d)</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-3xl font-bold text-purple-400">{overview.linkedAccounts30d}</div>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-neutral-800 border-neutral-700">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-gray-400">Geo Velocity (7d)</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-3xl font-bold text-red-400">{overview.geoVelocityHits7d}</div>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-neutral-800 border-neutral-700">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-gray-400">Concurrent Sessions (7d)</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-3xl font-bold text-orange-400">{overview.concurrentSessionsHits7d}</div>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-neutral-800 border-neutral-700">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-gray-400">IP Churn (7d)</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-3xl font-bold text-cyan-400">{overview.ipChurnHits7d}</div>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-neutral-800 border-neutral-700">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-gray-400">UA Churn (7d)</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-3xl font-bold text-teal-400">{overview.uaChurnHits7d}</div>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-neutral-800 border-neutral-700">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-gray-400">Device Churn (7d)</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-3xl font-bold text-pink-400">{overview.deviceChurnHits7d}</div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card className="bg-neutral-800 border-neutral-700">
+        <CardHeader>
+          <CardTitle className="text-base">Risk Tier Distribution</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="flex gap-4 flex-wrap">
+            <div className="flex items-center gap-2">
+              <Badge className={getTierColor("LOW")}>LOW</Badge>
+              <span className="text-xl font-semibold">{overview.tierCounts?.LOW || 0}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <Badge className={getTierColor("MED")}>MEDIUM</Badge>
+              <span className="text-xl font-semibold">{overview.tierCounts?.MED || 0}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <Badge className={getTierColor("HIGH")}>HIGH</Badge>
+              <span className="text-xl font-semibold">{overview.tierCounts?.HIGH || 0}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <Badge className={getTierColor("CRITICAL")}>CRITICAL</Badge>
+              <span className="text-xl font-semibold">{overview.tierCounts?.CRITICAL || 0}</span>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="bg-neutral-800 border-neutral-700">
+        <CardHeader>
+          <CardTitle className="text-base">Top Users by Risk Score</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <Table>
+            <TableHeader>
+              <TableRow className="border-neutral-700">
+                <TableHead>User</TableHead>
+                <TableHead>Email</TableHead>
+                <TableHead>Score</TableHead>
+                <TableHead>Tier</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {overview.topUsersByScore?.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={4} className="text-center text-gray-400">
+                    No flagged users
+                  </TableCell>
+                </TableRow>
+              ) : (
+                overview.topUsersByScore?.map((user) => (
+                  <TableRow key={user.user_id} className="border-neutral-700">
+                    <TableCell className="font-mono">{user.username || `User #${user.user_id}`}</TableCell>
+                    <TableCell className="text-gray-400">{user.email}</TableCell>
+                    <TableCell className="font-bold">{user.score_current}</TableCell>
+                    <TableCell>
+                      <Badge className={getTierColor(user.tier)}>{user.tier}</Badge>
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function SignalsTab() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const [statusFilter, setStatusFilter] = useState("all_status");
+  const [ruleFilter, setRuleFilter] = useState("all_rules");
+  const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set());
+
+  const { data, isLoading, refetch } = useQuery<{ signals: GriftSignal[] }>({
+    queryKey: ["/api/admin/grift/signals", statusFilter, ruleFilter],
+    queryFn: async () => {
+      const params = new URLSearchParams();
+      if (statusFilter !== "all_status") params.set("status", statusFilter);
+      if (ruleFilter !== "all_rules") params.set("ruleCode", ruleFilter);
+      const res = await apiRequest("GET", `/api/admin/grift/signals?${params.toString()}`);
+      return await res.json();
+    },
+  });
+
+  const closeSignalMutation = useMutation({
+    mutationFn: async (signalId: number) => {
+      await apiRequest("POST", `/api/admin/grift/signals/${signalId}/close`, {});
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/grift/signals"] });
+      toast({ title: "Signal closed" });
+    },
+    onError: () => {
+      toast({ title: "Failed to close signal", variant: "destructive" });
+    },
+  });
+
+  const toggleExpand = (id: number) => {
+    const next = new Set(expandedRows);
+    if (next.has(id)) {
+      next.delete(id);
+    } else {
+      next.add(id);
+    }
+    setExpandedRows(next);
+  };
+
+  const signals = data?.signals || [];
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-4 flex-wrap">
+        <div className="flex items-center gap-2">
+          <Label>Status:</Label>
+          <Select value={statusFilter} onValueChange={setStatusFilter}>
+            <SelectTrigger className="w-32 bg-neutral-700 border-neutral-600">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all_status">All</SelectItem>
+              <SelectItem value="OPEN">Open</SelectItem>
+              <SelectItem value="CLOSED">Closed</SelectItem>
+              <SelectItem value="IGNORED">Ignored</SelectItem>
+              <SelectItem value="IN_REVIEW">In Review</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <Label>Rule:</Label>
+          <Select value={ruleFilter} onValueChange={setRuleFilter}>
+            <SelectTrigger className="w-40 bg-neutral-700 border-neutral-600">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all_rules">All Rules</SelectItem>
+              <SelectItem value="HEDGE_PAIR">Hedge Pair</SelectItem>
+              <SelectItem value="MULTI_ACCOUNT_DEVICE">Multi-Account (Install ID)</SelectItem>
+              <SelectItem value="MULTI_ACCOUNT_FINGERPRINT">Multi-Account (Fingerprint)</SelectItem>
+              <SelectItem value="IP_CHURN">IP Churn</SelectItem>
+              <SelectItem value="UA_CHURN">UA Churn</SelectItem>
+              <SelectItem value="DEVICE_CHURN">Device Churn</SelectItem>
+              <SelectItem value="ASN_VOLATILITY">ASN Volatility</SelectItem>
+              <SelectItem value="GEO_VELOCITY">Geo Velocity</SelectItem>
+              <SelectItem value="CONCURRENT_SESSIONS">Concurrent Sessions</SelectItem>
+              <SelectItem value="SHARED_IPASN_CLUSTER">Shared IP+ASN Cluster</SelectItem>
+              <SelectItem value="MULTI_ACCOUNT_LADDERING">Multi-Account Laddering</SelectItem>
+              <SelectItem value="SHARED_DEVICE">Shared Device (Legacy)</SelectItem>
+              <SelectItem value="IMPOSSIBLE_TRAVEL">Impossible Travel (Legacy)</SelectItem>
+              <SelectItem value="UA_CHANGE_IN_SESSION">UA Change In Session (Legacy)</SelectItem>
+              <SelectItem value="COORDINATED_HEDGE">Coordinated Hedge (Legacy)</SelectItem>
+              <SelectItem value="ACCOUNT_FROZEN">Account Frozen</SelectItem>
+              <SelectItem value="ACCOUNT_DISABLED">Account Disabled</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        <GriftRefreshButton onClick={() => refetch()}>
+          <RefreshCw className="h-4 w-4 mr-2" />
+          Refresh
+        </GriftRefreshButton>
+      </div>
+
+      {isLoading ? (
+        <div className="flex items-center justify-center h-40">
+          <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary"></div>
+        </div>
+      ) : (
+        <Card className="bg-neutral-800 border-neutral-700">
+          <CardContent className="p-0">
+            <Table>
+              <TableHeader>
+                <TableRow className="border-neutral-700">
+                  <TableHead className="w-8"></TableHead>
+                  <TableHead>ID</TableHead>
+                  <TableHead>Rule</TableHead>
+                  <TableHead>User</TableHead>
+                  <TableHead>Severity</TableHead>
+                  <TableHead>Points</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Created</TableHead>
+                  <TableHead>Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {signals.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={9} className="text-center text-gray-400 py-8">
+                      No signals found
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  signals.map((signal) => {
+                    const evidence = parseJson(signal.evidence_json);
+                    return (
+                    <Collapsible key={signal.id} open={expandedRows.has(signal.id)} asChild>
+                      <>
+                        <TableRow className="border-neutral-700">
+                          <TableCell>
+                            <CollapsibleTrigger asChild>
+                              <Button variant="ghost" size="sm" onClick={() => toggleExpand(signal.id)}>
+                                {expandedRows.has(signal.id) ? (
+                                  <ChevronDown className="h-4 w-4" />
+                                ) : (
+                                  <ChevronRight className="h-4 w-4" />
+                                )}
+                              </Button>
+                            </CollapsibleTrigger>
+                          </TableCell>
+                          <TableCell className="font-mono text-xs">{signal.id}</TableCell>
+                          <TableCell className="font-mono text-xs">{signal.rule_code}</TableCell>
+                          <TableCell>
+                            <span className="text-sm">{signal.username || `#${signal.user_id}`}</span>
+                          </TableCell>
+                          <TableCell>
+                            <Badge className={getSeverityColor(signal.severity)}>{signal.severity}</Badge>
+                          </TableCell>
+                          <TableCell className="font-bold">{signal.points}</TableCell>
+                          <TableCell>
+                            <Badge className={getStatusColor(signal.status)}>{signal.status}</Badge>
+                          </TableCell>
+                          <TableCell className="text-xs text-gray-400">{formatTimestamp(signal.created_at)}</TableCell>
+                          <TableCell>
+                            {signal.status === "OPEN" && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => closeSignalMutation.mutate(signal.id)}
+                                disabled={closeSignalMutation.isPending}
+                              >
+                                Close
+                              </Button>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                        <CollapsibleContent asChild>
+                          <TableRow className="border-neutral-700 bg-neutral-900">
+                            <TableCell colSpan={9}>
+                              <div className="p-4">
+                                <h4 className="text-sm font-semibold mb-2">Identifiers</h4>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
+                                  <div>
+                                    <span className="text-gray-400">Device Install ID: </span>
+                                    <span className="font-mono">{signal.device_install_id || "N/A"}</span>
+                                  </div>
+                                  <div>
+                                    <span className="text-gray-400">Device ID (legacy): </span>
+                                    <span className="font-mono">{signal.device_id || "N/A"}</span>
+                                  </div>
+                                  <div>
+                                    <span className="text-gray-400">Device Fingerprint: </span>
+                                    <span className="font-mono">{signal.device_fp || "N/A"}</span>
+                                  </div>
+                                  <div>
+                                    <span className="text-gray-400">Client TZ: </span>
+                                    <span>{signal.client_tz || "N/A"}</span>
+                                  </div>
+                                  <div>
+                                    <span className="text-gray-400">Client Lang: </span>
+                                    <span>{signal.client_lang || "N/A"}</span>
+                                  </div>
+                                  <div>
+                                    <span className="text-gray-400">IP: </span>
+                                    <span className="font-mono">{signal.ip || "N/A"}</span>
+                                  </div>
+                                  <div>
+                                    <span className="text-gray-400">ASN: </span>
+                                    <span>{signal.asn ?? "N/A"}</span>
+                                  </div>
+                                  <div>
+                                    <span className="text-gray-400">Org: </span>
+                                    <span>{signal.org || "N/A"}</span>
+                                  </div>
+                                  <div>
+                                    <span className="text-gray-400">Geo: </span>
+                                    <span>{signal.geo_country || "N/A"}</span>
+                                    {signal.geo_region ? ` / ${signal.geo_region}` : ""}
+                                    {signal.geo_city ? ` / ${signal.geo_city}` : ""}
+                                  </div>
+                                  <div>
+                                    <span className="text-gray-400">Lat/Lon: </span>
+                                    <span>{signal.latitude ?? "N/A"}</span>
+                                    <span>{signal.longitude != null ? `, ${signal.longitude}` : ""}</span>
+                                  </div>
+                                  <div>
+                                    <span className="text-gray-400">Symbol: </span>
+                                    <span className="font-mono">{signal.symbol || "N/A"}</span>
+                                  </div>
+                                  <div>
+                                    <span className="text-gray-400">Trade ID: </span>
+                                    <span className="font-mono">{signal.trade_id ?? "N/A"}</span>
+                                  </div>
+                                  <div className="md:col-span-2">
+                                    <span className="text-gray-400">User Agent: </span>
+                                    <span className="break-all">{signal.user_agent || "N/A"}</span>
+                                  </div>
+                                </div>
+
+                                <h4 className="text-sm font-semibold mt-4 mb-2">Evidence</h4>
+                                <pre className="text-xs bg-neutral-950 p-3 rounded overflow-auto max-h-40">
+                                  {evidence ? JSON.stringify(evidence, null, 2) : "No evidence data"}
+                                </pre>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        </CollapsibleContent>
+                      </>
+                    </Collapsible>
+                    );
+                  })
+                )}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+function UsersTab() {
+  const { data, isLoading, refetch } = useQuery<{ users: FlaggedUser[] }>({
+    queryKey: ["/api/admin/grift/flagged-users"],
+  });
+
+  const users = data?.users || [];
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h3 className="text-lg font-semibold">Flagged Users</h3>
+        <GriftRefreshButton onClick={() => refetch()}>
+          <RefreshCw className="h-4 w-4 mr-2" />
+          Refresh
+        </GriftRefreshButton>
+      </div>
+
+      {isLoading ? (
+        <div className="flex items-center justify-center h-40">
+          <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary"></div>
+        </div>
+      ) : (
+        <Card className="bg-neutral-800 border-neutral-700">
+          <CardContent className="p-0">
+            <Table>
+              <TableHeader>
+                <TableRow className="border-neutral-700">
+                  <TableHead>User</TableHead>
+                  <TableHead>Email</TableHead>
+                  <TableHead>Score</TableHead>
+                  <TableHead>7d Score</TableHead>
+                  <TableHead>30d Score</TableHead>
+                  <TableHead>Tier</TableHead>
+                  <TableHead>Open Signals</TableHead>
+                  <TableHead>Last Evaluated</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {users.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={8} className="text-center text-gray-400 py-8">
+                      No flagged users
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  users.map((user) => (
+                    <TableRow key={user.user_id} className="border-neutral-700">
+                      <TableCell className="font-mono">{user.username || `#${user.user_id}`}</TableCell>
+                      <TableCell className="text-gray-400">{user.email}</TableCell>
+                      <TableCell className="font-bold text-lg">{user.total_score}</TableCell>
+                      <TableCell>{user.last_7d_score}</TableCell>
+                      <TableCell>{user.last_30d_score}</TableCell>
+                      <TableCell>
+                        <Badge className={getTierColor(user.tier)}>{user.tier}</Badge>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="outline">{user.open_signal_count}</Badge>
+                      </TableCell>
+                      <TableCell className="text-xs text-gray-400">{formatTimestamp(user.last_evaluated_at)}</TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+export function KycQueueTab() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const [statusFilter, setStatusFilter] = useState("all_status");
+
+  // Build query URL based on filter - default queryFn uses first queryKey element as URL
+  const kycQueryUrl = statusFilter !== "all_status" 
+    ? `/api/admin/kyc/queue?status=${statusFilter}` 
+    : "/api/admin/kyc/queue";
+    
+  const { data, isLoading, refetch } = useQuery<KycQueueItem[]>({
+    queryKey: [kycQueryUrl],
+  });
+
+  const reviewMutation = useMutation({
+    mutationFn: async ({ userId, decision, rejectionReason }: { userId: number; decision: "APPROVED" | "REJECTED"; rejectionReason?: string }) => {
+      await apiRequest("POST", "/api/admin/kyc/review", { userId, decision, rejectionReason });
+    },
+    onSuccess: (_, variables) => {
+      // Invalidate all KYC queue queries regardless of filter
+      queryClient.invalidateQueries({ 
+        predicate: (query) => {
+          const key = query.queryKey[0];
+          return typeof key === 'string' && key.startsWith('/api/admin/kyc/queue');
+        }
+      });
+      toast({ title: `KYC ${variables.decision.toLowerCase()}` });
+    },
+    onError: () => {
+      toast({ title: "Failed to process KYC review", variant: "destructive" });
+    },
+  });
+
+  const kycQueue = data || [];
+
+  const getKycStatusColor = (status: string) => {
+    switch (status?.toUpperCase()) {
+      case "INVITED": return "bg-blue-500";
+      case "SUBMITTED": return "bg-amber-500";
+      case "APPROVED": return "bg-green-600";
+      case "REJECTED": return "bg-red-600";
+      default: return "bg-gray-500";
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h3 className="text-lg font-semibold">KYC Queue</h3>
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2">
+            <Label>Status:</Label>
+            <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <SelectTrigger className="w-36 bg-neutral-700 border-neutral-600">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all_status">All</SelectItem>
+                <SelectItem value="INVITED">Invited</SelectItem>
+                <SelectItem value="SUBMITTED">Submitted</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <GriftRefreshButton onClick={() => refetch()}>
+            <RefreshCw className="h-4 w-4 mr-2" />
+            Refresh
+          </GriftRefreshButton>
+        </div>
+      </div>
+
+      {isLoading ? (
+        <div className="flex items-center justify-center h-40">
+          <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary"></div>
+        </div>
+      ) : (
+        <Card className="bg-neutral-800 border-neutral-700">
+          <CardContent className="p-0">
+            <Table>
+              <TableHeader>
+                <TableRow className="border-neutral-700">
+                  <TableHead>User ID</TableHead>
+                  <TableHead>Email</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Invited At</TableHead>
+                  <TableHead>Submitted At</TableHead>
+                  <TableHead>Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {kycQueue.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={6} className="text-center text-gray-400 py-8">
+                      <CheckCheck className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                      No pending KYC applications
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  kycQueue.map((item) => (
+                    <TableRow key={item.userId} className="border-neutral-700">
+                      <TableCell className="font-mono text-sm">{item.userId}</TableCell>
+                      <TableCell>
+                        <div className="text-sm">{item.username || `User #${item.userId}`}</div>
+                        <div className="text-xs text-gray-400">{item.email}</div>
+                      </TableCell>
+                      <TableCell>
+                        <Badge className={getKycStatusColor(item.status)}>{item.status}</Badge>
+                      </TableCell>
+                      <TableCell className="text-xs text-gray-400">
+                        {item.invitedAt ? formatTimestamp(item.invitedAt * 1000) : "N/A"}
+                      </TableCell>
+                      <TableCell className="text-xs text-gray-400">
+                        {item.submittedAt ? formatTimestamp(item.submittedAt * 1000) : "N/A"}
+                      </TableCell>
+                      <TableCell>
+                        {item.status === "SUBMITTED" && (
+                          <div className="flex gap-2">
+                            <Button
+                              variant="default"
+                              size="sm"
+                              className="bg-green-600 hover:bg-green-700"
+                              onClick={() => reviewMutation.mutate({ userId: item.userId, decision: "APPROVED" })}
+                              disabled={reviewMutation.isPending}
+                            >
+                              <CheckCircle className="h-3 w-3 mr-1" />
+                              Approve
+                            </Button>
+                            <Button
+                              variant="destructive"
+                              size="sm"
+                              onClick={() => reviewMutation.mutate({ userId: item.userId, decision: "REJECTED", rejectionReason: "Documents did not meet requirements" })}
+                              disabled={reviewMutation.isPending}
+                            >
+                              <XCircle className="h-3 w-3 mr-1" />
+                              Reject
+                            </Button>
+                          </div>
+                        )}
+                        {item.status === "INVITED" && (
+                          <span className="text-xs text-gray-400 flex items-center gap-1">
+                            <Clock className="h-3 w-3" />
+                            Awaiting submission
+                          </span>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+function PairsTab() {
+  const { data, isLoading, refetch } = useQuery<{ pairs: HedgePair[]; total: number }>({
+    queryKey: ["/api/admin/grift/pairs"],
+  });
+
+  const pairs = data?.pairs || [];
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h3 className="text-lg font-semibold">Hedge Pair Detections</h3>
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-gray-400">Total: {data?.total || 0}</span>
+          <GriftRefreshButton onClick={() => refetch()}>
+            <RefreshCw className="h-4 w-4 mr-2" />
+            Refresh
+          </GriftRefreshButton>
+        </div>
+      </div>
+
+      {isLoading ? (
+        <div className="flex items-center justify-center h-40">
+          <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary"></div>
+        </div>
+      ) : (
+        <Card className="bg-neutral-800 border-neutral-700">
+          <CardContent className="p-0">
+            <Table>
+              <TableHeader>
+                <TableRow className="border-neutral-700">
+                  <TableHead>ID</TableHead>
+                  <TableHead>User A</TableHead>
+                  <TableHead>User B</TableHead>
+                  <TableHead>Symbol</TableHead>
+                  <TableHead>Severity</TableHead>
+                  <TableHead>Points</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Created</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {pairs.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={8} className="text-center text-gray-400 py-8">
+                      No hedge pairs detected
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  pairs.map((pair) => (
+                    <TableRow key={pair.id} className="border-neutral-700">
+                      <TableCell className="font-mono text-xs">{pair.id}</TableCell>
+                      <TableCell>
+                        <div className="text-sm">{pair.userUsername || `#${pair.userId}`}</div>
+                        <div className="text-xs text-gray-400">{pair.userEmail}</div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="text-sm">{pair.relatedUsername || `#${pair.relatedUserId}`}</div>
+                        <div className="text-xs text-gray-400">{pair.relatedEmail}</div>
+                      </TableCell>
+                      <TableCell className="font-mono font-bold">{pair.symbol || "N/A"}</TableCell>
+                      <TableCell>
+                        <Badge className={getSeverityColor(pair.severity)}>{pair.severity}</Badge>
+                      </TableCell>
+                      <TableCell className="font-bold">{pair.points}</TableCell>
+                      <TableCell>
+                        <Badge className={getStatusColor(pair.status)}>{pair.status}</Badge>
+                      </TableCell>
+                      <TableCell className="text-xs text-gray-400">{formatTimestamp(pair.createdAt)}</TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+function NetworksTab() {
+  const { data, isLoading, refetch } = useQuery<NetworkData>({
+    queryKey: ["/api/admin/grift/networks"],
+  });
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h3 className="text-lg font-semibold">Linked Account Networks</h3>
+        <GriftRefreshButton onClick={() => refetch()}>
+          <RefreshCw className="h-4 w-4 mr-2" />
+          Refresh
+        </GriftRefreshButton>
+      </div>
+
+      {isLoading ? (
+        <div className="flex items-center justify-center h-40">
+          <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary"></div>
+        </div>
+      ) : (
+        <>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <Card className="bg-neutral-800 border-neutral-700">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-gray-400">Total Edges</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-3xl font-bold">{data?.totalEdges || 0}</div>
+              </CardContent>
+            </Card>
+
+            <Card className="bg-neutral-800 border-neutral-700">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-gray-400">Cluster Count</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-3xl font-bold">{data?.clusterCount || 0}</div>
+              </CardContent>
+            </Card>
+          </div>
+
+          <Card className="bg-neutral-800 border-neutral-700">
+            <CardHeader>
+              <CardTitle className="text-base">Detected Clusters</CardTitle>
+              <CardDescription>Groups of accounts linked by shared devices/IPs</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {data?.clusters?.length === 0 ? (
+                <p className="text-gray-400">No clusters detected</p>
+              ) : (
+                <div className="space-y-3">
+                  {data?.clusters?.map((cluster, idx) => (
+                    <div key={idx} className="bg-neutral-900 p-3 rounded">
+                      <div className="flex items-center gap-2 mb-2">
+                        <Network className="h-4 w-4 text-purple-400" />
+                        <span className="font-semibold">Cluster {idx + 1}</span>
+                        <Badge variant="outline">{cluster.size} users</Badge>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {cluster.userIds.map((userId) => (
+                          <Badge key={userId} variant="secondary" className="font-mono">
+                            User #{userId}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </>
+      )}
+    </div>
+  );
+}
+
+function IdentitiesTab() {
+  const { toast } = useToast();
+
+  const [linkType, setLinkType] = useState<string>("all");
+  const [search, setSearch] = useState("");
+  const [minUsers, setMinUsers] = useState(2);
+  const [limit, setLimit] = useState(200);
+  const [openKey, setOpenKey] = useState<string | null>(null);
+  const [selectedLink, setSelectedLink] = useState<{ linkType: string; linkValue: string } | null>(null);
+  const [selectedUserId, setSelectedUserId] = useState<number | null>(null);
+
+  const { data, isLoading, refetch } = useQuery<IdentityLinksResponse>({
+    queryKey: ["/api/admin/grift/identity-links", linkType, search, minUsers, limit],
+    queryFn: async () => {
+      const params = new URLSearchParams();
+      if (linkType && linkType !== "all") params.set("linkType", linkType);
+      if (search.trim()) params.set("search", search.trim());
+      params.set("minUsers", String(minUsers));
+      params.set("limit", String(limit));
+      const res = await apiRequest("GET", `/api/admin/grift/identity-links?${params.toString()}`);
+      return await res.json();
+    },
+  });
+
+  const links = data?.links || [];
+
+  const { data: linkUsersData, isLoading: linkUsersLoading, refetch: refetchLinkUsers } = useQuery<
+    IdentityLinkUsersResponse
+  >({
+    queryKey: ["/api/admin/grift/identity-links/users", selectedLink?.linkType, selectedLink?.linkValue],
+    enabled: !!selectedLink,
+    queryFn: async () => {
+      const params = new URLSearchParams();
+      params.set("linkType", selectedLink!.linkType);
+      params.set("linkValue", selectedLink!.linkValue);
+      const res = await apiRequest("GET", `/api/admin/grift/identity-links/users?${params.toString()}`);
+      return await res.json();
+    },
+  });
+
+  const { data: userLinksData, isLoading: userLinksLoading } = useQuery<UserIdentityLinksResponse>({
+    queryKey: ["/api/admin/grift/users", selectedUserId, "identity-links"],
+    enabled: selectedUserId !== null,
+    queryFn: async () => {
+      const res = await apiRequest("GET", `/api/admin/grift/users/${selectedUserId}/identity-links`);
+      return await res.json();
+    },
+  });
+
+  const toggleLink = (t: string, v: string) => {
+    const key = `${t}|${v}`;
+    if (openKey === key) {
+      setOpenKey(null);
+      setSelectedLink(null);
+      setSelectedUserId(null);
+      return;
+    }
+    setOpenKey(key);
+    setSelectedLink({ linkType: t, linkValue: v });
+    setSelectedUserId(null);
+  };
+
+  const linkUsers = linkUsersData?.users || [];
+  const userLinks = userLinksData?.links || [];
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h3 className="text-lg font-semibold">Identity Links</h3>
+        <GriftRefreshButton onClick={() => refetch()}>
+          <RefreshCw className="h-4 w-4 mr-2" />
+          Refresh
+        </GriftRefreshButton>
+      </div>
+
+      <Card className="bg-neutral-800 border-neutral-700">
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <Fingerprint className="h-5 w-5" />
+            Fingerprints & Identifiers
+          </CardTitle>
+          <CardDescription>
+            Inspect shared device install IDs, device fingerprints, IPs, and subnets across users.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div>
+              <Label className="text-sm">Link Type</Label>
+              <Select value={linkType} onValueChange={setLinkType}>
+                <SelectTrigger className="bg-neutral-700 border-neutral-600 mt-1">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All</SelectItem>
+                  <SelectItem value="device_install_id">Device Install ID</SelectItem>
+                  <SelectItem value="device_fp">Device Fingerprint</SelectItem>
+                  <SelectItem value="device_id">Legacy Device ID</SelectItem>
+                  <SelectItem value="ip">IP Address</SelectItem>
+                  <SelectItem value="ip_subnet">IP Subnet</SelectItem>
+                  <SelectItem value="asn">ASN</SelectItem>
+                  <SelectItem value="org">Org</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="md:col-span-2">
+              <Label className="text-sm">Search</Label>
+              <Input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search link value (prefix/hash/IP)"
+                className="bg-neutral-700 border-neutral-600 mt-1"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <Label className="text-sm">Min Users</Label>
+                <Input
+                  type="number"
+                  value={minUsers}
+                  min={2}
+                  onChange={(e) => setMinUsers(Math.max(2, Number(e.target.value) || 2))}
+                  className="bg-neutral-700 border-neutral-600 mt-1"
+                />
+              </div>
+              <div>
+                <Label className="text-sm">Limit</Label>
+                <Input
+                  type="number"
+                  value={limit}
+                  min={10}
+                  max={1000}
+                  onChange={(e) => setLimit(Math.max(10, Math.min(1000, Number(e.target.value) || 200)))}
+                  className="bg-neutral-700 border-neutral-600 mt-1"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <GriftRefreshButton
+              onClick={() => {
+                setOpenKey(null);
+                setSelectedLink(null);
+                setSelectedUserId(null);
+                void refetch();
+                toast({ title: "Identity links refreshed" });
+              }}
+            >
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Apply Filters
+            </GriftRefreshButton>
+          </div>
+        </CardContent>
+      </Card>
+
+      {isLoading ? (
+        <div className="flex items-center justify-center h-40">
+          <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary"></div>
+        </div>
+      ) : (
+        <Card className="bg-neutral-800 border-neutral-700">
+          <CardContent className="p-0">
+            <Table>
+              <TableHeader>
+                <TableRow className="border-neutral-700">
+                  <TableHead className="w-8"></TableHead>
+                  <TableHead>Type</TableHead>
+                  <TableHead>Value</TableHead>
+                  <TableHead>Users</TableHead>
+                  <TableHead>Last Seen</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {links.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={5} className="text-center text-gray-400 py-8">
+                      No identity links found
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  links.map((link) => {
+                    const key = `${link.link_type}|${link.link_value}`;
+                    const isOpenRow = openKey === key;
+                    return (
+                      <Collapsible key={key} open={isOpenRow} asChild>
+                        <>
+                          <TableRow className="border-neutral-700">
+                            <TableCell>
+                              <CollapsibleTrigger asChild>
+                                <Button variant="ghost" size="sm" onClick={() => toggleLink(link.link_type, link.link_value)}>
+                                  {isOpenRow ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                                </Button>
+                              </CollapsibleTrigger>
+                            </TableCell>
+                            <TableCell>
+                              <Badge variant="outline" className="font-mono text-xs">
+                                {link.link_type}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="font-mono text-xs max-w-[520px] truncate">{link.link_value}</TableCell>
+                            <TableCell className="font-semibold">{link.user_count}</TableCell>
+                            <TableCell className="text-xs text-gray-400">{formatTimestamp(link.last_seen_at)}</TableCell>
+                          </TableRow>
+
+                          <CollapsibleContent asChild>
+                            <TableRow className="border-neutral-700 bg-neutral-900/30">
+                              <TableCell colSpan={5}>
+                                <div className="p-4 space-y-4">
+                                  <div className="flex items-center justify-between">
+                                    <div>
+                                      <div className="font-semibold">Users for this identity</div>
+                                      <div className="text-xs text-gray-400">
+                                        {link.link_type} = <span className="font-mono">{link.link_value}</span>
+                                      </div>
+                                  </div>
+                                    <GriftRefreshButton
+                                      onClick={() => {
+                                        setSelectedUserId(null);
+                                        const next = { linkType: link.link_type, linkValue: link.link_value };
+                                        const isSame =
+                                          selectedLink?.linkType === next.linkType && selectedLink?.linkValue === next.linkValue;
+                                        setSelectedLink(next);
+                                        if (isSame) void refetchLinkUsers();
+                                      }}
+                                    >
+                                      <RefreshCw className="h-4 w-4 mr-2" />
+                                      Refresh Users
+                                    </GriftRefreshButton>
+                                  </div>
+
+                                  {linkUsersLoading ? (
+                                    <div className="flex items-center gap-2 text-gray-400">
+                                      <div className="animate-spin rounded-full h-4 w-4 border-t-2 border-b-2 border-primary"></div>
+                                      Loading users...
+                                    </div>
+                                  ) : linkUsers.length === 0 ? (
+                                    <div className="text-sm text-gray-400">No users found for this identity.</div>
+                                  ) : (
+                                    <Table>
+                                      <TableHeader>
+                                        <TableRow className="border-neutral-700">
+                                          <TableHead>User</TableHead>
+                                          <TableHead>Email</TableHead>
+                                          <TableHead>Last Seen</TableHead>
+                                          <TableHead className="w-40">Actions</TableHead>
+                                        </TableRow>
+                                      </TableHeader>
+                                      <TableBody>
+                                        {linkUsers.map((u) => (
+                                          <TableRow key={u.id} className="border-neutral-700">
+                                            <TableCell className="font-mono text-xs">
+                                              {u.username || `#${u.id}`}
+                                            </TableCell>
+                                            <TableCell className="text-xs text-gray-400">{u.email || "N/A"}</TableCell>
+                                            <TableCell className="text-xs text-gray-400">{formatTimestamp(u.last_seen_at)}</TableCell>
+                                            <TableCell>
+                                              <Button variant="outline" size="sm" onClick={() => setSelectedUserId(u.id)}>
+                                                View User Links
+                                              </Button>
+                                            </TableCell>
+                                          </TableRow>
+                                        ))}
+                                      </TableBody>
+                                    </Table>
+                                  )}
+
+                                  {selectedUserId !== null && (
+                                    <Card className="bg-neutral-800 border-neutral-700">
+                                      <CardHeader className="pb-2">
+                                        <CardTitle className="text-sm">User #{selectedUserId} Identity Links</CardTitle>
+                                        <CardDescription>
+                                          All link types observed for this user (with global user counts).
+                                        </CardDescription>
+                                      </CardHeader>
+                                      <CardContent>
+                                        {userLinksLoading ? (
+                                          <div className="flex items-center gap-2 text-gray-400">
+                                            <div className="animate-spin rounded-full h-4 w-4 border-t-2 border-b-2 border-primary"></div>
+                                            Loading identity links...
+                                          </div>
+                                        ) : userLinks.length === 0 ? (
+                                          <div className="text-sm text-gray-400">No identity links recorded for this user.</div>
+                                        ) : (
+                                          <Table>
+                                            <TableHeader>
+                                              <TableRow className="border-neutral-700">
+                                                <TableHead>Type</TableHead>
+                                                <TableHead>Value</TableHead>
+                                                <TableHead>Users</TableHead>
+                                                <TableHead>Count</TableHead>
+                                                <TableHead>Last Seen</TableHead>
+                                              </TableRow>
+                                            </TableHeader>
+                                            <TableBody>
+                                              {userLinks.map((r, idx) => (
+                                                <TableRow key={`${r.link_type}|${r.link_value}|${idx}`} className="border-neutral-700">
+                                                  <TableCell className="font-mono text-xs">{r.link_type}</TableCell>
+                                                  <TableCell className="font-mono text-xs max-w-[520px] truncate">{r.link_value}</TableCell>
+                                                  <TableCell className="font-semibold">{r.user_count}</TableCell>
+                                                  <TableCell className="font-mono text-xs">{r.occurrence_count}</TableCell>
+                                                  <TableCell className="text-xs text-gray-400">{formatTimestamp(r.last_seen_at)}</TableCell>
+                                                </TableRow>
+                                              ))}
+                                            </TableBody>
+                                          </Table>
+                                        )}
+                                      </CardContent>
+                                    </Card>
+                                  )}
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          </CollapsibleContent>
+                        </>
+                      </Collapsible>
+                    );
+                  })
+                )}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+function CasesTab() {
+  const { data, isLoading, refetch } = useQuery<{ cases: GriftCase[] }>({
+    queryKey: ["/api/admin/grift/cases"],
+  });
+
+  const cases = data?.cases || [];
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h3 className="text-lg font-semibold">Case Management</h3>
+        <GriftRefreshButton onClick={() => refetch()}>
+          <RefreshCw className="h-4 w-4 mr-2" />
+          Refresh
+        </GriftRefreshButton>
+      </div>
+
+      {isLoading ? (
+        <div className="flex items-center justify-center h-40">
+          <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary"></div>
+        </div>
+      ) : (
+        <Card className="bg-neutral-800 border-neutral-700">
+          <CardContent className="p-0">
+            <Table>
+              <TableHeader>
+                <TableRow className="border-neutral-700">
+                  <TableHead>ID</TableHead>
+                  <TableHead>Title</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Priority</TableHead>
+                  <TableHead>Created</TableHead>
+                  <TableHead>Updated</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {cases.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={6} className="text-center text-gray-400 py-8">
+                      <Briefcase className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                      No cases created yet
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  cases.map((c) => (
+                    <TableRow key={c.id} className="border-neutral-700">
+                      <TableCell className="font-mono text-xs">{c.id}</TableCell>
+                      <TableCell>{c.title}</TableCell>
+                      <TableCell>
+                        <Badge className={getStatusColor(c.status)}>{c.status}</Badge>
+                      </TableCell>
+                      <TableCell>
+                        <Badge className={getTierColor(c.priority)}>{c.priority}</Badge>
+                      </TableCell>
+                      <TableCell className="text-xs text-gray-400">{formatTimestamp(c.created_at)}</TableCell>
+                      <TableCell className="text-xs text-gray-400">{formatTimestamp(c.updated_at)}</TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+function ExportsTab() {
+  const handleExport = (endpoint: string, filename: string) => {
+    window.open(`/api/admin/grift/export/${endpoint}`, "_blank");
+  };
+
+  return (
+    <div className="space-y-4">
+      <h3 className="text-lg font-semibold">Export Data</h3>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <Card className="bg-neutral-800 border-neutral-700">
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-amber-400" />
+              Signals Export
+            </CardTitle>
+            <CardDescription>Export all grift signals to CSV</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button
+              variant="outline"
+              className="w-full"
+              onClick={() => handleExport("signals", "grift_signals.csv")}
+            >
+              <Download className="h-4 w-4 mr-2" />
+              Export Signals CSV
+            </Button>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-neutral-800 border-neutral-700">
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2">
+              <Users className="h-5 w-5 text-red-400" />
+              Flagged Users Export
+            </CardTitle>
+            <CardDescription>Export flagged users to CSV</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button
+              variant="outline"
+              className="w-full"
+              onClick={() => handleExport("flagged-users", "flagged_users.csv")}
+            >
+              <Download className="h-4 w-4 mr-2" />
+              Export Users CSV
+            </Button>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-neutral-800 border-neutral-700">
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2">
+              <Activity className="h-5 w-5 text-blue-400" />
+              Observations Export
+            </CardTitle>
+            <CardDescription>Export observation data to CSV</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button
+              variant="outline"
+              className="w-full"
+              onClick={() => handleExport("observations", "observations.csv")}
+            >
+              <Download className="h-4 w-4 mr-2" />
+              Export Observations CSV
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+function ConfigTab() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const [localConfig, setLocalConfig] = useState<GriftConfig | null>(null);
+  const [hasChanges, setHasChanges] = useState(false);
+  const [vacuumConfirm, setVacuumConfirm] = useState("");
+
+  const { data, isLoading } = useQuery<{ config: GriftConfig }>({
+    queryKey: ["/api/admin/grift/config"],
+  });
+
+  const {
+    data: dbStatsData,
+    isLoading: dbStatsLoading,
+    refetch: refetchDbStats,
+  } = useQuery<{ stats: DbMaintenanceStats }>({
+    queryKey: ["/api/admin/grift/maintenance/db-stats"],
+  });
+
+  const {
+    data: ip2asnStatus,
+    isLoading: ip2asnStatusLoading,
+    refetch: refetchIp2asnStatus,
+  } = useQuery<{
+    datasetPath: string | null;
+    file: { path: string; name: string; size: number; mtimeMs: number } | null;
+    meta: any | null;
+    metaMatchesFile: boolean;
+    ranges: { total: number; v4: number; v6: number };
+    cache: { total: number; missing: number };
+  }>({
+    queryKey: ["/api/admin/grift/ip2asn/status"],
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: async (config: Partial<GriftConfig>) => {
+      await apiRequest("PUT", "/api/admin/grift/config", config);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/grift/config"] });
+      setHasChanges(false);
+      toast({ title: "Configuration saved" });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Failed to save configuration",
+        description: error?.message ?? undefined,
+        variant: "destructive",
+      });
+    },
+  });
+
+  const reimportIp2AsnMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/admin/grift/ip2asn/reimport", {});
+      return res.json();
+    },
+    onSuccess: (payload: any) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/grift/ip2asn/status"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/grift/identity-links"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/grift/overview"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/grift/signals"] });
+      toast({
+        title: "ip2asn dataset reimported",
+        description: payload?.result?.imported ? `Rows: ${payload?.result?.rows ?? "?"}` : payload?.result?.reason ?? undefined,
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Failed to reimport ip2asn dataset",
+        description: error?.message ?? undefined,
+        variant: "destructive",
+      });
+    },
+  });
+
+  const enrichIp2AsnMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/admin/grift/ip2asn/enrich", { limit: 100, lookbackHours: 24 });
+      return res.json();
+    },
+    onSuccess: (payload: any) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/grift/ip2asn/status"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/grift/identity-links"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/grift/overview"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/grift/signals"] });
+      toast({
+        title: "ASN/Org enrichment completed",
+        description: payload?.result?.skipped
+          ? payload?.result?.reason ?? "Skipped"
+          : `Attempted: ${payload?.result?.attempted ?? 0}, enriched: ${payload?.result?.enriched ?? 0}`,
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Failed to run ASN/Org enrichment",
+        description: error?.message ?? undefined,
+        variant: "destructive",
+      });
+    },
+  });
+
+  const checkpointMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/admin/grift/maintenance/checkpoint", { mode: "TRUNCATE" });
+      return res.json();
+    },
+    onSuccess: (payload: any) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/grift/maintenance/db-stats"] });
+      toast({
+        title: "WAL checkpoint completed",
+        description: payload?.skipped?.reason ?? "Checkpoint executed",
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Failed to checkpoint WAL",
+        description: error?.message ?? undefined,
+        variant: "destructive",
+      });
+    },
+  });
+
+  const vacuumMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/admin/grift/maintenance/vacuum", {
+        confirm: vacuumConfirm,
+        checkpointFirst: true,
+      });
+      return res.json();
+    },
+    onSuccess: (payload: any) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/grift/maintenance/db-stats"] });
+      toast({
+        title: "VACUUM completed",
+        description: payload?.durationMs ? `Duration: ${(payload.durationMs / 1000).toFixed(1)}s` : undefined,
+      });
+      setVacuumConfirm("");
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Failed to VACUUM database",
+        description: error?.message ?? undefined,
+        variant: "destructive",
+      });
+    },
+  });
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-40">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary"></div>
+      </div>
+    );
+  }
+
+  const config = localConfig || data?.config;
+
+  if (!config) {
+    return <p className="text-gray-400">Failed to load configuration</p>;
+  }
+
+  const handleChange = (key: string, value: number | boolean) => {
+    const updated = { ...config, [key]: value };
+    setLocalConfig(updated);
+    setHasChanges(true);
+  };
+
+  const handleSave = () => {
+    if (localConfig) {
+      updateMutation.mutate(localConfig);
+    }
+  };
+
+  const configGroups = [
+    {
+      title: "General",
+      fields: [
+        { key: "enabled", label: "Detection Enabled", type: "boolean" },
+        { key: "hedgeRequireDeviceMatch", label: "Hedge Requires Device Match", type: "boolean" },
+        { key: "hedgeAllowIpMatch", label: "Hedge Allows IP Match", type: "boolean" },
+      ],
+    },
+    {
+      title: "Tier Thresholds",
+      fields: [
+        { key: "tierMed", label: "Medium Tier Threshold", type: "number" },
+        { key: "tierHigh", label: "High Tier Threshold", type: "number" },
+        { key: "tierCritical", label: "Critical Tier Threshold", type: "number" },
+      ],
+    },
+    {
+      title: "Detection Windows",
+      fields: [
+        { key: "multiAccountWindowDays", label: "Multi-Account Window (days)", type: "number" },
+        { key: "churnWindowHours", label: "Churn Window (hours)", type: "number" },
+        { key: "hedgeWindowMinutes", label: "Hedge Window (minutes)", type: "number" },
+        { key: "concurrentWindowMinutes", label: "Concurrent Window (minutes)", type: "number" },
+        { key: "geoVelocityMaxHours", label: "Geo Velocity Max Hours", type: "number" },
+        { key: "ladderingWindowDays", label: "Laddering Window (days)", type: "number" },
+      ],
+    },
+    {
+      title: "Detection Thresholds",
+      fields: [
+        { key: "ipUniqueThreshold", label: "IP Unique Threshold", type: "number" },
+        { key: "uaUniqueThreshold", label: "UA Unique Threshold", type: "number" },
+        { key: "deviceUniqueThreshold", label: "Device Unique Threshold", type: "number" },
+        { key: "asnUniqueThreshold", label: "ASN Unique Threshold", type: "number" },
+        { key: "geoVelocityKmhThreshold", label: "Geo Velocity Threshold (km/h)", type: "number" },
+        { key: "geoVelocityMinDistanceKm", label: "Geo Velocity Min Distance (km)", type: "number" },
+        { key: "clusterMinUsersForIpAsn", label: "Min Users For IP+ASN Cluster", type: "number" },
+        { key: "ladderingMinSequence", label: "Laddering Min Sequence", type: "number" },
+      ],
+    },
+    {
+      title: "Score Weights",
+      fields: [
+        { key: "scoreMultiAccountDevice", label: "Multi-Account Device (Install ID)", type: "number" },
+        { key: "scoreMultiAccountFingerprint", label: "Multi-Account Fingerprint", type: "number" },
+        { key: "scoreHedgePair", label: "Hedge Pair", type: "number" },
+        { key: "scoreIpChurn", label: "IP Churn", type: "number" },
+        { key: "scoreUaChurn", label: "UA Churn", type: "number" },
+        { key: "scoreDeviceChurn", label: "Device Churn", type: "number" },
+        { key: "scoreGeoVelocity", label: "Geo Velocity", type: "number" },
+        { key: "scoreConcurrentSessions", label: "Concurrent Sessions", type: "number" },
+        { key: "scoreAsnVolatility", label: "ASN Volatility", type: "number" },
+        { key: "scoreSharedIpAsnCluster", label: "Shared IP+ASN Cluster", type: "number" },
+        { key: "scoreMultiAccountLaddering", label: "Multi-Account Laddering", type: "number" },
+      ],
+    },
+    {
+      title: "Mitigations",
+      fields: [
+        { key: "mitigationMfa", label: "MFA Mitigation (points)", type: "number" },
+        { key: "mitigationKycApproved", label: "KYC Approved Mitigation (points)", type: "number" },
+      ],
+    },
+    {
+      title: "Enforcement",
+      fields: [
+        { key: "enforcementFreezeThreshold", label: "Freeze Threshold", type: "number" },
+        { key: "enforcementDisableThreshold", label: "Disable Threshold", type: "number" },
+        { key: "enforcementAutoFreeze", label: "Auto Freeze", type: "boolean" },
+        { key: "enforcementAutoDisable", label: "Auto Disable", type: "boolean" },
+      ],
+    },
+    {
+      title: "Retention",
+      fields: [
+        { key: "retentionObservationsDays", label: "Retention: Observations (days)", type: "number" },
+        { key: "retentionTradeObservationsDays", label: "Retention: Trade Observations (days)", type: "number" },
+        { key: "retentionAuthEventsDays", label: "Retention: Auth Events (days)", type: "number" },
+        { key: "retentionIpAsnCacheDays", label: "Retention: IP→ASN Cache (days)", type: "number" },
+      ],
+    },
+  ];
+
+  const dbStats = dbStatsData?.stats;
+  const reclaimable = dbStats?.derived?.reclaimableBytes ?? 0;
+  const reclaimablePct = dbStats?.derived?.reclaimablePercent ?? 0;
+  const shouldVacuum = reclaimablePct >= 10;
+  const vacuumResult = vacuumMutation.data as any | undefined;
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <h3 className="text-lg font-semibold">Grift Detection Configuration</h3>
+        <Button
+          onClick={handleSave}
+          disabled={!hasChanges || updateMutation.isPending}
+          className="bg-blue-600 hover:bg-blue-700"
+        >
+          {updateMutation.isPending ? "Saving..." : "Save Changes"}
+        </Button>
+      </div>
+
+      <Card className="bg-neutral-800 border-neutral-700">
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <Network className="h-5 w-5 text-cyan-400" />
+            IP → ASN/Org Dataset (ip2asn)
+          </CardTitle>
+          <CardDescription>
+            Offline ASN/Org enrichment using `attached_assets/ip2asn-combined.tsv` (fallback when proxy headers are absent).
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <GriftRefreshButton onClick={() => refetchIp2asnStatus()} disabled={ip2asnStatusLoading}>
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Refresh Status
+            </GriftRefreshButton>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={reimportIp2AsnMutation.isPending}
+              onClick={() => {
+                const ok = window.confirm(
+                  "Reimport ip2asn TSV? This can take a moment and will rebuild the local range table."
+                );
+                if (!ok) return;
+                reimportIp2AsnMutation.mutate();
+              }}
+            >
+              <Download className="h-4 w-4 mr-2" />
+              Reimport TSV
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={enrichIp2AsnMutation.isPending}
+              onClick={() => enrichIp2AsnMutation.mutate()}
+            >
+              <Activity className="h-4 w-4 mr-2" />
+              Enrich Now
+            </Button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-sm">
+            <div>
+              <div className="text-xs text-gray-400">Dataset Path</div>
+              <div className="font-mono text-xs break-all">{ip2asnStatus?.datasetPath ?? "—"}</div>
+            </div>
+            <div>
+              <div className="text-xs text-gray-400">File</div>
+              {ip2asnStatus?.file ? (
+                <div className="space-y-1">
+                  <div className="font-mono text-xs">{ip2asnStatus.file.name}</div>
+                  <div className="text-xs text-gray-400">
+                    {Math.round(ip2asnStatus.file.size / (1024 * 1024))} MB • {formatTimestamp(ip2asnStatus.file.mtimeMs)}
+                  </div>
+                </div>
+              ) : (
+                <div className="text-xs text-red-400">Missing</div>
+              )}
+            </div>
+            <div>
+              <div className="text-xs text-gray-400">Imported</div>
+              {ip2asnStatus?.meta?.imported_at ? (
+                <div className="text-xs">{formatTimestamp(Number(ip2asnStatus.meta.imported_at))}</div>
+              ) : (
+                <div className="text-xs text-gray-400">—</div>
+              )}
+              <div className="text-xs text-gray-400">
+                Ranges: {ip2asnStatus?.ranges?.total ?? 0} (v4 {ip2asnStatus?.ranges?.v4 ?? 0}, v6 {ip2asnStatus?.ranges?.v6 ?? 0})
+              </div>
+            </div>
+          </div>
+
+          <div className="text-xs text-gray-400">
+            Cache: {ip2asnStatus?.cache?.total ?? 0} IPs • missing ASN/Org: {ip2asnStatus?.cache?.missing ?? 0}
+          </div>
+
+          {ip2asnStatus?.file && ip2asnStatus?.meta && !ip2asnStatus?.metaMatchesFile ? (
+            <div className="text-xs text-amber-300 flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4" />
+              Imported dataset meta does not match the current TSV; reimport recommended.
+            </div>
+          ) : null}
+        </CardContent>
+      </Card>
+
+      <Card className="bg-neutral-800 border-neutral-700">
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <FileText className="h-5 w-5 text-cyan-400" />
+            Database Maintenance (Manual VACUUM)
+          </CardTitle>
+          <CardDescription>
+            Retention pruning deletes rows but does not reclaim `trading_app.db` file size until VACUUM runs. VACUUM requires an exclusive lock and can pause trading/logins while it runs; use a maintenance window.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <GriftRefreshButton onClick={() => refetchDbStats()} disabled={dbStatsLoading}>
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Refresh Stats
+            </GriftRefreshButton>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={checkpointMutation.isPending}
+              onClick={() => {
+                const ok = window.confirm("Run WAL checkpoint (TRUNCATE)? This is usually quick and can shrink the -wal file.");
+                if (!ok) return;
+                checkpointMutation.mutate();
+              }}
+            >
+              <Activity className="h-4 w-4 mr-2" />
+              Checkpoint WAL
+            </Button>
+            <div className="flex items-center gap-2">
+              <Input
+                value={vacuumConfirm}
+                onChange={(e) => setVacuumConfirm(e.target.value)}
+                placeholder="Type VACUUM"
+                className="w-36"
+              />
+              <Button
+                variant="outline"
+                size="sm"
+                className="bg-red-600 border-red-500 text-white hover:bg-red-700 hover:border-red-600"
+                disabled={vacuumMutation.isPending || vacuumConfirm !== "VACUUM"}
+                onClick={() => {
+                  const ok = window.confirm("VACUUM will take an exclusive lock and may pause trading/logins. Run now?");
+                  if (!ok) return;
+                  vacuumMutation.mutate();
+                }}
+              >
+                <AlertTriangle className="h-4 w-4 mr-2" />
+                Run VACUUM
+              </Button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-sm">
+            <div>
+              <div className="text-xs text-gray-400">DB File Size</div>
+              <div className="font-mono text-xs">{formatBytes(dbStats?.files?.db?.size ?? 0)}</div>
+              <div className="text-xs text-gray-500">
+                {dbStats?.files?.db?.mtimeMs ? formatTimestamp(dbStats.files.db.mtimeMs) : "—"}
+              </div>
+            </div>
+            <div>
+              <div className="text-xs text-gray-400">WAL / SHM</div>
+              <div className="font-mono text-xs">
+                {formatBytes(dbStats?.files?.wal?.size ?? 0)} / {formatBytes(dbStats?.files?.shm?.size ?? 0)}
+              </div>
+              <div className="text-xs text-gray-500">journal_mode: {dbStats?.pragmas?.journalMode ?? "—"}</div>
+            </div>
+            <div>
+              <div className="text-xs text-gray-400">Reclaimable (Freelist)</div>
+              <div className="font-mono text-xs">
+                {formatBytes(reclaimable)} ({reclaimablePct}%)
+              </div>
+              <div className="text-xs text-gray-500">
+                page_size: {dbStats?.pragmas?.pageSize ?? "—"} • freelist: {dbStats?.pragmas?.freelistCount ?? 0}/{dbStats?.pragmas?.pageCount ?? 0}
+              </div>
+            </div>
+          </div>
+
+          {dbStats ? (
+            <div className="text-xs text-gray-400">
+              Total on disk (db+wal+shm): {formatBytes(dbStats.derived.totalOnDiskBytes)} • last checked: {formatTimestamp(dbStats.generatedAt)}
+            </div>
+          ) : (
+            <div className="text-xs text-gray-400">No DB stats loaded yet.</div>
+          )}
+
+          <div className="rounded border border-neutral-700 bg-neutral-900 p-3 text-xs text-gray-400 space-y-1">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="h-4 w-4 text-amber-300" />
+              <span>
+                Recommendation: {shouldVacuum ? "VACUUM recommended (≥10% reclaimable pages)" : "VACUUM optional (low reclaimable pages)"}
+              </span>
+            </div>
+            <div>Gold standard: run VACUUM only during a planned maintenance window and after a recent backup.</div>
+            <div>Checkpoint WAL first to reclaim `-wal` growth without rebuilding the full database.</div>
+          </div>
+
+          {vacuumResult?.before?.derived?.totalOnDiskBytes != null && vacuumResult?.after?.derived?.totalOnDiskBytes != null ? (
+            <div className="rounded border border-neutral-700 bg-neutral-900 p-3 text-xs text-gray-300">
+              <div className="font-semibold mb-1">Last VACUUM Result</div>
+              <div>
+                Before: {formatBytes(Number(vacuumResult.before.derived.totalOnDiskBytes) || 0)} • After:{" "}
+                {formatBytes(Number(vacuumResult.after.derived.totalOnDiskBytes) || 0)}
+              </div>
+              <div>
+                Reclaimed:{" "}
+                {formatBytes(
+                  Math.max(
+                    0,
+                    Number(vacuumResult.before.derived.totalOnDiskBytes || 0) -
+                      Number(vacuumResult.after.derived.totalOnDiskBytes || 0)
+                  )
+                )}
+              </div>
+            </div>
+          ) : null}
+        </CardContent>
+      </Card>
+
+      {configGroups.map((group) => (
+        <Card key={group.title} className="bg-neutral-800 border-neutral-700">
+          <CardHeader>
+            <CardTitle className="text-base">{group.title}</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {group.fields.map((field) => (
+                <div key={field.key}>
+                  <Label className="text-sm">{field.label}</Label>
+                  {field.type === "boolean" ? (
+                    <div className="flex items-center gap-2 mt-2">
+                      <input
+                        type="checkbox"
+                        checked={!!config[field.key]}
+                        onChange={(e) => handleChange(field.key, e.target.checked)}
+                        className="h-5 w-5"
+                      />
+                      <span className="text-sm text-gray-400">
+                        {config[field.key] ? "Enabled" : "Disabled"}
+                      </span>
+                    </div>
+                  ) : (
+                    <Input
+                      type="number"
+                      value={config[field.key] as number}
+                      onChange={(e) => handleChange(field.key, parseFloat(e.target.value) || 0)}
+                      className="bg-neutral-700 border-neutral-600 mt-1"
+                    />
+                  )}
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      ))}
+    </div>
+  );
+}
+
+function AuditTab() {
+  const { data: logsData, isLoading: logsLoading, refetch: refetchLogs } = useQuery<{ logs: AuditLogEntry[] }>({
+    queryKey: ["/api/admin/grift/audit-log"],
+  });
+
+  const { data: verifyData, isLoading: verifyLoading, refetch: refetchVerify } = useQuery<AuditVerifyResult>({
+    queryKey: ["/api/admin/grift/audit-log/verify"],
+  });
+
+  const logs = logsData?.logs || [];
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h3 className="text-lg font-semibold">Audit Log</h3>
+        <div className="flex items-center gap-2">
+          <GriftRefreshButton onClick={() => { refetchLogs(); refetchVerify(); }}>
+            <RefreshCw className="h-4 w-4 mr-2" />
+            Refresh
+          </GriftRefreshButton>
+        </div>
+      </div>
+
+      <Card className="bg-neutral-800 border-neutral-700">
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <Shield className="h-5 w-5" />
+            Hash Chain Verification
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {verifyLoading ? (
+            <div className="flex items-center gap-2">
+              <div className="animate-spin rounded-full h-4 w-4 border-t-2 border-b-2 border-primary"></div>
+              <span>Verifying...</span>
+            </div>
+          ) : verifyData?.valid ? (
+            <div className="flex items-center gap-2 text-green-400">
+              <CheckCircle className="h-5 w-5" />
+              <span>Audit chain integrity verified ({verifyData.totalEntries} entries)</span>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 text-red-400">
+              <XCircle className="h-5 w-5" />
+              <span>Chain broken at entry {verifyData?.brokenAt}: {verifyData?.message}</span>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {logsLoading ? (
+        <div className="flex items-center justify-center h-40">
+          <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary"></div>
+        </div>
+      ) : (
+        <Card className="bg-neutral-800 border-neutral-700">
+          <CardContent className="p-0">
+            <ScrollArea className="h-[400px]">
+              <Table>
+                <TableHeader>
+                  <TableRow className="border-neutral-700">
+                    <TableHead>ID</TableHead>
+                    <TableHead>Action</TableHead>
+                    <TableHead>Target</TableHead>
+                    <TableHead>Admin</TableHead>
+                    <TableHead>Timestamp</TableHead>
+                    <TableHead>Hash</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {logs.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={6} className="text-center text-gray-400 py-8">
+                        <FileText className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                        No audit logs
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    logs.map((log) => (
+                      <TableRow key={log.id} className="border-neutral-700">
+                        <TableCell className="font-mono text-xs">{log.id}</TableCell>
+                        <TableCell>
+                          <Badge variant="outline">{log.action}</Badge>
+                        </TableCell>
+                        <TableCell className="text-xs">
+                          {log.target_type} #{log.target_id}
+                        </TableCell>
+                        <TableCell>Admin #{log.admin_id}</TableCell>
+                        <TableCell className="text-xs text-gray-400">{formatTimestamp(log.created_at)}</TableCell>
+                        <TableCell className="font-mono text-xs text-gray-500 max-w-[100px] truncate">
+                          {log.hash?.slice(0, 12)}...
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </ScrollArea>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+export default function GriftAdmin() {
+  const [activeTab, setActiveTab] = useState("dashboard");
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-2 mb-4">
+        <Shield className="h-6 w-6 text-amber-400" />
+        <h2 className="text-xl font-semibold">Grift Detection System</h2>
+      </div>
+
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <TabsList className="bg-neutral-700 flex-wrap h-auto gap-1 p-1">
+          <TabsTrigger value="dashboard" className="data-[state=active]:bg-neutral-600 text-xs">
+            <Activity className="h-3 w-3 mr-1" />
+            Dashboard
+          </TabsTrigger>
+          <TabsTrigger value="signals" className="data-[state=active]:bg-neutral-600 text-xs">
+            <AlertTriangle className="h-3 w-3 mr-1" />
+            Signals
+          </TabsTrigger>
+          <TabsTrigger value="users" className="data-[state=active]:bg-neutral-600 text-xs">
+            <Users className="h-3 w-3 mr-1" />
+            Users
+          </TabsTrigger>
+          <TabsTrigger value="pairs" className="data-[state=active]:bg-neutral-600 text-xs">
+            <Link2 className="h-3 w-3 mr-1" />
+            Pairs
+          </TabsTrigger>
+          <TabsTrigger value="networks" className="data-[state=active]:bg-neutral-600 text-xs">
+            <Network className="h-3 w-3 mr-1" />
+            Networks
+          </TabsTrigger>
+          <TabsTrigger value="identities" className="data-[state=active]:bg-neutral-600 text-xs">
+            <Fingerprint className="h-3 w-3 mr-1" />
+            Identities
+          </TabsTrigger>
+          <TabsTrigger value="cases" className="data-[state=active]:bg-neutral-600 text-xs">
+            <Briefcase className="h-3 w-3 mr-1" />
+            Cases
+          </TabsTrigger>
+          <TabsTrigger value="exports" className="data-[state=active]:bg-neutral-600 text-xs">
+            <Download className="h-3 w-3 mr-1" />
+            Exports
+          </TabsTrigger>
+          <TabsTrigger value="config" className="data-[state=active]:bg-neutral-600 text-xs">
+            <Settings className="h-3 w-3 mr-1" />
+            Config
+          </TabsTrigger>
+          <TabsTrigger value="audit" className="data-[state=active]:bg-neutral-600 text-xs">
+            <FileText className="h-3 w-3 mr-1" />
+            Audit
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="dashboard">
+          <DashboardTab />
+        </TabsContent>
+
+        <TabsContent value="signals">
+          <SignalsTab />
+        </TabsContent>
+
+        <TabsContent value="users">
+          <UsersTab />
+        </TabsContent>
+
+        <TabsContent value="pairs">
+          <PairsTab />
+        </TabsContent>
+
+        <TabsContent value="networks">
+          <NetworksTab />
+        </TabsContent>
+
+        <TabsContent value="identities">
+          <IdentitiesTab />
+        </TabsContent>
+
+        <TabsContent value="cases">
+          <CasesTab />
+        </TabsContent>
+
+        <TabsContent value="exports">
+          <ExportsTab />
+        </TabsContent>
+
+        <TabsContent value="config">
+          <ConfigTab />
+        </TabsContent>
+
+        <TabsContent value="audit">
+          <AuditTab />
+        </TabsContent>
+      </Tabs>
+    </div>
+  );
+}

@@ -1,0 +1,582 @@
+Below is a **full, implementation-audit checklist** Replit Agent 3 can use to cross-check end-to-end completion. It is written to be **deterministic and testable** (pass/fail), aligned to your **tiered gating invariants**, and scoped to: **email validation (initial + resend + rolling revalidation), SMS validation (Twilio), KYC (invite-based + Selected tier), profile settings (trader + admin), audit/data trails (hedge-fund-grade), and admin mini-tabs wiring (additions-only)**.
+
+---
+
+## A. Global invariants and non-negotiables (must hold everywhere)
+
+### A1) Single-source-of-truth gating (no UI/backend drift)
+
+* [ ] `shared/policyDecision.ts` exists and is imported by:
+
+  * [ ] Server routes (trade mutations, email resend, sms, kyc)
+  * [ ] Frontend gating (Profile Settings, header dropdown, KYC/Payout panes)
+* [ ] Every deny returns `{ deny_code, accountState }` (or at least `deny_code`) consistently.
+* [ ] A “decision matrix” endpoint or `GET /api/profile/me` returns sufficient fields so client can compute the same gating decisions without guessing.
+
+### A2) Server-side enforcement precedes all engine actions
+
+* [ ] **All** trade actions that affect exposure call `decidePolicy()` before risk engine checks:
+
+  * [ ] Market open / increase
+  * [ ] Pending placement
+  * [ ] SL/TP modify (with risk-reducing intent if supported)
+* [ ] Reduce-only actions remain allowed per policy:
+
+  * [ ] Close / reduce
+  * [ ] Cancel pending (if configured as allowed while locked)
+
+### A3) Additions-only rule
+
+* [ ] No existing top tabs removed/renamed.
+* [ ] No existing mini-tabs removed/renamed.
+* [ ] New tables/columns added without breaking current Drizzle schema compilation.
+
+---
+
+## B. Email validation requests (initial verification)
+
+### B1) Required user states
+
+* [ ] New signups create/ensure a `user_verification` record (idempotent).
+* [ ] State model exists in policy:
+
+  * [ ] `ACTIVE_UNVERIFIED_GRACE` (0–14 days)
+  * [ ] `LOCKED_EMAIL_UNVERIFIED` (>14 days with no verify)
+  * [ ] `ACTIVE_VERIFIED`
+  * [ ] `LOCKED_EMAIL_REVERIFY_OVERDUE` (verified but overdue beyond rolling window + grace)
+  * [ ] `SUSPENDED_ADMIN` (frozen/disabled equivalent)
+
+### B2) Initial verification request flow (Resend integration)
+
+* [ ] Endpoint exists: `POST /api/auth/email/send-verification` OR `POST /api/profile/email/resend` (exact name is OK; must exist).
+* [ ] Endpoint enforces policy action: `EMAIL_RESEND_VERIFICATION`.
+* [ ] Uses **Resend** to deliver verification email with:
+
+  * [ ] signed token / code
+  * [ ] expiry timestamp
+  * [ ] correlationId (optional but recommended for audit)
+* [ ] Verify endpoint exists: `GET /api/auth/email/verify?token=...` (or POST), and:
+
+  * [ ] sets `emailVerifiedAt`
+  * [ ] sets/refreshes `emailReverifyDueAt = now + 30 days`
+  * [ ] emits an audit event `EMAIL_VERIFIED`
+
+### B3) Enforcement behavior
+
+* [ ] If `LOCKED_EMAIL_UNVERIFIED`, server denies exposure-increasing trade actions with:
+
+  * [ ] HTTP 403 + `deny_code: EMAIL_UNVERIFIED_GRACE_EXPIRED`
+* [ ] UI displays lock banner and blocks trade UI actions consistent with policy.
+
+### B4) Anti-abuse throttles (email resend)
+
+* [ ] Cooldown enforced (e.g., 60s) → returns `EMAIL_SEND_COOLDOWN`.
+* [ ] Daily cap enforced (e.g., 5/day) → returns `EMAIL_SEND_RATE_LIMIT`.
+* [ ] Counters stored:
+
+  * [ ] `emailLastResendAt`
+  * [ ] `emailResendCountDay` (+ day bucket / reset logic)
+
+### B5) Audit trail coverage (hedge-fund grade)
+
+For each email event:
+
+* [ ] `EMAIL_VERIFICATION_SENT`
+* [ ] `EMAIL_VERIFICATION_SEND_DENIED` (rate limit / cooldown)
+* [ ] `EMAIL_VERIFIED`
+* [ ] `EMAIL_LOCK_APPLIED` (when lock state triggered or first detected)
+  Captured fields:
+* [ ] userId, email, username
+* [ ] ip, userAgent, sessionId (if available)
+* [ ] timestamp (ms)
+* [ ] event_hash + prev_hash if using hash chain for identity audit (recommended)
+
+---
+
+## C. Email rolling revalidation requests (30-day reverify policy)
+
+### C1) Rolling reverify state
+
+* [ ] On successful email verification, `emailReverifyDueAt = now + 30 days`.
+* [ ] `emailReverifyDueAt` is evaluated every request (no reliance on cron correctness).
+
+### C2) Overdue handling
+
+* [ ] Grace after overdue exists (configurable, e.g., 5 days).
+* [ ] After `emailReverifyDueAt + overdueGrace`, trade actions denied with:
+
+  * [ ] `deny_code: EMAIL_REVERIFY_OVERDUE`
+* [ ] Reduce-only actions remain allowed if policy config says so.
+
+### C3) Reverify request flow
+
+* [ ] Reverify trigger exists (same resend endpoint is fine).
+* [ ] Reverify email differs clearly (copy + reason logged).
+* [ ] Verify endpoint refreshes `emailReverifyDueAt` again.
+
+### C4) Audit coverage
+
+* [ ] `EMAIL_REVERIFY_REQUESTED`
+* [ ] `EMAIL_REVERIFY_VERIFIED`
+* [ ] `EMAIL_REVERIFY_LOCK_APPLIED`
+  All with identity metadata (IP/user agent/session).
+
+---
+
+## D. SMS validation requests (Twilio Verify)
+
+### D1) Eligibility gating (NOT baseline)
+
+* [ ] Policy enforces: SMS can start only if:
+
+  * [ ] accountState is `ACTIVE_VERIFIED`
+  * [ ] contender eligibility met (Path1 OR Path2) OR admin flagged as SMS-eligible
+* [ ] Non-eligible returns:
+
+  * [ ] `deny_code: SMS_NOT_ELIGIBLE`
+
+### D2) Twilio integration correctness
+
+* [ ] Env vars exist (names can vary):
+
+  * [ ] TWILIO_ACCOUNT_SID
+  * [ ] TWILIO_AUTH_TOKEN
+  * [ ] TWILIO_VERIFY_SERVICE_SID
+* [ ] Endpoint exists: `POST /api/sms/verify/start`:
+
+  * [ ] checks policy `PHONE_VERIFY_START`
+  * [ ] normalizes phone E.164
+  * [ ] calls Twilio Verify “send”
+  * [ ] increments daily counters & last sent timestamp
+* [ ] Endpoint exists: `POST /api/sms/verify/confirm`:
+
+  * [ ] checks policy `PHONE_VERIFY_CONFIRM`
+  * [ ] calls Twilio Verify “check”
+  * [ ] on success sets `smsVerifiedAt` and updates contender tier if needed
+
+### D3) Anti-abuse and lockouts
+
+* [ ] Daily cap enforced (e.g., 3/day) → `SMS_RATE_LIMIT`
+* [ ] 60s cooldown enforced for OTP sends → `SMS_RATE_LIMIT`
+* [ ] Max attempts enforced (e.g., 6) → `SMS_OTP_TOO_MANY_ATTEMPTS`
+* [ ] Attempt counts stored and reset logic defined:
+
+  * [ ] `smsVerifyFailCount`
+  * [ ] `smsSendCountDay`
+  * [ ] `smsLastSentAt`
+
+### D4) Audit coverage
+
+* [ ] `SMS_VERIFY_STARTED`
+* [ ] `SMS_VERIFY_START_DENIED`
+* [ ] `SMS_VERIFY_CONFIRMED`
+* [ ] `SMS_VERIFY_FAILED` (with attempt number)
+* [ ] `SMS_VERIFY_LOCKED` (max attempts hit)
+  Fields captured: userId, ip, userAgent, phone last-2 masked, sessionId, correlationId.
+
+---
+
+## E. KYC requests (invite-based + tiered)
+
+### E1) Schema and states
+
+* [ ] `user_kyc_profiles` table exists with:
+
+  * [ ] `status`: NOT_STARTED / INVITED / SUBMITTED / APPROVED / REJECTED
+  * [ ] invitedAt, submittedAt, reviewedAt
+  * [ ] reviewerAdminId, reviewerNote
+* [ ] No user-initiated KYC for baseline traders.
+
+### E2) Eligibility gating (Selected only)
+
+* [ ] Policy enforces: `KYC_VIEW`, `KYC_SUBMIT`, `PREFERRED_PAYMENT_CURRENCY_SET` allowed only when:
+
+  * [ ] `userTier === SELECTED` OR `contenderTier === SELECTED_REAL_CAPITAL` OR `kyc.status in (INVITED,SUBMITTED,APPROVED)`
+* [ ] Deny returns: `deny_code: KYC_NOT_SELECTED`
+
+### E3) Admin workflow endpoints
+
+* [ ] `GET /api/admin/kyc/queue` returns all candidates with status + timestamps.
+* [ ] `POST /api/admin/kyc/invite`:
+
+  * [ ] sets status to INVITED
+  * [ ] emits audit event `KYC_INVITED`
+* [ ] `POST /api/admin/kyc/review`:
+
+  * [ ] allows APPROVED/REJECTED transitions only from SUBMITTED (or REJECTED→INVITED if re-invite)
+  * [ ] emits `KYC_APPROVED` / `KYC_REJECTED`
+
+### E4) Trader-facing KYC status display
+
+* [ ] Profile Settings shows KYC card with:
+
+  * [ ] status label
+  * [ ] “Locked until selected/invited” state when not eligible
+  * [ ] “Invited – start submission” when invited
+  * [ ] “Submitted – pending review”
+  * [ ] “Approved”
+  * [ ] “Rejected – next steps”
+* [ ] KYC card uses the same policy gates (no frontend-only gating).
+
+### E5) Hedge-fund grade audit coverage
+
+* [ ] `KYC_INVITED`, `KYC_SUBMITTED`, `KYC_APPROVED`, `KYC_REJECTED`
+* [ ] includes admin actorId, reason/note, ip, userAgent, timestamp
+* [ ] hash chaining recommended for tamper-evidence.
+
+---
+
+## F. Tiered matching (Candidate / Performer / Selected)
+
+### F1) Schema requirement (must exist)
+
+* [ ] `users.userTier` exists (string enum):
+
+  * [ ] CANDIDATE
+  * [ ] PERFORMER
+  * [ ] SELECTED
+* [ ] Migration exists and default is `CANDIDATE`.
+
+### F2) Tier assignment logic (backend)
+
+* [ ] A backend function computes contender eligibility using the exact criteria:
+
+  * Path1: age ≥ 30d AND balancePctOfStart ≥ 1.2 AND tradesLifetime ≥ 30
+  * Path2: age ≥ 90d AND last trade ≤ 14d AND returnLast90d ≥ 10% AND tradesLast90d ≥ 20
+* [ ] Output stored (at least one of):
+
+  * [ ] `user_verification.contenderTier = CANDIDATE_SMS_REQUIRED` when eligible
+  * [ ] OR `users.userTier = PERFORMER` when eligible
+* [ ] A deliberate admin step moves PERFORMER → SELECTED (do not auto-select).
+* [ ] Tier transitions are audited (`TIER_CHANGED` event with old/new).
+
+### F3) Frontend tier badge display (trader + admin)
+
+* [ ] Trader header/avatar shows tier badge:
+
+  * [ ] Candidate / Performer / Selected (visual indicator)
+* [ ] Admin user rows show tier column or badge in:
+
+  * [ ] User list
+  * [ ] Profile Settings (Admin view)
+
+### F4) Tier-based feature gating (frontend + backend)
+
+* [ ] SMS start gated by contender eligibility (and verified email).
+* [ ] KYC/payout gated by Selected or invite state.
+* [ ] Profile Settings displays locked cards/panes accordingly.
+
+---
+
+## G. Profile Settings design and linked pages/panes/cards (Trader + Admin)
+
+### G1) Trader Profile Settings page must exist
+
+* [ ] Route exists: `/profile` (or `/account/profile`)
+* [ ] Header email dropdown includes:
+
+  * [ ] Profile Settings
+  * [ ] KYC / Payout (locked if not eligible)
+  * [ ] Logout
+  * [ ] (optional) Security / Sessions
+
+### G2) Trader Profile Settings page sections (cards)
+
+Must include at minimum:
+
+**Identity Card**
+
+* [ ] Email (read-only) + status badge (Verified / Unverified / Reverify due)
+* [ ] Username (read-only or limited policy)
+* [ ] First name, last name, display name (editable if allowed)
+* [ ] Timezone/locale (for audit consistency)
+
+**Email Verification Card**
+
+* [ ] Shows remaining grace days if unverified
+* [ ] Button: Resend verification (policy-throttled)
+* [ ] If locked: prominent lock banner + CTA to verify
+
+**SMS / Phone Card (gated)**
+
+* [ ] If not contender-eligible: locked state + “Requires eligibility”
+* [ ] If eligible: input phone + “Send code”
+* [ ] OTP confirm form
+* [ ] State badges: Not started / Verified
+
+**KYC Status Card (gated)**
+
+* [ ] Locked unless invited/selected
+* [ ] Shows status and next action
+
+**Payout Profile Card (gated)**
+
+* [ ] Preferred payment currency (locked unless invited/selected)
+* [ ] Stores in `user_payout_profiles` not in generic user profile
+
+**Security Card**
+
+* [ ] Sessions list (active sessions)
+* [ ] Login history preview
+* [ ] 2FA section with either “Coming soon” (if not implementing) OR actual enable/disable flow
+
+### G3) Admin Profile Settings view (mini-tab) must exist
+
+* [ ] Under Admin → User Management mini-tabs:
+
+  * [ ] Audit Trail
+  * [ ] KYC Queue
+  * [ ] Profile Settings (Admin View)
+* [ ] Admin Profile Settings table shows:
+
+  * [ ] names, email, phone
+  * [ ] verification tier/state
+  * [ ] KYC status
+  * [ ] preferred payment currency (if any)
+  * [ ] userTier badge
+
+### G4) Tier progression management (admin)
+
+* [ ] Admin can change userTier:
+
+  * [ ] Candidate → Performer
+  * [ ] Performer → Selected
+  * [ ] Selected → Performer (if needed)
+* [ ] Every change emits `TIER_CHANGED` audit event.
+
+---
+
+## H. Admin Dashboard mini-tabs: backend + UI wiring (additions-only)
+
+### H1) UI wiring checklist
+
+* [ ] `AdminAuditTrail.tsx` page added under `/client/src/pages`
+* [ ] `KycQueue.tsx`
+* [ ] `UserProfileSettings.tsx` (Admin view)
+* [ ] `AdminDashboard.tsx` adds mini-tab buttons after Login History
+* [ ] Rendering branches exist for those mini-tabs
+* [ ] Bulk action bar hidden on these three mini-tabs (as specified)
+
+### H2) Backend endpoints exist and return expected fields
+
+* [ ] `GET /api/admin/audit-trail` supports:
+
+  * [ ] q search
+  * [ ] limit
+  * [ ] (gap) event-type filter in main admin: `type=` or `category=`
+* [ ] `GET /api/admin/user-profiles` returns:
+
+  * [ ] userTier
+  * [ ] verification fields
+  * [ ] KYC status
+  * [ ] payout currency (if selected/invited)
+
+---
+
+## I. Data trails and hedge-fund grade security telemetry
+
+### I1) Identity audit log (separate from trade audit)
+
+* [ ] Identity audit table exists (or reuse `adminActions` with categories):
+
+  * [ ] LOGIN_SUCCESS / LOGIN_FAILED
+  * [ ] LOGOUT
+  * [ ] EMAIL_VERIFICATION_SENT / VERIFIED / LOCKED
+  * [ ] SMS_VERIFY_STARTED / CONFIRMED / FAILED / LOCKED
+  * [ ] KYC events
+  * [ ] TIER_CHANGED
+  * [ ] ADMIN_ACTION (freeze/disable/invite)
+* [ ] Captured fields include:
+
+  * [ ] eventId
+  * [ ] timestamp
+  * [ ] userId
+  * [ ] email/username snapshot
+  * [ ] actorType USER/ADMIN/SYSTEM
+  * [ ] actorAdminId (if admin)
+  * [ ] ip
+  * [ ] userAgent
+  * [ ] sessionId (if available)
+  * [ ] correlationId (recommended)
+  * [ ] event_hash + prev_hash (tamper-evident chaining recommended)
+
+### I2) Login history and session data
+
+* [ ] Login events recorded with:
+
+  * [ ] loginAt, logoutAt
+  * [ ] ip
+  * [ ] userAgent
+  * [ ] session length derived (or stored)
+* [ ] Admin “Login History” mini-tab and user timeline show these events.
+* [ ] CSV export includes new login columns (as previously specified in your threads).
+
+### I3) Export integrity
+
+* [ ] Export uses manifests/hashes if you already implemented them:
+
+  * [ ] export file hash (SHA-256)
+  * [ ] manifest record
+* [ ] Exports include user tier + verification status + KYC status columns.
+
+---
+
+## J. “Gaps / Not implemented” list — explicit completion checks
+
+### J1) Profile Settings: 2FA (High)
+
+Choose one of two acceptable completions:
+
+**Option A (Full enable/disable)**
+
+* [ ] `user_mfa` table exists with:
+
+  * [ ] type: TOTP
+  * [ ] secret (encrypted at rest strongly recommended)
+  * [ ] enabledAt
+  * [ ] recovery codes hashed
+* [ ] Endpoints:
+
+  * [ ] `POST /api/mfa/setup` (returns QR / otpauth)
+  * [ ] `POST /api/mfa/enable` (verify code)
+  * [ ] `POST /api/mfa/disable` (requires password or code)
+* [ ] Login flow enforces MFA when enabled.
+
+**Option B (Placeholder done correctly)**
+
+* [ ] “Coming soon” is shown BUT:
+
+  * [ ] The policy action `MFA_ENABLE` exists and returns deterministic deny for now
+  * [ ] UI clearly indicates non-availability and does not imply it works
+
+### J2) Profile Settings: Tier Badge Display (Medium)
+
+* [ ] Tier badge in header (avatar area) and Profile Settings identity card.
+* [ ] Tier shown in admin user list and admin profile view.
+
+### J3) Profile Settings: KYC Status Display (Medium)
+
+* [ ] Trader page shows status with correct gating:
+
+  * [ ] locked if not invited/selected
+  * [ ] shows INVITED/SUBMITTED/APPROVED/REJECTED otherwise
+
+### J4) Profile Settings: Payment/Payout Profile (Medium)
+
+* [ ] `user_payout_profiles` exists
+* [ ] Preferred payment currency stored there
+* [ ] Trader UI shows locked/unlocked based on `PREFERRED_PAYMENT_CURRENCY_SET` decision
+* [ ] Admin view displays currency for selected/invited users
+
+### J5) Admin: Audit Trail event-type filter (Low)
+
+* [ ] API supports filtering by `category` and/or `type`
+* [ ] UI adds a dropdown filter and passes params
+
+### J6) Admin: Tier progression management (Medium)
+
+* [ ] Admin control exists to promote/demote tiers
+* [ ] Emits `TIER_CHANGED` audit event
+* [ ] Visible in Audit Trail mini-tab
+
+### J7) Schema: user tier field (High)
+
+* [ ] `users.userTier` added with enum validation and default `CANDIDATE`.
+
+### J8) Backend: Tier assignment logic (Medium)
+
+* [ ] A job or on-demand recalculation updates eligibility and tier suggestions:
+
+  * [ ] computes Path1/Path2 metrics
+  * [ ] sets contenderTier to `CANDIDATE_SMS_REQUIRED` (or `userTier` to PERFORMER) without auto-selecting to SELECTED
+* [ ] Audit event created: `TIER_ELIGIBLE_DETECTED` (optional but recommended)
+
+### J9) Frontend: Tier-based feature gating (Medium)
+
+* [ ] Profile Settings renders locked cards based on `featureGates()` from shared policy module
+* [ ] Header dropdown shows KYC/Payout as disabled/locked unless eligible.
+
+---
+
+## K. Verification engine tie-in: “Hedge-fund grade” correctness tests
+
+### K1) Email enforcement tests
+
+* [ ] Create user unverified, set createdAt = now-15 days → trade open should deny with `EMAIL_UNVERIFIED_GRACE_EXPIRED`.
+* [ ] Verify email → trade open allowed.
+* [ ] Set emailVerifiedAt = now-40 days and emailReverifyDueAt = now-10 days → if overdue grace exceeded, deny with `EMAIL_REVERIFY_OVERDUE`.
+
+### K2) SMS eligibility tests
+
+* [ ] Verified email but NOT eligible → SMS start returns `SMS_NOT_ELIGIBLE`.
+* [ ] Eligible (Path1 or Path2) + verified email → SMS start allowed.
+* [ ] Exceed daily send cap → `SMS_RATE_LIMIT`.
+* [ ] Exceed OTP attempts → `SMS_OTP_TOO_MANY_ATTEMPTS`.
+
+### K3) KYC gating tests
+
+* [ ] Not selected and not invited → KYC view returns `KYC_NOT_SELECTED`.
+* [ ] Admin invites → KYC view allowed; status shows INVITED.
+* [ ] Submit then approve → KYC view allowed; status APPROVED; payout currency set allowed.
+
+### K4) Audit completeness tests
+
+For each deny above:
+
+* [ ] Audit record exists with deny_code
+* [ ] Includes ip + userAgent + timestamp
+* [ ] CorrelationId present for multi-step flows (OTP and email verify), if implemented.
+
+---
+
+## L. Deliverable verification (what must be present in repo after Agent 3 finishes)
+
+### L1) Shared
+
+* [ ] `shared/policyDecision.ts` (final)
+* [ ] `shared/schema.ts` additions:
+
+  * [ ] users.userTier
+  * [ ] user_verification
+  * [ ] user_kyc_profiles
+  * [ ] user_payout_profiles
+  * [ ] (optional) user_mfa
+
+### L2) Server
+
+* [ ] `server/policy/buildDecisionContext.ts` (introspecting or fixed to actual schema)
+* [ ] Trade mutation routes enforce policy decisions
+* [ ] Resend email endpoints enforce policy + update throttle counters
+* [ ] Twilio endpoints enforce policy + update throttle counters
+* [ ] Admin routes:
+
+  * [ ] audit-trail
+  * [ ] kyc queue
+  * [ ] tier management
+  * [ ] user profiles
+
+### L3) Client
+
+* [ ] Header dropdown patch (email area → menu)
+* [ ] Trader `ProfileSettings.tsx` page (cards + gating)
+* [ ] Admin mini-tabs pages (3 pages)
+* [ ] AdminDashboard tab wiring
+
+---
+
+## M. “Done means done” acceptance criteria (final sign-off)
+
+All must pass:
+
+* [ ] A locked user cannot open/increase exposure, but **can close/reduce** positions.
+* [ ] Email resend uses Resend and is throttled; audit shows each attempt.
+* [ ] Rolling reverify locks when overdue; UI shows clear state.
+* [ ] SMS verify is **only** available after eligibility; uses Twilio Verify.
+* [ ] KYC is invite-based and only accessible after invite/Selected; status visible in trader profile.
+* [ ] Preferred payment currency is under payout profile and locked unless eligible.
+* [ ] Admin has mini-tabs added without breaking existing tabs; all endpoints exist.
+* [ ] Audit trail captures identity/security/compliance events with hedge-fund-grade fields.
+
+---
+
+If you want this checklist to be even more “agent-executable,” I can rewrite it into a **file-by-file verification script** (what to open, what to search for, what to run in UI, what SQL queries to execute in SQLite to verify counters/timestamps).

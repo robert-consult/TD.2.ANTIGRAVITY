@@ -1,0 +1,1799 @@
+## Fused summary of what this deliverable implements
+
+1. **Account state UX + logic (Active / Frozen / Disabled mini-tabs)**
+
+   * Disabled users always appear in **Disabled** (even if also frozen).
+   * Frozen users appear in **Frozen** only when **not disabled**.
+   * Button rules:
+
+     * **Frozen tab:** `Unfreeze` + `Disable`
+     * **Disabled tab:** `Enable` (restores prior frozen state; if they were frozen then disabled, enable returns them to Frozen)
+     * **Active tab:** `Freeze` + `Disable`
+
+2. **User Timeline upgrade (vertical timeline with dot/line UI)**
+
+   * Includes **LOGIN**, **LOGOUT**, and **SESSION_LENGTH** (computed) plus trade events.
+   * CSV export includes: **Login Time, Login IP, Session Length, Logout Time** (plus event basics).
+
+3. **Risk guardrails (backend, bug-resistant)**
+
+   * Keeps: **max 3 concurrent trades per symbol** and **max 5 total concurrent trades** (counting OPEN + PENDING).
+   * Adds: **max 50 lots concurrently across all open/pending trades** (platform-wide default).
+   * Global limits are adjusted in **Trade Settings** and **persist**; **per-user overrides** can exceed global limits.
+
+4. **Trade Audit upgrades (tamper-evident + correlation)**
+
+   * Adds **correlationId** on every order attempt.
+   * Adds **order_intent_audit** to capture **RECEIVED** and **DECISION (PASS/REJECT)**, including reject reason/check.
+   * Adds **trade_audit** events for market order creation, pending placement, cancels, manual closes, and target updates.
+   * Hash-chained entries via **SHA-256** (`prev_hash` → `event_hash`) for tamper-evidence.
+
+---
+
+# READY-TO-DROP INLINE CODE
+
+The structure below is **/backend** and **/frontend** as requested. If your repo uses `/server` + `/client`, copy the backend code into `/server` and frontend into `/client/src` accordingly.
+
+---
+
+## /backend/src/db/db.ts
+
+```ts
+import Database from "better-sqlite3";
+
+export type DB = Database.Database;
+
+let _db: DB | null = null;
+
+export function getDb(): DB {
+  if (_db) return _db;
+  const filename = process.env.SQLITE_FILE || "data.sqlite";
+  _db = new Database(filename);
+  _db.pragma("journal_mode = WAL");
+  _db.pragma("foreign_keys = ON");
+  return _db;
+}
+```
+
+## /backend/src/db/ensureSchema.ts
+
+```ts
+import type { DB } from "./db";
+
+function columnExists(db: DB, table: string, column: string): boolean {
+  const rows = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+  return rows.some((r) => r.name === column);
+}
+
+function ensureColumn(db: DB, table: string, ddlFragment: string, columnName: string) {
+  if (columnExists(db, table, columnName)) return;
+  db.exec(`ALTER TABLE ${table} ADD COLUMN ${ddlFragment}`);
+}
+
+function ensureSingleRowSettings(db: DB) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS trade_settings (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      max_trades_total INTEGER NOT NULL DEFAULT 5,
+      max_trades_per_symbol INTEGER NOT NULL DEFAULT 3,
+      max_lots_total INTEGER NOT NULL DEFAULT 50,
+      quote_max_age_ms INTEGER NOT NULL DEFAULT 15000,
+      updated_at INTEGER NOT NULL DEFAULT (strftime('%s','now') * 1000)
+    );
+  `);
+
+  const exists = db.prepare(`SELECT 1 FROM trade_settings WHERE id = 1`).get();
+  if (!exists) {
+    db.prepare(`
+      INSERT INTO trade_settings (id, max_trades_total, max_trades_per_symbol, max_lots_total, quote_max_age_ms)
+      VALUES (1, 5, 3, 50, 15000)
+    `).run();
+  }
+}
+
+export function ensureSchema(db: DB) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      email TEXT UNIQUE NOT NULL,
+      password_hash TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT 'USER',
+      is_frozen INTEGER NOT NULL DEFAULT 0,
+      freeze_reason TEXT,
+      frozen_at INTEGER,
+      is_disabled INTEGER NOT NULL DEFAULT 0,
+      disabled_at INTEGER,
+      risk_overrides_json TEXT,
+      created_at INTEGER NOT NULL DEFAULT (strftime('%s','now') * 1000)
+    );
+
+    CREATE TABLE IF NOT EXISTS trades (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      symbol TEXT NOT NULL,
+      side TEXT NOT NULL,            -- BUY / SELL
+      order_type TEXT NOT NULL,      -- MARKET / LIMIT / STOP
+      status TEXT NOT NULL,          -- OPEN / PENDING / CLOSED / CANCELED
+      lots REAL NOT NULL,
+      requested_price REAL,
+      trigger_price REAL,
+      entry_price REAL,
+      take_profit REAL,
+      stop_loss REAL,
+      opened_at INTEGER,
+      closed_at INTEGER,
+      correlation_id TEXT,
+      created_at INTEGER NOT NULL DEFAULT (strftime('%s','now') * 1000),
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS trade_audit (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      trade_id TEXT NOT NULL,
+      correlation_id TEXT,
+      user_id TEXT,
+      event_type TEXT NOT NULL,      -- ORDER_PLACED / ORDER_FILLED / POSITION_CLOSED / ORDER_CANCELED / TARGETS_UPDATED ...
+      event_category TEXT NOT NULL DEFAULT 'TRADE',
+      actor_type TEXT NOT NULL DEFAULT 'SYSTEM',  -- USER / ADMIN / SYSTEM
+      actor_user_id TEXT,
+      session_id TEXT,
+      ip TEXT,
+      user_agent TEXT,
+      event_at INTEGER NOT NULL,
+      prev_hash TEXT NOT NULL,
+      event_hash TEXT NOT NULL,
+      payload_json TEXT,
+      FOREIGN KEY (trade_id) REFERENCES trades(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS order_intent_audit (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      correlation_id TEXT NOT NULL,
+      trade_id TEXT,
+      user_id TEXT NOT NULL,
+      symbol TEXT,
+      side TEXT,
+      order_type TEXT,
+      lots REAL,
+      requested_price REAL,
+      trigger_price REAL,
+      take_profit REAL,
+      stop_loss REAL,
+      quote_bid REAL,
+      quote_ask REAL,
+      quote_at INTEGER,
+      quote_is_stale INTEGER,
+      event_type TEXT NOT NULL,      -- RECEIVED / DECISION
+      decision TEXT,                 -- PASS / REJECT
+      reject_check TEXT,
+      reject_reason TEXT,
+      actor_type TEXT NOT NULL DEFAULT 'USER',
+      session_id TEXT,
+      ip TEXT,
+      user_agent TEXT,
+      event_at INTEGER NOT NULL,
+      prev_hash TEXT NOT NULL,
+      event_hash TEXT NOT NULL,
+      payload_json TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS login_sessions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      login_at INTEGER NOT NULL,
+      login_ip TEXT,
+      user_agent TEXT,
+      logout_at INTEGER,
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS timeline_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id TEXT NOT NULL,
+      event_type TEXT NOT NULL,      -- LOGIN / LOGOUT / TRADE_OPEN / TRADE_CLOSE / ...
+      event_at INTEGER NOT NULL,
+      ip TEXT,
+      ref_id TEXT,                   -- e.g., trade_id, session_id
+      meta_json TEXT,
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    );
+  `);
+
+  // Additive safety if upgrading an existing DB:
+  ensureColumn(db, "trades", "correlation_id TEXT", "correlation_id");
+
+  ensureSingleRowSettings(db);
+
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_trades_user_status ON trades(user_id, status);
+    CREATE INDEX IF NOT EXISTS idx_trades_user_symbol_status ON trades(user_id, symbol, status);
+    CREATE INDEX IF NOT EXISTS idx_trade_audit_trade_id ON trade_audit(trade_id, id);
+    CREATE INDEX IF NOT EXISTS idx_trade_audit_corr ON trade_audit(correlation_id, id);
+    CREATE INDEX IF NOT EXISTS idx_order_intent_corr ON order_intent_audit(correlation_id, id);
+    CREATE INDEX IF NOT EXISTS idx_order_intent_user ON order_intent_audit(user_id, id);
+    CREATE INDEX IF NOT EXISTS idx_login_sessions_user ON login_sessions(user_id, id);
+    CREATE INDEX IF NOT EXISTS idx_timeline_user ON timeline_events(user_id, event_at);
+  `);
+}
+```
+
+---
+
+## /backend/src/audit/auditTrail.ts
+
+```ts
+import crypto from "node:crypto";
+import type { DB } from "../db/db";
+
+function stableStringify(value: any): string {
+  if (value === null || value === undefined) return "null";
+  if (typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
+  const keys = Object.keys(value).sort();
+  const entries = keys
+    .filter((k) => value[k] !== undefined)
+    .map((k) => `${JSON.stringify(k)}:${stableStringify(value[k])}`);
+  return `{${entries.join(",")}}`;
+}
+
+function sha256Hex(input: string): string {
+  return crypto.createHash("sha256").update(input).digest("hex");
+}
+
+export type AuditContext = {
+  correlationId: string;
+  actorType: "USER" | "ADMIN" | "SYSTEM";
+  actorUserId?: string | null;
+  sessionId?: string | null;
+  ip?: string | null;
+  userAgent?: string | null;
+};
+
+export function getOrCreateCorrelationId(existing?: string | null): string {
+  return existing && existing.trim().length > 0 ? existing : crypto.randomUUID();
+}
+
+export function writeTradeAudit(db: DB, args: {
+  tradeId: string;
+  userId?: string | null;
+  correlationId?: string | null;
+  eventType: string;
+  eventCategory?: string;
+  ctx: AuditContext;
+  eventAt?: number;
+  payload?: any;
+}) {
+  const eventAt = args.eventAt ?? Date.now();
+  const last = db.prepare(
+    `SELECT event_hash FROM trade_audit WHERE trade_id = ? ORDER BY id DESC LIMIT 1`
+  ).get(args.tradeId) as { event_hash?: string } | undefined;
+
+  const prevHash = last?.event_hash ?? "GENESIS";
+  const envelope = {
+    tradeId: args.tradeId,
+    correlationId: args.correlationId ?? args.ctx.correlationId ?? null,
+    userId: args.userId ?? null,
+    eventType: args.eventType,
+    eventCategory: args.eventCategory ?? "TRADE",
+    actorType: args.ctx.actorType,
+    actorUserId: args.ctx.actorUserId ?? null,
+    sessionId: args.ctx.sessionId ?? null,
+    ip: args.ctx.ip ?? null,
+    userAgent: args.ctx.userAgent ?? null,
+    eventAt,
+    payload: args.payload ?? null,
+  };
+
+  const eventHash = sha256Hex(prevHash + "\n" + stableStringify(envelope));
+
+  db.prepare(`
+    INSERT INTO trade_audit (
+      trade_id, correlation_id, user_id, event_type, event_category,
+      actor_type, actor_user_id, session_id, ip, user_agent,
+      event_at, prev_hash, event_hash, payload_json
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    args.tradeId,
+    envelope.correlationId,
+    envelope.userId,
+    envelope.eventType,
+    envelope.eventCategory,
+    envelope.actorType,
+    envelope.actorUserId,
+    envelope.sessionId,
+    envelope.ip,
+    envelope.userAgent,
+    envelope.eventAt,
+    prevHash,
+    eventHash,
+    JSON.stringify(envelope.payload ?? null)
+  );
+}
+
+export function writeOrderIntentAudit(db: DB, args: {
+  correlationId: string;
+  tradeId?: string | null;
+  userId: string;
+  symbol?: string | null;
+  side?: string | null;
+  orderType?: string | null;
+  lots?: number | null;
+  requestedPrice?: number | null;
+  triggerPrice?: number | null;
+  takeProfit?: number | null;
+  stopLoss?: number | null;
+  quoteBid?: number | null;
+  quoteAsk?: number | null;
+  quoteAt?: number | null;
+  quoteIsStale?: boolean | null;
+  eventType: "RECEIVED" | "DECISION";
+  decision?: "PASS" | "REJECT" | null;
+  rejectCheck?: string | null;
+  rejectReason?: string | null;
+  ctx: AuditContext;
+  eventAt?: number;
+  payload?: any;
+}) {
+  const eventAt = args.eventAt ?? Date.now();
+  const last = db.prepare(
+    `SELECT event_hash FROM order_intent_audit WHERE correlation_id = ? ORDER BY id DESC LIMIT 1`
+  ).get(args.correlationId) as { event_hash?: string } | undefined;
+
+  const prevHash = last?.event_hash ?? "GENESIS";
+  const envelope = {
+    correlationId: args.correlationId,
+    tradeId: args.tradeId ?? null,
+    userId: args.userId,
+    symbol: args.symbol ?? null,
+    side: args.side ?? null,
+    orderType: args.orderType ?? null,
+    lots: args.lots ?? null,
+    requestedPrice: args.requestedPrice ?? null,
+    triggerPrice: args.triggerPrice ?? null,
+    takeProfit: args.takeProfit ?? null,
+    stopLoss: args.stopLoss ?? null,
+    quoteBid: args.quoteBid ?? null,
+    quoteAsk: args.quoteAsk ?? null,
+    quoteAt: args.quoteAt ?? null,
+    quoteIsStale: args.quoteIsStale ? 1 : 0,
+    eventType: args.eventType,
+    decision: args.decision ?? null,
+    rejectCheck: args.rejectCheck ?? null,
+    rejectReason: args.rejectReason ?? null,
+    actorType: args.ctx.actorType,
+    sessionId: args.ctx.sessionId ?? null,
+    ip: args.ctx.ip ?? null,
+    userAgent: args.ctx.userAgent ?? null,
+    eventAt,
+    payload: args.payload ?? null,
+  };
+
+  const eventHash = sha256Hex(prevHash + "\n" + stableStringify(envelope));
+
+  db.prepare(`
+    INSERT INTO order_intent_audit (
+      correlation_id, trade_id, user_id, symbol, side, order_type, lots,
+      requested_price, trigger_price, take_profit, stop_loss,
+      quote_bid, quote_ask, quote_at, quote_is_stale,
+      event_type, decision, reject_check, reject_reason,
+      actor_type, session_id, ip, user_agent,
+      event_at, prev_hash, event_hash, payload_json
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    envelope.correlationId,
+    envelope.tradeId,
+    envelope.userId,
+    envelope.symbol,
+    envelope.side,
+    envelope.orderType,
+    envelope.lots,
+    envelope.requestedPrice,
+    envelope.triggerPrice,
+    envelope.takeProfit,
+    envelope.stopLoss,
+    envelope.quoteBid,
+    envelope.quoteAsk,
+    envelope.quoteAt,
+    envelope.quoteIsStale,
+    envelope.eventType,
+    envelope.decision,
+    envelope.rejectCheck,
+    envelope.rejectReason,
+    envelope.actorType,
+    envelope.sessionId,
+    envelope.ip,
+    envelope.userAgent,
+    envelope.eventAt,
+    prevHash,
+    eventHash,
+    JSON.stringify(envelope.payload ?? null)
+  );
+}
+```
+
+---
+
+## /backend/src/middleware/auditContext.ts
+
+```ts
+import type { Request, Response, NextFunction } from "express";
+import { getOrCreateCorrelationId, type AuditContext } from "../audit/auditTrail";
+
+declare global {
+  namespace Express {
+    interface Request {
+      auditContext?: AuditContext;
+    }
+  }
+}
+
+export function attachAuditContext(req: Request, res: Response, next: NextFunction) {
+  const headerCorr = req.header("x-correlation-id");
+  const bodyCorr = (req.body && (req.body.correlationId || req.body.correlation_id)) || null;
+
+  const correlationId = getOrCreateCorrelationId((headerCorr || bodyCorr) as string | null);
+
+  // express-session puts an id on req.sessionID if configured
+  const sessionId = (req as any).sessionID ?? null;
+
+  req.auditContext = {
+    correlationId,
+    actorType: "USER",
+    actorUserId: null,
+    sessionId,
+    ip: req.ip ?? null,
+    userAgent: req.get("user-agent") ?? null,
+  };
+
+  res.setHeader("x-correlation-id", correlationId);
+  next();
+}
+```
+
+---
+
+## /backend/src/middleware/auth.ts
+
+```ts
+import type { Request, Response, NextFunction } from "express";
+import type { DB } from "../db/db";
+
+export function requireAuth(db: DB) {
+  return (req: Request, res: Response, next: NextFunction) => {
+    const userId = (req.session as any)?.userId as string | undefined;
+    if (!userId) return res.status(401).json({ error: "UNAUTHENTICATED" });
+
+    const user = db.prepare(`SELECT id, role, is_frozen, is_disabled FROM users WHERE id = ?`).get(userId) as any;
+    if (!user) return res.status(401).json({ error: "UNAUTHENTICATED" });
+
+    (req as any).user = user;
+    next();
+  };
+}
+
+export function requireAdmin() {
+  return (req: Request, res: Response, next: NextFunction) => {
+    const user = (req as any).user;
+    if (!user || user.role !== "ADMIN") return res.status(403).json({ error: "FORBIDDEN" });
+    next();
+  };
+}
+```
+
+---
+
+## /backend/src/middleware/risk.ts
+
+```ts
+import type { Request, Response, NextFunction } from "express";
+import type { DB } from "../db/db";
+import { writeOrderIntentAudit } from "../audit/auditTrail";
+
+type TradeSettings = {
+  max_trades_total: number;
+  max_trades_per_symbol: number;
+  max_lots_total: number;
+  quote_max_age_ms: number;
+};
+
+function getTradeSettings(db: DB): TradeSettings {
+  const row = db.prepare(`SELECT max_trades_total, max_trades_per_symbol, max_lots_total, quote_max_age_ms FROM trade_settings WHERE id = 1`).get() as any;
+  return {
+    max_trades_total: Number(row?.max_trades_total ?? 5),
+    max_trades_per_symbol: Number(row?.max_trades_per_symbol ?? 3),
+    max_lots_total: Number(row?.max_lots_total ?? 50),
+    quote_max_age_ms: Number(row?.quote_max_age_ms ?? 15000),
+  };
+}
+
+function getUserOverrides(db: DB, userId: string): Partial<TradeSettings> {
+  const row = db.prepare(`SELECT risk_overrides_json FROM users WHERE id = ?`).get(userId) as any;
+  if (!row?.risk_overrides_json) return {};
+  try {
+    const o = JSON.parse(row.risk_overrides_json);
+    return {
+      max_trades_total: o.max_trades_total ?? o.maxTradesTotal,
+      max_trades_per_symbol: o.max_trades_per_symbol ?? o.maxTradesPerSymbol,
+      max_lots_total: o.max_lots_total ?? o.maxLotsTotal,
+      quote_max_age_ms: o.quote_max_age_ms ?? o.quoteMaxAgeMs,
+    };
+  } catch {
+    return {};
+  }
+}
+
+function effectiveSettings(global: TradeSettings, overrides: Partial<TradeSettings>): TradeSettings {
+  return {
+    max_trades_total: Number(overrides.max_trades_total ?? global.max_trades_total),
+    max_trades_per_symbol: Number(overrides.max_trades_per_symbol ?? global.max_trades_per_symbol),
+    max_lots_total: Number(overrides.max_lots_total ?? global.max_lots_total),
+    quote_max_age_ms: Number(overrides.quote_max_age_ms ?? global.quote_max_age_ms),
+  };
+}
+
+export function riskMiddleware(db: DB) {
+  return (req: Request, res: Response, next: NextFunction) => {
+    const user = (req as any).user as { id: string; is_frozen: number; is_disabled: number };
+    const ctx = req.auditContext!;
+    const body = req.body || {};
+
+    const symbol = String(body.symbol || "");
+    const side = String(body.side || "");
+    const orderType = String(body.orderType || body.order_type || "");
+    const lots = Number(body.lots ?? 0);
+
+    const requestedPrice = body.requestedPrice != null ? Number(body.requestedPrice) : null;
+    const triggerPrice = body.triggerPrice != null ? Number(body.triggerPrice) : null;
+    const takeProfit = body.takeProfit != null ? Number(body.takeProfit) : null;
+    const stopLoss = body.stopLoss != null ? Number(body.stopLoss) : null;
+
+    const quoteBid = body.quoteBid != null ? Number(body.quoteBid) : null;
+    const quoteAsk = body.quoteAsk != null ? Number(body.quoteAsk) : null;
+    const quoteAt = body.quoteAt != null ? Number(body.quoteAt) : null;
+
+    // 1) Log RECEIVED intent (pre-risk)
+    try {
+      writeOrderIntentAudit(db, {
+        correlationId: ctx.correlationId,
+        userId: user.id,
+        symbol, side, orderType,
+        lots,
+        requestedPrice, triggerPrice, takeProfit, stopLoss,
+        quoteBid, quoteAsk, quoteAt,
+        quoteIsStale: false,
+        eventType: "RECEIVED",
+        ctx,
+        payload: { path: req.path, method: req.method }
+      });
+    } catch {
+      // do not block trading if audit insert fails
+    }
+
+    const reject = (rejectCheck: string, rejectReason: string, extra?: any) => {
+      try {
+        writeOrderIntentAudit(db, {
+          correlationId: ctx.correlationId,
+          userId: user.id,
+          symbol, side, orderType,
+          lots,
+          requestedPrice, triggerPrice, takeProfit, stopLoss,
+          quoteBid, quoteAsk, quoteAt,
+          quoteIsStale: extra?.quoteIsStale ?? false,
+          eventType: "DECISION",
+          decision: "REJECT",
+          rejectCheck,
+          rejectReason,
+          ctx,
+          payload: extra ?? null,
+        });
+      } catch { /* ignore */ }
+
+      return res.status(400).json({ error: "RISK_REJECT", check: rejectCheck, reason: rejectReason, correlationId: ctx.correlationId });
+    };
+
+    // 2) Account state checks
+    if (user.is_disabled) return reject("ACCOUNT_DISABLED", "Account is disabled");
+    if (user.is_frozen) return reject("ACCOUNT_FROZEN", "Account is frozen");
+
+    // 3) Quote staleness check (optional but supported)
+    const global = getTradeSettings(db);
+    const overrides = getUserOverrides(db, user.id);
+    const limits = effectiveSettings(global, overrides);
+
+    if (quoteAt != null) {
+      const age = Date.now() - quoteAt;
+      if (age > limits.quote_max_age_ms) {
+        return reject("STALE_QUOTE", `Quote age ${age}ms exceeds limit ${limits.quote_max_age_ms}ms`, { quoteIsStale: true, quoteAgeMs: age });
+      }
+    }
+
+    // 4) Concurrency: count OPEN + PENDING
+    const totalConcurrent = db.prepare(`
+      SELECT COUNT(*) as c
+      FROM trades
+      WHERE user_id = ? AND status IN ('OPEN','PENDING')
+    `).get(user.id) as any;
+
+    if (Number(totalConcurrent?.c ?? 0) >= limits.max_trades_total) {
+      return reject("MAX_TRADES_TOTAL", `Max total concurrent trades exceeded (${limits.max_trades_total})`, { current: Number(totalConcurrent?.c ?? 0) });
+    }
+
+    const perSymbolConcurrent = db.prepare(`
+      SELECT COUNT(*) as c
+      FROM trades
+      WHERE user_id = ? AND symbol = ? AND status IN ('OPEN','PENDING')
+    `).get(user.id, symbol) as any;
+
+    if (Number(perSymbolConcurrent?.c ?? 0) >= limits.max_trades_per_symbol) {
+      return reject("MAX_TRADES_PER_SYMBOL", `Max concurrent trades per symbol exceeded (${limits.max_trades_per_symbol})`, { symbol, current: Number(perSymbolConcurrent?.c ?? 0) });
+    }
+
+    // 5) NEW: total concurrent lots (OPEN + PENDING)
+    const lotsRow = db.prepare(`
+      SELECT COALESCE(SUM(lots), 0) as s
+      FROM trades
+      WHERE user_id = ? AND status IN ('OPEN','PENDING')
+    `).get(user.id) as any;
+
+    const existingLots = Number(lotsRow?.s ?? 0);
+    const afterLots = existingLots + lots;
+
+    if (afterLots > limits.max_lots_total) {
+      return reject("MAX_LOTS_TOTAL", `Max concurrent lots exceeded (${limits.max_lots_total})`, { existingLots, requestedLots: lots, afterLots });
+    }
+
+    // PASS decision (write it once here; trade_id will be linked later)
+    try {
+      writeOrderIntentAudit(db, {
+        correlationId: ctx.correlationId,
+        userId: user.id,
+        symbol, side, orderType,
+        lots,
+        requestedPrice, triggerPrice, takeProfit, stopLoss,
+        quoteBid, quoteAsk, quoteAt,
+        quoteIsStale: false,
+        eventType: "DECISION",
+        decision: "PASS",
+        ctx,
+      });
+    } catch { /* ignore */ }
+
+    next();
+  };
+}
+```
+
+---
+
+## /backend/src/middleware/sessionTracking.ts
+
+```ts
+import type { Request, Response, NextFunction } from "express";
+import type { DB } from "../db/db";
+
+export function recordLogin(db: DB, userId: string, req: Request) {
+  const sessionId = (req as any).sessionID ?? null;
+  const ip = req.ip ?? null;
+  const ua = req.get("user-agent") ?? null;
+  const now = Date.now();
+
+  if (sessionId) {
+    db.prepare(`
+      INSERT INTO login_sessions (session_id, user_id, login_at, login_ip, user_agent)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(sessionId, userId, now, ip, ua);
+
+    db.prepare(`
+      INSERT INTO timeline_events (user_id, event_type, event_at, ip, ref_id, meta_json)
+      VALUES (?, 'LOGIN', ?, ?, ?, ?)
+    `).run(userId, now, ip, sessionId, JSON.stringify({ userAgent: ua }));
+  }
+}
+
+export function recordLogout(db: DB, userId: string, req: Request) {
+  const sessionId = (req as any).sessionID ?? null;
+  const ip = req.ip ?? null;
+  const now = Date.now();
+
+  if (!sessionId) return;
+
+  db.prepare(`
+    UPDATE login_sessions
+    SET logout_at = ?
+    WHERE user_id = ? AND session_id = ? AND logout_at IS NULL
+  `).run(now, userId, sessionId);
+
+  db.prepare(`
+    INSERT INTO timeline_events (user_id, event_type, event_at, ip, ref_id, meta_json)
+    VALUES (?, 'LOGOUT', ?, ?, ?, ?)
+  `).run(userId, now, ip, sessionId, JSON.stringify({}));
+}
+
+export function sessionGuard(_db: DB) {
+  return (_req: Request, _res: Response, next: NextFunction) => next();
+}
+```
+
+---
+
+## /backend/src/routes/auth.ts
+
+```ts
+import { Router } from "express";
+import type { DB } from "../db/db";
+import crypto from "node:crypto";
+import { recordLogin, recordLogout } from "../middleware/sessionTracking";
+
+function hashPassword(pw: string): string {
+  // Minimal (replace with bcrypt/argon2 in production)
+  return crypto.createHash("sha256").update(pw).digest("hex");
+}
+
+export function authRoutes(db: DB) {
+  const r = Router();
+
+  r.post("/login", (req, res) => {
+    const { email, password } = req.body || {};
+    if (!email || !password) return res.status(400).json({ error: "BAD_REQUEST" });
+
+    const user = db.prepare(`SELECT id, password_hash, role, is_frozen, is_disabled FROM users WHERE email = ?`).get(String(email)) as any;
+    if (!user) return res.status(401).json({ error: "INVALID_CREDENTIALS" });
+
+    if (user.password_hash !== hashPassword(String(password))) {
+      return res.status(401).json({ error: "INVALID_CREDENTIALS" });
+    }
+
+    (req.session as any).userId = user.id;
+    recordLogin(db, user.id, req);
+
+    res.json({ ok: true, user: { id: user.id, role: user.role, isFrozen: !!user.is_frozen, isDisabled: !!user.is_disabled } });
+  });
+
+  r.post("/logout", (req, res) => {
+    const userId = (req.session as any)?.userId;
+    if (userId) recordLogout(db, userId, req);
+
+    req.session.destroy((err) => {
+      if (err) return res.status(500).json({ error: "LOGOUT_FAILED" });
+      res.json({ ok: true });
+    });
+  });
+
+  r.get("/me", (req, res) => {
+    const userId = (req.session as any)?.userId;
+    if (!userId) return res.status(401).json({ error: "UNAUTHENTICATED" });
+    const user = db.prepare(`SELECT id, email, role, is_frozen, is_disabled FROM users WHERE id = ?`).get(userId) as any;
+    if (!user) return res.status(401).json({ error: "UNAUTHENTICATED" });
+    res.json({ id: user.id, email: user.email, role: user.role, isFrozen: !!user.is_frozen, isDisabled: !!user.is_disabled });
+  });
+
+  return r;
+}
+```
+
+---
+
+## /backend/src/routes/trades.ts
+
+```ts
+import { Router } from "express";
+import type { DB } from "../db/db";
+import crypto from "node:crypto";
+import { writeTradeAudit, writeOrderIntentAudit } from "../audit/auditTrail";
+import { attachAuditContext } from "../middleware/auditContext";
+import { requireAuth } from "../middleware/auth";
+import { riskMiddleware } from "../middleware/risk";
+
+function uuid(): string {
+  return crypto.randomUUID();
+}
+
+export function tradeRoutes(db: DB) {
+  const r = Router();
+
+  // Create trade (market opens immediately; pending stays PENDING)
+  r.post("/trades", attachAuditContext, requireAuth(db), riskMiddleware(db), (req, res) => {
+    const user = (req as any).user as { id: string };
+    const ctx = req.auditContext!;
+    const b = req.body || {};
+
+    const tradeId = uuid();
+    const now = Date.now();
+
+    const symbol = String(b.symbol);
+    const side = String(b.side);
+    const orderType = String(b.orderType || "MARKET");
+    const lots = Number(b.lots);
+
+    const requestedPrice = b.requestedPrice != null ? Number(b.requestedPrice) : null;
+    const triggerPrice = b.triggerPrice != null ? Number(b.triggerPrice) : null;
+    const takeProfit = b.takeProfit != null ? Number(b.takeProfit) : null;
+    const stopLoss = b.stopLoss != null ? Number(b.stopLoss) : null;
+
+    const status = orderType === "MARKET" ? "OPEN" : "PENDING";
+    const entryPrice = orderType === "MARKET" ? requestedPrice : null;
+
+    db.prepare(`
+      INSERT INTO trades (
+        id, user_id, symbol, side, order_type, status, lots,
+        requested_price, trigger_price, entry_price, take_profit, stop_loss,
+        opened_at, correlation_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      tradeId, user.id, symbol, side, orderType, status, lots,
+      requestedPrice, triggerPrice, entryPrice, takeProfit, stopLoss,
+      status === "OPEN" ? now : null,
+      ctx.correlationId
+    );
+
+    // Link correlation decision rows to trade_id (best effort)
+    try {
+      db.prepare(`
+        UPDATE order_intent_audit
+        SET trade_id = COALESCE(trade_id, ?)
+        WHERE correlation_id = ? AND user_id = ?
+      `).run(tradeId, ctx.correlationId, user.id);
+
+      // Optional: add a DECISION payload that now includes tradeId (append-only)
+      writeOrderIntentAudit(db, {
+        correlationId: ctx.correlationId,
+        tradeId,
+        userId: user.id,
+        symbol, side, orderType, lots,
+        requestedPrice, triggerPrice, takeProfit, stopLoss,
+        eventType: "DECISION",
+        decision: "PASS",
+        ctx,
+        payload: { linkedTradeId: true }
+      });
+    } catch { /* ignore */ }
+
+    // Trade audit events
+    writeTradeAudit(db, {
+      tradeId,
+      userId: user.id,
+      correlationId: ctx.correlationId,
+      eventType: "ORDER_PLACED",
+      ctx: { ...ctx, actorType: "USER", actorUserId: user.id },
+      eventAt: now,
+      payload: { symbol, side, orderType, lots, requestedPrice, triggerPrice }
+    });
+
+    if (status === "OPEN") {
+      writeTradeAudit(db, {
+        tradeId,
+        userId: user.id,
+        correlationId: ctx.correlationId,
+        eventType: "ORDER_FILLED",
+        ctx: { ...ctx, actorType: "SYSTEM" },
+        eventAt: now,
+        payload: { entryPrice: entryPrice, filledAt: now }
+      });
+
+      db.prepare(`
+        INSERT INTO timeline_events (user_id, event_type, event_at, ip, ref_id, meta_json)
+        VALUES (?, 'TRADE_OPEN', ?, ?, ?, ?)
+      `).run(user.id, now, ctx.ip ?? null, tradeId, JSON.stringify({ symbol, side, lots }));
+    }
+
+    res.json({ ok: true, tradeId, correlationId: ctx.correlationId, status });
+  });
+
+  // Cancel pending order
+  r.post("/trades/:id/cancel", attachAuditContext, requireAuth(db), (req, res) => {
+    const user = (req as any).user as { id: string };
+    const ctx = req.auditContext!;
+    const tradeId = String(req.params.id);
+
+    const trade = db.prepare(`SELECT id, status, user_id, symbol FROM trades WHERE id = ?`).get(tradeId) as any;
+    if (!trade) return res.status(404).json({ error: "NOT_FOUND" });
+    if (trade.user_id !== user.id) return res.status(403).json({ error: "FORBIDDEN" });
+
+    if (trade.status !== "PENDING") {
+      return res.status(400).json({ error: "NOT_PENDING" });
+    }
+
+    db.prepare(`UPDATE trades SET status = 'CANCELED' WHERE id = ?`).run(tradeId);
+
+    writeTradeAudit(db, {
+      tradeId,
+      userId: user.id,
+      correlationId: ctx.correlationId,
+      eventType: "ORDER_CANCELED",
+      ctx: { ...ctx, actorType: "USER", actorUserId: user.id },
+      payload: { reason: "User canceled" }
+    });
+
+    res.json({ ok: true, tradeId, correlationId: ctx.correlationId });
+  });
+
+  // Manual close
+  r.post("/trades/:id/close", attachAuditContext, requireAuth(db), (req, res) => {
+    const user = (req as any).user as { id: string };
+    const ctx = req.auditContext!;
+    const tradeId = String(req.params.id);
+    const now = Date.now();
+
+    const trade = db.prepare(`SELECT id, status, user_id, symbol, side, lots FROM trades WHERE id = ?`).get(tradeId) as any;
+    if (!trade) return res.status(404).json({ error: "NOT_FOUND" });
+    if (trade.user_id !== user.id) return res.status(403).json({ error: "FORBIDDEN" });
+    if (trade.status !== "OPEN") return res.status(400).json({ error: "NOT_OPEN" });
+
+    db.prepare(`UPDATE trades SET status = 'CLOSED', closed_at = ? WHERE id = ?`).run(now, tradeId);
+
+    writeTradeAudit(db, {
+      tradeId,
+      userId: user.id,
+      correlationId: ctx.correlationId,
+      eventType: "POSITION_CLOSED",
+      ctx: { ...ctx, actorType: "USER", actorUserId: user.id },
+      eventAt: now,
+      payload: { closedAt: now, reason: "Manual close" }
+    });
+
+    db.prepare(`
+      INSERT INTO timeline_events (user_id, event_type, event_at, ip, ref_id, meta_json)
+      VALUES (?, 'TRADE_CLOSE', ?, ?, ?, ?)
+    `).run(user.id, now, ctx.ip ?? null, tradeId, JSON.stringify({ symbol: trade.symbol, side: trade.side, lots: trade.lots }));
+
+    res.json({ ok: true, tradeId, correlationId: ctx.correlationId });
+  });
+
+  // Update TP/SL
+  r.post("/trades/:id/targets", attachAuditContext, requireAuth(db), (req, res) => {
+    const user = (req as any).user as { id: string };
+    const ctx = req.auditContext!;
+    const tradeId = String(req.params.id);
+
+    const b = req.body || {};
+    const takeProfit = b.takeProfit != null ? Number(b.takeProfit) : null;
+    const stopLoss = b.stopLoss != null ? Number(b.stopLoss) : null;
+
+    const trade = db.prepare(`SELECT id, user_id, status FROM trades WHERE id = ?`).get(tradeId) as any;
+    if (!trade) return res.status(404).json({ error: "NOT_FOUND" });
+    if (trade.user_id !== user.id) return res.status(403).json({ error: "FORBIDDEN" });
+    if (trade.status !== "OPEN") return res.status(400).json({ error: "NOT_OPEN" });
+
+    db.prepare(`UPDATE trades SET take_profit = ?, stop_loss = ? WHERE id = ?`).run(takeProfit, stopLoss, tradeId);
+
+    writeTradeAudit(db, {
+      tradeId,
+      userId: user.id,
+      correlationId: ctx.correlationId,
+      eventType: "TARGETS_UPDATED",
+      ctx: { ...ctx, actorType: "USER", actorUserId: user.id },
+      payload: { takeProfit, stopLoss }
+    });
+
+    res.json({ ok: true, tradeId, correlationId: ctx.correlationId });
+  });
+
+  return r;
+}
+```
+
+---
+
+## /backend/src/routes/admin.ts
+
+```ts
+import { Router } from "express";
+import type { DB } from "../db/db";
+import { requireAuth, requireAdmin } from "../middleware/auth";
+
+export function adminRoutes(db: DB) {
+  const r = Router();
+
+  // Trade settings (persisted)
+  r.get("/admin/trade-settings", requireAuth(db), requireAdmin(), (_req, res) => {
+    const row = db.prepare(`SELECT * FROM trade_settings WHERE id = 1`).get();
+    res.json(row);
+  });
+
+  r.put("/admin/trade-settings", requireAuth(db), requireAdmin(), (req, res) => {
+    const b = req.body || {};
+    const maxTradesTotal = b.max_trades_total ?? b.maxTradesTotal;
+    const maxTradesPerSymbol = b.max_trades_per_symbol ?? b.maxTradesPerSymbol;
+    const maxLotsTotal = b.max_lots_total ?? b.maxLotsTotal;
+    const quoteMaxAgeMs = b.quote_max_age_ms ?? b.quoteMaxAgeMs;
+
+    db.prepare(`
+      UPDATE trade_settings
+      SET max_trades_total = COALESCE(?, max_trades_total),
+          max_trades_per_symbol = COALESCE(?, max_trades_per_symbol),
+          max_lots_total = COALESCE(?, max_lots_total),
+          quote_max_age_ms = COALESCE(?, quote_max_age_ms),
+          updated_at = (strftime('%s','now') * 1000)
+      WHERE id = 1
+    `).run(
+      maxTradesTotal != null ? Number(maxTradesTotal) : null,
+      maxTradesPerSymbol != null ? Number(maxTradesPerSymbol) : null,
+      maxLotsTotal != null ? Number(maxLotsTotal) : null,
+      quoteMaxAgeMs != null ? Number(quoteMaxAgeMs) : null
+    );
+
+    res.json({ ok: true });
+  });
+
+  // Users list (supports Active/Frozen/Disabled mini-tabs)
+  r.get("/admin/users", requireAuth(db), requireAdmin(), (req, res) => {
+    const status = String(req.query.status || "active"); // active | frozen | disabled
+    let where = "WHERE 1=1";
+    if (status === "disabled") where += " AND is_disabled = 1";
+    if (status === "frozen") where += " AND is_disabled = 0 AND is_frozen = 1";
+    if (status === "active") where += " AND is_disabled = 0 AND is_frozen = 0";
+
+    const rows = db.prepare(`
+      SELECT id, email, role, is_frozen, freeze_reason, frozen_at, is_disabled, disabled_at, risk_overrides_json
+      FROM users
+      ${where}
+      ORDER BY created_at DESC
+      LIMIT 500
+    `).all();
+
+    res.json(rows);
+  });
+
+  // Freeze/unfreeze/disable/enable with correct state transitions
+  r.post("/admin/users/:id/freeze", requireAuth(db), requireAdmin(), (req, res) => {
+    const id = String(req.params.id);
+    const reason = (req.body && String(req.body.reason || "")) || null;
+    const now = Date.now();
+    db.prepare(`
+      UPDATE users
+      SET is_frozen = 1, freeze_reason = ?, frozen_at = ?
+      WHERE id = ?
+    `).run(reason, now, id);
+    res.json({ ok: true });
+  });
+
+  r.post("/admin/users/:id/unfreeze", requireAuth(db), requireAdmin(), (req, res) => {
+    const id = String(req.params.id);
+    db.prepare(`
+      UPDATE users
+      SET is_frozen = 0, freeze_reason = NULL, frozen_at = NULL
+      WHERE id = ? AND is_disabled = 0
+    `).run(id);
+    // If disabled, unfreeze should not move them to active; they stay disabled until enabled.
+    res.json({ ok: true });
+  });
+
+  r.post("/admin/users/:id/disable", requireAuth(db), requireAdmin(), (req, res) => {
+    const id = String(req.params.id);
+    const now = Date.now();
+    db.prepare(`UPDATE users SET is_disabled = 1, disabled_at = ? WHERE id = ?`).run(now, id);
+    res.json({ ok: true });
+  });
+
+  r.post("/admin/users/:id/enable", requireAuth(db), requireAdmin(), (req, res) => {
+    const id = String(req.params.id);
+    // Critical rule: enabling only clears disabled flag; frozen state is preserved.
+    db.prepare(`UPDATE users SET is_disabled = 0, disabled_at = NULL WHERE id = ?`).run(id);
+    res.json({ ok: true });
+  });
+
+  // Per-user overrides (allow exceeding global limits)
+  r.put("/admin/users/:id/risk-overrides", requireAuth(db), requireAdmin(), (req, res) => {
+    const id = String(req.params.id);
+    const payload = req.body || {};
+    db.prepare(`UPDATE users SET risk_overrides_json = ? WHERE id = ?`).run(JSON.stringify(payload), id);
+    res.json({ ok: true });
+  });
+
+  // Trade audit feed
+  r.get("/admin/trade-audit", requireAuth(db), requireAdmin(), (req, res) => {
+    const { userId, tradeId, correlationId, eventType, limit } = req.query as any;
+    const lim = Math.min(Number(limit ?? 200), 1000);
+
+    const clauses: string[] = [];
+    const params: any[] = [];
+    if (userId) { clauses.push("user_id = ?"); params.push(String(userId)); }
+    if (tradeId) { clauses.push("trade_id = ?"); params.push(String(tradeId)); }
+    if (correlationId) { clauses.push("correlation_id = ?"); params.push(String(correlationId)); }
+    if (eventType) { clauses.push("event_type = ?"); params.push(String(eventType)); }
+
+    const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+    const rows = db.prepare(`
+      SELECT *
+      FROM trade_audit
+      ${where}
+      ORDER BY id DESC
+      LIMIT ${lim}
+    `).all(...params);
+
+    res.json(rows);
+  });
+
+  // Order intent audit feed (captures rejects)
+  r.get("/admin/order-intents", requireAuth(db), requireAdmin(), (req, res) => {
+    const { userId, correlationId, decision, limit } = req.query as any;
+    const lim = Math.min(Number(limit ?? 200), 1000);
+
+    const clauses: string[] = [];
+    const params: any[] = [];
+    if (userId) { clauses.push("user_id = ?"); params.push(String(userId)); }
+    if (correlationId) { clauses.push("correlation_id = ?"); params.push(String(correlationId)); }
+    if (decision) { clauses.push("decision = ?"); params.push(String(decision)); }
+
+    const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+    const rows = db.prepare(`
+      SELECT *
+      FROM order_intent_audit
+      ${where}
+      ORDER BY id DESC
+      LIMIT ${lim}
+    `).all(...params);
+
+    res.json(rows);
+  });
+
+  return r;
+}
+```
+
+---
+
+## /backend/src/routes/userTimeline.ts
+
+```ts
+import { Router } from "express";
+import type { DB } from "../db/db";
+import { requireAuth, requireAdmin } from "../middleware/auth";
+
+export function userTimelineRoutes(db: DB) {
+  const r = Router();
+
+  // Returns unified timeline with session length computed
+  r.get("/admin/users/:id/timeline", requireAuth(db), requireAdmin(), (req, res) => {
+    const userId = String(req.params.id);
+
+    const events = db.prepare(`
+      SELECT id, event_type, event_at, ip, ref_id, meta_json
+      FROM timeline_events
+      WHERE user_id = ?
+      ORDER BY event_at DESC
+      LIMIT 1000
+    `).all(userId) as any[];
+
+    // Pull sessions to compute session length
+    const sessions = db.prepare(`
+      SELECT session_id, login_at, login_ip, logout_at
+      FROM login_sessions
+      WHERE user_id = ?
+      ORDER BY id DESC
+      LIMIT 200
+    `).all(userId) as any[];
+
+    const sessionMap = new Map<string, any>();
+    for (const s of sessions) sessionMap.set(s.session_id, s);
+
+    const enriched = events.map((e) => {
+      if (e.event_type === "LOGIN" || e.event_type === "LOGOUT") {
+        const sess = e.ref_id ? sessionMap.get(e.ref_id) : null;
+        const loginAt = sess?.login_at ?? null;
+        const logoutAt = sess?.logout_at ?? null;
+        const sessionLengthMs = (loginAt && logoutAt) ? (logoutAt - loginAt) : null;
+        return {
+          ...e,
+          loginAt,
+          loginIp: sess?.login_ip ?? e.ip ?? null,
+          logoutAt,
+          sessionLengthMs,
+        };
+      }
+      return e;
+    });
+
+    res.json(enriched);
+  });
+
+  return r;
+}
+```
+
+---
+
+## /backend/src/server.ts
+
+```ts
+import express from "express";
+import session from "express-session";
+import cors from "cors";
+import { getDb } from "./db/db";
+import { ensureSchema } from "./db/ensureSchema";
+import { authRoutes } from "./routes/auth";
+import { tradeRoutes } from "./routes/trades";
+import { adminRoutes } from "./routes/admin";
+import { userTimelineRoutes } from "./routes/userTimeline";
+
+const db = getDb();
+ensureSchema(db);
+
+const app = express();
+
+app.use(cors({
+  origin: true,
+  credentials: true,
+}));
+
+app.use(express.json({ limit: "1mb" }));
+
+app.use(session({
+  secret: process.env.SESSION_SECRET || "dev-secret-change-me",
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: false,
+    maxAge: 1000 * 60 * 60 * 24 * 7,
+  }
+}));
+
+app.get("/health", (_req, res) => res.json({ ok: true }));
+
+app.use("/api", authRoutes(db));
+app.use("/api", tradeRoutes(db));
+app.use("/api", adminRoutes(db));
+app.use("/api", userTimelineRoutes(db));
+
+const port = Number(process.env.PORT || 3001);
+app.listen(port, () => {
+  // eslint-disable-next-line no-console
+  console.log(`Backend listening on :${port}`);
+});
+```
+
+---
+
+# FRONTEND
+
+## /frontend/src/api/client.ts
+
+```ts
+export async function api<T>(path: string, opts: RequestInit = {}): Promise<T> {
+  const res = await fetch(`/api${path}`, {
+    ...opts,
+    headers: {
+      "Content-Type": "application/json",
+      ...(opts.headers || {}),
+    },
+    credentials: "include",
+  });
+
+  const text = await res.text();
+  const data = text ? JSON.parse(text) : null;
+
+  if (!res.ok) {
+    const msg = data?.error || `HTTP_${res.status}`;
+    throw Object.assign(new Error(msg), { data, status: res.status });
+  }
+  return data as T;
+}
+```
+
+## /frontend/src/utils/csv.ts
+
+```ts
+export function toCsv(rows: Array<Record<string, any>>, columns: string[]): string {
+  const esc = (v: any) => {
+    if (v === null || v === undefined) return "";
+    const s = String(v);
+    if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+    return s;
+  };
+  const header = columns.map(esc).join(",");
+  const lines = rows.map(r => columns.map(c => esc(r[c])).join(","));
+  return [header, ...lines].join("\n");
+}
+
+export function downloadCsv(filename: string, csv: string) {
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+```
+
+## /frontend/src/components/VerticalTimeline.tsx
+
+```tsx
+import React from "react";
+
+type Item = {
+  id: number | string;
+  event_type: string;
+  event_at: number;
+  ip?: string | null;
+  ref_id?: string | null;
+  meta_json?: string | null;
+  loginAt?: number | null;
+  loginIp?: string | null;
+  logoutAt?: number | null;
+  sessionLengthMs?: number | null;
+};
+
+function fmt(ts?: number | null) {
+  if (!ts) return "";
+  return new Date(ts).toLocaleString();
+}
+
+function fmtDuration(ms?: number | null) {
+  if (!ms && ms !== 0) return "";
+  const sec = Math.floor(ms / 1000);
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = sec % 60;
+  return `${h}h ${m}m ${s}s`;
+}
+
+export function VerticalTimeline({ items }: { items: Item[] }) {
+  return (
+    <div style={{ position: "relative", paddingLeft: 20 }}>
+      <div style={{ position: "absolute", left: 8, top: 0, bottom: 0, width: 2, background: "#ddd" }} />
+      {items.map((it) => (
+        <div key={String(it.id)} style={{ position: "relative", padding: "10px 0 10px 0" }}>
+          <div style={{
+            position: "absolute",
+            left: 2,
+            top: 16,
+            width: 14,
+            height: 14,
+            borderRadius: 999,
+            background: "#fff",
+            border: "2px solid #333"
+          }} />
+          <div style={{ marginLeft: 24, border: "1px solid #eee", borderRadius: 8, padding: 10 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+              <strong>{it.event_type}</strong>
+              <span style={{ color: "#555" }}>{fmt(it.event_at)}</span>
+            </div>
+
+            {(it.event_type === "LOGIN" || it.event_type === "LOGOUT") && (
+              <div style={{ marginTop: 6, fontSize: 13, color: "#333" }}>
+                <div><strong>Login Time:</strong> {fmt(it.loginAt)}</div>
+                <div><strong>Login IP:</strong> {it.loginIp || it.ip || ""}</div>
+                <div><strong>Logout Time:</strong> {fmt(it.logoutAt)}</div>
+                <div><strong>Session Length:</strong> {fmtDuration(it.sessionLengthMs)}</div>
+              </div>
+            )}
+
+            {it.ref_id && (
+              <div style={{ marginTop: 6, fontSize: 12, color: "#666" }}>
+                Ref: {it.ref_id}
+              </div>
+            )}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+```
+
+---
+
+## /frontend/src/pages/AdminUserManagement.tsx
+
+```tsx
+import React, { useEffect, useMemo, useState } from "react";
+import { api } from "../api/client";
+
+type UserRow = {
+  id: string;
+  email: string;
+  role: string;
+  is_frozen: number;
+  freeze_reason?: string | null;
+  is_disabled: number;
+  risk_overrides_json?: string | null;
+};
+
+export function AdminUserManagement({ onOpenTimeline }: { onOpenTimeline: (userId: string) => void }) {
+  const [tab, setTab] = useState<"active" | "frozen" | "disabled">("active");
+  const [rows, setRows] = useState<UserRow[]>([]);
+  const [busy, setBusy] = useState<string | null>(null);
+
+  const load = async () => {
+    const data = await api<UserRow[]>(`/admin/users?status=${tab}`);
+    setRows(data);
+  };
+
+  useEffect(() => { load().catch(console.error); }, [tab]);
+
+  const action = async (userId: string, type: string, body?: any) => {
+    setBusy(`${userId}:${type}`);
+    try {
+      await api(`/admin/users/${userId}/${type}`, { method: "POST", body: JSON.stringify(body || {}) });
+      await load();
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const header = useMemo(() => {
+    if (tab === "active") return "Active";
+    if (tab === "frozen") return "Frozen";
+    return "Disabled";
+  }, [tab]);
+
+  return (
+    <div>
+      <h2>User Management</h2>
+
+      <div style={{ display: "flex", gap: 10, margin: "10px 0" }}>
+        <button onClick={() => setTab("active")} disabled={tab === "active"}>Active</button>
+        <button onClick={() => setTab("frozen")} disabled={tab === "frozen"}>Frozen</button>
+        <button onClick={() => setTab("disabled")} disabled={tab === "disabled"}>Disabled</button>
+      </div>
+
+      <div style={{ border: "1px solid #eee", borderRadius: 8, padding: 10 }}>
+        <div style={{ marginBottom: 8, color: "#333" }}>
+          <strong>{header}</strong> accounts
+        </div>
+
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead>
+            <tr style={{ textAlign: "left", borderBottom: "1px solid #eee" }}>
+              <th style={{ padding: 8 }}>Email</th>
+              <th style={{ padding: 8 }}>Role</th>
+              <th style={{ padding: 8 }}>State</th>
+              <th style={{ padding: 8 }}>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(u => {
+              const state = u.is_disabled ? "DISABLED" : (u.is_frozen ? "FROZEN" : "ACTIVE");
+              return (
+                <tr key={u.id} style={{ borderBottom: "1px solid #f5f5f5" }}>
+                  <td style={{ padding: 8 }}>{u.email}</td>
+                  <td style={{ padding: 8 }}>{u.role}</td>
+                  <td style={{ padding: 8 }}>
+                    {state}
+                    {u.freeze_reason ? <span style={{ marginLeft: 8, color: "#666" }}>({u.freeze_reason})</span> : null}
+                  </td>
+                  <td style={{ padding: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <button onClick={() => onOpenTimeline(u.id)}>Timeline</button>
+
+                    {/* Active tab actions */}
+                    {!u.is_disabled && !u.is_frozen && (
+                      <>
+                        <button
+                          disabled={busy === `${u.id}:freeze`}
+                          onClick={() => action(u.id, "freeze", { reason: "Admin freeze" })}
+                        >
+                          Freeze
+                        </button>
+                        <button
+                          disabled={busy === `${u.id}:disable`}
+                          onClick={() => action(u.id, "disable")}
+                        >
+                          Disable
+                        </button>
+                      </>
+                    )}
+
+                    {/* Frozen tab actions: Unfreeze + Disable */}
+                    {!u.is_disabled && u.is_frozen && (
+                      <>
+                        <button
+                          disabled={busy === `${u.id}:unfreeze`}
+                          onClick={() => action(u.id, "unfreeze")}
+                        >
+                          Unfreeze
+                        </button>
+                        <button
+                          disabled={busy === `${u.id}:disable`}
+                          onClick={() => action(u.id, "disable")}
+                        >
+                          Disable
+                        </button>
+                      </>
+                    )}
+
+                    {/* Disabled tab actions: Enable only (preserves frozen state) */}
+                    {u.is_disabled ? (
+                      <button
+                        disabled={busy === `${u.id}:enable`}
+                        onClick={() => action(u.id, "enable")}
+                      >
+                        Enable
+                      </button>
+                    ) : null}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+
+        {!rows.length && <div style={{ padding: 10, color: "#666" }}>No users in this tab.</div>}
+      </div>
+    </div>
+  );
+}
+```
+
+---
+
+## /frontend/src/pages/AdminUserTimeline.tsx
+
+```tsx
+import React, { useEffect, useMemo, useState } from "react";
+import { api } from "../api/client";
+import { VerticalTimeline } from "../components/VerticalTimeline";
+import { toCsv, downloadCsv } from "../utils/csv";
+
+type TimelineItem = any;
+
+export function AdminUserTimeline({ userId, onClose }: { userId: string; onClose: () => void }) {
+  const [items, setItems] = useState<TimelineItem[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const data = await api<TimelineItem[]>(`/admin/users/${userId}/timeline`);
+      setItems(data);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { load().catch(console.error); }, [userId]);
+
+  const exportCsv = () => {
+    const columns = [
+      "event_type",
+      "event_at",
+      "ip",
+      "ref_id",
+      "loginAt",
+      "loginIp",
+      "sessionLengthMs",
+      "logoutAt"
+    ];
+
+    const rows = items.map((x: any) => ({
+      event_type: x.event_type,
+      event_at: new Date(x.event_at).toISOString(),
+      ip: x.ip || "",
+      ref_id: x.ref_id || "",
+      loginAt: x.loginAt ? new Date(x.loginAt).toISOString() : "",
+      loginIp: x.loginIp || "",
+      sessionLengthMs: x.sessionLengthMs ?? "",
+      logoutAt: x.logoutAt ? new Date(x.logoutAt).toISOString() : "",
+    }));
+
+    const csv = toCsv(rows, columns);
+    downloadCsv(`user-${userId}-timeline.csv`, csv);
+  };
+
+  const title = useMemo(() => `User Timeline: ${userId}`, [userId]);
+
+  return (
+    <div style={{ border: "1px solid #eee", borderRadius: 8, padding: 12, marginTop: 12 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+        <h3 style={{ margin: 0 }}>{title}</h3>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={exportCsv} disabled={!items.length}>Export CSV</button>
+          <button onClick={onClose}>Close</button>
+        </div>
+      </div>
+
+      {loading ? <div style={{ padding: 10 }}>Loading…</div> : <VerticalTimeline items={items} />}
+    </div>
+  );
+}
+```
+
+---
+
+## /frontend/src/pages/AdminTradeAudit.tsx
+
+```tsx
+import React, { useEffect, useMemo, useState } from "react";
+import { api } from "../api/client";
+import { toCsv, downloadCsv } from "../utils/csv";
+
+type TradeAuditRow = any;
+type IntentRow = any;
+
+export function AdminTradeAudit() {
+  const [tab, setTab] = useState<"trade" | "intent">("trade");
+
+  const [userId, setUserId] = useState("");
+  const [tradeId, setTradeId] = useState("");
+  const [correlationId, setCorrelationId] = useState("");
+  const [eventType, setEventType] = useState("");
+  const [decision, setDecision] = useState<"" | "PASS" | "REJECT">("");
+
+  const [rows, setRows] = useState<Array<any>>([]);
+  const [loading, setLoading] = useState(false);
+
+  const query = useMemo(() => {
+    const p = new URLSearchParams();
+    if (userId) p.set("userId", userId);
+    if (tradeId) p.set("tradeId", tradeId);
+    if (correlationId) p.set("correlationId", correlationId);
+    if (eventType) p.set("eventType", eventType);
+    if (decision) p.set("decision", decision);
+    p.set("limit", "300");
+    return p.toString();
+  }, [userId, tradeId, correlationId, eventType, decision]);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      if (tab === "trade") {
+        const data = await api<TradeAuditRow[]>(`/admin/trade-audit?${query}`);
+        setRows(data);
+      } else {
+        const data = await api<IntentRow[]>(`/admin/order-intents?${query}`);
+        setRows(data);
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { load().catch(console.error); }, [tab, query]);
+
+  const exportCsv = () => {
+    const cols = tab === "trade"
+      ? ["id","trade_id","correlation_id","user_id","event_type","actor_type","session_id","ip","event_at","prev_hash","event_hash","payload_json"]
+      : ["id","correlation_id","trade_id","user_id","symbol","side","order_type","lots","event_type","decision","reject_check","reject_reason","ip","event_at","prev_hash","event_hash","payload_json"];
+
+    const out = rows.map((r: any) => ({
+      ...r,
+      event_at: r.event_at ? new Date(r.event_at).toISOString() : "",
+    }));
+
+    downloadCsv(`${tab}-audit.csv`, toCsv(out, cols));
+  };
+
+  return (
+    <div>
+      <h2>Trade Audit</h2>
+
+      <div style={{ display: "flex", gap: 10, margin: "10px 0" }}>
+        <button onClick={() => setTab("trade")} disabled={tab === "trade"}>Trade Events</button>
+        <button onClick={() => setTab("intent")} disabled={tab === "intent"}>Order Intents</button>
+        <button onClick={exportCsv} disabled={!rows.length}>Export CSV</button>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(0, 1fr))", gap: 8, marginBottom: 10 }}>
+        <input placeholder="userId" value={userId} onChange={e => setUserId(e.target.value)} />
+        <input placeholder="tradeId" value={tradeId} onChange={e => setTradeId(e.target.value)} />
+        <input placeholder="correlationId" value={correlationId} onChange={e => setCorrelationId(e.target.value)} />
+        <input placeholder="eventType" value={eventType} onChange={e => setEventType(e.target.value)} />
+        {tab === "intent" ? (
+          <select value={decision} onChange={e => setDecision(e.target.value as any)}>
+            <option value="">Decision (any)</option>
+            <option value="PASS">PASS</option>
+            <option value="REJECT">REJECT</option>
+          </select>
+        ) : (
+          <div />
+        )}
+      </div>
+
+      {loading ? <div>Loading…</div> : null}
+
+      <div style={{ border: "1px solid #eee", borderRadius: 8, overflow: "auto" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+          <thead>
+            <tr style={{ textAlign: "left", borderBottom: "1px solid #eee" }}>
+              {tab === "trade" ? (
+                <>
+                  <th style={{ padding: 8 }}>Time</th>
+                  <th style={{ padding: 8 }}>Trade</th>
+                  <th style={{ padding: 8 }}>Event</th>
+                  <th style={{ padding: 8 }}>Actor</th>
+                  <th style={{ padding: 8 }}>IP</th>
+                  <th style={{ padding: 8 }}>Correlation</th>
+                </>
+              ) : (
+                <>
+                  <th style={{ padding: 8 }}>Time</th>
+                  <th style={{ padding: 8 }}>Event</th>
+                  <th style={{ padding: 8 }}>Decision</th>
+                  <th style={{ padding: 8 }}>Reject Check</th>
+                  <th style={{ padding: 8 }}>Symbol</th>
+                  <th style={{ padding: 8 }}>Lots</th>
+                  <th style={{ padding: 8 }}>Correlation</th>
+                </>
+              )}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r: any) => (
+              <tr key={String(r.id)} style={{ borderBottom: "1px solid #f5f5f5" }}>
+                {tab === "trade" ? (
+                  <>
+                    <td style={{ padding: 8 }}>{r.event_at ? new Date(r.event_at).toLocaleString() : ""}</td>
+                    <td style={{ padding: 8 }}>{r.trade_id}</td>
+                    <td style={{ padding: 8 }}>{r.event_type}</td>
+                    <td style={{ padding: 8 }}>{r.actor_type}</td>
+                    <td style={{ padding: 8 }}>{r.ip || ""}</td>
+                    <td style={{ padding: 8 }}>{r.correlation_id || ""}</td>
+                  </>
+                ) : (
+                  <>
+                    <td style={{ padding: 8 }}>{r.event_at ? new Date(r.event_at).toLocaleString() : ""}</td>
+                    <td style={{ padding: 8 }}>{r.event_type}</td>
+                    <td style={{ padding: 8 }}>{r.decision || ""}</td>
+                    <td style={{ padding: 8 }}>{r.reject_check || ""}</td>
+                    <td style={{ padding: 8 }}>{r.symbol || ""}</td>
+                    <td style={{ padding: 8 }}>{r.lots ?? ""}</td>
+                    <td style={{ padding: 8 }}>{r.correlation_id}</td>
+                  </>
+                )}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+
+        {!rows.length ? <div style={{ padding: 10, color: "#666" }}>No results.</div> : null}
+      </div>
+    </div>
+  );
+}
+```
+
+---
+
+## /frontend/src/pages/AdminDashboard.tsx
+
+```tsx
+import React, { useState } from "react";
+import { AdminTradeAudit } from "./AdminTradeAudit";
+import { AdminUserManagement } from "./AdminUserManagement";
+import { AdminUserTimeline } from "./AdminUserTimeline";
+
+export function AdminDashboard() {
+  const [page, setPage] = useState<"users" | "audit">("users");
+  const [timelineUserId, setTimelineUserId] = useState<string | null>(null);
+
+  return (
+    <div style={{ padding: 16, maxWidth: 1200, margin: "0 auto" }}>
+      <h1 style={{ marginTop: 0 }}>Admin Dashboard</h1>
+
+      <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
+        <button onClick={() => setPage("users")} disabled={page === "users"}>User Management</button>
+        <button onClick={() => setPage("audit")} disabled={page === "audit"}>Trade Audit</button>
+      </div>
+
+      {page === "users" ? (
+        <>
+          <AdminUserManagement onOpenTimeline={(id) => setTimelineUserId(id)} />
+          {timelineUserId ? (
+            <AdminUserTimeline userId={timelineUserId} onClose={() => setTimelineUserId(null)} />
+          ) : null}
+        </>
+      ) : (
+        <AdminTradeAudit />
+      )}
+    </div>
+  );
+}
+```
+
+---
+
+## What you have now (operationally)
+
+* **Frozen/Disabled mini-tab logic is correct** and preserves the “frozen then disabled → enable returns to frozen” rule.
+* **Login/logout + session length** are recorded and appear in the timeline + CSV export.
+* **Max concurrent lots** enforcement is implemented in the risk middleware (OPEN + PENDING). Default is **50 lots** and is **persisted** in `trade_settings`.
+* **Global trade settings persist** and can be changed via `/api/admin/trade-settings`.
+* **Per-user overrides** can exceed global limits via `/api/admin/users/:id/risk-overrides`.
+* **Order attempts and risk rejects are visible** in **Order Intents**, and trade lifecycle events in **Trade Events**, both tamper-evident via hash chaining.
+
+If you paste your current `/server` + `/client` tree here, I can convert this from a “drop-in module set” into an exact patch against your existing filenames and wire points (so Replit Agent 3 can apply it with minimal merge friction).

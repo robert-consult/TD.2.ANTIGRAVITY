@@ -1,0 +1,493 @@
+Here’s the dependency map for the **Chart module** based on the code in the zip. I’ll group it by **front-end**, **back-end**, and **external services**, and show how they chain together.
+
+---
+
+## 1. Front-end dependency chain
+
+### 1.1 Entry + routing
+
+**`client/src/main.tsx` → `client/src/App.tsx`**
+
+* `App.tsx` wraps everything in:
+
+  * `QueryClientProvider` (React Query, from `client/src/lib/queryClient.ts`)
+  * `AuthProvider` (from `client/src/hooks/use-auth.tsx`)
+* Declares routes with `wouter`:
+
+  * `/` → `Dashboard`
+  * `/login` → `LoginPage`
+  * `/admin` → `AdminDashboard`
+
+👉 **Result:** The Chart screen always runs inside:
+
+* A configured React Query client
+* Auth context
+* Global Toaster
+
+So the chart relies indirectly on:
+
+* `client/src/lib/queryClient.ts`
+* `client/src/hooks/use-auth.tsx`
+* `@tanstack/react-query`
+
+---
+
+### 1.2 Navigation + tab state
+
+**`client/src/pages/Dashboard.tsx`**
+
+Imports:
+
+```ts
+import { Header } from "@/components/Header";
+import { MobileNavigation, SideNavigation } from "@/components/Navigation";
+import QuotesScreen from "./QuotesScreen";
+import ChartScreen from "./ChartScreen";
+import TradeScreen from "./TradeScreen";
+import HistoryScreen from "./HistoryScreen";
+import { useQuotes } from "@/hooks/use-quotes";
+import { useAuth } from "@/hooks/use-auth";
+import { Button } from "@/components/ui/button";
+```
+
+Key state:
+
+```ts
+const [activeTab, setActiveTab] = useState("quotes");
+const [selectedSymbol, setSelectedSymbol] = useState("USDJPY");
+```
+
+Selector for symbol:
+
+```ts
+const handleSelectSymbol = (symbol: string) => {
+  setSelectedSymbol(symbol);        // 👈 central symbol state
+  if (activeTab !== "chart" && activeTab !== "trade") {
+    setActiveTab("chart");         // 👈 jump to Chart tab
+  }
+};
+```
+
+Rendering:
+
+* `QuotesScreen` gets `onSelectSymbol={handleSelectSymbol}`.
+* `ChartScreen` gets `selectedSymbol={selectedSymbol}`.
+
+👉 **So, ChartScreen is driven by Dashboard’s `selectedSymbol` and `activeTab`, which themselves are controlled by navigation and the Quotes tab.**
+
+---
+
+### 1.3 Quotes tab (where the symbol selection happens)
+
+**`client/src/pages/QuotesScreen.tsx`**
+
+Imports:
+
+```ts
+import { useQuotes } from "@/hooks/use-quotes";
+import { Skeleton } from "@/components/ui/skeleton";
+import { useEffect, useState } from "react";
+import SpreadBadge from "@/components/SpreadBadge";
+import { useAuth } from "@/hooks/use-auth";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { Search, ArrowUpDown } from "lucide-react";
+```
+
+Critical interaction:
+
+```tsx
+<div
+  key={quote.symbol}
+  className="... cursor-pointer"
+  onClick={() => onSelectSymbol(quote.symbol)}   // 👈 triggers Dashboard handler
+>
+  {/* quote row contents */}
+</div>
+```
+
+Dependencies here that indirectly power the chart:
+
+* `useQuotes` hook → supplies prices/changes.
+* `SpreadBadge` component → uses spread info derived from `useQuotes`.
+* `useAuth` (user context) – not chart-specific, but part of the screen.
+
+👉 **When you click a row in QuotesScreen, it hands `quote.symbol` up to Dashboard, which then passes it down to ChartScreen.**
+
+---
+
+### 1.4 The Chart module itself
+
+**`client/src/pages/ChartScreen.tsx`**
+
+Imports:
+
+```ts
+import { useQuotes } from "@/hooks/use-quotes";
+import { useState, useEffect, useRef } from "react";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { toast } from "@/hooks/use-toast";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { apiRequest } from "@/lib/queryClient";
+```
+
+Local types/maps:
+
+* `ChartScreenProps { selectedSymbol: string }`
+* `ChartPeriod = "1H" | "1D" | "1W" | "1M"`
+* `tradingViewSymbolMap` – maps internal symbols to TradingView symbols:
+
+  * e.g. `"USDJPY" → "CMCMARKETS:USDJPY"`, `"EURUSD" → "CMCMARKETS:EURUSD"`, etc.
+* `periodIntervalMap` – maps `"1H" | "1D" | ...` → TradingView `interval` strings.
+
+Key dependencies and logic:
+
+1. **Data feed (quotes)**
+
+   ```ts
+   const { quotes, isLoading } = useQuotes();
+   const currentQuote = quotes?.find(q => q.symbol === selectedSymbol);
+   ```
+
+   * `useQuotes` is the *single source* of bid/ask/price/spread for the selected symbol.
+   * This powers:
+
+     * Bid/ask display in header.
+     * Spread overlay on top of the chart.
+     * Price used when executing trades from the chart panel.
+
+2. **TradingView script loader (tv.js)**
+
+   ```ts
+   const chartContainerRef = useRef<HTMLDivElement>(null);
+   const [tradingViewLoaded, setTradingViewLoaded] = useState(false);
+   const widgetInstanceRef = useRef<any>(null);
+
+   useEffect(() => {
+     if (!document.getElementById('tradingview-script')) {
+       const script = document.createElement('script');
+       script.id = 'tradingview-script';
+       script.src = 'https://s3.tradingview.com/tv.js';
+       script.async = true;
+       script.onload = () => setTradingViewLoaded(true);
+       document.head.appendChild(script);
+     } else {
+       setTradingViewLoaded(true);
+     }
+
+     return () => {
+       if (widgetInstanceRef.current?.remove) {
+         widgetInstanceRef.current.remove();
+       }
+     };
+   }, []);
+   ```
+
+   * Loads **tv.js exactly once**.
+   * Sets `tradingViewLoaded` on load → controls spinner overlay.
+   * Stores widget instance in `widgetInstanceRef` for cleanup.
+
+3. **TradingView widget creation / symbol & timeframe switching**
+
+   ```ts
+   useEffect(() => {
+     if (!tradingViewLoaded || !chartContainerRef.current || !window.TradingView) return;
+
+     const container = chartContainerRef.current;
+
+     // Remove old widget if present
+     if (widgetInstanceRef.current?.remove) {
+       widgetInstanceRef.current.remove();
+       widgetInstanceRef.current = null;
+     }
+
+     const tvSymbol = tradingViewSymbolMap[selectedSymbol] || `CMCMARKETS:${selectedSymbol}`;
+     const interval = periodIntervalMap[activePeriod] || "D";
+
+     widgetInstanceRef.current = new window.TradingView.widget({
+       autosize: true,
+       symbol: tvSymbol,
+       interval,
+       container_id: container.id,
+       timezone: "Etc/UTC",
+       theme: "dark",
+       style: "1",
+       locale: "en",
+       enable_publishing: false,
+       allow_symbol_change: true,
+       hide_top_toolbar: false,
+       hide_side_toolbar: false,
+       withdateranges: true,
+       studies: ["RSI@tv-basicstudies", "MASimple@tv-basicstudies"],
+       backgroundColor: "#121212",
+       toolbar_bg: "#121212",
+     });
+   }, [tradingViewLoaded, selectedSymbol, activePeriod]);
+   ```
+
+   **Dependencies here:**
+
+   * `selectedSymbol` (prop from Dashboard)
+   * `activePeriod` (local ChartScreen state; toggled by timeframe buttons)
+   * `window.TradingView` (global from tv.js)
+
+   👉 This is the core that lets **chart symbol/timeframe update seamlessly** whenever the user clicks a quote or a period button.
+
+4. **Quick Trade panel (chart-side trading)**
+   ChartScreen also depends on **trading and account state**:
+
+   * Uses `useMutation` + `apiRequest` to `POST /api/trades`.
+   * Invalidates:
+
+     * `/api/trades`
+     * `/api/trades/open`
+     * `/api/auth/current-user`
+   * Uses `toast` from `@/hooks/use-toast`.
+
+   That pulls in **backend trade and account logic** as dependencies of the chart screen.
+
+5. **UI components**
+
+   * `Button`, `Skeleton`, `Select*` from `components/ui/*` (ShadCN style).
+   * Tailwind classes and layout constraints from `index.css`.
+
+---
+
+### 1.5 Navigation components
+
+**`client/src/components/Navigation.tsx`**
+
+* `MobileNavigation` & `SideNavigation` simply toggle `activeTab` (`"quotes" | "chart" | "trade" | "history"`) via `setActiveTab`.
+* Indirectly, they control whether `ChartScreen` is mounted or not.
+
+So the chart module depends on these for **when** it appears but not for **what** it shows.
+
+---
+
+## 2. Front-end hooks and infrastructure
+
+### 2.1 `use-quotes` data hook
+
+**`client/src/hooks/use-quotes.tsx`**
+
+Imports:
+
+```ts
+import { useState, useEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
+```
+
+Key queries:
+
+```ts
+const { data: symbols = [] } = useQuery<SymbolConfig[]>({
+  queryKey: ["/api/config/symbols"],
+});
+
+const { data: latestQuotesData, isLoading, isError } = useQuery({
+  queryKey: ["/api/quotes/latest"],
+  enabled: true,
+  refetchInterval: POLLING_INTERVAL, // REST polling
+});
+```
+
+Processing logic:
+
+* Builds a `symbolMap` of enabled symbols.
+* Filters latest quotes to allowed symbols.
+* Parses numeric fields.
+* Calculates `% change` from `price` and `prevClose` when available.
+* Returns:
+
+  ```ts
+  {
+    quotes: Quote[],
+    isConnected,
+    isLoading,
+    isError
+  }
+  ```
+
+**Dependencies:**
+
+* Backend endpoints:
+
+  * `GET /api/config/symbols`
+  * `GET /api/quotes/latest`
+* React Query config from `client/src/lib/queryClient.ts`.
+* Database/market data on the server (indirectly).
+
+👉 **ChartScreen and QuotesScreen both share this same hook**, ensuring consistent prices, spreads, and change values.
+
+---
+
+### 2.2 Query + request infra
+
+**`client/src/lib/queryClient.ts`**
+
+* Exports:
+
+  ```ts
+  export async function apiRequest(method: string, url: string, data?: unknown): Promise<Response> { ... }
+  export const getQueryFn = (...) => QueryFunction<T>;
+  export const queryClient = new QueryClient({ ... });
+  ```
+
+* All data fetching on the front-end (including quotes + trades) uses:
+
+  * `useQuery` with `getQueryFn` → `fetch(..., { credentials: "include" })`
+  * `apiRequest` for POST/PUT/DELETE.
+
+**Chart dependencies:**
+
+* ChartScreen’s trade execution uses `apiRequest` and `useMutation`.
+* `use-quotes` uses `useQuery`, whose behavior is defined here (no auto refetch on focus, no retries, etc.).
+
+---
+
+## 3. Back-end pieces that power the chart
+
+### 3.1 Main Express routes
+
+**`server/routes.ts`**
+
+Key endpoints relevant to chart:
+
+1. **`GET /api/config/symbols`**
+
+   ```ts
+   app.get("/api/config/symbols", async (_req, res) => {
+     const symbols = await storage.getSymbolConfigs();
+     res.json(symbols);
+   });
+   ```
+
+   * Uses `storage.getSymbolConfigs()` (from `server/storage.ts`).
+   * Feeds `use-quotes` with the list of enabled symbols.
+
+2. **`GET /api/quotes/latest`**
+
+   * Uses `BetterSQLite3` to read latest `bid`, `ask`, `price` from `quotes` table.
+   * Enhances quotes with:
+
+     * `pctChange` using `calculateChange` from `server/utils/dailyChange.js`.
+     * Possibly other derived fields.
+
+   This is the primary data source for `use-quotes` → ChartScreen.
+
+3. **`GET /api/quotes/:symbol`**
+
+   * Used in some other flows but less critical for the chart core.
+
+4. **`GET /api/auth/current-user`**
+
+   * Used implicitly when ChartScreen’s trades invalidate the account query.
+
+5. **`POST /api/trades`**
+
+   * ChartScreen’s Quick Trade panel calls this via `apiRequest`.
+   * Internally:
+
+     * Looks up symbol config (via `storage`).
+     * Uses `/api/quotes/latest` to get current price.
+     * Runs risk checks and margin calculation (`riskMiddleware`, `requiredMargin`, `recalcAccount`).
+     * Inserts trade into DB.
+
+**Dependencies inside `routes.ts`:**
+
+* `storage` (`server/storage.ts`)
+* `@shared/schema` (validation)
+* `server/utils/dailyChange.js`
+* `server/lib/margin.ts`
+* `server/recalcAccount.ts`
+* `server/risk.ts`
+
+👉 **So the chart’s Quick Trade panel is tightly coupled to the trade & account back-end pipeline.**
+
+---
+
+### 3.2 Storage, schema, data
+
+* **`server/storage.ts`**
+
+  * `getSymbolConfigs()` → used by `/api/config/symbols`.
+  * `createTrade`, `getTrades`, `getUserByEmail`, etc. → used by `/api/trades` and `/api/auth/current-user`.
+
+* **`shared/schema.ts`**
+
+  * Exposes `insertTradeSchema`, `loginSchema` used in routes.
+
+* **`data/instruments.ts`**
+
+  * Used by some routes (`server/routes/instruments.ts`) for instrument search.
+  * Not directly required for the Chart tab, but part of the surrounding symbol/instrument ecosystem.
+
+---
+
+### 3.3 Market data ingestion (powering `quotes` table)
+
+**`server/feeds/forgeFeed.ts`**
+
+* Talks to **1Forge** (REST) to fetch FX/CFD quotes.
+* Formats instruments into 1Forge symbol format.
+* Writes into `trading_app.db` → `quotes` table.
+* Calls `recalcAccount` after updates.
+
+This is the **source** of the `quotes` table that `/api/quotes/latest` and `/api/quotes/:symbol` read from → which `use-quotes` → which ChartScreen and QuotesScreen consume.
+
+So the chart module indirectly depends on:
+
+* `.env` `FORGE_KEY`
+* 1Forge REST API
+* This cron/service or script being run alongside the Express server.
+
+---
+
+## 4. External dependencies
+
+* **TradingView (chart rendering):**
+
+  * `https://s3.tradingview.com/tv.js`
+    Exposes global `window.TradingView`.
+  * Used **only** in `client/src/pages/ChartScreen.tsx`.
+
+* **1Forge (market data):**
+
+  * Used in:
+
+    * `server/feeds/forgeFeed.ts` (rest feed into DB).
+    * `server/routes/market.ts` (direct `/api/market/*` endpoints – not directly used by chart tab but related).
+
+* **React Query, Wouter, ShadCN UI**:
+
+  * `@tanstack/react-query` – query/mutation infra.
+  * `wouter` – routing & location.
+  * ShadCN-style components under `client/src/components/ui/*`.
+
+---
+
+## 5. Summary graph (words)
+
+If you picture the **Chart module** as the Chart tab in the UI, its dependency chain looks like:
+
+* **UI + State Path**
+  `App` → `Dashboard` → `Navigation` + `QuotesScreen` → `selectedSymbol` → `ChartScreen`.
+
+* **Quotes / Data Path**
+  `ChartScreen` + `QuotesScreen` → `use-quotes` → React Query →
+  `GET /api/config/symbols` + `GET /api/quotes/latest` → `server/routes.ts` →
+  `storage.getSymbolConfigs` + SQLite `quotes` table ← `server/feeds/forgeFeed.ts` ← 1Forge API.
+
+* **Chart Rendering Path**
+  `ChartScreen` → loads `tv.js` → `window.TradingView.widget(...)` with:
+
+  * `symbol` = mapped from `selectedSymbol`
+  * `interval` = mapped from period buttons.
+
+* **Trading Path (from chart)**
+  `ChartScreen (Quick Trade)` → `useMutation` + `apiRequest` → `POST /api/trades` →
+  `server/routes.ts` → `storage` + `riskMiddleware` + `margin` + `recalcAccount` + `/api/quotes/latest`.
+
+That’s the full set of **components + interdependencies** from the zip that directly or indirectly power your chart module.

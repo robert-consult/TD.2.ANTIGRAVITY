@@ -1,0 +1,226 @@
+Below is the **stricter, jurisdiction-aware “best match” selection rule** for `resolve-doc-links`.
+
+**What changes:**
+
+* For **GLOBAL_MASTER** matches, prefer `DEFAULT/GLOBAL` (then other DEFAULT, then anything else).
+* For **ADDENDUM** matches, prefer in this order:
+
+  1. `COUNTRY/{acceptance.countryIso2}`
+  2. `REGION/{acceptance.regionKey}` (if present)
+  3. `DEFAULT/ROW`
+  4. otherwise fallback to the newest match
+
+When ties exist at the same priority, pick the **most recently created** doc.
+
+---
+
+## Patch: replace the resolve handler in `server/routes/adminLegalAcceptances.ts`
+
+Replace your existing `POST /resolve-doc-links` handler with this version:
+
+```ts
+// FILE: /server/routes/adminLegalAcceptances.ts
+// Ensure these imports exist at top:
+import { inArray } from "drizzle-orm";
+import { legalDocuments } from "../../shared/schema";
+
+// ... keep other code ...
+
+// POST /api/admin/legal-acceptances/resolve-doc-links
+// body: { ids: number[] }
+// returns: { [acceptanceId]: { global: {best, matches[]}, addendum: {best, matches[]}} }
+adminLegalAcceptancesRouter.post("/resolve-doc-links", (req, res) => {
+  try {
+    const idsRaw = (req.body || {}).ids;
+    if (!Array.isArray(idsRaw)) return res.status(400).json({ ok: false, error: "ids must be an array." });
+
+    const ids = idsRaw
+      .map((x) => Number(x))
+      .filter((n) => Number.isFinite(n) && n > 0)
+      .slice(0, 200);
+
+    if (ids.length === 0) return res.status(400).json({ ok: false, error: "No valid ids provided." });
+
+    // Pull acceptance rows for those IDs (NEED country/region for strict selection)
+    const acceptances = db
+      .select({
+        id: legalAcceptances.id,
+        countryIso2: legalAcceptances.countryIso2,
+        regionKey: legalAcceptances.regionKey,
+        globalDocSha256: legalAcceptances.globalDocSha256,
+        addendumSha256: legalAcceptances.addendumSha256,
+      })
+      .from(legalAcceptances)
+      .where(inArray(legalAcceptances.id, ids))
+      .all();
+
+    // Collect unique shas
+    const globalShas = Array.from(
+      new Set(acceptances.map((a) => String(a.globalDocSha256 || "")).filter(Boolean))
+    );
+    const addendumShas = Array.from(
+      new Set(acceptances.map((a) => String(a.addendumSha256 || "")).filter(Boolean))
+    );
+
+    // Fetch candidate legalDocuments by sha
+    const globalDocs =
+      globalShas.length === 0
+        ? []
+        : db
+            .select({
+              id: legalDocuments.id,
+              docSet: legalDocuments.docSet,
+              docType: legalDocuments.docType,
+              jurisdictionType: legalDocuments.jurisdictionType,
+              jurisdictionKey: legalDocuments.jurisdictionKey,
+              version: legalDocuments.version,
+              sha256: legalDocuments.sha256,
+              createdAt: legalDocuments.createdAt,
+            })
+            .from(legalDocuments)
+            .where(
+              and(
+                eq(legalDocuments.docSet, "DOC1"),
+                eq(legalDocuments.docType, "GLOBAL_MASTER"),
+                inArray(legalDocuments.sha256, globalShas)
+              ) as any
+            )
+            .orderBy(desc(legalDocuments.createdAt))
+            .all();
+
+    const addendumDocs =
+      addendumShas.length === 0
+        ? []
+        : db
+            .select({
+              id: legalDocuments.id,
+              docSet: legalDocuments.docSet,
+              docType: legalDocuments.docType,
+              jurisdictionType: legalDocuments.jurisdictionType,
+              jurisdictionKey: legalDocuments.jurisdictionKey,
+              version: legalDocuments.version,
+              sha256: legalDocuments.sha256,
+              createdAt: legalDocuments.createdAt,
+            })
+            .from(legalDocuments)
+            .where(
+              and(
+                eq(legalDocuments.docSet, "DOC1"),
+                eq(legalDocuments.docType, "ADDENDUM"),
+                inArray(legalDocuments.sha256, addendumShas)
+              ) as any
+            )
+            .orderBy(desc(legalDocuments.createdAt))
+            .all();
+
+    // Build sha -> docs[] maps
+    const globalMap = new Map<string, any[]>();
+    for (const d of globalDocs) {
+      const key = String(d.sha256);
+      if (!globalMap.has(key)) globalMap.set(key, []);
+      globalMap.get(key)!.push(d);
+    }
+
+    const addMap = new Map<string, any[]>();
+    for (const d of addendumDocs) {
+      const key = String(d.sha256);
+      if (!addMap.has(key)) addMap.set(key, []);
+      addMap.get(key)!.push(d);
+    }
+
+    const createdAtMs = (d: any) => {
+      const v = d?.createdAt;
+      if (!v) return 0;
+      return v instanceof Date ? v.getTime() : Number(v) || 0;
+    };
+
+    // Strict chooser for GLOBAL: prefer DEFAULT/GLOBAL
+    const chooseBestGlobal = (docs: any[] | undefined) => {
+      if (!docs || docs.length === 0) return null;
+
+      const score = (d: any) => {
+        const jt = String(d.jurisdictionType || "");
+        const jk = String(d.jurisdictionKey || "");
+        if (jt === "DEFAULT" && jk === "GLOBAL") return 3;
+        if (jt === "DEFAULT") return 2;
+        return 1;
+      };
+
+      return docs
+        .slice()
+        .sort((a, b) => {
+          const sa = score(a);
+          const sb = score(b);
+          if (sb !== sa) return sb - sa;
+          const ta = createdAtMs(a);
+          const tb = createdAtMs(b);
+          if (tb !== ta) return tb - ta;
+          return Number(b.id) - Number(a.id);
+        })[0];
+    };
+
+    // Strict chooser for ADDENDUM: COUNTRY/{ISO2} > REGION/{regionKey} > DEFAULT/ROW
+    const chooseBestAddendum = (docs: any[] | undefined, iso2: string, regionKey: string | null) => {
+      if (!docs || docs.length === 0) return null;
+
+      const ISO2 = String(iso2 || "").toUpperCase().trim();
+      const RK = regionKey ? String(regionKey).trim() : null;
+
+      const score = (d: any) => {
+        const jt = String(d.jurisdictionType || "");
+        const jk = String(d.jurisdictionKey || "");
+        if (jt === "COUNTRY" && jk === ISO2) return 3;
+        if (RK && jt === "REGION" && jk === RK) return 2;
+        if (jt === "DEFAULT" && jk === "ROW") return 1;
+        return 0;
+      };
+
+      return docs
+        .slice()
+        .sort((a, b) => {
+          const sa = score(a);
+          const sb = score(b);
+          if (sb !== sa) return sb - sa;
+          const ta = createdAtMs(a);
+          const tb = createdAtMs(b);
+          if (tb !== ta) return tb - ta;
+          return Number(b.id) - Number(a.id);
+        })[0];
+    };
+
+    const resolved: Record<
+      number,
+      {
+        global: { best: any | null; matches: any[] };
+        addendum: { best: any | null; matches: any[] };
+      }
+    > = {};
+
+    for (const a of acceptances) {
+      const gSha = String(a.globalDocSha256 || "");
+      const adSha = String(a.addendumSha256 || "");
+
+      const gMatches = globalMap.get(gSha) || [];
+      const aMatches = addMap.get(adSha) || [];
+
+      const bestGlobal = chooseBestGlobal(gMatches);
+      const bestAddendum = chooseBestAddendum(aMatches, String(a.countryIso2 || ""), a.regionKey ? String(a.regionKey) : null);
+
+      resolved[Number(a.id)] = {
+        global: { best: bestGlobal, matches: gMatches },
+        addendum: { best: bestAddendum, matches: aMatches },
+      };
+    }
+
+    return res.json({ ok: true, resolved });
+  } catch (e: any) {
+    return res.status(400).json({ ok: false, error: e?.message || "Resolve failed." });
+  }
+});
+```
+
+### Result
+
+* When “Resolve Doc Links” is clicked, “best” now aligns with your **signup assembly precedence**, so the link you show admins is consistent with how the user’s terms were selected at acceptance time.
+
+If you want, I can also tweak the UI to display *why* it chose the best doc (e.g., “COUNTRY match”, “REGION match”, “ROW fallback”) as a small badge next to `G# / A#`.

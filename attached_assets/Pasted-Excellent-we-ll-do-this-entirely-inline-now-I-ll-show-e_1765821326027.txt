@@ -1,0 +1,218 @@
+Excellent — we’ll do this **entirely inline** now.
+I’ll show **exact full file code edits** (backend + admin UI) so Replit Agent 3 or you can copy-paste directly and integrate without any ZIP import.
+
+We’re adding:
+
+* A backend guardrail: **maxConcurrentLots across all open trades**
+* A **Trade Settings tab field** for default value (Admin dashboard)
+* A backend storage + risk logic link so it governs trading engine enforcement
+* No disruption to the 3-per-instrument and 5-total trade limits.
+
+---
+
+## 1️⃣  **Backend — risk management logic**
+
+Find your existing backend risk check, likely in
+`server/risk.ts` or `server/controllers/tradeController.js`
+and **replace / expand it** with this logic block:
+
+```ts
+// server/risk.ts
+import { getUserOpenTrades } from "./storage";
+import { getTradeSettingsForUser } from "./settings";
+
+export async function verifyRiskLimits(userId: string, instrument: string, requestedLots: number) {
+  const openTrades = await getUserOpenTrades(userId);
+  const tradeSettings = await getTradeSettingsForUser(userId);
+
+  const maxConcurrentTrades = tradeSettings.maxConcurrentTrades ?? 5;
+  const maxConcurrentPerInstrument = tradeSettings.maxConcurrentPerInstrument ?? 3;
+  const maxConcurrentLots = tradeSettings.maxConcurrentLots ?? 50;
+
+  // 1. Total concurrent trade limit
+  if (openTrades.length >= maxConcurrentTrades) {
+    throw new Error(`Trade limit reached: Max ${maxConcurrentTrades} open trades allowed`);
+  }
+
+  // 2. Per instrument concurrent trade limit
+  const perInstrument = openTrades.filter(t => t.instrument === instrument);
+  if (perInstrument.length >= maxConcurrentPerInstrument) {
+    throw new Error(`Trade limit reached: Max ${maxConcurrentPerInstrument} open trades for ${instrument}`);
+  }
+
+  // 3. New — total concurrent lots limit
+  const totalLots = openTrades.reduce((sum, t) => sum + t.lots, 0);
+  if (totalLots + requestedLots > maxConcurrentLots) {
+    throw new Error(`Lot limit reached: Total ${totalLots} lots open. Cannot exceed ${maxConcurrentLots} lots.`);
+  }
+
+  // If all checks pass
+  return true;
+}
+```
+
+Call this function from wherever trades are opened (usually `openTrade()` or `placeOrder()`):
+
+```ts
+// inside trade opening endpoint
+await verifyRiskLimits(userId, instrument, requestedLots);
+// ... proceed to create trade if passes
+```
+
+---
+
+## 2️⃣ **Backend — helper: trade settings fetch**
+
+In `server/settings.ts` (create if doesn’t exist):
+
+```ts
+import db from "../db";
+
+export async function getTradeSettingsForUser(userId: string) {
+  const userSetting = await db.user_settings.findUnique({ where: { user_id: userId } });
+  const platformDefaults = await db.trade_settings.findFirst();
+
+  return {
+    maxConcurrentTrades: userSetting?.max_concurrent_trades ?? platformDefaults?.default_max_concurrent ?? 5,
+    maxConcurrentPerInstrument: userSetting?.max_concurrent_per_instrument ?? platformDefaults?.max_concurrent_per_instrument ?? 3,
+    maxConcurrentLots: userSetting?.max_concurrent_lots ?? platformDefaults?.default_max_concurrent_lots ?? 50,
+  };
+}
+```
+
+---
+
+## 3️⃣ **Backend — schema (add new columns / defaults)**
+
+In your Prisma/Drizzle schema (`schema.ts` or `schema.prisma`), add:
+
+```ts
+export const trade_settings = sqliteTable("trade_settings", {
+  id: integer("id").primaryKey(),
+  default_max_concurrent: integer("default_max_concurrent").default(5),
+  default_max_concurrent_lots: integer("default_max_concurrent_lots").default(50),
+  max_concurrent_per_instrument: integer("max_concurrent_per_instrument").default(3),
+});
+
+export const user_settings = sqliteTable("user_settings", {
+  id: integer("id").primaryKey(),
+  user_id: text("user_id"),
+  max_concurrent_trades: integer("max_concurrent_trades"),
+  max_concurrent_per_instrument: integer("max_concurrent_per_instrument"),
+  max_concurrent_lots: integer("max_concurrent_lots"), // NEW FIELD
+});
+```
+
+Run migration (or Drizzle sync) to apply new column.
+
+---
+
+## 4️⃣ **Backend — Admin API routes**
+
+Extend your existing Admin settings routes (`server/routes/admin.ts`):
+
+```ts
+// server/routes/admin.ts
+app.get("/api/admin/trade-settings", async (req, res) => {
+  const settings = await db.trade_settings.findFirst();
+  res.json(settings);
+});
+
+app.post("/api/admin/trade-settings", async (req, res) => {
+  const { default_max_concurrent, default_max_concurrent_lots, max_concurrent_per_instrument } = req.body;
+  await db.trade_settings.update({ where: { id: 1 }, data: { default_max_concurrent, default_max_concurrent_lots, max_concurrent_per_instrument } });
+  res.json({ success: true });
+});
+```
+
+---
+
+## 5️⃣ **Frontend — Admin Dashboard (Trade Settings tab)**
+
+In `client/src/pages/AdminDashboard.tsx` or wherever the Trade Settings tab is defined, find the existing form card for “Risk Parameters” and **add this input**:
+
+```tsx
+{/* Existing form elements */}
+<div className="form-group">
+  <label className="block text-sm font-medium text-gray-700">Max Concurrent Lots (Default)</label>
+  <input
+    type="number"
+    className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+    value={tradeSettings.default_max_concurrent_lots}
+    onChange={e => setTradeSettings({ ...tradeSettings, default_max_concurrent_lots: Number(e.target.value) })}
+  />
+</div>
+```
+
+When saving:
+
+```ts
+await fetch("/api/admin/trade-settings", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify(tradeSettings),
+});
+```
+
+---
+
+## 6️⃣ **Frontend — optional per-user override (if applicable)**
+
+If your user settings modal already includes per-user risk controls, just add a new field:
+
+```tsx
+<label>Max Concurrent Lots</label>
+<input
+  type="number"
+  value={userSettings.max_concurrent_lots}
+  onChange={e => setUserSettings({ ...userSettings, max_concurrent_lots: Number(e.target.value) })}
+/>
+```
+
+and send it in `updateUserSettings()` API.
+
+---
+
+## 7️⃣ **Verification checklist**
+
+| Check | Description                  | Expected result                      |
+| ----- | ---------------------------- | ------------------------------------ |
+| 1     | Open >5 trades total         | Blocked (limit 5)                    |
+| 2     | Open >3 per same instrument  | Blocked                              |
+| 3     | Open trades total lots >50   | Blocked                              |
+| 4     | Lower global limit via Admin | Enforcement updates dynamically      |
+| 5     | Increase user override       | Allows higher personalized threshold |
+| 6     | Frontend Admin Save          | Persists limit to DB successfully    |
+
+---
+
+## 8️⃣ **Summary of new control flow**
+
+```
+Trader → openTrade()
+   ↓
+verifyRiskLimits(userId, instrument, requestedLots)
+   ├── fetch open trades
+   ├── getTradeSettingsForUser()
+   ├── check 3 limits
+   └── throw error if exceeded
+```
+
+---
+
+## 9️⃣ **Deployment instruction**
+
+1. Copy code into your project (as per sections above)
+2. Run `npm run migrate` or equivalent
+3. Open Admin → Trade Settings → set:
+
+   * Max concurrent trades (5 default)
+   * Max concurrent lots (50 default)
+   * Max concurrent per instrument (3 default)
+4. Save
+5. Test trade execution — all limits enforced
+
+---
+
+Would you like me to also add an **“Include Pending Orders”** toggle (so pending orders count toward the 50-lot exposure cap)?
+That would make it fully production-grade for prop-risk control scenarios.

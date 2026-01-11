@@ -1,0 +1,239 @@
+Below is the **next upgrade** you asked for:
+
+1. **Tooltip on the Order Type icon (Stop/Limit)**
+2. **One-click “Fix TP/SL” suggestion in the EditTradeModal whenever warnings are detected** (and it sets valid ±10 points from reference price)
+
+I’m referencing your current ZIP structure:
+
+* `client/src/pages/TradeScreen.tsx`
+* `client/src/components/EditTradeModal.tsx`
+
+---
+
+## A) TradeScreen: add tooltip on Stop/Limit icon (and pill)
+
+### 1) Update lucide imports (if you haven’t already)
+
+**File:** `client/src/pages/TradeScreen.tsx`
+
+Replace:
+
+```tsx
+import { Pencil, X } from "lucide-react";
+```
+
+With:
+
+```tsx
+import { Pencil, X, Zap, Layers, AlertTriangle } from "lucide-react";
+```
+
+### 2) Add tooltip helper (inside `TradeScreen` component)
+
+Add this helper near your other UI helpers:
+
+```tsx
+  const orderTypeHelp = (t: string) => {
+    switch (t) {
+      case "stop":
+        return "Stop (trigger): Executes when market reaches your stop price. Commonly used for breakout entries.";
+      case "limit":
+        return "Limit (passive): Executes at your limit price or better. Commonly used for pullback entries.";
+      default:
+        return "Order mechanism (Stop/Limit).";
+    }
+  };
+```
+
+### 3) Apply tooltip to the Order Type pill (Pending Orders table)
+
+In your **Pending Orders** row render, wherever you build the pill span, set the `title` and also set it on the icon.
+
+Use this pattern:
+
+```tsx
+const helpText = orderTypeHelp(orderTypeKey);
+
+<span
+  title={helpText}
+  className={`inline-flex items-center rounded-md border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${orderTypePillClass(orderTypeLabel)}`}
+>
+  {OrderTypeIcon ? <OrderTypeIcon className="h-3 w-3 mr-1" title={helpText} /> : null}
+  {orderTypeLabel}
+</span>
+```
+
+That’s it for the tooltip: **hovering the icon or pill shows the explanation**.
+
+---
+
+## B) EditTradeModal: add “Auto-Fix TP/SL (±10 points)” when warnings exist
+
+### 1) Update React imports
+
+**File:** `client/src/components/EditTradeModal.tsx`
+
+Replace:
+
+```tsx
+import { useState } from "react";
+```
+
+With:
+
+```tsx
+import { useEffect, useState } from "react";
+```
+
+### 2) Make pending-order reference price selection case-insensitive (robust)
+
+Replace your pending order section in `getReferencePrice()`:
+
+```tsx
+if (trade.status === 'PENDING') {
+  if (trade.orderType === 'Limit' && trade.limitPrice) {
+    return trade.limitPrice;
+  } else if (trade.orderType === 'Stop' && trade.stopPrice) {
+    return trade.stopPrice;
+  } else {
+    return trade.openPrice || 0;
+  }
+}
+```
+
+With:
+
+```tsx
+if (trade.status === "PENDING") {
+  const ot = String(trade.orderType ?? "").trim().toLowerCase();
+  if (ot === "limit" && trade.limitPrice) return trade.limitPrice;
+  if (ot === "stop" && trade.stopPrice) return trade.stopPrice;
+  return trade.openPrice || 0;
+}
+```
+
+### 3) Fix the validation inequality bug (so “exactly 10 points away” is valid)
+
+Right now your logic effectively requires **more than** 10 points due to `<=`/`>=`.
+
+Replace the TP/SL checks inside `validateTPSL()` with this version:
+
+```tsx
+  const validateTPSL = (takeProfit: number | null, stopLoss: number | null) => {
+    const messages: { tp?: string; sl?: string } = {};
+    const priceLabel = trade.status === "PENDING" ? "order price" : "current price";
+
+    const tp = typeof takeProfit === "number" && Number.isFinite(takeProfit) ? takeProfit : null;
+    const sl = typeof stopLoss === "number" && Number.isFinite(stopLoss) ? stopLoss : null;
+
+    if (trade.type === "BUY") {
+      // BUY: TP >= ref + minDistance ; SL <= ref - minDistance
+      if (sl !== null && sl > (referencePrice - minDistance)) {
+        messages.sl = `Stop Loss must be at least ${isJpyPair ? "0.10" : "0.0010"} (10 points) below ${priceLabel} of ${referencePrice.toFixed(isJpyPair ? 2 : 4)}`;
+      }
+      if (tp !== null && tp < (referencePrice + minDistance)) {
+        messages.tp = `Take Profit must be at least ${isJpyPair ? "0.10" : "0.0010"} (10 points) above ${priceLabel} of ${referencePrice.toFixed(isJpyPair ? 2 : 4)}`;
+      }
+    } else if (trade.type === "SELL") {
+      // SELL: TP <= ref - minDistance ; SL >= ref + minDistance
+      if (sl !== null && sl < (referencePrice + minDistance)) {
+        messages.sl = `Stop Loss must be at least ${isJpyPair ? "0.10" : "0.0010"} (10 points) above ${priceLabel} of ${referencePrice.toFixed(isJpyPair ? 2 : 4)}`;
+      }
+      if (tp !== null && tp > (referencePrice - minDistance)) {
+        messages.tp = `Take Profit must be at least ${isJpyPair ? "0.10" : "0.0010"} (10 points) below ${priceLabel} of ${referencePrice.toFixed(isJpyPair ? 2 : 4)}`;
+      }
+    }
+
+    setValidationMessages(messages);
+    return Object.keys(messages).length === 0;
+  };
+```
+
+### 4) Run validation immediately on modal open (so warnings appear without typing)
+
+Add this `useEffect` **after** `form` is created:
+
+```tsx
+  useEffect(() => {
+    const tp = typeof trade?.takeProfit === "number" && Number.isFinite(trade.takeProfit) ? trade.takeProfit : null;
+    const sl = typeof trade?.stopLoss === "number" && Number.isFinite(trade.stopLoss) ? trade.stopLoss : null;
+    validateTPSL(tp, sl);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trade?.id, referencePrice, trade?.type]);
+```
+
+### 5) Add the one-click Auto-Fix function
+
+Add this function near `handleSubmit`:
+
+```tsx
+  const autoFixTargets = () => {
+    if (!referencePrice || referencePrice <= 0) return;
+
+    const decimals = isJpyPair ? 2 : 4;
+
+    const recommendedTP =
+      trade.type === "BUY"
+        ? Number((referencePrice + minDistance).toFixed(decimals))
+        : Number((referencePrice - minDistance).toFixed(decimals));
+
+    const recommendedSL =
+      trade.type === "BUY"
+        ? Number((referencePrice - minDistance).toFixed(decimals))
+        : Number((referencePrice + minDistance).toFixed(decimals));
+
+    const currentTPRaw = form.getValues("takeProfit");
+    const currentSLRaw = form.getValues("stopLoss");
+
+    const currentTP = typeof currentTPRaw === "number" && Number.isFinite(currentTPRaw) ? currentTPRaw : null;
+    const currentSL = typeof currentSLRaw === "number" && Number.isFinite(currentSLRaw) ? currentSLRaw : null;
+
+    // If missing OR invalid, set to recommended; otherwise keep user values.
+    let nextTP = currentTP;
+    let nextSL = currentSL;
+
+    if (trade.type === "BUY") {
+      if (nextTP === null || nextTP < referencePrice + minDistance) nextTP = recommendedTP;
+      if (nextSL === null || nextSL > referencePrice - minDistance) nextSL = recommendedSL;
+    } else {
+      if (nextTP === null || nextTP > referencePrice - minDistance) nextTP = recommendedTP;
+      if (nextSL === null || nextSL < referencePrice + minDistance) nextSL = recommendedSL;
+    }
+
+    form.setValue("takeProfit", nextTP ?? undefined, { shouldDirty: true, shouldTouch: true });
+    form.setValue("stopLoss", nextSL ?? undefined, { shouldDirty: true, shouldTouch: true });
+
+    validateTPSL(nextTP, nextSL);
+  };
+```
+
+### 6) Add the Auto-Fix UI block (shows when warnings exist)
+
+Place this block **right under** the inputs grid (before “Trading Rules Info” is fine):
+
+```tsx
+          {Object.keys(validationMessages).length > 0 && (
+            <div className="rounded-md border border-amber-500/20 bg-amber-500/5 p-3 flex items-center justify-between gap-3">
+              <div className="text-sm text-amber-200">
+                One or more targets are invalid relative to the {trade.status === "PENDING" ? "order price" : "current price"}.
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={autoFixTargets}
+                disabled={!referencePrice || referencePrice <= 0}
+              >
+                Auto-Fix TP/SL (±10 points)
+              </Button>
+            </div>
+          )}
+```
+
+---
+
+## Net effect
+
+* Pending Orders: **Stop/Limit icon + tooltip** makes the mechanism unambiguous and avoids confusion with SL.
+* Edit modal: if TP/SL are wrong-side or too close, user gets a **one-click Auto-Fix** that sets valid targets exactly ±10 points from reference price (and the validation now correctly treats “exactly 10 points” as acceptable).
+
+If you want the next micro-upgrade after this: I can add a **second button** “Set both to ±20 points” (or “±50 points”) as quick presets, still enforcing your min-distance rule.

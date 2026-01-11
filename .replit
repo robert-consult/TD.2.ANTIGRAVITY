@@ -1,0 +1,48 @@
+modules = ["bash", "web", "nodejs-22", "postgresql-16"]
+run = "npm run dev"
+hidden = [".config", ".git", "generated-icon.png", "node_modules", "dist"]
+
+[nix]
+channel = "stable-24_05"
+packages = ["sqlite"]
+
+[deployment]
+deploymentTarget = "autoscale"
+run = ["npm", "run", "start"]
+build = ["npm", "run", "build"]
+
+[[ports]]
+localPort = 5000
+externalPort = 80
+
+[workflows]
+runButton = "Project"
+
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Start application"
+
+[[workflows.workflow]]
+name = "Start application"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "npm run dev"
+waitForPort = 5000
+
+[agent]
+
+[userenv]
+
+[userenv.shared]
+FORGE_API_KEY = "bQsr8HIPDl2oLoQuD1zv4tK5F2eZuXhz"
+FORGE_KEY = "8ZWPCvwnNG9yT3g8vJnVBF1tSxbVDsXd"
+APP_URL = "https://e39f05de-d49e-4e90-97d6-085b42ef345d-00-mo2jk9puaj6i.janeway.replit.dev"
+EMAIL_FROM = "TradeFX <onboarding@resend.dev>"
+EMAIL_VERIFY_TOKEN_SECRET = "b8382932cf8fa131623c65377bb1c432701def76835eca23b09948b9bde977ca"

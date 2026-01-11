@@ -1,0 +1,287 @@
+Understood. You want a **sub-tabbed System Config UI** with confirm-on-toggle behavior for critical switches and admin bypass support preserved.
+Below is the **inline code output** (within time constraints) that you can drop directly into your existing `AdminDashboard.tsx` and related backend. It adds three sub-tabs:
+
+* **Trading Controls**
+* **Market Data & Refresh**
+* **System Health**
+
+All use your existing dark theme, `Card` UI, and backend endpoints `/api/admin/system-config` and `/api/admin/system-health`.
+
+---
+
+### ✅ `client/src/pages/AdminDashboard.tsx` (replace System Config section)
+
+```tsx
+import React, { useEffect, useState } from "react";
+import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Switch } from "@/components/ui/switch";
+import { Input } from "@/components/ui/input";
+import { useToast } from "@/components/ui/use-toast";
+
+export default function AdminDashboard() {
+  const [tab, setTab] = useState("trading");
+  const [config, setConfig] = useState<any>({});
+  const [health, setHealth] = useState<any>({});
+  const [loading, setLoading] = useState(false);
+  const { toast } = useToast();
+
+  useEffect(() => {
+    fetchConfig();
+    fetchHealth();
+  }, []);
+
+  async function fetchConfig() {
+    const res = await fetch("/api/admin/system-config");
+    const data = await res.json();
+    setConfig(data);
+  }
+
+  async function fetchHealth() {
+    const res = await fetch("/api/admin/system-health");
+    const data = await res.json();
+    setHealth(data);
+  }
+
+  async function handleSave() {
+    setLoading(true);
+    const res = await fetch("/api/admin/system-config", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(config),
+    });
+    if (res.ok) {
+      toast({ title: "System configuration updated" });
+      fetchConfig();
+    } else {
+      toast({ title: "Error saving config", variant: "destructive" });
+    }
+    setLoading(false);
+  }
+
+  const confirmToggle = (key: string, value: boolean) => {
+    if (
+      window.confirm(
+        `Are you sure you want to ${value ? "enable" : "disable"} ${key
+          .replace(/_/g, " ")
+          .toUpperCase()}?`
+      )
+    ) {
+      setConfig((prev: any) => ({ ...prev, [key]: value }));
+    }
+  };
+
+  return (
+    <div className="p-4 text-gray-200">
+      <h1 className="text-2xl font-semibold mb-4">System Configuration</h1>
+      <p className="mb-4 text-sm text-gray-400">
+        Manage platform-wide operational controls, API integration, and data
+        refresh parameters.
+      </p>
+
+      <Tabs value={tab} onValueChange={setTab} className="space-y-4">
+        <TabsList>
+          <TabsTrigger value="trading">Trading Controls</TabsTrigger>
+          <TabsTrigger value="market">Market Data & Refresh</TabsTrigger>
+          <TabsTrigger value="health">System Health</TabsTrigger>
+        </TabsList>
+
+        {/* TRADING CONTROLS */}
+        <TabsContent value="trading">
+          <Card>
+            <CardContent className="space-y-4 mt-4">
+              <div className="flex justify-between items-center">
+                <span>Maintenance Mode</span>
+                <Switch
+                  checked={config.maintenance_mode}
+                  onCheckedChange={(v) => confirmToggle("maintenance_mode", v)}
+                />
+              </div>
+
+              <div className="flex justify-between items-center">
+                <span>Trading Halt</span>
+                <Switch
+                  checked={config.trading_halt}
+                  onCheckedChange={(v) => confirmToggle("trading_halt", v)}
+                />
+              </div>
+
+              <div className="flex justify-between items-center">
+                <span>Close-Only Mode</span>
+                <Switch
+                  checked={config.close_only}
+                  onCheckedChange={(v) => confirmToggle("close_only", v)}
+                />
+              </div>
+
+              <div className="flex justify-between items-center">
+                <span>Block Open on Stale Quotes</span>
+                <Switch
+                  checked={config.block_open_on_stale_quotes}
+                  onCheckedChange={(v) =>
+                    confirmToggle("block_open_on_stale_quotes", v)
+                  }
+                />
+              </div>
+
+              <Button onClick={handleSave} disabled={loading}>
+                {loading ? "Saving..." : "Save Changes"}
+              </Button>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* MARKET DATA */}
+        <TabsContent value="market">
+          <Card>
+            <CardContent className="space-y-4 mt-4">
+              <div className="flex flex-col space-y-2">
+                <label>Client Quote Refresh Rate (ms)</label>
+                <Input
+                  type="number"
+                  value={config.quote_refresh_ms || ""}
+                  onChange={(e) =>
+                    setConfig((p: any) => ({
+                      ...p,
+                      quote_refresh_ms: Number(e.target.value),
+                    }))
+                  }
+                />
+              </div>
+
+              <div className="flex flex-col space-y-2">
+                <label>Server Feed Poll Interval (ms)</label>
+                <Input
+                  type="number"
+                  value={config.feed_poll_ms || ""}
+                  onChange={(e) =>
+                    setConfig((p: any) => ({
+                      ...p,
+                      feed_poll_ms: Number(e.target.value),
+                    }))
+                  }
+                />
+              </div>
+
+              <div className="flex flex-col space-y-2">
+                <label>Stale Threshold (ms)</label>
+                <Input
+                  type="number"
+                  value={config.stale_threshold_ms || ""}
+                  onChange={(e) =>
+                    setConfig((p: any) => ({
+                      ...p,
+                      stale_threshold_ms: Number(e.target.value),
+                    }))
+                  }
+                />
+              </div>
+
+              <Button onClick={handleSave} disabled={loading}>
+                {loading ? "Saving..." : "Save Changes"}
+              </Button>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* HEALTH SNAPSHOT */}
+        <TabsContent value="health">
+          <Card>
+            <CardContent className="mt-4 space-y-3 text-sm">
+              <div>
+                <strong>API Connection:</strong>{" "}
+                <span
+                  className={
+                    health.apiConnected ? "text-green-400" : "text-red-400"
+                  }
+                >
+                  {health.apiConnected ? "Connected" : "Disconnected"}
+                </span>
+              </div>
+              <div>
+                <strong>Last Successful Call:</strong>{" "}
+                {health.lastSuccess || "N/A"}
+              </div>
+              <div>
+                <strong>Consecutive Failures:</strong>{" "}
+                {health.failures || 0}
+              </div>
+              <div>
+                <strong>Stale Symbols:</strong> {health.staleCount || 0}
+              </div>
+              <div>
+                <strong>Cache Size:</strong> {health.cacheSize || 0}
+              </div>
+              <Button
+                variant="outline"
+                onClick={fetchHealth}
+                className="mt-2 text-gray-300"
+              >
+                Refresh Health Snapshot
+              </Button>
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
+    </div>
+  );
+}
+```
+
+---
+
+### ✅ Backend Integration Notes
+
+No new backend code needed if your current `system_config` schema and `/api/admin/system-config` / `/api/admin/system-health` routes are in place.
+If not, ensure:
+
+**`shared/schema.ts`**
+
+```ts
+system_config: pgTable("system_config", {
+  maintenance_mode: boolean("maintenance_mode").default(false),
+  trading_halt: boolean("trading_halt").default(false),
+  close_only: boolean("close_only").default(false),
+  block_open_on_stale_quotes: boolean("block_open_on_stale_quotes").default(true),
+  quote_refresh_ms: integer("quote_refresh_ms").default(1000),
+  feed_poll_ms: integer("feed_poll_ms").default(1000),
+  stale_threshold_ms: integer("stale_threshold_ms").default(30000),
+  updated_at: timestamp("updated_at").defaultNow(),
+}),
+```
+
+**`server/routes/admin.ts`**
+
+```ts
+app.get("/api/admin/system-config", async (req, res) => {
+  const config = await db.select().from(system_config).limit(1);
+  res.json(config[0]);
+});
+
+app.put("/api/admin/system-config", async (req, res) => {
+  await db.update(system_config).set({ ...req.body, updated_at: new Date() });
+  res.sendStatus(200);
+});
+
+app.get("/api/admin/system-health", async (req, res) => {
+  res.json({
+    apiConnected: forgeFeed.isConnected,
+    lastSuccess: forgeFeed.lastSuccess?.toISOString(),
+    failures: forgeFeed.failures,
+    staleCount: forgeFeed.staleCount,
+    cacheSize: forgeFeed.cacheSize,
+  });
+});
+```
+
+---
+
+### ✅ UI Summary
+
+* Three clean sub-tabs for clarity.
+* Confirm dialogs for dangerous toggles.
+* Dynamic save and live health refresh.
+* Fully aligned with your backend architecture and dark admin UI theme.
+
+Would you like me to now generate the backend **ensureSchema + forgeFeed dynamic refresh integration** patch inline next?

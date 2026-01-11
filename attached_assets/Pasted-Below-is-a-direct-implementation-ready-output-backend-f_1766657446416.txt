@@ -1,0 +1,587 @@
+Below is a **direct, implementation-ready output** (backend + frontend) derived from:
+
+* The zip codebase you provided (`TradingCentral-3AL-2`)
+* The audit report from Replit Agent 3
+* The “logic-engine-plan-and-algorithm-design” context docs you uploaded (email/SMS/KYC/tier gating, profile settings access model)
+* What is **actually present** in your repo (several items in the Agent 3 audit are already implemented but have **critical correctness gaps**)
+
+I am **not** asking for clarification. This is a concrete “apply these fixes” package.
+
+---
+
+# 0) IMPORTANT CORRECTION TO THE AUDIT REPORT (WHAT IS ACTUALLY ALREADY DONE)
+
+Replit Agent 3’s report contains several false negatives:
+
+## Already implemented (but may have correctness gaps)
+
+* `server/routes/verification.ts` already includes:
+
+  * Email send + verify (via Resend HTTP API using `fetch`)
+  * SMS start + confirm (via Twilio Verify HTTP API using `fetch`)
+  * Identity audit events for email/SMS
+  * `/api/verification/status` already returns gating flags
+* Profile Settings already includes verification section:
+
+  * `client/src/components/VerificationCards.tsx` exists and is wired into `ProfileSettings.tsx`
+* Trade routes already use `requirePolicy(...)` in some cases
+
+## What is **actually missing or incorrect**
+
+These are the real blockers that match your checklist intent:
+
+1. **Policy correctness gaps**
+
+   * `TRADE_MODIFY_SLTP` was not properly restricted in locked email states unless risk-reducing logic exists.
+   * `TRADE_CANCEL_PENDING` needs its own config flag (`allowCancelPendingWhenLocked`) enforced.
+   * SMS gating incorrectly blocks CANDIDATEs permanently unless a tier promotion exists.
+   * Daily throttle counters were not being reset by day-key in `buildDecisionContext`.
+
+2. **Backend persistence gaps**
+
+   * Signup does not guarantee a `user_verification` row (needed for throttles + contender tier persistence).
+   * Contender eligibility is computed but not reliably persisted or used to unlock SMS.
+
+3. **Checklist alignment gaps**
+
+   * `/api/profile/me` endpoint returning gating fields is missing (even though `/api/verification/status` exists).
+   * Admin tier promotion endpoint missing (Agent 3 was right here).
+   * KYC submit route missing (UI has placeholder “Start KYC Process” but no submission flow).
+
+---
+
+# 1) BACKEND FIXES — EXACT FILES + CODE
+
+## 1.1 `shared/policyDecision.ts` (CRITICAL FIXES)
+
+Your repo already contains a **patched/expanded** version of `policyDecision.ts` (350 lines in the extracted folder) that introduces:
+
+* `isRiskReducingSltpChange(...)`
+* `smsEligibility(...)`
+* Unified locked state behavior:
+
+  * Exposure-increasing blocked
+  * Close/reduce allowed by `allowReduceOnlyWhenLocked`
+  * Cancel pending allowed only by `allowCancelPendingWhenLocked`
+  * Modify SL/TP allowed only if risk-reducing and `allowRiskReducingSltpChangeWhenLocked`
+
+This is correct and should remain the source-of-truth.
+
+**Action required**: ensure the server is actually passing `tradeIntent` into the policy context for SL/TP modifications (see requirePolicy + trade routes changes below).
+
+---
+
+## 1.2 `server/policy/buildDecisionContext.ts` (DAILY DAY-KEY RESET FIX)
+
+**Problem**: counters like `emailResendCountDay` and `smsSendCountDay` were read as-is; policy gating could incorrectly deny after midnight.
+
+**Fix implemented**: add dayKey columns + reset counts if dayKey differs.
+
+### APPLY THIS PATCH (already staged by script in my working folder)
+
+Ensure your file contains these additions inside the `uvRow` load section:
+
+```ts
+const uvEmailResendDayKeyCol = pickColumn(uvCols, ["emailResendDayKey", "email_resend_day_key"]) ?? null;
+const uvSmsSendDayKeyCol = pickColumn(uvCols, ["smsSendDayKey", "sms_send_day_key"]) ?? null;
+
+const todayKey = new Date(nowMs).toISOString().slice(0, 10);
+...
+emailSendCountDay = ...
+smsSendCountDay = ...
+
+const emailDayKey = uvEmailResendDayKeyCol ? String(uvRow[uvEmailResendDayKeyCol] ?? "") : "";
+if (emailDayKey && emailDayKey !== todayKey) {
+  emailSendCountDay = 0;
+}
+
+const smsDayKey = uvSmsSendDayKeyCol ? String(uvRow[uvSmsSendDayKeyCol] ?? "") : "";
+if (smsDayKey && smsDayKey !== todayKey) {
+  smsSendCountDay = 0;
+}
+```
+
+This change is required for correct throttling enforcement.
+
+---
+
+## 1.3 `server/middleware/requirePolicy.ts` (ADD OVERRIDES + DYNAMIC ACTION)
+
+**Problem**:
+
+* Trade routes need to choose between `TRADE_OPEN_OR_INCREASE` vs `TRADE_PLACE_PENDING`
+* SL/TP modify must pass `tradeIntent` into the policy engine to enforce risk-reduction-only when locked.
+
+### FULL REPLACEMENT FILE
+
+Replace `server/middleware/requirePolicy.ts` with this:
+
+```ts
+import { Request, Response, NextFunction } from "express";
+import { buildDecisionContext } from "../policy/buildDecisionContext";
+import {
+  decidePolicy,
+  type PolicyAction,
+  type PolicyDecision,
+  type DecisionContext,
+} from "../../shared/policyDecision";
+import { appendIdentityAudit } from "../services/identityAudit";
+
+export interface PolicyEnforcedRequest extends Request {
+  policyDecision?: PolicyDecision;
+  policyAction?: PolicyAction;
+}
+
+type PolicyActionResolver = PolicyAction | ((req: PolicyEnforcedRequest) => PolicyAction);
+
+type PolicyOverrideBuilder =
+  | ((req: PolicyEnforcedRequest, baseCtx: DecisionContext) => Promise<Partial<DecisionContext>> | Partial<DecisionContext>)
+  | undefined;
+
+export function requirePolicy(actionOrResolver: PolicyActionResolver, buildOverrides?: PolicyOverrideBuilder) {
+  return async (req: PolicyEnforcedRequest, res: Response, next: NextFunction) => {
+    const session: any = (req as any).session;
+    const userId = session?.userId;
+    const actorAdminId = session?.realAdminId ?? null; // present when admin is impersonating
+
+    if (!userId) {
+      return res.status(401).json({ message: "Not authenticated" });
+    }
+
+    try {
+      const action = typeof actionOrResolver === "function" ? actionOrResolver(req) : actionOrResolver;
+
+      // Base ctx
+      let ctx = await buildDecisionContext({
+        userId,
+        nowMs: Date.now(),
+      });
+
+      // Overrides (tradeIntent, etc.)
+      if (buildOverrides) {
+        const overrides = await buildOverrides(req, ctx);
+        ctx = await buildDecisionContext({
+          userId,
+          nowMs: Date.now(),
+          overrides,
+          tradeIntent: (overrides as any)?.tradeIntent ?? ctx.tradeIntent,
+        });
+      }
+
+      const decision = decidePolicy(action, ctx);
+      req.policyDecision = decision;
+      req.policyAction = action;
+
+      if (!decision.allowed) {
+        try {
+          appendIdentityAudit({
+            userId,
+            actorAdminId,
+            email: ctx.user.email,
+            username: ctx.user.username ?? undefined,
+            category: "POLICY",
+            type: "ACTION_DENIED",
+            title: `Policy denied: ${action}`,
+            description: `Deny code: ${decision.deny_code}, Account state: ${decision.accountState}`,
+            ip: (req.ip || (req.headers["x-forwarded-for"] as string) || undefined) as any,
+            userAgent: req.headers["user-agent"],
+          });
+        } catch (auditErr) {
+          console.error("Error writing policy deny audit:", auditErr);
+        }
+
+        const httpStatus = getHttpStatusForDenyCode(decision.deny_code);
+        return res.status(httpStatus).json({
+          message: getMessageForDenyCode(decision.deny_code),
+          deny_code: decision.deny_code,
+          accountState: decision.accountState,
+          showLockedBanner: decision.showLockedBanner,
+          redirectTo: decision.redirectTo,
+        });
+      }
+
+      next();
+    } catch (error) {
+      console.error("Policy enforcement error:", error);
+      return res.status(500).json({ message: "Policy check failed" });
+    }
+  };
+}
+
+function getHttpStatusForDenyCode(code?: string): number {
+  switch (code) {
+    case "ACCOUNT_SUSPENDED":
+      return 403;
+    case "EMAIL_NOT_VERIFIED":
+    case "EMAIL_REVERIFY_OVERDUE":
+      return 403;
+    case "EMAIL_SEND_RATE_LIMIT":
+    case "EMAIL_SEND_COOLDOWN":
+    case "SMS_RATE_LIMIT":
+    case "SMS_OTP_TOO_MANY_ATTEMPTS":
+      return 429;
+    case "SMS_NOT_ELIGIBLE":
+    case "SMS_NOT_ELIGIBLE_TIER":
+    case "KYC_NOT_SELECTED":
+    case "KYC_STATE_INVALID":
+    case "ACTION_NOT_ALLOWED_IN_STATE":
+      return 403;
+    default:
+      return 403;
+  }
+}
+
+function getMessageForDenyCode(code?: string): string {
+  switch (code) {
+    case "ACCOUNT_SUSPENDED":
+      return "Your account has been suspended. Please contact support.";
+    case "EMAIL_NOT_VERIFIED":
+      return "Please verify your email address to continue trading.";
+    case "EMAIL_REVERIFY_OVERDUE":
+      return "Your email verification has expired. Please re-verify your email.";
+    case "EMAIL_SEND_RATE_LIMIT":
+      return "Daily email limit reached. Please try again tomorrow.";
+    case "EMAIL_SEND_COOLDOWN":
+      return "Please wait before requesting another verification email.";
+    case "SMS_NOT_ELIGIBLE":
+      return "Phone verification is not available for your account type.";
+    case "SMS_NOT_ELIGIBLE_TIER":
+      return "Phone verification requires account progression. Keep trading to unlock.";
+    case "SMS_RATE_LIMIT":
+      return "SMS limit reached. Please try again later.";
+    case "SMS_OTP_TOO_MANY_ATTEMPTS":
+      return "Too many failed attempts. Please wait before trying again.";
+    case "KYC_NOT_SELECTED":
+      return "KYC verification is only available for selected traders.";
+    case "KYC_STATE_INVALID":
+      return "KYC submission is not allowed in the current state.";
+    case "ACTION_NOT_ALLOWED_IN_STATE":
+      return "This action is not allowed in your current account state.";
+    default:
+      return "Action not permitted.";
+  }
+}
+```
+
+---
+
+## 1.4 Add contender progression persistence (NEW FILE)
+
+### `server/services/contenderProgress.ts`
+
+This is required to:
+
+* Ensure `user_verification` row exists
+* Persist contender tier progression when eligible
+* Auto-promote userTier `CANDIDATE -> PERFORMER` when eligible + email verified
+
+✅ **NOTE**: your version currently references `ctx.user.contenderEligibleAt` which does NOT exist in `DecisionContext.user` type. Fix included below: we read contender eligibility timestamp from `user_verification` by querying or by storing only if missing in DB. Since your DecisionContext currently doesn’t expose contenderEligibleAt, we will persist only if DB column is null.
+
+### FULL FILE
+
+Create `server/services/contenderProgress.ts`:
+
+```ts
+import { and, eq } from "drizzle-orm";
+import { db } from "../db/index";
+import { users, userVerification } from "../../shared/schema";
+import { computeContenderEligibility, type ContenderTier, type UserTier } from "../../shared/policyDecision";
+import { buildDecisionContext } from "../policy/buildDecisionContext";
+import { appendIdentityAudit } from "./identityAudit";
+
+/**
+ * Persists contender eligibility + tier progression safely (additive-only).
+ * - Ensures user_verification row exists
+ * - Advances contenderTier to CANDIDATE_SMS_REQUIRED once eligible+emailVerified (unless already beyond)
+ * - Auto-promotes users.userTier: CANDIDATE -> PERFORMER once eligible+emailVerified
+ */
+export async function syncContenderProgress(userId: number, actorAdminId: number | null = null) {
+  await db.insert(userVerification).values({ userId }).onConflictDoNothing();
+
+  const nowMs = Date.now();
+  const nowSec = Math.floor(nowMs / 1000);
+
+  const ctx = await buildDecisionContext({ userId, nowMs });
+  const contender = computeContenderEligibility(ctx);
+
+  if (!contender.eligible) return;
+
+  // Load current verification row to check contenderEligibleAt existence
+  const uv = await db.query.userVerification.findFirst({
+    where: eq(userVerification.userId, userId),
+  });
+
+  const patch: any = {};
+
+  if (uv && !uv.contenderEligibleAt) {
+    patch.contenderEligibleAt = nowSec;
+  }
+
+  if (ctx.user.emailVerifiedAt) {
+    const current = (uv?.contenderTier ?? ctx.user.contenderTier ?? "NONE") as ContenderTier;
+    const alreadyBeyond = current === "VERIFIED_SMS" || current === "SELECTED_REAL_CAPITAL";
+
+    if (!alreadyBeyond) {
+      const desired: ContenderTier = ctx.user.phoneVerifiedAt ? "VERIFIED_SMS" : "CANDIDATE_SMS_REQUIRED";
+      if (current !== desired) {
+        patch.contenderTier = desired;
+      }
+    }
+  }
+
+  if (Object.keys(patch).length > 0) {
+    await db.update(userVerification).set(patch).where(eq(userVerification.userId, userId));
+  }
+
+  if (ctx.user.emailVerifiedAt && ctx.user.userTier === "CANDIDATE") {
+    const updated = await db
+      .update(users)
+      .set({ userTier: "PERFORMER" as UserTier })
+      .where(and(eq(users.id, userId), eq(users.userTier, "CANDIDATE")))
+      .returning({ id: users.id });
+
+    if (updated.length > 0) {
+      appendIdentityAudit({
+        userId,
+        actorAdminId,
+        email: ctx.user.email,
+        username: ctx.user.username ?? undefined,
+        category: "TIER",
+        type: "TIER_CHANGED",
+        title: "Auto promotion to PERFORMER",
+        description: "Eligible contender + email verified. Auto-progression applied.",
+      });
+    }
+  }
+}
+```
+
+---
+
+# 2) ROUTE-LEVEL PATCHES (LINE-BY-LINE INSERTS)
+
+## 2.1 `server/routes.ts` — On signup create verification row
+
+Find `/api/auth/register` handler and insert after `storage.createUser(...)`:
+
+```ts
+import { userVerification, userKycProfiles, userPayoutProfiles } from "@shared/schema";
+...
+await db.insert(userVerification).values({ userId: user.id }).onConflictDoNothing();
+await db.insert(userKycProfiles).values({ userId: user.id }).onConflictDoNothing();
+await db.insert(userPayoutProfiles).values({ userId: user.id }).onConflictDoNothing();
+```
+
+This makes throttles + gating durable from day 1.
+
+---
+
+## 2.2 `server/routes.ts` — Add `/api/profile/me` endpoint (checklist requirement)
+
+Insert near `/api/auth/current-user`:
+
+```ts
+import { buildDecisionContext } from "./policy/buildDecisionContext";
+import { featureGates } from "../shared/policyDecision";
+import { syncContenderProgress } from "./services/contenderProgress";
+...
+app.get("/api/profile/me", ensureAuth, async (req, res) => {
+  const userId = req.session.userId!;
+  await syncContenderProgress(userId, req.session.realAdminId ?? null);
+
+  const ctx = await buildDecisionContext({ userId, nowMs: Date.now() });
+  const gates = featureGates(ctx);
+
+  res.json({
+    id: ctx.user.id,
+    email: ctx.user.email,
+    username: ctx.user.username,
+    userTier: ctx.user.userTier,
+    contenderTier: ctx.user.contenderTier,
+    accountState: gates.accountState,
+    contenderEligible: gates.contenderEligible,
+    gates,
+  });
+});
+```
+
+---
+
+## 2.3 Trade placement must choose correct policy action
+
+In `routes.ts` trade create route:
+
+### Replace:
+
+```ts
+requirePolicy("TRADE_OPEN_OR_INCREASE")
+```
+
+### With:
+
+```ts
+requirePolicy((req) => {
+  const body: any = req.body;
+  const orderType = String(body?.orderType ?? "MARKET").toUpperCase();
+  return orderType === "PENDING" ? "TRADE_PLACE_PENDING" : "TRADE_OPEN_OR_INCREASE";
+})
+```
+
+---
+
+## 2.4 SL/TP modification must pass tradeIntent to policy
+
+In the SL/TP modify endpoint (route handling `/api/trades/:id/targets` or similar), wrap `requirePolicy("TRADE_MODIFY_SLTP")` with overrides:
+
+```ts
+requirePolicy("TRADE_MODIFY_SLTP", async (req) => {
+  const tradeId = Number(req.params.id);
+  const nextSl = req.body?.stopLoss ?? null;
+
+  const trade = await db.query.trades.findFirst({ where: eq(trades.id, tradeId) });
+  if (!trade) return {};
+
+  return {
+    tradeIntent: {
+      kind: "SLTP_MODIFY",
+      side: trade.type,
+      slBefore: trade.stopLoss ? Number(trade.stopLoss) : null,
+      slAfter: nextSl !== null ? Number(nextSl) : null,
+    }
+  } as any;
+})
+```
+
+This is what makes your new `TRADE_MODIFY_SLTP locked-state risk-reduction` logic work.
+
+---
+
+## 2.5 Enforce policy on payout currency update
+
+Wrap `/api/profile/payout/currency` with:
+
+```ts
+requirePolicy("PREFERRED_PAYMENT_CURRENCY_SET")
+```
+
+---
+
+## 2.6 Add KYC submit endpoint (UI currently has no backend target)
+
+Add:
+
+```ts
+app.post("/api/profile/kyc/submit", ensureAuth, requirePolicy("KYC_SUBMIT"), async (req, res) => {
+  const userId = req.session.userId!;
+  const { documentType, documentNumber } = req.body;
+
+  if (!documentType || !documentNumber) {
+    return res.status(400).json({ message: "documentType and documentNumber are required" });
+  }
+
+  await db.update(userKycProfiles).set({
+    status: "SUBMITTED",
+    submittedAt: new Date(),
+    documentType,
+    documentNumber,
+    updatedAt: new Date(),
+  }).where(eq(userKycProfiles.userId, userId));
+
+  res.json({ ok: true });
+});
+```
+
+---
+
+# 3) FRONTEND FIXES
+
+## 3.1 Add “Locked account” banner (missing from UI)
+
+Create `client/src/components/LockedBanner.tsx`:
+
+```tsx
+import { useQuery } from "@tanstack/react-query";
+import { Link } from "wouter";
+
+export default function LockedBanner() {
+  const { data } = useQuery<any>({ queryKey: ["/api/verification/status"] });
+  if (!data?.showLockedBanner) return null;
+
+  return (
+    <div className="w-full bg-amber-500 text-black px-4 py-2 flex items-center justify-between">
+      <div className="font-medium">
+        Account restricted: {data.accountState}. Verify email to restore full access.
+      </div>
+      <Link href="/profile">
+        <a className="bg-black text-white px-3 py-1 rounded">Go to Profile</a>
+      </Link>
+    </div>
+  );
+}
+```
+
+Then add to `client/src/App.tsx` inside `AppRoutes()` layout, right under `<ImpersonationBanner />`:
+
+```tsx
+import LockedBanner from "@/components/LockedBanner";
+...
+<>
+  <ImpersonationBanner />
+  <LockedBanner />
+  ...
+</>
+```
+
+---
+
+## 3.2 Implement KYC submission UI (currently placeholder)
+
+In `client/src/components/VerificationCards.tsx`, inside `KycStatusCard`:
+
+* Add a modal form (documentType + documentNumber)
+* POST to `/api/profile/kyc/submit`
+* Invalidate `["verification-status"]` query key afterward
+
+This is required because the “Start KYC Process” button currently does nothing meaningful.
+
+---
+
+# 4) WHAT IS STILL INCOMPLETE IN THIS RESPONSE (TRANSPARENT)
+
+Because your request demanded “full deep context code inline,” I prioritized the **core missing enforcement/persistence paths** and checklist-critical correctness.
+
+The following are **not fully rewritten inline yet** because they require large refactors of `AdminDashboard.tsx` (very large file) and would balloon the output:
+
+1. Full extraction of Admin mini-tabs into separate files (`AdminAuditTrail.tsx`, `KycQueue.tsx`, etc.)
+2. Full `/api/admin/user-profiles` implementation + admin UI for tier promotion
+3. Full “Header tier progression display + progress meter” enhancements
+
+If you want, I can output the **admin endpoints + minimal admin UI page** next in a second response without needing more input.
+
+---
+
+# 5) FASTEST NEXT STEP (NO QUESTIONS, JUST EXECUTION ORDER)
+
+1. Apply backend files:
+
+   * `buildDecisionContext.ts` dayKey reset
+   * `requirePolicy.ts` override + dynamic action support
+   * Add `contenderProgress.ts`
+2. Patch `routes.ts` for:
+
+   * signup inserts into verification tables
+   * `/api/profile/me`
+   * trade open pending action selection
+   * SLTP modify override with tradeIntent
+   * payout currency policy enforcement
+   * add KYC submit endpoint
+3. Add UI locked banner and wire into App
+4. Add KYC submit modal UI
+
+---
+
+If you respond with **“continue”**, I will produce the **next tranche**:
+
+* `/api/admin/user-profiles` + `/api/admin/users/:id/tier` endpoints (fully inline)
+* Minimal `AdminUserProfileSettings.tsx` page + router wiring
+* Admin UI tier-change dialog (small insert patch into existing admin dashboard)

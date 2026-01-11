@@ -1,0 +1,869 @@
+Below is a concrete, “Replit Agent 3–implementable” algorithm + logic design that turns your intent into: **data capture → rule engine → risk scoring → admin dashboards** (User Management mini-tab: **Fraud Detection** next to **Login History** and **Audit Trail**), with aggregated risk measures and drilldowns.
+
+I am assuming your stack remains: **Express + TypeScript**, **Drizzle ORM + SQLite**, **React + Tailwind**, **wouter**, with existing audit tables (adminActions/tradeAudit/orderIntentAudit). This design ties directly into those.
+
+---
+
+## 1) Target outcomes (what the system must catch)
+
+### A) Multi-account on same device/network
+
+Detect cases where a single operator uses:
+
+* **multiple accounts on the same device** (strongest signal)
+* multiple accounts on same **IP/ASN/network** (supporting signal)
+* and especially **coordinated hedging** (buy on one account / sell on another) on same instrument/time window
+
+### B) Account sharing / pilot trading
+
+Detect when one account shows:
+
+* **device churn** (many deviceIds)
+* **IP/ASN churn** (rapid changes, VPN/proxy patterns)
+* **geo anomalies** (impossible travel)
+* **concurrent sessions** (two places at once)
+
+### C) Admin surfacing
+
+* A queue of flagged accounts (severity + explainable evidence)
+* A per-user “Integrity/Fraud Profile” drilldown
+* A “Linked Accounts” view (graph-style edges)
+
+---
+
+## 2) Data capture: what to collect and where (implementation-grade)
+
+### 2.1 Client (browser) must send a stable `deviceId`
+
+**Best practice:** generate a device identifier in the browser, store it, and send it on every auth + trading request.
+
+**Implementation choice options:**
+
+* **Option 1 (recommended):** FingerprintJS (deviceId is `visitorId`)
+* **Option 2 (fallback):** first-party “soft” deviceId (hash of UA/platform/timezone/screen + random salt in localStorage)
+
+**Contract:**
+
+* client sends `x-device-id: <string>` header
+* also send `x-client-timezone`, `x-client-locale` (optional but useful)
+
+### 2.2 Server middleware builds an `AuditContext` for every request
+
+On every request (especially auth and trading endpoints), extract:
+
+* `userId` (if authenticated)
+* `sessionId` (server-generated)
+* `ip` (from `x-forwarded-for`/`req.ip`)
+* `userAgent`
+* `deviceId`
+* `geo/asn/org` (via an enrichment provider; can be stubbed initially)
+
+This context is used for:
+
+* **auth/session logging**
+* **fraud rule evaluation**
+* **risk score updates**
+* **admin evidence snapshots**
+
+---
+
+## 3) Storage model (tables you should add)
+
+You need three layers: raw event logs, session records, and derived alerts/edges.
+
+### 3.1 Raw append-only logs
+
+**`auth_events`** (append-only)
+
+* `id`, `ts`
+* `userId` (nullable for failed logins)
+* `eventType` (LOGIN_SUCCESS/LOGIN_FAIL/LOGOUT/TOKEN_REFRESH/ORDER_SUBMIT/ORDER_REJECT/etc.)
+* `sessionId`, `deviceId`, `ip`, `userAgent`
+* `geoCountry`, `geoRegion`, `geoCity`, `geoAccuracyKm`
+* `asn`, `org`
+* `metaJson` (reject reason, error code, etc.)
+* **tamper-evident**: `prevHash`, `eventHash`
+
+**`auth_sessions`**
+
+* `sessionId` (PK), `userId`
+* `deviceId`, `ip`, `userAgent`
+* `geo*`, `asn`, `org`
+* `startedAt`, `endedAt`, `endReason`
+* `isActive`
+
+### 3.2 Device and linkage tables
+
+**`devices`**
+
+* `deviceId` (PK)
+* `firstSeenAt`, `lastSeenAt`
+* `firstIp`, `firstGeoCountry`, `firstAsn`, `firstOrg`
+* `trustLevel` (NEW/TRUSTED/CHALLENGED/BLOCKED)
+
+**`device_user_links`**
+
+* `deviceId`, `userId` (composite PK)
+* `firstSeenAt`, `lastSeenAt`
+* `seenCount`
+* `linkStrength` (computed weight)
+
+### 3.3 Derived risk + alerts + graph edges
+
+**`integrity_alerts`**
+
+* `id`, `createdAt`, `updatedAt`
+* `severity` (LOW/MED/HIGH/CRITICAL)
+* `ruleCode` (e.g., SHARED_DEVICE, IMPOSSIBLE_TRAVEL)
+* `primaryUserId`
+* `secondaryUserId` (nullable; for linked accounts)
+* `status` (OPEN/IN_REVIEW/CLOSED/IGNORED)
+* `evidenceJson` (snapshot: deviceId/ip/asn/geo/tradeIds)
+* `riskScoreAtCreation`
+* `assignedAdminId` (nullable)
+* `resolutionReason` (nullable)
+
+**`user_integrity_scores`**
+
+* `userId` (PK)
+* `scoreCurrent` (0–100)
+* `score7d`, `score30d`
+* `deviceCount7d`, `ipCount7d`, `asnCount7d`, `countryCount7d`
+* `newDeviceCount7d`, `concurrentSessionMax7d`
+* `linkedAccountsCount30d`
+* `hedgePairCount7d`
+* `lastEvaluatedAt`
+
+**`linked_account_edges`**
+
+* `id`
+* `userA`, `userB`
+* `edgeType` (SHARED_DEVICE/SHARED_IPASN/COORDINATED_HEDGE/COORDINATED_TIMING)
+* `weight` (0–100)
+* `firstSeenAt`, `lastSeenAt`
+* `evidenceJson`
+
+---
+
+## 4) Fraud detection engine (deep logic)
+
+### 4.1 Core architecture
+
+Implement a dedicated module:
+
+* `FraudContextBuilder` (middleware)
+* `AuthTelemetryService` (writes auth_events/auth_sessions)
+* `LinkageService` (updates device_user_links + edges)
+* `FraudRulesEngine` (evaluates rules, returns triggered rule events)
+* `FraudScoringService` (computes risk score + aggregates)
+* `FraudAlertService` (creates/updates integrity_alerts)
+* `FraudAdminService` (admin workflows + exports)
+
+### 4.2 Rule evaluation triggers (when to run rules)
+
+Run a lightweight evaluation on:
+
+1. `LOGIN_SUCCESS`
+2. `ORDER_SUBMIT` (market/pending)
+3. `ORDER_FILL` (optional)
+4. `TARGETS_UPDATED` (SL/TP edits)
+5. `LOGOUT` or session end (update session length + concurrent tracking)
+
+Nightly or hourly batch:
+
+* rebuild linked edges weight
+* compute rolling features 7d/30d
+* detect coordinated hedging patterns across accounts
+
+---
+
+## 5) Rules (implementation-ready)
+
+Below are rule definitions you can implement as deterministic queries (SQLite-friendly).
+
+### R1 — Shared device across accounts (strong)
+
+**Trigger:** `deviceId` used by ≥ 2 distinct `userId` in last 30 days
+**Output:** create/refresh `linked_account_edges` (SHARED_DEVICE), weight high (e.g., 80)
+
+### R2 — Shared device + opposite-side same symbol within time window (very strong)
+
+**Trigger:** two different users with same `deviceId` place trades:
+
+* same `symbol`
+* opposite `side`
+* within `Δt <= 120s` (configurable)
+  **Output:** edge type COORDINATED_HEDGE, weight 95, CRITICAL alert
+
+### R3 — Shared IP/ASN cluster across multiple accounts (medium; false positives possible)
+
+**Trigger:** multiple accounts share same `(asn, org)` and same IP prefix frequency
+**Output:** edge SHARED_IPASN weight 40–60 (depends on device correlation)
+
+### R4 — Device churn on one account (account sharing)
+
+**Trigger:** user has > N new deviceIds in 7 days (e.g., N=3)
+**Output:** alert MED/HIGH depending on MFA/KYC tier
+
+### R5 — Impossible travel (geo anomaly)
+
+**Trigger:** login A then login B:
+
+* time difference too small for distance between geos
+* incorporate `geoAccuracyKm` (don’t over-trigger)
+  **Output:** HIGH alert
+
+### R6 — Concurrent sessions far apart
+
+**Trigger:** two active sessions for same user overlap with different deviceId or distant geo
+**Output:** HIGH alert
+
+### R7 — ASN volatility / VPN-like behavior
+
+**Trigger:** asnCount7d above threshold, or frequent changes between residential/orgs/hosting
+**Output:** MED alert; stronger if combined with R4/R6
+
+### R8 — UA change within a session (session hijack indicator)
+
+**Trigger:** same sessionId shows materially different UA signature
+**Output:** HIGH alert
+
+### R9 — Multi-account “laddering” (coordinated timing)
+
+**Trigger:** two accounts share device or IP+UA and consistently open/close within tight windows across multiple days
+**Output:** weight grows as pattern repeats (anti-false-positive)
+
+---
+
+## 6) Risk scoring (aggregated measures you’ll show admins)
+
+### 6.1 Scoring model (explainable)
+
+Score = sum(rulePoints) − mitigations, clamp 0–100.
+
+Example:
+
+* R1 shared device: +35
+* R2 coordinated hedge: +55
+* R4 device churn: +20
+* R5 impossible travel: +35
+* R6 concurrent far sessions: +30
+* R7 ASN volatility: +15
+  Mitigations:
+* MFA enabled: −10
+* KYC tier high + trusted device: −10
+* long stable history (90d): −5
+
+### 6.2 Aggregations (store in `user_integrity_scores`)
+
+Compute and store:
+
+* `scoreCurrent`, `score7d`, `score30d`
+* counts: devices, IPs, ASNs, countries (7d/30d)
+* `linkedAccountsCount30d`
+* `hedgePairCount7d`
+* `concurrentSessionMax7d`
+
+This becomes your dashboard KPI layer (fast to query).
+
+---
+
+## 7) Analytics queries (what Replit Agent 3 should implement)
+
+### 7.1 “Flagged users” list (Fraud Detection mini-tab)
+
+Return users where:
+
+* `scoreCurrent >= threshold` OR
+* open alerts exist OR
+* linkedAccountsCount30d > 0 OR
+* hedgePairCount7d > 0
+
+Sort by severity then score.
+
+### 7.2 “Linked accounts” graph
+
+For a given user:
+
+* fetch all edges where `userA=userId OR userB=userId`
+* show edge types + weights + evidence
+
+### 7.3 “Coordinated hedging detector” (batch job)
+
+For each `deviceId` used by ≥2 users:
+
+* scan trades last 7 days
+* group by `(symbol, timeBucket)`
+* detect opposite-side pairs across distinct users
+* store evidence and edge weight increments
+
+**SQLite optimization:** create indexes on:
+
+* `trades(symbol, createdAt)`
+* `auth_events(deviceId, ts)`
+* `auth_sessions(userId, startedAt)`
+* `linked_account_edges(userA, userB, lastSeenAt)`
+
+---
+
+## 8) Admin UI integration (User Management mini-tab + dashboards)
+
+### 8.1 Where it goes
+
+In **AdminDashboard → User Management** mini-tabs:
+
+* All | Active | Disabled | Frozen | Online/Offline | Login History | Audit Trail | **Fraud Detection**
+
+### 8.2 Fraud Detection mini-tab layout (recommended)
+
+**Top KPI row (cards):**
+
+* Open High/Critical Alerts
+* Users above threshold
+* Linked-account clusters (unique groups)
+* Coordinated hedge signals (7d)
+
+**Main grid: “Flagged Users”**
+Columns:
+
+* Severity badge
+* User (name/email)
+* Risk Score (Current/7d/30d)
+* Devices (7d) / IPs (7d) / ASNs (7d)
+* Linked Accounts count
+* Hedge signals (7d)
+* Last Seen
+  Actions:
+* View Profile
+* Assign Case
+* Require Re-Verification
+* Freeze (with reason code)
+* Dismiss (log reason)
+
+### 8.3 User drilldown: “Fraud Profile”
+
+Tabs inside modal/drawer:
+
+1. Summary (scores, triggered rules)
+2. Sessions timeline (ip/asn/geo changes)
+3. Devices (list + linked users)
+4. Linked Accounts (edges graph list)
+5. Coordinated Trades (evidence table)
+6. Admin Actions (audit log tie-in)
+
+---
+
+## 9) Backend endpoints (what the UI will call)
+
+Recommended endpoints:
+
+### Read
+
+* `GET /api/admin/fraud/summary`
+* `GET /api/admin/fraud/alerts?status=OPEN&severity=HIGH`
+* `GET /api/admin/fraud/flagged-users?minScore=50`
+* `GET /api/admin/users/:userId/fraud-profile`
+* `GET /api/admin/users/:userId/linked-accounts`
+* `GET /api/admin/users/:userId/fraud-trade-signals`
+
+### Write (admin workflow)
+
+* `POST /api/admin/fraud/alerts/:id/assign`
+* `POST /api/admin/fraud/alerts/:id/status` (IN_REVIEW/CLOSED/IGNORED + reason)
+* `POST /api/admin/users/:userId/fraud-actions/require-reverification`
+* `POST /api/admin/users/:userId/fraud-actions/freeze` (reasonCode, note)
+
+Every write should also create an `adminActions` audit row.
+
+---
+
+## 10) Concrete implementation skeleton (inline code)
+
+Below are the core building blocks Replit Agent 3 can drop in. This is intentionally modular so you can integrate incrementally.
+
+### 10.1 Shared types: `server/fraud/types.ts`
+
+```ts
+export type FraudSeverity = "LOW" | "MED" | "HIGH" | "CRITICAL";
+export type FraudAlertStatus = "OPEN" | "IN_REVIEW" | "CLOSED" | "IGNORED";
+
+export type FraudRuleCode =
+  | "SHARED_DEVICE"
+  | "COORDINATED_HEDGE"
+  | "SHARED_IPASN_CLUSTER"
+  | "DEVICE_CHURN"
+  | "IMPOSSIBLE_TRAVEL"
+  | "CONCURRENT_FAR_SESSIONS"
+  | "ASN_VOLATILITY"
+  | "UA_CHANGE_IN_SESSION";
+
+export type AuditContext = {
+  ts: number;
+  userId?: number;
+  sessionId?: string;
+  deviceId?: string;
+  ip?: string;
+  userAgent?: string;
+  // enrichment
+  geoCountry?: string;
+  geoRegion?: string;
+  geoCity?: string;
+  geoAccuracyKm?: number;
+  asn?: number;
+  org?: string;
+};
+
+export type RuleTrigger = {
+  ruleCode: FraudRuleCode;
+  severity: FraudSeverity;
+  primaryUserId: number;
+  secondaryUserId?: number;
+  points: number;
+  evidence: Record<string, any>;
+};
+```
+
+### 10.2 Request context middleware: `server/middleware/auditContext.ts`
+
+```ts
+import type { Request, Response, NextFunction } from "express";
+import { randomUUID } from "crypto";
+import type { AuditContext } from "../fraud/types";
+import { enrichIp } from "../services/ipEnrichment";
+
+function getClientIp(req: Request): string | undefined {
+  const xff = req.headers["x-forwarded-for"];
+  if (typeof xff === "string" && xff.length) return xff.split(",")[0].trim();
+  return req.ip;
+}
+
+export async function withAuditContext(req: Request, _res: Response, next: NextFunction) {
+  const deviceId = typeof req.headers["x-device-id"] === "string" ? req.headers["x-device-id"] : undefined;
+  const userAgent = typeof req.headers["user-agent"] === "string" ? req.headers["user-agent"] : undefined;
+  const ip = getClientIp(req);
+
+  // You likely already have auth; adapt this to your current user extraction:
+  const userId = (req as any).user?.id as number | undefined;
+
+  // Server session id (persist in cookie/header if you already have sessions)
+  let sessionId = typeof req.headers["x-session-id"] === "string" ? req.headers["x-session-id"] : undefined;
+  if (!sessionId) sessionId = randomUUID();
+
+  const ctx: AuditContext = { ts: Date.now(), userId, sessionId, deviceId, ip, userAgent };
+
+  // Optional: enrich IP -> geo/asn. Stub returns empty if not configured.
+  const enr = ip ? await enrichIp(ip) : null;
+  if (enr) Object.assign(ctx, enr);
+
+  (req as any).auditContext = ctx;
+  next();
+}
+
+export function getAuditContext(req: Request): AuditContext {
+  return ((req as any).auditContext ?? { ts: Date.now() }) as AuditContext;
+}
+```
+
+### 10.3 IP enrichment stub: `server/services/ipEnrichment.ts`
+
+```ts
+export type IpEnrichment = {
+  geoCountry?: string;
+  geoRegion?: string;
+  geoCity?: string;
+  geoAccuracyKm?: number;
+  asn?: number;
+  org?: string;
+};
+
+export async function enrichIp(_ip: string): Promise<IpEnrichment | null> {
+  // Start as a stub to avoid blocking implementation.
+  // Later: wire to MaxMind GeoLite2 (offline) or a paid IP intel API.
+  return null;
+}
+```
+
+### 10.4 Rule engine core: `server/fraud/rulesEngine.ts`
+
+```ts
+import { db } from "../db";
+import { and, eq, gte, inArray, sql } from "drizzle-orm";
+import type { AuditContext, RuleTrigger } from "./types";
+import { deviceUserLinks, authSessions, trades } from "../../shared/schema"; // adjust import
+import { nowMinusMs } from "./time";
+
+const MS_30D = 30 * 24 * 60 * 60 * 1000;
+const MS_7D  = 7  * 24 * 60 * 60 * 1000;
+
+export async function evaluateOnLogin(ctx: AuditContext): Promise<RuleTrigger[]> {
+  if (!ctx.userId) return [];
+  const triggers: RuleTrigger[] = [];
+
+  // R1: Shared device across users (last 30d)
+  if (ctx.deviceId) {
+    const since = nowMinusMs(MS_30D);
+    const linked = await db.execute(sql`
+      SELECT DISTINCT user_id as userId
+      FROM device_user_links
+      WHERE device_id = ${ctx.deviceId} AND last_seen_at >= ${since}
+    `);
+
+    const userIds = (linked.rows as any[]).map(r => Number(r.userId)).filter(Boolean);
+    const others = userIds.filter(id => id !== ctx.userId);
+
+    if (others.length > 0) {
+      // create one trigger per linked user (keeps evidence clear)
+      for (const otherUserId of others.slice(0, 10)) {
+        triggers.push({
+          ruleCode: "SHARED_DEVICE",
+          severity: "HIGH",
+          primaryUserId: ctx.userId,
+          secondaryUserId: otherUserId,
+          points: 35,
+          evidence: { deviceId: ctx.deviceId, otherUserId }
+        });
+      }
+    }
+
+    // R4: Device churn (new device count in 7d) – computed via sessions or events
+    const since7 = nowMinusMs(MS_7D);
+    const churn = await db.execute(sql`
+      SELECT COUNT(DISTINCT device_id) as dcount
+      FROM auth_sessions
+      WHERE user_id = ${ctx.userId} AND started_at >= ${since7}
+    `);
+    const dcount = Number((churn.rows as any[])[0]?.dcount ?? 0);
+    if (dcount >= 4) {
+      triggers.push({
+        ruleCode: "DEVICE_CHURN",
+        severity: "MED",
+        primaryUserId: ctx.userId,
+        points: 20,
+        evidence: { distinctDevices7d: dcount }
+      });
+    }
+  }
+
+  // R6: Concurrent sessions far apart (simplified: concurrent sessions with different device or country)
+  // Implement properly after sessions logging is stable.
+
+  return triggers;
+}
+
+export async function evaluateOnOrder(ctx: AuditContext, tradeInput: { symbol: string; side: "BUY"|"SELL"; createdAt: number; }): Promise<RuleTrigger[]> {
+  if (!ctx.userId) return [];
+  const triggers: RuleTrigger[] = [];
+
+  // R2: Coordinated hedging across accounts on same device (last 2 minutes)
+  if (ctx.deviceId) {
+    const since = nowMinusMs(2 * 60 * 1000);
+    const rows = await db.execute(sql`
+      SELECT t.user_id as userId, t.side as side, t.id as tradeId, t.created_at as createdAt
+      FROM trades t
+      WHERE t.symbol = ${tradeInput.symbol}
+        AND t.created_at >= ${since}
+        AND t.user_id != ${ctx.userId}
+        AND EXISTS (
+          SELECT 1 FROM auth_sessions s
+          WHERE s.user_id = t.user_id
+            AND s.device_id = ${ctx.deviceId}
+            AND s.started_at >= ${nowMinusMs(MS_30D)}
+        )
+      ORDER BY t.created_at DESC
+      LIMIT 20
+    `);
+
+    const others = (rows.rows as any[]).map(r => ({
+      userId: Number(r.userId),
+      side: String(r.side),
+      tradeId: Number(r.tradeId),
+      createdAt: Number(r.createdAt)
+    }));
+
+    const opposite = others.find(o => o.side !== tradeInput.side);
+    if (opposite) {
+      triggers.push({
+        ruleCode: "COORDINATED_HEDGE",
+        severity: "CRITICAL",
+        primaryUserId: ctx.userId,
+        secondaryUserId: opposite.userId,
+        points: 55,
+        evidence: {
+          deviceId: ctx.deviceId,
+          symbol: tradeInput.symbol,
+          thisSide: tradeInput.side,
+          otherSide: opposite.side,
+          otherTradeId: opposite.tradeId,
+          windowSec: 120
+        }
+      });
+    }
+  }
+
+  return triggers;
+}
+```
+
+### 10.5 Scoring + alert creation: `server/fraud/alerts.ts`
+
+```ts
+import { db } from "../db";
+import type { RuleTrigger } from "./types";
+import { integrityAlerts, userIntegrityScores, linkedAccountEdges } from "../../shared/schema"; // adjust
+import { sql } from "drizzle-orm";
+
+function clamp(n: number, min: number, max: number) { return Math.max(min, Math.min(max, n)); }
+
+export async function applyTriggers(triggers: RuleTrigger[]) {
+  // 1) write alerts (upsert open alerts by (ruleCode, primary, secondary))
+  // 2) update edges where applicable
+  // 3) recompute user score aggregates
+
+  for (const t of triggers) {
+    await db.execute(sql`
+      INSERT INTO integrity_alerts
+        (created_at, updated_at, severity, rule_code, primary_user_id, secondary_user_id, status, evidence_json, risk_score_at_creation)
+      VALUES
+        (${Date.now()}, ${Date.now()}, ${t.severity}, ${t.ruleCode}, ${t.primaryUserId}, ${t.secondaryUserId ?? null}, 'OPEN',
+         ${JSON.stringify(t.evidence)}, ${t.points})
+    `);
+
+    // Edge for linked accounts
+    if (t.secondaryUserId && (t.ruleCode === "SHARED_DEVICE" || t.ruleCode === "COORDINATED_HEDGE")) {
+      const a = Math.min(t.primaryUserId, t.secondaryUserId);
+      const b = Math.max(t.primaryUserId, t.secondaryUserId);
+      await db.execute(sql`
+        INSERT INTO linked_account_edges (user_a, user_b, edge_type, weight, first_seen_at, last_seen_at, evidence_json)
+        VALUES (${a}, ${b}, ${t.ruleCode}, ${t.points}, ${Date.now()}, ${Date.now()}, ${JSON.stringify(t.evidence)})
+      `);
+    }
+
+    await bumpUserScore(t.primaryUserId, t.points);
+    if (t.secondaryUserId) await bumpUserScore(t.secondaryUserId, Math.floor(t.points / 2));
+  }
+}
+
+async function bumpUserScore(userId: number, points: number) {
+  // naive bump (replace with full recompute once you have aggregates stable)
+  await db.execute(sql`
+    INSERT INTO user_integrity_scores (user_id, score_current, last_evaluated_at)
+    VALUES (${userId}, ${clamp(points, 0, 100)}, ${Date.now()})
+    ON CONFLICT(user_id) DO UPDATE SET
+      score_current = ${sql`MIN(100, MAX(0, user_integrity_scores.score_current + ${points}))`},
+      last_evaluated_at = ${Date.now()}
+  `);
+}
+```
+
+### 10.6 Admin endpoints: `server/routes/adminFraud.ts`
+
+```ts
+import { Router } from "express";
+import { db } from "../db";
+import { sql } from "drizzle-orm";
+
+export const adminFraudRouter = Router();
+
+adminFraudRouter.get("/summary", async (_req, res) => {
+  const rows = await db.execute(sql`
+    SELECT
+      SUM(CASE WHEN status='OPEN' AND (severity='HIGH' OR severity='CRITICAL') THEN 1 ELSE 0 END) as openHigh,
+      SUM(CASE WHEN status='OPEN' THEN 1 ELSE 0 END) as openTotal
+    FROM integrity_alerts
+  `);
+  res.json(rows.rows?.[0] ?? { openHigh: 0, openTotal: 0 });
+});
+
+adminFraudRouter.get("/flagged-users", async (req, res) => {
+  const minScore = Number(req.query.minScore ?? 50);
+  const rows = await db.execute(sql`
+    SELECT u.id, u.email, u.name,
+           s.score_current as scoreCurrent,
+           s.device_count_7d as devices7d,
+           s.ip_count_7d as ips7d,
+           s.asn_count_7d as asns7d,
+           s.linked_accounts_count_30d as linkedAccounts30d,
+           s.hedge_pair_count_7d as hedgePairs7d,
+           s.last_evaluated_at as lastEvaluatedAt
+    FROM users u
+    JOIN user_integrity_scores s ON s.user_id = u.id
+    WHERE s.score_current >= ${minScore}
+    ORDER BY s.score_current DESC
+    LIMIT 500
+  `);
+  res.json(rows.rows ?? []);
+});
+
+adminFraudRouter.get("/users/:userId/profile", async (req, res) => {
+  const userId = Number(req.params.userId);
+
+  const score = await db.execute(sql`SELECT * FROM user_integrity_scores WHERE user_id=${userId}`);
+  const alerts = await db.execute(sql`
+    SELECT * FROM integrity_alerts
+    WHERE primary_user_id=${userId} OR secondary_user_id=${userId}
+    ORDER BY updated_at DESC
+    LIMIT 200
+  `);
+  const edges = await db.execute(sql`
+    SELECT * FROM linked_account_edges
+    WHERE user_a=${userId} OR user_b=${userId}
+    ORDER BY weight DESC, last_seen_at DESC
+    LIMIT 200
+  `);
+  const sessions = await db.execute(sql`
+    SELECT * FROM auth_sessions
+    WHERE user_id=${userId}
+    ORDER BY started_at DESC
+    LIMIT 200
+  `);
+
+  res.json({
+    score: score.rows?.[0] ?? null,
+    alerts: alerts.rows ?? [],
+    edges: edges.rows ?? [],
+    sessions: sessions.rows ?? [],
+  });
+});
+```
+
+### 10.7 UI tab skeleton: `client/src/pages/admin/UserManagementFraudTab.tsx`
+
+```tsx
+import React from "react";
+import { useEffect, useMemo, useState } from "react";
+
+type FlaggedUser = {
+  id: number;
+  email: string;
+  name?: string;
+  scoreCurrent: number;
+  devices7d?: number;
+  ips7d?: number;
+  asns7d?: number;
+  linkedAccounts30d?: number;
+  hedgePairs7d?: number;
+  lastEvaluatedAt?: number;
+};
+
+export default function UserManagementFraudTab() {
+  const [minScore, setMinScore] = useState(50);
+  const [rows, setRows] = useState<FlaggedUser[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      setLoading(true);
+      try {
+        const r = await fetch(`/api/admin/fraud/flagged-users?minScore=${minScore}`);
+        const j = await r.json();
+        if (mounted) setRows(j);
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    })();
+    return () => { mounted = false; };
+  }, [minScore]);
+
+  return (
+    <div className="p-4 space-y-4">
+      <div className="flex flex-wrap items-end gap-3">
+        <div>
+          <div className="text-sm font-medium">Min Risk Score</div>
+          <input
+            className="border rounded px-3 py-2 w-32"
+            type="number"
+            value={minScore}
+            min={0}
+            max={100}
+            onChange={(e) => setMinScore(Number(e.target.value))}
+          />
+        </div>
+        <div className="text-sm text-muted-foreground">
+          Showing users with score ≥ {minScore}. Use drilldown to review evidence before action.
+        </div>
+      </div>
+
+      <div className="rounded border overflow-hidden">
+        <table className="w-full text-sm">
+          <thead className="bg-muted">
+            <tr>
+              <th className="text-left p-2">User</th>
+              <th className="text-left p-2">Score</th>
+              <th className="text-left p-2">Devices (7d)</th>
+              <th className="text-left p-2">IPs (7d)</th>
+              <th className="text-left p-2">ASNs (7d)</th>
+              <th className="text-left p-2">Linked Accts</th>
+              <th className="text-left p-2">Hedge Signals</th>
+              <th className="text-left p-2">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading ? (
+              <tr><td className="p-3" colSpan={8}>Loading…</td></tr>
+            ) : rows.length === 0 ? (
+              <tr><td className="p-3" colSpan={8}>No flagged users at this threshold.</td></tr>
+            ) : (
+              rows.map(u => (
+                <tr key={u.id} className="border-t">
+                  <td className="p-2">
+                    <div className="font-medium">{u.name ?? "—"}</div>
+                    <div className="text-muted-foreground">{u.email}</div>
+                  </td>
+                  <td className="p-2 font-semibold">{u.scoreCurrent}</td>
+                  <td className="p-2">{u.devices7d ?? 0}</td>
+                  <td className="p-2">{u.ips7d ?? 0}</td>
+                  <td className="p-2">{u.asns7d ?? 0}</td>
+                  <td className="p-2">{u.linkedAccounts30d ?? 0}</td>
+                  <td className="p-2">{u.hedgePairs7d ?? 0}</td>
+                  <td className="p-2">
+                    <a className="underline" href={`/admin/user/${u.id}?tab=fraud`}>View Profile</a>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+```
+
+> Replit Agent 3 will wire this tab into `AdminDashboard.tsx` mini-tabs list, next to Login History and Audit Trail.
+
+---
+
+## 11) How this ties to your existing Trade Audit & Admin Actions (critical)
+
+When a fraud alert is created or updated:
+
+* write `integrity_alerts`
+* write `adminActions` whenever an admin:
+
+  * assigns a case
+  * changes status
+  * freezes/unfreezes
+  * requires revalidation
+* optionally write a `tradeAudit` event if you restrict trading due to integrity (so allocator diligence sees the control in the same audit fabric)
+
+This gives you “hedge-fund grade trails”: who detected what, when, why, and what action was taken.
+
+---
+
+## 12) Next step I recommend (to keep implementation smooth)
+
+Have Replit Agent 3 implement in this order:
+
+1. **Middleware + auth_sessions/auth_events logging**
+2. **device_user_links updates**
+3. **R1 + R4 rules and scoring**
+4. **Fraud Detection mini-tab (flagged users table + drilldown profile)**
+5. **R2 coordinated hedge detector (trade-side cross-account)**
+6. Remaining rules (impossible travel, concurrent far sessions, ASN volatility)
+
+This yields value early while keeping scope controlled.
+
+---
+
+If you paste (or upload) your current `shared/schema.ts`, `server/index.ts`, and the auth + trade endpoints that create trades, I can translate the above into **exact file-level patches** that match your existing naming and routing patterns (Drizzle table names, current session handling, current admin dashboard structure).

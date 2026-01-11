@@ -1,0 +1,1616 @@
+Below is the **next step**: a **System Config minitab** (“Legal Docs”) that lets admins **load, preview, replace, and roll back** the **Global Master** and **Country/Region Addenda**—and a backend that:
+
+* Stores documents **in DB** (so you can replace without redeploying files)
+* Selects the correct **active doc** per country/region at signup
+* Preserves **hashing + HMAC tokenization + acceptance ledger**
+* Adds a **separate tamper-evident audit chain** for **legal document changes** (who changed what, when, from/to hashes)
+
+Everything below is **copy/paste** file-by-file.
+
+---
+
+## 0) What changes conceptually
+
+* **Docs move from filesystem-only to DB-first** (with optional bootstrap import from your existing text files).
+* Signup terms are assembled from **active pointers**:
+
+  * `DOC1 / GLOBAL_MASTER / DEFAULT / GLOBAL`
+  * `DOC1 / ADDENDUM / COUNTRY / {ISO2}` else `REGION / {REGION_KEY}` else `DEFAULT / ROW`
+* Admin minitab can:
+
+  * View active doc + all prior versions
+  * Create a new version and **activate** it in one action
+  * Roll back by switching the pointer
+  * Preview what a country will receive (“assemble preview”)
+
+---
+
+# 1) Database schema additions
+
+## 1.1 `/shared/schema.ts` — add legal doc tables + change-audit chain
+
+```ts
+// FILE: /shared/schema.ts
+import { sqliteTable, text, integer, uniqueIndex } from "drizzle-orm/sqlite-core";
+
+// -----------------------------
+// Legal Documents (DB-first)
+// -----------------------------
+export const legalDocuments = sqliteTable(
+  "legalDocuments",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+
+    // Document Set (DOC1, DOC2, etc.)
+    docSet: text("doc_set").notNull(), // e.g. "DOC1"
+    docType: text("doc_type").notNull(), // "GLOBAL_MASTER" | "ADDENDUM"
+    jurisdictionType: text("jurisdiction_type").notNull(), // "DEFAULT" | "COUNTRY" | "REGION"
+    jurisdictionKey: text("jurisdiction_key").notNull(), // e.g. "GLOBAL", "ROW", "US", "WEST_EUROPE"
+
+    version: text("version").notNull(), // e.g. "1.0", "1.1"
+    sha256: text("sha256").notNull(),
+
+    // Exact bytes shown to users/admins
+    content: text("content").notNull(),
+
+    notes: text("notes"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    createdByAdminUserId: integer("created_by_admin_user_id"),
+  },
+  (t) => ({
+    // Prevent accidental duplicates of the exact same version for the same target
+    uqTargetVersion: uniqueIndex("ux_legalDocuments_target_version").on(
+      t.docSet,
+      t.docType,
+      t.jurisdictionType,
+      t.jurisdictionKey,
+      t.version
+    ),
+    uqTargetSha: uniqueIndex("ux_legalDocuments_target_sha").on(
+      t.docSet,
+      t.docType,
+      t.jurisdictionType,
+      t.jurisdictionKey,
+      t.sha256
+    ),
+  })
+);
+
+// Active pointer per target (exactly one active doc per target)
+export const legalDocPointers = sqliteTable(
+  "legalDocPointers",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+
+    docSet: text("doc_set").notNull(),
+    docType: text("doc_type").notNull(),
+    jurisdictionType: text("jurisdiction_type").notNull(),
+    jurisdictionKey: text("jurisdiction_key").notNull(),
+
+    activeDocumentId: integer("active_document_id").notNull(),
+
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+    updatedByAdminUserId: integer("updated_by_admin_user_id"),
+  },
+  (t) => ({
+    uqPointerTarget: uniqueIndex("ux_legalDocPointers_target").on(
+      t.docSet,
+      t.docType,
+      t.jurisdictionType,
+      t.jurisdictionKey
+    ),
+  })
+);
+
+// Tamper-evident audit chain for legal doc changes (separate from acceptance ledger)
+export const legalDocChangeAudit = sqliteTable("legalDocChangeAudit", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+
+  seq: integer("seq").notNull(),
+  prevHash: text("prev_hash").notNull(),
+  eventHash: text("event_hash").notNull(),
+
+  adminUserId: integer("admin_user_id"),
+  action: text("action").notNull(), // "CREATE_VERSION" | "SET_ACTIVE" | "REPLACE_ACTIVE" | "ROLLBACK"
+
+  docSet: text("doc_set").notNull(),
+  docType: text("doc_type").type<string>().notNull(),
+  jurisdictionType: text("jurisdiction_type").notNull(),
+  jurisdictionKey: text("jurisdiction_key").notNull(),
+
+  oldActiveDocumentId: integer("old_active_document_id"),
+  newActiveDocumentId: integer("new_active_document_id"),
+
+  note: text("note"),
+  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+});
+
+// -----------------------------------------
+// Existing: legalAcceptances (from prior step)
+// (Keep your existing table as previously added)
+// -----------------------------------------
+```
+
+Run your normal migration workflow (`db:push`).
+
+---
+
+# 2) Backend: DB-first terms engine + admin APIs
+
+## 2.1 `/server/middleware/requireAdmin.ts` — minimal placeholder gating
+
+```ts
+// FILE: /server/middleware/requireAdmin.ts
+import type { Request, Response, NextFunction } from "express";
+
+export function requireAdmin(req: Request, res: Response, next: NextFunction) {
+  // Option A: header token (useful until you wire real auth roles)
+  const token = String(req.headers["x-admin-token"] || "");
+  const expected = process.env.ADMIN_API_TOKEN;
+
+  if (expected && token && token === expected) return next();
+
+  // Option B: role-based (if your app attaches req.user)
+  const anyReq = req as any;
+  const user = anyReq.user;
+  if (user?.role === "ADMIN" || user?.isAdmin === true) return next();
+
+  return res.status(403).json({ ok: false, error: "Admin access required." });
+}
+```
+
+---
+
+## 2.2 `/server/legal/cryptoUtils.ts` (reuse from prior step)
+
+```ts
+// FILE: /server/legal/cryptoUtils.ts
+import crypto from "crypto";
+
+export function sha256Hex(input: string): string {
+  return crypto.createHash("sha256").update(input, "utf8").digest("hex");
+}
+
+export function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return "[" + value.map((v) => stableStringify(v)).join(",") + "]";
+  const obj = value as Record<string, unknown>;
+  const keys = Object.keys(obj).sort();
+  return "{" + keys.map((k) => JSON.stringify(k) + ":" + stableStringify(obj[k])).join(",") + "}";
+}
+
+export function base64UrlEncode(str: string): string {
+  return Buffer.from(str, "utf8")
+    .toString("base64")
+    .replaceAll("+", "-")
+    .replaceAll("/", "_")
+    .replaceAll("=", "");
+}
+
+export function base64UrlDecode(str: string): string {
+  const padLen = (4 - (str.length % 4)) % 4;
+  const padded = str + "=".repeat(padLen);
+  const b64 = padded.replaceAll("-", "+").replaceAll("_", "/");
+  return Buffer.from(b64, "base64").toString("utf8");
+}
+
+export function hmacSha256Hex(secret: string, payload: string): string {
+  return crypto.createHmac("sha256", secret).update(payload, "utf8").digest("hex");
+}
+
+export function timingSafeEqualHex(a: string, b: string): boolean {
+  try {
+    const ba = Buffer.from(a, "hex");
+    const bb = Buffer.from(b, "hex");
+    if (ba.length !== bb.length) return false;
+    return crypto.timingSafeEqual(ba, bb);
+  } catch {
+    return false;
+  }
+}
+```
+
+---
+
+## 2.3 `/server/legal/regionRules.ts` — region classification rules (same as earlier)
+
+```ts
+// FILE: /server/legal/regionRules.ts
+export type RegionRule = { regionKey: string; iso2: string[] };
+
+export const REGION_RULES_IN_ORDER: RegionRule[] = [
+  { regionKey: "MIDDLE_EAST", iso2: ["BH","IQ","IR","IL","JO","KW","LB","OM","PS","QA","SA","SY","TR","YE"] },
+  { regionKey: "NORTH_AFRICA", iso2: ["DZ","EG","LY","MA","SD","SS","TN","EH"] },
+  { regionKey: "WEST_AFRICA", iso2: ["BJ","BF","CV","CI","GM","GN","GW","LR","ML","MR","NE","SH","SL","SN","TG"] },
+  { regionKey: "EAST_AFRICA", iso2: ["BI","DJ","ER","KM","MG","MW","MZ","RE","RW","SC","SO","YT","ZM","ZW"] },
+  { regionKey: "SOUTHERN_AFRICA", iso2: ["BW","LS","NA","SZ"] },
+  { regionKey: "CENTRAL_AFRICA", iso2: ["CF","CG","CD","CM","GQ","GA","ST","TD"] },
+
+  { regionKey: "SE_ASIA", iso2: ["BN","KH","ID","LA","MM","MY","TL","VN"] },
+
+  { regionKey: "JAPAN", iso2: ["JP"] },
+  { regionKey: "SOUTH_KOREA", iso2: ["KR"] },
+  { regionKey: "PAKISTAN", iso2: ["PK"] },
+
+  { regionKey: "WEST_EUROPE", iso2: ["AT","BE","CH","DE","DK","ES","FI","FR","IE","IS","IT","LI","LU","MC","NL","NO","PT","SE"] },
+  { regionKey: "EAST_EUROPE", iso2: ["AL","BA","BG","BY","CZ","EE","GR","HR","HU","LT","LV","MD","ME","MK","PL","RO","RS","SI","SK","XK"] },
+
+  { regionKey: "NORTH_AMERICA", iso2: ["CA","GL","PM","BM"] },
+  { regionKey: "CENTRAL_AMERICA", iso2: ["BZ","CR","GT","HN","NI","PA","SV"] },
+  { regionKey: "SOUTH_AMERICA", iso2: ["BO","CL","EC","GF","GY","PE","PY","SR","UY","VE"] },
+
+  { regionKey: "CENTRAL_ASIA", iso2: ["KZ","KG","TJ","TM","UZ","AF"] },
+
+  { regionKey: "AUSTRALASIA", iso2: ["AU","NZ"] },
+  { regionKey: "PACIFIC_ISLANDS", iso2: ["FJ","FM","KI","MH","NR","NU","PF","PG","PW","SB","TO","TV","VU","WS","CK"] },
+  { regionKey: "INDIAN_OCEAN_ISLANDS", iso2: ["MU","MV","IO"] },
+];
+```
+
+---
+
+## 2.4 `/server/legal/legalDocsRepo.ts` — DB helpers for docs + pointers
+
+```ts
+// FILE: /server/legal/legalDocsRepo.ts
+import { and, desc, eq } from "drizzle-orm";
+import { db } from "../db";
+import { legalDocuments, legalDocPointers } from "../../shared/schema";
+import { sha256Hex } from "./cryptoUtils";
+
+export type DocTarget = {
+  docSet: string; // "DOC1"
+  docType: "GLOBAL_MASTER" | "ADDENDUM";
+  jurisdictionType: "DEFAULT" | "COUNTRY" | "REGION";
+  jurisdictionKey: string; // "GLOBAL" | "ROW" | "US" | "WEST_EUROPE"
+};
+
+export type LegalDocumentRow = {
+  id: number;
+  docSet: string;
+  docType: string;
+  jurisdictionType: string;
+  jurisdictionKey: string;
+  version: string;
+  sha256: string;
+  content: string;
+  notes: string | null;
+  createdAt: number;
+  createdByAdminUserId: number | null;
+};
+
+export function computeDocSha(content: string): string {
+  return sha256Hex(content);
+}
+
+export function getPointer(target: DocTarget) {
+  return db
+    .select()
+    .from(legalDocPointers)
+    .where(
+      and(
+        eq(legalDocPointers.docSet, target.docSet),
+        eq(legalDocPointers.docType, target.docType),
+        eq(legalDocPointers.jurisdictionType, target.jurisdictionType),
+        eq(legalDocPointers.jurisdictionKey, target.jurisdictionKey)
+      )
+    )
+    .get();
+}
+
+export function getActiveDoc(target: DocTarget) {
+  const pointer = getPointer(target);
+  if (!pointer) return { pointer: null, doc: null };
+
+  const doc = db
+    .select()
+    .from(legalDocuments)
+    .where(eq(legalDocuments.id, pointer.activeDocumentId))
+    .get();
+
+  return { pointer, doc };
+}
+
+export function listVersions(target: DocTarget) {
+  return db
+    .select()
+    .from(legalDocuments)
+    .where(
+      and(
+        eq(legalDocuments.docSet, target.docSet),
+        eq(legalDocuments.docType, target.docType),
+        eq(legalDocuments.jurisdictionType, target.jurisdictionType),
+        eq(legalDocuments.jurisdictionKey, target.jurisdictionKey)
+      )
+    )
+    .orderBy(desc(legalDocuments.createdAt))
+    .all();
+}
+
+export function createDocumentVersion(args: {
+  target: DocTarget;
+  version: string;
+  content: string;
+  notes?: string | null;
+  adminUserId?: number | null;
+}) {
+  const sha = computeDocSha(args.content);
+  const now = Date.now();
+
+  db.insert(legalDocuments)
+    .values({
+      docSet: args.target.docSet,
+      docType: args.target.docType,
+      jurisdictionType: args.target.jurisdictionType,
+      jurisdictionKey: args.target.jurisdictionKey,
+      version: args.version,
+      sha256: sha,
+      content: args.content,
+      notes: args.notes ?? null,
+      createdAt: new Date(now),
+      createdByAdminUserId: args.adminUserId ?? null,
+    })
+    .run();
+
+  // Fetch inserted by (target + sha)
+  const row = db
+    .select()
+    .from(legalDocuments)
+    .where(
+      and(
+        eq(legalDocuments.docSet, args.target.docSet),
+        eq(legalDocuments.docType, args.target.docType),
+        eq(legalDocuments.jurisdictionType, args.target.jurisdictionType),
+        eq(legalDocuments.jurisdictionKey, args.target.jurisdictionKey),
+        eq(legalDocuments.sha256, sha)
+      )
+    )
+    .orderBy(desc(legalDocuments.createdAt))
+    .limit(1)
+    .get();
+
+  if (!row) throw new Error("Failed to fetch inserted legal document.");
+  return row;
+}
+
+export function upsertPointer(args: {
+  target: DocTarget;
+  activeDocumentId: number;
+  adminUserId?: number | null;
+}) {
+  const now = Date.now();
+
+  const existing = getPointer(args.target);
+  if (!existing) {
+    db.insert(legalDocPointers)
+      .values({
+        docSet: args.target.docSet,
+        docType: args.target.docType,
+        jurisdictionType: args.target.jurisdictionType,
+        jurisdictionKey: args.target.jurisdictionKey,
+        activeDocumentId: args.activeDocumentId,
+        updatedAt: new Date(now),
+        updatedByAdminUserId: args.adminUserId ?? null,
+      })
+      .run();
+    return;
+  }
+
+  db.update(legalDocPointers)
+    .set({
+      activeDocumentId: args.activeDocumentId,
+      updatedAt: new Date(now),
+      updatedByAdminUserId: args.adminUserId ?? null,
+    })
+    .where(eq(legalDocPointers.id, existing.id))
+    .run();
+}
+```
+
+---
+
+## 2.5 `/server/legal/legalDocChangeAuditService.ts` — tamper-evident audit chain for doc changes
+
+```ts
+// FILE: /server/legal/legalDocChangeAuditService.ts
+import { desc, eq } from "drizzle-orm";
+import { db } from "../db";
+import { legalDocChangeAudit } from "../../shared/schema";
+import { sha256Hex, stableStringify } from "./cryptoUtils";
+
+export function appendLegalDocChangeAudit(args: {
+  adminUserId?: number | null;
+  action: "CREATE_VERSION" | "SET_ACTIVE" | "REPLACE_ACTIVE" | "ROLLBACK";
+  docSet: string;
+  docType: string;
+  jurisdictionType: string;
+  jurisdictionKey: string;
+  oldActiveDocumentId?: number | null;
+  newActiveDocumentId?: number | null;
+  note?: string | null;
+}) {
+  return db.transaction((tx) => {
+    const last = tx
+      .select({ seq: legalDocChangeAudit.seq, eventHash: legalDocChangeAudit.eventHash })
+      .from(legalDocChangeAudit)
+      .orderBy(desc(legalDocChangeAudit.seq))
+      .limit(1)
+      .all();
+
+    const prevSeq = last.length ? Number(last[0].seq) : 0;
+    const prevHash = last.length ? String(last[0].eventHash) : "GENESIS";
+    const nextSeq = prevSeq + 1;
+
+    const payload = {
+      seq: nextSeq,
+      prevHash,
+
+      adminUserId: args.adminUserId ?? null,
+      action: args.action,
+
+      docSet: args.docSet,
+      docType: args.docType,
+      jurisdictionType: args.jurisdictionType,
+      jurisdictionKey: args.jurisdictionKey,
+
+      oldActiveDocumentId: args.oldActiveDocumentId ?? null,
+      newActiveDocumentId: args.newActiveDocumentId ?? null,
+
+      note: args.note ?? null,
+      createdAtMs: Date.now(),
+    };
+
+    const payloadStr = stableStringify(payload);
+    const eventHash = sha256Hex(`${prevHash}|${payloadStr}`);
+
+    tx.insert(legalDocChangeAudit)
+      .values({
+        seq: nextSeq,
+        prevHash,
+        eventHash,
+        adminUserId: args.adminUserId ?? null,
+        action: args.action,
+        docSet: args.docSet,
+        docType: args.docType,
+        jurisdictionType: args.jurisdictionType,
+        jurisdictionKey: args.jurisdictionKey,
+        oldActiveDocumentId: args.oldActiveDocumentId ?? null,
+        newActiveDocumentId: args.newActiveDocumentId ?? null,
+        note: args.note ?? null,
+        createdAt: new Date(payload.createdAtMs),
+      })
+      .run();
+
+    return { seq: nextSeq, prevHash, eventHash };
+  });
+}
+```
+
+---
+
+## 2.6 `/server/legal/termsEngineDb.ts` — assemble DOC1 using active pointers (DB-first)
+
+```ts
+// FILE: /server/legal/termsEngineDb.ts
+import { REGION_RULES_IN_ORDER } from "./regionRules";
+import { base64UrlEncode, base64UrlDecode, hmacSha256Hex, sha256Hex, timingSafeEqualHex } from "./cryptoUtils";
+import { getActiveDoc } from "./legalDocsRepo";
+
+export type AssembledTerms = {
+  global: { id: string; version: string; sha256: string; documentId: number };
+  addendum: { id: string; version: string; sha256: string; documentId: number; regionKey: string | null };
+  combined: { sha256: string; text: string };
+  meta: { docSet: "DOC1"; countryIso2: string; regionKey: string | null; issuedAtMs: number };
+  token: string;
+};
+
+function normalizeIso2(iso2: string): string {
+  const up = (iso2 || "").trim().toUpperCase();
+  if (!/^[A-Z]{2}$/.test(up)) throw new Error("Invalid country ISO2.");
+  return up;
+}
+
+function resolveRegionKey(iso2: string): string | null {
+  for (const rule of REGION_RULES_IN_ORDER) {
+    if (rule.iso2.includes(iso2)) return rule.regionKey;
+  }
+  return null;
+}
+
+function requireSecret(): string {
+  const secret = process.env.LEGAL_TERMS_HMAC_SECRET;
+  if (!secret || secret.length < 32) throw new Error("LEGAL_TERMS_HMAC_SECRET missing/too short (min 32 chars).");
+  return secret;
+}
+
+export function assembleDoc1Terms(countryIso2Raw: string): AssembledTerms {
+  const countryIso2 = normalizeIso2(countryIso2Raw);
+  const regionKey = resolveRegionKey(countryIso2);
+
+  // GLOBAL MASTER (DEFAULT/GLOBAL)
+  const globalTarget = {
+    docSet: "DOC1",
+    docType: "GLOBAL_MASTER" as const,
+    jurisdictionType: "DEFAULT" as const,
+    jurisdictionKey: "GLOBAL",
+  };
+
+  const globalActive = getActiveDoc(globalTarget);
+  if (!globalActive.doc) throw new Error("Missing active DOC1 global master (DEFAULT/GLOBAL).");
+
+  // ADDENDUM selection priority:
+  // 1) COUNTRY/{ISO2}
+  // 2) REGION/{regionKey}
+  // 3) DEFAULT/ROW
+  const addCountryTarget = {
+    docSet: "DOC1",
+    docType: "ADDENDUM" as const,
+    jurisdictionType: "COUNTRY" as const,
+    jurisdictionKey: countryIso2,
+  };
+  const addRegionTarget = regionKey
+    ? {
+        docSet: "DOC1",
+        docType: "ADDENDUM" as const,
+        jurisdictionType: "REGION" as const,
+        jurisdictionKey: regionKey,
+      }
+    : null;
+
+  const addDefaultTarget = {
+    docSet: "DOC1",
+    docType: "ADDENDUM" as const,
+    jurisdictionType: "DEFAULT" as const,
+    jurisdictionKey: "ROW",
+  };
+
+  const addCountry = getActiveDoc(addCountryTarget);
+  const addRegion = addRegionTarget ? getActiveDoc(addRegionTarget) : { doc: null as any, pointer: null as any };
+  const addDefault = getActiveDoc(addDefaultTarget);
+
+  const addDoc = addCountry.doc ?? addRegion.doc ?? addDefault.doc;
+  const addRegionUsed = addCountry.doc ? null : addRegion.doc ? regionKey : null;
+
+  if (!addDoc) throw new Error("Missing active DOC1 addendum (COUNTRY/REGION/DEFAULT).");
+
+  const globalText = String(globalActive.doc.content);
+  const addendumText = String(addDoc.content);
+
+  // Strong invariant: stored sha must match actual content
+  const globalSha = sha256Hex(globalText);
+  const addSha = sha256Hex(addendumText);
+  if (globalSha !== String(globalActive.doc.sha256)) throw new Error("Global master sha mismatch (DB content vs sha).");
+  if (addSha !== String(addDoc.sha256)) throw new Error("Addendum sha mismatch (DB content vs sha).");
+
+  const combinedText =
+    globalText +
+    "\n\n---\n\n" +
+    "AUTO-SELECTED ADDENDUM:\n" +
+    `Addendum ID: ${addDoc.jurisdictionType === "COUNTRY" ? `ADD-${countryIso2}` : String(addDoc.jurisdictionKey)}\n` +
+    `Addendum Version: ${String(addDoc.version)}\n` +
+    `Country Selected: ${countryIso2}\n` +
+    (addRegionUsed ? `Region Key: ${addRegionUsed}\n` : "") +
+    "\n" +
+    addendumText;
+
+  const combinedSha = sha256Hex(combinedText);
+  const issuedAtMs = Date.now();
+
+  const payloadObj = {
+    v: 1,
+    docSet: "DOC1",
+    countryIso2,
+    regionKey: addRegionUsed,
+    global: { id: "DOC1_GLOBAL", version: String(globalActive.doc.version), sha256: globalSha, documentId: Number(globalActive.doc.id) },
+    addendum: { id: "DOC1_ADDENDUM", version: String(addDoc.version), sha256: addSha, documentId: Number(addDoc.id) },
+    combinedSha256: combinedSha,
+    issuedAtMs,
+  };
+
+  const payloadJson = JSON.stringify(payloadObj);
+  const payloadB64 = base64UrlEncode(payloadJson);
+  const sig = hmacSha256Hex(requireSecret(), payloadB64);
+  const token = `${payloadB64}.${sig}`;
+
+  return {
+    global: { id: "DOC1_GLOBAL", version: String(globalActive.doc.version), sha256: globalSha, documentId: Number(globalActive.doc.id) },
+    addendum: { id: "DOC1_ADDENDUM", version: String(addDoc.version), sha256: addSha, documentId: Number(addDoc.id), regionKey: addRegionUsed },
+    combined: { sha256: combinedSha, text: combinedText },
+    meta: { docSet: "DOC1", countryIso2, regionKey: addRegionUsed, issuedAtMs },
+    token,
+  };
+}
+
+export function verifyTermsToken(token: string, maxAgeMs = 24 * 60 * 60 * 1000) {
+  try {
+    const parts = String(token || "").split(".");
+    if (parts.length !== 2) return { ok: false as const, reason: "Bad token format." };
+    const [payloadB64, sig] = parts;
+
+    const expected = hmacSha256Hex(requireSecret(), payloadB64);
+    if (!timingSafeEqualHex(sig, expected)) return { ok: false as const, reason: "Bad token signature." };
+
+    const payloadJson = base64UrlDecode(payloadB64);
+    const payload = JSON.parse(payloadJson);
+
+    const age = Date.now() - Number(payload?.issuedAtMs || 0);
+    if (age < 0 || age > maxAgeMs) return { ok: false as const, reason: "Token expired." };
+
+    return { ok: true as const, payload };
+  } catch (e: any) {
+    return { ok: false as const, reason: e?.message || "Token verify error." };
+  }
+}
+```
+
+---
+
+## 2.7 `/server/routes/legal.ts` — public endpoint uses DB-first engine
+
+```ts
+// FILE: /server/routes/legal.ts
+import { Router } from "express";
+import { assembleDoc1Terms } from "../legal/termsEngineDb";
+
+export const legalRouter = Router();
+
+// GET /api/legal/doc1?country=KE
+legalRouter.get("/doc1", (req, res) => {
+  try {
+    const country = String(req.query.country || "");
+    const assembled = assembleDoc1Terms(country);
+
+    return res.json({
+      ok: true,
+      countryIso2: assembled.meta.countryIso2,
+      regionKey: assembled.meta.regionKey,
+      issuedAtMs: assembled.meta.issuedAtMs,
+
+      global: assembled.global,
+      addendum: assembled.addendum,
+
+      combinedSha256: assembled.combined.sha256,
+      token: assembled.token,
+      text: assembled.combined.text,
+    });
+  } catch (e: any) {
+    return res.status(400).json({ ok: false, error: e?.message || "Failed to assemble terms." });
+  }
+});
+```
+
+---
+
+## 2.8 `/server/routes/adminLegalDocs.ts` — admin APIs to load/replace/preview
+
+```ts
+// FILE: /server/routes/adminLegalDocs.ts
+import { Router } from "express";
+import { requireAdmin } from "../middleware/requireAdmin";
+import { and, eq, desc } from "drizzle-orm";
+import { db } from "../db";
+import { legalDocuments, legalDocPointers, legalDocChangeAudit } from "../../shared/schema";
+import { createDocumentVersion, getActiveDoc, listVersions, upsertPointer } from "../legal/legalDocsRepo";
+import { appendLegalDocChangeAudit } from "../legal/legalDocChangeAuditService";
+import { assembleDoc1Terms } from "../legal/termsEngineDb";
+import { REGION_RULES_IN_ORDER } from "../legal/regionRules";
+
+export const adminLegalDocsRouter = Router();
+adminLegalDocsRouter.use(requireAdmin);
+
+// Targets for dropdowns
+adminLegalDocsRouter.get("/targets", (_req, res) => {
+  const regionKeys = Array.from(new Set(REGION_RULES_IN_ORDER.map((r) => r.regionKey)));
+  return res.json({
+    ok: true,
+    docSets: ["DOC1"],
+    docTypes: ["GLOBAL_MASTER", "ADDENDUM"],
+    jurisdictionTypes: ["DEFAULT", "COUNTRY", "REGION"],
+    defaultKeys: ["GLOBAL", "ROW"],
+    regionKeys,
+  });
+});
+
+// List pointer for a target
+adminLegalDocsRouter.get("/pointer", (req, res) => {
+  const docSet = String(req.query.docSet || "DOC1");
+  const docType = String(req.query.docType || "");
+  const jurisdictionType = String(req.query.jurisdictionType || "");
+  const jurisdictionKey = String(req.query.jurisdictionKey || "");
+
+  const pointer = db
+    .select()
+    .from(legalDocPointers)
+    .where(
+      and(
+        eq(legalDocPointers.docSet, docSet),
+        eq(legalDocPointers.docType, docType),
+        eq(legalDocPointers.jurisdictionType, jurisdictionType),
+        eq(legalDocPointers.jurisdictionKey, jurisdictionKey)
+      )
+    )
+    .get();
+
+  return res.json({ ok: true, pointer: pointer ?? null });
+});
+
+// List versions for a target + active doc
+adminLegalDocsRouter.get("/versions", (req, res) => {
+  const docSet = String(req.query.docSet || "DOC1");
+  const docType = String(req.query.docType || "");
+  const jurisdictionType = String(req.query.jurisdictionType || "");
+  const jurisdictionKey = String(req.query.jurisdictionKey || "");
+
+  const target = {
+    docSet,
+    docType: docType as any,
+    jurisdictionType: jurisdictionType as any,
+    jurisdictionKey,
+  };
+
+  const versions = listVersions(target);
+  const active = getActiveDoc(target);
+
+  return res.json({
+    ok: true,
+    activeDocumentId: active.doc?.id ?? null,
+    versions,
+  });
+});
+
+// Get document content by id
+adminLegalDocsRouter.get("/document/:id", (req, res) => {
+  const id = Number(req.params.id);
+  const doc = db.select().from(legalDocuments).where(eq(legalDocuments.id, id)).get();
+  if (!doc) return res.status(404).json({ ok: false, error: "Not found." });
+  return res.json({ ok: true, doc });
+});
+
+// Replace active: creates new version and activates it atomically + logs audit chain
+adminLegalDocsRouter.post("/replace-active", (req, res) => {
+  const body = req.body || {};
+  const target = body.target as {
+    docSet: string;
+    docType: "GLOBAL_MASTER" | "ADDENDUM";
+    jurisdictionType: "DEFAULT" | "COUNTRY" | "REGION";
+    jurisdictionKey: string;
+  };
+
+  const version = String(body.version || "").trim();
+  const content = String(body.content || "");
+  const note = String(body.note || "");
+  const adminUserId = Number((req as any).user?.id || 0) || null;
+
+  if (!target?.docSet || !target?.docType || !target?.jurisdictionType || !target?.jurisdictionKey) {
+    return res.status(400).json({ ok: false, error: "Missing target." });
+  }
+  if (!version) return res.status(400).json({ ok: false, error: "Missing version." });
+  if (!content || content.length < 50) return res.status(400).json({ ok: false, error: "Content too short." });
+
+  try {
+    const result = db.transaction((tx) => {
+      const oldPointer = tx
+        .select()
+        .from(legalDocPointers)
+        .where(
+          and(
+            eq(legalDocPointers.docSet, target.docSet),
+            eq(legalDocPointers.docType, target.docType),
+            eq(legalDocPointers.jurisdictionType, target.jurisdictionType),
+            eq(legalDocPointers.jurisdictionKey, target.jurisdictionKey)
+          )
+        )
+        .get();
+
+      const oldActiveId = oldPointer?.activeDocumentId ?? null;
+
+      // Create new doc version
+      const newDoc = createDocumentVersion({
+        target,
+        version,
+        content,
+        notes: note || null,
+        adminUserId,
+      });
+
+      // Activate it
+      upsertPointer({
+        target,
+        activeDocumentId: Number(newDoc.id),
+        adminUserId,
+      });
+
+      // Audit chain
+      const audit = appendLegalDocChangeAudit({
+        adminUserId,
+        action: "REPLACE_ACTIVE",
+        docSet: target.docSet,
+        docType: target.docType,
+        jurisdictionType: target.jurisdictionType,
+        jurisdictionKey: target.jurisdictionKey,
+        oldActiveDocumentId: oldActiveId,
+        newActiveDocumentId: Number(newDoc.id),
+        note: note || null,
+      });
+
+      return { newDoc, audit, oldActiveId };
+    });
+
+    return res.json({ ok: true, ...result });
+  } catch (e: any) {
+    return res.status(400).json({ ok: false, error: e?.message || "Replace failed." });
+  }
+});
+
+// Set active to an existing version (rollback or switch)
+adminLegalDocsRouter.post("/set-active", (req, res) => {
+  const { target, documentId, note } = req.body || {};
+  const adminUserId = Number((req as any).user?.id || 0) || null;
+
+  if (!target || !documentId) return res.status(400).json({ ok: false, error: "Missing target/documentId." });
+
+  const doc = db.select().from(legalDocuments).where(eq(legalDocuments.id, Number(documentId))).get();
+  if (!doc) return res.status(404).json({ ok: false, error: "Document not found." });
+
+  try {
+    const result = db.transaction((tx) => {
+      const oldPointer = tx
+        .select()
+        .from(legalDocPointers)
+        .where(
+          and(
+            eq(legalDocPointers.docSet, target.docSet),
+            eq(legalDocPointers.docType, target.docType),
+            eq(legalDocPointers.jurisdictionType, target.jurisdictionType),
+            eq(legalDocPointers.jurisdictionKey, target.jurisdictionKey)
+          )
+        )
+        .get();
+
+      const oldActiveId = oldPointer?.activeDocumentId ?? null;
+
+      upsertPointer({ target, activeDocumentId: Number(documentId), adminUserId });
+
+      const audit = appendLegalDocChangeAudit({
+        adminUserId,
+        action: oldActiveId ? "SET_ACTIVE" : "SET_ACTIVE",
+        docSet: target.docSet,
+        docType: target.docType,
+        jurisdictionType: target.jurisdictionType,
+        jurisdictionKey: target.jurisdictionKey,
+        oldActiveDocumentId: oldActiveId,
+        newActiveDocumentId: Number(documentId),
+        note: String(note || "") || null,
+      });
+
+      return { oldActiveId, newActiveId: Number(documentId), audit };
+    });
+
+    return res.json({ ok: true, ...result });
+  } catch (e: any) {
+    return res.status(400).json({ ok: false, error: e?.message || "Set active failed." });
+  }
+});
+
+// Assemble preview for a country (admin QA)
+adminLegalDocsRouter.post("/preview-assemble", (req, res) => {
+  const { countryIso2 } = req.body || {};
+  try {
+    const assembled = assembleDoc1Terms(String(countryIso2 || ""));
+    return res.json({
+      ok: true,
+      countryIso2: assembled.meta.countryIso2,
+      regionKey: assembled.meta.regionKey,
+      combinedSha256: assembled.combined.sha256,
+      global: assembled.global,
+      addendum: assembled.addendum,
+      token: assembled.token,
+      text: assembled.combined.text,
+    });
+  } catch (e: any) {
+    return res.status(400).json({ ok: false, error: e?.message || "Preview failed." });
+  }
+});
+
+// (Optional) View change audit chain
+adminLegalDocsRouter.get("/change-audit", (req, res) => {
+  const limit = Math.min(200, Math.max(1, Number(req.query.limit || 50)));
+  const rows = db.select().from(legalDocChangeAudit).orderBy(desc(legalDocChangeAudit.seq)).limit(limit).all();
+  return res.json({ ok: true, rows });
+});
+```
+
+---
+
+## 2.9 Wire admin routes in `/server/index.ts`
+
+```ts
+// FILE: /server/index.ts
+import express from "express";
+import { legalRouter } from "./routes/legal";
+import { adminLegalDocsRouter } from "./routes/adminLegalDocs";
+
+const app = express();
+app.use(express.json());
+
+app.use("/api/legal", legalRouter);
+app.use("/api/admin/legal-docs", adminLegalDocsRouter);
+
+// ... existing routes ...
+
+export default app;
+```
+
+---
+
+# 3) Bootstrap: import your existing text files into DB once (optional but recommended)
+
+If you already have your word-for-word text pack in the repo, this seeds `legalDocuments` + pointers so the system runs immediately.
+
+## 3.1 `/server/legal/bootstrapDoc1FromFiles.ts`
+
+```ts
+// FILE: /server/legal/bootstrapDoc1FromFiles.ts
+import fs from "fs";
+import path from "path";
+import { db } from "../db";
+import { legalDocuments, legalDocPointers } from "../../shared/schema";
+import { and, eq, desc } from "drizzle-orm";
+import { sha256Hex } from "./cryptoUtils";
+
+function read(rel: string): string {
+  return fs.readFileSync(path.resolve(process.cwd(), rel), "utf8");
+}
+
+async function ensureDocAndPointer(args: {
+  target: { docSet: string; docType: string; jurisdictionType: string; jurisdictionKey: string };
+  version: string;
+  filePath: string;
+}) {
+  const content = read(args.filePath);
+  const sha = sha256Hex(content);
+  const now = Date.now();
+
+  const existing = db
+    .select()
+    .from(legalDocuments)
+    .where(
+      and(
+        eq(legalDocuments.docSet, args.target.docSet),
+        eq(legalDocuments.docType, args.target.docType),
+        eq(legalDocuments.jurisdictionType, args.target.jurisdictionType),
+        eq(legalDocuments.jurisdictionKey, args.target.jurisdictionKey),
+        eq(legalDocuments.sha256, sha)
+      )
+    )
+    .get();
+
+  let docId: number;
+  if (existing) {
+    docId = Number(existing.id);
+  } else {
+    db.insert(legalDocuments)
+      .values({
+        docSet: args.target.docSet,
+        docType: args.target.docType,
+        jurisdictionType: args.target.jurisdictionType,
+        jurisdictionKey: args.target.jurisdictionKey,
+        version: args.version,
+        sha256: sha,
+        content,
+        notes: "BOOTSTRAP_IMPORT",
+        createdAt: new Date(now),
+        createdByAdminUserId: null,
+      })
+      .run();
+
+    const inserted = db
+      .select()
+      .from(legalDocuments)
+      .where(
+        and(
+          eq(legalDocuments.docSet, args.target.docSet),
+          eq(legalDocuments.docType, args.target.docType),
+          eq(legalDocuments.jurisdictionType, args.target.jurisdictionType),
+          eq(legalDocuments.jurisdictionKey, args.target.jurisdictionKey),
+          eq(legalDocuments.sha256, sha)
+        )
+      )
+      .orderBy(desc(legalDocuments.createdAt))
+      .limit(1)
+      .get();
+
+    if (!inserted) throw new Error("Bootstrap insert failed.");
+    docId = Number(inserted.id);
+  }
+
+  const pointer = db
+    .select()
+    .from(legalDocPointers)
+    .where(
+      and(
+        eq(legalDocPointers.docSet, args.target.docSet),
+        eq(legalDocPointers.docType, args.target.docType),
+        eq(legalDocPointers.jurisdictionType, args.target.jurisdictionType),
+        eq(legalDocPointers.jurisdictionKey, args.target.jurisdictionKey)
+      )
+    )
+    .get();
+
+  if (!pointer) {
+    db.insert(legalDocPointers)
+      .values({
+        docSet: args.target.docSet,
+        docType: args.target.docType,
+        jurisdictionType: args.target.jurisdictionType,
+        jurisdictionKey: args.target.jurisdictionKey,
+        activeDocumentId: docId,
+        updatedAt: new Date(now),
+        updatedByAdminUserId: null,
+      })
+      .run();
+  }
+}
+
+export async function bootstrapDoc1FromFilesIfEmpty() {
+  const any = db.select().from(legalDocuments).limit(1).get();
+  if (any) return;
+
+  // Adjust these file paths to match where you store the text pack in repo:
+  await ensureDocAndPointer({
+    target: { docSet: "DOC1", docType: "GLOBAL_MASTER", jurisdictionType: "DEFAULT", jurisdictionKey: "GLOBAL" },
+    version: "1.0",
+    filePath: "server/legal/doc1/DOC1_GLOBAL_v1.0.txt",
+  });
+
+  // Default addendum ROW
+  await ensureDocAndPointer({
+    target: { docSet: "DOC1", docType: "ADDENDUM", jurisdictionType: "DEFAULT", jurisdictionKey: "ROW" },
+    version: "1.0",
+    filePath: "server/legal/doc1/addenda/ADD-ROW_v1.0.txt",
+  });
+
+  // Countries (repeat as needed)
+  const countries = ["US","AE","IN","KE","NG","BD","TH","PH","SG","HK","CN","BR","AR","CO","MX","ET","GH","AO","ZA","UG","TZ","RU","UA","GB"];
+  for (const iso2 of countries) {
+    const fp = `server/legal/doc1/addenda/ADD-${iso2}_v1.0.txt`;
+    if (fs.existsSync(path.resolve(process.cwd(), fp))) {
+      await ensureDocAndPointer({
+        target: { docSet: "DOC1", docType: "ADDENDUM", jurisdictionType: "COUNTRY", jurisdictionKey: iso2 },
+        version: "1.0",
+        filePath: fp,
+      });
+    }
+  }
+
+  // Regions (repeat as needed)
+  const regions = ["WEST_EUROPE","EAST_EUROPE","SE_ASIA","MIDDLE_EAST","NORTH_AFRICA","WEST_AFRICA","EAST_AFRICA","SOUTHERN_AFRICA","CENTRAL_AFRICA","SOUTH_AMERICA","CENTRAL_AMERICA","NORTH_AMERICA","CENTRAL_ASIA","JAPAN","SOUTH_KOREA","PAKISTAN","AUSTRALASIA","PACIFIC_ISLANDS","INDIAN_OCEAN_ISLANDS"];
+  for (const rk of regions) {
+    const fp = `server/legal/doc1/addenda/ADD-${rk}_v1.0.txt`;
+    if (fs.existsSync(path.resolve(process.cwd(), fp))) {
+      await ensureDocAndPointer({
+        target: { docSet: "DOC1", docType: "ADDENDUM", jurisdictionType: "REGION", jurisdictionKey: rk },
+        version: "1.0",
+        filePath: fp,
+      });
+    }
+  }
+}
+```
+
+## 3.2 Call bootstrap once at server startup
+
+Add near app initialization:
+
+```ts
+// FILE: /server/index.ts
+import { bootstrapDoc1FromFilesIfEmpty } from "./legal/bootstrapDoc1FromFiles";
+
+// call before routes (best effort)
+bootstrapDoc1FromFilesIfEmpty().catch((e) => {
+  // log only; do not crash prod
+  console.error("DOC1 bootstrap failed:", e?.message || e);
+});
+```
+
+---
+
+# 4) Frontend: System Config minitab “Legal Docs” (Admin UI)
+
+## 4.1 `/client/src/pages/AdminLegalDocs.tsx`
+
+```tsx
+// FILE: /client/src/pages/AdminLegalDocs.tsx
+import React, { useEffect, useMemo, useState } from "react";
+
+type Target = {
+  docSet: string;
+  docType: "GLOBAL_MASTER" | "ADDENDUM";
+  jurisdictionType: "DEFAULT" | "COUNTRY" | "REGION";
+  jurisdictionKey: string;
+};
+
+type VersionRow = {
+  id: number;
+  docSet: string;
+  docType: string;
+  jurisdictionType: string;
+  jurisdictionKey: string;
+  version: string;
+  sha256: string;
+  notes?: string | null;
+  createdAt: number;
+  createdByAdminUserId?: number | null;
+};
+
+function bumpPatch(v: string): string {
+  const m = String(v || "").match(/^(\d+)\.(\d+)$/);
+  if (!m) return "1.0";
+  const major = Number(m[1]);
+  const minor = Number(m[2]);
+  return `${major}.${minor + 1}`;
+}
+
+export default function AdminLegalDocs() {
+  const [targetsMeta, setTargetsMeta] = useState<any>(null);
+
+  const [docSet, setDocSet] = useState("DOC1");
+  const [docType, setDocType] = useState<Target["docType"]>("GLOBAL_MASTER");
+  const [jurisdictionType, setJurisdictionType] = useState<Target["jurisdictionType"]>("DEFAULT");
+  const [jurisdictionKey, setJurisdictionKey] = useState("GLOBAL");
+
+  const [versions, setVersions] = useState<VersionRow[]>([]);
+  const [activeDocumentId, setActiveDocumentId] = useState<number | null>(null);
+
+  const [selectedDocId, setSelectedDocId] = useState<number | null>(null);
+  const [selectedDocContent, setSelectedDocContent] = useState<string>("");
+
+  const [editorVersion, setEditorVersion] = useState("1.0");
+  const [editorNote, setEditorNote] = useState("");
+  const [editorContent, setEditorContent] = useState("");
+
+  const [previewCountry, setPreviewCountry] = useState("KE");
+  const [preview, setPreview] = useState<any>(null);
+
+  const target: Target = useMemo(
+    () => ({ docSet, docType, jurisdictionType, jurisdictionKey }),
+    [docSet, docType, jurisdictionType, jurisdictionKey]
+  );
+
+  async function loadTargets() {
+    const res = await fetch("/api/admin/legal-docs/targets");
+    const data = await res.json();
+    if (data?.ok) setTargetsMeta(data);
+  }
+
+  async function loadVersions() {
+    const qs = new URLSearchParams({
+      docSet,
+      docType,
+      jurisdictionType,
+      jurisdictionKey,
+    });
+    const res = await fetch(`/api/admin/legal-docs/versions?${qs.toString()}`);
+    const data = await res.json();
+    if (!data?.ok) {
+      alert(data?.error || "Failed to load versions.");
+      return;
+    }
+    setVersions(data.versions || []);
+    setActiveDocumentId(data.activeDocumentId ?? null);
+
+    // set editor version default based on active
+    const active = (data.versions || []).find((v: VersionRow) => v.id === data.activeDocumentId);
+    if (active?.version) setEditorVersion(bumpPatch(active.version));
+    else setEditorVersion("1.0");
+
+    // convenience: auto-select active doc
+    if (data.activeDocumentId) {
+      setSelectedDocId(data.activeDocumentId);
+      await loadDocContent(data.activeDocumentId);
+    } else {
+      setSelectedDocId(null);
+      setSelectedDocContent("");
+      setEditorContent("");
+    }
+  }
+
+  async function loadDocContent(id: number) {
+    const res = await fetch(`/api/admin/legal-docs/document/${id}`);
+    const data = await res.json();
+    if (!data?.ok) {
+      alert(data?.error || "Failed to load document.");
+      return;
+    }
+    setSelectedDocContent(String(data.doc?.content || ""));
+  }
+
+  async function onSelectDoc(id: number) {
+    setSelectedDocId(id);
+    await loadDocContent(id);
+  }
+
+  async function onLoadActiveIntoEditor() {
+    if (!selectedDocContent) return;
+    setEditorContent(selectedDocContent);
+  }
+
+  async function onReplaceActive() {
+    if (!editorContent || editorContent.length < 50) {
+      alert("Editor content too short.");
+      return;
+    }
+    const ok = window.confirm(
+      `Replace ACTIVE document for:\n${docSet}/${docType}/${jurisdictionType}/${jurisdictionKey}\n\nThis will activate version ${editorVersion}. Proceed?`
+    );
+    if (!ok) return;
+
+    const res = await fetch("/api/admin/legal-docs/replace-active", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        target,
+        version: editorVersion,
+        content: editorContent,
+        note: editorNote,
+      }),
+    });
+
+    const data = await res.json();
+    if (!data?.ok) {
+      alert(data?.error || "Replace active failed.");
+      return;
+    }
+
+    setEditorNote("");
+    await loadVersions();
+    alert(`Activated new doc id ${data.newDoc?.id} (sha ${data.newDoc?.sha256?.slice(0, 12)}...)`);
+  }
+
+  async function onSetActive(docId: number) {
+    const ok = window.confirm(`Set doc id ${docId} as ACTIVE for this target?`);
+    if (!ok) return;
+
+    const res = await fetch("/api/admin/legal-docs/set-active", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        target,
+        documentId: docId,
+        note: `Set active via admin UI`,
+      }),
+    });
+
+    const data = await res.json();
+    if (!data?.ok) {
+      alert(data?.error || "Set active failed.");
+      return;
+    }
+
+    await loadVersions();
+  }
+
+  async function onPreviewAssemble() {
+    const res = await fetch("/api/admin/legal-docs/preview-assemble", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ countryIso2: previewCountry }),
+    });
+    const data = await res.json();
+    if (!data?.ok) {
+      alert(data?.error || "Preview failed.");
+      return;
+    }
+    setPreview(data);
+  }
+
+  useEffect(() => {
+    loadTargets();
+  }, []);
+
+  useEffect(() => {
+    loadVersions();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [docSet, docType, jurisdictionType, jurisdictionKey]);
+
+  function suggestKeys() {
+    if (!targetsMeta?.ok) return [];
+    if (jurisdictionType === "DEFAULT") return targetsMeta.defaultKeys || ["GLOBAL", "ROW"];
+    if (jurisdictionType === "REGION") return targetsMeta.regionKeys || [];
+    return []; // COUNTRY is free-form ISO2
+  }
+
+  return (
+    <div style={{ display: "grid", gap: 12 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+        <div>
+          <div style={{ fontSize: 18, fontWeight: 700 }}>Legal Docs</div>
+          <div style={{ fontSize: 12, opacity: 0.75 }}>
+            DB-first document management. Replace active docs per country/region without redeploy.
+          </div>
+        </div>
+
+        <div style={{ fontSize: 12, opacity: 0.75 }}>
+          Tip: Use DEFAULT/GLOBAL for the master, DEFAULT/ROW for fallback addendum.
+        </div>
+      </div>
+
+      {/* Target selector */}
+      <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(4, minmax(180px, 1fr))" }}>
+        <Field label="Doc Set">
+          <select value={docSet} onChange={(e) => setDocSet(e.target.value)} style={input}>
+            <option value="DOC1">DOC1</option>
+          </select>
+        </Field>
+
+        <Field label="Doc Type">
+          <select value={docType} onChange={(e) => setDocType(e.target.value as any)} style={input}>
+            <option value="GLOBAL_MASTER">GLOBAL_MASTER</option>
+            <option value="ADDENDUM">ADDENDUM</option>
+          </select>
+        </Field>
+
+        <Field label="Jurisdiction Type">
+          <select value={jurisdictionType} onChange={(e) => setJurisdictionType(e.target.value as any)} style={input}>
+            <option value="DEFAULT">DEFAULT</option>
+            <option value="COUNTRY">COUNTRY</option>
+            <option value="REGION">REGION</option>
+          </select>
+        </Field>
+
+        <Field label="Jurisdiction Key">
+          {jurisdictionType === "COUNTRY" ? (
+            <input
+              value={jurisdictionKey}
+              onChange={(e) => setJurisdictionKey(e.target.value.toUpperCase())}
+              placeholder="ISO2 (e.g., KE, US)"
+              style={input}
+            />
+          ) : (
+            <select value={jurisdictionKey} onChange={(e) => setJurisdictionKey(e.target.value)} style={input}>
+              {suggestKeys().map((k: string) => (
+                <option key={k} value={k}>
+                  {k}
+                </option>
+              ))}
+            </select>
+          )}
+        </Field>
+      </div>
+
+      <div style={{ display: "grid", gap: 12, gridTemplateColumns: "1.2fr 1fr" }}>
+        {/* Versions list */}
+        <div style={card}>
+          <div style={{ fontWeight: 700, marginBottom: 8 }}>Versions</div>
+          <div style={{ fontSize: 12, opacity: 0.75, marginBottom: 10 }}>
+            Active document id: <strong>{activeDocumentId ?? "None"}</strong>
+          </div>
+
+          <div style={{ border: "1px solid rgba(0,0,0,0.12)", borderRadius: 10, overflow: "hidden" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "90px 90px 1fr 140px 120px", padding: 10, fontSize: 12, fontWeight: 700, background: "rgba(0,0,0,0.04)" }}>
+              <div>ID</div>
+              <div>Ver</div>
+              <div>SHA256</div>
+              <div>Created</div>
+              <div>Actions</div>
+            </div>
+
+            <div style={{ maxHeight: 300, overflow: "auto" }}>
+              {versions.map((v) => {
+                const isActive = v.id === activeDocumentId;
+                return (
+                  <div
+                    key={v.id}
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "90px 90px 1fr 140px 120px",
+                      padding: 10,
+                      fontSize: 12,
+                      borderTop: "1px solid rgba(0,0,0,0.08)",
+                      background: isActive ? "rgba(0, 120, 0, 0.06)" : "transparent",
+                    }}
+                  >
+                    <div>
+                      <button style={linkBtn} onClick={() => onSelectDoc(v.id)}>
+                        {v.id}
+                      </button>
+                      {isActive && <span style={{ marginLeft: 6, fontWeight: 700 }}>(active)</span>}
+                    </div>
+                    <div>{v.version}</div>
+                    <div style={{ fontFamily: "monospace" }}>{v.sha256}</div>
+                    <div>{new Date(v.createdAt).toLocaleString()}</div>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <button style={smallBtn} onClick={() => onSelectDoc(v.id)}>View</button>
+                      {!isActive && <button style={smallBtn} onClick={() => onSetActive(v.id)}>Set Active</button>}
+                    </div>
+                  </div>
+                );
+              })}
+              {versions.length === 0 && <div style={{ padding: 10, fontSize: 12, opacity: 0.7 }}>No versions found for this target.</div>}
+            </div>
+          </div>
+
+          <div style={{ marginTop: 10, fontSize: 12, opacity: 0.75 }}>
+            Selected doc id: <strong>{selectedDocId ?? "None"}</strong>
+          </div>
+        </div>
+
+        {/* Viewer + Editor */}
+        <div style={{ display: "grid", gap: 12 }}>
+          <div style={card}>
+            <div style={{ fontWeight: 700, marginBottom: 8 }}>Selected Document (read-only)</div>
+            <textarea value={selectedDocContent} readOnly style={{ ...textarea, height: 180 }} />
+            <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+              <button style={smallBtn} onClick={onLoadActiveIntoEditor} disabled={!selectedDocContent}>
+                Load Into Editor
+              </button>
+            </div>
+          </div>
+
+          <div style={card}>
+            <div style={{ fontWeight: 700, marginBottom: 8 }}>Replace Active (create new version + activate)</div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              <Field label="New Version">
+                <input value={editorVersion} onChange={(e) => setEditorVersion(e.target.value)} style={input} />
+              </Field>
+              <Field label="Note (optional)">
+                <input value={editorNote} onChange={(e) => setEditorNote(e.target.value)} style={input} />
+              </Field>
+            </div>
+
+            <Field label="New Content">
+              <textarea value={editorContent} onChange={(e) => setEditorContent(e.target.value)} style={{ ...textarea, height: 220 }} />
+            </Field>
+
+            <div style={{ display: "flex", gap: 10 }}>
+              <button style={primaryBtn} onClick={onReplaceActive}>
+                Replace Active
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Assemble preview */}
+      <div style={card}>
+        <div style={{ fontWeight: 700, marginBottom: 8 }}>Assemble Preview (QA what signup will load)</div>
+        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+          <Field label="Country ISO2">
+            <input value={previewCountry} onChange={(e) => setPreviewCountry(e.target.value.toUpperCase())} style={input} />
+          </Field>
+          <button style={primaryBtn} onClick={onPreviewAssemble}>Preview Assemble</button>
+        </div>
+
+        {preview?.ok && (
+          <div style={{ marginTop: 10, display: "grid", gap: 6, fontSize: 12 }}>
+            <div>Combined SHA256: <span style={{ fontFamily: "monospace" }}>{preview.combinedSha256}</span></div>
+            <div>Global Doc ID: {preview.global?.documentId} (v{preview.global?.version})</div>
+            <div>Addendum Doc ID: {preview.addendum?.documentId} (v{preview.addendum?.version})</div>
+            <div>Region Used: {preview.regionKey ?? "none"}</div>
+            <details style={{ marginTop: 8 }}>
+              <summary style={{ cursor: "pointer" }}>Show Rendered Text</summary>
+              <pre style={{ whiteSpace: "pre-wrap", marginTop: 8, border: "1px solid rgba(0,0,0,0.12)", padding: 10, borderRadius: 10 }}>
+                {preview.text}
+              </pre>
+            </details>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function Field(props: { label: string; children: React.ReactNode }) {
+  return (
+    <label style={{ display: "grid", gap: 6, fontSize: 12 }}>
+      <div style={{ opacity: 0.8 }}>{props.label}</div>
+      {props.children}
+    </label>
+  );
+}
+
+const card: React.CSSProperties = {
+  border: "1px solid rgba(0,0,0,0.12)",
+  borderRadius: 12,
+  padding: 12,
+  background: "white",
+};
+
+const input: React.CSSProperties = {
+  width: "100%",
+  padding: "10px 12px",
+  borderRadius: 10,
+  border: "1px solid rgba(0,0,0,0.2)",
+};
+
+const textarea: React.CSSProperties = {
+  width: "100%",
+  padding: "10px 12px",
+  borderRadius: 10,
+  border: "1px solid rgba(0,0,0,0.2)",
+  fontFamily: "monospace",
+  fontSize: 12,
+  lineHeight: 1.35,
+};
+
+const smallBtn: React.CSSProperties = {
+  padding: "8px 10px",
+  borderRadius: 10,
+  border: "1px solid rgba(0,0,0,0.2)",
+  background: "white",
+  cursor: "pointer",
+  fontSize: 12,
+};
+
+const primaryBtn: React.CSSProperties = {
+  padding: "10px 12px",
+  borderRadius: 10,
+  border: "1px solid rgba(0,0,0,0.25)",
+  background: "white",
+  cursor: "pointer",
+  fontWeight: 700,
+};
+
+const linkBtn: React.CSSProperties = {
+  padding: 0,
+  border: "none",
+  background: "transparent",
+  cursor: "pointer",
+  textDecoration: "underline",
+  fontSize: 12,
+};
+```
+
+---
+
+# 5) Add the “Legal Docs” minitab under System Config
+
+Because your `AdminDashboard.tsx` structure may differ, here is the **minimal pattern** to apply:
+
+## 5.1 Add a minitab entry
+
+```ts
+// In your System Config mini-tab list:
+{ key: "legalDocs", label: "Legal Docs" }
+```
+
+## 5.2 Render the page for that tab
+
+```tsx
+// FILE: /client/src/pages/AdminDashboard.tsx (or wherever System Config tabs render)
+import AdminLegalDocs from "./AdminLegalDocs";
+
+// in the System Config panel switch:
+if (activeSystemConfigTab === "legalDocs") return <AdminLegalDocs />;
+```
+
+---
+
+# 6) Environment variables
+
+Set in Replit Secrets:
+
+```text
+LEGAL_TERMS_HMAC_SECRET = (random 32+ chars)
+ADMIN_API_TOKEN = (optional; only if you use header gating)
+```
+
+---
+
+## Result
+
+With this, the Admin “Legal Docs” minitab can:
+
+* Load any **country/region** target
+* See active doc and all versions
+* Replace active doc (create new version + activate)
+* Roll back (set active to an older version)
+* Preview the assembled signup terms for any ISO2
+* Maintain a hash-chained **legal-doc change audit trail**
+
+When you are ready, the next build-out is the **Admin UI mini-tab “Legal Acceptances”** to:
+
+* Query acceptances by user / country / date
+* Validate the acceptance ledger chain
+* Export acceptance snapshots for compliance (CSV/JSON)

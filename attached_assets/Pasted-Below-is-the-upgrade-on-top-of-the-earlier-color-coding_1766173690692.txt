@@ -1,0 +1,301 @@
+Below is the “upgrade” on top of the earlier color-coding: **(a)** small icons inside **Order Type** pills and **(b)** optional **validation tint + warning icon** when **TP/SL are on the wrong side of entry** (BUY vs SELL). This is fully aligned to your current ZIP’s `TradeScreen.tsx`.
+
+---
+
+# 1) Update lucide imports
+
+**File:** `client/src/pages/TradeScreen.tsx`
+
+Replace:
+
+```tsx
+import { Pencil, X } from "lucide-react";
+```
+
+With:
+
+```tsx
+import { Pencil, X, Zap, Layers, AlertTriangle } from "lucide-react";
+```
+
+---
+
+# 2) Add the helper block (icons + TP/SL validation + pills)
+
+Inside `export default function TradeScreen(...) { ... }`, add this block **once** (place it just after your spread/pipFactor setup is fine):
+
+```tsx
+  // --- App-grade order/target styling + validation (TP/SL wrong-side warnings) ---
+  const showTargetValidation = true; // flip to false if you ever want to disable warnings
+
+  const toFiniteNumber = (value: unknown): number | null => {
+    if (value === null || value === undefined || value === "") return null;
+    const n = typeof value === "number" ? value : Number(value);
+    return Number.isFinite(n) ? n : null;
+  };
+
+  const formatPx = (value: unknown, symbol: string): string => {
+    const n = toFiniteNumber(value);
+    if (n === null) return "-";
+    return n.toFixed(symbol.includes("JPY") ? 2 : 4);
+  };
+
+  const orderTypePillClass = (orderType: unknown): string => {
+    const t = String(orderType ?? "").trim().toLowerCase();
+    if (t === "stop") return "text-amber-300 bg-amber-500/10 border-amber-500/20";
+    if (t === "limit") return "text-sky-300 bg-sky-500/10 border-sky-500/20";
+
+    // safe future-proofing
+    if (t === "market") return "text-violet-300 bg-violet-500/10 border-violet-500/20";
+    if (t === "stoplimit" || t === "stop-limit" || t === "stop limit")
+      return "text-fuchsia-300 bg-fuchsia-500/10 border-fuchsia-500/20";
+
+    return "text-gray-300 bg-gray-500/10 border-gray-500/20";
+  };
+
+  const targetPillClassBase = (kind: "TP" | "SL"): string =>
+    kind === "TP"
+      ? "text-emerald-300 bg-emerald-500/10 border-emerald-500/20"
+      : "text-rose-300 bg-rose-500/10 border-rose-500/20";
+
+  const invalidTargetPillClass = "text-amber-200 bg-amber-500/10 border-amber-500/30";
+
+  const isTargetValid = (
+    side: "BUY" | "SELL",
+    entry: number | null,
+    target: number | null,
+    kind: "TP" | "SL"
+  ): boolean | null => {
+    if (entry === null || target === null) return null;
+
+    if (side === "BUY") {
+      return kind === "TP" ? target > entry : target < entry;
+    }
+    // SELL
+    return kind === "TP" ? target < entry : target > entry;
+  };
+
+  const targetHint = (side: "BUY" | "SELL", kind: "TP" | "SL"): string => {
+    if (side === "BUY") {
+      return kind === "TP"
+        ? "Warning: For BUY, TP should be above entry."
+        : "Warning: For BUY, SL should be below entry.";
+    }
+    return kind === "TP"
+      ? "Warning: For SELL, TP should be below entry."
+      : "Warning: For SELL, SL should be above entry.";
+  };
+
+  const renderTargetPill = (
+    kind: "TP" | "SL",
+    rawValue: unknown,
+    symbol: string,
+    side: "BUY" | "SELL",
+    entry: number | null
+  ) => {
+    const v = toFiniteNumber(rawValue);
+    if (v === null) return <span className="text-gray-500">-</span>;
+
+    const valid = showTargetValidation ? isTargetValid(side, entry, v, kind) : null;
+    const cls = valid === false ? invalidTargetPillClass : targetPillClassBase(kind);
+
+    return (
+      <span
+        title={valid === false ? targetHint(side, kind) : undefined}
+        className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 font-mono text-xs tabular-nums ${cls}`}
+      >
+        {valid === false ? <AlertTriangle className="h-3 w-3" /> : null}
+        {formatPx(v, symbol)}
+      </span>
+    );
+  };
+
+  const editIconButtonClass =
+    "border-cyan-500/20 bg-cyan-500/5 hover:bg-cyan-500/10 hover:border-cyan-500/30 text-cyan-200 [&_svg]:text-cyan-300";
+```
+
+---
+
+# 3) Apply TP/SL warning pills + cyan pencil button in **Active Positions**
+
+In the **Active Positions** table row render:
+
+### Replace the TP cell:
+
+```tsx
+<TableCell>
+  {trade.takeProfit 
+    ? trade.takeProfit.toFixed(tradeSymbol.includes('JPY') ? 2 : 4)
+    : '-'
+  }
+</TableCell>
+```
+
+With:
+
+```tsx
+<TableCell>
+  {renderTargetPill("TP", trade.takeProfit, tradeSymbol, trade.type, trade.openPrice)}
+</TableCell>
+```
+
+### Replace the SL cell:
+
+```tsx
+<TableCell>
+  {trade.stopLoss 
+    ? trade.stopLoss.toFixed(tradeSymbol.includes('JPY') ? 2 : 4)
+    : '-'
+  }
+</TableCell>
+```
+
+With:
+
+```tsx
+<TableCell>
+  {renderTargetPill("SL", trade.stopLoss, tradeSymbol, trade.type, trade.openPrice)}
+</TableCell>
+```
+
+### Tint the pencil button (Active Positions action column)
+
+Replace:
+
+```tsx
+<Button 
+  variant="outline" 
+  size="sm"
+  onClick={() => setEditingTrade(trade)}
+>
+  <Pencil className="h-3 w-3" />
+</Button>
+```
+
+With:
+
+```tsx
+<Button
+  variant="outline"
+  size="sm"
+  className={editIconButtonClass}
+  onClick={() => setEditingTrade(trade)}
+>
+  <Pencil className="h-3 w-3" />
+</Button>
+```
+
+---
+
+# 4) Pending Orders: add **Stop/Limit icons**, robust orderPrice selection, TP/SL warning pills, cyan pencil
+
+In your Pending Orders `map`, replace the entire block starting at:
+
+```tsx
+{Array.isArray(pendingOrders) && pendingOrders.map((order: any) => {
+  const orderSymbol = symbols.find(s => s.id === order.symbolId)?.symbol || '';
+  const orderPrice = order.orderType === 'Limit' ? order.limitPrice : order.stopPrice;
+  ...
+```
+
+…with this upgraded version:
+
+```tsx
+{Array.isArray(pendingOrders) && pendingOrders.map((order: any) => {
+  const orderSymbol = symbols.find(s => s.id === order.symbolId)?.symbol || "";
+
+  const orderTypeLabel = String(order.orderType ?? "").trim() || "Unknown";
+  const orderTypeKey = orderTypeLabel.toLowerCase();
+
+  // Robust selection (case-insensitive + safe fallback)
+  const orderPrice =
+    orderTypeKey === "limit"
+      ? order.limitPrice
+      : orderTypeKey === "stop"
+        ? order.stopPrice
+        : (order.limitPrice ?? order.stopPrice);
+
+  const entry = toFiniteNumber(orderPrice);
+  const OrderTypeIcon =
+    orderTypeKey === "stop" ? Zap :
+    orderTypeKey === "limit" ? Layers :
+    null;
+
+  return (
+    <TableRow
+      key={order.id}
+      className={order.type === "BUY" ? "bg-success-50/5" : "bg-danger-50/5"}
+    >
+      <TableCell>{orderSymbol}</TableCell>
+
+      <TableCell>
+        <span
+          className={`uppercase font-semibold ${order.type === "BUY" ? "text-lime-500" : "text-orange-500"}`}
+        >
+          {order.type}
+        </span>
+      </TableCell>
+
+      {/* Order Type pill with icon */}
+      <TableCell>
+        <span
+          className={`inline-flex items-center rounded-md border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${orderTypePillClass(orderTypeLabel)}`}
+        >
+          {OrderTypeIcon ? <OrderTypeIcon className="h-3 w-3 mr-1" /> : null}
+          {orderTypeLabel}
+        </span>
+      </TableCell>
+
+      <TableCell>{order.lots} lots</TableCell>
+
+      <TableCell className="font-mono tabular-nums">
+        {formatPx(orderPrice, orderSymbol)}
+      </TableCell>
+
+      {/* TP/SL pills with wrong-side warnings (relative to entry/orderPrice) */}
+      <TableCell>
+        {renderTargetPill("TP", order.takeProfit, orderSymbol, order.type, entry)}
+      </TableCell>
+
+      <TableCell>
+        {renderTargetPill("SL", order.stopLoss, orderSymbol, order.type, entry)}
+      </TableCell>
+
+      <TableCell className="text-right">
+        <div className="flex gap-2 justify-end">
+          <Button
+            variant="outline"
+            size="sm"
+            className={`w-10 px-0 ${editIconButtonClass}`}
+            onClick={() => setEditingTrade(order)}
+          >
+            <Pencil className="h-4 w-4" />
+          </Button>
+
+          <Button
+            variant="destructive"
+            size="sm"
+            className="w-10 px-0"
+            onClick={() => cancelOrder.mutate(order.id)}
+            disabled={cancelOrder.isPending}
+          >
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+      </TableCell>
+    </TableRow>
+  );
+})}
+```
+
+---
+
+## What you get visually
+
+* **Stop** pill: amber + **Zap** icon
+* **Limit** pill: cyan + **Layers** icon
+* **TP** pill: emerald; **warns amber + triangle** if on wrong side of entry
+* **SL** pill: rose; **warns amber + triangle** if on wrong side of entry
+* **Edit (pencil)**: cyan-tinted outline for clear “modify” affordance next to destructive cancel.
+
+If you want the next incremental upgrade after this: I recommend adding a **tooltip on the order type icon** (Stop = “Breakout trigger”, Limit = “Pullback entry”) and a **one-click “Fix TP/SL”** suggestion in the edit modal when the warning state is detected.

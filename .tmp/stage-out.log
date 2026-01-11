@@ -1,0 +1,248 @@
+1Forge API Key present: false
+[FeedConfig] Initial: poll=870ms, stale=29804ms
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+Dynamic symbol set updated: AUDUSD, EURJPY, EURUSD, GBPJPY, GBPUSD, NGAS, US30, USDJPY, WTI, XAUUSD
+Environment validation complete:
+  - LEGAL_TERMS_HMAC_SECRET: configured
+  - RESEND_API_KEY: MISSING
+  - TWILIO_ACCOUNT_SID: MISSING
+  - TWILIO_AUTH_TOKEN: MISSING
+  - TWILIO_MESSAGING_SERVICE_SID: MISSING
+  - TWILIO_FROM_NUMBER: MISSING
+  - 1Forge API Key: MISSING
+3:48:18 PM [express] Auto-close scheduled to run every 60 minutes
+Price quotes initialized
+[Simulation] No FORGE_KEY found - starting simulated price updates
+3:48:18 PM [express] serving on port 5000
+Trade audit table ensured
+Institutional audit columns ensured
+Order intent audit table ensured
+Global settings table ensured
+System config table ensured
+Market daily close table ensured
+User login history table ensured
+Login history session columns ensured
+User account events table ensured
+User admin notes table ensured
+Trader journal table ensured
+Admin actions table ensured
+User sessions table ensured
+User sessions identity columns ensured
+User sessions geo columns ensured
+Login history identity columns ensured
+Login history geo columns ensured
+Trades provenance columns ensured
+Audit export manifest table ensured
+Migration tables ensured
+User tier columns ensured
+User verification table ensured
+Verification throttle columns ensured
+User verification policy columns ensured
+Email verification tokens table ensured
+SMS OTP tokens table ensured
+User equity daily table ensured
+User MFA table ensured
+User KYC profiles table ensured
+User payout profiles table ensured
+Identity audit table ensured
+Session revocation columns ensured
+Grift config table ensured with defaults
+Grift devices table ensured
+Grift device users table ensured
+Grift signals table ensured
+Grift identity links table ensured
+Grift alerts table ensured
+Grift user risk table ensured
+Grift enforcement log table ensured
+Grift linked account edges table ensured
+Grift observations table ensured
+Grift trade observations table ensured
+Grift IP ASN cache table ensured
+Grift IP ASN ranges table ensured
+Grift IP ASN dataset meta table ensured
+Grift cases tables ensured
+Grift admin actions table ensured
+Grift user scores table ensured
+Grift user enforcements table ensured
+Auth events table ensured
+Grift detection schema ensured
+Tiered access schema ensured
+Legal compliance schema ensured
+Signup freeze + waitlist schema ensured
+Signup fingerprint schema ensured
+Daily FX closes schema ensured
+i18n schema ensured
+3:48:18 PM [express] Schema audit columns verified (institutional-grade)
+[i18n] Built manifest ingest skipped: {
+  skipped: true,
+  reason: 'already-ingested',
+  path: 'C:\\Users\\Rb\\.codex\\TradingCentral-3AL-V3\\dist\\public\\i18n-manifest.json',
+  version: '64c6a2021534b7f266e52b913d2c7588fe7642d17edbeb4066b7be52515508bf'
+}
+[i18n] Worker started
+3:48:18 PM [express] Price feed and auto-close services initialized
+Creating admin data views...
+Admin data views created successfully
+Database admin views setup complete
+3:48:18 PM [express] Admin data views and tables initialized successfully
+[Grift Scheduler] Periodic risk evaluation scheduled (hourly)
+3:48:18 PM [express] Grift detection scheduler initialized
+[Verification Reminders] Starting cron job
+3:48:18 PM [express] Verification reminder cron initialized
+3:48:18 PM [express] Deferred initialization complete
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+3:48:51 PM [express] GET /api/i18n/config 200 in 19ms :: {"ok":true,"enabled":true,"defaultLocale":"…
+3:48:51 PM [express] GET /api/auth/current-user 401 in 5ms :: {"message":"Not authenticated"}
+3:48:51 PM [express] GET /api/auth/current-user 401 in 2ms :: {"message":"Not authenticated"}
+3:48:51 PM [express] GET /api/i18n/bundle 200 in 25ms :: {"locale":"en","strings":{}}
+3:48:51 PM [express] GET /api/config/symbols 200 in 11ms :: [{"id":4,"symbol":"AUDUSD","name":"Austr…
+3:48:52 PM [express] GET /api/quotes/latest 200 in 27ms :: [{"symbol":"EURUSD","bid":1.0945819114745…
+3:48:52 PM [express] GET /api/auth/signup-config 200 in 10ms :: {"captcha":{"enforceSignupCaptcha":t…
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+3:48:53 PM [express] POST /api/auth/login 200 in 305ms :: {"id":8,"email":"admin@local.test","userna…
+3:48:53 PM [express] GET /api/i18n/config 304 in 24ms :: {"ok":true,"enabled":true,"defaultLocale":"…
+3:48:53 PM [express] GET /api/i18n/bundle 304 in 27ms
+3:48:53 PM [express] POST /api/grift/ping 200 in 51ms :: {"ok":true}
+3:48:54 PM [express] GET /api/legal/doc1/reaccept 200 in 33ms :: {"ok":true,"docSet":"DOC1","require…
+3:48:54 PM [express] GET /api/auth/signup-config 304 in 39ms :: {"captcha":{"enforceSignupCaptcha":t…
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+3:48:54 PM [express] GET /api/config/symbols 304 in 19ms :: [{"id":4,"symbol":"AUDUSD","name":"Austr…
+3:48:54 PM [express] GET /api/quotes/latest 200 in 29ms :: [{"symbol":"EURUSD","bid":1.0945433467539…
+3:48:54 PM [express] GET /api/trades 200 in 44ms :: [{"id":189,"userId":8,"symbolId":2,"type":"BUY",…
+3:48:54 PM [express] GET /api/trades/open 200 in 34ms :: []
+3:48:55 PM [express] GET /api/account/summary 200 in 57ms :: {"balance":1000000,"equity":1000000,"fl…
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+3:48:55 PM [express] GET /api/trades/pending 200 in 32ms :: []
+3:48:55 PM [express] GET /api/auth/current-user 200 in 50ms :: {"id":8,"email":"admin@local.test","u…
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+3:48:56 PM [express] GET /api/quotes/latest 200 in 63ms :: [{"symbol":"EURUSD","bid":1.0937572043534…
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+3:48:57 PM [express] GET /api/quotes/latest 200 in 27ms :: [{"symbol":"EURUSD","bid":1.0944041856119…
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+3:48:57 PM [express] GET /api/auth/current-user 304 in 45ms :: {"id":8,"email":"admin@local.test","u…
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata
+[Fallback] Using static fallback prices as last resort (marked stale)
+[Fallback] Persisted 6 fallback quotes with staleness metadata

@@ -1,0 +1,766 @@
+Understood. Below is the **“Resolve Doc Links”** implementation that maps each **legal acceptance** row to the corresponding **Legal Docs** DB record(s) using **sha256 matching**, with:
+
+* **Backend endpoint**: `POST /api/admin/legal-acceptances/resolve-doc-links`
+* **UI button**: “Resolve Doc Links” to resolve the currently loaded page of rows
+* **Detail modal enhancement**: shows resolved Global/Addendum doc IDs and allows viewing the resolved doc content inline
+
+This works even after future doc replacements, because the linkage is based on the **exact sha256** stored at acceptance time.
+
+---
+
+# 1) Backend: add resolve endpoint
+
+## 1.1 Update `server/routes/adminLegalAcceptances.ts`
+
+Add the new route **near the other admin routes** (e.g., after `/list`), keeping existing code intact.
+
+```ts
+// FILE: /server/routes/adminLegalAcceptances.ts
+// ADD THESE IMPORTS at top with others:
+import { inArray } from "drizzle-orm";
+import { legalDocuments } from "../../shared/schema";
+
+// ... existing code ...
+
+// POST /api/admin/legal-acceptances/resolve-doc-links
+// body: { ids: number[] }
+// returns: { [acceptanceId]: { global: {best, matches[]}, addendum: {best, matches[]}} }
+adminLegalAcceptancesRouter.post("/resolve-doc-links", (req, res) => {
+  try {
+    const idsRaw = (req.body || {}).ids;
+    if (!Array.isArray(idsRaw)) return res.status(400).json({ ok: false, error: "ids must be an array." });
+
+    const ids = idsRaw
+      .map((x) => Number(x))
+      .filter((n) => Number.isFinite(n) && n > 0)
+      .slice(0, 200);
+
+    if (ids.length === 0) return res.status(400).json({ ok: false, error: "No valid ids provided." });
+
+    // Pull acceptance rows for those IDs
+    const acceptances = db
+      .select({
+        id: legalAcceptances.id,
+        globalDocSha256: legalAcceptances.globalDocSha256,
+        addendumSha256: legalAcceptances.addendumSha256,
+      })
+      .from(legalAcceptances)
+      .where(inArray(legalAcceptances.id, ids))
+      .all();
+
+    // Collect unique shas
+    const globalShas = Array.from(
+      new Set(acceptances.map((a) => String(a.globalDocSha256 || "")).filter(Boolean))
+    );
+    const addendumShas = Array.from(
+      new Set(acceptances.map((a) => String(a.addendumSha256 || "")).filter(Boolean))
+    );
+
+    // Fetch candidate legalDocuments by sha
+    const globalDocs =
+      globalShas.length === 0
+        ? []
+        : db
+            .select({
+              id: legalDocuments.id,
+              docSet: legalDocuments.docSet,
+              docType: legalDocuments.docType,
+              jurisdictionType: legalDocuments.jurisdictionType,
+              jurisdictionKey: legalDocuments.jurisdictionKey,
+              version: legalDocuments.version,
+              sha256: legalDocuments.sha256,
+              createdAt: legalDocuments.createdAt,
+            })
+            .from(legalDocuments)
+            .where(
+              and(
+                eq(legalDocuments.docSet, "DOC1"),
+                eq(legalDocuments.docType, "GLOBAL_MASTER"),
+                inArray(legalDocuments.sha256, globalShas)
+              ) as any
+            )
+            .orderBy(desc(legalDocuments.createdAt))
+            .all();
+
+    const addendumDocs =
+      addendumShas.length === 0
+        ? []
+        : db
+            .select({
+              id: legalDocuments.id,
+              docSet: legalDocuments.docSet,
+              docType: legalDocuments.docType,
+              jurisdictionType: legalDocuments.jurisdictionType,
+              jurisdictionKey: legalDocuments.jurisdictionKey,
+              version: legalDocuments.version,
+              sha256: legalDocuments.sha256,
+              createdAt: legalDocuments.createdAt,
+            })
+            .from(legalDocuments)
+            .where(
+              and(
+                eq(legalDocuments.docSet, "DOC1"),
+                eq(legalDocuments.docType, "ADDENDUM"),
+                inArray(legalDocuments.sha256, addendumShas)
+              ) as any
+            )
+            .orderBy(desc(legalDocuments.createdAt))
+            .all();
+
+    // Build sha -> docs[] maps
+    const globalMap = new Map<string, any[]>();
+    for (const d of globalDocs) {
+      const key = String(d.sha256);
+      if (!globalMap.has(key)) globalMap.set(key, []);
+      globalMap.get(key)!.push(d);
+    }
+
+    const addMap = new Map<string, any[]>();
+    for (const d of addendumDocs) {
+      const key = String(d.sha256);
+      if (!addMap.has(key)) addMap.set(key, []);
+      addMap.get(key)!.push(d);
+    }
+
+    // Choose best match:
+    // - If single match => it
+    // - If multiple => latest createdAt (already ordered desc)
+    const chooseBest = (arr: any[] | undefined) => {
+      if (!arr || arr.length === 0) return null;
+      if (arr.length === 1) return arr[0];
+      return arr[0]; // latest createdAt
+    };
+
+    const resolved: Record<
+      number,
+      {
+        global: { best: any | null; matches: any[] };
+        addendum: { best: any | null; matches: any[] };
+      }
+    > = {};
+
+    for (const a of acceptances) {
+      const gSha = String(a.globalDocSha256 || "");
+      const adSha = String(a.addendumSha256 || "");
+
+      const gMatches = globalMap.get(gSha) || [];
+      const aMatches = addMap.get(adSha) || [];
+
+      resolved[Number(a.id)] = {
+        global: { best: chooseBest(gMatches), matches: gMatches },
+        addendum: { best: chooseBest(aMatches), matches: aMatches },
+      };
+    }
+
+    return res.json({ ok: true, resolved });
+  } catch (e: any) {
+    return res.status(400).json({ ok: false, error: e?.message || "Resolve failed." });
+  }
+});
+```
+
+No additional wiring is needed if your router is already mounted at:
+`app.use("/api/admin/legal-acceptances", adminLegalAcceptancesRouter);`
+
+---
+
+# 2) Frontend: add “Resolve Doc Links” UI + display
+
+## 2.1 Update `client/src/pages/AdminLegalAcceptances.tsx`
+
+Replace the file with the version below (it includes your existing tab plus the resolve functionality). If you prefer patch-style edits, you can still copy/paste and diff.
+
+```tsx
+// FILE: /client/src/pages/AdminLegalAcceptances.tsx
+import React, { useEffect, useMemo, useState } from "react";
+
+type ListRow = {
+  id: number;
+  userId: number | null;
+  emailAtAcceptance: string | null;
+  countryIso2: string;
+  regionKey: string | null;
+
+  globalDocId: string;
+  globalDocVersion: string;
+  globalDocSha256: string;
+
+  addendumId: string;
+  addendumVersion: string;
+  addendumSha256: string;
+
+  combinedSha256: string;
+  acceptedAt: any;
+
+  ipAddress: string | null;
+  userAgent: string | null;
+
+  ledgerSeq: number;
+  prevLedgerHash: string;
+  ledgerHash: string;
+};
+
+type DocLite = {
+  id: number;
+  docSet: string;
+  docType: string;
+  jurisdictionType: string;
+  jurisdictionKey: string;
+  version: string;
+  sha256: string;
+  createdAt: any;
+};
+
+type ResolvedMap = Record<
+  number,
+  {
+    global: { best: DocLite | null; matches: DocLite[] };
+    addendum: { best: DocLite | null; matches: DocLite[] };
+  }
+>;
+
+export default function AdminLegalAcceptances() {
+  const [countryIso2, setCountryIso2] = useState("");
+  const [email, setEmail] = useState("");
+  const [userId, setUserId] = useState("");
+
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
+
+  const [limit, setLimit] = useState(50);
+  const [offset, setOffset] = useState(0);
+
+  const [total, setTotal] = useState(0);
+  const [rows, setRows] = useState<ListRow[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [detail, setDetail] = useState<any>(null);
+
+  const [validateOpen, setValidateOpen] = useState(false);
+  const [validateResult, setValidateResult] = useState<any>(null);
+  const [validateN, setValidateN] = useState(500);
+
+  // NEW: resolved doc links (by acceptanceId)
+  const [resolved, setResolved] = useState<ResolvedMap>({});
+  const [resolving, setResolving] = useState(false);
+
+  // NEW: quick doc-viewer inside the acceptance modal
+  const [docViewOpen, setDocViewOpen] = useState(false);
+  const [docView, setDocView] = useState<{ title: string; content: string } | null>(null);
+
+  const queryParams = useMemo(() => {
+    const qs = new URLSearchParams();
+    qs.set("limit", String(limit));
+    qs.set("offset", String(offset));
+
+    if (countryIso2.trim()) qs.set("countryIso2", countryIso2.trim().toUpperCase());
+    if (email.trim()) qs.set("email", email.trim());
+    if (userId.trim()) qs.set("userId", userId.trim());
+
+    const toMs = (d: string, endOfDay: boolean) => {
+      if (!d) return "";
+      const dt = new Date(d + "T00:00:00");
+      if (endOfDay) dt.setHours(23, 59, 59, 999);
+      return String(dt.getTime());
+    };
+
+    if (fromDate) qs.set("fromMs", toMs(fromDate, false));
+    if (toDate) qs.set("toMs", toMs(toDate, true));
+
+    return qs.toString();
+  }, [countryIso2, email, userId, fromDate, toDate, limit, offset]);
+
+  async function load() {
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/admin/legal-acceptances/list?${queryParams}`);
+      const data = await res.json();
+      if (!data?.ok) throw new Error(data?.error || "Failed to load.");
+
+      setTotal(Number(data.total || 0));
+      setRows(data.rows || []);
+      // Clear resolved for new page (prevents showing stale mappings)
+      setResolved({});
+    } catch (e: any) {
+      alert(e?.message || "Load failed.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queryParams]);
+
+  function fmtTime(v: any) {
+    try {
+      const d = v instanceof Date ? v : new Date(v);
+      return d.toLocaleString();
+    } catch {
+      return String(v ?? "");
+    }
+  }
+
+  async function openDetail(id: number) {
+    const res = await fetch(`/api/admin/legal-acceptances/${id}`);
+    const data = await res.json();
+    if (!data?.ok) {
+      alert(data?.error || "Failed to load detail.");
+      return;
+    }
+    setDetail(data.row);
+    setDetailOpen(true);
+  }
+
+  async function runValidate() {
+    setValidateResult(null);
+    const res = await fetch(`/api/admin/legal-acceptances/validate-chain`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ mode: "lastN", n: validateN }),
+    });
+    const data = await res.json();
+    if (!data?.ok) {
+      alert(data?.error || "Validation failed.");
+      return;
+    }
+    setValidateResult(data);
+  }
+
+  function exportCsv() {
+    const qs = new URLSearchParams(queryParams);
+    qs.delete("limit");
+    qs.delete("offset");
+    qs.set("limit", "2000");
+    const url = `/api/admin/legal-acceptances/export.csv?${qs.toString()}`;
+    window.open(url, "_blank");
+  }
+
+  // NEW: resolve doc links for currently loaded rows
+  async function resolveDocLinksForPage() {
+    if (!rows.length) return;
+    setResolving(true);
+    try {
+      const res = await fetch(`/api/admin/legal-acceptances/resolve-doc-links`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ids: rows.map((r) => r.id) }),
+      });
+      const data = await res.json();
+      if (!data?.ok) throw new Error(data?.error || "Resolve failed.");
+      setResolved(data.resolved || {});
+    } catch (e: any) {
+      alert(e?.message || "Resolve failed.");
+    } finally {
+      setResolving(false);
+    }
+  }
+
+  async function openLegalDocById(docId: number) {
+    // Uses the Legal Docs admin endpoint you already added:
+    // GET /api/admin/legal-docs/document/:id
+    const res = await fetch(`/api/admin/legal-docs/document/${docId}`);
+    const data = await res.json();
+    if (!data?.ok) {
+      alert(data?.error || "Failed to load legal doc.");
+      return;
+    }
+    const d = data.doc;
+    setDocView({
+      title: `${d.docSet}/${d.docType}/${d.jurisdictionType}/${d.jurisdictionKey} v${d.version} (#${d.id})`,
+      content: String(d.content || ""),
+    });
+    setDocViewOpen(true);
+  }
+
+  const page = Math.floor(offset / limit) + 1;
+  const pageCount = Math.max(1, Math.ceil(total / limit));
+
+  return (
+    <div style={{ display: "grid", gap: 12 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+        <div>
+          <div style={{ fontSize: 18, fontWeight: 700 }}>Legal Acceptances</div>
+          <div style={{ fontSize: 12, opacity: 0.75 }}>
+            Filter, inspect, validate acceptance ledger, export. Resolve links to Legal Docs versions by SHA.
+          </div>
+        </div>
+
+        <div style={{ display: "flex", gap: 8 }}>
+          <button style={btn} onClick={resolveDocLinksForPage} disabled={resolving || rows.length === 0}>
+            {resolving ? "Resolving..." : "Resolve Doc Links"}
+          </button>
+          <button style={btn} onClick={() => { setValidateOpen(true); runValidate(); }}>
+            Validate Ledger
+          </button>
+          <button style={btn} onClick={exportCsv}>
+            Export CSV
+          </button>
+        </div>
+      </div>
+
+      {/* Filters */}
+      <div style={{ ...card, display: "grid", gap: 10, gridTemplateColumns: "repeat(6, minmax(140px, 1fr))" }}>
+        <Field label="Country ISO2">
+          <input value={countryIso2} onChange={(e) => { setOffset(0); setCountryIso2(e.target.value.toUpperCase()); }} style={input} placeholder="KE" />
+        </Field>
+
+        <Field label="Email contains">
+          <input value={email} onChange={(e) => { setOffset(0); setEmail(e.target.value); }} style={input} placeholder="gmail" />
+        </Field>
+
+        <Field label="User ID">
+          <input value={userId} onChange={(e) => { setOffset(0); setUserId(e.target.value); }} style={input} placeholder="123" />
+        </Field>
+
+        <Field label="From (date)">
+          <input type="date" value={fromDate} onChange={(e) => { setOffset(0); setFromDate(e.target.value); }} style={input} />
+        </Field>
+
+        <Field label="To (date)">
+          <input type="date" value={toDate} onChange={(e) => { setOffset(0); setToDate(e.target.value); }} style={input} />
+        </Field>
+
+        <Field label="Limit">
+          <select value={limit} onChange={(e) => { setOffset(0); setLimit(Number(e.target.value)); }} style={input}>
+            {[25, 50, 100, 200].map((n) => (
+              <option key={n} value={n}>{n}</option>
+            ))}
+          </select>
+        </Field>
+      </div>
+
+      {/* Table */}
+      <div style={card}>
+        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+          <div style={{ fontSize: 12, opacity: 0.75 }}>
+            {loading ? "Loading..." : `Total: ${total} | Page ${page}/${pageCount}`}
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button style={btnSmall} disabled={offset <= 0} onClick={() => setOffset(Math.max(0, offset - limit))}>Prev</button>
+            <button style={btnSmall} disabled={offset + limit >= total} onClick={() => setOffset(offset + limit)}>Next</button>
+          </div>
+        </div>
+
+        <div style={{ border: "1px solid rgba(0,0,0,0.12)", borderRadius: 10, overflow: "hidden" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "70px 110px 220px 80px 210px 220px 120px 130px", padding: 10, background: "rgba(0,0,0,0.04)", fontSize: 12, fontWeight: 700 }}>
+            <div>ID</div>
+            <div>Accepted</div>
+            <div>Email</div>
+            <div>ISO2</div>
+            <div>Resolved Docs</div>
+            <div>Combined SHA</div>
+            <div>Ledger Seq</div>
+            <div>Actions</div>
+          </div>
+
+          <div style={{ maxHeight: 420, overflow: "auto" }}>
+            {rows.map((r) => {
+              const rr = resolved[r.id];
+              const gBest = rr?.global?.best || null;
+              const aBest = rr?.addendum?.best || null;
+
+              const resolvedLabel =
+                rr
+                  ? `G#${gBest?.id ?? "—"} / A#${aBest?.id ?? "—"}`
+                  : "—";
+
+              const ambiguity =
+                rr
+                  ? `${rr.global.matches.length > 1 ? `G(${rr.global.matches.length}) ` : ""}${rr.addendum.matches.length > 1 ? `A(${rr.addendum.matches.length})` : ""}`.trim()
+                  : "";
+
+              return (
+                <div key={r.id} style={{ display: "grid", gridTemplateColumns: "70px 110px 220px 80px 210px 220px 120px 130px", padding: 10, borderTop: "1px solid rgba(0,0,0,0.08)", fontSize: 12, alignItems: "center" }}>
+                  <div>{r.id}</div>
+                  <div>{fmtTime(r.acceptedAt)}</div>
+                  <div title={r.emailAtAcceptance || ""} style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {r.emailAtAcceptance || "(none)"}
+                  </div>
+                  <div>{r.countryIso2}</div>
+
+                  <div style={{ fontFamily: "monospace" }} title={ambiguity ? `Ambiguous: ${ambiguity}` : ""}>
+                    {resolvedLabel}{ambiguity ? `  ${ambiguity}` : ""}
+                  </div>
+
+                  <div style={{ fontFamily: "monospace" }} title={r.combinedSha256}>
+                    {r.combinedSha256.slice(0, 18)}…
+                  </div>
+
+                  <div>{r.ledgerSeq}</div>
+
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button style={btnSmall} onClick={() => openDetail(r.id)}>View</button>
+                    {resolved[r.id]?.global?.best?.id && (
+                      <button style={btnSmall} onClick={() => openLegalDocById(resolved[r.id].global.best!.id)}>
+                        Open Global
+                      </button>
+                    )}
+                    {resolved[r.id]?.addendum?.best?.id && (
+                      <button style={btnSmall} onClick={() => openLegalDocById(resolved[r.id].addendum.best!.id)}>
+                        Open Addendum
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+            {rows.length === 0 && <div style={{ padding: 10, fontSize: 12, opacity: 0.7 }}>No rows found.</div>}
+          </div>
+        </div>
+
+        <div style={{ marginTop: 10, fontSize: 12, opacity: 0.75 }}>
+          Resolution notes: matches are resolved by SHA256 against `legalDocuments` (DOC1/GLOBAL_MASTER and DOC1/ADDENDUM).
+          If multiple matches exist, the most recently created doc is selected as “best”.
+        </div>
+      </div>
+
+      {/* Detail modal */}
+      <Modal open={detailOpen} onClose={() => setDetailOpen(false)} title={`Acceptance #${detail?.id ?? ""}`}>
+        {detail && (
+          <div style={{ display: "grid", gap: 10, fontSize: 12 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              <Info label="User ID" value={detail.userId} />
+              <Info label="Email" value={detail.emailAtAcceptance} />
+              <Info label="Country" value={detail.countryIso2} />
+              <Info label="Region Key" value={detail.regionKey ?? "—"} />
+              <Info label="Accepted At" value={new Date(detail.acceptedAt).toLocaleString()} />
+              <Info label="IP" value={detail.ipAddress ?? "—"} />
+              <Info label="Ledger Seq" value={detail.ledgerSeq} />
+              <Info label="Ledger Hash" value={detail.ledgerHash} mono />
+              <Info label="Prev Ledger Hash" value={detail.prevLedgerHash} mono />
+              <Info label="Combined SHA256" value={detail.combinedSha256} mono />
+
+              <Info label="Global (snapshot)" value={`${detail.globalDocId} v${detail.globalDocVersion}`} />
+              <Info label="Addendum (snapshot)" value={`${detail.addendumId} v${detail.addendumVersion}`} />
+            </div>
+
+            {resolved?.[detail.id] && (
+              <div style={{ display: "grid", gap: 8, padding: 10, border: "1px solid rgba(0,0,0,0.12)", borderRadius: 10 }}>
+                <div style={{ fontWeight: 700 }}>Resolved Legal Docs (by SHA)</div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                  <ResolvedBox title="Global Best Match" doc={resolved[detail.id].global.best} onOpen={openLegalDocById} />
+                  <ResolvedBox title="Addendum Best Match" doc={resolved[detail.id].addendum.best} onOpen={openLegalDocById} />
+                </div>
+              </div>
+            )}
+
+            <details>
+              <summary style={{ cursor: "pointer" }}>Terms Token (HMAC)</summary>
+              <pre style={pre}>{String(detail.termsToken || "")}</pre>
+            </details>
+
+            <details open>
+              <summary style={{ cursor: "pointer" }}>Rendered Combined Text (exact snapshot)</summary>
+              <pre style={pre}>{String(detail.combinedText || "")}</pre>
+            </details>
+          </div>
+        )}
+      </Modal>
+
+      {/* Validate modal */}
+      <Modal open={validateOpen} onClose={() => setValidateOpen(false)} title="Validate Acceptance Ledger Chain">
+        <div style={{ display: "grid", gap: 10, fontSize: 12 }}>
+          <div style={{ display: "flex", gap: 10, alignItems: "end" }}>
+            <Field label="Validate last N rows">
+              <input value={String(validateN)} onChange={(e) => setValidateN(Number(e.target.value || 0))} style={input} />
+            </Field>
+            <button style={btn} onClick={runValidate}>Run</button>
+          </div>
+
+          {validateResult?.summary && (
+            <div style={{ padding: 10, border: "1px solid rgba(0,0,0,0.12)", borderRadius: 10 }}>
+              <div><strong>Rows:</strong> {validateResult.summary.rows}</div>
+              <div><strong>Seq range:</strong> {validateResult.summary.firstSeq} → {validateResult.summary.lastSeq}</div>
+              <div>
+                <strong>Status:</strong>{" "}
+                <span style={{ fontWeight: 700 }}>
+                  {validateResult.summary.ok ? "OK" : "ISSUES FOUND"}
+                </span>
+              </div>
+            </div>
+          )}
+
+          {Array.isArray(validateResult?.issues) && validateResult.issues.length > 0 && (
+            <div style={{ maxHeight: 320, overflow: "auto", border: "1px solid rgba(0,0,0,0.12)", borderRadius: 10 }}>
+              <div style={{ padding: 10, background: "rgba(0,0,0,0.04)", fontWeight: 700 }}>Issues</div>
+              {validateResult.issues.slice(0, 500).map((iss: any, idx: number) => (
+                <div key={idx} style={{ padding: 10, borderTop: "1px solid rgba(0,0,0,0.08)", fontFamily: "monospace" }}>
+                  {JSON.stringify(iss)}
+                </div>
+              ))}
+              {validateResult.issues.length > 500 && (
+                <div style={{ padding: 10, fontSize: 12, opacity: 0.75 }}>
+                  Showing first 500 issues.
+                </div>
+              )}
+            </div>
+          )}
+
+          {validateResult?.summary && validateResult.summary.ok && (
+            <div style={{ fontSize: 12, opacity: 0.75 }}>
+              No issues detected in the requested validation range.
+            </div>
+          )}
+        </div>
+      </Modal>
+
+      {/* Inline Legal Doc viewer modal */}
+      <Modal open={docViewOpen} onClose={() => setDocViewOpen(false)} title={docView?.title || "Legal Doc"}>
+        <pre style={pre}>{docView?.content || ""}</pre>
+      </Modal>
+    </div>
+  );
+}
+
+function ResolvedBox(props: { title: string; doc: DocLite | null; onOpen: (id: number) => void }) {
+  const d = props.doc;
+  return (
+    <div style={{ border: "1px solid rgba(0,0,0,0.12)", borderRadius: 10, padding: 10 }}>
+      <div style={{ fontSize: 12, opacity: 0.75 }}>{props.title}</div>
+      {!d ? (
+        <div style={{ marginTop: 6, fontSize: 12, opacity: 0.7 }}>No match found.</div>
+      ) : (
+        <div style={{ marginTop: 6, display: "grid", gap: 6, fontSize: 12 }}>
+          <div><strong>ID:</strong> {d.id}</div>
+          <div><strong>Target:</strong> {d.docSet}/{d.docType}/{d.jurisdictionType}/{d.jurisdictionKey}</div>
+          <div><strong>Version:</strong> {d.version}</div>
+          <div style={{ fontFamily: "monospace" }}><strong>SHA:</strong> {d.sha256}</div>
+          <button style={btnSmall} onClick={() => props.onOpen(d.id)}>Open Doc</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Field(props: { label: string; children: React.ReactNode }) {
+  return (
+    <label style={{ display: "grid", gap: 6 }}>
+      <div style={{ fontSize: 12, opacity: 0.8 }}>{props.label}</div>
+      {props.children}
+    </label>
+  );
+}
+
+function Info(props: { label: string; value: any; mono?: boolean }) {
+  return (
+    <div style={{ border: "1px solid rgba(0,0,0,0.12)", borderRadius: 10, padding: 10 }}>
+      <div style={{ fontSize: 12, opacity: 0.75 }}>{props.label}</div>
+      <div style={{ fontSize: 12, fontFamily: props.mono ? "monospace" : "inherit", wordBreak: "break-word" }}>
+        {props.value == null || props.value === "" ? "—" : String(props.value)}
+      </div>
+    </div>
+  );
+}
+
+function Modal(props: { open: boolean; onClose: () => void; title: string; children: React.ReactNode }) {
+  if (!props.open) return null;
+  return (
+    <div style={overlay} onMouseDown={props.onClose}>
+      <div style={modal} onMouseDown={(e) => e.stopPropagation()}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+          <div style={{ fontWeight: 700 }}>{props.title}</div>
+          <button style={btn} onClick={props.onClose}>Close</button>
+        </div>
+        <div style={{ marginTop: 12 }}>{props.children}</div>
+      </div>
+    </div>
+  );
+}
+
+const card: React.CSSProperties = {
+  border: "1px solid rgba(0,0,0,0.12)",
+  borderRadius: 12,
+  padding: 12,
+  background: "white",
+};
+
+const input: React.CSSProperties = {
+  width: "100%",
+  padding: "10px 12px",
+  borderRadius: 10,
+  border: "1px solid rgba(0,0,0,0.2)",
+  fontSize: 12,
+};
+
+const btn: React.CSSProperties = {
+  padding: "10px 12px",
+  borderRadius: 10,
+  border: "1px solid rgba(0,0,0,0.25)",
+  background: "white",
+  cursor: "pointer",
+  fontWeight: 700,
+  fontSize: 12,
+};
+
+const btnSmall: React.CSSProperties = {
+  padding: "8px 10px",
+  borderRadius: 10,
+  border: "1px solid rgba(0,0,0,0.2)",
+  background: "white",
+  cursor: "pointer",
+  fontSize: 12,
+};
+
+const overlay: React.CSSProperties = {
+  position: "fixed",
+  inset: 0,
+  background: "rgba(0,0,0,0.35)",
+  display: "grid",
+  placeItems: "center",
+  padding: 16,
+  zIndex: 1000,
+};
+
+const modal: React.CSSProperties = {
+  width: "min(1100px, 96vw)",
+  background: "white",
+  borderRadius: 12,
+  padding: 14,
+  boxShadow: "0 12px 30px rgba(0,0,0,0.25)",
+  maxHeight: "92vh",
+  overflow: "auto",
+};
+
+const pre: React.CSSProperties = {
+  whiteSpace: "pre-wrap",
+  border: "1px solid rgba(0,0,0,0.12)",
+  borderRadius: 10,
+  padding: 10,
+  maxHeight: 520,
+  overflow: "auto",
+  marginTop: 8,
+};
+```
+
+---
+
+# 3) What “Resolve” does operationally
+
+* For each acceptance row:
+
+  * `globalDocSha256` is matched to `legalDocuments` where `docSet=DOC1` and `docType=GLOBAL_MASTER`
+  * `addendumSha256` is matched to `legalDocuments` where `docSet=DOC1` and `docType=ADDENDUM`
+* If multiple matches exist (rare but possible if identical content was inserted for different targets), the UI:
+
+  * Shows `G(n)` / `A(n)` counts
+  * Picks “best” as **most recently created** doc (deterministic)
+
+---
+
+# 4) Minimal AdminDashboard wiring reminder
+
+If you haven’t already, ensure the mini-tab renders:
+
+```tsx
+import AdminLegalAcceptances from "./AdminLegalAcceptances";
+
+// ...
+if (activeSystemConfigTab === "legalAcceptances") return <AdminLegalAcceptances />;
+```
+
+---
+
+If you want the “best match” selection rule to be stricter (e.g., for addenda prefer `COUNTRY/{ISO2}` over `REGION/*` over `DEFAULT/ROW` when multiple matches exist), I can adjust the backend to pick best deterministically based on `jurisdictionType` priority rather than recency.

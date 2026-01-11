@@ -1,0 +1,915 @@
+Below is a **TypeScript-first**, **wouter-friendly** drop-in patch, aligned to your audited structure:
+
+* Backend: `server/index.ts`, `server/routes.ts`, `server/routes/admin.ts`
+* Frontend: `client/src/App.tsx` (wouter), components in `client/src/components/**`, pages in `client/src/pages/**`
+* Adds: **Admin “View As” mini-tab**, **Trader Journal tab**, **Trader Insights card**, **audit logging**, **impersonation write-block**, and **search endpoint**.
+
+---
+
+# 0) DB Migrations (SQL)
+
+Create a migration (e.g., `migrations/2025-12-17_insights_journal_viewas.sql`):
+
+```sql
+-- Admin actions audit log
+CREATE TABLE IF NOT EXISTS admin_actions (
+  id BIGSERIAL PRIMARY KEY,
+  admin_id BIGINT NOT NULL,
+  user_id BIGINT NOT NULL,
+  action_type VARCHAR(50) NOT NULL,
+  metadata JSONB,
+  ip VARCHAR(64),
+  user_agent TEXT,
+  created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_admin_actions_admin_id ON admin_actions(admin_id);
+CREATE INDEX IF NOT EXISTS idx_admin_actions_user_id ON admin_actions(user_id);
+CREATE INDEX IF NOT EXISTS idx_admin_actions_type_time ON admin_actions(action_type, created_at DESC);
+
+-- Trader journal
+CREATE TABLE IF NOT EXISTS trader_journal (
+  id BIGSERIAL PRIMARY KEY,
+  user_id BIGINT NOT NULL,
+  trade_id BIGINT,
+  note TEXT NOT NULL,
+  mood VARCHAR(50),
+  tags TEXT[] DEFAULT '{}',
+  attachment_url TEXT,
+  created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_trader_journal_user_time ON trader_journal(user_id, created_at DESC);
+
+-- Trader insights cache
+CREATE TABLE IF NOT EXISTS trader_insights_cache (
+  user_id BIGINT PRIMARY KEY,
+  insights JSONB NOT NULL,
+  generated_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_trader_insights_generated ON trader_insights_cache(generated_at DESC);
+```
+
+---
+
+# 1) Backend (TypeScript)
+
+## 1.1 Shared typings (augment Express user)
+
+`server/types/express.d.ts`
+
+```ts
+import "express";
+
+declare module "express-serve-static-core" {
+  interface Request {
+    user?: {
+      id: number;
+      role: "admin" | "user" | string;
+      username?: string;
+      email?: string;
+      impersonated?: boolean;
+      impersonated_by?: number;
+    };
+  }
+}
+```
+
+Ensure `tsconfig.json` includes `"typeRoots": ["./node_modules/@types", "./server/types"]`.
+
+---
+
+## 1.2 Middleware
+
+`server/middleware/adminGuard.ts`
+
+```ts
+import { Request, Response, NextFunction } from "express";
+
+export function adminGuard(req: Request, res: Response, next: NextFunction) {
+  if (!req.user || req.user.role !== "admin") {
+    return res.status(403).json({ error: "Admin access required" });
+  }
+  next();
+}
+```
+
+`server/middleware/impersonationWriteBlock.ts`
+
+```ts
+import { Request, Response, NextFunction } from "express";
+
+const WRITE = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+
+export function impersonationWriteBlock(req: Request, res: Response, next: NextFunction) {
+  if (req.user?.impersonated && WRITE.has(req.method)) {
+    return res.status(403).json({ error: "Writes disabled while impersonating (View-As mode)" });
+  }
+  next();
+}
+```
+
+---
+
+## 1.3 Admin: user search + view-as start/stop
+
+Assumptions:
+
+* `server/db.ts` exports `query<T=any>(sql: string, params?: any[]): Promise<{ rows: T[] }>`
+* `server/auth.ts` has already mounted a JWT auth middleware that populates `req.user`
+* `process.env.JWT_SECRET` is set
+
+`server/routes/admin.ts`
+
+```ts
+import { Router } from "express";
+import jwt from "jsonwebtoken";
+import { adminGuard } from "../middleware/adminGuard";
+import db from "../db";
+
+const admin = Router();
+
+type UserRow = { id: number; username: string; email: string; role: string; status?: string };
+
+function auditMeta(req: any, extra: Record<string, any> = {}) {
+  return {
+    ...extra,
+    request_id: req.headers?.["x-request-id"] || null
+  };
+}
+
+async function logAdminAction(opts: {
+  adminId: number;
+  userId: number;
+  actionType: string;
+  req: any;
+  metadata?: any;
+}) {
+  const { adminId, userId, actionType, req, metadata } = opts;
+  await db.query(
+    `INSERT INTO admin_actions (admin_id, user_id, action_type, metadata, ip, user_agent)
+     VALUES ($1,$2,$3,$4,$5,$6)`,
+    [
+      adminId,
+      userId,
+      actionType,
+      metadata ? JSON.stringify(metadata) : null,
+      req.ip || null,
+      req.headers?.["user-agent"] || null
+    ]
+  );
+}
+
+/**
+ * GET /admin/users/search?q=...
+ * match by numeric id OR ILIKE username/email
+ */
+admin.get("/users/search", adminGuard, async (req, res) => {
+  const qRaw = String(req.query.q || "").trim();
+  if (!qRaw) return res.json([]);
+
+  const isNum = /^[0-9]+$/.test(qRaw);
+  const q = `%${qRaw}%`;
+  const { rows } = await db.query<UserRow>(
+    `
+    SELECT id, username, email, role, status
+    FROM users
+    WHERE (${isNum} AND id = $1)
+       OR (username ILIKE $2)
+       OR (email ILIKE $2)
+    ORDER BY id DESC
+    LIMIT 20
+    `,
+    [isNum ? Number(qRaw) : -1, q]
+  );
+
+  res.json(rows);
+});
+
+/**
+ * POST /admin/view-as/start
+ * body: { targetUserId: number }
+ */
+admin.post("/view-as/start", adminGuard, async (req, res) => {
+  const { targetUserId } = req.body || {};
+  if (!targetUserId) return res.status(400).json({ error: "targetUserId required" });
+
+  const userQ = await db.query<UserRow>(
+    "SELECT id, username, email, role FROM users WHERE id = $1",
+    [targetUserId]
+  );
+  if (!userQ.rows.length) return res.status(404).json({ error: "User not found" });
+  const u = userQ.rows[0];
+
+  const token = jwt.sign(
+    {
+      id: u.id,
+      role: u.role,
+      username: u.username,
+      email: u.email,
+      impersonated: true,
+      impersonated_by: req.user!.id
+    },
+    process.env.JWT_SECRET!,
+    { expiresIn: "15m" }
+  );
+
+  await logAdminAction({
+    adminId: req.user!.id,
+    userId: u.id,
+    actionType: "VIEW_AS_START",
+    req,
+    metadata: auditMeta(req, { target: { id: u.id, username: u.username, email: u.email } })
+  });
+
+  res.json({ token, target: { id: u.id, username: u.username, email: u.email } });
+});
+
+/**
+ * POST /admin/view-as/stop
+ * body: { targetUserId: number }
+ */
+admin.post("/view-as/stop", adminGuard, async (req, res) => {
+  const { targetUserId } = req.body || {};
+  if (!targetUserId) return res.status(400).json({ error: "targetUserId required" });
+
+  await logAdminAction({
+    adminId: req.user!.id,
+    userId: Number(targetUserId),
+    actionType: "VIEW_AS_STOP",
+    req,
+    metadata: auditMeta(req, { note: "Admin exited View-As" })
+  });
+
+  res.json({ success: true });
+});
+
+export default admin;
+```
+
+---
+
+## 1.4 Trader Journal (CRUD)
+
+`server/routes/journal.ts`
+
+```ts
+import { Router } from "express";
+import db from "../db";
+
+const journal = Router();
+
+function cleanTags(tags: unknown): string[] {
+  if (!Array.isArray(tags)) return [];
+  return tags.map(t => String(t || "").trim()).filter(Boolean).slice(0, 20);
+}
+
+// GET /journal
+journal.get("/journal", async (req, res) => {
+  const { rows } = await db.query(
+    `
+    SELECT id, user_id, trade_id, note, mood, tags, attachment_url, created_at, updated_at
+    FROM trader_journal
+    WHERE user_id = $1
+    ORDER BY created_at DESC
+    LIMIT 200
+    `,
+    [req.user!.id]
+  );
+  res.json(rows);
+});
+
+// POST /journal
+journal.post("/journal", async (req, res) => {
+  const { trade_id = null, note, mood = null, tags = [], attachment_url = null } = req.body || {};
+  const noteClean = String(note || "").trim();
+  if (!noteClean || noteClean.length < 3) return res.status(400).json({ error: "note min length 3" });
+  if (noteClean.length > 10000) return res.status(400).json({ error: "note too long (max 10,000)" });
+
+  const { rows } = await db.query(
+    `
+    INSERT INTO trader_journal (user_id, trade_id, note, mood, tags, attachment_url)
+    VALUES ($1,$2,$3,$4,$5,$6) RETURNING *
+    `,
+    [req.user!.id, trade_id, noteClean, mood, cleanTags(tags), attachment_url]
+  );
+  res.json(rows[0]);
+});
+
+// PUT /journal/:id
+journal.put("/journal/:id", async (req, res) => {
+  const { id } = req.params;
+  const { note, mood = null, tags = [], attachment_url = null } = req.body || {};
+  const noteClean = String(note || "").trim();
+  if (!noteClean || noteClean.length < 3) return res.status(400).json({ error: "note min length 3" });
+
+  const { rows } = await db.query(
+    `
+    UPDATE trader_journal
+    SET note=$1, mood=$2, tags=$3, attachment_url=$4, updated_at=NOW()
+    WHERE id=$5 AND user_id=$6
+    RETURNING *
+    `,
+    [noteClean, mood, cleanTags(tags), attachment_url, id, req.user!.id]
+  );
+  if (!rows.length) return res.status(404).json({ error: "not found" });
+  res.json(rows[0]);
+});
+
+// DELETE /journal/:id
+journal.delete("/journal/:id", async (req, res) => {
+  const { id } = req.params;
+  const del = await db.query(`DELETE FROM trader_journal WHERE id=$1 AND user_id=$2 RETURNING id`, [
+    id,
+    req.user!.id
+  ]);
+  if (!del.rows.length) return res.status(404).json({ error: "not found" });
+  res.json({ success: true });
+});
+
+export default journal;
+```
+
+---
+
+## 1.5 Trader Insights (compute + cache + timeframe)
+
+`server/services/insights.ts`
+
+```ts
+import db from "../db";
+
+function bucketHoldMinutes(mins?: number | null): string {
+  const m = typeof mins === "number" ? mins : NaN;
+  if (Number.isNaN(m)) return "unknown";
+  if (m < 1) return "<1m";
+  if (m < 5) return "1-5m";
+  if (m < 15) return "5-15m";
+  if (m < 30) return "15-30m";
+  if (m < 60) return "30-60m";
+  if (m < 180) return "1-3h";
+  return "3h+";
+}
+
+type Agg = { pnl: number; trades: number; wins: number };
+type Ranked = { key: string; pnl: number; trades: number; win_rate: number };
+
+function bestWorst(map: Record<string, Agg>) {
+  const arr: Ranked[] = Object.entries(map).map(([k, v]) => ({
+    key: k,
+    pnl: v.pnl,
+    trades: v.trades,
+    win_rate: v.trades ? v.wins / v.trades : 0
+  }));
+  arr.sort((a, b) => b.pnl - a.pnl);
+  return { best: arr[0] || null, worst: arr.length ? arr[arr.length - 1] : null, ranked: arr };
+}
+
+export async function computeInsights(userId: number, sinceDays = 30) {
+  const whereTime = sinceDays ? `AND entry_time >= NOW() - INTERVAL '${sinceDays} days'` : "";
+  const q = await db.query(
+    `
+    SELECT instrument, direction, profit,
+           EXTRACT(EPOCH FROM (exit_time - entry_time))/60 AS hold_minutes,
+           EXTRACT(HOUR FROM entry_time) AS entry_hour
+    FROM trades
+    WHERE user_id=$1
+      AND exit_time IS NOT NULL
+      AND entry_time IS NOT NULL
+      ${whereTime}
+    `,
+    [userId]
+  );
+
+  const byInstrument: Record<string, Agg> = {};
+  const byDirection: Record<string, Agg> = {};
+  const byHour: Record<string, Agg> = {};
+  const byHold: Record<string, Agg> = {};
+  let trades = 0, wins = 0, pnl = 0;
+
+  for (const t of q.rows as any[]) {
+    const inst = t.instrument || "UNKNOWN";
+    const dir = t.direction || "UNKNOWN";
+    const hour = t.entry_hour != null ? String(t.entry_hour).padStart(2, "0") : "NA";
+    const bucket = bucketHoldMinutes(typeof t.hold_minutes === "number" ? t.hold_minutes : Number(t.hold_minutes));
+
+    const p = Number(t.profit || 0);
+    trades++; pnl += p; if (p > 0) wins++;
+
+    byInstrument[inst] ??= { pnl: 0, trades: 0, wins: 0 };
+    byInstrument[inst].pnl += p; byInstrument[inst].trades++; if (p > 0) byInstrument[inst].wins++;
+
+    byDirection[dir] ??= { pnl: 0, trades: 0, wins: 0 };
+    byDirection[dir].pnl += p; byDirection[dir].trades++; if (p > 0) byDirection[dir].wins++;
+
+    byHour[hour] ??= { pnl: 0, trades: 0, wins: 0 };
+    byHour[hour].pnl += p; byHour[hour].trades++; if (p > 0) byHour[hour].wins++;
+
+    byHold[bucket] ??= { pnl: 0, trades: 0, wins: 0 };
+    byHold[bucket].pnl += p; byHold[bucket].trades++; if (p > 0) byHold[bucket].wins++;
+  }
+
+  return {
+    window_days: sinceDays,
+    totals: { trades, pnl, win_rate: trades ? wins / trades : 0 },
+    instruments: bestWorst(byInstrument),
+    directions: bestWorst(byDirection),
+    hours: bestWorst(byHour),
+    hold_time: bestWorst(byHold)
+  };
+}
+```
+
+`server/routes/insights.ts`
+
+```ts
+import { Router } from "express";
+import db from "../db";
+import { computeInsights } from "../services/insights";
+
+const insights = Router();
+const CACHE_TTL_MIN = 12 * 60;
+
+insights.get("/insights", async (req, res) => {
+  const sinceDays = req.query.since_days ? Number(req.query.since_days) : 30;
+  const refresh = String(req.query.refresh || "0") === "1";
+
+  const cached = await db.query<{ insights: any; generated_at: Date }>(
+    `SELECT insights, generated_at FROM trader_insights_cache WHERE user_id=$1`,
+    [req.user!.id]
+  );
+
+  if (!refresh && cached.rows.length) {
+    const blob = cached.rows[0].insights as any;
+    const ageMin = (Date.now() - new Date(cached.rows[0].generated_at).getTime()) / (1000 * 60);
+    if (blob?.window_days === sinceDays && ageMin < CACHE_TTL_MIN) {
+      return res.json(blob);
+    }
+  }
+
+  const out = await computeInsights(req.user!.id, sinceDays);
+  await db.query(
+    `
+    INSERT INTO trader_insights_cache (user_id, insights, generated_at)
+    VALUES ($1,$2,NOW())
+    ON CONFLICT (user_id) DO UPDATE SET insights=$2, generated_at=NOW()
+    `,
+    [req.user!.id, out]
+  );
+  res.json(out);
+});
+
+export default insights;
+```
+
+---
+
+## 1.6 Route wiring (your audited structure)
+
+`server/routes.ts` (user routes)
+
+```ts
+import { Router } from "express";
+import journal from "./routes/journal";
+import insights from "./routes/insights";
+
+const routes = Router();
+
+// user-scoped routes:
+routes.use(journal);
+routes.use(insights);
+
+export default routes;
+```
+
+`server/index.ts` (app entry)
+
+```ts
+import express from "express";
+import cors from "cors";
+import helmet from "helmet";
+import routes from "./routes";
+import adminRoutes from "./routes/admin";
+import { impersonationWriteBlock } from "./middleware/impersonationWriteBlock";
+import auth from "./auth"; // your existing JWT auth that sets req.user
+
+const app = express();
+app.use(helmet());
+app.use(cors());
+app.use(express.json());
+
+// your auth must run before write-block and routes:
+app.use(auth);
+
+// block write operations in impersonation mode
+app.use(impersonationWriteBlock);
+
+// mount routes
+app.use("/admin", adminRoutes);
+app.use("/", routes);
+
+const port = process.env.PORT || 3001;
+app.listen(port, () => console.log(`API on :${port}`));
+```
+
+---
+
+# 2) Frontend (wouter)
+
+Assumption:
+
+* API helper `client/src/lib/api.ts` returns axios instance with token header.
+
+`client/src/lib/api.ts`
+
+```ts
+import axios from "axios";
+
+const api = axios.create({
+  baseURL: import.meta.env.VITE_API_BASE || ""
+});
+
+api.interceptors.request.use((cfg) => {
+  const token = localStorage.getItem("token");
+  if (token) cfg.headers.Authorization = `Bearer ${token}`;
+  return cfg;
+});
+
+export default api;
+```
+
+---
+
+## 2.1 Impersonation banner (global)
+
+`client/src/components/ImpersonationBanner.tsx`
+
+```tsx
+import { useMemo, useState } from "react";
+import api from "../lib/api";
+
+export default function ImpersonationBanner() {
+  const [busy, setBusy] = useState(false);
+
+  const target = useMemo(() => {
+    try { return JSON.parse(localStorage.getItem("impersonated_target") || "null"); }
+    catch { return null; }
+  }, []);
+
+  const isImpersonating = !!target;
+
+  const exit = async () => {
+    const adminToken = localStorage.getItem("admin_token");
+    if (!adminToken || !target?.id) {
+      localStorage.removeItem("impersonated_target");
+      return (window.location.href = "/admin");
+    }
+    setBusy(true);
+    try {
+      // temporarily set admin token to log stop-event
+      localStorage.setItem("token", adminToken);
+      await api.post("/admin/view-as/stop", { targetUserId: target.id });
+      localStorage.removeItem("impersonated_target");
+      localStorage.removeItem("admin_token");
+      window.location.href = "/admin";
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!isImpersonating) return null;
+
+  return (
+    <div style={{
+      position: "sticky", top: 0, zIndex: 9999, padding: "10px 12px",
+      borderBottom: "1px solid #333", background: "rgba(255,200,0,0.08)"
+    }}>
+      <strong>VIEW AS ACTIVE</strong>
+      <span style={{ marginLeft: 10, opacity: 0.9 }}>
+        {target?.username} (id: {target?.id}, {target?.email})
+      </span>
+      <button style={{ float: "right" }} onClick={exit} disabled={busy}>
+        {busy ? "Exiting..." : "Exit View As"}
+      </button>
+    </div>
+  );
+}
+```
+
+Mount at your **top layout** (e.g., inside `App.tsx` before `<Switch/>`).
+
+---
+
+## 2.2 Admin → User Management mini-tab: View As
+
+`client/src/components/admin/ViewAsTab.tsx`
+
+```tsx
+import { useEffect, useMemo, useState } from "react";
+import api from "../../lib/api";
+
+type UserLite = { id: number; username: string; email: string; role: string; status?: string };
+
+export default function ViewAsTab() {
+  const [q, setQ] = useState("");
+  const [results, setResults] = useState<UserLite[]>([]);
+  const [selected, setSelected] = useState<UserLite | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const canSearch = useMemo(() => q.trim().length >= 2, [q]);
+
+  useEffect(() => {
+    let dead = false;
+    const run = async () => {
+      if (!canSearch) { setResults([]); return; }
+      const res = await api.get(`/admin/users/search?q=${encodeURIComponent(q.trim())}`);
+      if (!dead) setResults(res.data || []);
+    };
+    run();
+    return () => { dead = true; };
+  }, [q, canSearch]);
+
+  const startViewAs = async () => {
+    if (!selected?.id) return;
+    setBusy(true);
+    try {
+      const adminToken = localStorage.getItem("token");
+      if (adminToken) localStorage.setItem("admin_token", adminToken);
+
+      const res = await api.post("/admin/view-as/start", { targetUserId: selected.id });
+      localStorage.setItem("token", res.data.token);
+      localStorage.setItem("impersonated_target", JSON.stringify(res.data.target));
+      window.location.href = "/dashboard?impersonated=1";
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="card">
+      <h3>View As</h3>
+      <p>Search by ID, username, or email. Impersonation expires in 15 minutes.</p>
+      <input
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        placeholder="Search user..."
+        style={{ width: "100%", marginBottom: 8 }}
+      />
+      <div style={{ maxHeight: 280, overflow: "auto" }}>
+        {results.map(u => (
+          <div key={u.id}
+               onClick={() => setSelected(u)}
+               style={{
+                 padding: 8, border: "1px solid #333", marginBottom: 6, cursor: "pointer",
+                 background: selected?.id === u.id ? "rgba(255,255,255,0.06)" : "transparent"
+               }}>
+            <div><strong>{u.username}</strong> (id: {u.id})</div>
+            <div style={{ opacity: .8 }}>{u.email}</div>
+            <div style={{ opacity: .6 }}>role: {u.role} | status: {u.status ?? "-"}</div>
+          </div>
+        ))}
+      </div>
+      <button disabled={!selected || busy} onClick={startViewAs} style={{ marginTop: 8 }}>
+        {busy ? "Starting..." : "View As Selected User"}
+      </button>
+    </div>
+  );
+}
+```
+
+Mount this **as a mini-tab** inside your existing User Management view; e.g., if you have tabs: “User Settings” and now “View As”, render `<ViewAsTab/>` in that panel.
+
+---
+
+## 2.3 Trader Journal page (CRUD)
+
+`client/src/pages/TraderJournal.tsx`
+
+```tsx
+import { useEffect, useState } from "react";
+import api from "../lib/api";
+import { Link } from "wouter";
+
+type Entry = {
+  id: number; user_id: number; trade_id?: number | null;
+  note: string; mood?: string | null; tags?: string[]; attachment_url?: string | null;
+  created_at: string; updated_at: string;
+};
+
+export default function TraderJournal() {
+  const [entries, setEntries] = useState<Entry[]>([]);
+  const [note, setNote] = useState("");
+  const [mood, setMood] = useState("");
+  const [tags, setTags] = useState("");
+  const [attachmentUrl, setAttachmentUrl] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const load = async () => {
+    const res = await api.get("/journal");
+    setEntries(res.data || []);
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const add = async () => {
+    if (note.trim().length < 3) return;
+    setBusy(true);
+    try {
+      await api.post("/journal", {
+        note: note.trim(),
+        mood: mood || null,
+        tags: tags.split(",").map(s => s.trim()).filter(Boolean),
+        attachment_url: attachmentUrl || null
+      });
+      setNote(""); setMood(""); setTags(""); setAttachmentUrl("");
+      await load();
+    } finally { setBusy(false); }
+  };
+
+  const remove = async (id: number) => {
+    await api.delete(`/journal/${id}`);
+    await load();
+  };
+
+  return (
+    <div style={{ padding: 16 }}>
+      <h2>Trader Journal</h2>
+
+      <div className="card" style={{ marginBottom: 14 }}>
+        <textarea
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          rows={6}
+          placeholder="Reasoning, emotions, plan vs execution, post-mortem..."
+          style={{ width: "100%" }}
+        />
+        <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+          <input value={mood} onChange={e => setMood(e.target.value)} placeholder="Mood (optional)" />
+          <input value={tags} onChange={e => setTags(e.target.value)} placeholder="Tags (comma separated)" />
+          <input value={attachmentUrl} onChange={e => setAttachmentUrl(e.target.value)} placeholder="Attachment URL" />
+        </div>
+        <button onClick={add} disabled={busy || note.trim().length < 3} style={{ marginTop: 8 }}>
+          {busy ? "Saving..." : "Add Entry"}
+        </button>
+      </div>
+
+      {entries.map(e => (
+        <div key={e.id} className="card" style={{ marginBottom: 10 }}>
+          <div style={{ opacity: .75 }}>
+            {new Date(e.created_at).toLocaleString()}
+            {e.updated_at !== e.created_at ? " (edited)" : ""}
+          </div>
+          <div style={{ marginTop: 8, whiteSpace: "pre-wrap" }}>{e.note}</div>
+          <div style={{ marginTop: 8, opacity: .85 }}>
+            {e.mood ? <span>Mood: {e.mood} </span> : null}
+            {e.tags?.length ? <span>Tags: {e.tags.join(", ")} </span> : null}
+            {e.attachment_url ? <span>Attachment: {e.attachment_url}</span> : null}
+          </div>
+          <button onClick={() => remove(e.id)} style={{ marginTop: 8 }}>Delete</button>
+        </div>
+      ))}
+
+      <div style={{ marginTop: 24 }}>
+        <Link href="/account">← Back to Account</Link>
+      </div>
+    </div>
+  );
+}
+```
+
+---
+
+## 2.4 Trader Insights card
+
+`client/src/components/account/TraderInsightsCard.tsx`
+
+```tsx
+import { useEffect, useState } from "react";
+import api from "../../lib/api";
+
+type Ranked = { key: string; pnl: number; trades: number; win_rate: number };
+type Section = { best: Ranked | null; worst: Ranked | null; ranked: Ranked[] };
+
+type Insights = {
+  window_days: number;
+  totals: { trades: number; pnl: number; win_rate: number };
+  instruments: Section;
+  directions: Section;
+  hours: Section;
+  hold_time: Section;
+};
+
+function pct(x?: number) { return x == null ? "-" : `${(x * 100).toFixed(1)}%`; }
+function num(x?: number) { return x == null ? "-" : Number(x).toFixed(2); }
+
+export default function TraderInsightsCard() {
+  const [data, setData] = useState<Insights | null>(null);
+  const [sinceDays, setSinceDays] = useState(30);
+
+  const load = async (refresh = false) => {
+    const res = await api.get(`/insights?since_days=${sinceDays}&refresh=${refresh ? 1 : 0}`);
+    setData(res.data);
+  };
+
+  useEffect(() => { load(false); }, [sinceDays]);
+
+  if (!data) return null;
+  const bestInst = data.instruments?.best;
+  const worstInst = data.instruments?.worst;
+  const bestDir = data.directions?.best;
+  const bestHour = data.hours?.best;
+  const bestHold = data.hold_time?.best;
+
+  return (
+    <div className="card" style={{ marginTop: 12 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+        <h3 style={{ margin: 0 }}>Trader Insights</h3>
+        <div style={{ display: "flex", gap: 8 }}>
+          <select value={sinceDays} onChange={e => setSinceDays(Number(e.target.value))}>
+            <option value={7}>Last 7d</option>
+            <option value={30}>Last 30d</option>
+            <option value={90}>Last 90d</option>
+          </select>
+          <button onClick={() => load(true)}>Refresh</button>
+        </div>
+      </div>
+
+      <div style={{ marginTop: 10, opacity: .9 }}>
+        Trades: <strong>{data.totals.trades}</strong> |
+        Win rate: <strong>{pct(data.totals.win_rate)}</strong> |
+        PnL: <strong>{num(data.totals.pnl)}</strong>
+      </div>
+
+      <div style={{ marginTop: 12 }}>
+        <div><strong>Most profitable instrument:</strong> {bestInst ? `${bestInst.key} (PnL ${num(bestInst.pnl)}, WR ${pct(bestInst.win_rate)})` : "-"}</div>
+        <div><strong>Most loss-making instrument:</strong> {worstInst ? `${worstInst.key} (PnL ${num(worstInst.pnl)}, WR ${pct(worstInst.win_rate)})` : "-"}</div>
+        <div><strong>Best direction:</strong> {bestDir ? `${bestDir.key} (PnL ${num(bestDir.pnl)}, WR ${pct(bestDir.win_rate)})` : "-"}</div>
+        <div><strong>Most profitable hour:</strong> {bestHour ? `${bestHour.key}:00 (PnL ${num(bestHour.pnl)}, WR ${pct(bestHour.win_rate)})` : "-"}</div>
+        <div><strong>Optimal hold-time bucket:</strong> {bestHold ? `${bestHold.key} (PnL ${num(bestHold.pnl)}, WR ${pct(bestHold.win_rate)})` : "-"}</div>
+      </div>
+    </div>
+  );
+}
+```
+
+Place this **below your Trading Statistics card** on the Account page component.
+
+---
+
+## 2.5 wouter routing and nav
+
+`client/src/App.tsx` (core router)
+
+```tsx
+import { Route, Switch } from "wouter";
+import ImpersonationBanner from "./components/ImpersonationBanner";
+import TraderJournal from "./pages/TraderJournal";
+// ... import other pages
+
+export default function App() {
+  return (
+    <div>
+      <ImpersonationBanner />
+      <Switch>
+        {/* existing routes */}
+        <Route path="/journal" component={TraderJournal} />
+        {/* ... */}
+      </Switch>
+    </div>
+  );
+}
+```
+
+Add **Trader Journal** between Leaderboard and Account in your nav:
+
+`client/src/components/NavBar.tsx`
+
+```tsx
+import { Link } from "wouter";
+
+export default function NavBar() {
+  return (
+    <nav className="nav">
+      <Link href="/leaderboard">Leaderboard</Link>
+      <Link href="/journal">Trader Journal</Link>
+      <Link href="/account">Account</Link>
+      {/* ...other links */}
+    </nav>
+  );
+}
+```
+
+---
+
+# 3) Notes on integration
+
+* **User Management mini-tab**: wherever you render user-admin tabs, add a new tab labeled “View As” and place `<ViewAsTab/>` in that panel.
+* **Impersonation safety**: The global middleware blocks **writes** while impersonating. If you require narrow exceptions (e.g., allow “support-notes/create”), wrap those endpoints before the middleware or add an allow-list check inside `impersonationWriteBlock`.
+* **Caching**: Insights cache TTL is 12h. Users can force refresh via the card. You can parametrize TTL via env if desired.
+* **Audit**: Start/Stop events log admin id, target id, IP, user-agent, and request id (if sent by your proxy). Extend `metadata` with more fields as needed.
+
+---
+
+If you want, I can also produce a **CSV export** endpoint for Journal and Insights, plus an **Admin snapshot export** (single JSON/CSV bundle) to hand to allocators or compliance.

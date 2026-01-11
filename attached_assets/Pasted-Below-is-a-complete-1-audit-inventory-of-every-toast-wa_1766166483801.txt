@@ -1,0 +1,681 @@
+Below is a complete (1) audit inventory of **every toast/warning popup** identified by your Replit Agent 3 scan, plus (2) an **“app-grade” redesign** that fixes the raw JSON issue in your screenshots and automatically chooses **icons/colors/layout** by category, and (3) **ready-to-drop code** (same file paths you listed).
+
+---
+
+## 1) Audit: where warning/error popup cards are issued (current system)
+
+### Root cause shown in your screenshots
+
+Your “Trade Failed” cards are rendering **stringified JSON** directly (e.g. `{"message":"Maximum concurrent lots exceeded..." ...}`) instead of extracting and formatting:
+
+* **human message** (what users should see)
+* **code + hint** (optional, collapsed)
+* **metrics** (Current / Requested / Limit)
+
+### Base toast system files (as you listed)
+
+* `client/src/components/ui/toast.tsx` (styling + variants)
+* `client/src/hooks/use-toast.ts` (toast state + API)
+* `client/src/components/ui/toaster.tsx` (renderer/layout)
+* `client/src/index.css` (color variables; destructive is currently “flat red”)
+
+### All warning/error toast occurrences (27)
+
+**Trade Execution**
+
+1. `ChartScreen.tsx:159` — *Trade Failed*
+2. `ChartScreen.tsx:254` — *Trade Error*
+3. `TradeScreen.tsx:239` — *Trade Failed*
+4. `use-trades.tsx:96` — *Error* (place trade)
+
+**Trade Validation**
+2. `ChartScreen.tsx:199` — *Symbol Configurations Missing*
+3. `ChartScreen.tsx:210` — *Symbol Not Found*
+4. `ChartScreen.tsx:220` — *Invalid Lot Size*
+5. `ChartScreen.tsx:230` — *Trade Error* (price not available)
+8. `TradeScreen.tsx:267` — *Trade Error* (price not available)
+9. `TradeScreen.tsx:279` — *Trade Error* (limit price invalid)
+10. `TradeScreen.tsx:291` — *Trade Error* (stop price invalid)
+11. `TradeScreen.tsx:302` — *Trade Error* (order type invalid)
+
+**Trade API**
+13. `use-trades.tsx:121` — *Error* (close trade)
+
+**Order Management**
+14. `usePendingOrders.ts:41` — *Error* (cancel order)
+
+**Trade Edit**
+15. `EditTradeModal.tsx:142` — *Error* (update targets)
+
+**Authentication**
+16. `LoginPage.tsx:58` — *Login Failed*
+17. `LoginPage.tsx:74` — *Registration Failed*
+
+**Journal**
+18. `JournalPage.tsx:145` — *Error* (create entry)
+19. `JournalPage.tsx:160` — *Error* (update entry)
+20. `JournalPage.tsx:173` — *Error* (delete entry)
+
+**Journal Validation**
+21. `JournalPage.tsx:188` — *Error* (note too short)
+22. `JournalPage.tsx:202` — *Error* (note too short)
+
+**Admin**
+23. `AdminDashboard.tsx:673` — *Error* (update user status)
+24. `AdminDashboard.tsx:688` — *Error* (freeze account)
+25. `AdminDashboard.tsx:699` — *Error* (unfreeze)
+26. `AdminDashboard.tsx:710` — *Error* (start impersonation)
+27. `AdminDashboard.tsx:740` — *Error* (update users)
+
+---
+
+## 2) Redesign target: app-grade “auto-choosing” toast cards
+
+### What changes visually (matches Gemini direction)
+
+* **Glass / dark fintech surface** (not a flat red block)
+* **Left accent strip** by category (purple admin, amber validation, red execution, cyan journal, indigo auth)
+* **Icon + label chips** (fast scan)
+* **Human message first**
+* **Technical payload hidden behind “Details”** (for support/dev)
+
+### Auto-category mapping (engine behavior)
+
+| Category     | Used for                                          | Icon (Lucide)   | Accent             |
+| ------------ | ------------------------------------------------- | --------------- | ------------------ |
+| `ADMIN`      | impersonation, freeze/unfreeze, admin ops         | `ShieldAlert`   | Purple             |
+| `AUTH`       | login/registration                                | `Lock`          | Indigo             |
+| `JOURNAL`    | journal CRUD + note validation                    | `NotebookPen`   | Cyan               |
+| `VALIDATION` | bad inputs, missing symbol config, missing prices | `Zap`           | Amber              |
+| `LIMIT`      | max trades / max lots / per-instrument caps       | `Gauge`         | Amber→Red emphasis |
+| `EXECUTION`  | failed to execute / trade failed                  | `AlertTriangle` | Red                |
+| `API`        | close/cancel/update-target failures               | `Database`      | Rose/Red           |
+
+---
+
+## 3) Dependencies (Replit Agent 3 should run)
+
+Run these in the Replit shell (only if missing):
+
+```bash
+npm i lucide-react
+```
+
+---
+
+## 4) Ready-to-drop code (universal beautifier + auto-choosing engine)
+
+### A) NEW — `client/src/lib/error-parser.ts`
+
+```ts
+// client/src/lib/error-parser.ts
+export type ToastCategory =
+  | "ADMIN"
+  | "AUTH"
+  | "JOURNAL"
+  | "VALIDATION"
+  | "LIMIT"
+  | "EXECUTION"
+  | "API"
+  | "INFO";
+
+export type ToastTone = "error" | "warning" | "info" | "success";
+
+export type NormalizedPayload = {
+  message: string;
+  code?: string;
+  hint?: string;
+  fields?: Record<string, unknown>;
+  raw?: unknown; // original (string or object) for debugging
+};
+
+export type ToastMeta = {
+  category: ToastCategory;
+  tone: ToastTone;
+  label: string;
+
+  // Lucide icon name (used by DynamicIcon)
+  icon: string;
+
+  // Tailwind classes for icon + badge
+  iconColor: string;
+  iconBg: string;
+  badgeText: string;
+  borderHex: string; // used by CSS attr selectors (optional)
+  shadow: string;
+
+  // Optional title override when the incoming title is generic
+  titleOverride?: string;
+};
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+function safeJsonParse(s: string): unknown | undefined {
+  const trimmed = s.trim();
+  if (!(trimmed.startsWith("{") && trimmed.endsWith("}"))) return undefined;
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    return undefined;
+  }
+}
+
+export function normalizeToastPayload(raw: unknown): NormalizedPayload {
+  // Most of your current calls pass `error.message` (string).
+  // Your screenshots show that string is sometimes JSON.
+  if (typeof raw === "string") {
+    const parsed = safeJsonParse(raw);
+    if (isRecord(parsed)) {
+      const { message, code, hint, ...rest } = parsed;
+      return {
+        message: typeof message === "string" ? message : raw,
+        code: typeof code === "string" ? code : undefined,
+        hint: typeof hint === "string" ? hint : undefined,
+        fields: Object.keys(rest).length ? rest : undefined,
+        raw,
+      };
+    }
+    return { message: raw, raw };
+  }
+
+  // If anything else somehow reaches the toast system:
+  if (isRecord(raw)) {
+    const msg =
+      (typeof raw.message === "string" && raw.message) ||
+      (typeof raw.error === "string" && raw.error) ||
+      "An unexpected error occurred.";
+
+    return {
+      message: msg,
+      code: typeof raw.code === "string" ? raw.code : undefined,
+      hint: typeof raw.hint === "string" ? raw.hint : undefined,
+      fields: Object.keys(raw).length ? raw : undefined,
+      raw,
+    };
+  }
+
+  return { message: "An unexpected error occurred.", raw };
+}
+
+function lower(s: string | undefined) {
+  return (s || "").toLowerCase();
+}
+
+function hasAny(msg: string, re: RegExp) {
+  return re.test(msg);
+}
+
+function classify(payload: NormalizedPayload): ToastMeta {
+  const msg = lower(payload.message);
+  const code = lower(payload.code);
+
+  // 1) Impersonation / View-As blocks (your screenshot with code + hint)
+  if (hasAny(code, /impersonation/) || hasAny(msg, /viewing as another user|view as|impersonation|write operations are disabled/)) {
+    return {
+      category: "ADMIN",
+      tone: "error",
+      label: "ADMIN / SECURITY",
+      icon: "ShieldAlert",
+      iconColor: "text-purple-300",
+      iconBg: "bg-purple-500/10",
+      badgeText: "text-purple-300",
+      borderHex: "#A855F7",
+      shadow: "shadow-[0_0_24px_rgba(168,85,247,0.14)]",
+      titleOverride: "Action Restricted",
+    };
+  }
+
+  // 2) Authentication
+  if (hasAny(msg, /login failed|invalid email|invalid password|registration failed|password|email may already be in use/)) {
+    return {
+      category: "AUTH",
+      tone: "error",
+      label: "IDENTITY",
+      icon: "Lock",
+      iconColor: "text-indigo-300",
+      iconBg: "bg-indigo-500/10",
+      badgeText: "text-indigo-300",
+      borderHex: "#6366F1",
+      shadow: "shadow-[0_0_24px_rgba(99,102,241,0.14)]",
+      titleOverride: "Authentication Failed",
+    };
+  }
+
+  // 3) Journal
+  if (hasAny(msg, /journal|entry|note must be at least|failed to create entry|failed to update entry|failed to delete entry|characters/)) {
+    return {
+      category: "JOURNAL",
+      tone: "error",
+      label: "JOURNAL",
+      icon: "NotebookPen",
+      iconColor: "text-cyan-300",
+      iconBg: "bg-cyan-500/10",
+      badgeText: "text-cyan-300",
+      borderHex: "#22D3EE",
+      shadow: "shadow-[0_0_24px_rgba(34,211,238,0.14)]",
+      titleOverride: "Journal Error",
+    };
+  }
+
+  // 4) Admin operations
+  if (hasAny(msg, /failed to update user status|failed to freeze|failed to unfreeze|failed to start impersonation|failed to update users|admin/)) {
+    return {
+      category: "ADMIN",
+      tone: "error",
+      label: "ADMIN",
+      icon: "ShieldAlert",
+      iconColor: "text-purple-300",
+      iconBg: "bg-purple-500/10",
+      badgeText: "text-purple-300",
+      borderHex: "#A855F7",
+      shadow: "shadow-[0_0_24px_rgba(168,85,247,0.14)]",
+      titleOverride: "Admin Action Failed",
+    };
+  }
+
+  // 5) Risk / guardrails (your max trades / max lots screenshots)
+  if (hasAny(msg, /maximum .*concurrent|concurrent lots exceeded|max concurrent|limit=\d+|open \+ pending/)) {
+    return {
+      category: "LIMIT",
+      tone: "warning",
+      label: "RISK GUARDRAIL",
+      icon: "Gauge",
+      iconColor: "text-amber-300",
+      iconBg: "bg-amber-500/10",
+      badgeText: "text-amber-300",
+      borderHex: "#FBBF24",
+      shadow: "shadow-[0_0_24px_rgba(251,191,36,0.14)]",
+      titleOverride: "Order Blocked",
+    };
+  }
+
+  // 6) Validation (symbol config, prices, lot size, order params)
+  if (hasAny(msg, /symbol configurations missing|symbol not found|invalid lot size|current price is not available|valid limit price|valid stop price|invalid order type|configuration/)) {
+    return {
+      category: "VALIDATION",
+      tone: "warning",
+      label: "VALIDATION",
+      icon: "Zap",
+      iconColor: "text-amber-300",
+      iconBg: "bg-amber-500/10",
+      badgeText: "text-amber-300",
+      borderHex: "#FBBF24",
+      shadow: "shadow-[0_0_24px_rgba(251,191,36,0.14)]",
+      titleOverride: "Check Your Inputs",
+    };
+  }
+
+  // 7) API / operations (close/cancel/update targets)
+  if (hasAny(msg, /failed to place trade|failed to close trade|failed to cancel order|failed to update trade targets/)) {
+    return {
+      category: "API",
+      tone: "error",
+      label: "SYSTEM",
+      icon: "Database",
+      iconColor: "text-rose-300",
+      iconBg: "bg-rose-500/10",
+      badgeText: "text-rose-300",
+      borderHex: "#FB7185",
+      shadow: "shadow-[0_0_24px_rgba(251,113,133,0.14)]",
+      titleOverride: "System Error",
+    };
+  }
+
+  // Default: execution failure
+  return {
+    category: "EXECUTION",
+    tone: "error",
+    label: "TRADE",
+    icon: "AlertTriangle",
+    iconColor: "text-red-300",
+    iconBg: "bg-red-500/10",
+    badgeText: "text-red-300",
+    borderHex: "#F87171",
+    shadow: "shadow-[0_0_24px_rgba(248,113,113,0.14)]",
+    titleOverride: "Trade Failed",
+  };
+}
+
+function formatMetricRow(fields?: Record<string, unknown>): string | null {
+  if (!fields) return null;
+
+  const pickNum = (k: string) => {
+    const v = fields[k];
+    return typeof v === "number" ? v : (typeof v === "string" && !Number.isNaN(Number(v)) ? Number(v) : null);
+  };
+
+  // Handles your screenshots:
+  // currentLots, requestedLots, limit
+  const currentLots = pickNum("currentLots");
+  const requestedLots = pickNum("requestedLots");
+  const limit = pickNum("limit");
+
+  if (currentLots !== null && requestedLots !== null && limit !== null) {
+    const total = currentLots + requestedLots;
+    const overBy = total - limit;
+    const overTxt = overBy > 0 ? ` • Over by ${overBy}` : "";
+    return `Current ${currentLots} • Requested ${requestedLots} • Max ${limit}${overTxt}`;
+  }
+
+  // activeTrades, limit
+  const activeTrades = pickNum("activeTrades");
+  if (activeTrades !== null && limit !== null) {
+    return `Active ${activeTrades} • Max ${limit}`;
+  }
+
+  // activePerSymbol, limit
+  const activePerSymbol = pickNum("activePerSymbol");
+  const symbolId = fields["symbolId"];
+  if (activePerSymbol !== null && limit !== null) {
+    const symTxt = symbolId !== undefined ? `Symbol ${String(symbolId)} • ` : "";
+    return `${symTxt}Active ${activePerSymbol} • Max ${limit}`;
+  }
+
+  return null;
+}
+
+export function buildToastView(rawDescription: unknown, rawTitle?: unknown) {
+  const payload = normalizeToastPayload(rawDescription);
+  const meta = classify(payload);
+
+  const incomingTitle = typeof rawTitle === "string" ? rawTitle : undefined;
+  const title =
+    !incomingTitle || incomingTitle.trim().toLowerCase() === "error" || incomingTitle.trim().toLowerCase() === "trade failed"
+      ? (meta.titleOverride || incomingTitle || "Notification")
+      : incomingTitle;
+
+  const metrics = formatMetricRow(payload.fields);
+
+  return { payload, meta, title, metrics };
+}
+```
+
+---
+
+### B) NEW — `client/src/components/ui/dynamic-icon.tsx`
+
+```tsx
+// client/src/components/ui/dynamic-icon.tsx
+import * as Icons from "lucide-react";
+import type { LucideProps } from "lucide-react";
+
+type Props = LucideProps & {
+  name: string;
+};
+
+export function DynamicIcon({ name, ...props }: Props) {
+  const Icon = (Icons as any)[name] || Icons.AlertTriangle;
+  return <Icon {...props} strokeWidth={2.2} />;
+}
+```
+
+---
+
+### C) MODIFY — `client/src/components/ui/toaster.tsx`
+
+This replaces the “raw JSON block” rendering with a premium layout + collapsible details, without forcing you to rewrite all 27 call sites.
+
+```tsx
+// client/src/components/ui/toaster.tsx
+import * as React from "react";
+import { useToast } from "@/hooks/use-toast";
+import {
+  Toast,
+  ToastClose,
+  ToastDescription,
+  ToastProvider,
+  ToastTitle,
+  ToastViewport,
+} from "@/components/ui/toast";
+import { cn } from "@/lib/utils";
+import { DynamicIcon } from "@/components/ui/dynamic-icon";
+import { buildToastView } from "@/lib/error-parser";
+
+function isReactElement(v: unknown): v is React.ReactElement {
+  return React.isValidElement(v);
+}
+
+export function Toaster() {
+  const { toasts } = useToast();
+
+  return (
+    <ToastProvider>
+      {toasts.map(({ id, title, description, action, ...props }) => {
+        // If someone passes a custom ReactNode description, keep it (don’t parse).
+        const customNode = isReactElement(description) ? description : null;
+
+        const view = buildToastView(customNode ? "" : description, title);
+        const { payload, meta, metrics } = view;
+
+        return (
+          <Toast
+            key={id}
+            {...props}
+            data-category={meta.category}
+            className={cn(
+              "toast-premium",
+              meta.shadow,
+              props.className
+            )}
+          >
+            <div className="toast-shimmer" aria-hidden="true" />
+
+            <div className="flex w-full gap-3">
+              {/* Icon */}
+              <div className={cn("toast-icon", meta.iconBg)}>
+                <DynamicIcon
+                  name={meta.icon}
+                  className={cn("h-5 w-5", meta.iconColor)}
+                />
+              </div>
+
+              {/* Content */}
+              <div className="min-w-0 flex-1">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className={cn("toast-badge", meta.badgeText)}>
+                        {meta.label}
+                      </span>
+
+                      {payload.code ? (
+                        <span className="toast-code">
+                          {payload.code}
+                        </span>
+                      ) : null}
+                    </div>
+
+                    {view.title ? (
+                      <ToastTitle className="toast-title">
+                        {view.title}
+                      </ToastTitle>
+                    ) : null}
+                  </div>
+
+                  <ToastClose className="toast-close" />
+                </div>
+
+                {/* Human message */}
+                <ToastDescription className="toast-desc">
+                  {customNode ? customNode : payload.message}
+                </ToastDescription>
+
+                {/* Metrics row (for guardrails like max lots/trades) */}
+                {metrics ? (
+                  <div className="toast-metrics">
+                    {metrics}
+                  </div>
+                ) : null}
+
+                {/* Hint (e.g., View-As guidance) */}
+                {payload.hint ? (
+                  <div className="toast-hint">
+                    Hint: {payload.hint}
+                  </div>
+                ) : null}
+
+                {/* Action slot (kept compatible with existing calls) */}
+                {action ? (
+                  <div className="mt-3">
+                    {action}
+                  </div>
+                ) : null}
+
+                {/* Technical details (collapsed) */}
+                {(payload.code || payload.fields) ? (
+                  <details className="toast-details">
+                    <summary>Details</summary>
+                    <pre className="toast-pre">
+                      {JSON.stringify(
+                        {
+                          code: payload.code,
+                          hint: payload.hint,
+                          ...(payload.fields || {}),
+                        },
+                        null,
+                        2
+                      )}
+                    </pre>
+                  </details>
+                ) : null}
+              </div>
+            </div>
+          </Toast>
+        );
+      })}
+
+      <ToastViewport className="toast-viewport" />
+    </ToastProvider>
+  );
+}
+```
+
+---
+
+### D) MODIFY — `client/src/index.css`
+
+Add this near the end (or inside your existing `@layer utilities` / `@layer components` section).
+
+```css
+/* client/src/index.css */
+
+/* App-grade toast styling utilities */
+@layer utilities {
+  .toast-viewport {
+    @apply fixed top-4 right-4 z-[100] flex max-h-screen w-[420px] max-w-[calc(100vw-2rem)] flex-col gap-3 outline-none;
+  }
+
+  .toast-premium {
+    /* overrides the flat destructive background */
+    @apply relative overflow-hidden rounded-2xl border border-white/10 bg-[#0B0E14]/90 p-4 backdrop-blur-xl shadow-[0_20px_50px_rgba(0,0,0,0.55)];
+    border-left-width: 4px;
+    border-left-color: rgba(255,255,255,0.08);
+  }
+
+  /* Category accent strip (auto-chosen by data-category) */
+  .toast-premium[data-category="ADMIN"] { border-left-color: #A855F7; }
+  .toast-premium[data-category="AUTH"] { border-left-color: #6366F1; }
+  .toast-premium[data-category="JOURNAL"] { border-left-color: #22D3EE; }
+  .toast-premium[data-category="VALIDATION"] { border-left-color: #FBBF24; }
+  .toast-premium[data-category="LIMIT"] { border-left-color: #FBBF24; }
+  .toast-premium[data-category="EXECUTION"] { border-left-color: #F87171; }
+  .toast-premium[data-category="API"] { border-left-color: #FB7185; }
+
+  .toast-icon {
+    @apply flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl border border-white/10 bg-black/30;
+  }
+
+  .toast-badge {
+    @apply inline-flex items-center rounded-full bg-white/5 px-2 py-0.5 text-[10px] font-black tracking-[0.22em];
+  }
+
+  .toast-code {
+    @apply inline-flex items-center rounded-md border border-white/10 bg-black/30 px-2 py-0.5 text-[10px] font-mono text-gray-300;
+  }
+
+  .toast-title {
+    @apply mt-1 truncate text-sm font-bold tracking-tight text-white;
+  }
+
+  .toast-desc {
+    @apply mt-1 text-xs font-medium leading-relaxed text-gray-300 break-words;
+  }
+
+  .toast-metrics {
+    @apply mt-2 inline-flex w-fit items-center rounded-lg border border-white/10 bg-black/30 px-2 py-1 text-[10px] font-mono text-gray-300;
+  }
+
+  .toast-hint {
+    @apply mt-2 text-[11px] font-medium text-gray-400;
+  }
+
+  .toast-details {
+    @apply mt-3;
+  }
+
+  .toast-details > summary {
+    @apply cursor-pointer select-none text-[10px] font-mono uppercase tracking-widest text-gray-500 hover:text-gray-300;
+  }
+
+  .toast-pre {
+    @apply mt-2 max-h-48 overflow-auto rounded-lg border border-white/10 bg-black/50 p-2 text-[10px] text-gray-300;
+  }
+
+  .toast-close {
+    @apply rounded-md p-1 text-gray-400 hover:text-white hover:bg-white/5 transition-colors;
+  }
+
+  /* Premium shimmer line (subtle, non-intrusive) */
+  .toast-shimmer {
+    position: absolute;
+    inset: auto 0 0 0;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.25), transparent);
+    transform: translateX(-100%);
+    animation: toast-shimmer 2.2s linear infinite;
+    opacity: 0.45;
+  }
+
+  @keyframes toast-shimmer {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(100%); }
+  }
+
+  /* Optional app-grade card base (use across the system) */
+  .app-card {
+    @apply rounded-2xl border border-white/10 bg-white/5 backdrop-blur-md shadow-[0_20px_50px_rgba(0,0,0,0.45)];
+  }
+}
+```
+
+---
+
+## 5) Icon + category matching for your 27 audit points (what the engine will produce)
+
+* **#1, #6, #7 (Trade execution failed)** → `EXECUTION` → `AlertTriangle` (red accent)
+* **#2–#5, #8–#11 (validation / missing price / bad params)** → `VALIDATION` → `Zap` (amber accent)
+* **#12–#15 (API ops: place/close/cancel/update targets)** → `API` → `Database` (rose accent)
+* **#16–#17 (auth)** → `AUTH` → `Lock` (indigo accent)
+* **#18–#22 (journal)** → `JOURNAL` → `NotebookPen` (cyan accent)
+* **#23–#27 (admin)** → `ADMIN` → `ShieldAlert` (purple accent)
+* **Your screenshots (max lots / max trades / per-symbol cap)** → `LIMIT` → `Gauge` (amber accent + metrics row)
+* **Your screenshot (View-As write blocked / impersonation)** → `ADMIN` → `ShieldAlert` (purple + hint + details)
+
+---
+
+## 6) Apply “app-card” styling to other cards (system-wide upgrade)
+
+Wherever you render `Card` components, add `className="app-card"` or merge it into your base `Card` component. Minimal example:
+
+```tsx
+// Example usage anywhere in the UI:
+<Card className="app-card p-6">
+  ...
+</Card>
+```
+
+---
+
+If you want, I can also generate a **ToastTestDashboard** page (4 buttons) that triggers representative messages for each category so you can visually QA the full mapping in under 60 seconds.

@@ -1,0 +1,807 @@
+Below is (A) the concrete bug-fix patch set for **Profile Settings → Login Activity / Sessions / Timezones / Language**, plus (B) a **production-grade i18n foundation** (French/Spanish/Portuguese/Arabic/Hindi first), and (C) the **hedge-fund-grade implementation checklist** Replit Agent 3 should audit against end-to-end (signup → email via Resend → SMS via Twilio → gating/tiering → revalidations → admin audit/KYC queue → full data trails).
+
+---
+
+## A) Immediate fixes for the two cards (Login Activity + Sessions) and GMT/UTC timezone standards
+
+### A1) Fix “Invalid Date” in Login Activity card (field mismatch)
+
+Your backend returns login history timestamps as `eventAt`, but `ProfileSettings.tsx` renders `login.createdAt * 1000`, so it becomes `undefined * 1000 → NaN → Invalid Date`.
+
+#### Patch 1 — `client/src/pages/ProfileSettings.tsx` (surgical change)
+
+**Find** the login history timestamp rendering:
+
+```tsx
+{new Date(login.createdAt * 1000).toLocaleString()}
+```
+
+**Replace** with a robust parser that supports `eventAt` (Date string), `createdAt` (sec), or `createdAtMs` (ms):
+
+```tsx
+const parseLoginTsMs = (login: any): number | null => {
+  const v = login?.createdAtMs ?? login?.eventAtMs ?? login?.eventAt ?? login?.createdAt;
+  if (v == null) return null;
+
+  if (typeof v === "number") {
+    // Heuristic: seconds vs milliseconds
+    return v < 2_000_000_000 ? v * 1000 : v;
+  }
+
+  // string (ISO) or Date-like
+  const ms = Date.parse(String(v));
+  return Number.isFinite(ms) ? ms : null;
+};
+```
+
+Then render:
+
+```tsx
+{(() => {
+  const ms = parseLoginTsMs(login);
+  return ms ? new Date(ms).toLocaleString() : "Unknown";
+})()}
+```
+
+---
+
+### A2) “Log out other devices” does nothing (wrong endpoint)
+
+Your UI calls:
+
+* `POST /api/me/sessions/logout-others`
+
+But your backend implements:
+
+* `POST /api/me/sessions/revoke-others`
+
+#### Patch 2 — `client/src/pages/ProfileSettings.tsx` (one-line fix)
+
+**Find**:
+
+```ts
+await apiRequest("POST", "/api/me/sessions/logout-others", {});
+```
+
+**Replace**:
+
+```ts
+await apiRequest("POST", "/api/me/sessions/revoke-others", {});
+```
+
+#### Patch 3 — add backward-compatible alias (recommended)
+
+**Full file replacement:** `server/routes/meSessions.ts`
+(Adds `/logout-others` alias that routes to the same logic.)
+
+```ts
+// server/routes/meSessions.ts
+import type { Express, Request, Response } from "express";
+import express from "express";
+import { getActiveUserSessions, revokeUserSession, revokeOtherUserSessions } from "../security/sessionTrail";
+
+export function registerMeSessionsRoutes(app: Express) {
+  const router = express.Router();
+
+  const ensureAuth = (req: Request, res: Response, next: any) => {
+    if (!req.session?.userId) return res.status(401).json({ message: "Not authenticated" });
+    next();
+  };
+
+  // List active sessions/devices
+  router.get("/", ensureAuth, async (req, res) => {
+    const userId = req.session.userId!;
+    const currentSessionId = req.sessionID;
+
+    const sessions = await getActiveUserSessions(userId, currentSessionId);
+    res.json(
+      sessions.map((s) => ({
+        ...s,
+        createdAtMs: s.createdAt?.getTime?.() ?? null,
+        lastSeenAtMs: s.lastActiveAt?.getTime?.() ?? null,
+      }))
+    );
+  });
+
+  // Revoke one session by ID
+  router.post("/:sessionId/revoke", ensureAuth, async (req, res) => {
+    const userId = req.session.userId!;
+    const { sessionId } = req.params;
+
+    await revokeUserSession({
+      userId,
+      sessionId,
+      actorAdminId: null,
+      req,
+      sessionStore: (req as any).sessionStore,
+    });
+
+    res.json({ ok: true });
+  });
+
+  // Revoke all other sessions
+  router.post("/revoke-others", ensureAuth, async (req, res) => {
+    const userId = req.session.userId!;
+    const currentSessionId = req.sessionID;
+
+    const result = await revokeOtherUserSessions({
+      userId,
+      currentSessionId,
+      actorAdminId: null,
+      req,
+      sessionStore: (req as any).sessionStore,
+    });
+
+    res.json({ ok: true, ...result });
+  });
+
+  // Backward-compatible alias (UI previously used this)
+  router.post("/logout-others", ensureAuth, async (req, res) => {
+    const userId = req.session.userId!;
+    const currentSessionId = req.sessionID;
+
+    const result = await revokeOtherUserSessions({
+      userId,
+      currentSessionId,
+      actorAdminId: null,
+      req,
+      sessionStore: (req as any).sessionStore,
+    });
+
+    res.json({ ok: true, ...result });
+  });
+
+  app.use("/api/me/sessions", router);
+}
+```
+
+---
+
+### A3) Enforce revoked sessions (hedge-fund-grade)
+
+Today, a revoked session may remain usable if the cookie persists and the session store entry isn’t destroyed for some reason. Hedge-fund-grade requires **server-side revocation enforcement** on every authenticated request.
+
+#### Patch 4 — `server/routes.ts` (block revoked sessions in `ensureAuth`)
+
+**Step 1: add `userSessions` import**
+At the top of `server/routes.ts`, update the `@shared/schema` import:
+
+```ts
+import { loginSchema, insertTradeSchema, tradeAudit, globalSettings, userKycProfiles, userPayoutProfiles, userSessions } from "@shared/schema";
+```
+
+**Step 2: replace `ensureAuth` with async revoked check**
+Find the existing `ensureAuth` in `server/routes.ts` and replace it with:
+
+```ts
+const ensureAuth = async (req: Request, res: Response, next: NextFunction) => {
+  if (!req.session.userId) return res.status(401).json({ message: "Not authenticated" });
+
+  // Hedge-fund-grade: revoked-session enforcement
+  try {
+    const sid = req.sessionID;
+    const uid = req.session.userId;
+
+    const row = await db.query.userSessions.findFirst({
+      where: (t, { and, eq }) => and(eq(t.sessionId, sid), eq(t.userId, uid)),
+      columns: { revokedAt: true },
+    });
+
+    if (row?.revokedAt) {
+      req.session.destroy(() => {});
+      return res.status(401).json({ message: "Session revoked" });
+    }
+  } catch {
+    // Fail-open to avoid global outage if DB hiccups;
+    // the revoke route still destroys store entry in the normal path.
+  }
+
+  next();
+};
+```
+
+---
+
+### A4) GMT/UTC standards + “deep city-based” timezone selection
+
+You are already using `@vvo/tzdb` (major cities + “always up-to-date list of time zones”), which is an appropriate “gold standard” for a user-facing selector. ([npm][1])
+To match your requirement, update labels to show both **UTC** and **GMT** consistently and ensure the UI uses **search-by-city** (your backend already supports `/api/meta/timezones/search`).
+
+#### Patch 5 — `server/routes/meta.ts` label format (UTC + GMT + cities)
+
+In `server/routes/meta.ts`, update `formatTzLabel`:
+
+**Find:**
+
+```ts
+function formatTzLabel(z: any) {
+  const offset = formatUtcOffset(tzOffsetMinutes(z.name));
+  const cities = z.mainCities?.slice(0, 3)?.join(", ");
+  return `${offset} • ${z.name}${cities ? ` • ${cities}` : ""}`;
+}
+```
+
+**Replace:**
+
+```ts
+function formatTzLabel(z: any) {
+  const utc = formatUtcOffset(tzOffsetMinutes(z.name)); // "UTC+02:00"
+  const gmt = utc.replace(/^UTC/, "GMT");               // "GMT+02:00"
+  const cities = z.mainCities?.slice(0, 3)?.join(", ");
+  return `${utc} / ${gmt} • ${z.name}${cities ? ` • ${cities}` : ""}`;
+}
+```
+
+This keeps everything in UTC/GMT standards while still preserving the IANA zone ID and major cities. ([npm][1])
+
+#### Patch 6 — Use city search in UI (recommended component)
+
+Create a dedicated searchable selector that calls your existing endpoint:
+
+* `GET /api/meta/timezones/search?q=<user input>`
+
+**New file:** `client/src/components/TimezoneSelect.tsx`
+
+```tsx
+import * as React from "react";
+import { Button } from "@/components/ui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { Check, ChevronsUpDown } from "lucide-react";
+
+type TzOption = { name: string; label: string };
+
+export function TimezoneSelect({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: string;
+  onChange: (tz: string) => void;
+  disabled?: boolean;
+}) {
+  const [open, setOpen] = React.useState(false);
+  const [q, setQ] = React.useState("");
+  const [options, setOptions] = React.useState<TzOption[]>([]);
+  const [loading, setLoading] = React.useState(false);
+
+  const fetchOptions = React.useCallback(async (query: string) => {
+    setLoading(true);
+    try {
+      const url = `/api/meta/timezones/search?q=${encodeURIComponent(query)}`;
+      const res = await fetch(url, { credentials: "include" });
+      const data = (await res.json()) as TzOption[];
+      setOptions(Array.isArray(data) ? data : []);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    const t = setTimeout(() => fetchOptions(q), 200);
+    return () => clearTimeout(t);
+  }, [q, fetchOptions]);
+
+  const selected = React.useMemo(() => {
+    return options.find((o) => o.name === value)?.label ?? value ?? "Select timezone";
+  }, [options, value]);
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button variant="outline" role="combobox" disabled={disabled} className="w-full justify-between">
+          <span className="truncate">{selected}</span>
+          <ChevronsUpDown className="ml-2 h-4 w-4 opacity-50" />
+        </Button>
+      </PopoverTrigger>
+
+      <PopoverContent className="w-[420px] p-0" align="start">
+        <Command>
+          <CommandInput
+            placeholder="Search timezone (city, country, UTC offset, IANA)…"
+            value={q}
+            onValueChange={setQ}
+          />
+          <CommandList>
+            <CommandEmpty>{loading ? "Loading…" : "No results"}</CommandEmpty>
+            {options.map((o) => (
+              <CommandItem
+                key={o.name}
+                value={o.name}
+                onSelect={() => {
+                  onChange(o.name);
+                  setOpen(false);
+                }}
+              >
+                <Check className={`mr-2 h-4 w-4 ${o.name === value ? "opacity-100" : "opacity-0"}`} />
+                <span className="truncate">{o.label}</span>
+              </CommandItem>
+            ))}
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
+}
+```
+
+Then in `ProfileSettings.tsx`, replace the existing timezone `<Select>` with:
+
+```tsx
+import { TimezoneSelect } from "@/components/TimezoneSelect";
+
+// ...
+
+<TimezoneSelect
+  value={preferences.timezone}
+  onChange={(tz) => setPreferences((p) => ({ ...p, timezone: tz }))}
+  disabled={saving}
+/>
+```
+
+---
+
+## B) Full trader-facing interface language auto-switch (FR/ES/PT/AR/HI first)
+
+### B1) Use `react-i18next` (standard) + persist per user preference
+
+`react-i18next` is designed for runtime language switching via `i18n.changeLanguage()`, and supports the hook-based approach you want. ([react-i18next][2])
+
+#### Install
+
+```bash
+npm i i18next react-i18next i18next-browser-languagedetector
+```
+
+### B2) Add i18n bootstrap (single source of truth)
+
+**New file:** `client/src/i18n.ts`
+
+```ts
+import i18n from "i18next";
+import LanguageDetector from "i18next-browser-languagedetector";
+import { initReactI18next } from "react-i18next";
+
+// NOTE: These translations are a starter pack for key UX surfaces.
+// For hedge-fund-grade localization, you will expand coverage across ALL trader-facing strings.
+const resources = {
+  en: { translation: {
+    common: { save: "Save", cancel: "Cancel", close: "Close", loading: "Loading…" },
+    profile: {
+      title: "Profile Settings",
+      language: "Language",
+      timezone: "Time Zone",
+      sessions: "Active Sessions",
+      loginActivity: "Login Activity",
+      logoutOthers: "Log out other devices",
+    },
+    policy: {
+      EMAIL_VERIFY_REQUIRED: "Email verification required.",
+      SMS_VERIFY_REQUIRED: "Phone verification required.",
+      KYC_REQUIRED: "KYC required.",
+      REVERIFY_REQUIRED: "Email revalidation required.",
+    },
+  }},
+  fr: { translation: {
+    common: { save: "Enregistrer", cancel: "Annuler", close: "Fermer", loading: "Chargement…" },
+    profile: {
+      title: "Paramètres du profil",
+      language: "Langue",
+      timezone: "Fuseau horaire",
+      sessions: "Sessions actives",
+      loginActivity: "Activité de connexion",
+      logoutOthers: "Déconnecter les autres appareils",
+    },
+    policy: {
+      EMAIL_VERIFY_REQUIRED: "Vérification e-mail requise.",
+      SMS_VERIFY_REQUIRED: "Vérification du téléphone requise.",
+      KYC_REQUIRED: "KYC requis.",
+      REVERIFY_REQUIRED: "Revalidation e-mail requise.",
+    },
+  }},
+  es: { translation: {
+    common: { save: "Guardar", cancel: "Cancelar", close: "Cerrar", loading: "Cargando…" },
+    profile: {
+      title: "Configuración del perfil",
+      language: "Idioma",
+      timezone: "Zona horaria",
+      sessions: "Sesiones activas",
+      loginActivity: "Actividad de inicio de sesión",
+      logoutOthers: "Cerrar sesión en otros dispositivos",
+    },
+    policy: {
+      EMAIL_VERIFY_REQUIRED: "Se requiere verificación de correo.",
+      SMS_VERIFY_REQUIRED: "Se requiere verificación del teléfono.",
+      KYC_REQUIRED: "Se requiere KYC.",
+      REVERIFY_REQUIRED: "Se requiere revalidación de correo.",
+    },
+  }},
+  pt: { translation: {
+    common: { save: "Salvar", cancel: "Cancelar", close: "Fechar", loading: "Carregando…" },
+    profile: {
+      title: "Configurações do perfil",
+      language: "Idioma",
+      timezone: "Fuso horário",
+      sessions: "Sessões ativas",
+      loginActivity: "Atividade de login",
+      logoutOthers: "Sair de outros dispositivos",
+    },
+    policy: {
+      EMAIL_VERIFY_REQUIRED: "Verificação de e-mail obrigatória.",
+      SMS_VERIFY_REQUIRED: "Verificação de telefone obrigatória.",
+      KYC_REQUIRED: "KYC obrigatório.",
+      REVERIFY_REQUIRED: "Revalidação de e-mail obrigatória.",
+    },
+  }},
+  ar: { translation: {
+    common: { save: "حفظ", cancel: "إلغاء", close: "إغلاق", loading: "جارٍ التحميل…" },
+    profile: {
+      title: "إعدادات الملف الشخصي",
+      language: "اللغة",
+      timezone: "المنطقة الزمنية",
+      sessions: "الجلسات النشطة",
+      loginActivity: "نشاط تسجيل الدخول",
+      logoutOthers: "تسجيل الخروج من الأجهزة الأخرى",
+    },
+    policy: {
+      EMAIL_VERIFY_REQUIRED: "يلزم التحقق من البريد الإلكتروني.",
+      SMS_VERIFY_REQUIRED: "يلزم التحقق من الهاتف.",
+      KYC_REQUIRED: "يلزم التحقق من الهوية (KYC).",
+      REVERIFY_REQUIRED: "يلزم إعادة التحقق من البريد الإلكتروني.",
+    },
+  }},
+  hi: { translation: {
+    common: { save: "सहेजें", cancel: "रद्द करें", close: "बंद करें", loading: "लोड हो रहा है…" },
+    profile: {
+      title: "प्रोफ़ाइल सेटिंग्स",
+      language: "भाषा",
+      timezone: "समय क्षेत्र",
+      sessions: "सक्रिय सत्र",
+      loginActivity: "लॉगिन गतिविधि",
+      logoutOthers: "अन्य डिवाइस से लॉग आउट करें",
+    },
+    policy: {
+      EMAIL_VERIFY_REQUIRED: "ईमेल सत्यापन आवश्यक है।",
+      SMS_VERIFY_REQUIRED: "फ़ोन सत्यापन आवश्यक है।",
+      KYC_REQUIRED: "KYC आवश्यक है।",
+      REVERIFY_REQUIRED: "ईमेल पुनः सत्यापन आवश्यक है।",
+    },
+  }},
+};
+
+i18n
+  .use(LanguageDetector)
+  .use(initReactI18next)
+  .init({
+    resources,
+    fallbackLng: "en",
+    supportedLngs: ["en", "fr", "es", "pt", "ar", "hi"],
+    interpolation: { escapeValue: false },
+    detection: {
+      // User preference will override this once loaded from the API.
+      order: ["localStorage", "navigator"],
+      caches: ["localStorage"],
+    },
+    react: { useSuspense: false },
+  });
+
+i18n.on("languageChanged", (lng) => {
+  document.documentElement.lang = lng;
+  document.documentElement.dir = i18n.dir(lng);
+});
+
+export default i18n;
+```
+
+**Update:** `client/src/main.tsx` (import once at the top)
+
+```ts
+import "./i18n";
+```
+
+This eliminates the common “missing i18next instance” integration failure mode. ([react-i18next][3])
+
+### B3) Make the app auto-switch after login (server-provided preference)
+
+Right now `/api/auth/current-user` does not include `language/timezone`, so the client can’t auto-apply them after login.
+
+#### Patch 7 — `server/routes.ts` current-user payload
+
+In `/api/auth/current-user`, add the missing fields:
+
+```ts
+res.json({
+  id: user.id,
+  email: user.email,
+  username: user.username,
+  isAdmin: user.isAdmin,
+  firstName: user.firstName,
+  lastName: user.lastName,
+  displayName: user.displayName,
+  timezone: user.timezone,
+  language: user.language,
+  country: user.country,
+});
+```
+
+#### Patch 8 — `client/src/hooks/use-auth.tsx` apply language immediately
+
+At the top:
+
+```ts
+import i18n from "@/i18n";
+```
+
+Then after you set `setUser(data)` in `checkAuth()`:
+
+```ts
+if (data?.language) {
+  i18n.changeLanguage(data.language);
+}
+```
+
+### B4) “Automatic translation engines” you can plug in (optional, but scalable)
+
+To reach “entire trader-facing UX” coverage quickly without hand-translating thousands of strings:
+
+1. **Build-time auto-translation pipeline (recommended)**
+
+   * Extract keys (scanner), machine-translate missing keys (DeepL/Google), store JSON, then human review for finance-specific terms.
+2. **Runtime fallback for missing keys (aggressive)**
+
+   * If `t(key)` missing in locale, call translation API → cache in localStorage + server table `i18n_cache`.
+   * Use strict allowlist (only UI chrome strings, never legal docs/contracts without review).
+
+This keeps deterministic UX while still moving fast.
+
+---
+
+## C) Replit Agent 3 — Hedge-fund-grade implementation audit checklist (end-to-end)
+
+This is the audit document Agent 3 should run **component-by-component, route-by-route, table-by-table**.
+
+### C0) Known mismatches to verify are fixed (these are currently breaking UX)
+
+* [ ] **Login Activity “Invalid Date”** fixed by using `eventAt`/`createdAtMs` (frontend) and/or normalizing backend output.
+* [ ] **Log out other devices** calls `/api/me/sessions/revoke-others` (or backend alias added).
+* [ ] **Revoked session enforcement** blocks revoked sessions on authenticated requests (server-side check).
+
+---
+
+## C1) Data model: required tables/columns and what they power
+
+### Users core
+
+**`users`**
+
+* [ ] `email`, `username`
+* [ ] `firstName`, `lastName`, `displayName` (trader-facing and payout/KYC alignment)
+* [ ] `country`, `timezone` (IANA), `language` (BCP-47-ish: `en/fr/es/pt/ar/hi`)
+* [ ] `emailVerified` boolean (legacy) — verify actual source of truth is `user_verification.emailVerifiedAt`
+* [ ] **Audit requirement:** all changes to identity fields append `identity_audit` row.
+
+### Verification state + gating
+
+**`user_verification`**
+
+* [ ] `email`, `emailVerifiedAt`
+* [ ] `emailInitialDueAt` (or derived from `users.createdAt`)
+* [ ] `emailReverifyDueAt`, `lastEmailSentAt`, `emailSendCount24h`, `emailLastSendDay`
+* [ ] `phone`, `phoneVerifiedAt`, `lastSmsSentAt`, `smsSendCount24h`, `smsLastSendDay`
+* [ ] `contenderTier` transitions (e.g., `CANDIDATE_EMAIL_ONLY` → `CANDIDATE_SMS_REQUIRED`)
+* [ ] `kycStatus`, `kycSubmittedAt`, `kycVerifiedAt`
+* [ ] **Tamper-evidence:** verification milestones also append `identity_audit` records.
+
+**Email tokens**
+
+* [ ] `email_verification_tokens`: `tokenHash`, `expiresAt`, `usedAt`, `sentToEmail`, `userId`, `createdAt`
+
+### Session/device trail
+
+**`user_sessions`**
+
+* [ ] `sessionId`, `userId`, `createdAt`, `lastActiveAt`, `revokedAt`
+* [ ] `ip`, `userAgent`, `browser`, `os`, `deviceType`, `deviceBrand`, `deviceModel`
+* [ ] `countryCode`, `region`, `city`, `timezone` (geo-enriched)
+* [ ] `isCurrent` (optional), otherwise compute in API by comparing `sessionId === req.sessionID`
+* [ ] **Server enforcement:** revoked sessions cannot pass `ensureAuth`.
+
+**`user_login_history`**
+
+* [ ] `userId`, `emailAttempted`, `success`
+* [ ] `ip`, `userAgent`, geo fields, device parse fields
+* [ ] timestamps normalized and returned consistently to UI (ms preferred)
+
+### Identity/audit chain (hedge-fund-grade evidence)
+
+**`identity_audit`**
+
+* [ ] SHA-256 hash chain: `prev_hash` → `event_hash` for tamper evidence
+* [ ] Must log: email sends, email verify success/failure, SMS sends, SMS verify, KYC submit/approve/reject, payout changes, session revoke, password/MFA events
+
+(Your code already supports chained hashing via `appendIdentityAudit`.)
+
+---
+
+## C2) Signup → Email verification (Resend) flow: endpoints + gating
+
+### Signup UX (trader-facing)
+
+* [ ] After register: user lands in app but **trade open/increase is gated** until email verified (policy denial codes).
+* [ ] UI shows:
+
+  * [ ] “Verify your email” card with countdown: **14 days** to verify.
+  * [ ] Resend button obeying cooldown and daily caps.
+
+### Backend (Resend)
+
+**Required endpoints**
+
+* [ ] `POST /api/verification/email/send`
+
+  * [ ] Calls policy action `EMAIL_VERIFY_START`
+  * [ ] Enforces: cooldown + 24h cap + “hard-lock” states
+  * [ ] Creates token row, sends via Resend
+  * [ ] Appends identity audit event
+* [ ] `GET /api/verification/email/verify?token=...`
+
+  * [ ] Validates token hash and expiry, marks usedAt
+  * [ ] Updates `user_verification.emailVerifiedAt`
+  * [ ] Updates tier (`contenderTier`)
+  * [ ] Appends identity audit event
+
+**Resend configuration checks**
+
+* [ ] API key configured; from-domain verified
+* [ ] Email template includes:
+
+  * [ ] User id / correlation id (non-sensitive)
+  * [ ] IP & device summary (optional)
+  * [ ] Link with token (token stored hashed)
+
+---
+
+## C3) SMS validation (Twilio) flow: gating/tiering
+
+### Frontend rules
+
+* [ ] SMS verification only becomes available when:
+
+  * [ ] policy action `PHONE_VERIFY_START` permits it (eligible after email verification + contender criteria)
+* [ ] UI:
+
+  * [ ] “Start phone verification” button
+  * [ ] OTP entry
+  * [ ] Clear denial messaging (translated)
+
+### Backend (Twilio)
+
+* [ ] `POST /api/verification/sms/start` (or equivalent in your router)
+
+  * [ ] `PHONE_VERIFY_START` policy enforced
+  * [ ] daily caps, cooldown, fail counters
+  * [ ] appends identity audit
+* [ ] `POST /api/verification/sms/verify`
+
+  * [ ] verify code
+  * [ ] set `phoneVerifiedAt`
+  * [ ] update tier
+  * [ ] appends identity audit
+
+---
+
+## C4) Tiered access + progressive confirmations + revalidations
+
+### Policy engine must be the single source of truth
+
+* [ ] `requirePolicy("TRADE_OPEN_OR_INCREASE")` blocks new/increasing exposure when:
+
+  * [ ] email not verified and grace period exceeded
+  * [ ] email reverify is due
+  * [ ] phone required and not verified
+  * [ ] KYC required and not complete
+* [ ] Denials return machine-parseable codes (`deny_code`) so UI can translate.
+
+### Rolling revalidation (email)
+
+* [ ] `emailReverifyDueAt` is set on verify/reverify (e.g., now + 30 days)
+* [ ] Deterministic jitter (optional) supported for load distribution:
+
+  * [ ] If SQLite CRC32 unavailable, compute jitter in Node and persist (your supplied CRC32 plan covers this).
+* [ ] UI shows:
+
+  * [ ] Next revalidation due date
+  * [ ] “Revalidate now” flow
+
+---
+
+## C5) Profile Settings: fields, gating, and trails
+
+### Required cards and what populates them
+
+**Identity + preferences**
+
+* [ ] First name, last name, display name (from `users`)
+* [ ] Country selector (from `meta/countries`)
+* [ ] Timezone selector (from `meta/timezones/search`) — city-based, UTC/GMT label
+* [ ] Language selector (stored in `users.language`) and **immediately switches UI**
+
+**Email**
+
+* [ ] Current email display
+* [ ] Change-email flow:
+
+  * [ ] marks email as unverified
+  * [ ] sends new verification
+  * [ ] audit trail for old/new email
+
+**Phone**
+
+* [ ] current phone + verification state
+* [ ] start/verify flow
+
+**Security**
+
+* [ ] Password change flow + identity audit
+* [ ] MFA (TOTP):
+
+  * [ ] enroll, verify, disable
+  * [ ] backup codes (optional but recommended)
+
+**Sessions/devices**
+
+* [ ] List active sessions from `user_sessions`
+* [ ] Terminate single session
+* [ ] Terminate all other sessions
+* [ ] Revocation enforced server-side
+
+**Login Activity**
+
+* [ ] Recent logins from `user_login_history`
+* [ ] Must display correct timestamps
+* [ ] Should show IP + city/region/country + device parse
+
+---
+
+## C6) Admin dashboard: Audit Trail + KYC queue + analytics surfaces
+
+### Admin mini-tabs (User Management)
+
+* [ ] **Audit Trail** (user-specific): reads from `identity_audit`, `adminActions`, verification events
+* [ ] **KYC Queue**: reads `user_kyc_profiles` + `user_verification.kycStatus`
+* [ ] **Trader progression**:
+
+  * [ ] contender tier, gating state, eligibility metrics, confirmation stages
+* [ ] **Grift detection** (not “fraud”): signals, device clusters, IP clusters, session anomalies
+
+### Audit export and tamper evidence
+
+* [ ] export endpoints generate manifests with SHA-256 hashes
+* [ ] export includes correlation IDs for verification + session revocations + KYC decisions
+
+---
+
+## C7) Internationalization audit (trader-facing)
+
+* [ ] Language preference stored and applied globally post-login
+* [ ] Arabic triggers RTL (`dir="rtl"`) and layout still holds
+* [ ] All trader-facing strings moved behind `t("...")` keys (phased rollout acceptable, but track coverage)
+* [ ] Policy denial codes translated consistently
+* [ ] Emails/SMS templates localized OR at minimum bilingual headers for priority locales
+
+(react-i18next supports runtime switching via `changeLanguage` and hook access patterns you need.) ([react-i18next][2])
+
+---
+
+## What I would have Replit Agent 3 do next (in order)
+
+1. Apply patches A1–A3 (they directly fix the two broken cards and the session termination behavior).
+2. Apply A4 timezone label + city-search selector.
+3. Add i18n bootstrap (B) and wire “language auto-switch” to `users.language`.
+4. Run the checklist C end-to-end and mark each item: **DONE / PARTIAL / NOT DONE**, with file paths, route names, and table columns verified.
+
+If you want, paste back Agent 3’s DONE/PARTIAL report and I will convert it into a precise “patch queue” (file-by-file) with no ambiguity.
+
+[1]: https://npmjs.com/package/%40vvo/tzdb?utm_source=chatgpt.com "vvo/tzdb"
+[2]: https://react.i18next.com/guides/quick-start?utm_source=chatgpt.com "Quick start | react-i18next documentation"
+[3]: https://react.i18next.com/latest/using-with-hooks?utm_source=chatgpt.com "Step by step guide | react-i18next documentation"

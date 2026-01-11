@@ -1,0 +1,1300 @@
+Understood. Below is a **trade-audit–only** implementation that delivers exactly the four requirements:
+
+1. **CorrelationId on every order attempt**
+2. **order_intent_audit** capturing **RECEIVED** + **DECISION (PASS/REJECT)** with **reject_check / reject_reason**
+3. **trade_audit** events for **market creation**, **pending placement**, **cancel**, **manual close**, **targets update**
+4. **Tamper-evident hash chain** via **SHA-256** (`prev_hash` → `event_hash`) with **canonical JSON payloads**
+
+This is designed to drop into most Node/Express + SQLite (better-sqlite3) backends. If your project uses different paths, only adjust the import paths and route wiring.
+
+---
+
+# /backend/src/db/ensureAuditSchema.ts
+
+```ts
+import type Database from "better-sqlite3";
+
+type DB = Database.Database;
+
+function tableInfo(db: DB, table: string) {
+  return db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+}
+
+function colExists(db: DB, table: string, col: string) {
+  try {
+    return tableInfo(db, table).some((r) => r.name === col);
+  } catch {
+    return false;
+  }
+}
+
+function ensureCol(db: DB, table: string, ddlFragment: string, colName: string) {
+  if (colExists(db, table, colName)) return;
+  db.exec(`ALTER TABLE ${table} ADD COLUMN ${ddlFragment}`);
+}
+
+export function ensureAuditSchema(db: DB) {
+  // ---- order_intent_audit: append-only, chained by correlation_id
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS order_intent_audit (
+      audit_event_id TEXT PRIMARY KEY,
+      correlation_id TEXT NOT NULL,
+      ts_server_utc_ms INTEGER NOT NULL,
+
+      event_code TEXT NOT NULL,            -- RECEIVED | DECISION
+      decision TEXT,                       -- PASS | REJECT (nullable for RECEIVED)
+      reject_check TEXT,                   -- e.g., MAX_CONCURRENT_LOTS
+      reject_reason TEXT,                  -- human readable
+
+      actor_type TEXT NOT NULL DEFAULT 'USER',  -- USER | ADMIN | SYSTEM
+      actor_user_id TEXT,
+      user_id TEXT NOT NULL,
+
+      session_id TEXT,
+      ip TEXT,
+      user_agent TEXT,
+
+      symbol TEXT,
+      side TEXT,                           -- BUY | SELL
+      order_type TEXT,                     -- MARKET | LIMIT | STOP | STOP_LIMIT
+      time_in_force TEXT,                  -- GTC | DAY | IOC | FOK (optional)
+      qty_lots REAL,
+      requested_price REAL,
+      limit_price REAL,
+      stop_price REAL,
+      take_profit REAL,
+      stop_loss REAL,
+
+      quote_bid REAL,
+      quote_ask REAL,
+      quote_mid REAL,
+      quote_ts_utc_ms INTEGER,
+      quote_is_stale INTEGER,              -- 0/1
+
+      risk_limit_json TEXT,                -- optional evidence of limits used
+      risk_observed_json TEXT,             -- optional evidence of observed exposure
+      risk_snapshot_json TEXT,             -- optional structured snapshot
+
+      payload_json TEXT NOT NULL,          -- canonical JSON used for hashing
+      prev_hash TEXT NOT NULL,
+      event_hash TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_oia_corr_ts ON order_intent_audit(correlation_id, ts_server_utc_ms);
+    CREATE INDEX IF NOT EXISTS idx_oia_user_ts ON order_intent_audit(user_id, ts_server_utc_ms);
+    CREATE INDEX IF NOT EXISTS idx_oia_decision_ts ON order_intent_audit(decision, ts_server_utc_ms);
+  `);
+
+  // ---- trade_audit: append-only, chained by trade_id (and includes correlation_id)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS trade_audit (
+      audit_event_id TEXT PRIMARY KEY,
+      ts_server_utc_ms INTEGER NOT NULL,
+
+      event_category TEXT NOT NULL DEFAULT 'TRADE',  -- ORDER | EXECUTION | POSITION | RISK | ADMIN | AUTH | SYSTEM
+      event_code TEXT NOT NULL,                      -- ORDER_PLACED | ORDER_FILLED | ORDER_CANCELED | POSITION_CLOSED | TARGETS_UPDATED ...
+
+      actor_type TEXT NOT NULL DEFAULT 'SYSTEM',     -- USER | ADMIN | SYSTEM
+      actor_user_id TEXT,
+
+      user_id TEXT,
+      session_id TEXT,
+      ip TEXT,
+      user_agent TEXT,
+
+      correlation_id TEXT,
+
+      trade_id TEXT NOT NULL,
+      order_id TEXT,          -- optional but recommended
+      execution_id TEXT,      -- optional
+      position_id TEXT,       -- optional
+
+      symbol TEXT,
+      side TEXT,
+      order_type TEXT,
+      time_in_force TEXT,
+
+      qty_lots REAL,
+      requested_price REAL,
+      limit_price REAL,
+      stop_price REAL,
+      fill_price REAL,
+      fill_qty_lots REAL,
+      avg_fill_price REAL,
+      cum_fill_qty_lots REAL,
+
+      bid REAL,
+      ask REAL,
+      mid REAL,
+      spread_points REAL,
+      spread_pips REAL,
+
+      slippage_points REAL,
+      slippage_pips REAL,
+      slippage_reference TEXT,     -- MID | BIDASK | LAST | SYNTHETIC
+
+      note TEXT,
+
+      payload_json TEXT NOT NULL,  -- canonical JSON used for hashing
+      prev_hash TEXT NOT NULL,
+      event_hash TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_ta_trade_ts ON trade_audit(trade_id, ts_server_utc_ms);
+    CREATE INDEX IF NOT EXISTS idx_ta_corr_ts ON trade_audit(correlation_id, ts_server_utc_ms);
+    CREATE INDEX IF NOT EXISTS idx_ta_user_ts ON trade_audit(user_id, ts_server_utc_ms);
+    CREATE INDEX IF NOT EXISTS idx_ta_event_ts ON trade_audit(event_code, ts_server_utc_ms);
+  `);
+
+  // If you already have a trades table, ensure it can store correlation_id and optional ids.
+  // Safe additive migrations (no-op if cols exist).
+  if (colExists(db, "trades", "id")) {
+    ensureCol(db, "trades", "correlation_id TEXT", "correlation_id");
+    ensureCol(db, "trades", "order_id TEXT", "order_id");
+    ensureCol(db, "trades", "execution_id TEXT", "execution_id");
+    ensureCol(db, "trades", "position_id TEXT", "position_id");
+  }
+}
+```
+
+---
+
+# /backend/src/audit/canonicalJson.ts
+
+```ts
+export function canonicalJson(value: any): string {
+  // Stable, deterministic JSON serialization (sorted keys), suitable for hashing.
+  if (value === null || value === undefined) return "null";
+  const t = typeof value;
+  if (t === "number" || t === "boolean") return JSON.stringify(value);
+  if (t === "string") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (t === "object") {
+    const keys = Object.keys(value).sort();
+    const pairs = keys
+      .filter((k) => value[k] !== undefined)
+      .map((k) => `${JSON.stringify(k)}:${canonicalJson(value[k])}`);
+    return `{${pairs.join(",")}}`;
+  }
+  // fallback
+  return JSON.stringify(String(value));
+}
+```
+
+---
+
+# /backend/src/audit/hashChain.ts
+
+```ts
+import crypto from "node:crypto";
+
+export function sha256Hex(s: string): string {
+  return crypto.createHash("sha256").update(s).digest("hex");
+}
+```
+
+---
+
+# /backend/src/audit/auditWriter.ts
+
+```ts
+import crypto from "node:crypto";
+import type Database from "better-sqlite3";
+import { canonicalJson } from "./canonicalJson";
+import { sha256Hex } from "./hashChain";
+
+type DB = Database.Database;
+
+export type AuditContext = {
+  correlationId: string;
+  actorType: "USER" | "ADMIN" | "SYSTEM";
+  actorUserId?: string | null;
+  userId?: string | null;
+  sessionId?: string | null;
+  ip?: string | null;
+  userAgent?: string | null;
+};
+
+export function getOrCreateCorrelationId(v?: string | null) {
+  return v && String(v).trim() ? String(v) : crypto.randomUUID();
+}
+
+function nowMs() {
+  return Date.now();
+}
+
+function genesis() {
+  return "GENESIS";
+}
+
+export function appendOrderIntentAudit(db: DB, args: {
+  ctx: AuditContext;
+
+  eventCode: "RECEIVED" | "DECISION";
+  decision?: "PASS" | "REJECT" | null;
+  rejectCheck?: string | null;
+  rejectReason?: string | null;
+
+  economics?: {
+    symbol?: string | null;
+    side?: string | null;
+    orderType?: string | null;
+    timeInForce?: string | null;
+    qtyLots?: number | null;
+    requestedPrice?: number | null;
+    limitPrice?: number | null;
+    stopPrice?: number | null;
+    takeProfit?: number | null;
+    stopLoss?: number | null;
+  };
+
+  quote?: {
+    bid?: number | null;
+    ask?: number | null;
+    mid?: number | null;
+    quoteTsUtcMs?: number | null;
+    quoteIsStale?: boolean | null;
+  };
+
+  riskEvidence?: {
+    riskLimit?: any;       // object
+    riskObserved?: any;    // object
+    riskSnapshot?: any;    // object
+  };
+
+  payload?: any;
+  tsServerUtcMs?: number;
+}) {
+  const ts = args.tsServerUtcMs ?? nowMs();
+  const auditEventId = crypto.randomUUID();
+
+  const corr = args.ctx.correlationId;
+
+  // chain per correlation_id
+  const last = db.prepare(
+    `SELECT event_hash FROM order_intent_audit WHERE correlation_id = ? ORDER BY ts_server_utc_ms DESC LIMIT 1`
+  ).get(corr) as { event_hash?: string } | undefined;
+
+  const prevHash = last?.event_hash ?? genesis();
+
+  const envelope = {
+    auditEventId,
+    correlationId: corr,
+    tsServerUtcMs: ts,
+    eventCode: args.eventCode,
+    decision: args.decision ?? null,
+    rejectCheck: args.rejectCheck ?? null,
+    rejectReason: args.rejectReason ?? null,
+    actorType: args.ctx.actorType,
+    actorUserId: args.ctx.actorUserId ?? null,
+    userId: args.ctx.userId ?? null,
+    sessionId: args.ctx.sessionId ?? null,
+    ip: args.ctx.ip ?? null,
+    userAgent: args.ctx.userAgent ?? null,
+    economics: args.economics ?? null,
+    quote: args.quote ?? null,
+    riskEvidence: args.riskEvidence ?? null,
+    payload: args.payload ?? null,
+  };
+
+  const payloadJson = canonicalJson(envelope);
+  const eventHash = sha256Hex(prevHash + "\n" + payloadJson);
+
+  db.prepare(`
+    INSERT INTO order_intent_audit (
+      audit_event_id, correlation_id, ts_server_utc_ms,
+      event_code, decision, reject_check, reject_reason,
+      actor_type, actor_user_id, user_id, session_id, ip, user_agent,
+      symbol, side, order_type, time_in_force, qty_lots,
+      requested_price, limit_price, stop_price, take_profit, stop_loss,
+      quote_bid, quote_ask, quote_mid, quote_ts_utc_ms, quote_is_stale,
+      risk_limit_json, risk_observed_json, risk_snapshot_json,
+      payload_json, prev_hash, event_hash
+    ) VALUES (
+      ?, ?, ?,
+      ?, ?, ?, ?,
+      ?, ?, ?, ?, ?, ?,
+      ?, ?, ?, ?, ?,
+      ?, ?, ?, ?, ?,
+      ?, ?, ?, ?, ?,
+      ?, ?, ?,
+      ?, ?, ?
+    )
+  `).run(
+    auditEventId, corr, ts,
+    args.eventCode, args.decision ?? null, args.rejectCheck ?? null, args.rejectReason ?? null,
+    args.ctx.actorType, args.ctx.actorUserId ?? null, args.ctx.userId ?? null, args.ctx.sessionId ?? null, args.ctx.ip ?? null, args.ctx.userAgent ?? null,
+
+    args.economics?.symbol ?? null,
+    args.economics?.side ?? null,
+    args.economics?.orderType ?? null,
+    args.economics?.timeInForce ?? null,
+    args.economics?.qtyLots ?? null,
+
+    args.economics?.requestedPrice ?? null,
+    args.economics?.limitPrice ?? null,
+    args.economics?.stopPrice ?? null,
+    args.economics?.takeProfit ?? null,
+    args.economics?.stopLoss ?? null,
+
+    args.quote?.bid ?? null,
+    args.quote?.ask ?? null,
+    args.quote?.mid ?? null,
+    args.quote?.quoteTsUtcMs ?? null,
+    args.quote?.quoteIsStale ? 1 : 0,
+
+    args.riskEvidence?.riskLimit ? JSON.stringify(args.riskEvidence.riskLimit) : null,
+    args.riskEvidence?.riskObserved ? JSON.stringify(args.riskEvidence.riskObserved) : null,
+    args.riskEvidence?.riskSnapshot ? JSON.stringify(args.riskEvidence.riskSnapshot) : null,
+
+    payloadJson,
+    prevHash,
+    eventHash
+  );
+
+  return { auditEventId, prevHash, eventHash, tsServerUtcMs: ts };
+}
+
+export function appendTradeAudit(db: DB, args: {
+  ctx: AuditContext;
+
+  tradeId: string;
+  eventCategory: string;
+  eventCode: string;
+
+  ids?: {
+    correlationId?: string | null;
+    orderId?: string | null;
+    executionId?: string | null;
+    positionId?: string | null;
+  };
+
+  economics?: {
+    symbol?: string | null;
+    side?: string | null;
+    orderType?: string | null;
+    timeInForce?: string | null;
+    qtyLots?: number | null;
+    requestedPrice?: number | null;
+    limitPrice?: number | null;
+    stopPrice?: number | null;
+    fillPrice?: number | null;
+    fillQtyLots?: number | null;
+    avgFillPrice?: number | null;
+    cumFillQtyLots?: number | null;
+  };
+
+  market?: {
+    bid?: number | null;
+    ask?: number | null;
+    mid?: number | null;
+    spreadPoints?: number | null;
+    spreadPips?: number | null;
+  };
+
+  tca?: {
+    slippagePoints?: number | null;
+    slippagePips?: number | null;
+    slippageReference?: string | null;
+  };
+
+  note?: string | null;
+  payload?: any;
+  tsServerUtcMs?: number;
+}) {
+  const ts = args.tsServerUtcMs ?? nowMs();
+  const auditEventId = crypto.randomUUID();
+
+  // chain per trade_id
+  const last = db.prepare(
+    `SELECT event_hash FROM trade_audit WHERE trade_id = ? ORDER BY ts_server_utc_ms DESC LIMIT 1`
+  ).get(args.tradeId) as { event_hash?: string } | undefined;
+
+  const prevHash = last?.event_hash ?? genesis();
+
+  const envelope = {
+    auditEventId,
+    tsServerUtcMs: ts,
+    eventCategory: args.eventCategory,
+    eventCode: args.eventCode,
+    actorType: args.ctx.actorType,
+    actorUserId: args.ctx.actorUserId ?? null,
+    userId: args.ctx.userId ?? null,
+    sessionId: args.ctx.sessionId ?? null,
+    ip: args.ctx.ip ?? null,
+    userAgent: args.ctx.userAgent ?? null,
+
+    correlationId: args.ids?.correlationId ?? args.ctx.correlationId ?? null,
+    tradeId: args.tradeId,
+    orderId: args.ids?.orderId ?? null,
+    executionId: args.ids?.executionId ?? null,
+    positionId: args.ids?.positionId ?? null,
+
+    economics: args.economics ?? null,
+    market: args.market ?? null,
+    tca: args.tca ?? null,
+    note: args.note ?? null,
+    payload: args.payload ?? null,
+  };
+
+  const payloadJson = canonicalJson(envelope);
+  const eventHash = sha256Hex(prevHash + "\n" + payloadJson);
+
+  db.prepare(`
+    INSERT INTO trade_audit (
+      audit_event_id, ts_server_utc_ms,
+      event_category, event_code,
+      actor_type, actor_user_id,
+      user_id, session_id, ip, user_agent,
+      correlation_id,
+      trade_id, order_id, execution_id, position_id,
+      symbol, side, order_type, time_in_force,
+      qty_lots,
+      requested_price, limit_price, stop_price,
+      fill_price, fill_qty_lots, avg_fill_price, cum_fill_qty_lots,
+      bid, ask, mid, spread_points, spread_pips,
+      slippage_points, slippage_pips, slippage_reference,
+      note,
+      payload_json, prev_hash, event_hash
+    ) VALUES (
+      ?, ?,
+      ?, ?,
+      ?, ?,
+      ?, ?, ?, ?,
+      ?,
+      ?, ?, ?, ?,
+      ?, ?, ?, ?,
+      ?,
+      ?, ?, ?,
+      ?, ?, ?, ?,
+      ?, ?, ?, ?, ?,
+      ?, ?, ?,
+      ?,
+      ?, ?, ?
+    )
+  `).run(
+    auditEventId, ts,
+    args.eventCategory, args.eventCode,
+    args.ctx.actorType, args.ctx.actorUserId ?? null,
+    args.ctx.userId ?? null, args.ctx.sessionId ?? null, args.ctx.ip ?? null, args.ctx.userAgent ?? null,
+    args.ids?.correlationId ?? args.ctx.correlationId ?? null,
+
+    args.tradeId,
+    args.ids?.orderId ?? null,
+    args.ids?.executionId ?? null,
+    args.ids?.positionId ?? null,
+
+    args.economics?.symbol ?? null,
+    args.economics?.side ?? null,
+    args.economics?.orderType ?? null,
+    args.economics?.timeInForce ?? null,
+
+    args.economics?.qtyLots ?? null,
+
+    args.economics?.requestedPrice ?? null,
+    args.economics?.limitPrice ?? null,
+    args.economics?.stopPrice ?? null,
+
+    args.economics?.fillPrice ?? null,
+    args.economics?.fillQtyLots ?? null,
+    args.economics?.avgFillPrice ?? null,
+    args.economics?.cumFillQtyLots ?? null,
+
+    args.market?.bid ?? null,
+    args.market?.ask ?? null,
+    args.market?.mid ?? null,
+    args.market?.spreadPoints ?? null,
+    args.market?.spreadPips ?? null,
+
+    args.tca?.slippagePoints ?? null,
+    args.tca?.slippagePips ?? null,
+    args.tca?.slippageReference ?? null,
+
+    args.note ?? null,
+
+    payloadJson,
+    prevHash,
+    eventHash
+  );
+
+  return { auditEventId, prevHash, eventHash, tsServerUtcMs: ts };
+}
+```
+
+---
+
+# /backend/src/middleware/auditContext.ts
+
+```ts
+import type { Request, Response, NextFunction } from "express";
+import { getOrCreateCorrelationId, type AuditContext } from "../audit/auditWriter";
+
+declare global {
+  namespace Express {
+    interface Request {
+      auditContext?: AuditContext;
+      user?: { id: string; role?: string };
+    }
+  }
+}
+
+export function attachAuditContext(req: Request, res: Response, next: NextFunction) {
+  const headerCorr = req.header("x-correlation-id") || null;
+  const bodyCorr = (req.body && (req.body.correlationId || req.body.correlation_id)) || null;
+
+  const correlationId = getOrCreateCorrelationId((headerCorr || bodyCorr) as string | null);
+  const sessionId = (req as any).sessionID ?? null;
+
+  req.auditContext = {
+    correlationId,
+    actorType: "USER",
+    actorUserId: null,
+    userId: (req as any).user?.id ?? null,
+    sessionId,
+    ip: req.ip ?? null,
+    userAgent: req.get("user-agent") ?? null,
+  };
+
+  res.setHeader("x-correlation-id", correlationId);
+  next();
+}
+```
+
+---
+
+# /backend/src/risk/riskAuditHelpers.ts
+
+This is the minimal helper that guarantees you always get:
+
+* **RECEIVED** event at the start
+* **DECISION PASS/REJECT** at the end, with reject check + reason
+
+```ts
+import type Database from "better-sqlite3";
+import { appendOrderIntentAudit, type AuditContext } from "../audit/auditWriter";
+
+type DB = Database.Database;
+
+export function logOrderReceived(db: DB, ctx: AuditContext, args: {
+  userId: string;
+  symbol?: string;
+  side?: string;
+  orderType?: string;
+  timeInForce?: string;
+  qtyLots?: number;
+  requestedPrice?: number;
+  limitPrice?: number;
+  stopPrice?: number;
+  takeProfit?: number;
+  stopLoss?: number;
+  quoteBid?: number;
+  quoteAsk?: number;
+  quoteMid?: number;
+  quoteTsUtcMs?: number;
+  quoteIsStale?: boolean;
+  payload?: any;
+}) {
+  appendOrderIntentAudit(db, {
+    ctx: { ...ctx, userId },
+    eventCode: "RECEIVED",
+    economics: {
+      symbol: args.symbol ?? null,
+      side: args.side ?? null,
+      orderType: args.orderType ?? null,
+      timeInForce: args.timeInForce ?? null,
+      qtyLots: args.qtyLots ?? null,
+      requestedPrice: args.requestedPrice ?? null,
+      limitPrice: args.limitPrice ?? null,
+      stopPrice: args.stopPrice ?? null,
+      takeProfit: args.takeProfit ?? null,
+      stopLoss: args.stopLoss ?? null,
+    },
+    quote: {
+      bid: args.quoteBid ?? null,
+      ask: args.quoteAsk ?? null,
+      mid: args.quoteMid ?? null,
+      quoteTsUtcMs: args.quoteTsUtcMs ?? null,
+      quoteIsStale: args.quoteIsStale ?? null,
+    },
+    payload: args.payload ?? null,
+  });
+}
+
+export function logOrderDecision(db: DB, ctx: AuditContext, args: {
+  userId: string;
+  decision: "PASS" | "REJECT";
+  rejectCheck?: string;
+  rejectReason?: string;
+
+  symbol?: string;
+  side?: string;
+  orderType?: string;
+  timeInForce?: string;
+  qtyLots?: number;
+  requestedPrice?: number;
+  limitPrice?: number;
+  stopPrice?: number;
+  takeProfit?: number;
+  stopLoss?: number;
+
+  quoteBid?: number;
+  quoteAsk?: number;
+  quoteMid?: number;
+  quoteTsUtcMs?: number;
+  quoteIsStale?: boolean;
+
+  riskLimit?: any;
+  riskObserved?: any;
+  riskSnapshot?: any;
+
+  payload?: any;
+}) {
+  appendOrderIntentAudit(db, {
+    ctx: { ...ctx, userId },
+    eventCode: "DECISION",
+    decision: args.decision,
+    rejectCheck: args.rejectCheck ?? null,
+    rejectReason: args.rejectReason ?? null,
+    economics: {
+      symbol: args.symbol ?? null,
+      side: args.side ?? null,
+      orderType: args.orderType ?? null,
+      timeInForce: args.timeInForce ?? null,
+      qtyLots: args.qtyLots ?? null,
+      requestedPrice: args.requestedPrice ?? null,
+      limitPrice: args.limitPrice ?? null,
+      stopPrice: args.stopPrice ?? null,
+      takeProfit: args.takeProfit ?? null,
+      stopLoss: args.stopLoss ?? null,
+    },
+    quote: {
+      bid: args.quoteBid ?? null,
+      ask: args.quoteAsk ?? null,
+      mid: args.quoteMid ?? null,
+      quoteTsUtcMs: args.quoteTsUtcMs ?? null,
+      quoteIsStale: args.quoteIsStale ?? null,
+    },
+    riskEvidence: {
+      riskLimit: args.riskLimit ?? null,
+      riskObserved: args.riskObserved ?? null,
+      riskSnapshot: args.riskSnapshot ?? null,
+    },
+    payload: args.payload ?? null,
+  });
+}
+```
+
+---
+
+# /backend/src/routes/trades.auditWiring.ts
+
+This is the core lifecycle hook set you asked for:
+
+* market order creation → `ORDER_PLACED` + `ORDER_FILLED`
+* pending placement → `ORDER_PLACED`
+* cancel → `ORDER_CANCELED`
+* manual close → `POSITION_CLOSED`
+* targets update → `TARGETS_UPDATED`
+
+```ts
+import type { Request, Response } from "express";
+import type Database from "better-sqlite3";
+import crypto from "node:crypto";
+import { appendTradeAudit } from "../audit/auditWriter";
+
+type DB = Database.Database;
+
+const uuid = () => crypto.randomUUID();
+
+function calcSpread(bid?: number | null, ask?: number | null) {
+  if (bid == null || ask == null) return { spreadPoints: null, spreadPips: null };
+  const spreadPoints = ask - bid;
+  return { spreadPoints, spreadPips: spreadPoints }; // if you treat 1 point == 1 pip for some symbols, adjust here
+}
+
+function signedSlippage(side: string | null | undefined, ref: number | null, fill: number | null) {
+  if (ref == null || fill == null) return { slippagePoints: null, slippagePips: null };
+  const raw = fill - ref;
+  // Signed convention: for BUY, positive = worse (paid higher); for SELL, positive = better (sold higher)
+  const signed = side === "BUY" ? raw : -raw;
+  return { slippagePoints: signed, slippagePips: signed };
+}
+
+export function auditOrderPlaced(db: DB, req: Request, trade: {
+  id: string; user_id: string; symbol: string; side: string; order_type: string; time_in_force?: string | null;
+  lots: number; requested_price?: number | null; limit_price?: number | null; stop_price?: number | null;
+  correlation_id?: string | null; order_id?: string | null; position_id?: string | null;
+}, quote?: { bid?: number | null; ask?: number | null; mid?: number | null }) {
+  const ctx = req.auditContext!;
+  const { spreadPoints, spreadPips } = calcSpread(quote?.bid ?? null, quote?.ask ?? null);
+
+  appendTradeAudit(db, {
+    ctx: { ...ctx, userId: trade.user_id, actorType: "USER", actorUserId: trade.user_id },
+    tradeId: trade.id,
+    eventCategory: "ORDER",
+    eventCode: "ORDER_PLACED",
+    ids: {
+      correlationId: trade.correlation_id ?? ctx.correlationId,
+      orderId: trade.order_id ?? null,
+      positionId: trade.position_id ?? null,
+    },
+    economics: {
+      symbol: trade.symbol,
+      side: trade.side,
+      orderType: trade.order_type,
+      timeInForce: trade.time_in_force ?? null,
+      qtyLots: trade.lots,
+      requestedPrice: trade.requested_price ?? null,
+      limitPrice: trade.limit_price ?? null,
+      stopPrice: trade.stop_price ?? null,
+    },
+    market: {
+      bid: quote?.bid ?? null,
+      ask: quote?.ask ?? null,
+      mid: quote?.mid ?? null,
+      spreadPoints,
+      spreadPips,
+    },
+    note: "Order placed",
+  });
+}
+
+export function auditOrderFilled(db: DB, req: Request, trade: {
+  id: string; user_id: string; symbol: string; side: string; order_type: string; time_in_force?: string | null;
+  lots: number; requested_price?: number | null; fill_price?: number | null;
+  correlation_id?: string | null; order_id?: string | null; execution_id?: string | null; position_id?: string | null;
+}, quote?: { bid?: number | null; ask?: number | null; mid?: number | null }) {
+  const ctx = req.auditContext!;
+  const { spreadPoints, spreadPips } = calcSpread(quote?.bid ?? null, quote?.ask ?? null);
+  const ref = quote?.mid ?? trade.requested_price ?? null;
+  const { slippagePoints, slippagePips } = signedSlippage(trade.side, ref, trade.fill_price ?? null);
+
+  appendTradeAudit(db, {
+    ctx: { ...ctx, userId: trade.user_id, actorType: "SYSTEM" },
+    tradeId: trade.id,
+    eventCategory: "EXECUTION",
+    eventCode: "ORDER_FILLED",
+    ids: {
+      correlationId: trade.correlation_id ?? ctx.correlationId,
+      orderId: trade.order_id ?? null,
+      executionId: trade.execution_id ?? uuid(),
+      positionId: trade.position_id ?? null,
+    },
+    economics: {
+      symbol: trade.symbol,
+      side: trade.side,
+      orderType: trade.order_type,
+      timeInForce: trade.time_in_force ?? null,
+      qtyLots: trade.lots,
+      requestedPrice: trade.requested_price ?? null,
+      fillPrice: trade.fill_price ?? null,
+      fillQtyLots: trade.lots,
+      avgFillPrice: trade.fill_price ?? null,
+      cumFillQtyLots: trade.lots,
+    },
+    market: {
+      bid: quote?.bid ?? null,
+      ask: quote?.ask ?? null,
+      mid: quote?.mid ?? null,
+      spreadPoints,
+      spreadPips,
+    },
+    tca: {
+      slippagePoints,
+      slippagePips,
+      slippageReference: "MID",
+    },
+    note: "Order filled",
+  });
+}
+
+export function auditOrderCanceled(db: DB, req: Request, trade: {
+  id: string; user_id: string; symbol?: string | null; side?: string | null; order_type?: string | null; time_in_force?: string | null;
+  lots?: number | null; requested_price?: number | null;
+  correlation_id?: string | null; order_id?: string | null; position_id?: string | null;
+}, note?: string) {
+  const ctx = req.auditContext!;
+  appendTradeAudit(db, {
+    ctx: { ...ctx, userId: trade.user_id, actorType: "USER", actorUserId: trade.user_id },
+    tradeId: trade.id,
+    eventCategory: "ORDER",
+    eventCode: "ORDER_CANCELED",
+    ids: {
+      correlationId: trade.correlation_id ?? ctx.correlationId,
+      orderId: trade.order_id ?? null,
+      positionId: trade.position_id ?? null,
+    },
+    economics: {
+      symbol: trade.symbol ?? null,
+      side: trade.side ?? null,
+      orderType: trade.order_type ?? null,
+      timeInForce: trade.time_in_force ?? null,
+      qtyLots: trade.lots ?? null,
+      requestedPrice: trade.requested_price ?? null,
+    },
+    note: note ?? "Order canceled",
+  });
+}
+
+export function auditPositionClosed(db: DB, req: Request, trade: {
+  id: string; user_id: string; symbol?: string | null; side?: string | null; order_type?: string | null;
+  lots?: number | null; correlation_id?: string | null; position_id?: string | null;
+}, note?: string) {
+  const ctx = req.auditContext!;
+  appendTradeAudit(db, {
+    ctx: { ...ctx, userId: trade.user_id, actorType: "USER", actorUserId: trade.user_id },
+    tradeId: trade.id,
+    eventCategory: "POSITION",
+    eventCode: "POSITION_CLOSED",
+    ids: {
+      correlationId: trade.correlation_id ?? ctx.correlationId,
+      positionId: trade.position_id ?? null,
+    },
+    economics: {
+      symbol: trade.symbol ?? null,
+      side: trade.side ?? null,
+      orderType: trade.order_type ?? null,
+      qtyLots: trade.lots ?? null,
+    },
+    note: note ?? "Position closed (manual)",
+  });
+}
+
+export function auditTargetsUpdated(db: DB, req: Request, trade: {
+  id: string; user_id: string; symbol?: string | null; side?: string | null;
+  correlation_id?: string | null; position_id?: string | null;
+}, targets: { takeProfit?: number | null; stopLoss?: number | null }) {
+  const ctx = req.auditContext!;
+  appendTradeAudit(db, {
+    ctx: { ...ctx, userId: trade.user_id, actorType: "USER", actorUserId: trade.user_id },
+    tradeId: trade.id,
+    eventCategory: "POSITION",
+    eventCode: "TARGETS_UPDATED",
+    ids: {
+      correlationId: trade.correlation_id ?? ctx.correlationId,
+      positionId: trade.position_id ?? null,
+    },
+    payload: { takeProfit: targets.takeProfit ?? null, stopLoss: targets.stopLoss ?? null },
+    note: "Targets updated",
+  });
+}
+```
+
+---
+
+# /backend/src/routes/trades.ts
+
+This is the **minimal route wiring** showing how to guarantee:
+
+* correlationId exists (middleware)
+* order_intent_audit RECEIVED/DECISION are written (risk middleware hooks)
+* trade_audit events are written for the lifecycle events you listed
+
+```ts
+import { Router } from "express";
+import type Database from "better-sqlite3";
+import crypto from "node:crypto";
+import { attachAuditContext } from "../middleware/auditContext";
+import { logOrderReceived, logOrderDecision } from "../risk/riskAuditHelpers";
+import {
+  auditOrderPlaced,
+  auditOrderFilled,
+  auditOrderCanceled,
+  auditPositionClosed,
+  auditTargetsUpdated
+} from "./trades.auditWiring";
+
+type DB = Database.Database;
+const uuid = () => crypto.randomUUID();
+
+export function tradeRoutes(db: DB) {
+  const r = Router();
+
+  // Replace with your auth
+  const requireAuth = (req: any, res: any, next: any) => {
+    if (!req.user?.id) return res.status(401).json({ error: "UNAUTHENTICATED" });
+    next();
+  };
+
+  // ---- POST /trades (order attempt) ----
+  r.post("/trades", attachAuditContext, requireAuth, (req, res) => {
+    const userId = req.user.id as string;
+    const ctx = req.auditContext!;
+    ctx.userId = userId;
+
+    const b = req.body || {};
+    const symbol = String(b.symbol || "");
+    const side = String(b.side || "");
+    const orderType = String(b.orderType || "MARKET");
+    const tif = b.timeInForce ? String(b.timeInForce) : null;
+    const qtyLots = Number(b.lots ?? 0);
+
+    const requestedPrice = b.requestedPrice != null ? Number(b.requestedPrice) : null;
+    const limitPrice = b.limitPrice != null ? Number(b.limitPrice) : null;
+    const stopPrice = b.stopPrice != null ? Number(b.stopPrice) : null;
+    const takeProfit = b.takeProfit != null ? Number(b.takeProfit) : null;
+    const stopLoss = b.stopLoss != null ? Number(b.stopLoss) : null;
+
+    const quoteBid = b.quoteBid != null ? Number(b.quoteBid) : null;
+    const quoteAsk = b.quoteAsk != null ? Number(b.quoteAsk) : null;
+    const quoteMid = b.quoteMid != null ? Number(b.quoteMid) : (quoteBid != null && quoteAsk != null ? (quoteBid + quoteAsk) / 2 : null);
+    const quoteTsUtcMs = b.quoteAt != null ? Number(b.quoteAt) : null;
+
+    // (1) RECEIVED (always)
+    logOrderReceived(db, ctx, {
+      userId, symbol, side, orderType, timeInForce: tif ?? undefined,
+      qtyLots, requestedPrice: requestedPrice ?? undefined,
+      limitPrice: limitPrice ?? undefined, stopPrice: stopPrice ?? undefined,
+      takeProfit: takeProfit ?? undefined, stopLoss: stopLoss ?? undefined,
+      quoteBid: quoteBid ?? undefined, quoteAsk: quoteAsk ?? undefined, quoteMid: quoteMid ?? undefined, quoteTsUtcMs: quoteTsUtcMs ?? undefined,
+      payload: { route: "POST /trades" },
+    });
+
+    // (2) Minimal PASS/REJECT decision example (plug in your actual risk engine)
+    // NOTE: this section is purposely small to keep scope on audit. Replace with your real checks.
+    const effectiveLimits = { maxLotsTotal: 50, maxTradesTotal: 5, maxTradesPerSymbol: 3 };
+    const observed = { concurrentLots: b.concurrentLots ?? null, concurrentTrades: b.concurrentTrades ?? null };
+    const snapshot = { hint: "attach your real risk snapshot here" };
+
+    const reject = (check: string, reason: string) => {
+      logOrderDecision(db, ctx, {
+        userId,
+        decision: "REJECT",
+        rejectCheck: check,
+        rejectReason: reason,
+        symbol, side, orderType, timeInForce: tif ?? undefined, qtyLots,
+        requestedPrice: requestedPrice ?? undefined, limitPrice: limitPrice ?? undefined, stopPrice: stopPrice ?? undefined,
+        takeProfit: takeProfit ?? undefined, stopLoss: stopLoss ?? undefined,
+        quoteBid: quoteBid ?? undefined, quoteAsk: quoteAsk ?? undefined, quoteMid: quoteMid ?? undefined, quoteTsUtcMs: quoteTsUtcMs ?? undefined,
+        riskLimit: effectiveLimits,
+        riskObserved: observed,
+        riskSnapshot: snapshot,
+      });
+      return res.status(400).json({ error: "RISK_REJECT", check, reason, correlationId: ctx.correlationId });
+    };
+
+    if (!symbol || !side || qtyLots <= 0) return reject("BAD_REQUEST", "Missing symbol/side/lots");
+
+    // Example reject: max lots (replace with actual computed exposure)
+    if (qtyLots > effectiveLimits.maxLotsTotal) return reject("MAX_CONCURRENT_LOTS", "Requested lots exceed max concurrent lots");
+
+    // PASS decision
+    logOrderDecision(db, ctx, {
+      userId,
+      decision: "PASS",
+      symbol, side, orderType, timeInForce: tif ?? undefined, qtyLots,
+      requestedPrice: requestedPrice ?? undefined, limitPrice: limitPrice ?? undefined, stopPrice: stopPrice ?? undefined,
+      takeProfit: takeProfit ?? undefined, stopLoss: stopLoss ?? undefined,
+      quoteBid: quoteBid ?? undefined, quoteAsk: quoteAsk ?? undefined, quoteMid: quoteMid ?? undefined, quoteTsUtcMs: quoteTsUtcMs ?? undefined,
+      riskLimit: effectiveLimits,
+      riskObserved: observed,
+      riskSnapshot: snapshot,
+    });
+
+    // (3) Create trade (your table may differ; key requirement is persisting correlation_id)
+    const tradeId = uuid();
+    const orderId = uuid(); // allocator-grade separation: order_id distinct from trade_id
+    const positionId = orderType === "MARKET" ? uuid() : null;
+
+    const status = orderType === "MARKET" ? "OPEN" : "PENDING";
+    const fillPrice = orderType === "MARKET" ? (requestedPrice ?? quoteMid) : null;
+
+    db.prepare(`
+      INSERT INTO trades (
+        id, user_id, symbol, side, order_type, time_in_force, status, lots,
+        requested_price, limit_price, stop_price, take_profit, stop_loss,
+        fill_price, correlation_id, order_id, position_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      tradeId, userId, symbol, side, orderType, tif,
+      status, qtyLots,
+      requestedPrice, limitPrice, stopPrice, takeProfit, stopLoss,
+      fillPrice,
+      ctx.correlationId,
+      orderId,
+      positionId
+    );
+
+    // (4) trade_audit events:
+    // ORDER_PLACED always
+    auditOrderPlaced(db, req, {
+      id: tradeId,
+      user_id: userId,
+      symbol,
+      side,
+      order_type: orderType,
+      time_in_force: tif,
+      lots: qtyLots,
+      requested_price: requestedPrice,
+      limit_price: limitPrice,
+      stop_price: stopPrice,
+      correlation_id: ctx.correlationId,
+      order_id: orderId,
+      position_id: positionId,
+    }, { bid: quoteBid, ask: quoteAsk, mid: quoteMid });
+
+    // ORDER_FILLED only for MARKET on creation
+    if (status === "OPEN") {
+      auditOrderFilled(db, req, {
+        id: tradeId,
+        user_id: userId,
+        symbol,
+        side,
+        order_type: orderType,
+        time_in_force: tif,
+        lots: qtyLots,
+        requested_price: requestedPrice,
+        fill_price: fillPrice,
+        correlation_id: ctx.correlationId,
+        order_id: orderId,
+        execution_id: uuid(),
+        position_id: positionId,
+      }, { bid: quoteBid, ask: quoteAsk, mid: quoteMid });
+    }
+
+    return res.json({ ok: true, tradeId, orderId, positionId, status, correlationId: ctx.correlationId });
+  });
+
+  // ---- POST /trades/:id/cancel (pending cancel) ----
+  r.post("/trades/:id/cancel", attachAuditContext, requireAuth, (req, res) => {
+    const userId = req.user.id as string;
+    const ctx = req.auditContext!;
+    ctx.userId = userId;
+
+    const tradeId = String(req.params.id);
+    const t = db.prepare(`SELECT * FROM trades WHERE id = ?`).get(tradeId) as any;
+    if (!t) return res.status(404).json({ error: "NOT_FOUND" });
+    if (t.user_id !== userId) return res.status(403).json({ error: "FORBIDDEN" });
+
+    db.prepare(`UPDATE trades SET status = 'CANCELED' WHERE id = ?`).run(tradeId);
+
+    auditOrderCanceled(db, req, {
+      id: t.id,
+      user_id: t.user_id,
+      symbol: t.symbol,
+      side: t.side,
+      order_type: t.order_type,
+      time_in_force: t.time_in_force,
+      lots: t.lots,
+      requested_price: t.requested_price,
+      correlation_id: t.correlation_id,
+      order_id: t.order_id,
+      position_id: t.position_id,
+    }, "User canceled pending order");
+
+    res.json({ ok: true, tradeId, correlationId: ctx.correlationId });
+  });
+
+  // ---- POST /trades/:id/close (manual close) ----
+  r.post("/trades/:id/close", attachAuditContext, requireAuth, (req, res) => {
+    const userId = req.user.id as string;
+    const ctx = req.auditContext!;
+    ctx.userId = userId;
+
+    const tradeId = String(req.params.id);
+    const t = db.prepare(`SELECT * FROM trades WHERE id = ?`).get(tradeId) as any;
+    if (!t) return res.status(404).json({ error: "NOT_FOUND" });
+    if (t.user_id !== userId) return res.status(403).json({ error: "FORBIDDEN" });
+
+    db.prepare(`UPDATE trades SET status = 'CLOSED' WHERE id = ?`).run(tradeId);
+
+    auditPositionClosed(db, req, {
+      id: t.id,
+      user_id: t.user_id,
+      symbol: t.symbol,
+      side: t.side,
+      order_type: t.order_type,
+      lots: t.lots,
+      correlation_id: t.correlation_id,
+      position_id: t.position_id,
+    }, "Manual close");
+
+    res.json({ ok: true, tradeId, correlationId: ctx.correlationId });
+  });
+
+  // ---- POST /trades/:id/targets (TP/SL update) ----
+  r.post("/trades/:id/targets", attachAuditContext, requireAuth, (req, res) => {
+    const userId = req.user.id as string;
+    const ctx = req.auditContext!;
+    ctx.userId = userId;
+
+    const tradeId = String(req.params.id);
+    const t = db.prepare(`SELECT * FROM trades WHERE id = ?`).get(tradeId) as any;
+    if (!t) return res.status(404).json({ error: "NOT_FOUND" });
+    if (t.user_id !== userId) return res.status(403).json({ error: "FORBIDDEN" });
+
+    const takeProfit = req.body?.takeProfit != null ? Number(req.body.takeProfit) : null;
+    const stopLoss = req.body?.stopLoss != null ? Number(req.body.stopLoss) : null;
+
+    db.prepare(`UPDATE trades SET take_profit = ?, stop_loss = ? WHERE id = ?`).run(takeProfit, stopLoss, tradeId);
+
+    auditTargetsUpdated(db, req, {
+      id: t.id,
+      user_id: t.user_id,
+      symbol: t.symbol,
+      side: t.side,
+      correlation_id: t.correlation_id,
+      position_id: t.position_id,
+    }, { takeProfit, stopLoss });
+
+    res.json({ ok: true, tradeId, correlationId: ctx.correlationId });
+  });
+
+  return r;
+}
+```
+
+---
+
+# /backend/src/routes/admin.audit.ts
+
+A basic admin read API for both tables (so you can drive your existing “Trade Audit” tab and/or the “Order Intents” tab).
+
+```ts
+import { Router } from "express";
+import type Database from "better-sqlite3";
+
+type DB = Database.Database;
+
+export function adminAuditRoutes(db: DB) {
+  const r = Router();
+
+  // Replace with your auth + admin middleware
+  const requireAdmin = (req: any, res: any, next: any) => {
+    if (req.user?.role !== "ADMIN") return res.status(403).json({ error: "FORBIDDEN" });
+    next();
+  };
+
+  r.get("/admin/order-intent-audit", requireAdmin, (req, res) => {
+    const p = req.query as any;
+    const lim = Math.min(Number(p.limit ?? 500), 2000);
+
+    const clauses: string[] = [];
+    const args: any[] = [];
+
+    if (p.userId) { clauses.push("user_id = ?"); args.push(String(p.userId)); }
+    if (p.correlationId) { clauses.push("correlation_id = ?"); args.push(String(p.correlationId)); }
+    if (p.decision) { clauses.push("decision = ?"); args.push(String(p.decision)); }
+    if (p.eventCode) { clauses.push("event_code = ?"); args.push(String(p.eventCode)); }
+
+    const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+    const rows = db.prepare(`
+      SELECT *
+      FROM order_intent_audit
+      ${where}
+      ORDER BY ts_server_utc_ms DESC
+      LIMIT ${lim}
+    `).all(...args);
+
+    res.json(rows);
+  });
+
+  r.get("/admin/trade-audit", requireAdmin, (req, res) => {
+    const p = req.query as any;
+    const lim = Math.min(Number(p.limit ?? 500), 2000);
+
+    const clauses: string[] = [];
+    const args: any[] = [];
+
+    if (p.userId) { clauses.push("user_id = ?"); args.push(String(p.userId)); }
+    if (p.tradeId) { clauses.push("trade_id = ?"); args.push(String(p.tradeId)); }
+    if (p.correlationId) { clauses.push("correlation_id = ?"); args.push(String(p.correlationId)); }
+    if (p.eventCode) { clauses.push("event_code = ?"); args.push(String(p.eventCode)); }
+
+    const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+    const rows = db.prepare(`
+      SELECT *
+      FROM trade_audit
+      ${where}
+      ORDER BY ts_server_utc_ms DESC
+      LIMIT ${lim}
+    `).all(...args);
+
+    res.json(rows);
+  });
+
+  return r;
+}
+```
+
+---
+
+# /backend/src/server.ts (wiring)
+
+```ts
+import express from "express";
+import Database from "better-sqlite3";
+import { ensureAuditSchema } from "./db/ensureAuditSchema";
+import { tradeRoutes } from "./routes/trades";
+import { adminAuditRoutes } from "./routes/admin.audit";
+
+const db = new Database(process.env.SQLITE_FILE || "data.sqlite");
+ensureAuditSchema(db);
+
+const app = express();
+app.use(express.json({ limit: "1mb" }));
+
+// NOTE: your auth middleware must set req.user = { id, role }
+app.use("/api", tradeRoutes(db));
+app.use("/api", adminAuditRoutes(db));
+
+app.listen(Number(process.env.PORT || 3001));
+```
+
+---
+
+## What this gives you immediately (auditor-grade for the four items)
+
+### 1) CorrelationId on every attempt
+
+* Generated if missing; returned as `x-correlation-id` response header
+* Stored in `order_intent_audit.correlation_id` and `trades.correlation_id` and `trade_audit.correlation_id`
+
+### 2) order_intent_audit (RECEIVED + DECISION)
+
+* Always writes:
+
+  * `RECEIVED` at request entry
+  * `DECISION PASS/REJECT` at risk conclusion
+* For rejects: writes `reject_check` and `reject_reason`
+
+### 3) trade_audit lifecycle events
+
+* Market creation: `ORDER_PLACED` then `ORDER_FILLED`
+* Pending placement: `ORDER_PLACED`
+* Cancel: `ORDER_CANCELED`
+* Manual close: `POSITION_CLOSED`
+* TP/SL update: `TARGETS_UPDATED`
+
+### 4) Tamper-evident SHA-256 chaining
+
+* Both tables are **append-only**
+* Each stream is hash-chained:
+
+  * `order_intent_audit` chained per `correlation_id`
+  * `trade_audit` chained per `trade_id`
+* Stored fields:
+
+  * `prev_hash`
+  * `event_hash`
+  * `payload_json` is **canonical** and is exactly what is hashed
+
+---
+
+## Strictly optional (but allocator-relevant) improvements that do NOT change your UI
+
+If you want the same implementation to satisfy the “Trade ID is not enough” critique without changing your grid:
+
+* Keep your current grid columns, but persist and hash:
+
+  * `order_id`, `position_id`, `execution_id` (already included as optional)
+* You can keep showing “Trade ID” while still being able to reconstruct lifecycle.
+
+---
+
+If you paste (not upload) just the following from your current repo, I will adapt the above into a **direct file-by-file patch** that matches your exact existing naming and DB layer without guessing:
+
+* your current `trades` schema/table definition
+* the current `/api/trades` create route
+* your existing “risk middleware” or rejection logic
+* your current Trade Audit API endpoint (if any)

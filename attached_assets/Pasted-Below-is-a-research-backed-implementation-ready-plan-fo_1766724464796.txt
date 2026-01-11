@@ -1,0 +1,301 @@
+Below is a research-backed, implementation-ready plan for **capturing**, **auditing**, **detecting**, and **surfacing** (to admins) traders who (a) run **multiple accounts on the same device/network** and/or (b) show **account-sharing / “pilot trading” signals** (same account hopping across IPs/devices/locations).
+
+---
+
+## 1) Research takeaways you can rely on
+
+### A. “Device identity” must be probabilistic, not absolute
+
+* **Browser/device fingerprinting** can produce a stable “visitor/device ID” even when cookies are cleared, but it is not perfect and must be treated as a **confidence signal**, not a legal identity. FingerprintJS explicitly positions “visitor identification” as a best-practice capability, and their open-source ecosystem plus commercial variants are widely used for fraud and abuse prevention. ([Fingerprint][1])
+
+### B. IP geolocation is useful, but accuracy is limited at city-level
+
+* MaxMind’s own accuracy guidance is explicit: country-level is high; region/state is materially lower; city is lower still (they cite ~66% city accuracy within ~50km radius in the U.S.). That means location-based rules must incorporate **accuracy radius** and avoid over-triggering. ([MaxMind Support][2])
+
+### C. Build “in-app intrusion detection” as detection points + responses
+
+* OWASP Session Management guidance calls out detecting **session anomalies**, and points to AppSensor-style thinking: define **detection points** and **response actions** (flag → step-up auth → restrict → freeze). ([OWASP Cheat Sheet Series][3])
+
+### D. Align with modern identity guidance: risk-based decisions and binding
+
+* NIST SP 800-63B (recent revisions) supports risk-based authentication patterns and emphasizes binding/management of authenticators and lifecycle hygiene—useful framing for “trusted device”, “new device step-up”, and “re-verification on anomaly.” ([NIST Pages][4])
+
+---
+
+## 2) What you should capture (signals) — and where
+
+Think in four layers: **Account ↔ Session ↔ Device ↔ Network/Geo**. You want enough to detect abuse, but not so much that you create unnecessary privacy/regulatory exposure.
+
+### A. Session & login telemetry (server-truth)
+
+Capture on every:
+
+* login success / login failure
+* token refresh
+* logout (explicit + idle timeout)
+* privileged actions (placing orders, cancelling, changing SL/TP, withdrawals if applicable)
+
+**Fields (minimum viable, high value):**
+
+* `userId`
+* `sessionId` (server-generated)
+* `timestamp`
+* `ipAddress` (and `x-forwarded-for` parsing if behind proxy/CDN)
+* `userAgent`
+* `deviceId` (from client fingerprint, see below)
+* `geo`: country/region/city + `accuracyRadius`
+* `asn`, `isp/org` (very useful to spot VPN/proxy/hosting vs residential)
+* `authContext`: login method, MFA present, email verified, SMS verified, KYC tier
+* `riskSnapshot`: risk score at time of event + triggered rules (if any)
+
+**Why:** This makes “account-sharing” measurable: session hopping, concurrent sessions, impossible travel, abnormal ASN changes, etc.
+
+### B. Device fingerprint (client-provided, server-stored)
+
+You need a stable `deviceId` that survives session rotation.
+
+Two common options:
+
+1. **Fingerprint provider** (e.g., FingerprintJS): returns a visitor/device identifier and confidence meta. ([Fingerprint][1])
+2. **First-party “soft fingerprint”** (lower accuracy): hash of UA + platform + timezone + screen metrics + some entropy (less reliable; easier to spoof)
+
+**Recommended approach:** Use a provider-grade `deviceId` if you can; store:
+
+* `deviceId`
+* `firstSeenAt`, `lastSeenAt`
+* `firstUserIdSeen` (for linking)
+* `deviceSignalsHash` (hash of the raw signals; store raw signals only if needed)
+* `trustLevel`: NEW / TRUSTED / CHALLENGED / BLOCKED
+
+### C. Network & Geo enrichment (server-enriched)
+
+Use an IP intelligence source to enrich IP into:
+
+* country/region/city, accuracy radius
+* ASN / organization / ISP (MaxMind has this in their datasets/services) ([MaxMind][5])
+* proxy/VPN likelihood if available (optional but valuable)
+
+**Key point:** Geo is supportive evidence; never the only evidence (accuracy limits). ([MaxMind Support][2])
+
+### D. Trading behavior linkage (engine-derived)
+
+This is where you detect “two-account hedging” and “pilot trading” with high confidence:
+
+* Same instrument, opposite side, same/similar timestamps, same device/network
+* High correlation of entries/exits across accounts
+* Coordinated risk behavior (e.g., one account takes aggressive risk, other hedges to stabilize outcome)
+
+---
+
+## 3) Detection goals and concrete rules (the “what to flag”)
+
+You want two categories:
+
+### Category 1: **Multi-account control / same operator**
+
+**Primary evidence (strong):**
+
+* Same `deviceId` seen on **multiple userIds**
+* Same `deviceId` + same `ip/asn` across accounts
+* Same browser fingerprint + consistent trade coordination patterns
+
+**Rules (examples):**
+
+* **R1 – Shared device:** `deviceId` observed on ≥2 accounts within last 30 days → create “Linked Accounts” record.
+* **R2 – Shared device + coordinated trading:** R1 plus trades on same symbol within X minutes and opposite direction → severity HIGH.
+* **R3 – Shared network cluster:** same ASN + /24 (IPv4) or /48 (IPv6) + same UA family across accounts frequently → severity MED (false positives possible: offices, schools).
+
+### Category 2: **Account sharing / pilot trading (one account, many operators)**
+
+**Primary evidence:**
+
+* Frequent changes in `deviceId`
+* Frequent and geographically inconsistent IP/ASN changes
+* Concurrent sessions from distant locations
+
+**Rules (examples):**
+
+* **R4 – New device churn:** >N new deviceIds for same user in 7 days (e.g., N=3) → severity MED; trigger step-up checks.
+* **R5 – Impossible travel:** login from region A then region B in time < realistic travel threshold, factoring IP accuracy radius → severity HIGH.
+* **R6 – Concurrent far sessions:** two active sessions overlapping with materially different geo/ASN/device → severity HIGH.
+
+**OWASP-aligned response model:** rules are your detection points; responses are: flag → step-up verification → restrict risky actions → freeze. ([OWASP Cheat Sheet Series][3])
+
+---
+
+## 4) Storage model (audit-first + graph-friendly)
+
+You will need (at minimum) these tables/entities. Even on SQLite, this is workable if indexed properly.
+
+### A. Core tables
+
+1. **`auth_sessions`**
+
+* session facts: `sessionId`, `userId`, `deviceId`, `ip`, `asn`, `geo`, `userAgent`, `startedAt`, `endedAt`, `endReason`
+
+2. **`auth_events`**
+
+* append-only: LOGIN_SUCCESS, LOGIN_FAIL, LOGOUT, TOKEN_REFRESH, STEP_UP_REQUIRED, etc.
+
+3. **`devices`**
+
+* `deviceId`, `firstSeenAt`, `lastSeenAt`, `trustLevel`, `firstIp`, `firstGeo`, etc.
+
+4. **`device_user_links`**
+
+* many-to-many: `deviceId` ↔ `userId`, with `firstSeenAt`, `lastSeenAt`, `linkStrength`
+
+5. **`integrity_alerts`**
+
+* `alertId`, `userId` (or pair), `ruleCode`, `severity`, `status` (OPEN/IN_REVIEW/CLOSED), `evidenceJson`, timestamps, `assignedAdminId`
+
+### B. Derived tables (optional but very useful)
+
+6. **`integrity_daily_features`**
+
+* per user/day features: device count, ip count, asn count, geo dispersion, concurrent session count, etc.
+
+7. **`linked_account_graph_edges`**
+
+* edges between accounts: same device, same IP/ASN, same trade coordination; store weights for quick admin viewing.
+
+---
+
+## 5) Detection engine design (rules + scoring + workflows)
+
+### A. Two-pass system: Real-time + Batch
+
+1. **Real-time (request-time)**
+
+* On login / order placement: compute quick risk checks:
+
+  * new device?
+  * device linked to other accounts?
+  * concurrent session?
+  * sudden ASN jump?
+* Output:
+
+  * risk score
+  * triggered rules
+  * optional “step-up required” or “restrict action”
+
+2. **Batch (every 15–60 minutes, and nightly deeper job)**
+
+* Build/refresh:
+
+  * account-link graph
+  * coordinated trading checks
+  * rolling risk score based on last 7/30/90 days
+
+### B. Risk scoring (admin-friendly)
+
+Use a 0–100 score with transparent components:
+
+* +30 if shared device with another account
+* +25 if shared device AND opposite-direction symbol trading correlation
+* +15 if impossible travel
+* +10 if ASN volatility above baseline
+* +10 if device churn above baseline
+* -10 if MFA enabled + device marked TRUSTED for >30 days (optional)
+
+This keeps it explainable: admins can see “why” without black-box ML.
+
+---
+
+## 6) Admin surfacing (what the dashboard needs)
+
+Create a dedicated area in Admin Dashboard, e.g. **“Integrity / Abuse”**:
+
+### A. Integrity Queue (triage table)
+
+Columns:
+
+* Severity (HIGH/MED/LOW)
+* Alert Type (Shared Device, Linked Accounts, Impossible Travel, Concurrent Sessions, Coordinated Hedging)
+* User(s)
+* Last Seen
+* Key Evidence (deviceId snippet, ASN/org, country pair)
+* Status + Assigned To
+* Actions: View, Assign, Request Re-Verification, Freeze, Dismiss (with reason)
+
+### B. User Integrity Profile (drill-down)
+
+Sections:
+
+1. **Devices**: list deviceIds, first/last seen, trust level, linked accounts count
+2. **Sessions timeline**: logins/logouts with IP/ASN/geo, “new device” markers
+3. **Linked accounts graph**: show accounts connected by same device/network/trade coordination
+4. **Trade coordination evidence**: suspicious pairs of trades (symbol, timestamp, side, lots)
+5. **Audit export**: export evidence bundle for compliance review
+
+---
+
+## 7) Response actions (graduated, allocator/compliance-friendly)
+
+Recommended ladder (do not jump straight to bans/freeze unless confidence is high):
+
+1. **Flag only** (LOW): queue for review
+2. **Step-up verification** (MED): require email/SMS revalidation or MFA enrollment
+3. **Restrict sensitive actions** (MED/HIGH): limit new trades, prevent withdrawals, cap lots
+4. **Freeze with reason code** (HIGH): “Integrity review: linked accounts / account sharing suspected”
+5. **KYC escalation**: only when policy requires
+
+This maps cleanly to “detection points and responses” thinking. ([OWASP Cheat Sheet Series][3])
+
+---
+
+## 8) Privacy, consent, and operational guardrails (practical, not theoretical)
+
+* **Minimize raw fingerprint data**: store a provider `deviceId` + hash of signals; keep raw signals only if you truly need them.
+* **Retention**: keep raw IP/session logs for a fixed window (e.g., 90–180 days) and keep aggregated features longer.
+* **Geo caveat**: always display accuracy radius and treat city-level as approximate (MaxMind’s own guidance supports this caution). ([MaxMind Support][2])
+* **Explainability**: every alert must store the exact rule triggers and evidence snapshot.
+
+---
+
+## 9) Implementation plan (phased, lowest-risk path)
+
+### Phase 1 — Instrumentation (foundation)
+
+* Add server middleware to capture: IP, UA, sessionId, userId, timestamp.
+* Add client capture of `deviceId` (fingerprint provider or first-party) and send on login + periodically.
+* Enrich IP → geo/asn via an IP intelligence source (MaxMind-style datasets/services). ([MaxMind][5])
+
+### Phase 2 — Audit tables + admin read paths
+
+* Create `auth_sessions`, `auth_events`, `devices`, `device_user_links`, `integrity_alerts`.
+* Build admin endpoints to:
+
+  * list alerts
+  * get user integrity profile
+  * get linked accounts graph
+
+### Phase 3 — Rule engine + queue
+
+* Implement R1–R6 rules with severity + evidence snapshots.
+* Add status workflow (OPEN/IN_REVIEW/CLOSED) and admin notes.
+
+### Phase 4 — Trading coordination detection
+
+* Add “coordinated hedging” detector:
+
+  * same symbol, opposite direction, short time window, shared device/ip/asn
+  * compute correlation features and raise HIGH severity when combined with linkage
+
+### Phase 5 — Step-up verification + restrictions
+
+* Integrate risk-based actions:
+
+  * “new device requires email/SMS revalidation”
+  * “HIGH risk blocks new trades pending review”
+* Align this with your existing email/SMS verification and KYC tiers.
+
+---
+
+If you want the next step, I can translate this into your stack directly (Drizzle + SQLite schema additions, Express middleware hooks, and the Admin dashboard “Integrity” tab design with the exact fields and filters). To do that cleanly, I would implement it as **append-only audit logs + derived alert tables** so it fits your hedge-fund-grade “data trails” standard.
+
+[1]: https://dev.fingerprint.com/docs/identify-visitors?utm_source=chatgpt.com "Identify visitors"
+[2]: https://support.maxmind.com/knowledge-base/articles/maxmind-geolocation-accuracy?utm_source=chatgpt.com "Geolocation accuracy"
+[3]: https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html?utm_source=chatgpt.com "Session Management - OWASP Cheat Sheet Series"
+[4]: https://pages.nist.gov/800-63-3/sp800-63b.html?utm_source=chatgpt.com "NIST Special Publication 800-63B"
+[5]: https://www.maxmind.com/en/geoip-databases?utm_source=chatgpt.com "MaxMind GeoIP® Databases"

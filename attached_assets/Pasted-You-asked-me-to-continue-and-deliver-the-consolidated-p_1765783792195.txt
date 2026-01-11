@@ -1,0 +1,171 @@
+You asked me to **continue and deliver the consolidated patch ZIP** (TradeScreen UI transformation + 10-pip suggestion/tracking + backend MT5 validation + pending execution engine + stale quote blocking + proper history transitions).
+
+I **started the finalization work** on a fresh extraction of `TradingCentral-3AL.zip` at:
+
+* `/mnt/data/tc3al_final/TradingCentral-2`
+
+and I validated the exact locations that must be changed on both client and server.
+
+However, I **cannot honestly claim completion** yet: I hit the tool/runtime cutoff **mid-edit while overwriting `server/recalcAccount.ts`** (I was actively replacing the stale-unsafe recalc logic with the risk-safe “Option 1” freeze behavior). Because of that cutoff, I did **not** get to finish:
+
+* the full file overwrite of `server/recalcAccount.ts`,
+* the remaining `server/routes.ts` modifications (MT5 validations + close logic + account summary shape),
+* the new pending execution engine file,
+* the TradeScreen minitab/button rewrite and 10-pip tracking effects,
+* and the **final consolidated ZIP packaging**.
+
+So the patch ZIP is **not yet produced** in this message.
+
+---
+
+## What I have confirmed (and what will be in the consolidated patch)
+
+### A) Client: TradeScreen changes required (Limit/Stop only, MT5 style)
+
+**Current state:** Limit/Stop uses the same BUY/SELL submit buttons and relies on `openPrice` client-side.
+**Target:**
+
+* Market: keep BUY/SELL
+* Limit/Stop: **mini-tabs** + a **single Place Order button** with MT5-style labels:
+
+**Limit tab**
+
+* mini-tabs: **BUY LIMIT** / **SELL LIMIT**
+* button: **Place BUY LIMIT @ {limitPrice}** or **Place SELL LIMIT @ {limitPrice}**
+
+**Stop tab**
+
+* mini-tabs: **BUY STOP** / **SELL STOP**
+* button: **Place BUY STOP @ {stopPrice}** or **Place SELL STOP @ {stopPrice}**
+
+**10 pips (= 10 points) auto-suggest & tracking**
+
+* Pip size:
+
+  * JPY pairs: `pip = 0.01`
+  * non-JPY: `pip = 0.0001`
+  * distance = `10 * pip`
+* Suggested entry:
+
+  * BUY LIMIT: `ask − 10 pips`
+  * SELL LIMIT: `bid + 10 pips`
+  * BUY STOP: `ask + 10 pips`
+  * SELL STOP: `bid − 10 pips`
+* Suggested TP/SL relative to entry:
+
+  * BUY: TP = entry + 10 pips, SL = entry − 10 pips
+  * SELL: TP = entry − 10 pips, SL = entry + 10 pips
+* **Tracking rule:** entry/TP/SL **follow market** until user edits that field.
+
+### B) Backend: MT5 placement validation rules (Limit/Stop)
+
+In `POST /api/trades`, the server must:
+
+* **Ignore client openPrice** entirely.
+* Fetch authoritative bid/ask from quotes table.
+* Reject if quote is **missing/stale** (Option 1).
+* Validate pending order placement:
+
+  * BUY LIMIT ≤ ask − 10 pips
+  * SELL LIMIT ≥ bid + 10 pips
+  * BUY STOP ≥ ask + 10 pips
+  * SELL STOP ≤ bid − 10 pips
+* Validate TP/SL direction vs entry price (and optionally min distance).
+* Store pending entry as requested price in `openPrice` + also in `limitPrice`/`stopPrice`.
+* Create trade as:
+
+  * Market → status OPEN
+  * Limit/Stop → status PENDING
+
+### C) Pending execution engine (PENDING → OPEN)
+
+A new engine will:
+
+* Poll (default 1s) all PENDING trades
+* Block processing if quote missing/stale (Option 1)
+* Trigger conditions using bid/ask (MT5-style):
+
+  * BUY LIMIT triggers when **ask ≤ limitPrice**
+  * SELL LIMIT triggers when **bid ≥ limitPrice**
+  * BUY STOP triggers when **ask ≥ stopPrice**
+  * SELL STOP triggers when **bid ≤ stopPrice**
+* Fill prices:
+
+  * BUY fill at **ask**
+  * SELL fill at **bid**
+* Re-check margin at execution time (professional requirement)
+* Update:
+
+  * status: PENDING → OPEN
+  * executedAt set
+  * openPrice updated to fill price
+* Broadcast `trades:updated` via WS so clients refresh immediately.
+
+### D) TP/SL trigger execution (recommended, professional)
+
+Same engine will also:
+
+* Close OPEN positions on TP/SL using correct close-out side:
+
+  * BUY closes on **bid**
+
+    * TP if bid ≥ TP
+    * SL if bid ≤ SL
+  * SELL closes on **ask**
+
+    * TP if ask ≤ TP
+    * SL if ask ≥ SL
+* Block if quote stale (Option 1)
+* Realize P/L using server PnL formula (preferably `unrealizedPnl()`)
+
+### E) Account summary & recalcAccount (Option 1 freeze)
+
+`server/recalcAccount.ts` must be rewritten to:
+
+* Use bid/ask close-out prices per side
+* Fix the “one price per symbol” caching bug (BUY+SELL same symbol)
+* If any required quote missing/stale:
+
+  * return `{ pricingStale: true, staleSymbols: [...] }`
+  * **do not overwrite** `users.equity/freeMargin/usedMargin`
+* `/api/account/summary` should return:
+
+  * both `floatingPnl` and `floatingPL` (your UI currently expects both in different places)
+  * and include `pricingStale/staleSymbols/pricingAsOf`
+
+---
+
+## What is incomplete right now
+
+1. I did **not finish overwriting `server/recalcAccount.ts`** due to tool cutoff mid-write.
+2. I did **not complete** the `server/routes.ts` edits for:
+
+   * MT5 pending validation
+   * close route removing client closePrice acceptance
+   * stale quote blocking everywhere
+3. I did **not add** the pending execution engine file nor wire it into `routes.ts`.
+4. I did **not complete** the TradeScreen UI rewrite nor the 10-pip auto-follow logic.
+5. I did **not produce the consolidated patch ZIP**.
+
+---
+
+## What I need to do next (and will do immediately when tools are available again)
+
+I will continue from `/mnt/data/tc3al_final/TradingCentral-2`, complete the file edits, then output:
+
+✅ **one consolidated patch ZIP** containing:
+
+* `client/src/pages/TradeScreen.tsx`
+* `client/src/hooks/use-trades.tsx`
+* `server/routes.ts`
+* `server/recalcAccount.ts`
+* `server/cron/orderEngine.ts` (new)
+* plus any wiring changes (`server/index.ts` or `routes.ts` depending on broadcast integration)
+
+---
+
+If you want me to proceed, respond with:
+
+**“Proceed with tool edits and output the consolidated patch ZIP.”**
+
+And I will complete all remaining modifications and provide the finished ZIP in a single response.

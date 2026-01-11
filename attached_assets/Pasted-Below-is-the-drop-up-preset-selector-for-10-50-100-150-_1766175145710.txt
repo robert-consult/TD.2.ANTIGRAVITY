@@ -1,0 +1,193 @@
+Below is the **drop-up preset selector** for **±10 / ±50 / ±100 / ±150 / ±200 points**, built directly on top of your existing **Auto-Fix TP/SL (±10 points)** implementation in **`EditTradeModal.tsx`**.
+
+---
+
+## 1) Add Drop-up imports + icons
+
+**File:** `client/src/components/EditTradeModal.tsx`
+
+### Add to your existing imports
+
+Add these imports (adjust if your project already imports some of them):
+
+```tsx
+import { ChevronUp, Check } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from "@/components/ui/dropdown-menu";
+```
+
+If you already import from `lucide-react`, just extend that import line.
+
+---
+
+## 2) Replace your current `autoFixTargets` with a preset-aware version
+
+Find your existing `autoFixTargets()` (the ±10 one) and replace it with this:
+
+```tsx
+  const AUTO_FIX_PRESETS = [10, 50, 100, 150, 200] as const;
+
+  const autoFixTargets = (points: number = 10) => {
+    if (!referencePrice || referencePrice <= 0) return;
+
+    const decimals = isJpyPair ? 2 : 4;
+
+    // Convert "points" → price distance using the same pipFactor rule used elsewhere in this modal.
+    // Enforce the minimum distance rule (10 points) regardless of selection.
+    const requestedDistance = points * pipFactor;
+    const distance = Math.max(minDistance, requestedDistance);
+
+    const recommendedTP =
+      trade.type === "BUY"
+        ? Number((referencePrice + distance).toFixed(decimals))
+        : Number((referencePrice - distance).toFixed(decimals));
+
+    const recommendedSL =
+      trade.type === "BUY"
+        ? Number((referencePrice - distance).toFixed(decimals))
+        : Number((referencePrice + distance).toFixed(decimals));
+
+    const currentTPRaw = form.getValues("takeProfit");
+    const currentSLRaw = form.getValues("stopLoss");
+
+    const currentTP =
+      typeof currentTPRaw === "number" && Number.isFinite(currentTPRaw) ? currentTPRaw : null;
+    const currentSL =
+      typeof currentSLRaw === "number" && Number.isFinite(currentSLRaw) ? currentSLRaw : null;
+
+    // If missing OR invalid relative to minimum rules, set to recommended; otherwise keep user values.
+    let nextTP = currentTP;
+    let nextSL = currentSL;
+
+    if (trade.type === "BUY") {
+      if (nextTP === null || nextTP < referencePrice + minDistance) nextTP = recommendedTP;
+      if (nextSL === null || nextSL > referencePrice - minDistance) nextSL = recommendedSL;
+    } else {
+      if (nextTP === null || nextTP > referencePrice - minDistance) nextTP = recommendedTP;
+      if (nextSL === null || nextSL < referencePrice + minDistance) nextSL = recommendedSL;
+    }
+
+    form.setValue("takeProfit", nextTP ?? undefined, { shouldDirty: true, shouldTouch: true });
+    form.setValue("stopLoss", nextSL ?? undefined, { shouldDirty: true, shouldTouch: true });
+
+    validateTPSL(nextTP, nextSL);
+  };
+```
+
+This preserves your “fix only when missing/invalid” behavior, but allows any preset distance to be used as the recommended target spacing.
+
+---
+
+## 3) Replace the single Auto-Fix button with a **drop-up** preset selector
+
+Find the UI block you added previously (the one that shows the single button):
+
+```tsx
+{Object.keys(validationMessages).length > 0 && (
+  <div className="rounded-md border border-amber-500/20 bg-amber-500/5 p-3 flex items-center justify-between gap-3">
+    <div className="text-sm text-amber-200">
+      One or more targets are invalid relative to the ...
+    </div>
+    <Button ...>
+      Auto-Fix TP/SL (±10 points)
+    </Button>
+  </div>
+)}
+```
+
+Replace it with this **drop-up** version:
+
+```tsx
+          {Object.keys(validationMessages).length > 0 && (
+            <div className="rounded-md border border-amber-500/20 bg-amber-500/5 p-3 flex items-center justify-between gap-3">
+              <div className="text-sm text-amber-200">
+                One or more targets are invalid relative to the{" "}
+                {trade.status === "PENDING" ? "order price" : "current price"}.
+              </div>
+
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={!referencePrice || referencePrice <= 0}
+                    className="border-amber-500/30 bg-amber-500/5 hover:bg-amber-500/10"
+                  >
+                    Auto-Fix TP/SL (±10)
+                    <ChevronUp className="ml-2 h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+
+                {/* Drop-up: open ABOVE the button */}
+                <DropdownMenuContent side="top" align="end" className="w-56">
+                  {AUTO_FIX_PRESETS.map((p) => (
+                    <DropdownMenuItem
+                      key={p}
+                      onSelect={() => autoFixTargets(p)}
+                      className="flex items-center justify-between"
+                    >
+                      <span>Set TP/SL to ±{p} points</span>
+                      {p === 10 ? <Check className="h-4 w-4 opacity-80" /> : null}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          )}
+```
+
+### Notes
+
+* `DropdownMenuContent side="top"` makes it a **drop-up** (opens above).
+* The trigger still says **±10** to keep your default framing (“build on top of the 10”), but now traders can pick larger offsets instantly.
+
+---
+
+## Optional (recommended): show the same drop-up even when targets are already valid
+
+If you want traders to use presets even when no warnings exist, add this **second block** right below the inputs (or below the Trading Rules panel). It’s neutral-styled and always available:
+
+```tsx
+          {Object.keys(validationMessages).length === 0 && (
+            <div className="rounded-md border border-white/10 bg-white/5 p-3 flex items-center justify-between gap-3">
+              <div className="text-sm text-gray-200">
+                Quick presets: set TP/SL relative to the {trade.status === "PENDING" ? "order price" : "current price"}.
+              </div>
+
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={!referencePrice || referencePrice <= 0}
+                    className="border-white/10 bg-white/5 hover:bg-white/10"
+                  >
+                    Presets (±10)
+                    <ChevronUp className="ml-2 h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+
+                <DropdownMenuContent side="top" align="end" className="w-56">
+                  {AUTO_FIX_PRESETS.map((p) => (
+                    <DropdownMenuItem
+                      key={p}
+                      onSelect={() => autoFixTargets(p)}
+                      className="flex items-center justify-between"
+                    >
+                      <span>Set TP/SL to ±{p} points</span>
+                      {p === 10 ? <Check className="h-4 w-4 opacity-80" /> : null}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          )}
+```
+
+---
+
+If you want the dropdown label to reflect the **last used preset** (e.g., “Presets (±150)”), I can add a tiny `useState<number>(10)` and update it on selection—no other logic changes required.

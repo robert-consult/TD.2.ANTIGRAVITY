@@ -1,0 +1,61 @@
+profile settings, 
+lets introduce profile settings at the holder point where testa@testa.com appears on top right hand of the screen,
+before designing the profile settings page, first search and research the best standards frictionless and prop trader grade profile settings page, i expect it to at a minimum hold, email,phone number, username, names first last
+search research what else
+for now research design and suffice details
+
+MY ACCOUNT MODEL IS TRADERS COME TO TGHE PLATFORM AND SIGNUP FREE, NO FEES OR MINIMUM BALANCE, AFTER A TIME, ONCE THEY BECOME GOOD VIRTUAL LIVE PERFORMERS WITH A GOOD GAIN , THEY THEN CAN BE SELECTED  TO MANAGE REAL CAPITAL, SO THE MODEL ISN'T BASED ON PAYOUTS BUT ON VIRTUAL TRADING SELECTION OF RULE FOLLOWING BEST PERFORMERS IN THIS CASE INSTEAD OF HAVING ALL FEATURES AVAILABLE AT START, I WOULD AVAIL SOME OF THE MORE ARDOUS FEATURES TO THE TOP PERFORMERS( SEE THE OTHER CONVERSATION NAMES"EMAIL VALIDATION OPTIONS" IN THIS TRADEHUB FOLDR FOR CRITERIA.
+I WOULD PREFER BASE CURRENCY TO TIE TO BE UNDER KYC/PAYOUT PROFILE AND LABELED PREFFERED PAYMENT CURRENCY (DEFAULT TO COUNTRY /REGION CURRENCY) INSTEAD
+
+SEE THE SAME COONVERSATION FOR PHONE VERIFICATIONS WHERE WE RESERVE THESE FOR PEOPLE WHO MEET THE PERFORMACE CRITERIA AND TIME ON PLATFORM
+
+REFINE THE OUTPUT WITH THIS IN MIND
+
+
+https://chatgpt.com/share/694c75cf-70c8-8003-b270-eae08e204f6c
+Pasted-Below-is-a-logic-engine-plan-and-algorithm-design-that-_1766621061450.txt
+Document
+GOOD, NOW REPRODUCE THE OUTPUT WITH THE CONTEXT DOCUMENT UPLOADED IN MIND, SO THAT THE LOGIC MATCHES IT FOR TRADERS, EMAIL SEND, DATA TRAIL, DATA LOGS, REMINDERS, ACCESS CONTROL,  SMS SEND, KYC, PROFILE SETTINGS ETC AND VERIFY THE RESULTANT  THE ENGINE WILL HAVE NO CONFLICTS
+DO
+OUTPUT ALL
+Here's the current database setup:
+
+Database Engine
+SQLite via better-sqlite3
+
+// db/index.ts
+import { drizzle } from 'drizzle-orm/better-sqlite3';
+import Database from 'better-sqlite3';
+const sqlite = new Database('trading_app.db');
+export const db = drizzle(sqlite, { schema });
+Schema Location
+shared/schema.ts
+
+Uses SQLite-specific imports:
+
+import { sqliteTable, text, integer, real } from "drizzle-orm/sqlite-core";
+Key Drizzle Tables
+Table	Purpose
+users	User accounts with margin/equity fields
+trades	All trades (open, closed, pending)
+symbolConfigs	Instrument settings
+quotes	Real-time price data
+userSettings	Per-user risk limits
+traderJournal	Trade notes/journal
+adminActions	Audit log for admin ops
+tradeAudit	Institutional audit trail
+orderIntentAudit	Order lifecycle events
+auditExportManifest	SHA-256 export hashes
+systemConfig	Platform-wide settings
+Migration Execution
+Migrations run via Node script using Drizzle Kit:
+
+npm run db:push   # Push schema changes
+npm run db:seed   # Seed data
+For CRC32 bucketing with SQLite, note that SQLite doesn't have a native CRC32 function - you'd need to either:
+
+Use a custom SQLite extension
+Compute CRC32 in JavaScript and store/query the bucket value
+Use a hash-based alternative like substr(hex(randomblob(4)), 1, 8) for bucketing
+
+where in the admin dashboard would you add the audit trails and tracking signups and viewing kyc completrion and user analytics etc? just looking for suggestions on admin board edit in retrospectr give a simple outline

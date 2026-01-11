@@ -1,0 +1,1038 @@
+Below is a **phase-by-phase, ready-to-drop implementation** that matches your Replit Agent plan and stays locked on the 4 trade-audit upgrades:
+
+* **correlationId on every order attempt**
+* **order_intent_audit**: `RECEIVED` + `DECISION (PASS/REJECT)` + `reject_check/reject_reason`
+* **trade_audit** events: **market create**, **pending place**, **cancel**, **manual close**, **targets update**
+* **tamper-evident SHA-256 hash chaining**: `prev_hash → event_hash` on **append-only** inserts
+
+I’m assuming **Node + Express + TypeScript + SQLite (better-sqlite3)** (common on Replit). If you’re on Postgres/Drizzle, keep the writer logic and swap the DB calls.
+
+---
+
+## Phase 1 — Schema Extension (Foundation)
+
+### 1A) Extend `trades` with provenance + correlation
+
+**Goal:** order engine can later read origin context even when async.
+
+#### `/backend/src/db/ensureAuditSchema.ts`
+
+```ts
+import type Database from "better-sqlite3";
+
+type DB = Database.Database;
+
+function pragmaCols(db: DB, table: string): Set<string> {
+  const rows = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+  return new Set(rows.map((r) => r.name));
+}
+
+function ensureTable(db: DB, sql: string) {
+  db.exec(sql);
+}
+
+function ensureColumn(db: DB, table: string, colName: string, ddl: string) {
+  const cols = pragmaCols(db, table);
+  if (!cols.has(colName)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${ddl}`);
+}
+
+export function ensureAuditSchema(db: DB) {
+  // ---- Trades provenance (safe additive ALTERs)
+  // If your trades table name differs, change it here.
+  try {
+    pragmaCols(db, "trades"); // throws if table missing
+    ensureColumn(db, "trades", "correlation_id", "correlation_id TEXT");
+    ensureColumn(db, "trades", "last_actor_user_id", "last_actor_user_id TEXT"); // use INTEGER if you use ints
+    ensureColumn(db, "trades", "last_actor_session_id", "last_actor_session_id TEXT");
+    ensureColumn(db, "trades", "last_actor_ip", "last_actor_ip TEXT");
+    ensureColumn(db, "trades", "last_actor_user_agent", "last_actor_user_agent TEXT");
+    ensureColumn(db, "trades", "last_actor_type", "last_actor_type TEXT"); // USER | ADMIN | SYSTEM
+  } catch {
+    // If trades doesn’t exist yet, ignore here; your normal schema creation will run elsewhere.
+  }
+
+  // ---- order_intent_audit (chained per correlation_id)
+  ensureTable(
+    db,
+    `
+    CREATE TABLE IF NOT EXISTS order_intent_audit (
+      audit_event_id TEXT PRIMARY KEY,
+      correlation_id TEXT NOT NULL,
+      ts_server_utc_ms INTEGER NOT NULL,
+
+      event_code TEXT NOT NULL,          -- RECEIVED | DECISION
+      decision TEXT,                     -- PASS | REJECT (null for RECEIVED)
+      reject_check TEXT,                 -- e.g. MAX_CONCURRENT_LOTS
+      reject_reason TEXT,                -- human readable
+
+      actor_type TEXT NOT NULL,          -- USER | ADMIN | SYSTEM
+      actor_user_id TEXT,
+      user_id TEXT,
+
+      session_id TEXT,
+      ip TEXT,
+      user_agent TEXT,
+
+      symbol TEXT,
+      side TEXT,
+      order_type TEXT,
+      time_in_force TEXT,
+      qty_lots REAL,
+      requested_price REAL,
+      limit_price REAL,
+      stop_price REAL,
+      take_profit REAL,
+      stop_loss REAL,
+
+      quote_bid REAL,
+      quote_ask REAL,
+      quote_mid REAL,
+      quote_ts_utc_ms INTEGER,
+      quote_is_stale INTEGER,
+
+      risk_limit_json TEXT,
+      risk_observed_json TEXT,
+      risk_snapshot_json TEXT,
+
+      payload_json TEXT NOT NULL,
+      prev_hash TEXT NOT NULL,
+      event_hash TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_oia_corr_ts ON order_intent_audit(correlation_id, ts_server_utc_ms);
+    CREATE INDEX IF NOT EXISTS idx_oia_user_ts ON order_intent_audit(user_id, ts_server_utc_ms);
+    `
+  );
+
+  // ---- trade_audit (chained per trade_id; includes correlation_id)
+  ensureTable(
+    db,
+    `
+    CREATE TABLE IF NOT EXISTS trade_audit (
+      audit_event_id TEXT PRIMARY KEY,
+      ts_server_utc_ms INTEGER NOT NULL,
+
+      event_category TEXT NOT NULL,      -- ORDER | EXECUTION | POSITION | AMENDMENT | RISK | SYSTEM
+      event_code TEXT NOT NULL,          -- ORDER_PLACED | ORDER_FILLED | ORDER_CANCELED | POSITION_CLOSED | TARGETS_UPDATED
+
+      actor_type TEXT NOT NULL,
+      actor_user_id TEXT,
+
+      user_id TEXT,
+      session_id TEXT,
+      ip TEXT,
+      user_agent TEXT,
+
+      correlation_id TEXT,
+
+      trade_id TEXT NOT NULL,
+
+      symbol TEXT,
+      side TEXT,
+      order_type TEXT,
+      time_in_force TEXT,
+      qty_lots REAL,
+
+      requested_price REAL,
+      limit_price REAL,
+      stop_price REAL,
+      fill_price REAL,
+
+      note TEXT,
+
+      payload_json TEXT NOT NULL,
+      prev_hash TEXT NOT NULL,
+      event_hash TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_ta_trade_ts ON trade_audit(trade_id, ts_server_utc_ms);
+    CREATE INDEX IF NOT EXISTS idx_ta_corr_ts ON trade_audit(correlation_id, ts_server_utc_ms);
+    CREATE INDEX IF NOT EXISTS idx_ta_user_ts ON trade_audit(user_id, ts_server_utc_ms);
+    `
+  );
+}
+```
+
+### 1B) Call schema ensure at server startup
+
+#### `/backend/src/server.ts` (or your server entry)
+
+```ts
+import Database from "better-sqlite3";
+import { ensureAuditSchema } from "./db/ensureAuditSchema";
+
+export const db = new Database(process.env.SQLITE_FILE || "data.sqlite");
+ensureAuditSchema(db);
+```
+
+---
+
+## Phase 2 — Request Context Helper
+
+### 2A) Build context from request consistently
+
+#### `/backend/src/audit/auditContext.ts`
+
+```ts
+import crypto from "node:crypto";
+import type { Request } from "express";
+
+export type ActorType = "USER" | "ADMIN" | "SYSTEM";
+
+export type AuditContext = {
+  correlationId: string;
+  actorType: ActorType;
+  actorUserId: string | null;
+  userId: string | null;
+
+  sessionId: string | null;
+  ip: string | null;
+  userAgent: string | null;
+};
+
+export function getClientIp(req: Request): string | null {
+  const xfwd = (req.headers["x-forwarded-for"] as string | undefined)?.split(",")[0]?.trim();
+  return xfwd || req.ip || (req.socket?.remoteAddress ?? null);
+}
+
+export function getSessionId(req: any): string | null {
+  // express-session: req.sessionID; some libs: req.session?.id
+  return req.sessionID || req.session?.id || req.headers["x-session-id"] || null;
+}
+
+export function inferActorType(req: any): ActorType {
+  const role = req.user?.role;
+  if (role === "ADMIN") return "ADMIN";
+  if (req.user?.id) return "USER";
+  return "SYSTEM";
+}
+
+export function getOrCreateCorrelationId(req: Request): string {
+  const h = req.header("x-correlation-id");
+  const b = (req.body as any)?.correlationId || (req.body as any)?.correlation_id;
+  const existing = (h || b || "").toString().trim();
+  return existing || crypto.randomUUID();
+}
+
+export function buildAuditContext(req: any, overrides?: Partial<AuditContext>): AuditContext {
+  const base: AuditContext = {
+    correlationId: getOrCreateCorrelationId(req),
+    actorType: inferActorType(req),
+    actorUserId: req.user?.id ? String(req.user.id) : null,
+    userId: req.user?.id ? String(req.user.id) : null,
+    sessionId: getSessionId(req),
+    ip: getClientIp(req),
+    userAgent: (req.headers["user-agent"] as string | undefined) || null,
+  };
+  return { ...base, ...(overrides || {}) };
+}
+```
+
+### 2B) Middleware to attach context + return correlation header
+
+#### `/backend/src/middleware/attachAuditContext.ts`
+
+```ts
+import type { Request, Response, NextFunction } from "express";
+import { buildAuditContext } from "../audit/auditContext";
+
+declare global {
+  namespace Express {
+    interface Request {
+      auditContext?: ReturnType<typeof buildAuditContext>;
+      user?: { id: string; role?: string };
+    }
+  }
+}
+
+export function attachAuditContext(req: Request, res: Response, next: NextFunction) {
+  const ctx = buildAuditContext(req);
+  req.auditContext = ctx;
+  res.setHeader("x-correlation-id", ctx.correlationId);
+  next();
+}
+```
+
+---
+
+## Phase 3 — ORDER_RECEIVED + DECISION in POST /api/trades
+
+### 3A) Tamper-evident canonical JSON + SHA-256 chain
+
+#### `/backend/src/audit/hash.ts`
+
+```ts
+import crypto from "node:crypto";
+
+export function canonicalJson(v: any): string {
+  if (v === null || v === undefined) return "null";
+  if (typeof v !== "object") return JSON.stringify(v);
+  if (Array.isArray(v)) return `[${v.map(canonicalJson).join(",")}]`;
+  const keys = Object.keys(v).sort();
+  return `{${keys
+    .filter((k) => v[k] !== undefined)
+    .map((k) => `${JSON.stringify(k)}:${canonicalJson(v[k])}`)
+    .join(",")}}`;
+}
+
+export function sha256Hex(s: string): string {
+  return crypto.createHash("sha256").update(s).digest("hex");
+}
+```
+
+### 3B) Audit writers (order_intent_audit + trade_audit)
+
+#### `/backend/src/audit/auditWriters.ts`
+
+```ts
+import crypto from "node:crypto";
+import type Database from "better-sqlite3";
+import { canonicalJson, sha256Hex } from "./hash";
+import type { AuditContext } from "./auditContext";
+
+type DB = Database.Database;
+
+const GENESIS = "GENESIS";
+
+function nowMs() {
+  return Date.now();
+}
+
+export function writeOrderIntentAudit(db: DB, params: {
+  ctx: AuditContext;
+
+  eventCode: "RECEIVED" | "DECISION";
+  decision?: "PASS" | "REJECT" | null;
+  rejectCheck?: string | null;
+  rejectReason?: string | null;
+
+  symbol?: string | null;
+  side?: string | null;
+  orderType?: string | null;
+  timeInForce?: string | null;
+  qtyLots?: number | null;
+
+  requestedPrice?: number | null;
+  limitPrice?: number | null;
+  stopPrice?: number | null;
+  takeProfit?: number | null;
+  stopLoss?: number | null;
+
+  quoteBid?: number | null;
+  quoteAsk?: number | null;
+  quoteMid?: number | null;
+  quoteTsUtcMs?: number | null;
+  quoteIsStale?: boolean | null;
+
+  riskLimit?: any;
+  riskObserved?: any;
+  riskSnapshot?: any;
+
+  payload?: any;
+  tsServerUtcMs?: number;
+}) {
+  const auditEventId = crypto.randomUUID();
+  const ts = params.tsServerUtcMs ?? nowMs();
+
+  const last = db
+    .prepare(
+      `SELECT event_hash FROM order_intent_audit
+       WHERE correlation_id = ?
+       ORDER BY ts_server_utc_ms DESC
+       LIMIT 1`
+    )
+    .get(params.ctx.correlationId) as { event_hash?: string } | undefined;
+
+  const prevHash = last?.event_hash ?? GENESIS;
+
+  const envelope = {
+    auditEventId,
+    tsServerUtcMs: ts,
+    correlationId: params.ctx.correlationId,
+
+    eventCode: params.eventCode,
+    decision: params.decision ?? null,
+    rejectCheck: params.rejectCheck ?? null,
+    rejectReason: params.rejectReason ?? null,
+
+    actorType: params.ctx.actorType,
+    actorUserId: params.ctx.actorUserId,
+    userId: params.ctx.userId,
+
+    sessionId: params.ctx.sessionId,
+    ip: params.ctx.ip,
+    userAgent: params.ctx.userAgent,
+
+    symbol: params.symbol ?? null,
+    side: params.side ?? null,
+    orderType: params.orderType ?? null,
+    timeInForce: params.timeInForce ?? null,
+    qtyLots: params.qtyLots ?? null,
+
+    requestedPrice: params.requestedPrice ?? null,
+    limitPrice: params.limitPrice ?? null,
+    stopPrice: params.stopPrice ?? null,
+    takeProfit: params.takeProfit ?? null,
+    stopLoss: params.stopLoss ?? null,
+
+    quote: {
+      bid: params.quoteBid ?? null,
+      ask: params.quoteAsk ?? null,
+      mid: params.quoteMid ?? null,
+      tsUtcMs: params.quoteTsUtcMs ?? null,
+      isStale: params.quoteIsStale ?? null,
+    },
+
+    riskEvidence: {
+      riskLimit: params.riskLimit ?? null,
+      riskObserved: params.riskObserved ?? null,
+      riskSnapshot: params.riskSnapshot ?? null,
+    },
+
+    payload: params.payload ?? null,
+  };
+
+  const payloadJson = canonicalJson(envelope);
+  const eventHash = sha256Hex(prevHash + "\n" + payloadJson);
+
+  db.prepare(`
+    INSERT INTO order_intent_audit (
+      audit_event_id, correlation_id, ts_server_utc_ms,
+      event_code, decision, reject_check, reject_reason,
+      actor_type, actor_user_id, user_id,
+      session_id, ip, user_agent,
+      symbol, side, order_type, time_in_force, qty_lots,
+      requested_price, limit_price, stop_price, take_profit, stop_loss,
+      quote_bid, quote_ask, quote_mid, quote_ts_utc_ms, quote_is_stale,
+      risk_limit_json, risk_observed_json, risk_snapshot_json,
+      payload_json, prev_hash, event_hash
+    ) VALUES (
+      ?, ?, ?,
+      ?, ?, ?, ?,
+      ?, ?, ?,
+      ?, ?, ?,
+      ?, ?, ?, ?, ?,
+      ?, ?, ?, ?, ?,
+      ?, ?, ?, ?, ?,
+      ?, ?, ?,
+      ?, ?, ?
+    )
+  `).run(
+    auditEventId, params.ctx.correlationId, ts,
+    params.eventCode, params.decision ?? null, params.rejectCheck ?? null, params.rejectReason ?? null,
+    params.ctx.actorType, params.ctx.actorUserId, params.ctx.userId,
+    params.ctx.sessionId, params.ctx.ip, params.ctx.userAgent,
+    params.symbol ?? null, params.side ?? null, params.orderType ?? null, params.timeInForce ?? null, params.qtyLots ?? null,
+    params.requestedPrice ?? null, params.limitPrice ?? null, params.stopPrice ?? null, params.takeProfit ?? null, params.stopLoss ?? null,
+    params.quoteBid ?? null, params.quoteAsk ?? null, params.quoteMid ?? null, params.quoteTsUtcMs ?? null, params.quoteIsStale ? 1 : 0,
+    params.riskLimit ? JSON.stringify(params.riskLimit) : null,
+    params.riskObserved ? JSON.stringify(params.riskObserved) : null,
+    params.riskSnapshot ? JSON.stringify(params.riskSnapshot) : null,
+    payloadJson, prevHash, eventHash
+  );
+
+  return { auditEventId, prevHash, eventHash };
+}
+
+export function writeTradeAudit(db: DB, params: {
+  ctx: AuditContext;
+
+  tradeId: string;
+  eventCategory: "ORDER" | "EXECUTION" | "POSITION" | "AMENDMENT" | "RISK" | "SYSTEM";
+  eventCode:
+    | "ORDER_PLACED"
+    | "ORDER_FILLED"
+    | "ORDER_CANCELED"
+    | "POSITION_CLOSED"
+    | "TARGETS_UPDATED";
+
+  symbol?: string | null;
+  side?: string | null;
+  orderType?: string | null;
+  timeInForce?: string | null;
+  qtyLots?: number | null;
+
+  requestedPrice?: number | null;
+  limitPrice?: number | null;
+  stopPrice?: number | null;
+  fillPrice?: number | null;
+
+  note?: string | null;
+  payload?: any;
+  tsServerUtcMs?: number;
+}) {
+  const auditEventId = crypto.randomUUID();
+  const ts = params.tsServerUtcMs ?? nowMs();
+
+  const last = db
+    .prepare(
+      `SELECT event_hash FROM trade_audit
+       WHERE trade_id = ?
+       ORDER BY ts_server_utc_ms DESC
+       LIMIT 1`
+    )
+    .get(params.tradeId) as { event_hash?: string } | undefined;
+
+  const prevHash = last?.event_hash ?? GENESIS;
+
+  const envelope = {
+    auditEventId,
+    tsServerUtcMs: ts,
+
+    eventCategory: params.eventCategory,
+    eventCode: params.eventCode,
+
+    correlationId: params.ctx.correlationId,
+
+    actorType: params.ctx.actorType,
+    actorUserId: params.ctx.actorUserId,
+    userId: params.ctx.userId,
+    sessionId: params.ctx.sessionId,
+    ip: params.ctx.ip,
+    userAgent: params.ctx.userAgent,
+
+    tradeId: params.tradeId,
+
+    symbol: params.symbol ?? null,
+    side: params.side ?? null,
+    orderType: params.orderType ?? null,
+    timeInForce: params.timeInForce ?? null,
+    qtyLots: params.qtyLots ?? null,
+
+    requestedPrice: params.requestedPrice ?? null,
+    limitPrice: params.limitPrice ?? null,
+    stopPrice: params.stopPrice ?? null,
+    fillPrice: params.fillPrice ?? null,
+
+    note: params.note ?? null,
+    payload: params.payload ?? null,
+  };
+
+  const payloadJson = canonicalJson(envelope);
+  const eventHash = sha256Hex(prevHash + "\n" + payloadJson);
+
+  db.prepare(`
+    INSERT INTO trade_audit (
+      audit_event_id, ts_server_utc_ms,
+      event_category, event_code,
+      actor_type, actor_user_id,
+      user_id, session_id, ip, user_agent,
+      correlation_id,
+      trade_id,
+      symbol, side, order_type, time_in_force, qty_lots,
+      requested_price, limit_price, stop_price, fill_price,
+      note,
+      payload_json, prev_hash, event_hash
+    ) VALUES (
+      ?, ?,
+      ?, ?,
+      ?, ?,
+      ?, ?, ?, ?,
+      ?,
+      ?,
+      ?, ?, ?, ?, ?,
+      ?, ?, ?, ?,
+      ?,
+      ?, ?, ?
+    )
+  `).run(
+    auditEventId, ts,
+    params.eventCategory, params.eventCode,
+    params.ctx.actorType, params.ctx.actorUserId,
+    params.ctx.userId, params.ctx.sessionId, params.ctx.ip, params.ctx.userAgent,
+    params.ctx.correlationId,
+    params.tradeId,
+    params.symbol ?? null, params.side ?? null, params.orderType ?? null, params.timeInForce ?? null, params.qtyLots ?? null,
+    params.requestedPrice ?? null, params.limitPrice ?? null, params.stopPrice ?? null, params.fillPrice ?? null,
+    params.note ?? null,
+    payloadJson, prevHash, eventHash
+  );
+
+  return { auditEventId, prevHash, eventHash };
+}
+```
+
+### 3C) Hook ORDER_RECEIVED + DECISION into trade creation
+
+**Key logic:**
+
+* On route entry: `RECEIVED`
+* Run risk checks
+* On reject: `DECISION(REJECT)` **before** returning
+* On pass: `DECISION(PASS)` then create trade, persist provenance, write trade_audit events
+
+#### `/backend/src/routes/trades.ts`
+
+```ts
+import { Router } from "express";
+import type Database from "better-sqlite3";
+import crypto from "node:crypto";
+import { attachAuditContext } from "../middleware/attachAuditContext";
+import { buildAuditContext } from "../audit/auditContext";
+import { writeOrderIntentAudit, writeTradeAudit } from "../audit/auditWriters";
+
+type DB = Database.Database;
+const uuid = () => crypto.randomUUID();
+
+export function tradesRoutes(db: DB) {
+  const r = Router();
+
+  const requireAuth = (req: any, res: any, next: any) => {
+    if (!req.user?.id) return res.status(401).json({ error: "UNAUTHENTICATED" });
+    next();
+  };
+
+  r.post("/api/trades", attachAuditContext, requireAuth, (req: any, res) => {
+    // Build ctx (req.auditContext already set)
+    const ctx = buildAuditContext(req, {
+      // For a user-submitted order attempt, actor is USER
+      actorType: req.user?.role === "ADMIN" ? "ADMIN" : "USER",
+      actorUserId: String(req.user.id),
+      userId: String(req.user.id),
+    });
+
+    const b = req.body || {};
+    const symbol = String(b.symbol || "");
+    const side = String(b.side || "");
+    const orderType = String(b.orderType || "MARKET");
+    const tif = b.timeInForce ? String(b.timeInForce) : null;
+
+    const qtyLots = Number(b.lots ?? 0);
+    const requestedPrice = b.requestedPrice != null ? Number(b.requestedPrice) : null;
+    const limitPrice = b.limitPrice != null ? Number(b.limitPrice) : null;
+    const stopPrice = b.stopPrice != null ? Number(b.stopPrice) : null;
+    const takeProfit = b.takeProfit != null ? Number(b.takeProfit) : null;
+    const stopLoss = b.stopLoss != null ? Number(b.stopLoss) : null;
+
+    // optional quote snapshot from client or quote service
+    const quoteBid = b.quoteBid != null ? Number(b.quoteBid) : null;
+    const quoteAsk = b.quoteAsk != null ? Number(b.quoteAsk) : null;
+    const quoteMid =
+      b.quoteMid != null
+        ? Number(b.quoteMid)
+        : quoteBid != null && quoteAsk != null
+          ? (quoteBid + quoteAsk) / 2
+          : null;
+
+    // 1) ORDER_RECEIVED
+    writeOrderIntentAudit(db, {
+      ctx,
+      eventCode: "RECEIVED",
+      symbol, side, orderType, timeInForce: tif,
+      qtyLots,
+      requestedPrice, limitPrice, stopPrice, takeProfit, stopLoss,
+      quoteBid, quoteAsk, quoteMid,
+      quoteTsUtcMs: b.quoteTsUtcMs != null ? Number(b.quoteTsUtcMs) : null,
+      quoteIsStale: b.quoteIsStale != null ? Boolean(b.quoteIsStale) : null,
+      payload: { route: "POST /api/trades" },
+    });
+
+    // 2) Risk check (replace with your real logic)
+    // IMPORTANT: any early return must also write DECISION(REJECT).
+    const effectiveLimit = { maxConcurrentLots: 50, maxTotalTrades: 5, maxTradesPerSymbol: 3 };
+    const observed = {
+      // plug in your computed values
+      concurrentLots: b.concurrentLots ?? null,
+      totalOpenTrades: b.totalOpenTrades ?? null,
+      openTradesForSymbol: b.openTradesForSymbol ?? null,
+    };
+    const snapshot = b.riskSnapshot ?? { hint: "attach structured snapshot here" };
+
+    const reject = (rejectCheck: string, rejectReason: string) => {
+      writeOrderIntentAudit(db, {
+        ctx,
+        eventCode: "DECISION",
+        decision: "REJECT",
+        rejectCheck,
+        rejectReason,
+        symbol, side, orderType, timeInForce: tif,
+        qtyLots,
+        requestedPrice, limitPrice, stopPrice, takeProfit, stopLoss,
+        quoteBid, quoteAsk, quoteMid,
+        riskLimit: effectiveLimit,
+        riskObserved: observed,
+        riskSnapshot: snapshot,
+      });
+      return res.status(400).json({
+        error: "RISK_REJECT",
+        rejectCheck,
+        rejectReason,
+        correlationId: ctx.correlationId,
+      });
+    };
+
+    if (!symbol || !side || qtyLots <= 0) return reject("BAD_REQUEST", "Missing symbol/side/lots");
+    if (qtyLots > effectiveLimit.maxConcurrentLots) return reject("MAX_CONCURRENT_LOTS", "Requested lots exceed max concurrent lots");
+
+    // 3) DECISION(PASS)
+    writeOrderIntentAudit(db, {
+      ctx,
+      eventCode: "DECISION",
+      decision: "PASS",
+      symbol, side, orderType, timeInForce: tif,
+      qtyLots,
+      requestedPrice, limitPrice, stopPrice, takeProfit, stopLoss,
+      quoteBid, quoteAsk, quoteMid,
+      riskLimit: effectiveLimit,
+      riskObserved: observed,
+      riskSnapshot: snapshot,
+    });
+
+    // 4) Create trade and persist provenance
+    const tradeId = uuid();
+    const status = orderType === "MARKET" ? "OPEN" : "PENDING";
+    const fillPrice = orderType === "MARKET" ? (requestedPrice ?? quoteMid) : null;
+
+    db.prepare(`
+      INSERT INTO trades (
+        id, user_id, symbol, side, order_type, time_in_force, status, lots,
+        requested_price, limit_price, stop_price, take_profit, stop_loss, fill_price,
+        correlation_id,
+        last_actor_user_id, last_actor_session_id, last_actor_ip, last_actor_user_agent, last_actor_type
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      tradeId, ctx.userId, symbol, side, orderType, tif, status, qtyLots,
+      requestedPrice, limitPrice, stopPrice, takeProfit, stopLoss, fillPrice,
+      ctx.correlationId,
+      ctx.actorUserId, ctx.sessionId, ctx.ip, ctx.userAgent, ctx.actorType
+    );
+
+    // 5) trade_audit events: placement always, fill if market
+    writeTradeAudit(db, {
+      ctx,
+      tradeId,
+      eventCategory: "ORDER",
+      eventCode: "ORDER_PLACED",
+      symbol, side, orderType, timeInForce: tif, qtyLots,
+      requestedPrice, limitPrice, stopPrice,
+      note: status === "PENDING" ? "Pending order placed" : "Market order placed",
+    });
+
+    if (status === "OPEN") {
+      // Fill is executed by system (but keep correlationId; provenance persists on trade record)
+      const systemCtx = { ...ctx, actorType: "SYSTEM", actorUserId: null };
+      writeTradeAudit(db, {
+        ctx: systemCtx,
+        tradeId,
+        eventCategory: "EXECUTION",
+        eventCode: "ORDER_FILLED",
+        symbol, side, orderType, timeInForce: tif, qtyLots,
+        requestedPrice,
+        fillPrice,
+        note: "Filled on creation (market)",
+        payload: { origin: { lastActor: ctx } }, // optional: preserves original provenance in payload
+      });
+    }
+
+    return res.json({ ok: true, tradeId, status, correlationId: ctx.correlationId });
+  });
+
+  return r;
+}
+```
+
+---
+
+## Phase 4 — Propagate Provenance to Order Engine (Async)
+
+**Goal:** order engine events shouldn’t lose the correlationId and the original provenance (session/ip/UA).
+**Rule:**
+
+* Use `actor_type = SYSTEM` for engine-driven fills/closes
+* Preserve `correlation_id` **always**
+* Include origin provenance via trade’s `last_actor_*` fields (either in ctx fields or payload)
+
+### 4A) Build ctx from trade record
+
+#### `/backend/src/audit/auditContextFromTrade.ts`
+
+```ts
+import type { AuditContext, ActorType } from "./auditContext";
+
+export type TradeProvenanceRow = {
+  user_id: string | null;
+  correlation_id: string | null;
+
+  last_actor_user_id: string | null;
+  last_actor_session_id: string | null;
+  last_actor_ip: string | null;
+  last_actor_user_agent: string | null;
+  last_actor_type: string | null;
+};
+
+export function buildAuditContextFromTrade(trade: TradeProvenanceRow, overrides?: Partial<AuditContext>): AuditContext {
+  const actorType = (trade.last_actor_type as ActorType) || "USER";
+
+  const base: AuditContext = {
+    correlationId: trade.correlation_id || "MISSING_CORRELATION",
+    actorType,
+    actorUserId: trade.last_actor_user_id,
+    userId: trade.user_id,
+    sessionId: trade.last_actor_session_id,
+    ip: trade.last_actor_ip,
+    userAgent: trade.last_actor_user_agent,
+  };
+
+  return { ...base, ...(overrides || {}) };
+}
+```
+
+### 4B) Example: pending fill event uses SYSTEM actor + preserved origin
+
+#### `/backend/src/engine/orderEngineAuditHooks.ts`
+
+```ts
+import type Database from "better-sqlite3";
+import { buildAuditContextFromTrade } from "../audit/auditContextFromTrade";
+import { writeTradeAudit } from "../audit/auditWriters";
+
+type DB = Database.Database;
+
+export function auditPendingFill(db: DB, tradeId: string, fillPrice: number) {
+  const t = db.prepare(`
+    SELECT
+      id, user_id, symbol, side, order_type, time_in_force, lots, requested_price,
+      correlation_id,
+      last_actor_user_id, last_actor_session_id, last_actor_ip, last_actor_user_agent, last_actor_type
+    FROM trades
+    WHERE id = ?
+  `).get(tradeId) as any;
+
+  if (!t) return;
+
+  const originCtx = buildAuditContextFromTrade(t, { actorType: "SYSTEM", actorUserId: null });
+
+  // Update trade row (your engine already does this; keep your logic)
+  db.prepare(`UPDATE trades SET status = 'OPEN', fill_price = ? WHERE id = ?`).run(fillPrice, tradeId);
+
+  writeTradeAudit(db, {
+    ctx: originCtx,
+    tradeId,
+    eventCategory: "EXECUTION",
+    eventCode: "ORDER_FILLED",
+    symbol: t.symbol,
+    side: t.side,
+    orderType: t.order_type,
+    timeInForce: t.time_in_force,
+    qtyLots: t.lots,
+    requestedPrice: t.requested_price,
+    fillPrice,
+    note: "Pending triggered and filled (engine)",
+    payload: {
+      origin: {
+        last_actor_user_id: t.last_actor_user_id,
+        last_actor_session_id: t.last_actor_session_id,
+        last_actor_ip: t.last_actor_ip,
+        last_actor_user_agent: t.last_actor_user_agent,
+        last_actor_type: t.last_actor_type,
+      },
+    },
+  });
+}
+```
+
+### 4C) SL/TP auto-close uses SYSTEM actor (but keeps correlationId)
+
+#### `/backend/src/engine/autoCloseAudit.ts`
+
+```ts
+import type Database from "better-sqlite3";
+import { buildAuditContextFromTrade } from "../audit/auditContextFromTrade";
+import { writeTradeAudit } from "../audit/auditWriters";
+
+type DB = Database.Database;
+
+export function auditAutoClose(db: DB, tradeId: string, reason: "STOP_LOSS" | "TAKE_PROFIT") {
+  const t = db.prepare(`
+    SELECT
+      id, user_id, symbol, side, order_type, lots,
+      correlation_id,
+      last_actor_user_id, last_actor_session_id, last_actor_ip, last_actor_user_agent, last_actor_type
+    FROM trades
+    WHERE id = ?
+  `).get(tradeId) as any;
+
+  if (!t) return;
+
+  const ctx = buildAuditContextFromTrade(t, { actorType: "SYSTEM", actorUserId: null });
+
+  writeTradeAudit(db, {
+    ctx,
+    tradeId,
+    eventCategory: "POSITION",
+    eventCode: "POSITION_CLOSED",
+    symbol: t.symbol,
+    side: t.side,
+    orderType: t.order_type,
+    qtyLots: t.lots,
+    note: `Auto-close by ${reason}`,
+    payload: { autoCloseReason: reason },
+  });
+}
+```
+
+---
+
+## Phase 5 — TARGETS_UPDATED Event (SL/TP modification route)
+
+**Goal:** After successful update, append `TARGETS_UPDATED` with before/after values.
+
+### 5A) Patch SL/TP route
+
+#### `/backend/src/routes/tradeTargets.ts`
+
+```ts
+import { Router } from "express";
+import type Database from "better-sqlite3";
+import { attachAuditContext } from "../middleware/attachAuditContext";
+import { buildAuditContext } from "../audit/auditContext";
+import { writeTradeAudit } from "../audit/auditWriters";
+
+type DB = Database.Database;
+
+export function tradeTargetsRoutes(db: DB) {
+  const r = Router();
+
+  const requireAuth = (req: any, res: any, next: any) => {
+    if (!req.user?.id) return res.status(401).json({ error: "UNAUTHENTICATED" });
+    next();
+  };
+
+  // Adjust path to your actual route: PATCH /api/trades/:id/sl-tp or similar
+  r.patch("/api/trades/:id/targets", attachAuditContext, requireAuth, (req: any, res) => {
+    const tradeId = String(req.params.id);
+    const userId = String(req.user.id);
+
+    const t = db.prepare(`SELECT * FROM trades WHERE id = ?`).get(tradeId) as any;
+    if (!t) return res.status(404).json({ error: "NOT_FOUND" });
+    if (String(t.user_id) !== userId) return res.status(403).json({ error: "FORBIDDEN" });
+
+    const before = { takeProfit: t.take_profit ?? null, stopLoss: t.stop_loss ?? null };
+
+    const takeProfit = req.body?.takeProfit != null ? Number(req.body.takeProfit) : null;
+    const stopLoss = req.body?.stopLoss != null ? Number(req.body.stopLoss) : null;
+
+    db.prepare(`UPDATE trades SET take_profit = ?, stop_loss = ? WHERE id = ?`).run(takeProfit, stopLoss, tradeId);
+
+    const after = { takeProfit, stopLoss };
+
+    const ctx = buildAuditContext(req, {
+      actorType: req.user?.role === "ADMIN" ? "ADMIN" : "USER",
+      actorUserId: userId,
+      userId,
+      correlationId: t.correlation_id || req.auditContext!.correlationId, // preserve original if present
+    });
+
+    writeTradeAudit(db, {
+      ctx,
+      tradeId,
+      eventCategory: "AMENDMENT",
+      eventCode: "TARGETS_UPDATED",
+      symbol: t.symbol ?? null,
+      side: t.side ?? null,
+      orderType: t.order_type ?? null,
+      qtyLots: t.lots ?? null,
+      note: "User updated SL/TP",
+      payload: {
+        before,
+        after,
+      },
+    });
+
+    return res.json({ ok: true, tradeId, correlationId: ctx.correlationId });
+  });
+
+  return r;
+}
+```
+
+---
+
+# Post-Implementation: Practical Verification (Integrity)
+
+### Verify a chain isn’t tampered with (quick admin/dev utility)
+
+#### `/backend/src/audit/verifyChain.ts`
+
+```ts
+import type Database from "better-sqlite3";
+import { sha256Hex } from "./hash";
+
+type DB = Database.Database;
+
+export function verifyOrderIntentChain(db: DB, correlationId: string) {
+  const rows = db.prepare(`
+    SELECT payload_json, prev_hash, event_hash
+    FROM order_intent_audit
+    WHERE correlation_id = ?
+    ORDER BY ts_server_utc_ms ASC
+  `).all(correlationId) as Array<{ payload_json: string; prev_hash: string; event_hash: string }>;
+
+  let ok = true;
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i];
+    const expected = sha256Hex(r.prev_hash + "\n" + r.payload_json);
+    if (expected !== r.event_hash) {
+      ok = false;
+      break;
+    }
+  }
+  return { ok, count: rows.length };
+}
+
+export function verifyTradeChain(db: DB, tradeId: string) {
+  const rows = db.prepare(`
+    SELECT payload_json, prev_hash, event_hash
+    FROM trade_audit
+    WHERE trade_id = ?
+    ORDER BY ts_server_utc_ms ASC
+  `).all(tradeId) as Array<{ payload_json: string; prev_hash: string; event_hash: string }>;
+
+  let ok = true;
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i];
+    const expected = sha256Hex(r.prev_hash + "\n" + r.payload_json);
+    if (expected !== r.event_hash) {
+      ok = false;
+      break;
+    }
+  }
+  return { ok, count: rows.length };
+}
+```
+
+---
+
+# Exactly how this maps to your Replit Agent phases
+
+### Phase 1 (Schema)
+
+* Adds provenance columns to `trades` (**correlation_id + last_actor_* fields**)
+* Creates `order_intent_audit` (RECEIVED/DECISION) **hash-chained**
+* Creates `trade_audit` (lifecycle events) **hash-chained**
+
+### Phase 2 (Context helper)
+
+* `buildAuditContext(req)` extracts session/ip/UA/user/actorType and ensures correlationId
+
+### Phase 3 (ORDER_RECEIVED + DECISION)
+
+* In `POST /api/trades`:
+
+  * `writeOrderIntentAudit(RECEIVED)` at entry
+  * `writeOrderIntentAudit(DECISION PASS/REJECT)` before returning
+  * Persist provenance on the trade row
+  * `writeTradeAudit(ORDER_PLACED)` always, `ORDER_FILLED` for market
+
+### Phase 4 (Order engine provenance)
+
+* Engine reads `trades.correlation_id` + `last_actor_*` to preserve origin context
+* Uses `actor_type = SYSTEM` for async actions while keeping correlationId + origin in payload
+
+### Phase 5 (TARGETS_UPDATED)
+
+* Route writes `TARGETS_UPDATED` with before/after SL/TP
+
+---
+
+If you want, I can also add the **missing trade_audit events** you listed earlier (cancel-requested vs canceled, close-requested vs closed, replace, etc.) using the same writers—without changing your UI—just by inserting additional `writeTradeAudit(...)` calls at the right endpoints.

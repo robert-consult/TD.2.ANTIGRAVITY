@@ -1,0 +1,353 @@
+Understood — and confirmed. I have begun implementing the **Priority #3 deliverable** (professional-semantics order logic + integrity hardening) directly in your uploaded codebase, and I will be explicit about what is already completed vs. what remains.
+
+Below is the **current state of the investigation + patch work** and the **exact Replit Agent patch plan (ordered)** you requested.
+
+---
+
+## 1) Trades 102 & 104: “impossible” close prices — verified against real-world levels
+
+Both trades were closed on **Saturday, 2025-12-06 23:44:04Z**, i.e., during the FX weekend closure window (markets closed). Therefore, the correct comparator is the **last valid Friday price (2025-12-05)** or “weekend-stamped last-close” values.
+
+### Recorded by your platform
+
+| Trade | Symbol | Platform Close Price | Realistic Market Level (approx) | Comment                                |
+| ----: | ------ | -------------------: | ------------------------------: | -------------------------------------- |
+|   102 | GBPUSD |         **1.265052** |                ~**1.333–1.334** | Your price is not market-adjacent      |
+|   104 | EURJPY |        **99.658185** |                      ~**180.9** | Completely off-scale (wrong magnitude) |
+
+### Public references I found (daily values around that weekend)
+
+* GBP/USD daily values around **Dec 5–6, 2025** show ~**1.333–1.334**, not 1.265
+
+  * TwelveData historical table shows **Dec 05, 2025 close ~1.3334** and Dec 06 label ~1.3333 (weekend labeling)
+    [https://twelvedata.com/markets/232236/forex/gbp-usd/historical-data](https://twelvedata.com/markets/232236/forex/gbp-usd/historical-data)
+  * exchangerates.org.uk shows **Sat 6 Dec 2025 ~1.3340**
+    [https://www.exchangerates.org.uk/GBP-USD-exchange-rate-history.html](https://www.exchangerates.org.uk/GBP-USD-exchange-rate-history.html)
+* EUR/JPY values around **Dec 5–6, 2025** show ~**180.94**
+
+  * exchange-rates.org shows **Dec 5 2025 EUR/JPY ~180.94**
+    [https://www.exchange-rates.org/exchange-rate-history/eur-jpy-2025-12-05](https://www.exchange-rates.org/exchange-rate-history/eur-jpy-2025-12-05)
+  * Macrotrends lists **2025-12-05/06 ~180.94**
+    [https://www.macrotrends.net/2554/euro-japanese-yen-exchange-rate-historical-chart](https://www.macrotrends.net/2554/euro-japanese-yen-exchange-rate-historical-chart)
+
+**Conclusion:** the close prices on 102/104 were not “slippage.” They came from a **non-market pricing path**, which (as you already identified) is currently possible in your stack.
+
+---
+
+## 2) Priority #3: Professional order semantics + integrity hardening (status)
+
+### What I have already implemented in your code (backend)
+
+These files are **already created and complete** in your uploaded project directory:
+
+### ✅ A) Runtime schema hardening (prevents “missing migration” drift)
+
+**File added:** `server/utils/ensureSchema.ts`
+What it does:
+
+* Adds `trades.close_reason` column if missing (idempotent ALTER TABLE).
+* Creates a new admin-only `trade_audit` table for execution proof.
+* Adds indexes to support the order engine.
+
+**Why:** Replit deploys often skip migrations; this prevents “works locally / breaks in prod” drift.
+
+---
+
+### ✅ B) Server-authoritative quote service + FX market-hours gating
+
+**File added:** `server/services/quoteService.ts`
+What it does:
+
+* Reads quotes directly from the **server quotes table** (not client input).
+* Enforces:
+
+  * `QUOTE_STALE_THRESHOLD_MS` freshness checks
+  * **FX market open/closed logic** using **America/New_York** time rules
+* Exposes:
+
+  * `getLatestQuote(symbol)`
+  * `getExecutableQuote(symbol)` (must be live + market open)
+
+**Why:** This is the enforcement point that prevents execution using stale/simulated prices.
+
+---
+
+### ✅ C) Admin-only audit trail writer
+
+**File added:** `server/engine/tradeAudit.ts`
+What it does:
+
+* Inserts audit events into `trade_audit` (e.g., `ORDER_FILLED`, `POSITION_CLOSED`)
+* Stores: requested/trigger/fill price, bid/ask/mid/spread, quote timestamp/source, reason code.
+
+**Why:** This is what lets you prove execution integrity in CSV exports without cluttering trader UI.
+
+---
+
+### ✅ D) Dedicated order engine (professional semantics)
+
+**File added:** `server/engine/orderEngine.ts`
+What it currently does (server-side, no UI dependency):
+
+* Processes quote ticks and enforces correct trigger logic:
+
+**Pending execution rules implemented:**
+
+* Buy Limit triggers when **ask ≤ limit**
+* Sell Limit triggers when **bid ≥ limit**
+* Buy Stop triggers when **ask ≥ stop**
+* Sell Stop triggers when **bid ≤ stop**
+
+**Open-position SL/TP close rules implemented:**
+
+* BUY closes at **bid**; SL triggers when **bid ≤ SL**, TP when **bid ≥ TP**
+* SELL closes at **ask**; SL triggers when **ask ≥ SL**, TP when **ask ≤ TP**
+
+**Margin enforcement at trigger time:**
+
+* Uses `requiredMargin(...)`
+* Rejects (cancels) pending orders on insufficient margin with `close_reason='REJECTED'`
+* Records audit event + recalculates account.
+
+**Audit trail:**
+
+* Writes `ORDER_FILLED`, `ORDER_REJECTED`, `POSITION_CLOSED` with full quote metadata.
+
+**Why this is critical:** It removes “pending order types exist but do nothing,” and it formalizes professional order behavior.
+
+---
+
+## 3) What is NOT yet wired (incomplete items)
+
+Because the work is mid-stream, the **engine exists**, but it is not yet fully connected to:
+
+1. `forgeFeed.ts` (quote ingestion)
+2. `routes.ts` endpoints (open/close/cancel must be server-price authoritative)
+3. `shared/schema.ts` + `storage.ts` (to expose/use `close_reason` cleanly)
+4. `autoClose.ts` replacement per Option 1 & 2
+5. Admin export endpoints (CSV availability of audit records)
+6. Minimal trader UI change: add only `close_reason` column to History
+
+I am not going to ask you to clarify anything; below is the exact ordered patch plan to complete these.
+
+---
+
+# 4) Consolidated “Replit Agent Patch Plan” (exact order)
+
+This is the **ordered sequence** Replit Agent should apply.
+
+---
+
+## Step 1 — Schema + types (shared)
+
+### Edit: `shared/schema.ts`
+
+Add to `trades` table definition:
+
+* `closeReason: text("close_reason")`
+
+And ensure it appears in:
+
+* `insertTradeSchema` (optional)
+* `Trade` / `InsertTrade` types
+
+**Result:** `closeReason` becomes part of the trade record everywhere, without UI clutter.
+
+---
+
+## Step 2 — Storage layer updates
+
+### Edit: `server/storage.ts`
+
+Make these changes:
+
+1. Update `closeTrade(...)` signature to accept `closeReason`
+
+* Set `closeReason` on update.
+
+2. Update `cancelTrade(...)`
+
+* Set:
+
+  * `status = "CANCELED"`
+  * `closedAt = new Date()`
+  * `closeReason = "CANCELED_BY_USER"`
+
+**Result:** all terminal states have explicit reason coding.
+
+---
+
+## Step 3 — Route integrity hardening (critical)
+
+### Edit: `server/routes.ts`
+
+#### A) OPEN trade endpoint: `POST /api/trades`
+
+Replace all client-driven pricing assumptions:
+
+* Market orders:
+
+  * Use `getExecutableQuote(symbol)`
+  * BUY fills at **ask**
+  * SELL fills at **bid**
+  * Reject if market closed or quote stale.
+
+* Limit/Stop orders:
+
+  * Store as `PENDING`
+  * Store requested price in `limitPrice` / `stopPrice`
+  * `openPrice` should equal requested price initially
+  * Immediately try-fill only if trigger condition already met (optional), else remain pending.
+
+* Record audit:
+
+  * `ORDER_PLACED` for pending
+  * `ORDER_FILLED` for market fills
+
+#### B) CLOSE trade endpoint: `POST /api/trades/:id/close`
+
+* **Ignore `req.body.closePrice` completely**
+* Use `getExecutableQuote(symbol)`:
+
+  * BUY closes at **bid**
+  * SELL closes at **ask**
+* Set `closeReason="MANUAL"`
+* Record audit `POSITION_CLOSED` with quote metadata
+
+This removes unlimited-profit fabrication by client payload.
+
+#### C) CANCEL endpoint: `PATCH /api/trades/:id/cancel`
+
+* Ensure closeReason is set (via storage change)
+* Record audit: `ORDER_CANCELED`
+
+---
+
+## Step 4 — Wire order engine into the quote feed
+
+### Edit: `server/feeds/forgeFeed.ts`
+
+You need to call the order engine whenever quotes are persisted.
+
+**Required changes:**
+
+* Import:
+
+  * `ensureSchema`
+  * `onQuotesUpdated`
+* Make `persist(...)` and `persistWithMeta(...)` **async**
+* After DB upsert, call:
+
+```ts
+await onQuotesUpdated(
+  rows.map(q => ({
+    symbol: q.symbol,
+    price: q.price,
+    bid: q.bid ?? q.price,
+    ask: q.ask ?? q.price,
+    isStale: false,
+    quoteTs: Date.now(),
+    source: "1forge"
+  }))
+);
+```
+
+For fallback/meta persistence, pass `isStale: true`, `source:"fallback"`.
+
+**Result:** Pending orders and SL/TP closures start working automatically with live quotes.
+
+---
+
+## Step 5 — AutoClose hardening (Option 1 + Option 2)
+
+### Edit: `server/cron/autoClose.ts`
+
+Replace the simulated close path entirely:
+
+* Option 1: Use server quotes (quotes table) via `getExecutableQuote(symbol)`
+* Option 2: If market closed or quote stale, **do not close**; defer until next open
+
+Set:
+
+* `trade.closeReason = "AUTO_TIME_LIMIT"`
+
+Record admin-only audit fields (NOT trader UI):
+
+* close_quote_ts, close_source, close_bid, close_ask, close_mid, close_spread
+  These should be stored via `trade_audit` insert (already supported by `recordTradeAudit`), not as trader-facing columns.
+
+---
+
+## Step 6 — Admin export endpoints (backend only)
+
+### Edit: `server/routes/admin.ts`
+
+1. Extend `/api/admin/all-trades` output to include `close_reason` (safe)
+2. Add a new endpoint `/api/admin/trade-audit`
+
+* Returns rows from `trade_audit` ordered by `event_ts desc`
+
+**Result:** The admin “Data tab export CSV” can include the extra fields without confusing traders.
+
+---
+
+## Step 7 — Minimal trader UI change only: History column
+
+### Edit: `client/src/pages/HistoryScreen.tsx`
+
+Add one column:
+
+* `close_reason` (display only)
+
+No other audit fields should be shown.
+
+---
+
+## Step 8 — Remove client closePrice submission (must)
+
+### Edit: `client/src/hooks/use-trades.tsx`
+
+Change close mutation to:
+
+```ts
+mutationFn: async ({ id }: { id: number }) =>
+  apiRequest("POST", `/api/trades/${id}/close`, {})
+```
+
+### Edit: `client/src/pages/TradeScreen.tsx`
+
+Update any `closeTrade.mutate({ id, closePrice })` to `closeTrade.mutate({ id })`.
+
+**Result:** Traders can no longer inject close prices through requests.
+
+---
+
+# 5) What you already have (ready to use)
+
+These new backend modules are already implemented and ready:
+
+* `server/utils/ensureSchema.ts`
+* `server/services/quoteService.ts`
+* `server/engine/tradeAudit.ts`
+* `server/engine/orderEngine.ts`
+
+They are the core of your professional execution semantics.
+
+---
+
+## 6) Key integrity takeaway (matches your risk focus)
+
+Your immediate systemic risk is exactly what you stated:
+
+> any simulated or client-supplied price path = unlimited profit fabrication.
+
+The work above removes those paths by enforcing:
+
+* **server quotes only**
+* **market-hours gating**
+* **staleness rejection/defer**
+* **auditable execution proofs**
+
+---
+
+If you want, in your next message upload (or point me to) the specific Replit Agent format you prefer (diff-style vs. file-by-file patch blocks), and I will output the patch instructions in that exact format.

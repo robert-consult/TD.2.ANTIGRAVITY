@@ -1,0 +1,828 @@
+Proceeding with **Phase 2 (UI)** using the **Phase 1 backend defaults + admin-editable placeholders** and the **“fraud” → “grift”** naming convention throughout.
+
+Below are **copy/paste-ready** frontend additions and the minimal integration edits you need to make in the Admin Dashboard.
+
+---
+
+# 0) Phase 2 Objectives Delivered
+
+1. **Client device identity**: stable `X-Device-Id` header on every API call (login + trade + admin views).
+2. **Admin UI**: User Management mini-tab **“Grift Detection”** next to **Login History** and **Audit Trail**.
+3. **Dashboards**: summary KPIs + tiers + flagged users list + user drilldown + close signal + config editor.
+
+Endpoints used (from Phase 1):
+
+* `GET /api/admin/grift/summary`
+* `GET /api/admin/grift/config`
+* `PUT /api/admin/grift/config`
+* `GET /api/admin/grift/users?minScore=40`
+* `GET /api/admin/grift/users/:userId`
+* `POST /api/admin/grift/signals/:id/close`
+
+---
+
+# 1) Client Device ID (stable per device)
+
+## File: `client/src/lib/deviceId.ts` (NEW)
+
+```ts
+// client/src/lib/deviceId.ts
+const STORAGE_KEY = "tc_device_id_v1";
+
+function fallbackUuid(): string {
+  // RFC4122-ish fallback (good enough)
+  const s: string[] = [];
+  const hex = "0123456789abcdef";
+  for (let i = 0; i < 36; i++) s.push(hex[Math.floor(Math.random() * 16)]);
+  s[14] = "4";
+  // @ts-ignore
+  s[19] = hex[(parseInt(s[19], 16) & 0x3) | 0x8];
+  s[8] = s[13] = s[18] = s[23] = "-";
+  return s.join("");
+}
+
+export function getDeviceId(): string {
+  try {
+    const existing = localStorage.getItem(STORAGE_KEY);
+    if (existing && existing.length >= 16) return existing;
+
+    const id =
+      typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? (crypto as any).randomUUID()
+        : fallbackUuid();
+
+    localStorage.setItem(STORAGE_KEY, id);
+    return id;
+  } catch {
+    // If localStorage blocked, still return something stable-ish for this session:
+    return typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? (crypto as any).randomUUID()
+      : fallbackUuid();
+  }
+}
+```
+
+---
+
+# 2) Ensure all requests send `X-Device-Id`
+
+Because I’m not inspecting your ZIP, I’m giving you a **repo-agnostic approach** that will work even if you have multiple callers.
+
+## File: `client/src/lib/api.ts` (NEW)
+
+Use this everywhere in the admin UI (and you can gradually migrate other calls later).
+
+```ts
+// client/src/lib/api.ts
+import { getDeviceId } from "./deviceId";
+
+export async function apiFetch<T>(
+  url: string,
+  opts?: {
+    method?: string;
+    body?: any;
+    headers?: Record<string, string>;
+  }
+): Promise<T> {
+  const method = opts?.method ?? "GET";
+  const headers: Record<string, string> = {
+    ...(opts?.headers ?? {}),
+    "X-Device-Id": getDeviceId(),
+  };
+
+  let body: any = undefined;
+  if (opts?.body !== undefined) {
+    headers["Content-Type"] = "application/json";
+    body = JSON.stringify(opts.body);
+  }
+
+  const res = await fetch(url, {
+    method,
+    headers,
+    body,
+    credentials: "include",
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`API ${res.status}: ${text || res.statusText}`);
+  }
+
+  return (await res.json()) as T;
+}
+```
+
+### Optional global patch (recommended)
+
+If your app uses a centralized fetch wrapper like `client/src/lib/queryClient.ts`, add the `X-Device-Id` header there too.
+
+Example pattern:
+
+```ts
+// Wherever your default fetcher lives
+import { getDeviceId } from "./deviceId";
+
+const headers = {
+  "X-Device-Id": getDeviceId(),
+  ...(yourExistingHeaders),
+};
+```
+
+---
+
+# 3) Admin UI: Grift Detection Mini-Tab
+
+## File: `client/src/pages/admin/UserManagementGriftTab.tsx` (NEW)
+
+```tsx
+import React, { useEffect, useMemo, useState } from "react";
+import { apiFetch } from "../../lib/api";
+
+type GriftSummary = {
+  open: { openTotal: number; openHigh: number };
+  tiers: Array<{ tier: string; c: number }>;
+};
+
+type GriftConfig = {
+  id: number;
+  enabled: number;
+
+  multiAccountWindowDays: number;
+  churnWindowHours: number;
+  hedgeWindowMinutes: number;
+
+  ipUniqueThreshold: number;
+  uaUniqueThreshold: number;
+  deviceUniqueThreshold: number;
+
+  geoVelocityKmhThreshold: number;
+  geoVelocityMinDistanceKm: number;
+  geoVelocityMaxHours: number;
+
+  scoreMultiAccountDevice: number;
+  scoreHedgePair: number;
+  scoreIpChurn: number;
+  scoreUaChurn: number;
+  scoreDeviceChurn: number;
+  scoreGeoVelocity: number;
+
+  tierMed: number;
+  tierHigh: number;
+  tierCritical: number;
+
+  updatedAt: number;
+  updatedByAdminId?: number | null;
+};
+
+type FlaggedUserRow = {
+  userId: number;
+  email: string;
+  name?: string | null;
+
+  scoreCurrent: number;
+  tier: string;
+
+  devices7d: number;
+  ips7d: number;
+  userAgents7d: number;
+  countries7d: number;
+
+  linkedAccounts30d: number;
+  hedgePairs7d: number;
+  openSignalsCount: number;
+  lastEvaluatedAt: number;
+};
+
+type UserDetail = {
+  score: any;
+  signals: any[];
+  deviceLinks: any[];
+  linkedUsers: any[];
+};
+
+function fmtTs(ts?: number) {
+  if (!ts) return "—";
+  try {
+    return new Date(ts).toLocaleString();
+  } catch {
+    return String(ts);
+  }
+}
+
+function TierBadge({ tier }: { tier: string }) {
+  const t = (tier || "").toUpperCase();
+  const cls =
+    t === "CRITICAL"
+      ? "bg-red-600 text-white"
+      : t === "HIGH"
+      ? "bg-orange-600 text-white"
+      : t === "MED"
+      ? "bg-yellow-500 text-black"
+      : "bg-muted text-foreground";
+  return <span className={`px-2 py-1 rounded text-xs font-semibold ${cls}`}>{t || "LOW"}</span>;
+}
+
+export default function UserManagementGriftTab() {
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
+
+  const [summary, setSummary] = useState<GriftSummary | null>(null);
+  const [config, setConfig] = useState<GriftConfig | null>(null);
+
+  const [minScore, setMinScore] = useState<number>(40);
+  const [rows, setRows] = useState<FlaggedUserRow[]>([]);
+
+  const [selectedUserId, setSelectedUserId] = useState<number | null>(null);
+  const [detail, setDetail] = useState<UserDetail | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+
+  const [configEdit, setConfigEdit] = useState<Partial<GriftConfig>>({});
+  const [savingConfig, setSavingConfig] = useState(false);
+
+  async function refreshAll() {
+    setErr(null);
+    setLoading(true);
+    try {
+      const [s, c] = await Promise.all([
+        apiFetch<GriftSummary>("/api/admin/grift/summary"),
+        apiFetch<GriftConfig>("/api/admin/grift/config"),
+      ]);
+      setSummary(s);
+      setConfig(c);
+      setConfigEdit({});
+    } catch (e: any) {
+      setErr(e?.message ?? "Failed to load grift data");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function refreshUsers() {
+    setErr(null);
+    try {
+      const u = await apiFetch<FlaggedUserRow[]>(`/api/admin/grift/users?minScore=${minScore}`);
+      setRows(u);
+    } catch (e: any) {
+      setErr(e?.message ?? "Failed to load users");
+    }
+  }
+
+  useEffect(() => {
+    refreshAll().then(refreshUsers);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    refreshUsers();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [minScore]);
+
+  async function openUser(userId: number) {
+    setSelectedUserId(userId);
+    setDetail(null);
+    setDetailLoading(true);
+    try {
+      const d = await apiFetch<UserDetail>(`/api/admin/grift/users/${userId}`);
+      setDetail(d);
+    } catch (e: any) {
+      setErr(e?.message ?? "Failed to load user detail");
+    } finally {
+      setDetailLoading(false);
+    }
+  }
+
+  async function closeSignal(signalId: number) {
+    const reason = prompt("Close reason (optional):") ?? "Closed by admin";
+    try {
+      await apiFetch(`/api/admin/grift/signals/${signalId}/close`, { method: "POST", body: { reason } });
+      if (selectedUserId) await openUser(selectedUserId);
+      await refreshAll();
+      await refreshUsers();
+    } catch (e: any) {
+      setErr(e?.message ?? "Failed to close signal");
+    }
+  }
+
+  async function saveConfig() {
+    if (!config) return;
+    setSavingConfig(true);
+    setErr(null);
+    try {
+      const payload = configEdit;
+      const updated = await apiFetch<GriftConfig>("/api/admin/grift/config", { method: "PUT", body: payload });
+      setConfig(updated);
+      setConfigEdit({});
+      await refreshAll();
+      await refreshUsers();
+    } catch (e: any) {
+      setErr(e?.message ?? "Failed to save config");
+    } finally {
+      setSavingConfig(false);
+    }
+  }
+
+  const tierCounts = useMemo(() => {
+    const map: Record<string, number> = { LOW: 0, MED: 0, HIGH: 0, CRITICAL: 0 };
+    (summary?.tiers ?? []).forEach((t) => {
+      const key = String(t.tier || "LOW").toUpperCase();
+      map[key] = Number(t.c ?? 0);
+    });
+    return map;
+  }, [summary]);
+
+  return (
+    <div className="p-4 space-y-4">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <div className="text-lg font-semibold">Grift Detection</div>
+          <div className="text-sm text-muted-foreground">
+            Multi-account device linkage, coordinated hedging, and environment churn signals.
+          </div>
+        </div>
+        <button
+          className="px-3 py-2 rounded border hover:bg-muted"
+          onClick={() => refreshAll().then(refreshUsers)}
+          disabled={loading}
+        >
+          Refresh
+        </button>
+      </div>
+
+      {err && (
+        <div className="border border-red-300 bg-red-50 text-red-900 rounded p-3 text-sm">
+          {err}
+        </div>
+      )}
+
+      {/* KPI Row */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+        <div className="rounded border p-3">
+          <div className="text-sm text-muted-foreground">Open Signals</div>
+          <div className="text-2xl font-semibold">{summary?.open?.openTotal ?? 0}</div>
+        </div>
+        <div className="rounded border p-3">
+          <div className="text-sm text-muted-foreground">Open High/Critical</div>
+          <div className="text-2xl font-semibold">{summary?.open?.openHigh ?? 0}</div>
+        </div>
+        <div className="rounded border p-3">
+          <div className="text-sm text-muted-foreground">Users HIGH</div>
+          <div className="text-2xl font-semibold">{tierCounts["HIGH"] ?? 0}</div>
+        </div>
+        <div className="rounded border p-3">
+          <div className="text-sm text-muted-foreground">Users CRITICAL</div>
+          <div className="text-2xl font-semibold">{tierCounts["CRITICAL"] ?? 0}</div>
+        </div>
+      </div>
+
+      {/* Filters + Config */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+        <div className="rounded border p-3 space-y-3">
+          <div className="font-semibold">Filters</div>
+          <div className="flex gap-2 items-end">
+            <div className="flex-1">
+              <div className="text-xs text-muted-foreground">Min Score</div>
+              <input
+                className="w-full border rounded px-3 py-2"
+                type="number"
+                min={0}
+                max={100}
+                value={minScore}
+                onChange={(e) => setMinScore(Number(e.target.value))}
+              />
+            </div>
+            <button className="px-3 py-2 rounded border hover:bg-muted" onClick={refreshUsers}>
+              Apply
+            </button>
+          </div>
+          <div className="text-xs text-muted-foreground">
+            Default threshold is 40 (MED). Raise to 60 for HIGH-only triage.
+          </div>
+        </div>
+
+        <div className="lg:col-span-2 rounded border p-3 space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <div className="font-semibold">Grift Config (Admin-editable)</div>
+            <div className="text-xs text-muted-foreground">
+              Last update: {fmtTs(config?.updatedAt)}
+            </div>
+          </div>
+
+          {!config ? (
+            <div className="text-sm text-muted-foreground">Loading config…</div>
+          ) : (
+            <>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                <label className="text-xs">
+                  Enabled
+                  <select
+                    className="mt-1 w-full border rounded px-2 py-2"
+                    value={String(configEdit.enabled ?? config.enabled)}
+                    onChange={(e) => setConfigEdit((p) => ({ ...p, enabled: Number(e.target.value) }))}
+                  >
+                    <option value="1">ON</option>
+                    <option value="0">OFF</option>
+                  </select>
+                </label>
+
+                <label className="text-xs">
+                  Multi-Account Window (days)
+                  <input
+                    className="mt-1 w-full border rounded px-2 py-2"
+                    type="number"
+                    value={configEdit.multiAccountWindowDays ?? config.multiAccountWindowDays}
+                    onChange={(e) => setConfigEdit((p) => ({ ...p, multiAccountWindowDays: Number(e.target.value) }))}
+                  />
+                </label>
+
+                <label className="text-xs">
+                  Churn Window (hours)
+                  <input
+                    className="mt-1 w-full border rounded px-2 py-2"
+                    type="number"
+                    value={configEdit.churnWindowHours ?? config.churnWindowHours}
+                    onChange={(e) => setConfigEdit((p) => ({ ...p, churnWindowHours: Number(e.target.value) }))}
+                  />
+                </label>
+
+                <label className="text-xs">
+                  Hedge Window (minutes)
+                  <input
+                    className="mt-1 w-full border rounded px-2 py-2"
+                    type="number"
+                    value={configEdit.hedgeWindowMinutes ?? config.hedgeWindowMinutes}
+                    onChange={(e) => setConfigEdit((p) => ({ ...p, hedgeWindowMinutes: Number(e.target.value) }))}
+                  />
+                </label>
+              </div>
+
+              <div className="grid grid-cols-2 md:grid-cols-6 gap-2">
+                <label className="text-xs">
+                  Score: Multi-Account
+                  <input
+                    className="mt-1 w-full border rounded px-2 py-2"
+                    type="number"
+                    value={configEdit.scoreMultiAccountDevice ?? config.scoreMultiAccountDevice}
+                    onChange={(e) => setConfigEdit((p) => ({ ...p, scoreMultiAccountDevice: Number(e.target.value) }))}
+                  />
+                </label>
+                <label className="text-xs">
+                  Score: Hedge Pair
+                  <input
+                    className="mt-1 w-full border rounded px-2 py-2"
+                    type="number"
+                    value={configEdit.scoreHedgePair ?? config.scoreHedgePair}
+                    onChange={(e) => setConfigEdit((p) => ({ ...p, scoreHedgePair: Number(e.target.value) }))}
+                  />
+                </label>
+                <label className="text-xs">
+                  Tier MED
+                  <input
+                    className="mt-1 w-full border rounded px-2 py-2"
+                    type="number"
+                    value={configEdit.tierMed ?? config.tierMed}
+                    onChange={(e) => setConfigEdit((p) => ({ ...p, tierMed: Number(e.target.value) }))}
+                  />
+                </label>
+                <label className="text-xs">
+                  Tier HIGH
+                  <input
+                    className="mt-1 w-full border rounded px-2 py-2"
+                    type="number"
+                    value={configEdit.tierHigh ?? config.tierHigh}
+                    onChange={(e) => setConfigEdit((p) => ({ ...p, tierHigh: Number(e.target.value) }))}
+                  />
+                </label>
+                <label className="text-xs">
+                  Tier CRITICAL
+                  <input
+                    className="mt-1 w-full border rounded px-2 py-2"
+                    type="number"
+                    value={configEdit.tierCritical ?? config.tierCritical}
+                    onChange={(e) => setConfigEdit((p) => ({ ...p, tierCritical: Number(e.target.value) }))}
+                  />
+                </label>
+
+                <div className="flex items-end">
+                  <button
+                    className="w-full px-3 py-2 rounded border hover:bg-muted disabled:opacity-50"
+                    onClick={saveConfig}
+                    disabled={savingConfig}
+                  >
+                    {savingConfig ? "Saving…" : "Save Config"}
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Flagged Users Table */}
+      <div className="rounded border overflow-hidden">
+        <div className="p-3 border-b flex items-center justify-between">
+          <div className="font-semibold">Flagged Users</div>
+          <div className="text-xs text-muted-foreground">Threshold: score ≥ {minScore}</div>
+        </div>
+
+        {loading ? (
+          <div className="p-3 text-sm text-muted-foreground">Loading…</div>
+        ) : rows.length === 0 ? (
+          <div className="p-3 text-sm text-muted-foreground">No users at this threshold.</div>
+        ) : (
+          <table className="w-full text-sm">
+            <thead className="bg-muted">
+              <tr>
+                <th className="text-left p-2">User</th>
+                <th className="text-left p-2">Tier</th>
+                <th className="text-left p-2">Score</th>
+                <th className="text-left p-2">Devices(7d)</th>
+                <th className="text-left p-2">IPs(7d)</th>
+                <th className="text-left p-2">Linked(30d)</th>
+                <th className="text-left p-2">Hedge(7d)</th>
+                <th className="text-left p-2">Open Signals</th>
+                <th className="text-left p-2">Last Eval</th>
+                <th className="text-left p-2">Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((u) => (
+                <tr key={u.userId} className="border-t">
+                  <td className="p-2">
+                    <div className="font-medium">{u.name || "User #" + u.userId}</div>
+                    <div className="text-muted-foreground">{u.email}</div>
+                  </td>
+                  <td className="p-2">
+                    <TierBadge tier={u.tier} />
+                  </td>
+                  <td className="p-2 font-semibold">{u.scoreCurrent}</td>
+                  <td className="p-2">{u.devices7d}</td>
+                  <td className="p-2">{u.ips7d}</td>
+                  <td className="p-2">{u.linkedAccounts30d}</td>
+                  <td className="p-2">{u.hedgePairs7d}</td>
+                  <td className="p-2">{u.openSignalsCount}</td>
+                  <td className="p-2">{fmtTs(u.lastEvaluatedAt)}</td>
+                  <td className="p-2">
+                    <button
+                      className="px-3 py-1 rounded border hover:bg-muted"
+                      onClick={() => openUser(u.userId)}
+                    >
+                      Review
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {/* Detail Drawer (simple modal) */}
+      {selectedUserId !== null && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-background rounded-lg border w-[95vw] max-w-5xl max-h-[90vh] overflow-auto">
+            <div className="p-3 border-b flex items-center justify-between">
+              <div className="font-semibold">Grift Review — User #{selectedUserId}</div>
+              <button
+                className="px-3 py-2 rounded border hover:bg-muted"
+                onClick={() => {
+                  setSelectedUserId(null);
+                  setDetail(null);
+                }}
+              >
+                Close
+              </button>
+            </div>
+
+            {detailLoading ? (
+              <div className="p-4 text-sm text-muted-foreground">Loading user detail…</div>
+            ) : !detail ? (
+              <div className="p-4 text-sm text-muted-foreground">No data.</div>
+            ) : (
+              <div className="p-4 space-y-4">
+                {/* Summary */}
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                  <div className="rounded border p-3">
+                    <div className="text-xs text-muted-foreground">Score</div>
+                    <div className="text-2xl font-semibold">{detail.score?.score_current ?? 0}</div>
+                  </div>
+                  <div className="rounded border p-3">
+                    <div className="text-xs text-muted-foreground">Tier</div>
+                    <div className="text-2xl font-semibold">{String(detail.score?.tier ?? "LOW")}</div>
+                  </div>
+                  <div className="rounded border p-3">
+                    <div className="text-xs text-muted-foreground">Open Signals</div>
+                    <div className="text-2xl font-semibold">{detail.score?.open_signals_count ?? 0}</div>
+                  </div>
+                  <div className="rounded border p-3">
+                    <div className="text-xs text-muted-foreground">Last Evaluated</div>
+                    <div className="text-sm">{fmtTs(detail.score?.last_evaluated_at)}</div>
+                  </div>
+                </div>
+
+                {/* Linked Users */}
+                <div className="rounded border">
+                  <div className="p-3 border-b font-semibold">Linked Accounts (Shared Device)</div>
+                  {detail.linkedUsers?.length ? (
+                    <table className="w-full text-sm">
+                      <thead className="bg-muted">
+                        <tr>
+                          <th className="text-left p-2">Linked User</th>
+                          <th className="text-left p-2">Device</th>
+                          <th className="text-left p-2">Last Seen</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {detail.linkedUsers.map((r: any, idx: number) => (
+                          <tr key={idx} className="border-t">
+                            <td className="p-2">User #{r.linkedUserId}</td>
+                            <td className="p-2 font-mono text-xs">{r.deviceId}</td>
+                            <td className="p-2">{fmtTs(r.lastSeenAt)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  ) : (
+                    <div className="p-3 text-sm text-muted-foreground">No linked users detected.</div>
+                  )}
+                </div>
+
+                {/* Device Links */}
+                <div className="rounded border">
+                  <div className="p-3 border-b font-semibold">Devices Seen</div>
+                  {detail.deviceLinks?.length ? (
+                    <table className="w-full text-sm">
+                      <thead className="bg-muted">
+                        <tr>
+                          <th className="text-left p-2">Device</th>
+                          <th className="text-left p-2">Seen Count</th>
+                          <th className="text-left p-2">First Seen</th>
+                          <th className="text-left p-2">Last Seen</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {detail.deviceLinks.map((r: any, idx: number) => (
+                          <tr key={idx} className="border-t">
+                            <td className="p-2 font-mono text-xs">{r.deviceId}</td>
+                            <td className="p-2">{r.seenCount}</td>
+                            <td className="p-2">{fmtTs(r.firstSeenAt)}</td>
+                            <td className="p-2">{fmtTs(r.lastSeenAt)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  ) : (
+                    <div className="p-3 text-sm text-muted-foreground">No devices recorded yet.</div>
+                  )}
+                </div>
+
+                {/* Signals */}
+                <div className="rounded border">
+                  <div className="p-3 border-b font-semibold">Signals</div>
+                  {detail.signals?.length ? (
+                    <table className="w-full text-sm">
+                      <thead className="bg-muted">
+                        <tr>
+                          <th className="text-left p-2">Time</th>
+                          <th className="text-left p-2">Rule</th>
+                          <th className="text-left p-2">Severity</th>
+                          <th className="text-left p-2">Status</th>
+                          <th className="text-left p-2">Points</th>
+                          <th className="text-left p-2">Evidence</th>
+                          <th className="text-left p-2">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {detail.signals.map((s: any) => (
+                          <tr key={s.id} className="border-t align-top">
+                            <td className="p-2">{fmtTs(s.created_at)}</td>
+                            <td className="p-2 font-mono text-xs">{s.rule_code}</td>
+                            <td className="p-2"><TierBadge tier={s.severity} /></td>
+                            <td className="p-2">{s.status}</td>
+                            <td className="p-2">{s.points}</td>
+                            <td className="p-2">
+                              <details>
+                                <summary className="cursor-pointer underline text-xs">view</summary>
+                                <pre className="text-xs whitespace-pre-wrap break-words mt-2">
+                                  {s.evidence_json}
+                                </pre>
+                              </details>
+                            </td>
+                            <td className="p-2">
+                              {s.status === "OPEN" ? (
+                                <button
+                                  className="px-3 py-1 rounded border hover:bg-muted"
+                                  onClick={() => closeSignal(Number(s.id))}
+                                >
+                                  Close
+                                </button>
+                              ) : (
+                                <span className="text-xs text-muted-foreground">—</span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  ) : (
+                    <div className="p-3 text-sm text-muted-foreground">No signals.</div>
+                  )}
+                </div>
+
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+```
+
+---
+
+# 4) Integrate mini-tab into your Admin Dashboard
+
+You said your User Management mini-tabs exist in:
+
+* `client/src/pages/AdminDashboard.tsx`
+
+Because I’m not reading your ZIP, here is the **minimal integration pattern**:
+
+### A) Import the new tab component
+
+Add near the top:
+
+```tsx
+import UserManagementGriftTab from "./admin/UserManagementGriftTab";
+```
+
+### B) Add the mini-tab button next to Login History and Audit Trail
+
+Where you define mini-tabs for User Management, add a new entry:
+
+```ts
+const userMiniTabs = [
+  "All",
+  "Active",
+  "Disabled",
+  "Frozen",
+  "Online/Offline",
+  "Login History",
+  "Audit Trail",
+  "Grift Detection", // NEW
+];
+```
+
+### C) Render the tab content
+
+Where you switch on mini-tab selection:
+
+```tsx
+{activeUserMiniTab === "Grift Detection" && <UserManagementGriftTab />}
+```
+
+Place it immediately after the existing Login History / Audit Trail render blocks so the UX is consistent.
+
+---
+
+# 5) Optional but recommended: make the device ID available early
+
+If you want the deviceId to exist as soon as the app loads (not only when first API call happens), add one line to your app entry, e.g. `client/src/main.tsx`:
+
+```ts
+import { getDeviceId } from "./lib/deviceId";
+getDeviceId();
+```
+
+This ensures the ID is created before login/trading actions.
+
+---
+
+# 6) What Replit Agent 3 must ensure (Phase 2 acceptance checklist)
+
+### Device header
+
+* [ ] All authenticated API calls include `X-Device-Id`
+* [ ] Login call includes `X-Device-Id` (so the first session is linked properly)
+* [ ] Trade placement call includes `X-Device-Id` (so hedging linkage works)
+
+### Admin tab
+
+* [ ] “Grift Detection” mini-tab appears in User Management next to Login History and Audit Trail
+* [ ] Summary KPIs load without error
+* [ ] Config loads and saves via PUT
+* [ ] Flagged users list loads and filters by min score
+* [ ] Drilldown modal loads signals + linked users + devices
+* [ ] Closing a signal updates UI and recomputes aggregates
+
+---
+
+# 7) One important note (so this works on first run)
+
+The UI assumes backend returns the fields exactly as Phase 1 router provides them. If your backend differs slightly:
+
+* Keep the UI, but adjust only the JSON field names in the UI types.
+
+---
+
+If you want the next increment after this: I can add **“geo velocity”, “ip churn”, “ua churn”, “device churn”** into the UI as additional filter chips and dedicated KPI cards (Phase 2.1), but the above already gives you a functional triage queue and a tunable configuration surface.

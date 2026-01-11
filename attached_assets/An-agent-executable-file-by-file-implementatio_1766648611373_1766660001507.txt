@@ -1,0 +1,714 @@
+Below is an **agent-executable, file-by-file implementation audit script** for Replit Agent 3. It is designed to be run against your **actual repo** (TradeCentral in TRADEHUB) and your **live SQLite DB**, and it yields deterministic **PASS/FAIL** outcomes for:
+
+* Email validation (initial + resend throttles)
+* Rolling email revalidation (30-day due + overdue lock)
+* SMS validation (Twilio Verify) with contender-only gating
+* KYC (invite-based; Selected-tier gating)
+* Tier model (Candidate/Performer/Selected) + performance-based eligibility detection
+* Admin mini-tabs + backend endpoints
+* Hedge-fund-grade identity/security/compliance audit trails
+* Trader Profile Settings UI (cards/panes/dropdowns) + admin view variant
+
+This assumes your DB is `trading_app.db` (per prior context). If different, replace accordingly.
+
+---
+
+# 0) Pre-flight: repo + runtime assumptions
+
+## 0.1 Confirm the DB and schema location
+
+**PASS if all present**
+
+* [ ] SQLite file exists: `trading_app.db` at repo root (or configured path)
+* [ ] Drizzle schema is at: `shared/schema.ts`
+* [ ] Backend entry: `server/index.ts` (TypeScript)
+* [ ] Frontend: `client/src`
+
+### Commands
+
+```bash
+ls -la
+ls -la trading_app.db || find . -maxdepth 3 -name "*.db" -print
+ls -la shared/schema.ts
+ls -la server/index.ts
+ls -la client/src
+```
+
+## 0.2 Confirm env vars for Resend + Twilio
+
+**PASS if these exist in Replit secrets or `.env`**
+
+* [ ] `RESEND_API_KEY`
+* [ ] `TWILIO_ACCOUNT_SID`
+* [ ] `TWILIO_AUTH_TOKEN`
+* [ ] `TWILIO_VERIFY_SERVICE_SID`
+
+### Commands
+
+```bash
+# On Replit, env is usually injected. If using .env locally:
+ls -la .env || true
+node -e "console.log(!!process.env.RESEND_API_KEY, !!process.env.TWILIO_ACCOUNT_SID, !!process.env.TWILIO_VERIFY_SERVICE_SID)"
+```
+
+---
+
+# 1) Static code audit: “single source of truth” gating
+
+## 1.1 PolicyDecision module exists and is shared
+
+**PASS if file exists and exports are used**
+
+* [ ] `shared/policyDecision.ts` exists
+* [ ] exports include `decidePolicy`, `decisionMatrix` or `featureGates`, `DEFAULT_POLICY_CONFIG`
+
+### Commands
+
+```bash
+ls -la shared/policyDecision.ts
+rg "export function decidePolicy" shared/policyDecision.ts
+rg "DEFAULT_POLICY_CONFIG" shared/policyDecision.ts
+```
+
+## 1.2 Server uses policy checks before side effects
+
+**PASS if every relevant route calls decidePolicy prior to engine**
+
+* [ ] Trade open/increase route calls `decidePolicy("TRADE_OPEN_OR_INCREASE", ctx)` **before** risk/trade engine logic
+* [ ] Pending placement route calls `decidePolicy("TRADE_PLACE_PENDING", ctx)` before creating pending
+* [ ] SL/TP modify route calls `decidePolicy("TRADE_MODIFY_SLTP", ctx)` and (if supported) passes `tradeIntent` for risk-reducing logic
+* [ ] Close/reduce route calls `decidePolicy("TRADE_CLOSE_OR_REDUCE", ctx)` (should almost always allow)
+* [ ] Cancel pending route calls `decidePolicy("TRADE_CANCEL_PENDING", ctx)`
+
+### Commands
+
+```bash
+rg "decidePolicy\\(" server -n
+rg "TRADE_OPEN_OR_INCREASE|TRADE_PLACE_PENDING|TRADE_MODIFY_SLTP|TRADE_CLOSE_OR_REDUCE|TRADE_CANCEL_PENDING" server -n
+```
+
+**FAIL patterns**
+
+* If you see trade creation logic before any policy call
+* If only frontend hides buttons but backend does not enforce
+
+## 1.3 Builder exists (schema-aware)
+
+**PASS**
+
+* [ ] `server/policy/buildDecisionContext.ts` exists
+* [ ] Called by all routes above
+* [ ] Pulls (or derives) `emailInitialDueAt`, `emailReverifyDueAt`, `metrics`, `throttle`, `kyc`
+
+### Commands
+
+```bash
+ls -la server/policy/buildDecisionContext.ts
+rg "buildDecisionContext" server -n
+rg "emailInitialDueAt|emailReverifyDueAt|tradesLifetime|tradesLast90d|smsSendCountDay|emailResendCountDay|kyc" server/policy/buildDecisionContext.ts
+```
+
+---
+
+# 2) Schema audit: tables/columns required for enforcement + trails
+
+Open `shared/schema.ts` and confirm additions.
+
+## 2.1 Users tier field (required)
+
+**PASS**
+
+* [ ] `users` has `userTier` (TEXT) with values: `CANDIDATE|PERFORMER|SELECTED`
+* [ ] Default = `CANDIDATE`
+
+### Commands (code + DB)
+
+```bash
+rg "userTier|user_tier" shared/schema.ts
+sqlite3 trading_app.db "PRAGMA table_info(users);"
+```
+
+## 2.2 Verification table
+
+**PASS**
+
+* [ ] `user_verification` exists with:
+
+  * [ ] `userId`
+  * [ ] `emailVerifiedAt`
+  * [ ] `emailReverifyDueAt`
+  * [ ] email throttle: `emailResendCountDay`, `emailLastResendAt` (or similar)
+  * [ ] SMS throttle: `smsSendCountDay`, `smsLastSentAt`, `smsVerifyFailCount`
+  * [ ] `contenderTier` (`NONE|CANDIDATE_SMS_REQUIRED|VERIFIED_SMS|SELECTED_REAL_CAPITAL`)
+  * [ ] `smsVerifiedAt` (or phoneVerifiedAt)
+
+### Commands
+
+```bash
+sqlite3 trading_app.db "SELECT name FROM sqlite_master WHERE type='table' AND name='user_verification';"
+sqlite3 trading_app.db "PRAGMA table_info(user_verification);"
+```
+
+## 2.3 KYC table
+
+**PASS**
+
+* [ ] `user_kyc_profiles` exists with:
+
+  * [ ] `userId`
+  * [ ] `status` (`NOT_STARTED|INVITED|SUBMITTED|APPROVED|REJECTED`)
+  * [ ] invited/submitted/reviewed timestamps
+  * [ ] reviewer admin id + note
+
+### Commands
+
+```bash
+sqlite3 trading_app.db "SELECT name FROM sqlite_master WHERE type='table' AND name='user_kyc_profiles';"
+sqlite3 trading_app.db "PRAGMA table_info(user_kyc_profiles);"
+```
+
+## 2.4 Payout profile table (preferred payment currency belongs here)
+
+**PASS**
+
+* [ ] `user_payout_profiles` exists with:
+
+  * [ ] `userId`
+  * [ ] `preferredPaymentCurrency`
+  * [ ] optional payout rails fields (country, method, etc.)
+
+### Commands
+
+```bash
+sqlite3 trading_app.db "SELECT name FROM sqlite_master WHERE type='table' AND name='user_payout_profiles';"
+sqlite3 trading_app.db "PRAGMA table_info(user_payout_profiles);"
+```
+
+## 2.5 Hedge-fund grade identity/security audit trail table
+
+**PASS**
+
+* [ ] An identity audit store exists (one of):
+
+  * [ ] `adminActions` with categories, OR
+  * [ ] `identityAudit` table, OR
+  * [ ] consolidated `audit_log` with categories
+* [ ] Captures: timestamp, userId, actorType, ip, userAgent, sessionId, event type, description
+* [ ] If tamper-evident: `prev_hash` and `event_hash` present
+
+### Commands
+
+```bash
+sqlite3 trading_app.db ".tables"
+# Try common tables:
+sqlite3 trading_app.db "PRAGMA table_info(adminActions);" 2>/dev/null || true
+sqlite3 trading_app.db "PRAGMA table_info(identityAudit);" 2>/dev/null || true
+sqlite3 trading_app.db "PRAGMA table_info(audit_log);" 2>/dev/null || true
+```
+
+---
+
+# 3) API surface audit: endpoints must exist and enforce policy
+
+## 3.1 Email (Resend)
+
+**PASS**
+
+* [ ] `POST /api/.../email/resend` exists (name may vary)
+* [ ] Calls `decidePolicy("EMAIL_RESEND_VERIFICATION", ctx)`
+* [ ] Updates throttle counters in DB
+* [ ] Writes audit events for:
+
+  * [ ] SENT
+  * [ ] DENIED (cooldown/limit)
+  * [ ] VERIFIED (on callback/verify)
+
+### Commands
+
+```bash
+rg "EMAIL_RESEND_VERIFICATION" server -n
+rg "resend" server -n
+rg "RESEND_API_KEY|Resend" server -n
+```
+
+## 3.2 Rolling email reverify
+
+**PASS**
+
+* [ ] Verify action sets `emailReverifyDueAt = now + 30 days`
+* [ ] Policy locks exposure-increasing trade if overdue beyond grace
+* [ ] UI shows “reverify due/overdue” state
+
+### Commands
+
+```bash
+rg "emailReverifyDueAt|email_reverify_due_at" -n server shared
+rg "LOCKED_EMAIL_REVERIFY_OVERDUE|EMAIL_REVERIFY_OVERDUE" -n shared server
+```
+
+## 3.3 SMS (Twilio Verify)
+
+**PASS**
+
+* [ ] `POST /api/sms/verify/start` exists
+* [ ] `POST /api/sms/verify/confirm` exists
+* [ ] Both enforce policy:
+
+  * [ ] `PHONE_VERIFY_START`
+  * [ ] `PHONE_VERIFY_CONFIRM`
+* [ ] Throttle stored (daily + cooldown + fail count)
+* [ ] Audit events are emitted
+
+### Commands
+
+```bash
+rg "PHONE_VERIFY_START|PHONE_VERIFY_CONFIRM" server -n
+rg "TWILIO_VERIFY_SERVICE_SID|twilio" server -n
+rg "/api/sms/verify" server -n
+```
+
+## 3.4 KYC (invite-based)
+
+**PASS**
+
+* [ ] Admin endpoints:
+
+  * [ ] `GET /api/admin/kyc/queue`
+  * [ ] `POST /api/admin/kyc/invite`
+  * [ ] `POST /api/admin/kyc/review`
+* [ ] Trader endpoints:
+
+  * [ ] `GET /api/kyc/me` (or included in `/api/profile/me`)
+  * [ ] `POST /api/kyc/submit` (if implementing)
+* [ ] Policy enforced:
+
+  * [ ] `KYC_VIEW`, `KYC_SUBMIT`, `PREFERRED_PAYMENT_CURRENCY_SET`
+
+### Commands
+
+```bash
+rg "/api/admin/kyc" server -n
+rg "KYC_VIEW|KYC_SUBMIT|PREFERRED_PAYMENT_CURRENCY_SET" server shared -n
+```
+
+---
+
+# 4) UI audit: Admin mini-tabs + Trader profile settings + dropdowns
+
+## 4.1 Admin mini-tabs (additions only)
+
+**PASS**
+
+* [ ] `client/src/pages/AdminAuditTrail.tsx` exists
+* [ ] `client/src/pages/KycQueue.tsx` exists
+* [ ] `client/src/pages/UserProfileSettings.tsx` exists (admin view)
+* [ ] `AdminDashboard.tsx` imports them and adds mini-tab buttons after “Login History”
+* [ ] Render branches exist and bulk action bar hidden for those tabs
+
+### Commands
+
+```bash
+ls -la client/src/pages/AdminAuditTrail.tsx client/src/pages/KycQueue.tsx client/src/pages/UserProfileSettings.tsx
+rg "AdminAuditTrail|KycQueue|UserProfileSettings" client/src/pages/AdminDashboard.tsx
+rg "setUserFilterTab\\(\"auditTrail\"\\)|\"kycQueue\"|\"profileSettings\"" client/src/pages/AdminDashboard.tsx
+```
+
+## 4.2 Trader Profile Settings page
+
+**PASS**
+
+* [ ] `client/src/pages/ProfileSettings.tsx` exists (or equivalent)
+* [ ] Route exists: `/profile`
+* [ ] Page includes cards/panes:
+
+  * [ ] Identity
+  * [ ] Email Verification status + resend
+  * [ ] SMS Verification (locked until eligible)
+  * [ ] KYC Status (locked until invited/selected)
+  * [ ] Payout Profile / Preferred Currency (locked until invited/selected)
+  * [ ] Security Sessions + (2FA either implemented or properly gated “Coming soon”)
+
+### Commands
+
+```bash
+rg "ProfileSettings" client/src -n
+rg "path=\\\"/profile\\\"|/profile" client/src -n
+```
+
+## 4.3 Header email dropdown (entry point)
+
+**PASS**
+
+* [ ] Top-right email area becomes dropdown trigger
+* [ ] Menu items:
+
+  * [ ] Profile Settings
+  * [ ] KYC / Payout (disabled when locked)
+  * [ ] Logout
+* [ ] Tier badge visible (Candidate/Performer/Selected)
+
+### Commands
+
+```bash
+rg "DropdownMenu|Profile Settings|Logout|KYC" client/src/components -n
+rg "tier|userTier|badge" client/src -n
+```
+
+---
+
+# 5) Runtime verification: deterministic DB-driven test cases
+
+Everything below is run against SQLite to force each state, then confirmed via API + UI.
+
+## 5.1 Create or identify a test user
+
+Pick an existing userId or create one via signup.
+
+### Commands
+
+```bash
+sqlite3 trading_app.db "SELECT id,email,username,createdAt,created_at,userTier,user_tier FROM users ORDER BY id DESC LIMIT 10;"
+```
+
+Set a variable:
+
+* `TEST_UID = <id>`
+
+---
+
+## 5.2 Email initial grace expiry lock (14-day rule)
+
+### Step A: Force user to be unverified and older than 14 days
+
+**PASS**
+
+* [ ] No `emailVerifiedAt`
+* [ ] `users.createdAt` (or created_at) is older than 15 days
+
+**Commands (adapt columns based on your schema output)**
+
+```bash
+# Inspect columns first
+sqlite3 trading_app.db "PRAGMA table_info(users);"
+sqlite3 trading_app.db "PRAGMA table_info(user_verification);"
+
+# Example if users.created_at exists:
+sqlite3 trading_app.db "UPDATE users SET created_at = strftime('%s','now')*1000 - (15*86400000) WHERE id = TEST_UID;"
+
+# Ensure verification row exists and emailVerifiedAt is null
+sqlite3 trading_app.db "INSERT OR IGNORE INTO user_verification(user_id) VALUES(TEST_UID);"
+sqlite3 trading_app.db "UPDATE user_verification SET email_verified_at = NULL, email_reverify_due_at = NULL WHERE user_id = TEST_UID;"
+```
+
+### Step B: Attempt a trade open/increase (should deny)
+
+**PASS**
+
+* [ ] API returns 403
+* [ ] deny_code = `EMAIL_UNVERIFIED_GRACE_EXPIRED`
+
+**Command**
+
+```bash
+curl -s -i -X POST "http://localhost:3000/api/trades/open" \
+  -H "Content-Type: application/json" \
+  -H "Cookie: <your_auth_cookie>" \
+  -d '{"symbol":"EURUSD","side":"BUY","lots":1,"type":"MARKET"}'
+```
+
+### Step C: Attempt close/reduce (should allow)
+
+**PASS**
+
+* [ ] Close endpoint succeeds OR returns “no position” but not policy deny
+
+---
+
+## 5.3 Email resend throttles (cooldown + daily cap)
+
+### Step A: Send resend twice within cooldown
+
+**PASS**
+
+* [ ] First call allowed, second denied with `EMAIL_SEND_COOLDOWN`
+
+### Command
+
+```bash
+curl -s -X POST "http://localhost:3000/api/profile/email/resend" -H "Cookie: <cookie>"
+curl -s -X POST "http://localhost:3000/api/profile/email/resend" -H "Cookie: <cookie>"
+```
+
+### Step B: Exceed daily cap
+
+**PASS**
+
+* [ ] After N sends (e.g., 5), next returns `EMAIL_SEND_RATE_LIMIT`
+
+If you need to force counters:
+
+```bash
+sqlite3 trading_app.db "UPDATE user_verification SET email_resend_count_day = 5 WHERE user_id = TEST_UID;"
+```
+
+---
+
+## 5.4 Rolling reverify overdue lock (30 days + overdue grace)
+
+### Step A: Mark email verified long ago + set reverify due in past beyond grace
+
+**PASS**
+
+* [ ] accountState becomes LOCKED_EMAIL_REVERIFY_OVERDUE
+* [ ] trade open/increase denied with `EMAIL_REVERIFY_OVERDUE`
+
+**Example**
+
+```bash
+# Set verified 40 days ago
+sqlite3 trading_app.db "UPDATE user_verification SET email_verified_at = strftime('%s','now')*1000 - (40*86400000) WHERE user_id = TEST_UID;"
+
+# Set reverify due 10 days ago (and overdue grace is e.g. 5 days → lock)
+sqlite3 trading_app.db "UPDATE user_verification SET email_reverify_due_at = strftime('%s','now')*1000 - (10*86400000) WHERE user_id = TEST_UID;"
+```
+
+### Step B: Attempt trade open/increase
+
+**PASS** deny_code = `EMAIL_REVERIFY_OVERDUE`
+
+---
+
+## 5.5 Contender eligibility (performance-based) for SMS gating
+
+You need to satisfy **Path1 or Path2** metrics.
+
+### Path1 (easier to force with DB if starting_equity exists)
+
+**Target**
+
+* accountAgeDays ≥ 30
+* balancePctOfStart ≥ 1.2
+* tradesLifetime ≥ 30
+
+**DB steps**
+
+1. Set account age:
+
+```bash
+sqlite3 trading_app.db "UPDATE users SET created_at = strftime('%s','now')*1000 - (31*86400000) WHERE id = TEST_UID;"
+```
+
+2. Ensure equity >= 1.2 * starting_equity:
+
+```bash
+sqlite3 trading_app.db "PRAGMA table_info(users);"
+# Example columns:
+sqlite3 trading_app.db "UPDATE users SET starting_equity = 10000, equity = 12050 WHERE id = TEST_UID;"
+```
+
+3. Ensure 30 trades exist for this user (insert minimal rows):
+
+```bash
+sqlite3 trading_app.db "PRAGMA table_info(trades);"
+# You must adapt this insert to your actual column set. Minimum: user_id + created_at (and maybe symbol/side).
+# If Agent 3 added a dev helper script, use it. Otherwise, create trades via API in a loop (preferred).
+```
+
+**PASS** when:
+
+* `/api/profile/me` metrics show eligibility true
+* `decidePolicy(PHONE_VERIFY_START)` returns allowed
+
+### Confirm SMS start allowed
+
+**PASS**
+
+* [ ] `POST /api/sms/verify/start` returns ok
+* [ ] audit event `SMS_VERIFY_STARTED` exists
+
+---
+
+## 5.6 SMS throttles and attempt lock
+
+**PASS**
+
+* [ ] daily cap → `SMS_RATE_LIMIT`
+* [ ] cooldown 60s → `SMS_RATE_LIMIT`
+* [ ] fail attempts ≥ otpMaxAttempts → `SMS_OTP_TOO_MANY_ATTEMPTS`
+
+Force:
+
+```bash
+sqlite3 trading_app.db "UPDATE user_verification SET sms_send_count_day = 3 WHERE user_id = TEST_UID;"
+sqlite3 trading_app.db "UPDATE user_verification SET sms_verify_fail_count = 6 WHERE user_id = TEST_UID;"
+```
+
+---
+
+## 5.7 KYC invite gating (Selected-only access)
+
+### Step A: Confirm user not selected and not invited
+
+**PASS**
+
+* [ ] `KYC_VIEW` denied with `KYC_NOT_SELECTED`
+* [ ] UI shows KYC locked state
+
+### Step B: Admin invites user to KYC
+
+**PASS**
+
+* [ ] `POST /api/admin/kyc/invite` sets status INVITED
+* [ ] audit event `KYC_INVITED`
+
+### Step C: Trader can view KYC pane and payout currency becomes unlockable
+
+**PASS**
+
+* [ ] `KYC_VIEW` allowed
+* [ ] `PREFERRED_PAYMENT_CURRENCY_SET` allowed only after invite/selected
+
+---
+
+## 5.8 Tier changes and badges
+
+### Step A: Verify schema + default
+
+**PASS** users.userTier exists and default is CANDIDATE
+
+### Step B: Promote to PERFORMER then SELECTED (admin)
+
+**PASS**
+
+* [ ] Admin UI provides tier management action
+* [ ] Audit event `TIER_CHANGED` logged with old/new tiers
+
+Force via SQL if needed:
+
+```bash
+sqlite3 trading_app.db "UPDATE users SET user_tier = 'PERFORMER' WHERE id = TEST_UID;"
+sqlite3 trading_app.db "UPDATE users SET user_tier = 'SELECTED' WHERE id = TEST_UID;"
+```
+
+UI checks:
+
+* [ ] Header badge updates
+* [ ] Admin profile view shows new tier
+
+---
+
+# 6) Audit trail verification (identity/security/compliance)
+
+## 6.1 Audit events must be written for both allowed and denied actions
+
+**PASS**
+
+* [ ] At least one entry per key action class:
+
+  * EMAIL_VERIFICATION_SENT / DENIED / VERIFIED
+  * EMAIL_REVERIFY_* (if implemented)
+  * SMS_VERIFY_STARTED / FAILED / CONFIRMED / DENIED / LOCKED
+  * KYC_INVITED / SUBMITTED / APPROVED / REJECTED
+  * TIER_CHANGED
+  * ACCOUNT_ACTION_DENIED (trade denial events)
+* [ ] Captures ip, userAgent, actorType, timestamps, user snapshot
+
+### Commands (adapt table name)
+
+```bash
+# Replace identityAudit with your actual table:
+sqlite3 trading_app.db "SELECT * FROM identityAudit ORDER BY at DESC LIMIT 50;" 2>/dev/null || true
+sqlite3 trading_app.db "SELECT * FROM adminActions ORDER BY created_at DESC LIMIT 50;" 2>/dev/null || true
+sqlite3 trading_app.db "SELECT * FROM audit_log ORDER BY at DESC LIMIT 50;" 2>/dev/null || true
+```
+
+## 6.2 Tamper-evidence (if implemented)
+
+**PASS**
+
+* [ ] Every row has prev_hash and event_hash
+* [ ] Hash chain validates for last N rows
+
+(If Agent 3 already has a validation script, run it. Otherwise, add one; this checklist flags failure until present.)
+
+---
+
+# 7) Admin mini-tabs: functional checks
+
+## 7.1 Audit Trail filter support
+
+**PASS**
+
+* [ ] Backend supports `?category=` or `?type=` filters
+* [ ] Admin UI includes dropdown filter and sends params
+
+### Commands
+
+```bash
+rg "category=|type=" client/src/pages/AdminAuditTrail.tsx
+rg "GET\\s+\\/api\\/admin\\/audit-trail" -n server
+```
+
+## 7.2 KYC Queue
+
+**PASS**
+
+* [ ] shows users with status
+* [ ] Invite button works and refreshes queue
+* [ ] Approve/Reject actions log audit and update status
+
+## 7.3 Profile Settings (Admin view)
+
+**PASS**
+
+* [ ] shows names, phone, verification tier/state, KYC, preferred currency, userTier
+
+---
+
+# 8) Trader Profile Settings: design and gating consistency
+
+**PASS**
+
+* [ ] Cards show locked/unlocked based on policy decisions
+* [ ] Buttons disabled in locked state and backend denies if forced
+* [ ] Tier badge visible and consistent
+* [ ] KYC/Payout only visible/unlocked when invited/selected
+
+Manual UI run:
+
+* [ ] Login as unverified user older than 14 days → trade UI disabled + banner, but close/reduce possible
+* [ ] Resend email shows cooldown messaging (deny_code mapped)
+* [ ] Eligible performer sees SMS card unlocked
+* [ ] Non-eligible sees SMS locked with rationale (“Requires eligibility criteria”)
+
+---
+
+# 9) Final PASS/FAIL sign-off matrix (Agent 3 must complete)
+
+Mark PASS only when both **backend + UI + audit** are correct.
+
+* [ ] Email initial verification enforced (14-day lock)
+* [ ] Email resend throttles enforced + audited
+* [ ] Rolling reverify enforced (30d + grace) + audited
+* [ ] SMS gating by contender eligibility + Twilio Verify + throttles + audited
+* [ ] KYC invite-based gating + status display + audited
+* [ ] Payout profile + preferred currency gated + stored in payout table + audited
+* [ ] userTier field present + admin management + badge display + audited
+* [ ] Tier eligibility detection logic computed from real metrics (Path1/Path2)
+* [ ] Admin mini-tabs wired (additions only) + endpoints + filter
+* [ ] Identity/security trail captures IP/UA/session + correlationId where applicable
+
+---
+
+## If Agent 3 wants a “single command” audit run
+
+Have them implement a script `npm run audit:policy` that:
+
+* hits `/api/profile/me`
+* prints `featureGates()`
+* runs a set of automated curl checks
+* queries DB for the latest audit events for those actions
+
+This is optional, but it’s the fastest way to prevent regressions.
+
+If you want, I can provide the exact `audit:policy` Node script template (repo-relative, no hardcoded columns, works with the schema-introspecting builder).

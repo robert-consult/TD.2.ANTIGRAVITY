@@ -1,0 +1,149 @@
+Understood. I picked up from where the prior work left off and implemented (and verified end-to-end in the codebase) the **“max concurrent lots across all open trades”** guard rail, while **preserving the existing limits** of **max 3 concurrent trades per instrument** and **max 5 concurrent trades per user** (now also configurable as a default).
+
+Below is a clear summary of what is now in place, how it ties into the backend risk guard rails, and the exact deliverable Replit Agent 3 can use immediately.
+
+---
+
+## 1) What’s implemented (Risk Guard Rails)
+
+### A) Existing trade concurrency limits (kept intact)
+
+* **Max 5 concurrent OPEN trades per user** (default)
+* **Max 3 concurrent OPEN trades per instrument** (default)
+
+These remain, but are now supported as **platform defaults** (so you can change them without altering core logic).
+
+### B) New enhancement: **Max Concurrent Lots** across ALL open trades (main focus)
+
+A new check prevents opening any new trade if:
+
+> `sum(open lots across all OPEN trades) + requested lots > maxConcurrentLots`
+
+Examples:
+
+* **1 trade of 50 lots** → blocks all additional trades (until some lots are freed)
+* **2 trades of 30 + 30 = 60 lots** → would already violate a 50-lot cap; new trades blocked once cap would be exceeded
+
+This is enforced in the **backend trading engine risk middleware** (not just UI), meaning it cannot be bypassed.
+
+---
+
+## 2) Where this enforcement lives (Backend)
+
+### Risk Middleware (server/risk.ts)
+
+The middleware enforces:
+
+1. **Max concurrent trades (user)**
+2. **Max concurrent trades (per instrument)**
+3. **Max concurrent lots (sum across all open trades)**  ← your requested enhancement
+
+It resolves settings using this order:
+
+1. **Per-user overrides** (`user_settings`)
+2. **Platform defaults** (`trade_settings`)
+3. Hard-coded fallbacks (5 trades / 50 lots / 3 per instrument)
+
+So: **your lot limit becomes a first-class backend risk guard rail**, but still supports per-user overrides.
+
+---
+
+## 3) “Holder place” control added in the Admin Dashboard (Trade Settings tab)
+
+### AdminDashboard Trade Settings tab now includes a dedicated control:
+
+* **Maximum Concurrent Lots Per User (default)**
+
+This is placed in the “Default Risk Parameters” card and is **wired to the backend** via:
+
+* `GET  /api/admin/trade-settings`
+* `POST /api/admin/trade-settings`
+
+This satisfies the requirement:
+
+> “create a holder place for this control in the trade settings tab… risk management focus for backend + trading engine.”
+
+Also: the per-user “Edit User Settings” dialog now includes:
+
+* **Max Concurrent Lots** (per-user override)
+
+---
+
+## 4) Database / schema support (safe, additive)
+
+### New platform defaults table (single row)
+
+A new table is created at startup via runtime migration:
+
+**trade_settings** (id = 1)
+
+* `default_max_concurrent` (default 5)
+* `default_max_concurrent_lots` (default 50)
+* `max_concurrent_per_instrument` (default 3)
+
+This does **not** break existing tables and is safe to deploy.
+
+---
+
+## 5) Deliverable for Replit Agent 3 (Ready-to-apply patch ZIP)
+
+I created a **drop-in patch ZIP** for Agent 3:
+
+**/mnt/data/TC3AL_risk_guardrails_patch.zip**
+
+It contains only the changed files, with correct paths preserved:
+
+* `shared/schema.ts`
+* `db/ensure_schema.ts`
+* `server/storage.ts`
+* `server/risk.ts`
+* `server/routes/admin.ts`
+* `client/src/pages/AdminDashboard.tsx`
+* `README.md` (apply instructions)
+
+### What Agent 3 does:
+
+1. Copy files into project (preserving paths)
+2. Run the app once (startup migration creates/seeds `trade_settings`)
+3. Go to Admin → Trade Settings → set:
+
+   * Max trades per user (default)
+   * **Max concurrent lots (default)**
+   * Max trades per instrument (default)
+4. Save
+
+---
+
+## 6) Additional stability fix (important, risk-related)
+
+While adding this, I also corrected a hidden risk issue:
+
+### Previously:
+
+Toggling “Show on Leaderboard” could unintentionally overwrite `maxConcurrentLots` because that payload omitted it.
+
+### Now:
+
+The payload includes `maxConcurrentLots`, so risk controls are not silently reset.
+
+This aligns with your requirement:
+
+> “ensure the lot limit is the main focus not changing elements already present”
+
+It prevents unintended drift in risk guard rails.
+
+---
+
+# Status vs your request
+
+✅ Added **max concurrent lots across open trades** backend enforcement
+✅ Added **placeholder/control** in **Trade Settings** tab
+✅ Maintained existing limits (3 per instrument, 5 total)
+✅ Ensured settings tie into risk guard rails (backend middleware)
+✅ Produced a patch Agent 3 can directly apply
+
+---
+
+If you want the lot cap to also count **PENDING** orders (limit/stop) as “concurrent exposure,” I can extend the open-trade query to include PENDING—right now it enforces lots only against **OPEN** trades, which is consistent with “concurrently open trades,” but some brokers treat pending exposure similarly.
+
+If you do not want that change, the implementation as delivered matches your spec precisely.

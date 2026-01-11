@@ -1,0 +1,101 @@
+Below is an enhanced **trader-facing** Close Reason list that stays readable (not “compliance enum soup”), while still covering the real ways positions get closed. The key is to keep the **UI labels short**, and push nuance into a tooltip / details drawer.
+
+## Recommended trader-facing Close Reason list (UI labels)
+
+### Trader actions
+
+1. **Closed by you**
+   Use when the trader manually closes (full or partial).
+
+2. **Closed by strategy** (optional)
+   Use if you support automation/bots for the trader.
+
+### Targets and protections
+
+3. **Take Profit hit**
+4. **Stop Loss hit**
+5. **Trailing Stop hit** (only if you actually support trailing stops; otherwise fold into Stop Loss)
+
+### Time and rules
+
+6. **Time limit reached** (your “max hold time close”)
+7. **Risk rule triggered**
+   Keep this generic in the column; show the exact rule in tooltip (e.g., “Max total lots (50) exceeded”, “Daily loss limit reached”, “Max concurrent trades reached”).
+
+### Margin / broker-style forced actions
+
+8. **Stop out (low margin)**
+   This is a must-have. Traders understand it immediately.
+
+### Admin / account state
+
+9. **Closed by admin**
+10. **Closed due to account hold**
+    Use for Frozen/Disabled/KYC hold type actions (avoid blaming language like “violation” in the main label).
+
+### System / market exceptions (rare, but important)
+
+11. **Market closed / instrument unavailable** (optional; only if it can happen in your system)
+12. **System safety close**
+    For “stale price”, “feed disconnected”, “quote invalid”, etc.
+
+### Fallback
+
+13. **Other / unknown**
+    Never show “—”. If you don’t know, show **Other** and let tooltip say what data was missing.
+
+---
+
+## How to present it in the UI (so it feels “app-grade”)
+
+### 1) Use a two-level display: Badge + Tooltip
+
+* **Column** shows a compact badge: `Stop Loss hit`
+* **Tooltip / details** shows specifics:
+
+  * Initiator: You / Strategy / Admin / System
+  * Rule (if any): `Max total lots (50)`
+  * Close context: slippage, spread, hold time, margin level
+
+This keeps the table clean but still defensible.
+
+### 2) Normalize language to avoid “punitive” wording
+
+Trader UI should be neutral:
+
+* “Risk rule triggered” (not “Risk violation”)
+* “System safety close” (not “System error”)
+* “Account hold” (not “Account frozen by compliance” in the table row)
+
+Reserve stronger wording for admin/audit views.
+
+### 3) Treat partial closes explicitly (if supported)
+
+If partial closes exist, add a small suffix in the details, not the main label:
+
+* Badge: **Closed by you**
+* Detail: “Partial close: 0.50 / 1.00 lots”
+
+### 4) Keep the filter list shorter than the internal list
+
+Internally you can store 20+ codes. Trader filter list should be ~8–12 categories. Map many internal reasons into a few trader-friendly buckets.
+
+---
+
+## Suggested mapping (internal → trader-facing)
+
+* `MANUAL` → Closed by you
+* `TAKE_PROFIT` → Take Profit hit
+* `STOP_LOSS` → Stop Loss hit
+* `TRAILING_STOP` → Trailing Stop hit
+* `MAX_HOLD_TIME` → Time limit reached
+* `STOP_OUT` → Stop out (low margin)
+* `RISK_LIMIT`, `MAX_LOTS`, `MAX_TRADES`, `DAILY_LOSS_LIMIT`, etc. → Risk rule triggered
+* `ADMIN` → Closed by admin
+* `ACCOUNT_FROZEN`, `ACCOUNT_DISABLED`, `KYC_HOLD` → Closed due to account hold
+* `STALE_FEED`, `PRICE_INVALID`, `INTERNAL_SAFETY` → System safety close
+* `UNKNOWN`/null → Other / unknown
+
+---
+
+If you want, I can also propose the **exact dropdown filter options** to match this (including “Auto-closed” grouping), and a clean badge/tooltip design pattern consistent with your BUY/SELL pills and your dark theme UI.

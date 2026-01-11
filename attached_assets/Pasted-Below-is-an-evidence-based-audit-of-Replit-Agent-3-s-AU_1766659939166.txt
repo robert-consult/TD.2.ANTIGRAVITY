@@ -1,0 +1,654 @@
+Below is an evidence-based audit of **Replit Agent 3’s `AUDIT_REPORT.md`** against the **actual code in your latest ZIP** (`TradingCentral-3AL-2 (2).zip`), followed by a targeted “re-audit redirect” checklist and the **critical code fixes** required so **UI + backend cannot drift** (per your context docs).
+
+---
+
+## 1) What Replit’s audit got right (implemented in latest ZIP)
+
+These items are **implemented** (the “not implemented” flags in your gaps list are stale):
+
+* **Trader Profile Settings page exists and is wired**: `client/src/pages/ProfileSettings.tsx`
+* **Tier Badge Display exists**: `client/src/components/TierBadge.tsx`, used in `Header.tsx` and `ProfileSettings.tsx`
+* **2FA is implemented (not “Coming Soon”)**:
+
+  * UI: `ProfileSettings.tsx` (Enable/Disable + backup codes UX)
+  * Backend: `server/routes/profileMfa.ts`
+  * Schema: `user_mfa` table in `shared/schema.ts`
+* **KYC status display (user-facing) exists**: `client/src/components/VerificationCards.tsx` (KycStatusCard)
+* **Payment/Payout Profile exists**: `client/src/components/VerificationCards.tsx` (PayoutProfileCard) + endpoints in `server/routes.ts`
+* **Main Admin has an audit trail section with event-type filtering UI**: `client/src/pages/AdminDashboard.tsx` (filter pills)
+
+So: **the “2FA / Tier Badge / KYC status / Payout profile not implemented” claims are incorrect for this ZIP**.
+
+---
+
+## 2) Critical failures / drift risks (Replit audit missed these)
+
+These are **hard failures** relative to your invariants (“PolicyDecision must be single source of truth; UI + backend never drift”) and your tiered-access context docs.
+
+### A) PolicyDecision does not enforce SL/TP modify + pending cancel when email-locked
+
+Your context matrix says locked accounts should be **reduce-only** (and typically **no pending cancel, no SL/TP edits** unless explicitly permitted). In current code:
+
+* `shared/policyDecision.ts` **does not implement** `TRADE_MODIFY_SLTP` at all inside locked-state logic, so it falls through to **ALLOW**.
+* `TRADE_CANCEL_PENDING` is treated as reduce-only and is **allowed when locked**, but your config field `allowCancelPendingWhenLocked` is **never used**.
+
+Evidence:
+
+* `TRADE_MODIFY_SLTP` exists only in the action union but is not handled in the locked blocks (falls through). See `shared/policyDecision.ts` around the locked checks.
+* Reduce-only action set includes cancel-pending, so cancel gets allowed when locked. See `shared/policyDecision.ts` lines ~187–214 (in your ZIP).
+
+Impact:
+
+* A trader with an **email-locked** account can still:
+
+  * modify SL/TP (risk controls drift),
+  * cancel pending orders (if you intended to block it).
+
+### B) Email resend throttling is wired to the wrong columns (throttle effectively broken)
+
+`PolicyDecision` throttles using:
+
+* `emailSendCountDay`, `emailLastSentAt`
+
+But `server/routes/verification.ts` increments:
+
+* `emailResendCountDay`, `emailResendDayKey`, `emailLastResendAt`, `emailResendCountTotal`
+
+Evidence:
+
+* `server/routes/verification.ts` update uses resend fields (see numbered lines ~118–136 in your ZIP).
+* `server/policy/buildDecisionContext.ts` reads send fields (emailSendCountDay/emailLastSentAt), not resend fields.
+
+Impact:
+
+* Resend throttles can silently fail; users may spam Resend, while UI believes throttles exist.
+
+### C) Tier progression is not correctly implemented; SMS gating will not unlock as designed
+
+Replit’s audit claims tier progression is complete, but the reality:
+
+1. Admin tier update assigns an **invalid contenderTier value** `"CONTENDER"`:
+
+* `server/routes/admin.ts` sets:
+
+  * `newContenderTier = "CONTENDER"` for `PERFORMER`
+* `"CONTENDER"` is **not in** `ContenderTier` union; `clampContenderTier()` will map it to `"NONE"` in the builder.
+
+Evidence:
+
+* `server/routes/admin.ts` around lines ~1731–1741 in your ZIP assigns `"CONTENDER"`.
+
+2. SMS start gating depends on contenderTier, but contenderTier is never reliably promoted to `CANDIDATE_SMS_REQUIRED` from performance:
+
+* `PolicyDecision` currently checks “hasSmsTier” by contenderTier value rather than contenderEligible.
+* Because contenderTier never gets promoted correctly, **canStartSms can stay false** even when performance qualifies.
+
+Impact:
+
+* Your “performance → SMS unlock” funnel can stall, violating the tiered-access model.
+
+### D) KYC backend is internally inconsistent (two competing implementations), and Admin UI points at the placeholder
+
+You currently have:
+
+* A placeholder admin KYC queue + status endpoint:
+
+  * `GET /api/admin/kyc-queue`
+  * `POST /api/admin/users/:id/kyc-status` (does not update `userKycProfiles`)
+* A “real” KYC flow:
+
+  * `GET /api/admin/kyc/queue`
+  * `POST /api/admin/kyc/invite`
+  * `POST /api/admin/kyc/review` (writes `userKycProfiles`)
+
+But the Admin UI uses the placeholder endpoints (`/api/admin/kyc-queue` and `/api/admin/users/:id/kyc-status`) and uses non-schema statuses like `PENDING_DOCS`.
+
+Impact:
+
+* Admin actions may not change the real KYC state used by the user-facing KYC cards.
+* KYC status is not a reliable single source of truth.
+
+### E) Backend does not enforce KYC/Payout gating (direct API calls can bypass UI)
+
+Trader endpoints:
+
+* `GET /api/profile/kyc`
+* `GET /api/profile/payout`
+* `POST /api/profile/payout/currency`
+
+…do **not** use `requirePolicy()`. They rely on the UI to hide buttons.
+
+Impact:
+
+* Anyone can call endpoints directly even if PolicyDecision would deny.
+* This violates your core invariant: **UI + backend never drift**.
+
+### F) Admin “Audit Trail” does not include identity_audit or KYC/tier events
+
+Admin audit trail endpoint aggregates signups/logins/adminActions, but does not include:
+
+* `identity_audit` stream (email/SMS/KYC status changes, tier promotion, etc.)
+* This reduces “hedge-fund grade” forensic completeness.
+
+---
+
+## 3) Re-audit redirect (what Replit Agent 3 must re-check, exactly)
+
+Give Agent 3 the following re-audit tasks (these are deterministic, pass/fail):
+
+### Policy enforcement drift tests
+
+1. **Email-locked user** (unverified past grace) should be:
+
+   * ✅ allowed: close/reduce
+   * ❌ denied: open/increase
+   * ❌ denied: modify SL/TP
+   * ❌ denied: cancel pending (unless explicitly allowed)
+   * Files to inspect:
+
+     * `shared/policyDecision.ts`
+     * `server/routes.ts` (ensure `requirePolicy()` is used for each action)
+
+2. **KYC view + payout endpoints** must enforce policy on backend:
+
+   * `GET /api/profile/kyc` must require `KYC_VIEW`
+   * `GET /api/profile/payout` must require `PAYOUT_PROFILE_VIEW`
+   * `POST /api/profile/payout/currency` must require `PAYOUT_SET_CURRENCY`
+
+### Email resend throttling correctness
+
+3. Trigger `/api/verification/email/send` 4–5 times and verify:
+
+   * daily limit is enforced,
+   * cooldown is enforced.
+   * Code must update the same columns that builder reads.
+
+### Tier progression correctness
+
+4. Admin tier update must only set contenderTier values in:
+
+   * `NONE`, `CANDIDATE_EMAIL_ONLY`, `CANDIDATE_SMS_REQUIRED`, `VERIFIED_SMS`, `SELECTED_REAL_CAPITAL`
+5. SMS start should become allowed when:
+
+   * `contenderEligible === true`
+   * email verified
+   * and SMS rate limits allow
+
+### KYC single-source-of-truth
+
+6. Admin UI must point to the same endpoints that write `userKycProfiles`:
+
+   * queue from `GET /api/admin/kyc/queue`
+   * invite via `POST /api/admin/kyc/invite`
+   * review via `POST /api/admin/kyc/review`
+7. User-facing status must reflect `userKycProfiles.status` only.
+
+### Audit trail completeness
+
+8. Ensure identity/KYC/tier changes are appended to `identity_audit`.
+9. Extend admin audit trail view to include identity_audit records, or provide a dedicated “Identity Audit” view with filters.
+
+---
+
+## 4) Required code fixes (inline)
+
+### 4.1 Full replacement: `shared/policyDecision.ts` (fix locked actions, SMS unlock by eligibility, overdue grace)
+
+> Copy/paste replace the entire file.
+
+```ts
+// shared/policyDecision.ts
+// Single-source-of-truth: UI + backend must call this (directly or via requirePolicy)
+// Returns allow + denyCode so both layers stay aligned.
+
+export type PolicyAction =
+  | "TRADE_OPEN_OR_INCREASE"
+  | "TRADE_CLOSE_OR_REDUCE"
+  | "TRADE_CANCEL_PENDING"
+  | "TRADE_MODIFY_SLTP"
+  | "EMAIL_SEND_VERIFY"
+  | "EMAIL_RESEND_VERIFICATION"
+  | "PHONE_VERIFY_START"
+  | "KYC_VIEW"
+  | "PAYOUT_PROFILE_VIEW"
+  | "PAYOUT_SET_CURRENCY";
+
+export type DenyCode =
+  | "OK"
+  | "AUTH_REQUIRED"
+  | "EMAIL_NOT_VERIFIED"
+  | "EMAIL_REVERIFY_OVERDUE"
+  | "EMAIL_REVERIFY_OVERDUE_GRACE"
+  | "THROTTLED_EMAIL_SEND"
+  | "SMS_DAILY_LIMIT_REACHED"
+  | "SMS_COOLDOWN"
+  | "EMAIL_DAILY_LIMIT_REACHED"
+  | "EMAIL_COOLDOWN"
+  | "KYC_NOT_INVITED"
+  | "KYC_NOT_APPROVED"
+  | "NOT_ELIGIBLE"
+  | "TRADE_LOCKED_EMAIL_NOT_VERIFIED"
+  | "TRADE_LOCKED_EMAIL_REVERIFY_OVERDUE"
+  | "TRADE_CANCEL_NOT_ALLOWED_WHEN_LOCKED"
+  | "TRADE_TARGETS_NOT_ALLOWED_WHEN_LOCKED"
+  | "SMS_ALREADY_VERIFIED";
+
+export type AccountState =
+  | "ACTIVE"
+  | "WARN_EMAIL_REVERIFY_DUE_SOON"
+  | "WARN_EMAIL_REVERIFY_OVERDUE_GRACE"
+  | "LOCKED_EMAIL_NOT_VERIFIED"
+  | "LOCKED_EMAIL_REVERIFY_OVERDUE";
+
+export type ContenderTier =
+  | "NONE"
+  | "CANDIDATE_EMAIL_ONLY"
+  | "CANDIDATE_SMS_REQUIRED"
+  | "VERIFIED_SMS"
+  | "SELECTED_REAL_CAPITAL";
+
+export type UserTier = "CANDIDATE" | "PERFORMER" | "SELECTED";
+
+export type KycStatus =
+  | "NOT_STARTED"
+  | "INVITED"
+  | "SUBMITTED"
+  | "UNDER_REVIEW"
+  | "PENDING_DOCS"
+  | "APPROVED"
+  | "REJECTED";
+
+export type DecisionContext = {
+  now: number;
+
+  user: {
+    id: number;
+
+    // Email
+    emailVerifiedAt: number | null;
+    userCreatedAt: number;
+    emailInitialDueAt: number | null; // builder should provide; fallback to createdAt+initialGrace
+    emailReverifyDueAtMs: number | null;
+
+    // Rate limits
+    emailSendCountDay: number;
+    emailLastSentAtMs: number | null;
+
+    smsSendCountDay: number;
+    smsLastSentAt: number | null;
+    phoneVerifiedAt: number | null;
+
+    // Tiering
+    userTier: UserTier;
+    contenderTier: ContenderTier;
+
+    // Eligibility computed by builder
+    contenderEligible: boolean;
+
+    // KYC
+    kycStatus: KycStatus;
+  };
+
+  // Optional: allow future “risk-reducing only” logic
+  tradeChange?: {
+    riskReducing?: boolean;
+  };
+
+  config?: Partial<PolicyConfig>;
+};
+
+export type PolicyConfig = {
+  // Email policy
+  emailInitialGraceDays: number;      // e.g., 14
+  emailReverifyPeriodDays: number;    // e.g., 30
+  emailOverdueGraceDays: number;      // e.g., 7
+  emailDueSoonDays: number;           // e.g., 7
+
+  emailDailyLimit: number;            // e.g., 3
+  emailCooldownMinutes: number;       // e.g., 2
+
+  // SMS policy
+  smsDailyLimit: number;              // e.g., 3
+  smsCooldownMinutes: number;         // e.g., 2
+
+  // Locked account behavior
+  allowReduceOnlyWhenLocked: boolean;                 // close/reduce always true
+  allowCancelPendingWhenLocked: boolean;              // typically false
+  allowRiskReducingSltpChangeWhenLocked: boolean;     // typically false unless you pass tradeChange.riskReducing
+};
+
+const DEFAULT_CONFIG: PolicyConfig = {
+  emailInitialGraceDays: 14,
+  emailReverifyPeriodDays: 30,
+  emailOverdueGraceDays: 7,
+  emailDueSoonDays: 7,
+
+  emailDailyLimit: 3,
+  emailCooldownMinutes: 2,
+
+  smsDailyLimit: 3,
+  smsCooldownMinutes: 2,
+
+  allowReduceOnlyWhenLocked: true,
+  allowCancelPendingWhenLocked: false,
+  allowRiskReducingSltpChangeWhenLocked: false,
+};
+
+const MS_DAY = 24 * 60 * 60 * 1000;
+
+function getConfig(ctx: DecisionContext): PolicyConfig {
+  return { ...DEFAULT_CONFIG, ...(ctx.config ?? {}) };
+}
+
+function resolveEmailInitialDueAt(ctx: DecisionContext, cfg: PolicyConfig): number {
+  if (ctx.user.emailInitialDueAt && ctx.user.emailInitialDueAt > 0) return ctx.user.emailInitialDueAt;
+  return ctx.user.userCreatedAt + cfg.emailInitialGraceDays * MS_DAY;
+}
+
+export function resolveAccountState(ctx: DecisionContext): AccountState {
+  const cfg = getConfig(ctx);
+  const now = ctx.now;
+
+  const emailVerifiedAt = ctx.user.emailVerifiedAt;
+  const initialDueAt = resolveEmailInitialDueAt(ctx, cfg);
+
+  // Not verified: grace then lock
+  if (!emailVerifiedAt) {
+    if (now <= initialDueAt) return "ACTIVE";
+    return "LOCKED_EMAIL_NOT_VERIFIED";
+  }
+
+  // Verified: rolling reverify schedule
+  const dueAt =
+    ctx.user.emailReverifyDueAtMs && ctx.user.emailReverifyDueAtMs > 0
+      ? ctx.user.emailReverifyDueAtMs
+      : emailVerifiedAt + cfg.emailReverifyPeriodDays * MS_DAY;
+
+  const overdueGraceEndsAt = dueAt + cfg.emailOverdueGraceDays * MS_DAY;
+
+  // Due soon warning (before due)
+  const daysLeft = Math.floor((dueAt - now) / MS_DAY);
+  if (daysLeft >= 0 && daysLeft <= cfg.emailDueSoonDays) {
+    return "WARN_EMAIL_REVERIFY_DUE_SOON";
+  }
+
+  // Overdue but within grace: warn, not locked
+  if (now > dueAt && now <= overdueGraceEndsAt) {
+    return "WARN_EMAIL_REVERIFY_OVERDUE_GRACE";
+  }
+
+  // Overdue beyond grace: lock
+  if (now > overdueGraceEndsAt) {
+    return "LOCKED_EMAIL_REVERIFY_OVERDUE";
+  }
+
+  return "ACTIVE";
+}
+
+function isLocked(state: AccountState): boolean {
+  return state === "LOCKED_EMAIL_NOT_VERIFIED" || state === "LOCKED_EMAIL_REVERIFY_OVERDUE";
+}
+
+function emailThrottleDecision(ctx: DecisionContext, cfg: PolicyConfig): { allow: boolean; denyCode: DenyCode } {
+  if (ctx.user.emailSendCountDay >= cfg.emailDailyLimit) {
+    return { allow: false, denyCode: "EMAIL_DAILY_LIMIT_REACHED" };
+  }
+  if (ctx.user.emailLastSentAtMs) {
+    const cooldownMs = cfg.emailCooldownMinutes * 60 * 1000;
+    if (ctx.now - ctx.user.emailLastSentAtMs < cooldownMs) {
+      return { allow: false, denyCode: "EMAIL_COOLDOWN" };
+    }
+  }
+  return { allow: true, denyCode: "OK" };
+}
+
+function smsThrottleDecision(ctx: DecisionContext, cfg: PolicyConfig): { allow: boolean; denyCode: DenyCode } {
+  if (ctx.user.smsSendCountDay >= cfg.smsDailyLimit) {
+    return { allow: false, denyCode: "SMS_DAILY_LIMIT_REACHED" };
+  }
+  if (ctx.user.smsLastSentAt) {
+    const cooldownMs = cfg.smsCooldownMinutes * 60 * 1000;
+    if (ctx.now - ctx.user.smsLastSentAt < cooldownMs) {
+      return { allow: false, denyCode: "SMS_COOLDOWN" };
+    }
+  }
+  return { allow: true, denyCode: "OK" };
+}
+
+export function decidePolicy(
+  ctx: DecisionContext,
+  action: PolicyAction
+): { allow: boolean; denyCode: DenyCode; accountState: AccountState } {
+  const cfg = getConfig(ctx);
+  const accountState = resolveAccountState(ctx);
+  const locked = isLocked(accountState);
+
+  // Trade actions
+  if (action === "TRADE_OPEN_OR_INCREASE") {
+    if (accountState === "LOCKED_EMAIL_NOT_VERIFIED") {
+      return { allow: false, denyCode: "TRADE_LOCKED_EMAIL_NOT_VERIFIED", accountState };
+    }
+    if (accountState === "LOCKED_EMAIL_REVERIFY_OVERDUE") {
+      return { allow: false, denyCode: "TRADE_LOCKED_EMAIL_REVERIFY_OVERDUE", accountState };
+    }
+    return { allow: true, denyCode: "OK", accountState };
+  }
+
+  if (action === "TRADE_CLOSE_OR_REDUCE") {
+    // Always allow close/reduce
+    return { allow: true, denyCode: "OK", accountState };
+  }
+
+  if (action === "TRADE_CANCEL_PENDING") {
+    if (!locked) return { allow: true, denyCode: "OK", accountState };
+    if (cfg.allowCancelPendingWhenLocked) return { allow: true, denyCode: "OK", accountState };
+    return { allow: false, denyCode: "TRADE_CANCEL_NOT_ALLOWED_WHEN_LOCKED", accountState };
+  }
+
+  if (action === "TRADE_MODIFY_SLTP") {
+    if (!locked) return { allow: true, denyCode: "OK", accountState };
+
+    if (cfg.allowRiskReducingSltpChangeWhenLocked && ctx.tradeChange?.riskReducing) {
+      return { allow: true, denyCode: "OK", accountState };
+    }
+
+    return { allow: false, denyCode: "TRADE_TARGETS_NOT_ALLOWED_WHEN_LOCKED", accountState };
+  }
+
+  // Email verification sends (allow even if trading is locked; this is how user unlocks)
+  if (action === "EMAIL_SEND_VERIFY" || action === "EMAIL_RESEND_VERIFICATION") {
+    const t = emailThrottleDecision(ctx, cfg);
+    return { allow: t.allow, denyCode: t.allow ? "OK" : "THROTTLED_EMAIL_SEND", accountState };
+  }
+
+  // SMS verification start: gate by eligibility + email verified + throttles
+  if (action === "PHONE_VERIFY_START") {
+    if (ctx.user.phoneVerifiedAt) {
+      return { allow: false, denyCode: "SMS_ALREADY_VERIFIED", accountState };
+    }
+    if (!ctx.user.emailVerifiedAt) {
+      return { allow: false, denyCode: "EMAIL_NOT_VERIFIED", accountState };
+    }
+    if (locked) {
+      return {
+        allow: false,
+        denyCode: accountState === "LOCKED_EMAIL_NOT_VERIFIED" ? "EMAIL_NOT_VERIFIED" : "EMAIL_REVERIFY_OVERDUE",
+        accountState,
+      };
+    }
+    if (!ctx.user.contenderEligible) {
+      return { allow: false, denyCode: "NOT_ELIGIBLE", accountState };
+    }
+
+    const t = smsThrottleDecision(ctx, cfg);
+    return { allow: t.allow, denyCode: t.allow ? "OK" : t.denyCode, accountState };
+  }
+
+  // KYC view: invite-based (or selected), but always require email OK
+  if (action === "KYC_VIEW") {
+    if (!ctx.user.emailVerifiedAt) return { allow: false, denyCode: "EMAIL_NOT_VERIFIED", accountState };
+    if (locked) return { allow: false, denyCode: "EMAIL_REVERIFY_OVERDUE", accountState };
+
+    const status = ctx.user.kycStatus;
+    const invitedLike =
+      status === "INVITED" ||
+      status === "SUBMITTED" ||
+      status === "UNDER_REVIEW" ||
+      status === "PENDING_DOCS" ||
+      status === "APPROVED";
+
+    if (ctx.user.userTier === "SELECTED" || invitedLike) {
+      return { allow: true, denyCode: "OK", accountState };
+    }
+
+    return { allow: false, denyCode: "KYC_NOT_INVITED", accountState };
+  }
+
+  // Payout profile view: same gating as KYC view
+  if (action === "PAYOUT_PROFILE_VIEW") {
+    const d = decidePolicy(ctx, "KYC_VIEW");
+    if (!d.allow) return { allow: false, denyCode: d.denyCode, accountState };
+    return { allow: true, denyCode: "OK", accountState };
+  }
+
+  // Setting payout currency: require KYC approved
+  if (action === "PAYOUT_SET_CURRENCY") {
+    const d = decidePolicy(ctx, "KYC_VIEW");
+    if (!d.allow) return { allow: false, denyCode: d.denyCode, accountState };
+    if (ctx.user.kycStatus !== "APPROVED") return { allow: false, denyCode: "KYC_NOT_APPROVED", accountState };
+    return { allow: true, denyCode: "OK", accountState };
+  }
+
+  return { allow: true, denyCode: "OK", accountState };
+}
+
+export function featureGates(ctx: DecisionContext) {
+  const tradeOpen = decidePolicy(ctx, "TRADE_OPEN_OR_INCREASE");
+  const tradeClose = decidePolicy(ctx, "TRADE_CLOSE_OR_REDUCE");
+  const tradeCancel = decidePolicy(ctx, "TRADE_CANCEL_PENDING");
+  const tradeTargets = decidePolicy(ctx, "TRADE_MODIFY_SLTP");
+  const canStartSms = decidePolicy(ctx, "PHONE_VERIFY_START");
+  const canViewKyc = decidePolicy(ctx, "KYC_VIEW");
+  const canViewPayout = decidePolicy(ctx, "PAYOUT_PROFILE_VIEW");
+  const canSetCurrency = decidePolicy(ctx, "PAYOUT_SET_CURRENCY");
+
+  return {
+    accountState: tradeOpen.accountState,
+    denyCodes: {
+      tradeOpen: tradeOpen.denyCode,
+      tradeClose: tradeClose.denyCode,
+      tradeCancel: tradeCancel.denyCode,
+      tradeTargets: tradeTargets.denyCode,
+      smsStart: canStartSms.denyCode,
+      kycView: canViewKyc.denyCode,
+      payoutView: canViewPayout.denyCode,
+      payoutSetCurrency: canSetCurrency.denyCode,
+    },
+    canTradeOpenOrIncrease: tradeOpen.allow,
+    canTradeCloseOrReduce: tradeClose.allow,
+    canCancelPending: tradeCancel.allow,
+    canModifySltp: tradeTargets.allow,
+    canStartSms: canStartSms.allow,
+    canViewKyc: canViewKyc.allow,
+    canViewPayoutProfile: canViewPayout.allow,
+    canSetPreferredPaymentCurrency: canSetCurrency.allow,
+  };
+}
+```
+
+---
+
+### 4.2 Patch: Fix email throttling columns in `server/routes/verification.ts`
+
+Replace the email-update block inside `/email/send` with this (keep everything else):
+
+```ts
+// Inside server/routes/verification.ts, after successful send:
+const nowMs = Date.now();
+const dayKey = new Date().toISOString().slice(0, 10);
+const dayStamp = Math.floor(nowMs / (24 * 60 * 60 * 1000));
+
+await db
+  .update(userVerification)
+  .set({
+    // canonical fields used by buildDecisionContext + PolicyDecision
+    emailSendCountDay: (verification.emailSendCountDay || 0) + 1,
+    emailSendDayStamp: dayStamp,
+    emailLastSentAt: nowMs,
+
+    // keep resend fields for backward compatibility / UI display if you use them
+    emailResendCountDay: (verification.emailResendCountDay || 0) + 1,
+    emailResendDayKey: dayKey,
+    emailLastResendAt: nowMs,
+    emailResendCountTotal: (verification.emailResendCountTotal || 0) + 1,
+
+    updatedAt: new Date(),
+  })
+  .where(eq(userVerification.userId, userId));
+```
+
+---
+
+### 4.3 Patch: Enforce policy on backend for KYC + payout endpoints (`server/routes.ts`)
+
+Add `requirePolicy()` to these routes:
+
+```ts
+// server/routes.ts
+
+import { requirePolicy } from "./middleware/requirePolicy";
+
+// ...
+
+app.get("/api/profile/kyc", ensureAuth, requirePolicy("KYC_VIEW"), async (req, res) => {
+  // existing body unchanged
+});
+
+app.get("/api/profile/payout", ensureAuth, requirePolicy("PAYOUT_PROFILE_VIEW"), async (req, res) => {
+  // existing body unchanged
+});
+
+app.post("/api/profile/payout/currency", ensureAuth, requirePolicy("PAYOUT_SET_CURRENCY"), async (req, res) => {
+  // existing body unchanged
+});
+```
+
+This single change removes the largest “UI-only gating” drift vector.
+
+---
+
+### 4.4 Patch: Fix invalid contenderTier assignment in `server/routes/admin.ts`
+
+In the `/api/admin/users/:id/tier` endpoint, replace the mapping with:
+
+```ts
+// server/routes/admin.ts inside POST /api/admin/users/:id/tier
+
+let newContenderTier: string = "NONE";
+if (tier === "CANDIDATE") {
+  newContenderTier = "NONE";
+} else if (tier === "PERFORMER") {
+  // Performer means: eligible for SMS verification funnel (after email verified)
+  newContenderTier = "CANDIDATE_SMS_REQUIRED";
+} else if (tier === "SELECTED") {
+  newContenderTier = "SELECTED_REAL_CAPITAL";
+}
+```
+
+Do not use `"CONTENDER"` anywhere.
+
+---
+
+## 5) Summary: What you should tell Replit Agent 3
+
+1. The audit report is **overstated**; key enforcement invariants are broken:
+
+   * trade modify/cancel while locked,
+   * email resend throttle columns mismatch,
+   * tier progression uses invalid contenderTier,
+   * KYC has two competing backends + Admin UI wired to placeholder,
+   * KYC/payout backend routes not policy-enforced.
+
+2. Apply the patches above, then re-run the re-audit redirect checklist.
+
+If you want, paste Replit Agent 3’s specific “audit bullets” they claim are complete (the exact section), and I’ll annotate each line item with **PASS/FAIL + the file/line evidence** from this ZIP.

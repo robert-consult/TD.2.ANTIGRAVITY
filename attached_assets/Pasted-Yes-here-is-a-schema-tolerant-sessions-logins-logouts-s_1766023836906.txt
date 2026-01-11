@@ -1,0 +1,507 @@
+Yes — here is a **schema-tolerant “sessions / logins / logouts / session length” add-on** that plugs into your existing TypeScript backend layout and **extends the Admin Snapshot (JSON + CSV)** to include session history.
+
+This implementation:
+
+* Attempts to read sessions from several likely tables (`user_sessions`, `sessions`, `auth_sessions`)
+* If those don’t exist, it falls back to **pairing LOGIN/LOGOUT events** from common “events” tables (best-effort)
+* Normalizes output into a single shape:
+
+  * `login_time`, `logout_time`, `login_ip`, `user_agent`, `session_length_seconds`
+
+---
+
+# 1) Backend — New Service: Session Fetch + Normalize
+
+## `server/services/sessions.ts`
+
+```ts
+import { tryQuery } from "../utils/tryQuery";
+
+export type NormalizedSession = {
+  session_id: string | number;
+  login_time: string | null;
+  logout_time: string | null;
+  login_ip: string | null;
+  user_agent: string | null;
+  session_length_seconds: number | null;
+};
+
+function toIso(v: any): string | null {
+  if (!v) return null;
+  const d = new Date(v);
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+}
+
+function lenSeconds(login: any, logout: any): number | null {
+  const a = login ? new Date(login).getTime() : NaN;
+  const b = logout ? new Date(logout).getTime() : NaN;
+  if (Number.isNaN(a) || Number.isNaN(b) || b < a) return null;
+  return Math.floor((b - a) / 1000);
+}
+
+/**
+ * Attempts to load session history from:
+ *  1) user_sessions
+ *  2) sessions
+ *  3) auth_sessions
+ *  4) (fallback) event pairing from auth/user events tables
+ *
+ * Returns { source, sessions }
+ */
+export async function getUserSessions(userId: number, sinceDays = 30): Promise<{
+  source: string;
+  sessions: NormalizedSession[];
+}> {
+  const whereSince = sinceDays ? `NOW() - INTERVAL '${sinceDays} days'` : null;
+
+  // 1) user_sessions table (common naming)
+  {
+    const r = await tryQuery<any>(
+      `
+      SELECT
+        id,
+        user_id,
+        login_time,
+        logout_time,
+        login_ip,
+        user_agent
+      FROM user_sessions
+      WHERE user_id = $1
+        ${whereSince ? `AND login_time >= ${whereSince}` : ""}
+      ORDER BY login_time DESC
+      LIMIT 500
+      `,
+      [userId]
+    );
+    if (r?.rows?.length) {
+      return {
+        source: "user_sessions",
+        sessions: r.rows.map((x) => ({
+          session_id: x.id,
+          login_time: toIso(x.login_time),
+          logout_time: toIso(x.logout_time),
+          login_ip: x.login_ip ?? null,
+          user_agent: x.user_agent ?? null,
+          session_length_seconds: lenSeconds(x.login_time, x.logout_time)
+        }))
+      };
+    }
+  }
+
+  // 2) sessions table (common naming)
+  {
+    const r = await tryQuery<any>(
+      `
+      SELECT
+        id,
+        user_id,
+        created_at,
+        ended_at,
+        ip,
+        user_agent
+      FROM sessions
+      WHERE user_id = $1
+        ${whereSince ? `AND created_at >= ${whereSince}` : ""}
+      ORDER BY created_at DESC
+      LIMIT 500
+      `,
+      [userId]
+    );
+    if (r?.rows?.length) {
+      return {
+        source: "sessions",
+        sessions: r.rows.map((x) => ({
+          session_id: x.id,
+          login_time: toIso(x.created_at),
+          logout_time: toIso(x.ended_at),
+          login_ip: x.ip ?? null,
+          user_agent: x.user_agent ?? null,
+          session_length_seconds: lenSeconds(x.created_at, x.ended_at)
+        }))
+      };
+    }
+  }
+
+  // 3) auth_sessions table (alternate naming)
+  {
+    const r = await tryQuery<any>(
+      `
+      SELECT
+        session_id,
+        user_id,
+        started_at,
+        ended_at,
+        ip_address,
+        user_agent
+      FROM auth_sessions
+      WHERE user_id = $1
+        ${whereSince ? `AND started_at >= ${whereSince}` : ""}
+      ORDER BY started_at DESC
+      LIMIT 500
+      `,
+      [userId]
+    );
+    if (r?.rows?.length) {
+      return {
+        source: "auth_sessions",
+        sessions: r.rows.map((x) => ({
+          session_id: x.session_id,
+          login_time: toIso(x.started_at),
+          logout_time: toIso(x.ended_at),
+          login_ip: x.ip_address ?? null,
+          user_agent: x.user_agent ?? null,
+          session_length_seconds: lenSeconds(x.started_at, x.ended_at)
+        }))
+      };
+    }
+  }
+
+  // 4) Fallback: pair login/logout events from common event tables
+  // Try a few likely schemas. If found, pair sequentially (LOGIN -> LOGOUT).
+  const eventCandidates: Array<{
+    table: string;
+    timeCol: string;
+    typeCol: string;
+    ipCol?: string;
+    uaCol?: string;
+    loginValues: string[];
+    logoutValues: string[];
+  }> = [
+    {
+      table: "auth_events",
+      timeCol: "created_at",
+      typeCol: "event_type",
+      ipCol: "ip",
+      uaCol: "user_agent",
+      loginValues: ["LOGIN", "login"],
+      logoutValues: ["LOGOUT", "logout"]
+    },
+    {
+      table: "user_events",
+      timeCol: "created_at",
+      typeCol: "event_type",
+      ipCol: "ip",
+      uaCol: "user_agent",
+      loginValues: ["LOGIN", "login"],
+      logoutValues: ["LOGOUT", "logout"]
+    },
+    {
+      table: "user_activity",
+      timeCol: "created_at",
+      typeCol: "action",
+      ipCol: "ip",
+      uaCol: "user_agent",
+      loginValues: ["LOGIN", "login"],
+      logoutValues: ["LOGOUT", "logout"]
+    }
+  ];
+
+  for (const c of eventCandidates) {
+    const r = await tryQuery<any>(
+      `
+      SELECT
+        id,
+        user_id,
+        ${c.timeCol} AS t,
+        ${c.typeCol} AS typ
+        ${c.ipCol ? `, ${c.ipCol} AS ip` : ""}
+        ${c.uaCol ? `, ${c.uaCol} AS ua` : ""}
+      FROM ${c.table}
+      WHERE user_id = $1
+        ${whereSince ? `AND ${c.timeCol} >= ${whereSince}` : ""}
+      ORDER BY ${c.timeCol} ASC
+      LIMIT 2000
+      `,
+      [userId]
+    );
+
+    if (r?.rows?.length) {
+      const events = r.rows.map((e: any) => ({
+        id: e.id,
+        t: e.t,
+        typ: String(e.typ || ""),
+        ip: e.ip ?? null,
+        ua: e.ua ?? null
+      }));
+
+      // Pair: take the last seen LOGIN, close it on next LOGOUT
+      const sessions: NormalizedSession[] = [];
+      let open: { login_time: any; login_ip: any; user_agent: any; event_id: any } | null = null;
+
+      const isLogin = (typ: string) => c.loginValues.includes(typ);
+      const isLogout = (typ: string) => c.logoutValues.includes(typ);
+
+      for (const e of events) {
+        if (isLogin(e.typ)) {
+          // If already open, close it as "unknown logout" and start new
+          if (open) {
+            sessions.push({
+              session_id: `eventpair_${open.event_id}_abandoned`,
+              login_time: toIso(open.login_time),
+              logout_time: null,
+              login_ip: open.login_ip ?? null,
+              user_agent: open.user_agent ?? null,
+              session_length_seconds: null
+            });
+          }
+          open = { login_time: e.t, login_ip: e.ip, user_agent: e.ua, event_id: e.id };
+          continue;
+        }
+        if (isLogout(e.typ) && open) {
+          sessions.push({
+            session_id: `eventpair_${open.event_id}_${e.id}`,
+            login_time: toIso(open.login_time),
+            logout_time: toIso(e.t),
+            login_ip: open.login_ip ?? null,
+            user_agent: open.user_agent ?? null,
+            session_length_seconds: lenSeconds(open.login_time, e.t)
+          });
+          open = null;
+        }
+      }
+
+      // leftover open login
+      if (open) {
+        sessions.push({
+          session_id: `eventpair_${open.event_id}_open`,
+          login_time: toIso(open.login_time),
+          logout_time: null,
+          login_ip: open.login_ip ?? null,
+          user_agent: open.user_agent ?? null,
+          session_length_seconds: null
+        });
+      }
+
+      // Return newest-first
+      sessions.sort((a, b) => {
+        const ta = a.login_time ? new Date(a.login_time).getTime() : 0;
+        const tb = b.login_time ? new Date(b.login_time).getTime() : 0;
+        return tb - ta;
+      });
+
+      return { source: `events:${c.table}`, sessions: sessions.slice(0, 500) };
+    }
+  }
+
+  return { source: "none", sessions: [] };
+}
+```
+
+---
+
+# 2) Backend — Extend Admin Snapshot JSON + CSV
+
+Update `server/routes/admin.ts` by adding one import:
+
+```ts
+import { getUserSessions } from "../services/sessions";
+```
+
+## 2.1 Extend JSON snapshot endpoint
+
+In your existing:
+`GET /admin/users/:id/snapshot?since_days=30`
+
+Add just after `const insights = await computeInsights(...)`:
+
+```ts
+const sessionBundle = await getUserSessions(userId, sinceDays);
+```
+
+Then return it in the JSON:
+
+```ts
+res.json({
+  user: userQ.rows[0],
+  since_days: sinceDays,
+  risk_settings: risk,
+  trade_totals: totalsQ.rows[0] || null,
+  insights,
+  journal: journalQ.rows,
+  sessions: {
+    source: sessionBundle.source,
+    rows: sessionBundle.sessions
+  }
+});
+```
+
+Also improve audit metadata (recommended):
+
+```ts
+await logAdminAction({
+  adminId: req.user!.id,
+  userId,
+  actionType: "USER_SNAPSHOT_VIEW",
+  req,
+  metadata: auditMeta(req, { since_days: sinceDays, sessions_source: sessionBundle.source, sessions_count: sessionBundle.sessions.length })
+});
+```
+
+---
+
+## 2.2 Extend Snapshot CSV endpoint
+
+In your existing:
+`GET /admin/users/:id/snapshot.csv?since_days=30`
+
+Add:
+
+```ts
+const sessionBundle = await getUserSessions(userId, sinceDays);
+```
+
+### Expand headers (add session columns)
+
+Modify your `headers` to include these new columns:
+
+```ts
+const headers = [
+  { key: "user_id", label: "user_id" },
+  { key: "since_days", label: "since_days" },
+  { key: "section", label: "section" },
+  { key: "key", label: "key" },
+  { key: "value", label: "value" },
+  { key: "pnl", label: "pnl" },
+  { key: "trades", label: "trades" },
+  { key: "win_rate", label: "win_rate" },
+  { key: "rank", label: "rank" },
+  { key: "note", label: "note" },
+  { key: "created_at", label: "created_at" },
+
+  // NEW for sessions
+  { key: "login_time", label: "login_time" },
+  { key: "logout_time", label: "logout_time" },
+  { key: "login_ip", label: "login_ip" },
+  { key: "session_length_seconds", label: "session_length_seconds" },
+  { key: "user_agent", label: "user_agent" }
+];
+```
+
+### Add session rows near the bottom (after journal)
+
+Append:
+
+```ts
+// Sessions (normalized)
+rows.push({
+  user_id: user.id,
+  since_days: sinceDays,
+  section: "sessions_meta",
+  key: "source",
+  value: sessionBundle.source,
+  pnl: "",
+  trades: "",
+  win_rate: "",
+  rank: "",
+  note: "",
+  created_at: "",
+  login_time: "",
+  logout_time: "",
+  login_ip: "",
+  session_length_seconds: "",
+  user_agent: ""
+});
+
+for (const s of sessionBundle.sessions) {
+  rows.push({
+    user_id: user.id,
+    since_days: sinceDays,
+    section: "sessions",
+    key: s.session_id,
+    value: "",
+    pnl: "",
+    trades: "",
+    win_rate: "",
+    rank: "",
+    note: "",
+    created_at: "",
+    login_time: s.login_time ?? "",
+    logout_time: s.logout_time ?? "",
+    login_ip: s.login_ip ?? "",
+    session_length_seconds: s.session_length_seconds ?? "",
+    user_agent: s.user_agent ?? ""
+  });
+}
+```
+
+### Update audit log for CSV export
+
+Replace / expand your existing audit metadata call:
+
+```ts
+await logAdminAction({
+  adminId: req.user!.id,
+  userId,
+  actionType: "USER_SNAPSHOT_EXPORT_CSV",
+  req,
+  metadata: auditMeta(req, {
+    since_days: sinceDays,
+    sessions_source: sessionBundle.source,
+    sessions_count: sessionBundle.sessions.length
+  })
+});
+```
+
+---
+
+# 3) Optional (Recommended): User-level Sessions Export Endpoint
+
+If you want traders/admins to export their own sessions (useful for security/compliance):
+
+## `server/routes/sessionsExport.ts`
+
+```ts
+import { Router } from "express";
+import { getUserSessions } from "../services/sessions";
+import { toCsv, sendCsv } from "../utils/csv";
+
+const sessionsExport = Router();
+
+sessionsExport.get("/sessions/export.csv", async (req, res) => {
+  const sinceDays = req.query.since_days ? Number(req.query.since_days) : 30;
+  const out = await getUserSessions(req.user!.id, sinceDays);
+
+  const headers = [
+    { key: "source", label: "source" },
+    { key: "session_id", label: "session_id" },
+    { key: "login_time", label: "login_time" },
+    { key: "logout_time", label: "logout_time" },
+    { key: "login_ip", label: "login_ip" },
+    { key: "session_length_seconds", label: "session_length_seconds" },
+    { key: "user_agent", label: "user_agent" }
+  ];
+
+  const rows = out.sessions.map(s => ({ source: out.source, ...s }));
+  const csv = toCsv(headers, rows);
+  sendCsv(res, `sessions_user_${req.user!.id}_${sinceDays}d.csv`, csv);
+});
+
+export default sessionsExport;
+```
+
+Wire into `server/routes.ts`:
+
+```ts
+import sessionsExport from "./routes/sessionsExport";
+routes.use(sessionsExport);
+```
+
+---
+
+# 4) What you should expect after deploying this
+
+* If you already store sessions in `user_sessions`/`sessions`/`auth_sessions`, you’ll get **precise session lengths**.
+* If you only store `LOGIN`/`LOGOUT` events, you’ll still get:
+
+  * paired sessions where possible
+  * “open” sessions (login without logout)
+  * “abandoned” sessions (login overwritten by a new login without logout)
+
+In all cases, the snapshot will clearly label the **source** in:
+
+* JSON: `sessions.source`
+* CSV: `sessions_meta` row
+
+---
+
+If you paste the names (or a screenshot) of the table(s) you currently use for login/logout tracking, I can tighten the session query to be exact (no multi-table probing), and add any missing indexes for performance at 25k+ users.

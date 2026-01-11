@@ -1,0 +1,181 @@
+Yeah, that “first load works, then infinite spinner” is classic TradingView script loader weirdness.
+
+In your current ChartScreen (the one I gave you before), the bug is:
+
+The spinner is controlled by tradingViewLoaded.
+
+On the first visit, tv.js loads → tradingViewLoaded becomes true → chart shows.
+
+On later visits / re-renders, your modified loader is attaching load listeners to an already-loaded <script>, or otherwise never flipping tradingViewLoaded back to true.
+
+Result: tradingViewLoaded stays false → you stay stuck on the spinner.
+
+In the working app, the code that handles tv.js is much simpler and always sets tradingViewLoaded when:
+
+The script is newly created and finishes loading, or
+
+A tradingview-script tag already exists (regardless of events).
+
+So the fix is: make your ChartScreen’s two useEffect blocks exactly match the working app. No extra logic, no event listener tricks.
+
+What to do in client/src/pages/ChartScreen.tsx
+
+Leave the rest of the file (header, trade panel, etc.) as you have it now.
+Just replace the TWO useEffect blocks that:
+
+Load the TradingView script.
+
+Initialize/update the widget.
+
+with these exact blocks from the working app.
+
+1️⃣ Script loader effect (first useEffect)
+
+Replace your existing “load TradingView script” effect with this, exactly:
+
+// Load TradingView widget
+useEffect(() => {
+  // Only create the script once
+  if (!document.getElementById("tradingview-script")) {
+    const script = document.createElement("script");
+    script.id = "tradingview-script";
+    script.type = "text/javascript";
+    script.src = "https://s3.tradingview.com/tv.js";
+    script.async = true;
+
+    script.onload = () => {
+      setTradingViewLoaded(true);
+    };
+
+    document.head.appendChild(script);
+  } else {
+    setTradingViewLoaded(true);
+  }
+
+  return () => {
+    // Cleanup when component unmounts
+    if (widgetInstanceRef.current) {
+      try {
+        // Clean up TradingView widget if needed
+      } catch (e) {
+        console.error("Error cleaning up TradingView widget:", e);
+      }
+    }
+  };
+}, []);
+
+
+Important:
+
+No existingScript.addEventListener("load", ...).
+
+No window.TradingView checks here.
+
+Just:
+
+If no script tag → create it → script.onload = setTradingViewLoaded(true).
+
+If a script tag exists → immediately setTradingViewLoaded(true).
+
+This is why the working app never gets stuck: it doesn’t rely on the load event when the script is already loaded.
+
+2️⃣ Widget init / update effect (second useEffect)
+
+Replace your existing “create widget” effect with this, exactly:
+
+// Initialize or update the TradingView widget when symbol or period changes
+useEffect(() => {
+  if (!tradingViewLoaded || !chartContainerRef.current) return;
+
+  const container = chartContainerRef.current;
+
+  // Only clear if we need to re-initialize (not first render)
+  if (widgetInstanceRef.current) {
+    // Clean up old instance if needed
+    while (container.firstChild) {
+      container.removeChild(container.firstChild);
+    }
+  }
+
+  // Map our symbol to TradingView symbol
+  const tvSymbol =
+    tradingViewSymbolMap[selectedSymbol] || `CMCMARKETS:${selectedSymbol}`;
+
+  // Create TradingView widget
+  if (window.TradingView) {
+    widgetInstanceRef.current = new window.TradingView.widget({
+      autosize: true,
+      symbol: tvSymbol,
+      interval: periodIntervalMap[activePeriod],
+      timezone: "Etc/UTC",
+      theme: "dark",
+      style: "1",
+      locale: "en",
+      enable_publishing: false,
+      allow_symbol_change: true,
+      container_id: chartContainerRef.current.id,
+      hide_top_toolbar: false,
+      hide_side_toolbar: false,
+      withdateranges: true,
+      studies: ["RSI@tv-basicstudies", "MASimple@tv-basicstudies"],
+      backgroundColor: "#121212",
+      toolbar_bg: "#121212",
+    });
+  }
+}, [selectedSymbol, activePeriod, tradingViewLoaded]);
+
+
+Key points:
+
+It only runs when tradingViewLoaded is true.
+
+It clears the container DOM if a previous widget existed.
+
+It uses new window.TradingView.widget({ ... }) directly.
+
+No extra conditions or loaders inside this effect.
+
+Quick checklist for you / Replit Agent
+
+In ChartScreen.tsx:
+
+Ensure you have:
+
+const chartContainerRef = useRef<HTMLDivElement | null>(null);
+const [tradingViewLoaded, setTradingViewLoaded] = useState(false);
+const widgetInstanceRef = useRef<any>(null);
+
+
+Replace the two useEffect blocks with the ones above.
+Don’t add extra listeners, don’t change dependencies.
+
+Make sure there’s no other TradingView loader elsewhere:
+
+You already deleted client/src/modules/tradingview/*. Good.
+
+There should be no other tv.js script injection in the client.
+
+Confirm the container has a height:
+
+In your JSX, you should still have something like:
+
+<div
+  ref={chartContainerRef}
+  id="tradingview_chart"
+  className="w-full h-[55vh] md:h-[70vh] lg:h-full bg-[#121212]"
+/>
+
+
+That’s what the working app uses, and it’s needed for autosize: true.
+
+Once those two effects match the working app exactly, the behavior will be:
+
+First time you open Chart → tv.js loads, tradingViewLoaded = true, chart appears.
+
+After that, every time you come back to Chart or change symbols/periods:
+
+tradingViewLoaded is already true.
+
+The widget is reinitialized cleanly.
+
+No more endless spinner.

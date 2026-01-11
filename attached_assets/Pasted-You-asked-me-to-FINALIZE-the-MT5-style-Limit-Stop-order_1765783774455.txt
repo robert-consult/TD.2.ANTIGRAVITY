@@ -1,0 +1,225 @@
+You asked me to **FINALIZE** the MT5-style Limit/Stop order work end-to-end (UI + backend + execution engine), treating **10 points as 10 pips**.
+
+I started implementing exactly that, and I can confirm **the design and patch plan is correct**, but I did **not complete the consolidated patch ZIP yet** because I hit the tool/runtime cutoff mid-edit while patching the **TradeScreen UI button block and the backend trade route**.
+
+That said, I did make meaningful progress and I can be precise about what is already completed vs. what remains to be completed for the “FINALIZE” requirement.
+
+---
+
+# ✅ Completed (implemented in the working copy)
+
+## 1) Client: stop sending client-controlled close prices (security/risk fix)
+
+* `client/src/hooks/use-trades.tsx`
+
+  * `closeTrade` mutation now calls:
+    `POST /api/trades/:id/close` with `{}` (no `closePrice`).
+* `createTrade` type signature was broadened to support pending-order fields without requiring openPrice.
+
+This eliminates the “non-live price injection” vector and aligns with professional execution.
+
+---
+
+## 2) Client: TradeScreen onSubmit logic partially updated (removing openPrice reliance)
+
+* In `client/src/pages/TradeScreen.tsx` I replaced the onSubmit block so it:
+
+  * uses **Market = BUY/SELL instant buttons**
+  * uses **Limit/Stop = pendingSide (BUY/SELL)** (new mini-tab logic planned)
+  * sends:
+
+    * `symbolId`
+    * `type`
+    * `lots`
+    * `orderType`
+    * `limitPrice` / `stopPrice` as applicable
+    * optional `TP/SL`
+  * **does not send openPrice**
+
+This is necessary for MT5-style pending orders.
+
+---
+
+## 3) TradeScreen: pending order state scaffolding is added (not fully wired to UI yet)
+
+In `TradeScreen.tsx`, I inserted the state foundation for the pending order UI:
+
+* `pendingSide: "BUY" | "SELL"` (defaults to BUY)
+* auto-follow flags:
+
+  * `autoEntry`
+  * `autoTp`
+  * `autoSl`
+
+These are required to implement “suggest 10 pips away and track market until user edits.”
+
+---
+
+# ⚠️ Not yet finalized (what remains to complete to meet your request)
+
+To truly **FINALIZE** as you specified, the following is still pending:
+
+## A) TradeScreen UI transformation (not completed)
+
+You requested:
+
+* Limit mini-tab:
+
+  * “BUY LIMIT” / “SELL LIMIT” selection
+  * single submit button labeled: **Place BUY LIMIT @ {price}**
+* Stop mini-tab:
+
+  * “BUY STOP” / “SELL STOP”
+  * single submit button labeled: **Place SELL STOP @ {price}**
+* Replace generic BUY/SELL market buttons for these tabs.
+
+I was in the middle of replacing the existing always-on BUY/SELL submit button block with:
+
+* Market: keep current BUY/SELL block unchanged
+* Limit/Stop: render mini-tab + single “Place … @ …” button
+
+This is the main incomplete UI piece.
+
+---
+
+## B) 10-pip suggestions + tracking behavior (not completed)
+
+You requested MT5-like “auto suggested entry/TP/SL = 10 pips away and tracks market unless user edits.”
+
+I have not yet inserted the finished `useEffect` logic to:
+
+* compute pip size and apply **10 pips**
+* auto-fill entry price (limit/stop)
+* auto-fill TP/SL relative to entry
+* continue tracking with quote movements until the user manually changes a field
+* disable auto-tracking per field once edited
+
+The state scaffolding exists, but the full effect + onChange wiring is still pending.
+
+---
+
+## C) Backend: MT5 placement validation & openPrice authority (not completed)
+
+You requested:
+
+* MT5 rules:
+
+  * BUY LIMIT below ASK by ≥ 10 pips
+  * SELL LIMIT above BID by ≥ 10 pips
+  * BUY STOP above ASK by ≥ 10 pips
+  * SELL STOP below BID by ≥ 10 pips
+* enforce correct TP/SL placement relative to entry
+* enforce stale quote blocking (Option 1)
+
+I have not finished patching `server/routes.ts` to:
+
+* compute authoritative market bid/ask
+* normalize orderType
+* validate limit/stop placement
+* set `openPrice` properly for pending orders (requested price)
+* run margin check against **intendedEntryPrice**
+* refuse on stale/missing quotes
+
+This is a core piece of your “FINALIZE” request and is still pending.
+
+---
+
+## D) Pending execution engine (PENDING → OPEN) (not implemented yet)
+
+You requested a professional pending order engine:
+
+* checks pending orders against current bid/ask
+* fills using MT5 trigger logic:
+
+  * BUY LIMIT triggers on ASK ≤ limit
+  * SELL LIMIT triggers on BID ≥ limit
+  * BUY STOP triggers on ASK ≥ stop
+  * SELL STOP triggers on BID ≤ stop
+* fills at current:
+
+  * BUY fill = ASK
+  * SELL fill = BID
+* re-check margin at execution
+* blocks on stale quotes
+* updates trade status PENDING → OPEN (and timestamps correctly)
+
+I have not yet created/imported this worker file (e.g. `server/cron/pendingEngine.ts`) and wired it into `server/index.ts`.
+
+---
+
+## E) TP/SL auto-close engine (not implemented yet, but recommended)
+
+You explicitly agreed earlier that TP/SL being cosmetic is non-professional, so this should be included:
+
+* BUY closes when BID hits TP/SL
+* SELL closes when ASK hits TP/SL
+* blocks if quote stale
+* updates balance + recalc account
+
+Not yet implemented.
+
+---
+
+# What I will deliver when finalized (single consolidated patch ZIP)
+
+Per your directive, the final output will be **one consolidated patch ZIP** containing:
+
+1. `client/src/pages/TradeScreen.tsx`
+
+   * Market buttons unchanged
+   * Limit/Stop mini-tabs + “Place … @ …” button
+   * 10-pip suggestion + tracking logic for entry/TP/SL
+   * correct field wiring to stop auto-follow once user edits
+
+2. `client/src/hooks/use-trades.tsx`
+
+   * closeTrade sends no closePrice
+   * createTrade supports pending fields without openPrice
+
+3. `server/routes.ts`
+
+   * MT5 placement validation rules (bid/ask aware)
+   * 10-pip distance enforcement
+   * TP/SL direction + distance enforcement
+   * stale quote blocking (Option 1)
+   * server-authoritative openPrice handling
+
+4. `server/cron/pendingEngine.ts` (new)
+
+   * pending trigger and fill logic
+   * margin re-check at execution
+   * stale quote blocking
+
+5. `server/index.ts`
+
+   * imports the pending engine
+
+6. (Optional but recommended) `server/cron/tpSlEngine.ts` or integrated into pending engine
+
+   * TP/SL closes with bid/ask correctness + stale blocking
+
+---
+
+# Important note about your “FINALIZE” request
+
+Right now, I cannot truthfully claim the patch is fully finalized and packaged because:
+
+* I did not finish the **TradeScreen UI rewrite** (buttons + minitabs)
+* I did not implement the **auto-follow 10-pip logic**
+* I did not complete **server-side MT5 validations**
+* I did not implement the **pending execution engine** and **TP/SL engine**
+* I did not produce the consolidated ZIP
+
+Those are precisely the things you told me to finalize.
+
+---
+
+# If you want me to complete it in the very next response
+
+I can finish the remaining steps in one pass and provide the consolidated ZIP, but to do so I need to continue tool-based file edits. In your next message, just reply:
+
+**“Continue and deliver the consolidated patch zip.”**
+
+I will then complete all remaining items above and output the ZIP with the correct folder paths for direct drop-in replacement.
+
+If you prefer the pending engine to run at a specific interval (e.g., **250ms**, **1s**, **2s**) or want broker-like slippage rules, tell me now; otherwise I will default to **1 second** execution checks with strict bid/ask fills.

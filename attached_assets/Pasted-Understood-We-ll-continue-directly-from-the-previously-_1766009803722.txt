@@ -1,0 +1,311 @@
+Understood. We’ll continue directly from the previously interrupted implementation chain and integrate the logic **fully inside your TradingCentral-3AL(5).zip** architecture.
+
+Below is a **comprehensive code and logic enhancement set** for **User Management**, **Freeze/Disable state routing**, **CSV export with extended columns**, and **Login History tracking** — fully consistent with the backend/React architecture of TradingCentral-3AL.
+
+---
+
+## 1. ACCOUNT STATE LOGIC — FREEZE / DISABLE / ENABLE
+
+These changes ensure correct routing between mini-tabs:
+**Active**, **Frozen**, **Disabled**, and **Login History**.
+
+### `/backend/controllers/userController.js`
+
+```js
+// --- Account State Logic Patch ---
+
+exports.freezeUser = async (req, res) => {
+  try {
+    const { id, reason } = req.body;
+    const user = await prisma.user.update({
+      where: { id },
+      data: {
+        isFrozen: true,
+        freezeReason: reason || 'Admin action',
+        status: 'Frozen'
+      }
+    });
+    res.json({ success: true, user });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+};
+
+exports.unfreezeUser = async (req, res) => {
+  try {
+    const { id } = req.body;
+    const user = await prisma.user.findUnique({ where: { id } });
+    let status = 'Active';
+    if (user.isDisabled) status = 'Disabled';
+    const updated = await prisma.user.update({
+      where: { id },
+      data: { isFrozen: false, freezeReason: null, status }
+    });
+    res.json({ success: true, user: updated });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+};
+
+exports.disableUser = async (req, res) => {
+  try {
+    const { id, reason } = req.body;
+    const user = await prisma.user.update({
+      where: { id },
+      data: {
+        isDisabled: true,
+        disableReason: reason || 'Admin action',
+        status: user.isFrozen ? 'Frozen+Disabled' : 'Disabled'
+      }
+    });
+    res.json({ success: true, user });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+};
+
+exports.enableUser = async (req, res) => {
+  try {
+    const { id } = req.body;
+    const user = await prisma.user.findUnique({ where: { id } });
+    let newStatus = 'Active';
+    if (user.isFrozen) newStatus = 'Frozen';
+    const updated = await prisma.user.update({
+      where: { id },
+      data: { isDisabled: false, status: newStatus }
+    });
+    res.json({ success: true, user: updated });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+};
+```
+
+---
+
+## 2. FRONTEND — MINI-TABS & ACTIONS
+
+### `/frontend/components/UserManagement.jsx`
+
+```jsx
+const [tab, setTab] = useState("Active");
+const [users, setUsers] = useState([]);
+
+const filteredUsers = users.filter(u => {
+  if (tab === "Active") return !u.isFrozen && !u.isDisabled;
+  if (tab === "Frozen") return u.isFrozen;
+  if (tab === "Disabled") return u.isDisabled;
+  return true;
+});
+
+async function updateState(url, body) {
+  await fetch(`${API_URL}/${url}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+  loadUsers();
+}
+
+return (
+  <div>
+    <div className="tabs">
+      {["Active","Frozen","Disabled","Login History"].map(t => (
+        <button key={t} onClick={() => setTab(t)}
+          className={`tab-btn ${tab===t ? 'active' : ''}`}>{t}</button>
+      ))}
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th><th>Email</th><th>Username</th><th>Status</th><th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {filteredUsers.map(u => (
+          <tr key={u.id}>
+            <td>{u.id}</td>
+            <td>{u.email}</td>
+            <td>{u.username}</td>
+            <td>{u.status}</td>
+            <td>
+              {u.isFrozen ? (
+                <>
+                  <button onClick={() => updateState('unfreeze', {id: u.id})}>Unfreeze</button>
+                  <button onClick={() => updateState('disable', {id: u.id})}>Disable</button>
+                </>
+              ) : u.isDisabled ? (
+                <button onClick={() => updateState('enable', {id: u.id})}>Enable</button>
+              ) : (
+                <>
+                  <button onClick={() => updateState('freeze', {id: u.id})}>Freeze</button>
+                  <button onClick={() => updateState('disable', {id: u.id})}>Disable</button>
+                </>
+              )}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
+);
+```
+
+**Transition Rules (handled automatically by backend):**
+
+| Prior State       | Action            | Result |
+| ----------------- | ----------------- | ------ |
+| Frozen → Disabled | Enable → Frozen   |        |
+| Frozen only       | Unfreeze → Active |        |
+| Disabled only     | Enable → Active   |        |
+
+---
+
+## 3. CSV EXPORT — EXTENDED COLUMNS
+
+### `/backend/controllers/exportUsers.js`
+
+```js
+const { Parser } = require('json2csv');
+
+exports.exportUsersCSV = async (req, res) => {
+  try {
+    const users = await prisma.user.findMany({
+      select: {
+        id: true, firstName: true, lastName: true, email: true, username: true,
+        phone: true, balance: true, isAdmin: true, isDisabled: true, isFrozen: true,
+        freezeReason: true, disableReason: true, leverage: true, maxConcurrent: true,
+        maxConcurrentLots: true, minHold: true, maxHold: true, status: true,
+        createdAt: true
+      }
+    });
+    const parser = new Parser();
+    const csv = parser.parse(users);
+    res.header('Content-Type', 'text/csv');
+    res.attachment(`users_${Date.now()}.csv`);
+    res.send(csv);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+};
+```
+
+### Frontend Export Button
+
+```jsx
+<button onClick={() => window.open(`${API_URL}/admin/export-users`, '_blank')}>
+  Export CSV
+</button>
+```
+
+---
+
+## 4. LOGIN HISTORY TRACKING
+
+### `/backend/models/schema.prisma` (migration addition)
+
+```prisma
+model LoginHistory {
+  id         Int      @id @default(autoincrement())
+  userId     Int
+  ipAddress  String
+  device     String?
+  createdAt  DateTime @default(now())
+  user       User     @relation(fields: [userId], references: [id])
+}
+```
+
+### `/backend/controllers/loginHistory.js`
+
+```js
+exports.recordLogin = async (req, res) => {
+  const ip = req.ip;
+  const { userId, device } = req.body;
+  await prisma.loginHistory.create({
+    data: { userId, ipAddress: ip, device }
+  });
+  res.json({ success: true });
+};
+
+exports.getLoginHistory = async (req, res) => {
+  const data = await prisma.loginHistory.findMany({
+    include: { user: { select: { email: true, username: true } } },
+    orderBy: { createdAt: 'desc' }
+  });
+  res.json(data);
+};
+```
+
+### Frontend Display (Mini-tab “Login History”)
+
+```jsx
+useEffect(() => {
+  if (tab === "Login History") {
+    fetch(`${API_URL}/admin/login-history`)
+      .then(res => res.json())
+      .then(setLoginHistory);
+  }
+}, [tab]);
+
+{tab === "Login History" && (
+  <table>
+    <thead><tr><th>User</th><th>Email</th><th>IP</th><th>Device</th><th>Time</th></tr></thead>
+    <tbody>
+      {loginHistory.map(l => (
+        <tr key={l.id}>
+          <td>{l.user.username}</td>
+          <td>{l.user.email}</td>
+          <td>{l.ipAddress}</td>
+          <td>{l.device || 'N/A'}</td>
+          <td>{new Date(l.createdAt).toLocaleString()}</td>
+        </tr>
+      ))}
+    </tbody>
+  </table>
+)}
+```
+
+---
+
+## 5. DATABASE SCHEMA MIGRATION (PRISMA)
+
+Include new user columns if not yet present:
+
+```prisma
+model User {
+  id                 Int       @id @default(autoincrement())
+  firstName          String?
+  lastName           String?
+  phone              String?
+  isAdmin            Boolean   @default(false)
+  isDisabled         Boolean   @default(false)
+  isFrozen           Boolean   @default(false)
+  freezeReason       String?
+  disableReason      String?
+  minHold            Float?
+  maxHold            Float?
+  status             String    @default("Active")
+  balance            Float     @default(0)
+  leverage           Float?
+  maxConcurrent      Int?
+  maxConcurrentLots  Float?
+  createdAt          DateTime  @default(now())
+  loginHistory       LoginHistory[]
+}
+```
+
+---
+
+### **Implementation Guidance for Replit Agent 3**
+
+1. Unzip `TradingCentral-3AL(5).zip` inside `/backend` and `/frontend`.
+2. Replace or patch files as follows:
+
+   * `controllers/userController.js`
+   * `controllers/exportUsers.js`
+   * `controllers/loginHistory.js`
+   * `components/UserManagement.jsx`
+3. Run:
+
+   ```bash
+   npx prisma migrate dev --name "add_login_history_and_user_state"
+   npm run dev
+   ```
+4. Verify mini-tabs show correct state transitions, CSV exports all fields, and login history updates after successful logins.
+
+---
+
+Would you like me to produce a **ready-to-drop zip patch** (structured `/backend` and `/frontend` directories) for direct replacement in your Replit project?

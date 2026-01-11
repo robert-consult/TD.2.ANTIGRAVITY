@@ -1,0 +1,586 @@
+Below is the **targets table + “active doc” plumbing** (backend + schema + frontend) so “current active doc” is **explicit** (not “latest created”). This is the deterministic foundation you want for legal ops, upgrades, and enforceability.
+
+You will add:
+
+1. `legalDocTargets` table (target → activeDocId)
+2. Admin endpoints to **get/list** and **set active** (upsert)
+3. Update **Legal Docs** minitab to show **ACTIVE** and allow **Set Active**
+4. Update **Diff vs Current** endpoint to use **targets.activeDocId** (fallback to latest only if target missing)
+
+---
+
+## 0) Assumptions (aligned with your stack)
+
+* DB: SQLite + Drizzle
+* Existing table: `legalDocuments` (with `id`, `docSet`, `docType`, `jurisdictionType`, `jurisdictionKey`, `version`, `sha256`, `content`, `createdAt`)
+* Admin auth middleware: `requireAdmin`
+
+If your timestamp pattern differs (e.g., `mode: "timestamp"` vs `timestamp_ms`), adjust only the `updatedAt` column mode.
+
+---
+
+# 1) Schema: add `legalDocTargets`
+
+## 1.1 `shared/schema.ts` (ADD TABLE)
+
+```ts
+// FILE: /shared/schema.ts
+// ADD these imports near the top with other drizzle sqlite imports
+import { sqliteTable, text, integer, index, uniqueIndex } from "drizzle-orm/sqlite-core";
+
+// Ensure legalDocuments is already defined above.
+// Then ADD this table definition (place near legalDocuments for clarity).
+
+export const legalDocTargets = sqliteTable(
+  "legal_doc_targets",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+
+    // Which doc family this target belongs to (DOC1 for your signup terms)
+    docSet: text("doc_set").notNull(), // "DOC1"
+    docType: text("doc_type").notNull(), // "GLOBAL_MASTER" | "ADDENDUM"
+    jurisdictionType: text("jurisdiction_type").notNull(), // "DEFAULT" | "COUNTRY" | "REGION"
+    jurisdictionKey: text("jurisdiction_key").notNull(), // e.g., "GLOBAL" | "ROW" | "KE" | "SE_ASIA"
+
+    // The explicitly active legalDocuments.id for this target
+    activeDocId: integer("active_doc_id").notNull(),
+
+    // Operational metadata
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+    updatedByAdminUserId: integer("updated_by_admin_user_id"), // nullable if you don't have admin user ids
+    note: text("note"), // optional: "FTC update", "Kenya update", etc.
+  },
+  (t) => ({
+    uqTarget: uniqueIndex("uq_legal_doc_target").on(t.docSet, t.docType, t.jurisdictionType, t.jurisdictionKey),
+    idxActive: index("idx_legal_doc_target_active").on(t.activeDocId),
+  })
+);
+```
+
+After adding schema: run your usual migration/push (`npm run db:push`).
+
+---
+
+# 2) Backend: Targets router
+
+## 2.1 `server/routes/adminLegalDocTargets.ts` (NEW FILE)
+
+```ts
+// FILE: /server/routes/adminLegalDocTargets.ts
+import { Router } from "express";
+import { and, desc, eq } from "drizzle-orm";
+import { db } from "../db";
+import { requireAdmin } from "../middleware/requireAdmin";
+import { legalDocTargets, legalDocuments } from "../../shared/schema";
+
+export const adminLegalDocTargetsRouter = Router();
+adminLegalDocTargetsRouter.use(requireAdmin);
+
+function normText(v: any) {
+  return String(v || "").trim();
+}
+
+function validateTarget(body: any) {
+  const docSet = normText(body.docSet);
+  const docType = normText(body.docType);
+  const jurisdictionType = normText(body.jurisdictionType);
+  const jurisdictionKey = normText(body.jurisdictionKey);
+
+  if (!docSet || !docType || !jurisdictionType || !jurisdictionKey) {
+    throw new Error("docSet, docType, jurisdictionType, jurisdictionKey are required.");
+  }
+  return { docSet, docType, jurisdictionType, jurisdictionKey };
+}
+
+// GET /api/admin/legal-docs/targets/get?docSet=DOC1&docType=ADDENDUM&jurisdictionType=COUNTRY&jurisdictionKey=KE
+adminLegalDocTargetsRouter.get("/get", (req, res) => {
+  try {
+    const docSet = normText(req.query.docSet);
+    const docType = normText(req.query.docType);
+    const jurisdictionType = normText(req.query.jurisdictionType);
+    const jurisdictionKey = normText(req.query.jurisdictionKey);
+
+    if (!docSet || !docType || !jurisdictionType || !jurisdictionKey) {
+      return res.status(400).json({ ok: false, error: "Missing target parameters." });
+    }
+
+    const row = db
+      .select()
+      .from(legalDocTargets)
+      .where(
+        and(
+          eq(legalDocTargets.docSet, docSet),
+          eq(legalDocTargets.docType, docType),
+          eq(legalDocTargets.jurisdictionType, jurisdictionType),
+          eq(legalDocTargets.jurisdictionKey, jurisdictionKey)
+        ) as any
+      )
+      .get();
+
+    return res.json({ ok: true, target: row || null });
+  } catch (e: any) {
+    return res.status(400).json({ ok: false, error: e?.message || "Failed to get target." });
+  }
+});
+
+// GET /api/admin/legal-docs/targets/list?docSet=DOC1&docType=ADDENDUM
+adminLegalDocTargetsRouter.get("/list", (req, res) => {
+  try {
+    const docSet = normText(req.query.docSet);
+    const docType = normText(req.query.docType);
+
+    const where: any[] = [];
+    if (docSet) where.push(eq(legalDocTargets.docSet, docSet));
+    if (docType) where.push(eq(legalDocTargets.docType, docType));
+
+    const rows = db
+      .select()
+      .from(legalDocTargets)
+      .where(where.length ? (and(...(where as any)) as any) : undefined)
+      .orderBy(desc(legalDocTargets.updatedAt))
+      .limit(500)
+      .all();
+
+    return res.json({ ok: true, rows });
+  } catch (e: any) {
+    return res.status(400).json({ ok: false, error: e?.message || "Failed to list targets." });
+  }
+});
+
+// POST /api/admin/legal-docs/targets/set-active
+// body: { docSet, docType, jurisdictionType, jurisdictionKey, activeDocId, note? }
+adminLegalDocTargetsRouter.post("/set-active", (req, res) => {
+  try {
+    const body = req.body || {};
+    const { docSet, docType, jurisdictionType, jurisdictionKey } = validateTarget(body);
+
+    const activeDocId = Number(body.activeDocId);
+    if (!Number.isFinite(activeDocId) || activeDocId <= 0) throw new Error("activeDocId must be a positive number.");
+
+    // Ensure the document exists and matches target
+    const doc = db
+      .select({
+        id: legalDocuments.id,
+        docSet: legalDocuments.docSet,
+        docType: legalDocuments.docType,
+        jurisdictionType: legalDocuments.jurisdictionType,
+        jurisdictionKey: legalDocuments.jurisdictionKey,
+      })
+      .from(legalDocuments)
+      .where(eq(legalDocuments.id, activeDocId))
+      .get();
+
+    if (!doc) throw new Error("activeDocId does not exist in legalDocuments.");
+    if (
+      doc.docSet !== docSet ||
+      doc.docType !== docType ||
+      doc.jurisdictionType !== jurisdictionType ||
+      doc.jurisdictionKey !== jurisdictionKey
+    ) {
+      throw new Error("activeDocId document does not match the specified target.");
+    }
+
+    const now = Date.now();
+    const note = body.note != null ? String(body.note) : null;
+
+    // If your auth middleware exposes admin identity, you can set this.
+    // Otherwise it remains null.
+    const adminUserId = (req as any)?.user?.id ? Number((req as any).user.id) : null;
+
+    // Upsert into legal_doc_targets
+    db.insert(legalDocTargets)
+      .values({
+        docSet,
+        docType,
+        jurisdictionType,
+        jurisdictionKey,
+        activeDocId,
+        updatedAt: new Date(now),
+        updatedByAdminUserId: adminUserId,
+        note,
+      } as any)
+      .onConflictDoUpdate({
+        target: [legalDocTargets.docSet, legalDocTargets.docType, legalDocTargets.jurisdictionType, legalDocTargets.jurisdictionKey],
+        set: {
+          activeDocId,
+          updatedAt: new Date(now) as any,
+          updatedByAdminUserId: adminUserId,
+          note,
+        },
+      })
+      .run();
+
+    const saved = db
+      .select()
+      .from(legalDocTargets)
+      .where(
+        and(
+          eq(legalDocTargets.docSet, docSet),
+          eq(legalDocTargets.docType, docType),
+          eq(legalDocTargets.jurisdictionType, jurisdictionType),
+          eq(legalDocTargets.jurisdictionKey, jurisdictionKey)
+        ) as any
+      )
+      .get();
+
+    return res.json({ ok: true, target: saved });
+  } catch (e: any) {
+    return res.status(400).json({ ok: false, error: e?.message || "Failed to set active target." });
+  }
+});
+```
+
+## 2.2 Mount router in `server/index.ts`
+
+```ts
+// FILE: /server/index.ts
+import { adminLegalDocTargetsRouter } from "./routes/adminLegalDocTargets";
+
+// ...
+app.use("/api/admin/legal-docs/targets", adminLegalDocTargetsRouter);
+```
+
+---
+
+# 3) Backend: Update “Diff vs Current” to use targets (deterministic)
+
+## Patch `server/routes/adminLegalAcceptances.ts`
+
+Inside your existing `/:id/diff-current` handler, replace the “current doc resolution” logic with this.
+
+Add import if missing:
+
+```ts
+import { legalDocTargets, legalDocuments } from "../../shared/schema";
+```
+
+Then replace the “getCurrentDoc” helper and resolution block with:
+
+```ts
+// Deterministic: current doc = legal_doc_targets.active_doc_id
+const getActiveDocByTarget = (target: {
+  docSet: string;
+  docType: string;
+  jurisdictionType: string;
+  jurisdictionKey: string;
+}) => {
+  const t = db
+    .select()
+    .from(legalDocTargets)
+    .where(
+      and(
+        eq(legalDocTargets.docSet, target.docSet),
+        eq(legalDocTargets.docType, target.docType),
+        eq(legalDocTargets.jurisdictionType, target.jurisdictionType),
+        eq(legalDocTargets.jurisdictionKey, target.jurisdictionKey)
+      ) as any
+    )
+    .get();
+
+  if (!t) return { target: null, doc: null, mode: "MISSING_TARGET" as const };
+
+  const doc = db
+    .select({
+      id: legalDocuments.id,
+      docSet: legalDocuments.docSet,
+      docType: legalDocuments.docType,
+      jurisdictionType: legalDocuments.jurisdictionType,
+      jurisdictionKey: legalDocuments.jurisdictionKey,
+      version: legalDocuments.version,
+      sha256: legalDocuments.sha256,
+      content: legalDocuments.content,
+      createdAt: legalDocuments.createdAt,
+    })
+    .from(legalDocuments)
+    .where(eq(legalDocuments.id, t.activeDocId))
+    .get();
+
+  if (!doc) return { target: t, doc: null, mode: "BROKEN_TARGET" as const };
+
+  return { target: t, doc, mode: "ACTIVE_TARGET" as const };
+};
+
+// Optional safety fallback if target missing: latest doc for that target.
+// Keeps the diff usable while you are rolling out targets across jurisdictions.
+const getLatestDocFallback = (target: {
+  docSet: string;
+  docType: string;
+  jurisdictionType: string;
+  jurisdictionKey: string;
+}) => {
+  const doc = db
+    .select({
+      id: legalDocuments.id,
+      docSet: legalDocuments.docSet,
+      docType: legalDocuments.docType,
+      jurisdictionType: legalDocuments.jurisdictionType,
+      jurisdictionKey: legalDocuments.jurisdictionKey,
+      version: legalDocuments.version,
+      sha256: legalDocuments.sha256,
+      content: legalDocuments.content,
+      createdAt: legalDocuments.createdAt,
+    })
+    .from(legalDocuments)
+    .where(
+      and(
+        eq(legalDocuments.docSet, target.docSet),
+        eq(legalDocuments.docType, target.docType),
+        eq(legalDocuments.jurisdictionType, target.jurisdictionType),
+        eq(legalDocuments.jurisdictionKey, target.jurisdictionKey)
+      ) as any
+    )
+    .orderBy(desc(legalDocuments.createdAt))
+    .limit(1)
+    .get();
+
+  return doc || null;
+};
+
+// Current Global (usually DEFAULT/GLOBAL)
+const globalRes = getActiveDocByTarget({
+  docSet: "DOC1",
+  docType: "GLOBAL_MASTER",
+  jurisdictionType: "DEFAULT",
+  jurisdictionKey: "GLOBAL",
+});
+
+const currentGlobal =
+  globalRes.doc ||
+  getLatestDocFallback({
+    docSet: "DOC1",
+    docType: "GLOBAL_MASTER",
+    jurisdictionType: "DEFAULT",
+    jurisdictionKey: "GLOBAL",
+  });
+
+// Current Addendum: COUNTRY/ISO2 > REGION/RK > DEFAULT/ROW (targets first; fallback if missing)
+const ISO2 = String(acc.countryIso2 || "").toUpperCase();
+const RK = acc.regionKey ? String(acc.regionKey) : null;
+
+let addRes:
+  | { target: any; doc: any; mode: string; chosenTarget: any }
+  | { target: any; doc: any; mode: string; chosenTarget: any };
+
+let currentAddendum: any = null;
+let addendumMode = "ACTIVE_TARGET";
+let chosenAddTarget: any = null;
+
+const tryTargets = [
+  ISO2
+    ? { docSet: "DOC1", docType: "ADDENDUM", jurisdictionType: "COUNTRY", jurisdictionKey: ISO2 }
+    : null,
+  RK
+    ? { docSet: "DOC1", docType: "ADDENDUM", jurisdictionType: "REGION", jurisdictionKey: RK }
+    : null,
+  { docSet: "DOC1", docType: "ADDENDUM", jurisdictionType: "DEFAULT", jurisdictionKey: "ROW" },
+].filter(Boolean) as any[];
+
+for (const t of tryTargets) {
+  const r = getActiveDocByTarget(t);
+  if (r.doc) {
+    currentAddendum = r.doc;
+    addendumMode = r.mode;
+    chosenAddTarget = t;
+    break;
+  }
+}
+
+if (!currentAddendum) {
+  // fallback latest doc in precedence order
+  for (const t of tryTargets) {
+    const doc = getLatestDocFallback(t);
+    if (doc) {
+      currentAddendum = doc;
+      addendumMode = "FALLBACK_LATEST";
+      chosenAddTarget = t;
+      break;
+    }
+  }
+}
+```
+
+Then when returning JSON, replace your `current.global` and `current.addendum` objects to include target mode for operator clarity:
+
+```ts
+current: {
+  global: currentGlobal
+    ? {
+        id: currentGlobal.id,
+        docSet: currentGlobal.docSet,
+        docType: currentGlobal.docType,
+        jurisdictionType: currentGlobal.jurisdictionType,
+        jurisdictionKey: currentGlobal.jurisdictionKey,
+        version: currentGlobal.version,
+        sha256: currentGlobal.sha256,
+        createdAt: currentGlobal.createdAt,
+        resolveMode: globalRes.mode, // ACTIVE_TARGET / MISSING_TARGET / BROKEN_TARGET
+      }
+    : null,
+  addendum: currentAddendum
+    ? {
+        id: currentAddendum.id,
+        docSet: currentAddendum.docSet,
+        docType: currentAddendum.docType,
+        jurisdictionType: currentAddendum.jurisdictionType,
+        jurisdictionKey: currentAddendum.jurisdictionKey,
+        version: currentAddendum.version,
+        sha256: currentAddendum.sha256,
+        createdAt: currentAddendum.createdAt,
+        resolveMode: addendumMode, // ACTIVE_TARGET or FALLBACK_LATEST
+        chosenTarget: chosenAddTarget,
+      }
+    : null,
+  combinedSha256: currentCombinedSha,
+},
+```
+
+This makes “current active” legally defensible and audit-friendly.
+
+---
+
+# 4) Frontend: Legal Docs minitab shows ACTIVE + Set Active
+
+## Patch `client/src/pages/AdminLegalDocs.tsx`
+
+### 4.1 Add state + loader for the current target
+
+Add these state hooks:
+
+```tsx
+  const [activeDocId, setActiveDocId] = useState<number | null>(null);
+  const [activeLoading, setActiveLoading] = useState(false);
+  const [setActiveLoadingId, setSetActiveLoadingId] = useState<number | null>(null);
+```
+
+Add helper to load the target’s active doc:
+
+```tsx
+  async function loadActiveTarget() {
+    setActiveLoading(true);
+    try {
+      const qs = new URLSearchParams({
+        docSet,
+        docType,
+        jurisdictionType,
+        jurisdictionKey,
+      });
+      const res = await fetch(`/api/admin/legal-docs/targets/get?${qs.toString()}`);
+      const data = await res.json();
+      if (!data?.ok) throw new Error(data?.error || "Failed to load active target.");
+      setActiveDocId(data.target?.activeDocId ? Number(data.target.activeDocId) : null);
+    } catch {
+      setActiveDocId(null);
+    } finally {
+      setActiveLoading(false);
+    }
+  }
+```
+
+Call `loadActiveTarget()` whenever the selector changes (same place you load versions):
+
+```tsx
+  useEffect(() => {
+    loadActiveTarget().catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [docSet, docType, jurisdictionType, jurisdictionKey]);
+```
+
+Add setter helper:
+
+```tsx
+  async function setActive(docId: number) {
+    setSetActiveLoadingId(docId);
+    try {
+      const res = await fetch(`/api/admin/legal-docs/targets/set-active`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          docSet,
+          docType,
+          jurisdictionType,
+          jurisdictionKey,
+          activeDocId: docId,
+          note: "Set via AdminLegalDocs",
+        }),
+      });
+      const data = await res.json();
+      if (!data?.ok) throw new Error(data?.error || "Failed to set active doc.");
+      setActiveDocId(Number(data.target.activeDocId));
+    } catch (e: any) {
+      alert(e?.message || "Failed to set active doc.");
+    } finally {
+      setSetActiveLoadingId(null);
+    }
+  }
+```
+
+### 4.2 Mark ACTIVE in the versions list + add “Set Active” button
+
+Where you render each version row (your versions table/list), add:
+
+* `isActive = Number(v.id) === Number(activeDocId)`
+
+Then render:
+
+```tsx
+{isActive ? (
+  <span style={{ ...badge, fontWeight: 700 }}>ACTIVE</span>
+) : (
+  <button
+    style={btnSmall}
+    onClick={() => setActive(Number(v.id))}
+    disabled={setActiveLoadingId === Number(v.id)}
+    title="Set this version as the explicitly active doc for this target"
+  >
+    {setActiveLoadingId === Number(v.id) ? "Setting..." : "Set Active"}
+  </button>
+)}
+```
+
+Add a small badge style if you don’t have one:
+
+```tsx
+const badge: React.CSSProperties = {
+  display: "inline-block",
+  padding: "2px 8px",
+  borderRadius: 999,
+  border: "1px solid rgba(0,0,0,0.18)",
+  fontSize: 11,
+  opacity: 0.9,
+};
+```
+
+Also show current target status in the header:
+
+```tsx
+<div style={{ fontSize: 12, opacity: 0.75 }}>
+  Active target: {activeLoading ? "Loading..." : (activeDocId ? `#${activeDocId}` : "NOT SET")}
+</div>
+```
+
+---
+
+# 5) Operational requirement satisfied: “load/replace future documents”
+
+With `legalDocTargets`, you can:
+
+* Upload new versions anytime (your `legalDocuments` grows as an immutable history)
+* Choose the active version per target (country/region/global)
+* Diff “accepted vs current active” deterministically
+* Change active versions as law shifts, without breaking your audit trail
+
+---
+
+# 6) What to do immediately after adding this
+
+1. Create targets for the initial set you care about (at minimum):
+
+   * `DOC1 / GLOBAL_MASTER / DEFAULT / GLOBAL`
+   * `DOC1 / ADDENDUM / DEFAULT / ROW`
+   * plus any country addenda you have (e.g., `COUNTRY/US`, `COUNTRY/KE`, etc.)
+2. Use Legal Docs UI to click **Set Active** for each target once.
+3. Now your “Diff vs Current” is legally crisp.
+
+---
+
+If you want, I can also add an **Admin “Target Coverage” panel** that lists which ISO2/regions have (a) docs present and (b) targets set, and highlights gaps before you onboard those jurisdictions.

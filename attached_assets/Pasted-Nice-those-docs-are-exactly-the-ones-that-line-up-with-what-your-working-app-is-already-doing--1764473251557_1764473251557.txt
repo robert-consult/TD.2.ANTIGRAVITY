@@ -1,0 +1,338 @@
+Nice, those docs are exactly the ones that line up with what your **working** app is already doing (even though it’s using `tv.js` directly rather than raw embed snippets).
+
+Let me translate those docs into a **final pattern** you can give Replit Agent so:
+
+* Quotes tab → Chart tab symbol hand-off is seamless.
+* No infinite spinner / blank chart.
+* Chart is fully responsive.
+* Symbol switches use TradingView’s *intended* dynamic behaviour.
+
+---
+
+## 1. What those docs imply for *your* app
+
+From the TradingView docs you sent:
+
+* **Widget integration**:
+  Advanced Chart must either have:
+
+  * fixed `height` in options, **or**
+  * `autosize: true` and the **container element must have an explicit height** in CSS.
+
+  → You’re already doing this in the working app (`h-[55vh] md:h-[70vh] lg:h-full`). That is correct.
+
+* **Dynamic symbols**:
+  Docs say “to change symbol, change the `symbol` option / URL param (`tvwidgetsymbol`) or re-embed with a different symbol” for basic embed usage.
+
+  In an SPA/React app, the more powerful pattern is:
+
+  * Load `tv.js` once.
+  * Create a widget once.
+  * On symbol change, call **`widget.chart().setSymbol(newSymbol, newInterval)`** instead of nuking & recreating the whole widget.
+
+Your **working** app is ~90% there, but it recreates the widget on each symbol/period change. That’s fine (and why it works), but we can now refine it to follow TradingView’s dynamic symbol idea and be even smoother.
+
+---
+
+## 2. Final architecture for TradingView in your SPA
+
+Replit Agent should implement this structure (which replaces the broken app’s advanced-embed component):
+
+1. **One shared loader for `tv.js`**
+
+   * Global `loadTradingViewScript()` that:
+
+     * Adds `<script id="tradingview-script" src="https://s3.tradingview.com/tv.js">` once.
+     * Returns a promise that resolves when `window.TradingView` is ready.
+
+2. **A `TradingViewChart` React component** that:
+
+   * On first mount:
+
+     * Awaits `loadTradingViewScript()`.
+     * Calls `new window.TradingView.widget({ ... })`.
+     * Stores the widget instance in a ref.
+   * On **symbol/interval change**:
+
+     * If widget already exists, calls `widget.chart().setSymbol(symbol, interval)` instead of recreating.
+   * Cleans up (optional) on unmount.
+
+3. **Chart container**:
+
+   * Has a *real* height to support `autosize: true`, e.g. `h-[55vh] md:h-[70vh] lg:h-full`.
+
+4. **Dashboard / Quotes wiring** (this is already correct):
+
+   * Quotes row click → `onSelectSymbol("EURUSD")`.
+   * Dashboard sets `selectedSymbol` and `activeTab = "chart"`.
+   * ChartScreen receives `selectedSymbol` prop, maps it to a TradingView symbol and interval, and passes those to `TradingViewChart`.
+
+---
+
+## 3. Concrete code Replit Agent should use
+
+### 3.1 Shared loader for tv.js
+
+Create or update **`client/src/modules/tradingview/TradingViewChart.tsx`** like this:
+
+```tsx
+// client/src/modules/tradingview/TradingViewChart.tsx
+import { useEffect, useRef, useState, useId } from "react";
+
+// ---------- Shared tv.js loader ----------
+let tvScriptPromise: Promise<void> | null = null;
+
+function loadTradingViewScript(): Promise<void> {
+  if (typeof window === "undefined") return Promise.resolve();
+
+  if (window.TradingView) return Promise.resolve();  // already loaded
+
+  if (tvScriptPromise) return tvScriptPromise;        // already loading
+
+  tvScriptPromise = new Promise<void>((resolve, reject) => {
+    const existing = document.getElementById("tradingview-script");
+    if (existing) {
+      existing.addEventListener("load", () => resolve(), { once: true });
+      existing.addEventListener("error", () => reject(new Error("tv.js failed to load")), { once: true });
+      return;
+    }
+
+    const script = document.createElement("script");
+    script.id = "tradingview-script";
+    script.type = "text/javascript";
+    script.src = "https://s3.tradingview.com/tv.js";
+    script.async = true;
+
+    script.onload = () => resolve();
+    script.onerror = (err) => {
+      console.error("Error loading TradingView tv.js:", err);
+      reject(err instanceof Error ? err : new Error("tv.js failed to load"));
+    };
+
+    document.head.appendChild(script);
+  });
+
+  return tvScriptPromise;
+}
+
+// ---------- Component ----------
+interface TradingViewChartProps {
+  symbol: string;   // e.g. "CMCMARKETS:USDJPY"
+  interval: string; // e.g. "5", "30", "240", "D"
+  theme?: "light" | "dark";
+  backgroundColor?: string;
+  className?: string;
+}
+
+/**
+ * Advanced Chart wrapper:
+ * - loads tv.js once
+ * - creates widget once
+ * - uses chart().setSymbol(...) on prop changes
+ */
+export function TradingViewChart({
+  symbol,
+  interval,
+  theme = "dark",
+  backgroundColor = "#0F0F0F",
+  className = "",
+}: TradingViewChartProps) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const widgetRef = useRef<any>(null);
+  const id = useId();
+  const containerId = `tv-chart-${id.replace(/:/g, "")}`;
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function init() {
+      await loadTradingViewScript();
+
+      if (cancelled) return;
+      if (!containerRef.current || !window.TradingView) return;
+
+      // If widget not yet created -> create it
+      if (!widgetRef.current) {
+        widgetRef.current = new window.TradingView.widget({
+          autosize: true,
+          symbol,
+          interval,
+          timezone: "Etc/UTC",
+          theme,
+          style: "1",
+          locale: "en",
+          enable_publishing: false,
+          allow_symbol_change: true,
+          container_id: containerId,
+          hide_top_toolbar: false,
+          hide_side_toolbar: false,
+          withdateranges: true,
+          studies: [
+            "RSI@tv-basicstudies",
+            "MASimple@tv-basicstudies",
+          ],
+          backgroundColor,
+          toolbar_bg: backgroundColor,
+        });
+
+        widgetRef.current.onChartReady?.(() => {
+          if (!cancelled) setReady(true);
+        });
+
+        return;
+      }
+
+      // If widget already exists -> dynamic symbol / interval change
+      try {
+        const chart = widgetRef.current.chart?.();
+        if (chart && typeof chart.setSymbol === "function") {
+          chart.setSymbol(symbol, interval, () => {
+            // optional callback once symbol is applied
+          });
+        } else {
+          // Fallback: recreate widget if chart API not available
+          widgetRef.current.remove?.();
+          widgetRef.current = null;
+          init();
+        }
+      } catch (e) {
+        console.error("Error changing TradingView symbol:", e);
+      }
+    }
+
+    init();
+
+    return () => {
+      cancelled = true;
+      // optional: you can keep widget alive across unmounts if you want
+      // here we clean it up to avoid leaks
+      try {
+        widgetRef.current?.remove?.();
+        widgetRef.current = null;
+      } catch (e) {
+        console.warn("Error cleaning TradingView widget:", e);
+      }
+    };
+  }, [symbol, interval, theme, backgroundColor, containerId]);
+
+  return (
+    <div
+      id={containerId}
+      ref={containerRef}
+      className={className}
+      style={{ height: "100%", width: "100%" }}
+      data-tv-ready={ready ? "true" : "false"}
+    />
+  );
+}
+```
+
+**What this fixes:**
+
+* No more advanced-embed scripts (`embed-widget-advanced-chart.js`).
+* No more “spinner forever” because the widget never initializes.
+* Symbol changes use `chart().setSymbol(...)` first, matching TradingView’s dynamic-symbol idea.
+* Still fully compatible with your existing `selectedSymbol` state.
+
+---
+
+### 3.2 Using it from `ChartScreen`
+
+In **`ChartScreen.tsx`** (both working and broken app):
+
+* Keep your mapping helpers (they’re good):
+
+```ts
+import {
+  TradingViewChart,
+  getTradingViewSymbol,
+  getTradingViewInterval,
+  type ChartPeriod,
+} from "@/modules/tradingview";
+// ...
+
+const tvSymbol = getTradingViewSymbol(selectedSymbol);
+const tvInterval = getTradingViewInterval(activePeriod);
+```
+
+* Render the chart like this, with a **real height**:
+
+```tsx
+<div className="flex-1 min-h-0 relative bg-neutral-900">
+  <TradingViewChart
+    symbol={tvSymbol}
+    interval={tvInterval}
+    theme="dark"
+    backgroundColor="#0F0F0F"
+    className="w-full h-[55vh] md:h-[70vh] lg:h-full"
+  />
+
+  {/* overlays for bid/ask, spread, etc. */}
+</div>
+```
+
+Everything else (Quick Trade panel, period buttons, spreads) can stay as-is.
+
+---
+
+### 3.3 Dashboard + Quotes wiring (just to confirm)
+
+In **`Dashboard.tsx`**:
+
+```ts
+const [activeTab, setActiveTab] = useState("quotes");
+const [selectedSymbol, setSelectedSymbol] = useState("USDJPY");
+
+const handleSelectSymbol = (symbol: string) => {
+  setSelectedSymbol(symbol);
+  if (activeTab !== "chart" && activeTab !== "trade") {
+    setActiveTab("chart");
+  }
+};
+
+return (
+  <>
+    {activeTab === "quotes" && (
+      <QuotesScreen onSelectSymbol={handleSelectSymbol} />
+    )}
+    {activeTab === "chart" && (
+      <ChartScreen selectedSymbol={selectedSymbol} />
+    )}
+    {/* ... */}
+  </>
+);
+```
+
+In **`QuotesScreen.tsx`**:
+
+```tsx
+<div
+  key={quote.symbol}
+  className="... cursor-pointer"
+  onClick={() => onSelectSymbol(quote.symbol)}
+>
+  {/* row contents */}
+</div>
+```
+
+This path is already correct and matches TradingView’s idea of “dynamic symbol” – you’re just feeding the chosen symbol into a single chart widget instead of static page reloads.
+
+---
+
+## 4. TL;DR for Replit Agent
+
+Tell Replit Agent to:
+
+1. **Delete** any TradingView code that uses:
+
+   * `embed-widget-advanced-chart.js`
+   * `script.innerHTML = JSON.stringify({...})` inside React components.
+
+2. **Install** the `TradingViewChart` component above in `modules/tradingview/TradingViewChart.tsx`, using `tv.js` and `widget.chart().setSymbol(...)`.
+
+3. **Ensure the chart container has a real height** (`h-[55vh] md:h-[70vh] lg:h-full`) to support `autosize: true` as per the TradingView docs.
+
+4. Keep the **Dashboard / Quotes → Chart** symbol flow exactly as is; just wire `selectedSymbol` into `TradingViewChart` via `getTradingViewSymbol` + `getTradingViewInterval`.
+
+With that, both apps will share the **same, doc-aligned TradingView implementation** as the one that already works, and symbol changes from the Quotes tab will feel instant and stable.

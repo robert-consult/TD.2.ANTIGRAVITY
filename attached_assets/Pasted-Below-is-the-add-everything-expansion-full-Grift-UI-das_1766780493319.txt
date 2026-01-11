@@ -1,0 +1,2805 @@
+Below is the **“add everything”** expansion: full **Grift** UI dashboards + filters + queues + drilldowns + exports **and** the backend extensions needed to support them robustly **without depending on your existing `trades`/`login_history` schema** (the Grift module becomes self-contained via observation tables).
+
+This is delivered as **full file replacements / new files**, inline.
+
+---
+
+# A) BACKEND: “Add Everything” Extensions
+
+## A1) `server/grift/griftTypes.ts` (REPLACE)
+
+```ts
+// server/grift/griftTypes.ts
+export type GriftSeverity = "LOW" | "MED" | "HIGH" | "CRITICAL";
+export type GriftSignalStatus = "OPEN" | "IN_REVIEW" | "CLOSED" | "IGNORED";
+
+export type GriftRuleCode =
+  | "MULTI_ACCOUNT_DEVICE"
+  | "HEDGE_PAIR"
+  | "IP_CHURN"
+  | "UA_CHURN"
+  | "DEVICE_CHURN"
+  | "GEO_VELOCITY"
+  | "CONCURRENT_SESSIONS"
+  | "ASN_VOLATILITY";
+
+export type GriftConfig = {
+  id: number; // always 1
+  enabled: number; // 1/0
+
+  // windows
+  multiAccountWindowDays: number; // default 30
+  churnWindowHours: number;       // default 24
+  hedgeWindowMinutes: number;     // default 10
+  concurrentWindowMinutes: number; // default 15
+
+  // churn thresholds
+  ipUniqueThreshold: number;      // default 4
+  uaUniqueThreshold: number;      // default 3
+  deviceUniqueThreshold: number;  // default 3
+  asnUniqueThreshold: number;     // default 3
+
+  // geo velocity
+  geoVelocityKmhThreshold: number;    // default 900
+  geoVelocityMinDistanceKm: number;   // default 800
+  geoVelocityMaxHours: number;        // default 6
+
+  // hedging linkage controls
+  hedgeRequireDeviceMatch: number; // default 1
+  hedgeAllowIpMatch: number;       // default 1
+
+  // scoring weights
+  scoreMultiAccountDevice: number; // default 35
+  scoreHedgePair: number;          // default 55
+  scoreIpChurn: number;            // default 20
+  scoreUaChurn: number;            // default 15
+  scoreDeviceChurn: number;        // default 20
+  scoreGeoVelocity: number;        // default 30
+  scoreConcurrentSessions: number; // default 25
+  scoreAsnVolatility: number;      // default 15
+
+  // tiers (score cutoffs)
+  tierMed: number;      // default 40
+  tierHigh: number;     // default 60
+  tierCritical: number; // default 80
+
+  updatedAt: number;
+  updatedByAdminId?: number | null;
+};
+```
+
+---
+
+## A2) `server/grift/griftDefaults.ts` (REPLACE)
+
+```ts
+// server/grift/griftDefaults.ts
+import type { GriftConfig } from "./griftTypes";
+
+export const DEFAULT_GRIFT_CONFIG: GriftConfig = {
+  id: 1,
+  enabled: 1,
+
+  multiAccountWindowDays: 30,
+  churnWindowHours: 24,
+  hedgeWindowMinutes: 10,
+  concurrentWindowMinutes: 15,
+
+  ipUniqueThreshold: 4,
+  uaUniqueThreshold: 3,
+  deviceUniqueThreshold: 3,
+  asnUniqueThreshold: 3,
+
+  geoVelocityKmhThreshold: 900,
+  geoVelocityMinDistanceKm: 800,
+  geoVelocityMaxHours: 6,
+
+  hedgeRequireDeviceMatch: 1,
+  hedgeAllowIpMatch: 1,
+
+  scoreMultiAccountDevice: 35,
+  scoreHedgePair: 55,
+  scoreIpChurn: 20,
+  scoreUaChurn: 15,
+  scoreDeviceChurn: 20,
+  scoreGeoVelocity: 30,
+  scoreConcurrentSessions: 25,
+  scoreAsnVolatility: 15,
+
+  tierMed: 40,
+  tierHigh: 60,
+  tierCritical: 80,
+
+  updatedAt: Date.now(),
+  updatedByAdminId: null,
+};
+```
+
+---
+
+## A3) `server/grift/ensureGriftSchema.ts` (REPLACE)
+
+This adds:
+
+* `grift_observations` (login/session telemetry)
+* `grift_trade_observations` (trade submissions)
+* robust “add missing config columns” behavior for existing DBs
+
+```ts
+// server/grift/ensureGriftSchema.ts
+import { sqlite } from "@db";
+import { DEFAULT_GRIFT_CONFIG } from "./griftDefaults";
+
+/**
+ * Helper: add a missing column if it does not exist.
+ * SQLite supports ALTER TABLE ADD COLUMN (no IF NOT EXISTS), so we check PRAGMA first.
+ */
+function ensureColumn(table: string, column: string, ddl: string) {
+  const cols = sqlite.prepare(`PRAGMA table_info(${table})`).all() as any[];
+  const exists = cols.some((c) => String(c.name).toLowerCase() === column.toLowerCase());
+  if (!exists) sqlite.exec(`ALTER TABLE ${table} ADD COLUMN ${ddl}`);
+}
+
+export function ensureGriftSchema() {
+  // Config base table (legacy subset)
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS grift_config (
+      id INTEGER PRIMARY KEY,
+      enabled INTEGER NOT NULL DEFAULT 1,
+
+      multi_account_window_days INTEGER NOT NULL,
+      churn_window_hours INTEGER NOT NULL,
+      hedge_window_minutes INTEGER NOT NULL,
+
+      ip_unique_threshold INTEGER NOT NULL,
+      ua_unique_threshold INTEGER NOT NULL,
+      device_unique_threshold INTEGER NOT NULL,
+
+      geo_velocity_kmh_threshold INTEGER NOT NULL,
+      geo_velocity_min_distance_km INTEGER NOT NULL,
+      geo_velocity_max_hours INTEGER NOT NULL,
+
+      score_multi_account_device INTEGER NOT NULL,
+      score_hedge_pair INTEGER NOT NULL,
+      score_ip_churn INTEGER NOT NULL,
+      score_ua_churn INTEGER NOT NULL,
+      score_device_churn INTEGER NOT NULL,
+      score_geo_velocity INTEGER NOT NULL,
+
+      tier_med INTEGER NOT NULL,
+      tier_high INTEGER NOT NULL,
+      tier_critical INTEGER NOT NULL,
+
+      updated_at INTEGER NOT NULL,
+      updated_by_admin_id INTEGER
+    );
+  `);
+
+  // Ensure "add everything" config columns exist
+  ensureColumn("grift_config", "concurrent_window_minutes", "concurrent_window_minutes INTEGER NOT NULL DEFAULT 15");
+  ensureColumn("grift_config", "asn_unique_threshold", "asn_unique_threshold INTEGER NOT NULL DEFAULT 3");
+  ensureColumn("grift_config", "hedge_require_device_match", "hedge_require_device_match INTEGER NOT NULL DEFAULT 1");
+  ensureColumn("grift_config", "hedge_allow_ip_match", "hedge_allow_ip_match INTEGER NOT NULL DEFAULT 1");
+  ensureColumn("grift_config", "score_concurrent_sessions", "score_concurrent_sessions INTEGER NOT NULL DEFAULT 25");
+  ensureColumn("grift_config", "score_asn_volatility", "score_asn_volatility INTEGER NOT NULL DEFAULT 15");
+
+  // Devices
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS grift_devices (
+      device_id TEXT PRIMARY KEY,
+      first_seen_at INTEGER NOT NULL,
+      last_seen_at INTEGER NOT NULL,
+      first_ip TEXT,
+      last_ip TEXT,
+      first_user_agent TEXT,
+      last_user_agent TEXT,
+      first_country TEXT,
+      last_country TEXT,
+      trust_level TEXT NOT NULL DEFAULT 'NEW'
+    );
+  `);
+
+  // Device<->User links
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS grift_device_users (
+      device_id TEXT NOT NULL,
+      user_id INTEGER NOT NULL,
+      first_seen_at INTEGER NOT NULL,
+      last_seen_at INTEGER NOT NULL,
+      seen_count INTEGER NOT NULL DEFAULT 1,
+      link_strength INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (device_id, user_id)
+    );
+  `);
+
+  // Signals (cases)
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS grift_signals (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+
+      rule_code TEXT NOT NULL,
+      severity TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'OPEN',
+
+      primary_user_id INTEGER NOT NULL,
+      secondary_user_id INTEGER,
+
+      device_id TEXT,
+      ip TEXT,
+      user_agent TEXT,
+      country TEXT,
+      region TEXT,
+      city TEXT,
+      latitude REAL,
+      longitude REAL,
+      asn INTEGER,
+      org TEXT,
+
+      symbol TEXT,
+      trade_id INTEGER,
+
+      points INTEGER NOT NULL DEFAULT 0,
+      dedupe_key TEXT NOT NULL UNIQUE,
+      evidence_json TEXT NOT NULL,
+
+      closed_at INTEGER,
+      closed_by_admin_id INTEGER,
+      closed_reason TEXT
+    );
+  `);
+
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_grift_signals_primary ON grift_signals(primary_user_id, status, created_at);`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_grift_signals_secondary ON grift_signals(secondary_user_id, status, created_at);`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_grift_signals_rule ON grift_signals(rule_code, status, created_at);`);
+
+  // Observations: login/session environment snapshots (self-contained, avoids depending on your existing login tables)
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS grift_observations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      ts INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      event_type TEXT NOT NULL, -- LOGIN_SUCCESS, SESSION_START, etc.
+
+      device_id TEXT,
+      ip TEXT,
+      user_agent TEXT,
+
+      country TEXT,
+      region TEXT,
+      city TEXT,
+      latitude REAL,
+      longitude REAL,
+
+      asn INTEGER,
+      org TEXT
+    );
+  `);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_grift_obs_user_ts ON grift_observations(user_id, ts DESC);`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_grift_obs_device_ts ON grift_observations(device_id, ts DESC);`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_grift_obs_ip_ts ON grift_observations(ip, ts DESC);`);
+
+  // Trade observations: trade submit snapshots (self-contained, avoids depending on trades schema)
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS grift_trade_observations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      ts INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      trade_id INTEGER NOT NULL,
+      symbol TEXT NOT NULL,
+      side TEXT NOT NULL, -- BUY/SELL
+      device_id TEXT,
+      ip TEXT
+    );
+  `);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_grift_tobs_symbol_ts ON grift_trade_observations(symbol, ts DESC);`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_grift_tobs_user_ts ON grift_trade_observations(user_id, ts DESC);`);
+
+  // Aggregated user scores
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS grift_user_scores (
+      user_id INTEGER PRIMARY KEY,
+      score_current INTEGER NOT NULL DEFAULT 0,
+      tier TEXT NOT NULL DEFAULT 'LOW',
+
+      score_7d INTEGER NOT NULL DEFAULT 0,
+      score_30d INTEGER NOT NULL DEFAULT 0,
+
+      devices_7d INTEGER NOT NULL DEFAULT 0,
+      ips_7d INTEGER NOT NULL DEFAULT 0,
+      user_agents_7d INTEGER NOT NULL DEFAULT 0,
+      countries_7d INTEGER NOT NULL DEFAULT 0,
+      asns_7d INTEGER NOT NULL DEFAULT 0,
+
+      linked_accounts_30d INTEGER NOT NULL DEFAULT 0,
+      hedge_pairs_7d INTEGER NOT NULL DEFAULT 0,
+      open_signals_count INTEGER NOT NULL DEFAULT 0,
+
+      last_evaluated_at INTEGER NOT NULL DEFAULT 0
+    );
+  `);
+
+  // Seed config row id=1 if missing
+  const row = sqlite.prepare(`SELECT id FROM grift_config WHERE id=1`).get();
+  if (!row) {
+    const c = DEFAULT_GRIFT_CONFIG;
+
+    sqlite.prepare(`
+      INSERT INTO grift_config (
+        id, enabled,
+        multi_account_window_days, churn_window_hours, hedge_window_minutes,
+        ip_unique_threshold, ua_unique_threshold, device_unique_threshold,
+        geo_velocity_kmh_threshold, geo_velocity_min_distance_km, geo_velocity_max_hours,
+        score_multi_account_device, score_hedge_pair, score_ip_churn, score_ua_churn, score_device_churn, score_geo_velocity,
+        tier_med, tier_high, tier_critical,
+        updated_at, updated_by_admin_id,
+        concurrent_window_minutes, asn_unique_threshold, hedge_require_device_match, hedge_allow_ip_match,
+        score_concurrent_sessions, score_asn_volatility
+      ) VALUES (
+        1, ?,
+        ?, ?, ?,
+        ?, ?, ?,
+        ?, ?, ?,
+        ?, ?, ?, ?, ?, ?,
+        ?, ?, ?,
+        ?, ?,
+        ?, ?, ?, ?,
+        ?, ?
+      )
+    `).run(
+      c.enabled,
+      c.multiAccountWindowDays, c.churnWindowHours, c.hedgeWindowMinutes,
+      c.ipUniqueThreshold, c.uaUniqueThreshold, c.deviceUniqueThreshold,
+      c.geoVelocityKmhThreshold, c.geoVelocityMinDistanceKm, c.geoVelocityMaxHours,
+      c.scoreMultiAccountDevice, c.scoreHedgePair, c.scoreIpChurn, c.scoreUaChurn, c.scoreDeviceChurn, c.scoreGeoVelocity,
+      c.tierMed, c.tierHigh, c.tierCritical,
+      c.updatedAt, c.updatedByAdminId ?? null,
+      c.concurrentWindowMinutes, c.asnUniqueThreshold, c.hedgeRequireDeviceMatch, c.hedgeAllowIpMatch,
+      c.scoreConcurrentSessions, c.scoreAsnVolatility
+    );
+  }
+}
+```
+
+---
+
+## A4) `server/grift/griftEngine.ts` (REPLACE)
+
+Now implements:
+
+* multi-account device linkage
+* hedging across accounts (device/IP config)
+* IP churn / UA churn / device churn / ASN volatility
+* geo velocity
+* concurrent-session heuristic (login overlap window)
+
+```ts
+// server/grift/griftEngine.ts
+import { sqlite } from "@db";
+import type { GriftConfig, GriftRuleCode, GriftSeverity } from "./griftTypes";
+
+function clamp(n: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, n));
+}
+
+function tierFor(score: number, cfg: GriftConfig): "LOW" | "MED" | "HIGH" | "CRITICAL" {
+  if (score >= cfg.tierCritical) return "CRITICAL";
+  if (score >= cfg.tierHigh) return "HIGH";
+  if (score >= cfg.tierMed) return "MED";
+  return "LOW";
+}
+
+function now() { return Date.now(); }
+
+function getConfig(): GriftConfig {
+  const row = sqlite.prepare(`
+    SELECT
+      id,
+      enabled,
+      multi_account_window_days as multiAccountWindowDays,
+      churn_window_hours as churnWindowHours,
+      hedge_window_minutes as hedgeWindowMinutes,
+
+      ip_unique_threshold as ipUniqueThreshold,
+      ua_unique_threshold as uaUniqueThreshold,
+      device_unique_threshold as deviceUniqueThreshold,
+
+      geo_velocity_kmh_threshold as geoVelocityKmhThreshold,
+      geo_velocity_min_distance_km as geoVelocityMinDistanceKm,
+      geo_velocity_max_hours as geoVelocityMaxHours,
+
+      score_multi_account_device as scoreMultiAccountDevice,
+      score_hedge_pair as scoreHedgePair,
+      score_ip_churn as scoreIpChurn,
+      score_ua_churn as scoreUaChurn,
+      score_device_churn as scoreDeviceChurn,
+      score_geo_velocity as scoreGeoVelocity,
+
+      tier_med as tierMed,
+      tier_high as tierHigh,
+      tier_critical as tierCritical,
+
+      updated_at as updatedAt,
+      updated_by_admin_id as updatedByAdminId,
+
+      concurrent_window_minutes as concurrentWindowMinutes,
+      asn_unique_threshold as asnUniqueThreshold,
+      hedge_require_device_match as hedgeRequireDeviceMatch,
+      hedge_allow_ip_match as hedgeAllowIpMatch,
+      score_concurrent_sessions as scoreConcurrentSessions,
+      score_asn_volatility as scoreAsnVolatility
+    FROM grift_config WHERE id=1
+  `).get();
+
+  if (!row) throw new Error("grift_config row id=1 missing. ensureGriftSchema() must run on startup.");
+  return row as GriftConfig;
+}
+
+function severityFromPoints(points: number): GriftSeverity {
+  if (points >= 80) return "CRITICAL";
+  if (points >= 55) return "HIGH";
+  if (points >= 25) return "MED";
+  return "LOW";
+}
+
+function makeDedupeKey(rule: GriftRuleCode, primaryUserId: number, secondaryUserId: number | null, bucketMs: number) {
+  const bucket = Math.floor(now() / bucketMs);
+  return `${rule}:${primaryUserId}:${secondaryUserId ?? 0}:${bucket}`;
+}
+
+function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const R = 6371;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
+function upsertDevice(deviceId: string, ip?: string, userAgent?: string, country?: string) {
+  const ts = now();
+  const existing = sqlite.prepare(`SELECT device_id FROM grift_devices WHERE device_id=?`).get(deviceId);
+  if (!existing) {
+    sqlite.prepare(`
+      INSERT INTO grift_devices (device_id, first_seen_at, last_seen_at, first_ip, last_ip, first_user_agent, last_user_agent, first_country, last_country, trust_level)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'NEW')
+    `).run(deviceId, ts, ts, ip ?? null, ip ?? null, userAgent ?? null, userAgent ?? null, country ?? null, country ?? null);
+  } else {
+    sqlite.prepare(`
+      UPDATE grift_devices
+      SET last_seen_at=?, last_ip=?, last_user_agent=?, last_country=?
+      WHERE device_id=?
+    `).run(ts, ip ?? null, userAgent ?? null, country ?? null, deviceId);
+  }
+}
+
+function upsertDeviceUserLink(deviceId: string, userId: number) {
+  const ts = now();
+  const row = sqlite.prepare(`SELECT seen_count FROM grift_device_users WHERE device_id=? AND user_id=?`).get(deviceId, userId) as any;
+  if (!row) {
+    sqlite.prepare(`
+      INSERT INTO grift_device_users (device_id, user_id, first_seen_at, last_seen_at, seen_count, link_strength)
+      VALUES (?, ?, ?, ?, 1, 0)
+    `).run(deviceId, userId, ts, ts);
+  } else {
+    sqlite.prepare(`
+      UPDATE grift_device_users
+      SET last_seen_at=?, seen_count=seen_count+1
+      WHERE device_id=? AND user_id=?
+    `).run(ts, deviceId, userId);
+  }
+}
+
+function insertObservation(args: {
+  userId: number;
+  eventType: "LOGIN_SUCCESS" | "TRADE_SUBMIT";
+  deviceId?: string;
+  ip?: string;
+  userAgent?: string;
+  country?: string;
+  region?: string;
+  city?: string;
+  latitude?: number | null;
+  longitude?: number | null;
+  asn?: number | null;
+  org?: string | null;
+}) {
+  const ts = now();
+  sqlite.prepare(`
+    INSERT INTO grift_observations (
+      ts, user_id, event_type,
+      device_id, ip, user_agent,
+      country, region, city, latitude, longitude,
+      asn, org
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    ts,
+    args.userId,
+    args.eventType,
+    args.deviceId ?? null,
+    args.ip ?? null,
+    args.userAgent ?? null,
+    args.country ?? null,
+    args.region ?? null,
+    args.city ?? null,
+    args.latitude ?? null,
+    args.longitude ?? null,
+    args.asn ?? null,
+    args.org ?? null
+  );
+
+  return ts;
+}
+
+function insertTradeObservation(args: {
+  userId: number;
+  tradeId: number;
+  symbol: string;
+  side: "BUY" | "SELL";
+  deviceId?: string;
+  ip?: string;
+}) {
+  const ts = now();
+  sqlite.prepare(`
+    INSERT INTO grift_trade_observations (ts, user_id, trade_id, symbol, side, device_id, ip)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    ts,
+    args.userId,
+    args.tradeId,
+    args.symbol,
+    args.side,
+    args.deviceId ?? null,
+    args.ip ?? null
+  );
+  return ts;
+}
+
+function insertSignal(args: {
+  ruleCode: GriftRuleCode;
+  severity: GriftSeverity;
+  primaryUserId: number;
+  secondaryUserId?: number | null;
+
+  deviceId?: string;
+  ip?: string;
+  userAgent?: string;
+  country?: string;
+  region?: string;
+  city?: string;
+  latitude?: number | null;
+  longitude?: number | null;
+  asn?: number | null;
+  org?: string | null;
+
+  symbol?: string;
+  tradeId?: number;
+
+  points: number;
+  dedupeKey: string;
+  evidence: Record<string, any>;
+}) {
+  const ts = now();
+  try {
+    sqlite.prepare(`
+      INSERT INTO grift_signals (
+        created_at, updated_at, rule_code, severity, status,
+        primary_user_id, secondary_user_id,
+        device_id, ip, user_agent, country, region, city, latitude, longitude, asn, org,
+        symbol, trade_id,
+        points, dedupe_key, evidence_json
+      ) VALUES (
+        ?, ?, ?, ?, 'OPEN',
+        ?, ?,
+        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+        ?, ?,
+        ?, ?, ?
+      )
+    `).run(
+      ts, ts, args.ruleCode, args.severity,
+      args.primaryUserId, args.secondaryUserId ?? null,
+      args.deviceId ?? null, args.ip ?? null, args.userAgent ?? null,
+      args.country ?? null, args.region ?? null, args.city ?? null,
+      args.latitude ?? null, args.longitude ?? null,
+      args.asn ?? null, args.org ?? null,
+      args.symbol ?? null, args.tradeId ?? null,
+      args.points, args.dedupeKey, JSON.stringify(args.evidence)
+    );
+    return true;
+  } catch (e: any) {
+    if (String(e?.message ?? "").includes("UNIQUE")) return false;
+    throw e;
+  }
+}
+
+function recomputeUserAggregates(userId: number, cfg: GriftConfig) {
+  const ts = now();
+  const ms7d = 7 * 24 * 60 * 60 * 1000;
+  const ms30d = 30 * 24 * 60 * 60 * 1000;
+  const since7d = ts - ms7d;
+  const since30d = ts - ms30d;
+
+  const openSignals = sqlite.prepare(`
+    SELECT COUNT(*) as c, COALESCE(SUM(points),0) as p
+    FROM grift_signals
+    WHERE status='OPEN' AND (primary_user_id=? OR secondary_user_id=?)
+  `).get(userId, userId) as any;
+
+  const scoreCurrent = clamp(Number(openSignals?.p ?? 0), 0, 100);
+  const tier = tierFor(scoreCurrent, cfg);
+
+  const score7d = sqlite.prepare(`
+    SELECT COALESCE(SUM(points),0) as p
+    FROM grift_signals
+    WHERE created_at>=? AND status='OPEN' AND (primary_user_id=? OR secondary_user_id=?)
+  `).get(since7d, userId, userId) as any;
+
+  const score30d = sqlite.prepare(`
+    SELECT COALESCE(SUM(points),0) as p
+    FROM grift_signals
+    WHERE created_at>=? AND status='OPEN' AND (primary_user_id=? OR secondary_user_id=?)
+  `).get(since30d, userId, userId) as any;
+
+  const devices7d = sqlite.prepare(`
+    SELECT COUNT(DISTINCT device_id) as c
+    FROM grift_observations
+    WHERE ts>=? AND user_id=? AND device_id IS NOT NULL
+  `).get(since7d, userId) as any;
+
+  const ips7d = sqlite.prepare(`
+    SELECT COUNT(DISTINCT ip) as c
+    FROM grift_observations
+    WHERE ts>=? AND user_id=? AND ip IS NOT NULL
+  `).get(since7d, userId) as any;
+
+  const uas7d = sqlite.prepare(`
+    SELECT COUNT(DISTINCT user_agent) as c
+    FROM grift_observations
+    WHERE ts>=? AND user_id=? AND user_agent IS NOT NULL
+  `).get(since7d, userId) as any;
+
+  const countries7d = sqlite.prepare(`
+    SELECT COUNT(DISTINCT country) as c
+    FROM grift_observations
+    WHERE ts>=? AND user_id=? AND country IS NOT NULL
+  `).get(since7d, userId) as any;
+
+  const asns7d = sqlite.prepare(`
+    SELECT COUNT(DISTINCT asn) as c
+    FROM grift_observations
+    WHERE ts>=? AND user_id=? AND asn IS NOT NULL
+  `).get(since7d, userId) as any;
+
+  const linkedAccounts30d = sqlite.prepare(`
+    SELECT COUNT(DISTINCT du2.user_id) as c
+    FROM grift_device_users du1
+    JOIN grift_device_users du2 ON du1.device_id = du2.device_id
+    WHERE du1.user_id=? AND du2.user_id != ?
+      AND du1.last_seen_at >= ?
+      AND du2.last_seen_at >= ?
+  `).get(userId, userId, since30d, since30d) as any;
+
+  const hedgePairs7d = sqlite.prepare(`
+    SELECT COUNT(*) as c
+    FROM grift_signals
+    WHERE created_at>=? AND rule_code='HEDGE_PAIR' AND status='OPEN'
+      AND (primary_user_id=? OR secondary_user_id=?)
+  `).get(since7d, userId, userId) as any;
+
+  const existing = sqlite.prepare(`SELECT user_id FROM grift_user_scores WHERE user_id=?`).get(userId);
+
+  if (!existing) {
+    sqlite.prepare(`
+      INSERT INTO grift_user_scores (
+        user_id, score_current, tier,
+        score_7d, score_30d,
+        devices_7d, ips_7d, user_agents_7d, countries_7d, asns_7d,
+        linked_accounts_30d, hedge_pairs_7d, open_signals_count,
+        last_evaluated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      userId, scoreCurrent, tier,
+      Number(score7d?.p ?? 0), Number(score30d?.p ?? 0),
+      Number(devices7d?.c ?? 0),
+      Number(ips7d?.c ?? 0),
+      Number(uas7d?.c ?? 0),
+      Number(countries7d?.c ?? 0),
+      Number(asns7d?.c ?? 0),
+      Number(linkedAccounts30d?.c ?? 0),
+      Number(hedgePairs7d?.c ?? 0),
+      Number(openSignals?.c ?? 0),
+      ts
+    );
+  } else {
+    sqlite.prepare(`
+      UPDATE grift_user_scores
+      SET
+        score_current=?,
+        tier=?,
+        score_7d=?,
+        score_30d=?,
+        devices_7d=?,
+        ips_7d=?,
+        user_agents_7d=?,
+        countries_7d=?,
+        asns_7d=?,
+        linked_accounts_30d=?,
+        hedge_pairs_7d=?,
+        open_signals_count=?,
+        last_evaluated_at=?
+      WHERE user_id=?
+    `).run(
+      scoreCurrent, tier,
+      Number(score7d?.p ?? 0),
+      Number(score30d?.p ?? 0),
+      Number(devices7d?.c ?? 0),
+      Number(ips7d?.c ?? 0),
+      Number(uas7d?.c ?? 0),
+      Number(countries7d?.c ?? 0),
+      Number(asns7d?.c ?? 0),
+      Number(linkedAccounts30d?.c ?? 0),
+      Number(hedgePairs7d?.c ?? 0),
+      Number(openSignals?.c ?? 0),
+      ts,
+      userId
+    );
+  }
+}
+
+export const griftEngine = {
+  getConfig,
+
+  onLoginSuccess(input: {
+    userId: number;
+    deviceId?: string;
+    ip?: string;
+    userAgent?: string;
+    country?: string;
+    region?: string;
+    city?: string;
+    latitude?: number | null;
+    longitude?: number | null;
+    asn?: number | null;
+    org?: string | null;
+  }) {
+    const cfg = getConfig();
+    if (!cfg.enabled) return;
+
+    const ts = insertObservation({
+      userId: input.userId,
+      eventType: "LOGIN_SUCCESS",
+      deviceId: input.deviceId,
+      ip: input.ip,
+      userAgent: input.userAgent,
+      country: input.country,
+      region: input.region,
+      city: input.city,
+      latitude: input.latitude ?? null,
+      longitude: input.longitude ?? null,
+      asn: input.asn ?? null,
+      org: input.org ?? null,
+    });
+
+    const bucketHour = 60 * 60 * 1000;
+
+    // DEVICE LINKAGE (multi-account)
+    if (input.deviceId) {
+      upsertDevice(input.deviceId, input.ip, input.userAgent, input.country);
+      upsertDeviceUserLink(input.deviceId, input.userId);
+
+      const since = ts - cfg.multiAccountWindowDays * 24 * 60 * 60 * 1000;
+      const others = sqlite.prepare(`
+        SELECT DISTINCT user_id as userId
+        FROM grift_device_users
+        WHERE device_id=? AND last_seen_at>=? AND user_id != ?
+        LIMIT 25
+      `).all(input.deviceId, since, input.userId) as any[];
+
+      if (others.length > 0) {
+        for (const o of others) {
+          const otherUserId = Number(o.userId);
+          const points = clamp(cfg.scoreMultiAccountDevice + 10 * Math.max(0, others.length - 1), 0, 75);
+          const dedupeKey = makeDedupeKey("MULTI_ACCOUNT_DEVICE", input.userId, otherUserId, bucketHour);
+
+          insertSignal({
+            ruleCode: "MULTI_ACCOUNT_DEVICE",
+            severity: severityFromPoints(points),
+            primaryUserId: input.userId,
+            secondaryUserId: otherUserId,
+            deviceId: input.deviceId,
+            ip: input.ip,
+            userAgent: input.userAgent,
+            country: input.country,
+            region: input.region,
+            city: input.city,
+            latitude: input.latitude ?? null,
+            longitude: input.longitude ?? null,
+            asn: input.asn ?? null,
+            org: input.org ?? null,
+            points,
+            dedupeKey,
+            evidence: {
+              deviceId: input.deviceId,
+              primaryUserId: input.userId,
+              secondaryUserId: otherUserId,
+              windowDays: cfg.multiAccountWindowDays,
+            },
+          });
+        }
+      }
+    }
+
+    // CHURN METRICS
+    const churnSince = ts - cfg.churnWindowHours * 60 * 60 * 1000;
+
+    const ipCount = sqlite.prepare(`
+      SELECT COUNT(DISTINCT ip) as c
+      FROM grift_observations
+      WHERE user_id=? AND ts>=? AND ip IS NOT NULL
+    `).get(input.userId, churnSince) as any;
+
+    if (Number(ipCount?.c ?? 0) >= cfg.ipUniqueThreshold) {
+      const points = cfg.scoreIpChurn;
+      const dedupeKey = makeDedupeKey("IP_CHURN", input.userId, null, bucketHour);
+      insertSignal({
+        ruleCode: "IP_CHURN",
+        severity: severityFromPoints(points),
+        primaryUserId: input.userId,
+        deviceId: input.deviceId,
+        ip: input.ip,
+        userAgent: input.userAgent,
+        country: input.country,
+        points,
+        dedupeKey,
+        evidence: { uniqueIps: Number(ipCount?.c ?? 0), windowHours: cfg.churnWindowHours, threshold: cfg.ipUniqueThreshold },
+      });
+    }
+
+    const uaCount = sqlite.prepare(`
+      SELECT COUNT(DISTINCT user_agent) as c
+      FROM grift_observations
+      WHERE user_id=? AND ts>=? AND user_agent IS NOT NULL
+    `).get(input.userId, churnSince) as any;
+
+    if (Number(uaCount?.c ?? 0) >= cfg.uaUniqueThreshold) {
+      const points = cfg.scoreUaChurn;
+      const dedupeKey = makeDedupeKey("UA_CHURN", input.userId, null, bucketHour);
+      insertSignal({
+        ruleCode: "UA_CHURN",
+        severity: severityFromPoints(points),
+        primaryUserId: input.userId,
+        deviceId: input.deviceId,
+        ip: input.ip,
+        userAgent: input.userAgent,
+        country: input.country,
+        points,
+        dedupeKey,
+        evidence: { uniqueUserAgents: Number(uaCount?.c ?? 0), windowHours: cfg.churnWindowHours, threshold: cfg.uaUniqueThreshold },
+      });
+    }
+
+    const devCount = sqlite.prepare(`
+      SELECT COUNT(DISTINCT device_id) as c
+      FROM grift_observations
+      WHERE user_id=? AND ts>=? AND device_id IS NOT NULL
+    `).get(input.userId, churnSince) as any;
+
+    if (Number(devCount?.c ?? 0) >= cfg.deviceUniqueThreshold) {
+      const points = cfg.scoreDeviceChurn;
+      const dedupeKey = makeDedupeKey("DEVICE_CHURN", input.userId, null, bucketHour);
+      insertSignal({
+        ruleCode: "DEVICE_CHURN",
+        severity: severityFromPoints(points),
+        primaryUserId: input.userId,
+        deviceId: input.deviceId,
+        ip: input.ip,
+        userAgent: input.userAgent,
+        country: input.country,
+        points,
+        dedupeKey,
+        evidence: { uniqueDevices: Number(devCount?.c ?? 0), windowHours: cfg.churnWindowHours, threshold: cfg.deviceUniqueThreshold },
+      });
+    }
+
+    const asnCount = sqlite.prepare(`
+      SELECT COUNT(DISTINCT asn) as c
+      FROM grift_observations
+      WHERE user_id=? AND ts>=? AND asn IS NOT NULL
+    `).get(input.userId, churnSince) as any;
+
+    if (Number(asnCount?.c ?? 0) >= cfg.asnUniqueThreshold) {
+      const points = cfg.scoreAsnVolatility;
+      const dedupeKey = makeDedupeKey("ASN_VOLATILITY", input.userId, null, bucketHour);
+      insertSignal({
+        ruleCode: "ASN_VOLATILITY",
+        severity: severityFromPoints(points),
+        primaryUserId: input.userId,
+        deviceId: input.deviceId,
+        ip: input.ip,
+        userAgent: input.userAgent,
+        country: input.country,
+        asn: input.asn ?? null,
+        org: input.org ?? null,
+        points,
+        dedupeKey,
+        evidence: { uniqueAsns: Number(asnCount?.c ?? 0), windowHours: cfg.churnWindowHours, threshold: cfg.asnUniqueThreshold },
+      });
+    }
+
+    // GEO VELOCITY: compare previous observation with lat/lng
+    if (input.latitude != null && input.longitude != null) {
+      const prev = sqlite.prepare(`
+        SELECT ts, latitude, longitude, country, city
+        FROM grift_observations
+        WHERE user_id=? AND ts < ? AND latitude IS NOT NULL AND longitude IS NOT NULL
+        ORDER BY ts DESC
+        LIMIT 1
+      `).get(input.userId, ts) as any;
+
+      if (prev?.latitude != null && prev?.longitude != null && prev?.ts != null) {
+        const dtHours = (ts - Number(prev.ts)) / (1000 * 60 * 60);
+        if (dtHours > 0 && dtHours <= cfg.geoVelocityMaxHours) {
+          const distKm = haversineKm(Number(prev.latitude), Number(prev.longitude), Number(input.latitude), Number(input.longitude));
+          const kmh = distKm / dtHours;
+
+          if (distKm >= cfg.geoVelocityMinDistanceKm && kmh >= cfg.geoVelocityKmhThreshold) {
+            const points = cfg.scoreGeoVelocity;
+            const dedupeKey = makeDedupeKey("GEO_VELOCITY", input.userId, null, bucketHour);
+
+            insertSignal({
+              ruleCode: "GEO_VELOCITY",
+              severity: severityFromPoints(points),
+              primaryUserId: input.userId,
+              deviceId: input.deviceId,
+              ip: input.ip,
+              userAgent: input.userAgent,
+              country: input.country,
+              region: input.region,
+              city: input.city,
+              latitude: input.latitude,
+              longitude: input.longitude,
+              points,
+              dedupeKey,
+              evidence: {
+                from: { ts: Number(prev.ts), lat: Number(prev.latitude), lng: Number(prev.longitude), country: prev.country, city: prev.city },
+                to: { ts, lat: Number(input.latitude), lng: Number(input.longitude), country: input.country, city: input.city },
+                distKm,
+                dtHours,
+                kmh,
+                thresholds: { minDistanceKm: cfg.geoVelocityMinDistanceKm, minKmh: cfg.geoVelocityKmhThreshold, maxHours: cfg.geoVelocityMaxHours },
+              },
+            });
+          }
+        }
+      }
+    }
+
+    // CONCURRENT_SESSIONS heuristic: another login within concurrentWindowMinutes with different device or IP
+    const concSince = ts - cfg.concurrentWindowMinutes * 60 * 1000;
+    const conc = sqlite.prepare(`
+      SELECT ts, device_id, ip, country
+      FROM grift_observations
+      WHERE user_id=? AND ts>=? AND ts < ?
+      ORDER BY ts DESC
+      LIMIT 1
+    `).get(input.userId, concSince, ts) as any;
+
+    if (conc) {
+      const devDiff = input.deviceId && conc.device_id && String(input.deviceId) !== String(conc.device_id);
+      const ipDiff = input.ip && conc.ip && String(input.ip) !== String(conc.ip);
+      const cDiff = input.country && conc.country && String(input.country) !== String(conc.country);
+
+      if (devDiff || ipDiff || cDiff) {
+        const points = cfg.scoreConcurrentSessions;
+        const dedupeKey = makeDedupeKey("CONCURRENT_SESSIONS", input.userId, null, bucketHour);
+        insertSignal({
+          ruleCode: "CONCURRENT_SESSIONS",
+          severity: severityFromPoints(points),
+          primaryUserId: input.userId,
+          deviceId: input.deviceId,
+          ip: input.ip,
+          userAgent: input.userAgent,
+          country: input.country,
+          points,
+          dedupeKey,
+          evidence: {
+            windowMinutes: cfg.concurrentWindowMinutes,
+            previous: conc,
+            current: { ts, deviceId: input.deviceId, ip: input.ip, country: input.country },
+            differences: { devDiff, ipDiff, cDiff },
+          },
+        });
+      }
+    }
+
+    recomputeUserAggregates(input.userId, cfg);
+  },
+
+  onTradeSubmit(input: {
+    userId: number;
+    tradeId: number;
+    symbol: string;
+    side: "BUY" | "SELL";
+    deviceId?: string;
+    ip?: string;
+  }) {
+    const cfg = getConfig();
+    if (!cfg.enabled) return;
+
+    if (!input.symbol || !input.side) return;
+
+    const ts = insertTradeObservation({
+      userId: input.userId,
+      tradeId: input.tradeId,
+      symbol: input.symbol,
+      side: input.side,
+      deviceId: input.deviceId,
+      ip: input.ip,
+    });
+
+    const since = ts - cfg.hedgeWindowMinutes * 60 * 1000;
+    const bucketMs = 10 * 60 * 1000;
+
+    const candidates = sqlite.prepare(`
+      SELECT user_id as userId, trade_id as tradeId, side as side, device_id as deviceId, ip as ip, ts as ts
+      FROM grift_trade_observations
+      WHERE symbol=? AND ts>=? AND user_id != ?
+      ORDER BY ts DESC
+      LIMIT 100
+    `).all(input.symbol, since, input.userId) as any[];
+
+    if (!candidates.length) {
+      const cfg2 = getConfig();
+      recomputeUserAggregates(input.userId, cfg2);
+      return;
+    }
+
+    const opp = candidates.find((c) => String(c.side).toUpperCase() !== input.side);
+    if (!opp) {
+      const cfg2 = getConfig();
+      recomputeUserAggregates(input.userId, cfg2);
+      return;
+    }
+
+    const otherUserId = Number(opp.userId);
+
+    // linkage logic per config
+    let deviceMatch = false;
+    let ipMatch = false;
+
+    if (input.deviceId && opp.deviceId && String(input.deviceId) === String(opp.deviceId)) deviceMatch = true;
+    if (input.ip && opp.ip && String(input.ip) === String(opp.ip)) ipMatch = true;
+
+    const linkageOk =
+      (cfg.hedgeRequireDeviceMatch ? deviceMatch : true) ||
+      (cfg.hedgeAllowIpMatch ? ipMatch : false);
+
+    if (!linkageOk) {
+      recomputeUserAggregates(input.userId, cfg);
+      return;
+    }
+
+    const points = cfg.scoreHedgePair;
+    const dedupeKey = makeDedupeKey("HEDGE_PAIR", input.userId, otherUserId, bucketMs);
+
+    insertSignal({
+      ruleCode: "HEDGE_PAIR",
+      severity: severityFromPoints(points),
+      primaryUserId: input.userId,
+      secondaryUserId: otherUserId,
+      deviceId: input.deviceId,
+      ip: input.ip,
+      symbol: input.symbol,
+      tradeId: input.tradeId,
+      points,
+      dedupeKey,
+      evidence: {
+        symbol: input.symbol,
+        thisUserId: input.userId,
+        otherUserId,
+        thisSide: input.side,
+        otherSide: String(opp.side).toUpperCase(),
+        hedgeWindowMinutes: cfg.hedgeWindowMinutes,
+        linkage: { deviceMatch, ipMatch, requireDevice: !!cfg.hedgeRequireDeviceMatch, allowIp: !!cfg.hedgeAllowIpMatch },
+        thisTradeId: input.tradeId,
+        otherTradeId: Number(opp.tradeId),
+      },
+    });
+
+    recomputeUserAggregates(input.userId, cfg);
+    recomputeUserAggregates(otherUserId, cfg);
+  }
+};
+```
+
+---
+
+## A5) `server/grift/griftAdminRouter.ts` (REPLACE)
+
+Adds:
+
+* full config editor fields
+* signals queue endpoint with filters
+* breakdown endpoint (rule/severity/status)
+* user detail includes observations + trade observations
+
+```ts
+// server/grift/griftAdminRouter.ts
+import { Router } from "express";
+import { sqlite } from "@db";
+import type { GriftConfig } from "./griftTypes";
+import { griftEngine } from "./griftEngine";
+
+export const griftAdminRouter = Router();
+
+function requireAdmin(req: any, res: any, next: any) {
+  // Replace with your existing admin auth middleware if present.
+  if (!req.user || !req.user.isAdmin) return res.status(403).json({ error: "Admin required" });
+  next();
+}
+
+function sanitizeConfigPatch(body: any): Partial<GriftConfig> {
+  const out: any = {};
+  const num = (v: any) => (typeof v === "number" && Number.isFinite(v) ? v : undefined);
+
+  const setInt = (k: keyof GriftConfig, min: number, max: number) => {
+    const v = num(body[k]);
+    if (v === undefined) return;
+    out[k] = Math.max(min, Math.min(max, Math.round(v)));
+  };
+
+  const setBoolInt = (k: keyof GriftConfig) => {
+    if (body[k] === 1 || body[k] === 0) out[k] = body[k];
+    if (body[k] === true) out[k] = 1;
+    if (body[k] === false) out[k] = 0;
+  };
+
+  setBoolInt("enabled");
+
+  setInt("multiAccountWindowDays", 1, 365);
+  setInt("churnWindowHours", 1, 168);
+  setInt("hedgeWindowMinutes", 1, 240);
+  setInt("concurrentWindowMinutes", 1, 120);
+
+  setInt("ipUniqueThreshold", 2, 100);
+  setInt("uaUniqueThreshold", 2, 100);
+  setInt("deviceUniqueThreshold", 2, 50);
+  setInt("asnUniqueThreshold", 2, 100);
+
+  setInt("geoVelocityKmhThreshold", 200, 2500);
+  setInt("geoVelocityMinDistanceKm", 50, 20000);
+  setInt("geoVelocityMaxHours", 1, 48);
+
+  setBoolInt("hedgeRequireDeviceMatch");
+  setBoolInt("hedgeAllowIpMatch");
+
+  setInt("scoreMultiAccountDevice", 0, 100);
+  setInt("scoreHedgePair", 0, 100);
+  setInt("scoreIpChurn", 0, 100);
+  setInt("scoreUaChurn", 0, 100);
+  setInt("scoreDeviceChurn", 0, 100);
+  setInt("scoreGeoVelocity", 0, 100);
+  setInt("scoreConcurrentSessions", 0, 100);
+  setInt("scoreAsnVolatility", 0, 100);
+
+  setInt("tierMed", 0, 100);
+  setInt("tierHigh", 0, 100);
+  setInt("tierCritical", 0, 100);
+
+  return out;
+}
+
+griftAdminRouter.use(requireAdmin);
+
+// GET config
+griftAdminRouter.get("/config", (_req, res) => {
+  res.json(griftEngine.getConfig());
+});
+
+// PUT config
+griftAdminRouter.put("/config", (req: any, res) => {
+  const patch = sanitizeConfigPatch(req.body ?? {});
+  const keys = Object.keys(patch);
+  if (keys.length === 0) return res.status(400).json({ error: "No valid config fields provided" });
+
+  const adminId = req.user?.id ?? null;
+  const updatedAt = Date.now();
+
+  const map: Record<string, string> = {
+    enabled: "enabled",
+
+    multiAccountWindowDays: "multi_account_window_days",
+    churnWindowHours: "churn_window_hours",
+    hedgeWindowMinutes: "hedge_window_minutes",
+    concurrentWindowMinutes: "concurrent_window_minutes",
+
+    ipUniqueThreshold: "ip_unique_threshold",
+    uaUniqueThreshold: "ua_unique_threshold",
+    deviceUniqueThreshold: "device_unique_threshold",
+    asnUniqueThreshold: "asn_unique_threshold",
+
+    geoVelocityKmhThreshold: "geo_velocity_kmh_threshold",
+    geoVelocityMinDistanceKm: "geo_velocity_min_distance_km",
+    geoVelocityMaxHours: "geo_velocity_max_hours",
+
+    hedgeRequireDeviceMatch: "hedge_require_device_match",
+    hedgeAllowIpMatch: "hedge_allow_ip_match",
+
+    scoreMultiAccountDevice: "score_multi_account_device",
+    scoreHedgePair: "score_hedge_pair",
+    scoreIpChurn: "score_ip_churn",
+    scoreUaChurn: "score_ua_churn",
+    scoreDeviceChurn: "score_device_churn",
+    scoreGeoVelocity: "score_geo_velocity",
+    scoreConcurrentSessions: "score_concurrent_sessions",
+    scoreAsnVolatility: "score_asn_volatility",
+
+    tierMed: "tier_med",
+    tierHigh: "tier_high",
+    tierCritical: "tier_critical",
+  };
+
+  const sets: string[] = [];
+  const params: any[] = [];
+
+  for (const k of keys) {
+    const col = map[k];
+    if (!col) continue;
+    sets.push(`${col}=?`);
+    params.push((patch as any)[k]);
+  }
+
+  sets.push(`updated_at=?`);
+  params.push(updatedAt);
+  sets.push(`updated_by_admin_id=?`);
+  params.push(adminId);
+
+  params.push(1);
+
+  sqlite.prepare(`UPDATE grift_config SET ${sets.join(", ")} WHERE id=?`).run(...params);
+
+  res.json(griftEngine.getConfig());
+});
+
+// Summary + tier counts + top rules
+griftAdminRouter.get("/summary", (_req, res) => {
+  const open = sqlite.prepare(`
+    SELECT
+      SUM(CASE WHEN status='OPEN' THEN 1 ELSE 0 END) as openTotal,
+      SUM(CASE WHEN status='OPEN' AND (severity='HIGH' OR severity='CRITICAL') THEN 1 ELSE 0 END) as openHigh
+    FROM grift_signals
+  `).get() as any;
+
+  const tiers = sqlite.prepare(`
+    SELECT tier, COUNT(*) as c
+    FROM grift_user_scores
+    GROUP BY tier
+  `).all() as any[];
+
+  const topRules = sqlite.prepare(`
+    SELECT rule_code as ruleCode, COUNT(*) as c
+    FROM grift_signals
+    WHERE status='OPEN'
+    GROUP BY rule_code
+    ORDER BY c DESC
+    LIMIT 10
+  `).all() as any[];
+
+  const bySeverity = sqlite.prepare(`
+    SELECT severity, COUNT(*) as c
+    FROM grift_signals
+    WHERE status='OPEN'
+    GROUP BY severity
+  `).all() as any[];
+
+  res.json({
+    open: open ?? { openTotal: 0, openHigh: 0 },
+    tiers,
+    topRules,
+    bySeverity,
+  });
+});
+
+// Breakdown table by rule+severity+status (time-windowed)
+griftAdminRouter.get("/breakdown", (req, res) => {
+  const sinceHours = Number(req.query.sinceHours ?? 168);
+  const since = Date.now() - Math.max(1, Math.min(24 * 365, sinceHours)) * 60 * 60 * 1000;
+
+  const rows = sqlite.prepare(`
+    SELECT rule_code as ruleCode, severity, status, COUNT(*) as c
+    FROM grift_signals
+    WHERE created_at >= ?
+    GROUP BY rule_code, severity, status
+    ORDER BY c DESC
+  `).all(since);
+
+  res.json({ since, rows });
+});
+
+// Signals queue with filters
+griftAdminRouter.get("/signals", (req, res) => {
+  const status = typeof req.query.status === "string" ? req.query.status : "OPEN";
+  const severity = typeof req.query.severity === "string" ? req.query.severity : "";
+  const ruleCode = typeof req.query.ruleCode === "string" ? req.query.ruleCode : "";
+  const userId = req.query.userId ? Number(req.query.userId) : null;
+  const limit = Math.max(10, Math.min(1000, Number(req.query.limit ?? 200)));
+  const sinceHours = Number(req.query.sinceHours ?? 168);
+  const since = Date.now() - Math.max(1, Math.min(24 * 365, sinceHours)) * 60 * 60 * 1000;
+
+  const where: string[] = ["created_at >= ?"];
+  const params: any[] = [since];
+
+  if (status) { where.push("status = ?"); params.push(status); }
+  if (severity) { where.push("severity = ?"); params.push(severity); }
+  if (ruleCode) { where.push("rule_code = ?"); params.push(ruleCode); }
+  if (userId != null && Number.isFinite(userId)) {
+    where.push("(primary_user_id = ? OR secondary_user_id = ?)");
+    params.push(userId, userId);
+  }
+
+  const sql = `
+    SELECT *
+    FROM grift_signals
+    WHERE ${where.join(" AND ")}
+    ORDER BY created_at DESC
+    LIMIT ${limit}
+  `;
+
+  const rows = sqlite.prepare(sql).all(...params);
+  res.json({ since, rows });
+});
+
+// Flagged users list
+griftAdminRouter.get("/users", (req, res) => {
+  const minScore = Number(req.query.minScore ?? 40);
+
+  const rows = sqlite.prepare(`
+    SELECT
+      u.id as userId,
+      u.email as email,
+      u.name as name,
+      s.score_current as scoreCurrent,
+      s.tier as tier,
+      s.devices_7d as devices7d,
+      s.ips_7d as ips7d,
+      s.user_agents_7d as userAgents7d,
+      s.countries_7d as countries7d,
+      s.asns_7d as asns7d,
+      s.linked_accounts_30d as linkedAccounts30d,
+      s.hedge_pairs_7d as hedgePairs7d,
+      s.open_signals_count as openSignalsCount,
+      s.last_evaluated_at as lastEvaluatedAt
+    FROM users u
+    JOIN grift_user_scores s ON s.user_id = u.id
+    WHERE s.score_current >= ?
+    ORDER BY s.score_current DESC, s.open_signals_count DESC
+    LIMIT 500
+  `).all(minScore);
+
+  res.json(rows);
+});
+
+// User detail: scores + signals + device links + linked users + observations
+griftAdminRouter.get("/users/:userId", (req, res) => {
+  const userId = Number(req.params.userId);
+
+  const score = sqlite.prepare(`SELECT * FROM grift_user_scores WHERE user_id=?`).get(userId);
+
+  const signals = sqlite.prepare(`
+    SELECT *
+    FROM grift_signals
+    WHERE primary_user_id=? OR secondary_user_id=?
+    ORDER BY created_at DESC
+    LIMIT 300
+  `).all(userId, userId);
+
+  const deviceLinks = sqlite.prepare(`
+    SELECT device_id as deviceId, first_seen_at as firstSeenAt, last_seen_at as lastSeenAt, seen_count as seenCount
+    FROM grift_device_users
+    WHERE user_id=?
+    ORDER BY last_seen_at DESC
+    LIMIT 200
+  `).all(userId);
+
+  const linkedUsers = sqlite.prepare(`
+    SELECT DISTINCT du2.user_id as linkedUserId, du2.device_id as deviceId, du2.last_seen_at as lastSeenAt
+    FROM grift_device_users du1
+    JOIN grift_device_users du2 ON du1.device_id = du2.device_id
+    WHERE du1.user_id=? AND du2.user_id != ?
+    ORDER BY du2.last_seen_at DESC
+    LIMIT 200
+  `).all(userId, userId);
+
+  const observations = sqlite.prepare(`
+    SELECT *
+    FROM grift_observations
+    WHERE user_id=?
+    ORDER BY ts DESC
+    LIMIT 200
+  `).all(userId);
+
+  const tradeObservations = sqlite.prepare(`
+    SELECT *
+    FROM grift_trade_observations
+    WHERE user_id=?
+    ORDER BY ts DESC
+    LIMIT 200
+  `).all(userId);
+
+  res.json({ score, signals, deviceLinks, linkedUsers, observations, tradeObservations });
+});
+
+// Close signal
+griftAdminRouter.post("/signals/:id/close", (req: any, res) => {
+  const id = Number(req.params.id);
+  const adminId = req.user?.id ?? null;
+  const reason = typeof req.body?.reason === "string" ? req.body.reason.slice(0, 300) : "Closed by admin";
+  const ts = Date.now();
+
+  sqlite.prepare(`
+    UPDATE grift_signals
+    SET status='CLOSED', updated_at=?, closed_at=?, closed_by_admin_id=?, closed_reason=?
+    WHERE id=?
+  `).run(ts, ts, adminId, reason, id);
+
+  res.json({ ok: true });
+});
+```
+
+---
+
+## A6) Server mount reminder (YOU MUST HAVE THIS)
+
+Where you mount admin routes in your server bootstrap:
+
+```ts
+import { ensureGriftSchema } from "./grift/ensureGriftSchema";
+import { griftAdminRouter } from "./grift/griftAdminRouter";
+
+ensureGriftSchema();
+app.use("/api/admin/grift", griftAdminRouter);
+```
+
+---
+
+## A7) Hook points (must already exist in your code)
+
+Call these hooks:
+
+### On login success:
+
+```ts
+import { griftEngine } from "./grift/griftEngine";
+
+griftEngine.onLoginSuccess({
+  userId: user.id,
+  deviceId: typeof req.headers["x-device-id"] === "string" ? req.headers["x-device-id"] : undefined,
+  ip: req.ip,
+  userAgent: typeof req.headers["user-agent"] === "string" ? req.headers["user-agent"] : undefined,
+  // If you have geo/asn enrichment, pass them. If not, pass nothing.
+  country: geo?.countryCode,
+  region: geo?.region,
+  city: geo?.city,
+  latitude: geo?.latitude ?? null,
+  longitude: geo?.longitude ?? null,
+  asn: geo?.asn ?? null,
+  org: geo?.org ?? null,
+});
+```
+
+### On trade submit (after you create the trade/order record):
+
+```ts
+import { griftEngine } from "./grift/griftEngine";
+
+griftEngine.onTradeSubmit({
+  userId: req.user.id,
+  tradeId: createdTrade.id,
+  symbol: createdTrade.symbol,
+  side: createdTrade.side, // BUY/SELL
+  deviceId: typeof req.headers["x-device-id"] === "string" ? req.headers["x-device-id"] : undefined,
+  ip: req.ip,
+});
+```
+
+---
+
+# B) FRONTEND: “Add Everything” Grift Detection UI
+
+## B1) `client/src/lib/deviceId.ts` (NEW)
+
+```ts
+// client/src/lib/deviceId.ts
+const STORAGE_KEY = "tc_device_id_v1";
+
+function fallbackUuid(): string {
+  const s: string[] = [];
+  const hex = "0123456789abcdef";
+  for (let i = 0; i < 36; i++) s.push(hex[Math.floor(Math.random() * 16)]);
+  s[14] = "4";
+  // @ts-ignore
+  s[19] = hex[(parseInt(s[19], 16) & 0x3) | 0x8];
+  s[8] = s[13] = s[18] = s[23] = "-";
+  return s.join("");
+}
+
+export function getDeviceId(): string {
+  try {
+    const existing = localStorage.getItem(STORAGE_KEY);
+    if (existing && existing.length >= 16) return existing;
+
+    const id =
+      typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? (crypto as any).randomUUID()
+        : fallbackUuid();
+
+    localStorage.setItem(STORAGE_KEY, id);
+    return id;
+  } catch {
+    return typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? (crypto as any).randomUUID()
+      : fallbackUuid();
+  }
+}
+```
+
+---
+
+## B2) `client/src/lib/api.ts` (NEW)
+
+```ts
+// client/src/lib/api.ts
+import { getDeviceId } from "./deviceId";
+
+export async function apiFetch<T>(
+  url: string,
+  opts?: {
+    method?: string;
+    body?: any;
+    headers?: Record<string, string>;
+  }
+): Promise<T> {
+  const method = opts?.method ?? "GET";
+  const headers: Record<string, string> = {
+    ...(opts?.headers ?? {}),
+    "X-Device-Id": getDeviceId(),
+  };
+
+  let body: any = undefined;
+  if (opts?.body !== undefined) {
+    headers["Content-Type"] = "application/json";
+    body = JSON.stringify(opts.body);
+  }
+
+  const res = await fetch(url, {
+    method,
+    headers,
+    body,
+    credentials: "include",
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`API ${res.status}: ${text || res.statusText}`);
+  }
+
+  return (await res.json()) as T;
+}
+```
+
+---
+
+## B3) OPTIONAL: Axios device header (if you use axios anywhere)
+
+**File: `client/src/lib/axiosDevice.ts` (NEW)**
+
+```ts
+// client/src/lib/axiosDevice.ts
+import axios from "axios";
+import { getDeviceId } from "./deviceId";
+
+let installed = false;
+
+export function installAxiosDeviceHeader() {
+  if (installed) return;
+  installed = true;
+
+  axios.interceptors.request.use((config) => {
+    config.headers = config.headers ?? {};
+    (config.headers as any)["X-Device-Id"] = getDeviceId();
+    return config;
+  });
+}
+```
+
+Call once at app start (e.g., `main.tsx`):
+
+```ts
+import { installAxiosDeviceHeader } from "./lib/axiosDevice";
+installAxiosDeviceHeader();
+```
+
+---
+
+## B4) `client/src/pages/admin/UserManagementGriftTab.tsx` (REPLACE — “everything”)
+
+This file adds:
+
+* KPI dashboard (open totals, by severity, tiers, top rules)
+* Breakdown matrix (rule/severity/status)
+* Signals Queue with filters (status/severity/rule/userId/time window)
+* Flagged Users list with CSV export
+* Signals export CSV
+* User drilldown modal includes:
+
+  * signals
+  * linked accounts
+  * devices
+  * login observations timeline
+  * trade observations list
+  * close signal action
+
+```tsx
+import React, { useEffect, useMemo, useState } from "react";
+import { apiFetch } from "../../lib/api";
+
+type GriftSummary = {
+  open: { openTotal: number; openHigh: number };
+  tiers: Array<{ tier: string; c: number }>;
+  topRules: Array<{ ruleCode: string; c: number }>;
+  bySeverity: Array<{ severity: string; c: number }>;
+};
+
+type BreakdownRow = { ruleCode: string; severity: string; status: string; c: number };
+
+type GriftBreakdown = {
+  since: number;
+  rows: BreakdownRow[];
+};
+
+type GriftConfig = {
+  id: number;
+  enabled: number;
+
+  multiAccountWindowDays: number;
+  churnWindowHours: number;
+  hedgeWindowMinutes: number;
+  concurrentWindowMinutes: number;
+
+  ipUniqueThreshold: number;
+  uaUniqueThreshold: number;
+  deviceUniqueThreshold: number;
+  asnUniqueThreshold: number;
+
+  geoVelocityKmhThreshold: number;
+  geoVelocityMinDistanceKm: number;
+  geoVelocityMaxHours: number;
+
+  hedgeRequireDeviceMatch: number;
+  hedgeAllowIpMatch: number;
+
+  scoreMultiAccountDevice: number;
+  scoreHedgePair: number;
+  scoreIpChurn: number;
+  scoreUaChurn: number;
+  scoreDeviceChurn: number;
+  scoreGeoVelocity: number;
+  scoreConcurrentSessions: number;
+  scoreAsnVolatility: number;
+
+  tierMed: number;
+  tierHigh: number;
+  tierCritical: number;
+
+  updatedAt: number;
+  updatedByAdminId?: number | null;
+};
+
+type FlaggedUserRow = {
+  userId: number;
+  email: string;
+  name?: string | null;
+
+  scoreCurrent: number;
+  tier: string;
+
+  devices7d: number;
+  ips7d: number;
+  userAgents7d: number;
+  countries7d: number;
+  asns7d: number;
+
+  linkedAccounts30d: number;
+  hedgePairs7d: number;
+  openSignalsCount: number;
+  lastEvaluatedAt: number;
+};
+
+type GriftSignal = any;
+
+type SignalsResponse = {
+  since: number;
+  rows: GriftSignal[];
+};
+
+type UserDetail = {
+  score: any;
+  signals: any[];
+  deviceLinks: any[];
+  linkedUsers: any[];
+  observations: any[];
+  tradeObservations: any[];
+};
+
+function fmtTs(ts?: number) {
+  if (!ts) return "—";
+  try {
+    return new Date(ts).toLocaleString();
+  } catch {
+    return String(ts);
+  }
+}
+
+function TierBadge({ tier }: { tier: string }) {
+  const t = (tier || "").toUpperCase();
+  const cls =
+    t === "CRITICAL"
+      ? "bg-red-600 text-white"
+      : t === "HIGH"
+      ? "bg-orange-600 text-white"
+      : t === "MED"
+      ? "bg-yellow-500 text-black"
+      : "bg-muted text-foreground";
+  return <span className={`px-2 py-1 rounded text-xs font-semibold ${cls}`}>{t || "LOW"}</span>;
+}
+
+function toCsv(rows: Record<string, any>[]) {
+  const cols = Array.from(
+    rows.reduce((set, r) => {
+      Object.keys(r || {}).forEach((k) => set.add(k));
+      return set;
+    }, new Set<string>())
+  );
+
+  const esc = (v: any) => {
+    if (v === null || v === undefined) return "";
+    const s = typeof v === "string" ? v : JSON.stringify(v);
+    if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+    return s;
+  };
+
+  const header = cols.join(",");
+  const lines = rows.map((r) => cols.map((c) => esc(r[c])).join(","));
+  return [header, ...lines].join("\n");
+}
+
+function downloadText(filename: string, content: string, mime = "text/plain") {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+const RULES = [
+  "MULTI_ACCOUNT_DEVICE",
+  "HEDGE_PAIR",
+  "IP_CHURN",
+  "UA_CHURN",
+  "DEVICE_CHURN",
+  "GEO_VELOCITY",
+  "CONCURRENT_SESSIONS",
+  "ASN_VOLATILITY",
+];
+
+const SEVERITIES = ["", "LOW", "MED", "HIGH", "CRITICAL"];
+const STATUSES = ["OPEN", "IN_REVIEW", "CLOSED", "IGNORED"];
+
+export default function UserManagementGriftTab() {
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
+
+  const [summary, setSummary] = useState<GriftSummary | null>(null);
+  const [breakdown, setBreakdown] = useState<GriftBreakdown | null>(null);
+  const [config, setConfig] = useState<GriftConfig | null>(null);
+
+  const [minScore, setMinScore] = useState<number>(40);
+  const [rows, setRows] = useState<FlaggedUserRow[]>([]);
+
+  // Signals queue filters
+  const [sigStatus, setSigStatus] = useState<string>("OPEN");
+  const [sigSeverity, setSigSeverity] = useState<string>("");
+  const [sigRule, setSigRule] = useState<string>("");
+  const [sigUserId, setSigUserId] = useState<string>("");
+  const [sigSinceHours, setSigSinceHours] = useState<number>(168);
+  const [signals, setSignals] = useState<GriftSignal[]>([]);
+  const [signalsLoading, setSignalsLoading] = useState(false);
+
+  const [selectedUserId, setSelectedUserId] = useState<number | null>(null);
+  const [detail, setDetail] = useState<UserDetail | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+
+  const [configEdit, setConfigEdit] = useState<Partial<GriftConfig>>({});
+  const [savingConfig, setSavingConfig] = useState(false);
+
+  async function refreshSummary() {
+    const [s, b, c] = await Promise.all([
+      apiFetch<GriftSummary>("/api/admin/grift/summary"),
+      apiFetch<GriftBreakdown>(`/api/admin/grift/breakdown?sinceHours=${sigSinceHours}`),
+      apiFetch<GriftConfig>("/api/admin/grift/config"),
+    ]);
+    setSummary(s);
+    setBreakdown(b);
+    setConfig(c);
+    setConfigEdit({});
+  }
+
+  async function refreshUsers() {
+    const u = await apiFetch<FlaggedUserRow[]>(`/api/admin/grift/users?minScore=${minScore}`);
+    setRows(u);
+  }
+
+  async function refreshSignals() {
+    setSignalsLoading(true);
+    try {
+      const userIdParam = sigUserId.trim() ? `&userId=${encodeURIComponent(sigUserId.trim())}` : "";
+      const url =
+        `/api/admin/grift/signals?status=${encodeURIComponent(sigStatus)}` +
+        `&severity=${encodeURIComponent(sigSeverity)}` +
+        `&ruleCode=${encodeURIComponent(sigRule)}` +
+        `&sinceHours=${encodeURIComponent(String(sigSinceHours))}` +
+        `&limit=300` +
+        userIdParam;
+
+      const r = await apiFetch<SignalsResponse>(url);
+      setSignals(r.rows || []);
+    } finally {
+      setSignalsLoading(false);
+    }
+  }
+
+  async function refreshAll() {
+    setErr(null);
+    setLoading(true);
+    try {
+      await refreshSummary();
+      await refreshUsers();
+      await refreshSignals();
+    } catch (e: any) {
+      setErr(e?.message ?? "Failed to load grift data");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    refreshAll();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    refreshUsers().catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [minScore]);
+
+  async function openUser(userId: number) {
+    setSelectedUserId(userId);
+    setDetail(null);
+    setDetailLoading(true);
+    setErr(null);
+    try {
+      const d = await apiFetch<UserDetail>(`/api/admin/grift/users/${userId}`);
+      setDetail(d);
+    } catch (e: any) {
+      setErr(e?.message ?? "Failed to load user detail");
+    } finally {
+      setDetailLoading(false);
+    }
+  }
+
+  async function closeSignal(signalId: number) {
+    const reason = prompt("Close reason (optional):") ?? "Closed by admin";
+    setErr(null);
+    try {
+      await apiFetch(`/api/admin/grift/signals/${signalId}/close`, { method: "POST", body: { reason } });
+      await refreshSummary();
+      await refreshUsers();
+      await refreshSignals();
+      if (selectedUserId) await openUser(selectedUserId);
+    } catch (e: any) {
+      setErr(e?.message ?? "Failed to close signal");
+    }
+  }
+
+  async function saveConfig() {
+    if (!config) return;
+    setSavingConfig(true);
+    setErr(null);
+    try {
+      const updated = await apiFetch<GriftConfig>("/api/admin/grift/config", { method: "PUT", body: configEdit });
+      setConfig(updated);
+      setConfigEdit({});
+      await refreshSummary();
+      await refreshUsers();
+      await refreshSignals();
+    } catch (e: any) {
+      setErr(e?.message ?? "Failed to save config");
+    } finally {
+      setSavingConfig(false);
+    }
+  }
+
+  const tierCounts = useMemo(() => {
+    const map: Record<string, number> = { LOW: 0, MED: 0, HIGH: 0, CRITICAL: 0 };
+    (summary?.tiers ?? []).forEach((t) => {
+      const key = String(t.tier || "LOW").toUpperCase();
+      map[key] = Number(t.c ?? 0);
+    });
+    return map;
+  }, [summary]);
+
+  const severityCounts = useMemo(() => {
+    const map: Record<string, number> = { LOW: 0, MED: 0, HIGH: 0, CRITICAL: 0 };
+    (summary?.bySeverity ?? []).forEach((s) => {
+      const key = String(s.severity || "").toUpperCase();
+      if (map[key] !== undefined) map[key] = Number(s.c ?? 0);
+    });
+    return map;
+  }, [summary]);
+
+  const breakdownMatrix = useMemo(() => {
+    // matrix[rule][severity/status] => count
+    const m: Record<string, Record<string, number>> = {};
+    (breakdown?.rows ?? []).forEach((r) => {
+      const rule = r.ruleCode;
+      const key = `${String(r.severity).toUpperCase()}|${String(r.status).toUpperCase()}`;
+      m[rule] = m[rule] || {};
+      m[rule][key] = Number(r.c ?? 0);
+    });
+    return m;
+  }, [breakdown]);
+
+  const topRules = summary?.topRules ?? [];
+
+  function exportFlaggedUsersCsv() {
+    const data = rows.map((r) => ({
+      userId: r.userId,
+      email: r.email,
+      name: r.name ?? "",
+      tier: r.tier,
+      scoreCurrent: r.scoreCurrent,
+      devices7d: r.devices7d,
+      ips7d: r.ips7d,
+      userAgents7d: r.userAgents7d,
+      countries7d: r.countries7d,
+      asns7d: r.asns7d,
+      linkedAccounts30d: r.linkedAccounts30d,
+      hedgePairs7d: r.hedgePairs7d,
+      openSignalsCount: r.openSignalsCount,
+      lastEvaluatedAt: r.lastEvaluatedAt,
+    }));
+    downloadText(`grift_flagged_users_${Date.now()}.csv`, toCsv(data), "text/csv");
+  }
+
+  function exportSignalsCsv() {
+    const data = signals.map((s: any) => ({
+      id: s.id,
+      created_at: s.created_at,
+      updated_at: s.updated_at,
+      rule_code: s.rule_code,
+      severity: s.severity,
+      status: s.status,
+      primary_user_id: s.primary_user_id,
+      secondary_user_id: s.secondary_user_id,
+      device_id: s.device_id,
+      ip: s.ip,
+      country: s.country,
+      symbol: s.symbol,
+      trade_id: s.trade_id,
+      points: s.points,
+      evidence_json: s.evidence_json,
+      closed_at: s.closed_at,
+      closed_by_admin_id: s.closed_by_admin_id,
+      closed_reason: s.closed_reason,
+    }));
+    downloadText(`grift_signals_${Date.now()}.csv`, toCsv(data), "text/csv");
+  }
+
+  return (
+    <div className="p-4 space-y-4">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <div className="text-lg font-semibold">Grift Detection</div>
+          <div className="text-sm text-muted-foreground">
+            Device linkage, coordinated hedging, churn signals (IP/UA/device/ASN), geo velocity, and concurrent session heuristics.
+          </div>
+        </div>
+        <div className="flex gap-2">
+          <button className="px-3 py-2 rounded border hover:bg-muted" onClick={exportFlaggedUsersCsv}>
+            Export Users CSV
+          </button>
+          <button className="px-3 py-2 rounded border hover:bg-muted" onClick={exportSignalsCsv}>
+            Export Signals CSV
+          </button>
+          <button className="px-3 py-2 rounded border hover:bg-muted" onClick={refreshAll} disabled={loading}>
+            Refresh
+          </button>
+        </div>
+      </div>
+
+      {err && (
+        <div className="border border-red-300 bg-red-50 text-red-900 rounded p-3 text-sm">
+          {err}
+        </div>
+      )}
+
+      {/* KPI Row */}
+      <div className="grid grid-cols-1 md:grid-cols-6 gap-3">
+        <div className="rounded border p-3">
+          <div className="text-sm text-muted-foreground">Open Signals</div>
+          <div className="text-2xl font-semibold">{summary?.open?.openTotal ?? 0}</div>
+        </div>
+        <div className="rounded border p-3">
+          <div className="text-sm text-muted-foreground">Open High/Critical</div>
+          <div className="text-2xl font-semibold">{summary?.open?.openHigh ?? 0}</div>
+        </div>
+        <div className="rounded border p-3">
+          <div className="text-sm text-muted-foreground">Open MED</div>
+          <div className="text-2xl font-semibold">{severityCounts["MED"] ?? 0}</div>
+        </div>
+        <div className="rounded border p-3">
+          <div className="text-sm text-muted-foreground">Open HIGH</div>
+          <div className="text-2xl font-semibold">{severityCounts["HIGH"] ?? 0}</div>
+        </div>
+        <div className="rounded border p-3">
+          <div className="text-sm text-muted-foreground">Users HIGH</div>
+          <div className="text-2xl font-semibold">{tierCounts["HIGH"] ?? 0}</div>
+        </div>
+        <div className="rounded border p-3">
+          <div className="text-sm text-muted-foreground">Users CRITICAL</div>
+          <div className="text-2xl font-semibold">{tierCounts["CRITICAL"] ?? 0}</div>
+        </div>
+      </div>
+
+      {/* Top rules + breakdown */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+        <div className="rounded border p-3 space-y-2">
+          <div className="font-semibold">Top Open Rule Codes</div>
+          {!topRules.length ? (
+            <div className="text-sm text-muted-foreground">No open signals.</div>
+          ) : (
+            <div className="space-y-1">
+              {topRules.map((r) => (
+                <div key={r.ruleCode} className="flex items-center justify-between text-sm">
+                  <span className="font-mono text-xs">{r.ruleCode}</span>
+                  <span className="font-semibold">{r.c}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="lg:col-span-2 rounded border p-3 space-y-2 overflow-auto">
+          <div className="flex items-center justify-between">
+            <div className="font-semibold">Breakdown (since {Math.round(sigSinceHours)}h)</div>
+            <div className="text-xs text-muted-foreground">Last refresh: {fmtTs(Date.now())}</div>
+          </div>
+
+          <div className="text-xs text-muted-foreground">
+            Matrix shows counts by Rule Code, Severity, Status. Use Signals Queue filters below for drilldown.
+          </div>
+
+          <table className="w-full text-sm min-w-[900px]">
+            <thead className="bg-muted">
+              <tr>
+                <th className="text-left p-2">Rule</th>
+                {["LOW", "MED", "HIGH", "CRITICAL"].map((sev) =>
+                  STATUSES.map((st) => (
+                    <th key={`${sev}|${st}`} className="text-left p-2">
+                      {sev}/{st}
+                    </th>
+                  ))
+                )}
+              </tr>
+            </thead>
+            <tbody>
+              {RULES.map((rule) => {
+                const row = breakdownMatrix[rule] || {};
+                return (
+                  <tr key={rule} className="border-t">
+                    <td className="p-2 font-mono text-xs">{rule}</td>
+                    {["LOW", "MED", "HIGH", "CRITICAL"].map((sev) =>
+                      STATUSES.map((st) => {
+                        const key = `${sev}|${st}`;
+                        return (
+                          <td key={`${rule}-${key}`} className="p-2">
+                            {row[key] ?? 0}
+                          </td>
+                        );
+                      })
+                    )}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Config */}
+      <div className="rounded border p-3 space-y-3">
+        <div className="flex items-center justify-between gap-3">
+          <div className="font-semibold">Grift Config (Admin-editable)</div>
+          <div className="text-xs text-muted-foreground">Last update: {fmtTs(config?.updatedAt)}</div>
+        </div>
+
+        {!config ? (
+          <div className="text-sm text-muted-foreground">Loading config…</div>
+        ) : (
+          <>
+            <div className="grid grid-cols-2 md:grid-cols-6 gap-2">
+              <label className="text-xs">
+                Enabled
+                <select
+                  className="mt-1 w-full border rounded px-2 py-2"
+                  value={String(configEdit.enabled ?? config.enabled)}
+                  onChange={(e) => setConfigEdit((p) => ({ ...p, enabled: Number(e.target.value) }))}
+                >
+                  <option value="1">ON</option>
+                  <option value="0">OFF</option>
+                </select>
+              </label>
+
+              <label className="text-xs">
+                MultiAcct Window (days)
+                <input
+                  className="mt-1 w-full border rounded px-2 py-2"
+                  type="number"
+                  value={configEdit.multiAccountWindowDays ?? config.multiAccountWindowDays}
+                  onChange={(e) => setConfigEdit((p) => ({ ...p, multiAccountWindowDays: Number(e.target.value) }))}
+                />
+              </label>
+
+              <label className="text-xs">
+                Churn Window (hours)
+                <input
+                  className="mt-1 w-full border rounded px-2 py-2"
+                  type="number"
+                  value={configEdit.churnWindowHours ?? config.churnWindowHours}
+                  onChange={(e) => setConfigEdit((p) => ({ ...p, churnWindowHours: Number(e.target.value) }))}
+                />
+              </label>
+
+              <label className="text-xs">
+                Hedge Window (min)
+                <input
+                  className="mt-1 w-full border rounded px-2 py-2"
+                  type="number"
+                  value={configEdit.hedgeWindowMinutes ?? config.hedgeWindowMinutes}
+                  onChange={(e) => setConfigEdit((p) => ({ ...p, hedgeWindowMinutes: Number(e.target.value) }))}
+                />
+              </label>
+
+              <label className="text-xs">
+                Concurrent Window (min)
+                <input
+                  className="mt-1 w-full border rounded px-2 py-2"
+                  type="number"
+                  value={configEdit.concurrentWindowMinutes ?? config.concurrentWindowMinutes}
+                  onChange={(e) => setConfigEdit((p) => ({ ...p, concurrentWindowMinutes: Number(e.target.value) }))}
+                />
+              </label>
+
+              <label className="text-xs">
+                Require Device for Hedge
+                <select
+                  className="mt-1 w-full border rounded px-2 py-2"
+                  value={String(configEdit.hedgeRequireDeviceMatch ?? config.hedgeRequireDeviceMatch)}
+                  onChange={(e) => setConfigEdit((p) => ({ ...p, hedgeRequireDeviceMatch: Number(e.target.value) }))}
+                >
+                  <option value="1">YES</option>
+                  <option value="0">NO</option>
+                </select>
+              </label>
+
+              <label className="text-xs">
+                Allow IP Match for Hedge
+                <select
+                  className="mt-1 w-full border rounded px-2 py-2"
+                  value={String(configEdit.hedgeAllowIpMatch ?? config.hedgeAllowIpMatch)}
+                  onChange={(e) => setConfigEdit((p) => ({ ...p, hedgeAllowIpMatch: Number(e.target.value) }))}
+                >
+                  <option value="1">YES</option>
+                  <option value="0">NO</option>
+                </select>
+              </label>
+            </div>
+
+            <div className="grid grid-cols-2 md:grid-cols-6 gap-2">
+              <label className="text-xs">
+                IP Threshold
+                <input className="mt-1 w-full border rounded px-2 py-2" type="number"
+                  value={configEdit.ipUniqueThreshold ?? config.ipUniqueThreshold}
+                  onChange={(e) => setConfigEdit((p) => ({ ...p, ipUniqueThreshold: Number(e.target.value) }))} />
+              </label>
+              <label className="text-xs">
+                UA Threshold
+                <input className="mt-1 w-full border rounded px-2 py-2" type="number"
+                  value={configEdit.uaUniqueThreshold ?? config.uaUniqueThreshold}
+                  onChange={(e) => setConfigEdit((p) => ({ ...p, uaUniqueThreshold: Number(e.target.value) }))} />
+              </label>
+              <label className="text-xs">
+                Device Threshold
+                <input className="mt-1 w-full border rounded px-2 py-2" type="number"
+                  value={configEdit.deviceUniqueThreshold ?? config.deviceUniqueThreshold}
+                  onChange={(e) => setConfigEdit((p) => ({ ...p, deviceUniqueThreshold: Number(e.target.value) }))} />
+              </label>
+              <label className="text-xs">
+                ASN Threshold
+                <input className="mt-1 w-full border rounded px-2 py-2" type="number"
+                  value={configEdit.asnUniqueThreshold ?? config.asnUniqueThreshold}
+                  onChange={(e) => setConfigEdit((p) => ({ ...p, asnUniqueThreshold: Number(e.target.value) }))} />
+              </label>
+              <label className="text-xs">
+                Geo Min Dist (km)
+                <input className="mt-1 w-full border rounded px-2 py-2" type="number"
+                  value={configEdit.geoVelocityMinDistanceKm ?? config.geoVelocityMinDistanceKm}
+                  onChange={(e) => setConfigEdit((p) => ({ ...p, geoVelocityMinDistanceKm: Number(e.target.value) }))} />
+              </label>
+              <label className="text-xs">
+                Geo Min Kmh
+                <input className="mt-1 w-full border rounded px-2 py-2" type="number"
+                  value={configEdit.geoVelocityKmhThreshold ?? config.geoVelocityKmhThreshold}
+                  onChange={(e) => setConfigEdit((p) => ({ ...p, geoVelocityKmhThreshold: Number(e.target.value) }))} />
+              </label>
+              <label className="text-xs">
+                Geo Max Hours
+                <input className="mt-1 w-full border rounded px-2 py-2" type="number"
+                  value={configEdit.geoVelocityMaxHours ?? config.geoVelocityMaxHours}
+                  onChange={(e) => setConfigEdit((p) => ({ ...p, geoVelocityMaxHours: Number(e.target.value) }))} />
+              </label>
+            </div>
+
+            <div className="grid grid-cols-2 md:grid-cols-8 gap-2">
+              <label className="text-xs">Score: MultiAcct
+                <input className="mt-1 w-full border rounded px-2 py-2" type="number"
+                  value={configEdit.scoreMultiAccountDevice ?? config.scoreMultiAccountDevice}
+                  onChange={(e) => setConfigEdit((p) => ({ ...p, scoreMultiAccountDevice: Number(e.target.value) }))} />
+              </label>
+              <label className="text-xs">Score: Hedge
+                <input className="mt-1 w-full border rounded px-2 py-2" type="number"
+                  value={configEdit.scoreHedgePair ?? config.scoreHedgePair}
+                  onChange={(e) => setConfigEdit((p) => ({ ...p, scoreHedgePair: Number(e.target.value) }))} />
+              </label>
+              <label className="text-xs">Score: IP Churn
+                <input className="mt-1 w-full border rounded px-2 py-2" type="number"
+                  value={configEdit.scoreIpChurn ?? config.scoreIpChurn}
+                  onChange={(e) => setConfigEdit((p) => ({ ...p, scoreIpChurn: Number(e.target.value) }))} />
+              </label>
+              <label className="text-xs">Score: UA Churn
+                <input className="mt-1 w-full border rounded px-2 py-2" type="number"
+                  value={configEdit.scoreUaChurn ?? config.scoreUaChurn}
+                  onChange={(e) => setConfigEdit((p) => ({ ...p, scoreUaChurn: Number(e.target.value) }))} />
+              </label>
+              <label className="text-xs">Score: Dev Churn
+                <input className="mt-1 w-full border rounded px-2 py-2" type="number"
+                  value={configEdit.scoreDeviceChurn ?? config.scoreDeviceChurn}
+                  onChange={(e) => setConfigEdit((p) => ({ ...p, scoreDeviceChurn: Number(e.target.value) }))} />
+              </label>
+              <label className="text-xs">Score: Geo
+                <input className="mt-1 w-full border rounded px-2 py-2" type="number"
+                  value={configEdit.scoreGeoVelocity ?? config.scoreGeoVelocity}
+                  onChange={(e) => setConfigEdit((p) => ({ ...p, scoreGeoVelocity: Number(e.target.value) }))} />
+              </label>
+              <label className="text-xs">Score: Concurrent
+                <input className="mt-1 w-full border rounded px-2 py-2" type="number"
+                  value={configEdit.scoreConcurrentSessions ?? config.scoreConcurrentSessions}
+                  onChange={(e) => setConfigEdit((p) => ({ ...p, scoreConcurrentSessions: Number(e.target.value) }))} />
+              </label>
+              <label className="text-xs">Score: ASN Vol
+                <input className="mt-1 w-full border rounded px-2 py-2" type="number"
+                  value={configEdit.scoreAsnVolatility ?? config.scoreAsnVolatility}
+                  onChange={(e) => setConfigEdit((p) => ({ ...p, scoreAsnVolatility: Number(e.target.value) }))} />
+              </label>
+            </div>
+
+            <div className="grid grid-cols-2 md:grid-cols-6 gap-2">
+              <label className="text-xs">Tier MED
+                <input className="mt-1 w-full border rounded px-2 py-2" type="number"
+                  value={configEdit.tierMed ?? config.tierMed}
+                  onChange={(e) => setConfigEdit((p) => ({ ...p, tierMed: Number(e.target.value) }))} />
+              </label>
+              <label className="text-xs">Tier HIGH
+                <input className="mt-1 w-full border rounded px-2 py-2" type="number"
+                  value={configEdit.tierHigh ?? config.tierHigh}
+                  onChange={(e) => setConfigEdit((p) => ({ ...p, tierHigh: Number(e.target.value) }))} />
+              </label>
+              <label className="text-xs">Tier CRITICAL
+                <input className="mt-1 w-full border rounded px-2 py-2" type="number"
+                  value={configEdit.tierCritical ?? config.tierCritical}
+                  onChange={(e) => setConfigEdit((p) => ({ ...p, tierCritical: Number(e.target.value) }))} />
+              </label>
+
+              <div className="flex items-end">
+                <button
+                  className="w-full px-3 py-2 rounded border hover:bg-muted disabled:opacity-50"
+                  onClick={saveConfig}
+                  disabled={savingConfig}
+                >
+                  {savingConfig ? "Saving…" : "Save Config"}
+                </button>
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* Signals Queue */}
+      <div className="rounded border overflow-hidden">
+        <div className="p-3 border-b flex items-center justify-between">
+          <div className="font-semibold">Signals Queue</div>
+          <div className="text-xs text-muted-foreground">
+            Filtered view used for admin triage (close signals after review).
+          </div>
+        </div>
+
+        <div className="p-3 grid grid-cols-1 md:grid-cols-6 gap-2 border-b">
+          <label className="text-xs">
+            Status
+            <select className="mt-1 w-full border rounded px-2 py-2" value={sigStatus} onChange={(e) => setSigStatus(e.target.value)}>
+              {STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </label>
+
+          <label className="text-xs">
+            Severity
+            <select className="mt-1 w-full border rounded px-2 py-2" value={sigSeverity} onChange={(e) => setSigSeverity(e.target.value)}>
+              {SEVERITIES.map((s) => <option key={s} value={s}>{s || "ALL"}</option>)}
+            </select>
+          </label>
+
+          <label className="text-xs">
+            Rule
+            <select className="mt-1 w-full border rounded px-2 py-2" value={sigRule} onChange={(e) => setSigRule(e.target.value)}>
+              <option value="">ALL</option>
+              {RULES.map((r) => <option key={r} value={r}>{r}</option>)}
+            </select>
+          </label>
+
+          <label className="text-xs">
+            User ID (optional)
+            <input className="mt-1 w-full border rounded px-2 py-2" value={sigUserId} onChange={(e) => setSigUserId(e.target.value)} />
+          </label>
+
+          <label className="text-xs">
+            Lookback (hours)
+            <input className="mt-1 w-full border rounded px-2 py-2" type="number" value={sigSinceHours} onChange={(e) => setSigSinceHours(Number(e.target.value))} />
+          </label>
+
+          <div className="flex items-end gap-2">
+            <button className="px-3 py-2 rounded border hover:bg-muted" onClick={refreshSignals} disabled={signalsLoading}>
+              {signalsLoading ? "Loading…" : "Apply"}
+            </button>
+          </div>
+        </div>
+
+        {signalsLoading ? (
+          <div className="p-3 text-sm text-muted-foreground">Loading signals…</div>
+        ) : signals.length === 0 ? (
+          <div className="p-3 text-sm text-muted-foreground">No signals for current filters.</div>
+        ) : (
+          <table className="w-full text-sm">
+            <thead className="bg-muted">
+              <tr>
+                <th className="text-left p-2">Time</th>
+                <th className="text-left p-2">Rule</th>
+                <th className="text-left p-2">Severity</th>
+                <th className="text-left p-2">Users</th>
+                <th className="text-left p-2">Symbol</th>
+                <th className="text-left p-2">Device/IP</th>
+                <th className="text-left p-2">Points</th>
+                <th className="text-left p-2">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {signals.map((s: any) => (
+                <tr key={s.id} className="border-t align-top">
+                  <td className="p-2">{fmtTs(s.created_at)}</td>
+                  <td className="p-2 font-mono text-xs">{s.rule_code}</td>
+                  <td className="p-2"><TierBadge tier={s.severity} /></td>
+                  <td className="p-2">
+                    <button className="underline" onClick={() => openUser(Number(s.primary_user_id))}>
+                      #{s.primary_user_id}
+                    </button>
+                    {s.secondary_user_id ? (
+                      <>
+                        <span className="mx-2">↔</span>
+                        <button className="underline" onClick={() => openUser(Number(s.secondary_user_id))}>
+                          #{s.secondary_user_id}
+                        </button>
+                      </>
+                    ) : null}
+                  </td>
+                  <td className="p-2">{s.symbol ?? "—"}</td>
+                  <td className="p-2">
+                    <div className="font-mono text-xs break-all">{s.device_id ?? "—"}</div>
+                    <div className="text-xs text-muted-foreground">{s.ip ?? "—"}</div>
+                  </td>
+                  <td className="p-2 font-semibold">{s.points}</td>
+                  <td className="p-2">
+                    {s.status === "OPEN" ? (
+                      <button className="px-3 py-1 rounded border hover:bg-muted" onClick={() => closeSignal(Number(s.id))}>
+                        Close
+                      </button>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">{s.status}</span>
+                    )}
+                    <details className="mt-2">
+                      <summary className="cursor-pointer underline text-xs">evidence</summary>
+                      <pre className="text-xs whitespace-pre-wrap break-words mt-2">{s.evidence_json}</pre>
+                    </details>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {/* Flagged Users Table */}
+      <div className="rounded border overflow-hidden">
+        <div className="p-3 border-b flex items-center justify-between">
+          <div className="font-semibold">Flagged Users</div>
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <span>Threshold:</span>
+            <input className="border rounded px-2 py-1 w-20" type="number" min={0} max={100} value={minScore} onChange={(e) => setMinScore(Number(e.target.value))} />
+          </div>
+        </div>
+
+        {loading ? (
+          <div className="p-3 text-sm text-muted-foreground">Loading…</div>
+        ) : rows.length === 0 ? (
+          <div className="p-3 text-sm text-muted-foreground">No users at this threshold.</div>
+        ) : (
+          <table className="w-full text-sm">
+            <thead className="bg-muted">
+              <tr>
+                <th className="text-left p-2">User</th>
+                <th className="text-left p-2">Tier</th>
+                <th className="text-left p-2">Score</th>
+                <th className="text-left p-2">Devices(7d)</th>
+                <th className="text-left p-2">IPs(7d)</th>
+                <th className="text-left p-2">ASNs(7d)</th>
+                <th className="text-left p-2">Linked(30d)</th>
+                <th className="text-left p-2">Hedge(7d)</th>
+                <th className="text-left p-2">Open Signals</th>
+                <th className="text-left p-2">Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((u) => (
+                <tr key={u.userId} className="border-t">
+                  <td className="p-2">
+                    <div className="font-medium">{u.name || "User #" + u.userId}</div>
+                    <div className="text-muted-foreground">{u.email}</div>
+                  </td>
+                  <td className="p-2"><TierBadge tier={u.tier} /></td>
+                  <td className="p-2 font-semibold">{u.scoreCurrent}</td>
+                  <td className="p-2">{u.devices7d}</td>
+                  <td className="p-2">{u.ips7d}</td>
+                  <td className="p-2">{u.asns7d}</td>
+                  <td className="p-2">{u.linkedAccounts30d}</td>
+                  <td className="p-2">{u.hedgePairs7d}</td>
+                  <td className="p-2">{u.openSignalsCount}</td>
+                  <td className="p-2">
+                    <button className="px-3 py-1 rounded border hover:bg-muted" onClick={() => openUser(u.userId)}>
+                      Review
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {/* Detail Modal */}
+      {selectedUserId !== null && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-background rounded-lg border w-[95vw] max-w-6xl max-h-[90vh] overflow-auto">
+            <div className="p-3 border-b flex items-center justify-between">
+              <div className="font-semibold">Grift Review — User #{selectedUserId}</div>
+              <button className="px-3 py-2 rounded border hover:bg-muted" onClick={() => { setSelectedUserId(null); setDetail(null); }}>
+                Close
+              </button>
+            </div>
+
+            {detailLoading ? (
+              <div className="p-4 text-sm text-muted-foreground">Loading user detail…</div>
+            ) : !detail ? (
+              <div className="p-4 text-sm text-muted-foreground">No data.</div>
+            ) : (
+              <div className="p-4 space-y-4">
+                {/* User score summary */}
+                <div className="grid grid-cols-1 md:grid-cols-6 gap-3">
+                  <div className="rounded border p-3">
+                    <div className="text-xs text-muted-foreground">Score</div>
+                    <div className="text-2xl font-semibold">{detail.score?.score_current ?? 0}</div>
+                  </div>
+                  <div className="rounded border p-3">
+                    <div className="text-xs text-muted-foreground">Tier</div>
+                    <div className="text-2xl font-semibold">{String(detail.score?.tier ?? "LOW")}</div>
+                  </div>
+                  <div className="rounded border p-3">
+                    <div className="text-xs text-muted-foreground">Score 7d</div>
+                    <div className="text-2xl font-semibold">{detail.score?.score_7d ?? 0}</div>
+                  </div>
+                  <div className="rounded border p-3">
+                    <div className="text-xs text-muted-foreground">Score 30d</div>
+                    <div className="text-2xl font-semibold">{detail.score?.score_30d ?? 0}</div>
+                  </div>
+                  <div className="rounded border p-3">
+                    <div className="text-xs text-muted-foreground">Open Signals</div>
+                    <div className="text-2xl font-semibold">{detail.score?.open_signals_count ?? 0}</div>
+                  </div>
+                  <div className="rounded border p-3">
+                    <div className="text-xs text-muted-foreground">Last Evaluated</div>
+                    <div className="text-sm">{fmtTs(detail.score?.last_evaluated_at)}</div>
+                  </div>
+                </div>
+
+                {/* Linked Accounts */}
+                <div className="rounded border">
+                  <div className="p-3 border-b font-semibold">Linked Accounts (Shared Device)</div>
+                  {detail.linkedUsers?.length ? (
+                    <table className="w-full text-sm">
+                      <thead className="bg-muted">
+                        <tr>
+                          <th className="text-left p-2">Linked User</th>
+                          <th className="text-left p-2">Device</th>
+                          <th className="text-left p-2">Last Seen</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {detail.linkedUsers.map((r: any, idx: number) => (
+                          <tr key={idx} className="border-t">
+                            <td className="p-2">
+                              <button className="underline" onClick={() => openUser(Number(r.linkedUserId))}>
+                                User #{r.linkedUserId}
+                              </button>
+                            </td>
+                            <td className="p-2 font-mono text-xs">{r.deviceId}</td>
+                            <td className="p-2">{fmtTs(r.lastSeenAt)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  ) : (
+                    <div className="p-3 text-sm text-muted-foreground">No linked users detected.</div>
+                  )}
+                </div>
+
+                {/* Devices */}
+                <div className="rounded border">
+                  <div className="p-3 border-b font-semibold">Devices Seen</div>
+                  {detail.deviceLinks?.length ? (
+                    <table className="w-full text-sm">
+                      <thead className="bg-muted">
+                        <tr>
+                          <th className="text-left p-2">Device</th>
+                          <th className="text-left p-2">Seen Count</th>
+                          <th className="text-left p-2">First Seen</th>
+                          <th className="text-left p-2">Last Seen</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {detail.deviceLinks.map((r: any, idx: number) => (
+                          <tr key={idx} className="border-t">
+                            <td className="p-2 font-mono text-xs">{r.deviceId}</td>
+                            <td className="p-2">{r.seenCount}</td>
+                            <td className="p-2">{fmtTs(r.firstSeenAt)}</td>
+                            <td className="p-2">{fmtTs(r.lastSeenAt)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  ) : (
+                    <div className="p-3 text-sm text-muted-foreground">No devices recorded yet.</div>
+                  )}
+                </div>
+
+                {/* Observations Timeline */}
+                <div className="rounded border">
+                  <div className="p-3 border-b font-semibold">Login Observations (latest 200)</div>
+                  {detail.observations?.length ? (
+                    <table className="w-full text-sm">
+                      <thead className="bg-muted">
+                        <tr>
+                          <th className="text-left p-2">Time</th>
+                          <th className="text-left p-2">Device</th>
+                          <th className="text-left p-2">IP</th>
+                          <th className="text-left p-2">Country/City</th>
+                          <th className="text-left p-2">ASN/Org</th>
+                          <th className="text-left p-2">UA</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {detail.observations.map((o: any) => (
+                          <tr key={o.id} className="border-t align-top">
+                            <td className="p-2">{fmtTs(o.ts)}</td>
+                            <td className="p-2 font-mono text-xs break-all">{o.device_id ?? "—"}</td>
+                            <td className="p-2 font-mono text-xs">{o.ip ?? "—"}</td>
+                            <td className="p-2">
+                              <div>{o.country ?? "—"}</div>
+                              <div className="text-xs text-muted-foreground">{o.city ?? ""}</div>
+                            </td>
+                            <td className="p-2">
+                              <div>{o.asn ?? "—"}</div>
+                              <div className="text-xs text-muted-foreground">{o.org ?? ""}</div>
+                            </td>
+                            <td className="p-2">
+                              <div className="text-xs break-words">{o.user_agent ?? "—"}</div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  ) : (
+                    <div className="p-3 text-sm text-muted-foreground">No observations.</div>
+                  )}
+                </div>
+
+                {/* Trade Observations */}
+                <div className="rounded border">
+                  <div className="p-3 border-b font-semibold">Trade Observations (latest 200)</div>
+                  {detail.tradeObservations?.length ? (
+                    <table className="w-full text-sm">
+                      <thead className="bg-muted">
+                        <tr>
+                          <th className="text-left p-2">Time</th>
+                          <th className="text-left p-2">Trade</th>
+                          <th className="text-left p-2">Symbol</th>
+                          <th className="text-left p-2">Side</th>
+                          <th className="text-left p-2">Device</th>
+                          <th className="text-left p-2">IP</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {detail.tradeObservations.map((t: any) => (
+                          <tr key={t.id} className="border-t">
+                            <td className="p-2">{fmtTs(t.ts)}</td>
+                            <td className="p-2">#{t.trade_id}</td>
+                            <td className="p-2">{t.symbol}</td>
+                            <td className="p-2 font-semibold">{t.side}</td>
+                            <td className="p-2 font-mono text-xs break-all">{t.device_id ?? "—"}</td>
+                            <td className="p-2 font-mono text-xs">{t.ip ?? "—"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  ) : (
+                    <div className="p-3 text-sm text-muted-foreground">No trade observations.</div>
+                  )}
+                </div>
+
+                {/* Signals */}
+                <div className="rounded border">
+                  <div className="p-3 border-b font-semibold">Signals (latest 300)</div>
+                  {detail.signals?.length ? (
+                    <table className="w-full text-sm">
+                      <thead className="bg-muted">
+                        <tr>
+                          <th className="text-left p-2">Time</th>
+                          <th className="text-left p-2">Rule</th>
+                          <th className="text-left p-2">Severity</th>
+                          <th className="text-left p-2">Status</th>
+                          <th className="text-left p-2">Users</th>
+                          <th className="text-left p-2">Points</th>
+                          <th className="text-left p-2">Evidence</th>
+                          <th className="text-left p-2">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {detail.signals.map((s: any) => (
+                          <tr key={s.id} className="border-t align-top">
+                            <td className="p-2">{fmtTs(s.created_at)}</td>
+                            <td className="p-2 font-mono text-xs">{s.rule_code}</td>
+                            <td className="p-2"><TierBadge tier={s.severity} /></td>
+                            <td className="p-2">{s.status}</td>
+                            <td className="p-2">
+                              #{s.primary_user_id}
+                              {s.secondary_user_id ? <> ↔ #{s.secondary_user_id}</> : null}
+                            </td>
+                            <td className="p-2">{s.points}</td>
+                            <td className="p-2">
+                              <details>
+                                <summary className="cursor-pointer underline text-xs">view</summary>
+                                <pre className="text-xs whitespace-pre-wrap break-words mt-2">{s.evidence_json}</pre>
+                              </details>
+                            </td>
+                            <td className="p-2">
+                              {s.status === "OPEN" ? (
+                                <button className="px-3 py-1 rounded border hover:bg-muted" onClick={() => closeSignal(Number(s.id))}>
+                                  Close
+                                </button>
+                              ) : (
+                                <span className="text-xs text-muted-foreground">—</span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  ) : (
+                    <div className="p-3 text-sm text-muted-foreground">No signals.</div>
+                  )}
+                </div>
+
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+```
+
+---
+
+# C) AdminDashboard Integration (recap)
+
+In `client/src/pages/AdminDashboard.tsx`:
+
+1. Import:
+
+```tsx
+import UserManagementGriftTab from "./admin/UserManagementGriftTab";
+```
+
+2. Add mini-tab label:
+
+```ts
+"Grift Detection"
+```
+
+3. Render:
+
+```tsx
+{activeUserMiniTab === "Grift Detection" && <UserManagementGriftTab />}
+```
+
+Place it next to Login History and Audit Trail.
+
+---
+
+# D) Final “Everything” Checklist for Replit Agent 3
+
+## Backend
+
+* [ ] `ensureGriftSchema()` called on server startup
+* [ ] `app.use("/api/admin/grift", griftAdminRouter)` mounted with admin auth
+* [ ] login success calls `griftEngine.onLoginSuccess(...)`
+* [ ] trade submit calls `griftEngine.onTradeSubmit(...)`
+
+## Frontend
+
+* [ ] `X-Device-Id` included in all calls (at minimum: login + trade submit + admin pages)
+* [ ] Grift Detection mini-tab appears in User Management
+* [ ] Summary cards populate
+* [ ] Config edits save
+* [ ] Signals Queue filters and close action work
+* [ ] Flagged Users list works, drilldown opens
+* [ ] CSV export works
+
+---
+
+If you want the next hardening increment after this (not required for this “add everything” request): I can add **case assignment**, **IN_REVIEW workflow**, and **admin action logging** on every signal close/config change so the Grift system itself is audit-trailable at “hedge fund grade.”

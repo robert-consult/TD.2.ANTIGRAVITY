@@ -1,0 +1,136 @@
+proceed
+Updated saved memory
+Thought for 11m 46s
+Thought for 10s
+Account tab: what it actually renders (data lineage)
+
+From the uploaded package, the Account tab is correctly wired to:
+
+/api/auth/current-user for: username, isAdmin, createdAt
+
+/api/account/summary for: balance, equity, usedMargin, freeMargin, pricingStale, asOf
+
+On the client, Floating P/L is not computed from trades directly. It is computed as:
+
+floatingPnl = equity - balance
+
+So, if Floating P/L is wrong in the Account tab, the root cause is almost always in the server-side account revaluation (recalcAccount) or the price source used for MTM.
+
+The concrete bug that can corrupt Floating P/L on the Account tab
+Where it is
+
+server/recalcAccount.ts
+
+What was wrong (execution-quality issue)
+
+The revaluation logic was effectively caching one scalar price per symbol, derived from whichever open trade for that symbol was processed first.
+
+That is not safe when a user holds both BUY and SELL positions on the same symbol, because:
+
+BUY MTM must use BID (close-out price)
+
+SELL MTM must use ASK (close-out price)
+
+If you cache only one price per symbol (e.g., BID), then the SELL trades are marked incorrectly (or vice versa), producing incorrect Floating P/L and potentially incorrect margin.
+
+What I changed
+
+I modified recalcAccount.ts so it caches bid/ask/price/mid per symbol, and then chooses the correct MTM price per trade based on side:
+
+BUY → BID preferred
+
+SELL → ASK preferred
+
+fallback: price / mid if bid/ask missing
+
+This directly fixes the Account tab’s Floating P/L when there are both longs and shorts on the same instrument.
+
+Download the patched file bundle:
+TradingCentral-3AL_recalcAccount_fix.zip
+
+Critical related issue: client was sending close prices (can inject non-live prices)
+
+Even though you said this thread is “about the Account tab,” this is directly connected because realized P/L updates balance, and then MTM uses that balance as the equity base.
+
+What was wrong
+
+Client code (use-trades.tsx + TradeScreen.tsx) was calling:
+
+POST /api/trades/:id/close with { closePrice: currentPrice }
+
+But the server’s close endpoint is designed to be risk-safe and should compute the authoritative close price from the quote feed (bid/ask), blocking stale quotes. Passing client prices creates two problems:
+
+Admins could close at a mid/incorrect price (or a UI-stale price)
+
+Non-admins can be blocked (server rejects manual closePrice unless admin)
+
+What I changed
+
+I updated the client to stop sending closePrice and let the server always compute the close price from the live quotes table.
+
+Download the patched client files bundle:
+TradingCentral-3AL_closePrice_client_fix.zip
+
+Your stale/missing quote policy question (Option 1)
+
+Yes—Option 1 is the professional / risk-safe policy, and your backend in this package is already aligned with it in key places:
+
+Account summary can mark pricing as stale and freeze MTM display (pricingStale)
+
+Trade close blocks execution when quotes are stale (returns 503 + stale symbol info)
+
+Auto-close also skips closing when quotes are stale
+
+That is the correct posture for preventing “non-live price” contamination of P/L.
+
+Immediate professional critique of your order model (Market/Limit/Stop/Pending)
+
+This is important because it will affect history correctness and risk controls:
+
+Pending orders currently have no execution engine
+
+createTrade() sets status = PENDING for Limit/Stop
+
+But there is no backend process that checks quotes and flips PENDING → OPEN
+
+Result: Limit/Stop orders can sit forever and never fill.
+
+Pending orders should not be marked-to-market
+
+MTM / margin should apply only to OPEN positions
+
+Pending orders should reserve margin only if you implement “margin reservation,” otherwise they must not impact equity/used margin.
+
+Correct trigger rules (minimum viable, professional)
+
+Limit BUY: execute when ASK ≤ limitPrice
+
+Limit SELL: execute when BID ≥ limitPrice
+
+Stop BUY: execute when ASK ≥ stopPrice
+
+Stop SELL: execute when BID ≤ stopPrice
+
+Execution must be blocked if quotes are stale (same policy as market/close).
+
+If you want, I will implement the pending-order execution engine in the backend (likely hooked into the quote persist loop or a tight interval worker) and make sure it is bug-resistant: idempotent fills, slippage rules, staleness gating, and correct history fields.
+
+How to verify the Account tab fix quickly
+
+Create two OPEN trades on the same symbol: one BUY, one SELL.
+
+Confirm quotes have valid bid/ask and are not stale.
+
+Open Account tab:
+
+Equity should move correctly with price
+
+Floating P/L should reflect BUY using BID and SELL using ASK
+
+Temporarily force a stale quote (e.g., set is_stale = 1 in quotes for that symbol):
+
+Account tab should show stale banner
+
+Floating P/L should freeze
+
+Closing should be blocked

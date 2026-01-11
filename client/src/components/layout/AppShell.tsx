@@ -1,0 +1,52 @@
+import * as React from "react";
+
+import { cn } from "@/lib/utils";
+
+type AppShellProps = {
+  header?: React.ReactNode;
+  sidebar?: React.ReactNode;
+  mobileNav?: React.ReactNode;
+  children: React.ReactNode;
+  className?: string;
+  contentClassName?: string;
+};
+
+export function AppShell({
+  header,
+  sidebar,
+  mobileNav,
+  children,
+  className,
+  contentClassName,
+}: AppShellProps) {
+  return (
+    <div
+      className={cn(
+        "h-dvh flex flex-col overflow-hidden bg-background text-foreground",
+        className
+      )}
+    >
+      {header ? <div className="shrink-0">{header}</div> : null}
+
+      <div className="@container/app flex-1 min-h-0 overflow-hidden">
+        <div className="flex h-full flex-col @3xl/app:flex-row overflow-hidden">
+          {mobileNav ? (
+            <div className="shrink-0 @3xl/app:hidden">{mobileNav}</div>
+          ) : null}
+
+          {sidebar ? (
+            <aside className="hidden @3xl/app:block w-sidebar shrink-0">
+              {sidebar}
+            </aside>
+          ) : null}
+
+          <main
+            className={cn("flex-1 min-w-0 min-h-0 overflow-hidden", contentClassName)}
+          >
+            {children}
+          </main>
+        </div>
+      </div>
+    </div>
+  );
+}

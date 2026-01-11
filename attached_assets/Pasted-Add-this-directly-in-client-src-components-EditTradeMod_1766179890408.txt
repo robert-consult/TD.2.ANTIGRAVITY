@@ -1,0 +1,80 @@
+Add this directly in **`client/src/components/EditTradeModal.tsx`** inside the **Quick presets** block so you have a one-click **Auto-Fix** that applies the **currently selected/persisted preset** (without reopening the drop-up).
+
+---
+
+## 1) Replace the right-side control area in the Quick presets row
+
+Find your current Quick presets UI (the part that renders the single **Presets (±X)** button). Replace that right-side area with the following:
+
+```tsx
+          {/* Quick presets (drop-up) */}
+          <div className="rounded-md border border-white/10 bg-white/5 p-3 flex items-center justify-between gap-3">
+            <div className="text-sm text-gray-200">
+              Quick presets: set TP/SL relative to the <span className="font-medium">{priceLabel}</span>.
+            </div>
+
+            {/* Controls: Auto-Fix button + Presets drop-up */}
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                disabled={!referencePrice || referencePrice <= 0}
+                className="border-emerald-500/25 bg-emerald-500/5 hover:bg-emerald-500/10"
+                onClick={() => applyPreset(lastPresetPoints)}
+                title={`Apply TP/SL using the current preset (±${lastPresetPoints} points)`}
+              >
+                Auto-Fix
+              </Button>
+
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button type="button" variant="secondary" className="gap-2">
+                    Presets (±{lastPresetPoints})
+                    <ChevronUp className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+
+                <DropdownMenuContent side="top" align="end" className="w-44">
+                  {(AUTO_FIX_PRESETS as unknown as number[]).map((p) => (
+                    <DropdownMenuItem
+                      key={p}
+                      onSelect={() => {
+                        setLastPresetPoints(p); // persists per symbol (your existing logic)
+                        applyPreset(p);          // applies immediately
+                      }}
+                      className="flex items-center justify-between"
+                    >
+                      <span>±{p}</span>
+                      {lastPresetPoints === p ? (
+                        <Check className="h-4 w-4 opacity-90" />
+                      ) : (
+                        <span className="h-4 w-4" />
+                      )}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          </div>
+```
+
+### What this achieves
+
+* **Auto-Fix** applies TP/SL using the **currently selected preset** (e.g., ±200) in one click.
+* **Presets (±X)** still opens the drop-up to change the preset; selecting a preset **applies it immediately**, and the button label updates and persists per symbol.
+
+---
+
+## Optional refinement (recommended)
+
+If you want the button to make the applied preset explicit, change the label:
+
+```tsx
+Auto-Fix (±{lastPresetPoints})
+```
+
+This reduces user confusion when they are switching pairs quickly.
+
+---
+
+If you want, I can also add a small “Applied ±X” toast (non-destructive) when Auto-Fix is clicked, so traders get immediate confirmation without scanning the input fields.

@@ -1,0 +1,1723 @@
+## Trader-facing “Close Reason” list (enhanced)
+
+**Core (must-have)**
+
+* **MANUAL_CLOSE** — Manual (trader clicked Close)
+* **STOP_LOSS_HIT** — Stop Loss hit
+* **TAKE_PROFIT_HIT** — Take Profit hit
+* **MAX_HOLD_TIME** — Max hold time reached (auto-close)
+
+**High-value additions (common in real trading ops)**
+
+* **TRAILING_STOP_HIT** — Trailing stop hit
+* **BREAKEVEN_STOP_HIT** — Break-even stop hit
+* **MARGIN_STOP_OUT** — Stop-out / liquidation (insufficient margin)
+* **DAILY_LOSS_LIMIT** — Daily loss limit hit (risk guardrail)
+* **MAX_DRAWDOWN_LIMIT** — Max drawdown limit hit (risk guardrail)
+* **MAX_CONCURRENT_LOTS_LIMIT** — Max concurrent lots exceeded (risk guardrail)
+* **MAX_CONCURRENT_TRADES_LIMIT** — Max trades exceeded (risk guardrail)
+* **SYMBOL_DISABLED** — Symbol disabled by admin/system
+* **ACCOUNT_FROZEN** — Account frozen (compliance/risk)
+
+**Order-state reasons (not “position close”, but useful in History/Audit)**
+
+* **CANCELED_BY_USER** — Pending order canceled by trader
+* **ORDER_REJECTED** — Pending order rejected (risk/validation/margin)
+
+---
+
+## Implementation strategy (structure + flow)
+
+1. **Single canonical taxonomy** in `shared/closeReasons.ts`
+
+   * Codes + labels + UI severity + backward-compatible normalization (maps legacy values like `SL`, `TP`, `AUTO_TIME_LIMIT`, `MANUAL`).
+2. **Persist closeReason on the trade row** (`trades.closeReason`)
+
+   * Manual close → `MANUAL_CLOSE`
+   * SL/TP auto-close in engine → `STOP_LOSS_HIT` / `TAKE_PROFIT_HIT`
+   * Max-hold cron → `MAX_HOLD_TIME`
+   * Cancel pending → `CANCELED_BY_USER`
+   * Reject pending → `ORDER_REJECTED`
+3. **Write trade audit events with reasonCode = closeReason**
+
+   * Manual close route: `POSITION_CLOSED` + reasonCode `MANUAL_CLOSE`
+   * Engine SL/TP: `SL_TRIGGERED` / `TP_TRIGGERED` + reasonCode `STOP_LOSS_HIT` / `TAKE_PROFIT_HIT`
+   * Max-hold cron: `POSITION_CLOSED` + reasonCode `MAX_HOLD_TIME`
+4. **Trader UI**
+
+   * Display badge (mapped severity) + add a Close Reason filter dropdown
+   * Normalize legacy reasons for display and filtering.
+
+---
+
+# CODE (copy/paste)
+
+## 1) NEW FILE — `shared/closeReasons.ts`
+
+```ts
+/**
+ * Close Reason Taxonomy (shared across backend + frontend)
+ *
+ * Goals:
+ * - Consistent values across trades.closeReason and trade_audit.reasonCode
+ * - Human-friendly labels for trader UI and admin/audit UI
+ * - Backward-compatible normalization for legacy DB values
+ */
+
+export type CloseReasonCode =
+  // Trader / user initiated
+  | "MANUAL_CLOSE"
+  | "PARTIAL_CLOSE" // reserved
+  // Targets / exits
+  | "STOP_LOSS_HIT"
+  | "TAKE_PROFIT_HIT"
+  | "TRAILING_STOP_HIT"
+  | "BREAKEVEN_STOP_HIT"
+  // Time-based
+  | "MAX_HOLD_TIME"
+  // Risk / margin / compliance
+  | "MARGIN_STOP_OUT"
+  | "DAILY_LOSS_LIMIT"
+  | "MAX_DRAWDOWN_LIMIT"
+  | "MAX_CONCURRENT_LOTS_LIMIT"
+  | "MAX_CONCURRENT_TRADES_LIMIT"
+  | "SYMBOL_DISABLED"
+  | "ACCOUNT_FROZEN"
+  // Order-state (pending)
+  | "CANCELED_BY_USER"
+  | "EXPIRED_PENDING_ORDER"
+  | "ORDER_REJECTED"
+  // Market / system
+  | "MARKET_CLOSED"
+  | "MARKET_HALTED"
+  | "PRICE_UNAVAILABLE"
+  | "SYSTEM_MAINTENANCE"
+  // Admin / system discretionary
+  | "ADMIN_CLOSE"
+  | "SYSTEM_CLOSE";
+
+export type CloseReasonCategory =
+  | "USER"
+  | "TARGET"
+  | "TIME"
+  | "MARGIN"
+  | "RISK"
+  | "ORDER"
+  | "MARKET"
+  | "SYSTEM"
+  | "ADMIN";
+
+export type CloseReasonUiVariant =
+  | "success" // expected "normal exit"
+  | "warning" // cautionary, but not necessarily bad
+  | "danger"  // risk/forced/stop-out
+  | "info"    // neutral/system
+  | "neutral";
+
+export interface CloseReasonMeta {
+  code: CloseReasonCode;
+  label: string;       // full label
+  shortLabel?: string; // compact label
+  category: CloseReasonCategory;
+  variant: CloseReasonUiVariant;
+  traderFacing: boolean;
+  description?: string;
+}
+
+const META: Record<CloseReasonCode, CloseReasonMeta> = {
+  MANUAL_CLOSE: {
+    code: "MANUAL_CLOSE",
+    label: "Manual close",
+    shortLabel: "Manual",
+    category: "USER",
+    variant: "neutral",
+    traderFacing: true,
+    description: "Trader manually closed the position.",
+  },
+  PARTIAL_CLOSE: {
+    code: "PARTIAL_CLOSE",
+    label: "Partial close",
+    shortLabel: "Partial",
+    category: "USER",
+    variant: "neutral",
+    traderFacing: false,
+  },
+  STOP_LOSS_HIT: {
+    code: "STOP_LOSS_HIT",
+    label: "Stop loss hit",
+    shortLabel: "SL hit",
+    category: "TARGET",
+    variant: "danger",
+    traderFacing: true,
+  },
+  TAKE_PROFIT_HIT: {
+    code: "TAKE_PROFIT_HIT",
+    label: "Take profit hit",
+    shortLabel: "TP hit",
+    category: "TARGET",
+    variant: "success",
+    traderFacing: true,
+  },
+  TRAILING_STOP_HIT: {
+    code: "TRAILING_STOP_HIT",
+    label: "Trailing stop hit",
+    shortLabel: "TS hit",
+    category: "TARGET",
+    variant: "danger",
+    traderFacing: true,
+  },
+  BREAKEVEN_STOP_HIT: {
+    code: "BREAKEVEN_STOP_HIT",
+    label: "Break-even stop hit",
+    shortLabel: "BE stop",
+    category: "TARGET",
+    variant: "warning",
+    traderFacing: true,
+  },
+  MAX_HOLD_TIME: {
+    code: "MAX_HOLD_TIME",
+    label: "Max hold time reached",
+    shortLabel: "Max hold",
+    category: "TIME",
+    variant: "warning",
+    traderFacing: true,
+  },
+  MARGIN_STOP_OUT: {
+    code: "MARGIN_STOP_OUT",
+    label: "Stop-out / liquidation",
+    shortLabel: "Stop-out",
+    category: "MARGIN",
+    variant: "danger",
+    traderFacing: true,
+  },
+  DAILY_LOSS_LIMIT: {
+    code: "DAILY_LOSS_LIMIT",
+    label: "Daily loss limit",
+    shortLabel: "Daily loss",
+    category: "RISK",
+    variant: "danger",
+    traderFacing: true,
+  },
+  MAX_DRAWDOWN_LIMIT: {
+    code: "MAX_DRAWDOWN_LIMIT",
+    label: "Max drawdown limit",
+    shortLabel: "Drawdown",
+    category: "RISK",
+    variant: "danger",
+    traderFacing: true,
+  },
+  MAX_CONCURRENT_LOTS_LIMIT: {
+    code: "MAX_CONCURRENT_LOTS_LIMIT",
+    label: "Max concurrent lots limit",
+    shortLabel: "Lots limit",
+    category: "RISK",
+    variant: "danger",
+    traderFacing: true,
+  },
+  MAX_CONCURRENT_TRADES_LIMIT: {
+    code: "MAX_CONCURRENT_TRADES_LIMIT",
+    label: "Max concurrent trades limit",
+    shortLabel: "Trade limit",
+    category: "RISK",
+    variant: "danger",
+    traderFacing: true,
+  },
+  SYMBOL_DISABLED: {
+    code: "SYMBOL_DISABLED",
+    label: "Symbol disabled",
+    shortLabel: "Disabled",
+    category: "RISK",
+    variant: "info",
+    traderFacing: true,
+  },
+  ACCOUNT_FROZEN: {
+    code: "ACCOUNT_FROZEN",
+    label: "Account frozen",
+    shortLabel: "Frozen",
+    category: "RISK",
+    variant: "danger",
+    traderFacing: true,
+  },
+  CANCELED_BY_USER: {
+    code: "CANCELED_BY_USER",
+    label: "Canceled by user",
+    shortLabel: "Canceled",
+    category: "ORDER",
+    variant: "neutral",
+    traderFacing: true,
+  },
+  EXPIRED_PENDING_ORDER: {
+    code: "EXPIRED_PENDING_ORDER",
+    label: "Pending order expired",
+    shortLabel: "Expired",
+    category: "ORDER",
+    variant: "neutral",
+    traderFacing: true,
+  },
+  ORDER_REJECTED: {
+    code: "ORDER_REJECTED",
+    label: "Order rejected",
+    shortLabel: "Rejected",
+    category: "ORDER",
+    variant: "danger",
+    traderFacing: true,
+  },
+  MARKET_CLOSED: {
+    code: "MARKET_CLOSED",
+    label: "Market closed",
+    shortLabel: "Mkt closed",
+    category: "MARKET",
+    variant: "info",
+    traderFacing: true,
+  },
+  MARKET_HALTED: {
+    code: "MARKET_HALTED",
+    label: "Market halted",
+    shortLabel: "Halt",
+    category: "MARKET",
+    variant: "info",
+    traderFacing: true,
+  },
+  PRICE_UNAVAILABLE: {
+    code: "PRICE_UNAVAILABLE",
+    label: "Price unavailable",
+    shortLabel: "No price",
+    category: "SYSTEM",
+    variant: "info",
+    traderFacing: true,
+  },
+  SYSTEM_MAINTENANCE: {
+    code: "SYSTEM_MAINTENANCE",
+    label: "System maintenance",
+    shortLabel: "Maintenance",
+    category: "SYSTEM",
+    variant: "info",
+    traderFacing: true,
+  },
+  ADMIN_CLOSE: {
+    code: "ADMIN_CLOSE",
+    label: "Closed by admin",
+    shortLabel: "Admin",
+    category: "ADMIN",
+    variant: "warning",
+    traderFacing: true,
+  },
+  SYSTEM_CLOSE: {
+    code: "SYSTEM_CLOSE",
+    label: "Closed by system",
+    shortLabel: "System",
+    category: "SYSTEM",
+    variant: "info",
+    traderFacing: true,
+  },
+};
+
+export function getCloseReasonMeta(raw: unknown): CloseReasonMeta | null {
+  const code = normalizeCloseReason(raw);
+  if (!code) return null;
+  return META[code] ?? null;
+}
+
+export function listAllCloseReasons(): CloseReasonMeta[] {
+  return Object.values(META);
+}
+
+export function listTraderFacingCloseReasons(): CloseReasonMeta[] {
+  return Object.values(META).filter((m) => m.traderFacing);
+}
+
+/**
+ * Normalizes legacy values found in older rows to the canonical CloseReasonCode.
+ * Returns null if value is empty/unknown.
+ */
+export function normalizeCloseReason(raw: unknown): CloseReasonCode | null {
+  const v = String(raw ?? "").trim();
+  if (!v) return null;
+
+  // Already canonical?
+  if ((META as any)[v]) return v as CloseReasonCode;
+
+  // Legacy values used previously in this repo
+  switch (v) {
+    case "MANUAL":
+    case "MANUAL_CLOSE_REQUESTED":
+      return "MANUAL_CLOSE";
+    case "SL":
+      return "STOP_LOSS_HIT";
+    case "TP":
+      return "TAKE_PROFIT_HIT";
+    case "AUTO_TIME_LIMIT":
+      return "MAX_HOLD_TIME";
+    case "USER_CANCEL":
+      return "CANCELED_BY_USER";
+    case "REJECTED":
+      return "ORDER_REJECTED";
+    default:
+      return null;
+  }
+}
+
+export function closeReasonLabel(raw: unknown, fallback: string = "—"): string {
+  const meta = getCloseReasonMeta(raw);
+  return meta?.label ?? fallback;
+}
+
+export function closeReasonShortLabel(raw: unknown, fallback: string = "—"): string {
+  const meta = getCloseReasonMeta(raw);
+  return meta?.shortLabel ?? meta?.label ?? fallback;
+}
+```
+
+---
+
+## 2) REPLACE FILE — `server/cron/autoClose.ts`
+
+```ts
+import { db } from "../db";
+import { trades, symbolConfigs } from "@shared/schema";
+import { and, eq } from "drizzle-orm";
+import { getExecutionQuote } from "../services/quotes";
+import { realizedPnlUsd } from "../lib/realizedPnl";
+import { storage } from "../storage";
+import { writeTradeAudit, calculateSpreadPips } from "../lib/auditWriter";
+import { buildSystemContext } from "../lib/auditContext";
+import { generateExecutionId, generatePositionId } from "../lib/id";
+import type { CloseReasonCode } from "@shared/closeReasons";
+
+// TODO: wire to System Config / admin setting.
+// For now: 1 hour.
+const MAX_HOLD_MS = 60 * 60 * 1000;
+const CLOSE_REASON: CloseReasonCode = "MAX_HOLD_TIME";
+
+export async function autoClosePositions() {
+  const now = Date.now();
+
+  const open = await db
+    .select({ t: trades, sym: symbolConfigs })
+    .from(trades)
+    .leftJoin(symbolConfigs, eq(trades.symbolId, symbolConfigs.id))
+    .where(eq(trades.status, "OPEN"));
+
+  for (const r of open) {
+    const t = r.t;
+    const sym = r.sym;
+    if (!sym) continue;
+
+    const openedTs = (t.executedAt ?? t.openedAt ?? new Date()).getTime();
+    const heldMs = now - openedTs;
+
+    if (heldMs < MAX_HOLD_MS) continue;
+
+    // Fetch quote (bid/ask/mid/spread)
+    const q = await getExecutionQuote(sym.symbol);
+    if (!q) continue;
+
+    const side = t.type as "BUY" | "SELL";
+    const lots = Number(t.lots ?? 1);
+
+    // Close price: BUY closes at bid, SELL closes at ask
+    const closePx = side === "BUY" ? Number(q.bid) : Number(q.ask);
+
+    const pnlUsd = realizedPnlUsd({
+      symbol: sym.symbol,
+      side,
+      lots,
+      openPrice: Number(t.openPrice),
+      closePrice: closePx,
+    });
+
+    // Persist trade closure
+    const closed = await storage.closeTrade(t.id, closePx, pnlUsd.toFixed(2), CLOSE_REASON);
+
+    // Write audit event (SYSTEM close)
+    try {
+      const correlationId = String((t as any).correlationId || undefined);
+      const ctx = buildSystemContext(correlationId || undefined);
+
+      await writeTradeAudit({
+        ctx,
+        eventType: "POSITION_CLOSED",
+        eventCategory: "SYSTEM",
+        tradeId: t.id,
+        orderId: null,
+        executionId: generateExecutionId(),
+        positionId: generatePositionId(),
+        symbol: sym.symbol,
+        side,
+        qtyLots: lots,
+        requestedPrice: closePx,
+        triggerPrice: null,
+        fillPrice: closePx,
+        quoteBid: Number(q.bid),
+        quoteAsk: Number(q.ask),
+        quoteMid: Number(q.mid),
+        quoteSpread: Number(q.spread),
+        quoteTs: q.lastUpdated ? new Date(q.lastUpdated) : new Date(),
+        spreadPips: calculateSpreadPips(sym.symbol, Number(q.spread)),
+        slippagePips: 0,
+        slippageUsd: 0,
+        riskCheckName: "MAX_HOLD_TIME",
+        riskLimitValue: MAX_HOLD_MS,
+        riskObservedValue: heldMs,
+        riskResult: "PASS",
+        reasonCode: CLOSE_REASON,
+        note: `Auto-closed: max hold time reached (${Math.round(heldMs / 60000)}m)`,
+        payload: {
+          closeReason: CLOSE_REASON,
+          heldMs,
+          maxHoldMs: MAX_HOLD_MS,
+          openedAt: new Date(openedTs).toISOString(),
+          closedAt: new Date().toISOString(),
+          closeSource: q.source ?? "quotes_db",
+        },
+      });
+    } catch (e) {
+      console.warn("[autoClose] Failed to write audit event", e);
+    }
+
+    // Update user balance via existing path
+    await storage.updateUserBalance(closed.userId);
+
+    console.log(
+      `[autoClose] Closed trade=${t.id} symbol=${sym.symbol} reason=${CLOSE_REASON} heldMs=${heldMs} pnlUsd=${pnlUsd.toFixed(
+        2
+      )}`
+    );
+  }
+}
+```
+
+---
+
+## 3) REPLACE FILE — `server/engine/orderEngine.ts`
+
+```ts
+import { db } from "../db";
+import { trades, users, userSettings, symbolConfigs, globalSettings } from "@shared/schema";
+import { type CloseReasonCode } from "@shared/closeReasons";
+
+import { and, desc, eq, sql } from "drizzle-orm";
+import { calculateSpreadPips, calculateSlippagePips, calculateSlippageUsd, writeTradeAudit, type AuditContext } from "../lib/auditWriter";
+import { requiredMargin } from "../lib/margin";
+import { realizedPnlUsd } from "../lib/realizedPnl";
+import { generateCorrelationId, generateExecutionId, generateOrderId, generatePositionId } from "../lib/id";
+import { getBidAsk, type Quote } from "../services/quotes";
+
+let running = false;
+
+function n(v: unknown): number | null {
+  if (v === null || v === undefined || v === "") return null;
+  const x = Number(v);
+  return Number.isFinite(x) ? x : null;
+}
+
+function getSystemAuditContext(correlationId: string): AuditContext {
+  return {
+    actorType: "SYSTEM",
+    actorUserId: null,
+    actorSessionId: null,
+    actorIp: null,
+    actorUserAgent: "orderEngine",
+    correlationId,
+  };
+}
+
+// Fetch global limits from the database
+async function getGlobalLimits() {
+  const [settings] = await db.select().from(globalSettings).limit(1);
+  
+  // Default values if not configured
+  return {
+    maxTradesPerUser: Number(settings?.maxTradesPerUser ?? 5),
+    maxTradesPerInstrument: Number(settings?.maxTradesPerInstrument ?? 3),
+    maxConcurrentLots: Number(settings?.maxConcurrentLots ?? 50),
+    defaultLeverage: Number(settings?.defaultLeverage ?? 100),
+  };
+}
+
+async function recalcAccount(userId: number) {
+  // No-op placeholder: balance is updated on close; freeMargin recalcs are elsewhere.
+  return userId;
+}
+
+async function auditFill(params: {
+  tradeId: number;
+  correlationId: string;
+  orderId: string;
+  executionId: string;
+  positionId: string;
+  symbol: string;
+  side: string;
+  orderType: string;
+  qtyLots: number;
+  requestedPrice: number | null;
+  triggerPrice: number | null;
+  fillPrice: number;
+  quoteBid: number;
+  quoteAsk: number;
+  quoteMid: number;
+  quoteSpread: number;
+  quoteTs: Date;
+  note: string;
+}) {
+  const ctx = getSystemAuditContext(params.correlationId);
+  const slippagePips = calculateSlippagePips(params.symbol, params.requestedPrice, params.fillPrice);
+  const spreadPips = calculateSpreadPips(params.symbol, params.quoteSpread);
+  const slippageUsd = calculateSlippageUsd(params.symbol, params.qtyLots, slippagePips);
+
+  await writeTradeAudit({
+    ctx,
+    eventType: "ORDER_FILLED",
+    eventCategory: "ORDER",
+    tradeId: params.tradeId,
+    orderId: params.orderId,
+    executionId: params.executionId,
+    positionId: params.positionId,
+    symbol: params.symbol,
+    side: params.side,
+    qtyLots: params.qtyLots,
+    requestedPrice: params.requestedPrice,
+    triggerPrice: params.triggerPrice,
+    fillPrice: params.fillPrice,
+    quoteBid: params.quoteBid,
+    quoteAsk: params.quoteAsk,
+    quoteMid: params.quoteMid,
+    quoteSpread: params.quoteSpread,
+    quoteTs: params.quoteTs,
+    spreadPips,
+    slippagePips,
+    slippageUsd,
+    riskCheckName: "ORDER_FILL",
+    riskLimitValue: 0,
+    riskObservedValue: 0,
+    riskResult: "PASS",
+    reasonCode: null,
+    note: params.note,
+    payload: {
+      orderType: params.orderType,
+    },
+  });
+}
+
+async function auditRejection(params: {
+  tradeId: number;
+  correlationId: string;
+  orderId: string;
+  symbol: string;
+  side: string;
+  orderType: string;
+  qtyLots: number;
+  requestedPrice: number | null;
+  quoteBid: number;
+  quoteAsk: number;
+  quoteMid: number;
+  quoteSpread: number;
+  quoteTs: Date;
+  riskCheckName: string;
+  riskLimitValue: number;
+  riskObservedValue: number;
+  reasonCode: string;
+  note: string;
+}) {
+  const ctx = getSystemAuditContext(params.correlationId);
+  const spreadPips = calculateSpreadPips(params.symbol, params.quoteSpread);
+
+  await writeTradeAudit({
+    ctx,
+    eventType: "ORDER_REJECTED",
+    eventCategory: "RISK",
+    tradeId: params.tradeId,
+    orderId: params.orderId,
+    executionId: null,
+    positionId: null,
+    symbol: params.symbol,
+    side: params.side,
+    qtyLots: params.qtyLots,
+    requestedPrice: params.requestedPrice,
+    triggerPrice: null,
+    fillPrice: null,
+    quoteBid: params.quoteBid,
+    quoteAsk: params.quoteAsk,
+    quoteMid: params.quoteMid,
+    quoteSpread: params.quoteSpread,
+    quoteTs: params.quoteTs,
+    spreadPips,
+    slippagePips: 0,
+    slippageUsd: 0,
+    riskCheckName: params.riskCheckName,
+    riskLimitValue: params.riskLimitValue,
+    riskObservedValue: params.riskObservedValue,
+    riskResult: "FAIL",
+    reasonCode: params.reasonCode,
+    note: params.note,
+    payload: {
+      orderType: params.orderType,
+      requestedPrice: params.requestedPrice,
+      riskCheckName: params.riskCheckName,
+      riskLimitValue: params.riskLimitValue,
+      riskObservedValue: params.riskObservedValue,
+      reasonCode: params.reasonCode,
+    },
+  });
+}
+
+// Institutional-grade audit for position closes
+async function auditClose(params: {
+  tradeId: number;
+  correlationId: string;
+  positionId: string;
+  executionId: string;
+  symbol: string;
+  side: string;
+  qtyLots: number;
+  openPrice: number;
+  closePrice: number;
+  closeReason: CloseReasonCode;
+  quoteBid: number;
+  quoteAsk: number;
+  quoteMid: number;
+  quoteSpread: number;
+  quoteTs: Date;
+  profit: number;
+}) {
+  const ctx = getSystemAuditContext(params.correlationId);
+  const spreadPips = calculateSpreadPips(params.symbol, params.quoteSpread);
+
+  // Close events are executed at the current quote (no separate "request" vs "fill")
+  const cr = params.closeReason;
+  const eventType = cr === "STOP_LOSS_HIT" ? "SL_TRIGGERED"
+                  : cr === "TAKE_PROFIT_HIT" ? "TP_TRIGGERED"
+                  : "POSITION_CLOSED";
+
+  await writeTradeAudit({
+    ctx,
+    eventType,
+    eventCategory: "POSITION",
+    tradeId: params.tradeId,
+    orderId: null,
+    executionId: params.executionId,
+    positionId: params.positionId,
+    symbol: params.symbol,
+    side: params.side,
+    qtyLots: params.qtyLots,
+    requestedPrice: params.closePrice,
+    triggerPrice: null,
+    fillPrice: params.closePrice,
+    quoteBid: params.quoteBid,
+    quoteAsk: params.quoteAsk,
+    quoteMid: params.quoteMid,
+    quoteSpread: params.quoteSpread,
+    quoteTs: params.quoteTs,
+    spreadPips,
+    slippagePips: 0,
+    slippageUsd: 0,
+    riskCheckName: "POSITION_CLOSE",
+    riskLimitValue: 0,
+    riskObservedValue: 0,
+    riskResult: "PASS",
+    reasonCode: cr,
+    note: `closeReason=${cr}, profit=${params.profit.toFixed(2)}`,
+    payload: {
+      openPrice: params.openPrice,
+      closePrice: params.closePrice,
+      profit: params.profit,
+      closeReason: cr,
+    },
+  });
+}
+
+async function processPendingForSymbol(symbol: string, q: Quote) {
+  const ba = getBidAsk(q);
+  if (!ba) return;
+
+  const rows = await db
+    .select({
+      t: trades,
+      u: users,
+      s: userSettings,
+      sym: symbolConfigs,
+    })
+    .from(trades)
+    .leftJoin(users, eq(trades.userId, users.id))
+    .leftJoin(userSettings, eq(userSettings.userId, users.id))
+    .leftJoin(symbolConfigs, eq(trades.symbolId, symbolConfigs.id))
+    .where(and(eq(trades.status, "PENDING"), eq(symbolConfigs.symbol, symbol)))
+    .orderBy(desc(trades.openedAt));
+
+  for (const r of rows) {
+    const t = r.t;
+    const u = r.u;
+    if (!u) continue;
+
+    const side = t.type as "BUY" | "SELL";
+    const orderType = String(t.orderType ?? "Market");
+    const orderTypeLower = orderType.toLowerCase();
+    const lots = Number(t.lots ?? 1);
+    const quoteTs = q.lastUpdated ? new Date(q.lastUpdated) : new Date();
+    
+    // Generate lifecycle IDs for this order processing
+    const correlationId = String((t as any).correlationId || generateCorrelationId());
+    const orderId = generateOrderId();
+
+    const requested =
+      orderTypeLower.includes("limit") ? n(t.limitPrice) :
+      orderTypeLower.includes("stop") ? n(t.stopPrice) :
+      null;
+
+    if (requested === null) {
+      await db.update(trades)
+        .set({ status: "CANCELED", closeReason: "ORDER_REJECTED", closedAt: new Date() })
+        .where(and(eq(trades.id, t.id), eq(trades.status, "PENDING")));
+      await auditRejection({
+        tradeId: t.id,
+        correlationId,
+        orderId,
+        symbol,
+        side,
+        orderType,
+        qtyLots: lots,
+        requestedPrice: null,
+        quoteBid: ba.bid,
+        quoteAsk: ba.ask,
+        quoteMid: ba.mid,
+        quoteSpread: ba.spread,
+        quoteTs,
+        riskCheckName: "ORDER_VALIDATION",
+        riskLimitValue: 0,
+        riskObservedValue: 0,
+        reasonCode: "MISSING_PRICE",
+        note: "Missing limitPrice/stopPrice",
+      });
+      continue;
+    }
+
+    let triggered = false;
+    let triggerPrice: number = 0;
+
+    if (orderTypeLower.includes("limit")) {
+      if (side === "BUY") { triggered = ba.ask <= requested; triggerPrice = ba.ask; }
+      else { triggered = ba.bid >= requested; triggerPrice = ba.bid; }
+    } else if (orderTypeLower.includes("stop")) {
+      if (side === "BUY") { triggered = ba.ask >= requested; triggerPrice = ba.ask; }
+      else { triggered = ba.bid <= requested; triggerPrice = ba.bid; }
+    } else {
+      await db.update(trades)
+        .set({ status: "CANCELED", closeReason: "ORDER_REJECTED", closedAt: new Date() })
+        .where(and(eq(trades.id, t.id), eq(trades.status, "PENDING")));
+      await auditRejection({
+        tradeId: t.id,
+        correlationId,
+        orderId,
+        symbol,
+        side,
+        orderType,
+        qtyLots: lots,
+        requestedPrice: requested,
+        quoteBid: ba.bid,
+        quoteAsk: ba.ask,
+        quoteMid: ba.mid,
+        quoteSpread: ba.spread,
+        quoteTs,
+        riskCheckName: "ORDER_VALIDATION",
+        riskLimitValue: 0,
+        riskObservedValue: 0,
+        reasonCode: "UNKNOWN_ORDER_TYPE",
+        note: `Unknown orderType=${t.orderType}`,
+      });
+      continue;
+    }
+
+    if (!triggered) continue;
+
+    const fillPrice = side === "BUY" ? ba.ask : ba.bid;
+    
+    // Get global limits dynamically
+    const globalLimits = await getGlobalLimits();
+    
+    // Leverage: user override takes precedence over global (can exceed)
+    const effectiveLeverage = Number(u.leverage ?? globalLimits.defaultLeverage);
+    const neededMargin = requiredMargin(symbol, lots, fillPrice, effectiveLeverage);
+
+    // Check max concurrent trades using global limits (user can be stricter)
+    const openCount = await db.select({ c: trades.id })
+      .from(trades)
+      .where(and(eq(trades.userId, u.id), eq(trades.status, "OPEN")));
+
+    // User override takes precedence over global (can exceed)
+    const effectiveMaxConcurrent = Number(r.s?.maxConcurrent ?? globalLimits.maxTradesPerUser);
+    if (openCount.length >= effectiveMaxConcurrent) {
+      await db.update(trades)
+        .set({ status: "CANCELED", closeReason: "ORDER_REJECTED", closedAt: new Date() })
+        .where(and(eq(trades.id, t.id), eq(trades.status, "PENDING")));
+      await auditRejection({
+        tradeId: t.id,
+        correlationId,
+        orderId,
+        symbol,
+        side,
+        orderType,
+        qtyLots: lots,
+        requestedPrice: requested,
+        quoteBid: ba.bid,
+        quoteAsk: ba.ask,
+        quoteMid: ba.mid,
+        quoteSpread: ba.spread,
+        quoteTs,
+        riskCheckName: "MAX_CONCURRENT_TRADES",
+        riskLimitValue: effectiveMaxConcurrent,
+        riskObservedValue: openCount.length,
+        reasonCode: "MAX_TRADES_EXCEEDED",
+        note: `Max concurrent open trades exceeded (limit=${effectiveMaxConcurrent})`,
+      });
+      continue;
+    }
+
+    // Check max concurrent lots using global limits (user can be stricter)
+    const openTrades = await db.select({ lots: trades.lots })
+      .from(trades)
+      .where(and(eq(trades.userId, u.id), eq(trades.status, "OPEN")));
+    
+    const currentOpenLots = openTrades.reduce((sum, ot) => sum + Number(ot.lots || 0), 0);
+    // User override takes precedence over global (can exceed)
+    const effectiveMaxConcurrentLots = Number(r.s?.maxConcurrentLots ?? globalLimits.maxConcurrentLots);
+    
+    if (currentOpenLots + lots > effectiveMaxConcurrentLots) {
+      await db.update(trades)
+        .set({ status: "CANCELED", closeReason: "ORDER_REJECTED", closedAt: new Date() })
+        .where(and(eq(trades.id, t.id), eq(trades.status, "PENDING")));
+      await auditRejection({
+        tradeId: t.id,
+        correlationId,
+        orderId,
+        symbol,
+        side,
+        orderType,
+        qtyLots: lots,
+        requestedPrice: requested,
+        quoteBid: ba.bid,
+        quoteAsk: ba.ask,
+        quoteMid: ba.mid,
+        quoteSpread: ba.spread,
+        quoteTs,
+        riskCheckName: "MAX_CONCURRENT_LOTS",
+        riskLimitValue: effectiveMaxConcurrentLots,
+        riskObservedValue: currentOpenLots + lots,
+        reasonCode: "MAX_LOTS_EXCEEDED",
+        note: `Max concurrent lots exceeded. Open: ${currentOpenLots}, Requested: ${lots}, Limit: ${effectiveMaxConcurrentLots}`,
+      });
+      console.log(`[OrderEngine] Canceled pending order ${t.id}: would exceed max concurrent lots (${currentOpenLots} + ${lots} > ${effectiveMaxConcurrentLots})`);
+      continue;
+    }
+
+    // Check per-instrument cap (count OPEN + other PENDING trades for this symbol)
+    const openPerSymbol = await db.select({ c: trades.id })
+      .from(trades)
+      .leftJoin(symbolConfigs, eq(trades.symbolId, symbolConfigs.id))
+      .where(and(eq(trades.userId, u.id), eq(trades.status, "OPEN"), eq(symbolConfigs.symbol, symbol)));
+    
+    // Also count other pending orders for this symbol (excluding the current one being processed)
+    const pendingPerSymbol = await db.select({ c: trades.id })
+      .from(trades)
+      .leftJoin(symbolConfigs, eq(trades.symbolId, symbolConfigs.id))
+      .where(and(
+        eq(trades.userId, u.id), 
+        eq(trades.status, "PENDING"), 
+        eq(symbolConfigs.symbol, symbol),
+        sql`${trades.id} != ${t.id}` // Exclude current pending order
+      ));
+
+    // Total active per symbol = OPEN + other PENDING (current order will become OPEN if filled)
+    const activePerSymbol = openPerSymbol.length + pendingPerSymbol.length;
+
+    // User override takes precedence over global (can exceed)
+    const effectiveMaxTradesPerInstrument = Number(r.s?.maxConcurrentPerInstrument ?? globalLimits.maxTradesPerInstrument);
+
+    // If filling this order would exceed the limit, reject it
+    if (activePerSymbol >= effectiveMaxTradesPerInstrument) {
+      await db.update(trades)
+        .set({ status: "CANCELED", closeReason: "ORDER_REJECTED", closedAt: new Date() })
+        .where(and(eq(trades.id, t.id), eq(trades.status, "PENDING")));
+      await auditRejection({
+        tradeId: t.id,
+        correlationId,
+        orderId,
+        symbol,
+        side,
+        orderType,
+        qtyLots: lots,
+        requestedPrice: requested,
+        quoteBid: ba.bid,
+        quoteAsk: ba.ask,
+        quoteMid: ba.mid,
+        quoteSpread: ba.spread,
+        quoteTs,
+        riskCheckName: "MAX_TRADES_PER_INSTRUMENT",
+        riskLimitValue: effectiveMaxTradesPerInstrument,
+        riskObservedValue: activePerSymbol,
+        reasonCode: "MAX_PER_INSTRUMENT_EXCEEDED",
+        note: `Max trades per instrument exceeded (OPEN=${openPerSymbol.length}, PENDING=${pendingPerSymbol.length}, limit=${effectiveMaxTradesPerInstrument})`,
+      });
+      continue;
+    }
+
+    // Margin check
+    const freeMargin = Number(u.freeMargin ?? 0);
+    if (freeMargin < neededMargin) {
+      await db.update(trades)
+        .set({ status: "CANCELED", closeReason: "ORDER_REJECTED", closedAt: new Date() })
+        .where(and(eq(trades.id, t.id), eq(trades.status, "PENDING")));
+      await auditRejection({
+        tradeId: t.id,
+        correlationId,
+        orderId,
+        symbol,
+        side,
+        orderType,
+        qtyLots: lots,
+        requestedPrice: requested,
+        quoteBid: ba.bid,
+        quoteAsk: ba.ask,
+        quoteMid: ba.mid,
+        quoteSpread: ba.spread,
+        quoteTs,
+        riskCheckName: "MARGIN_CHECK",
+        riskLimitValue: neededMargin,
+        riskObservedValue: freeMargin,
+        reasonCode: "INSUFFICIENT_MARGIN",
+        note: "Insufficient free margin at execution",
+      });
+      continue;
+    }
+
+    // Fill the order
+    const updated = await db.update(trades)
+      .set({
+        status: "OPEN",
+        executedAt: new Date(),
+        openPrice: fillPrice,
+        correlationId,
+        openQuoteTs: quoteTs,
+        openSource: "quotes_db",
+        openBid: ba.bid,
+        openAsk: ba.ask,
+        openMid: ba.mid,
+        openSpread: ba.spread,
+      })
+      .where(and(eq(trades.id, t.id), eq(trades.status, "PENDING")))
+      .returning();
+
+    if (updated.length === 0) continue;
+
+    // Generate execution and position IDs for the fill
+    const executionId = generateExecutionId();
+    const positionId = generatePositionId();
+
+    await auditFill({
+      tradeId: t.id,
+      correlationId,
+      orderId,
+      executionId,
+      positionId,
+      symbol,
+      side,
+      orderType,
+      qtyLots: lots,
+      requestedPrice: requested,
+      triggerPrice,
+      fillPrice,
+      quoteBid: ba.bid,
+      quoteAsk: ba.ask,
+      quoteMid: ba.mid,
+      quoteSpread: ba.spread,
+      quoteTs,
+      note: `orderType=${t.orderType}`,
+    });
+
+    await recalcAccount(u.id);
+    console.log(`[OrderEngine] Filled pending order: trade=${t.id} type=${t.orderType} fillPrice=${fillPrice}`);
+  }
+}
+
+async function processStopsForOpenTrades(symbol: string, q: Quote) {
+  const ba = getBidAsk(q);
+  if (!ba) return;
+
+  const openRows = await db
+    .select({ t: trades, u: users, sym: symbolConfigs })
+    .from(trades)
+    .leftJoin(users, eq(trades.userId, users.id))
+    .leftJoin(symbolConfigs, eq(trades.symbolId, symbolConfigs.id))
+    .where(and(eq(trades.status, "OPEN"), eq(symbolConfigs.symbol, symbol)));
+
+  for (const r of openRows) {
+    const t = r.t;
+    const u = r.u;
+    if (!u) continue;
+
+    const side = t.type as "BUY" | "SELL";
+    const sl = n(t.stopLoss);
+    const tp = n(t.takeProfit);
+
+    // Close price: BUY closes at bid, SELL closes at ask
+    const closePx = side === "BUY" ? ba.bid : ba.ask;
+
+    let reason: CloseReasonCode | null = null;
+
+    if (side === "BUY") {
+      if (sl !== null && ba.bid <= sl) reason = "STOP_LOSS_HIT";
+      else if (tp !== null && ba.bid >= tp) reason = "TAKE_PROFIT_HIT";
+    } else {
+      if (sl !== null && ba.ask >= sl) reason = "STOP_LOSS_HIT";
+      else if (tp !== null && ba.ask <= tp) reason = "TAKE_PROFIT_HIT";
+    }
+
+    if (!reason) continue;
+
+    const lots = Number(t.lots ?? 1);
+    const openPx = Number(t.openPrice);
+    const quoteTs = q.lastUpdated ? new Date(q.lastUpdated) : new Date();
+
+    // Use proper P/L calculation
+    const pnlUsd = realizedPnlUsd({
+      symbol,
+      side,
+      lots,
+      openPrice: openPx,
+      closePrice: closePx,
+    });
+    const profitNum = pnlUsd;
+    const profit = profitNum.toFixed(2);
+
+    const closed = await db.update(trades)
+      .set({
+        status: "CLOSED",
+        closePrice: closePx,
+        profit,
+        closeReason: reason,
+        closeQuoteTs: quoteTs,
+        closeSource: "quotes_db",
+        closeBid: ba.bid,
+        closeAsk: ba.ask,
+        closeMid: ba.mid,
+        closeSpread: ba.spread,
+        closedAt: new Date(),
+      })
+      .where(and(eq(trades.id, t.id), eq(trades.status, "OPEN")))
+      .returning();
+
+    if (closed.length === 0) continue;
+
+    // Update balance
+    const newBalance = (Number(u.balance) + Number(profit)).toFixed(2);
+    await db.update(users).set({ balance: newBalance }).where(eq(users.id, u.id));
+
+    // Generate lifecycle IDs for the close event
+    const correlationId = String((t as any).correlationId || generateCorrelationId());
+    const positionId = generatePositionId();
+    const executionId = generateExecutionId();
+
+    await auditClose({
+      tradeId: t.id,
+      correlationId,
+      positionId,
+      executionId,
+      symbol,
+      side,
+      qtyLots: lots,
+      openPrice: openPx,
+      closePrice: closePx,
+      closeReason: reason,
+      quoteBid: ba.bid,
+      quoteAsk: ba.ask,
+      quoteMid: ba.mid,
+      quoteSpread: ba.spread,
+      quoteTs,
+      profit: profitNum,
+    });
+
+    await recalcAccount(u.id);
+    console.log(`[OrderEngine] Closed position via ${reason}: trade=${t.id} profit=${profit}`);
+  }
+}
+
+export async function onQuotesUpdated(quotes: Quote[]) {
+  if (running) return;
+  running = true;
+  try {
+    for (const q of quotes) {
+      if (!q?.symbol) continue;
+      if (q.isStale) continue;
+
+      const symbol = String(q.symbol).toUpperCase();
+      await processPendingForSymbol(symbol, q);
+      await processStopsForOpenTrades(symbol, q);
+    }
+  } finally {
+    running = false;
+  }
+}
+```
+
+---
+
+## 4) REPLACE FILE — `client/src/pages/HistoryScreen.tsx`
+
+```tsx
+import { useQuery } from "@tanstack/react-query";
+import { useMemo, useState } from "react";
+import { useAuth } from "@/hooks/use-auth";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Badge } from "@/components/ui/badge";
+import { getCloseReasonMeta, listTraderFacingCloseReasons, normalizeCloseReason } from "@shared/closeReasons";
+import {
+  Pagination,
+  PaginationContent,
+  PaginationEllipsis,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+} from "@/components/ui/pagination";
+
+export default function HistoryScreen() {
+  const { user } = useAuth();
+  const [search, setSearch] = useState("");
+  const [symbolFilter, setSymbolFilter] = useState("all");
+  const [timeFilter, setTimeFilter] = useState("all");
+  const [closeReasonFilter, setCloseReasonFilter] = useState<string>("all");
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
+
+  const { data: trades = [], isLoading } = useQuery({
+    queryKey: ["/api/trades", user?.id],
+  });
+
+  const traderReasonOptions = useMemo(() => listTraderFacingCloseReasons(), []);
+
+  const filteredTrades = useMemo(() => {
+    return trades.filter((trade: any) => {
+      // Only show closed trades
+      if (!trade.closePrice) return false;
+
+      // Search filter
+      if (search && !trade.symbol.toLowerCase().includes(search.toLowerCase())) return false;
+
+      // Symbol filter
+      if (symbolFilter !== "all" && trade.symbol !== symbolFilter) return false;
+
+      // Time filter
+      if (timeFilter !== "all") {
+        const closeDate = new Date(trade.closedAt);
+        const now = new Date();
+
+        switch (timeFilter) {
+          case "today":
+            if (closeDate.toDateString() !== now.toDateString()) return false;
+            break;
+          case "week":
+            const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+            if (closeDate < weekAgo) return false;
+            break;
+          case "month":
+            const monthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+            if (closeDate < monthAgo) return false;
+            break;
+        }
+      }
+
+      // Close reason filter
+      if (closeReasonFilter !== "all") {
+        const norm = normalizeCloseReason(trade.closeReason);
+        if (norm !== closeReasonFilter) return false;
+      }
+
+      return true;
+    });
+  }, [trades, search, symbolFilter, timeFilter, closeReasonFilter]);
+
+  const sortedTrades = useMemo(() => {
+    return filteredTrades.sort((a: any, b: any) => new Date(b.closedAt).getTime() - new Date(a.closedAt).getTime());
+  }, [filteredTrades]);
+
+  // Pagination logic
+  const totalPages = Math.ceil(sortedTrades.length / itemsPerPage);
+  const paginatedTrades = sortedTrades.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+
+  // Get unique symbols for filter dropdown
+  const uniqueSymbols = useMemo(() => {
+    const symbols = [...new Set(trades.map((trade: any) => trade.symbol))];
+    return symbols.sort();
+  }, [trades]);
+
+  // Format currency
+  const formatCurrency = (value: number) => {
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: "USD",
+      minimumFractionDigits: 2,
+    }).format(value);
+  };
+
+  // Format date
+  const formatDate = (dateString: string) => {
+    return new Date(dateString).toLocaleString();
+  };
+
+  // Reset page when filters change
+  const resetPage = () => setCurrentPage(1);
+
+  // Generate pagination items
+  const paginationItems = () => {
+    const items = [];
+    const maxVisible = 5;
+
+    if (totalPages <= maxVisible) {
+      for (let i = 1; i <= totalPages; i++) {
+        items.push(
+          <PaginationItem key={i}>
+            <PaginationLink
+              isActive={currentPage === i}
+              onClick={() => setCurrentPage(i)}
+              className="cursor-pointer"
+            >
+              {i}
+            </PaginationLink>
+          </PaginationItem>
+        );
+      }
+    } else {
+      // Always show first page
+      items.push(
+        <PaginationItem key={1}>
+          <PaginationLink
+            isActive={currentPage === 1}
+            onClick={() => setCurrentPage(1)}
+            className="cursor-pointer"
+          >
+            1
+          </PaginationLink>
+        </PaginationItem>
+      );
+
+      // Show ellipsis if needed
+      if (currentPage > 3) {
+        items.push(
+          <PaginationItem key="ellipsis1">
+            <PaginationEllipsis />
+          </PaginationItem>
+        );
+      }
+
+      // Show pages around current
+      const start = Math.max(2, currentPage - 1);
+      const end = Math.min(totalPages - 1, currentPage + 1);
+
+      for (let i = start; i <= end; i++) {
+        items.push(
+          <PaginationItem key={i}>
+            <PaginationLink
+              isActive={currentPage === i}
+              onClick={() => setCurrentPage(i)}
+              className="cursor-pointer"
+            >
+              {i}
+            </PaginationLink>
+          </PaginationItem>
+        );
+      }
+
+      // Show ellipsis if needed
+      if (currentPage < totalPages - 2) {
+        items.push(
+          <PaginationItem key="ellipsis2">
+            <PaginationEllipsis />
+          </PaginationItem>
+        );
+      }
+
+      // Always show last page
+      items.push(
+        <PaginationItem key={totalPages}>
+          <PaginationLink
+            isActive={currentPage === totalPages}
+            onClick={() => setCurrentPage(totalPages)}
+            className="cursor-pointer"
+          >
+            {totalPages}
+          </PaginationLink>
+        </PaginationItem>
+      );
+    }
+
+    return items;
+  };
+
+  if (isLoading) {
+    return (
+      <div className="p-6">
+        <Card>
+          <CardContent className="p-6">
+            <div className="text-center">Loading trade history...</div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  return (
+    <div className="p-6 space-y-6">
+      <Card>
+        <CardHeader>
+          <CardTitle>Trade History</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {/* Filters */}
+          <div className="flex flex-wrap gap-4 mb-6">
+            <Input
+              placeholder="Search by symbol..."
+              value={search}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                resetPage();
+              }}
+              className="w-[200px]"
+            />
+
+            <Select
+              value={symbolFilter}
+              onValueChange={(value) => {
+                setSymbolFilter(value);
+                resetPage();
+              }}
+            >
+              <SelectTrigger className="w-[150px]">
+                <SelectValue placeholder="All symbols" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All symbols</SelectItem>
+                {uniqueSymbols.map((symbol) => (
+                  <SelectItem key={symbol} value={symbol}>
+                    {symbol}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <Select
+              value={closeReasonFilter}
+              onValueChange={(value) => {
+                setCloseReasonFilter(value);
+                resetPage();
+              }}
+            >
+              <SelectTrigger className="w-[190px]">
+                <SelectValue placeholder="Close reason" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All close reasons</SelectItem>
+                {traderReasonOptions.map((r) => (
+                  <SelectItem key={r.code} value={r.code}>
+                    {r.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <Select
+              value={timeFilter}
+              onValueChange={(value) => {
+                setTimeFilter(value);
+                resetPage();
+              }}
+            >
+              <SelectTrigger className="w-[150px]">
+                <SelectValue placeholder="All time" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All time</SelectItem>
+                <SelectItem value="today">Today</SelectItem>
+                <SelectItem value="week">Last 7 days</SelectItem>
+                <SelectItem value="month">Last 30 days</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Results count */}
+          <div className="mb-4 text-sm text-gray-600">
+            Showing {paginatedTrades.length} of {sortedTrades.length} closed trades
+          </div>
+
+          {/* Table */}
+          <div className="rounded-md border">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Date</TableHead>
+                  <TableHead>Symbol</TableHead>
+                  <TableHead>Type</TableHead>
+                  <TableHead>Lots</TableHead>
+                  <TableHead>Open Price</TableHead>
+                  <TableHead>Close Price</TableHead>
+                  <TableHead>P&L</TableHead>
+                  <TableHead>Close Reason</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {paginatedTrades.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={8} className="text-center py-8">
+                      No closed trades found
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  paginatedTrades.map((trade: any) => (
+                    <TableRow key={trade.id}>
+                      <TableCell className="font-mono text-xs">{formatDate(trade.closedAt)}</TableCell>
+                      <TableCell className="font-medium">{trade.symbol}</TableCell>
+                      <TableCell>
+                        <span className={trade.type === "BUY" ? "text-green-600" : "text-red-600"}>
+                          {trade.type}
+                        </span>
+                      </TableCell>
+                      <TableCell>{trade.lots}</TableCell>
+                      <TableCell className="font-mono">{trade.openPrice}</TableCell>
+                      <TableCell className="font-mono">{trade.closePrice}</TableCell>
+                      <TableCell>
+                        <span className={parseFloat(trade.profit) >= 0 ? "text-green-600" : "text-red-600"}>
+                          {formatCurrency(parseFloat(trade.profit))}
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        {(() => {
+                          const meta = getCloseReasonMeta(trade.closeReason);
+                          if (!meta) return <span className="text-gray-500">—</span>;
+                          const badgeVariant =
+                            meta.variant === "danger"
+                              ? "destructive"
+                              : meta.variant === "info"
+                                ? "outline"
+                                : meta.variant === "success"
+                                  ? "default"
+                                  : "secondary";
+                          return <Badge variant={badgeVariant}>{meta.shortLabel ?? meta.label}</Badge>;
+                        })()}
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </div>
+
+          {/* Pagination */}
+          {totalPages > 1 && (
+            <div className="mt-6 flex justify-center">
+              <Pagination>
+                <PaginationContent>
+                  <PaginationItem>
+                    <PaginationPrevious
+                      onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
+                      className={`cursor-pointer ${currentPage === 1 ? "pointer-events-none opacity-50" : ""}`}
+                    />
+                  </PaginationItem>
+
+                  {paginationItems()}
+
+                  <PaginationItem>
+                    <PaginationNext
+                      onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
+                      className={`cursor-pointer ${
+                        currentPage === totalPages ? "pointer-events-none opacity-50" : ""
+                      }`}
+                    />
+                  </PaginationItem>
+                </PaginationContent>
+              </Pagination>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+```
+
+---
+
+# SMALL PATCHES (copy/paste blocks)
+
+## A) `server/storage.ts` — replace `cancelTrade(...)` with this
+
+```ts
+async cancelTrade(id: number): Promise<Trade | undefined> {
+  const [trade] = await db
+    .update(trades)
+    .set({ status: "CANCELED", closeReason: "CANCELED_BY_USER", closedAt: new Date() })
+    .where(eq(trades.id, id))
+    .returning();
+  return trade;
+}
+```
+
+## B) `server/routes.ts` — manual close route block (replace the whole handler)
+
+```ts
+  app.post("/api/trades/:id/close", async (req, res) => {
+    try {
+      const tradeId = parseInt(req.params.id);
+      const trade = await storage.getTrade(tradeId);
+
+      if (!trade) {
+        return res.status(404).json({ message: "Trade not found" });
+      }
+
+      if (trade.status !== "OPEN") {
+        return res.status(400).json({ message: "Only open trades can be closed" });
+      }
+
+      const symbolConfig = await storage.getSymbolConfigById(trade.symbolId);
+      if (!symbolConfig) {
+        return res.status(400).json({ message: "Invalid symbol config" });
+      }
+
+      // Use execution quote for closing
+      const q = await getExecutionQuote(symbolConfig.symbol);
+      if (!q) {
+        return res.status(503).json({ message: "No executable price available" });
+      }
+
+      // Close price: BUY closes at bid, SELL closes at ask
+      const closePrice = trade.type === "BUY" ? Number(q.bid) : Number(q.ask);
+
+      // Calculate profit/loss
+      const pnlUsd = realizedPnlUsd({
+        symbol: symbolConfig.symbol,
+        side: trade.type,
+        lots: Number(trade.lots ?? 1),
+        openPrice: Number(trade.openPrice),
+        closePrice,
+      });
+
+      // Close trade
+      const closedTrade = await storage.closeTrade(
+        tradeId,
+        closePrice,
+        pnlUsd.toFixed(2),
+        "MANUAL_CLOSE"
+      );
+
+      // Update user balance
+      await storage.updateUserBalance(trade.userId);
+
+      // Audit trail (institutional grade)
+      await writeTradeAudit({
+        ctx: buildAuditContext(req, { correlationId: trade.correlationId || generateCorrelationId() }),
+        eventType: "POSITION_CLOSED",
+        eventCategory: "POSITION",
+        tradeId,
+        orderId: null,
+        executionId: generateExecutionId(),
+        positionId: generatePositionId(),
+        symbol: symbolConfig.symbol,
+        side: trade.type,
+        qtyLots: Number(trade.lots ?? 1),
+        requestedPrice: closePrice,
+        triggerPrice: null,
+        fillPrice: closePrice,
+        quoteBid: Number(q.bid),
+        quoteAsk: Number(q.ask),
+        quoteMid: Number(q.mid),
+        quoteSpread: Number(q.spread),
+        quoteTs: q.lastUpdated ? new Date(q.lastUpdated) : new Date(),
+        spreadPips: calculateSpreadPips(symbolConfig.symbol, Number(q.spread)),
+        slippagePips: 0,
+        slippageUsd: 0,
+        riskCheckName: "MANUAL_CLOSE",
+        riskLimitValue: 0,
+        riskObservedValue: 0,
+        riskResult: "PASS",
+        reasonCode: "MANUAL_CLOSE",
+        note: "Manual close requested",
+        payload: {
+          closeReason: "MANUAL_CLOSE",
+          closeSource: q.source,
+          closeBid: q.bid,
+          closeAsk: q.ask,
+          closeMid: q.mid,
+          closeSpread: q.spread,
+        },
+      });
+
+      res.json(closedTrade);
+    } catch (error) {
+      console.error("Error closing trade:", error);
+      res.status(500).json({ message: "Failed to close trade" });
+    }
+  });
+```
+
+## C) `server/routes.ts` — pending cancel route block (replace the whole handler)
+
+```ts
+  app.post("/api/trades/:id/cancel", async (req, res) => {
+    try {
+      const tradeId = parseInt(req.params.id);
+      const trade = await storage.getTrade(tradeId);
+
+      if (!trade) {
+        return res.status(404).json({ message: "Trade not found" });
+      }
+
+      if (trade.status !== "PENDING") {
+        return res.status(400).json({ message: "Only pending trades can be canceled" });
+      }
+
+      const canceledTrade = await storage.cancelTrade(tradeId);
+
+      // Audit trail
+      const symbolConfig = await storage.getSymbolConfigById(trade.symbolId);
+      await writeTradeAudit({
+        ctx: buildAuditContext(req, { correlationId: trade.correlationId || generateCorrelationId() }),
+        eventType: "ORDER_CANCELED",
+        eventCategory: "ORDER",
+        tradeId,
+        orderId: null,
+        executionId: null,
+        positionId: null,
+        symbol: symbolConfig?.symbol || "UNKNOWN",
+        side: trade.type,
+        qtyLots: Number(trade.lots ?? 1),
+        requestedPrice: null,
+        triggerPrice: null,
+        fillPrice: null,
+        quoteBid: null,
+        quoteAsk: null,
+        quoteMid: null,
+        quoteSpread: null,
+        quoteTs: new Date(),
+        spreadPips: null,
+        slippagePips: null,
+        slippageUsd: null,
+        riskCheckName: "USER_CANCEL",
+        riskLimitValue: 0,
+        riskObservedValue: 0,
+        riskResult: "PASS",
+        reasonCode: "CANCELED_BY_USER",
+        note: "Trader canceled pending order",
+        payload: { status: "CANCELED" },
+      });
+
+      res.json(canceledTrade);
+    } catch (error) {
+      console.error("Error canceling trade:", error);
+      res.status(500).json({ message: "Failed to cancel trade" });
+    }
+  });
+```
+
+---
+
+If you want the **Close Reason dropdown** to only show the four core items (Manual / SL / TP / Max hold), set `traderFacing: false` on the rest in `shared/closeReasons.ts`, or filter `traderReasonOptions` down to a curated subset.

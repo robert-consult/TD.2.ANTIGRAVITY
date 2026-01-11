@@ -1,0 +1,5067 @@
+Dynamic UI Translation System
+
+TradingCentral-3AL-V3-GIT1.zip
+Clean-export-TradingCentral-3ALV3 (4).zip 
+Design a dynamic languagetranslation system for all userfacing dashboard components.
+The system should operate as
+follows:
+Research and Planning Phase
+Conduct background research and
+produce a concrete
+implementation plan for a
+dynamic, extensible translation
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 1/244
+engine.
+Automatic UI Translation Coverage
+All user-facing text—including
+buttons, labels, navigation
+elements, tooltips, and component
+copy—must be automatically
+translated across supported
+languages, including any newly
+added components without
+requiring manual intervention.
+Change Detection & Content
+Collection
+The translation engine must
+continuously and passively detect
+newly introduced or modified userfacing text in trader dashboards
+and related UI components,
+without incurring unnecessary
+runtime overhead.
+LLM-Driven Translation Pipeline
+When new text or components are
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 2/244
+detected:
+The engine submits the content to
+an LLM for translation into the
+configured target languages.
+The translated outputs are
+returned in a structured format.
+Persistent Translation Storage
+Translations are encoded and
+stored in a database or displayschema layer so that:
+The application can render
+translated content natively.
+Translations remain available even
+if the external LLM or helper
+service becomes unavailable.
+Offline-Safe and Future-Proof
+Operation
+Once translations are stored, the
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 3/244
+system must rely on internal data
+for rendering language variants,
+only re-engaging the LLM when
+new or modified UI content is
+detected.
+Low-Overhead Monitoring
+The translation engine should
+remain idle and resource-efficient
+when no UI changes are detected,
+activating only when new userfacing content is introduced.
+The result should be a selfmaintaining, scalable, and faulttolerant UI translation system that
+automatically adapts as the
+application evolves.
+Start and then first produce a
+formal system architecture diagram
+(logical + data flow)
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 4/244
+Thought for 2m 23s
+Dynamic UI Translation Engine — Formal
+System Architecture (Logical + Data Flow)
+1) Logical architecture (components + interfaces)
+mermaid
+flowchart LR
+ %% ======================
+ %% BUILD / DEPLOY PLANE
+ %% ======================
+ subgraph BD["Build & Deploy Plane (CI/CD)"]
+ R["Repo: client/src (TS/TSX)"] --> VP["Vite Bui
+ VP --> PLG["Auto-i18n Vite Plugin\n(A) AST stri
+ PLG --> MAN["i18n-manifest.json\n{stringId, sou
+ PLG --> BND["Client Bundle\n(tr(), I18nProvider
+ MAN -->|CI authenticated POST| ING["Backend: /a
+ end
+ %% ======================
+ %% BACKEND PLANE
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 5/244
+ %% ======================
+ subgraph BE["Backend Plane (Express + SQLite/Driz
+ ING --> DIFF["Manifest diff + upsert\n(new/chan
+ DIFF --> DB[(SQLite)\n i18n_source_strings\n i1
+ DIFF --> JOBS["Enqueue translation jobs\n(per l
+ JOBS --> DB
+ APIB["/api/i18n/bundle?locale=xx\nETag/If-None-
+ ADM["Admin UI (System Config)\n- supported loca
+ end
+ %% ======================
+ %% WORKER PLANE
+ %% ======================
+ subgraph WK["Worker Plane (node-cron / queue cons
+ DB --> WKR["Translation Worker\n(pull pending j
+ WKR --> PRM["Prompt & policy layer\n(ICU-safe, 
+ PRM --> LLM["LLM Provider Adapter\n(OpenAI/othe
+ LLM --> VAL["Validation\n- placeholders preserv
+ VAL -->|write| DB
+ end
+ %% ======================
+ %% FRONTEND RUNTIME
+ %% ======================
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 6/244
+Key enabling mechanisms reflected above:
+Build-time change detection (low/no runtime
+overhead) via a Vite plugin transform hook. 
+Extraction + stable IDs patterned after established
+message-extraction workflows (hash/id interpolation
+ subgraph FE["Frontend Runtime (React)"]
+ BND --> BOOT["Locale bootstrap\n(user pref → fa
+ BOOT --> LOAD["I18nProvider loads bundle\n(HTTP
+ LOAD --> CACHE["Local cache\n(IndexedDB/localSt
+ CACHE --> MEM["In-memory dictionary\nstringId →
+ MEM --> TR["tr(sourceText, context)\n→ translat
+ end
+ %% Runtime fetch path
+ LOAD -->|GET bundle| APIB
+ APIB -->|JSON bundle| LOAD
+ %% Notes
+ classDef plane fill:#f7f7f7,stroke:#999,stroke-wi
+ class BD,BE,WK,FE plane;
+vitejs +1
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 7/244
+concepts). 
+Runtime bundle loading aligned with standard
+“load translations from server” i18n approaches.
+2) End-to-end data flow (sequence diagram)
+formatjs.github.io
+i18next
+mermaid
+sequenceDiagram
+ autonumber
+ participant Dev as Developer/Repo
+ participant CI as CI Build (Vite)
+ participant Plug as Auto-i18n Plugin
+ participant API as Backend Ingest API
+ participant DB as SQLite (i18n tables)
+ participant W as Translation Worker
+ participant LLM as LLM Provider
+ participant FE as Frontend (React)
+ Dev->>CI: Commit UI changes (new/modified text)
+ CI->>Plug: Build + run AST harvest + JSX transfor
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 8/244
+This sequence is self-maintaining because the only time
+the LLM is engaged is when the manifest diff produces
+new/changed strings; otherwise, the runtime stays in
+“bundle fetch + cache + render” mode.
+ Plug-->>CI: Emit i18n-manifest.json + client bund
+ CI->>API: POST manifest (auth)
+ API->>DB: Upsert strings + store manifest version
+ API->>DB: Create translation jobs for missing loc
+ loop Pending jobs
+ W->>DB: Pull N pending jobs
+ W->>LLM: Translate payload (batched)
+ LLM-->>W: Structured translations
+ W->>DB: Validate + store translations + mark jo
+ end
+ FE->>API: GET /api/i18n/bundle?locale=xx (ETag)
+ API->>DB: Read translations for locale + version
+ API-->>FE: JSON bundle (stringId→text) + ETag
+ FE->>FE: Cache bundle + render via tr() fallback 
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 9/244
+If you want the next deliverable immediately after this: I
+will translate this architecture into (a) concrete DB
+schema additions in Drizzle, (b) the Vite plugin design
+(harvester + transformer rules), and (c) the worker + API
+endpoints and caching strategy.
+Sources
+Proceed
+Thought for 25m 36s
+Below is the next step (“Proceed”) after the architecture
+diagram: a concrete, repo-aligned implementation
+blueprint plus the first tranche of real code scaffolding
+already staged against the clean-export codebase
+(client build-time auto-extraction + runtime i18n
+store/provider + Vite integration + DB schema/ensure
+hooks).
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 10/244
+What remains incomplete in this response (and will be
+completed next if you say “Continue”): server i18n API
+routes + manifest ingestion service + translation job
+queue worker + OpenAI/LLM provider adapter +
+minimal admin endpoints. I also have not yet added the
+final routes.ts registration for /api/i18n nor the
+server startup ingestion from dist/public/i18nmanifest.json . Those are the next steps.
+1) Background Research (Key Design
+Justifications)
+1.1 Why build-time detection (not runtime
+scanning)
+To satisfy:
+“continuously and passively detect newly
+introduced or modified text”
+“without incurring unnecessary runtime overhead”
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 11/244
+“automatic coverage including newly added
+components”
+…the most reliable approach is build-time AST
+extraction + transformation, not runtime DOM scraping.
+Build-time extraction enables:
+deterministic detection of new/changed strings on
+every build,
+zero production runtime overhead (no DOM
+observation / mutation scanning),
+automatic inclusion of new components without dev
+“remembering to add translation hooks.”
+1.2 Vite plugin approach is idiomatic and
+low overhead
+Vite supports transforming code during build using
+plugins. This is the correct integration point for
+“automatic coverage,” because Vite already
+parses/transforms TSX/JSX and runs once per build.
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 12/244
+Vite plugin transform and generateBundle are
+standard hooks for:
+rewriting JSX literals into t(...) calls,
+emitting a manifest asset ( i18n-manifest.json ) into
+the final build.
+This aligns with common Vite plugin patterns (transform
++ emit assets).
+1.3 LLM integration should use structured
+output
+To ensure translation responses are machine-safe and do
+not “drift” into unparseable formats, use structured
+outputs / JSON schema in the LLM request.
+OpenAI’s Responses API supports structured outputs
+and has a stable endpoint:
+POST https://api.openai.com/v1/responses
+and structured output is configured using text.format
+with JSON schema ( type: "json_schema" , strict:
+true ).
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 13/244
+This is the most robust way to ensure returned
+translations can be reliably persisted without
+retries/parsing errors.
+2) Concrete Implementation Plan
+(Phased)
+Phase A — Client i18n Runtime (DONE in
+code below)
+1. Add a global i18n store and translation helpers:
+tr(id, defaultText) → returns translated text
+or fallback.
+trFmt(...) → lightweight placeholder
+interpolation ( {name} ).
+2. Add I18nProvider :
+selects locale from localStorage → browser →
+user profile preference,
+fetches bundle from backend
+/api/i18n/bundle?locale=xx ,
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 14/244
+supports ETag caching to avoid redundant
+payloads.
+Phase B — Build-Time Auto-Translation
+Coverage (DONE in code below)
+1. Create Vite plugin:
+parses TSX/JSX files with Babel parser,
+detects user-facing strings in:
+JSXText nodes,
+string literal JSX props ( label , title ,
+placeholder , etc.),
+common object keys ( toast({title:
+"..."}) style).
+rewrites those literals to __tr("id",
+"defaultText") .
+injects import { tr as __tr } from "@/i18n";
+as needed.
+2. Emits i18n-manifest.json into dist/public/
+during build.
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 15/244
+Phase C — DB Persistence Layer (DONE in
+code below)
+1. Add i18n tables:
+i18n_manifest_versions
+i18n_source_strings
+i18n_translations
+i18n_translation_jobs
+2. Extend system_config with i18n flags and defaults:
+i18n_enabled , i18n_default_locale ,
+i18n_supported_locales_csv ,
+i18n_llm_enabled ,
+i18n_auto_translate_on_ingest ,
+optional model param i18n_openai_model .
+3. Add ensureSchema hooks so SQLite boots cleanly
+without manual migrations.
+Phase D — Server APIs + Ingest + Worker
+(NEXT)
+1. Public endpoint:
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 16/244
+GET /api/i18n/bundle?locale=xx → returns {
+locale, strings } with ETag.
+2. Ingest:
+server reads dist/public/i18n-manifest.json
+at startup and/or admin endpoint POST
+/api/admin/i18n/ingest .
+upserts strings into i18n_source_strings .
+enqueues missing translation jobs for
+configured locales.
+3. Worker:
+processes i18n_translation_jobs only when
+queue non-empty (idle otherwise).
+calls LLM provider in batches.
+stores translations in i18n_translations .
+3) Implemented Code (Already
+Applied to clean-export )
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 17/244
+Below I’m listing the exact files created/changed (all
+inline).
+These are real, repo-compatible changes with your stack
+(React 18 + Vite + Express + SQLite + Drizzle).
+3.1 Client — i18n store
+File: client/src/i18n/store.ts
+ts
+type Listener = () => void;
+export type I18nBundle = {
+ locale: string;
+ etag?: string;
+ strings: Record<string, string>;
+};
+type I18nState = {
+ locale: string;
+ bundle: I18nBundle | null;
+Copy code
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 18/244
+};
+let state: I18nState = {
+ locale: "en",
+ bundle: null,
+};
+const listeners = new Set<Listener>();
+export function getI18nState(): I18nState {
+ return state;
+}
+export function setI18nLocale(locale: string) {
+ if (!locale) return;
+ if (state.locale === locale) return;
+ state = { ...state, locale };
+ for (const l of listeners) l();
+}
+export function setI18nBundle(bundle: I18nBundle | 
+ state = { ...state, bundle };
+ for (const l of listeners) l();
+}
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 19/244
+3.2 Client — translation helpers used by the
+plugin
+File: client/src/i18n/index.ts
+export function subscribeI18n(listener: Listener) {
+ listeners.add(listener);
+ return () => listeners.delete(listener);
+}
+ts
+import { getI18nState } from "./store";
+/**
+ * Translate by stable id.
+ *
+ * The build-time auto-i18n plugin injects calls to
+ *
+ * - If a translation is missing, we fall back to d
+Copy code
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 20/244
+ * - We keep runtime overhead minimal: no network c
+ */
+export function tr(id: string, defaultText: string)
+ if (!id) return defaultText;
+ const { bundle } = getI18nState();
+ const translated = bundle?.strings?.[id];
+ return translated ?? defaultText;
+}
+/**
+ * Translate with ICU-lite placeholders: "Hello {na
+ *
+ * NOTE: This is intentionally simple (no plural ru
+ * semantics later, swap this function with a full 
+ */
+export function trFmt(
+ id: string,
+ defaultText: string,
+ vars: Record<string, string | number | boolean | 
+): string {
+ const base = tr(id, defaultText);
+ return base.replace(/\{([a-zA-Z0-9_]+)\}/g, (_, k
+ const v = vars?.[key];
+ return v === null || v === undefined ? "" : Str
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 21/244
+3.3 Client — provider that selects locale and
+loads bundle
+File: client/src/i18n/I18nProvider.tsx
+ });
+}
+tsx
+import React, { createContext, useCallback, useEff
+import { useQuery } from "@tanstack/react-query";
+import { getI18nState, setI18nBundle, setI18nLocale
+import { useAuth } from "@/hooks/use-auth";
+export type I18nContextValue = {
+ locale: string;
+ setLocale: (locale: string) => void;
+ loaded: boolean;
+};
+Copy code
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 22/244
+export const I18nContext = createContext<I18nContex
+function normalizeLocale(locale: string | null | un
+ if (!locale) return "en";
+ // Keep only the primary language subtag (e.g. "e
+ return locale.toLowerCase().split("-")[0];
+}
+async function fetchBundle(locale: string, etag?: s
+ const headers: Record<string, string> = {};
+ if (etag) headers["If-None-Match"] = etag;
+ const res = await fetch(`/api/i18n/bundle?locale=
+ if (res.status === 304) {
+ const cur = getI18nState().bundle;
+ if (!cur) throw new Error("Got 304 but no cache
+ return cur;
+ }
+ if (!res.ok) {
+ const body = await res.text().catch(() => "");
+ throw new Error(`Failed to load i18n bundle (${
+ }
+ const next = (await res.json()) as I18nBundle;
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 23/244
+ const nextEtag = res.headers.get("ETag") ?? undef
+ return { ...next, etag: nextEtag };
+}
+export function I18nProvider({ children }: { childr
+ const { isAuthenticated } = useAuth();
+ const [locale, _setLocale] = useState<string>(() 
+ const saved = localStorage.getItem("i18n.locale
+ if (saved) return normalizeLocale(saved);
+ return normalizeLocale(navigator.language);
+ });
+ useEffect(() => {
+ setI18nLocale(locale);
+ }, [locale]);
+ // If authenticated, prefer server-stored languag
+ const preferencesQuery = useQuery({
+ queryKey: ["profilePreferences"],
+ queryFn: async () => {
+ const res = await fetch("/api/profile/prefere
+ if (!res.ok) return null;
+ return (await res.json()) as { language?: str
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 24/244
+ },
+ enabled: isAuthenticated,
+ staleTime: 60_000,
+ });
+ useEffect(() => {
+ const pref = preferencesQuery.data?.language;
+ if (!pref) return;
+ const normalized = normalizeLocale(pref);
+ if (normalized && normalized !== locale) {
+ _setLocale(normalized);
+ }
+ }, [preferencesQuery.data?.language]);
+ const setLocale = useCallback((next: string) => {
+ const normalized = normalizeLocale(next);
+ localStorage.setItem("i18n.locale", normalized)
+ _setLocale(normalized);
+ }, []);
+ const bundleQuery = useQuery({
+ queryKey: ["i18nBundle", locale],
+ queryFn: async () => {
+ const currentEtag = getI18nState().bundle?.et
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 25/244
+ return await fetchBundle(locale, currentEtag)
+ },
+ staleTime: 5 * 60_000,
+ refetchOnWindowFocus: false,
+ });
+ useEffect(() => {
+ if (bundleQuery.data) setI18nBundle(bundleQuery
+ }, [bundleQuery.data]);
+ const value = useMemo<I18nContextValue>(
+ () => ({
+ locale,
+ setLocale,
+ loaded: !!bundleQuery.data,
+ }),
+ [locale, setLocale, bundleQuery.data],
+ );
+ return <I18nContext.Provider value={value}>{child
+}
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 26/244
+3.4 Client — wiring provider into the app
+File changed: client/src/App.tsx
+(only showing the relevant delta)
+tsx
+import { I18nProvider } from "@/i18n/I18nProvider"
+function App() {
+ return (
+ <QueryClientProvider client={queryClient}>
+ <AuthProvider>
+ <I18nProvider>
+ <AppRoutes />
+ <Toaster />
+ </I18nProvider>
+ </AuthProvider>
+ </QueryClientProvider>
+ );
+}
+Copy code
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 27/244
+3.5 Build-time: Auto-i18n Vite plugin
+File: client/vite.plugins/autoI18n.ts
+ts
+import type { Plugin, ResolvedConfig } from "vite"
+import crypto from "crypto";
+import MagicString from "magic-string";
+import { parse } from "@babel/parser";
+import traverse from "@babel/traverse";
+type ManifestEntry = {
+ id: string;
+ defaultText: string;
+ file: string;
+ line?: number;
+ column?: number;
+ kind: "JSXText" | "JSXAttr" | "ObjectProp";
+ propName?: string;
+};
+const TRANSLATABLE_JSX_ATTRS = new Set([
+Copy code
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 28/244
+ "label",
+ "title",
+ "placeholder",
+ "alt",
+ "aria-label",
+ "ariaLabel",
+ "tooltip",
+ "helpText",
+ "description",
+ "emptyText",
+ "header",
+]);
+const TRANSLATABLE_OBJECT_KEYS = new Set([
+ "title",
+ "description",
+ "label",
+ "placeholder",
+ "emptyText",
+ "header",
+ "text",
+]);
+function looksTranslatable(text: string): boolean {
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 29/244
+ const t = text.trim();
+ if (!t) return false;
+ if (/^(https?:\/\/|\/{1,2})/i.test(t)) return fal
+ if (/^[A-Z0-9_\-]{1,6}$/.test(t)) return false; /
+ if (!/[A-Za-z]/.test(t)) return false;
+ return true;
+}
+function normalizeText(text: string): string {
+ return text.replace(/\s+/g, " ").trim();
+}
+function stableId(params: { file: string; kind: str
+ const base = `${params.file}::${params.kind}::${p
+ return crypto.createHash("sha256").update(base).d
+}
+function nodeLoc(node: any): { line?: number; colum
+ const loc = node?.loc?.start;
+ if (!loc) return {};
+ return { line: loc.line, column: loc.column };
+}
+function hasI18nDisablePragma(code: string): boolea
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 30/244
+ return /i18n-disable/i.test(code);
+}
+export function autoI18nPlugin(): Plugin {
+ let config: ResolvedConfig;
+ const manifest = new Map<string, ManifestEntry>()
+ return {
+ name: "tradehub-auto-i18n",
+ enforce: "pre",
+ configResolved(resolved) {
+ config = resolved;
+ },
+ transform(code, id) {
+ if (!id.includes("/src/")) return;
+ if (!/\.(tsx|jsx|ts|js)$/.test(id)) return;
+ if (id.includes("/node_modules/")) return;
+ if (hasI18nDisablePragma(code)) return;
+ let ast;
+ try {
+ ast = parse(code, {
+ sourceType: "module",
+ plugins: ["typescript", "jsx"],
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 31/244
+ sourceFilename: id,
+ errorRecovery: true,
+ ranges: true,
+ });
+ } catch {
+ return;
+ }
+ const relFile = id
+ .replace(config.root.replace(/\\/g, "/"), "
+ .replace(/^\//, "");
+ const s = new MagicString(code);
+ let changed = false;
+ let needsImport = false;
+ let lastImportEnd = 0;
+ let hasImport = false;
+ for (const stmt of (ast as any).program.body)
+ if (stmt?.type === "ImportDeclaration") {
+ lastImportEnd = Math.max(lastImportEnd, s
+ if (stmt.source?.value === "@/i18n") {
+ hasImport = true;
+ }
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 32/244
+ }
+ }
+ traverse(ast as any, {
+ JSXText(path) {
+ const raw = path.node.value;
+ const text = normalizeText(raw);
+ if (!looksTranslatable(text)) return;
+ const idHash = stableId({ file: relFile, 
+ manifest.set(idHash, {
+ id: idHash,
+ defaultText: text,
+ file: relFile,
+ ...nodeLoc(path.node),
+ kind: "JSXText",
+ });
+ if (typeof path.node.start !== "number"
+ s.overwrite(path.node.start, path.node.en
+ changed = true;
+ needsImport = true;
+ },
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 33/244
+ JSXAttribute(path) {
+ const name = path.node.name;
+ if (name.type !== "JSXIdentifier") return
+ const propName = name.name;
+ if (!TRANSLATABLE_JSX_ATTRS.has(propName)
+ const v = path.node.value;
+ if (!v || v.type !== "StringLiteral") ret
+ const text = normalizeText(v.value);
+ if (!looksTranslatable(text)) return;
+ const idHash = stableId({ file: relFile, 
+ manifest.set(idHash, {
+ id: idHash,
+ defaultText: text,
+ file: relFile,
+ ...nodeLoc(v),
+ kind: "JSXAttr",
+ propName,
+ });
+ if (typeof v.start !== "number" || typeof
+ s.overwrite(v.start, v.end, `{__tr("${idH
+ changed = true;
+ needsImport = true;
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 34/244
+ },
+ ObjectProperty(path) {
+ const key = path.node.key;
+ let keyName: string | null = null;
+ if (key.type === "Identifier") keyName = 
+ if (key.type === "StringLiteral") keyName
+ if (!keyName || !TRANSLATABLE_OBJECT_KEYS
+ const v = path.node.value;
+ if (!v || v.type !== "StringLiteral") ret
+ const text = normalizeText(v.value);
+ if (!looksTranslatable(text)) return;
+ const idHash = stableId({ file: relFile, 
+ manifest.set(idHash, {
+ id: idHash,
+ defaultText: text,
+ file: relFile,
+ ...nodeLoc(v),
+ kind: "ObjectProp",
+ propName: keyName,
+ });
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 35/244
+ if (typeof v.start !== "number" || typeof
+ s.overwrite(v.start, v.end, `__tr("${idHa
+ changed = true;
+ needsImport = true;
+ },
+ });
+ if (!changed) return;
+ if (needsImport && !hasImport) {
+ s.appendLeft(lastImportEnd, `\nimport { tr 
+ }
+ return {
+ code: s.toString(),
+ map: s.generateMap({ hires: true }),
+ };
+ },
+ generateBundle() {
+ const entries = Array.from(manifest.values())
+ const payload = {
+ version: 1,
+ generatedAt: new Date().toISOString(),
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 36/244
+3.6 Vite config integration
+File changed: vite.config.ts
+ entries,
+ };
+ this.emitFile({
+ type: "asset",
+ fileName: "i18n-manifest.json",
+ source: JSON.stringify(payload, null, 2),
+ });
+ },
+ };
+}
+ts
+import { autoI18nPlugin } from "./client/vite.plug
+export default defineConfig({
+Copy code
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 37/244
+3.7 Package.json dependencies for the
+plugin
+File changed: package.json (devDependencies added)
+ plugins: [
+ autoI18nPlugin(),
+ react(),
+ runtimeErrorOverlay(),
+ ...
+ ],
+ ...
+});
+json
+"devDependencies": {
+ "@babel/parser": "^7.26.0",
+ "@babel/traverse": "^7.26.0",
+ "@babel/types": "^7.26.0",
+ "magic-string": "^0.30.12",
+Copy code
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 38/244
+4) DB Schema: i18n tables +
+system_config fields (Implemented)
+4.1 server/db/ensureSchema.ts
+Added i18n columns to system_config
+Added ensureI18nSchema() that creates:
+i18n_manifest_versions
+i18n_source_strings
+i18n_translations
+i18n_translation_jobs
+4.2 server/index.ts
+Imports and calls ensureI18nSchema() during
+startup schema validation
+4.3 shared/schema.ts
+ ...
+}
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 39/244
+Added table definitions:
+i18nManifestVersions
+i18nSourceStrings
+i18nTranslations
+i18nTranslationJobs
+Extended systemConfig table definition with:
+i18nEnabled , i18nDefaultLocale ,
+i18nSupportedLocalesCsv ,
+i18nLlmEnabled , i18nAutoTranslateOnIngest ,
+i18nOpenAiModel
+5) What’s Next (to fully satisfy your
+spec)
+To complete the system end-to-end, we still need serverside logic:
+5.1 Required server pieces (NEXT)
+1. Public API: GET /api/i18n/bundle?locale=xx
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 40/244
+Pulls translations from DB and returns a
+dictionary keyed by string id.
+Uses ETag computed from (locale +
+max(updated_at)) or bundle hash.
+2. Manifest ingestion
+Reads dist/public/i18n-manifest.json after
+build (startup hook),
+Upserts i18n_source_strings ,
+Writes a new i18n_manifest_versions record,
+Marks old strings inactive,
+Enqueues translation jobs for non-default
+locales.
+3. LLM translation worker
+Pulls pending jobs in batches,
+Calls LLM with structured output JSON schema,
+Writes i18n_translations ,
+Marks jobs complete,
+Goes idle when queue empty.
+4. Low-overhead behavior
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 41/244
+Worker runs only when jobs exist (no polling
+hot-loop),
+Bundle endpoint uses ETag and caching.
+If you respond “Continue”, I will implement the
+remaining server modules in the same repo style:
+server/routes/i18n.ts
+server/i18n/i18nService.ts
+server/i18n/i18nWorker.ts
+server/i18n/providers/openai.ts
+minimal changes to server/routes.ts to register
+the router
+startup ingestion from dist/public/i18nmanifest.json
+This will complete the full “self-maintaining, scalable,
+fault-tolerant” translation engine you described.
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 42/244
+CONTINUE
+Thought for 25m 35s
+Below is the continuation you requested. This installment
+focuses on the backend/server-side implementation
+(schema + services + routes + worker) and includes an
+updated formal architecture diagram (logical + dataflow) to anchor the build.
+What is still incomplete after this message:
+I have not yet output the final client-side runtime
+i18n provider + t() helper wiring and the Vite
+extraction plugin code inline in this continuation
+(those were previously described; if you want, I will
+output the full files next).
+I have not yet output the updated admin UI pages
+to configure i18n fields (I added an admin API; UI
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 43/244
+can be added next).
+I have implemented the backend against the
+TradingCentral-3AL-V3-GIT1 structure (the newer
+one). The “clean-export” had a mismatched server
+bootstrap and is not the canonical base for
+production changes.
+1) Formal Architecture Diagram
+(Logical + Data Flow)
+1.1 Logical Architecture (Components)
+mermaid
+flowchart LR
+ subgraph BuildTime["Build Time (CI/CD or Local)"]
+ SRC["React/TSX Source Files"]
+ EXTRACT["Vite/Babel Extraction Plugin\n(JSXText
+ MANIFEST["i18n-manifest.json\n(versioned, stabl
+ SRC --> EXTRACT --> MANIFEST
+ end
+Copy code
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 44/244
+ subgraph Server["Server Runtime (Express)"]
+ ROUTES["/api/i18n/bundle\n/api/admin/i18n/*"]
+ INGEST["Manifest Ingest Service"]
+ WORKER["Translation Worker\n(low-overhead, even
+ PROVIDER["LLM Provider Adapter\n(OpenAI etc.)"]
+ end
+ subgraph DB["SQLite (trading_app.db)"]
+ STR["i18n_source_strings"]
+ TR["i18n_translations"]
+ JOBS["i18n_translation_jobs"]
+ MV["i18n_manifest_versions"]
+ CFG["system_config\n(i18n_* columns)"]
+ end
+ subgraph Client["Client Runtime (React)"]
+ I18NPROV["I18nProvider\n(bundle fetch + cache)"
+ UI["Dashboard Components\n(t()/Trans wrapper)"]
+ end
+ MANIFEST -->|POST /api/admin/i18n/manifest\nor Bo
+ INGEST --> MV
+ INGEST --> STR
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 45/244
+1.2 Data Flow (Event Sequence)
+ INGEST -->|enqueue| JOBS
+ WORKER -->|poll pending| JOBS
+ WORKER -->|fetch source| STR
+ WORKER -->|LLM translate| PROVIDER
+ PROVIDER -->|structured JSON| WORKER
+ WORKER -->|upsert| TR
+ ROUTES -->|GET bundle| TR
+ ROUTES -->|read config| CFG
+ Client -->|GET /api/i18n/bundle?locale=..| ROUTES
+ ROUTES -->|bundle JSON| Client
+ Client --> UI
+mermaid
+sequenceDiagram
+ participant Dev as Dev/CI Build
+ participant Vite as Vite Extract Plugin
+ participant Srv as Express Server
+ participant DB as SQLite
+ participant Wkr as i18n Worker
+Copy code
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 46/244
+ participant LLM as LLM Provider
+ participant UI as Client UI
+ Dev->>Vite: Build pipeline runs
+ Vite->>Vite: Scan TSX + collect user-facing strin
+ Vite->>Dev: Emit i18n-manifest.json (versioned)
+ Note over Srv: Startup (prod)
+ Srv->>DB: ensureI18nSchema() + ensure system_conf
+ Srv->>Srv: maybeIngestBuiltManifest() (dist/publi
+ Srv->>DB: Insert manifest_versions + upsert sourc
+ Srv->>DB: Enqueue translation_jobs for missing/st
+ Srv->>Wkr: start worker (backoff idle)
+ Wkr->>DB: Fetch pending jobs (batch)
+ Wkr->>DB: Lock jobs IN_PROGRESS
+ Wkr->>DB: Load source text
+ Wkr->>LLM: Translate batch (structured outputs)
+ LLM->>Wkr: JSON translations
+ Wkr->>DB: Upsert translations + mark jobs DONE
+ UI->>Srv: GET /api/i18n/bundle?locale=es
+ Srv->>DB: Select translations for locale
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 47/244
+2) Backend Implementation (GIT1):
+Files to Add/Modify
+Everything below is designed to drop directly into:
+TradingCentral-3AL-V3-main/
+and uses your current stack:
+Express
+SQLite (better-sqlite3)
+Existing server bootstrap and schema “ensure”
+pattern
+ DB->>Srv: translation map + updated_at
+ Srv->>UI: Bundle JSON + ETag caching
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 48/244
+2.1 Database Schema:
+server/db/ensureSchema.ts (ADD)
+Add this function at the end of
+server/db/ensureSchema.ts
+ts
+// --------------------
+// i18n (dynamic translation) schema
+// --------------------
+export function ensureI18nSchema() {
+ const db = getDb();
+ try {
+ // Core tables
+ db.exec(`
+ CREATE TABLE IF NOT EXISTS i18n_manifest_vers
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ version INTEGER NOT NULL,
+ generated_at TEXT NOT NULL,
+ entry_count INTEGER NOT NULL,
+ ingested_at INTEGER NOT NULL DEFAULT (strft
+ source TEXT NOT NULL DEFAULT 'BUILD',
+ notes TEXT
+Copy code
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 49/244
+ );
+ `);
+ db.exec(`
+ CREATE TABLE IF NOT EXISTS i18n_source_string
+ id TEXT PRIMARY KEY,
+ default_text TEXT NOT NULL,
+ kind TEXT,
+ file TEXT,
+ prop_name TEXT,
+ context_json TEXT,
+ checksum TEXT NOT NULL,
+ is_active INTEGER NOT NULL DEFAULT 1,
+ first_seen_at INTEGER NOT NULL,
+ last_seen_at INTEGER NOT NULL,
+ last_manifest_id INTEGER,
+ FOREIGN KEY(last_manifest_id) REFERENCES i1
+ );
+ `);
+ db.exec(`
+ CREATE TABLE IF NOT EXISTS i18n_translations 
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ string_id TEXT NOT NULL,
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 50/244
+ locale TEXT NOT NULL,
+ translated_text TEXT NOT NULL,
+ source TEXT NOT NULL DEFAULT 'LLM',
+ source_checksum TEXT,
+ created_at INTEGER NOT NULL,
+ updated_at INTEGER NOT NULL,
+ UNIQUE(string_id, locale),
+ FOREIGN KEY(string_id) REFERENCES i18n_sour
+ );
+ `);
+ db.exec(`
+ CREATE TABLE IF NOT EXISTS i18n_translation_j
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ string_id TEXT NOT NULL,
+ locale TEXT NOT NULL,
+ source_checksum TEXT NOT NULL,
+ status TEXT NOT NULL DEFAULT 'PENDING',
+ attempts INTEGER NOT NULL DEFAULT 0,
+ last_error TEXT,
+ created_at INTEGER NOT NULL,
+ updated_at INTEGER NOT NULL,
+ locked_at INTEGER,
+ locked_by TEXT,
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 51/244
+ completed_at INTEGER,
+ UNIQUE(string_id, locale),
+ FOREIGN KEY(string_id) REFERENCES i18n_sour
+ );
+ `);
+ db.exec(`CREATE INDEX IF NOT EXISTS idx_i18n_jo
+ db.exec(`CREATE INDEX IF NOT EXISTS idx_i18n_tr
+ // System config toggles
+ const table = "system_config";
+ const adds: Array<{ col: string; ddl: string }>
+ { col: "i18n_enabled", ddl: "ALTER TABLE syst
+ { col: "i18n_default_locale", ddl: "ALTER TAB
+ { col: "i18n_supported_locales_csv", ddl: "AL
+ { col: "i18n_auto_translate", ddl: "ALTER TAB
+ { col: "i18n_llm_enabled", ddl: "ALTER TABLE 
+ { col: "i18n_llm_provider", ddl: "ALTER TABLE
+ { col: "i18n_llm_model", ddl: "ALTER TABLE sy
+ { col: "i18n_llm_max_batch_size", ddl: "ALTER
+ { col: "i18n_llm_max_attempts", ddl: "ALTER T
+ ];
+ for (const a of adds) {
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 52/244
+2.2 Server Bootstrap: server/index.ts
+(MODIFY)
+2.2.1 Import and call the schema + worker +
+boot ingest
+Add to your existing ensureSchema import list:
+ if (!hasColumn(db, table, a.col)) {
+ db.exec(a.ddl);
+ console.log(`Added column ${a.col} to ${tab
+ }
+ }
+ console.log("i18n schema ensured");
+ } finally {
+ db.close();
+ }
+}
+ts Copy code
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 53/244
+Add these imports:
+In the schema ensure block, after
+ensureSystemConfigTable(); , add:
+After bootstrapDoc1Seed(); , add:
+ensureDailyFxClosesSchema, ensureI18nSchema
+ts
+import { startI18nWorker } from "./i18n/worker";
+import { maybeIngestBuiltManifest } from "./i18n/se
+Copy code
+ts
+ensureI18nSchema(); // Dynamic UI translation table
+Copy code
+ts Copy code
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 54/244
+2.3 Server Routes Registration:
+server/routes.ts (MODIFY)
+2.3.1 Import routers
+// i18n: ingest built manifest (if present) and sta
+try {
+ const ing = maybeIngestBuiltManifest();
+ if (ing?.ingested) console.log("[i18n] Ingested b
+} catch (e) {
+ console.warn("[i18n] Built manifest ingest skippe
+}
+try {
+ startI18nWorker();
+ console.log("[i18n] Worker started");
+} catch (e) {
+ console.warn("[i18n] Worker failed to start:", e)
+}
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 55/244
+Add:
+2.3.2 Register routers
+In the “Register additional routes” section, add:
+and among admin routes:
+ts
+import { i18nRouter } from "./routes/i18n";
+import { adminI18nRouter } from "./routes/adminI18n
+Copy code
+ts
+app.use("/api/i18n", i18nRouter); // UI translation
+Copy code
+ts Copy code
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 56/244
+3) New Server-Side i18n Modules
+(ADD)
+Create directory:
+server/i18n/
+and add these files.
+3.1 server/i18n/types.ts
+app.use('/api/admin/i18n', adminI18nRouter); // Adm
+ts
+export type I18nStringKind =
+ | "JSXText"
+ | "JSXAttribute"
+Copy code
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 57/244
+ | "PlainString"
+ | "Tooltip"
+ | "Toast"
+ | "AriaLabel";
+export type I18nManifestEntry = {
+ /** Stable key (recommended: sha256 of defaultTex
+ id: string;
+ defaultText: string;
+ kind: I18nStringKind;
+ file?: string;
+ propName?: string;
+ context?: Record<string, unknown>;
+};
+export type I18nManifestPayload = {
+ version: number;
+ generatedAt: string; // ISO
+ app?: string;
+ entries: I18nManifestEntry[];
+};
+export type I18nSystemConfig = {
+ enabled: boolean;
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 58/244
+3.2 server/i18n/i18nDb.ts
+ defaultLocale: string;
+ supportedLocales: string[];
+ autoTranslate: boolean;
+ llmEnabled: boolean;
+ llmProvider: "OPENAI";
+ llmModel: string;
+ llmMaxBatchSize: number;
+ llmMaxAttempts: number;
+};
+export type I18nBundleResponse = {
+ locale: string;
+ etag: string;
+ strings: Record<string, string>;
+ generatedAt: string;
+};
+ts Copy code
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 59/244
+import Database from "better-sqlite3";
+let cached: Database.Database | null = null;
+export function getI18nDb(): Database.Database {
+ if (cached) return cached;
+ const db = new Database("trading_app.db");
+ // Prefer WAL for concurrent reads (bundle fetche
+ try { db.pragma("journal_mode = WAL"); } catch {}
+ try { db.pragma("busy_timeout = 5000"); } catch {
+ try { db.pragma("foreign_keys = ON"); } catch {}
+ cached = db;
+ return db;
+}
+export function closeI18nDb(): void {
+ try { cached?.close(); } catch {} finally { cache
+}
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 60/244
+3.3 server/i18n/config.ts
+ts
+import { getI18nDb } from "./i18nDb";
+import type { I18nSystemConfig } from "./types";
+const DEFAULTS: I18nSystemConfig = {
+ enabled: false,
+ defaultLocale: "en",
+ supportedLocales: ["en"],
+ autoTranslate: true,
+ llmEnabled: false,
+ llmProvider: "OPENAI",
+ llmModel: "gpt-4o-mini",
+ llmMaxBatchSize: 25,
+ llmMaxAttempts: 5,
+};
+function parseCsv(input: unknown): string[] {
+ const raw = String(input || "").trim();
+ if (!raw) return [];
+ const parts = raw.split(",").map(s => s.trim()).f
+Copy code
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 61/244
+ const seen = new Set<string>();
+ const out: string[] = [];
+ for (const p of parts) {
+ const v = p.toLowerCase();
+ if (!seen.has(v)) { seen.add(v); out.push(v); }
+ }
+ return out;
+}
+function toBool(v: unknown, fallback: boolean): boo
+ if (v === null || v === undefined) return fallbac
+ if (typeof v === "boolean") return v;
+ const n = Number(v);
+ if (!Number.isNaN(n)) return n !== 0;
+ const s = String(v).toLowerCase().trim();
+ if (["true","yes","y","on"].includes(s)) return t
+ if (["false","no","n","off"].includes(s)) return
+ return fallback;
+}
+function toInt(v: unknown, fallback: number): numbe
+ const n = Number(v);
+ if (Number.isFinite(n)) return Math.trunc(n);
+ return fallback;
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 62/244
+}
+export function getI18nSystemConfig(): I18nSystemCo
+ const db = getI18nDb();
+ try {
+ const row = db.prepare(
+ `SELECT 
+ i18n_enabled,
+ i18n_default_locale,
+ i18n_supported_locales_csv,
+ i18n_auto_translate,
+ i18n_llm_enabled,
+ i18n_llm_provider,
+ i18n_llm_model,
+ i18n_llm_max_batch_size,
+ i18n_llm_max_attempts
+ FROM system_config
+ ORDER BY id DESC
+ LIMIT 1`
+ ).get() as any;
+ if (!row) return { ...DEFAULTS };
+ const defaultLocale = String(row.i18n_default_l
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 63/244
+ const supported = parseCsv(row.i18n_supported_l
+ const supportedLocales = supported.length ? sup
+ const out: I18nSystemConfig = {
+ enabled: toBool(row.i18n_enabled, DEFAULTS.en
+ defaultLocale,
+ supportedLocales: supportedLocales.includes(d
+ autoTranslate: toBool(row.i18n_auto_translate
+ llmEnabled: toBool(row.i18n_llm_enabled, DEFA
+ llmProvider: "OPENAI",
+ llmModel: String(row.i18n_llm_model || DEFAUL
+ llmMaxBatchSize: Math.max(1, Math.min(100, to
+ llmMaxAttempts: Math.max(1, Math.min(20, toIn
+ };
+ return out;
+ } catch {
+ return { ...DEFAULTS };
+ }
+}
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 64/244
+3.4 server/i18n/service.ts
+ts
+import fs from "node:fs";
+import path from "node:path";
+import { sha256Hex, stableStringify } from "../lega
+import { getI18nDb } from "./i18nDb";
+import { getI18nSystemConfig } from "./config";
+import type { I18nBundleResponse, I18nManifestPaylo
+function nowMs(): number {
+ return Date.now();
+}
+export function computeSourceChecksum(params: {
+ defaultText: string;
+ kind?: string;
+ file?: string;
+ propName?: string;
+ context?: Record<string, unknown>;
+}): string {
+ return sha256Hex(
+ stableStringify({
+Copy code
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 65/244
+ defaultText: params.defaultText,
+ kind: params.kind ?? null,
+ file: params.file ?? null,
+ propName: params.propName ?? null,
+ context: params.context ?? null,
+ })
+ );
+}
+export function ingestManifest(
+ payload: I18nManifestPayload,
+ meta?: { source?: string; notes?: string }
+): { manifestId: number; upserted: number; changed
+ const db = getI18nDb();
+ const cfg = getI18nSystemConfig();
+ const source = meta?.source || "BUILD";
+ const notes = meta?.notes || null;
+ const tx = db.transaction(() => {
+ const insertManifest = db.prepare(
+ `INSERT INTO i18n_manifest_versions (version,
+ VALUES (@version, @generated_at, @entry_coun
+ );
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 66/244
+ const manifest = insertManifest.run({
+ version: payload.version,
+ generated_at: payload.generatedAt,
+ entry_count: payload.entries.length,
+ ingested_at: nowMs(),
+ source,
+ notes,
+ });
+ const manifestId = Number(manifest.lastInsertRo
+ const selectExisting = db.prepare(
+ `SELECT checksum FROM i18n_source_strings WHE
+ );
+ const upsertSource = db.prepare(
+ `INSERT INTO i18n_source_strings
+ (id, default_text, kind, file, prop_name, c
+ VALUES
+ (@id, @default_text, @kind, @file, @prop_na
+ ON CONFLICT(id) DO UPDATE SET
+ default_text=excluded.default_text,
+ kind=excluded.kind,
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 67/244
+ file=excluded.file,
+ prop_name=excluded.prop_name,
+ context_json=excluded.context_json,
+ checksum=excluded.checksum,
+ is_active=1,
+ last_seen_at=excluded.last_seen_at,
+ last_manifest_id=excluded.last_manifest_id`
+ );
+ const enqueueJob = db.prepare(
+ `INSERT INTO i18n_translation_jobs
+ (string_id, locale, source_checksum, status
+ VALUES
+ (@string_id, @locale, @source_checksum, 'PE
+ ON CONFLICT(string_id, locale) DO UPDATE SET
+ source_checksum=excluded.source_checksum,
+ status=CASE
+ WHEN i18n_translation_jobs.status='IN_PRO
+ ELSE 'PENDING'
+ END,
+ updated_at=excluded.updated_at,
+ last_error=NULL`
+ );
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 68/244
+ const seenIds = new Set<string>();
+ let upserted = 0;
+ let changed = 0;
+ let jobsEnqueued = 0;
+ for (const entry of payload.entries) {
+ if (!entry?.id || !entry?.defaultText) contin
+ const id = String(entry.id);
+ if (seenIds.has(id)) continue;
+ seenIds.add(id);
+ const checksum = computeSourceChecksum({
+ defaultText: entry.defaultText,
+ kind: entry.kind,
+ file: entry.file,
+ propName: entry.propName,
+ context: entry.context,
+ });
+ const existing = selectExisting.get(id) as an
+ const prevChecksum = existing?.checksum ? Str
+ const didChange = !prevChecksum || prevChecks
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 69/244
+ upsertSource.run({
+ id,
+ default_text: entry.defaultText,
+ kind: entry.kind ?? null,
+ file: entry.file ?? null,
+ prop_name: entry.propName ?? null,
+ context_json: entry.context ? JSON.stringif
+ checksum,
+ now: nowMs(),
+ manifest_id: manifestId,
+ });
+ upserted++;
+ if (didChange) changed++;
+ // enqueue jobs if enabled
+ if (!cfg.enabled || !cfg.autoTranslate || !cf
+ for (const locale of cfg.supportedLocales) {
+ if (locale === cfg.defaultLocale) continue;
+ enqueueJob.run({
+ string_id: id,
+ locale,
+ source_checksum: checksum,
+ now: nowMs(),
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 70/244
+ });
+ jobsEnqueued++;
+ }
+ }
+ // Soft deactivate strings not seen in this man
+ db.prepare(
+ `UPDATE i18n_source_strings
+ SET is_active=0, last_seen_at=@now
+ WHERE last_manifest_id <> @manifest_id`
+ ).run({ now: nowMs(), manifest_id: manifestId }
+ return { manifestId, upserted, changed, jobsEnq
+ });
+ return tx();
+}
+export function getBundle(locale: string): I18nBund
+ const db = getI18nDb();
+ const cfg = getI18nSystemConfig();
+ const loc = String(locale || cfg.defaultLocale).t
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 71/244
+ const rows = db.prepare(
+ `SELECT string_id, translated_text, updated_at
+ FROM i18n_translations
+ WHERE locale = ?`
+ ).all(loc) as Array<{ string_id: string; translat
+ const strings: Record<string, string> = {};
+ let maxUpdated = 0;
+ for (const r of rows) {
+ strings[r.string_id] = r.translated_text;
+ if (r.updated_at > maxUpdated) maxUpdated = r.u
+ }
+ const etag = sha256Hex(stableStringify({ loc, max
+ return {
+ locale: loc,
+ etag,
+ strings,
+ generatedAt: new Date().toISOString(),
+ };
+}
+export function getI18nSummary(): {
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 72/244
+ stringsTotal: number;
+ stringsActive: number;
+ translationsTotal: number;
+ pendingJobs: number;
+ failedJobs: number;
+ lastManifest?: {
+ id: number;
+ version: number;
+ generatedAt: string;
+ ingestedAt: number;
+ entryCount: number;
+ source: string;
+ };
+} {
+ const db = getI18nDb();
+ const stringsTotal = Number((db.prepare(`SELECT C
+ const stringsActive = Number((db.prepare(`SELECT 
+ const translationsTotal = Number((db.prepare(`SEL
+ const pendingJobs = Number((db.prepare(`SELECT CO
+ const failedJobs = Number((db.prepare(`SELECT COU
+ const last = db.prepare(
+ `SELECT id, version, generated_at, ingested_at,
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 73/244
+ FROM i18n_manifest_versions
+ ORDER BY id DESC
+ LIMIT 1`
+ ).get() as any;
+ const lastManifest = last
+ ? {
+ id: Number(last.id),
+ version: Number(last.version),
+ generatedAt: String(last.generated_at),
+ ingestedAt: Number(last.ingested_at),
+ entryCount: Number(last.entry_count),
+ source: String(last.source),
+ }
+ : undefined;
+ return { stringsTotal, stringsActive, translation
+}
+export function maybeIngestBuiltManifest(): { inges
+ try {
+ const file = path.resolve(process.cwd(), "dist/
+ if (!fs.existsSync(file)) return { ingested: fa
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 74/244
+3.5 server/i18n/providers/openai.ts
+ const payload = JSON.parse(fs.readFileSync(file
+ const db = getI18nDb();
+ const last = db.prepare(`SELECT version FROM i1
+ if (last && Number(last.version) === Number(pay
+ return { ingested: false, insertedOrUpdated: 
+ }
+ const result = ingestManifest(payload, { source
+ return { ingested: true, insertedOrUpdated: res
+ } catch (e) {
+ return { ingested: false, insertedOrUpdated: 0,
+ }
+}
+ts Copy code
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 75/244
+import { stableStringify } from "../../legal/crypto
+export async function openAiTranslateBatch(params: 
+ model: string;
+ locale: string;
+ items: Array<{ id: string; text: string }>;
+}): Promise<Record<string, string>> {
+ const apiKey = process.env.OPENAI_API_KEY;
+ if (!apiKey) throw new Error("OPENAI_API_KEY is n
+ const { model, locale, items } = params;
+ const schema = {
+ type: "object",
+ additionalProperties: false,
+ properties: {
+ translations: {
+ type: "array",
+ items: {
+ type: "object",
+ additionalProperties: false,
+ properties: {
+ id: { type: "string" },
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 76/244
+ text: { type: "string" },
+ },
+ required: ["id", "text"],
+ },
+ },
+ },
+ required: ["translations"],
+ };
+ const system =
+ "You are a professional software localization e
+ "Translate UI strings accurately and naturally
+ "Preserve any placeholders exactly as-is (e.g.,
+ "Do not add new placeholders. Do not remove pla
+ "Do not wrap output in markdown. Return only JS
+ const user =
+ `Target locale: ${locale}.\n` +
+ "Translate the following items. Each item has a
+ "Return translations for every id provided.\n\n
+ stableStringify({ items });
+ const body = {
+ model,
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 77/244
+ messages: [
+ { role: "system", content: system },
+ { role: "user", content: user },
+ ],
+ temperature: 0.2,
+ response_format: {
+ type: "json_schema",
+ json_schema: {
+ name: "i18n_translations",
+ strict: true,
+ schema,
+ },
+ },
+ };
+ const res = await fetch("https://api.openai.com/v
+ method: "POST",
+ headers: {
+ Authorization: `Bearer ${apiKey}`,
+ "Content-Type": "application/json",
+ },
+ body: JSON.stringify(body),
+ });
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 78/244
+ if (!res.ok) {
+ const text = await res.text();
+ throw new Error(`OpenAI API error: ${res.status
+ }
+ const json: any = await res.json();
+ const content = json?.choices?.[0]?.message?.cont
+ if (!content || typeof content !== "string") thro
+ const parsed = JSON.parse(content);
+ const arr = parsed?.translations;
+ if (!Array.isArray(arr)) throw new Error("OpenAI 
+ const out: Record<string, string> = {};
+ for (const t of arr) {
+ if (t && typeof t.id === "string" && typeof t.t
+ }
+ return out;
+}
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 79/244
+3.6 server/i18n/worker.ts (Low-overhead
+backoff worker)
+ts
+import { getI18nDb } from "./i18nDb";
+import { getI18nSystemConfig } from "./config";
+import { openAiTranslateBatch } from "./providers/o
+type JobRow = {
+ id: number;
+ string_id: string;
+ locale: string;
+ source_checksum: string;
+ status: "PENDING" | "IN_PROGRESS" | "DONE" | "FAI
+ attempts: number;
+};
+function nowMs(): number {
+ return Date.now();
+}
+let workerStarted = false;
+let kickRequested = false;
+Copy code
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 80/244
+export function kickI18nWorker(): void {
+ kickRequested = true;
+}
+function extractPlaceholders(text: string): string
+ const re = /\{\{[^}]+\}\}|\{[a-zA-Z0-9_.]+\}/g;
+ const matches = text.match(re) || [];
+ const out: string[] = [];
+ const seen = new Set<string>();
+ for (const m of matches) {
+ if (!seen.has(m)) { seen.add(m); out.push(m); }
+ }
+ return out;
+}
+function validatePlaceholders(source: string, trans
+ const placeholders = extractPlaceholders(source);
+ for (const ph of placeholders) {
+ if (!translated.includes(ph)) return false;
+ }
+ return true;
+}
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 81/244
+async function processOnce(instanceId: string): Pro
+ const cfg = getI18nSystemConfig();
+ if (!cfg.enabled || !cfg.autoTranslate || !cfg.ll
+ const db = getI18nDb();
+ const jobs = db.transaction(() => {
+ const rows = db.prepare(
+ `SELECT id, string_id, locale, source_checksu
+ FROM i18n_translation_jobs
+ WHERE status='PENDING'
+ ORDER BY id ASC
+ LIMIT ?`
+ ).all(cfg.llmMaxBatchSize) as JobRow[];
+ if (!rows.length) return [] as JobRow[];
+ const ids = rows.map(r => r.id);
+ const qMarks = ids.map(() => "?").join(",");
+ db.prepare(
+ `UPDATE i18n_translation_jobs
+ SET status='IN_PROGRESS', locked_at=?, locke
+ WHERE id IN (${qMarks}) AND status='PENDING
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 82/244
+ ).run(nowMs(), instanceId, nowMs(), ...ids);
+ return db.prepare(
+ `SELECT id, string_id, locale, source_checksu
+ FROM i18n_translation_jobs
+ WHERE locked_by=? AND status='IN_PROGRESS'
+ ORDER BY id ASC`
+ ).all(instanceId) as JobRow[];
+ })();
+ if (!jobs.length) return { didWork: false, proces
+ const ids = jobs.map(j => j.string_id);
+ const qMarks = ids.map(() => "?").join(",");
+ const sources = db.prepare(
+ `SELECT id, default_text
+ FROM i18n_source_strings
+ WHERE id IN (${qMarks})`
+ ).all(...ids) as Array<{ id: string; default_text
+ const sourceMap = new Map<string, string>(sources
+ const byLocale = new Map<string, JobRow[]>();
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 83/244
+ for (const j of jobs) {
+ const list = byLocale.get(j.locale) || [];
+ list.push(j);
+ byLocale.set(j.locale, list);
+ }
+ let processed = 0;
+ for (const [locale, group] of byLocale.entries())
+ const items = group
+ .map(j => {
+ const src = sourceMap.get(j.string_id);
+ return src ? { id: j.string_id, text: src }
+ })
+ .filter(Boolean) as Array<{ id: string; text
+ if (!items.length) continue;
+ try {
+ const translations = await openAiTranslateBat
+ db.transaction(() => {
+ const upsertTr = db.prepare(
+ `INSERT INTO i18n_translations
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 84/244
+ (string_id, locale, translated_text, so
+ VALUES
+ (@string_id, @locale, @translated_text,
+ ON CONFLICT(string_id, locale) DO UPDATE
+ translated_text=excluded.translated_tex
+ source=excluded.source,
+ source_checksum=excluded.source_checksu
+ updated_at=excluded.updated_at`
+ );
+ const markDone = db.prepare(
+ `UPDATE i18n_translation_jobs
+ SET status='DONE', completed_at=@now, up
+ WHERE id=@id AND status='IN_PROGRESS' AN
+ );
+ const markFailed = db.prepare(
+ `UPDATE i18n_translation_jobs
+ SET status=@status, attempts=@attempts, 
+ WHERE id=@id AND status='IN_PROGRESS' AN
+ );
+ for (const j of group) {
+ const src = sourceMap.get(j.string_id);
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 85/244
+ const tr = translations[j.string_id];
+ if (!src || !tr) {
+ const attempts = j.attempts + 1;
+ markFailed.run({
+ id: j.id,
+ status: attempts >= cfg.llmMaxAttempt
+ attempts,
+ err: "missing translation output",
+ now: nowMs(),
+ locked_by: instanceId,
+ });
+ continue;
+ }
+ if (!validatePlaceholders(src, tr)) {
+ const attempts = j.attempts + 1;
+ markFailed.run({
+ id: j.id,
+ status: attempts >= cfg.llmMaxAttempt
+ attempts,
+ err: "placeholder validation failed",
+ now: nowMs(),
+ locked_by: instanceId,
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 86/244
+ });
+ continue;
+ }
+ upsertTr.run({
+ string_id: j.string_id,
+ locale: j.locale,
+ translated_text: tr,
+ source: "LLM",
+ source_checksum: j.source_checksum,
+ now: nowMs(),
+ });
+ markDone.run({ id: j.id, now: nowMs(), lo
+ processed++;
+ }
+ })();
+ } catch (e) {
+ const err = (e as Error)?.message || "transla
+ db.transaction(() => {
+ const mark = db.prepare(
+ `UPDATE i18n_translation_jobs
+ SET status=@status, attempts=@attempts, 
+ WHERE id=@id AND status='IN_PROGRESS' AN
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 87/244
+ );
+ for (const j of group) {
+ const attempts = j.attempts + 1;
+ mark.run({
+ id: j.id,
+ status: attempts >= cfg.llmMaxAttempts
+ attempts,
+ err,
+ now: nowMs(),
+ locked_by: instanceId,
+ });
+ }
+ })();
+ }
+ }
+ return { didWork: true, processed };
+}
+export function startI18nWorker(): void {
+ if (workerStarted) return;
+ workerStarted = true;
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 88/244
+ const instanceId = `i18n-${Math.random().toString
+ let backoffMs = 1000;
+ const maxBackoffMs = 60_000;
+ const loop = async () => {
+ try {
+ const forced = kickRequested;
+ kickRequested = false;
+ const { didWork, processed } = await processO
+ if (forced || didWork) {
+ backoffMs = processed > 0 ? 250 : 1000;
+ } else {
+ backoffMs = Math.min(maxBackoffMs, Math.max
+ }
+ } catch {
+ backoffMs = Math.min(maxBackoffMs, Math.max(1
+ } finally {
+ setTimeout(loop, backoffMs);
+ }
+ };
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 89/244
+4) New Routes (ADD)
+4.1 server/routes/i18n.ts (Public bundle
+endpoint)
+ setTimeout(loop, 250);
+}
+ts
+import express from "express";
+import { getBundle } from "../i18n/service";
+export const i18nRouter = express.Router();
+i18nRouter.get("/bundle", (req, res) => {
+ const locale = String(req.query.locale || "en");
+ const bundle = getBundle(locale);
+ res.setHeader("ETag", bundle.etag);
+Copy code
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 90/244
+4.2 server/routes/adminI18n.ts (Admin
+controls)
+Important note: I recommend adding /config
+endpoints here so i18n can be enabled without
+modifying the existing system-config router. In this
+continuation, I have not yet output the final
+adminI18n.ts with /config endpoints inline (I can do
+so next), but the following endpoints are already
+included:
+ res.setHeader("Cache-Control", "private, max-age=
+ const inm = req.header("If-None-Match");
+ if (inm && inm === bundle.etag) {
+ res.status(304).end();
+ return;
+ }
+ res.json(bundle);
+});
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 91/244
+GET /summary
+POST /manifest
+POST /requeue/failed
+POST /requeue/stale
+POST /translation (manual overrides)
+If you want, I will output the fully expanded file next
+with:
+GET /config
+POST /config
+to toggle:
+i18n_enabled, i18n_llm_enabled,
+i18n_supported_locales_csv, i18n_default_locale,
+...
+5) Shared Schema Update (GIT1):
+shared/schema.ts (MODIFY)
+Add these fields into the systemConfig table definition
+(I placed them right after allowUserTimezoneEdit ):
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 92/244
+6) Operational Notes (Meets Your
+Requirements)
+Automatic UI coverage + change detection
+No runtime scanning occurs. The build pipeline
+generates a manifest, and only manifest diffs
+ts
+// i18n (dynamic UI translations)
+i18nEnabled: integer("i18n_enabled", { mode: "boole
+i18nDefaultLocale: text("i18n_default_locale").notN
+i18nSupportedLocalesCsv: text("i18n_supported_local
+i18nAutoTranslate: integer("i18n_auto_translate", {
+i18nLlmEnabled: integer("i18n_llm_enabled", { mode
+i18nLlmProvider: text("i18n_llm_provider").notNull(
+i18nLlmModel: text("i18n_llm_model").notNull().defa
+i18nLlmMaxBatchSize: integer("i18n_llm_max_batch_si
+i18nLlmMaxAttempts: integer("i18n_llm_max_attempts"
+Copy code
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 93/244
+trigger jobs.
+Offline-safe & persistent
+Translations are stored in SQLite and served directly
+from DB.
+If the LLM is down, the system still renders whatever
+is already stored.
+Low-overhead monitoring
+Worker uses adaptive backoff and stays effectively
+idle with no pending jobs.
+Worker is also “kickable” after ingest to process
+immediately.
+Fault tolerance
+Jobs have attempts + failure tracking.
+Placeholder validation prevents broken
+{placeholders} from shipping.
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 94/244
+Next Step (If you say “continue”
+again)
+I will output (inline, fully) the remaining pieces:
+1. Final server/routes/adminI18n.ts including
+/config endpoints (so you can toggle i18n + LLM
+entirely through admin APIs).
+2. The client runtime: I18nProvider , t() helper,
+caching, language selection binding to user
+preferences.
+3. The Vite extraction plugin (manifest generation +
+hashing + passive detection).
+4. Optional: a build/CI hook that auto-posts the
+manifest to the server (or stores it to dist/public for
+boot ingest).
+If you want me to proceed in a specific order (admin
+config vs client runtime vs build plugin), tell me your
+preference.
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 95/244
+CONTINUe
+Thought for 9m 42s
+Formal system architecture diagram (logical
++ data flow)
+Logical architecture (components)
+mermaid
+flowchart LR
+ subgraph DEV["Dev / CI (Build-time)"]
+ SRC["React TSX source<br/>client/src/**"]
+ VITE["Vite plugin: i18nExtract<br/>- scans TSX 
+ SRC --> VITE
+ VITE --> MANIFEST["dist/public/i18n-manifest.js
+ end
+ subgraph APP["Runtime (Server)"]
+ API["Express API<br/>/api/i18n/*"]
+Copy code
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 96/244
+ ADMIN["Admin API<br/>/api/admin/i18n/*"]
+ INGEST["Manifest Ingestor<br/>upsert strings + 
+ WORKER["Translation Worker<br/>polls pending/st
+ LLM["LLM Provider Adapter<br/>(OpenAI / future)
+ DB["SQLite<br/>i18n_* tables"]
+ API --> DB
+ ADMIN --> DB
+ MANIFEST --> INGEST --> DB
+ WORKER --> DB
+ WORKER --> LLM --> WORKER
+ end
+ subgraph CLIENT["Runtime (Client)"]
+ I18N["I18nProvider<br/>- fetch config<br/>- fet
+ DOMOBS["Optional DOM Auto-Translator<br/>Mutati
+ UI["Dashboard Components"]
+ I18N --> UI
+ I18N --> DOMOBS --> UI
+ API --> I18N
+ end
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 97/244
+Data-flow sequence (ingest → translate →
+render)
+mermaid
+sequenceDiagram
+ participant Build as Vite Build
+ participant Server as Express Server
+ participant DB as SQLite
+ participant Worker as i18n Worker
+ participant LLM as LLM Provider
+ participant Client as React Client
+ Build->>Build: Scan TSX UI strings
+ Build->>Server: (deploy artifact) i18n-manifest.j
+ Server->>DB: Ingest manifest (upsert strings + sh
+ Worker->>DB: Find missing/stale translations (per
+ Worker->>LLM: Translate batch
+ LLM-->>Worker: Structured translations (JSON)
+ Worker->>DB: Persist translations (offline-safe)
+ Client->>Server: GET /api/i18n/config
+ Client->>Server: GET /api/i18n/bundle?locale=xx (
+Copy code
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 98/244
+Implementation (repo-aligned) — file-byfile code
+Below are full file replacements / new files designed to
+drop into TradingCentral-3AL-V3-GIT1 with minimal
+disruption.
+1) Server: DB schema + core engine
+1.1 server/db/ensureSchema.ts (APPEND at
+end — new function)
+Add this below the existing
+ensureDailyFxClosesSchema() (end of file):
+ Server-->>Client: Bundle (key→text + byText map)
+ Client->>Client: Render via t() and/or DOM Auto-T
+ts Copy code
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 99/244
+// FILE: /server/db/ensureSchema.ts (append at end)
+export function ensureI18nSchema() {
+ const db = getDb();
+ try {
+ db.exec(`
+ CREATE TABLE IF NOT EXISTS i18n_config (
+ id INTEGER PRIMARY KEY CHECK (id = 1),
+ enabled INTEGER NOT NULL DEFAULT 0,
+ default_locale TEXT NOT NULL DEFAULT 'en',
+ supported_locales_csv TEXT NOT NULL DEFAULT
+ auto_translate INTEGER NOT NULL DEFAULT 1,
+ dom_auto_translate INTEGER NOT NULL DEFAULT
+ provider TEXT NOT NULL DEFAULT 'OPENAI',
+ model TEXT NOT NULL DEFAULT 'gpt-4.1-mini',
+ max_batch_chars INTEGER NOT NULL DEFAULT 80
+ worker_poll_ms INTEGER NOT NULL DEFAULT 150
+ last_manifest_ingest_at INTEGER,
+ updated_at INTEGER NOT NULL DEFAULT (strfti
+ updated_by_admin_id INTEGER
+ );
+ `);
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 100/244
+ db.exec(`INSERT OR IGNORE INTO i18n_config(id) 
+ db.exec(`
+ CREATE TABLE IF NOT EXISTS i18n_strings (
+ key TEXT PRIMARY KEY,
+ default_text TEXT NOT NULL,
+ default_text_sha256 TEXT NOT NULL,
+ context_json TEXT,
+ source_file TEXT,
+ source_kind TEXT,
+ first_seen_at INTEGER NOT NULL,
+ last_seen_at INTEGER NOT NULL,
+ last_manifest_build_id TEXT,
+ is_deleted INTEGER NOT NULL DEFAULT 0
+ );
+ `);
+ db.exec(`CREATE INDEX IF NOT EXISTS idx_i18n_st
+ db.exec(`CREATE INDEX IF NOT EXISTS idx_i18n_st
+ db.exec(`
+ CREATE TABLE IF NOT EXISTS i18n_translations 
+ key TEXT NOT NULL,
+ locale TEXT NOT NULL,
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 101/244
+ text TEXT NOT NULL,
+ default_text_sha256 TEXT NOT NULL,
+ provider TEXT,
+ model TEXT,
+ quality REAL,
+ state TEXT NOT NULL DEFAULT 'READY',
+ error TEXT,
+ retry_count INTEGER NOT NULL DEFAULT 0,
+ next_retry_at INTEGER,
+ is_manual INTEGER NOT NULL DEFAULT 0,
+ updated_at INTEGER NOT NULL,
+ PRIMARY KEY (key, locale),
+ FOREIGN KEY(key) REFERENCES i18n_strings(ke
+ );
+ `);
+ db.exec(`CREATE INDEX IF NOT EXISTS idx_i18n_tr
+ console.log("i18n schema ensured");
+ } finally {
+ db.close();
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 102/244
+1.2 server/i18n/i18nDb.ts (NEW)
+ }
+}
+ts
+// FILE: /server/i18n/i18nDb.ts
+import BetterSQLite3 from "better-sqlite3";
+export function openI18nDb() {
+ const db = new BetterSQLite3("./trading_app.db");
+ try {
+ db.pragma("busy_timeout = 5000");
+ db.pragma("journal_mode = WAL");
+ } catch {
+ // ignore
+ }
+ return db;
+}
+Copy code
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 103/244
+1.3 server/i18n/i18nTypes.ts (NEW)
+export function nowSec(): number {
+ return Math.floor(Date.now() / 1000);
+}
+ts
+// FILE: /server/i18n/i18nTypes.ts
+export type I18nConfigRow = {
+ id: 1;
+ enabled: 0 | 1;
+ default_locale: string;
+ supported_locales_csv: string;
+ auto_translate: 0 | 1;
+ dom_auto_translate: 0 | 1;
+ provider: "OPENAI" | "NONE" | string;
+ model: string;
+ max_batch_chars: number;
+Copy code
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 104/244
+ worker_poll_ms: number;
+ last_manifest_ingest_at: number | null;
+ updated_at: number;
+ updated_by_admin_id: number | null;
+};
+export type I18nManifest = {
+ version: number;
+ buildId: string;
+ generatedAtMs: number;
+ strings: Array<{
+ key: string;
+ defaultText: string;
+ context?: Record<string, any>;
+ source?: { file?: string; kind?: string; line?
+ }>;
+};
+export type I18nBundle = {
+ locale: string;
+ defaultLocale: string;
+ enabled: boolean;
+ // key → translated text (or default text fallbac
+ strings: Record<string, string>;
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 105/244
+1.4 server/i18n/i18nConfig.ts (NEW)
+ // default_text → translated text (used by DOM au
+ byText: Record<string, string>;
+ etag: string;
+ generatedAtSec: number;
+};
+ts
+// FILE: /server/i18n/i18nConfig.ts
+import type Database from "better-sqlite3";
+import type { I18nConfigRow } from "./i18nTypes";
+export function parseLocalesCsv(csv: string): strin
+ return String(csv || "")
+ .split(",")
+ .map((s) => s.trim())
+ .filter(Boolean);
+}
+Copy code
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 106/244
+export function getI18nConfig(db: Database.Database
+ const row = db.prepare(`SELECT * FROM i18n_config
+ if (!row) {
+ throw new Error("i18n_config missing (ensureI18
+ }
+ return row as I18nConfigRow;
+}
+export function updateI18nConfig(
+ db: Database.Database,
+ updates: Partial<Pick<I18nConfigRow,
+ | "enabled"
+ | "default_locale"
+ | "supported_locales_csv"
+ | "auto_translate"
+ | "dom_auto_translate"
+ | "provider"
+ | "model"
+ | "max_batch_chars"
+ | "worker_poll_ms"
+ | "updated_by_admin_id"
+ >>,
+) {
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 107/244
+1.5 server/i18n/i18nService.ts (NEW)
+ const fields: string[] = [];
+ const params: any = {};
+ for (const [k, v] of Object.entries(updates)) {
+ fields.push(`${k} = @${k}`);
+ (params as any)[k] = v;
+ }
+ fields.push(`updated_at = (strftime('%s','now'))`
+ const sql = `UPDATE i18n_config SET ${fields.join
+ db.prepare(sql).run(params);
+}
+ts
+// FILE: /server/i18n/i18nService.ts
+import fs from "fs";
+import path from "path";
+Copy code
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 108/244
+import type Database from "better-sqlite3";
+import { sha256Hex, stableStringify } from "../lega
+import type { I18nBundle, I18nManifest } from "./i1
+import { getI18nConfig, parseLocalesCsv } from "./i
+import { nowSec } from "./i18nDb";
+function normalizeText(s: string): string {
+ return String(s ?? "").replace(/\s+/g, " ").trim
+}
+export function ingestManifest(db: Database.Databas
+ const cfg = getI18nConfig(db);
+ const ts = nowSec();
+ const buildId = String(manifest?.buildId || "UNKN
+ const upsert = db.prepare(`
+ INSERT INTO i18n_strings (
+ key, default_text, default_text_sha256, conte
+ first_seen_at, last_seen_at, last_manifest_bu
+ ) VALUES (
+ @key, @default_text, @default_text_sha256, @c
+ @first_seen_at, @last_seen_at, @last_manifest
+ )
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 109/244
+ ON CONFLICT(key) DO UPDATE SET
+ default_text = excluded.default_text,
+ default_text_sha256 = excluded.default_text_s
+ context_json = excluded.context_json,
+ source_file = excluded.source_file,
+ source_kind = excluded.source_kind,
+ last_seen_at = excluded.last_seen_at,
+ last_manifest_build_id = excluded.last_manife
+ is_deleted = 0
+ `);
+ const markSeen = db.prepare(`UPDATE i18n_strings 
+ const tx = db.transaction(() => {
+ for (const item of manifest.strings || []) {
+ const key = String(item.key || "").trim();
+ const defaultText = normalizeText(item.defaul
+ if (!key || !defaultText) continue;
+ const payload = {
+ key,
+ default_text: defaultText,
+ default_text_sha256: sha256Hex(defaultText)
+ context_json: item.context ? stableStringif
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 110/244
+ source_file: item.source?.file ? String(ite
+ source_kind: item.source?.kind ? String(ite
+ first_seen_at: ts,
+ last_seen_at: ts,
+ last_manifest_build_id: buildId,
+ };
+ // Upsert full record (first_seen_at is only 
+ upsert.run(payload);
+ // Ensure last_seen_at updates even if identi
+ markSeen.run({ key, ts });
+ }
+ db.prepare(`UPDATE i18n_config SET last_manifes
+ .run(ts);
+ });
+ tx();
+ return {
+ ok: true,
+ ingestedCount: (manifest.strings || []).length,
+ enabled: !!cfg.enabled,
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 111/244
+ lastManifestIngestAt: ts,
+ };
+}
+export function maybeIngestBuiltManifest(db: Databa
+ // Server build layout: dist/public/i18n-manifest
+ const manifestPath = path.resolve(process.cwd(), 
+ if (!fs.existsSync(manifestPath)) return { ok: fa
+ let raw: string;
+ try {
+ raw = fs.readFileSync(manifestPath, "utf8");
+ } catch {
+ return { ok: false, reason: "READ_FAILED" };
+ }
+ let manifest: I18nManifest;
+ try {
+ manifest = JSON.parse(raw);
+ } catch {
+ return { ok: false, reason: "JSON_PARSE_FAILED"
+ }
+ if (!manifest?.strings?.length) return { ok: fals
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 112/244
+ ingestManifest(db, manifest);
+ return { ok: true };
+}
+export function buildBundle(db: Database.Database, 
+ const cfg = getI18nConfig(db);
+ const enabled = !!cfg.enabled;
+ const defaultLocale = String(cfg.default_locale
+ const requested = String(locale || defaultLocale)
+ // If disabled, always return defaultLocale bundl
+ const effectiveLocale = enabled ? requested : def
+ // Pull all strings (not deleted). For scale, you
+ const rows = db
+ .prepare(
+ `
+ SELECT s.key, s.default_text, s.default_text_
+ t.text as translated_text
+ FROM i18n_strings s
+ LEFT JOIN i18n_translations t
+ ON t.key = s.key AND t.locale = @locale AND
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 113/244
+ WHERE s.is_deleted = 0
+ `,
+ )
+ .all({ locale: effectiveLocale }) as any[];
+ const strings: Record<string, string> = {};
+ const byText: Record<string, string> = {};
+ for (const r of rows) {
+ const key = String(r.key);
+ const def = String(r.default_text || "");
+ const tr = r.translated_text ? String(r.transla
+ strings[key] = tr;
+ // Used only by optional DOM auto translator (e
+ const defNorm = normalizeText(def);
+ if (defNorm && !byText[defNorm]) {
+ byText[defNorm] = tr;
+ }
+ }
+ // ETag: stable hash of (locale + max(updated_at)
+ const maxT = db
+ .prepare(`SELECT COALESCE(MAX(updated_at), 0) a
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 114/244
+ .get(effectiveLocale) as any;
+ const maxS = db.prepare(`SELECT COALESCE(MAX(last
+ const etag = sha256Hex(
+ stableStringify({
+ v: 1,
+ locale: effectiveLocale,
+ enabled,
+ maxT: Number(maxT?.m || 0),
+ maxS: Number(maxS?.m || 0),
+ }),
+ );
+ return {
+ locale: effectiveLocale,
+ defaultLocale,
+ enabled,
+ strings,
+ byText,
+ etag,
+ generatedAtSec: nowSec(),
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 115/244
+1.6 server/i18n/openaiProvider.ts (NEW)
+ };
+}
+ts
+// FILE: /server/i18n/openaiProvider.ts
+import type { I18nManifest } from "./i18nTypes";
+export type TranslateRequestItem = {
+ key: string;
+ defaultText: string;
+ context?: Record<string, any> | null;
+};
+export type TranslateResult = {
+ key: string;
+ translatedText: string;
+ quality?: number;
+Copy code
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 116/244
+};
+export async function translateWithOpenAI(params: {
+ apiKey: string;
+ model: string;
+ targetLocale: string;
+ items: TranslateRequestItem[];
+}): Promise<TranslateResult[]> {
+ const { apiKey, model, targetLocale, items } = pa
+ const schema = {
+ name: "i18n_translations",
+ schema: {
+ type: "object",
+ additionalProperties: false,
+ properties: {
+ translations: {
+ type: "array",
+ items: {
+ type: "object",
+ additionalProperties: false,
+ properties: {
+ key: { type: "string" },
+ translatedText: { type: "string" },
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 117/244
+ quality: { type: "number" },
+ },
+ required: ["key", "translatedText"],
+ },
+ },
+ },
+ required: ["translations"],
+ },
+ } as const;
+ const body = {
+ model,
+ response_format: { type: "json_schema", json_sc
+ messages: [
+ {
+ role: "system",
+ content:
+ "You are a professional product UI transl
+ },
+ {
+ role: "user",
+ content: JSON.stringify({
+ targetLocale,
+ items: items.map((i) => ({
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 118/244
+ key: i.key,
+ defaultText: i.defaultText,
+ context: i.context ?? null,
+ })),
+ }),
+ },
+ ],
+ };
+ const res = await fetch("https://api.openai.com/v
+ method: "POST",
+ headers: {
+ Authorization: `Bearer ${apiKey}`,
+ "Content-Type": "application/json",
+ },
+ body: JSON.stringify(body),
+ });
+ if (!res.ok) {
+ const txt = await res.text();
+ throw new Error(`OpenAI translate failed: ${res
+ }
+ const json: any = await res.json();
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 119/244
+ const content = json?.choices?.[0]?.message?.cont
+ if (!content) throw new Error("OpenAI translate r
+ let parsed: any;
+ try {
+ parsed = JSON.parse(content);
+ } catch {
+ throw new Error("OpenAI translate returned non-
+ }
+ const out: TranslateResult[] = [];
+ for (const t of parsed?.translations || []) {
+ if (!t?.key || !t?.translatedText) continue;
+ out.push({
+ key: String(t.key),
+ translatedText: String(t.translatedText),
+ quality: typeof t.quality === "number" ? t.qu
+ });
+ }
+ return out;
+}
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 120/244
+1.7 server/i18n/i18nWorker.ts (NEW)
+ts
+// FILE: /server/i18n/i18nWorker.ts
+import type Database from "better-sqlite3";
+import { openI18nDb, nowSec } from "./i18nDb";
+import { getI18nConfig, parseLocalesCsv } from "./i
+import { translateWithOpenAI } from "./openaiProvid
+import { sha256Hex } from "../legal/cryptoUtils";
+let running = false;
+let timer: any = null;
+function backoffSec(retryCount: number): number {
+ // 30s, 60s, 120s, 240s ... capped at 3600s
+ const v = Math.min(3600, 30 * Math.pow(2, Math.ma
+ return Math.floor(v);
+}
+function shouldRetry(row: any, ts: number): boolean
+ if (!row) return true;
+ if (row.state !== "ERROR") return true;
+Copy code
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 121/244
+ const next = row.next_retry_at ? Number(row.next_
+ return next <= ts;
+}
+async function translateLocaleBatch(db: Database.Da
+ const cfg = getI18nConfig(db);
+ const ts = nowSec();
+ // Pull candidates missing or stale for this loca
+ const rows = db
+ .prepare(
+ `
+ SELECT
+ s.key, s.default_text, s.default_text_sha25
+ t.state as t_state, t.retry_count as t_retr
+ t.is_manual as t_is_manual
+ FROM i18n_strings s
+ LEFT JOIN i18n_translations t
+ ON t.key = s.key AND t.locale = @locale
+ WHERE s.is_deleted = 0
+ AND (
+ t.key IS NULL
+ OR (t.is_manual = 0 AND t.default_text_sh
+ OR (t.is_manual = 0 AND t.state = 'ERROR
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 122/244
+ )
+ LIMIT @limit
+ `,
+ )
+ .all({ locale, limit }) as any[];
+ const items = [];
+ for (const r of rows) {
+ // Do not overwrite manual translations
+ if (Number(r.t_is_manual || 0) === 1) continue;
+ // Respect retry schedule for ERROR rows
+ const retryOk = shouldRetry(
+ { state: r.t_state, next_retry_at: r.t_next_r
+ ts,
+ );
+ if (!retryOk) continue;
+ let ctx: any = null;
+ try {
+ ctx = r.context_json ? JSON.parse(String(r.co
+ } catch {
+ ctx = null;
+ }
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 123/244
+ items.push({
+ key: String(r.key),
+ defaultText: String(r.default_text),
+ context: ctx,
+ defaultTextSha: String(r.default_text_sha256)
+ retryCount: Number(r.t_retry_count || 0),
+ });
+ }
+ if (items.length === 0) return { translated: 0 };
+ const provider = String(cfg.provider || "NONE").t
+ if (provider !== "OPENAI") {
+ // Provider disabled; mark as error once so adm
+ const mark = db.prepare(`
+ INSERT INTO i18n_translations (key, locale, t
+ VALUES (@key, @locale, @text, @sha, @provider
+ ON CONFLICT(key, locale) DO UPDATE SET
+ state='ERROR',
+ error=excluded.error,
+ retry_count=i18n_translations.retry_count +
+ next_retry_at=excluded.next_retry_at,
+ updated_at=excluded.updated_at
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 124/244
+ `);
+ for (const it of items) {
+ mark.run({
+ key: it.key,
+ locale,
+ text: it.defaultText,
+ sha: it.defaultTextSha,
+ provider,
+ model: cfg.model,
+ error: "PROVIDER_DISABLED",
+ retry_count: it.retryCount,
+ next_retry_at: ts + backoffSec(it.retryCoun
+ updated_at: ts,
+ });
+ }
+ return { translated: 0 };
+ }
+ const apiKey = process.env.OPENAI_API_KEY;
+ if (!apiKey) {
+ const mark = db.prepare(`
+ INSERT INTO i18n_translations (key, locale, t
+ VALUES (@key, @locale, @text, @sha, 'OPENAI',
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 125/244
+ ON CONFLICT(key, locale) DO UPDATE SET
+ state='ERROR',
+ error=excluded.error,
+ retry_count=i18n_translations.retry_count +
+ next_retry_at=excluded.next_retry_at,
+ updated_at=excluded.updated_at
+ `);
+ for (const it of items) {
+ mark.run({
+ key: it.key,
+ locale,
+ text: it.defaultText,
+ sha: it.defaultTextSha,
+ model: cfg.model,
+ error: "OPENAI_API_KEY_MISSING",
+ retry_count: it.retryCount,
+ next_retry_at: ts + backoffSec(it.retryCoun
+ updated_at: ts,
+ });
+ }
+ return { translated: 0 };
+ }
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 126/244
+ // Batch-size guard by chars
+ const maxChars = Math.max(1000, Number(cfg.max_ba
+ const batch: any[] = [];
+ let used = 0;
+ for (const it of items) {
+ const n = it.defaultText.length;
+ if (batch.length > 0 && used + n > maxChars) br
+ batch.push(it);
+ used += n;
+ }
+ try {
+ const results = await translateWithOpenAI({
+ apiKey,
+ model: String(cfg.model || "gpt-4.1-mini"),
+ targetLocale: locale,
+ items: batch.map((b) => ({ key: b.key, defaul
+ });
+ const upsert = db.prepare(`
+ INSERT INTO i18n_translations (key, locale, t
+ VALUES (@key, @locale, @text, @sha, 'OPENAI',
+ ON CONFLICT(key, locale) DO UPDATE SET
+ text=excluded.text,
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 127/244
+ default_text_sha256=excluded.default_text_s
+ provider=excluded.provider,
+ model=excluded.model,
+ quality=excluded.quality,
+ state='READY',
+ error=NULL,
+ retry_count=0,
+ next_retry_at=NULL,
+ is_manual=0,
+ updated_at=excluded.updated_at
+ `);
+ const resultMap = new Map(results.map((r) => [S
+ for (const it of batch) {
+ const r = resultMap.get(it.key);
+ const outText = r?.translatedText ? String(r
+ upsert.run({
+ key: it.key,
+ locale,
+ text: outText,
+ sha: it.defaultTextSha,
+ model: String(cfg.model || "gpt-4.1-mini"),
+ quality: typeof r?.quality === "number" ? r
+ updated_at: ts,
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 128/244
+ });
+ }
+ return { translated: batch.length };
+ } catch (e: any) {
+ const err = String(e?.message || "TRANSLATE_FAI
+ const mark = db.prepare(`
+ INSERT INTO i18n_translations (key, locale, t
+ VALUES (@key, @locale, @text, @sha, 'OPENAI',
+ ON CONFLICT(key, locale) DO UPDATE SET
+ state='ERROR',
+ error=excluded.error,
+ retry_count=i18n_translations.retry_count +
+ next_retry_at=excluded.next_retry_at,
+ updated_at=excluded.updated_at
+ `);
+ for (const it of batch) {
+ const next = ts + backoffSec(it.retryCount + 
+ mark.run({
+ key: it.key,
+ locale,
+ text: it.defaultText,
+ sha: it.defaultTextSha,
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 129/244
+ model: String(cfg.model || "gpt-4.1-mini"),
+ error: err,
+ retry_count: it.retryCount + 1,
+ next_retry_at: next,
+ updated_at: ts,
+ });
+ }
+ return { translated: 0 };
+ }
+}
+export async function runI18nOnce() {
+ const db = openI18nDb();
+ try {
+ const cfg = getI18nConfig(db);
+ if (!cfg.enabled) return { ok: true, reason: "D
+ if (!cfg.auto_translate) return { ok: true, rea
+ const locales = parseLocalesCsv(cfg.supported_l
+ const defaultLocale = String(cfg.default_locale
+ const targets = locales.filter((l) => l && l !=
+ let total = 0;
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 130/244
+ for (const loc of targets) {
+ const r = await translateLocaleBatch(db, loc,
+ total += r.translated;
+ }
+ return { ok: true, translated: total };
+ } finally {
+ db.close();
+ }
+}
+export function startI18nWorker() {
+ if (timer) return () => stopI18nWorker();
+ timer = setInterval(async () => {
+ if (running) return;
+ running = true;
+ try {
+ await runI18nOnce();
+ } catch (e) {
+ console.error("i18n worker error:", e);
+ } finally {
+ running = false;
+ }
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 131/244
+2) Server: routes
+2.1 server/routes/i18n.ts (NEW)
+ }, 15000);
+ return () => stopI18nWorker();
+}
+export function stopI18nWorker() {
+ if (timer) clearInterval(timer);
+ timer = null;
+}
+ts
+// FILE: /server/routes/i18n.ts
+import { Router } from "express";
+import { openI18nDb } from "../i18n/i18nDb";
+import { buildBundle } from "../i18n/i18nService";
+Copy code
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 132/244
+import { getI18nConfig, parseLocalesCsv } from "../
+export const i18nRouter = Router();
+// Public: client reads config (login page may call
+i18nRouter.get("/config", (_req, res) => {
+ const db = openI18nDb();
+ try {
+ const cfg = getI18nConfig(db);
+ const supportedLocales = parseLocalesCsv(cfg.su
+ return res.json({
+ ok: true,
+ enabled: !!cfg.enabled,
+ defaultLocale: cfg.default_locale,
+ supportedLocales,
+ domAutoTranslate: !!cfg.dom_auto_translate,
+ });
+ } finally {
+ db.close();
+ }
+});
+// Public: bundle fetch with ETag
+i18nRouter.get("/bundle", (req, res) => {
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 133/244
+2.2 server/routes/adminI18n.ts (NEW)
+ const locale = String(req.query.locale || "en").t
+ const db = openI18nDb();
+ try {
+ const bundle = buildBundle(db, locale);
+ const inm = req.header("if-none-match");
+ res.setHeader("Cache-Control", "private, max-ag
+ res.setHeader("ETag", bundle.etag);
+ if (inm && inm === bundle.etag) {
+ return res.status(304).end();
+ }
+ return res.json(bundle);
+ } finally {
+ db.close();
+ }
+});
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 134/244
+ts
+// FILE: /server/routes/adminI18n.ts
+import { Router } from "express";
+import { requireAdmin } from "../middleware/require
+import { openI18nDb } from "../i18n/i18nDb";
+import { getI18nConfig, parseLocalesCsv, updateI18n
+import { ingestManifest } from "../i18n/i18nService
+import type { I18nManifest } from "../i18n/i18nType
+import { runI18nOnce } from "../i18n/i18nWorker";
+export const adminI18nRouter = Router();
+adminI18nRouter.use(requireAdmin);
+adminI18nRouter.get("/config", (_req, res) => {
+ const db = openI18nDb();
+ try {
+ const cfg = getI18nConfig(db);
+ return res.json({
+ ok: true,
+ config: {
+ enabled: !!cfg.enabled,
+ defaultLocale: cfg.default_locale,
+Copy code
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 135/244
+ supportedLocales: parseLocalesCsv(cfg.suppo
+ autoTranslate: !!cfg.auto_translate,
+ domAutoTranslate: !!cfg.dom_auto_translate,
+ provider: cfg.provider,
+ model: cfg.model,
+ maxBatchChars: cfg.max_batch_chars,
+ workerPollMs: cfg.worker_poll_ms,
+ lastManifestIngestAt: cfg.last_manifest_ing
+ updatedAt: cfg.updated_at,
+ updatedByAdminId: cfg.updated_by_admin_id,
+ },
+ });
+ } finally {
+ db.close();
+ }
+});
+adminI18nRouter.post("/config", (req, res) => {
+ const body = req.body || {};
+ const db = openI18nDb();
+ try {
+ const updates: any = {};
+ if (body.enabled !== undefined) updates.enabled
+ if (body.defaultLocale) updates.default_locale
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 136/244
+ if (Array.isArray(body.supportedLocales)) updat
+ if (body.autoTranslate !== undefined) updates.a
+ if (body.domAutoTranslate !== undefined) update
+ if (body.provider) updates.provider = String(bo
+ if (body.model) updates.model = String(body.mod
+ if (body.maxBatchChars !== undefined) updates.m
+ if (body.workerPollMs !== undefined) updates.wo
+ updates.updated_by_admin_id = Number((req as an
+ updateI18nConfig(db, updates);
+ const cfg = getI18nConfig(db);
+ return res.json({
+ ok: true,
+ config: {
+ enabled: !!cfg.enabled,
+ defaultLocale: cfg.default_locale,
+ supportedLocales: parseLocalesCsv(cfg.suppo
+ autoTranslate: !!cfg.auto_translate,
+ domAutoTranslate: !!cfg.dom_auto_translate,
+ provider: cfg.provider,
+ model: cfg.model,
+ maxBatchChars: cfg.max_batch_chars,
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 137/244
+ workerPollMs: cfg.worker_poll_ms,
+ },
+ });
+ } finally {
+ db.close();
+ }
+});
+// POST manifest for ingestion (admin-triggered; CI
+adminI18nRouter.post("/manifest", (req, res) => {
+ const manifest = req.body as I18nManifest;
+ if (!manifest || !Array.isArray(manifest.strings)
+ return res.status(400).json({ ok: false, error
+ }
+ const db = openI18nDb();
+ try {
+ const result = ingestManifest(db, manifest);
+ return res.json(result);
+ } finally {
+ db.close();
+ }
+});
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 138/244
+// Manual translation override
+adminI18nRouter.post("/translation/manual", (req, r
+ const { key, locale, text } = req.body || {};
+ if (!key || !locale || !text) return res.status(4
+ const db = openI18nDb();
+ try {
+ const s = db.prepare(`SELECT default_text_sha25
+ if (!s) return res.status(404).json({ ok: false
+ const ts = Math.floor(Date.now() / 1000);
+ db.prepare(`
+ INSERT INTO i18n_translations (key, locale, t
+ VALUES (?, ?, ?, ?, 'MANUAL', 'MANUAL', NULL,
+ ON CONFLICT(key, locale) DO UPDATE SET
+ text=excluded.text,
+ default_text_sha256=excluded.default_text_s
+ provider='MANUAL',
+ model='MANUAL',
+ state='READY',
+ error=NULL,
+ retry_count=0,
+ next_retry_at=NULL,
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 139/244
+ is_manual=1,
+ updated_at=excluded.updated_at
+ `).run(String(key), String(locale), String(text
+ return res.json({ ok: true });
+ } finally {
+ db.close();
+ }
+});
+// Trigger a translation pass immediately (useful a
+adminI18nRouter.post("/translate/run", async (_req,
+ try {
+ const r = await runI18nOnce();
+ return res.json({ ok: true, result: r });
+ } catch (e: any) {
+ return res.status(500).json({ ok: false, error
+ }
+});
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 140/244
+3) Server: wire-up in
+server/index.ts and
+server/routes.ts
+3.1 server/index.ts (PATCH)
+Add imports + call schema ensure + start worker.
+ts
+// FILE: /server/index.ts (patch)
+// 1) Add to imports:
+import { ensureI18nSchema } from "./db/ensureSchema
+import { openI18nDb } from "./i18n/i18nDb";
+import { maybeIngestBuiltManifest } from "./i18n/i1
+import { startI18nWorker } from "./i18n/i18nWorker"
+// 2) In startup sequence (near other ensure* calls
+ensureI18nSchema();
+// 3) After the server starts / after bootstraps (s
+try {
+ const db = openI18nDb();
+Copy code
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 141/244
+Where to place:
+Put ensureI18nSchema(); alongside the other
+ensure*Schema() calls already in the file.
+Put maybeIngestBuiltManifest + startI18nWorker
+after your existing boot calls (e.g., after legal seed /
+cron initialization).
+ try {
+ maybeIngestBuiltManifest(db);
+ } finally {
+ db.close();
+ }
+} catch (e) {
+ console.error("i18n manifest ingest failed:", e);
+}
+// 4) Start worker (idle when nothing pending; poll
+startI18nWorker();
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 142/244
+3.2 server/routes.ts (PATCH)
+Add imports at top:
+Then register near the other routers (around where
+app.use("/api/legal", ...) is done):
+4) Client: runtime loader + optional
+DOM auto-translation
+ts
+import { i18nRouter } from "./routes/i18n";
+import { adminI18nRouter } from "./routes/adminI18n
+Copy code
+ts
+app.use("/api/i18n", i18nRouter);
+app.use("/api/admin/i18n", adminI18nRouter);
+Copy code
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 143/244
+4.1 client/src/i18n/I18nProvider.tsx
+(NEW)
+tsx
+// FILE: /client/src/i18n/I18nProvider.tsx
+import React, { createContext, useContext, useEffec
+import { enableDomAutoTranslator, disableDomAutoTra
+type I18nConfig = {
+ enabled: boolean;
+ defaultLocale: string;
+ supportedLocales: string[];
+ domAutoTranslate: boolean;
+};
+type Bundle = {
+ locale: string;
+ defaultLocale: string;
+ enabled: boolean;
+ strings: Record<string, string>;
+ byText: Record<string, string>;
+ etag: string;
+ generatedAtSec: number;
+Copy code
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 144/244
+};
+type I18nCtx = {
+ locale: string;
+ config: I18nConfig | null;
+ ready: boolean;
+ t: (key: string, fallback?: string) => string;
+ setLocale: (locale: string) => void;
+};
+const Ctx = createContext<I18nCtx | null>(null);
+function cacheKey(locale: string) {
+ return `i18n.bundle.${locale}`;
+}
+function readCached(locale: string): Bundle | null
+ try {
+ const raw = localStorage.getItem(cacheKey(local
+ if (!raw) return null;
+ return JSON.parse(raw);
+ } catch {
+ return null;
+ }
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 145/244
+}
+function writeCached(locale: string, bundle: Bundle
+ try {
+ localStorage.setItem(cacheKey(locale), JSON.str
+ } catch {
+ // ignore
+ }
+}
+async function fetchConfig(): Promise<I18nConfig> {
+ const res = await fetch("/api/i18n/config", { cre
+ if (!res.ok) throw new Error("Failed to fetch i18
+ const json = await res.json();
+ return {
+ enabled: !!json.enabled,
+ defaultLocale: String(json.defaultLocale || "en
+ supportedLocales: Array.isArray(json.supportedL
+ domAutoTranslate: !!json.domAutoTranslate,
+ };
+}
+async function fetchBundle(locale: string, etag?: s
+ const headers: Record<string, string> = {};
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 146/244
+ if (etag) headers["If-None-Match"] = etag;
+ const res = await fetch(`/api/i18n/bundle?locale=
+ credentials: "include",
+ headers,
+ });
+ if (res.status === 304) {
+ return { bundle: null, etag: etag || null, notM
+ }
+ if (!res.ok) throw new Error("Failed to fetch i18
+ const newEtag = res.headers.get("ETag");
+ const bundle = (await res.json()) as Bundle;
+ return { bundle, etag: newEtag, notModified: fals
+}
+export function I18nProvider(props: { children: Rea
+ const [config, setConfig] = useState<I18nConfig 
+ const initialLocale =
+ (typeof window !== "undefined" && localStorage
+ (typeof navigator !== "undefined" ? (navigator
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 147/244
+ const [locale, setLocaleState] = useState<string>
+ const [bundle, setBundle] = useState<Bundle | nul
+ const [ready, setReady] = useState<boolean>(false
+ // Load config once
+ useEffect(() => {
+ let alive = true;
+ fetchConfig()
+ .then((cfg) => {
+ if (!alive) return;
+ setConfig(cfg);
+ // If current locale not supported, fall ba
+ if (cfg.supportedLocales.length && !cfg.sup
+ setLocaleState(cfg.defaultLocale);
+ }
+ })
+ .catch((e) => {
+ console.error("i18n config load failed:", e
+ });
+ return () => {
+ alive = false;
+ };
+ }, []);
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 148/244
+ // Load bundle (ETag + localStorage cache)
+ useEffect(() => {
+ let alive = true;
+ const cached = readCached(locale);
+ if (cached) setBundle(cached);
+ const cachedEtag = cached?.etag || null;
+ fetchBundle(locale, cachedEtag)
+ .then(({ bundle: b, notModified }) => {
+ if (!alive) return;
+ if (!notModified && b) {
+ setBundle(b);
+ writeCached(locale, b);
+ }
+ setReady(true);
+ })
+ .catch((e) => {
+ console.error("i18n bundle load failed:", e
+ // offline-safe: still mark ready if we hav
+ setReady(true);
+ });
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 149/244
+ return () => {
+ alive = false;
+ };
+ }, [locale]);
+ // Optional DOM auto-translation (zero work when 
+ useEffect(() => {
+ if (!config) return;
+ const enabled =
+ config.enabled &&
+ config.domAutoTranslate &&
+ bundle?.enabled &&
+ bundle.locale &&
+ bundle.locale !== bundle.defaultLocale;
+ if (enabled && bundle) {
+ enableDomAutoTranslator(bundle.byText);
+ } else {
+ disableDomAutoTranslator();
+ }
+ }, [config, bundle]);
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 150/244
+ const t = useMemo(() => {
+ return (key: string, fallback?: string) => {
+ const k = String(key || "").trim();
+ if (!k) return fallback ?? "";
+ const v = bundle?.strings?.[k];
+ if (typeof v === "string" && v.length) return
+ return fallback ?? k;
+ };
+ }, [bundle]);
+ const setLocale = (loc: string) => {
+ const next = String(loc || "").trim();
+ if (!next) return;
+ localStorage.setItem("i18n.locale", next);
+ setLocaleState(next);
+ };
+ const value: I18nCtx = {
+ locale,
+ config,
+ ready,
+ t,
+ setLocale,
+ };
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 151/244
+4.2 client/src/i18n/domTranslator.ts
+(NEW)
+This is the “no manual intervention” layer: it translates
+already-rendered UI text by exact-match against
+byText (low overhead; only active when non-default
+locale + config enabled).
+ return <Ctx.Provider value={value}>{props.childre
+}
+export function useI18n() {
+ const v = useContext(Ctx);
+ if (!v) throw new Error("useI18n must be used wit
+ return v;
+}
+ts Copy code
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 152/244
+// FILE: /client/src/i18n/domTranslator.ts
+let observer: MutationObserver | null = null;
+let activeMap: Record<string, string> | null = null
+function normalize(s: string): string {
+ return String(s || "").replace(/\s+/g, " ").trim
+}
+function translateTextNode(node: Text) {
+ if (!activeMap) return;
+ const raw = node.nodeValue;
+ if (!raw) return;
+ const norm = normalize(raw);
+ if (!norm) return;
+ const translated = activeMap[norm];
+ if (!translated) return;
+ if (translated === raw) return;
+ node.nodeValue = translated;
+}
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 153/244
+function translateElementAttrs(el: Element) {
+ if (!activeMap) return;
+ const attrNames = ["title", "placeholder", "aria-
+ for (const name of attrNames) {
+ const v = el.getAttribute(name);
+ if (!v) continue;
+ const norm = normalize(v);
+ const translated = activeMap[norm];
+ if (translated && translated !== v) {
+ el.setAttribute(name, translated);
+ }
+ }
+}
+function walk(node: Node) {
+ if (node.nodeType === Node.TEXT_NODE) {
+ translateTextNode(node as Text);
+ return;
+ }
+ if (node.nodeType === Node.ELEMENT_NODE) {
+ translateElementAttrs(node as Element);
+ }
+ for (const child of Array.from(node.childNodes)) 
+ walk(child);
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 154/244
+ }
+}
+export function enableDomAutoTranslator(byText: Rec
+ activeMap = byText;
+ // Initial pass (fast; dashboards are modest size
+ try {
+ if (document.body) walk(document.body);
+ } catch {
+ // ignore
+ }
+ if (observer) return;
+ observer = new MutationObserver((mutations) => {
+ if (!activeMap) return;
+ for (const m of mutations) {
+ for (const added of Array.from(m.addedNodes
+ // translate only added subtrees
+ try {
+ walk(added);
+ } catch {
+ // ignore
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 155/244
+4.3 client/src/i18n/index.ts (NEW)
+ }
+ }
+ }
+ });
+ observer.observe(document.documentElement, {
+ childList: true,
+ subtree: true,
+ });
+}
+export function disableDomAutoTranslator() {
+ activeMap = null;
+ if (observer) {
+ observer.disconnect();
+ observer = null;
+ }
+}
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 156/244
+4.4 client/src/App.tsx (PATCH)
+Wrap routes with the provider:
+ts
+// FILE: /client/src/i18n/index.ts
+export { I18nProvider, useI18n } from "./I18nProvid
+Copy code
+tsx
+// FILE: /client/src/App.tsx (patch)
+import { I18nProvider } from "@/i18n";
+// ...inside App()
+function App() {
+ return (
+ <QueryClientProvider client={queryClient}>
+ <AuthProvider>
+ <I18nProvider>
+ <AppRoutes />
+Copy code
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 157/244
+5) Build-time change detection: Vite
+manifest extractor
+5.1 client/vite.plugins/i18nExtract.ts
+(NEW)
+ <Toaster />
+ </I18nProvider>
+ </AuthProvider>
+ </QueryClientProvider>
+ );
+}
+ts
+// FILE: /client/vite.plugins/i18nExtract.ts
+import crypto from "crypto";
+import { parse } from "@babel/parser";
+import traverse from "@babel/traverse";
+type ManifestString = {
+Copy code
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 158/244
+ key: string;
+ defaultText: string;
+ context?: Record<string, any>;
+ source?: { file?: string; kind?: string; line?: n
+};
+function norm(s: string) {
+ return String(s || "").replace(/\s+/g, " ").trim
+}
+function keyForText(text: string): string {
+ const h = crypto.createHash("sha256").update(text
+ return `ui_${h.slice(0, 24)}`;
+}
+const ATTR_ALLOW = new Set(["title", "placeholder",
+const PROP_ALLOW = new Set(["title", "label", "desc
+export function i18nExtractPlugin() {
+ const map = new Map<string, ManifestString>();
+ return {
+ name: "i18n-extract",
+ enforce: "pre" as const,
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 159/244
+ transform(code: string, id: string) {
+ if (!id.includes("/client/src/")) return null
+ if (!id.endsWith(".tsx")) return null;
+ let ast: any;
+ try {
+ ast = parse(code, {
+ sourceType: "module",
+ plugins: ["typescript", "jsx"],
+ errorRecovery: true,
+ });
+ } catch {
+ return null;
+ }
+ traverse(ast, {
+ JSXText(path: any) {
+ const t = norm(path.node.value);
+ if (!t) return;
+ const key = keyForText(t);
+ if (!map.has(key)) {
+ map.set(key, {
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 160/244
+ key,
+ defaultText: t,
+ source: { file: id, kind: "JSX_TEXT",
+ });
+ }
+ },
+ JSXAttribute(path: any) {
+ const name = path.node.name?.name;
+ if (!ATTR_ALLOW.has(String(name))) return
+ const v = path.node.value;
+ if (!v || v.type !== "StringLiteral") ret
+ const t = norm(v.value);
+ if (!t) return;
+ const key = keyForText(t);
+ if (!map.has(key)) {
+ map.set(key, {
+ key,
+ defaultText: t,
+ source: { file: id, kind: `JSX_ATTR:$
+ });
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 161/244
+ }
+ },
+ ObjectProperty(path: any) {
+ const keyNode = path.node.key;
+ const valNode = path.node.value;
+ const propName =
+ keyNode?.type === "Identifier"
+ ? keyNode.name
+ : keyNode?.type === "StringLiteral"
+ ? keyNode.value
+ : null;
+ if (!propName || !PROP_ALLOW.has(String(p
+ if (!valNode || valNode.type !== "StringL
+ const t = norm(valNode.value);
+ if (!t) return;
+ const key = keyForText(t);
+ if (!map.has(key)) {
+ map.set(key, {
+ key,
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 162/244
+ defaultText: t,
+ source: { file: id, kind: `OBJ_PROP:$
+ });
+ }
+ },
+ });
+ return null;
+ },
+ generateBundle(_opts: any, bundle: any) {
+ const strings = Array.from(map.values()).sort
+ const buildId = process.env.GIT_COMMIT || pro
+ const manifest = {
+ version: 1,
+ buildId: String(buildId),
+ generatedAtMs: Date.now(),
+ strings,
+ };
+ const source = JSON.stringify(manifest, null,
+ // Emit into dist/public (Vite outDir)
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 163/244
+5.2 vite.config.ts (PATCH)
+Add the plugin:
+ this.emitFile({
+ type: "asset",
+ fileName: "i18n-manifest.json",
+ source,
+ });
+ },
+ };
+}
+ts
+// FILE: /vite.config.ts (patch)
+import { i18nExtractPlugin } from "./client/vite.pl
+export default defineConfig({
+ plugins: [
+ i18nExtractPlugin(),
+Copy code
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 164/244
+5.3 package.json (ADD dev deps)
+Add:
+ react(),
+ runtimeErrorOverlay(),
+ // ...
+ ],
+ // ...
+});
+json
+"devDependencies": {
+ "@babel/parser": "^7.26.0",
+ "@babel/traverse": "^7.26.0",
+ "...": "..."
+}
+Copy code
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 165/244
+(Keep existing versions; the exact Babel versions are not
+critical as long as parser+traverse are compatible.)
+6) Operational behavior checklist
+(what you get immediately)
+1. Build-time change detection
+Every vite build emits dist/public/i18nmanifest.json containing discovered UI strings.
+2. Passive / low overhead monitoring
+No runtime “string scanning.” Only the worker polls
+DB for pending translations (cheap queries).
+3. Offline-safe rendering
+Client caches bundles in localStorage . If LLM is
+down, the app still renders (default text or cached
+translations).
+4. Fully automated coverage option (no manual t()
+calls required)
+If enabled, the DOM Auto-Translator replaces
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 166/244
+visible UI strings by exact match using byText .
+This is the “self-maintaining, adapts as app evolves”
+layer.
+If you want the next step in this same pass, I will output:
+an Admin dashboard mini-tab plan + UI
+components (config + manual overrides +
+translation status),
+and a curl/manual test script proving: manifest
+ingest → DB persistence → worker translation →
+client bundle/ETag caching → DOM auto translation
+behavior.
+1/3 CoNTinue
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 167/244
+Thought for 26m 11s
+2/2
+ContinuE
+Stopped thinking
+COT TRANSLATION 2.txt
+Document
+COT TRANSLATION 1.txt
+Document
+YOU DROPPED COT BEFORE
+OUPUT TWICE, EXTRACT BOTH
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 168/244
+AND PRODUCE AN OUTPUT THIS
+TIME 
+Thought for 11m 55s
+Below is the consolidated “missing output” you were
+aiming for (built from both COT fragments you
+uploaded) — starting with the formal system
+architecture diagrams (logical + data flow), followed by
+a concrete, repo-aligned implementation plan and full
+code (new files + precise modifications) for a selfmaintaining, DB-backed, LLM-assisted translation engine
+for all user-facing dashboard components.
+1) Formal system architecture diagram
+(logical)
+mermaid
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 169/244
+graph TD
+ subgraph Build-Time (Dev + CI)
+ A[Vite i18n Extract+Rewrite Plugin<br/>- finds 
+ end
+ subgraph Server (Express)
+ B[i18n Ingestor<br/>reads i18n-manifest.json<br
+ C[i18n Worker<br/>polls for jobs<br/>batches tr
+ D[Public i18n API<br/>/api/i18n/config<br/>/api
+ E[Admin i18n API (admin-only)<br/>/api/admin/i1
+ end
+ subgraph Data Layer (SQLite)
+ F[(i18n_config)]
+ G[(i18n_strings)]
+ H[(i18n_translations)]
+ I[(i18n_jobs)]
+ J[(i18n_manifest_ingest)]
+ end
+ subgraph External
+ K[LLM Translation Provider<br/>HTTP_JSON / Open
+ end
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 170/244
+ subgraph Client (React)
+ L[I18nProvider<br/>loads config + bundle<br/>se
+ M[t(key,fallback)<br/>runtime lookup<br/>offlin
+ N[Dashboard UI Components<br/>automatically rew
+ end
+ A -->|i18n-manifest.json| B
+ B --> F
+ B --> G
+ B --> I
+ B --> J
+ C --> I
+ C --> H
+ C -->|translate batch| K
+ D --> H
+ D --> G
+ L -->|fetch config/bundle| D
+ N --> M
+ L --> M
+ E --> F
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 171/244
+Key points:
+Automatic coverage is achieved by build-time AST
+rewriting: new components with hardcoded user
+text are rewritten into t(key,fallback) without dev
+intervention.
+Low overhead monitoring is achieved by: manifest
+SHA checks + idle worker when no jobs.
+Offline-safe: once i18n_translations is populated,
+client renders entirely from internal bundle without
+LLM dependency.
+(BCP-47 language tags for html lang are
+recommended. )
+ E --> J
+ E --> I
+ E --> G
+ E --> H
+MDN Web Docs +1
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 172/244
+2) Formal system architecture diagram (data
+flow)
+mermaid
+sequenceDiagram
+ autonumber
+ participant Dev as Developer / CI Build
+ participant Vite as Vite i18n Plugin
+ participant FS as Manifest File (i18n-manifest.js
+ participant S as Server Ingestor
+ participant DB as SQLite (i18n_*)
+ participant W as i18n Worker
+ participant LLM as LLM Provider
+ participant C as Client (I18nProvider + UI)
+ Dev->>Vite: build / dev hot-reload
+ Vite->>Vite: parse TSX/JSX, extract user-facing s
+ Vite->>Vite: rewrite to t(key,fallback) + emit ma
+ Vite->>FS: write i18n-manifest.json
+ S->>FS: read manifest + compute sha256
+ alt manifest sha changed
+ S->>DB: upsert i18n_strings (first_seen/last_se
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 173/244
+ S->>DB: enqueue i18n_jobs for missing target lo
+ else unchanged
+ S->>S: no-op (idle)
+ end
+ loop every interval (idle if no jobs)
+ W->>DB: select PENDING jobs
+ alt jobs exist
+ W->>LLM: translate batch(locale, items[])
+ LLM-->>W: translations{key->text}
+ W->>DB: upsert i18n_translations; mark jobs D
+ else no jobs
+ W->>W: sleep (idle)
+ end
+ end
+ C->>S: GET /api/i18n/config
+ S-->>C: enabled, defaultLocale, supportedLocales,
+ C->>S: GET /api/i18n/bundle?locale=xx
+ S-->>C: { key: translatedText }
+ C->>C: render UI via t(key,fallback)
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 174/244
+MutationObserver is not required in the primary design
+(build-time rewrite is cleaner and lower overhead), but it
+remains a valid fallback pattern for any runtime-only
+injected DOM. 
+3) Concrete implementation plan
+(repo-aligned)
+Phase A — Build-time: automatic extraction +
+rewriting (the core “no manual intervention”
+mechanism)
+1. Add a Vite plugin that:
+Parses .tsx/.jsx under client/src .
+Detects user-facing strings in:
+JSXText (component children)
+selected JSXAttribute string props (e.g.,
+title , placeholder , aria-label , alt ,
+label , description )
+Copy code
+MDN Web Docs +1
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 175/244
+Generates a stable i18n_key (hash of file + loc
++ text).
+Rewrites the string into t(i18n_key,
+fallbackText) so the UI is translation-aware
+automatically.
+Emits client/public/i18n-manifest.json in
+dev and dist/public/i18n-manifest.json in
+prod builds.
+Phase B — Data layer: persistent translation
+storage + job queue
+Create SQLite tables:
+i18n_config (enabled, default locale, supported
+locales, provider config, worker limits)
+i18n_strings (i18n_key, source_text, source_hash,
+context, first/last seen, retired)
+i18n_translations (string_id + locale →
+translated_text, manual lock)
+i18n_jobs (pending translations)
+i18n_manifest_ingest (sha tracking, auditability)
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 176/244
+Phase C — Server: ingestion + worker + APIs
+Startup step: ensureI18nSchema() .
+Background worker:
+Reads manifest periodically, ingest only if sha
+changed.
+Enqueues missing translations.
+Batches jobs by locale, calls provider, stores
+results.
+Idle when no changes and no jobs.
+APIs:
+Public:
+GET /api/i18n/config
+GET /api/i18n/bundle?locale=xx
+Admin (protected by requireAdmin ):
+GET/PUT /api/admin/i18n/config
+GET /api/admin/i18n/summary
+POST /api/admin/i18n/ingest-manifest
+POST /api/admin/i18n/run-worker
+Phase D — Client runtime
+Copy code
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 177/244
+I18nProvider loads config + bundle and updates
+runtime state.
+t(key,fallback) does O(1) lookup from loaded
+bundle.
+HTML lang set to the current locale tag.
+Phase E — Future-proofing (recommended)
+Introduce ICU message format for
+pluralization/variables once you start translating
+dynamic strings. 
+4) CODE — full implementation (new
+files + modifications)
+4.1 package.json (add dev deps)
+Add these to devDependencies:
+MDN Web Docs +1
+FormatJS +1
+json
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 178/244
+4.2 NEW — client/vite.i18nExtractPlugin.ts
+{
+ "devDependencies": {
+ "@babel/generator": "^7.26.0",
+ "@babel/parser": "^7.26.0",
+ "@babel/traverse": "^7.26.0",
+ "@babel/types": "^7.26.0"
+ }
+}
+Copy code
+ts
+import type { Plugin } from "vite";
+import fs from "fs";
+import path from "path";
+import crypto from "crypto";
+import { parse } from "@babel/parser";
+import traverse from "@babel/traverse";
+import generate from "@babel/generator";
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 179/244
+import * as t from "@babel/types";
+type ManifestEntry = {
+ key: string;
+ text: string;
+ file: string;
+ line: number;
+ column: number;
+ kind: "JSXText" | "JSXAttribute";
+ attr?: string;
+};
+type Manifest = {
+ version: number;
+ generatedAtMs: number;
+ sourceLocale: string;
+ strings: ManifestEntry[];
+};
+const IMPORT_SOURCE = "@/i18n/runtime";
+const IMPORT_NAME = "t";
+const ATTR_DENY = new Set([
+ "className",
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 180/244
+ "id",
+ "href",
+ "to",
+ "src",
+ "name",
+ "type",
+ "value", // WARNING: may be user-facing in some c
+ "variant",
+ "size",
+ "role",
+ "tabIndex",
+ "data-testid",
+]);
+const ATTR_ALLOW = new Set([
+ "title",
+ "placeholder",
+ "aria-label",
+ "alt",
+ "label",
+ "description",
+ "helperText",
+ "tooltip",
+]);
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 181/244
+function hasLetters(s: string) {
+ return /[A-Za-z\u00C0-\u024F\u1E00-\u1EFF\u0400-\
+}
+function stableKey(fileRel: string, line: number, c
+ const h = crypto.createHash("sha256");
+ h.update(fileRel);
+ h.update("|");
+ h.update(String(line));
+ h.update(":");
+ h.update(String(column));
+ h.update("|");
+ h.update(text);
+ return h.digest("base64url").slice(0, 16);
+}
+function splitWhitespace(raw: string) {
+ const leadMatch = raw.match(/^\s+/);
+ const trailMatch = raw.match(/\s+$/);
+ const lead = leadMatch ? leadMatch[0] : "";
+ const trail = trailMatch ? trailMatch[0] : "";
+ const core = raw.trim();
+ return { lead, core, trail };
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 182/244
+}
+function ensureImport(program: t.Program) {
+ const already = program.body.some(
+ (n) =>
+ t.isImportDeclaration(n) &&
+ n.source.value === IMPORT_SOURCE &&
+ n.specifiers.some((s) => t.isImportSpecifier(
+ );
+ if (already) return;
+ program.body.unshift(
+ t.importDeclaration([t.importSpecifier(t.identi
+ );
+}
+export function i18nExtractAndRewritePlugin(opts?: 
+ const sourceLocale = opts?.sourceLocale ?? "en";
+ const entries: ManifestEntry[] = [];
+ // Debounced dev-manifest write (prevents excessi
+ let devWriteTimer: NodeJS.Timeout | null = null;
+ let lastDevJson = "";
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 183/244
+ function scheduleDevWrite(manifestPathAbs: string
+ const json = JSON.stringify(manifest, null, 2);
+ if (json === lastDevJson) return;
+ lastDevJson = json;
+ if (devWriteTimer) clearTimeout(devWriteTimer);
+ devWriteTimer = setTimeout(() => {
+ fs.mkdirSync(path.dirname(manifestPathAbs), {
+ fs.writeFileSync(manifestPathAbs, json, "utf8
+ }, 250);
+ }
+ return {
+ name: "tradequip-i18n-extract-rewrite",
+ enforce: "pre",
+ transform(code, id) {
+ // Only operate on client source TSX/JSX
+ if (!id.includes(`${path.sep}client${path.sep
+ if (!id.endsWith(".tsx") && !id.endsWith(".js
+ const fileRel = id.split(`${path.sep}client${
+ let ast: t.File;
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 184/244
+ try {
+ ast = parse(code, {
+ sourceType: "module",
+ plugins: ["typescript", "jsx"],
+ }) as unknown as t.File;
+ } catch {
+ return null;
+ }
+ let touched = false;
+ traverse(ast, {
+ JSXText(p) {
+ const raw = p.node.value ?? "";
+ const { lead, core, trail } = splitWhites
+ if (!core) return;
+ if (!hasLetters(core)) return;
+ const loc = p.node.loc?.start;
+ const line = loc?.line ?? 0;
+ const column = loc?.column ?? 0;
+ const key = stableKey(fileRel, line, colu
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 185/244
+ entries.push({ key, text: core, file: fil
+ // Replace with [lead] {t(key, core)} [tr
+ const expr = t.jSXExpressionContainer(
+ t.callExpression(t.identifier("t"), [t
+ );
+ const repl: t.JSXText | t.JSXExpressionCo
+ const nodes: any[] = [];
+ if (lead) nodes.push(t.jSXText(lead));
+ nodes.push(expr);
+ if (trail) nodes.push(t.jSXText(trail));
+ p.replaceWithMultiple(nodes);
+ touched = true;
+ },
+ JSXAttribute(p) {
+ const name = p.node.name;
+ if (!t.isJSXIdentifier(name)) return;
+ const attrName = name.name;
+ if (ATTR_DENY.has(attrName)) return;
+ if (!ATTR_ALLOW.has(attrName)) return;
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 186/244
+ const v = p.node.value;
+ if (!v) return;
+ if (!t.isStringLiteral(v)) return;
+ const raw = String(v.value ?? "");
+ const core = raw.trim();
+ if (!core) return;
+ if (!hasLetters(core)) return;
+ const loc = p.node.loc?.start;
+ const line = loc?.line ?? 0;
+ const column = loc?.column ?? 0;
+ const key = stableKey(fileRel, line, colu
+ entries.push({ key, text: core, file: fil
+ // attr="X" -> attr={t(key,"X")}
+ p.node.value = t.jSXExpressionContainer(
+ t.callExpression(t.identifier("t"), [t
+ );
+ touched = true;
+ },
+ });
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 187/244
+ if (!touched) return null;
+ ensureImport(ast.program);
+ const out = generate(ast, { retainLines: true
+ return { code: out.code, map: out.map as any
+ },
+ generateBundle() {
+ const manifest: Manifest = {
+ version: 1,
+ generatedAtMs: Date.now(),
+ sourceLocale,
+ strings: entries,
+ };
+ // Emit into dist/public as an asset
+ this.emitFile({
+ type: "asset",
+ fileName: "i18n-manifest.json",
+ source: JSON.stringify(manifest, null, 2),
+ });
+ },
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 188/244
+4.3 MODIFY — vite.config.ts (add plugin)
+ configureServer(server) {
+ // In dev, write to client/public so server c
+ const clientRoot = server.config.root; // ..
+ const manifestPathAbs = path.resolve(clientRo
+ server.watcher.on("all", () => {
+ const manifest: Manifest = {
+ version: 1,
+ generatedAtMs: Date.now(),
+ sourceLocale,
+ strings: entries,
+ };
+ scheduleDevWrite(manifestPathAbs, manifest)
+ });
+ },
+ };
+}
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 189/244
+ts
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+import path from "path";
+import runtimeErrorOverlay from "@replit/vite-plugi
+import { i18nExtractAndRewritePlugin } from "./clie
+export default defineConfig({
+ plugins: [
+ i18nExtractAndRewritePlugin({ sourceLocale: "en
+ react(),
+ runtimeErrorOverlay(),
+ ...(process.env.NODE_ENV !== "production" &&
+ process.env.REPL_ID !== undefined
+ ? [
+ await import("@replit/vite-plugin-cartogr
+ m.cartographer(),
+ ),
+ ]
+ : []),
+ ],
+ resolve: {
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 190/244
+4.4 NEW — client/src/i18n/runtime.ts
+ alias: {
+ "@db": path.resolve(import.meta.dirname, "db"
+ "@": path.resolve(import.meta.dirname, "clien
+ "@shared": path.resolve(import.meta.dirname, 
+ "@assets": path.resolve(import.meta.dirname, 
+ },
+ },
+ root: path.resolve(import.meta.dirname, "client")
+ build: {
+ outDir: path.resolve(import.meta.dirname, "dist
+ emptyOutDir: true,
+ },
+});
+ts
+type I18nState = {
+ enabled: boolean;
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 191/244
+ locale: string;
+ defaultLocale: string;
+ supportedLocales: string[];
+ bundle: Record<string, string>;
+ bundleEtag?: string | null;
+};
+let state: I18nState = {
+ enabled: false,
+ locale: "en",
+ defaultLocale: "en",
+ supportedLocales: ["en"],
+ bundle: {},
+ bundleEtag: null,
+};
+const listeners = new Set<() => void>();
+export function getI18nState(): I18nState {
+ return state;
+}
+export function subscribeI18n(listener: () => void)
+ listeners.add(listener);
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 192/244
+4.5 NEW — client/src/i18n/I18nProvider.tsx
+Copy code
+ return () => listeners.delete(listener);
+}
+export function setI18nState(patch: Partial<I18nSta
+ state = { ...state, ...patch };
+ for (const l of listeners) l();
+}
+export function t(key: string, fallback?: string) {
+ const s = state;
+ if (!s.enabled) return fallback ?? key;
+ const v = s.bundle?.[key];
+ return typeof v === "string" && v.length ? v : (f
+}
+tsx
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 193/244
+import React, { useEffect, useMemo, useState } from
+import { useAuth } from "@/hooks/use-auth";
+import { getI18nState, setI18nState, subscribeI18n 
+type I18nConfigResponse = {
+ ok: boolean;
+ enabled: boolean;
+ defaultLocale: string;
+ supportedLocales: string[];
+ bundleEtag?: string | null;
+};
+async function fetchJson<T>(url: string): Promise<T
+ const res = await fetch(url, { credentials: "incl
+ if (!res.ok) throw new Error(`HTTP ${res.status}`
+ return (await res.json()) as T;
+}
+export function I18nProvider({ children }: { childr
+ const { user } = useAuth();
+ const [tick, setTick] = useState(0);
+ // Re-render subtree when i18n state changes (loc
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 194/244
+ useEffect(() => subscribeI18n(() => setTick((x) =
+ const preferredLocale = useMemo(() => {
+ const raw = String((user as any)?.language || "
+ return raw || "en";
+ }, [user]);
+ useEffect(() => {
+ let cancelled = false;
+ (async () => {
+ // Load config first
+ const cfg = await fetchJson<I18nConfigRespons
+ if (cancelled) return;
+ const supported = Array.isArray(cfg.supported
+ const defaultLocale = cfg.defaultLocale || "e
+ const nextLocale = supported.includes(preferr
+ setI18nState({
+ enabled: !!cfg.enabled,
+ supportedLocales: supported,
+ defaultLocale,
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 195/244
+Copy code
+ locale: nextLocale,
+ });
+ if (!cfg.enabled) {
+ setI18nState({ bundle: {}, bundleEtag: null
+ document.documentElement.lang = defaultLoca
+ return;
+ }
+ // Load bundle for locale (no-op for default 
+ const url = `/api/i18n/bundle?locale=${encode
+ const res = await fetch(url, { credentials: "
+ if (!res.ok) throw new Error(`Bundle HTTP ${r
+ const bundle = (await res.json()) as Record<s
+ if (cancelled) return;
+ setI18nState({
+ bundle: bundle || {},
+ bundleEtag: cfg.bundleEtag ?? null,
+ });
+ // Set HTML lang using BCP-47 tag format reco
+ document.documentElement.lang = nextLocale;
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 196/244
+ })().catch(() => {
+ // Fail closed: render fallback text
+ setI18nState({ enabled: false, bundle: {}, bu
+ document.documentElement.lang = "en";
+ });
+ return () => {
+ cancelled = true;
+ };
+ }, [preferredLocale, tick]);
+ // Provider exists mainly to own lifecycle + rere
+ return <>{children}</>;
+}
+// Optional helper for UI language switching later
+export function getCurrentLocale() {
+ return getI18nState().locale;
+}
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 197/244
+4.6 MODIFY — client/src/App.tsx (wrap app
+with I18nProvider)
+tsx
+import { Switch, Route } from "wouter";
+import { QueryClientProvider } from "@tanstack/reac
+import { queryClient } from "./lib/queryClient";
+import { Toaster } from "@/components/ui/toaster";
+import { AuthProvider } from "./hooks/use-auth";
+import Landing from "@/pages/Landing";
+import Signup from "@/pages/Signup";
+import Login from "@/pages/Login";
+import Trading from "@/pages/Trading";
+import ProfileSettings from "@/pages/ProfileSetting
+import AdminDashboard from "@/pages/AdminDashboard"
+import NotFound from "@/pages/not-found";
+import { RequireAuth } from "@/components/RequireAu
+import { RequireAdmin } from "@/components/RequireA
+import { I18nProvider } from "@/i18n/I18nProvider";
+function AppRoutes() {
+ return (
+1/7/26, 1:55 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 198/244
+ <Switch>
+ <Route path="/" component={Landing} />
+ <Route path="/signup" component={Signup} />
+ <Route path="/login" component={Login} />
+ <Route path="/trading">
+ <RequireAuth>
+ <Trading />
+ </RequireAuth>
+ </Route>
+ <Route path="/profile-settings">
+ <RequireAuth>
+ <ProfileSettings />
+ </RequireAuth>
+ </Route>
+ <Route path="/admin">
+ <RequireAdmin>
+ <AdminDashboard />
+ </RequireAdmin>
+ </Route>
+ <Route component={NotFound} />
+ </Switch>
+ );
+}
+1/7/26, 1:56 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 199/244
+4.7 NEW —
+client/src/components/admin/AdminI18nCa
+function App() {
+ return (
+ <QueryClientProvider client={queryClient}>
+ <AuthProvider>
+ <I18nProvider>
+ <div className="min-h-screen bg-neutral-9
+ <AppRoutes />
+ <Toaster />
+ </div>
+ </I18nProvider>
+ </AuthProvider>
+ </QueryClientProvider>
+ );
+}
+export default App;
+1/7/26, 1:56 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 200/244
+rd.tsx
+tsx
+import { useMutation, useQuery } from "@tanstack/r
+import { Card, CardContent, CardHeader, CardTitle }
+import { Switch } from "@/components/ui/switch";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { useToast } from "@/hooks/use-toast";
+import { queryClient } from "@/lib/queryClient";
+type I18nAdminConfig = {
+ ok: boolean;
+ enabled: boolean;
+ defaultLocale: string;
+ supportedLocales: string[];
+ provider: string;
+};
+type I18nSummary = {
+ ok: boolean;
+ stringsTotal: number;
+1/7/26, 1:56 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 201/244
+ translationsTotal: number;
+ jobsPending: number;
+ lastManifestSha256?: string | null;
+ lastIngestedAt?: number | null;
+};
+async function postJson(url: string, body?: any) {
+ const res = await fetch(url, {
+ method: "POST",
+ headers: { "Content-Type": "application/json" }
+ credentials: "include",
+ body: body ? JSON.stringify(body) : "{}",
+ });
+ if (!res.ok) throw new Error(`HTTP ${res.status}`
+ return res.json();
+}
+async function putJson(url: string, body: any) {
+ const res = await fetch(url, {
+ method: "PUT",
+ headers: { "Content-Type": "application/json" }
+ credentials: "include",
+ body: JSON.stringify(body),
+ });
+1/7/26, 1:56 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 202/244
+Copy code
+ if (!res.ok) throw new Error(`HTTP ${res.status}`
+ return res.json();
+}
+export function AdminI18nCard() {
+ const { toast } = useToast();
+ const { data: cfg } = useQuery<I18nAdminConfig>({
+ queryKey: ["/api/admin/i18n/config"],
+ });
+ const { data: summary, refetch: refetchSummary } 
+ queryKey: ["/api/admin/i18n/summary"],
+ });
+ const updateMutation = useMutation({
+ mutationFn: async (patch: Partial<I18nAdminConf
+ return putJson("/api/admin/i18n/config", patc
+ },
+ onSuccess: () => {
+ toast({ title: "Saved", description: "i18n se
+ queryClient.invalidateQueries({ queryKey: ["/
+ queryClient.invalidateQueries({ queryKey: ["/
+ },
+1/7/26, 1:56 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 203/244
+Copy code
+Copy code
+ onError: (e: any) => toast({ title: "Error", de
+ });
+ const ingestMutation = useMutation({
+ mutationFn: async () => postJson("/api/admin/i1
+ onSuccess: () => {
+ toast({ title: "Ingested", description: "Mani
+ refetchSummary();
+ },
+ onError: (e: any) => toast({ title: "Error", de
+ });
+ const runWorkerMutation = useMutation({
+ mutationFn: async () => postJson("/api/admin/i1
+ onSuccess: () => {
+ toast({ title: "Worker tick complete", descri
+ refetchSummary();
+ },
+ onError: (e: any) => toast({ title: "Error", de
+ });
+ const supportedLocalesCsv = (cfg?.supportedLocale
+ return (
+1/7/26, 1:56 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 204/244
+ <Card className="bg-neutral-700 border-gray-600
+ <CardHeader>
+ <CardTitle className="text-base">Automatic 
+ </CardHeader>
+ <CardContent className="space-y-4">
+ <div className="flex items-center justify-b
+ <div>
+ <Label className="text-base font-medium
+ <p className="text-xs text-gray-400 mt-
+ When enabled, UI strings are rendered
+ </p>
+ </div>
+ <Switch
+ checked={!!cfg?.enabled}
+ onCheckedChange={(checked) => updateMut
+ />
+ </div>
+ <div className="grid grid-cols-1 md:grid-co
+ <div className="space-y-2">
+ <Label>Default locale</Label>
+ <Input
+ value={cfg?.defaultLocale || "en"}
+ onChange={(e) => updateMutation.mutat
+1/7/26, 1:56 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 205/244
+ />
+ </div>
+ <div className="space-y-2 md:col-span-2">
+ <Label>Supported locales (CSV)</Label>
+ <Input
+ defaultValue={supportedLocalesCsv}
+ onBlur={(e) => {
+ const raw = String(e.target.value 
+ const locales = raw.split(",").map(
+ updateMutation.mutate({ supportedLo
+ }}
+ />
+ </div>
+ </div>
+ <div className="flex items-center gap-2 pt-
+ <Button
+ variant="outline"
+ className="bg-neutral-600 hover:bg-neut
+ onClick={() => ingestMutation.mutate()}
+ disabled={ingestMutation.isPending}
+ >
+ {ingestMutation.isPending ? "Ingesting
+ </Button>
+1/7/26, 1:56 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 206/244
+ <Button
+ variant="outline"
+ className="bg-neutral-600 hover:bg-neut
+ onClick={() => runWorkerMutation.mutate
+ disabled={runWorkerMutation.isPending}
+ >
+ {runWorkerMutation.isPending ? "Running
+ </Button>
+ <Button
+ variant="outline"
+ className="bg-neutral-600 hover:bg-neut
+ onClick={() => refetchSummary()}
+ >
+ Refresh
+ </Button>
+ </div>
+ <div className="text-sm text-gray-200 bg-ne
+ <div className="grid grid-cols-2 md:grid-
+ <div><span className="text-gray-400">St
+ <div><span className="text-gray-400">Tr
+ <div><span className="text-gray-400">Jo
+ <div><span className="text-gray-400">Ma
+ </div>
+1/7/26, 1:56 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 207/244
+4.8 MODIFY —
+client/src/pages/AdminDashboard.tsx
+(insert card in Controls tab)
+1. Add import near the top with other imports:
+2. In the Controls tab content, insert <AdminI18nCard
+/> after the existing “Regional Preferences” card:
+ </div>
+ </CardContent>
+ </Card>
+ );
+}
+ts
+import { AdminI18nCard } from "@/components/admin/A
+Copy code
+tsx
+1/7/26, 1:56 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 208/244
+4.9 MODIFY — server/db/ensureSchema.ts
+(add ensureI18nSchema)
+Append this near the bottom of the file (and export it):
+{/* CONTROLS */}
+<TabsContent value="controls">
+ <div className="space-y-4">
+ <Card className="bg-neutral-700 border-gray-600
+ ...
+ </Card>
+ <AdminI18nCard />
+ <div className="flex justify-end pt-2">
+ ...
+ </div>
+ </div>
+</TabsContent>
+1/7/26, 1:56 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 209/244
+Copy code
+ts
+export function ensureI18nSchema() {
+ const db = getDb();
+ try {
+ db.exec(`
+ CREATE TABLE IF NOT EXISTS i18n_config (
+ id INTEGER PRIMARY KEY CHECK (id = 1),
+ enabled INTEGER NOT NULL DEFAULT 0,
+ default_locale TEXT NOT NULL DEFAULT 'en',
+ supported_locales_json TEXT NOT NULL DEFAUL
+ provider TEXT NOT NULL DEFAULT 'MOCK',
+ provider_config_json TEXT,
+ last_manifest_sha256 TEXT,
+ max_jobs_per_tick INTEGER NOT NULL DEFAULT 
+ updated_at INTEGER NOT NULL DEFAULT (strfti
+ );
+ `);
+ db.exec(`INSERT OR IGNORE INTO i18n_config (id)
+ db.exec(`
+ CREATE TABLE IF NOT EXISTS i18n_strings (
+1/7/26, 1:56 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 210/244
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ i18n_key TEXT NOT NULL UNIQUE,
+ source_locale TEXT NOT NULL DEFAULT 'en',
+ source_text TEXT NOT NULL,
+ source_text_hash TEXT NOT NULL,
+ context_json TEXT,
+ first_seen_at INTEGER NOT NULL DEFAULT (str
+ last_seen_at INTEGER NOT NULL DEFAULT (strf
+ is_retired INTEGER NOT NULL DEFAULT 0,
+ retired_at INTEGER,
+ updated_at INTEGER NOT NULL DEFAULT (strfti
+ );
+ CREATE INDEX IF NOT EXISTS idx_i18n_strings_l
+ `);
+ db.exec(`
+ CREATE TABLE IF NOT EXISTS i18n_translations 
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ string_id INTEGER NOT NULL,
+ locale TEXT NOT NULL,
+ translated_text TEXT NOT NULL,
+ is_manual INTEGER NOT NULL DEFAULT 0,
+ updated_at INTEGER NOT NULL DEFAULT (strfti
+ created_at INTEGER NOT NULL DEFAULT (strfti
+1/7/26, 1:56 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 211/244
+ UNIQUE(string_id, locale),
+ FOREIGN KEY(string_id) REFERENCES i18n_stri
+ );
+ CREATE INDEX IF NOT EXISTS idx_i18n_translati
+ `);
+ db.exec(`
+ CREATE TABLE IF NOT EXISTS i18n_jobs (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ job_type TEXT NOT NULL,
+ string_id INTEGER NOT NULL,
+ target_locale TEXT NOT NULL,
+ status TEXT NOT NULL DEFAULT 'PENDING',
+ priority INTEGER NOT NULL DEFAULT 0,
+ attempts INTEGER NOT NULL DEFAULT 0,
+ next_attempt_at INTEGER,
+ last_error TEXT,
+ payload_json TEXT,
+ requested_at INTEGER NOT NULL DEFAULT (strf
+ started_at INTEGER,
+ finished_at INTEGER,
+ FOREIGN KEY(string_id) REFERENCES i18n_stri
+ );
+ CREATE INDEX IF NOT EXISTS idx_i18n_jobs_stat
+ChatGPT 5.2 Thinking
+1/7/26, 1:56 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 212/244
+ CREATE INDEX IF NOT EXISTS idx_i18n_jobs_next
+ `);
+ db.exec(`
+ CREATE TABLE IF NOT EXISTS i18n_manifest_inge
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ manifest_sha256 TEXT NOT NULL UNIQUE,
+ ingested_at INTEGER NOT NULL DEFAULT (strft
+ manifest_version TEXT,
+ file_path TEXT,
+ string_count INTEGER
+ );
+ `);
+ console.log("ensureI18nSchema: OK");
+ } finally {
+ db.close();
+ }
+}
+1/7/26, 1:56 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 213/244
+4.10 NEW — server/i18n/i18nDb.ts
+ts
+import Database from "better-sqlite3";
+function getDb() {
+ // Keep consistent with other runtime schema util
+ return new Database("./trading_app.db");
+}
+function sha256Hex(s: string) {
+ const crypto = require("crypto") as typeof import
+ return crypto.createHash("sha256").update(s).dige
+}
+export type I18nConfig = {
+ enabled: boolean;
+ defaultLocale: string;
+ supportedLocales: string[];
+ provider: string;
+ providerConfig: any;
+ lastManifestSha256?: string | null;
+ maxJobsPerTick: number;
+1/7/26, 1:56 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 214/244
+};
+export function getI18nConfig(): I18nConfig {
+ const db = getDb();
+ try {
+ const row = db.prepare(`SELECT * FROM i18n_conf
+ const supportedLocales = (() => {
+ try {
+ const arr = JSON.parse(String(row?.supporte
+ return Array.isArray(arr) && arr.length ? a
+ } catch {
+ return ["en"];
+ }
+ })();
+ const providerConfig = (() => {
+ try {
+ return row?.provider_config_json ? JSON.par
+ } catch {
+ return {};
+ }
+ })();
+ return {
+1/7/26, 1:56 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 215/244
+ enabled: !!row?.enabled,
+ defaultLocale: String(row?.default_locale || 
+ supportedLocales,
+ provider: String(row?.provider || "MOCK"),
+ providerConfig,
+ lastManifestSha256: row?.last_manifest_sha256
+ maxJobsPerTick: Number(row?.max_jobs_per_tick
+ };
+ } finally {
+ db.close();
+ }
+}
+export function updateI18nConfig(patch: Partial<I18
+ const db = getDb();
+ try {
+ const existing = getI18nConfig();
+ const next = {
+ enabled: patch.enabled ?? existing.enabled,
+ defaultLocale: patch.defaultLocale ?? existin
+ supportedLocales: patch.supportedLocales ?? e
+ provider: patch.provider ?? existing.provider
+ providerConfig: patch.providerConfig ?? exist
+1/7/26, 1:56 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 216/244
+ lastManifestSha256: patch.lastManifestSha256
+ maxJobsPerTick: patch.maxJobsPerTick ?? exist
+ };
+ db.prepare(
+ `UPDATE i18n_config
+ SET enabled=?,
+ default_locale=?,
+ supported_locales_json=?,
+ provider=?,
+ provider_config_json=?,
+ last_manifest_sha256=?,
+ max_jobs_per_tick=?,
+ updated_at=strftime('%s','now')
+ WHERE id=1`,
+ ).run(
+ next.enabled ? 1 : 0,
+ next.defaultLocale,
+ JSON.stringify(next.supportedLocales),
+ next.provider,
+ JSON.stringify(next.providerConfig ?? {}),
+ next.lastManifestSha256,
+ next.maxJobsPerTick,
+ );
+1/7/26, 1:56 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 217/244
+Copy code
+ return next;
+ } finally {
+ db.close();
+ }
+}
+export type ManifestEntry = {
+ key: string;
+ text: string;
+ file: string;
+ line: number;
+ column: number;
+ kind: string;
+ attr?: string;
+};
+export function upsertStringFromManifest(e: Manifes
+ const db = getDb();
+ try {
+ const now = Math.floor(Date.now() / 1000);
+ const hash = sha256Hex(e.text);
+ const context = JSON.stringify({
+ file: e.file,
+1/7/26, 1:56 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 218/244
+Copy code
+ line: e.line,
+ column: e.column,
+ kind: e.kind,
+ attr: e.attr ?? null,
+ });
+ const existing = db
+ .prepare(`SELECT id, source_text_hash FROM i1
+ .get(e.key) as any;
+ if (!existing) {
+ const info = db
+ .prepare(
+ `INSERT INTO i18n_strings
+ (i18n_key, source_locale, source_text, s
+ VALUES (?,?,?,?,?,?,?,?)`,
+ )
+ .run(e.key, sourceLocale, e.text, hash, con
+ return { id: Number(info.lastInsertRowid), ch
+ }
+ // Update last_seen always
+ db.prepare(`UPDATE i18n_strings SET last_seen_a
+1/7/26, 1:56 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 219/244
+ // If source changed, overwrite source text + h
+ if (String(existing.source_text_hash) !== hash)
+ db.prepare(
+ `UPDATE i18n_strings
+ SET source_text=?, source_text_hash=?, upd
+ WHERE id=?`,
+ ).run(e.text, hash, now, existing.id);
+ db.prepare(`DELETE FROM i18n_translations WHE
+ return { id: Number(existing.id), changed: tr
+ }
+ // Ensure not retired
+ db.prepare(`UPDATE i18n_strings SET is_retired=
+ return { id: Number(existing.id), changed: fals
+ } finally {
+ db.close();
+ }
+}
+export function retireStringsNotSeenSince(cutoffUni
+1/7/26, 1:56 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 220/244
+ const db = getDb();
+ try {
+ const now = Math.floor(Date.now() / 1000);
+ const info = db
+ .prepare(
+ `UPDATE i18n_strings
+ SET is_retired=1, retired_at=?
+ WHERE is_retired=0 AND last_seen_at < ?`,
+ )
+ .run(now, cutoffUnix);
+ return { retired: info.changes };
+ } finally {
+ db.close();
+ }
+}
+export function enqueueMissingTranslations(stringId
+ const db = getDb();
+ try {
+ const now = Math.floor(Date.now() / 1000);
+ // For each locale, if translation missing, ins
+ for (const locale of targetLocales) {
+1/7/26, 1:56 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 221/244
+ if (locale === sourceLocale) continue;
+ const existsTranslation = db
+ .prepare(`SELECT id FROM i18n_translations 
+ .get(stringId, locale);
+ if (existsTranslation) continue;
+ const existsPending = db
+ .prepare(`SELECT id FROM i18n_jobs WHERE st
+ .get(stringId, locale);
+ if (existsPending) continue;
+ db.prepare(
+ `INSERT INTO i18n_jobs (job_type, string_id
+ VALUES ('TRANSLATE', ?, ?, 'PENDING', ?)`,
+ ).run(stringId, locale, now);
+ }
+ } finally {
+ db.close();
+ }
+}
+1/7/26, 1:56 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 222/244
+export function getBundle(locale: string) {
+ const db = getDb();
+ try {
+ const rows = db.prepare(
+ `SELECT s.i18n_key as k, t.translated_text as
+ FROM i18n_strings s
+ JOIN i18n_translations t ON t.string_id = s
+ WHERE s.is_retired=0 AND t.locale=?`,
+ ).all(locale) as any[];
+ const out: Record<string, string> = {};
+ for (const r of rows) out[String(r.k)] = String
+ return out;
+ } finally {
+ db.close();
+ }
+}
+export function getSummary() {
+ const db = getDb();
+ try {
+ const stringsTotal = Number(db.prepare(`SELECT 
+ const translationsTotal = Number(db.prepare(`SE
+ const jobsPending = Number(db.prepare(`SELECT C
+1/7/26, 1:56 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 223/244
+4.11 NEW — server/i18n/i18nManifest.ts
+ const cfg = db.prepare(`SELECT last_manifest_sh
+ const lastIngest = db.prepare(`SELECT ingested_
+ return {
+ stringsTotal,
+ translationsTotal,
+ jobsPending,
+ lastManifestSha256: cfg?.last_manifest_sha256
+ lastIngestedAt: lastIngest?.ingested_at ? Num
+ };
+ } finally {
+ db.close();
+ }
+}
+ts
+1/7/26, 1:56 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 224/244
+import fs from "fs";
+import path from "path";
+import crypto from "crypto";
+import { enqueueMissingTranslations, getI18nConfig,
+type Manifest = {
+ version: number;
+ generatedAtMs: number;
+ sourceLocale: string;
+ strings: ManifestEntry[];
+};
+function sha256FileHex(p: string) {
+ const buf = fs.readFileSync(p);
+ return crypto.createHash("sha256").update(buf).di
+}
+export function resolveManifestPath(): string | nul
+ const candidates = [
+ path.resolve(process.cwd(), "dist/public/i18n-m
+ path.resolve(process.cwd(), "client/public/i18n
+ ];
+ for (const p of candidates) {
+1/7/26, 1:56 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 225/244
+ if (fs.existsSync(p)) return p;
+ }
+ return null;
+}
+export function ingestManifestIfChanged(): { ok: bo
+ const cfg = getI18nConfig();
+ const manifestPath = resolveManifestPath();
+ if (!manifestPath) return { ok: false, changed: f
+ const sha = sha256FileHex(manifestPath);
+ if (cfg.lastManifestSha256 && cfg.lastManifestSha
+ return { ok: true, changed: false, reason: "unc
+ }
+ const raw = fs.readFileSync(manifestPath, "utf8")
+ const parsed = JSON.parse(raw) as Manifest;
+ const sourceLocale = String(parsed?.sourceLocale
+ const strings = Array.isArray(parsed?.strings) ? 
+ // Update config sha first (so repeated ticks don
+ updateI18nConfig({ lastManifestSha256: sha });
+ // Ingest strings and enqueue jobs
+1/7/26, 1:56 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 226/244
+4.12 NEW — server/i18n/i18nProvider.ts
+ const targetLocales = cfg.supportedLocales || ["e
+ for (const e of strings) {
+ if (!e?.key || !e?.text) continue;
+ const up = upsertStringFromManifest(e, sourceLo
+ enqueueMissingTranslations(up.id, sourceLocale,
+ }
+ return { ok: true, changed: true };
+}
+ts
+export type TranslateItem = {
+ key: string;
+ text: string;
+};
+export interface I18nTranslateProvider {
+1/7/26, 1:56 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 227/244
+ translateBatch(args: {
+ sourceLocale: string;
+ targetLocale: string;
+ items: TranslateItem[];
+ }): Promise<Record<string, string>>;
+}
+export class MockProvider implements I18nTranslateP
+ async translateBatch({ targetLocale, items }: any
+ const out: Record<string, string> = {};
+ for (const it of items) out[it.key] = `[${targe
+ return out;
+ }
+}
+/**
+ * HTTP JSON provider:
+ * POST <url>
+ * body: { sourceLocale, targetLocale, items:[{key,
+ * returns: { translations: { [key]: translatedText
+ */
+export class HttpJsonProvider implements I18nTransl
+ constructor(private url: string, private apiKey?
+1/7/26, 1:56 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 228/244
+4.13 NEW — server/i18n/i18nWorker.ts
+ async translateBatch({ sourceLocale, targetLocale
+ const res = await fetch(this.url, {
+ method: "POST",
+ headers: {
+ "Content-Type": "application/json",
+ ...(this.apiKey ? { Authorization: `Bearer 
+ },
+ body: JSON.stringify({ sourceLocale, targetLo
+ });
+ if (!res.ok) throw new Error(`provider_http_${r
+ const data = await res.json();
+ const translations = data?.translations;
+ if (!translations || typeof translations !== "o
+ return translations as Record<string, string>;
+ }
+}
+ts
+1/7/26, 1:56 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 229/244
+Copy code
+import Database from "better-sqlite3";
+import { getI18nConfig } from "./i18nDb";
+import { ingestManifestIfChanged } from "./i18nMani
+import { HttpJsonProvider, MockProvider, type I18nT
+function getDb() {
+ return new Database("./trading_app.db");
+}
+function sleep(ms: number) {
+ return new Promise((r) => setTimeout(r, ms));
+}
+function getProvider(cfg: ReturnType<typeof getI18n
+ const provider = String(cfg.provider || "MOCK").t
+ if (provider === "HTTP_JSON") {
+ const url = String(cfg.providerConfig?.url || p
+ if (!url) return new MockProvider();
+ const apiKey = String(cfg.providerConfig?.apiKe
+ return new HttpJsonProvider(url, apiKey || unde
+ }
+ return new MockProvider();
+}
+1/7/26, 1:56 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 230/244
+export async function runI18nWorkerTick() {
+ const cfg = getI18nConfig();
+ if (!cfg.enabled) return { ok: true, skipped: "di
+ // Ingest manifest only if changed (idle-friendly
+ ingestManifestIfChanged();
+ const provider = getProvider(cfg);
+ const db = getDb();
+ try {
+ const now = Math.floor(Date.now() / 1000);
+ const max = Math.max(1, Number(cfg.maxJobsPerTi
+ // Only jobs that are due
+ const jobs = db
+ .prepare(
+ `SELECT j.id, j.string_id, j.target_locale,
+ s.i18n_key, s.source_locale, s.sour
+ FROM i18n_jobs j
+ JOIN i18n_strings s ON s.id = j.string_id
+ WHERE j.status='PENDING'
+ AND (j.next_attempt_at IS NULL OR j.next
+1/7/26, 1:56 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 231/244
+Copy code
+ AND s.is_retired=0
+ ORDER BY j.priority DESC, j.requested_at A
+ LIMIT ?`,
+ )
+ .all(now, max) as any[];
+ if (!jobs.length) return { ok: true, processed
+ // Group by target locale to batch calls
+ const byLocale = new Map<string, any[]>();
+ for (const j of jobs) {
+ const loc = String(j.target_locale);
+ if (!byLocale.has(loc)) byLocale.set(loc, [])
+ byLocale.get(loc)!.push(j);
+ }
+ let processed = 0;
+ for (const [targetLocale, group] of byLocale.en
+ // Mark running
+ const ids = group.map((g) => g.id);
+ db.prepare(`UPDATE i18n_jobs SET status='RUNN
+ .run(now, ...ids);
+1/7/26, 1:56 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 232/244
+ const items = group.map((g) => ({ key: String
+ const sourceLocale = String(group[0]?.source_
+ try {
+ const translations = await provider.transla
+ // Upsert translations + mark done
+ const tx = db.transaction(() => {
+ for (const g of group) {
+ const key = String(g.i18n_key);
+ const translated = String(translations?
+ if (!translated) throw new Error(`missi
+ db.prepare(
+ `INSERT INTO i18n_translations (strin
+ VALUES (?,?,?,?,?,?)
+ ON CONFLICT(string_id, locale)
+ DO UPDATE SET translated_text=exclud
+ WHERE i18n_translations.is_manual=0`
+ ).run(Number(g.string_id), targetLocale
+ db.prepare(`UPDATE i18n_jobs SET status
+ processed += 1;
+ }
+1/7/26, 1:56 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 233/244
+ });
+ tx();
+ } catch (err: any) {
+ // Backoff: next_attempt_at = now + attempt
+ const tx = db.transaction(() => {
+ for (const g of group) {
+ const attempts = Number(g.attempts || 0
+ const backoff = attempts * attempts * 6
+ const nextAttemptAt = now + backoff;
+ if (attempts >= 3) {
+ db.prepare(
+ `UPDATE i18n_jobs
+ SET status='FAILED', attempts=?, l
+ WHERE id=?`,
+ ).run(attempts, String(err?.message
+ } else {
+ db.prepare(
+ `UPDATE i18n_jobs
+ SET status='PENDING', attempts=?, 
+ WHERE id=?`,
+ ).run(attempts, String(err?.message
+ }
+1/7/26, 1:56 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 234/244
+ }
+ });
+ tx();
+ }
+ // Avoid hammering provider if multiple local
+ await sleep(50);
+ }
+ return { ok: true, processed };
+ } finally {
+ db.close();
+ }
+}
+let started = false;
+export function startI18nWorker(intervalMs = 30_000
+ if (started) return;
+ started = true;
+ setInterval(() => {
+ runI18nWorkerTick().catch(() => {
+1/7/26, 1:56 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 235/244
+4.14 NEW — server/routes/i18n.ts (public)
+ // swallow: worker should not crash server
+ });
+ }, intervalMs);
+}
+ts
+import { Router } from "express";
+import { getBundle, getI18nConfig } from "../i18n/i
+export const i18nPublicRouter = Router();
+// GET /api/i18n/config
+i18nPublicRouter.get("/config", (_req, res) => {
+ const cfg = getI18nConfig();
+ return res.json({
+ ok: true,
+ enabled: cfg.enabled,
+1/7/26, 1:56 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 236/244
+ defaultLocale: cfg.defaultLocale,
+ supportedLocales: cfg.supportedLocales,
+ bundleEtag: cfg.lastManifestSha256 || null,
+ });
+});
+// GET /api/i18n/bundle?locale=xx
+i18nPublicRouter.get("/bundle", (req, res) => {
+ const cfg = getI18nConfig();
+ if (!cfg.enabled) return res.json({});
+ const locale = String(req.query?.locale || cfg.de
+ if (!cfg.supportedLocales.includes(locale)) {
+ // return empty rather than 400 to keep UI resi
+ return res.json({});
+ }
+ const bundle = getBundle(locale);
+ return res.json(bundle);
+});
+1/7/26, 1:56 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 237/244
+4.15 NEW — server/routes/adminI18n.ts
+(admin)
+ts
+import { Router } from "express";
+import { requireAdmin } from "../middleware/require
+import { getI18nConfig, updateI18nConfig, getSummar
+import { ingestManifestIfChanged } from "../i18n/i1
+import { runI18nWorkerTick } from "../i18n/i18nWork
+export const adminI18nRouter = Router();
+adminI18nRouter.use(requireAdmin);
+// GET /api/admin/i18n/config
+adminI18nRouter.get("/config", (_req, res) => {
+ const cfg = getI18nConfig();
+ res.json({
+ ok: true,
+ enabled: cfg.enabled,
+ defaultLocale: cfg.defaultLocale,
+ supportedLocales: cfg.supportedLocales,
+ provider: cfg.provider,
+ });
+1/7/26, 1:56 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 238/244
+Copy code
+});
+// PUT /api/admin/i18n/config
+adminI18nRouter.put("/config", (req, res) => {
+ const body = req.body || {};
+ const patch: any = {};
+ if (typeof body.enabled === "boolean") patch.enab
+ if (typeof body.defaultLocale === "string" && bod
+ if (Array.isArray(body.supportedLocales)) {
+ const locales = body.supportedLocales.map(Strin
+ patch.supportedLocales = locales.length ? local
+ }
+ const next = updateI18nConfig(patch);
+ res.json({ ok: true, ...next });
+});
+// GET /api/admin/i18n/summary
+adminI18nRouter.get("/summary", (_req, res) => {
+ const s = getSummary();
+ res.json({ ok: true, ...s });
+});
+1/7/26, 1:56 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 239/244
+4.16 MODIFY — server/routes.ts (mount
+routers)
+Add imports near the top (with other route imports):
+Copy code
+// POST /api/admin/i18n/ingest-manifest
+adminI18nRouter.post("/ingest-manifest", (_req, res
+ const r = ingestManifestIfChanged();
+ res.json({ ok: true, ...r });
+});
+// POST /api/admin/i18n/run-worker
+adminI18nRouter.post("/run-worker", async (_req, re
+ const r = await runI18nWorkerTick();
+ res.json({ ok: true, ...r });
+});
+ts
+1/7/26, 1:56 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 240/244
+Then mount them in the registerRoutes function with
+the others (near other app.use(...) lines):
+4.17 MODIFY — server/index.ts (ensure
+schema + start worker)
+Add imports:
+import { i18nPublicRouter } from "./routes/i18n";
+import { adminI18nRouter } from "./routes/adminI18n
+Copy code
+ts
+app.use("/api/i18n", i18nPublicRouter);
+app.use("/api/admin/i18n", adminI18nRouter);
+Copy code
+ts
+import { ensureI18nSchema } from "./db/ensureSchem
+1/7/26, 1:56 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 241/244
+Then in main() after other ensure calls:
+5) Operational behavior summary
+(matches your requirements)
+Automatic UI translation coverage: achieved via
+build-time rewrite — no developer has to wrap new
+text manually.
+Change detection: manifest SHA changes; only then
+ingestion + jobs run.
+LLM-driven translation: worker batches jobs per
+locale via provider abstraction.
+import { startI18nWorker } from "./i18n/i18nWorker"
+Copy code
+ts
+ensureI18nSchema();
+startI18nWorker(30_000);
+Copy code
+1/7/26, 1:56 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 242/244
+Persistent storage: translations live in SQLite tables;
+client renders from bundles.
+Offline-safe: once translated, bundles load from
+internal DB, no external calls required.
+Low overhead: idle when manifest unchanged and
+no jobs.
+If you want the engine to also cover edge cases like
+runtime-only injected DOM or text coming from external
+feeds, the next hardening step is a secondary runtime
+capture path (limited MutationObserver scope) that
+only runs in dev/admin mode to discover strings that
+your build-time AST rules didn’t catch. MDN Web Docs +1
+Sources
+1/7/26, 1:56 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 243/244
+1/7/26, 1:56 AM TRADE HUB - Dynamic UI Translation System
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44/c/695d7171-cd7c-832e-8408-b09c9bbeb4f4 244/244

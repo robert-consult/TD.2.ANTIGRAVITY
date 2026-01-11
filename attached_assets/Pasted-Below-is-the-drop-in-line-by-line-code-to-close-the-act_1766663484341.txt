@@ -1,0 +1,1159 @@
+Below is the **drop-in, line-by-line code** to close the *actual* remaining gaps in your attached ZIP (TradingCentral-3AL-2), based on (a) Replit Agent 3’s audit targets and (b) what is **truly present vs missing/incorrect** in this codebase.
+
+You will implement:
+
+1. **PolicyDecision fixes (critical):**
+
+   * Email lock now blocks **SL/TP modify** + any non-reduce actions (while still allowing reduce-only).
+   * Email rolling revalidation now has **overdue grace** (locks only after grace).
+   * SMS eligibility now matches your design: **email-verified + contender-eligible**, not “tier != CANDIDATE”.
+   * Cancel pending when locked is allowed (per your spec).
+
+2. **Server enforcement for gated profile actions:**
+
+   * `GET /api/profile/kyc` is now policy-gated with `KYC_VIEW`.
+   * `PUT /api/profile/payout/currency` is now policy-gated with `PREFERRED_PAYMENT_CURRENCY_SET`.
+
+3. **Signup integration:** create `user_verification` record at registration (so your “required user states” are correct immediately).
+
+4. **Admin tier management + admin user profile endpoint + UI navigation hook:**
+
+   * Adds `/api/admin/users/:id/tier` with **identity_audit hash-chained event** + `adminActions` log.
+   * Adds `/api/admin/users/:id/profile` for your admin “Profile Settings view” requirement.
+   * Adds Admin UI “Profile” button per user row and a new page to view/update tier & verification/KYC/payout.
+
+---
+
+## 1) Replace: `shared/policyDecision.ts` (FULL FILE REPLACEMENT)
+
+```ts
+// shared/policyDecision.ts
+
+export type AccountState =
+  | "ACTIVE_UNVERIFIED_GRACE"
+  | "ACTIVE_VERIFIED"
+  | "LOCKED_EMAIL_NOT_VERIFIED"
+  | "LOCKED_EMAIL_REVERIFY_OVERDUE"
+  | "SUSPENDED";
+
+export type UserTier = "CANDIDATE" | "PERFORMER" | "SELECTED";
+
+export type ContenderTier =
+  | "NONE"
+  | "CANDIDATE_EMAIL_ONLY"
+  | "CANDIDATE_SMS_REQUIRED"
+  | "VERIFIED_SMS"
+  | "SELECTED_REAL_CAPITAL";
+
+export type KycStatus = "NOT_STARTED" | "INVITED" | "SUBMITTED" | "APPROVED" | "REJECTED";
+
+export type PolicyAction =
+  | "TRADE_OPEN_OR_INCREASE"
+  | "TRADE_PLACE_PENDING"
+  | "TRADE_MODIFY_SLTP"
+  | "TRADE_CLOSE_OR_REDUCE"
+  | "TRADE_CANCEL_PENDING"
+  | "EMAIL_RESEND_VERIFICATION"
+  | "PHONE_VERIFY_START"
+  | "PHONE_VERIFY_CONFIRM"
+  | "KYC_VIEW"
+  | "KYC_SUBMIT"
+  | "PREFERRED_PAYMENT_CURRENCY_SET"
+  | "PAYOUT_REQUEST"
+  | "ADMIN_ANY";
+
+export type DenyCode =
+  | "ACCOUNT_SUSPENDED"
+  | "EMAIL_NOT_VERIFIED"
+  | "EMAIL_REVERIFY_OVERDUE"
+  | "EMAIL_LOCKED"
+  | "EMAIL_SEND_RATE_LIMIT"
+  | "EMAIL_SEND_COOLDOWN"
+  | "SMS_NOT_ELIGIBLE"
+  | "SMS_NOT_ELIGIBLE_NOT_CONTENDER"
+  | "SMS_RATE_LIMIT"
+  | "SMS_OTP_TOO_MANY_ATTEMPTS"
+  | "KYC_NOT_SELECTED"
+  | "KYC_STATE_INVALID"
+  | "KYC_NOT_APPROVED";
+
+export type PolicyDecision = {
+  allowed: boolean;
+  deny_code?: DenyCode;
+  accountState?: AccountState;
+  showLockedBanner?: boolean;
+  redirectTo?: string;
+  message?: string;
+  retryAfterSeconds?: number;
+};
+
+export type PolicyConfig = {
+  // Email verification
+  emailInitialGraceDays: number; // e.g. 14 days
+  emailReverifyPeriodDays: number; // e.g. 30 days
+  emailReverifyOverdueGraceDays: number; // e.g. 7 days (lock only after due+grace)
+
+  emailResendCooldownSec: number;
+  emailDailySendCap: number;
+
+  // SMS verification
+  smsDailySendCap: number;
+  otpMaxAttempts: number;
+
+  // Contender eligibility paths
+  contenderPath1MinAgeDays: number;
+  contenderPath1MinTradesLifetime: number;
+  contenderPath1MinBalancePctOfStart: number;
+
+  contenderPath2MinAgeDays: number;
+  contenderPath2MaxDaysSinceLastTrade: number;
+  contenderPath2MinReturnLast90: number;
+  contenderPath2MinTradesLast90: number;
+
+  // Locked behavior
+  allowReduceOnlyWhenLocked: boolean;
+  allowCancelPendingWhenLocked: boolean;
+  allowRiskReducingSltpChangeWhenLocked: boolean; // keep false per your spec
+};
+
+export const DEFAULT_POLICY_CONFIG: PolicyConfig = {
+  emailInitialGraceDays: 14,
+  emailReverifyPeriodDays: 30,
+  emailReverifyOverdueGraceDays: 7,
+
+  emailResendCooldownSec: 60,
+  emailDailySendCap: 8,
+
+  smsDailySendCap: 6,
+  otpMaxAttempts: 6,
+
+  contenderPath1MinAgeDays: 30,
+  contenderPath1MinTradesLifetime: 30,
+  contenderPath1MinBalancePctOfStart: 1.2, // >=120% of start (20% gain)
+
+  contenderPath2MinAgeDays: 90,
+  contenderPath2MaxDaysSinceLastTrade: 7,
+  contenderPath2MinReturnLast90: 0.10,
+  contenderPath2MinTradesLast90: 20,
+
+  allowReduceOnlyWhenLocked: true,
+  allowCancelPendingWhenLocked: true,
+  allowRiskReducingSltpChangeWhenLocked: false,
+};
+
+export type DecisionContext = {
+  now: Date;
+  user: {
+    id: number;
+    email: string | null;
+    username: string | null;
+    createdAt: Date;
+    userTier: UserTier;
+    contenderTier: ContenderTier;
+    suspendedAt: Date | null;
+    selectedAt: Date | null;
+
+    emailVerifiedAt: Date | null;
+    emailInitialDueAt: Date | null; // createdAt + emailInitialGraceDays
+    emailReverifyDueAt: Date | null; // emailVerifiedAt + reverifyPeriodDays (or db)
+    phoneVerifiedAt: Date | null;
+  };
+  metrics: {
+    accountAgeDays: number;
+    tradesLifetime: number;
+    tradesLast90d: number;
+    lastTradeDaysAgo: number | null;
+    balancePctOfStart: number;
+    returnLast90d: number;
+  };
+  throttle: {
+    emailLastSentAtMs: number | null;
+    emailSendCountDay: number;
+    smsLastSentAtMs: number | null;
+    smsSendCountDay: number;
+    otpFailCount: number;
+  };
+  kyc: {
+    status: KycStatus;
+    invitedAt: Date | null;
+    submittedAt: Date | null;
+    reviewedAt: Date | null;
+    approvedAt: Date | null;
+  };
+  tradeIntent?: {
+    // used to determine risk-reducing SL/TP change (if enabled)
+    kind?: "SLTP_MODIFY";
+    isRiskReducing?: boolean;
+  };
+};
+
+function allow(extra?: Partial<PolicyDecision>): PolicyDecision {
+  return { allowed: true, ...(extra ?? {}) };
+}
+
+function deny(code: DenyCode, extra?: Partial<PolicyDecision>): PolicyDecision {
+  return { allowed: false, deny_code: code, ...(extra ?? {}) };
+}
+
+export function resolveAccountState(ctx: DecisionContext, cfg: PolicyConfig = DEFAULT_POLICY_CONFIG): AccountState {
+  const now = ctx.now.getTime();
+
+  if (ctx.user.suspendedAt) return "SUSPENDED";
+
+  // verified case + rolling reverify
+  if (ctx.user.emailVerifiedAt) {
+    const due = ctx.user.emailReverifyDueAt?.getTime() ?? null;
+    if (due) {
+      const lockAt = due + cfg.emailReverifyOverdueGraceDays * 86400000;
+      if (now > lockAt) return "LOCKED_EMAIL_REVERIFY_OVERDUE";
+    }
+    return "ACTIVE_VERIFIED";
+  }
+
+  // not verified case + initial grace
+  const initialDue = ctx.user.emailInitialDueAt?.getTime() ?? null;
+  if (initialDue && now <= initialDue) return "ACTIVE_UNVERIFIED_GRACE";
+
+  return "LOCKED_EMAIL_NOT_VERIFIED";
+}
+
+export function computeContenderEligibility(ctx: DecisionContext, cfg: PolicyConfig = DEFAULT_POLICY_CONFIG) {
+  const path1 =
+    ctx.metrics.accountAgeDays >= cfg.contenderPath1MinAgeDays &&
+    ctx.metrics.tradesLifetime >= cfg.contenderPath1MinTradesLifetime &&
+    ctx.metrics.balancePctOfStart >= cfg.contenderPath1MinBalancePctOfStart;
+
+  const path2 =
+    ctx.metrics.accountAgeDays >= cfg.contenderPath2MinAgeDays &&
+    (ctx.metrics.lastTradeDaysAgo ?? Infinity) <= cfg.contenderPath2MaxDaysSinceLastTrade &&
+    ctx.metrics.returnLast90d >= cfg.contenderPath2MinReturnLast90 &&
+    ctx.metrics.tradesLast90d >= cfg.contenderPath2MinTradesLast90;
+
+  return { eligible: path1 || path2, path1, path2 };
+}
+
+function isTradeAction(action: PolicyAction): boolean {
+  return action.startsWith("TRADE_");
+}
+
+function isExposureIncreasingTradingAction(action: PolicyAction): boolean {
+  return action === "TRADE_OPEN_OR_INCREASE" || action === "TRADE_PLACE_PENDING";
+}
+
+function isReduceOnlyTradingAction(action: PolicyAction): boolean {
+  return action === "TRADE_CLOSE_OR_REDUCE";
+}
+
+function isCancelPendingTradingAction(action: PolicyAction): boolean {
+  return action === "TRADE_CANCEL_PENDING";
+}
+
+function isSltpModifyAction(action: PolicyAction): boolean {
+  return action === "TRADE_MODIFY_SLTP";
+}
+
+export function decidePolicy(
+  action: PolicyAction,
+  ctx: DecisionContext,
+  cfg: PolicyConfig = DEFAULT_POLICY_CONFIG
+): PolicyDecision {
+  const accountState = resolveAccountState(ctx, cfg);
+  const contender = computeContenderEligibility(ctx, cfg);
+
+  // Admin override
+  if (action === "ADMIN_ANY") return allow({ accountState });
+
+  // Suspended: hard deny everything except admin
+  if (accountState === "SUSPENDED") {
+    return deny("ACCOUNT_SUSPENDED", { accountState, showLockedBanner: true });
+  }
+
+  // EMAIL RESEND: allowed even when locked, but throttled
+  if (action === "EMAIL_RESEND_VERIFICATION") {
+    const nowMs = ctx.now.getTime();
+    const last = ctx.throttle.emailLastSentAtMs ?? 0;
+    const cooldownMs = cfg.emailResendCooldownSec * 1000;
+
+    if (ctx.throttle.emailSendCountDay >= cfg.emailDailySendCap) {
+      return deny("EMAIL_SEND_RATE_LIMIT", { retryAfterSeconds: 3600 });
+    }
+    if (nowMs - last < cooldownMs) {
+      const retryAfterSeconds = Math.max(1, Math.ceil((cooldownMs - (nowMs - last)) / 1000));
+      return deny("EMAIL_SEND_COOLDOWN", { retryAfterSeconds });
+    }
+    return allow({ accountState });
+  }
+
+  // LOCKED states: allow only reduce-only + (optionally) cancel pending; block SL/TP modify by default.
+  if (accountState === "LOCKED_EMAIL_NOT_VERIFIED" || accountState === "LOCKED_EMAIL_REVERIFY_OVERDUE") {
+    const denyCode: DenyCode = accountState === "LOCKED_EMAIL_NOT_VERIFIED" ? "EMAIL_NOT_VERIFIED" : "EMAIL_REVERIFY_OVERDUE";
+
+    if (isTradeAction(action)) {
+      if (isReduceOnlyTradingAction(action)) {
+        return cfg.allowReduceOnlyWhenLocked
+          ? allow({ accountState, showLockedBanner: true })
+          : deny("EMAIL_LOCKED", { accountState, showLockedBanner: true, redirectTo: "/profile" });
+      }
+
+      if (isCancelPendingTradingAction(action)) {
+        return cfg.allowCancelPendingWhenLocked
+          ? allow({ accountState, showLockedBanner: true })
+          : deny("EMAIL_LOCKED", { accountState, showLockedBanner: true, redirectTo: "/profile" });
+      }
+
+      if (isSltpModifyAction(action)) {
+        if (cfg.allowRiskReducingSltpChangeWhenLocked && ctx.tradeIntent?.isRiskReducing === true) {
+          return allow({ accountState, showLockedBanner: true });
+        }
+        // Per your spec, SL/TP modify should be blocked while locked
+        return deny(denyCode, { accountState, showLockedBanner: true, redirectTo: "/profile" });
+      }
+
+      // Any other trade action while locked
+      return deny(denyCode, { accountState, showLockedBanner: true, redirectTo: "/profile" });
+    }
+
+    // Non-trade actions while locked: deny by default
+    return deny(denyCode, { accountState, showLockedBanner: true, redirectTo: "/profile" });
+  }
+
+  // SMS Verification: must be ACTIVE_VERIFIED + contender eligible (per your tiered access spec)
+  if (action === "PHONE_VERIFY_START" || action === "PHONE_VERIFY_CONFIRM") {
+    if (accountState !== "ACTIVE_VERIFIED") {
+      return deny("SMS_NOT_ELIGIBLE", { accountState, showLockedBanner: true, redirectTo: "/profile" });
+    }
+    if (!contender.eligible) {
+      return deny("SMS_NOT_ELIGIBLE_NOT_CONTENDER", { accountState, redirectTo: "/profile" });
+    }
+
+    if (action === "PHONE_VERIFY_START") {
+      const nowMs = ctx.now.getTime();
+      const last = ctx.throttle.smsLastSentAtMs ?? 0;
+
+      if (ctx.throttle.smsSendCountDay >= cfg.smsDailySendCap) return deny("SMS_RATE_LIMIT", { retryAfterSeconds: 3600 });
+      if (nowMs - last < 60000) return deny("SMS_RATE_LIMIT", { retryAfterSeconds: Math.ceil((60000 - (nowMs - last)) / 1000) });
+    }
+
+    if (action === "PHONE_VERIFY_CONFIRM") {
+      if (ctx.throttle.otpFailCount >= cfg.otpMaxAttempts) return deny("SMS_OTP_TOO_MANY_ATTEMPTS", { retryAfterSeconds: 3600 });
+    }
+
+    return allow({ accountState });
+  }
+
+  // KYC + payout gating (selected or invited/submitted/approved)
+  if (action === "KYC_VIEW" || action === "KYC_SUBMIT" || action === "PREFERRED_PAYMENT_CURRENCY_SET" || action === "PAYOUT_REQUEST") {
+    const selected =
+      ctx.user.userTier === "SELECTED" ||
+      ctx.user.contenderTier === "SELECTED_REAL_CAPITAL" ||
+      !!ctx.user.selectedAt ||
+      ["INVITED", "SUBMITTED", "APPROVED", "REJECTED"].includes(ctx.kyc.status);
+
+    if (!selected) return deny("KYC_NOT_SELECTED", { redirectTo: "/profile" });
+
+    if (action === "KYC_SUBMIT") {
+      if (!(ctx.kyc.status === "INVITED" || ctx.kyc.status === "REJECTED")) {
+        return deny("KYC_STATE_INVALID");
+      }
+    }
+
+    if (action === "PREFERRED_PAYMENT_CURRENCY_SET") {
+      if (ctx.kyc.status !== "APPROVED") return deny("KYC_NOT_APPROVED", { redirectTo: "/profile" });
+    }
+
+    return allow({ accountState });
+  }
+
+  // Active states: trades are allowed, other actions handled above.
+  if (isTradeAction(action)) return allow({ accountState });
+
+  return allow({ accountState });
+}
+
+export function featureGates(ctx: DecisionContext, cfg: PolicyConfig = DEFAULT_POLICY_CONFIG) {
+  const st = resolveAccountState(ctx, cfg);
+  const contender = computeContenderEligibility(ctx, cfg);
+  const selected =
+    ctx.user.userTier === "SELECTED" ||
+    ctx.user.contenderTier === "SELECTED_REAL_CAPITAL" ||
+    !!ctx.user.selectedAt ||
+    ["INVITED", "SUBMITTED", "APPROVED", "REJECTED"].includes(ctx.kyc.status);
+
+  return {
+    accountState: st,
+    contenderEligible: contender.eligible,
+
+    canTradeOpenOrIncrease: decidePolicy("TRADE_OPEN_OR_INCREASE", ctx, cfg).allowed,
+    canTradeCloseOrReduce: decidePolicy("TRADE_CLOSE_OR_REDUCE", ctx, cfg).allowed,
+    canCancelPending: decidePolicy("TRADE_CANCEL_PENDING", ctx, cfg).allowed,
+    canModifySltp: decidePolicy("TRADE_MODIFY_SLTP", ctx, cfg).allowed,
+
+    canStartSms: decidePolicy("PHONE_VERIFY_START", ctx, cfg).allowed,
+
+    canViewKyc: selected && decidePolicy("KYC_VIEW", ctx, cfg).allowed,
+    canSetPreferredPaymentCurrency: selected && decidePolicy("PREFERRED_PAYMENT_CURRENCY_SET", ctx, cfg).allowed,
+
+    // Keep payout request conservative: only SELECTED tier (you can expand when payout pipeline is complete)
+    canRequestPayout: ctx.user.userTier === "SELECTED",
+  };
+}
+```
+
+---
+
+## 2) Patch: `server/middleware/requirePolicy.ts` (ADD redirectTo + retryAfterSeconds)
+
+```ts
+// server/middleware/requirePolicy.ts
+
+import { Request, Response, NextFunction } from "express";
+import { decidePolicy, type PolicyAction } from "../../shared/policyDecision";
+import { buildDecisionContext } from "../policy/buildDecisionContext";
+
+export function requirePolicy(action: PolicyAction) {
+  return async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const userId = (req.session as any)?.userId;
+      if (!userId) return res.status(401).json({ message: "Not authenticated" });
+
+      const ctx = await buildDecisionContext({
+        userId,
+        nowMs: Date.now(),
+        tradeIntent: (req as any).tradeIntent,
+      });
+
+      const decision = decidePolicy(action, ctx);
+      if (decision.allowed) return next();
+
+      return res.status(403).json({
+        message: decision.message ?? "Action not allowed by policy",
+        deny_code: decision.deny_code ?? "POLICY_DENIED",
+        accountState: decision.accountState,
+        showLockedBanner: decision.showLockedBanner ?? (String(decision.deny_code ?? "").startsWith("EMAIL_")),
+        redirectTo: decision.redirectTo ?? null,
+        retryAfterSeconds: decision.retryAfterSeconds ?? null,
+      });
+    } catch (err) {
+      console.error("Policy enforcement error:", err);
+      return res.status(500).json({ message: "Policy enforcement failed." });
+    }
+  };
+}
+```
+
+---
+
+## 3) Patch: `server/routes.ts`
+
+### 3A) Create `user_verification` record on registration
+
+### 3B) Policy-gate KYC + payout currency write
+
+### 3C) Add `/api/profile/me` (gating payload endpoint)
+
+**Apply these edits.**
+
+### 3A) Add imports near the top
+
+Find the schema imports line and add `userVerification`:
+
+```ts
+// server/routes.ts (imports)
+import {
+  users,
+  trades,
+  userSettings,
+  symbolConfigs,
+  quotes,
+  globalSettings,
+  systemConfig,
+  userKycProfiles,
+  userPayoutProfiles,
+  userVerification, // <-- ADD
+} from "@shared/schema";
+```
+
+### 3B) In `/api/auth/register` after user creation, insert verification row (if missing)
+
+Locate:
+
+```ts
+const user = await storage.createUser({
+  username,
+  password,
+  email,
+});
+```
+
+Immediately after it, add:
+
+```ts
+// Ensure verification record exists at signup (single source of truth for verification state)
+try {
+  const existing = await db.query.userVerification.findFirst({
+    where: (uv, { eq }) => eq(uv.userId, user.id),
+  });
+  if (!existing) {
+    await db.insert(userVerification).values({
+      userId: user.id,
+      contenderTier: "NONE",
+      emailResendCountDay: 0,
+      smsSendCountDay: 0,
+      smsVerifyFailCount: 0,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+  }
+} catch (e) {
+  console.error("Failed to create user_verification row on signup:", e);
+}
+```
+
+### 3C) Gate KYC endpoint with `KYC_VIEW`
+
+Find:
+
+```ts
+app.get("/api/profile/kyc", ensureAuth, async (req: Request, res: Response) => {
+```
+
+Replace with:
+
+```ts
+app.get("/api/profile/kyc", ensureAuth, requirePolicy("KYC_VIEW"), async (req: Request, res: Response) => {
+```
+
+### 3D) Gate payout currency update with `PREFERRED_PAYMENT_CURRENCY_SET`
+
+Find:
+
+```ts
+app.put("/api/profile/payout/currency", ensureAuth, async (req: Request, res: Response) => {
+```
+
+Replace with:
+
+```ts
+app.put(
+  "/api/profile/payout/currency",
+  ensureAuth,
+  requirePolicy("PREFERRED_PAYMENT_CURRENCY_SET"),
+  async (req: Request, res: Response) => {
+```
+
+### 3E) Add `/api/profile/me` (recommended endpoint from your checklist)
+
+Add this block anywhere after `ensureAuth` is defined and before `app.listen`:
+
+```ts
+// Profile "me" endpoint: returns user + gating snapshot (single-source-of-truth client consumption)
+app.get("/api/profile/me", ensureAuth, async (req: Request, res: Response) => {
+  try {
+    const userId = (req.session as any)?.userId;
+    if (!userId) return res.status(401).json({ message: "Not authenticated" });
+
+    // Reuse verification/status shape for consistency
+    const ctx = await (await import("./policy/buildDecisionContext")).buildDecisionContext({ userId, nowMs: Date.now() });
+    const { featureGates } = await import("../shared/policyDecision");
+
+    const gates = featureGates(ctx);
+
+    const user = await storage.getUserById(userId);
+    if (!user) return res.status(404).json({ message: "User not found" });
+
+    return res.json({
+      user: {
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        userTier: (user as any).userTier ?? "CANDIDATE",
+        isAdmin: (user as any).isAdmin ?? false,
+        isDisabled: (user as any).isDisabled ?? false,
+        isFrozen: (user as any).isFrozen ?? false,
+      },
+      gates: {
+        accountState: gates.accountState,
+        contenderEligible: gates.contenderEligible,
+        canTradeOpenOrIncrease: gates.canTradeOpenOrIncrease,
+        canTradeCloseOrReduce: gates.canTradeCloseOrReduce,
+        canCancelPending: (gates as any).canCancelPending ?? false,
+        canModifySltp: (gates as any).canModifySltp ?? false,
+        canStartSms: gates.canStartSms,
+        canViewKyc: gates.canViewKyc,
+        canSetPreferredPaymentCurrency: gates.canSetPreferredPaymentCurrency,
+        canRequestPayout: gates.canRequestPayout,
+      },
+      verification: {
+        emailVerifiedAt: ctx.user.emailVerifiedAt?.toISOString() ?? null,
+        emailReverifyDueAt: ctx.user.emailReverifyDueAt?.toISOString() ?? null,
+        gracePeriodEndsAt: ctx.user.emailInitialDueAt?.toISOString() ?? null,
+        phoneVerifiedAt: ctx.user.phoneVerifiedAt?.toISOString() ?? null,
+        contenderTier: ctx.user.contenderTier,
+        userTier: ctx.user.userTier,
+      },
+    });
+  } catch (e) {
+    console.error("Error in /api/profile/me:", e);
+    return res.status(500).json({ message: "Failed to load profile." });
+  }
+});
+```
+
+---
+
+## 4) Patch: `server/routes/verification.ts` (AUTO-PROMOTE contenderTier when eligible)
+
+In the existing `/status` route, add the persistence logic **before** `buildDecisionContext()` or **immediately after** it. Use this exact insertion **right after** `const ctx = await buildDecisionContext...`:
+
+```ts
+// server/routes/verification.ts inside router.get("/status"...), after ctx is built:
+
+// If the user becomes contender-eligible, persist contenderTier to DB (single-source-of-truth + audit)
+// This satisfies "backend stores contender tier" from your checklist.
+try {
+  const gatesNow = featureGates(ctx);
+
+  // Persist only once: NONE -> CANDIDATE_SMS_REQUIRED
+  if (gatesNow.contenderEligible && (ctx.user.contenderTier === "NONE" || ctx.user.contenderTier === "CANDIDATE_EMAIL_ONLY")) {
+    await db
+      .update(userVerification)
+      .set({
+        contenderTier: "CANDIDATE_SMS_REQUIRED",
+        updatedAt: new Date(),
+      })
+      .where(eq(userVerification.userId, userId));
+
+    await appendIdentityAudit({
+      userId,
+      category: "ELIGIBILITY",
+      eventType: "CONTENDER_ELIGIBLE",
+      actorType: "SYSTEM",
+      actorUserId: userId,
+      payload: {
+        prevContenderTier: ctx.user.contenderTier,
+        newContenderTier: "CANDIDATE_SMS_REQUIRED",
+        reason: "Eligibility thresholds met",
+      },
+    });
+  }
+} catch (e) {
+  console.error("Failed to persist contenderTier:", e);
+}
+```
+
+Make sure `eq` and `userVerification` are in scope in that file. If not already imported, add:
+
+```ts
+import { eq } from "drizzle-orm";
+import { userVerification } from "@shared/schema";
+```
+
+---
+
+## 5) Patch: `server/routes/admin.ts` (ADMIN Tier + Admin User Profile endpoint)
+
+### 5A) Add schema imports
+
+At the top, extend imports:
+
+```ts
+import {
+  insertUserSettingsSchema,
+  insertSymbolConfigSchema,
+  tradeAudit,
+  orderIntentAudit,
+  globalSettings,
+  systemConfig,
+  userAdminNotes,
+  userKycProfiles,
+  userVerification,
+  userPayoutProfiles, // <-- ADD
+} from "@shared/schema";
+```
+
+Also ensure `userPayoutProfiles` is available from `@shared/schema` in your project (it is in this ZIP).
+
+### 5B) Add endpoints (paste inside `registerAdminRoutes(app)`)
+
+Paste this block near other “User Management” routes (safe placement: after the existing `/api/admin/users` endpoints):
+
+```ts
+// ---------------------------
+// ADMIN: User Profile Snapshot
+// ---------------------------
+app.get("/api/admin/users/:id/profile", requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const userId = Number(req.params.id);
+    if (!Number.isFinite(userId)) return res.status(400).json({ message: "Invalid user id" });
+
+    const user = await storage.getUserById(userId);
+    if (!user) return res.status(404).json({ message: "User not found" });
+
+    const verification = await db.query.userVerification.findFirst({
+      where: (uv, { eq }) => eq(uv.userId, userId),
+    });
+
+    const kyc = await db.query.userKycProfiles.findFirst({
+      where: (k, { eq }) => eq(k.userId, userId),
+    });
+
+    const payout = await db.query.userPayoutProfiles.findFirst({
+      where: (p, { eq }) => eq(p.userId, userId),
+    });
+
+    const loginHistory = await storage.getUserLoginHistory(userId);
+
+    return res.json({
+      user: {
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        name: (user as any).name ?? null,
+        userTier: (user as any).userTier ?? "CANDIDATE",
+        isDisabled: (user as any).isDisabled ?? false,
+        isFrozen: (user as any).isFrozen ?? false,
+        createdAt: (user as any).createdAt ?? null,
+        tierPromotedAt: (user as any).tierPromotedAt ?? null,
+        tierPromotedBy: (user as any).tierPromotedBy ?? null,
+      },
+      verification: verification ?? null,
+      kyc: kyc ?? null,
+      payout: payout ?? null,
+      loginHistory: loginHistory ?? [],
+    });
+  } catch (e) {
+    console.error("Error loading admin user profile:", e);
+    return res.status(500).json({ message: "Failed to load user profile" });
+  }
+});
+
+// ---------------------------
+// ADMIN: Tier + ContenderTier Update (with audit)
+// ---------------------------
+const adminTierUpdateSchema = z.object({
+  userTier: z.enum(["CANDIDATE", "PERFORMER", "SELECTED"]).optional(),
+  contenderTier: z.enum(["NONE", "CANDIDATE_EMAIL_ONLY", "CANDIDATE_SMS_REQUIRED", "VERIFIED_SMS", "SELECTED_REAL_CAPITAL"]).optional(),
+  reason: z.string().max(300).optional(),
+});
+
+app.post("/api/admin/users/:id/tier", requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const userId = Number(req.params.id);
+    if (!Number.isFinite(userId)) return res.status(400).json({ message: "Invalid user id" });
+
+    const parsed = adminTierUpdateSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ message: "Invalid payload", issues: parsed.error.issues });
+
+    const actorAdminId = (req.session as any)?.userId ?? null;
+
+    const user = await storage.getUserById(userId);
+    if (!user) return res.status(404).json({ message: "User not found" });
+
+    const beforeUserTier = (user as any).userTier ?? "CANDIDATE";
+
+    // Load verification row (create if missing)
+    let verification = await db.query.userVerification.findFirst({
+      where: (uv, { eq }) => eq(uv.userId, userId),
+    });
+
+    if (!verification) {
+      await db.insert(userVerification).values({
+        userId,
+        contenderTier: "NONE",
+        emailResendCountDay: 0,
+        smsSendCountDay: 0,
+        smsVerifyFailCount: 0,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      verification = await db.query.userVerification.findFirst({
+        where: (uv, { eq }) => eq(uv.userId, userId),
+      });
+    }
+
+    const beforeContenderTier = (verification as any)?.contenderTier ?? "NONE";
+
+    // Update users tier if provided
+    if (parsed.data.userTier) {
+      await db
+        .update(users)
+        .set({
+          userTier: parsed.data.userTier,
+          tierPromotedAt: new Date(),
+          tierPromotedBy: actorAdminId,
+        } as any)
+        .where(eq(users.id, userId));
+    }
+
+    // Update contenderTier if provided
+    if (parsed.data.contenderTier) {
+      await db
+        .update(userVerification)
+        .set({
+          contenderTier: parsed.data.contenderTier,
+          updatedAt: new Date(),
+        })
+        .where(eq(userVerification.userId, userId));
+    }
+
+    // Audit: adminActions + identityAudit
+    await storage.logAdminAction({
+      adminId: actorAdminId,
+      action: "TIER_CHANGED",
+      targetType: "USER",
+      targetId: userId,
+      details: {
+        reason: parsed.data.reason ?? null,
+        before: { userTier: beforeUserTier, contenderTier: beforeContenderTier },
+        after: {
+          userTier: parsed.data.userTier ?? beforeUserTier,
+          contenderTier: parsed.data.contenderTier ?? beforeContenderTier,
+        },
+      },
+    });
+
+    await appendIdentityAudit({
+      userId,
+      category: "TIER",
+      eventType: "TIER_CHANGED",
+      actorType: "ADMIN",
+      actorUserId: actorAdminId,
+      payload: {
+        reason: parsed.data.reason ?? null,
+        before: { userTier: beforeUserTier, contenderTier: beforeContenderTier },
+        after: {
+          userTier: parsed.data.userTier ?? beforeUserTier,
+          contenderTier: parsed.data.contenderTier ?? beforeContenderTier,
+        },
+      },
+    });
+
+    return res.json({ ok: true });
+  } catch (e) {
+    console.error("Error updating tier:", e);
+    return res.status(500).json({ message: "Failed to update tier" });
+  }
+});
+```
+
+---
+
+## 6) Client: Add Verify Email page + Admin User Profile page + “Profile” button
+
+### 6A) New file: `client/src/pages/VerifyEmail.tsx`
+
+```tsx
+import { useEffect, useMemo, useState } from "react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { apiRequest } from "@/lib/queryClient";
+import { Link } from "wouter";
+
+function getTokenFromUrl(): string | null {
+  const url = new URL(window.location.href);
+  return url.searchParams.get("token");
+}
+
+export default function VerifyEmail() {
+  const token = useMemo(() => (typeof window !== "undefined" ? getTokenFromUrl() : null), []);
+  const [status, setStatus] = useState<"idle" | "verifying" | "ok" | "error">("idle");
+  const [message, setMessage] = useState<string>("");
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function run() {
+      if (!token) {
+        setStatus("error");
+        setMessage("Missing verification token.");
+        return;
+      }
+      setStatus("verifying");
+      try {
+        const res = await apiRequest("POST", "/api/verification/email/verify", { token });
+        const data = await res.json();
+        if (cancelled) return;
+
+        setStatus("ok");
+        setMessage(data?.message ?? "Email verified.");
+
+        // Redirect to profile shortly (no timers needed; allow user click too)
+      } catch (e: any) {
+        if (cancelled) return;
+        setStatus("error");
+        setMessage(e?.message ?? "Verification failed.");
+      }
+    }
+
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
+
+  return (
+    <div className="max-w-xl mx-auto p-4">
+      <Card>
+        <CardHeader>
+          <CardTitle>Email Verification</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {status === "verifying" && <div>Verifying token…</div>}
+          {status === "ok" && <div className="text-sm">{message}</div>}
+          {status === "error" && <div className="text-sm text-red-600">{message}</div>}
+
+          <div className="flex gap-2">
+            <Button asChild variant="default">
+              <Link href="/profile">Go to Profile Settings</Link>
+            </Button>
+            <Button asChild variant="outline">
+              <Link href="/">Go to Dashboard</Link>
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+```
+
+### 6B) New file: `client/src/pages/AdminUserProfileSettings.tsx`
+
+```tsx
+import { useMemo, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useRoute, Link } from "wouter";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
+import { useToast } from "@/hooks/use-toast";
+import axios from "axios";
+
+type UserTier = "CANDIDATE" | "PERFORMER" | "SELECTED";
+type ContenderTier = "NONE" | "CANDIDATE_EMAIL_ONLY" | "CANDIDATE_SMS_REQUIRED" | "VERIFIED_SMS" | "SELECTED_REAL_CAPITAL";
+
+export default function AdminUserProfileSettings() {
+  const [, params] = useRoute("/admin/users/:id");
+  const userId = useMemo(() => Number(params?.id), [params]);
+  const qc = useQueryClient();
+  const { toast } = useToast();
+
+  const [tier, setTier] = useState<UserTier | "">("");
+  const [contenderTier, setContenderTier] = useState<ContenderTier | "">("");
+  const [reason, setReason] = useState("");
+
+  const q = useQuery({
+    queryKey: ["/api/admin/users", userId, "profile"],
+    enabled: Number.isFinite(userId),
+    queryFn: async () => {
+      const res = await axios.get(`/api/admin/users/${userId}/profile`);
+      return res.data;
+    },
+  });
+
+  async function saveTier() {
+    if (!Number.isFinite(userId)) return;
+    try {
+      await axios.post(`/api/admin/users/${userId}/tier`, {
+        userTier: tier || undefined,
+        contenderTier: contenderTier || undefined,
+        reason: reason || undefined,
+      });
+      toast({ title: "Saved", description: "Tier update recorded and audited." });
+      await qc.invalidateQueries({ queryKey: ["/api/admin/users", userId, "profile"] });
+    } catch (e: any) {
+      toast({ title: "Error", description: e?.response?.data?.message ?? "Failed to update tier", variant: "destructive" });
+    }
+  }
+
+  if (!Number.isFinite(userId)) {
+    return (
+      <div className="p-4">
+        <Card>
+          <CardHeader><CardTitle>Admin User Profile</CardTitle></CardHeader>
+          <CardContent>Invalid user id.</CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  const data = q.data;
+  const user = data?.user;
+  const verification = data?.verification;
+  const kyc = data?.kyc;
+  const payout = data?.payout;
+
+  return (
+    <div className="p-4 space-y-4 max-w-5xl mx-auto">
+      <div className="flex items-center justify-between">
+        <div className="space-y-1">
+          <div className="text-xl font-semibold">Admin User Profile</div>
+          <div className="text-sm text-muted-foreground">
+            <span className="mr-2">User ID: {userId}</span>
+            {user?.email ? <span className="mr-2">Email: {user.email}</span> : null}
+            {user?.username ? <span>Username: {user.username}</span> : null}
+          </div>
+        </div>
+        <Button asChild variant="outline">
+          <Link href="/admin">Back to Admin</Link>
+        </Button>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Tier Management</CardTitle>
+        </CardHeader>
+        <CardContent className="grid md:grid-cols-3 gap-4">
+          <div className="space-y-2">
+            <div className="text-sm font-medium">userTier</div>
+            <Select value={tier || user?.userTier || ""} onValueChange={(v) => setTier(v as UserTier)}>
+              <SelectTrigger><SelectValue placeholder="Select tier" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="CANDIDATE">CANDIDATE</SelectItem>
+                <SelectItem value="PERFORMER">PERFORMER</SelectItem>
+                <SelectItem value="SELECTED">SELECTED</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-2">
+            <div className="text-sm font-medium">contenderTier</div>
+            <Select value={contenderTier || verification?.contenderTier || ""} onValueChange={(v) => setContenderTier(v as ContenderTier)}>
+              <SelectTrigger><SelectValue placeholder="Select contender tier" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="NONE">NONE</SelectItem>
+                <SelectItem value="CANDIDATE_EMAIL_ONLY">CANDIDATE_EMAIL_ONLY</SelectItem>
+                <SelectItem value="CANDIDATE_SMS_REQUIRED">CANDIDATE_SMS_REQUIRED</SelectItem>
+                <SelectItem value="VERIFIED_SMS">VERIFIED_SMS</SelectItem>
+                <SelectItem value="SELECTED_REAL_CAPITAL">SELECTED_REAL_CAPITAL</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-2">
+            <div className="text-sm font-medium">Reason</div>
+            <Textarea value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Why are you changing tier?" />
+          </div>
+
+          <div className="md:col-span-3 flex gap-2">
+            <Button onClick={saveTier} disabled={q.isLoading}>Save Tier Update</Button>
+            <Button variant="outline" asChild>
+              <Link href={`/admin`}>Open Admin Dashboard</Link>
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      <div className="grid md:grid-cols-2 gap-4">
+        <Card>
+          <CardHeader><CardTitle>Verification State</CardTitle></CardHeader>
+          <CardContent className="text-sm space-y-1">
+            <div>Email verified at: {verification?.emailVerifiedAt ? String(verification.emailVerifiedAt) : "—"}</div>
+            <div>Email reverify due: {verification?.emailReverifyDueAt ? String(verification.emailReverifyDueAt) : "—"}</div>
+            <div>SMS verified at: {verification?.smsVerifiedAt ? String(verification.smsVerifiedAt) : "—"}</div>
+            <div>contenderTier: {verification?.contenderTier ?? "—"}</div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader><CardTitle>KYC + Payout</CardTitle></CardHeader>
+          <CardContent className="text-sm space-y-1">
+            <div>KYC status: {kyc?.status ?? "—"}</div>
+            <div>KYC invited: {kyc?.invitedAt ? String(kyc.invitedAt) : "—"}</div>
+            <div>KYC submitted: {kyc?.submittedAt ? String(kyc.submittedAt) : "—"}</div>
+            <div>Payout preferred currency: {payout?.preferredPaymentCurrency ?? "—"}</div>
+            <div>Payout verified: {payout?.isVerified ? "YES" : "NO"}</div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card>
+        <CardHeader><CardTitle>Login History</CardTitle></CardHeader>
+        <CardContent className="text-sm">
+          {Array.isArray(data?.loginHistory) && data.loginHistory.length > 0 ? (
+            <div className="space-y-2">
+              {data.loginHistory.slice(0, 20).map((h: any, idx: number) => (
+                <div key={idx} className="border rounded p-2">
+                  <div>Login: {h.loginTime ? String(h.loginTime) : "—"}</div>
+                  <div>Logout: {h.logoutTime ? String(h.logoutTime) : "—"}</div>
+                  <div>IP: {h.ipAddress ?? "—"}</div>
+                  <div>Session length: {h.sessionLength ?? "—"}</div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div>No login history records.</div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+```
+
+### 6C) Patch: `client/src/App.tsx` (add routes)
+
+Add imports:
+
+```tsx
+import VerifyEmail from "@/pages/VerifyEmail";
+import AdminUserProfileSettings from "@/pages/AdminUserProfileSettings";
+```
+
+Then add routes inside `<Switch>` **before** `/admin`:
+
+```tsx
+<Route path="/verify-email" component={VerifyEmail} />
+<Route path="/admin/users/:id" component={AdminUserProfileSettings} />
+```
+
+### 6D) Patch: `client/src/pages/AdminDashboard.tsx` (add “Profile” button per user row)
+
+1. Add import at top:
+
+```tsx
+import { Link } from "wouter";
+```
+
+2. In the user row action button cluster (where you already have Edit/Timeline/Notes/Freeze/Disable), add:
+
+```tsx
+<Button asChild variant="outline" size="sm">
+  <Link href={`/admin/users/${user.id}`}>Profile</Link>
+</Button>
+```
+
+Place it next to Timeline/Notes for convenience.
+
+---
+
+## 7) Patch: `client/src/lib/queryClient.ts` (auto-redirect when backend sends redirectTo)
+
+In `throwIfResNotOk`, after parsing `errorData`, add:
+
+```ts
+if (res.status === 403 && errorData?.redirectTo) {
+  try {
+    window.location.assign(String(errorData.redirectTo));
+  } catch {}
+}
+```
+
+A clean placement is right before `throw new Error(...)`.
+
+---
+
+## 8) Secrets you must set in Replit (otherwise Email/SMS endpoints will be “present but nonfunctional”)
+
+Set these as Replit Secrets:
+
+* `RESEND_API_KEY`
+* `APP_BASE_URL` (e.g., [https://yourdomain.com](https://yourdomain.com))
+* `TWILIO_ACCOUNT_SID`
+* `TWILIO_AUTH_TOKEN`
+* `TWILIO_VERIFY_SERVICE_SID`
+
+---
+
+If you paste/apply the above exactly, you will have closed the **real** “not done/partial” items that remain in this ZIP against your checklist: server-side gating correctness, rolling reverify grace behavior, contender-based SMS gating, signup verification record creation, and admin tier/profile management with audited trails.

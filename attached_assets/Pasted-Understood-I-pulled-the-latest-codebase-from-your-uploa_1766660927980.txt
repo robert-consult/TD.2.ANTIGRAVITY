@@ -1,0 +1,308 @@
+Understood. I pulled the **latest** codebase from your uploaded `TradingCentral-3AL-2 (2).zip` and cross-checked it against **Replit Agent 3’s `AUDIT_REPORT.md`**. Below is a **re-audit with concrete PASS/FAIL findings** plus the **exact remediation plan** (and where the code needs to be changed).
+
+Important note: I started extracting exact insertion points for the AdminDashboard mini-tab wiring, but the tool session ended before I could finish that part. Everything else below is complete and accurate from direct inspection of your uploaded ZIP.
+
+---
+
+# 1) Re-Audit of Replit Agent 3’s `AUDIT_REPORT.md` (Against the Latest ZIP)
+
+## A. “Policy Engine” Accuracy
+
+### A.1 Single-source-of-truth exists (PASS)
+
+**PASS** — The repo includes:
+
+* `shared/policyDecision.ts` with `decidePolicy()` returning `{ allowed, deny_code }`
+* `server/policy/buildDecisionContext.ts` builder
+* `server/middleware/requirePolicy.ts` enforcement middleware
+
+This part of Agent 3’s audit is correct.
+
+---
+
+### A.2 “Locked accounts become reduce-only” claim (FAIL – Material)
+
+**FAIL** — Agent 3 states locked accounts become “reduce-only.”
+However, in `shared/policyDecision.ts`:
+
+* Locked states only block **exposure-increasing actions** (`TRADE_OPEN_OR_INCREASE`, `TRADE_PLACE_PENDING`).
+* **Two critical actions remain allowed even when locked:**
+
+  1. `TRADE_CANCEL_PENDING`
+  2. `TRADE_MODIFY_SLTP`
+
+This is not “reduce-only”; it is “reduce-only plus modify/cancel.”
+
+Why this is especially problematic:
+
+* Config fields exist:
+
+  * `allowCancelPendingWhenLocked: false`
+  * `allowRiskReducingSltpChangeWhenLocked: true`
+* But those config toggles are **not enforced anywhere**.
+
+So this is a **logic-engine drift risk**: the policy config says one thing, the effective behavior is different.
+
+---
+
+### A.3 “Risk-reducing SLTP updates allowed when locked” (FAIL – Not implemented)
+
+**FAIL** — The codebase has an optional `tradeIntent` in `DecisionContext`, but:
+
+* `requirePolicy()` never supplies `tradeIntent`
+* `buildDecisionContext()` returns `tradeIntent: input.tradeIntent`, but nobody sets it
+* `decidePolicy()` never evaluates *whether* SL changes are risk-reducing
+
+Net effect:
+
+* A locked trader can widen SL / remove SL entirely
+* That violates “reduce-only / locked” invariants
+
+---
+
+## B. KYC + Payout Gating
+
+### B.1 UI gating exists (PASS)
+
+**PASS** — Trader UI components already gate:
+
+* `KYC` card fetch is `enabled: status?.canViewKyc`
+* `Payout` card fetch is `enabled: status?.canSetPreferredPaymentCurrency`
+
+So “frontend gating exists.”
+
+---
+
+### B.2 Backend enforcement for KYC/Payout is missing (FAIL – Material)
+
+**FAIL** — Key trader endpoints do **not** use `requirePolicy()`:
+
+In `server/routes.ts`:
+
+* `GET /api/profile/kyc` does **not** enforce `KYC_VIEW`
+* `GET /api/profile/payout` does **not** enforce any policy action
+* `PUT /api/profile/payout/currency` does **not** enforce `PREFERRED_PAYMENT_CURRENCY_SET`
+
+This means:
+
+* Even if UI hides payout features, a trader can directly call the API
+* This breaks the “UI + backend never drift” requirement
+
+---
+
+### B.3 PolicyDecision lacks payout context (FAIL – Structural)
+
+**FAIL** — `DecisionContext` includes `kyc` but **no payout profile data**, and builder `buildDecisionContext.ts` does **not** query `user_payout_profiles`.
+
+Therefore:
+
+* `decidePolicy("PAYOUT_REQUEST")` cannot enforce payout profile verification
+* `decidePolicy("PREFERRED_PAYMENT_CURRENCY_SET")` cannot enforce invite-only payout gating properly
+
+This is a core requirement you explicitly requested (“compact policy module so UI/backend never drift”).
+
+---
+
+## C. Tiering System
+
+### C.1 User Tier field in schema (PASS – Agent’s gap list is wrong)
+
+**PASS** — The schema **does** contain:
+
+* `users.userTier` (`CANDIDATE | PERFORMER | SELECTED`)
+
+So the gap item “Schema user tier field not in schema” is **incorrect** in Agent 3’s audit.
+
+---
+
+### C.2 Tier badge UI (PASS – Agent’s gap list is wrong)
+
+**PASS** — Tier badge component exists:
+
+* `client/src/components/TierBadge.tsx`
+
+So “Tier Badge Display not implemented” is also **incorrect**.
+
+---
+
+### C.3 Tier progression automation based on performance (FAIL)
+
+**FAIL** — There is **eligibility computation** (`computeContenderEligibility`) but:
+
+* No job/event-driven logic persists tier upgrades automatically
+* Admin can manually set tier, but there is no “promotion engine”
+* That corresponds to your gap list item: “Tier assignment logic based on performance not implemented”
+
+---
+
+## D. Admin Dashboard Features
+
+### D.1 KYC Queue exists (PASS)
+
+**PASS** — Admin UI calls:
+
+* `GET /api/admin/kyc-queue`
+
+Admin endpoint exists in `server/routes/admin.ts`.
+
+---
+
+### D.2 “Profile Settings (Admin View)” mini-tab (FAIL – Not wired)
+
+**FAIL** — You have:
+
+* Endpoint `GET /api/admin/user-profiles`
+  But **AdminDashboard UI does not expose a Profile Settings tab/pane**.
+
+Also, the endpoint currently uses `storage.listUsersWithSettings()` and is not returning hedge-fund-grade profile completeness / verification / KYC / payout readiness.
+
+So this feature is **partial and not meeting your spec**.
+
+---
+
+### D.3 Audit Trail Data Source Drift (FAIL – Hedge-fund grade mismatch)
+
+**FAIL** — You have **two parallel audit systems**:
+
+1. `/api/admin/audit-trail` (aggregated summary endpoint)
+2. `identity_audit` table with hash chain + endpoints:
+
+   * `/api/admin/identity-audit`
+   * `/api/admin/identity-audit/verify-chain`
+
+But AdminDashboard uses `/api/admin/audit-trail` and does not expose the hash-chained audit in the main admin UX.
+
+For “hedgefund trail grade,” your Audit Trail mini-tab should prioritize **identity_audit**.
+
+---
+
+## E. Admin Tier Management Endpoint bug (FAIL)
+
+**FAIL** — In `server/routes/admin.ts`, the tier endpoint sets:
+
+* `newContenderTier = "CONTENDER"` when tier == "PERFORMER"
+
+But `"CONTENDER"` is **not a valid contenderTier** value (valid values live in `user_verification.contender_tier` and are like:
+`NONE | CANDIDATE_EMAIL_ONLY | CANDIDATE_SMS_REQUIRED | VERIFIED_SMS | SELECTED_REAL_CAPITAL`)
+
+This is a correctness bug and will cause drift/broken tier states.
+
+---
+
+# 2) Summary of “Failure Gaps” That Must Be Fixed
+
+## Critical (must-fix)
+
+1. **Locked trade state is not truly reduce-only**
+
+   * Cancel pending & SLTP modification allowed even when locked
+2. **Risk-reducing SLTP modifications not enforced**
+3. **Backend policy enforcement missing for KYC + payout endpoints**
+4. **DecisionContext + builder missing payout context**
+5. **Admin tier endpoint writes invalid contenderTier value**
+6. **Admin Profile Settings mini-tab missing / user-profiles endpoint insufficient**
+7. **Audit Trail UX not using hash-chained identity_audit by default**
+
+## Medium
+
+8. Tier progression automation based on performance (persist tier upgrades)
+9. Tier-based feature gating (fully consistent across UI + backend) — currently partial
+
+---
+
+# 3) What I Will Output Next (Code) — In Your Next Message
+
+I can immediately output **file-by-file drop-in code** to close every critical gap above, including:
+
+### Backend (enforcement + schema-context)
+
+1. **Updated** `shared/policyDecision.ts`
+
+   * Enforce `allowCancelPendingWhenLocked`
+   * Enforce `allowRiskReducingSltpChangeWhenLocked` using `tradeIntent`
+   * Add payout gating invariants
+2. **Updated** `server/policy/buildDecisionContext.ts`
+
+   * Include payout profile state from `user_payout_profiles`
+3. **Updated** `server/middleware/requirePolicy.ts`
+
+   * Support optional `buildTradeIntent(req)` so trade routes can pass SL changes into policy
+4. **Patched** `server/routes.ts`
+
+   * Add `requirePolicy("KYC_VIEW")` to `/api/profile/kyc`
+   * Add `requirePolicy("PREFERRED_PAYMENT_CURRENCY_SET")` to payout currency update
+   * Add `requirePolicy("KYC_VIEW")` to payout profile fetch
+   * Enhance `/api/trades/:id/targets` to supply `tradeIntent` to policy
+5. **Patched** `server/routes/admin.ts`
+
+   * Fix contenderTier mapping bug (`"CONTENDER"` invalid)
+   * Upgrade `/api/admin/user-profiles` to include verification + kyc + payout readiness
+   * Add admin endpoint to mark payout profile verified (if you want hedge-fund-grade ops)
+
+### Frontend (admin + trader UX alignment)
+
+6. Add **Admin Profile Settings mini-tab** and table UI
+7. Update Admin Audit Trail mini-tab to use `/api/admin/identity-audit` + chain verify UI
+
+---
+
+# 4) Re-Audit Redirect Checklist for Replit Agent 3 (What They Must Re-check)
+
+Replit Agent 3 should re-audit against these exact invariants:
+
+## Trade Enforcement
+
+* Locked accounts:
+
+  * Must deny **open/increase**, **place pending**
+  * Must deny **cancel pending** unless explicitly allowed by config
+  * Must allow SLTP updates only if *risk-reducing* AND config allows
+* Ensure `/api/trades/:id/targets` provides `tradeIntent` → policy engine
+
+## SMS
+
+* Eligibility must be enforced both:
+
+  * UI gating (already exists)
+  * API-level `PHONE_VERIFY_START` enforcement (already exists but must remain consistent)
+* Ensure Twilio Verify calls are rate-limited + audit logged
+
+## Email
+
+* Resend:
+
+  * cooldown enforced
+  * daily cap enforced
+* Rolling reverify:
+
+  * locked after overdue
+  * reminders + audit entries consistent
+
+## KYC + Payout
+
+* Users must not be able to:
+
+  * fetch KYC/payout profile endpoints when not invited (`KYC_VIEW`)
+  * update payout currency unless invited (`PREFERRED_PAYMENT_CURRENCY_SET`)
+* Policy engine must have payout context
+
+## Admin
+
+* Profile Settings mini-tab must exist and show:
+
+  * userTier + contenderTier + verification states
+  * KYC status and timestamps
+  * payout currency + payout verification state
+* Audit Trail should default to hash-chained identity audit system
+
+---
+
+# What I Need From You to Proceed
+
+Reply with **“CONTINUE — APPLY PATCHES”** and I will output the full code **inline** in clean drop-in format, grouped as:
+
+* `/shared/...`
+* `/server/...`
+* `/client/...`
+
+I will also include a short “integration notes” section so Replit Agent 3 can apply it without ambiguity.

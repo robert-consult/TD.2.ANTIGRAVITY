@@ -1,0 +1,105 @@
+This plan outlines the integration of your dynamic legal assembly and phone validation logic into the existing Replit signup flow. Per your instructions, we will **skip the email confirmation step** and maintain the **timed reminder on the login/homepage**, while adding a **Sliding Button Captcha** for signup security.
+
+### **1. The Signup Security: Sliding Captcha Integration**
+
+To replace standard text captchas, we implement a "Slide to Verify" mechanism. This validates human interaction and is a prerequisite for the "Sign Up" button to become active.
+
+* **Logic:** The `handleSubmit` function remains disabled until the `captchaVerified` state is `true`.
+* **Replit Guidance:** Use a library like `react-slider-captcha` or a custom CSS/JS slider. The backend must receive a unique session token generated only upon a successful slide completion to prevent bot-spoofing the API request.
+
+---
+
+### **2. The Implementation Algorithm (The "Caveat Function")**
+
+This algorithm handles the cascading logic triggered by the **Country Selector**.
+
+#### **Step 1: Selection Trigger**
+
+When the user selects a Country (e.g., "Poland"), the frontend triggers two parallel engines: `PhoneEngine` and `LegalEngine`.
+
+#### **Step 2: Phone Prefix & Regex Engine**
+
+1. **Lookup:** Match the ISO country code against the phone metadata.
+2. **UI Update:** * Populate the prefix (e.g., `+48` for Poland).
+* Apply the length/format regex to the input field.
+* *Example:* If Kenya is selected, the field length is set to 9-10 digits and the prefix to `+254`.
+
+
+
+#### **Step 3: Legal Terms Assembly (The Core Logic)**
+
+The system resolves the document using a **Priority Fallback Chain**:
+
+1. **Exact Match:** Does the `AddendumMap` have a specific file for "Poland"? If yes, load `DOC1_GLOBAL` + `ADD_POLAND`.
+2. **Regional Resolution:** If no exact match, look up the "Region" for Poland.
+* *Note:* Per your instructions, **Europe** is added as a region. If Poland resolves to `EUROPE`, it loads `DOC1_GLOBAL` + `ADD_EUROPE`.
+
+
+3. **Default (ROW):** If the country/region is not found, load `DOC1_GLOBAL` + `ADD_ROW`.
+
+---
+
+### **3. Implementation Plan for Replit**
+
+#### **Key Planning Document: Data Mapping**
+
+You will need to provide Replit with a JSON mapping file (derived from the documents you provided).
+
+```json
+{
+  "regions": {
+    "EUROPE": ["PL", "DE", "FR", "ES", "IT", "NL", "BE", "AT"],
+    "EAST_AFRICA": ["KE", "UG", "TZ"],
+    "GCC": ["AE", "SA", "QA"]
+  },
+  "legal_map": {
+    "KE": "ADD_KENYA",
+    "AE": "ADD_UAE",
+    "EUROPE": "ADD_EUROPE_GENERAL",
+    "DEFAULT": "ADD_ROW"
+  }
+}
+
+```
+
+#### **Frontend Component Architecture**
+
+1. **Signup Form Component:**
+* `Email`, `Username` (Standard Inputs).
+* `CountrySelector` (Triggers `onCountryChange`).
+* `PhoneField` (Managed by the Phone Engine; dynamic prefix + regex).
+* `SlidingCaptcha` (Unlocks the Submit button).
+* `TermsCheckbox`: The label "I agree to Terms & Conditions" contains a link.
+
+
+2. **The Modal Renderer:**
+* When the user clicks the "Terms & Conditions" link, the modal fetches the **already resolved** document string (Global + Specific Addendum) so there is no loading delay.
+
+
+
+---
+
+### **4. Onboarding Logic (Maintenance Request)**
+
+**Replit Instruction:** * **DO NOT** add an "Email Confirmation Required" block to the signup POST request.
+
+* Allow the user to transition directly to the `Authenticated` state upon successful form submission.
+* **KEEP AS IS:** Maintain the `Home.js` or `Dashboard.js` logic that checks for `user.is_verified`. If false, display the **Timed Reminder/Notification Bar** asking them to verify later.
+
+---
+
+### **5. Implementation Steps for the Developer**
+
+| Phase | Task | Guidance |
+| --- | --- | --- |
+| **1. Data Setup** | Load Global Master and Addenda | Store the text from your "Option A Pack" in a `/legal` directory. |
+| **2. Logic** | Country Change Handler | Create a function `handleCountrySelection(iso)` that updates both `phoneRules` and `activeAddendum` states. |
+| **3. UI** | Sliding Captcha | Place the slider above the "Sign Up" button. Use `onSuccess` to enable the button. |
+| **4. Backend** | Submission Audit | Ensure the signup API saves the `addendum_id` and a `timestamp` of acceptance to the user record for legal audit trails. |
+
+### **The "Caveat" Verification**
+
+To ensure the "Country must resolve" requirement is met:
+
+* **The Europe Region:** Ensure the code includes: `if (countryInEurope) { loadAddendum('EUROPE'); }`.
+* **Background Loading:** The addendum text should be fetched via a React `useEffect` hook as soon as the country is selected, not when the link is clicked, to ensure the review is "instant."

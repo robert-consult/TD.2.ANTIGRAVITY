@@ -1,0 +1,1816 @@
+According to the uploaded context documents (no date metadata provided), your tiered model must keep onboarding frictionless and then progressively unlock phone/SMS, sessions/devices, and finally KYC + “Preferred Payment Currency” at the Selected tier—driven by a server-side tier field and deterministic gating. This includes: **user_tier = CANDIDATE | PERFORMER | SELECTED**, locked UI banners, and eligibility rules for promotion (account age + performance + activity) before SMS/KYC become available.
+
+Below is an **additions-only** drop-in set that closes your listed gaps:
+
+* Profile Settings (Trader): **real TOTP 2FA**, Tier badge, KYC status display, Payment/Payout profile (locked until Selected)
+* Admin: **Tier progression management**, audit-trail event-type filter (in-tab), and schema + backend automation for tier assignment
+* SMS via **Twilio Verify**
+* Email verification/resend via **Resend**
+
+---
+
+## 0) Dependencies + Env (additions)
+
+### `package.json` (server deps)
+
+Add these dependencies:
+
+```json
+{
+  "dependencies": {
+    "resend": "^4.0.0",
+    "twilio": "^5.0.0",
+    "speakeasy": "^2.0.0",
+    "qrcode": "^1.5.4"
+  }
+}
+```
+
+### `.env` (server)
+
+Add:
+
+```bash
+# Resend
+RESEND_API_KEY=...
+RESEND_FROM_EMAIL="TradeHub <no-reply@yourdomain.com>"
+APP_BASE_URL="https://your-domain.com"   # used in verify links
+
+# Twilio Verify
+TWILIO_ACCOUNT_SID=...
+TWILIO_AUTH_TOKEN=...
+TWILIO_VERIFY_SERVICE_SID=...
+
+# MFA encryption (32+ chars recommended)
+MFA_ENCRYPTION_KEY="replace-with-strong-random-string"
+```
+
+---
+
+## 1) Schema gap: `user_tier` + related tables (Drizzle / SQLite)
+
+### PATCH: `shared/schema.ts` (additions only)
+
+> Add near your other table definitions (do not remove anything). Adjust import list if needed.
+
+```ts
+// shared/schema.ts (ADD ONLY)
+import { sqliteTable, text, integer, real } from "drizzle-orm/sqlite-core";
+import { sql } from "drizzle-orm";
+
+// --- Enums (string unions enforced at app layer; SQLite uses TEXT) ---
+export type UserTier = "CANDIDATE" | "PERFORMER" | "SELECTED";
+export type KycStatus = "NOT_STARTED" | "INVITED" | "SUBMITTED" | "APPROVED" | "REJECTED";
+
+// --- USERS: add tier + startingEquity (for performance baseline) ---
+// If you already have users table exported as `users`, add these columns to it.
+// Example:
+// export const users = sqliteTable("users", { ...existing..., userTier: text("user_tier").notNull().default("CANDIDATE") ... })
+
+// If you cannot safely edit the existing users table definition right now,
+// you can instead keep tier in `userVerification` below and expose it in APIs.
+// But your gap list explicitly requires a schema user tier field, so do add it.
+
+export const userVerification = sqliteTable("user_verification", {
+  userId: integer("user_id").primaryKey(), // references users(id) (FK optional in SQLite)
+  // Email lifecycle
+  emailVerifiedAt: integer("email_verified_at"), // unix ms
+  emailVerificationDueAt: integer("email_verification_due_at"), // for grace window
+  emailReverifyDueAt: integer("email_reverify_due_at"), // rolling 30d
+  // Contender/SMS gating (kept separate from tier; tier derives from this + admin actions)
+  contenderEligibleAt: integer("contender_eligible_at"),
+  contenderTier: text("contender_tier").notNull().default("NONE"),
+  smsVerifiedAt: integer("sms_verified_at"),
+  // Resend/OTP rate limits
+  emailResendCountDay: integer("email_resend_count_day").notNull().default(0),
+  emailResendDayKey: text("email_resend_day_key"), // YYYY-MM-DD
+  emailLastResendAt: integer("email_last_resend_at"),
+
+  smsSendCountDay: integer("sms_send_count_day").notNull().default(0),
+  smsSendDayKey: text("sms_send_day_key"),
+  smsLastSentAt: integer("sms_last_sent_at"),
+  smsVerifyFailCount: integer("sms_verify_fail_count").notNull().default(0),
+
+  createdAt: integer("created_at").notNull().default(sql`(strftime('%s','now')*1000)`),
+  updatedAt: integer("updated_at").notNull().default(sql`(strftime('%s','now')*1000)`),
+});
+
+export const emailVerificationTokens = sqliteTable("email_verification_tokens", {
+  id: text("id").primaryKey(), // uuid
+  userId: integer("user_id").notNull(),
+  tokenHash: text("token_hash").notNull(),
+  purpose: text("purpose").notNull().default("VERIFY"), // VERIFY | REVERIFY | CHANGE_EMAIL
+  expiresAt: integer("expires_at").notNull(), // unix ms
+  createdAt: integer("created_at").notNull().default(sql`(strftime('%s','now')*1000)`),
+  usedAt: integer("used_at"),
+});
+
+export const userMfa = sqliteTable("user_mfa", {
+  userId: integer("user_id").primaryKey(),
+  // encrypted TOTP secret (AES-GCM in app layer)
+  totpSecretEnc: text("totp_secret_enc"),
+  // pending setup secret so user can scan QR then confirm
+  totpPendingSecretEnc: text("totp_pending_secret_enc"),
+  enabledAt: integer("enabled_at"),
+  disabledAt: integer("disabled_at"),
+  recoveryCodesHashJson: text("recovery_codes_hash_json"), // JSON array of sha256 hashes
+  createdAt: integer("created_at").notNull().default(sql`(strftime('%s','now')*1000)`),
+  updatedAt: integer("updated_at").notNull().default(sql`(strftime('%s','now')*1000)`),
+});
+
+export const userKycProfiles = sqliteTable("user_kyc_profiles", {
+  userId: integer("user_id").primaryKey(),
+  status: text("status").notNull().default("NOT_STARTED"),
+  invitedAt: integer("invited_at"),
+  submittedAt: integer("submitted_at"),
+  reviewedAt: integer("reviewed_at"),
+  reviewerAdminId: integer("reviewer_admin_id"),
+  reviewerNote: text("reviewer_note"),
+  createdAt: integer("created_at").notNull().default(sql`(strftime('%s','now')*1000)`),
+  updatedAt: integer("updated_at").notNull().default(sql`(strftime('%s','now')*1000)`),
+});
+
+export const userPayoutProfiles = sqliteTable("user_payout_profiles", {
+  userId: integer("user_id").primaryKey(),
+  // This is your “Preferred Payment Currency” (only for Selected tier)
+  preferredPaymentCurrency: text("preferred_payment_currency"),
+  legalFirstName: text("legal_first_name"),
+  legalLastName: text("legal_last_name"),
+  dob: text("dob"), // ISO date
+  addressLine1: text("address_line1"),
+  addressLine2: text("address_line2"),
+  city: text("city"),
+  region: text("region"),
+  postalCode: text("postal_code"),
+  country: text("country"),
+  payoutMethodType: text("payout_method_type"), // BANK | WALLET | OTHER (placeholder)
+  payoutMethodRef: text("payout_method_ref"),   // placeholder token/id
+  createdAt: integer("created_at").notNull().default(sql`(strftime('%s','now')*1000)`),
+  updatedAt: integer("updated_at").notNull().default(sql`(strftime('%s','now')*1000)`),
+});
+
+export const identityAudit = sqliteTable("identity_audit", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  at: integer("at").notNull(),
+  userId: integer("user_id"),
+  email: text("email"),
+  username: text("username"),
+  category: text("category").notNull(), // LOGIN | ACCOUNT_EVENT | ADMIN_ACTION | KYC | MFA | EMAIL | SMS | TIER
+  type: text("type").notNull(),
+  title: text("title"),
+  description: text("description"),
+  ip: text("ip"),
+  userAgent: text("user_agent"),
+  actorAdminId: integer("actor_admin_id"),
+  prevHash: text("prev_hash"),
+  eventHash: text("event_hash").notNull(),
+});
+```
+
+---
+
+## 2) Backend: Resend + Twilio + MFA + Tiering + APIs
+
+### NEW: `server/services/crypto.ts`
+
+```ts
+// server/services/crypto.ts
+import crypto from "crypto";
+
+export function sha256Hex(input: string): string {
+  return crypto.createHash("sha256").update(input).digest("hex");
+}
+
+export function randomToken(bytes = 32): string {
+  return crypto.randomBytes(bytes).toString("hex");
+}
+
+// Simple AES-256-GCM encryption for MFA secrets (no external libs)
+const key = (() => {
+  const raw = process.env.MFA_ENCRYPTION_KEY ?? "";
+  if (raw.length < 32) return null;
+  return crypto.createHash("sha256").update(raw).digest(); // 32 bytes
+})();
+
+export function encryptString(plaintext: string): string {
+  if (!key) throw new Error("MFA_ENCRYPTION_KEY is missing/too short");
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
+  const enc = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return Buffer.concat([iv, tag, enc]).toString("base64");
+}
+
+export function decryptString(ciphertextB64: string): string {
+  if (!key) throw new Error("MFA_ENCRYPTION_KEY is missing/too short");
+  const buf = Buffer.from(ciphertextB64, "base64");
+  const iv = buf.subarray(0, 12);
+  const tag = buf.subarray(12, 28);
+  const enc = buf.subarray(28);
+  const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
+  decipher.setAuthTag(tag);
+  const dec = Buffer.concat([decipher.update(enc), decipher.final()]);
+  return dec.toString("utf8");
+}
+```
+
+### NEW: `server/services/resend.ts`
+
+```ts
+// server/services/resend.ts
+import { Resend } from "resend";
+
+const apiKey = process.env.RESEND_API_KEY;
+const from = process.env.RESEND_FROM_EMAIL;
+
+if (!apiKey) console.warn("RESEND_API_KEY not set");
+if (!from) console.warn("RESEND_FROM_EMAIL not set");
+
+export const resend = apiKey ? new Resend(apiKey) : null;
+export const RESEND_FROM = from ?? "no-reply@example.com";
+
+export async function sendVerifyEmail(params: { to: string; subject: string; html: string }) {
+  if (!resend) throw new Error("Resend not configured");
+  return resend.emails.send({
+    from: RESEND_FROM,
+    to: params.to,
+    subject: params.subject,
+    html: params.html,
+  });
+}
+```
+
+### NEW: `server/services/twilioVerify.ts`
+
+```ts
+// server/services/twilioVerify.ts
+import twilio from "twilio";
+
+const sid = process.env.TWILIO_ACCOUNT_SID;
+const token = process.env.TWILIO_AUTH_TOKEN;
+const verifySid = process.env.TWILIO_VERIFY_SERVICE_SID;
+
+if (!sid) console.warn("TWILIO_ACCOUNT_SID not set");
+if (!token) console.warn("TWILIO_AUTH_TOKEN not set");
+if (!verifySid) console.warn("TWILIO_VERIFY_SERVICE_SID not set");
+
+const client = sid && token ? twilio(sid, token) : null;
+
+export async function sendOtp(toE164: string) {
+  if (!client || !verifySid) throw new Error("Twilio Verify not configured");
+  return client.verify.v2.services(verifySid).verifications.create({ to: toE164, channel: "sms" });
+}
+
+export async function checkOtp(toE164: string, code: string) {
+  if (!client || !verifySid) throw new Error("Twilio Verify not configured");
+  return client.verify.v2.services(verifySid).verificationChecks.create({ to: toE164, code });
+}
+```
+
+### NEW: `server/services/identityAudit.ts`
+
+```ts
+// server/services/identityAudit.ts
+import { db } from "../db";
+import { identityAudit } from "../../shared/schema";
+import { desc, eq } from "drizzle-orm";
+import { sha256Hex } from "./crypto";
+
+type AuditInput = {
+  userId?: number | null;
+  email?: string | null;
+  username?: string | null;
+  category: string;
+  type: string;
+  title?: string | null;
+  description?: string | null;
+  ip?: string | null;
+  userAgent?: string | null;
+  actorAdminId?: number | null;
+  at?: number; // unix ms
+};
+
+export async function appendIdentityAudit(evt: AuditInput) {
+  const at = evt.at ?? Date.now();
+
+  const last = await db
+    .select({ eventHash: identityAudit.eventHash })
+    .from(identityAudit)
+    .orderBy(desc(identityAudit.id))
+    .limit(1);
+
+  const prevHash = last[0]?.eventHash ?? null;
+
+  const payload = {
+    at,
+    userId: evt.userId ?? null,
+    email: evt.email ?? null,
+    username: evt.username ?? null,
+    category: evt.category,
+    type: evt.type,
+    title: evt.title ?? null,
+    description: evt.description ?? null,
+    ip: evt.ip ?? null,
+    userAgent: evt.userAgent ?? null,
+    actorAdminId: evt.actorAdminId ?? null,
+  };
+
+  const eventHash = sha256Hex(`${prevHash ?? ""}|${JSON.stringify(payload)}`);
+
+  await db.insert(identityAudit).values({
+    ...payload,
+    at,
+    prevHash,
+    eventHash,
+  });
+}
+```
+
+### NEW: `server/services/tiering.ts` (performance → tier assignment)
+
+This encodes your eligibility concept (age + performance + activity) for promotion triggers before SMS/KYC unlocks.
+
+```ts
+// server/services/tiering.ts
+import { db } from "../db";
+import { userVerification, userKycProfiles } from "../../shared/schema";
+import { and, eq, gte, sql } from "drizzle-orm";
+
+/**
+ * NOTE:
+ * - This function is "best-effort" because your current schema for balances may differ.
+ * - It uses trade counts and basic time windows, plus a pluggable "equityReturn90d" callback.
+ * - Replit Agent 3 should wire `getReturnLast90d` to your actual equity/balance time-series if present.
+ */
+
+export async function recomputeContenderTier(userId: number, opts?: {
+  // provide if you have a reliable 90d return calculator
+  getReturnLast90d?: (userId: number) => Promise<number>; // e.g., 0.10 for +10%
+  getBalancePctOfStart?: (userId: number) => Promise<number>; // e.g., 1.20
+}) {
+  const now = Date.now();
+  const dayKey = new Date(now).toISOString().slice(0, 10);
+
+  const uv = await db.select().from(userVerification).where(eq(userVerification.userId, userId)).limit(1);
+  if (!uv[0]) {
+    await db.insert(userVerification).values({
+      userId,
+      contenderTier: "NONE",
+      emailResendDayKey: dayKey,
+      smsSendDayKey: dayKey,
+    });
+  }
+
+  // --- trade activity metrics (assumes `trades` table exists with userId + createdAt/closedAt)
+  // Replace `trades`/columns to match your repo.
+  const tradesLifetime = await db.get<{ n: number }>(sql`
+    SELECT COUNT(1) as n FROM trades WHERE user_id = ${userId}
+  `);
+
+  const tradesLast90 = await db.get<{ n: number }>(sql`
+    SELECT COUNT(1) as n FROM trades
+    WHERE user_id = ${userId}
+      AND COALESCE(closed_at, created_at) >= ${now - 90 * 24 * 3600 * 1000}
+  `);
+
+  const firstTrade = await db.get<{ t: number | null }>(sql`
+    SELECT MIN(created_at) as t FROM trades WHERE user_id = ${userId}
+  `);
+
+  const lastTrade = await db.get<{ t: number | null }>(sql`
+    SELECT MAX(COALESCE(closed_at, created_at)) as t FROM trades WHERE user_id = ${userId}
+  `);
+
+  const accountAgeDays = firstTrade?.t ? Math.floor((now - firstTrade.t) / (24 * 3600 * 1000)) : 0;
+  const lastTradeDaysAgo = lastTrade?.t ? Math.floor((now - lastTrade.t) / (24 * 3600 * 1000)) : 9999;
+
+  const balancePctOfStart = opts?.getBalancePctOfStart ? await opts.getBalancePctOfStart(userId) : 1.0;
+  const returnLast90 = opts?.getReturnLast90d ? await opts.getReturnLast90d(userId) : 0.0;
+
+  // Eligibility Path 1 (>=30d, >120%, >=30 trades)
+  const path1 =
+    accountAgeDays >= 30 &&
+    balancePctOfStart >= 1.2 &&
+    (tradesLifetime?.n ?? 0) >= 30;
+
+  // Eligibility Path 2 (>=90d, active recently, >=10% return, >=20 trades in 90d)
+  const path2 =
+    accountAgeDays >= 90 &&
+    lastTradeDaysAgo <= 14 &&
+    returnLast90 >= 0.10 &&
+    (tradesLast90?.n ?? 0) >= 20;
+
+  const contenderTier = (path1 || path2) ? "CANDIDATE_SMS_REQUIRED" : "CANDIDATE_EMAIL_ONLY";
+
+  await db
+    .update(userVerification)
+    .set({
+      contenderTier,
+      contenderEligibleAt: (path1 || path2) ? now : null,
+      updatedAt: now,
+    })
+    .where(eq(userVerification.userId, userId));
+
+  return { contenderTier, path1, path2, accountAgeDays, tradesLifetime: tradesLifetime?.n ?? 0, tradesLast90: tradesLast90?.n ?? 0 };
+}
+
+/**
+ * SELECTED is driven by admin selection / KYC invite state (not purely automation).
+ * This matches your "invite-based" KYC design and avoids forced friction.
+ */
+export async function isSelectedByKycInvite(userId: number): Promise<boolean> {
+  const row = await db.select().from(userKycProfiles).where(eq(userKycProfiles.userId, userId)).limit(1);
+  const s = row[0]?.status ?? "NOT_STARTED";
+  return s === "INVITED" || s === "SUBMITTED" || s === "APPROVED";
+}
+```
+
+---
+
+## 3) Backend routes: Trader Profile Settings (2FA, Tier badge, KYC, Payout, SMS, Resend)
+
+### NEW: `server/routes/profileSettings.ts`
+
+Assumes you already have `requireAuth` middleware. If your repo uses a different name, Replit Agent 3 should swap it.
+
+```ts
+// server/routes/profileSettings.ts
+import express from "express";
+import speakeasy from "speakeasy";
+import QRCode from "qrcode";
+import { db } from "../db";
+import {
+  userVerification,
+  emailVerificationTokens,
+  userMfa,
+  userKycProfiles,
+  userPayoutProfiles,
+} from "../../shared/schema";
+import { eq } from "drizzle-orm";
+import { appendIdentityAudit } from "../services/identityAudit";
+import { sha256Hex, randomToken, encryptString, decryptString } from "../services/crypto";
+import { sendVerifyEmail } from "../services/resend";
+import { sendOtp, checkOtp } from "../services/twilioVerify";
+import { recomputeContenderTier, isSelectedByKycInvite } from "../services/tiering";
+
+// Replace with your auth middleware
+import { requireAuth } from "../middleware/requireAuth";
+
+function dayKeyNow() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function asE164(raw: string) {
+  // Minimal; prefer a proper lib later. Expect "+1..." etc.
+  const s = raw.trim();
+  if (!s.startsWith("+")) throw new Error("Phone must be E.164 (e.g., +14155552671)");
+  return s;
+}
+
+function canAccessPayout(userTier: string) {
+  return userTier === "SELECTED";
+}
+
+export const profileSettingsRouter = express.Router();
+
+/**
+ * GET /api/profile/me
+ * Returns profile + derived feature flags for tier-based gating.
+ */
+profileSettingsRouter.get("/api/profile/me", requireAuth, async (req, res) => {
+  const user = req.user as any; // expect { id, email, username, userTier, ... }
+
+  const uv = await db.select().from(userVerification).where(eq(userVerification.userId, user.id)).limit(1);
+  const kyc = await db.select().from(userKycProfiles).where(eq(userKycProfiles.userId, user.id)).limit(1);
+  const payout = await db.select().from(userPayoutProfiles).where(eq(userPayoutProfiles.userId, user.id)).limit(1);
+  const mfa = await db.select().from(userMfa).where(eq(userMfa.userId, user.id)).limit(1);
+
+  const contenderTier = uv[0]?.contenderTier ?? "NONE";
+  const selectedByKyc = await isSelectedByKycInvite(user.id);
+
+  // Tier gating model: Candidate -> Performer -> Selected
+  const userTier = (user.userTier ?? "CANDIDATE") as string;
+
+  const features = {
+    canStartPhoneVerify: userTier !== "CANDIDATE",          // Tier 2+
+    canViewSessions: userTier !== "CANDIDATE",              // Tier 2+
+    canViewKyc: userTier === "SELECTED" || selectedByKyc,   // Tier 3 / invited
+    canEditPayout: userTier === "SELECTED",                 // Tier 3
+    canUseSmsNotifications: userTier !== "CANDIDATE",        // Email always on; SMS Tier2+
+  };
+
+  return res.json({
+    user: {
+      id: user.id,
+      email: user.email,
+      username: user.username,
+      firstName: user.firstName ?? null,
+      lastName: user.lastName ?? null,
+      displayName: user.displayName ?? null,
+      userTier,
+    },
+    verification: {
+      emailVerifiedAt: uv[0]?.emailVerifiedAt ?? null,
+      contenderTier,
+      smsVerifiedAt: uv[0]?.smsVerifiedAt ?? null,
+    },
+    mfa: {
+      enabled: !!mfa[0]?.enabledAt,
+      enabledAt: mfa[0]?.enabledAt ?? null,
+    },
+    kyc: {
+      status: (kyc[0]?.status ?? "NOT_STARTED"),
+      invitedAt: kyc[0]?.invitedAt ?? null,
+      submittedAt: kyc[0]?.submittedAt ?? null,
+      reviewedAt: kyc[0]?.reviewedAt ?? null,
+      reviewerNote: kyc[0]?.reviewerNote ?? null,
+    },
+    payout: payout[0] ?? null,
+    features,
+  });
+});
+
+/**
+ * PATCH /api/profile/me
+ * Basic profile edits (names/display). Keep email/username immutable here.
+ */
+profileSettingsRouter.patch("/api/profile/me", requireAuth, async (req, res) => {
+  const user = req.user as any;
+  const { firstName, lastName, displayName } = req.body ?? {};
+
+  // Replace with your actual users update method. This is intentionally minimal.
+  await db.run(
+    `UPDATE users SET first_name = ?, last_name = ?, display_name = ? WHERE id = ?`,
+    [firstName ?? null, lastName ?? null, displayName ?? null, user.id]
+  );
+
+  await appendIdentityAudit({
+    userId: user.id,
+    email: user.email,
+    username: user.username,
+    category: "ACCOUNT_EVENT",
+    type: "PROFILE_UPDATED",
+    title: "Profile updated",
+    description: "First/last/display name updated",
+    ip: (req.headers["x-forwarded-for"] as string) ?? req.ip,
+    userAgent: req.headers["user-agent"] ?? null,
+  });
+
+  return res.json({ ok: true });
+});
+
+/**
+ * POST /api/profile/email/resend
+ * Resend email verification via Resend (rate-limited).
+ */
+profileSettingsRouter.post("/api/profile/email/resend", requireAuth, async (req, res) => {
+  const user = req.user as any;
+  const now = Date.now();
+  const dk = dayKeyNow();
+
+  const uv = await db.select().from(userVerification).where(eq(userVerification.userId, user.id)).limit(1);
+  const row = uv[0];
+
+  if (!row) {
+    await db.insert(userVerification).values({ userId: user.id, emailResendDayKey: dk, smsSendDayKey: dk });
+  }
+
+  // reset day counter if needed
+  if (row?.emailResendDayKey !== dk) {
+    await db.update(userVerification).set({ emailResendDayKey: dk, emailResendCountDay: 0 }).where(eq(userVerification.userId, user.id));
+  }
+
+  const refreshed = await db.select().from(userVerification).where(eq(userVerification.userId, user.id)).limit(1);
+  const count = refreshed[0]?.emailResendCountDay ?? 0;
+  const lastAt = refreshed[0]?.emailLastResendAt ?? 0;
+
+  // cooldown 60s + daily cap 5 (aligns with your plan)
+  if (now - lastAt < 60_000) return res.status(429).json({ code: "deny.verify_resend_cooldown" });
+  if (count >= 5) return res.status(429).json({ code: "deny.verify_resend_daily_limit" });
+
+  const token = randomToken(32);
+  const tokenHash = sha256Hex(token);
+  const expiresAt = now + 24 * 3600 * 1000;
+
+  await db.insert(emailVerificationTokens).values({
+    id: crypto.randomUUID(),
+    userId: user.id,
+    tokenHash,
+    purpose: "VERIFY",
+    expiresAt,
+  });
+
+  const base = process.env.APP_BASE_URL ?? "http://localhost:5000";
+  const link = `${base}/verify-email?token=${token}`;
+
+  await sendVerifyEmail({
+    to: user.email,
+    subject: "Verify your email",
+    html: `<p>Verify your email to continue:</p><p><a href="${link}">Verify Email</a></p>`,
+  });
+
+  await db.update(userVerification).set({ emailResendCountDay: count + 1, emailLastResendAt: now, updatedAt: now }).where(eq(userVerification.userId, user.id));
+
+  await appendIdentityAudit({
+    userId: user.id,
+    email: user.email,
+    username: user.username,
+    category: "EMAIL",
+    type: "EMAIL_VERIFY_RESENT",
+    title: "Verification email resent",
+    ip: (req.headers["x-forwarded-for"] as string) ?? req.ip,
+    userAgent: req.headers["user-agent"] ?? null,
+  });
+
+  return res.json({ ok: true });
+});
+
+/**
+ * GET /api/profile/email/verify?token=...
+ * Verify token endpoint (can also be mounted as a public route without requireAuth if you prefer).
+ */
+profileSettingsRouter.get("/api/profile/email/verify", requireAuth, async (req, res) => {
+  const user = req.user as any;
+  const token = String(req.query.token ?? "");
+  if (!token) return res.status(400).json({ ok: false });
+
+  const tokenHash = sha256Hex(token);
+  const now = Date.now();
+
+  const rows = await db
+    .select()
+    .from(emailVerificationTokens)
+    .where(eq(emailVerificationTokens.tokenHash, tokenHash))
+    .limit(1);
+
+  const t = rows[0];
+  if (!t || t.userId !== user.id) return res.status(400).json({ code: "deny.verify_token_invalid" });
+  if (t.usedAt) return res.status(400).json({ code: "deny.verify_token_invalid" });
+  if (now > t.expiresAt) return res.status(400).json({ code: "deny.verify_token_expired" });
+
+  await db.update(emailVerificationTokens).set({ usedAt: now }).where(eq(emailVerificationTokens.id, t.id));
+  await db
+    .update(userVerification)
+    .set({ emailVerifiedAt: now, updatedAt: now })
+    .where(eq(userVerification.userId, user.id));
+
+  await appendIdentityAudit({
+    userId: user.id,
+    email: user.email,
+    username: user.username,
+    category: "EMAIL",
+    type: "EMAIL_VERIFIED",
+    title: "Email verified",
+    ip: (req.headers["x-forwarded-for"] as string) ?? req.ip,
+    userAgent: req.headers["user-agent"] ?? null,
+  });
+
+  return res.json({ ok: true });
+});
+
+/**
+ * POST /api/profile/phone/send-otp (Twilio Verify)
+ * Locked until Tier 2+ (Performer).
+ */
+profileSettingsRouter.post("/api/profile/phone/send-otp", requireAuth, async (req, res) => {
+  const user = req.user as any;
+  const userTier = (user.userTier ?? "CANDIDATE") as string;
+  if (userTier === "CANDIDATE") return res.status(403).json({ code: "deny.sms_not_eligible_yet" });
+
+  const { phone } = req.body ?? {};
+  const to = asE164(String(phone ?? ""));
+
+  const now = Date.now();
+  const dk = dayKeyNow();
+
+  const uv = await db.select().from(userVerification).where(eq(userVerification.userId, user.id)).limit(1);
+  if (!uv[0]) await db.insert(userVerification).values({ userId: user.id, smsSendDayKey: dk, emailResendDayKey: dk });
+
+  const cur = (await db.select().from(userVerification).where(eq(userVerification.userId, user.id)).limit(1))[0];
+
+  if (cur.smsSendDayKey !== dk) {
+    await db.update(userVerification).set({ smsSendDayKey: dk, smsSendCountDay: 0 }).where(eq(userVerification.userId, user.id));
+  }
+
+  const refreshed = (await db.select().from(userVerification).where(eq(userVerification.userId, user.id)).limit(1))[0];
+  if (refreshed.smsLastSentAt && now - refreshed.smsLastSentAt < 60_000) {
+    return res.status(429).json({ code: "deny.sms_rate_limited" });
+  }
+  if ((refreshed.smsSendCountDay ?? 0) >= 5) {
+    return res.status(429).json({ code: "deny.sms_rate_limited" });
+  }
+
+  await sendOtp(to);
+
+  await db.update(userVerification).set({
+    smsLastSentAt: now,
+    smsSendCountDay: (refreshed.smsSendCountDay ?? 0) + 1,
+    updatedAt: now,
+  }).where(eq(userVerification.userId, user.id));
+
+  await appendIdentityAudit({
+    userId: user.id,
+    email: user.email,
+    username: user.username,
+    category: "SMS",
+    type: "SMS_OTP_SENT",
+    title: "SMS OTP sent",
+    description: `Sent to ${to}`,
+    ip: (req.headers["x-forwarded-for"] as string) ?? req.ip,
+    userAgent: req.headers["user-agent"] ?? null,
+  });
+
+  return res.json({ ok: true });
+});
+
+/**
+ * POST /api/profile/phone/verify-otp
+ */
+profileSettingsRouter.post("/api/profile/phone/verify-otp", requireAuth, async (req, res) => {
+  const user = req.user as any;
+  const userTier = (user.userTier ?? "CANDIDATE") as string;
+  if (userTier === "CANDIDATE") return res.status(403).json({ code: "deny.sms_not_eligible_yet" });
+
+  const { phone, code } = req.body ?? {};
+  const to = asE164(String(phone ?? ""));
+  const c = String(code ?? "").trim();
+
+  const now = Date.now();
+  const result = await checkOtp(to, c);
+  const ok = result?.status === "approved";
+
+  if (!ok) {
+    await db.update(userVerification).set({
+      smsVerifyFailCount: sql`${userVerification.smsVerifyFailCount} + 1`,
+      updatedAt: now,
+    }).where(eq(userVerification.userId, user.id));
+
+    await appendIdentityAudit({
+      userId: user.id,
+      email: user.email,
+      username: user.username,
+      category: "SMS",
+      type: "SMS_VERIFY_FAILED",
+      title: "SMS verification failed",
+      ip: (req.headers["x-forwarded-for"] as string) ?? req.ip,
+      userAgent: req.headers["user-agent"] ?? null,
+    });
+
+    return res.status(400).json({ ok: false, code: "deny.sms_otp_invalid" });
+  }
+
+  await db.update(userVerification).set({
+    smsVerifiedAt: now,
+    contenderTier: "VERIFIED_SMS",
+    updatedAt: now,
+  }).where(eq(userVerification.userId, user.id));
+
+  await appendIdentityAudit({
+    userId: user.id,
+    email: user.email,
+    username: user.username,
+    category: "SMS",
+    type: "SMS_VERIFIED",
+    title: "Phone verified",
+    description: `Verified ${to}`,
+    ip: (req.headers["x-forwarded-for"] as string) ?? req.ip,
+    userAgent: req.headers["user-agent"] ?? null,
+  });
+
+  return res.json({ ok: true });
+});
+
+/**
+ * --- MFA (TOTP) ---
+ * Implemented now (closes your “Coming soon” gap).
+ * MFA is friction-light and should be available across tiers.
+ */
+
+profileSettingsRouter.get("/api/profile/mfa/status", requireAuth, async (req, res) => {
+  const user = req.user as any;
+  const row = await db.select().from(userMfa).where(eq(userMfa.userId, user.id)).limit(1);
+  return res.json({ enabled: !!row[0]?.enabledAt, enabledAt: row[0]?.enabledAt ?? null });
+});
+
+profileSettingsRouter.post("/api/profile/mfa/setup", requireAuth, async (req, res) => {
+  const user = req.user as any;
+
+  const secret = speakeasy.generateSecret({
+    name: `TradeHub (${user.email})`,
+    length: 20,
+  });
+
+  const otpauthUrl = secret.otpauth_url!;
+  const qr = await QRCode.toDataURL(otpauthUrl);
+
+  const enc = encryptString(secret.base32);
+
+  const existing = await db.select().from(userMfa).where(eq(userMfa.userId, user.id)).limit(1);
+  if (!existing[0]) {
+    await db.insert(userMfa).values({ userId: user.id, totpPendingSecretEnc: enc });
+  } else {
+    await db.update(userMfa).set({ totpPendingSecretEnc: enc, updatedAt: Date.now() }).where(eq(userMfa.userId, user.id));
+  }
+
+  await appendIdentityAudit({
+    userId: user.id,
+    email: user.email,
+    username: user.username,
+    category: "MFA",
+    type: "MFA_SETUP_STARTED",
+    title: "MFA setup started",
+    ip: (req.headers["x-forwarded-for"] as string) ?? req.ip,
+    userAgent: req.headers["user-agent"] ?? null,
+  });
+
+  return res.json({ otpauthUrl, qrCodeDataUrl: qr });
+});
+
+function generateRecoveryCodes(n = 10) {
+  const codes: string[] = [];
+  for (let i = 0; i < n; i++) {
+    codes.push(randomToken(8).slice(0, 10).toUpperCase());
+  }
+  return codes;
+}
+
+profileSettingsRouter.post("/api/profile/mfa/enable", requireAuth, async (req, res) => {
+  const user = req.user as any;
+  const { code } = req.body ?? {};
+  const c = String(code ?? "").trim();
+
+  const row = await db.select().from(userMfa).where(eq(userMfa.userId, user.id)).limit(1);
+  const pending = row[0]?.totpPendingSecretEnc;
+  if (!pending) return res.status(400).json({ ok: false, message: "No pending MFA setup" });
+
+  const secretBase32 = decryptString(pending);
+  const ok = speakeasy.totp.verify({ secret: secretBase32, encoding: "base32", token: c, window: 1 });
+
+  if (!ok) return res.status(400).json({ ok: false, message: "Invalid code" });
+
+  const recovery = generateRecoveryCodes(10);
+  const recoveryHashes = recovery.map((x) => sha256Hex(x));
+
+  await db.update(userMfa).set({
+    totpSecretEnc: pending,
+    totpPendingSecretEnc: null,
+    enabledAt: Date.now(),
+    disabledAt: null,
+    recoveryCodesHashJson: JSON.stringify(recoveryHashes),
+    updatedAt: Date.now(),
+  }).where(eq(userMfa.userId, user.id));
+
+  await appendIdentityAudit({
+    userId: user.id,
+    email: user.email,
+    username: user.username,
+    category: "MFA",
+    type: "MFA_ENABLED",
+    title: "MFA enabled",
+    ip: (req.headers["x-forwarded-for"] as string) ?? req.ip,
+    userAgent: req.headers["user-agent"] ?? null,
+  });
+
+  // Show recovery codes ONCE (client must prompt user to download)
+  return res.json({ ok: true, recoveryCodes: recovery });
+});
+
+profileSettingsRouter.post("/api/profile/mfa/disable", requireAuth, async (req, res) => {
+  const user = req.user as any;
+  const { codeOrRecovery } = req.body ?? {};
+  const token = String(codeOrRecovery ?? "").trim();
+
+  const row = await db.select().from(userMfa).where(eq(userMfa.userId, user.id)).limit(1);
+  if (!row[0]?.enabledAt || !row[0]?.totpSecretEnc) return res.status(400).json({ ok: false, message: "MFA not enabled" });
+
+  const secretBase32 = decryptString(row[0].totpSecretEnc);
+  const totpOk = speakeasy.totp.verify({ secret: secretBase32, encoding: "base32", token, window: 1 });
+
+  const hashes: string[] = row[0].recoveryCodesHashJson ? JSON.parse(row[0].recoveryCodesHashJson) : [];
+  const recoveryOk = hashes.includes(sha256Hex(token));
+
+  if (!totpOk && !recoveryOk) return res.status(400).json({ ok: false, message: "Invalid code" });
+
+  await db.update(userMfa).set({
+    enabledAt: null,
+    disabledAt: Date.now(),
+    totpSecretEnc: null,
+    totpPendingSecretEnc: null,
+    recoveryCodesHashJson: null,
+    updatedAt: Date.now(),
+  }).where(eq(userMfa.userId, user.id));
+
+  await appendIdentityAudit({
+    userId: user.id,
+    email: user.email,
+    username: user.username,
+    category: "MFA",
+    type: "MFA_DISABLED",
+    title: "MFA disabled",
+    ip: (req.headers["x-forwarded-for"] as string) ?? req.ip,
+    userAgent: req.headers["user-agent"] ?? null,
+  });
+
+  return res.json({ ok: true });
+});
+
+/**
+ * GET /api/profile/kyc (user-facing KYC status display)
+ * Only visible if invited/selected.
+ */
+profileSettingsRouter.get("/api/profile/kyc", requireAuth, async (req, res) => {
+  const user = req.user as any;
+  const userTier = (user.userTier ?? "CANDIDATE") as string;
+  const selectedByKyc = await isSelectedByKycInvite(user.id);
+
+  if (!(userTier === "SELECTED" || selectedByKyc)) {
+    return res.status(403).json({ code: "LOCKED_TIER" });
+  }
+
+  const row = await db.select().from(userKycProfiles).where(eq(userKycProfiles.userId, user.id)).limit(1);
+  return res.json(row[0] ?? { status: "NOT_STARTED" });
+});
+
+/**
+ * PUT /api/profile/payout (Payment/Payout Profile)
+ * Locked until Selected tier (tier-based gating).
+ */
+profileSettingsRouter.put("/api/profile/payout", requireAuth, async (req, res) => {
+  const user = req.user as any;
+  const userTier = (user.userTier ?? "CANDIDATE") as string;
+  if (!canAccessPayout(userTier)) return res.status(403).json({ code: "LOCKED_TIER" });
+
+  const now = Date.now();
+  const body = req.body ?? {};
+
+  const existing = await db.select().from(userPayoutProfiles).where(eq(userPayoutProfiles.userId, user.id)).limit(1);
+  if (!existing[0]) {
+    await db.insert(userPayoutProfiles).values({
+      userId: user.id,
+      preferredPaymentCurrency: body.preferredPaymentCurrency ?? null,
+      legalFirstName: body.legalFirstName ?? null,
+      legalLastName: body.legalLastName ?? null,
+      dob: body.dob ?? null,
+      addressLine1: body.addressLine1 ?? null,
+      addressLine2: body.addressLine2 ?? null,
+      city: body.city ?? null,
+      region: body.region ?? null,
+      postalCode: body.postalCode ?? null,
+      country: body.country ?? null,
+      payoutMethodType: body.payoutMethodType ?? null,
+      payoutMethodRef: body.payoutMethodRef ?? null,
+      updatedAt: now,
+    });
+  } else {
+    await db.update(userPayoutProfiles).set({
+      preferredPaymentCurrency: body.preferredPaymentCurrency ?? existing[0].preferredPaymentCurrency,
+      legalFirstName: body.legalFirstName ?? existing[0].legalFirstName,
+      legalLastName: body.legalLastName ?? existing[0].legalLastName,
+      dob: body.dob ?? existing[0].dob,
+      addressLine1: body.addressLine1 ?? existing[0].addressLine1,
+      addressLine2: body.addressLine2 ?? existing[0].addressLine2,
+      city: body.city ?? existing[0].city,
+      region: body.region ?? existing[0].region,
+      postalCode: body.postalCode ?? existing[0].postalCode,
+      country: body.country ?? existing[0].country,
+      payoutMethodType: body.payoutMethodType ?? existing[0].payoutMethodType,
+      payoutMethodRef: body.payoutMethodRef ?? existing[0].payoutMethodRef,
+      updatedAt: now,
+    }).where(eq(userPayoutProfiles.userId, user.id));
+  }
+
+  await appendIdentityAudit({
+    userId: user.id,
+    email: user.email,
+    username: user.username,
+    category: "ACCOUNT_EVENT",
+    type: "PAYOUT_PROFILE_UPDATED",
+    title: "Payout profile updated",
+    ip: (req.headers["x-forwarded-for"] as string) ?? req.ip,
+    userAgent: req.headers["user-agent"] ?? null,
+  });
+
+  return res.json({ ok: true });
+});
+
+/**
+ * POST /api/profile/tier/recompute (manual recompute for current user; admin uses admin endpoint)
+ */
+profileSettingsRouter.post("/api/profile/tier/recompute", requireAuth, async (req, res) => {
+  const user = req.user as any;
+  const out = await recomputeContenderTier(user.id);
+  return res.json({ ok: true, out });
+});
+```
+
+### PATCH: `server/index.ts` (mount router, additions only)
+
+```ts
+// server/index.ts (ADD ONLY)
+import { profileSettingsRouter } from "./routes/profileSettings";
+
+// ... after app is created
+app.use(profileSettingsRouter);
+```
+
+---
+
+## 4) Admin gaps: event-type filter + tier progression management + endpoints
+
+### PATCH: `server/routes/admin.ts` (additions only)
+
+Add these routes (or put them in `server/routes/adminProfile.ts` if you prefer cleanliness; mount similarly).
+
+```ts
+// server/routes/admin.ts (ADD ONLY)
+import { db } from "../db";
+import { identityAudit, userKycProfiles, userVerification } from "../../shared/schema";
+import { and, desc, eq, like, sql } from "drizzle-orm";
+import { appendIdentityAudit } from "../services/identityAudit";
+import { recomputeContenderTier } from "../services/tiering";
+
+// Replace with your admin auth
+import { requireAdmin } from "../middleware/requireAdmin";
+
+app.get("/api/admin/audit-trail", requireAdmin, async (req, res) => {
+  const q = String(req.query.q ?? "").trim();
+  const limit = Math.min(parseInt(String(req.query.limit ?? "200"), 10) || 200, 1000);
+  const category = String(req.query.category ?? "").trim();
+  const type = String(req.query.type ?? "").trim();
+
+  // Basic filter (email/username/type/category)
+  const whereParts: any[] = [];
+  if (q) {
+    whereParts.push(sql`(email LIKE ${"%" + q + "%"} OR username LIKE ${"%" + q + "%"} OR type LIKE ${"%" + q + "%"} OR category LIKE ${"%" + q + "%"})`);
+  }
+  if (category) whereParts.push(eq(identityAudit.category, category));
+  if (type) whereParts.push(eq(identityAudit.type, type));
+
+  const where = whereParts.length ? sql.join(whereParts, sql` AND `) : undefined;
+
+  const rows = await db.all(sql`
+    SELECT
+      id,
+      at,
+      user_id as userId,
+      email,
+      username,
+      category,
+      type,
+      title,
+      description,
+      ip,
+      user_agent as userAgent,
+      actor_admin_id as actorAdminId
+    FROM identity_audit
+    ${where ? sql`WHERE ${where}` : sql``}
+    ORDER BY id DESC
+    LIMIT ${limit}
+  `);
+
+  return res.json(rows);
+});
+
+/**
+ * Tier progression management:
+ * - set explicit user_tier
+ * - recompute contender tier (performance-based) and optionally auto-promote to PERFORMER
+ */
+app.post("/api/admin/users/:userId/tier", requireAdmin, async (req, res) => {
+  const userId = Number(req.params.userId);
+  const { userTier } = req.body ?? {}; // CANDIDATE|PERFORMER|SELECTED
+
+  if (!["CANDIDATE", "PERFORMER", "SELECTED"].includes(String(userTier))) {
+    return res.status(400).json({ ok: false, message: "Invalid tier" });
+  }
+
+  await db.run(`UPDATE users SET user_tier = ? WHERE id = ?`, [userTier, userId]);
+
+  await appendIdentityAudit({
+    userId,
+    category: "TIER",
+    type: "ADMIN_TIER_SET",
+    title: "Tier updated by admin",
+    description: `Set to ${userTier}`,
+    actorAdminId: (req.user as any)?.id ?? null,
+    ip: (req.headers["x-forwarded-for"] as string) ?? req.ip,
+    userAgent: req.headers["user-agent"] ?? null,
+  });
+
+  return res.json({ ok: true });
+});
+
+app.post("/api/admin/users/:userId/tier/recompute", requireAdmin, async (req, res) => {
+  const userId = Number(req.params.userId);
+  const out = await recomputeContenderTier(userId);
+
+  // Optional: auto-promote to PERFORMER if contenderTier becomes SMS_REQUIRED or VERIFIED_SMS
+  if (out.contenderTier === "CANDIDATE_SMS_REQUIRED") {
+    await db.run(`UPDATE users SET user_tier = ? WHERE id = ? AND user_tier = ?`, ["PERFORMER", userId, "CANDIDATE"]);
+    await appendIdentityAudit({
+      userId,
+      category: "TIER",
+      type: "AUTO_PROMOTED_PERFORMER",
+      title: "Auto-promoted to Performer",
+      description: "Performance eligibility met (SMS gate).",
+      actorAdminId: (req.user as any)?.id ?? null,
+      ip: (req.headers["x-forwarded-for"] as string) ?? req.ip,
+      userAgent: req.headers["user-agent"] ?? null,
+    });
+  }
+
+  return res.json({ ok: true, out });
+});
+
+/**
+ * KYC invite should also promote to SELECTED (invite-based model).
+ */
+app.post("/api/admin/kyc/invite", requireAdmin, async (req, res) => {
+  const { userId, note } = req.body ?? {};
+  const uid = Number(userId);
+  const now = Date.now();
+
+  const existing = await db.select().from(userKycProfiles).where(eq(userKycProfiles.userId, uid)).limit(1);
+  if (!existing[0]) {
+    await db.insert(userKycProfiles).values({
+      userId: uid,
+      status: "INVITED",
+      invitedAt: now,
+      reviewerNote: note ?? null,
+      updatedAt: now,
+    });
+  } else {
+    await db.update(userKycProfiles).set({
+      status: "INVITED",
+      invitedAt: now,
+      reviewerNote: note ?? existing[0].reviewerNote,
+      updatedAt: now,
+    }).where(eq(userKycProfiles.userId, uid));
+  }
+
+  // Promote to SELECTED (explicitly aligns with your “invite-based” KYC unlock)
+  await db.run(`UPDATE users SET user_tier = ? WHERE id = ?`, ["SELECTED", uid]);
+
+  await appendIdentityAudit({
+    userId: uid,
+    category: "KYC",
+    type: "KYC_INVITED",
+    title: "KYC invited",
+    description: note ?? null,
+    actorAdminId: (req.user as any)?.id ?? null,
+    ip: (req.headers["x-forwarded-for"] as string) ?? req.ip,
+    userAgent: req.headers["user-agent"] ?? null,
+  });
+
+  return res.json({ ok: true });
+});
+```
+
+---
+
+## 5) Frontend gaps: Tier badge, KYC status display, payout profile, 2FA UI, tier-based gating
+
+### NEW: `client/src/components/settings/TierBadge.tsx`
+
+(Your context doc already sketches this pattern; this is the shadcn/Tailwind-friendly version.)
+
+```tsx
+// client/src/components/settings/TierBadge.tsx
+export function TierBadge({ tier }: { tier: string }) {
+  const map: Record<string, { label: string; cls: string }> = {
+    CANDIDATE: { label: "Candidate", cls: "bg-slate-500/15 text-slate-200 border-slate-500/30" },
+    PERFORMER: { label: "Performer", cls: "bg-yellow-500/15 text-yellow-200 border-yellow-500/30" },
+    SELECTED: { label: "Selected", cls: "bg-emerald-500/15 text-emerald-200 border-emerald-500/30" },
+  };
+  const m = map[tier] ?? map.CANDIDATE;
+  return <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs ${m.cls}`}>{m.label}</span>;
+}
+```
+
+### NEW: `client/src/components/settings/LockedFeatureBanner.tsx`
+
+```tsx
+// client/src/components/settings/LockedFeatureBanner.tsx
+export function LockedFeatureBanner({ title, message }: { title: string; message: string }) {
+  return (
+    <div className="rounded-xl border border-slate-700/60 bg-slate-900/40 p-3 text-sm">
+      <div className="font-medium text-slate-200">{title}</div>
+      <div className="mt-1 text-slate-400">{message}</div>
+    </div>
+  );
+}
+```
+
+### NEW: `client/src/hooks/useProfileMe.ts`
+
+```tsx
+// client/src/hooks/useProfileMe.ts
+import { useQuery } from "@tanstack/react-query";
+import { apiRequest } from "@/lib/queryClient";
+
+export function useProfileMe() {
+  return useQuery({
+    queryKey: ["profile-me"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", "/api/profile/me");
+      return res.json();
+    },
+  });
+}
+```
+
+### NEW (Trader): `client/src/pages/ProfileSettings.tsx`
+
+This closes **2FA**, **tier badge display**, **KYC status display**, **payout profile**, and **tier-based gating**.
+
+```tsx
+// client/src/pages/ProfileSettings.tsx
+import { useMemo, useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { useToast } from "@/hooks/use-toast";
+import { apiRequest } from "@/lib/queryClient";
+import { useProfileMe } from "@/hooks/useProfileMe";
+import { TierBadge } from "@/components/settings/TierBadge";
+import { LockedFeatureBanner } from "@/components/settings/LockedFeatureBanner";
+
+type NavKey = "profile" | "verification" | "security" | "kyc" | "payout";
+
+export default function ProfileSettings() {
+  const qc = useQueryClient();
+  const { toast } = useToast();
+  const { data, isLoading } = useProfileMe();
+  const [nav, setNav] = useState<NavKey>("profile");
+
+  const user = data?.user;
+  const features = data?.features;
+  const verification = data?.verification;
+  const kyc = data?.kyc;
+  const payout = data?.payout;
+  const mfa = data?.mfa;
+
+  const saveProfile = useMutation({
+    mutationFn: async (body: any) => (await apiRequest("PATCH", "/api/profile/me", body)).json(),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["profile-me"] });
+      toast({ title: "Saved", description: "Profile updated." });
+    },
+  });
+
+  const resendEmail = useMutation({
+    mutationFn: async () => (await apiRequest("POST", "/api/profile/email/resend", {})).json(),
+    onSuccess: () => toast({ title: "Sent", description: "Verification email resent." }),
+    onError: () => toast({ title: "Cannot resend yet", description: "Please wait and try again." }),
+  });
+
+  const sendOtp = useMutation({
+    mutationFn: async (phone: string) => (await apiRequest("POST", "/api/profile/phone/send-otp", { phone })).json(),
+    onSuccess: () => toast({ title: "OTP sent", description: "Check your phone for the verification code." }),
+  });
+
+  const verifyOtp = useMutation({
+    mutationFn: async (payload: { phone: string; code: string }) =>
+      (await apiRequest("POST", "/api/profile/phone/verify-otp", payload)).json(),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["profile-me"] });
+      toast({ title: "Verified", description: "Phone verified successfully." });
+    },
+  });
+
+  const mfaSetup = useMutation({
+    mutationFn: async () => (await apiRequest("POST", "/api/profile/mfa/setup", {})).json(),
+  });
+
+  const mfaEnable = useMutation({
+    mutationFn: async (code: string) => (await apiRequest("POST", "/api/profile/mfa/enable", { code })).json(),
+    onSuccess: (out: any) => {
+      qc.invalidateQueries({ queryKey: ["profile-me"] });
+      toast({ title: "MFA enabled", description: "Save your recovery codes now." });
+      // You may want to open a dialog and show out.recoveryCodes once.
+      console.log("Recovery Codes (show once):", out?.recoveryCodes);
+    },
+  });
+
+  const mfaDisable = useMutation({
+    mutationFn: async (codeOrRecovery: string) =>
+      (await apiRequest("POST", "/api/profile/mfa/disable", { codeOrRecovery })).json(),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["profile-me"] });
+      toast({ title: "MFA disabled", description: "Two-factor authentication disabled." });
+    },
+  });
+
+  const savePayout = useMutation({
+    mutationFn: async (body: any) => (await apiRequest("PUT", "/api/profile/payout", body)).json(),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["profile-me"] });
+      toast({ title: "Saved", description: "Payout profile updated." });
+    },
+  });
+
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [displayName, setDisplayName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [otp, setOtp] = useState("");
+  const [mfaCode, setMfaCode] = useState("");
+  const [mfaDisableCode, setMfaDisableCode] = useState("");
+
+  const [prefCur, setPrefCur] = useState("");
+
+  useMemo(() => {
+    if (!user) return;
+    setFirstName(user.firstName ?? "");
+    setLastName(user.lastName ?? "");
+    setDisplayName(user.displayName ?? "");
+    setPrefCur(payout?.preferredPaymentCurrency ?? "");
+  }, [user, payout]);
+
+  if (isLoading) return <div contributions="p-6 text-gray-400">Loading profile settings...</div>;
+
+  return (
+    <div className="flex flex-col gap-4 p-4 md:flex-row">
+      {/* Left nav */}
+      <div className="w-full md:w-64 space-y-3">
+        <Card className="bg-neutral-900 border-gray-800">
+          <CardHeader>
+            <CardTitle className="flex items-center justify-between">
+              <span>Settings</span>
+              <TierBadge tier={user?.userTier ?? "CANDIDATE"} />
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {([
+              ["profile", "Profile"],
+              ["verification", "Contact & Verification"],
+              ["security", "Security (2FA)"],
+              ["kyc", "KYC Status"],
+              ["payout", "Payment / Payout"],
+            ] as Array<[NavKey, string]>).map(([k, label]) => (
+              <button
+                key={k}
+                onClick={() => setNav(k)}
+                className={`w-full rounded-lg px-3 py-2 text-left text-sm transition ${
+                  nav === k ? "bg-slate-700/60 text-white" : "text-gray-300 hover:bg-neutral-800"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </CardContent>
+        </Card>
+
+        {/* Tier-based education */}
+        {user?.userTier === "CANDIDATE" ? (
+          <LockedFeatureBanner
+            title="Progressive Unlock"
+            message='Phone verification, sessions/devices, and SMS alerts unlock at Performer. KYC & payout unlock at Selected.'
+          />
+        ) : null}
+      </div>
+
+      {/* Right panel */}
+      <div className="flex-1 space-y-4">
+        {nav === "profile" ? (
+          <Card className="bg-neutral-900 border-gray-800">
+            <CardHeader>
+              <CardTitle>Profile</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                <div>
+                  <div className="text-xs text-gray-400 mb-1">First name</div>
+                  <Input value={firstName} onChange={(e) => setFirstName(e.target.value)} className="bg-neutral-950 border-gray-700" />
+                </div>
+                <div>
+                  <div className="text-xs text-gray-400 mb-1">Last name</div>
+                  <Input value={lastName} onChange={(e) => setLastName(e.target.value)} className="bg-neutral-950 border-gray-700" />
+                </div>
+                <div className="md:col-span-2">
+                  <div className="text-xs text-gray-400 mb-1">Display name</div>
+                  <Input value={displayName} onChange={(e) => setDisplayName(e.target.value)} className="bg-neutral-950 border-gray-700" />
+                </div>
+              </div>
+
+              <div className="text-xs text-gray-400">Email and username are managed by policy and are not edited here.</div>
+
+              <Button
+                onClick={() => saveProfile.mutate({ firstName, lastName, displayName })}
+                className="bg-blue-700 hover:bg-blue-800"
+                disabled={saveProfile.isPending}
+              >
+                Save
+              </Button>
+            </CardContent>
+          </Card>
+        ) : null}
+
+        {nav === "verification" ? (
+          <Card className="bg-neutral-900 border-gray-800">
+            <CardHeader>
+              <CardTitle>Contact & Verification</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="rounded-lg border border-gray-800 bg-neutral-950 p-3">
+                <div className="text-sm text-gray-200 flex items-center justify-between">
+                  <span>Email</span>
+                  <span className="text-xs text-gray-400">
+                    {verification?.emailVerifiedAt ? "Verified" : "Pending"}
+                  </span>
+                </div>
+                <div className="text-xs text-gray-400 mt-1">{user?.email}</div>
+                {!verification?.emailVerifiedAt ? (
+                  <div className="mt-2">
+                    <Button variant="outline" className="bg-neutral-900 border-gray-700" onClick={() => resendEmail.mutate()} disabled={resendEmail.isPending}>
+                      Resend verification email
+                    </Button>
+                  </div>
+                ) : null}
+              </div>
+
+              {/* Phone locked until Performer */}
+              {!features?.canStartPhoneVerify ? (
+                <LockedFeatureBanner title="Phone verification locked" message="Unlocks at Performer tier based on eligibility." />
+              ) : (
+                <div className="rounded-lg border border-gray-800 bg-neutral-950 p-3 space-y-2">
+                  <div className="text-sm text-gray-200 flex items-center justify-between">
+                    <span>Phone</span>
+                    <span className="text-xs text-gray-400">
+                      {verification?.smsVerifiedAt ? "Verified" : "Not verified"}
+                    </span>
+                  </div>
+                  <Input
+                    placeholder="+14155552671"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    className="bg-neutral-900 border-gray-700"
+                  />
+                  <div className="flex gap-2">
+                    <Button variant="outline" className="bg-neutral-900 border-gray-700" onClick={() => sendOtp.mutate(phone)} disabled={sendOtp.isPending}>
+                      Send OTP
+                    </Button>
+                    <Input placeholder="123456" value={otp} onChange={(e) => setOtp(e.target.value)} className="bg-neutral-900 border-gray-700 w-32" />
+                    <Button className="bg-emerald-700 hover:bg-emerald-800" onClick={() => verifyOtp.mutate({ phone, code: otp })} disabled={verifyOtp.isPending}>
+                      Verify
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        ) : null}
+
+        {nav === "security" ? (
+          <Card className="bg-neutral-900 border-gray-800">
+            <CardHeader>
+              <CardTitle>Security (2FA)</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="text-sm text-gray-200 flex items-center justify-between">
+                <span>Authenticator (TOTP)</span>
+                <span className="text-xs text-gray-400">{mfa?.enabled ? "Enabled" : "Disabled"}</span>
+              </div>
+
+              {!mfa?.enabled ? (
+                <div className="space-y-2">
+                  <Button variant="outline" className="bg-neutral-900 border-gray-700" onClick={() => mfaSetup.mutate()}>
+                    Start setup (QR)
+                  </Button>
+                  {mfaSetup.data?.qrCodeDataUrl ? (
+                    <div className="rounded-lg border border-gray-800 bg-neutral-950 p-3 space-y-2">
+                      <div className="text-xs text-gray-400">Scan QR in your authenticator app, then enter the 6-digit code.</div>
+                      <img src={mfaSetup.data.qrCodeDataUrl} alt="MFA QR" className="h-40 w-40 rounded bg-white p-2" />
+                      <div className="flex gap-2">
+                        <Input value={mfaCode} onChange={(e) => setMfaCode(e.target.value)} placeholder="123456" className="bg-neutral-900 border-gray-700 w-40" />
+                        <Button className="bg-blue-700 hover:bg-blue-800" onClick={() => mfaEnable.mutate(mfaCode)} disabled={mfaEnable.isPending}>
+                          Enable
+                        </Button>
+                      </div>
+                      <div className="text-xs text-amber-300">
+                        After enabling, recovery codes are shown once (download immediately).
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              ) : (
+                <div className="rounded-lg border border-gray-800 bg-neutral-950 p-3 space-y-2">
+                  <div className="text-xs text-gray-400">Disable requires a TOTP code (or a recovery code).</div>
+                  <div className="flex gap-2">
+                    <Input value={mfaDisableCode} onChange={(e) => setMfaDisableCode(e.target.value)} placeholder="TOTP or recovery code" className="bg-neutral-900 border-gray-700" />
+                    <Button className="bg-red-700 hover:bg-red-800" onClick={() => mfaDisable.mutate(mfaDisableCode)} disabled={mfaDisable.isPending}>
+                      Disable
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        ) : null}
+
+        {nav === "kyc" ? (
+          <Card className="bg-neutral-900 border-gray-800">
+            <CardHeader>
+              <CardTitle>KYC Status</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {!features?.canViewKyc ? (
+                <LockedFeatureBanner title="KYC locked" message="KYC becomes available only when you are invited/Selected." />
+              ) : (
+                <div className="rounded-lg border border-gray-800 bg-neutral-950 p-3">
+                  <div className="text-sm text-gray-200">Status: <span className="font-medium">{kyc?.status ?? "NOT_STARTED"}</span></div>
+                  <div className="mt-2 text-xs text-gray-400">
+                    {kyc?.reviewerNote ? `Reviewer note: ${kyc.reviewerNote}` : "No reviewer note."}
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        ) : null}
+
+        {nav === "payout" ? (
+          <Card className="bg-neutral-900 border-gray-800">
+            <CardHeader>
+              <CardTitle>Payment / Payout Profile</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {!features?.canEditPayout ? (
+                <LockedFeatureBanner
+                  title="Payout profile locked"
+                  message="Preferred Payment Currency and payout profile unlock at Selected tier."
+                />
+              ) : (
+                <div className="space-y-3">
+                  <div>
+                    <div className="text-xs text-gray-400 mb-1">Preferred Payment Currency</div>
+                    <Input value={prefCur} onChange={(e) => setPrefCur(e.target.value)} placeholder="USD" className="bg-neutral-950 border-gray-700" />
+                  </div>
+                  <Button className="bg-blue-700 hover:bg-blue-800" onClick={() => savePayout.mutate({ preferredPaymentCurrency: prefCur })} disabled={savePayout.isPending}>
+                    Save payout profile
+                  </Button>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+```
+
+---
+
+## 6) Admin UI: audit filter + tier management page
+
+### PATCH: `client/src/pages/AdminAuditTrail.tsx` (add category/type filters)
+
+Add state + controls; update request URL.
+
+```tsx
+// AdminAuditTrail.tsx (PATCH)
+const [category, setCategory] = useState("");
+const [type, setType] = useState("");
+
+// in queryFn:
+const url =
+  `/api/admin/audit-trail?q=${encodeURIComponent(q)}&limit=${limit}` +
+  (category ? `&category=${encodeURIComponent(category)}` : "") +
+  (type ? `&type=${encodeURIComponent(type)}` : "");
+
+// in UI controls (add next to search):
+<Input placeholder="Event type (exact)" value={type} onChange={(e) => setType(e.target.value)} className="bg-neutral-900 border-gray-700" />
+<select value={category} onChange={(e) => setCategory(e.target.value)} className="h-10 rounded-md border border-gray-700 bg-neutral-900 px-3 text-sm text-gray-200">
+  <option value="">All categories</option>
+  <option value="LOGIN">LOGIN</option>
+  <option value="ACCOUNT_EVENT">ACCOUNT_EVENT</option>
+  <option value="ADMIN_ACTION">ADMIN_ACTION</option>
+  <option value="KYC">KYC</option>
+  <option value="MFA">MFA</option>
+  <option value="EMAIL">EMAIL</option>
+  <option value="SMS">SMS</option>
+  <option value="TIER">TIER</option>
+</select>
+```
+
+### NEW: `client/src/pages/AdminTierManagement.tsx`
+
+```tsx
+// client/src/pages/AdminTierManagement.tsx
+import { useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { apiRequest } from "@/lib/queryClient";
+
+type Row = {
+  userId: number;
+  email: string;
+  username: string;
+  userTier: "CANDIDATE" | "PERFORMER" | "SELECTED";
+  contenderTier?: string | null;
+  smsVerifiedAt?: number | null;
+};
+
+export default function AdminTierManagement() {
+  const qc = useQueryClient();
+  const [q, setQ] = useState("");
+
+  const { data, isLoading } = useQuery({
+    queryKey: ["admin-tier-users"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", "/api/admin/user-profiles");
+      // user-profiles should include tier fields; if not, extend it
+      return (await res.json()) as Row[];
+    },
+  });
+
+  const rows = useMemo(() => {
+    const all = (data ?? []) as any[];
+    if (!q.trim()) return all;
+    const s = q.toLowerCase();
+    return all.filter((r) => (r.email ?? "").toLowerCase().includes(s) || (r.username ?? "").toLowerCase().includes(s) || String(r.userId).includes(s));
+  }, [data, q]);
+
+  const setTier = useMutation({
+    mutationFn: async (payload: { userId: number; userTier: Row["userTier"] }) =>
+      (await apiRequest("POST", `/api/admin/users/${payload.userId}/tier`, { userTier: payload.userTier })).json(),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["admin-tier-users"] });
+      qc.invalidateQueries({ queryKey: ["admin-audit-trail"] });
+    },
+  });
+
+  const recompute = useMutation({
+    mutationFn: async (userId: number) => (await apiRequest("POST", `/api/admin/users/${userId}/tier/recompute`, {})).json(),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["admin-tier-users"] });
+      qc.invalidateQueries({ queryKey: ["admin-audit-trail"] });
+    },
+  });
+
+  return (
+    <div className="space-y-4">
+      <Card className="bg-neutral-850 border-gray-800">
+        <CardHeader>
+          <CardTitle>Tier Progression Management</CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-col sm:flex-row gap-2 sm:items-center">
+          <Input placeholder="Search email/username/userId..." value={q} onChange={(e) => setQ(e.target.value)} className="bg-neutral-900 border-gray-700" />
+          <div className="text-xs text-gray-400">
+            Admin can set tiers; recompute runs performance eligibility checks.
+          </div>
+        </CardContent>
+      </Card>
+
+      <div className="overflow-x-auto">
+        {isLoading ? (
+          <div className="p-6 text-gray-400">Loading...</div>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow className="border-b border-gray-700">
+                <TableHead className="text-gray-400">User</TableHead>
+                <TableHead className="text-gray-400">Tier</TableHead>
+                <TableHead className="text-gray-400">Contender Tier</TableHead>
+                <TableHead className="text-gray-400">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {rows.map((r: any) => (
+                <TableRow key={r.userId} className="border-b border-gray-800">
+                  <TableCell>
+                    <div className="font-medium text-gray-200">{r.email}</div>
+                    <div className="text-xs text-gray-400">@{r.username} (#{r.userId})</div>
+                  </TableCell>
+                  <TableCell className="text-xs text-gray-200">{r.userTier ?? "CANDIDATE"}</TableCell>
+                  <TableCell className="text-xs text-gray-400">{r.contenderTier ?? "—"}</TableCell>
+                  <TableCell className="flex flex-wrap gap-2 py-3">
+                    <Button size="sm" variant="outline" className="bg-neutral-900 border-gray-700" onClick={() => recompute.mutate(r.userId)} disabled={recompute.isPending}>
+                      Recompute
+                    </Button>
+                    <Button size="sm" className="bg-slate-700 hover:bg-slate-800" onClick={() => setTier.mutate({ userId: r.userId, userTier: "CANDIDATE" })} disabled={setTier.isPending}>
+                      Candidate
+                    </Button>
+                    <Button size="sm" className="bg-yellow-700 hover:bg-yellow-800" onClick={() => setTier.mutate({ userId: r.userId, userTier: "PERFORMER" })} disabled={setTier.isPending}>
+                      Performer
+                    </Button>
+                    <Button size="sm" className="bg-emerald-700 hover:bg-emerald-800" onClick={() => setTier.mutate({ userId: r.userId, userTier: "SELECTED" })} disabled={setTier.isPending}>
+                      Selected
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </div>
+    </div>
+  );
+}
+```
+
+### PATCH: `client/src/pages/AdminDashboard.tsx` (add Tier Management mini-tab)
+
+Add imports:
+
+```tsx
+import AdminTierManagement from "@/pages/AdminTierManagement";
+```
+
+Add mini-tab button (append after Profile Settings):
+
+```tsx
+<button
+  onClick={() => { setUserFilterTab("tierManagement"); setSelectedUserIds([]); }}
+  className={`px-3 py-1.5 rounded text-sm transition ${userFilterTab === "tierManagement" ? "bg-emerald-700 text-white" : "text-gray-300 hover:bg-neutral-600"}`}
+>
+  Tier Management
+</button>
+```
+
+Add render branch:
+
+```tsx
+) : userFilterTab === "tierManagement" ? (
+  <AdminTierManagement />
+) : (
+  // existing user list view...
+```
+
+Exclude from bulk action bar condition:
+
+```tsx
+userFilterTab !== "tierManagement"
+```
+
+---
+
+## 7) Header tier badge + link to trader Profile Settings (where email appears)
+
+### PATCH: `client/src/components/Header.tsx` (additions)
+
+You already planned an identity dropdown; this adds TierBadge + “Profile Settings” nav.
+
+```tsx
+// Header.tsx (PATCH - additions)
+import { TierBadge } from "@/components/settings/TierBadge";
+import { useProfileMe } from "@/hooks/useProfileMe";
+import { Link } from "wouter";
+
+// inside Header component:
+const { data } = useProfileMe();
+const tier = data?.user?.userTier ?? "CANDIDATE";
+
+// wherever you render top-right email pill:
+<div className="flex items-center gap-2">
+  <TierBadge tier={tier} />
+  <Link href="/profile">
+    <span className="cursor-pointer text-sm text-gray-200 hover:text-white">
+      {data?.user?.email ?? "—"}
+    </span>
+  </Link>
+</div>
+```
+
+### PATCH: `client/src/App.tsx` (route)
+
+```tsx
+import ProfileSettings from "@/pages/ProfileSettings";
+
+// in routes:
+<Route path="/profile" component={ProfileSettings} />
+```
+
+---
+
+## What this closes (your gap list)
+
+1. **2FA (High)**: Implemented TOTP setup/enable/disable + recovery codes + audit events.
+
+2. **Tier Badge Display (Medium)**: `TierBadge` + header + settings view; schema supports `user_tier` and admin management.
+
+3. **KYC Status Display user-facing (Medium)**: `/api/profile/kyc` + ProfileSettings “KYC Status” tab (locked until invited/Selected).
+
+4. **Payment/Payout Profile (Medium)**: `user_payout_profiles` + `/api/profile/payout` + UI (locked until Selected).
+
+5. **Admin Audit Trail event-type filter (Low)**: backend query params + UI filters.
+
+6. **Tier progression management (Medium)**: `AdminTierManagement` + admin endpoints for set tier + recompute.
+
+7. **Schema user tier field (High)**: `users.user_tier` (plus supporting tables).
+
+8. **Backend tier assignment logic (Medium)**: `recomputeContenderTier()` implements eligibility concept (age + activity + performance placeholders) per your criteria; agent wires real PnL/equity function if available.
+
+9. **Frontend tier-based gating (Medium)**: `features` flags from `/api/profile/me` + locked banners and locked tabs, consistent with progressive unlock model.
+
+---
+
+## One critical Replit Agent 3 note (to avoid engine conflicts)
+
+Keep tier/verification gating **out of trade execution** except for explicit policy-deny checks you already designed (email lockouts, etc.). This implementation stays parallel: profile/KYC/SMS routes + identity audit trail only, which matches the “no conflicts with logic-engine constraints” requirement.
+
+If you want, I can also provide a compact **`PolicyDecision`** module that returns `deny_code` + `allowed` booleans for (a) trade actions, (b) SMS start, (c) KYC view, so UI and backend never drift—aligned to the enforcement invariants in your context doc.

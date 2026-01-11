@@ -1,0 +1,3900 @@
+Implement a whole of app
+automatically globally responsive
+fluid and dynamic responsiveness
+that doesnt require hard coding as
+its been done right now. This is for
+all app components check all
+components and ensure fluidity. If
+any dependencies are needed for
+that research and install.
+This may require redefining the css
+and how it's then used. 
+Do a deep search research and
+then investigate the attached files
+for current implementation and
+then produce refactoring code and
+instructions inline. 
+Thought for 7m 16s
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 1/188
+Below is a concrete approach to make the entire app
+globally fluid/responsive without continuing the current
+pattern of per-component hard-coded widths/heights.
+The core idea is:
+1. Design tokens (CSS variables) with
+clamp() / min() for gutters, card padding, sidebar
+width, gaps, and typography (fluid by default).
+2. Layout primitives (AppShell, PageContainer,
+ResponsiveGrid, TableWrap) so components inherit
+responsiveness instead of reinventing layout rules.
+3. Container queries so components respond to their
+parent width (not just viewport breakpoints), which
+is the closest you get to “no hard-coding” while
+remaining deterministic. Tailwind supports this via
+the container-queries plugin on v3.x. 
+4. A repo-wide refactor pass that replaces fixed
+widths/heights and rigid grid counts with tokenized
+and auto-fit layouts.
+GitHub
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 2/188
+1) Research conclusions you should adopt
+A) Prefer container queries over viewport
+breakpoints for “automatic” responsiveness
+Container queries let a component adapt inside any
+parent layout, which prevents the “hard-coded per page”
+responsive logic that grows unmaintainable. Tailwind v3.x
+uses @tailwindcss/container-queries for @container
+and @md: -style variants. 
+B) Use clamp() tokens for fluid spacing +
+typography
+A small set of tokens (gutter, gaps, padding, sidebar
+width, font sizes) can scale smoothly across devices.
+clamp() is widely used for this. 
+Important: do not override the browser/user base fontsize globally in a way that fights accessibility; use fluid
+typography in utilities/tokens and apply where
+appropriate. 
+GitHub
+web.dev +1
+web.dev
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 3/188
+C) Make “dense UI” responsive via patterns, not
+per-component hacks
+Tables: wrap in horizontal scroll + sticky header as
+needed (pattern-based). 
+Modals: render Dialog on desktop and Drawer on
+mobile (pattern-based). 
+2) What I observed in your repo (attached
+zip, key offenders)
+You currently have hard-coded layout constraints in core
+layout:
+Dashboard.tsx uses a full-screen rigid shell ( hscreen , nested overflow locks).
+Navigation.tsx uses a fixed sidebar width ( w-56 )
+and breakpoint-specific show/hide.
+Many components use arbitrary fixed sizes like w-
+[90px] , h-[90vh] , fixed table column widths, fixed
+modal heights, etc.
+Tailkits +1
+Shadcn UI +1
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 4/188
+So the fix is not “tweak a few classes”; it’s: introduce
+global tokens + primitives and migrate screens to
+them.
+3) Dependency to add (Tailwind v3.x)
+If you remain on Tailwind v3.x, add container queries:
+Tailwind v4 has container queries built-in (then you can
+skip this plugin). 
+4) Refactor step 1 — Tokenize
+responsiveness globally
+4.1 Update tailwind.config.ts (minimal, safe
+edits)
+bash
+npm i -D @tailwindcss/container-queries
+Copy code
+GitHub
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 5/188
+In your existing tailwind.config.ts :
+A) Add theme tokens under extend :
+ts
+// inside theme.extend
+containers: {
+ // optional extra small container steps for tight
+ "2xs": "16rem",
+},
+width: {
+ sidebar: "var(--sidebar-w)",
+},
+minWidth: {
+ sidebar: "var(--sidebar-w)",
+},
+maxWidth: {
+ page: "var(--page-max)",
+},
+spacing: {
+ gutter: "var(--page-gutter)",
+ panel: "var(--panel-gap)",
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 6/188
+B) Add the plugin:
+This enables @container + @md: variants as
+documented. 
+4.2 Update client/src/index.css (global
+tokens + utilities)
+Append the following inside @layer base { :root { ...
+} } (keep your existing variables; add these):
+ card: "var(--card-p)",
+},
+ts
+plugins: [
+ require("tailwindcss-animate"),
+ require("@tailwindcss/typography"),
+ require("@tailwindcss/container-queries"),
+],
+Copy code
+GitHub
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 7/188
+Copy code
+css
+/* Add to :root (keep your existing theme vars) */
+:root {
+ /* Fluid layout tokens */
+ --page-gutter: clamp(12px, 3vw, 24px);
+ --panel-gap: clamp(10px, 2vw, 18px);
+ --card-p: clamp(12px, 2.2vw, 18px);
+ /* Fluid sidebar width: grows with screen, bounde
+ --sidebar-w: clamp(14rem, 18vw, 18rem);
+ /* Page max width (prevents ultra-wide unreadable
+ --page-max: 80rem;
+ /* Fluid type tokens (apply via utility classes, 
+ --text-sm: clamp(0.85rem, 0.15vw + 0.82rem, 0.95r
+ --text-base: clamp(0.95rem, 0.20vw + 0.90rem, 1.0
+ --text-lg: clamp(1.05rem, 0.35vw + 1.00rem, 1.20r
+ --text-xl: clamp(1.20rem, 0.60vw + 1.10rem, 1.50r
+}
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 8/188
+Now add these utilities below your existing CSS
+(preferably in @layer utilities ):
+css
+@layer utilities {
+ /* Dynamic viewport height (mobile-safe) */
+ .min-h-dvh { min-height: 100dvh; }
+ /* Page container primitive */
+ .page-container {
+ width: 100%;
+ max-width: var(--page-max);
+ margin-left: auto;
+ margin-right: auto;
+ padding-left: var(--page-gutter);
+ padding-right: var(--page-gutter);
+ }
+ /* Fluid spacing helpers */
+ .gap-panel { gap: var(--panel-gap); }
+ .p-card { padding: var(--card-p); }
+ .px-gutter { padding-left: var(--page-gutter); pa
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 9/188
+Copy code
+ /* Fluid typography helpers */
+ .text-fluid-sm { font-size: var(--text-sm); }
+ .text-fluid-base { font-size: var(--text-base); }
+ .text-fluid-lg { font-size: var(--text-lg); }
+ .text-fluid-xl { font-size: var(--text-xl); }
+ /* Auto-fit grid (no breakpoint hard-coding) */
+ .grid-auto-fit {
+ display: grid;
+ gap: var(--panel-gap);
+ grid-template-columns: repeat(auto-fit, minmax(
+ }
+ .grid-min-14 { --grid-min: 14rem; }
+ .grid-min-16 { --grid-min: 16rem; }
+ .grid-min-18 { --grid-min: 18rem; }
+ .grid-min-20 { --grid-min: 20rem; }
+ /* Table wrapper primitive */
+ .table-wrap {
+ width: 100%;
+ overflow: auto;
+ -webkit-overflow-scrolling: touch;
+ }
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 10/188
+Why this matters:
+This converts “responsive design” from hundreds of
+local class tweaks into a small number of global
+contracts.
+You’ll replace px-4 , p-4 , gap-4 , w-56 , etc., with
+tokenized utilities ( px-gutter , p-card , gap-panel ,
+w-sidebar ) where it matters most.
+5) Refactor step 2 — Introduce layout
+primitives (one-time)
+Create: client/src/components/layout/AppShell.tsx
+ /* Make media naturally responsive */
+ img, video, canvas, svg {
+ max-width: 100%;
+ height: auto;
+ }
+}
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 11/188
+tsx
+import * as React from "react";
+import { cn } from "@/lib/utils";
+type AppShellProps = {
+ header?: React.ReactNode;
+ sidebar?: React.ReactNode;
+ mobileNav?: React.ReactNode;
+ children: React.ReactNode;
+ className?: string;
+};
+/**
+ * Global responsive shell:
+ * - Uses container queries so sidebar/mobile nav r
+ * - Prevents nested overflow traps by keeping a si
+ */
+export function AppShell({
+ header,
+ sidebar,
+ mobileNav,
+ children,
+ className,
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 12/188
+}: AppShellProps) {
+ return (
+ <div className={cn("min-h-dvh flex flex-col bg-
+ {header ? <div className="shrink-0">{header}<
+ {/* Named container enables @3xl/app:* varian
+ <div className="@container/app flex-1 min-h-0
+ <div className="h-full grid grid-cols-1 @3x
+ {/* Sidebar appears when container is wid
+ <aside className="hidden @3xl/app:block b
+ <div className="h-full sticky top-0">{s
+ </aside>
+ {/* Main: single scroll region */}
+ <main className="min-h-0 overflow-auto">
+ {children}
+ </main>
+ </div>
+ {/* Mobile nav appears when container is na
+ {mobileNav ? (
+ <div className="@3xl/app:hidden border-t 
+ {mobileNav}
+ </div>
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 13/188
+This uses the Tailwind container query plugin behavior
+( @container , @3xl: etc.). 
+6) Refactor step 3 — Convert your core
+screens to the shell (starting with
+Dashboard)
+6.1 Patch client/src/pages/Dashboard.tsx
+Goal: eliminate h-screen /overflow traps and use
+AppShell .
+Add import:
+Copy code
+ ) : null}
+ </div>
+ </div>
+ );
+}
+GitHub
+ts
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 14/188
+Then replace your outer return wrapper with this
+structure (keep your existing logic and conditional tab
+renders):
+import { AppShell } from "@/components/layout/AppS
+Copy code
+tsx
+return (
+ <AppShell
+ header={
+ <>
+ <Header />
+ {/* Admin Quick Access (make it wrap instea
+ {user && (
+ <div className="bg-neutral-850 px-gutter 
+ <div className="flex flex-wrap items-ce
+ {user.isAdmin ? (
+ <Link href="/admin">
+ <Button size="sm" variant="outlin
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 15/188
+ Admin Dashboard
+ </Button>
+ </Link>
+ ) : (
+ <Button
+ size="sm"
+ variant="outline"
+ onClick={promoteToAdmin}
+ disabled={adminPromotion.isPromot
+ className="bg-neutral-700 hover:b
+ >
+ {adminPromotion.isPromoting ? "Pr
+ </Button>
+ )}
+ {adminPromotion.success && (
+ <span className="text-green-500 tex
+ Admin access granted! You can now
+ </span>
+ )}
+ {adminPromotion.error && (
+ <span className="text-red-500 text-
+ {adminPromotion.error}
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 16/188
+Copy code
+ </span>
+ )}
+ </div>
+ <div className="text-sm text-gray-400 w
+ Balance: <span className="font-semibo
+ </div>
+ </div>
+ )}
+ </>
+ }
+ sidebar={<SideNavigation activeTab={activeTab}
+ mobileNav={<MobileNavigation activeTab={activeT
+ >
+ {/* Content area: add consistent padding + avoi
+ <div className="page-container py-4">
+ {activeTab === "quotes" && <QuotesScreen onSe
+ {activeTab === "chart" && <ChartScreen select
+ {activeTab === "trade" && <TradeScreen select
+ {activeTab === "history" && <HistoryScreen />
+ {activeTab === "leaderboard" && <LeaderboardS
+ {activeTab === "account" && <AccountScreen />
+ </div>
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 17/188
+Key changes:
+page-container and tokenized paddings.
+No more h-screen flex flex-col overflow-hidden
+nesting.
+Sidebar/mobile nav switch happens via container
+width, not hard-coded viewport breakpoints.
+7) Refactor step 4 — Make Navigation fluid
+(remove fixed width + viewport breakpoint
+dependency)
+Patch client/src/components/Navigation.tsx :
+7.1 MobileNavigation: replace md:hidden with
+container-query hide
+ </AppShell>
+);
+tsx
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 18/188
+7.2 SideNavigation: replace md:block w-56 with
+container-query show + token width
+This is exactly the “portable responsiveness” container
+queries are intended to solve. 
+8) Refactor step 5 — Tables, dialogs, and
+“dense” components (global patterns)
+8.1 Tables: enforce a single rule everywhere
+Wrap any <Table /> in:
+<div className="@3xl/app:hidden bg-neutral-850 bor
+Copy code
+tsx
+<div className="hidden @3xl/app:block w-sidebar bg
+Copy code
+GitHub
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 19/188
+table-wrap handles overflow.
+min-w-[48rem] prevents columns from collapsing
+into unreadability; on small screens it scrolls.
+This aligns with common responsive table guidance
+and Tailwind table utilities. 
+8.2 Dialogs: responsive Dialog (desktop) +
+Drawer (mobile)
+If you have any modal-heavy flows (trade edit, filters,
+settings), implement a wrapper following shadcn’s
+“responsive dialog” approach. 
+tsx
+<div className="table-wrap rounded-md border borde
+ <Table className="min-w-[48rem]">
+ {/* ... */}
+ </Table>
+</div>
+Copy code
+Tailkits +1
+Shadcn UI +1
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 20/188
+Create client/src/components/ui/responsivedialog.tsx :
+tsx
+import * as React from "react";
+import { Dialog, DialogContent, DialogHeader, Dialo
+import { Drawer, DrawerContent, DrawerHeader, Drawe
+import { useMediaQuery } from "@/hooks/useMediaQuer
+type ResponsiveDialogProps = {
+ title: string;
+ trigger: React.ReactNode;
+ children: React.ReactNode;
+};
+export function ResponsiveDialog({ title, trigger, 
+ const isDesktop = useMediaQuery("(min-width: 768p
+ if (isDesktop) {
+ return (
+ <Dialog>
+ <DialogTrigger asChild>{trigger}</DialogTri
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 21/188
+Copy code <DialogContent className="max-w-[min(42rem,
+ <DialogHeader>
+ <DialogTitle>{title}</DialogTitle>
+ </DialogHeader>
+ <div className="max-h-[75dvh] overflow-au
+ </DialogContent>
+ </Dialog>
+ );
+ }
+ return (
+ <Drawer>
+ <DrawerTrigger asChild>{trigger}</DrawerTrigg
+ <DrawerContent>
+ <DrawerHeader>
+ <DrawerTitle>{title}</DrawerTitle>
+ </DrawerHeader>
+ <div className="max-h-[75dvh] overflow-auto
+ </DrawerContent>
+ </Drawer>
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 22/188
+And a simple hook
+client/src/hooks/useMediaQuery.ts :
+ );
+}
+ts
+import { useEffect, useState } from "react";
+export function useMediaQuery(query: string) {
+ const [matches, setMatches] = useState(false);
+ useEffect(() => {
+ const mql = window.matchMedia(query);
+ const onChange = () => setMatches(mql.matches);
+ onChange();
+ mql.addEventListener("change", onChange);
+ return () => mql.removeEventListener("change", 
+ }, [query]);
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 23/188
+(You can also convert this to container-query driven
+behavior later; this is still a major improvement and
+aligns with shadcn’s recommended pattern.) 
+9) Repo-wide refactor instructions
+(Codex/Agent checklist)
+Run a systematic pass using these rules:
+9.1 Replace rigid screen height/overflow traps
+Replace h-screen with min-h-dvh
+Avoid multiple nested overflow-hidden wrappers.
+The rule should be:
+Shell: min-h-dvh
+Main scroll region: overflow-auto
+ return matches;
+}
+Shadcn UI +1
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 24/188
+Inner components: only add overflow where
+necessary (tables, code blocks)
+9.2 Replace fixed sidebar and fixed panels
+Replace w-56 , w-64 , etc. used for navigation/side
+panels with:
+w-sidebar (token)
+Replace repeated px-4 / p-4 for main layout
+spacing with:
+px-gutter , p-card , gap-panel
+9.3 Replace rigid grids with auto-fit grids
+Where you have grid-cols-2 , grid-cols-3 , etc. for
+cards/KPIs/widgets, replace with:
+This removes breakpoint hard-coding and stays fluid.
+Copy code
+Copy code
+tsx
+<div className="grid-auto-fit grid-min-18">
+ {/* cards */}
+</div>
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 25/188
+9.4 Replace hard-coded widths in tables/cards
+w-[90px] table headers: prefer:
+content-driven sizing ( table-auto ) + wrapping
+table container
+or tokenized min widths ( min-w-[8rem] , minw-[10rem] ) only where truly necessary
+9.5 Make text scale fluid only where density
+changes
+Apply text-fluid-* utilities to:
+headers ( text-fluid-xl )
+dense labels ( text-fluid-sm )
+body ( text-fluid-base )
+This is consistent with clamp-based best practices
+while respecting user font settings. 
+10) Verification protocol (fast,
+unambiguous)
+Copy code
+web.dev +1
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 26/188
+1. In Chrome DevTools: test widths 320 → 1440,
+ensure:
+Sidebar appears/disappears based on available
+container width.
+No horizontal scroll on pages except inside
+.table-wrap .
+2. Rotate mobile view (portrait/landscape): confirm
+min-h-dvh prevents “cut off” content.
+3. For each “dense” page (Trading, History, Admin
+tables):
+Ensure tables scroll horizontally inside wrapper,
+not the whole page.
+If you want, I can also generate the exact
+patch list per file (file-by-file replacements)
+I’ve given you the global system and the core screen
+conversions (Dashboard + Navigation) because those
+unlock most of the responsiveness across the app. The
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 27/188
+remaining work is a mechanical sweep: replace fixed
+grids/widths with the primitives above.
+If you paste (or point me to) the current
+AdminDashboard.tsx and 1–2 of your densest screens
+(Trading/History), I will return exact inline refactors for
+those as well, using the same primitives so the whole
+app becomes consistent.
+Sources
+Generate 
+Thought for 9m 31s
+Below is a concrete, repo-specific refactor that makes the
+entire app’s layout globally fluid, responsive, and selfadjusting—without sprinkling hard-coded pixel
+widths/heights across components.
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 28/188
+Key improvements:
+Use dynamic viewport units ( min-h-dvh , h-dvh ) to
+eliminate mobile address-bar/keyboard layout
+breakage (supported in Tailwind v3.4).
+Introduce layout tokens (CSS variables using
+clamp() ) for gutters + sidebar width so layout
+adapts continuously—not just at breakpoints.
+Add container queries so components can respond
+to their container (not just the viewport). (Tailwind v3
+needs the plugin; Tailwind v4 would not.)
+Remove brittle calc(100vh - …) scrolling hacks and
+replace with correct flex + min-h-0 patterns.
+1) Dependency install
+Run:
+bash
+npm i -D @tailwindcss/container-queries
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 29/188
+2) File replacement: tailwind.config.ts
+Replace entire file with:
+Copy code
+ts
+import type { Config } from "tailwindcss";
+export default {
+ darkMode: ["class"],
+ content: ["./client/index.html", "./client/src/**
+ theme: {
+ extend: {
+ borderRadius: {
+ lg: "var(--radius)",
+ md: "calc(var(--radius) - 2px)",
+ sm: "calc(var(--radius) - 4px)",
+ },
+ colors: {
+ background: "hsl(var(--background))",
+ foreground: "hsl(var(--foreground))",
+ card: {
+ DEFAULT: "hsl(var(--card))",
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 30/188
+ foreground: "hsl(var(--card-foreground))"
+ },
+ popover: {
+ DEFAULT: "hsl(var(--popover))",
+ foreground: "hsl(var(--popover-foreground
+ },
+ primary: {
+ DEFAULT: "hsl(var(--primary))",
+ foreground: "hsl(var(--primary-foreground
+ },
+ secondary: {
+ DEFAULT: "hsl(var(--secondary))",
+ foreground: "hsl(var(--secondary-foregrou
+ },
+ muted: {
+ DEFAULT: "hsl(var(--muted))",
+ foreground: "hsl(var(--muted-foreground))
+ },
+ accent: {
+ DEFAULT: "hsl(var(--accent))",
+ foreground: "hsl(var(--accent-foreground)
+ },
+ destructive: {
+ DEFAULT: "hsl(var(--destructive))",
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 31/188
+ foreground: "hsl(var(--destructive-foregr
+ },
+ border: "hsl(var(--border))",
+ input: "hsl(var(--input))",
+ ring: "hsl(var(--ring))",
+ chart: {
+ "1": "hsl(var(--chart-1))",
+ "2": "hsl(var(--chart-2))",
+ "3": "hsl(var(--chart-3))",
+ "4": "hsl(var(--chart-4))",
+ "5": "hsl(var(--chart-5))",
+ },
+ sidebar: {
+ DEFAULT: "hsl(var(--sidebar-background))"
+ foreground: "hsl(var(--sidebar-foreground
+ primary: "hsl(var(--sidebar-primary))",
+ "primary-foreground": "hsl(var(--sidebar-
+ accent: "hsl(var(--sidebar-accent))",
+ "accent-foreground": "hsl(var(--sidebar-a
+ border: "hsl(var(--sidebar-border))",
+ ring: "hsl(var(--sidebar-ring))",
+ },
+ },
+ keyframes: {
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 32/188
+ "accordion-down": {
+ from: { height: "0" },
+ to: { height: "var(--radix-accordion-cont
+ },
+ "accordion-up": {
+ from: { height: "var(--radix-accordion-co
+ to: { height: "0" },
+ },
+ },
+ animation: {
+ "accordion-down": "accordion-down 0.2s ease
+ "accordion-up": "accordion-up 0.2s ease-out
+ },
+ },
+ },
+ plugins: [
+ require("tailwindcss-animate"),
+ require("@tailwindcss/typography"),
+ require("@tailwindcss/container-queries"),
+ ],
+} satisfies Config;
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 33/188
+3) File replacement: client/src/index.css
+Keep your existing theme variables, but add global
+layout tokens + utilities.
+Replace entire file with the version below (it preserves
+your existing variables and styles, adding the missing
+global responsiveness layer):
+css
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+html,
+body,
+#root {
+ height: 100%;
+}
+/* Ensure the React root always has a dynamic-viewp
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 34/188
+#root {
+ min-height: 100dvh;
+}
+@layer base {
+ :root {
+ --background: 0 0% 7%;
+ --foreground: 0 0% 90%;
+ --card: 0 0% 12%;
+ --card-foreground: 0 0% 90%;
+ --popover: 0 0% 12%;
+ --popover-foreground: 0 0% 90%;
+ --primary: 200 97% 40%;
+ --primary-foreground: 0 0% 100%;
+ --secondary: 0 0% 12%;
+ --secondary-foreground: 0 0% 90%;
+ --muted: 0 0% 24%;
+ --muted-foreground: 0 0% 60%;
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 35/188
+ --accent: 0 0% 15%;
+ --accent-foreground: 0 0% 90%;
+ --destructive: 0 84% 60%;
+ --destructive-foreground: 0 0% 100%;
+ --success: 142 70% 45%;
+ --success-foreground: 142 100% 90%;
+ --danger: 0 84% 60%;
+ --danger-foreground: 0 90% 90%;
+ --border: 0 0% 20%;
+ --input: 0 0% 20%;
+ --ring: 0 0% 20%;
+ --radius: 0.5rem;
+ --chart-1: 200 97% 40%;
+ --chart-2: 142 70% 45%;
+ --chart-3: 0 84% 60%;
+ --chart-4: 25 95% 53%;
+ --chart-5: 262 83% 58%;
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 36/188
+ --sidebar-background: 0 0% 12%;
+ --sidebar-foreground: 0 0% 90%;
+ --sidebar-primary: 200 97% 40%;
+ --sidebar-primary-foreground: 0 0% 100%;
+ --sidebar-accent: 0 0% 15%;
+ --sidebar-accent-foreground: 0 0% 90%;
+ --sidebar-border: 0 0% 20%;
+ --sidebar-ring: 0 0% 20%;
+ --export-csv: 142 71% 45%;
+ --export-csv-hover: 142 71% 40%;
+ --export-jsonl: 271 81% 56%;
+ --export-jsonl-hover: 271 81% 48%;
+ /* =========================
+ GLOBAL FLUID LAYOUT TOKENS
+ ========================= */
+ --page-gutter: clamp(12px, 2.2vw, 24px);
+ --page-max: 1280px;
+ /* Sidebar width scales smoothly with viewport/
+ --sidebar-w: clamp(14rem, 18vw, 18rem);
+ /* Practical tap target baseline (mobile) */
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 37/188
+ --tap-target: 44px;
+ }
+ * {
+ @apply border-border;
+ }
+ body {
+ @apply font-sans antialiased bg-background text
+ }
+}
+@layer utilities {
+ /* Consistent horizontal padding across the app *
+ .page-pad {
+ padding-left: var(--page-gutter);
+ padding-right: var(--page-gutter);
+ }
+ /* Optional max-width container */
+ .page-container {
+ max-width: var(--page-max);
+ margin-left: auto;
+ margin-right: auto;
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 38/188
+Copy code
+ }
+ /* Correct flex scrolling pattern helpers */
+ .min-h-0 {
+ min-height: 0;
+ }
+ .min-w-0 {
+ min-width: 0;
+ }
+ /* Utility: hide scrollbars without disabling scr
+ .no-scrollbar::-webkit-scrollbar {
+ display: none;
+ }
+ .no-scrollbar {
+ -ms-overflow-style: none;
+ scrollbar-width: none;
+ }
+ .scrollbar-thin {
+ scrollbar-width: thin;
+ }
+}
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 39/188
+/* Custom scrollbar */
+::-webkit-scrollbar {
+ width: 6px;
+ height: 6px;
+}
+::-webkit-scrollbar-track {
+ @apply bg-neutral-900;
+}
+::-webkit-scrollbar-thumb {
+ @apply bg-gray-600 rounded-sm;
+}
+::-webkit-scrollbar-thumb:hover {
+ @apply bg-gray-500;
+}
+/* Button styles for trading */
+.btn-buy {
+ @apply bg-lime-500 hover:bg-lime-400 text-black f
+}
+.btn-sell {
+ @apply bg-orange-500 hover:bg-orange-400 text-whi
+}
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 40/188
+/* Table styles for trade history */
+.table-header {
+ @apply bg-gray-800 text-gray-300 text-sm font-med
+}
+.profit-positive {
+ @apply text-lime-400;
+}
+.profit-negative {
+ @apply text-red-500;
+}
+.trade-buy {
+ @apply text-lime-400;
+}
+.trade-sell {
+ @apply text-orange-400;
+}
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 41/188
+4) Add new file:
+client/src/components/layout/AppShell.ts
+x
+Create folders if missing:
+client/src/components/layout/
+tsx
+import * as React from "react";
+import { cn } from "@/lib/utils";
+type AppShellProps = {
+ header?: React.ReactNode;
+ topbar?: React.ReactNode;
+ sidebar?: React.ReactNode;
+ mobileNav?: React.ReactNode;
+ children: React.ReactNode;
+ className?: string;
+};
+/**
+ * AppShell enforces:
+ * - dynamic viewport sizing (mobile-safe)
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 42/188
+ * - single, stable layout model
+ * - sidebar width controlled by global CSS tokens 
+ */
+export function AppShell({
+ header,
+ topbar,
+ sidebar,
+ mobileNav,
+ children,
+ className,
+}: AppShellProps) {
+ return (
+ <div className={cn("min-h-dvh bg-background tex
+ {header}
+ {topbar}
+ <div className="flex-1 min-h-0 flex flex-col 
+ {/* Mobile top nav (tabs) */}
+ {mobileNav ? <div className="md:hidden shri
+ {/* Desktop sidebar */}
+ {sidebar ? (
+ <aside className="hidden md:block shrink-
+ <div className="h-full overflow-y-auto 
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 43/188
+5) File replacement:
+client/src/pages/Dashboard.tsx
+Replace entire file with:
+ </aside>
+ ) : null}
+ {/* Main content area: children handle thei
+ <main className="flex-1 min-h-0 overflow-hi
+ </div>
+ </div>
+ );
+}
+tsx
+import { useState } from "react";
+import { useAuth } from "@/hooks/use-auth";
+import { Header } from "@/components/Header";
+import QuotesScreen from "./QuotesScreen";
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 44/188
+import ChartScreen from "./ChartScreen";
+import TradeScreen from "./TradeScreen";
+import HistoryScreen from "./HistoryScreen";
+import LeaderboardScreen from "./LeaderboardScreen"
+import { MobileNavigation, SideNavigation } from "@
+import { useQuotes } from "@/hooks/use-quotes";
+import { Skeleton } from "@/components/ui/skeleton"
+import { useAdminDeepLinks } from "@/lib/adminDeepL
+import { Button } from "@/components/ui/button";
+import { Shield } from "lucide-react";
+import { AppShell } from "@/components/layout/AppSh
+export default function Dashboard() {
+ const { user } = useAuth();
+ const [activeTab, setActiveTab] = useState("quote
+ const [selectedSymbol, setSelectedSymbol] = useSt
+ const { quotes, isLoading } = useQuotes();
+ const { handleDeepLink, isImpersonating, returnTo
+ const currentQuote = quotes?.find((q) => q.symbol
+ const handleSelectSymbol = (symbol: string) => {
+ setSelectedSymbol(symbol);
+ setActiveTab("trade");
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 45/188
+ };
+ function AdminQuickAccess() {
+ if (!isImpersonating) return null;
+ return (
+ <div className="bg-neutral-800 border-b borde
+ <div className="flex items-center justify-b
+ <div className="flex items-center gap-2 t
+ <Shield className="h-4 w-4" />
+ <span className="text-sm font-medium">A
+ </div>
+ <Button
+ variant="outline"
+ size="sm"
+ onClick={returnToAdmin}
+ className="text-xs bg-amber-500/10 bord
+ >
+ Return to Admin
+ </Button>
+ </div>
+ </div>
+ );
+ }
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 46/188
+Copy code
+ if (!user) {
+ return (
+ <div className="min-h-dvh flex items-center j
+ <div className="w-full max-w-md">
+ <Skeleton className="h-8 w-3/4 mb-4" />
+ <Skeleton className="h-4 w-full mb-2" />
+ <Skeleton className="h-4 w-2/3 mb-6" />
+ <Skeleton className="h-10 w-full" />
+ </div>
+ </div>
+ );
+ }
+ return (
+ <AppShell
+ header={<Header />}
+ topbar={<AdminQuickAccess />}
+ mobileNav={<MobileNavigation activeTab={activ
+ sidebar={<SideNavigation activeTab={activeTab
+ >
+ {/* This wrapper guarantees children using h-
+ <div className="h-full min-h-0 overflow-hidde
+ {activeTab === "quotes" && <QuotesScreen on
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 47/188
+ {activeTab === "chart" && <ChartScreen sele
+ {activeTab === "trade" && (
+ <TradeScreen selectedSymbol={selectedSymb
+ )}
+ {activeTab === "history" && <HistoryScreen
+ {activeTab === "leaderboard" && <Leaderboar
+ </div>
+ {/* Handle admin deep link navigation */}
+ <div className="hidden">
+ <AdminDeepLinkHandler onDeepLink={handleDee
+ </div>
+ </AppShell>
+ );
+}
+function AdminDeepLinkHandler({ onDeepLink }: { onD
+ useState(() => {
+ const currentPath = window.location.pathname;
+ if (currentPath.startsWith("/admin/")) {
+ onDeepLink(currentPath);
+ }
+ return null;
+ });
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 48/188
+6) File replacement:
+client/src/components/Navigation.tsx
+Replace entire file with:
+ return null;
+}
+tsx
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+import { BarChart2, CandlestickChart, LineChart, Hi
+import { useAuth } from "@/hooks/use-auth";
+import { Link } from "wouter";
+type NavigationProps = {
+ activeTab: string;
+ setActiveTab: (tab: string) => void;
+};
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 49/188
+export function MobileNavigation({ activeTab, setAc
+ const base =
+ "flex-1 min-w-[clamp(3.75rem,16vw,6rem)] py-3 t
+ const item = (tab: string) =>
+ cn(
+ base,
+ activeTab === tab
+ ? "border-primary text-primary"
+ : "border-transparent text-gray-400 hover:t
+ );
+ return (
+ <div className="md:hidden bg-sidebar text-sideb
+ <div className="flex overflow-x-auto no-scrol
+ <button className={item("quotes")} onClick=
+ Quotes
+ </button>
+ <button className={item("chart")} onClick={
+ Charts
+ </button>
+ <button className={item("trade")} onClick={
+ Trade
+ </button>
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 50/188
+ <button className={item("history")} onClick
+ History
+ </button>
+ <button className={item("leaderboard")} onC
+ Board
+ </button>
+ </div>
+ </div>
+ );
+}
+export function SideNavigation({ activeTab, setActi
+ const { user } = useAuth();
+ const isAdmin = user?.isAdmin;
+ return (
+ <div className="h-full">
+ <div className="py-4 page-pad">
+ <nav className="space-y-2 sticky top-0">
+ <NavItem
+ icon={<BarChart2 size={18} />}
+ label="Live Quotes"
+ active={activeTab === "quotes"}
+ onClick={() => setActiveTab("quotes")}
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 51/188
+Copy code
+ />
+ <NavItem
+ icon={<LineChart size={18} />}
+ label="Charts"
+ active={activeTab === "chart"}
+ onClick={() => setActiveTab("chart")}
+ />
+ <NavItem
+ icon={<CandlestickChart size={18} />}
+ label="Trade"
+ active={activeTab === "trade"}
+ onClick={() => setActiveTab("trade")}
+ />
+ <NavItem
+ icon={<History size={18} />}
+ label="History"
+ active={activeTab === "history"}
+ onClick={() => setActiveTab("history")}
+ />
+ <NavItem
+ icon={<Trophy size={18} />}
+ label="Leaderboard"
+ active={activeTab === "leaderboard"}
+ onClick={() => setActiveTab("leaderboar
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 52/188
+ />
+ <div className="h-px bg-border my-4" />
+ <Link href="/profile">
+ <Button
+ variant="ghost"
+ className="w-full justify-start text-
+ >
+ <Settings size={18} className="mr-3"
+ Profile Settings
+ </Button>
+ </Link>
+ {isAdmin && (
+ <Link href="/admin">
+ <Button
+ variant="ghost"
+ className="w-full justify-start tex
+ >
+ <UserCog size={18} className="mr-3"
+ Admin Dashboard
+ </Button>
+ </Link>
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 53/188
+ )}
+ </nav>
+ </div>
+ </div>
+ );
+}
+type NavItemProps = {
+ icon: React.ReactNode;
+ label: string;
+ active: boolean;
+ onClick: () => void;
+};
+function NavItem({ icon, label, active, onClick }: 
+ return (
+ <Button
+ variant="ghost"
+ className={cn(
+ "w-full justify-start font-medium transitio
+ "min-h-[var(--tap-target)]",
+ active
+ ? "bg-primary/10 text-primary hover:bg-pr
+ : "text-gray-300 hover:text-white hover:b
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 54/188
+7) File replacement:
+client/src/pages/QuotesScreen.tsx
+This removes the hard-coded calc(100vh - 120px) and
+uses the correct scroll pattern.
+Replace entire file with:
+Copy code
+ )}
+ onClick={onClick}
+ >
+ <span className="mr-3">{icon}</span>
+ <span className="truncate">{label}</span>
+ </Button>
+ );
+}
+tsx
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 55/188
+import { useQuotes } from "@/hooks/use-quotes";
+import { Skeleton } from "@/components/ui/skeleton"
+import { useEffect, useState } from "react";
+import SpreadBadge from "@/components/SpreadBadge";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { Search, AlertTriangle } from "lucide-react
+interface QuotesScreenProps {
+ onSelectSymbol: (symbol: string) => void;
+}
+export default function QuotesScreen({ onSelectSymb
+ const { quotes, isLoading, isConnected, hasStaleD
+ const [connectionStatus, setConnectionStatus] = u
+ const [searchTerm, setSearchTerm] = useState<stri
+ const [sortField, setSortField] = useState<string
+ const [sortDirection, setSortDirection] = useStat
+ useEffect(() => {
+ if (hasStaleData) setConnectionStatus("stale");
+ else if (isConnected) setConnectionStatus("conn
+ else if (isLoading) setConnectionStatus("connec
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 56/188
+ else setConnectionStatus("disconnected");
+ }, [isConnected, isLoading, hasStaleData]);
+ const filteredAndSortedQuotes = quotes
+ .filter((quote) => {
+ if (!searchTerm) return true;
+ const s = searchTerm.toLowerCase();
+ return quote.symbol.toLowerCase().includes(s)
+ })
+ .sort((a, b) => {
+ if (sortField === "price" || sortField === "c
+ const aValue = a[sortField as keyof typeof
+ const bValue = b[sortField as keyof typeof
+ return sortDirection === "asc" ? Number(aVa
+ }
+ const aValue = String(a[sortField as keyof ty
+ const bValue = String(b[sortField as keyof ty
+ return sortDirection === "asc" ? aValue.local
+ });
+ const toggleSort = (field: string) => {
+ if (sortField === field) setSortDirection(sortD
+ else {
+ setSortField(field);
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 57/188
+ setSortDirection("asc");
+ }
+ };
+ return (
+ <div className="h-full min-h-0 flex flex-col bg
+ <div className="px-4 py-3 border-b border-gra
+ <div className="flex justify-between items-
+ <h2 className="text-lg font-semibold text
+ <div className="flex items-center shrink-
+ {connectionStatus === "stale" ? (
+ <AlertTriangle className="w-3 h-3 mr-
+ ) : (
+ <span
+ className={`w-2 h-2 rounded-full mr
+ connectionStatus === "connected"
+ ? "bg-green-500"
+ : connectionStatus === "connect
+ ? "bg-yellow-500"
+ : "bg-red-500"
+ }`}
+ />
+ )}
+ <span className={`text-xs ${connectionS
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 58/188
+ {connectionStatus === "connected"
+ ? "Real-time Data"
+ : connectionStatus === "stale"
+ ? "Cached Prices"
+ : connectionStatus === "connectin
+ ? "Connecting..."
+ : "Offline"}
+ </span>
+ </div>
+ </div>
+ <div className="relative">
+ <Input
+ type="text"
+ placeholder="Search instruments..."
+ value={searchTerm}
+ onChange={(e) => setSearchTerm(e.target
+ className="pl-8 bg-neutral-800 border-n
+ />
+ <Search className="absolute left-2 top-2
+ </div>
+ <div className="flex justify-between text-x
+ <div className="flex items-center gap-2">
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 59/188
+ <Button
+ variant="ghost"
+ size="sm"
+ className={`px-2 py-1 h-7 ${sortField
+ onClick={() => toggleSort("symbol")}
+ >
+ Symbol {sortField === "symbol" && (so
+ </Button>
+ </div>
+ <div className="flex items-center gap-2">
+ <Button
+ variant="ghost"
+ size="sm"
+ className={`px-2 py-1 h-7 ${sortField
+ onClick={() => toggleSort("price")}
+ >
+ Price {sortField === "price" && (sort
+ </Button>
+ <Button
+ variant="ghost"
+ size="sm"
+ className={`px-2 py-1 h-7 ${sortField
+ onClick={() => toggleSort("change")}
+ >
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 60/188
+ Change {sortField === "change" && (so
+ </Button>
+ </div>
+ </div>
+ </div>
+ {/* Correct scroll pattern: flex-1 + min-h-0 
+ <div className="flex-1 min-h-0 overflow-y-aut
+ <div className="divide-y divide-gray-800">
+ {isLoading &&
+ Array(8)
+ .fill(null)
+ .map((_, index) => (
+ <div key={index} className="px-4 py
+ <div className="flex items-center
+ <div className="flex items-cent
+ <Skeleton className="h-6 w-16
+ <Skeleton className="h-4 w-32
+ </div>
+ <div className="flex items-cent
+ <div className="text-right">
+ <Skeleton className="h-6 w-
+ <Skeleton className="h-4 w-
+ </div>
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 61/188
+ <Skeleton className="h-4 w-4 
+ </div>
+ </div>
+ </div>
+ ))}
+ {!isLoading &&
+ filteredAndSortedQuotes.length > 0 &&
+ filteredAndSortedQuotes.map((quote) => 
+ <div
+ key={quote.symbol}
+ className="flex items-center justif
+ onClick={() => onSelectSymbol(quote
+ >
+ <div className="min-w-0">
+ <div className="flex items-start 
+ <div className="font-medium tex
+ {quote.symbol}
+ </div>
+ <div className="text-sm text-gr
+ </div>
+ </div>
+ <div className="flex items-center g
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 62/188
+ <div className="flex flex-col ite
+ <div className="font-mono font-
+ {quote.price?.toFixed(quote.s
+ </div>
+ <div
+ className={`text-sm ${
+ (quote.percent_change ?? 0)
+ ? "text-lime-400"
+ : (quote.percent_change ?
+ ? "text-red-500"
+ : "text-yellow-500"
+ }`}
+ >
+ {(quote.percent_change ?? 0) 
+ {(quote.percent_change ?? 0)
+ </div>
+ </div>
+ <div className="hidden md:flex fl
+ <div className="flex justify-be
+ <span className="text-gray-40
+ <span className="font-mono te
+ {quote.bid?.toFixed(quote.s
+ </span>
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 63/188
+Copy code
+ </div>
+ <div className="flex justify-be
+ <span className="text-gray-40
+ <span className="font-mono te
+ {quote.ask?.toFixed(quote.s
+ </span>
+ </div>
+ {quote.spread !== undefined && 
+ <div className="flex justify-
+ <SpreadBadge
+ spread={(quote.spread * (
+ />
+ </div>
+ )}
+ </div>
+ <svg
+ xmlns="http://www.w3.org/2000/s
+ className="h-5 w-5 text-gray-60
+ viewBox="0 0 24 24"
+ fill="none"
+ stroke="currentColor"
+ strokeWidth="2"
+ strokeLinecap="round"
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 64/188
+ strokeLinejoin="round"
+ >
+ <polyline points="9 18 15 12 9 
+ </svg>
+ </div>
+ </div>
+ ))}
+ {!isLoading && filteredAndSortedQuotes.le
+ <div className="px-4 py-8 text-center t
+ {searchTerm ? `No instruments found m
+ </div>
+ )}
+ </div>
+ </div>
+ </div>
+ );
+}
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 65/188
+8) Small but important patch:
+client/src/App.tsx
+Only one critical responsiveness fix here: loader should
+use min-h-dvh not h-screen .
+Change this block:
+to:
+Everything else can remain as-is.
+tsx
+<div className="flex justify-center items-center h
+Copy code
+tsx
+<div className="flex justify-center items-center m
+Copy code
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 66/188
+9) Replace min-h-screen across pages
+(repo-wide)
+These are directly in your repo and should be changed
+to min-h-dvh :
+client/src/pages/LoginPage.tsx
+Find:
+Replace with:
+client/src/pages/VerifyEmail.tsx
+tsx
+<div className="min-h-screen flex items-center just
+Copy code
+tsx
+<div className="min-h-dvh flex items-center justify
+Copy code
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 67/188
+Find:
+Replace with:
+client/src/pages/ProfileSettings.tsx
+Find:
+tsx
+<div className="min-h-screen flex items-center just
+Copy code
+tsx
+<div className="min-h-dvh flex items-center justify
+Copy code
+tsx
+<div className="min-h-screen bg-neutral-900 text-w
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 68/188
+Replace with:
+Then change:
+to:
+client/src/pages/JournalPage.tsx
+Replace each min-h-screen with min-h-dvh .
+Copy code
+tsx
+<div className="min-h-dvh bg-neutral-900 text-whit
+Copy code
+tsx
+<main className="flex-1 p-6">
+Copy code tsx
+<main className="flex-1 min-h-0 overflow-auto page
+Copy code
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 69/188
+Also change dialog max-height:
+to:
+client/src/pages/not-found.tsx
+Find:
+tsx
+<DialogContent className="max-w-2xl max-h-[90vh] ov
+Copy code
+tsx
+<DialogContent className="max-w-2xl max-h-[90dvh] o
+Copy code
+tsx
+<div className="min-h-screen w-full flex items-cent
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 70/188
+Replace with:
+client/src/pages/AdminDashboard.tsx
+Find:
+Replace with:
+Copy code
+tsx
+<div className="min-h-dvh w-full flex items-center 
+Copy code
+tsx
+<div className="p-6 bg-neutral-900 text-white minCopy code
+tsx
+<div className="bg-neutral-900 text-white min-h-dv
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 71/188
+Codex/Replit Agent mechanical
+refactor checklist (to ensure “all
+components” stay fluid)
+Run these searches and apply the patterns:
+A) Remove viewport math hacks
+Search for:
+calc(100vh
+100vh
+h-screen
+Rules:
+Replace h-screen → min-h-dvh (or h-dvh if you
+truly need fixed height)
+Replace calc(100vh - X) scroll containers → flex1 min-h-0 overflow-auto
+B) Remove hard-coded layout widths for
+structural regions
+Copy code
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 72/188
+Search for structural widths:
+w-56 , w-64 , w-72 , max-w- on nav containers
+Rules:
+If it’s a layout region (sidebar, column, main
+wrapper), convert to:
+w-[var(--sidebar-w)] (sidebar)
+page-pad for horizontal padding
+page-container if a max width is required
+C) Ensure scroll works inside flex layouts
+Search for:
+overflow-hidden on parents
+h-full on children
+Rule:
+Any flex column where a child needs to scroll must
+have:
+parent: min-h-0
+scroll child: flex-1 min-h-0 overflow-auto
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 73/188
+Quick verification (manual)
+Mobile Chrome:
+rotate portrait/landscape on Dashboard
+open keyboard in Login / VerifyEmail (layout
+must not jump/crop)
+Desktop:
+resize browser continuously (sidebar width
+should “breathe”, not snap)
+Quotes list should scroll without inner
+maxHeight hacks
+If you want, I can also produce a single scripted
+codemod plan (ripgrep patterns + safe replacements)
+tailored to this repo to let Codex apply changes across
+every page/component deterministically, but the patches
+above already fix the core structural causes of “hardcoded responsiveness” in your current implementation.
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 74/188
+Produce 
+Thought for 22m 27s
+Below is a complete “global, fluid, future-proof
+responsiveness” refactor package for this repo, based on
+(1) current Tailwind/shadcn architecture in the ZIP and (2)
+best-practice modern responsive patterns: dynamic
+viewport units (to stop mobile address-bar jump),
+container queries (layout reacts to available space, not
+only viewport), and auto-fit grids (remove most
+breakpoint hard-coding).
+Your repo currently contains (client-side): 12× h-screen ,
+8× min-h-screen , 1× calc(100vh …) , 4× max-h-
+[90vh] , and ~89× grid-cols-* . The changes below
+eliminate the trader-facing height/scroll issues globally
+and convert the “layout grids” to auto-fit (no per-page
+breakpoint tuning in most places).
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 75/188
+1) Dependency install
+Tailwind v3 needs the plugin to use @container and
+@md/NAME: variants.
+2) Tailwind config patch
+File: tailwind.config.ts
+Replace:
+With:
+bash
+npm i -D @tailwindcss/container-queries
+Copy code
+ts
+plugins: [require("tailwindcss-animate"), require(
+Copy code
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 76/188
+3) Global CSS: fluid tokens + reusable
+utilities (NO per-component hardcoding)
+File (full replacement): client/src/index.css
+ts
+plugins: [
+ require("tailwindcss-animate"),
+ require("@tailwindcss/typography"),
+ require("@tailwindcss/container-queries"),
+],
+Copy code
+css
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+/* Root layout needs 100dvh to avoid mobile browser
+html,
+body,
+Copy code
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 77/188
+#root {
+ height: 100%;
+ min-height: 100dvh;
+}
+@layer base {
+ :root {
+ --background: 240 10% 3.9%;
+ --foreground: 0 0% 98%;
+ --card: 240 10% 3.9%;
+ --card-foreground: 0 0% 98%;
+ --popover: 240 10% 3.9%;
+ --popover-foreground: 0 0% 98%;
+ --primary: 0 0% 98%;
+ --primary-foreground: 240 5.9% 10%;
+ --secondary: 240 3.7% 15.9%;
+ --secondary-foreground: 0 0% 98%;
+ --muted: 240 3.7% 15.9%;
+ --muted-foreground: 240 5% 64.9%;
+ --accent: 240 3.7% 15.9%;
+ --accent-foreground: 0 0% 98%;
+ --destructive: 0 62.8% 30.6%;
+ --destructive-foreground: 0 0% 98%;
+ --border: 240 3.7% 15.9%;
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 78/188
+ --input: 240 3.7% 15.9%;
+ --ring: 240 4.9% 83.9%;
+ --radius: 0.75rem;
+ /* Layout tokens (fluid + global) */
+ --page-max: 80rem;
+ --page-gutter: clamp(0.75rem, 2vw, 1.5rem);
+ --page-pad-y: clamp(0.75rem, 1.5vw, 1.25rem);
+ --sidebar-w: clamp(14rem, 18vw, 18rem);
+ --grid-min: 16rem;
+ }
+}
+body {
+ @apply bg-neutral-900 text-white;
+}
+/* Candlestick visuals used in charting */
+.candlestick {
+ position: relative;
+ display: inline-block;
+}
+.candlestick:before,
+.candlestick:after {
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 79/188
+ content: "";
+ position: absolute;
+ left: 50%;
+ width: 1px;
+ background-color: currentColor;
+}
+.candlestick:before {
+ top: 0;
+ height: 25%;
+}
+.candlestick:after {
+ bottom: 0;
+ height: 25%;
+}
+/* App-grade toast styling utilities */
+@layer utilities {
+ .toast-viewport {
+ @apply fixed top-4 right-4 z-[100] flex max-h-
+ }
+ .toast-premium {
+ @apply relative overflow-hidden rounded-2xl bor
+ border-left-width: 4px;
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 80/188
+ border-left-color: rgba(255, 255, 255, 0.08);
+ }
+ .toast-premium[data-category="ADMIN"] {
+ border-left-color: #a855f7;
+ }
+ .toast-premium[data-category="AUTH"] {
+ border-left-color: #6366f1;
+ }
+ .toast-premium[data-category="JOURNAL"] {
+ border-left-color: #22d3ee;
+ }
+ .toast-premium[data-category="VALIDATION"] {
+ border-left-color: #fbbf24;
+ }
+ .toast-premium[data-category="LIMIT"] {
+ border-left-color: #fbbf24;
+ }
+ .toast-premium[data-category="EXECUTION"] {
+ border-left-color: #f87171;
+ }
+ .toast-premium[data-category="API"] {
+ border-left-color: #fb7185;
+ }
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 81/188
+ .toast-premium[data-category="SUCCESS"] {
+ border-left-color: #22c55e;
+ }
+ .toast-premium[data-category="INFO"] {
+ border-left-color: #3b82f6;
+ }
+ .toast-icon {
+ @apply mr-2 inline-flex h-8 w-8 items-center ju
+ }
+ .toast-title {
+ @apply text-sm font-semibold tracking-tight tex
+ }
+ .toast-desc {
+ @apply mt-1 text-xs leading-relaxed text-white/
+ }
+}
+/* NEW: global, reusable, breakpoint-free layout ut
+@layer utilities {
+ /* Full-height app layouts should use dynamic vie
+ .app-dvh {
+ min-height: 100dvh;
+ }
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 82/188
+ /* Global page container + padding (fluid) */
+ .page-container {
+ width: 100%;
+ max-width: var(--page-max);
+ margin-left: auto;
+ margin-right: auto;
+ }
+ .page-pad {
+ padding-left: var(--page-gutter);
+ padding-right: var(--page-gutter);
+ padding-top: var(--page-pad-y);
+ padding-bottom: var(--page-pad-y);
+ }
+ /*
+ Scroll areas inside flex columns:
+ min-height: 0 prevents the classic “overflow ar
+ */
+ .scroll-area {
+ min-height: 0;
+ overflow: auto;
+ }
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 83/188
+ /* Auto-fit grid (removes most hard-coded grid-co
+ .grid-auto-fit {
+ display: grid;
+ grid-template-columns: repeat(auto-fit, minmax(
+ }
+ .grid-min-4 {
+ --grid-min: 4rem;
+ }
+ .grid-min-6 {
+ --grid-min: 6rem;
+ }
+ .grid-min-8 {
+ --grid-min: 8rem;
+ }
+ .grid-min-10 {
+ --grid-min: 10rem;
+ }
+ .grid-min-12 {
+ --grid-min: 12rem;
+ }
+ .grid-min-14 {
+ --grid-min: 14rem;
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 84/188
+Why this matters:
+100dvh fixes mobile address bar / keyboard resizing
+issues.
+ }
+ .grid-min-16 {
+ --grid-min: 16rem;
+ }
+ .grid-min-18 {
+ --grid-min: 18rem;
+ }
+ .grid-min-20 {
+ --grid-min: 20rem;
+ }
+ /* Prevent wide tables from breaking layouts */
+ .table-wrap {
+ width: 100%;
+ overflow-x: auto;
+ }
+}
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 85/188
+.scroll-area enforces min-height:0 so nested
+scrolling works reliably.
+4) Add a container-query-driven AppShell
+(layout becomes automatic)
+NEW file: client/src/components/layout/AppShell.tsx
+tsx
+import * as React from "react";
+import { cn } from "@/lib/utils";
+/**
+ * AppShell
+ * - Uses dynamic viewport units (100dvh) to avoid 
+ * - Uses container queries so layout responds to a
+ */
+export function AppShell(props: {
+ header?: React.ReactNode;
+ topBar?: React.ReactNode;
+ sidebar?: React.ReactNode;
+Copy code
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 86/188
+ mobileNav?: React.ReactNode;
+ children: React.ReactNode;
+ className?: string;
+}) {
+ const { header, topBar, sidebar, mobileNav, child
+ return (
+ <div className={cn("app-dvh flex flex-col @cont
+ {header}
+ {topBar ? <div className="shrink-0">{topBar}<
+ <div className="flex-1 min-h-0 flex flex-col 
+ {sidebar ? (
+ <aside className="hidden @3xl/app:block s
+ ) : null}
+ <main className="flex-1 min-h-0 overflow-hi
+ </div>
+ {mobileNav ? <div className="@3xl/app:hidden"
+ </div>
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 87/188
+This is the key “no-hardcoding” mechanism: layout
+switches based on container width via Tailwind container
+queries.
+5) Make shadcn UI overlays fluid (dialogs,
+popovers, hover cards, toasts)
+A) Dialogs
+File (full replacement):
+client/src/components/ui/dialog.tsx
+ );
+}
+tsx
+import * as React from "react";
+import * as DialogPrimitive from "@radix-ui/react-d
+import { X } from "lucide-react";
+Copy code
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 88/188
+import { cn } from "@/lib/utils";
+const Dialog = DialogPrimitive.Root;
+const DialogTrigger = DialogPrimitive.Trigger;
+const DialogPortal = DialogPrimitive.Portal;
+const DialogClose = DialogPrimitive.Close;
+const DialogOverlay = React.forwardRef<
+ React.ElementRef<typeof DialogPrimitive.Overlay>,
+ React.ComponentPropsWithoutRef<typeof DialogPrimi
+>(({ className, ...props }, ref) => (
+ <DialogPrimitive.Overlay
+ ref={ref}
+ className={cn(
+ "fixed inset-0 z-50 bg-black/80 data-[state=o
+ className
+ )}
+ {...props}
+ />
+));
+DialogOverlay.displayName = DialogPrimitive.Overlay
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 89/188
+const DialogContent = React.forwardRef<
+ React.ElementRef<typeof DialogPrimitive.Content>,
+ React.ComponentPropsWithoutRef<typeof DialogPrimi
+>(({ className, children, ...props }, ref) => (
+ <DialogPortal>
+ <DialogOverlay />
+ <DialogPrimitive.Content
+ ref={ref}
+ className={cn(
+ // Fluid width + safe max-height for all sc
+ 'fixed left-[50%] top-[50%] z-50 grid w-[ca
+ className
+ )}
+ {...props}
+ >
+ {children}
+ <DialogPrimitive.Close className="absolute ri
+ <X className="h-4 w-4" />
+ <span className="sr-only">Close</span>
+ </DialogPrimitive.Close>
+ </DialogPrimitive.Content>
+ </DialogPortal>
+));
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 90/188
+DialogContent.displayName = DialogPrimitive.Content
+const DialogHeader = ({
+ className,
+ ...props
+}: React.HTMLAttributes<HTMLDivElement>) => (
+ <div
+ className={cn(
+ "flex flex-col space-y-1.5 text-center sm:tex
+ className
+ )}
+ {...props}
+ />
+);
+DialogHeader.displayName = "DialogHeader";
+const DialogFooter = ({
+ className,
+ ...props
+}: React.HTMLAttributes<HTMLDivElement>) => (
+ <div
+ className={cn(
+ "flex flex-col-reverse sm:flex-row sm:justify
+ className
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 91/188
+ )}
+ {...props}
+ />
+);
+DialogFooter.displayName = "DialogFooter";
+const DialogTitle = React.forwardRef<
+ React.ElementRef<typeof DialogPrimitive.Title>,
+ React.ComponentPropsWithoutRef<typeof DialogPrimi
+>(({ className, ...props }, ref) => (
+ <DialogPrimitive.Title
+ ref={ref}
+ className={cn(
+ "text-lg font-semibold leading-none tracking-
+ className
+ )}
+ {...props}
+ />
+));
+DialogTitle.displayName = DialogPrimitive.Title.dis
+const DialogDescription = React.forwardRef<
+ React.ElementRef<typeof DialogPrimitive.Descripti
+ React.ComponentPropsWithoutRef<typeof DialogPrimi
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 92/188
+>(({ className, ...props }, ref) => (
+ <DialogPrimitive.Description
+ ref={ref}
+ className={cn("text-sm text-muted-foreground", 
+ {...props}
+ />
+));
+DialogDescription.displayName = DialogPrimitive.Des
+export {
+ Dialog,
+ DialogPortal,
+ DialogOverlay,
+ DialogClose,
+ DialogTrigger,
+ DialogContent,
+ DialogHeader,
+ DialogFooter,
+ DialogTitle,
+ DialogDescription,
+};
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 93/188
+B) Toast viewport width/height (mobile-safe)
+File (full replacement):
+client/src/components/ui/toast.tsx
+tsx
+import * as React from "react";
+import * as ToastPrimitives from "@radix-ui/react-t
+import { cva, type VariantProps } from "class-varia
+import { X } from "lucide-react";
+import { cn } from "@/lib/utils";
+const ToastProvider = ToastPrimitives.Provider;
+const ToastViewport = React.forwardRef<
+ React.ElementRef<typeof ToastPrimitives.Viewport>
+ React.ComponentPropsWithoutRef<typeof ToastPrimit
+>(({ className, ...props }, ref) => (
+ <ToastPrimitives.Viewport
+ ref={ref}
+ className={cn(
+ // 100dvh prevents toast stack from running u
+Copy code
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 94/188
+ "fixed top-0 z-[100] flex max-h-[100dvh] w-fu
+ className
+ )}
+ {...props}
+ />
+));
+ToastViewport.displayName = ToastPrimitives.Viewpor
+const toastVariants = cva(
+ "group pointer-events-auto relative flex w-full i
+ {
+ variants: {
+ variant: {
+ default: "border bg-background text-foregro
+ destructive:
+ "destructive group border-destructive bg-
+ },
+ },
+ defaultVariants: {
+ variant: "default",
+ },
+ }
+);
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 95/188
+const Toast = React.forwardRef<
+ React.ElementRef<typeof ToastPrimitives.Root>,
+ React.ComponentPropsWithoutRef<typeof ToastPrimit
+ VariantProps<typeof toastVariants>
+>(({ className, variant, ...props }, ref) => {
+ return (
+ <ToastPrimitives.Root
+ ref={ref}
+ className={cn(toastVariants({ variant }), cla
+ {...props}
+ />
+ );
+});
+Toast.displayName = ToastPrimitives.Root.displayNam
+const ToastAction = React.forwardRef<
+ React.ElementRef<typeof ToastPrimitives.Action>,
+ React.ComponentPropsWithoutRef<typeof ToastPrimit
+>(({ className, ...props }, ref) => (
+ <ToastPrimitives.Action
+ ref={ref}
+ className={cn(
+ "inline-flex h-8 shrink-0 items-center justif
+ className
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 96/188
+ )}
+ {...props}
+ />
+));
+ToastAction.displayName = ToastPrimitives.Action.di
+const ToastClose = React.forwardRef<
+ React.ElementRef<typeof ToastPrimitives.Close>,
+ React.ComponentPropsWithoutRef<typeof ToastPrimit
+>(({ className, ...props }, ref) => (
+ <ToastPrimitives.Close
+ ref={ref}
+ className={cn(
+ "absolute right-2 top-2 rounded-md p-1 text-f
+ className
+ )}
+ toast-close=""
+ {...props}
+ >
+ <X className="h-4 w-4" />
+ </ToastPrimitives.Close>
+));
+ToastClose.displayName = ToastPrimitives.Close.disp
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 97/188
+const ToastTitle = React.forwardRef<
+ React.ElementRef<typeof ToastPrimitives.Title>,
+ React.ComponentPropsWithoutRef<typeof ToastPrimit
+>(({ className, ...props }, ref) => (
+ <ToastPrimitives.Title
+ ref={ref}
+ className={cn("text-sm font-semibold [&+div]:te
+ {...props}
+ />
+));
+ToastTitle.displayName = ToastPrimitives.Title.disp
+const ToastDescription = React.forwardRef<
+ React.ElementRef<typeof ToastPrimitives.Descripti
+ React.ComponentPropsWithoutRef<typeof ToastPrimit
+>(({ className, ...props }, ref) => (
+ <ToastPrimitives.Description
+ ref={ref}
+ className={cn("text-sm opacity-90", className)}
+ {...props}
+ />
+));
+ToastDescription.displayName = ToastPrimitives.Desc
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 98/188
+C) Popover + HoverCard width clamps
+File (full replacement):
+client/src/components/ui/popover.tsx
+type ToastProps = React.ComponentPropsWithoutRef<ty
+type ToastActionElement = React.ReactElement<typeof
+export {
+ type ToastProps,
+ type ToastActionElement,
+ ToastProvider,
+ ToastViewport,
+ Toast,
+ ToastTitle,
+ ToastDescription,
+ ToastClose,
+ ToastAction,
+};
+tsx Copy code
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 99/188
+import * as React from "react";
+import * as PopoverPrimitive from "@radix-ui/reactimport { cn } from "@/lib/utils";
+const Popover = PopoverPrimitive.Root;
+const PopoverTrigger = PopoverPrimitive.Trigger;
+const PopoverContent = React.forwardRef<
+ React.ElementRef<typeof PopoverPrimitive.Content>
+ React.ComponentPropsWithoutRef<typeof PopoverPrim
+>(({ className, align = "center", sideOffset = 4, 
+ <PopoverPrimitive.Portal>
+ <PopoverPrimitive.Content
+ ref={ref}
+ align={align}
+ sideOffset={sideOffset}
+ className={cn(
+ "z-50 w-[min(18rem,calc(100vw-2*var(--page-
+ className
+ )}
+ {...props}
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 100/188
+File (full replacement):
+client/src/components/ui/hover-card.tsx
+ />
+ </PopoverPrimitive.Portal>
+));
+PopoverContent.displayName = PopoverPrimitive.Conte
+export { Popover, PopoverTrigger, PopoverContent };
+tsx
+import * as React from "react";
+import * as HoverCardPrimitive from "@radix-ui/reac
+import { cn } from "@/lib/utils";
+const HoverCard = HoverCardPrimitive.Root;
+const HoverCardTrigger = HoverCardPrimitive.Trigger
+const HoverCardContent = React.forwardRef<
+Copy code
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 101/188
+ React.ElementRef<typeof HoverCardPrimitive.Conten
+ React.ComponentPropsWithoutRef<typeof HoverCardPr
+>(({ className, align = "center", sideOffset = 4, 
+ <HoverCardPrimitive.Portal>
+ <HoverCardPrimitive.Content
+ ref={ref}
+ align={align}
+ sideOffset={sideOffset}
+ className={cn(
+ "z-50 w-[min(16rem,calc(100vw-2*var(--page-
+ className
+ )}
+ {...props}
+ />
+ </HoverCardPrimitive.Portal>
+));
+HoverCardContent.displayName = HoverCardPrimitive.C
+export { HoverCard, HoverCardTrigger, HoverCardCont
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 102/188
+6) Core app shell wiring (trader-facing)
+A) Dashboard uses the AppShell
+File (full replacement):
+client/src/pages/Dashboard.tsx
+tsx
+import { useMemo, useState } from "react";
+import { Header } from "@/components/Header";
+import { MobileNavigation, SideNavigation } from "@
+import { AppShell } from "@/components/layout/AppSh
+import QuotesScreen from "./QuotesScreen";
+import ChartScreen from "./ChartScreen";
+import TradeScreen from "./TradeScreen";
+import HistoryScreen from "./HistoryScreen";
+import LeaderboardScreen from "./LeaderboardScreen"
+import AccountScreen from "./AccountScreen";
+import { useQuotes } from "@/hooks/use-quotes";
+import { useAuth } from "@/hooks/use-auth";
+import axios from "axios";
+import { Link } from "wouter";
+import { Button } from "@/components/ui/button";
+Copy code
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 103/188
+export default function Dashboard() {
+ const [activeTab, setActiveTab] = useState("quote
+ const [selectedSymbol, setSelectedSymbol] = useSt
+ const { quotes } = useQuotes();
+ const { user, checkAuth } = useAuth();
+ const [adminPromotion, setAdminPromotion] = useSt
+ isPromoting: false,
+ success: false,
+ error: "",
+ });
+ // Promote current user to admin (development hel
+ const promoteToAdmin = async () => {
+ if (!user) return;
+ setAdminPromotion({
+ isPromoting: true,
+ success: false,
+ error: "",
+ });
+ try {
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 104/188
+ await axios.post("/api/promote-to-admin", { u
+ setAdminPromotion({
+ isPromoting: false,
+ success: true,
+ error: "",
+ });
+ // Refresh authentication to update admin sta
+ await checkAuth();
+ } catch {
+ setAdminPromotion({
+ isPromoting: false,
+ success: false,
+ error: "Failed to promote to admin",
+ });
+ }
+ };
+ // Find the current price for the selected symbol
+ const currentQuote = useMemo(
+ () => quotes?.find((quote) => quote.symbol === 
+ [quotes, selectedSymbol]
+ );
+ const handleSelectSymbol = (symbol: string) => {
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 105/188
+ setSelectedSymbol(symbol);
+ // If we're not on chart or trade tab, switch t
+ if (activeTab !== "chart" && activeTab !== "tra
+ setActiveTab("chart");
+ }
+ };
+ const main = (() => {
+ switch (activeTab) {
+ case "quotes":
+ return <QuotesScreen onSelectSymbol={handle
+ case "chart":
+ return <ChartScreen selectedSymbol={selecte
+ case "trade":
+ return <TradeScreen selectedSymbol={selecte
+ case "history":
+ return <HistoryScreen />;
+ case "leaderboard":
+ return <LeaderboardScreen />;
+ case "account":
+ return <AccountScreen />;
+ default:
+ return <QuotesScreen onSelectSymbol={handle
+ }
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 106/188
+ })();
+ return (
+ <AppShell
+ header={<Header />}
+ topBar={
+ user ? (
+ <div className="bg-neutral-850 border-b b
+ <div className="page-container page-pad
+ <div className="flex flex-wrap items-
+ {user.isAdmin ? (
+ <Link href="/admin">
+ <Button
+ size="sm"
+ variant="outline"
+ className="bg-blue-900 hover
+ >
+ Admin Dashboard
+ </Button>
+ </Link>
+ ) : (
+ <Button
+ size="sm"
+ variant="outline"
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 107/188
+ onClick={promoteToAdmin}
+ disabled={adminPromotion.isProm
+ className="bg-neutral-700 hover
+ >
+ {adminPromotion.isPromoting
+ ? "Processing..."
+ : "Enable Admin Mode"}
+ </Button>
+ )}
+ {adminPromotion.success ? (
+ <span className="text-xs text-gre
+ Admin mode enabled — refresh co
+ </span>
+ ) : null}
+ {adminPromotion.error ? (
+ <span className="text-xs text-red
+ {adminPromotion.error}
+ </span>
+ ) : null}
+ </div>
+ {currentQuote ? (
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 108/188
+ <div className="text-xs text-gray-4
+ <span className="text-gray-200">{
+ {currentQuote.price}
+ </div>
+ ) : null}
+ </div>
+ </div>
+ ) : null
+ }
+ sidebar={
+ <SideNavigation activeTab={activeTab} setAc
+ }
+ mobileNav={
+ <MobileNavigation activeTab={activeTab} set
+ }
+ >
+ <div className="h-full min-h-0">{main}</div>
+ </AppShell>
+ );
+}
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 109/188
+B) Navigation becomes fluid (no fixed
+14rem/16rem)
+File (full replacement):
+client/src/components/Navigation.tsx
+tsx
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+import {
+ LineChart,
+ BarChart4,
+ Clock,
+ Trophy,
+ User,
+ TrendingUp,
+} from "lucide-react";
+interface NavigationProps {
+ activeTab: string;
+ setActiveTab: (tab: string) => void;
+}
+Copy code
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 110/188
+export function MobileNavigation({ activeTab, setAc
+ const navigationItems = [
+ { id: "quotes", label: "Quotes", icon: Trending
+ { id: "chart", label: "Chart", icon: LineChart
+ { id: "trade", label: "Trade", icon: BarChart4
+ { id: "history", label: "History", icon: Clock
+ { id: "leaderboard", label: "Board", icon: Trop
+ { id: "account", label: "Account", icon: User }
+ ];
+ return (
+ <div className="bg-neutral-850 border-b border-
+ <div className="page-container page-pad py-3"
+ <div className="flex justify-between items-
+ {navigationItems.map((item) => (
+ <Button
+ key={item.id}
+ variant="ghost"
+ size="sm"
+ onClick={() => setActiveTab(item.id)}
+ className={cn(
+ "flex flex-col items-center px-2 py
+ activeTab === item.id
+ ? "text-green-400"
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 111/188
+ : "text-gray-400 hover:text-gray-
+ )}
+ >
+ <item.icon className="h-4 w-4 mb-1" /
+ <span>{item.label}</span>
+ </Button>
+ ))}
+ </div>
+ </div>
+ </div>
+ );
+}
+export function SideNavigation({ activeTab, setActi
+ const navigationItems = [
+ { id: "quotes", label: "Quotes", icon: Trending
+ { id: "chart", label: "Chart", icon: LineChart
+ { id: "trade", label: "Trade", icon: BarChart4
+ { id: "history", label: "History", icon: Clock
+ { id: "leaderboard", label: "Leaderboard", icon
+ { id: "account", label: "Account", icon: User }
+ ];
+ return (
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 112/188
+ <div className="hidden @3xl/app:block w-[var(--
+ <div className="h-full flex flex-col">
+ <div className="p-4 border-b border-gray-80
+ <div className="flex items-center gap-2">
+ <TrendingUp className="h-5 w-5 text-gre
+ <h2 className="font-semibold">TradeCent
+ </div>
+ </div>
+ <div className="flex-1 py-4">
+ <nav className="space-y-1 px-2">
+ {navigationItems.map((item) => (
+ <Button
+ key={item.id}
+ variant="ghost"
+ onClick={() => setActiveTab(item.id
+ className={cn(
+ "w-full justify-start gap-3 px-3 
+ activeTab === item.id
+ ? "bg-neutral-800 text-green-40
+ : "text-gray-400 hover:text-gra
+ )}
+ >
+ <item.icon className="h-4 w-4" />
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 113/188
+7) Targeted patches across remaining
+components (fast, deterministic)
+ {item.label}
+ </Button>
+ ))}
+ </nav>
+ </div>
+ <div className="p-4 border-t border-gray-80
+ <div className="text-xs text-gray-500">
+ © {new Date().getFullYear()} TradeCentr
+ </div>
+ </div>
+ </div>
+ </div>
+ );
+}
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 114/188
+A) Remove the last 100vh calc (Quotes list scroll
+becomes automatic)
+File: client/src/pages/QuotesScreen.tsx
+1. Root container
+Find:
+Replace:
+2. Scrollable list
+Find:
+tsx
+<div className="h-full flex flex-col bg-neutral-900
+Copy code
+tsx
+<div className="h-full min-h-0 flex flex-col bg-ne
+Copy code
+tsx Copy code
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 115/188
+Replace:
+B) Fix nested flex scrolling in screens (add min-h0 , remove root overflow locks)
+File: client/src/pages/TradeScreen.tsx
+Find:
+Replace:
+<div className="flex-1 overflow-y-auto" style={{ m
+tsx
+<div className="flex-1 min-h-0 overflow-y-auto scro
+Copy code
+tsx
+<div className="h-full flex flex-col bg-neutral-900
+Copy code
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 116/188
+Then convert “layout grids” to auto-fit (no breakpoints):
+Replace:
+with:
+Replace:
+tsx
+<div className="h-full min-h-0 flex flex-col bg-ne
+Copy code
+tsx
+className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg
+Copy code
+tsx
+className="grid-auto-fit grid-min-10 gap-2 bg-neut
+Copy code
+tsx Copy code
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 117/188
+with:
+Replace:
+with:
+<TabsList className="w-full grid grid-cols-3 round
+tsx
+<TabsList className="w-full grid grid-flow-col auto
+Copy code
+tsx
+className="mt-2 grid grid-cols-3 sm:grid-cols-5 ga
+Copy code
+tsx Copy code
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 118/188
+Replace:
+with:
+File: client/src/pages/ChartScreen.tsx
+Find:
+className="mt-2 grid-auto-fit grid-min-4 gap-2"
+tsx
+className="grid grid-cols-1 sm:grid-cols-2 gap-3"
+Copy code
+tsx
+className="grid-auto-fit grid-min-18 gap-3"
+Copy code
+tsx
+className="h-full flex flex-col bg-[#0F0F0F] overf
+Copy code
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 119/188
+Replace:
+Replace:
+with:
+File: client/src/pages/HistoryScreen.tsx
+Find:
+tsx
+className="h-full min-h-0 flex flex-col bg-[#0F0F0
+Copy code
+tsx
+className="grid grid-cols-2 gap-2 text-sm"
+Copy code
+tsx
+className="grid-auto-fit grid-min-10 gap-2 text-sm
+Copy code
+tsx Copy code
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 120/188
+Replace:
+File: client/src/pages/AccountScreen.tsx
+Find:
+Replace:
+<div className="h-full flex flex-col bg-neutral-900
+tsx
+<div className="h-full min-h-0 flex flex-col bg-ne
+Copy code
+tsx
+className="h-full flex flex-col bg-neutral-900 ove
+Copy code
+tsx Copy code
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 121/188
+Convert layout grids:
+Replace:
+with:
+Replace:
+className="h-full min-h-0 flex flex-col bg-neutral
+tsx
+className="grid grid-cols-1 md:grid-cols-2 lg:grid
+Copy code
+tsx
+className="grid-auto-fit grid-min-18 gap-4"
+Copy code
+tsx Copy code
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 122/188
+with:
+Replace:
+with:
+C) Auth pages: switch to min-h-dvh
+className="grid grid-cols-2 md:grid-cols-4 gap-4"
+tsx
+className="grid-auto-fit grid-min-12 gap-4"
+Copy code
+tsx
+className="grid grid-cols-1 md:grid-cols-2 gap-3"
+Copy code
+tsx
+className="grid-auto-fit grid-min-16 gap-3"
+Copy code
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 123/188
+File: client/src/pages/LoginPage.tsx
+Replace all min-h-screen → min-h-dvh
+Replace:
+with:
+File: client/src/pages/VerifyEmail.tsx
+Replace all min-h-screen → min-h-dvh
+File: client/src/pages/not-found.tsx
+Replace all min-h-screen → min-h-dvh
+File: client/src/pages/ProfileSettings.tsx
+tsx
+<TabsList className="grid w-full grid-cols-2 mb-4"
+Copy code
+tsx
+<TabsList className="grid w-full grid-flow-col auto
+Copy code
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 124/188
+Replace all min-h-screen → min-h-dvh
+Replace:
+with:
+Replace:
+with:
+tsx
+className="grid grid-cols-2 gap-3"
+Copy code
+tsx
+className="grid-auto-fit grid-min-16 gap-3"
+Copy code
+tsx
+className="grid grid-cols-2 gap-2 font-mono text-sm
+Copy code
+tsx Copy code
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 125/188
+D) Legal modals: 90dvh + safe width
+File: client/src/components/TermsModal.tsx
+Replace:
+with:
+File: client/src/components/LegalReacceptGate.tsx
+className="grid-auto-fit grid-min-10 gap-2 font-mo
+tsx
+<DialogContent className="max-w-3xl max-h-[90vh] f
+Copy code
+tsx
+<DialogContent className="w-[calc(100vw-2*var(--pag
+Copy code
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 126/188
+Replace:
+with:
+E) Journal page: min-h-dvh , 90dvh , and auto-fit
+info grids
+File: client/src/pages/JournalPage.tsx
+Replace all min-h-screen → min-h-dvh
+Replace all max-h-[90vh] → max-h-[90dvh]
+Replace:
+tsx
+<DialogContent className="max-w-3xl max-h-[90vh] f
+Copy code
+tsx
+<DialogContent className="w-[calc(100vw-2*var(--pag
+Copy code
+tsx Copy code
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 127/188
+with:
+Replace:
+with:
+className="max-w-2xl max-h-[90dvh] overflow-y-auto
+tsx
+className="w-[calc(100vw-2*var(--page-gutter))] max
+Copy code
+tsx
+className="grid grid-cols-2 gap-x-4 gap-y-1 text-x
+Copy code
+tsx Copy code
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 128/188
+F) App loading state uses min-h-dvh
+File: client/src/App.tsx
+Replace:
+with:
+className="grid-auto-fit grid-min-14 gap-x-4 gap-y
+tsx
+className="flex justify-center items-center h-scre
+Copy code
+tsx
+className="flex justify-center items-center min-hCopy code
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 129/188
+G) Admin (optional but included): use container
+query variant instead of md:hidden
+File: client/src/pages/AdminDashboard.tsx
+Replace min-h-screen → min-h-dvh
+Add container on root:
+Find:
+Replace:
+Replace all:
+md:hidden → @md/admin:hidden
+tsx
+className="p-6 bg-neutral-900 text-white m
+Copy code
+tsx
+className="p-6 bg-neutral-900 text-white m
+Copy code
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 130/188
+8) “No hardcoding going forward”
+enforcement rules (use these repo-wide)
+Use these rules whenever you or Codex adds new UI:
+1. Never use h-screen / min-h-screen for app shell
+or pages. Use min-h-dvh (Tailwind) or .app-dvh
+(utility).
+2. Any “page” inside a flex column must use:
+parent: min-h-0
+scroll area: .scroll-area (or min-h-0
+overflow-auto )
+This prevents the “can’t scroll” flex overflow
+bug.
+3. Replace most “card grids” with:
+grid-auto-fit grid-min-18 gap-4 (or choose
+min size token)
+4. Use container queries for layout switches:
+Put @container/NAME on the wrapper
+Use @md/NAME: / @3xl/NAME: variants on
+children (sidebar vs mobile nav).
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 131/188
+9) Quick verification script (manual)
+1. Mobile viewport (360×800):
+Sidebar hidden, MobileNavigation visible.
+Quotes list scrolls without cutting off the
+bottom.
+Open Terms modal: content fits and scrolls;
+close button visible.
+2. Tablet (768×1024):
+Layout remains stable (no “double scroll” on
+screens).
+Toast stack never goes offscreen.
+3. Desktop (≥1280 wide):
+Sidebar appears automatically (container
+query), mobile nav hidden.
+TradeScreen presets wrap cleanly (auto-fit), no
+overflow.
+If you want, I can also provide a single ripgrep-driven
+codemod plan (exact rg patterns + replacements) to
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 132/188
+convert the remaining non-admin grid-cols-*
+occurrences repo-wide into grid-auto-fit safely by
+category (cards vs tabs vs tables).
+Provide 
+Thought for 9m 24s
+Below is a complete, repo-specific refactor pack to make
+the UI globally fluid/responsive without per-component
+“magic numbers”, while keeping your existing Tailwind +
+shadcn structure. The core strategy is:
+1. Dynamic viewport units ( dvh ) everywhere (fixes
+mobile address-bar resizing) 
+2. Container queries (components respond to
+available layout space, not just md/lg viewport
+breakpoints)
+Tailwind CSS
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 133/188
+3. Global fluid layout tokens via CSS variables
+( clamp(...) ) so widths/padding scale
+automatically.
+From your current codebase, the main hard-coded
+responsiveness issues are:
+h-screen in Dashboard.tsx and App.tsx (mobile
+viewport bugs)
+calc(100vh - 120px) in QuotesScreen.tsx
+Fixed sidebar width w-56 and breakpoint-driven
+show/hide in Navigation.tsx
+Toast viewport uses max-h-screen (same viewport
+issue on mobile)
+0) Install the only new dependency
+bash
+npm i -D @tailwindcss/container-queries
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 134/188
+1) Replace tailwind.config.ts
+File: tailwind.config.ts
+Copy code
+ts
+import type { Config } from "tailwindcss";
+import typography from "@tailwindcss/typography";
+import containerQueries from "@tailwindcss/containe
+export default {
+ darkMode: ["class"],
+ content: ["./client/src/**/*.{js,jsx,ts,tsx}"],
+ theme: {
+ extend: {
+ borderRadius: {
+ lg: "var(--radius)",
+ md: "calc(var(--radius) - 2px)",
+ sm: "calc(var(--radius) - 4px)",
+ },
+ colors: {
+ background: "hsl(var(--background))",
+ foreground: "hsl(var(--foreground))",
+ card: {
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 135/188
+ DEFAULT: "hsl(var(--card))",
+ foreground: "hsl(var(--card-foreground))"
+ },
+ popover: {
+ DEFAULT: "hsl(var(--popover))",
+ foreground: "hsl(var(--popover-foreground
+ },
+ primary: {
+ DEFAULT: "hsl(var(--primary))",
+ foreground: "hsl(var(--primary-foreground
+ },
+ secondary: {
+ DEFAULT: "hsl(var(--secondary))",
+ foreground: "hsl(var(--secondary-foregrou
+ },
+ muted: {
+ DEFAULT: "hsl(var(--muted))",
+ foreground: "hsl(var(--muted-foreground))
+ },
+ accent: {
+ DEFAULT: "hsl(var(--accent))",
+ foreground: "hsl(var(--accent-foreground)
+ },
+ destructive: {
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 136/188
+ DEFAULT: "hsl(var(--destructive))",
+ foreground: "hsl(var(--destructive-foregr
+ },
+ border: "hsl(var(--border))",
+ input: "hsl(var(--input))",
+ ring: "hsl(var(--ring))",
+ chart: {
+ "1": "hsl(var(--chart-1))",
+ "2": "hsl(var(--chart-2))",
+ "3": "hsl(var(--chart-3))",
+ "4": "hsl(var(--chart-4))",
+ "5": "hsl(var(--chart-5))",
+ },
+ },
+ },
+ },
+ plugins: [typography, containerQueries],
+} satisfies Config;
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 137/188
+2) Replace client/src/index.css (global
+fluid tokens + utilities)
+File: client/src/index.css
+css
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+@layer base {
+ :root {
+ --background: 0 0% 100%;
+ --foreground: 222.2 84% 4.9%;
+ --card: 0 0% 100%;
+ --card-foreground: 222.2 84% 4.9%;
+ --popover: 0 0% 100%;
+ --popover-foreground: 222.2 84% 4.9%;
+ --primary: 222.2 47.4% 11.2%;
+ --primary-foreground: 210 40% 98%;
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 138/188
+ --secondary: 210 40% 96.1%;
+ --secondary-foreground: 222.2 47.4% 11.2%;
+ --muted: 210 40% 96.1%;
+ --muted-foreground: 215.4 16.3% 46.9%;
+ --accent: 210 40% 96.1%;
+ --accent-foreground: 222.2 47.4% 11.2%;
+ --destructive: 0 84.2% 60.2%;
+ --destructive-foreground: 210 40% 98%;
+ --border: 214.3 31.8% 91.4%;
+ --input: 214.3 31.8% 91.4%;
+ --ring: 222.2 84% 4.9%;
+ --radius: 0.5rem;
+ --chart-1: 12 76% 61%;
+ --chart-2: 173 58% 39%;
+ --chart-3: 197 37% 24%;
+ --chart-4: 43 74% 66%;
+ --chart-5: 27 87% 67%;
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 139/188
+ /* ---------- Global fluid layout tokens (autom
+ --app-max-w: 96rem; /* 1536px max, but content 
+ --app-gutter: clamp(0.75rem, 1.2vw, 1.5rem);
+ --app-gutter-sm: clamp(0.5rem, 0.9vw, 1rem);
+ /* Sidebar & nav scale automatically with avail
+ --sidebar-w: clamp(12rem, 18vw, 16rem);
+ --nav-item-min: 4.5rem;
+ /* Safe-area insets (iOS) */
+ --safe-top: env(safe-area-inset-top, 0px);
+ --safe-right: env(safe-area-inset-right, 0px);
+ --safe-bottom: env(safe-area-inset-bottom, 0px)
+ --safe-left: env(safe-area-inset-left, 0px);
+ }
+ .dark {
+ --background: 222.2 84% 4.9%;
+ --foreground: 210 40% 98%;
+ --card: 222.2 84% 4.9%;
+ --card-foreground: 210 40% 98%;
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 140/188
+Copy code
+ --popover: 222.2 84% 4.9%;
+ --popover-foreground: 210 40% 98%;
+ --primary: 210 40% 98%;
+ --primary-foreground: 222.2 47.4% 11.2%;
+ --secondary: 217.2 32.6% 17.5%;
+ --secondary-foreground: 210 40% 98%;
+ --muted: 217.2 32.6% 17.5%;
+ --muted-foreground: 215 20.2% 65.1%;
+ --accent: 217.2 32.6% 17.5%;
+ --accent-foreground: 210 40% 98%;
+ --destructive: 0 62.8% 30.6%;
+ --destructive-foreground: 210 40% 98%;
+ --border: 217.2 32.6% 17.5%;
+ --input: 217.2 32.6% 17.5%;
+ --ring: 212.7 26.8% 83.9%;
+ --chart-1: 220 70% 50%;
+ --chart-2: 160 60% 45%;
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 141/188
+ --chart-3: 30 80% 55%;
+ --chart-4: 280 65% 60%;
+ --chart-5: 340 75% 55%;
+ }
+}
+/* Global reset */
+html {
+ height: 100%;
+ width: 100%;
+ margin: 0;
+ padding: 0;
+ overflow-x: hidden;
+}
+body {
+ min-height: 100%;
+ width: 100%;
+ margin: 0;
+ padding: 0;
+ overflow-x: hidden;
+ font-family: system-ui, -apple-system, BlinkMacSy
+ background-color: hsl(var(--background));
+ color: hsl(var(--foreground));
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 142/188
+}
+/* Root should be dvh-safe (mobile address bar) */
+#root {
+ width: 100%;
+ min-height: 100vh;
+ min-height: 100dvh;
+}
+/* Media elements should never overflow */
+img,
+video,
+canvas,
+svg {
+ max-width: 100%;
+ height: auto;
+}
+/* Improved scrollbar styling */
+::-webkit-scrollbar {
+ width: 8px;
+ height: 8px;
+}
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 143/188
+::-webkit-scrollbar-track {
+ background: #1a1a1a;
+ border-radius: 4px;
+}
+::-webkit-scrollbar-thumb {
+ background: #333;
+ border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+ background: #444;
+}
+/* Shadcn base */
+@layer base {
+ * {
+ @apply border-border;
+ }
+ body {
+ @apply bg-background text-foreground;
+ }
+}
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 144/188
+/* Toasts (updated to dvh-safe max height) */
+@layer utilities {
+ .toast-viewport {
+ @apply fixed top-4 right-4 z-[100] flex max-h-s
+ w-[min(26.25rem,calc(100vw-2rem))] flex-col g
+ }
+ .toast-premium {
+ @apply relative overflow-hidden rounded-xl bord
+ text-white shadow-2xl backdrop-blur-md;
+ }
+ .toast-shimmer {
+ @apply absolute inset-0 opacity-0 transition-op
+ background: linear-gradient(
+ 120deg,
+ rgba(255, 255, 255, 0) 0%,
+ rgba(255, 255, 255, 0.06) 30%,
+ rgba(255, 255, 255, 0.02) 60%,
+ rgba(255, 255, 255, 0) 100%
+ );
+ }
+ .toast-premium:hover .toast-shimmer {
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 145/188
+ @apply opacity-100;
+ animation: shimmer 1.5s ease-in-out infinite;
+ }
+ @keyframes shimmer {
+ 0% { transform: translateX(-20%); }
+ 100% { transform: translateX(20%); }
+ }
+ .toast-icon {
+ @apply flex h-10 w-10 items-center justify-cent
+ }
+ .toast-badge {
+ @apply inline-flex items-center rounded-full px
+ }
+ .toast-title {
+ @apply mt-1 text-sm font-semibold leading-snug;
+ }
+ .toast-desc {
+ @apply mt-1 text-xs text-white/80 leading-relax
+ }
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 146/188
+ .toast-close {
+ @apply rounded-md p-1 text-white/60 hover:text-
+ }
+ .toast-code {
+ @apply font-mono text-[10px] text-white/70 bg-w
+ }
+ .toast-details {
+ @apply mt-3 text-xs text-white/70;
+ }
+ .toast-pre {
+ @apply mt-2 max-h-40 overflow-auto rounded-lg b
+ }
+ .toast-metrics {
+ @apply mt-2 text-[10px] text-white/60;
+ }
+ .toast-hint {
+ @apply mt-2 text-[11px] text-amber-200/90;
+ }
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 147/188
+ .toast-glow {
+ @apply absolute -inset-1 rounded-xl opacity-0 b
+ background: radial-gradient(circle at 30% 30%, 
+ }
+ .toast-premium:hover .toast-glow {
+ @apply opacity-100;
+ }
+ /* ---------- Global layout utilities (use everyw
+ .app-shell {
+ @apply min-h-screen min-h-[100dvh] flex flex-co
+ }
+ .app-main {
+ @apply flex-1 min-h-0 overflow-hidden;
+ }
+ .app-scroll {
+ @apply flex-1 min-h-0 overflow-auto;
+ }
+ .page-container {
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 148/188
+ width: min(100%, var(--app-max-w));
+ margin-inline: auto;
+ padding-inline: var(--app-gutter);
+ }
+ .page-pad {
+ padding: var(--app-gutter);
+ }
+ .safe-pad-x {
+ padding-left: calc(var(--safe-left) + var(--app
+ padding-right: calc(var(--safe-right) + var(--a
+ }
+ .safe-pad-b {
+ padding-bottom: calc(var(--safe-bottom) + var(-
+ }
+ .safe-pad-t {
+ padding-top: calc(var(--safe-top) + var(--app-g
+ }
+ .grid-auto-fit {
+ display: grid;
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 149/188
+Key improvements here:
+Root is dvh -safe
+Shared tokens remove one-off widths/paddings
+ grid-template-columns: repeat(auto-fit, minmax(
+ gap: var(--app-gutter);
+ }
+ .table-wrap {
+ @apply w-full overflow-x-auto;
+ -webkit-overflow-scrolling: touch;
+ }
+ .no-scrollbar {
+ scrollbar-width: none;
+ }
+ .no-scrollbar::-webkit-scrollbar {
+ display: none;
+ }
+}
+Tailwind CSS
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 150/188
+Shared layout utilities let every page become fluid
+with minimal edits
+3) Replace client/src/App.tsx (fix hscreen )
+File: client/src/App.tsx
+tsx
+import { useEffect, useState } from "react";
+import { Switch, Route, useLocation } from "wouter"
+import { queryClient } from "./lib/queryClient";
+import { QueryClientProvider } from "@tanstack/reac
+import { Toaster } from "@/components/ui/toaster";
+import NotFound from "@/pages/not-found";
+import Dashboard from "@/pages/Dashboard";
+import LoginPage from "@/pages/LoginPage";
+import AdminDashboard from "@/pages/AdminDashboard"
+import JournalPage from "@/pages/JournalPage";
+import ProfileSettings from "@/pages/ProfileSetting
+import VerifyEmail from "@/pages/VerifyEmail";
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 151/188
+import { useAuth } from "@/hooks/use-auth";
+import { AuthProvider } from "./hooks/use-auth";
+import { VerificationReminderPopup } from "@/compon
+import { LegalReacceptGate } from "@/components/Leg
+import { installAxiosIdentityHeaders } from "./lib/
+import { startGriftPing } from "./lib/griftPing";
+installAxiosIdentityHeaders();
+function ImpersonationBanner() {
+ const { user, stopImpersonating } = useAuth();
+ const [stopping, setStopping] = useState(false);
+ const [, navigate] = useLocation();
+ if (!user?.isImpersonating) return null;
+ const handleStop = async () => {
+ setStopping(true);
+ try {
+ await stopImpersonating();
+ navigate("/admin");
+ } catch (error) {
+ console.error("Failed to stop impersonation:"
+ } finally {
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 152/188
+ setStopping(false);
+ }
+ };
+ return (
+ <div className="fixed top-0 left-0 right-0 z-50
+ <div className="flex items-center gap-2">
+ <span className="font-semibold">View As Mod
+ <span>
+ You are viewing as {user.email} (ID: {use
+ </span>
+ </div>
+ <button
+ onClick={handleStop}
+ disabled={stopping}
+ className="bg-black text-white px-4 py-1 ro
+ >
+ {stopping ? "Exiting..." : "Exit View As"}
+ </button>
+ </div>
+ );
+}
+function AppRoutes() {
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 153/188
+ const { user, isAuthenticated, loading, checkAuth
+ const [location, navigate] = useLocation();
+ useEffect(() => {
+ checkAuth();
+ }, [checkAuth]);
+ useEffect(() => {
+ if (!isAuthenticated) return;
+ const stop = startGriftPing({ intervalMs: 60_00
+ return () => stop();
+ }, [isAuthenticated]);
+ useEffect(() => {
+ if (!loading && !isAuthenticated && location !=
+ navigate("/login");
+ }
+ if (!loading && isAuthenticated && location ===
+ navigate("/");
+ }
+ }, [isAuthenticated, loading, location, navigate]
+ if (loading) {
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 154/188
+ return (
+ <div className="flex justify-center items-cen
+ <div className="animate-spin rounded-full h
+ </div>
+ );
+ }
+ return (
+ <>
+ <ImpersonationBanner />
+ <VerificationReminderPopup />
+ <LegalReacceptGate />
+ <div className={user?.isImpersonating ? "pt-1
+ <Switch>
+ <Route path="/login" component={LoginPage
+ <Route path="/verify-email" component={Ve
+ <Route path="/admin" component={AdminDash
+ <Route path="/journal" component={Journal
+ <Route path="/profile" component={Profile
+ <Route path="/" component={Dashboard} />
+ <Route component={NotFound} />
+ </Switch>
+ </div>
+ </>
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 155/188
+4) Replace
+client/src/components/ui/toast.tsx (dvhsafe viewport)
+ );
+}
+function App() {
+ return (
+ <QueryClientProvider client={queryClient}>
+ <AuthProvider>
+ <AppRoutes />
+ <Toaster />
+ </AuthProvider>
+ </QueryClientProvider>
+ );
+}
+export default App;
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 156/188
+File: client/src/components/ui/toast.tsx
+tsx
+import * as React from "react";
+import * as ToastPrimitives from "@radix-ui/react-t
+import { cva, type VariantProps } from "class-varia
+import { X } from "lucide-react";
+import { cn } from "@/lib/utils";
+const ToastProvider = ToastPrimitives.Provider;
+const ToastViewport = React.forwardRef<
+ React.ElementRef<typeof ToastPrimitives.Viewport>
+ React.ComponentPropsWithoutRef<typeof ToastPrimit
+>(({ className, ...props }, ref) => (
+ <ToastPrimitives.Viewport
+ ref={ref}
+ className={cn(
+ // dvh-safe: keep fallback then override
+ "fixed top-0 z-[100] flex max-h-screen max-h-
+ className
+ )}
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 157/188
+ {...props}
+ />
+));
+ToastViewport.displayName = ToastPrimitives.Viewpor
+const toastVariants = cva(
+ "group pointer-events-auto relative flex w-full i
+ {
+ variants: {
+ variant: {
+ default: "border bg-background text-foregro
+ destructive:
+ "destructive group border-destructive bg-
+ },
+ },
+ defaultVariants: {
+ variant: "default",
+ },
+ }
+);
+const Toast = React.forwardRef<
+ React.ElementRef<typeof ToastPrimitives.Root>,
+ React.ComponentPropsWithoutRef<typeof ToastPrimit
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 158/188
+ VariantProps<typeof toastVariants>
+>(({ className, variant, ...props }, ref) => {
+ return (
+ <ToastPrimitives.Root
+ ref={ref}
+ className={cn(toastVariants({ variant }), cla
+ {...props}
+ />
+ );
+});
+Toast.displayName = ToastPrimitives.Root.displayNam
+const ToastAction = React.forwardRef<
+ React.ElementRef<typeof ToastPrimitives.Action>,
+ React.ComponentPropsWithoutRef<typeof ToastPrimit
+>(({ className, ...props }, ref) => (
+ <ToastPrimitives.Action
+ ref={ref}
+ className={cn(
+ "inline-flex h-8 shrink-0 items-center justif
+ className
+ )}
+ {...props}
+ />
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 159/188
+));
+ToastAction.displayName = ToastPrimitives.Action.di
+const ToastClose = React.forwardRef<
+ React.ElementRef<typeof ToastPrimitives.Close>,
+ React.ComponentPropsWithoutRef<typeof ToastPrimit
+>(({ className, ...props }, ref) => (
+ <ToastPrimitives.Close
+ ref={ref}
+ className={cn(
+ "absolute right-2 top-2 rounded-md p-1 text-f
+ className
+ )}
+ toast-close=""
+ {...props}
+ >
+ <X className="h-4 w-4" />
+ </ToastPrimitives.Close>
+));
+ToastClose.displayName = ToastPrimitives.Close.disp
+const ToastTitle = React.forwardRef<
+ React.ElementRef<typeof ToastPrimitives.Title>,
+ React.ComponentPropsWithoutRef<typeof ToastPrimit
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 160/188
+>(({ className, ...props }, ref) => (
+ <ToastPrimitives.Title
+ ref={ref}
+ className={cn("text-sm font-semibold", classNam
+ {...props}
+ />
+));
+ToastTitle.displayName = ToastPrimitives.Title.disp
+const ToastDescription = React.forwardRef<
+ React.ElementRef<typeof ToastPrimitives.Descripti
+ React.ComponentPropsWithoutRef<typeof ToastPrimit
+>(({ className, ...props }, ref) => (
+ <ToastPrimitives.Description
+ ref={ref}
+ className={cn("text-sm opacity-90", className)}
+ {...props}
+ />
+));
+ToastDescription.displayName = ToastPrimitives.Desc
+type ToastProps = React.ComponentPropsWithoutRef<ty
+type ToastActionElement = React.ReactElement<typeof
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 161/188
+5) Replace client/src/pages/Dashboard.tsx
+(container-query layout + fluid shell)
+File: client/src/pages/Dashboard.tsx
+export {
+ type ToastProps,
+ type ToastActionElement,
+ ToastProvider,
+ ToastViewport,
+ Toast,
+ ToastTitle,
+ ToastDescription,
+ ToastClose,
+ ToastAction,
+};
+tsx
+import { useState } from "react";
+import { Header } from "@/components/Header";
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 162/188
+import { MobileNavigation, SideNavigation } from "@
+import QuotesScreen from "./QuotesScreen";
+import ChartScreen from "./ChartScreen";
+import TradeScreen from "./TradeScreen";
+import HistoryScreen from "./HistoryScreen";
+import LeaderboardScreen from "./LeaderboardScreen"
+import AccountScreen from "./AccountScreen";
+import { useQuotes } from "@/hooks/use-quotes";
+import { useAuth } from "@/hooks/use-auth";
+import axios from "axios";
+import { Link } from "wouter";
+import { Button } from "@/components/ui/button";
+export default function Dashboard() {
+ const [activeTab, setActiveTab] = useState("quote
+ const [selectedSymbol, setSelectedSymbol] = useSt
+ const { quotes } = useQuotes();
+ const { user, checkAuth } = useAuth();
+ const [adminPromotion, setAdminPromotion] = useSt
+ isPromoting: false,
+ success: false,
+ error: "",
+ });
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 163/188
+Copy code
+ const promoteToAdmin = async () => {
+ if (!user) return;
+ setAdminPromotion({ isPromoting: true, success
+ try {
+ await axios.post("/api/promote-to-admin", { u
+ setAdminPromotion({ isPromoting: false, succe
+ await checkAuth();
+ } catch (error) {
+ setAdminPromotion({
+ isPromoting: false,
+ success: false,
+ error: "Failed to promote to admin",
+ });
+ }
+ };
+ const currentQuote = quotes?.find((quote) => quot
+ const handleSelectSymbol = (symbol: string) => {
+ setSelectedSymbol(symbol);
+ if (activeTab !== "chart" && activeTab !== "tra
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 164/188
+ setActiveTab("chart");
+ }
+ };
+ return (
+ <div className="app-shell">
+ <Header />
+ {/* Admin Quick Access */}
+ {user && (
+ <div className="border-b border-gray-800 sh
+ <div className="page-container flex items
+ <div className="flex items-center gap-2
+ {user.isAdmin ? (
+ <Link href="/admin">
+ <Button
+ size="sm"
+ variant="outline"
+ className="bg-blue-900 hover:bg
+ >
+ Admin Dashboard
+ </Button>
+ </Link>
+ ) : (
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 165/188
+ <Button
+ size="sm"
+ variant="outline"
+ onClick={promoteToAdmin}
+ disabled={adminPromotion.isPromot
+ className="bg-neutral-700 hover:b
+ >
+ {adminPromotion.isPromoting ? "Pr
+ </Button>
+ )}
+ {adminPromotion.success && (
+ <span className="text-green-500 tex
+ Admin access granted! You can now
+ </span>
+ )}
+ {adminPromotion.error && (
+ <span className="text-red-500 text-
+ )}
+ </div>
+ <div className="text-sm text-gray-400 s
+ Balance:{" "}
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 166/188
+ <span className="font-semibold text-w
+ </div>
+ </div>
+ </div>
+ )}
+ {/* Container-query shell: components react t
+ <main className="app-main @container/app flex
+ <MobileNavigation activeTab={activeTab} set
+ <SideNavigation activeTab={activeTab} setAc
+ <div className="flex-1 min-h-0 overflow-hid
+ {activeTab === "quotes" && <QuotesScreen
+ {activeTab === "chart" && <ChartScreen se
+ {activeTab === "trade" && (
+ <TradeScreen selectedSymbol={selectedSy
+ )}
+ {activeTab === "history" && <HistoryScree
+ {activeTab === "leaderboard" && <Leaderbo
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 167/188
+6) Replace
+client/src/components/Navigation.tsx
+(fluid sidebar width + container-query
+visibility)
+File: client/src/components/Navigation.tsx
+ {activeTab === "account" && <AccountScree
+ </div>
+ </main>
+ </div>
+ );
+}
+tsx
+import { Link, useLocation } from "wouter";
+import { cn } from "@/lib/utils";
+import {
+ BarChart3,
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 168/188
+Copy code
+ LineChart,
+ TrendingUp,
+ Clock,
+ Trophy,
+ User,
+ Settings,
+ BookText,
+} from "lucide-react";
+import { useAuth } from "@/hooks/use-auth";
+interface NavigationProps {
+ activeTab: string;
+ setActiveTab: (tab: string) => void;
+}
+const navItems = [
+ { id: "quotes", label: "Quotes", icon: BarChart3
+ { id: "chart", label: "Chart", icon: LineChart },
+ { id: "trade", label: "Trade", icon: TrendingUp }
+ { id: "history", label: "History", icon: Clock },
+ { id: "leaderboard", label: "Leaderboard", icon: 
+ { id: "account", label: "Account", icon: User },
+];
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 169/188
+Copy code
+export function MobileNavigation({ activeTab, setAc
+ return (
+ <div className="@3xl/app:hidden border-b border
+ <div className="page-container">
+ <div className="flex overflow-x-auto no-scr
+ {navItems.map((item) => {
+ const Icon = item.icon;
+ const isActive = activeTab === item.id;
+ return (
+ <button
+ key={item.id}
+ onClick={() => setActiveTab(item.id
+ className={cn(
+ "flex flex-col items-center justi
+ isActive ? "bg-primary text-white
+ )}
+ >
+ <Icon className="h-5 w-5" />
+ <span className="text-xs mt-1">{ite
+ </button>
+ );
+ })}
+ </div>
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 170/188
+ </div>
+ </div>
+ );
+}
+export function SideNavigation({ activeTab, setActi
+ const { user } = useAuth();
+ const [location] = useLocation();
+ return (
+ <div className="hidden @3xl/app:block bg-neutra
+ <div className="h-full flex flex-col overflow
+ <div className="p-4 border-b border-gray-80
+ <h2 className="text-lg font-bold text-whi
+ <p className="text-sm text-gray-400">Trad
+ </div>
+ <nav className="flex-1 min-h-0 p-2 overflow
+ {navItems.map((item) => {
+ const Icon = item.icon;
+ const isActive = activeTab === item.id;
+ return (
+ <button
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 171/188
+ key={item.id}
+ onClick={() => setActiveTab(item.id
+ className={cn(
+ "w-full flex items-center px-4 py
+ isActive ? "bg-primary text-white
+ )}
+ >
+ <Icon className="h-5 w-5 mr-3 shrin
+ <span className="font-medium trunca
+ </button>
+ );
+ })}
+ </nav>
+ <div className="p-4 border-t border-gray-80
+ <Link
+ href="/journal"
+ className={cn(
+ "w-full flex items-center px-4 py-2 r
+ location === "/journal" ? "bg-gray-80
+ )}
+ >
+ <BookText className="h-5 w-5 mr-3 shrin
+ <span className="font-medium truncate">
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 172/188
+ </Link>
+ <Link
+ href="/profile"
+ className={cn(
+ "w-full flex items-center px-4 py-2 r
+ location === "/profile" ? "bg-gray-80
+ )}
+ >
+ <Settings className="h-5 w-5 mr-3 shrin
+ <span className="font-medium truncate">
+ </Link>
+ {user?.isAdmin && (
+ <Link
+ href="/admin"
+ className={cn(
+ "w-full flex items-center px-4 py-2
+ location === "/admin"
+ ? "bg-blue-900 text-white"
+ : "text-blue-400 hover:bg-blue-90
+ )}
+ >
+ <Trophy className="h-5 w-5 mr-3 shrin
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 173/188
+7) Replace
+client/src/pages/QuotesScreen.tsx
+(remove calc(100vh...) , container-query
+columns)
+File: client/src/pages/QuotesScreen.tsx
+ <span className="font-medium truncate
+ </Link>
+ )}
+ </div>
+ </div>
+ </div>
+ );
+}
+tsx
+import { useQuotes } from "@/hooks/use-quotes";
+import { useState } from "react";
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 174/188
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton"
+import { Search, RefreshCw } from "lucide-react";
+interface QuotesScreenProps {
+ onSelectSymbol: (symbol: string) => void;
+}
+type SortOption = "symbol" | "spread" | "change";
+export default function QuotesScreen({ onSelectSymb
+ const { quotes, isLoading, error, refreshQuotes }
+ const [searchTerm, setSearchTerm] = useState("");
+ const [sortOption, setSortOption] = useState<Sort
+ const [sortDirection, setSortDirection] = useStat
+ const handleSort = (option: SortOption) => {
+ if (sortOption === option) {
+ setSortDirection(sortDirection === "asc" ? "d
+ } else {
+ setSortOption(option);
+ setSortDirection("asc");
+ }
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 175/188
+Copy code
+ };
+ const filteredQuotes = quotes?.filter((quote) =>
+ quote.symbol.toLowerCase().includes(searchTerm
+ );
+ const sortedQuotes = filteredQuotes?.sort((a, b) 
+ let compareValue = 0;
+ switch (sortOption) {
+ case "symbol":
+ compareValue = a.symbol.localeCompare(b.sym
+ break;
+ case "spread":
+ compareValue = (a.ask - a.bid) - (b.ask - b
+ break;
+ case "change":
+ compareValue = (a.changePercentage || 0) - 
+ break;
+ default:
+ compareValue = a.symbol.localeCompare(b.sym
+ }
+ return sortDirection === "asc" ? compareValue 
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 176/188
+ });
+ if (error) {
+ return (
+ <div className="h-full flex flex-col bg-neutr
+ <div className="page-pad">
+ <h2 className="text-xl font-bold">Quotes<
+ <p className="text-red-500 mt-4">Error lo
+ <Button onClick={refreshQuotes} className
+ Try Again
+ </Button>
+ </div>
+ </div>
+ );
+ }
+ return (
+ // Named container so internal columns adapt to
+ <div className="h-full flex flex-col bg-neutral
+ <div className="sticky top-0 z-10 bg-neutral-
+ <div className="page-container py-4">
+ <div className="flex flex-wrap items-cent
+ <h2 className="text-xl font-bold">Quote
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 177/188
+ <div className="flex items-center gap-2
+ <Button
+ variant="outline"
+ size="sm"
+ onClick={refreshQuotes}
+ disabled={isLoading}
+ className="border-gray-700"
+ >
+ <RefreshCw className={isLoading ? "
+ </Button>
+ </div>
+ </div>
+ <div className="flex flex-wrap gap-3 mt-4
+ <div className="relative flex-1 min-w-
+ <Search className="absolute left-2.5 
+ <Input
+ placeholder="Search by symbol..."
+ value={searchTerm}
+ onChange={(e) => setSearchTerm(e.ta
+ className="pl-9 bg-neutral-800 bord
+ />
+ </div>
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 178/188
+ <div className="flex flex-wrap gap-2">
+ <Button
+ variant={sortOption === "symbol" ? 
+ size="sm"
+ onClick={() => handleSort("symbol")
+ className={sortOption === "symbol" 
+ >
+ Symbol {sortOption === "symbol" && 
+ </Button>
+ <Button
+ variant={sortOption === "spread" ? 
+ size="sm"
+ onClick={() => handleSort("spread")
+ className={sortOption === "spread" 
+ >
+ Spread {sortOption === "spread" && 
+ </Button>
+ <Button
+ variant={sortOption === "change" ? 
+ size="sm"
+ onClick={() => handleSort("change")
+ className={sortOption === "change" 
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 179/188
+ >
+ Change {sortOption === "change" && 
+ </Button>
+ </div>
+ </div>
+ </div>
+ </div>
+ {/* No more calc(100vh-...) — use flex + min-
+ <div className="app-scroll">
+ <div className="divide-y divide-gray-800">
+ {isLoading
+ ? Array.from({ length: 10 }).map((_, i)
+ <div key={i} className="page-contai
+ <div className="flex items-center
+ <div className="space-y-2">
+ <Skeleton className="h-5 w-20
+ <Skeleton className="h-4 w-16
+ </div>
+ <Skeleton className="h-8 w-24 b
+ </div>
+ </div>
+ ))
+ : sortedQuotes?.map((quote) => (
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 180/188
+ <div
+ key={quote.symbol}
+ className="page-container py-3 ho
+ onClick={() => onSelectSymbol(quo
+ >
+ <div className="flex items-center
+ <div className="min-w-0">
+ <div className="font-semibold
+ <div className="text-sm text-
+ {quote.name || quote.symbol
+ </div>
+ </div>
+ <div className="flex items-cent
+ {/* Show this column only whe
+ <div className="hidden @xl/qu
+ <div className="text-sm tex
+ Bid: {quote.bid.toFixed(q
+ </div>
+ <div className="text-sm tex
+ Ask: {quote.ask.toFixed(q
+ </div>
+ </div>
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 181/188
+Copy code
+ <div className="flex flex-col
+ <div className="text-sm fon
+ Spread: {(quote.ask - quo
+ </div>
+ <div
+ className={`text-sm ${
+ (quote.changePercentage
+ }`}
+ >
+ {(quote.changePercentage 
+ </div>
+ </div>
+ <div className="flex items-ce
+ <svg
+ xmlns="http://www.w3.org/
+className="h-4 w-4 text-g
+viewBox="0 0 24 24"
+fill="none"
+stroke="currentColor"
+strokeWidth="2"
+strokeLinecap="round"
+strokeLinejoin="round"
+ >
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 182/188
+ <polyline points="9 18 15
+ </svg>
+ </div>
+ </div>
+ </div>
+ </div>
+ ))}
+ {(!sortedQuotes || sortedQuotes.length ==
+ <div className="page-container py-8 tex
+ {searchTerm ? `No instruments found m
+ </div>
+ )}
+ </div>
+ </div>
+ </div>
+ );
+}
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 183/188
+8) Small targeted edits across the remaining
+pages (dvh + fluid padding)
+These are single-line class updates; do not rewrite the
+whole files.
+A) client/src/pages/AdminDashboard.tsx
+Find:
+Replace with:
+B) client/src/pages/ProfileSettings.tsx
+tsx
+<div className="p-6 bg-neutral-900 text-white minCopy code
+tsx
+<div className="bg-neutral-900 text-white min-h-sc
+Copy code
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 184/188
+Find:
+Replace with:
+Optional (recommended): change main
+className="flex-1 p-6" → className="flex-1 pagepad"
+C) client/src/pages/JournalPage.tsx ,
+LoginPage.tsx , VerifyEmail.tsx , notfound.tsx
+tsx
+<div className="min-h-screen bg-neutral-900 text-w
+Copy code
+tsx
+<div className="min-h-screen min-h-[100dvh] bg-neut
+Copy code
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 185/188
+For every root wrapper using min-h-screen , append
+dvh:
+min-h-screen → min-h-screen min-h-[100dvh]
+Mechanical “check all components”
+refactor rules (apply repo-wide)
+Use these rules to eliminate remaining hard-coded
+layout behavior without hand-tuning each component:
+Rule 1 — Replace viewport-height math with flex
+patterns
+If you see any of:
+inline styles like maxHeight: 'calc(100vh - ...)'
+h-screen for app shells
+Refactor to:
+parent: flex flex-col min-h-0 overflow-hidden
+scroll region: flex-1 min-h-0 overflow-auto (or
+app-scroll )
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 186/188
+Rule 2 — Prefer container queries over md: for
+layout-critical show/hide
+For panels/columns that should appear only when there
+is room:
+Wrap the page in a named container:
+@container/pageName
+Replace md:* with @lg/pageName:* /
+@xl/pageName:*
+This makes responsiveness correct even when
+sidebars/panels reduce available width.
+Rule 3 — Remove fixed widths for layout
+primitives
+Replace common fixed widths with global tokens:
+w-56 , w-64 (sidebars) → w-[var(--sidebar-w)]
+“min widths” for navigation items → min-w-[var(--
+nav-item-min)]
+Rule 4 — Standardize padding to fluid tokens
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 187/188
+Replace page-level padding like p-6 , px-4 at major
+containers with:
+page-pad for general padding
+page-container + py-* where appropriate
+If you want, I can produce a repo-wide patch list (fileby-file) by scanning for the remaining patterns ( hscreen , min-h-screen , w-xx , max-w-[...] , overflow
+issues) and giving exact replacements per match, but the
+changes above already remove the major non-fluid
+constraints and give you the global system to finish the
+rest mechanically.
+Sources
+1/9/26, 6:42 PM TRADE HUB - Responsive Layout Refactor
+https://chatgpt.com/g/g-p-68c349da0e0c81918271a81f08092f44-trade-hub/c/696042c0-a2f4-832c-bc60-5d5b704c52f6 188/188

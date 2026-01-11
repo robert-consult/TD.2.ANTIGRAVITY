@@ -1,0 +1,391 @@
+Below is a **deep, implementation-grade audit checklist** for Replit Agent 3 to validate the **CAPTCHA (slider)** system, the **Phone (country-aware)** system, and the **Legal Render Engine (Country → Region → Global)** end-to-end. It is written as a “check against” list: the agent should mark each item as **DONE / PARTIAL / MISSING**, and include file/line references and evidence (screenshots, console logs, DB rows, API responses).
+
+---
+
+## 0) Audit Protocol
+
+### 0.1 What counts as “implemented”
+
+* Code exists **and** is wired into the actual runtime route/component path.
+* The enforcement is **server-side**, not only client-side (bypass-resistance).
+* DB writes exist and are correct (no “TODO” placeholders).
+* The UI behaves correctly on mobile and desktop.
+* Negative cases are handled (missing token, invalid phone, captcha not completed).
+
+### 0.2 Evidence required per item
+
+* File path + snippet location (line range).
+* Runtime proof:
+
+  * API request/response screenshots (browser devtools network tab)
+  * DB row proof (SQLite query output)
+  * UI proof (screenshots on mobile viewport)
+
+---
+
+# 1) CAPTCHA SYSTEM AUDIT (Left-to-right Slider)
+
+## 1.1 Frontend UI presence and gating
+
+* [ ] Signup page renders slider captcha on the **Register** tab (not only on Login tab).
+  Evidence: screenshot showing slider component in signup form.
+* [ ] Slider appears in correct position in UI (below Terms acceptance section OR above Register button, per your design).
+* [ ] Register button is disabled OR submit blocked until captcha verified.
+* [ ] Captcha reset works on:
+
+  * changing country
+  * switching Login/Register tabs
+  * form validation errors
+  * page refresh (should require re-verify)
+* [ ] Captcha failure messaging is clear and consistent with toast system.
+
+**Files to inspect**
+
+* `client/src/pages/LoginPage.tsx` (or equivalent signup page)
+* `client/src/components/SliderCaptcha.tsx`
+
+## 1.2 Frontend → backend handshake (session-bound)
+
+* [ ] On entering signup (or on first slider render), UI calls `GET /api/captcha/slider/start` and stores returned `captchaId`.
+* [ ] On slider completion, UI calls `POST /api/captcha/slider/complete` with the same `captchaId`.
+* [ ] On success, the UI sets state `captchaVerified=true` and enables register.
+* [ ] If `/complete` fails (mismatch, expired), UI forces reset and re-start.
+
+**Files to inspect**
+
+* `client/src/pages/LoginPage.tsx`
+* Any client fetch wrapper: `client/src/lib/api.ts` or similar
+
+## 1.3 Server routes exist and are mounted
+
+* [ ] Router exists at `server/routes/sliderCaptcha.ts` (or similar).
+* [ ] It is mounted in server bootstrap as `/api/captcha/*`.
+* [ ] Session fields are created and stored:
+
+  * `sliderCaptchaId`
+  * `sliderCaptchaVerified`
+  * `sliderCaptchaIssuedAtMs`
+* [ ] The session cookie settings are sane (HttpOnly, SameSite, Secure where relevant).
+
+**Files to inspect**
+
+* `server/routes.ts` (route mounting)
+* `server/index.ts` or server entry file
+* session middleware setup (express-session / cookie settings)
+
+## 1.4 Server-side enforcement in registration handler
+
+* [ ] `/api/auth/register` (or equivalent) **requires** `req.session.sliderCaptchaVerified === true` when enforcement is enabled.
+* [ ] Enforcement is not purely client-side (must reject direct POST attempts).
+* [ ] Captcha verification is single-use OR time-bounded:
+
+  * Max age enforced (e.g., 15 minutes)
+  * Optionally reset verified flag after successful registration to prevent reuse
+
+**Files to inspect**
+
+* `server/routes.ts` register handler
+* configuration module controlling enforcement
+
+## 1.5 Security logging / audit trail
+
+* [ ] Captcha issue event logged (`CAPTCHA_CHALLENGE_ISSUED`)
+* [ ] Captcha verified event logged (`CAPTCHA_VERIFIED`)
+* [ ] Capture provenance:
+
+  * IP
+  * user-agent
+  * timestamp
+  * session id correlation (if tracked)
+
+**Files to inspect**
+
+* `server/services/identityAudit.ts` (or equivalent)
+* DB table receiving these logs (adminActions / audit trail table)
+
+## 1.6 Config toggles (admin-controlled)
+
+* [ ] There is a backend config toggle such as:
+
+  * `captcha.enforceSignupCaptcha` (boolean)
+* [ ] Toggle is surfaced in admin “System Config” and cached/served to client.
+* [ ] UI respects the toggle and hides slider when off.
+* [ ] Server respects the toggle and does not require captcha when off.
+
+---
+
+# 2) PHONE SYSTEM AUDIT (Country-aware prefix + formatter + future verification)
+
+## 2.1 UI behavior tied to country selection
+
+* [ ] Phone field is **hidden until a country is selected**.
+* [ ] On selecting country:
+
+  * phone placeholder updates to show dial prefix (e.g., +61 for AU)
+  * phone formatter resets state appropriately
+* [ ] On changing country after typing:
+
+  * phone is cleared OR revalidated; no stale validity allowed
+* [ ] Validation states are visible:
+
+  * invalid phone shows inline error
+  * valid phone shows success state (optional)
+
+**Files to inspect**
+
+* `client/src/pages/LoginPage.tsx`
+* phone component file (if extracted): `client/src/components/PhoneInput*.tsx`
+
+## 2.2 Formatting + regex validation (lib-based, not hand-rolled)
+
+* [ ] Uses `libphonenumber-js` (or equivalent) for:
+
+  * calling code
+  * as-you-type formatting
+  * validity checks per country numbering plan
+* [ ] Produces an E.164 normalized value `+<countrycode><number>` when valid.
+* [ ] Rejects invalid length/pattern per country (AU is a good test case).
+
+**Files to inspect**
+
+* `package.json` dependency present
+* Usage in signup UI component
+
+## 2.3 Registration payload includes phone and country
+
+* [ ] Signup POST includes:
+
+  * `countryIso2`
+  * `phoneE164` (preferred)
+  * optionally `phoneRaw` (if you keep raw user input)
+* [ ] Server accepts and stores these fields.
+* [ ] Server validates:
+
+  * `countryIso2` is a real ISO2 from allowed list
+  * `phoneE164` matches E.164 regex and belongs to chosen country (if you enforce this strictly)
+
+**Files to inspect**
+
+* `client/src/hooks/use-auth.tsx` (register payload)
+* `server/routes.ts` register handler
+* any shared validation schemas (zod)
+
+## 2.4 Persistence model (profile settings integration)
+
+* [ ] Phone is stored in a stable place, and can be updated later in Profile Settings:
+
+  * Option A (recommended): `user_verification.phoneE164` + `user_verification.phoneVerifiedAt`
+  * Option B: `users.phone` plus a verification table
+* [ ] Profile Settings page shows:
+
+  * phone value
+  * verification status (unverified/verified)
+  * “Verify later” gating is possible (you requested later SMS verification after conditions met)
+
+**Files to inspect**
+
+* `shared/schema.ts` (tables/columns)
+* Profile settings UI: `client/src/pages/ProfileSettings.tsx` (or equivalent)
+* server endpoints for profile update
+
+## 2.5 Verification workflow is staged (not enforced at signup, but recorded)
+
+* [ ] Signup stores phone as “unverified”.
+* [ ] A future SMS verification can be enabled via config:
+
+  * `phone.requireSmsAfterKyc` or similar
+* [ ] Events logged when phone changes:
+
+  * `PHONE_ADDED`
+  * `PHONE_UPDATED`
+  * `PHONE_VERIFY_SENT`
+  * `PHONE_VERIFIED`
+* [ ] Phone update endpoint requires re-auth or additional security checks (to prevent account takeover).
+
+## 2.6 Abuse and edge cases
+
+* [ ] Phone is required on signup only if config says so (or always required if that’s your desired policy).
+* [ ] Duplicate phone handling policy exists:
+
+  * allow duplicates (with risk scoring) OR enforce uniqueness
+* [ ] Rate limiting and anti-spam controls exist (at minimum on verification send endpoints).
+
+---
+
+# 3) RENDER ENGINE AUDIT (Country → Region → Global, with token + hash integrity)
+
+## 3.1 Resolution precedence is correct everywhere
+
+The engine must always resolve legal docs in this order:
+
+1. **COUNTRY** addendum (`COUNTRY/AU`)
+2. **REGION** addendum (`REGION/AUSTRALASIA`)
+3. **DEFAULT/GLOBAL** addendum (`DEFAULT/ROW`)
+
+* [ ] Confirm this is true in:
+
+  * `/api/legal/doc1/check`
+  * `/api/legal/doc1/availability`
+  * `/api/auth/register` final verification
+  * admin preview assembler (if separate)
+
+**Files to inspect**
+
+* `server/legal/termsEngineDb.ts`
+* `server/legal/regionRules.ts`
+* routes serving doc1
+
+## 3.2 Region mapping correctness and coverage
+
+* [ ] Country-to-region mapping exists and includes:
+
+  * AU → AUSTRALASIA (or your chosen region key)
+  * All countries you listed previously (TH, PH, GH, ET, RU, UA, MX, AR, CO, CN, ID, MY, VN, etc.)
+* [ ] For countries without mapping, region resolution returns null and falls back to global.
+
+**Files to inspect**
+
+* `server/legal/regionRules.ts`
+
+## 3.3 Active pointer and versioning correctness
+
+* [ ] Active pointers table (`legal_doc_pointers`) includes:
+
+  * docSet (DOC1)
+  * docType (GLOBAL_MASTER, ADDENDUM)
+  * scopeKey (`COUNTRY/AU`, `REGION/...`, `DEFAULT/ROW`)
+  * activeDocId reference
+* [ ] Admin “Replace Active Docs” writes new pointer rows correctly and logs change.
+
+**Files to inspect**
+
+* admin routes for legal docs management
+* schema for pointers + audit
+
+## 3.4 Token issuance and verification exist (critical)
+
+* [ ] Render endpoint issues a signed token containing:
+
+  * global doc ID/version/hash
+  * addendum doc ID/version/hash
+  * combined hash
+  * country and region identity
+  * issued-at timestamp and TTL
+* [ ] Registration endpoint verifies the token **server-side**:
+
+  * signature valid
+  * not expired
+  * combined hash matches the current assembled terms (prevents “accept old terms” replay)
+* [ ] Token module exists and is not missing (this was a common break).
+
+**Files to inspect**
+
+* `server/legal/token.ts` (or `verifyTermsTokenDb.ts`)
+* `server/legal/termsEngineDb.ts`
+* register route enforcement
+
+## 3.5 UI messaging matches actual resolution scope
+
+* [ ] Signup banner should show:
+
+  * “Using Country Addendum” if COUNTRY matched
+  * “Using Regional Addendum” if REGION matched
+  * “Using Global Terms” only if DEFAULT matched
+* [ ] The API response includes a field such as `scopeKey` so the UI is not guessing.
+
+**Files to inspect**
+
+* `client/src/components/SignupAvailabilityGate.tsx`
+* `/api/legal/doc1/availability` response shape
+
+---
+
+# 4) END-TO-END COHESION CHECK (Signup → Acceptance Ledger)
+
+## 4.1 Required signup sequence
+
+Agent must confirm the sequence is enforced:
+
+1. User selects country
+2. System resolves terms (country/regional/global)
+3. System loads terms modal and requires scroll-to-end for checkbox
+4. User completes slider captcha
+5. User submits register
+6. Server verifies:
+
+   * captcha session verified
+   * terms token verified + hash matches
+   * inserts legal acceptance ledger record
+   * stores user with country + phone (unverified)
+7. User can later verify phone in Profile Settings
+
+## 4.2 Ledger write integrity
+
+* [ ] DB table `legal_acceptances` receives a row per successful signup.
+* [ ] Row includes:
+
+  * userId
+  * emailAtAcceptance
+  * countryIso2, regionKey
+  * globalDocId/version/sha
+  * addendumId/version/sha
+  * combinedSha256
+  * combinedText (assembled)
+  * termsToken
+  * ip/userAgent/sessionId
+* [ ] Hash chaining works:
+
+  * `ledgerSeq` increments
+  * `prevLedgerHash` is prior row hash
+  * `ledgerHash` recomputes correctly
+* [ ] Admin validation tool confirms chain (if you have a validate-chain function).
+
+---
+
+# 5) NEGATIVE TESTS (BYPASS RESISTANCE)
+
+## 5.1 Captcha bypass attempts
+
+* [ ] Direct POST to `/api/auth/register` without captcha session verified is rejected.
+* [ ] Attempt with incorrect captchaId fails.
+* [ ] Attempt after captcha expiry fails.
+
+## 5.2 Phone validation bypass attempts
+
+* [ ] Register with no phone (if required) is rejected.
+* [ ] Register with invalid E.164 is rejected.
+* [ ] Register with E.164 not matching selected country is rejected (if enforced).
+
+## 5.3 Terms token replay or spoof
+
+* [ ] Register with missing token is rejected.
+* [ ] Register with modified token fails signature check.
+* [ ] Register with expired token fails.
+* [ ] Register with correct token but mismatched combined hash (after admin replaced docs) fails.
+
+---
+
+# 6) PERFORMANCE AND OPERATIONAL CHECKS
+
+* [ ] Terms resolver endpoints are not excessively slow (no N+1 queries).
+* [ ] Resolver results are cacheable if needed, but caches are invalidated when pointers change.
+* [ ] Slider captcha endpoints do not create DB bloat (audit logging is bounded or configurable).
+* [ ] UI works on mobile (your screenshots are mobile; ensure layout doesn’t hide captcha or phone).
+
+---
+
+# 7) DELIVERABLE FORMAT FOR AGENT 3
+
+Agent 3 should produce:
+
+1. A checklist table (DONE/PARTIAL/MISSING) with file references.
+2. A list of exact patch actions for each “MISSING/PARTIAL” item.
+3. Proof artifacts:
+
+   * screenshots
+   * example API responses
+   * SQLite query outputs
+
+---
+
+If you want, I can also provide an “Agent 3 audit report template” (pre-formatted) that they fill out as they go, to ensure nothing gets skipped.

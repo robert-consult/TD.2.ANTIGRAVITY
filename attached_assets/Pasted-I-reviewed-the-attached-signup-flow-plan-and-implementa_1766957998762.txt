@@ -1,0 +1,1020 @@
+I reviewed the attached signup-flow plan and implementation notes.  The core design is correct (country selection as the “single source of truth” driving both phone validation and legal assembly). The main compliance hardening I’m applying before we proceed is:
+
+1. Assemble terms on the backend (canonical), not the frontend, so the server controls the exact bytes shown and hashed.
+
+
+2. Issue a signed “terms token” (HMAC) tied to {country, addendumId/version, globalVersion, combinedSha256, issuedAt} and require it on signup.
+
+
+3. Recompute and verify the hash server-side at signup time, so a client cannot swap text, country, or addendum.
+
+
+4. Persist a tamper-evident acceptance ledger (hash-chained rows) in legalAcceptances.
+
+
+
+Below is a copy/paste-ready implementation for your stack (Express + TypeScript + Drizzle + better-sqlite3 + React/wouter). All code is inline and organized by file path.
+
+
+---
+
+1) Backend: Legal terms engine + routes + audit ledger
+
+1.1 shared/schema.ts — add legalAcceptances table
+
+// FILE: /shared/schema.ts
+// Add to your existing schema exports.
+
+import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
+
+// ... your existing tables ...
+
+export const legalAcceptances = sqliteTable("legalAcceptances", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+
+  // User linkage
+  userId: integer("user_id"), // FK to users.id (enforce in app logic)
+  emailAtAcceptance: text("email_at_acceptance"),
+
+  // Jurisdiction context
+  countryIso2: text("country_iso2").notNull(),
+  regionKey: text("region_key"), // optional
+
+  // Document identifiers + hashes
+  globalDocId: text("global_doc_id").notNull(), // e.g. DOC1_GLOBAL
+  globalDocVersion: text("global_doc_version").notNull(), // e.g. 1.0
+  globalDocSha256: text("global_doc_sha256").notNull(),
+
+  addendumId: text("addendum_id").notNull(), // e.g. ADD-KE
+  addendumVersion: text("addendum_version").notNull(),
+  addendumSha256: text("addendum_sha256").notNull(),
+
+  combinedSha256: text("combined_sha256").notNull(),
+  combinedText: text("combined_text").notNull(), // store the exact rendered snapshot
+
+  // Acceptance context
+  acceptedAt: integer("accepted_at", { mode: "timestamp_ms" }).notNull(),
+  ipAddress: text("ip_address"),
+  userAgent: text("user_agent"),
+  sessionId: text("session_id"),
+
+  // Token presented at acceptance
+  termsToken: text("terms_token").notNull(),
+
+  // Tamper-evident ledger chain (global)
+  ledgerSeq: integer("ledger_seq").notNull(),
+  prevLedgerHash: text("prev_ledger_hash").notNull(),
+  ledgerHash: text("ledger_hash").notNull(),
+});
+
+
+---
+
+1.2 server/legal/doc1Pack.ts — manifest for doc locations + region rules
+
+This assumes you placed the word-for-word docs exactly where you previously saved them:
+
+/server/legal/doc1/DOC1_GLOBAL_v1.0.txt
+
+/server/legal/doc1/addenda/ADD-XX_v1.0.txt
+
+
+// FILE: /server/legal/doc1Pack.ts
+export type DocRef = {
+  id: string;
+  version: string;
+  path: string;
+};
+
+export const DOC1_GLOBAL: DocRef = {
+  id: "DOC1_GLOBAL",
+  version: "1.0",
+  path: "server/legal/doc1/DOC1_GLOBAL_v1.0.txt",
+};
+
+export const DEFAULT_ADDENDUM: DocRef = {
+  id: "ADD-ROW",
+  version: "1.0",
+  path: "server/legal/doc1/addenda/ADD-ROW_v1.0.txt",
+};
+
+// Dedicated country addenda (priority list)
+export const COUNTRY_ADDENDA: Record<string, DocRef> = {
+  US: { id: "ADD-US", version: "1.0", path: "server/legal/doc1/addenda/ADD-US_v1.0.txt" },
+  AE: { id: "ADD-AE", version: "1.0", path: "server/legal/doc1/addenda/ADD-AE_v1.0.txt" },
+  IN: { id: "ADD-IN", version: "1.0", path: "server/legal/doc1/addenda/ADD-IN_v1.0.txt" },
+  KE: { id: "ADD-KE", version: "1.0", path: "server/legal/doc1/addenda/ADD-KE_v1.0.txt" },
+  NG: { id: "ADD-NG", version: "1.0", path: "server/legal/doc1/addenda/ADD-NG_v1.0.txt" },
+  BD: { id: "ADD-BD", version: "1.0", path: "server/legal/doc1/addenda/ADD-BD_v1.0.txt" },
+  TH: { id: "ADD-TH", version: "1.0", path: "server/legal/doc1/addenda/ADD-TH_v1.0.txt" },
+  PH: { id: "ADD-PH", version: "1.0", path: "server/legal/doc1/addenda/ADD-PH_v1.0.txt" },
+  SG: { id: "ADD-SG", version: "1.0", path: "server/legal/doc1/addenda/ADD-SG_v1.0.txt" },
+  HK: { id: "ADD-HK", version: "1.0", path: "server/legal/doc1/addenda/ADD-HK_v1.0.txt" },
+  CN: { id: "ADD-CN", version: "1.0", path: "server/legal/doc1/addenda/ADD-CN_v1.0.txt" },
+  BR: { id: "ADD-BR", version: "1.0", path: "server/legal/doc1/addenda/ADD-BR_v1.0.txt" },
+  AR: { id: "ADD-AR", version: "1.0", path: "server/legal/doc1/addenda/ADD-AR_v1.0.txt" },
+  CO: { id: "ADD-CO", version: "1.0", path: "server/legal/doc1/addenda/ADD-CO_v1.0.txt" },
+  MX: { id: "ADD-MX", version: "1.0", path: "server/legal/doc1/addenda/ADD-MX_v1.0.txt" },
+  ET: { id: "ADD-ET", version: "1.0", path: "server/legal/doc1/addenda/ADD-ET_v1.0.txt" },
+  GH: { id: "ADD-GH", version: "1.0", path: "server/legal/doc1/addenda/ADD-GH_v1.0.txt" },
+  AO: { id: "ADD-AO", version: "1.0", path: "server/legal/doc1/addenda/ADD-AO_v1.0.txt" },
+  ZA: { id: "ADD-ZA", version: "1.0", path: "server/legal/doc1/addenda/ADD-ZA_v1.0.txt" },
+  UG: { id: "ADD-UG", version: "1.0", path: "server/legal/doc1/addenda/ADD-UG_v1.0.txt" },
+  TZ: { id: "ADD-TZ", version: "1.0", path: "server/legal/doc1/addenda/ADD-TZ_v1.0.txt" },
+  RU: { id: "ADD-RU", version: "1.0", path: "server/legal/doc1/addenda/ADD-RU_v1.0.txt" },
+  UA: { id: "ADD-UA", version: "1.0", path: "server/legal/doc1/addenda/ADD-UA_v1.0.txt" },
+  GB: { id: "ADD-UK", version: "1.0", path: "server/legal/doc1/addenda/ADD-UK_v1.0.txt" }
+};
+
+// Regional addenda docs
+export const REGION_ADDENDA: Record<string, DocRef> = {
+  WEST_EUROPE: { id: "ADD-WEST_EUROPE", version: "1.0", path: "server/legal/doc1/addenda/ADD-WEST_EUROPE_v1.0.txt" },
+  EAST_EUROPE: { id: "ADD-EAST_EUROPE", version: "1.0", path: "server/legal/doc1/addenda/ADD-EAST_EUROPE_v1.0.txt" },
+  SE_ASIA: { id: "ADD-SE_ASIA", version: "1.0", path: "server/legal/doc1/addenda/ADD-SE_ASIA_v1.0.txt" },
+  MIDDLE_EAST: { id: "ADD-MIDDLE_EAST", version: "1.0", path: "server/legal/doc1/addenda/ADD-MIDDLE_EAST_v1.0.txt" },
+  NORTH_AFRICA: { id: "ADD-NORTH_AFRICA", version: "1.0", path: "server/legal/doc1/addenda/ADD-NORTH_AFRICA_v1.0.txt" },
+  WEST_AFRICA: { id: "ADD-WEST_AFRICA", version: "1.0", path: "server/legal/doc1/addenda/ADD-WEST_AFRICA_v1.0.txt" },
+  EAST_AFRICA: { id: "ADD-EAST_AFRICA", version: "1.0", path: "server/legal/doc1/addenda/ADD-EAST_AFRICA_v1.0.txt" },
+  SOUTHERN_AFRICA: { id: "ADD-SOUTHERN_AFRICA", version: "1.0", path: "server/legal/doc1/addenda/ADD-SOUTHERN_AFRICA_v1.0.txt" },
+  CENTRAL_AFRICA: { id: "ADD-CENTRAL_AFRICA", version: "1.0", path: "server/legal/doc1/addenda/ADD-CENTRAL_AFRICA_v1.0.txt" },
+  SOUTH_AMERICA: { id: "ADD-SOUTH_AMERICA", version: "1.0", path: "server/legal/doc1/addenda/ADD-SOUTH_AMERICA_v1.0.txt" },
+  CENTRAL_AMERICA: { id: "ADD-CENTRAL_AMERICA", version: "1.0", path: "server/legal/doc1/addenda/ADD-CENTRAL_AMERICA_v1.0.txt" },
+  NORTH_AMERICA: { id: "ADD-NORTH_AMERICA", version: "1.0", path: "server/legal/doc1/addenda/ADD-NORTH_AMERICA_v1.0.txt" },
+  CENTRAL_ASIA: { id: "ADD-CENTRAL_ASIA", version: "1.0", path: "server/legal/doc1/addenda/ADD-CENTRAL_ASIA_v1.0.txt" },
+  JAPAN: { id: "ADD-JAPAN", version: "1.0", path: "server/legal/doc1/addenda/ADD-JAPAN_v1.0.txt" },
+  SOUTH_KOREA: { id: "ADD-SOUTH_KOREA", version: "1.0", path: "server/legal/doc1/addenda/ADD-SOUTH_KOREA_v1.0.txt" },
+  PAKISTAN: { id: "ADD-PAKISTAN", version: "1.0", path: "server/legal/doc1/addenda/ADD-PAKISTAN_v1.0.txt" },
+  AUSTRALASIA: { id: "ADD-AUSTRALASIA", version: "1.0", path: "server/legal/doc1/addenda/ADD-AUSTRALASIA_v1.0.txt" },
+  PACIFIC_ISLANDS: { id: "ADD-PACIFIC_ISLANDS", version: "1.0", path: "server/legal/doc1/addenda/ADD-PACIFIC_ISLANDS_v1.0.txt" },
+  INDIAN_OCEAN_ISLANDS: { id: "ADD-INDIAN_OCEAN_ISLANDS", version: "1.0", path: "server/legal/doc1/addenda/ADD-INDIAN_OCEAN_ISLANDS_v1.0.txt" },
+};
+
+export type RegionRule = { regionKey: string; iso2: string[] };
+
+// Order matters (first match wins)
+export const REGION_RULES_IN_ORDER: RegionRule[] = [
+  { regionKey: "MIDDLE_EAST", iso2: ["BH","IQ","IR","IL","JO","KW","LB","OM","PS","QA","SA","SY","TR","YE"] },
+  { regionKey: "NORTH_AFRICA", iso2: ["DZ","EG","LY","MA","SD","SS","TN","EH"] },
+  { regionKey: "WEST_AFRICA", iso2: ["BJ","BF","CV","CI","GM","GN","GW","LR","ML","MR","NE","SH","SL","SN","TG"] },
+  { regionKey: "EAST_AFRICA", iso2: ["BI","DJ","ER","KM","MG","MW","MZ","RE","RW","SC","SO","YT","ZM","ZW"] },
+  { regionKey: "SOUTHERN_AFRICA", iso2: ["BW","LS","NA","SZ"] },
+  { regionKey: "CENTRAL_AFRICA", iso2: ["CF","CG","CD","CM","GQ","GA","ST","TD"] },
+
+  { regionKey: "SE_ASIA", iso2: ["BN","KH","ID","LA","MM","MY","TL","VN"] },
+
+  { regionKey: "JAPAN", iso2: ["JP"] },
+  { regionKey: "SOUTH_KOREA", iso2: ["KR"] },
+  { regionKey: "PAKISTAN", iso2: ["PK"] },
+
+  { regionKey: "WEST_EUROPE", iso2: ["AT","BE","CH","DE","DK","ES","FI","FR","IE","IS","IT","LI","LU","MC","NL","NO","PT","SE"] },
+  { regionKey: "EAST_EUROPE", iso2: ["AL","BA","BG","BY","CZ","EE","GR","HR","HU","LT","LV","MD","ME","MK","PL","RO","RS","SI","SK","XK"] },
+
+  { regionKey: "NORTH_AMERICA", iso2: ["CA","GL","PM","BM"] },
+  { regionKey: "CENTRAL_AMERICA", iso2: ["BZ","CR","GT","HN","NI","PA","SV"] },
+  { regionKey: "SOUTH_AMERICA", iso2: ["BO","CL","EC","GF","GY","PE","PY","SR","UY","VE"] },
+
+  { regionKey: "CENTRAL_ASIA", iso2: ["KZ","KG","TJ","TM","UZ","AF"] },
+
+  { regionKey: "AUSTRALASIA", iso2: ["AU","NZ"] },
+  { regionKey: "PACIFIC_ISLANDS", iso2: ["FJ","FM","KI","MH","NR","NU","PF","PG","PW","SB","TO","TV","VU","WS","CK"] },
+  { regionKey: "INDIAN_OCEAN_ISLANDS", iso2: ["MU","MV","IO"] },
+];
+
+
+---
+
+1.3 server/legal/cryptoUtils.ts — sha256 + stable stringify + HMAC token
+
+// FILE: /server/legal/cryptoUtils.ts
+import crypto from "crypto";
+
+export function sha256Hex(input: string): string {
+  return crypto.createHash("sha256").update(input, "utf8").digest("hex");
+}
+
+// Deterministic stringify for hashing ledger payloads
+export function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+
+  if (Array.isArray(value)) {
+    return "[" + value.map((v) => stableStringify(v)).join(",") + "]";
+  }
+
+  const obj = value as Record<string, unknown>;
+  const keys = Object.keys(obj).sort();
+  return (
+    "{" +
+    keys
+      .map((k) => JSON.stringify(k) + ":" + stableStringify(obj[k]))
+      .join(",") +
+    "}"
+  );
+}
+
+export function base64UrlEncode(str: string): string {
+  return Buffer.from(str, "utf8")
+    .toString("base64")
+    .replaceAll("+", "-")
+    .replaceAll("/", "_")
+    .replaceAll("=", "");
+}
+
+export function base64UrlDecode(str: string): string {
+  const padLen = (4 - (str.length % 4)) % 4;
+  const padded = str + "=".repeat(padLen);
+  const b64 = padded.replaceAll("-", "+").replaceAll("_", "/");
+  return Buffer.from(b64, "base64").toString("utf8");
+}
+
+export function hmacSha256Hex(secret: string, payload: string): string {
+  return crypto.createHmac("sha256", secret).update(payload, "utf8").digest("hex");
+}
+
+
+---
+
+1.4 server/legal/termsEngine.ts — resolve addendum, assemble, hash, tokenize
+
+// FILE: /server/legal/termsEngine.ts
+import fs from "fs";
+import path from "path";
+import {
+  DOC1_GLOBAL,
+  DEFAULT_ADDENDUM,
+  COUNTRY_ADDENDA,
+  REGION_ADDENDA,
+  REGION_RULES_IN_ORDER,
+  DocRef,
+} from "./doc1Pack";
+import { base64UrlEncode, base64UrlDecode, hmacSha256Hex, sha256Hex } from "./cryptoUtils";
+
+type ResolveResult = { addendum: DocRef; regionKey?: string | null };
+
+export type AssembledTerms = {
+  global: { id: string; version: string; sha256: string };
+  addendum: { id: string; version: string; sha256: string; regionKey?: string | null };
+  combined: { sha256: string; text: string };
+  meta: { countryIso2: string; regionKey?: string | null; issuedAtMs: number };
+  token: string;
+};
+
+const CACHE = new Map<string, AssembledTerms>();
+
+function normalizeIso2(iso2: string): string {
+  const up = (iso2 || "").trim().toUpperCase();
+  if (!/^[A-Z]{2}$/.test(up)) throw new Error("Invalid country ISO2.");
+  return up;
+}
+
+function resolveRegionKey(iso2: string): string | null {
+  for (const rule of REGION_RULES_IN_ORDER) {
+    if (rule.iso2.includes(iso2)) return rule.regionKey;
+  }
+  return null;
+}
+
+function resolveAddendum(iso2: string): ResolveResult {
+  if (COUNTRY_ADDENDA[iso2]) return { addendum: COUNTRY_ADDENDA[iso2], regionKey: null };
+
+  const regionKey = resolveRegionKey(iso2);
+  if (regionKey && REGION_ADDENDA[regionKey]) return { addendum: REGION_ADDENDA[regionKey], regionKey };
+
+  return { addendum: DEFAULT_ADDENDUM, regionKey: null };
+}
+
+function readTextFile(relPath: string): string {
+  const abs = path.resolve(process.cwd(), relPath);
+  return fs.readFileSync(abs, "utf8");
+}
+
+function requireSecret(): string {
+  const secret = process.env.LEGAL_TERMS_HMAC_SECRET;
+  if (!secret || secret.length < 32) {
+    throw new Error("LEGAL_TERMS_HMAC_SECRET missing/too short (min 32 chars).");
+  }
+  return secret;
+}
+
+export function assembleDoc1Terms(countryIso2Raw: string): AssembledTerms {
+  const countryIso2 = normalizeIso2(countryIso2Raw);
+  const { addendum, regionKey } = resolveAddendum(countryIso2);
+
+  const cacheKey = `${countryIso2}|${DOC1_GLOBAL.id}@${DOC1_GLOBAL.version}|${addendum.id}@${addendum.version}`;
+  const cached = CACHE.get(cacheKey);
+  if (cached) return cached;
+
+  const globalText = readTextFile(DOC1_GLOBAL.path);
+  const addendumText = readTextFile(addendum.path);
+
+  const globalSha = sha256Hex(globalText);
+  const addendumSha = sha256Hex(addendumText);
+
+  const combinedText =
+    globalText +
+    "\n\n---\n\n" +
+    "AUTO-SELECTED ADDENDUM:\n" +
+    `Addendum ID: ${addendum.id}\n` +
+    `Addendum Version: ${addendum.version}\n` +
+    `Country Selected: ${countryIso2}\n` +
+    (regionKey ? `Region Key: ${regionKey}\n` : "") +
+    "\n" +
+    addendumText;
+
+  const combinedSha = sha256Hex(combinedText);
+
+  const issuedAtMs = Date.now();
+  const payloadObj = {
+    v: 1,
+    countryIso2,
+    regionKey: regionKey ?? null,
+    global: { id: DOC1_GLOBAL.id, version: DOC1_GLOBAL.version, sha256: globalSha },
+    addendum: { id: addendum.id, version: addendum.version, sha256: addendumSha },
+    combinedSha256: combinedSha,
+    issuedAtMs,
+  };
+
+  const payloadJson = JSON.stringify(payloadObj);
+  const payloadB64 = base64UrlEncode(payloadJson);
+  const sig = hmacSha256Hex(requireSecret(), payloadB64);
+  const token = `${payloadB64}.${sig}`;
+
+  const assembled: AssembledTerms = {
+    global: { id: DOC1_GLOBAL.id, version: DOC1_GLOBAL.version, sha256: globalSha },
+    addendum: { id: addendum.id, version: addendum.version, sha256: addendumSha, regionKey: regionKey ?? null },
+    combined: { sha256: combinedSha, text: combinedText },
+    meta: { countryIso2, regionKey: regionKey ?? null, issuedAtMs },
+    token,
+  };
+
+  CACHE.set(cacheKey, assembled);
+  return assembled;
+}
+
+export type VerifiedToken = {
+  ok: true;
+  payload: {
+    countryIso2: string;
+    regionKey: string | null;
+    global: { id: string; version: string; sha256: string };
+    addendum: { id: string; version: string; sha256: string };
+    combinedSha256: string;
+    issuedAtMs: number;
+  };
+} | { ok: false; reason: string };
+
+export function verifyTermsToken(token: string, maxAgeMs = 24 * 60 * 60 * 1000): VerifiedToken {
+  try {
+    const parts = (token || "").split(".");
+    if (parts.length !== 2) return { ok: false, reason: "Bad token format." };
+    const [payloadB64, sig] = parts;
+    const expected = hmacSha256Hex(requireSecret(), payloadB64);
+    if (!cryptoSafeEqualHex(sig, expected)) return { ok: false, reason: "Bad token signature." };
+
+    const payloadJson = base64UrlDecode(payloadB64);
+    const payload = JSON.parse(payloadJson);
+
+    if (!payload?.countryIso2 || !payload?.combinedSha256 || !payload?.issuedAtMs) {
+      return { ok: false, reason: "Token payload missing fields." };
+    }
+
+    const age = Date.now() - Number(payload.issuedAtMs);
+    if (age < 0 || age > maxAgeMs) return { ok: false, reason: "Token expired." };
+
+    return { ok: true, payload };
+  } catch (e: any) {
+    return { ok: false, reason: `Token verify error: ${e?.message || "unknown"}` };
+  }
+}
+
+function cryptoSafeEqualHex(a: string, b: string): boolean {
+  try {
+    const ba = Buffer.from(a, "hex");
+    const bb = Buffer.from(b, "hex");
+    if (ba.length !== bb.length) return false;
+    // timingSafeEqual throws if lengths differ (handled above)
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const crypto = require("crypto");
+    return crypto.timingSafeEqual(ba, bb);
+  } catch {
+    return false;
+  }
+}
+
+
+---
+
+1.5 server/routes/legal.ts — endpoint to fetch assembled terms (canonical)
+
+// FILE: /server/routes/legal.ts
+import { Router } from "express";
+import { assembleDoc1Terms } from "../legal/termsEngine";
+
+export const legalRouter = Router();
+
+// GET /api/legal/doc1?country=KE
+legalRouter.get("/doc1", (req, res) => {
+  try {
+    const country = String(req.query.country || "");
+    const assembled = assembleDoc1Terms(country);
+
+    // Return canonical rendered text + hashes + token
+    return res.json({
+      ok: true,
+      global: assembled.global,
+      addendum: assembled.addendum,
+      combinedSha256: assembled.combined.sha256,
+      issuedAtMs: assembled.meta.issuedAtMs,
+      countryIso2: assembled.meta.countryIso2,
+      regionKey: assembled.meta.regionKey,
+      token: assembled.token,
+      text: assembled.combined.text,
+    });
+  } catch (e: any) {
+    return res.status(400).json({ ok: false, error: e?.message || "Failed to assemble terms." });
+  }
+});
+
+
+---
+
+1.6 server/legal/legalAcceptanceService.ts — insert acceptance + hash-chained ledger
+
+// FILE: /server/legal/legalAcceptanceService.ts
+import { db } from "../db";
+import { legalAcceptances } from "../../shared/schema";
+import { desc } from "drizzle-orm";
+import { sha256Hex, stableStringify } from "./cryptoUtils";
+
+type InsertAcceptanceArgs = {
+  userId: number;
+  emailAtAcceptance: string | null;
+  countryIso2: string;
+  regionKey: string | null;
+
+  global: { id: string; version: string; sha256: string };
+  addendum: { id: string; version: string; sha256: string };
+  combined: { sha256: string; text: string };
+
+  termsToken: string;
+
+  acceptedAtMs: number;
+  ipAddress?: string | null;
+  userAgent?: string | null;
+  sessionId?: string | null;
+};
+
+export function insertLegalAcceptanceWithLedger(args: InsertAcceptanceArgs) {
+  return db.transaction((tx) => {
+    const last = tx
+      .select({
+        ledgerSeq: legalAcceptances.ledgerSeq,
+        ledgerHash: legalAcceptances.ledgerHash,
+      })
+      .from(legalAcceptances)
+      .orderBy(desc(legalAcceptances.ledgerSeq))
+      .limit(1)
+      .all();
+
+    const prevSeq = last.length ? Number(last[0].ledgerSeq) : 0;
+    const prevHash = last.length ? String(last[0].ledgerHash) : "GENESIS";
+    const nextSeq = prevSeq + 1;
+
+    const payloadForLedger = {
+      ledgerSeq: nextSeq,
+      prevLedgerHash: prevHash,
+
+      userId: args.userId,
+      emailAtAcceptance: args.emailAtAcceptance,
+      countryIso2: args.countryIso2,
+      regionKey: args.regionKey,
+
+      global: args.global,
+      addendum: args.addendum,
+      combinedSha256: args.combined.sha256,
+
+      acceptedAtMs: args.acceptedAtMs,
+      ipAddress: args.ipAddress ?? null,
+      userAgent: args.userAgent ?? null,
+      sessionId: args.sessionId ?? null,
+      termsToken: args.termsToken,
+    };
+
+    const ledgerPayloadStr = stableStringify(payloadForLedger);
+    const ledgerHash = sha256Hex(`${prevHash}|${ledgerPayloadStr}`);
+
+    tx.insert(legalAcceptances).values({
+      userId: args.userId,
+      emailAtAcceptance: args.emailAtAcceptance ?? null,
+
+      countryIso2: args.countryIso2,
+      regionKey: args.regionKey ?? null,
+
+      globalDocId: args.global.id,
+      globalDocVersion: args.global.version,
+      globalDocSha256: args.global.sha256,
+
+      addendumId: args.addendum.id,
+      addendumVersion: args.addendum.version,
+      addendumSha256: args.addendum.sha256,
+
+      combinedSha256: args.combined.sha256,
+      combinedText: args.combined.text,
+
+      acceptedAt: new Date(args.acceptedAtMs),
+      ipAddress: args.ipAddress ?? null,
+      userAgent: args.userAgent ?? null,
+      sessionId: args.sessionId ?? null,
+
+      termsToken: args.termsToken,
+
+      ledgerSeq: nextSeq,
+      prevLedgerHash: prevHash,
+      ledgerHash,
+    }).run();
+
+    return { ledgerSeq: nextSeq, prevLedgerHash: prevHash, ledgerHash };
+  });
+}
+
+
+---
+
+1.7 Signup route: verify token + hash, then create user, then log acceptance
+
+Wherever your signup endpoint is, apply this pattern. If you have POST /api/auth/signup, use the below.
+
+// FILE: /server/routes/auth.signup.ts
+import { Router } from "express";
+import { assembleDoc1Terms, verifyTermsToken } from "../legal/termsEngine";
+import { insertLegalAcceptanceWithLedger } from "../legal/legalAcceptanceService";
+import { db } from "../db";
+import { users } from "../../shared/schema"; // adjust import if your users table name differs
+
+export const authSignupRouter = Router();
+
+/**
+ * Expected payload:
+ * {
+ *   email, username, password, countryIso2, phoneE164,
+ *   legal: { token, combinedSha256 }
+ * }
+ */
+authSignupRouter.post("/signup", (req, res) => {
+  try {
+    const { email, username, password, countryIso2, phoneE164, legal } = req.body || {};
+    if (!email || !username || !password) return res.status(400).json({ ok: false, error: "Missing required fields." });
+    if (!countryIso2) return res.status(400).json({ ok: false, error: "Missing country." });
+    if (!legal?.token || !legal?.combinedSha256) return res.status(400).json({ ok: false, error: "Missing legal acceptance." });
+
+    // 1) Verify token signature + expiry
+    const vt = verifyTermsToken(String(legal.token));
+    if (!vt.ok) return res.status(400).json({ ok: false, error: `Invalid terms token: ${vt.reason}` });
+
+    // 2) Re-assemble canonical terms for the claimed country
+    const assembled = assembleDoc1Terms(String(countryIso2));
+
+    // 3) Ensure token payload matches assembled terms
+    const tokenCountry = String((vt as any).payload.countryIso2);
+    const tokenCombined = String((vt as any).payload.combinedSha256);
+
+    if (tokenCountry !== assembled.meta.countryIso2) {
+      return res.status(400).json({ ok: false, error: "Terms token country mismatch." });
+    }
+
+    if (tokenCombined !== assembled.combined.sha256) {
+      return res.status(400).json({ ok: false, error: "Terms token does not match current terms." });
+    }
+
+    // 4) Ensure client-reported hash matches canonical hash
+    if (String(legal.combinedSha256) !== assembled.combined.sha256) {
+      return res.status(400).json({ ok: false, error: "Client hash mismatch; reload terms and retry." });
+    }
+
+    // 5) Create user (simplified: replace with your actual password hashing and user creation logic)
+    // IMPORTANT: hash password properly in your existing auth system.
+    const created = db
+      .insert(users)
+      .values({
+        email,
+        username,
+        passwordHash: password, // <-- replace: store a real hash
+        countryIso: assembled.meta.countryIso2,
+        phone: phoneE164 ?? null,
+        createdAt: new Date(),
+      } as any)
+      .returning({ id: users.id })
+      .get();
+
+    const userId = Number(created?.id);
+    if (!userId) return res.status(500).json({ ok: false, error: "User creation failed." });
+
+    // 6) Audit: insert legal acceptance snapshot + ledger chain
+    const ipAddress = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.socket.remoteAddress || null;
+    const userAgent = String(req.headers["user-agent"] || "");
+    const sessionId = String(req.headers["x-session-id"] || ""); // optional if you have one
+
+    const ledger = insertLegalAcceptanceWithLedger({
+      userId,
+      emailAtAcceptance: email,
+      countryIso2: assembled.meta.countryIso2,
+      regionKey: assembled.meta.regionKey ?? null,
+      global: assembled.global,
+      addendum: { id: assembled.addendum.id, version: assembled.addendum.version, sha256: assembled.addendum.sha256 },
+      combined: { sha256: assembled.combined.sha256, text: assembled.combined.text },
+      termsToken: assembled.token,
+      acceptedAtMs: Date.now(),
+      ipAddress,
+      userAgent,
+      sessionId: sessionId || null,
+    });
+
+    return res.json({ ok: true, userId, legalLedger: ledger });
+  } catch (e: any) {
+    return res.status(500).json({ ok: false, error: e?.message || "Signup failed." });
+  }
+});
+
+Note: Replace passwordHash: password with your actual password hashing mechanism.
+
+
+---
+
+1.8 Wire routes in server/index.ts
+
+// FILE: /server/index.ts
+import express from "express";
+import { legalRouter } from "./routes/legal";
+import { authSignupRouter } from "./routes/auth.signup";
+
+const app = express();
+app.use(express.json());
+
+// Terms endpoint
+app.use("/api/legal", legalRouter);
+
+// Signup endpoint
+app.use("/api/auth", authSignupRouter);
+
+// ... existing routes ...
+
+export default app;
+
+
+---
+
+2) Frontend: Signup embed + dynamic terms modal + scroll gating
+
+2.1 client/src/pages/SignupPage.tsx — country selection triggers legal fetch
+
+This is a drop-in page (adjust route wiring to your wouter setup).
+
+// FILE: /client/src/pages/SignupPage.tsx
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { Link, useLocation } from "wouter";
+
+type LegalDocResponse = {
+  ok: boolean;
+  global?: { id: string; version: string; sha256: string };
+  addendum?: { id: string; version: string; sha256: string; regionKey?: string | null };
+  combinedSha256?: string;
+  issuedAtMs?: number;
+  countryIso2?: string;
+  regionKey?: string | null;
+  token?: string;
+  text?: string;
+  error?: string;
+};
+
+export default function SignupPage() {
+  const [, setLocation] = useLocation();
+
+  const [email, setEmail] = useState("");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [countryIso2, setCountryIso2] = useState("");
+  const [phoneE164, setPhoneE164] = useState("");
+
+  const [legal, setLegal] = useState<LegalDocResponse | null>(null);
+  const [legalLoading, setLegalLoading] = useState(false);
+  const [termsOpen, setTermsOpen] = useState(false);
+  const [scrolledToEnd, setScrolledToEnd] = useState(false);
+  const [accepted, setAccepted] = useState(false);
+
+  // Reset acceptance if country changes
+  useEffect(() => {
+    setAccepted(false);
+    setScrolledToEnd(false);
+  }, [countryIso2]);
+
+  // Fetch terms whenever country changes
+  useEffect(() => {
+    async function run() {
+      if (!countryIso2) {
+        setLegal(null);
+        return;
+      }
+      setLegalLoading(true);
+      try {
+        const res = await fetch(`/api/legal/doc1?country=${encodeURIComponent(countryIso2)}`);
+        const data: LegalDocResponse = await res.json();
+        setLegal(data.ok ? data : data);
+      } catch (e: any) {
+        setLegal({ ok: false, error: e?.message || "Failed to load terms." });
+      } finally {
+        setLegalLoading(false);
+      }
+    }
+    run();
+  }, [countryIso2]);
+
+  const canSubmit = useMemo(() => {
+    return (
+      !!email &&
+      !!username &&
+      !!password &&
+      !!countryIso2 &&
+      !!phoneE164 &&
+      !!legal?.ok &&
+      !!legal?.token &&
+      !!legal?.combinedSha256 &&
+      accepted
+    );
+  }, [email, username, password, countryIso2, phoneE164, legal, accepted]);
+
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!canSubmit || !legal?.ok) return;
+
+    const payload = {
+      email,
+      username,
+      password,
+      countryIso2,
+      phoneE164,
+      legal: {
+        token: legal.token,
+        combinedSha256: legal.combinedSha256,
+      },
+    };
+
+    const res = await fetch("/api/auth/signup", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+
+    const data = await res.json();
+    if (!data?.ok) {
+      alert(data?.error || "Signup failed.");
+      return;
+    }
+    setLocation("/"); // or login page
+  }
+
+  return (
+    <div style={{ maxWidth: 560, margin: "24px auto", padding: 16 }}>
+      <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 8 }}>Create Trader Account</h1>
+
+      <form onSubmit={onSubmit} style={{ display: "grid", gap: 12 }}>
+        <label>
+          Email
+          <input value={email} onChange={(e) => setEmail(e.target.value)} style={inputStyle} />
+        </label>
+
+        <label>
+          Username
+          <input value={username} onChange={(e) => setUsername(e.target.value)} style={inputStyle} />
+        </label>
+
+        <label>
+          Password
+          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} style={inputStyle} />
+        </label>
+
+        <label>
+          Country of Residence (ISO2)
+          <input
+            value={countryIso2}
+            onChange={(e) => setCountryIso2(e.target.value.toUpperCase())}
+            placeholder="e.g., KE, US, IN"
+            style={inputStyle}
+          />
+          <div style={{ fontSize: 12, opacity: 0.7, marginTop: 4 }}>
+            This selection controls both phone validation rules and the legal addendum loaded.
+          </div>
+        </label>
+
+        <label>
+          Phone (E.164)
+          <input value={phoneE164} onChange={(e) => setPhoneE164(e.target.value)} placeholder="+2547..." style={inputStyle} />
+        </label>
+
+        <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+          <button
+            type="button"
+            onClick={() => setTermsOpen(true)}
+            disabled={!countryIso2 || legalLoading || !legal?.ok}
+            style={buttonStyle}
+          >
+            {legalLoading ? "Loading Terms..." : "View Terms & Conditions"}
+          </button>
+
+          <div style={{ fontSize: 12, opacity: 0.85 }}>
+            {legal?.ok ? (
+              <>
+                Loaded: <strong>{legal.addendum?.id}</strong> (v{legal.addendum?.version})
+              </>
+            ) : (
+              countryIso2 && <span style={{ color: "#b00020" }}>{legal?.error || "Terms not loaded."}</span>
+            )}
+          </div>
+        </div>
+
+        <label style={{ display: "flex", gap: 10, alignItems: "center" }}>
+          <input
+            type="checkbox"
+            checked={accepted}
+            onChange={(e) => setAccepted(e.target.checked)}
+            disabled={!legal?.ok || !scrolledToEnd}
+          />
+          <span>
+            I accept the Terms & Conditions
+            {!scrolledToEnd && <span style={{ marginLeft: 6, fontSize: 12, opacity: 0.7 }}>(scroll to the end in the Terms modal)</span>}
+          </span>
+        </label>
+
+        <button type="submit" disabled={!canSubmit} style={{ ...buttonStyle, opacity: canSubmit ? 1 : 0.6 }}>
+          Create Account
+        </button>
+
+        <div style={{ fontSize: 12, opacity: 0.75 }}>
+          Already have an account? <Link href="/login">Log in</Link>
+        </div>
+      </form>
+
+      <TermsModal
+        open={termsOpen}
+        onClose={() => setTermsOpen(false)}
+        title="TradeQuip Terms & Conditions"
+        text={legal?.ok ? (legal.text || "") : ""}
+        footerMeta={legal?.ok ? `Document hash: ${legal.combinedSha256}` : ""}
+        onScrolledToEnd={() => setScrolledToEnd(true)}
+      />
+    </div>
+  );
+}
+
+function TermsModal(props: {
+  open: boolean;
+  onClose: () => void;
+  title: string;
+  text: string;
+  footerMeta?: string;
+  onScrolledToEnd: () => void;
+}) {
+  const { open, onClose, title, text, footerMeta, onScrolledToEnd } = props;
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    // reset scroll position on open
+    const el = scrollRef.current;
+    if (el) el.scrollTop = 0;
+  }, [open, text]);
+
+  function onScroll() {
+    const el = scrollRef.current;
+    if (!el) return;
+    const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 8;
+    if (atBottom) onScrolledToEnd();
+  }
+
+  if (!open) return null;
+
+  return (
+    <div style={modalOverlay} onMouseDown={onClose}>
+      <div style={modalCard} onMouseDown={(e) => e.stopPropagation()}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
+          <div style={{ fontSize: 16, fontWeight: 700 }}>{title}</div>
+          <button onClick={onClose} style={buttonStyle}>Close</button>
+        </div>
+
+        <div
+          ref={scrollRef}
+          onScroll={onScroll}
+          style={{
+            marginTop: 12,
+            border: "1px solid rgba(0,0,0,0.15)",
+            borderRadius: 8,
+            height: 420,
+            overflow: "auto",
+            padding: 12,
+            whiteSpace: "pre-wrap",
+            fontSize: 12,
+            lineHeight: 1.4,
+          }}
+        >
+          {text || "No terms loaded."}
+        </div>
+
+        <div style={{ marginTop: 10, fontSize: 12, opacity: 0.75 }}>
+          {footerMeta || ""}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const inputStyle: React.CSSProperties = {
+  width: "100%",
+  padding: "10px 12px",
+  borderRadius: 8,
+  border: "1px solid rgba(0,0,0,0.2)",
+  marginTop: 6,
+};
+
+const buttonStyle: React.CSSProperties = {
+  padding: "10px 12px",
+  borderRadius: 8,
+  border: "1px solid rgba(0,0,0,0.2)",
+  background: "white",
+  cursor: "pointer",
+};
+
+const modalOverlay: React.CSSProperties = {
+  position: "fixed",
+  inset: 0,
+  background: "rgba(0,0,0,0.35)",
+  display: "grid",
+  placeItems: "center",
+  padding: 16,
+  zIndex: 1000,
+};
+
+const modalCard: React.CSSProperties = {
+  width: "min(900px, 96vw)",
+  background: "white",
+  borderRadius: 12,
+  padding: 14,
+  boxShadow: "0 12px 30px rgba(0,0,0,0.25)",
+};
+
+
+---
+
+3) Ops: Environment variables + minimal checklist
+
+3.1 Required env var
+
+Set this in Replit Secrets:
+
+LEGAL_TERMS_HMAC_SECRET = a-long-random-secret-at-least-32-characters
+
+3.2 Minimum operational checklist
+
+Confirm the doc files exist at the paths used in doc1Pack.ts.
+
+Confirm GET /api/legal/doc1?country=KE returns:
+
+text, combinedSha256, token, and correct addendum.id.
+
+
+Confirm signup rejects:
+
+missing legal.token
+
+wrong country/token mismatch
+
+altered combinedSha256
+
+
+Confirm legalAcceptances rows are inserted and ledgerSeq increments with hash chaining.
+
+
+
+---
+
+4) What I applied from your attached plan (and what I tightened)
+
+From your design note, I retained:
+
+Country selection as the driver for both phone and legal engines.
+
+Assembling Global + Addendum in real time at country selection.
+
+Persisting a hash and metadata at acceptance. 
+
+
+And I tightened:
+
+Canonical assembly moved to backend + tokenization (prevents client spoofing).
+
+Recompute-and-verify at signup (prevents “terms mismatch”).
+
+Tamper-evident ledger (hash chain) for hedge-fund-grade auditability.
+
+
+
+---
+
+If you want the next increment immediately after this: I can add an Admin endpoint + UI mini-tab that lists legal acceptances per user, validates the ledger chain end-to-end, and exports a CSV/JSON with hashes and document versions for compliance reviews.

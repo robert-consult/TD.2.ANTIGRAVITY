@@ -1,0 +1,139 @@
+Perfect — that’s a clear and strong design principle:
+
+> **Global limits** (from the *Trade Settings* tab) apply **platform-wide as defaults**, but **user-specific overrides in the User Management tab** may *exceed* them.
+
+This means:
+
+* The *Trade Settings tab* defines baseline risk parameters for the entire platform.
+* The *User Management tab* defines overrides that **replace** (not cap) those global values for individual accounts.
+* The enforcement layer (trade placement, risk middleware, order engine) must respect user overrides as **authoritative**, while falling back to global values if not set.
+
+Below is a full inline implementation plan + code patches to make that consistent across all layers.
+
+---
+
+# 1) Policy Summary for Enforcement Consistency
+
+| Source                                  | Priority       | Scope                  | Example                                     |
+| --------------------------------------- | -------------- | ---------------------- | ------------------------------------------- |
+| **User Settings** (`user_settings`)     | Highest        | Individual trader      | Override leverage, trade count, lot limits  |
+| **Global Settings** (`global_settings`) | Default        | Platform-wide baseline | Used when user has no override              |
+| **Hardcoded Defaults** (fallbacks)      | Emergency only | Safety net             | e.g., 5 trades / 3 per instrument / 50 lots |
+
+---
+
+# 2) Code Adjustments (INLINE)
+
+## A) `server/risk.ts` — replace Math.min() with user override priority
+
+### Replace this part:
+
+```diff
+-  const effectiveMaxTradesPerUser = Math.min(Number(us?.maxConcurrent ?? gMaxTradesPerUser), gMaxTradesPerUser);
+-  const effectiveMaxConcurrentLots = Math.min(Number(us?.maxConcurrentLots ?? gMaxConcurrentLots), gMaxConcurrentLots);
++  const effectiveMaxTradesPerUser = Number(us?.maxConcurrent ?? gMaxTradesPerUser);
++  const effectiveMaxConcurrentLots = Number(us?.maxConcurrentLots ?? gMaxConcurrentLots);
+```
+
+### Explanation:
+
+* If a user override exists, it’s used directly (can exceed global).
+* If not, fallback to platform default.
+
+---
+
+## B) `server/routes.ts` (Trade Placement Enforcement) — same adjustment
+
+Find your `/api/trades` handler where you had:
+
+```diff
+-      const effMaxTradesPerUser = Math.min(gMaxTradesPerUser, uMaxTradesPerUser);
+-      const effMaxConcurrentLots = Math.min(gMaxConcurrentLots, uMaxConcurrentLots);
++      const effMaxTradesPerUser = Number(uMaxTradesPerUser ?? gMaxTradesPerUser);
++      const effMaxConcurrentLots = Number(uMaxConcurrentLots ?? gMaxConcurrentLots);
+```
+
+This ensures the *user-specific* limits are **effective**, not capped by global.
+
+---
+
+## C) `server/engine/orderEngine.ts` — align fill-time enforcement
+
+Find this block in your `processPendingForSymbol(...)`:
+
+```diff
+-    const maxActiveTrades = Math.min(Number(r.s?.maxConcurrent ?? g.maxTradesPerUser), g.maxTradesPerUser);
+-    const maxConcurrentLots = Math.min(Number(r.s?.maxConcurrentLots ?? g.maxConcurrentLots), g.maxConcurrentLots);
++    const maxActiveTrades = Number(r.s?.maxConcurrent ?? g.maxTradesPerUser);
++    const maxConcurrentLots = Number(r.s?.maxConcurrentLots ?? g.maxConcurrentLots);
+```
+
+Now pending-order fills also allow higher values if user overrides exist.
+
+---
+
+# 3) Verify Flow — end-to-end logic check
+
+| Layer                             | Uses Global | Uses User Override        | Behavior                                    |
+| --------------------------------- | ----------- | ------------------------- | ------------------------------------------- |
+| **Trade Settings UI**             | Yes         | N/A                       | Admin sets platform-wide defaults           |
+| **User Management UI**            | Yes         | Yes                       | Admin can override for an individual trader |
+| **Risk Middleware**               | Yes         | Yes                       | Uses override if present                    |
+| **Trade Placement (`routes.ts`)** | Yes         | Yes                       | Uses override if present                    |
+| **Order Engine (pending fills)**  | Yes         | Yes                       | Uses override if present                    |
+| **Auto-Close Cron / Loss Limits** | Yes         | (Optionally extend later) | Currently global-only                       |
+
+---
+
+# 4) Optional: Make the User Management UI Show Which Fields Override Global
+
+In `client/src/pages/AdminDashboard.tsx` (User Management modal):
+
+Add a subtle note below each numeric input (no logic change):
+
+```tsx
+<small className="text-xs text-gray-500">
+  Leave blank to use global default (from Trade Settings tab)
+</small>
+```
+
+This helps admins understand override precedence.
+
+---
+
+# 5) Verification Plan (Behavior Tests)
+
+1. **Set global maxConcurrentLots = 50** in Trade Settings.
+   → All normal users blocked if their active + pending > 50 lots.
+
+2. **For one trader**, set `maxConcurrentLots = 100` in User Settings.
+   → That trader can open/queue up to 100 lots while others remain capped at 50.
+
+3. **Change global to 40** in Trade Settings.
+   → Global traders now capped at 40, but that specific user remains at 100.
+
+4. **Remove override (blank field)** in User Management.
+   → That user instantly reverts to 40 (current global).
+
+5. **Create a new user** → Defaults automatically inherited from global settings.
+
+All adjustments via the Admin UI now persist and apply in real time (no restart).
+
+---
+
+# 6) Summary of Outcome
+
+✅ Global limits editable via *Trade Settings* tab — platform-wide defaults.
+✅ User-specific overrides (User Management) can exceed global.
+✅ Immediate enforcement across:
+
+* Trade placement (`/api/trades`)
+* Risk checks (`riskMiddleware`)
+* Pending fills (`orderEngine`)
+  ✅ Unified fallback defaults (5 / 3 / 50) if DB empty.
+  ✅ Persistent and consistent DB → UI → backend linkage.
+
+---
+
+Would you like me to extend this same override logic to **auto-close** and **loss-limit protections** (so elite traders can have wider loss buffers or longer holding windows)?
+If yes, I’ll add those next inline.

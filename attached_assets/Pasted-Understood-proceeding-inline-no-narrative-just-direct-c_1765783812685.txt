@@ -1,0 +1,277 @@
+Understood — proceeding **inline**, no narrative, just direct code and architecture for full MT5-style pending order implementation (10 pips = 10 × pipFactor).
+Below is the **final integrated code**: back-end and front-end sections ready to drop into your repo.
+
+---
+
+## **server/routes.ts**  (replace the POST /api/trades block)
+
+```ts
+app.post("/api/trades", async (req, res) => {
+  try {
+    const { symbol, type, orderType, lotSize, limitPrice, stopPrice, takeProfit, stopLoss } = req.body;
+    const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ error: "Unauthorized" });
+
+    const quote = await db("quotes").where({ symbol }).first();
+    if (!quote) return res.status(503).json({ error: "No live quote" });
+    if (quote.is_stale) return res.status(503).json({ error: "Pricing stale" });
+
+    const pip = symbol.includes("JPY") ? 0.01 : 0.0001;
+    const minDist = 10 * pip;
+    const bid = parseFloat(quote.bid);
+    const ask = parseFloat(quote.ask);
+
+    let intendedEntry = null;
+    let valid = true;
+    let reason = "";
+
+    switch (orderType) {
+      case "Market":
+        intendedEntry = type === "BUY" ? ask : bid;
+        break;
+      case "Limit":
+        intendedEntry = parseFloat(limitPrice);
+        if (type === "BUY" && !(intendedEntry <= ask - minDist)) { valid = false; reason = "BUY LIMIT must be below market ≥ 10 pips"; }
+        if (type === "SELL" && !(intendedEntry >= bid + minDist)) { valid = false; reason = "SELL LIMIT must be above market ≥ 10 pips"; }
+        break;
+      case "Stop":
+        intendedEntry = parseFloat(stopPrice);
+        if (type === "BUY" && !(intendedEntry >= ask + minDist)) { valid = false; reason = "BUY STOP must be above market ≥ 10 pips"; }
+        if (type === "SELL" && !(intendedEntry <= bid - minDist)) { valid = false; reason = "SELL STOP must be below market ≥ 10 pips"; }
+        break;
+      default:
+        valid = false; reason = "Unknown orderType";
+    }
+
+    if (!valid) return res.status(400).json({ error: reason });
+
+    // TP/SL validation
+    if (takeProfit && stopLoss) {
+      const tp = parseFloat(takeProfit);
+      const sl = parseFloat(stopLoss);
+      if (type === "BUY" && !(tp >= intendedEntry + minDist && sl <= intendedEntry - minDist))
+        return res.status(400).json({ error: "BUY TP/SL distance invalid" });
+      if (type === "SELL" && !(tp <= intendedEntry - minDist && sl >= intendedEntry + minDist))
+        return res.status(400).json({ error: "SELL TP/SL distance invalid" });
+    }
+
+    const status = orderType === "Market" ? "OPEN" : "PENDING";
+    const openPrice = orderType === "Market" ? intendedEntry : null;
+
+    const [trade] = await db("trades")
+      .insert({
+        userId,
+        symbol,
+        type,
+        orderType,
+        lotSize,
+        openPrice,
+        limitPrice: limitPrice ?? null,
+        stopPrice: stopPrice ?? null,
+        takeProfit,
+        stopLoss,
+        status,
+        createdAt: new Date()
+      })
+      .returning("*");
+
+    if (orderType === "Market") {
+      // immediate recalc
+      await recalcAccount(userId);
+    }
+
+    return res.json({ trade });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+```
+
+---
+
+## **server/cron/orderEngine.ts**
+
+```ts
+import db from "../db";
+import recalcAccount from "../recalcAccount.js";
+
+const pipOf = (sym: string) => (sym.includes("JPY") ? 0.01 : 0.0001);
+
+export async function pendingOrderEngine() {
+  const pendings = await db("trades").where({ status: "PENDING" });
+  const quotes = await db("quotes");
+  const qmap = Object.fromEntries(quotes.map(q => [q.symbol, q]));
+  const now = new Date();
+
+  for (const t of pendings) {
+    const q = qmap[t.symbol];
+    if (!q || q.is_stale) continue;
+    const bid = parseFloat(q.bid), ask = parseFloat(q.ask);
+    const pip = pipOf(t.symbol);
+    let trigger = false, fill = null;
+
+    if (t.orderType === "Limit") {
+      if (t.type === "BUY" && ask <= t.limitPrice) { trigger = true; fill = ask; }
+      if (t.type === "SELL" && bid >= t.limitPrice) { trigger = true; fill = bid; }
+    }
+    if (t.orderType === "Stop") {
+      if (t.type === "BUY" && ask >= t.stopPrice) { trigger = true; fill = ask; }
+      if (t.type === "SELL" && bid <= t.stopPrice) { trigger = true; fill = bid; }
+    }
+
+    if (trigger) {
+      await db("trades")
+        .where({ id: t.id })
+        .update({ status: "OPEN", openPrice: fill, executedAt: now });
+      await recalcAccount(t.userId);
+    }
+  }
+
+  // TP/SL checks
+  const opens = await db("trades").where({ status: "OPEN" });
+  for (const t of opens) {
+    const q = qmap[t.symbol];
+    if (!q || q.is_stale) continue;
+    const bid = parseFloat(q.bid), ask = parseFloat(q.ask);
+    let close = false, reason = "";
+    if (t.type === "BUY") {
+      if (t.takeProfit && bid >= t.takeProfit) { close = true; reason = "TP"; }
+      if (t.stopLoss && bid <= t.stopLoss) { close = true; reason = "SL"; }
+    } else {
+      if (t.takeProfit && ask <= t.takeProfit) { close = true; reason = "TP"; }
+      if (t.stopLoss && ask >= t.stopLoss) { close = true; reason = "SL"; }
+    }
+    if (close) {
+      const closePrice = t.type === "BUY" ? bid : ask;
+      await db("trades")
+        .where({ id: t.id })
+        .update({ status: "CLOSED", closePrice, closeReason: reason, closedAt: now });
+      await recalcAccount(t.userId);
+    }
+  }
+}
+
+// schedule every second
+setInterval(pendingOrderEngine, 1000);
+```
+
+---
+
+## **server/recalcAccount.ts**  (risk-safe, per-side bid/ask, freeze-on-stale)
+
+```ts
+import db from "./db";
+
+export default async function recalcAccount(userId: number) {
+  const trades = await db("trades").where({ userId, status: "OPEN" });
+  if (!trades.length) return;
+
+  const quotes = await db("quotes");
+  const qmap = Object.fromEntries(quotes.map(q => [q.symbol, q]));
+  let floating = 0;
+  const staleSymbols: string[] = [];
+
+  for (const t of trades) {
+    const q = qmap[t.symbol];
+    if (!q || q.is_stale) { staleSymbols.push(t.symbol); continue; }
+    const bid = parseFloat(q.bid), ask = parseFloat(q.ask);
+    const price = t.type === "BUY" ? bid : ask;
+    const diff = t.type === "BUY"
+      ? price - t.openPrice
+      : t.openPrice - price;
+    floating += diff * t.lotSize * 100000;
+  }
+
+  if (staleSymbols.length) return { pricingStale: true, staleSymbols };
+
+  const user = await db("users").where({ id: userId }).first();
+  const equity = user.balance + floating;
+  await db("users").where({ id: userId }).update({ equity, floatingPnl: floating });
+
+  return { pricingStale: false, equity, floating };
+}
+```
+
+---
+
+## **client/src/pages/TradeScreen.tsx**  (essential UI logic only)
+
+```tsx
+// inside component
+const [orderType, setOrderType] = useState<"Market"|"Limit"|"Stop">("Market");
+const [side, setSide] = useState<"BUY"|"SELL">("BUY");
+const [limitPrice,setLimitPrice]=useState("");
+const [stopPrice,setStopPrice]=useState("");
+const [tp,setTp]=useState("");
+const [sl,setSl]=useState("");
+const [auto,setAuto]=useState(true);
+
+// Auto-suggest 10 pip tracking
+useEffect(()=>{
+  if(!auto) return;
+  if(!quote) return;
+  const pip = quote.symbol.includes("JPY")?0.01:0.0001;
+  const bid = parseFloat(quote.bid), ask=parseFloat(quote.ask);
+  if(orderType==="Limit"){
+    if(side==="BUY"){setLimitPrice((ask-10*pip).toFixed(5));setTp((ask).toFixed(5));setSl((ask-20*pip).toFixed(5));}
+    else{setLimitPrice((bid+10*pip).toFixed(5));setTp((bid-10*pip).toFixed(5));setSl((bid+20*pip).toFixed(5));}
+  }
+  if(orderType==="Stop"){
+    if(side==="BUY"){setStopPrice((ask+10*pip).toFixed(5));setTp((ask+20*pip).toFixed(5));setSl((ask).toFixed(5));}
+    else{setStopPrice((bid-10*pip).toFixed(5));setTp((bid-20*pip).toFixed(5));setSl((bid).toFixed(5));}
+  }
+},[quote,orderType,side,auto]);
+
+// placement button
+const label = orderType==="Market"
+  ? `${side} Market`
+  : `Place ${side} ${orderType} @ ${orderType==="Limit"?limitPrice:stopPrice}`;
+
+<Button onClick={()=>submitTrade({symbol, type:side, orderType, lotSize, limitPrice, stopPrice, takeProfit:tp, stopLoss:sl})}>
+  {label}
+</Button>
+```
+
+---
+
+### **client/src/hooks/use-trades.tsx**  (safe mutation)
+
+```ts
+export const useTrades = () => {
+  const queryClient = useQueryClient();
+
+  const createTrade = useMutation({
+    mutationFn: (body:any)=>api.post("/api/trades", body),
+    onSuccess: ()=>queryClient.invalidateQueries(["trades"])
+  });
+
+  const closeTrade = useMutation({
+    mutationFn: (id:number)=>api.post(`/api/trades/${id}/close`,{}),
+    onSuccess: ()=>queryClient.invalidateQueries(["trades"])
+  });
+
+  return { createTrade, closeTrade };
+};
+```
+
+---
+
+### Integration (server/index.ts)
+
+```ts
+import "./cron/orderEngine.js"; // starts interval loop
+```
+
+---
+
+### Summary of effects
+
+* Market logic untouched.
+* Limit/Stop validation → 10 pip MT5-style.
+* Pending → fills using bid/ask correctly every 1 s.
+* TP/SL closes active positions.
+* Account MTM frozen on stale quotes.
+* UI shows single “Place BUY/SELL Limit/Stop @ price” button with live 10-pip suggestions.
+
+Drop these inline; they form the **consolidated patch** you requested.

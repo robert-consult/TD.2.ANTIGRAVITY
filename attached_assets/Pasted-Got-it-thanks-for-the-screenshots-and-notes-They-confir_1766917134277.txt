@@ -1,0 +1,293 @@
+Got it — thanks for the screenshots and notes. They confirm a few concrete gaps in the current build:
+
+* CAPTCHA widget is still missing from the signup UI.
+* Phone number field / country prefix + formatting + validation is not present.
+* Country selection should drive phone formatting and also the rules for choosing a country or regional addendum vs. global fallback; need to re‑check render/resolve logic is following that rule.
+* Legal version timestamp/year display is obviously wrong (e.g., shows year 57960).
+
+Below is a **tight, copy‑paste patch plan** for Replit Agent 3 to fix exactly those issues, plus a tiny update to re‑verify the render engine logic. Use these blocks directly in the repo.
+
+---
+
+## 1) CAPTCHA: add and enforce in signup
+
+### Why
+
+Cloudflare’s Turnstile requires server‑side validation of the client token, and it’s mandatory to call Siteverify for real protection. ([Cloudflare Docs][1])
+
+### What to add
+
+If you already applied the earlier patches, double‑check they’re included. If not, do the following:
+
+#### 1.1 Ensure Turnstile widget is rendered in signup UI
+
+In `LoginPage.tsx` or wherever signup form is:
+
+* Add the `CaptchaTurnstile` component (from earlier patch or recreate).
+* Only render it when config says captcha enforced.
+* Capture `captchaToken` and pass to register.
+
+Example snippet to insert near the bottom of the form area (copy from previous patch if present):
+
+```tsx
+{Boolean(publicCfg?.captcha?.enforceSignupCaptcha) && (
+  <div className="mt-3 space-y-2">
+    <CaptchaTurnstile
+      siteKey={(import.meta as any).env?.VITE_TURNSTILE_SITE_KEY || ""}
+      onToken={(t) => {
+        setCaptchaToken(t);
+        setCaptchaError(null);
+      }}
+      onError={(m) => setCaptchaError(m)}
+    />
+    {captchaError && <div className="text-sm text-red-500">{captchaError}</div>}
+  </div>
+)}
+```
+
+#### 1.2 Ensure server-side verification in `/api/register`
+
+If not already in place, add or confirm the following flow:
+
+* On `POST /api/register`, extract `captchaToken`.
+* Call the Turnstile Siteverify endpoint (via helper `verifySignupCaptcha` or similar).
+* Reject registration if the token is invalid or missing when enforcement is on.
+
+This was added in the earlier patch. Confirm it's still present. If you removed or changed it, reinsert exactly that logic.
+
+---
+
+## 2) Phone number field: country prefix, regex/formatting, validation
+
+### Goal
+
+Add a phone input that automatically formats/validates based on the selected country, and store or at least capture a normalized phone number.
+
+### Recommended library
+
+Use a well‑supported international phone input in React, such as `react-phone-number-input` or another similar component that handles country prefixes, formatting, and validation out of the box. This keeps the UI clean and reduces custom regex logic.
+
+You can install:
+
+```bash
+npm install react-phone-number-input
+```
+
+and optionally:
+
+```bash
+npm install react-phone-number-input/style.css
+```
+
+### Example patch additions
+
+#### 2.1 Add a phone input component
+
+Create a new component, e.g., `client/src/components/PhoneInputIntl.tsx`:
+
+```tsx
+import React from "react";
+import PhoneInput from "react-phone-number-input";
+import "react-phone-number-input/style.css";
+
+type Props = {
+  value: string | undefined;
+  onChange: (value: string | undefined) => void;
+  country: string | undefined; // e.g., "US", "AU"
+};
+
+export function PhoneInputIntl({ value, onChange, country }: Props) {
+  return (
+    <PhoneInput
+      international
+      defaultCountry={country}
+      value={value}
+      onChange={onChange}
+      // optional: add placeholder or styling props as desired
+    />
+  );
+}
+```
+
+#### 2.2 Use it in the signup page
+
+In `LoginPage.tsx` (or wherever the form is):
+
+* Add state to hold `phone` value.
+* Pass the selected country (ISO2) as the `country` prop.
+* Prevent submission when phone is invalid (use the library’s returned value or validation helpers; the library provides utilities to test validity).
+
+Example integration:
+
+```tsx
+// state
+const [phone, setPhone] = useState<string | undefined>(undefined);
+
+// ... inside form JSX, below email/username fields or wherever suitable
+<PhoneInputIntl
+  value={phone}
+  onChange={setPhone}
+  country={selectedCountry}
+/>
+```
+
+Then in registration submission logic:
+
+```tsx
+// before sending, ensure phone is present and valid
+if (!phone) {
+  toast({ title: "Enter a phone number", variant: "destructive" });
+  return;
+}
+// Optionally: use library's isValidPhoneNumber utility to check
+// import { isValidPhoneNumber } from 'react-phone-number-input';
+// if (!isValidPhoneNumber(phone)) { ... }
+```
+
+#### 2.3 Persist or forward phone to backend if needed
+
+If you want to store the phone, extend the `register` payload with `phone` and save it similar to `countryIso2`. That’s optional based on the system design. At minimum, capture it to ensure users can input properly formatted numbers.
+
+---
+
+## 3) Country selection drives addendum before global fallback — re‑check render engine
+
+### Issue
+
+Screens show Australia selected but terms show using Global Terms fallback. That is fine if Australia addendum doesn’t exist, but you want to confirm the engine correctly applies:
+
+1. country-specific addendum if available
+2. region-specific addendum if available
+3. global fallback
+
+### Action
+
+Double‑check the resolve logic in `termsEngineDb.ts` or equivalent:
+
+* Verify the order: `COUNTRY → REGION → DEFAULT` for addendum
+* Confirm that the system retrieves current active pointer for country or region if present
+* Confirm valid detection of region for Australia (if Australia is grouped under a region like APAC, etc.)
+* If missing, ensure region mapping includes AU properly. Add or correct mapping in `regionRules.ts` or relevant dataset.
+
+If you find a bug where the logic is reversed or missing country or region hits, update that function to follow the intended precedence.
+
+---
+
+## 4) Fix the legal version timestamp / year display
+
+### Observed problem
+
+In admin UI card, version displays date 3/25/57960 — clearly not the current year, suggests misuse of a numeric timestamp or formatting function that uses milliseconds as year or similar.
+
+### Likely cause
+
+* The display code might be interpreting a timestamp or the `created_at` value incorrectly. Possibly using raw milliseconds value when a date is expected, or mixing timestamp units.
+
+### Action
+
+Patch the UI formatting code that renders version card date/time.
+
+Identify the component file where the version card is rendered (e.g., `AdminLegalDocs.tsx` or a `VersionCard` component). Look for something like:
+
+```tsx
+{format(new Date(doc.createdAt), "MM/dd/yyyy, hh:mm:ss a")}
+```
+
+or something that tries to convert a numeric value.
+
+If it’s wrong, fix as follows:
+
+#### 4.1 Use a proper Date conversion
+
+Assuming `created_at` is stored as milliseconds since epoch:
+
+```tsx
+const createdAtMs = doc.createdAt; // ensure this is number
+const createdAtDate = new Date(createdAtMs);
+```
+
+Render:
+
+```tsx
+{createdAtDate.toLocaleString(undefined, {
+  month: "numeric",
+  day: "numeric",
+  year: "numeric",
+  hour: "numeric",
+  minute: "numeric",
+  hour12: true,
+})}
+```
+
+Or if using date-fns:
+
+```tsx
+import { format } from "date-fns";
+
+{format(createdAtDate, "MM/dd/yyyy, hh:mm:ss a")}
+```
+
+#### 4.2 Check data storage
+
+Ensure `created_at` stored in DB is indeed milliseconds, not some other unit. If the stored value is in seconds, multiply by 1000 when converting to Date.
+
+* If stored in seconds: `new Date(createdAtSeconds * 1000);`
+* If stored in ms: `new Date(createdAtMs);`
+
+Update the display logic accordingly.
+
+---
+
+## 5) Confirm country prefix behavior and phone regex / formatting logic
+
+If you had earlier custom code for phone formatting or regex, remove or disable it, and rely on the international phone library’s built‑in validation. That simplifies the system and avoids mismatches between country and phone prefix.
+
+Let the country dropdown control the default country for the phone input, not the other way around.
+
+---
+
+## 6) Short checklist for Agent 3 to apply, in order
+
+1. **Re‑insert or confirm CAPTCHA logic** in frontend and backend as above.
+2. **Add PhoneInputIntl component** and integrate into signup page.
+3. **Update register flow** to check/require phone if you decide to treat it as mandatory; else keep optional but still formatted.
+4. **Retest country + addendum logic** to ensure the fallback is exactly what’s intended; fix mapping if needed.
+5. **Fix version time display** by correcting date formatting code and/or conversion from timestamp.
+6. **Run full UI test** to ensure:
+
+   * On signup, country selection shows “Using global terms” only when there is no country or regional addendum.
+   * CAPTCHA appears and can produce a token.
+   * Phone input appears, defaults to prefix for the selected country, and formats typed number.
+   * Version card shows realistic date/time.
+
+---
+
+## 7) Optional but useful sanity check
+
+After patching, do a quick debug print or log of the resolved terms object when a country is chosen:
+
+```ts
+console.log("Resolved terms", {
+  country: selectedCountry,
+  region: resolvedRegion,
+  activeGlobalDocId: resolvedGlobalId,
+  activeAddendumDocId: resolvedAddendumId,
+});
+```
+
+This gives immediate visibility in the browser console or server logs to ensure the engine is picking the right addendum.
+
+---
+
+### Final note
+
+These fixes are small, targeted, and should slot into your existing codebase without requiring a full rewrite. Once applied, you’ll have:
+
+* CAPTCHA in place and enforced.
+* Proper international phone capture.
+* Correct fallback logic for legal terms.
+* Correct date display on admin cards.
+
+That addresses exactly what the screenshots highlight, plus the underlying logical requirement for legal compliance and user input rigor.
+
+[1]: https://developers.cloudflare.com/turnstile/get-started/server-side-validation/#:~:text=Learn%20how%20to%20securely%20validate,alone%20leaves%20major%20security%20vulnerabilities "Validate the token · Cloudflare Turnstile docs"

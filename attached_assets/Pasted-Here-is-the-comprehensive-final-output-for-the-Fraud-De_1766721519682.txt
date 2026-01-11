@@ -1,0 +1,1105 @@
+Here is the comprehensive, final output for the **Fraud Detection & Integrity System**. This implementation includes database schema updates, backend logic for risk scoring, and frontend integration for device fingerprinting.
+
+### **1. Executive Summary**
+
+This system detects potential fraud (multi-accounting, cross-account hedging, account sharing) by:
+
+* **Device Fingerprinting:** Tracking unique devices via a stable hash and a persistent `device_install_id`.
+* **Identity Linking:** Linking users who share IPs, subnets, or devices.
+* **Risk Scoring:** Calculating a real-time risk score based on churn, shared assets, and hedging patterns.
+* **Admin Dashboard:** A new "Fraud" tab to view alerts, risk scores, and linked accounts.
+
+---
+
+### **2. Database Schema (`shared/schema.ts`)**
+
+Add the following new tables and columns to your schema. This supports tracking identity signals and alerts.
+
+```typescript
+// [Add to existing imports]
+// ... existing imports
+
+// --------------------------------------------------------
+// MODIFICATION 1: Update userSessions and userLoginHistory
+// --------------------------------------------------------
+
+export const userSessions = sqliteTable("user_sessions", {
+  id: integer("id", { mode: "number" }).primaryKey({ autoIncrement: true }),
+  sessionId: text("session_id").notNull().unique(),
+  userId: integer("user_id", { mode: "number" }).notNull(),
+  ip: text("ip"),
+  userAgent: text("user_agent"),
+  // NEW IDENTITY COLUMNS
+  deviceFp: text("device_fp"),         // Hashed browser fingerprint
+  deviceInstallId: text("device_install_id"), // LocalStorage UUID
+  clientTz: text("client_tz"),         // Client-reported timezone
+  clientLang: text("client_lang"),     // Client-reported language
+  // ... existing fields
+  deviceType: text("device_type"),
+  browser: text("browser"),
+  os: text("os"),
+  isCurrent: integer("is_current", { mode: "boolean" }).notNull().default(false),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().default(sql`(strftime('%s', 'now'))`),
+  lastActiveAt: integer("last_active_at", { mode: "timestamp" }).notNull().default(sql`(strftime('%s', 'now'))`),
+  expiresAt: integer("expires_at", { mode: "timestamp" }),
+  // ... geo fields ...
+  countryCode: text("country_code"),
+  region: text("region"),
+  city: text("city"),
+  latitude: real("latitude"),
+  longitude: real("longitude"),
+  inferredTz: text("inferred_tz"),
+  revokedAt: integer("revoked_at", { mode: "timestamp" }),
+  revokedByUserId: integer("revoked_by_user_id", { mode: "number" }),
+  revokeReason: text("revoke_reason"),
+});
+
+export const userLoginHistory = sqliteTable("user_login_history", {
+  id: integer("id", { mode: "number" }).primaryKey({ autoIncrement: true }),
+  userId: integer("user_id", { mode: "number" }),
+  email: text("email").notNull(),
+  ip: text("ip"),
+  userAgent: text("user_agent"),
+  // NEW IDENTITY COLUMNS
+  deviceFp: text("device_fp"),
+  deviceInstallId: text("device_install_id"),
+  clientTz: text("client_tz"),
+  clientLang: text("client_lang"),
+  // ... existing fields
+  success: integer("success", { mode: "boolean" }).notNull(),
+  failureReason: text("failure_reason"),
+  logoutAt: integer("logout_at", { mode: "timestamp" }),
+  sessionLengthSec: integer("session_length_sec"),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().default(sql`(strftime('%s', 'now'))`),
+  countryCode: text("country_code"),
+  region: text("region"),
+  city: text("city"),
+  sessionId: text("session_id"),
+  eventType: text("event_type"),
+});
+
+// --------------------------------------------------------
+// MODIFICATION 2: Add Fraud Detection Tables
+// --------------------------------------------------------
+
+// Normalized identity links: many-to-many between users and identity keys
+export const fraudIdentityLinks = sqliteTable("fraud_identity_links", {
+  id: integer("id", { mode: "number" }).primaryKey({ autoIncrement: true }),
+  linkType: text("link_type").notNull(), // DEVICE_INSTALL | DEVICE_FP | IP | SUBNET24
+  linkKey: text("link_key").notNull(),
+  userId: integer("user_id", { mode: "number" }).notNull(),
+  firstSeenAt: integer("first_seen_at", { mode: "timestamp" }).notNull().default(sql`(strftime('%s', 'now'))`),
+  lastSeenAt: integer("last_seen_at", { mode: "timestamp" }).notNull().default(sql`(strftime('%s', 'now'))`),
+  seenCount: integer("seen_count", { mode: "number" }).notNull().default(1),
+  lastIp: text("last_ip"),
+  lastUserAgent: text("last_user_agent"),
+  lastCountryCode: text("last_country_code"),
+  lastCity: text("last_city"),
+  lastInferredTz: text("last_inferred_tz"),
+});
+
+// Alerts for admin review
+export const fraudAlerts = sqliteTable("fraud_alerts", {
+  id: integer("id", { mode: "number" }).primaryKey({ autoIncrement: true }),
+  dedupeKey: text("dedupe_key").notNull().unique(), // e.g. "MULTI_ACCOUNT:123:DEVICE_FP:abc..."
+  userId: integer("user_id", { mode: "number" }).notNull(),
+  severity: text("severity").notNull().default("MEDIUM"), // LOW | MEDIUM | HIGH | CRITICAL
+  category: text("category").notNull(), // MULTI_ACCOUNT | ACCOUNT_SHARING | HEDGING
+  status: text("status").notNull().default("OPEN"), // OPEN | RESOLVED | DISMISSED
+  score: integer("score", { mode: "number" }).notNull().default(0),
+  title: text("title").notNull(),
+  detailsJson: text("details_json").notNull().default("{}"),
+  relatedUserIdsJson: text("related_user_ids_json").notNull().default("[]"),
+  linkType: text("link_type"),
+  linkKey: text("link_key"),
+  ip: text("ip"),
+  countryCode: text("country_code"),
+  symbol: text("symbol"),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().default(sql`(strftime('%s', 'now'))`),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().default(sql`(strftime('%s', 'now'))`),
+  resolvedAt: integer("resolved_at", { mode: "timestamp" }),
+  resolvedByAdminId: integer("resolved_by_admin_id", { mode: "number" }),
+  resolutionNote: text("resolution_note"),
+});
+
+// Cached/aggregated risk score per user
+export const fraudUserRisk = sqliteTable("fraud_user_risk", {
+  userId: integer("user_id", { mode: "number" }).primaryKey(),
+  riskScore: integer("risk_score", { mode: "number" }).notNull().default(0),
+  riskLevel: text("risk_level").notNull().default("LOW"),
+  reasonsJson: text("reasons_json").notNull().default("[]"),
+  metricsJson: text("metrics_json").notNull().default("{}"),
+  openAlertsCount: integer("open_alerts_count", { mode: "number" }).notNull().default(0),
+  lastEvaluatedAt: integer("last_evaluated_at", { mode: "timestamp" }).notNull().default(sql`(strftime('%s', 'now'))`),
+});
+
+export const insertFraudAlertSchema = createInsertSchema(fraudAlerts);
+
+```
+
+---
+
+### **3. Schema Helpers (`server/db/ensureSchema.ts`)**
+
+Add these functions to ensure the new tables and columns exist at runtime.
+
+```typescript
+// Add these exports to ensureSchema.ts
+
+export function ensureUserSessionIdentityColumns() {
+  const db = getDb();
+  try {
+    const table = "user_sessions";
+    const adds = [
+      { col: "device_fp", ddl: `ALTER TABLE ${table} ADD COLUMN device_fp TEXT` },
+      { col: "device_install_id", ddl: `ALTER TABLE ${table} ADD COLUMN device_install_id TEXT` },
+      { col: "client_tz", ddl: `ALTER TABLE ${table} ADD COLUMN client_tz TEXT` },
+      { col: "client_lang", ddl: `ALTER TABLE ${table} ADD COLUMN client_lang TEXT` },
+    ];
+    for (const a of adds) {
+      if (!hasColumn(db, table, a.col)) db.exec(a.ddl);
+    }
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_user_sessions_device_fp ON user_sessions(device_fp);`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_user_sessions_device_install_id ON user_sessions(device_install_id);`);
+    console.log("User sessions identity columns ensured");
+  } finally {
+    db.close();
+  }
+}
+
+export function ensureLoginHistoryIdentityColumns() {
+  const db = getDb();
+  try {
+    const table = "user_login_history";
+    const adds = [
+      { col: "device_fp", ddl: `ALTER TABLE ${table} ADD COLUMN device_fp TEXT` },
+      { col: "device_install_id", ddl: `ALTER TABLE ${table} ADD COLUMN device_install_id TEXT` },
+      { col: "client_tz", ddl: `ALTER TABLE ${table} ADD COLUMN client_tz TEXT` },
+      { col: "client_lang", ddl: `ALTER TABLE ${table} ADD COLUMN client_lang TEXT` },
+    ];
+    for (const a of adds) {
+      if (!hasColumn(db, table, a.col)) db.exec(a.ddl);
+    }
+    console.log("Login history identity columns ensured");
+  } finally {
+    db.close();
+  }
+}
+
+export function ensureFraudDetectionTables() {
+  const db = getDb();
+  try {
+    // Identity Links
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS fraud_identity_links (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        link_type TEXT NOT NULL,
+        link_key TEXT NOT NULL,
+        user_id INTEGER NOT NULL,
+        first_seen_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+        last_seen_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+        seen_count INTEGER NOT NULL DEFAULT 1,
+        last_ip TEXT,
+        last_user_agent TEXT,
+        last_country_code TEXT,
+        last_city TEXT,
+        last_inferred_tz TEXT,
+        UNIQUE(link_type, link_key, user_id)
+      );
+    `);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_fraud_identity_links_user_id ON fraud_identity_links(user_id);`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_fraud_identity_links_link ON fraud_identity_links(link_type, link_key);`);
+
+    // Alerts
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS fraud_alerts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        dedupe_key TEXT NOT NULL UNIQUE,
+        user_id INTEGER NOT NULL,
+        severity TEXT NOT NULL DEFAULT 'MEDIUM',
+        category TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'OPEN',
+        score INTEGER NOT NULL DEFAULT 0,
+        title TEXT NOT NULL,
+        details_json TEXT NOT NULL DEFAULT '{}',
+        related_user_ids_json TEXT NOT NULL DEFAULT '[]',
+        link_type TEXT,
+        link_key TEXT,
+        ip TEXT,
+        country_code TEXT,
+        symbol TEXT,
+        created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+        updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+        resolved_at INTEGER,
+        resolved_by_admin_id INTEGER,
+        resolution_note TEXT
+      );
+    `);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_fraud_alerts_user_id ON fraud_alerts(user_id);`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_fraud_alerts_status ON fraud_alerts(status);`);
+
+    // User Risk
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS fraud_user_risk (
+        user_id INTEGER PRIMARY KEY,
+        risk_score INTEGER NOT NULL DEFAULT 0,
+        risk_level TEXT NOT NULL DEFAULT 'LOW',
+        reasons_json TEXT NOT NULL DEFAULT '[]',
+        metrics_json TEXT NOT NULL DEFAULT '{}',
+        open_alerts_count INTEGER NOT NULL DEFAULT 0,
+        last_evaluated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
+      );
+    `);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_fraud_user_risk_level ON fraud_user_risk(risk_level);`);
+
+    console.log('Fraud detection tables ensured');
+  } finally {
+    db.close();
+  }
+}
+
+```
+
+---
+
+### **4. Session Security Logic (`server/security/sessionTrail.ts`)**
+
+Replace the entire file content with this updated version. It handles reading the new headers and storing identity data.
+
+```typescript
+import { db } from "@db";
+import { userSessions, userLoginHistory } from "@shared/schema";
+import { eq, and, desc, isNull } from "drizzle-orm";
+import { UAParser } from "ua-parser-js";
+import geoip from "geoip-lite";
+import tzlookup from "@photostructure/tz-lookup";
+
+// ----------------------------
+// Client identity headers
+// ----------------------------
+const HEADER_DEVICE_FP = "x-device-fp";
+const HEADER_DEVICE_INSTALL = "x-device-install-id";
+const HEADER_CLIENT_TZ = "x-client-tz";
+const HEADER_CLIENT_LANG = "x-client-lang";
+
+export type ClientIdentityContext = {
+  deviceFp?: string;
+  deviceInstallId?: string;
+  clientTz?: string;
+  clientLang?: string;
+};
+
+export type GeoContext = {
+  countryCode?: string;
+  region?: string;
+  city?: string;
+  latitude?: number;
+  longitude?: number;
+  inferredTz?: string;
+};
+
+export type DeviceContext = {
+  deviceType?: string;
+  browser?: string;
+  os?: string;
+};
+
+function readHeader(req: any, name: string): string | undefined {
+  const v = req.headers?.[name] ?? req.headers?.[name.toLowerCase()];
+  if (!v) return undefined;
+  if (Array.isArray(v)) return String(v[0] ?? "");
+  return String(v);
+}
+
+function sanitizeId(value: string | undefined, maxLen = 256): string | undefined {
+  if (!value) return undefined;
+  const s = value.trim();
+  if (!s) return undefined;
+  return s.slice(0, maxLen);
+}
+
+// Helpers for Routes
+export function getClientIp(req: any): string {
+  const xff = req.headers?.["x-forwarded-for"];
+  if (typeof xff === "string" && xff.length > 0) return xff.split(",")[0].trim();
+  if (Array.isArray(xff) && xff.length > 0) return String(xff[0]).split(",")[0].trim();
+  return req.ip || req.socket?.remoteAddress || "0.0.0.0";
+}
+
+export function getUserAgent(req: any): string {
+  return String(req.headers?.["user-agent"] || "unknown");
+}
+
+export function getClientIdentity(req: any): ClientIdentityContext {
+  return {
+    deviceFp: sanitizeId(readHeader(req, HEADER_DEVICE_FP), 128),
+    deviceInstallId: sanitizeId(readHeader(req, HEADER_DEVICE_INSTALL), 128),
+    clientTz: sanitizeId(readHeader(req, HEADER_CLIENT_TZ), 64),
+    clientLang: sanitizeId(readHeader(req, HEADER_CLIENT_LANG), 32),
+  };
+}
+
+export function parseDevice(userAgent: string | null | undefined): DeviceContext {
+  if (!userAgent) return { deviceType: undefined, browser: undefined, os: undefined };
+  const parser = new UAParser(userAgent);
+  const device = parser.getDevice();
+  const browser = parser.getBrowser();
+  const os = parser.getOS();
+
+  let deviceType = device.type || "desktop";
+  const browserName = browser.name ? `${browser.name} ${browser.version || ""}`.trim() : undefined;
+  const osName = os.name ? `${os.name} ${os.version || ""}`.trim() : undefined;
+
+  return { deviceType, browser: browserName, os: osName };
+}
+
+export function buildGeoContext(ip: string | null | undefined): GeoContext {
+  if (!ip || ip === "0.0.0.0") return {};
+  try {
+    const geo = geoip.lookup(ip);
+    if (!geo) return {};
+    let inferredTz: string | undefined;
+    if (geo.ll && geo.ll.length === 2) {
+      try { inferredTz = tzlookup(geo.ll[0], geo.ll[1]); } catch {}
+    }
+    return {
+      countryCode: geo.country,
+      region: geo.region,
+      city: geo.city,
+      latitude: geo.ll?.[0],
+      longitude: geo.ll?.[1],
+      inferredTz,
+    };
+  } catch {
+    return {};
+  }
+}
+
+// ----------------------------
+// Session Management
+// ----------------------------
+
+export async function createUserSession(params: {
+  sessionId: string;
+  userId: number;
+  email: string;
+  ip: string;
+  userAgent: string;
+  identity?: ClientIdentityContext;
+}) {
+  const now = new Date();
+  const device = parseDevice(params.userAgent);
+  const geo = buildGeoContext(params.ip);
+
+  await db.insert(userSessions).values({
+    sessionId: params.sessionId,
+    userId: params.userId,
+    createdAt: now,
+    lastActiveAt: now,
+    isCurrent: true,
+    ip: params.ip,
+    userAgent: params.userAgent,
+    // Device identity
+    deviceFp: params.identity?.deviceFp,
+    deviceInstallId: params.identity?.deviceInstallId,
+    clientTz: params.identity?.clientTz,
+    clientLang: params.identity?.clientLang,
+    // Parsed
+    deviceType: device.deviceType,
+    browser: device.browser,
+    os: device.os,
+    // Geo
+    countryCode: geo.countryCode,
+    region: geo.region,
+    city: geo.city,
+    latitude: geo.latitude,
+    longitude: geo.longitude,
+    inferredTz: geo.inferredTz,
+  }).onConflictDoUpdate({
+    target: userSessions.sessionId,
+    set: {
+      isCurrent: true,
+      lastActiveAt: now,
+      ip: params.ip,
+      userAgent: params.userAgent,
+      deviceFp: params.identity?.deviceFp,
+      deviceInstallId: params.identity?.deviceInstallId,
+    },
+  });
+
+  // Log successful login
+  await db.insert(userLoginHistory).values({
+    userId: params.userId,
+    email: params.email,
+    ip: params.ip,
+    userAgent: params.userAgent,
+    success: true,
+    createdAt: now,
+    eventType: "LOGIN_SUCCESS",
+    sessionId: params.sessionId,
+    // Metadata
+    deviceFp: params.identity?.deviceFp,
+    deviceInstallId: params.identity?.deviceInstallId,
+    clientTz: params.identity?.clientTz,
+    clientLang: params.identity?.clientLang,
+    countryCode: geo.countryCode,
+    region: geo.region,
+    city: geo.city,
+  });
+
+  return { geo, device };
+}
+
+export async function recordLoginAttempt(params: {
+  email: string;
+  userId?: number | null;
+  ip: string;
+  userAgent: string;
+  success: boolean;
+  failureReason?: string;
+  sessionId?: string;
+  identity?: ClientIdentityContext;
+}) {
+  const geo = buildGeoContext(params.ip);
+  await db.insert(userLoginHistory).values({
+    userId: params.userId,
+    email: params.email,
+    ip: params.ip,
+    userAgent: params.userAgent,
+    success: params.success,
+    failureReason: params.failureReason,
+    createdAt: new Date(),
+    eventType: params.success ? "LOGIN_SUCCESS" : "LOGIN_FAILED",
+    sessionId: params.sessionId,
+    // Metadata
+    deviceFp: params.identity?.deviceFp,
+    deviceInstallId: params.identity?.deviceInstallId,
+    clientTz: params.identity?.clientTz,
+    clientLang: params.identity?.clientLang,
+    countryCode: geo.countryCode,
+    region: geo.region,
+    city: geo.city,
+  });
+}
+
+export async function touchSession(sessionId: string, ctx?: { ip?: string; userAgent?: string; identity?: ClientIdentityContext }) {
+  const updates: any = { lastActiveAt: new Date(), isCurrent: true };
+  
+  if (ctx?.ip) {
+    updates.ip = ctx.ip;
+    const geo = buildGeoContext(ctx.ip);
+    if (geo.countryCode) {
+      updates.countryCode = geo.countryCode;
+      updates.region = geo.region;
+      updates.city = geo.city;
+      updates.latitude = geo.latitude;
+      updates.longitude = geo.longitude;
+      updates.inferredTz = geo.inferredTz;
+    }
+  }
+  
+  if (ctx?.userAgent) {
+    updates.userAgent = ctx.userAgent;
+    const dev = parseDevice(ctx.userAgent);
+    updates.deviceType = dev.deviceType;
+    updates.browser = dev.browser;
+    updates.os = dev.os;
+  }
+
+  if (ctx?.identity) {
+    if (ctx.identity.deviceFp) updates.deviceFp = ctx.identity.deviceFp;
+    if (ctx.identity.deviceInstallId) updates.deviceInstallId = ctx.identity.deviceInstallId;
+    if (ctx.identity.clientTz) updates.clientTz = ctx.identity.clientTz;
+    if (ctx.identity.clientLang) updates.clientLang = ctx.identity.clientLang;
+  }
+
+  await db.update(userSessions)
+    .set(updates)
+    .where(and(eq(userSessions.sessionId, sessionId), isNull(userSessions.revokedAt)));
+}
+
+export async function endSession(sessionId: string, reason: string = "LOGOUT") {
+  const now = new Date();
+  
+  // 1. Mark session as not current
+  const session = await db.update(userSessions)
+    .set({ isCurrent: false, lastActiveAt: now })
+    .where(eq(userSessions.sessionId, sessionId))
+    .returning({ createdAt: userSessions.createdAt })
+    .get();
+
+  // 2. Update the corresponding login history row to record duration
+  if (session) {
+    const createdAt = new Date(session.createdAt);
+    const duration = Math.floor((now.getTime() - createdAt.getTime()) / 1000);
+    
+    // Find the latest successful login for this session
+    const lastHistory = await db.select({ id: userLoginHistory.id })
+      .from(userLoginHistory)
+      .where(and(eq(userLoginHistory.sessionId, sessionId), eq(userLoginHistory.eventType, "LOGIN_SUCCESS")))
+      .orderBy(desc(userLoginHistory.createdAt))
+      .limit(1)
+      .get();
+
+    if (lastHistory) {
+      await db.update(userLoginHistory)
+        .set({ logoutAt: now, sessionLengthSec: duration })
+        .where(eq(userLoginHistory.id, lastHistory.id));
+    }
+  }
+
+  // 3. Insert a LOGOUT event
+  // (We skip strict user lookups for brevity, assuming sessionId is valid context enough or passed in)
+}
+
+export async function getActiveSessions(args: { userId: number; limit: number }) {
+  return db.select()
+    .from(userSessions)
+    .where(and(
+      eq(userSessions.userId, args.userId),
+      isNull(userSessions.revokedAt),
+      eq(userSessions.isCurrent, true)
+    ))
+    .orderBy(desc(userSessions.lastActiveAt))
+    .limit(args.limit);
+}
+
+export async function getAllSessions(args: { userId: number; limit: number; includeRevoked?: boolean }) {
+  const where = args.includeRevoked
+    ? eq(userSessions.userId, args.userId)
+    : and(eq(userSessions.userId, args.userId), isNull(userSessions.revokedAt));
+    
+  return db.select()
+    .from(userSessions)
+    .where(where)
+    .orderBy(desc(userSessions.lastActiveAt))
+    .limit(args.limit);
+}
+
+export async function revokeSession(args: { actorUserId: number; targetUserId: number; sessionId: string; reason?: string }) {
+  const now = new Date();
+  await db.update(userSessions)
+    .set({
+      revokedAt: now,
+      revokedByUserId: args.actorUserId,
+      revokeReason: args.reason || "revoked",
+      isCurrent: false,
+      lastActiveAt: now
+    })
+    .where(and(eq(userSessions.sessionId, args.sessionId), eq(userSessions.userId, args.targetUserId)));
+
+  await db.insert(userLoginHistory).values({
+    userId: args.targetUserId,
+    email: "system", // placeholder
+    success: true,
+    createdAt: now,
+    sessionId: args.sessionId,
+    eventType: "SESSION_REVOKED"
+  });
+}
+
+export async function getRecentLoginActivity(args: { userId: number; limit: number }) {
+  return db.select()
+    .from(userLoginHistory)
+    .where(eq(userLoginHistory.userId, args.userId))
+    .orderBy(desc(userLoginHistory.createdAt))
+    .limit(args.limit);
+}
+
+```
+
+---
+
+### **5. Fraud Detection Service (`server/services/fraudDetection.ts`)**
+
+Create this **new file**. It contains the "brain" of the operation.
+
+```typescript
+import { db } from "@db";
+import {
+  fraudIdentityLinks, fraudAlerts, fraudUserRisk, userSessions, trades, symbolConfigs, users
+} from "@shared/schema";
+import { and, desc, eq, inArray, sql, ne } from "drizzle-orm";
+import type { ClientIdentityContext, GeoContext } from "../security/sessionTrail";
+
+export type FraudSeverity = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+
+type IdentityEvent = {
+  userId: number;
+  ip?: string;
+  userAgent?: string;
+  geo?: GeoContext;
+  identity?: ClientIdentityContext;
+  eventType: "LOGIN_SUCCESS" | "REGISTER_SUCCESS" | "TRADE_OPEN";
+  // trade context
+  tradeId?: number;
+  symbolId?: number;
+  side?: "BUY" | "SELL";
+};
+
+// --- Helpers ---
+function now() { return new Date(); }
+function safeJson(v: any) { try { return JSON.stringify(v); } catch { return "{}"; } }
+function parseJson(v: string) { try { return JSON.parse(v); } catch { return {}; } }
+
+// --- Core Logic ---
+
+function upsertIdentityLink(params: { linkType: string; linkKey: string; userId: number; ip?: string; country?: string }) {
+  const existing = db.select().from(fraudIdentityLinks)
+    .where(and(
+      eq(fraudIdentityLinks.linkType, params.linkType),
+      eq(fraudIdentityLinks.linkKey, params.linkKey),
+      eq(fraudIdentityLinks.userId, params.userId)
+    )).get();
+
+  if (existing) {
+    db.update(fraudIdentityLinks)
+      .set({
+        lastSeenAt: now(),
+        seenCount: (existing.seenCount || 0) + 1,
+        lastIp: params.ip,
+        lastCountryCode: params.country
+      })
+      .where(eq(fraudIdentityLinks.id, existing.id)).run();
+  } else {
+    db.insert(fraudIdentityLinks).values({
+      linkType: params.linkType,
+      linkKey: params.linkKey,
+      userId: params.userId,
+      firstSeenAt: now(),
+      lastSeenAt: now(),
+      seenCount: 1,
+      lastIp: params.ip,
+      lastCountryCode: params.country
+    }).run();
+  }
+}
+
+function upsertAlert(alert: {
+  dedupeKey: string; userId: number; severity: FraudSeverity; category: string;
+  score: number; title: string; details: any; relatedUserIds?: number[];
+}) {
+  try {
+    db.insert(fraudAlerts).values({
+      dedupeKey: alert.dedupeKey,
+      userId: alert.userId,
+      severity: alert.severity,
+      category: alert.category,
+      status: "OPEN",
+      score: alert.score,
+      title: alert.title,
+      detailsJson: safeJson(alert.details),
+      relatedUserIdsJson: safeJson(alert.relatedUserIds || []),
+      createdAt: now(),
+      updatedAt: now()
+    }).run();
+  } catch {
+    // Already exists; update timestamp
+    db.update(fraudAlerts)
+      .set({ updatedAt: now(), score: alert.score, severity: alert.severity })
+      .where(eq(fraudAlerts.dedupeKey, alert.dedupeKey)).run();
+  }
+}
+
+function getOtherUsersForLink(type: string, key: string, excludeUserId: number): number[] {
+  const rows = db.select({ uid: fraudIdentityLinks.userId })
+    .from(fraudIdentityLinks)
+    .where(and(eq(fraudIdentityLinks.linkType, type), eq(fraudIdentityLinks.linkKey, key), ne(fraudIdentityLinks.userId, excludeUserId)))
+    .all();
+  return rows.map(r => r.uid);
+}
+
+// --- Public Handlers ---
+
+export function onIdentityEvent(evt: IdentityEvent) {
+  // 1. Link Identity
+  if (evt.identity?.deviceInstallId) {
+    upsertIdentityLink({
+      linkType: "DEVICE_INSTALL",
+      linkKey: evt.identity.deviceInstallId,
+      userId: evt.userId,
+      ip: evt.ip,
+      country: evt.geo?.countryCode
+    });
+    
+    // Check Multi-Account (Strong)
+    const others = getOtherUsersForLink("DEVICE_INSTALL", evt.identity.deviceInstallId, evt.userId);
+    if (others.length > 0) {
+      upsertAlert({
+        dedupeKey: `MULTI:${evt.userId}:INSTALL:${evt.identity.deviceInstallId}`,
+        userId: evt.userId,
+        severity: "HIGH",
+        category: "MULTI_ACCOUNT",
+        score: 80,
+        title: `Shared Device Install (${others.length + 1} accounts)`,
+        details: { linkKey: evt.identity.deviceInstallId, others },
+        relatedUserIds: [evt.userId, ...others]
+      });
+    }
+  }
+
+  if (evt.identity?.deviceFp) {
+    upsertIdentityLink({
+      linkType: "DEVICE_FP",
+      linkKey: evt.identity.deviceFp,
+      userId: evt.userId,
+      ip: evt.ip,
+      country: evt.geo?.countryCode
+    });
+    // Check Multi-Account (Weak)
+    const others = getOtherUsersForLink("DEVICE_FP", evt.identity.deviceFp, evt.userId);
+    if (others.length >= 2) { // Tolerance of 2
+      upsertAlert({
+        dedupeKey: `MULTI:${evt.userId}:FP:${evt.identity.deviceFp}`,
+        userId: evt.userId,
+        severity: "MEDIUM",
+        category: "MULTI_ACCOUNT",
+        score: 40,
+        title: `Shared Device Fingerprint (${others.length + 1} accounts)`,
+        details: { linkKey: evt.identity.deviceFp, others },
+        relatedUserIds: [evt.userId, ...others]
+      });
+    }
+  }
+
+  if (evt.ip) {
+    upsertIdentityLink({ linkType: "IP", linkKey: evt.ip, userId: evt.userId, ip: evt.ip, country: evt.geo?.countryCode });
+  }
+
+  // 2. Recompute Risk Score
+  recomputeUserRisk(evt.userId);
+}
+
+export function onTradeOpened(params: { userId: number; tradeId: number; symbolId: number; side: "BUY" | "SELL"; identity?: ClientIdentityContext; ip?: string }) {
+  // First, standard identity logging
+  onIdentityEvent({ ...params, eventType: "TRADE_OPEN" });
+
+  // Hedging Detection
+  // Find linked users via device install ID (strongest link)
+  const installId = params.identity?.deviceInstallId;
+  if (!installId) return;
+
+  const linkedUsers = getOtherUsersForLink("DEVICE_INSTALL", installId, params.userId);
+  if (linkedUsers.length === 0) return;
+
+  const oppositeSide = params.side === "BUY" ? "SELL" : "BUY";
+  
+  // Check if any linked user has an OPEN trade on the same symbol with OPPOSITE side
+  const hedgingTrades = db.select({ id: trades.id, userId: trades.userId })
+    .from(trades)
+    .where(and(
+      inArray(trades.userId, linkedUsers),
+      eq(trades.symbolId, params.symbolId),
+      eq(trades.type, oppositeSide),
+      inArray(trades.status, ["OPEN", "PENDING"])
+    )).all();
+
+  if (hedgingTrades.length > 0) {
+    const symbolRow = db.select().from(symbolConfigs).where(eq(symbolConfigs.id, params.symbolId)).get();
+    const symbolStr = symbolRow?.symbol || String(params.symbolId);
+    
+    // Alert Current User
+    upsertAlert({
+      dedupeKey: `HEDGE:${params.userId}:${params.tradeId}`,
+      userId: params.userId,
+      severity: "CRITICAL",
+      category: "HEDGING",
+      score: 100,
+      title: `Cross-Account Hedging Detected (${symbolStr})`,
+      details: { tradeId: params.tradeId, oppositeTrades: hedgingTrades, installId },
+      relatedUserIds: [params.userId, ...linkedUsers]
+    });
+
+    // Alert Linked Users
+    for (const t of hedgingTrades) {
+      upsertAlert({
+        dedupeKey: `HEDGE:${t.userId}:${t.id}`,
+        userId: t.userId,
+        severity: "CRITICAL",
+        category: "HEDGING",
+        score: 100,
+        title: `Cross-Account Hedging Detected (${symbolStr})`,
+        details: { tradeId: t.id, triggeringTrade: params.tradeId, triggeringUser: params.userId },
+        relatedUserIds: [t.userId, params.userId]
+      });
+      recomputeUserRisk(t.userId);
+    }
+    recomputeUserRisk(params.userId);
+  }
+}
+
+export function recomputeUserRisk(userId: number) {
+  // Simple scoring
+  let score = 0;
+  const reasons: string[] = [];
+
+  // 1. Alert Score
+  const alerts = db.select().from(fraudAlerts).where(and(eq(fraudAlerts.userId, userId), eq(fraudAlerts.status, "OPEN"))).all();
+  for (const a of alerts) {
+    score += a.score;
+    if (a.score > 0) reasons.push(a.title);
+  }
+
+  // 2. Churn (IPs in last 24h)
+  const ipCount = db.select({ count: sql<number>`count(distinct ${userSessions.ip})` })
+    .from(userSessions)
+    .where(and(eq(userSessions.userId, userId), sql`${userSessions.createdAt} > date('now', '-1 day')`))
+    .get()?.count || 0;
+  
+  if (ipCount > 5) {
+    score += 20;
+    reasons.push(`High IP churn (${ipCount} in 24h)`);
+  }
+
+  const level: FraudSeverity = score > 80 ? "CRITICAL" : score > 50 ? "HIGH" : score > 20 ? "MEDIUM" : "LOW";
+
+  // Upsert Risk Table
+  const existing = db.select().from(fraudUserRisk).where(eq(fraudUserRisk.userId, userId)).get();
+  if (existing) {
+    db.update(fraudUserRisk).set({
+      riskScore: score,
+      riskLevel: level,
+      reasonsJson: safeJson(reasons),
+      openAlertsCount: alerts.length,
+      lastEvaluatedAt: now()
+    }).where(eq(fraudUserRisk.userId, userId)).run();
+  } else {
+    db.insert(fraudUserRisk).values({
+      userId,
+      riskScore: score,
+      riskLevel: level,
+      reasonsJson: safeJson(reasons),
+      openAlertsCount: alerts.length,
+      lastEvaluatedAt: now()
+    }).run();
+  }
+}
+
+export function listFraudUsers(limit = 100) {
+  return db.select({
+    userId: users.id,
+    email: users.email,
+    riskScore: fraudUserRisk.riskScore,
+    riskLevel: fraudUserRisk.riskLevel,
+    openAlerts: fraudUserRisk.openAlertsCount,
+    reasons: fraudUserRisk.reasonsJson
+  })
+  .from(users)
+  .leftJoin(fraudUserRisk, eq(users.id, fraudUserRisk.userId))
+  .orderBy(desc(fraudUserRisk.riskScore))
+  .limit(limit)
+  .all()
+  .map(u => ({ ...u, reasons: parseJson(u.reasons || '[]') }));
+}
+
+```
+
+---
+
+### **6. Server Entry Updates (`server/index.ts`)**
+
+Update `server/index.ts` to call the new schema helpers on startup.
+
+```typescript
+// [Modify imports]
+import { 
+  // ... existing ...
+  ensureUserSessionIdentityColumns,
+  ensureLoginHistoryIdentityColumns,
+  ensureFraudDetectionTables
+} from "./db/ensureSchema";
+
+// [Inside the async startup function, add these calls:]
+(async () => {
+  try {
+    // ... existing calls ...
+    ensureUserSessionsTable();
+    
+    // NEW CALLS
+    ensureUserSessionGeoColumns();
+    ensureUserSessionIdentityColumns(); // <--- Add this
+    ensureLoginHistoryGeoColumns();
+    ensureLoginHistoryIdentityColumns(); // <--- Add this
+    ensureFraudDetectionTables();        // <--- Add this
+    
+    // ... continue ...
+  }
+  // ...
+})();
+
+```
+
+---
+
+### **7. Admin Fraud Routes (`server/routes/adminFraud.ts`)**
+
+Create this **new file** to expose the data to the frontend.
+
+```typescript
+import { Router } from "express";
+import { requireAdmin } from "../middleware/auth";
+import { listFraudUsers, onIdentityEvent } from "../services/fraudDetection";
+import { db } from "@db";
+import { fraudAlerts } from "@shared/schema";
+import { eq, desc } from "drizzle-orm";
+
+export const adminFraudRouter = Router();
+
+// Get leaderboard of risky users
+adminFraudRouter.get("/users", requireAdmin, async (req, res) => {
+  const users = listFraudUsers(100);
+  res.json(users);
+});
+
+// Get details for a specific user (alerts)
+adminFraudRouter.get("/users/:userId/alerts", requireAdmin, async (req, res) => {
+  const alerts = await db.select().from(fraudAlerts)
+    .where(eq(fraudAlerts.userId, Number(req.params.userId)))
+    .orderBy(desc(fraudAlerts.createdAt))
+    .all();
+  res.json(alerts);
+});
+
+// Manually trigger a risk scan (optional)
+adminFraudRouter.post("/scan/:userId", requireAdmin, async (req, res) => {
+  // triggers recompute logic internally
+  const { userId } = req.params;
+  // This is a stub to force a re-check; reusing identity event logic
+  onIdentityEvent({ 
+    userId: Number(userId), 
+    eventType: "LOGIN_SUCCESS" // Dummy event to trigger refresh
+  });
+  res.json({ success: true });
+});
+
+```
+
+**Register this in `server/routes.ts`:**
+
+```typescript
+import { adminFraudRouter } from "./routes/adminFraud";
+// ...
+export async function registerRoutes(app: Express) {
+  // ... existing registrations ...
+  app.use("/api/admin/fraud", adminFraudRouter); // <--- Register the new router
+}
+
+```
+
+---
+
+### **8. Frontend Identity Logic (`client/src/lib/identity.ts`)**
+
+Create this **new file** on the client side.
+
+```typescript
+import { v4 as uuidv4 } from 'uuid';
+
+export function getDeviceInstallId(): string {
+  const key = 'device_install_id';
+  let id = localStorage.getItem(key);
+  if (!id) {
+    id = uuidv4();
+    localStorage.setItem(key, id);
+  }
+  return id;
+}
+
+export async function getDeviceFingerprint(): Promise<string> {
+  // Simple entropy collection (Canvas + UserAgent + Screen + Timezone)
+  // In a real app, use a library like FingerprintJS.
+  // This is a "light" version for demonstration.
+  const parts = [
+    navigator.userAgent,
+    navigator.language,
+    new Date().getTimezoneOffset(),
+    screen.width + 'x' + screen.height,
+    // Add canvas noise if needed
+  ];
+  
+  const str = parts.join('|');
+  const encoder = new TextEncoder();
+  const data = encoder.encode(str);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+```
+
+---
+
+### **9. Frontend Axios Interceptor (`client/src/main.tsx`)**
+
+Inject headers into all requests.
+
+```typescript
+import axios from "axios";
+import { getDeviceInstallId, getDeviceFingerprint } from "./lib/identity";
+
+// Initialize identity headers
+const setupIdentity = async () => {
+  const fp = await getDeviceFingerprint();
+  const installId = getDeviceInstallId();
+  
+  axios.interceptors.request.use((config) => {
+    config.headers['x-device-fp'] = fp;
+    config.headers['x-device-install-id'] = installId;
+    config.headers['x-client-tz'] = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    config.headers['x-client-lang'] = navigator.language;
+    return config;
+  });
+};
+
+setupIdentity(); // Call this before mounting App
+
+```
+
+---
+
+### **10. Admin Dashboard Update (`client/src/pages/AdminDashboard.tsx`)**
+
+Add a new tab for "Fraud" to the admin dashboard.
+
+```typescript
+// 1. Add state for the new tab
+// const [userFilterTab, setUserFilterTab] = useState("all"); // ... existing
+// Add "fraud" to the allowed values or separate tab logic.
+
+// 2. Fetch fraud data
+const { data: fraudUsers } = useQuery({
+  queryKey: ["/api/admin/fraud/users"],
+  queryFn: () => axios.get("/api/admin/fraud/users").then(r => r.data),
+  enabled: userFilterTab === "fraud"
+});
+
+// 3. Add Tab Button
+// <button onClick={() => setUserFilterTab("fraud")} ... >Fraud Risk</button>
+
+// 4. Render Table
+// {userFilterTab === "fraud" && (
+//   <Table>
+//     <TableHeader>
+//       <TableRow>
+//         <TableHead>User</TableHead>
+//         <TableHead>Risk Score</TableHead>
+//         <TableHead>Level</TableHead>
+//         <TableHead>Reasons</TableHead>
+//       </TableRow>
+//     </TableHeader>
+//     <TableBody>
+//       {fraudUsers?.map(u => (
+//         <TableRow key={u.userId}>
+//           <TableCell>{u.email}</TableCell>
+//           <TableCell>{u.riskScore}</TableCell>
+//           <TableCell className={u.riskLevel === 'CRITICAL' ? 'text-red-500 font-bold' : ''}>
+//             {u.riskLevel}
+//           </TableCell>
+//           <TableCell>{u.reasons.join(", ")}</TableCell>
+//         </TableRow>
+//       ))}
+//     </TableBody>
+//   </Table>
+// )}
+
+```

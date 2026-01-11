@@ -1,0 +1,162 @@
+Confirmed — we will enforce Option 1 (Risk-safe / Professional) as the platform-wide rule:
+
+Refuse to update floating P/L / MTM (mark-to-market) and margin metrics when quotes are missing or stale.
+
+Block execution and closing when the feed is stale.
+
+Below is what I have already implemented in the codebase you provided, what it achieves, and one critical item that is still incomplete (but already identified and queued for fix).
+
+What has been implemented (Option 1 enforcement)
+1) MTM / Margin Engine: “Freeze on stale” (no fallback to openPrice)
+File: server/recalcAccount.ts
+
+Behavior now:
+
+If the user has open positions, the engine requires fresh quotes.
+
+If any required quote is missing or stale, recalcAccount() returns:
+
+pricingStale: true
+
+staleSymbols: [...]
+
+and does NOT write new equity/freeMargin/usedMargin to users.
+
+This removes the “dangerous mask” behavior where missing quotes were silently replaced by openPrice, which falsely forces:
+
+floating P/L → 0
+
+equity == balance
+and hides feed failures.
+
+Also added strict dependency on FX reference pairs (EURUSD, GBPUSD, USDJPY, USDCAD) for conversion correctness. If these are stale, MTM is considered stale.
+
+2) Account Summary now explicitly reports stale status
+File: server/routes.ts → /api/account/summary
+
+The response now includes:
+
+pricingStale
+
+staleSymbols
+
+asOf
+
+So the frontend can display “pricing stale” and you have a proper audit signal instead of silent corruption.
+
+3) Execution engine blocks trading & closing on stale quotes
+File: server/routes.ts
+A) /api/trades (opening a trade)
+
+After fetching /api/quotes/latest, the engine now checks:
+
+quote.isStale === true → returns HTTP 503 and refuses to open.
+
+Additionally, after calling recalcAccount() (for margin check), it now blocks if:
+
+metrics.pricingStale === true → refuses the order (prevents stale freeMargin use).
+
+B) /api/trades/:id/close (closing a trade)
+
+Same stale check:
+
+quote.isStale === true → returns HTTP 503 and refuses to close.
+
+This prevents the platform from closing trades using cached/ghost prices.
+
+4) Auto-close job no longer uses fake/random prices
+File: server/cron/autoClose.ts
+
+Previously it used a simulated random market price, which is absolutely capable of generating “impossible closes” and unrealistic profits.
+
+Now it:
+
+pulls from the quotes table
+
+refuses to auto-close if quote is stale/missing (consistent with Option 1)
+
+closes using correct side logic (BUY closes on bid, SELL closes on ask)
+
+This is a major risk-control correction.
+
+5) A serious exploit was closed: user-supplied closePrice
+File: server/routes.ts → /api/trades/:id/close
+
+The endpoint previously allowed:
+
+req.body.closePrice
+Meaning a client could submit any close price and fabricate profits.
+
+Now:
+
+non-admins cannot supply closePrice
+
+request is rejected if attempted
+
+That is required for any “professional platform” posture.
+
+Minimal UI support for “mark stale”
+Files:
+
+client/src/hooks/use-account-summary.tsx
+
+client/src/pages/AccountScreen.tsx
+
+The account summary type was extended to include:
+
+pricingStale, staleSymbols, asOf
+
+And the Account tab now shows a small warning banner if pricingStale is true:
+
+“P/L and margin are frozen… execution/closing may be blocked.”
+
+This is not a UI enhancement; it is the required visibility signal for the risk-safe mode.
+
+One critical item still incomplete (but identified and in progress)
+BUG: recalcAccount price caching is wrong when user holds BOTH BUY and SELL in same symbol
+
+Right now, recalcAccount.ts caches one price per symbol based on the first trade encountered.
+That is wrong because:
+
+BUY should use bid
+
+SELL should use ask
+If both exist simultaneously, the second side is valued using the wrong quote side, corrupting floating P/L.
+
+Status:
+
+I already located the exact code block and began patching it.
+
+The correct fix is to cache { bid, ask, mid } per symbol, and choose per trade type at calculation time.
+
+I did not complete writing the patch before tool time ended.
+
+This is the next immediate change I will finalize.
+
+Net effect of Option 1 enforcement
+
+With the above changes:
+
+Equity/margin no longer silently becomes “clean” when the feed is broken.
+
+P/L is frozen and explicitly flagged as stale.
+
+Market execution + closing becomes impossible during stale quote conditions.
+
+Auto-close cannot fabricate pricing.
+
+Client-side manipulation of close price is blocked.
+
+This materially reduces “ghost price” and “impossible profit” scenarios.
+
+Next step (you confirm, I execute)
+
+I will now finalize the remaining patch:
+
+Fix the per-symbol cache bug in recalcAccount.ts (bid/ask per trade type)
+
+Then I can proceed to your broader request:
+
+full critique of market/limit/stop/pending logic to professional standard, including history integrity and state transitions.
+
+If you confirm “proceed”, I’ll complete that recalcAccount fix next.

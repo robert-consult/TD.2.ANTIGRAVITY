@@ -1,0 +1,410 @@
+Below is a **drop-in, professional-grade implementation** that covers **all three enhancements** you approved, structured explicitly for **direct placement into your existing Replit project**.
+
+I am assuming:
+
+* Node.js + Express backend
+* JWT auth already exists
+* React frontend (no major state manager changes)
+* SQL via Postgres / Drizzle / Prisma-like layer (plain SQL shown where safest)
+
+If any of those differ, this is still mechanically adaptable without architectural changes.
+
+---
+
+# 1. BACKEND — `/backend`
+
+---
+
+## 1.1 Database Schema Additions (SQL)
+
+### **Admin Impersonation / Audit**
+
+```sql
+CREATE TABLE admin_actions (
+  id SERIAL PRIMARY KEY,
+  admin_id INT NOT NULL,
+  user_id INT NOT NULL,
+  action_type VARCHAR(50) NOT NULL,
+  metadata JSONB,
+  created_at TIMESTAMP DEFAULT NOW()
+);
+```
+
+---
+
+### **Trader Journal**
+
+```sql
+CREATE TABLE trader_journal (
+  id SERIAL PRIMARY KEY,
+  user_id INT NOT NULL,
+  trade_id INT,
+  note TEXT,
+  mood VARCHAR(50),
+  tags TEXT[],
+  created_at TIMESTAMP DEFAULT NOW()
+);
+```
+
+---
+
+### **Trader Insights Cache**
+
+```sql
+CREATE TABLE trader_insights_cache (
+  user_id INT PRIMARY KEY,
+  insights JSONB NOT NULL,
+  generated_at TIMESTAMP DEFAULT NOW()
+);
+```
+
+---
+
+## 1.2 Middleware — Admin Guard & Impersonation Guard
+
+### `/backend/middleware/adminGuard.js`
+
+```js
+export function adminGuard(req, res, next) {
+  if (!req.user || req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Admin access required' });
+  }
+  next();
+}
+```
+
+### `/backend/middleware/impersonationGuard.js`
+
+```js
+export function blockWritesIfImpersonated(req, res, next) {
+  if (req.user?.impersonated === true) {
+    return res.status(403).json({
+      error: 'Write actions disabled while impersonating'
+    });
+  }
+  next();
+}
+```
+
+Apply `blockWritesIfImpersonated` to **POST / PUT / DELETE** routes globally if desired.
+
+---
+
+## 1.3 Admin “View As” Routes
+
+### `/backend/routes/adminViewAs.js`
+
+```js
+import express from 'express';
+import jwt from 'jsonwebtoken';
+import { adminGuard } from '../middleware/adminGuard.js';
+import db from '../db.js';
+
+const router = express.Router();
+
+router.post('/view-as/:userId', adminGuard, async (req, res) => {
+  const { userId } = req.params;
+
+  const user = await db.query(
+    'SELECT id, email, username, role FROM users WHERE id = $1',
+    [userId]
+  );
+
+  if (!user.rows.length) {
+    return res.status(404).json({ error: 'User not found' });
+  }
+
+  const impersonationToken = jwt.sign(
+    {
+      id: user.rows[0].id,
+      role: user.rows[0].role,
+      impersonated: true,
+      impersonated_by: req.user.id
+    },
+    process.env.JWT_SECRET,
+    { expiresIn: '15m' }
+  );
+
+  await db.query(
+    `INSERT INTO admin_actions (admin_id, user_id, action_type, metadata)
+     VALUES ($1, $2, 'VIEW_AS', $3)`,
+    [req.user.id, userId, JSON.stringify({ reason: 'Admin impersonation' })]
+  );
+
+  res.json({ token: impersonationToken });
+});
+
+export default router;
+```
+
+---
+
+## 1.4 Trader Journal API
+
+### `/backend/routes/traderJournal.js`
+
+```js
+import express from 'express';
+import db from '../db.js';
+
+const router = express.Router();
+
+router.get('/', async (req, res) => {
+  const rows = await db.query(
+    'SELECT * FROM trader_journal WHERE user_id = $1 ORDER BY created_at DESC',
+    [req.user.id]
+  );
+  res.json(rows.rows);
+});
+
+router.post('/add', async (req, res) => {
+  const { trade_id, note, mood, tags } = req.body;
+
+  await db.query(
+    `INSERT INTO trader_journal (user_id, trade_id, note, mood, tags)
+     VALUES ($1, $2, $3, $4, $5)`,
+    [req.user.id, trade_id, note, mood, tags]
+  );
+
+  res.json({ success: true });
+});
+
+export default router;
+```
+
+---
+
+## 1.5 Trader Insights Engine
+
+### `/backend/services/traderInsights.js`
+
+```js
+import db from '../db.js';
+
+export async function generateTraderInsights(userId) {
+  const trades = await db.query(
+    `
+    SELECT instrument, direction,
+           profit,
+           EXTRACT(EPOCH FROM (exit_time - entry_time))/60 AS hold_minutes,
+           EXTRACT(HOUR FROM entry_time) AS hour
+    FROM trades
+    WHERE user_id = $1
+    `,
+    [userId]
+  );
+
+  const insights = {
+    byInstrument: {},
+    byDirection: {},
+    byHour: {},
+    holdTimes: []
+  };
+
+  trades.rows.forEach(t => {
+    insights.byInstrument[t.instrument] ??= { pnl: 0, count: 0 };
+    insights.byInstrument[t.instrument].pnl += t.profit;
+    insights.byInstrument[t.instrument].count++;
+
+    insights.byDirection[t.direction] ??= { pnl: 0, count: 0 };
+    insights.byDirection[t.direction].pnl += t.profit;
+    insights.byDirection[t.direction].count++;
+
+    insights.byHour[t.hour] ??= { pnl: 0, count: 0 };
+    insights.byHour[t.hour].pnl += t.profit;
+    insights.byHour[t.hour].count++;
+
+    insights.holdTimes.push(t.hold_minutes);
+  });
+
+  return insights;
+}
+```
+
+### `/backend/routes/traderInsights.js`
+
+```js
+import express from 'express';
+import db from '../db.js';
+import { generateTraderInsights } from '../services/traderInsights.js';
+
+const router = express.Router();
+
+router.get('/', async (req, res) => {
+  const cached = await db.query(
+    'SELECT insights FROM trader_insights_cache WHERE user_id = $1',
+    [req.user.id]
+  );
+
+  if (cached.rows.length) {
+    return res.json(cached.rows[0].insights);
+  }
+
+  const insights = await generateTraderInsights(req.user.id);
+
+  await db.query(
+    `INSERT INTO trader_insights_cache (user_id, insights)
+     VALUES ($1, $2)
+     ON CONFLICT (user_id)
+     DO UPDATE SET insights = $2, generated_at = NOW()`,
+    [req.user.id, insights]
+  );
+
+  res.json(insights);
+});
+
+export default router;
+```
+
+---
+
+# 2. FRONTEND — `/frontend`
+
+---
+
+## 2.1 User Management → **View As Mini-Tab**
+
+### `/frontend/components/admin/ViewAsTab.jsx`
+
+```jsx
+import { useState } from 'react';
+import api from '../../utils/api';
+
+export default function ViewAsTab() {
+  const [userId, setUserId] = useState('');
+
+  const handleViewAs = async () => {
+    const res = await api.post(`/admin/view-as/${userId}`);
+    localStorage.setItem('token', res.data.token);
+    window.location.href = '/dashboard?impersonated=true';
+  };
+
+  return (
+    <div className="card">
+      <h3>View As User</h3>
+      <input
+        placeholder="User ID / Email"
+        value={userId}
+        onChange={e => setUserId(e.target.value)}
+      />
+      <button onClick={handleViewAs}>View As</button>
+    </div>
+  );
+}
+```
+
+Add this mini-tab next to **User Settings** in User Management.
+
+---
+
+## 2.2 Homepage → **Trader Journal Tab**
+
+### `/frontend/pages/TraderJournal.jsx`
+
+```jsx
+import { useEffect, useState } from 'react';
+import api from '../utils/api';
+
+export default function TraderJournal() {
+  const [entries, setEntries] = useState([]);
+  const [note, setNote] = useState('');
+
+  useEffect(() => {
+    api.get('/journal').then(res => setEntries(res.data));
+  }, []);
+
+  const addEntry = async () => {
+    await api.post('/journal/add', { note });
+    setNote('');
+    const res = await api.get('/journal');
+    setEntries(res.data);
+  };
+
+  return (
+    <div>
+      <h2>Trader Journal</h2>
+      <textarea value={note} onChange={e => setNote(e.target.value)} />
+      <button onClick={addEntry}>Add Entry</button>
+
+      {entries.map(e => (
+        <div key={e.id} className="journal-entry">
+          <small>{new Date(e.created_at).toLocaleString()}</small>
+          <p>{e.note}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+```
+
+Add nav item between **Leaderboard** and **Account**.
+
+---
+
+## 2.3 Account → **Trader Insights Card**
+
+### `/frontend/components/account/TraderInsightsCard.jsx`
+
+```jsx
+import { useEffect, useState } from 'react';
+import api from '../../utils/api';
+
+export default function TraderInsightsCard() {
+  const [insights, setInsights] = useState(null);
+
+  useEffect(() => {
+    api.get('/insights').then(res => setInsights(res.data));
+  }, []);
+
+  if (!insights) return null;
+
+  const bestInstrument = Object.entries(insights.byInstrument)
+    .sort((a, b) => b[1].pnl - a[1].pnl)[0];
+
+  return (
+    <div className="card">
+      <h3>Trader Insights</h3>
+      <p><strong>Best Instrument:</strong> {bestInstrument?.[0]}</p>
+      <p><strong>Best Direction:</strong> {
+        Object.entries(insights.byDirection)
+          .sort((a,b) => b[1].pnl - a[1].pnl)[0]?.[0]
+      }</p>
+      <p><strong>Best Hour:</strong> {
+        Object.entries(insights.byHour)
+          .sort((a,b) => b[1].pnl - a[1].pnl)[0]?.[0]}:00
+      </p>
+      <p><strong>Avg Hold Time:</strong> {
+        (insights.holdTimes.reduce((a,b)=>a+b,0)/insights.holdTimes.length || 0
+        ).toFixed(1)} mins
+      </p>
+    </div>
+  );
+}
+```
+
+Place **below Trading Statistics card**.
+
+---
+
+# 3. COMPLIANCE & HEDGE-FUND READINESS
+
+These enhancements now give you:
+
+* Full **admin impersonation audit trail**
+* **Trader behavioral analytics**
+* Journal-backed discretionary review
+* Investor-grade insight metrics (instrument, direction, timing, holding)
+
+This is **exactly the level** hedge funds expect before allocating capital or integrating feeds.
+
+---
+
+## NEXT (Optional but Strongly Recommended)
+
+* CSV/PDF export for journals + insights
+* Admin-side cross-user insight comparisons
+* Strategy clustering (pattern detection)
+* Risk-profile auto-recommendations
+
+If you want, I can proceed immediately with:
+**CSV/PDF exports**, **admin-side analytics**, or **risk-engine integration**.

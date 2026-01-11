@@ -1,0 +1,270 @@
+Interpreting “Adf” as “Add”: here is the **lightweight Signup Availability check** (backend endpoint + frontend widget) that uses your **coverage gate toggle** (`legal.coverage.enforce`) but does **not** ship the full document payload.
+
+---
+
+## 1) Backend: add `/availability` to your existing DOC1 router
+
+### Patch `server/routes/legalDoc1Resolve.ts`
+
+Add this route **below** your existing `/resolve` route (or anywhere in the same router file):
+
+```ts
+// FILE: /server/routes/legalDoc1Resolve.ts
+// Add below the existing /resolve handler:
+
+// GET /api/legal/doc1/availability?countryIso2=KE&regionKey=EAST_AFRICA
+legalDoc1ResolveRouter.get("/availability", (req, res) => {
+  try {
+    const countryIso2 = String(req.query.countryIso2 || "").trim().toUpperCase();
+    const regionKey = req.query.regionKey != null ? String(req.query.regionKey).trim() : null;
+
+    if (!countryIso2 || countryIso2.length !== 2) {
+      return res.status(400).json({ ok: false, error: "countryIso2 must be 2-letter ISO code." });
+    }
+
+    const enforce = getBoolConfig(CONFIG_KEYS.LEGAL_COVERAGE_ENFORCE, false);
+
+    const resolved = resolveDoc1ByJurisdiction({
+      countryIso2,
+      regionKey,
+      enforce,
+    });
+
+    if (resolved.blocked) {
+      return res.json({
+        ok: true,
+        available: false,
+        enforce: true,
+        code: "LEGAL_COVERAGE_BLOCKED",
+        reason: resolved.reason,
+        selected: resolved.selected,
+      });
+    }
+
+    // If not enforced, we still may be “unavailable” if we truly have no usable docs at all.
+    const hasGlobal = Boolean(resolved.current.global.doc?.content);
+    const hasAddendum = Boolean(resolved.current.addendum.doc?.content);
+    const available = hasGlobal && hasAddendum;
+
+    return res.json({
+      ok: true,
+      available,
+      enforce,
+      selected: resolved.selected,
+      modes: {
+        global: resolved.current.global.mode,
+        addendum: resolved.current.addendum.mode,
+      },
+      warnings: resolved.warnings,
+      reason: available ? null : "MISSING_DOC_CONTENT",
+    });
+  } catch (e: any) {
+    return res.status(400).json({ ok: false, error: e?.message || "Availability check failed." });
+  }
+});
+```
+
+No other backend changes are required (router is already mounted at `/api/legal/doc1`).
+
+---
+
+## 2) Frontend: Signup availability widget (disable proceed if not available)
+
+Create a small reusable component. You can drop this into your signup page where the user selects country/region.
+
+### New file: `client/src/components/SignupAvailabilityGate.tsx`
+
+```tsx
+// FILE: /client/src/components/SignupAvailabilityGate.tsx
+import React, { useEffect, useMemo, useState } from "react";
+
+type AvailabilityResp = {
+  ok: boolean;
+  available: boolean;
+  enforce: boolean;
+  code?: string;
+  reason?: string | null;
+  selected?: {
+    globalTarget: { docSet: string; docType: string; jurisdictionType: string; jurisdictionKey: string };
+    addendumTarget: { docSet: string; docType: string; jurisdictionType: string; jurisdictionKey: string };
+  };
+  modes?: { global: string; addendum: string };
+  warnings?: string[];
+};
+
+export function SignupAvailabilityGate(props: {
+  countryIso2: string;
+  regionKey?: string | null;
+  onAvailabilityChange?: (available: boolean, enforce: boolean, payload?: AvailabilityResp | null) => void;
+}) {
+  const countryIso2 = useMemo(() => String(props.countryIso2 || "").trim().toUpperCase(), [props.countryIso2]);
+  const regionKey = useMemo(() => (props.regionKey ? String(props.regionKey).trim() : ""), [props.regionKey]);
+
+  const [loading, setLoading] = useState(false);
+  const [data, setData] = useState<AvailabilityResp | null>(null);
+
+  useEffect(() => {
+    const ISO2 = countryIso2;
+    if (!ISO2 || ISO2.length !== 2) {
+      setData(null);
+      props.onAvailabilityChange?.(false, false, null);
+      return;
+    }
+
+    let cancelled = false;
+
+    (async () => {
+      setLoading(true);
+      try {
+        const qs = new URLSearchParams({ countryIso2: ISO2 });
+        if (regionKey) qs.set("regionKey", regionKey);
+
+        const res = await fetch(`/api/legal/doc1/availability?${qs.toString()}`);
+        const j = (await res.json()) as AvailabilityResp;
+        if (cancelled) return;
+
+        if (!j?.ok) throw new Error((j as any)?.error || "Availability check failed.");
+        setData(j);
+        props.onAvailabilityChange?.(Boolean(j.available), Boolean(j.enforce), j);
+      } catch {
+        if (cancelled) return;
+        setData({
+          ok: true,
+          available: false,
+          enforce: false,
+          reason: "CHECK_FAILED",
+        } as any);
+        props.onAvailabilityChange?.(false, false, null);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [countryIso2, regionKey]);
+
+  if (!countryIso2 || countryIso2.length !== 2) {
+    return (
+      <div style={boxMuted}>
+        <div style={{ fontWeight: 700 }}>Availability</div>
+        <div style={{ fontSize: 12, opacity: 0.8 }}>Select a valid country code to check availability.</div>
+      </div>
+    );
+  }
+
+  const available = Boolean(data?.available);
+  const enforce = Boolean(data?.enforce);
+
+  return (
+    <div style={available ? boxOk : boxWarn}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10 }}>
+        <div style={{ fontWeight: 800 }}>
+          Availability:{" "}
+          {loading ? "Checking…" : available ? "Available" : enforce ? "Not Available" : "Limited Availability"}
+        </div>
+        <div style={{ fontSize: 12, opacity: 0.8 }}>
+          Gate: <strong>{loading ? "…" : enforce ? "ENFORCED" : "OFF"}</strong>
+        </div>
+      </div>
+
+      {data?.selected && (
+        <div style={{ marginTop: 8, fontSize: 12, opacity: 0.85 }}>
+          <div style={{ fontFamily: "monospace" }}>
+            Global: {data.selected.globalTarget.jurisdictionType}/{data.selected.globalTarget.jurisdictionKey} (
+            {data.modes?.global || "—"})
+          </div>
+          <div style={{ fontFamily: "monospace" }}>
+            Addendum: {data.selected.addendumTarget.jurisdictionType}/{data.selected.addendumTarget.jurisdictionKey} (
+            {data.modes?.addendum || "—"})
+          </div>
+        </div>
+      )}
+
+      {!loading && !available && enforce && (
+        <div style={{ marginTop: 8, fontSize: 12 }}>
+          This jurisdiction is not yet supported. Please check back later.
+        </div>
+      )}
+
+      {!loading && !available && !enforce && (
+        <div style={{ marginTop: 8, fontSize: 12, opacity: 0.9 }}>
+          Terms coverage is not fully configured for this jurisdiction. Admin may allow fallback temporarily.
+        </div>
+      )}
+
+      {!loading && Array.isArray(data?.warnings) && data!.warnings!.length > 0 && (
+        <div style={{ marginTop: 8, fontSize: 12, opacity: 0.85 }}>
+          <div style={{ fontWeight: 700 }}>Warnings</div>
+          <ul style={{ margin: "6px 0 0 18px" }}>
+            {data!.warnings!.slice(0, 6).map((w, i) => (
+              <li key={i}>{w}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const boxBase: React.CSSProperties = {
+  border: "1px solid rgba(0,0,0,0.15)",
+  borderRadius: 12,
+  padding: 12,
+  background: "white",
+};
+
+const boxOk: React.CSSProperties = {
+  ...boxBase,
+};
+
+const boxWarn: React.CSSProperties = {
+  ...boxBase,
+};
+
+const boxMuted: React.CSSProperties = {
+  ...boxBase,
+  opacity: 0.85,
+};
+```
+
+---
+
+## 3) Example: wire it into your signup page to disable “Continue”
+
+In your signup page component, add:
+
+```tsx
+const [canProceed, setCanProceed] = useState(false);
+
+<SignupAvailabilityGate
+  countryIso2={countryIso2}
+  regionKey={regionKey}
+  onAvailabilityChange={(available, enforce) => {
+    // If enforced, must be available. If not enforced, allow proceed (your choice).
+    // Recommended: still require available=true (docs exist) even when not enforced.
+    setCanProceed(available);
+  }}
+/>
+
+<button disabled={!canProceed}>Continue</button>
+```
+
+If you want “non-enforced mode” to allow proceeding even when docs are missing (not recommended), change `setCanProceed(available)` to `setCanProceed(enforce ? available : true)`.
+
+---
+
+## 4) Admin control (already supported)
+
+You already have the backend toggle via System Config:
+
+* Key: `legal.coverage.enforce`
+* Values: `"true"` / `"false"`
+
+And you added UI controls in **Legal Coverage** to switch it.
+
+---
+
+If you confirm the exact signup page file path (or paste it), I will provide the exact inline patch to integrate this component into your current signup flow without guesswork.

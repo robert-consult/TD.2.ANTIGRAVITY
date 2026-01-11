@@ -1,0 +1,285 @@
+## Implementation Audit Checklist (Replit Agent 3)
+
+**Scope:** Verify hedge-fund-grade audit trail integrity + frontend inclusion + backend data access for close reasons, trade lifecycle, and tamper-evident/correlated events.
+
+---
+
+# A) Source-of-Truth Taxonomy (Close Reasons)
+
+### A1. Shared contract exists and is canonical
+
+* [ ] `shared/closeReasons.ts` exists and exports:
+
+  * [ ] `CloseReasonCode` (union type or const list)
+  * [ ] label mapping (`CLOSE_REASON_LABELS` or meta table)
+  * [ ] normalization (`normalizeCloseReason`) mapping legacy values (e.g., `SL`, `TP`, `MANUAL`, `AUTO_TIME_LIMIT`) to canonical codes
+  * [ ] trader-facing list (`TRADER_CLOSE_REASON_FILTER_OPTIONS` or equivalent)
+* [ ] Backend stores only canonical codes going forward (no new writes of legacy codes).
+* [ ] Frontend uses normalization for display/filter (so old rows render correctly).
+
+**Pass criteria:** A single module defines all close reason codes; no hardcoded close reason strings scattered in UI/backend.
+
+---
+
+# B) Database / Persistence Layer (Hedge-fund audit readiness)
+
+### B1. Trades table supports provenance + correlation
+
+* [ ] `trades` has:
+
+  * [ ] `correlationId` (TEXT/UUID) persisted at order submission
+  * [ ] `lastActorUserId` (nullable int)
+  * [ ] `lastActorSessionId` (nullable text)
+  * [ ] `lastActorIp` (nullable text)
+  * [ ] `lastActorUserAgent` (nullable text)
+  * [ ] `lastActorType` (USER/ADMIN/SYSTEM)
+* [ ] Migration exists and has been applied in the current DB environment.
+* [ ] New trade creation writes `correlationId` + lastActor* fields immediately at request-time (not later).
+
+**Pass criteria:** Every order attempt has a correlationId and actor provenance stored in DB before any async engine step can run.
+
+### B2. Trade audit table can represent full lifecycle
+
+* [ ] `trade_audit` (or equivalent) contains fields needed to evidence:
+
+  * [ ] `eventType`, `eventCategory`
+  * [ ] `tradeId`, `symbol`, `side`, `orderType`, `qtyLots`
+  * [ ] `requestedPrice`, `fillPrice`, `avgFillPrice` (where relevant)
+  * [ ] quote context: `quoteBid`, `quoteAsk`, `quoteMid`, `quoteSpread`, `quoteTs`, `quoteSource`
+  * [ ] `spreadPips`, `slippage`, `slippagePips`, `slippageReference`
+  * [ ] `reasonCode` (stores canonical `CloseReasonCode` for closes/rejects)
+  * [ ] `note`, `payload` (json)
+  * [ ] actor provenance mirrored: `actorType`, `actorUserId`, `sessionId`, `ip`, `userAgent`
+  * [ ] correlation chain: `correlationId`, and preferably `orderId`, `executionId`, `positionId`
+* [ ] Optional but strongly recommended: hash chain fields exist:
+
+  * [ ] `prevHash`, `eventHash` (tamper-evident)
+  * [ ] event hash is computed deterministically from event fields + prevHash.
+
+**Pass criteria:** Audit rows are sufficient for allocator diligence: reconstruct order decisions, fills, closes, and context.
+
+---
+
+# C) Backend Event Coverage (No missing lifecycle events)
+
+## C1. Order Intent Audit (submission-time)
+
+* [ ] On order submission, an audit event is written:
+
+  * [ ] `eventType=ORDER_RECEIVED` (or equivalent)
+  * [ ] includes request context (actorType USER/ADMIN, sessionId/ip/userAgent)
+  * [ ] includes initial order parameters (symbol, side, orderType, lots, requestedPrice/stop/limit, SL/TP)
+  * [ ] correlationId is generated here and stored both on trade + audit
+* [ ] If order is rejected at submission-time (risk/validation):
+
+  * [ ] audit event `ORDER_REJECTED` written with `riskCheckName`, `reasonCode`, and `payload` describing check.
+
+**Pass criteria:** You can prove the platform saw the order and what it decided, even if it never hit the engine.
+
+## C2. Pending order lifecycle (engine async)
+
+* [ ] Pending fill path uses the stored `trade.correlationId` (not a newly generated correlationId).
+* [ ] Pending fill audit writes:
+
+  * [ ] `eventType=ORDER_FILLED`
+  * [ ] includes quote context + slippage/spread pips
+  * [ ] actor attribution uses stored lastActor* fields (originator), not SYSTEM
+* [ ] Pending cancel path writes:
+
+  * [ ] trade.closeReason = `CANCELED_BY_USER`
+  * [ ] audit event `ORDER_CANCELED` (or equivalent) including actor context
+* [ ] Pending rejection path writes:
+
+  * [ ] trade.closeReason = `ORDER_REJECTED`
+  * [ ] audit event `ORDER_REJECTED` with `riskCheckName`, `riskLimitValue`, `riskObservedValue`, `reasonCode`
+
+**Pass criteria:** For any pending order, you can reconstruct trigger → decision → fill/reject/cancel with correlationId continuity.
+
+## C3. SL/TP closure lifecycle (engine)
+
+* [ ] When SL hit:
+
+  * [ ] trade.closeReason = `STOP_LOSS_HIT`
+  * [ ] audit event `SL_TRIGGERED` or `POSITION_CLOSED` with reasonCode `STOP_LOSS_HIT`
+  * [ ] uses trade.correlationId (not new)
+* [ ] When TP hit:
+
+  * [ ] trade.closeReason = `TAKE_PROFIT_HIT`
+  * [ ] audit event `TP_TRIGGERED` or `POSITION_CLOSED` with reasonCode `TAKE_PROFIT_HIT`
+  * [ ] uses trade.correlationId (not new)
+
+**Pass criteria:** Close reason is canonical and matches audit reasonCode and event type.
+
+## C4. Max-hold-time auto close (cron / system)
+
+* [ ] Cron closure sets trade.closeReason = `MAX_HOLD_TIME` (not `AUTO_TIME_LIMIT`)
+* [ ] Writes a trade_audit event:
+
+  * [ ] `eventType=POSITION_CLOSED`
+  * [ ] `actorType=SYSTEM`
+  * [ ] includes quote context and whether stale quote was used
+  * [ ] reasonCode=`MAX_HOLD_TIME`
+  * [ ] correlationId uses trade.correlationId if present; if missing, it backfills once.
+* [ ] Updates balances and triggers downstream recalcs as expected.
+
+**Pass criteria:** No “silent closes” without an audit entry.
+
+## C5. Manual close (API route)
+
+* [ ] Manual close endpoint sets trade.closeReason = `MANUAL_CLOSE`
+* [ ] Writes trade audit event:
+
+  * [ ] `eventType=POSITION_CLOSED`
+  * [ ] reasonCode=`MANUAL_CLOSE`
+  * [ ] actor context from request (USER/ADMIN) + session/ip/userAgent
+  * [ ] correlationId ties back to order’s correlationId
+
+**Pass criteria:** Manual closes are fully attributable and correlated.
+
+---
+
+# D) Risk Guardrails: Auditability of Blocks (Hedge fund standard)
+
+For each guardrail that blocks an order:
+
+* [ ] There is an audit event for the block (not just an HTTP error)
+* [ ] The audit includes:
+
+  * [ ] `riskCheckName` (e.g., MAX_CONCURRENT_TRADES, MAX_CONCURRENT_LOTS, MAX_PER_INSTRUMENT, MARGIN_CHECK)
+  * [ ] `riskLimitValue`
+  * [ ] `riskObservedValue`
+  * [ ] `riskResult=FAIL`
+  * [ ] deterministic reason code (e.g., `MAX_LOTS_EXCEEDED`, `MAX_TRADES_EXCEEDED`)
+  * [ ] payload with enough detail to reproduce the decision (open lots, requested lots, current open trades, etc.)
+* [ ] The user sees a friendly error message, but audit has full engineering-grade detail.
+
+**Pass criteria:** Every “deny” is evidence-backed and reproducible.
+
+---
+
+# E) Correlation & Integrity (Allocator diligence)
+
+### E1. Correlation continuity checks
+
+* [ ] For a given tradeId, all audit rows share the same `correlationId` across:
+
+  * [ ] order received → risk decision → pending fill → SL/TP close or manual close
+* [ ] orderId/executionId/positionId are consistent:
+
+  * [ ] orderId changes per attempt where appropriate
+  * [ ] executionId unique per fill
+  * [ ] positionId links open/close events for the same position lifecycle
+
+### E2. Tamper-evidence (if implemented)
+
+* [ ] `eventHash` exists and is computed from stable fields + prevHash
+* [ ] verifier job/script exists to validate hash chain for a date range
+* [ ] Admin UI can at least export hashes (even if not displayed by default)
+
+**Pass criteria:** You can prove audit logs weren’t altered after the fact.
+
+---
+
+# F) Backend Data Access (APIs must expose what UI needs)
+
+### F1. Trade history endpoint includes closeReason and timestamps
+
+* [ ] `/api/trades` or `/api/history` returns:
+
+  * [ ] trade id, symbol, side, lots, openPrice, closePrice, profit
+  * [ ] `closeReason` (raw stored value)
+  * [ ] `openedAt`, `executedAt`, `closedAt`
+* [ ] If symbol is nested object in current API responses, closeReason must still be accessible in the same trade object.
+
+### F2. Trade audit endpoint exists for admin view
+
+* [ ] Admin can fetch audit events by:
+
+  * [ ] tradeId
+  * [ ] correlationId
+  * [ ] userId
+  * [ ] date range
+* [ ] Response includes actor provenance and all audit fields needed for diligence.
+
+**Pass criteria:** Frontend doesn’t rely on hidden DB access; everything is via explicit API.
+
+---
+
+# G) Frontend Inclusion (Trader-facing UI)
+
+### G1. History UI renders close reason correctly
+
+* [ ] Trader History screen:
+
+  * [ ] displays a close reason badge for closed trades
+  * [ ] uses `normalizeCloseReason()` before mapping to label
+  * [ ] handles null/empty gracefully (“—”)
+* [ ] Badge styling is consistent and not hardcoded per legacy string.
+
+### G2. Close reason filter works
+
+* [ ] History screen has dropdown: “All Close Reasons” + canonical options
+* [ ] Filter works for both:
+
+  * [ ] canonical stored codes
+  * [ ] legacy values stored in DB (via normalization)
+
+### G3. Search includes close reason
+
+* [ ] Search box matches ticket OR symbol OR close reason label (post-normalization)
+
+**Pass criteria:** Trader can understand *why* positions closed without admin assistance.
+
+---
+
+# H) Regression & Consistency Tests (Required)
+
+### H1. Unit/integration tests (minimum)
+
+* [ ] `normalizeCloseReason()` tests cover legacy inputs: `SL`, `TP`, `MANUAL`, `AUTO_TIME_LIMIT`
+* [ ] Engine close writes `STOP_LOSS_HIT` / `TAKE_PROFIT_HIT`
+* [ ] AutoClose writes `MAX_HOLD_TIME` and inserts audit event
+
+### H2. Manual QA scripts (must be runnable)
+
+* [ ] Script: place pending order, wait for trigger, confirm:
+
+  * [ ] trade.correlationId persists
+  * [ ] audit has ORDER_RECEIVED + ORDER_FILLED
+* [ ] Script: force SL/TP hit, confirm:
+
+  * [ ] trade closeReason canonical
+  * [ ] audit close event reasonCode matches
+* [ ] Script: auto-close by max hold, confirm:
+
+  * [ ] audit event exists (no silent close)
+* [ ] Script: exceed max lots/trades limits, confirm:
+
+  * [ ] order rejected and audit contains risk details
+
+**Pass criteria:** A non-developer tester can follow steps and validate evidence is present.
+
+---
+
+# I) “Definition of Done” Gate (Hedge Fund Level)
+
+Agent 3 should mark the implementation as complete only when:
+
+* [ ] No closure path exists without an audit event.
+* [ ] No audit event exists without correlationId.
+* [ ] Every audit row has actor provenance (USER/ADMIN/SYSTEM) appropriate to the event.
+* [ ] Close reason is canonical everywhere (DB, audit.reasonCode, UI rendering).
+* [ ] Trader History UI displays and filters close reasons correctly.
+* [ ] Admin can retrieve audit by tradeId and correlationId via API.
+
+---
+
+## Optional “Nice-to-have” (but recommended for diligence)
+
+* [ ] CSV export includes close reason label + code + correlationId
+* [ ] Admin UI “Audit Integrity” view validates hash chain if implemented
+* [ ] “Explain this close” drawer shows payload context (e.g., SL value, TP value, quote used)
+
+---
+
+If you want, I can also produce a **one-page QA runbook** (step-by-step) that agent 3 can execute in under 20 minutes to validate all checklist items end-to-end in a staging environment.

@@ -1,0 +1,312 @@
+Yes—given SQLite has no native CRC32, the recommended approach in your stack is:
+
+* **Compute CRC32 bucketing in Node/TypeScript (not in SQL)**
+* **Persist the result** (either as `emailReverifyDueAt` directly, and optionally `reverifyJitterBucket` for diagnostics)
+
+This preserves the deterministic “hash-bucket jitter” behavior without requiring SQLite extensions.
+
+Below is a concrete, drop-in implementation plan tailored to **better-sqlite3 + Drizzle**.
+
+---
+
+## 1) What we will implement (recommended)
+
+### Deterministic jitter (migration/backfill only)
+
+* `bucket_count = 15`
+* `jitterDays = CRC32("reverify-v1|" + user_id) unsigned % 15`
+* For verified users during backfill:
+
+  * `emailReverifyDueAt = jobStartedAtUtc + (30 + jitterDays) days`
+* For unverified users during backfill:
+
+  * `emailInitialDueAt = jobStartedAtUtc + 14 days`
+
+### Rolling cycle (normal runtime, not jittered)
+
+After migration:
+
+* on any successful verify/reverify:
+
+  * `emailVerifiedAt = nowUtc`
+  * `emailReverifyDueAt = nowUtc + 30 days`
+* **No jitter** beyond migration.
+
+---
+
+## 2) Minimal schema additions (users table)
+
+In `shared/schema.ts` (SQLite columns as `integer` epoch ms or `text` ISO; pick one convention and stay consistent). Most teams use **integer epoch ms** for SQLite.
+
+Recommended fields if you don’t already have them:
+
+* `emailVerifiedAt` (nullable)
+* `emailInitialDueAt` (nullable, but backfill will populate)
+* `emailReverifyDueAt` (nullable; backfill populates for verified)
+* `reverifyJitterBucket` (nullable int 0–14) — **optional but strongly recommended** for audit/debug/distribution checks
+
+If you already store timestamps differently, keep your convention—just adapt the script accordingly.
+
+---
+
+## 3) Add CRC32 dependency (Node side)
+
+Use a small, stable package:
+
+```bash
+npm i crc-32
+```
+
+`crc-32` returns a signed 32-bit int; we’ll convert to unsigned via `>>> 0`.
+
+---
+
+## 4) Backfill script (TypeScript, runs once, idempotent)
+
+Create: `scripts/backfill_verification_due_dates.ts`
+
+* Uses a single `jobStartedAt` timestamp so results are consistent across batches.
+* Updates only missing/invalid values (safe to re-run).
+
+```ts
+// scripts/backfill_verification_due_dates.ts
+import CRC32 from "crc-32";
+import { db } from "../db"; // adjust if your db export path differs
+import { users } from "../shared/schema"; // adjust path
+import { and, isNull, lt, or } from "drizzle-orm";
+
+/**
+ * CONFIG
+ */
+const BUCKET_COUNT = 15;
+const INITIAL_GRACE_DAYS = 14;
+const REVERIFY_CADENCE_DAYS = 30;
+
+// Tune batching for your DB size; better-sqlite3 is fast, but keep transactions reasonable.
+const BATCH_SIZE = 1000;
+
+function toUnsigned32(n: number): number {
+  return n >>> 0;
+}
+
+function jitterDaysForUser(userId: string): number {
+  const s = `reverify-v1|${userId}`;
+  const crcSigned = CRC32.str(s);        // signed 32-bit
+  const u32 = toUnsigned32(crcSigned);   // unsigned 32-bit
+  return u32 % BUCKET_COUNT;             // 0..14
+}
+
+function addDaysUtc(date: Date, days: number): Date {
+  const d = new Date(date.getTime());
+  d.setUTCDate(d.getUTCDate() + days);
+  return d;
+}
+
+function toEpochMs(d: Date): number {
+  return d.getTime();
+}
+
+function fromEpochMs(ms: number | null): Date | null {
+  return ms == null ? null : new Date(ms);
+}
+
+async function main() {
+  const jobStartedAt = new Date(); // UTC millisecond timestamp internally
+  const jobStartedAtMs = toEpochMs(jobStartedAt);
+
+  console.log(`[backfill] jobStartedAt(utc) = ${jobStartedAt.toISOString()}`);
+
+  // 1) Backfill INITIAL due dates for unverified users where emailInitialDueAt is null.
+  // We do NOT lock here; enforcement is controlled by flags/runtime logic.
+  // NOTE: Adjust field names if your schema differs.
+  const unverifiedNeedsInitialDue = await db
+    .select({
+      id: users.id,
+      emailVerifiedAt: users.emailVerifiedAt,
+      emailInitialDueAt: users.emailInitialDueAt,
+    })
+    .from(users)
+    .where(
+      and(
+        isNull(users.emailVerifiedAt),
+        isNull(users.emailInitialDueAt)
+      )
+    );
+
+  console.log(`[backfill] unverified needing initial due: ${unverifiedNeedsInitialDue.length}`);
+
+  for (let i = 0; i < unverifiedNeedsInitialDue.length; i += BATCH_SIZE) {
+    const batch = unverifiedNeedsInitialDue.slice(i, i + BATCH_SIZE);
+
+    await db.transaction(async (tx) => {
+      for (const u of batch) {
+        const due = addDaysUtc(jobStartedAt, INITIAL_GRACE_DAYS);
+        await tx
+          .update(users)
+          .set({
+            emailInitialDueAt: toEpochMs(due),
+          })
+          .where(and(users.id.eq(u.id)));
+      }
+    });
+
+    console.log(`[backfill] initial due batch ${i}..${i + batch.length}`);
+  }
+
+  // 2) Backfill REVERIFY due dates for verified users where:
+  // - emailReverifyDueAt is null OR
+  // - emailReverifyDueAt is in the past (migration-safe reset)
+  const nowMs = Date.now();
+
+  const verifiedNeedsReverifyDue = await db
+    .select({
+      id: users.id,
+      emailVerifiedAt: users.emailVerifiedAt,
+      emailReverifyDueAt: users.emailReverifyDueAt,
+    })
+    .from(users)
+    .where(
+      and(
+        // verified users
+        or(
+          // emailVerifiedAt not null
+          // Drizzle has no "isNotNull" in all versions; this pattern works:
+          lt(users.emailVerifiedAt, 9_223_372_036_854_775_807) // "always true" for non-null ints; adjust if needed
+        ),
+        // needs reverify due
+        or(
+          isNull(users.emailReverifyDueAt),
+          lt(users.emailReverifyDueAt, nowMs)
+        )
+      )
+    );
+
+  // If your Drizzle version supports isNotNull(), replace the lt(...) hack with isNotNull(users.emailVerifiedAt).
+  // For example: and(isNotNull(users.emailVerifiedAt), or(isNull(users.emailReverifyDueAt), lt(users.emailReverifyDueAt, nowMs)))
+
+  console.log(`[backfill] verified needing reverify due: ${verifiedNeedsReverifyDue.length}`);
+
+  for (let i = 0; i < verifiedNeedsReverifyDue.length; i += BATCH_SIZE) {
+    const batch = verifiedNeedsReverifyDue.slice(i, i + BATCH_SIZE);
+
+    await db.transaction(async (tx) => {
+      for (const u of batch) {
+        const userId = String(u.id); // if your user_id is a UUID/text, use that column instead of id
+        const jitter = jitterDaysForUser(userId);
+
+        const due = addDaysUtc(jobStartedAt, REVERIFY_CADENCE_DAYS + jitter);
+
+        await tx
+          .update(users)
+          .set({
+            emailReverifyDueAt: toEpochMs(due),
+            // Optional diagnostic column:
+            reverifyJitterBucket: jitter,
+          } as any)
+          .where(and(users.id.eq(u.id)));
+      }
+    });
+
+    console.log(`[backfill] reverify due batch ${i}..${i + batch.length}`);
+  }
+
+  console.log("[backfill] complete");
+
+  // 3) Quick distribution sanity check (optional)
+  // If you stored reverifyJitterBucket, you can run a group-by query in SQLite to inspect distribution.
+}
+
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});
+```
+
+### Notes you must adapt (based on your schema)
+
+* If your stable identifier is `users.userId` (UUID/text) rather than `users.id`, **use that** for hashing:
+
+  * `jitterDaysForUser(users.userId)`
+* The `isNotNull()` helper availability depends on Drizzle version. If you have it, use it.
+* If your timestamps are stored as ISO text, change `toEpochMs()` to `.toISOString()` and comparisons accordingly.
+
+---
+
+## 5) Add an npm script to run the backfill
+
+In `package.json`:
+
+```json
+{
+  "scripts": {
+    "db:backfill:verification": "node --loader ts-node/esm scripts/backfill_verification_due_dates.ts"
+  }
+}
+```
+
+If you don’t use `ts-node`, use `tsx`:
+
+```json
+{
+  "scripts": {
+    "db:backfill:verification": "tsx scripts/backfill_verification_due_dates.ts"
+  }
+}
+```
+
+Run:
+
+```bash
+npm run db:backfill:verification
+```
+
+---
+
+## 6) SQLite verification distribution query (if you added `reverifyJitterBucket`)
+
+After backfill, validate spread:
+
+```sql
+SELECT reverifyJitterBucket, COUNT(*) AS users
+FROM users
+WHERE emailVerifiedAt IS NOT NULL
+GROUP BY reverifyJitterBucket
+ORDER BY reverifyJitterBucket;
+```
+
+Expected: roughly even across 0–14.
+
+Also verify due date range:
+
+```sql
+SELECT
+  MIN(emailReverifyDueAt) AS min_due,
+  MAX(emailReverifyDueAt) AS max_due
+FROM users
+WHERE emailVerifiedAt IS NOT NULL;
+```
+
+Expected: approximately `now+30d` to `now+44d` (epoch ms).
+
+---
+
+## 7) Enforcing rolling 30 days after migration (runtime rule)
+
+Once `emailReverifyDueAt` exists:
+
+* allow trading while `now <= emailReverifyDueAt + overdueGrace`
+* lock (reduce-only) when `now > emailReverifyDueAt + overdueGrace`
+* on successful reverify:
+
+  * set `emailVerifiedAt = now`
+  * set `emailReverifyDueAt = now + 30d` (no jitter)
+
+---
+
+## 8) One important adjustment (hash input column)
+
+In the script above, I used `users.id` as the hash input because that’s common. If your **true stable identifier** is a UUID/text column (often `users.userId`), use that instead—this avoids bucket drift if numeric IDs ever get reassigned in test resets.
+
+---
+
+If you paste the `users` table definition from `shared/schema.ts` (just that table), I will adapt the script precisely to your actual column names and types (epoch vs ISO text) so it compiles and runs cleanly in your repo.

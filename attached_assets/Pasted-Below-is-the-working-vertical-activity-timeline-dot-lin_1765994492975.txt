@@ -1,0 +1,201 @@
+Below is the **working vertical activity timeline (dot/line UI)** wired into **User Management → Edit User dialog**, powered by a new **admin API endpoint** that returns the user’s **trade audit events** (open/close/reject/etc). (Deposits/withdrawals can be appended later once those tables exist.)
+
+---
+
+## 1) `server/routes/admin.ts` — add user activity endpoint
+
+Add this route **right after** the existing `GET /api/admin/users` route:
+
+```ts
+// User activity timeline (trade audit events)
+app.get(
+  "/api/admin/users/:id/activity",
+  requireAdmin,
+  async (req: Request, res: Response) => {
+    try {
+      const userId = Number.parseInt(req.params.id, 10);
+      if (!Number.isFinite(userId)) {
+        return res.status(400).json({ error: "Invalid user id" });
+      }
+
+      const limitRaw = Number.parseInt(String(req.query.limit ?? "200"), 10);
+      const limit = Number.isFinite(limitRaw)
+        ? Math.min(Math.max(limitRaw, 1), 500)
+        : 200;
+
+      const rows = await db
+        .select({
+          auditId: tradeAudit.id,
+          tradeId: tradeAudit.tradeId,
+          eventType: tradeAudit.eventType,
+          note: tradeAudit.note,
+          eventAt: tradeAudit.eventAt,
+          symbol: symbolConfigs.symbol,
+          side: trades.type,
+          status: trades.status,
+          lots: trades.lots,
+        })
+        .from(tradeAudit)
+        .innerJoin(trades, eq(tradeAudit.tradeId, trades.id))
+        .innerJoin(symbolConfigs, eq(trades.symbolId, symbolConfigs.id))
+        .where(eq(trades.userId, userId))
+        .orderBy(desc(tradeAudit.eventAt))
+        .limit(limit);
+
+      return res.json({ events: rows });
+    } catch (err) {
+      console.error("GET /api/admin/users/:id/activity failed:", err);
+      return res.status(500).json({ error: "Failed to load user activity" });
+    }
+  }
+);
+```
+
+---
+
+## 2) `client/src/components/ActivityTimeline.tsx` — vertical dot/line timeline UI
+
+Create this new file:
+
+```tsx
+import React from "react";
+
+export type ActivityEvent = {
+  auditId: number;
+  tradeId: number;
+  eventType: string;
+  note: string | null;
+  eventAt: string; // ISO string
+  symbol: string;
+  side: string;
+  status: string;
+  lots: number;
+};
+
+function formatWhen(iso: string) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleString();
+}
+
+function titleFor(e: ActivityEvent) {
+  const side = String(e.side ?? "").toUpperCase();
+  const event = String(e.eventType ?? "").replaceAll("_", " ").toUpperCase();
+  return `${event} • ${e.symbol} • ${side}`;
+}
+
+export function ActivityTimeline({
+  events,
+  emptyText = "No activity yet.",
+}: {
+  events: ActivityEvent[];
+  emptyText?: string;
+}) {
+  if (!events || events.length === 0) {
+    return (
+      <div className="rounded-md border border-neutral-700 bg-neutral-900/40 p-3 text-sm text-neutral-400">
+        {emptyText}
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-md border border-neutral-700 bg-neutral-900/40 p-3">
+      <ol className="relative ml-2">
+        {/* vertical line */}
+        <div className="absolute left-[7px] top-0 h-full w-px bg-neutral-700" />
+
+        {events.map((e, idx) => (
+          <li key={`${e.auditId}-${idx}`} className="relative pl-6 pb-5">
+            {/* dot */}
+            <span className="absolute left-0 top-1.5 h-3.5 w-3.5 rounded-full border border-neutral-600 bg-neutral-900" />
+
+            <div className="flex flex-col gap-1">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                <span className="text-sm font-semibold text-neutral-100">
+                  {titleFor(e)}
+                </span>
+                <span className="text-xs text-neutral-400">
+                  {formatWhen(e.eventAt)}
+                </span>
+              </div>
+
+              <div className="text-xs text-neutral-300">
+                Trade #{e.tradeId} • Lots: {e.lots} • Status: {e.status}
+              </div>
+
+              {e.note ? (
+                <div className="text-xs text-neutral-400">{e.note}</div>
+              ) : null}
+            </div>
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
+export default ActivityTimeline;
+```
+
+---
+
+## 3) `client/src/pages/AdminDashboard.tsx` — wire timeline into Edit User dialog
+
+### A) Add import
+
+Near your other imports:
+
+```tsx
+import ActivityTimeline, { type ActivityEvent } from "@/components/ActivityTimeline";
+```
+
+### B) Add query to load activity for the selected user
+
+Add this near your other `useQuery(...)` calls:
+
+```tsx
+const { data: userActivity, isLoading: isLoadingUserActivity } = useQuery<{
+  events: ActivityEvent[];
+}>({
+  queryKey: ["/api/admin/users/activity", editingUser?.id],
+  enabled: !!editingUser?.id,
+  queryFn: () =>
+    axios
+      .get("/api/admin/users/" + editingUser!.id + "/activity", {
+        params: { limit: 200 },
+      })
+      .then((r) => r.data),
+});
+```
+
+### C) Render the vertical timeline inside the Edit User dialog
+
+Insert this block **above** `<DialogFooter>` inside the Edit User dialog content:
+
+```tsx
+<div className="border-t border-neutral-700 pt-4">
+  <div className="flex items-center justify-between">
+    <h3 className="text-sm font-semibold">Activity Timeline</h3>
+    <span className="text-xs text-neutral-400">Latest trade events</span>
+  </div>
+
+  <div className="mt-3 max-h-72 overflow-auto rounded-md">
+    {isLoadingUserActivity ? (
+      <div className="rounded-md border border-neutral-700 bg-neutral-900/40 p-3 text-sm text-neutral-400">
+        Loading activity…
+      </div>
+    ) : (
+      <ActivityTimeline events={userActivity?.events ?? []} />
+    )}
+  </div>
+</div>
+```
+
+---
+
+## Patch zip (optional)
+
+If you want to hand this straight to Replit Agent 3, I also packaged the modified files here:
+
+[Download the patch zip](sandbox:/mnt/data/user-activity-timeline-patch.zip)

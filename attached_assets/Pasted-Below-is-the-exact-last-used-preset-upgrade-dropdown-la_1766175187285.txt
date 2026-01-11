@@ -1,0 +1,119 @@
+Below is the exact “last-used preset” upgrade (dropdown label reflects **±10/50/100/150/200** based on the most recent selection), building directly on your current **EditTradeModal.tsx** changes.
+
+---
+
+# 1) Add state to track the last-used preset
+
+**File:** `client/src/components/EditTradeModal.tsx`
+
+Inside the component (near your other `useState` declarations), add:
+
+```tsx
+  const [lastPresetPoints, setLastPresetPoints] = useState<number>(10);
+```
+
+---
+
+# 2) Update the dropdown trigger label + selection behavior (warning block)
+
+Find your **warning** drop-up block and replace the trigger label + items so it uses `lastPresetPoints` and updates it on select.
+
+Use this version:
+
+```tsx
+          {Object.keys(validationMessages).length > 0 && (
+            <div className="rounded-md border border-amber-500/20 bg-amber-500/5 p-3 flex items-center justify-between gap-3">
+              <div className="text-sm text-amber-200">
+                One or more targets are invalid relative to the{" "}
+                {trade.status === "PENDING" ? "order price" : "current price"}.
+              </div>
+
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={!referencePrice || referencePrice <= 0}
+                    className="border-amber-500/30 bg-amber-500/5 hover:bg-amber-500/10"
+                  >
+                    Auto-Fix TP/SL (±{lastPresetPoints})
+                    <ChevronUp className="ml-2 h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+
+                <DropdownMenuContent side="top" align="end" className="w-56">
+                  {AUTO_FIX_PRESETS.map((p) => (
+                    <DropdownMenuItem
+                      key={p}
+                      onSelect={() => {
+                        setLastPresetPoints(p);
+                        autoFixTargets(p);
+                      }}
+                      className="flex items-center justify-between"
+                    >
+                      <span>Set TP/SL to ±{p} points</span>
+                      {p === lastPresetPoints ? <Check className="h-4 w-4 opacity-80" /> : null}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          )}
+```
+
+---
+
+# 3) Update the “always available” (non-warning) presets block as well (if you added it)
+
+If you added the optional “presets even when valid” block, update it the same way:
+
+```tsx
+          {Object.keys(validationMessages).length === 0 && (
+            <div className="rounded-md border border-white/10 bg-white/5 p-3 flex items-center justify-between gap-3">
+              <div className="text-sm text-gray-200">
+                Quick presets: set TP/SL relative to the{" "}
+                {trade.status === "PENDING" ? "order price" : "current price"}.
+              </div>
+
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={!referencePrice || referencePrice <= 0}
+                    className="border-white/10 bg-white/5 hover:bg-white/10"
+                  >
+                    Presets (±{lastPresetPoints})
+                    <ChevronUp className="ml-2 h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+
+                <DropdownMenuContent side="top" align="end" className="w-56">
+                  {AUTO_FIX_PRESETS.map((p) => (
+                    <DropdownMenuItem
+                      key={p}
+                      onSelect={() => {
+                        setLastPresetPoints(p);
+                        autoFixTargets(p);
+                      }}
+                      className="flex items-center justify-between"
+                    >
+                      <span>Set TP/SL to ±{p} points</span>
+                      {p === lastPresetPoints ? <Check className="h-4 w-4 opacity-80" /> : null}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          )}
+```
+
+---
+
+## Result
+
+* User selects **±150**, dropdown button now reads **“Auto-Fix TP/SL (±150)”** (and stays that way until changed).
+* The checkmark moves to the active preset.
+* Still enforces your **minimum 10-point rule** (because `autoFixTargets()` uses `Math.max(minDistance, points * pipFactor)`).
+
+If you want it to **persist across modal opens**, I can store `lastPresetPoints` in `localStorage` (two lines: read on mount, write on change).

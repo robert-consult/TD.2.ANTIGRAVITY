@@ -1,0 +1,285 @@
+Below is the **consolidated backend guardrail patch** that **adds/enforces the “50 lots max concurrently” rule** (across **any number of trades**) **on top of** the existing limits (**max 5 active trades total, max 3 active per instrument**), and makes it **bug-resistant** by enforcing at:
+
+* **placement time** (`riskMiddleware` → blocks the request)
+* **fill time** (`orderEngine` → cancels pending orders if limits are violated after admin changes)
+
+It counts **OPEN + PENDING** as “concurrent/active”.
+
+---
+
+## 1) `server/risk.ts` — REPLACE ENTIRE FILE WITH THIS
+
+```ts
+import { storage } from "./storage";
+import { Request, Response, NextFunction } from "express";
+import dayjs from "dayjs";
+import { Trade, globalSettings } from "@shared/schema";
+import { db } from "@db";
+import { eq } from "drizzle-orm";
+
+/**
+ * Risk management middleware
+ * Enforces:
+ * - Max active trades per user (OPEN + PENDING)  [default 5]
+ * - Max active trades per instrument (OPEN + PENDING) [default 3]
+ * - Max concurrent lots per user across ALL active trades (OPEN + PENDING) [default 50]
+ * - Daily loss limit (hardcoded 10% of initial)   [unchanged]
+ * - Lifetime loss limit (hardcoded 20% of initial; disables account) [unchanged]
+ *
+ * NOTE: Global settings act as a HARD CAP. User settings can only be stricter.
+ */
+
+const INITIAL_BALANCE_USD = 1_000_000;
+const DEFAULTS = {
+  maxTradesPerUser: 5,
+  maxTradesPerInstrument: 3,
+  maxConcurrentLots: 50,
+  dailyLossLimitPct: 10,
+  lifetimeLossLimitPct: 20,
+};
+
+function toInt(v: any): number | null {
+  if (v === null || v === undefined) return null;
+  if (typeof v === "number" && Number.isFinite(v)) return Math.trunc(v);
+  if (typeof v === "string" && v.trim() !== "") {
+    const x = Number(v);
+    return Number.isFinite(x) ? Math.trunc(x) : null;
+  }
+  return null;
+}
+
+async function getEffectiveLimits(userId: number) {
+  const gs =
+    (await db.query.globalSettings.findFirst({
+      where: eq(globalSettings.id, 1),
+    })) ?? null;
+
+  const us = (await storage.getUserSettingsById(userId)) ?? null;
+
+  const gMaxTradesPerUser = Number(gs?.maxTradesPerUser ?? DEFAULTS.maxTradesPerUser);
+  const gMaxTradesPerInstrument = Number(gs?.maxTradesPerInstrument ?? DEFAULTS.maxTradesPerInstrument);
+  const gMaxConcurrentLots = Number(gs?.maxConcurrentLots ?? DEFAULTS.maxConcurrentLots);
+
+  // User overrides are allowed but cannot exceed the global cap (global is hard guardrail)
+  const effectiveMaxTradesPerUser = Math.min(Number(us?.maxConcurrent ?? gMaxTradesPerUser), gMaxTradesPerUser);
+  const effectiveMaxConcurrentLots = Math.min(Number(us?.maxConcurrentLots ?? gMaxConcurrentLots), gMaxConcurrentLots);
+
+  return {
+    maxTradesPerInstrument: gMaxTradesPerInstrument,
+    maxTradesPerUser: effectiveMaxTradesPerUser,
+    maxConcurrentLots: effectiveMaxConcurrentLots,
+    dailyLossLimitPct: DEFAULTS.dailyLossLimitPct,
+    lifetimeLossLimitPct: DEFAULTS.lifetimeLossLimitPct,
+  };
+}
+
+export async function riskMiddleware(req: Request, res: Response, next: NextFunction) {
+  const userId = (req.session as any).userId;
+  if (!userId) return res.status(401).json({ message: "Unauthorized" });
+
+  const user = await storage.getUserById(userId);
+  if (!user) return res.status(404).json({ message: "User not found" });
+
+  const limits = await getEffectiveLimits(userId);
+
+  // Treat OPEN + PENDING as "active/concurrent"
+  const openTrades = await storage.getOpenTradesByUserId(userId);
+  const pendingTrades = await storage.getPendingTradesByUserId(userId);
+  const activeTrades = [...openTrades, ...pendingTrades];
+
+  // 1) Max active trades per user
+  if (activeTrades.length >= limits.maxTradesPerUser) {
+    return res.status(400).json({
+      message: `Maximum ${limits.maxTradesPerUser} concurrent trades allowed (OPEN + PENDING).`,
+      activeTrades: activeTrades.length,
+      limit: limits.maxTradesPerUser,
+    });
+  }
+
+  // 2) Max active trades per instrument
+  const symbolId = toInt((req.body as any)?.symbolId);
+  if (symbolId !== null) {
+    const activePerSymbol = activeTrades.filter((t) => Number(t.symbolId) === symbolId).length;
+    if (activePerSymbol >= limits.maxTradesPerInstrument) {
+      return res.status(400).json({
+        message: `Maximum ${limits.maxTradesPerInstrument} concurrent trades allowed per instrument (OPEN + PENDING).`,
+        symbolId,
+        activePerSymbol,
+        limit: limits.maxTradesPerInstrument,
+      });
+    }
+  }
+
+  // 3) Max concurrent lots across ALL active trades (OPEN + PENDING)
+  // Request uses either `lots` or `size` (your routes unify size->lots).
+  const requestedLots = toInt((req.body as any)?.lots ?? (req.body as any)?.size);
+  if (requestedLots !== null && requestedLots > 0) {
+    const currentLots = activeTrades.reduce((sum, t) => sum + Number((t as any).lots ?? 0), 0);
+
+    // Core requirement: 1 trade of 50 blocks new trades; 30+30 blocks 3rd, etc.
+    if (currentLots + requestedLots > limits.maxConcurrentLots) {
+      return res.status(409).json({
+        message: `Maximum concurrent lots exceeded (OPEN + PENDING). Current=${currentLots}, Requested=${requestedLots}, Limit=${limits.maxConcurrentLots}.`,
+        currentLots,
+        requestedLots,
+        limit: limits.maxConcurrentLots,
+      });
+    }
+  }
+
+  // 4) Daily loss (unchanged logic; still uses fixed initial balance baseline)
+  const todayStart = dayjs().startOf("day").unix();
+  const dailyTrades = await storage.getClosedTradesByDateRange(userId, todayStart);
+
+  let dailyPnL = 0;
+  dailyTrades.forEach((trade: Trade) => {
+    if (trade.profit) dailyPnL += parseFloat(trade.profit);
+  });
+
+  const dailyLossPercent = dailyPnL < 0 ? (Math.abs(dailyPnL) / INITIAL_BALANCE_USD) * 100 : 0;
+  if (dailyLossPercent >= limits.dailyLossLimitPct) {
+    return res.status(403).json({
+      message: `Daily loss limit of ${limits.dailyLossLimitPct}% reached. Try again tomorrow.`,
+      dailyLossPercent,
+      limit: limits.dailyLossLimitPct,
+    });
+  }
+
+  // 5) Lifetime loss (unchanged)
+  const currentBalance = parseFloat(String(user.balance));
+  const lifetimeLossPercent = ((INITIAL_BALANCE_USD - currentBalance) / INITIAL_BALANCE_USD) * 100;
+
+  if (lifetimeLossPercent >= limits.lifetimeLossLimitPct) {
+    await storage.disableUserAccount(userId);
+    return res.status(403).json({
+      message: `Lifetime loss limit of ${limits.lifetimeLossLimitPct}% reached. Account has been disabled.`,
+      lifetimeLossPercent,
+      limit: limits.lifetimeLossLimitPct,
+    });
+  }
+
+  return next();
+}
+```
+
+---
+
+## 2) `server/engine/orderEngine.ts` — APPLY THESE EDITS (LIMITED, TARGETED)
+
+### 2A) Update imports (top of file)
+
+Find:
+
+```ts
+import { and, eq, desc } from "drizzle-orm";
+import { trades, users, userSettings, symbolConfigs, tradeAudit } from "@shared/schema";
+```
+
+Replace with:
+
+```ts
+import { and, eq, desc, or } from "drizzle-orm";
+import { trades, users, userSettings, symbolConfigs, tradeAudit, globalSettings } from "@shared/schema";
+```
+
+### 2B) Add a tiny cached global settings helper (near top, under `let running = false;`)
+
+```ts
+const GS_TTL_MS = 5000;
+let gsCache: { ts: number; v: { maxTradesPerUser: number; maxTradesPerInstrument: number; maxConcurrentLots: number } } | null = null;
+
+async function getGlobalCaps() {
+  const now = Date.now();
+  if (gsCache && now - gsCache.ts < GS_TTL_MS) return gsCache.v;
+
+  const row = await db.query.globalSettings.findFirst({ where: eq(globalSettings.id, 1) });
+  const v = {
+    maxTradesPerUser: Number(row?.maxTradesPerUser ?? 5),
+    maxTradesPerInstrument: Number(row?.maxTradesPerInstrument ?? 3),
+    maxConcurrentLots: Number(row?.maxConcurrentLots ?? 50),
+  };
+
+  gsCache = { ts: now, v };
+  return v;
+}
+```
+
+### 2C) In `processPendingForSymbol(...)`, REPLACE the existing “max concurrent trades / lots / per-instrument” checks with this unified active-check block
+
+Find the block that starts around:
+
+* `// Check max concurrent trades`
+* `// Check max concurrent lots`
+* `// Check per-instrument cap (3)`
+
+Delete those three checks and insert this block **after** `neededMargin` is computed and **before** the margin/freeMargin check:
+
+```ts
+    // Global caps (hard guardrails) + user caps (can only be stricter)
+    const g = await getGlobalCaps();
+    const maxActiveTrades = Math.min(Number(r.s?.maxConcurrent ?? g.maxTradesPerUser), g.maxTradesPerUser);
+    const maxConcurrentLots = Math.min(Number(r.s?.maxConcurrentLots ?? g.maxConcurrentLots), g.maxConcurrentLots);
+    const maxPerInstrument = g.maxTradesPerInstrument;
+
+    // Active = OPEN + PENDING (includes this pending order right now)
+    const active = await db
+      .select({ id: trades.id, status: trades.status, lots: trades.lots, symbolId: trades.symbolId })
+      .from(trades)
+      .where(
+        and(
+          eq(trades.userId, u.id),
+          or(eq(trades.status, "OPEN"), eq(trades.status, "PENDING"))
+        )
+      );
+
+    const activeCount = active.length;
+    const activeLots = active.reduce((sum, a) => sum + Number(a.lots ?? 0), 0);
+    const activePerSymbol = active.filter((a) => Number(a.symbolId) === Number(t.symbolId)).length;
+
+    // If admin reduced limits and user is now over, cancel this pending order to reduce risk.
+    if (activeCount > maxActiveTrades) {
+      await db.update(trades)
+        .set({ status: "CANCELED", closeReason: "REJECTED", closedAt: new Date() })
+        .where(and(eq(trades.id, t.id), eq(trades.status, "PENDING")));
+      await audit({ tradeId: t.id, eventType: "ORDER_REJECTED", note: `Max active trades exceeded (OPEN+PENDING). Active=${activeCount}, Limit=${maxActiveTrades}` });
+      continue;
+    }
+
+    if (activePerSymbol > maxPerInstrument) {
+      await db.update(trades)
+        .set({ status: "CANCELED", closeReason: "REJECTED", closedAt: new Date() })
+        .where(and(eq(trades.id, t.id), eq(trades.status, "PENDING")));
+      await audit({ tradeId: t.id, eventType: "ORDER_REJECTED", note: `Max active trades per instrument exceeded (OPEN+PENDING). ActivePerSymbol=${activePerSymbol}, Limit=${maxPerInstrument}` });
+      continue;
+    }
+
+    // This is the "50 lots across any number of trades" guardrail.
+    // Because ACTIVE lots includes this order already, fill is allowed iff activeLots <= maxConcurrentLots.
+    if (activeLots > maxConcurrentLots) {
+      await db.update(trades)
+        .set({ status: "CANCELED", closeReason: "REJECTED", closedAt: new Date() })
+        .where(and(eq(trades.id, t.id), eq(trades.status, "PENDING")));
+      await audit({ tradeId: t.id, eventType: "ORDER_REJECTED", note: `Max concurrent lots exceeded (OPEN+PENDING). ActiveLots=${activeLots}, Limit=${maxConcurrentLots}` });
+      console.log(`[OrderEngine] Canceled pending order ${t.id}: active lots ${activeLots} > ${maxConcurrentLots}`);
+      continue;
+    }
+```
+
+That’s it for `orderEngine.ts`. It now prevents fills that violate the global/user lot cap even if settings were changed after placement.
+
+---
+
+## What this gives you (behavioral proof)
+
+* If user has **1 OPEN trade of 50 lots**, then:
+
+  * placing any new order with **requestedLots ≥ 1** fails: `currentLots(50) + requestedLots > 50`.
+* If user has **2 trades of 30 lots + 30 lots**, then:
+
+  * third trade is blocked because `60 + x > 50`.
+* It counts **PENDING** too, so users cannot bypass with limit/stop orders.
+* If an admin later tightens limits and the user is already over, the engine will **cancel pending orders** (reducing risk) instead of filling them.
+
+---
+
+If you want, paste your current `server/engine/orderEngine.ts` file header/import section and I’ll return a **single unified full-file** version (still inline) so Agent 3 can copy/paste without manual splicing.

@@ -1,0 +1,186 @@
+Understood — I proceeded with the deep-dive you asked for (Account tab + the balance display next to the “Leaders/Leaderboard” area), and I’ve already located and confirmed several **hard logic/data mapping faults** that explain the incorrect/blank/“0” behaviors you’re seeing.
+
+Below is the **current state of findings and fixes**, plus what is still **in-progress** (because I started implementing a deeper hardening pass in `recalcAccount.ts` and need one more step to finalize it cleanly).
+
+---
+
+## 1) Account Tab: Floating P/L is wired wrong (field mismatch = $0 / undefined)
+
+### What’s happening
+
+* Backend `/api/account/summary` returns:
+  **`floatingPnl`**
+* Account tab (`client/src/pages/AccountScreen.tsx`) was expecting:
+  **`floatingPL`**
+
+That mismatch guarantees Floating P/L renders as **undefined**, causing the UI to display `$0.00` or neutral behavior even when equity ≠ balance.
+
+### Fix applied
+
+* Account tab now uses the correct field name: **`floatingPnl`**
+* Account tab now uses the existing real-time hook (`useAccountSummary`) instead of a one-shot query.
+
+---
+
+## 2) Account Tab: “Member Since” shows “–” because backend never returns `createdAt`
+
+### Root cause
+
+* UI renders:
+
+  ```tsx
+  user?.createdAt ? new Date(user.createdAt).toLocaleDateString() : "-"
+  ```
+* But `/api/auth/current-user` never included `createdAt`.
+
+### Fix applied
+
+I updated all relevant auth responses to include `createdAt`:
+
+* `/api/auth/login`
+* `/api/auth/register`
+* `/api/auth/current-user` (both recalc-success and fallback)
+
+So the Account tab now receives a proper createdAt value and can render membership date.
+
+---
+
+## 3) Balance shown near “Leaderboard/Leaders” was stale and from the wrong “truth source”
+
+### What’s happening
+
+The balance displayed on dashboard header/top strip came from:
+
+```tsx
+${user.balance}
+```
+
+But `user` comes from `useAuth()` state — which does **not** automatically update when trades close/open, because the invalidation logic uses React Query but Auth is plain state.
+
+So even though your platform recalculates metrics, that balance label could be stale.
+
+### Fix applied
+
+Dashboard now reads balance from `/api/account/summary` via the real-time hook and formats it:
+
+* Uses `summary.balance` primarily
+* Falls back to `Number(user.balance)` if summary isn’t ready
+
+This ensures the “Balance:” displayed beside navigation reflects the true recalculated account state.
+
+---
+
+## 4) `/api/account/summary` was incomplete and non-professional in one key area
+
+### Issues found
+
+1. It returned `marginLevel: 0` when used margin = 0
+   That’s not MT5-style; “no margin used” is effectively **N/A**, not 0.
+2. It didn’t return `openPositions` even though Account view expects an account summary style payload.
+
+### Fix applied
+
+`server/routes.ts` → `/api/account/summary` now returns:
+
+* `balance`
+* `equity`
+* `floatingPnl`
+* `usedMargin`
+* `freeMargin`
+* `marginLevel` as **null** when usedMargin = 0 (JSON-safe; Infinity is not JSON-safe)
+* `openPositions` (count of open trades)
+
+And the Account screen margin level display was hardened to correctly display real numeric 0/low values and treat null as “-”.
+
+---
+
+## 5) Leaderboard logic bug (data presentation error)
+
+Not strictly account tab, but directly tied to “next to leaderboard” integrity:
+
+### Issue found
+
+Leaderboard UI showed profit like:
+
+```tsx
+$ {Math.abs(profit)}
+```
+
+Meaning **losses appeared as positive dollar values**, only colored red.
+
+### Fix applied
+
+Loss values now display with an explicit “-” sign:
+
+```tsx
+{profit < 0 ? '-' : ''}${Math.abs(profit).toLocaleString(...)}
+```
+
+---
+
+# Critical Remaining Risk (In Progress): Floating P/L can still be WRONG due to FX conversion + quote fallback
+
+This is the deeper backend logic part.
+
+## A) FX conversion rates are NEVER refreshed
+
+`server/lib/margin.ts` supports conversion via `FX_RATES` and has a function `updateFxRates(quotes)`.
+But `recalcAccount.ts` imports `updateFxRates` and **never calls it**.
+
+That means:
+
+* JPY and cross-pair P/L can be incorrect
+* Margin calculations for non-USD quote pairs can be incorrect
+
+## B) If quotes are missing, you silently fall back to `openPrice`
+
+In `recalcAccount.ts` you do:
+
+```ts
+priceCache.set(symbol, trade.openPrice)
+```
+
+That forces floating P/L = 0 and equity == balance even when positions exist, hiding quote feed failures.
+
+---
+
+## What I started doing (and what is incomplete)
+
+I began patching `server/recalcAccount.ts` to:
+
+1. Open the SQLite quotes DB **once**, not inside a loop
+2. Query FX reference pairs (EURUSD, GBPUSD, USDJPY, USDCAD) and call `updateFxRates()` before any P/L conversion
+3. Use **currentPrice for margin requirement**, not `openPrice`
+4. Optionally flag stale/missing quotes rather than silently using openPrice
+
+I applied the first structural patch step but did **not yet finish and re-validate the final compiled file**. The intent is correct, but I want to complete it cleanly and then give you:
+
+* the final hardened `recalcAccount.ts`
+* the exact safety checks (staleness thresholds, quote-missing handling behavior)
+* recommended “fail closed” vs “fail open” execution policies for risk integrity
+
+---
+
+# Next Step (Immediate)
+
+To finish the backend hardening properly, I need you to confirm one decision:
+
+## When quotes are missing/stale, should the platform:
+
+### Option 1 (Risk-safe / Professional):
+
+* **Refuse to update P/L** and mark account pricing “stale”
+* Possibly block closing/execution if the feed is stale
+
+### Option 2 (Continuity-first / Game-like):
+
+* Continue using last cached quote but clearly mark “stale”
+* Allow execution but log audit flags
+
+Right now your code effectively does a dangerous hybrid:
+
+* uses openPrice fallback (which masks failures and falsifies equity)
+
+---
+
+If you confirm your preferred policy, I will finalize `recalcAccount.ts` accordingly and then we can proceed to the full execution-order critique (market/limit/stop/pending) with history integrity exactly as you requested.

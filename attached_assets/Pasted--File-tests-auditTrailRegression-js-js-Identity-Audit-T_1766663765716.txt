@@ -1,0 +1,339 @@
+## File: `tests/auditTrailRegression.js`
+
+```js
+/**
+ * Identity Audit Trail Regression Harness (Hash-chain + Event Coverage)
+ * --------------------------------------------------------------------
+ * Validates:
+ *   1) identity_audit chain verification endpoint passes (primary signal)
+ *   2) identity_audit list endpoint returns well-formed rows
+ *   3) Optional: event coverage sanity checks (EMAIL/SMS/KYC/TIER) as warnings by default
+ *
+ * Requires:
+ *   - Backend running (default http://localhost:3000)
+ *   - Admin-authenticated cookie in TEST_COOKIE (or ADMIN_COOKIE)
+ *
+ * Usage:
+ *   ADMIN_COOKIE="connect.sid=..." npm run test:audit
+ * or:
+ *   TEST_COOKIE="connect.sid=..." npm run test:audit
+ *
+ * Optional strictness:
+ *   STRICT_EVENT_CHECK=1  -> fails if no EMAIL/SMS/KYC/TIER-like events appear in recent rows
+ */
+
+import fetch from "node-fetch";
+import assert from "node:assert";
+import fs from "fs";
+
+const BASE = process.env.BASE_URL || "http://localhost:3000";
+const CK = process.env.ADMIN_COOKIE || process.env.TEST_COOKIE;
+const STRICT = process.env.STRICT_EVENT_CHECK === "1";
+
+const HEADERS = {
+  Cookie: CK || "",
+  "Content-Type": "application/json",
+};
+
+const results = [];
+const warnings = [];
+
+function section(title) {
+  console.log(`\n=== ${title} ===`);
+}
+
+async function tryFetch(method, path, body) {
+  const url = `${BASE}${path}`;
+  const res = await fetch(url, {
+    method,
+    headers: HEADERS,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+
+  const text = await res.text();
+  let json = null;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    json = null;
+  }
+
+  return { res, json, text };
+}
+
+async function findWorkingEndpoint(candidates) {
+  for (const c of candidates) {
+    const { res, json } = await tryFetch(c.method, c.path, c.body);
+    const ok = res.status >= 200 && res.status < 300;
+    console.log(`${ok ? "✓" : "·"} [${res.status}] ${c.method} ${c.path}`);
+    if (ok) return { ...c, res, json };
+  }
+  return null;
+}
+
+function isObject(x) {
+  return !!x && typeof x === "object" && !Array.isArray(x);
+}
+
+function pickRows(payload) {
+  // Accept common patterns:
+  //  - array
+  //  - { rows: [...] }
+  //  - { data: [...] }
+  //  - { items: [...] }
+  if (Array.isArray(payload)) return payload;
+  if (isObject(payload) && Array.isArray(payload.rows)) return payload.rows;
+  if (isObject(payload) && Array.isArray(payload.data)) return payload.data;
+  if (isObject(payload) && Array.isArray(payload.items)) return payload.items;
+  return null;
+}
+
+function normalizeEventType(row) {
+  const v =
+    row?.eventType ??
+    row?.event_type ??
+    row?.type ??
+    row?.action ??
+    row?.category ??
+    null;
+  return typeof v === "string" ? v : null;
+}
+
+function normalizeHashes(row) {
+  const prev =
+    row?.prevHash ??
+    row?.prev_hash ??
+    row?.previousHash ??
+    row?.previous_hash ??
+    null;
+  const hash =
+    row?.eventHash ??
+    row?.event_hash ??
+    row?.hash ??
+    row?.eventhash ??
+    null;
+
+  return {
+    prevHash: typeof prev === "string" ? prev : null,
+    eventHash: typeof hash === "string" ? hash : null,
+  };
+}
+
+function normalizeAt(row) {
+  const v = row?.at ?? row?.timestamp ?? row?.time ?? row?.createdAt ?? row?.created_at ?? null;
+  if (typeof v === "number") return v;
+  if (typeof v === "string") {
+    const d = new Date(v);
+    if (!Number.isNaN(d.getTime())) return d.getTime();
+    const n = Number(v);
+    if (!Number.isNaN(n)) return n > 1e12 ? n : n * 1000;
+  }
+  return null;
+}
+
+function coverageScan(rows) {
+  const types = rows.map(normalizeEventType).filter(Boolean);
+  const joined = types.join(" | ").toUpperCase();
+
+  const hasEmail = joined.includes("EMAIL");
+  const hasSms = joined.includes("SMS") || joined.includes("PHONE") || joined.includes("OTP") || joined.includes("TWILIO");
+  const hasKyc = joined.includes("KYC");
+  const hasTier = joined.includes("TIER") || joined.includes("PROMOTE") || joined.includes("PERFORMER") || joined.includes("SELECTED");
+
+  return { hasEmail, hasSms, hasKyc, hasTier, types };
+}
+
+async function main() {
+  if (!CK) {
+    console.error("Missing ADMIN_COOKIE / TEST_COOKIE env. Run with ADMIN_COOKIE='connect.sid=...' npm run test:audit");
+    process.exit(1);
+  }
+
+  section("1) Locate verify-chain endpoint");
+  const verifyEndpoint = await findWorkingEndpoint([
+    // Try common variants; first success is used.
+    { method: "POST", path: "/api/admin/identity-audit/verify-chain", body: {} },
+    { method: "GET", path: "/api/admin/identity-audit/verify-chain" },
+    { method: "POST", path: "/api/admin/identity_audit/verify-chain", body: {} },
+    { method: "GET", path: "/api/admin/identity_audit/verify-chain" },
+  ]);
+
+  if (!verifyEndpoint) {
+    console.error("Could not find a working identity audit verify-chain endpoint. Check server routes.");
+    process.exit(1);
+  }
+
+  // Accept multiple possible shapes:
+  // { ok: true } | { valid: true } | { isValid: true } | { success: true }
+  const v = verifyEndpoint.json;
+  const verifyOk =
+    (isObject(v) && (v.ok === true || v.valid === true || v.isValid === true || v.success === true)) ||
+    (typeof v === "boolean" && v === true);
+
+  results.push({
+    name: "verify-chain",
+    endpoint: `${verifyEndpoint.method} ${verifyEndpoint.path}`,
+    ok: !!verifyOk,
+    payload: v ?? verifyEndpoint.text,
+  });
+
+  if (!verifyOk) {
+    console.error("✗ identity_audit chain verification FAILED. Payload:");
+    console.error(JSON.stringify(v ?? verifyEndpoint.text, null, 2));
+    process.exitCode = 1;
+  } else {
+    console.log("✓ identity_audit chain verification PASS");
+  }
+
+  section("2) Locate identity audit list endpoint");
+  const listEndpoint = await findWorkingEndpoint([
+    { method: "GET", path: "/api/admin/identity-audit?limit=200" },
+    { method: "GET", path: "/api/admin/identity-audit" },
+    { method: "GET", path: "/api/admin/identity_audit?limit=200" },
+    { method: "GET", path: "/api/admin/identity_audit" },
+  ]);
+
+  if (!listEndpoint) {
+    console.error("Could not find a working identity audit list endpoint. Check server routes.");
+    process.exit(1);
+  }
+
+  const rows = pickRows(listEndpoint.json);
+  results.push({
+    name: "identity-audit-list",
+    endpoint: `${listEndpoint.method} ${listEndpoint.path}`,
+    ok: Array.isArray(rows),
+    rowCount: Array.isArray(rows) ? rows.length : 0,
+  });
+
+  assert(Array.isArray(rows), "identity audit list did not return an array (or a {rows|data|items} array)");
+
+  // Basic row-shape checks (do not assume a specific schema, but require minimum forensic fields)
+  section("3) Validate row structure");
+  let badRows = 0;
+  const sampled = rows.slice(0, Math.min(rows.length, 50));
+
+  for (let i = 0; i < sampled.length; i++) {
+    const r = sampled[i];
+    const at = normalizeAt(r);
+    const et = normalizeEventType(r);
+    const { prevHash, eventHash } = normalizeHashes(r);
+
+    const ok = at !== null && !!et && !!eventHash; // prevHash may be null for genesis
+    if (!ok) badRows++;
+  }
+
+  results.push({
+    name: "row-shape-sample",
+    ok: badRows === 0,
+    sampled: sampled.length,
+    badRows,
+  });
+
+  if (badRows > 0) {
+    console.error(`✗ ${badRows}/${sampled.length} sampled rows missing required fields (time/type/hash).`);
+    process.exitCode = 1;
+  } else {
+    console.log(`✓ Row shape OK (${sampled.length} sampled rows)`);
+  }
+
+  section("4) Coverage scan (warnings by default)");
+  const cov = coverageScan(rows.slice(0, 200));
+  console.log(
+    `Coverage (recent rows): EMAIL=${cov.hasEmail} SMS=${cov.hasSms} KYC=${cov.hasKyc} TIER=${cov.hasTier}`
+  );
+
+  // By default, warn only (because test dataset may be sparse).
+  if (!cov.hasEmail) warnings.push("No EMAIL-like events found in recent identity audit rows.");
+  if (!cov.hasSms) warnings.push("No SMS/OTP-like events found in recent identity audit rows.");
+  if (!cov.hasKyc) warnings.push("No KYC-like events found in recent identity audit rows.");
+  if (!cov.hasTier) warnings.push("No TIER/PROMOTION-like events found in recent identity audit rows.");
+
+  if (STRICT) {
+    const strictFail = !cov.hasEmail || !cov.hasSms || !cov.hasKyc || !cov.hasTier;
+    results.push({
+      name: "strict-coverage",
+      ok: !strictFail,
+      coverage: { email: cov.hasEmail, sms: cov.hasSms, kyc: cov.hasKyc, tier: cov.hasTier },
+    });
+    if (strictFail) {
+      console.error("✗ STRICT_EVENT_CHECK enabled and coverage failed.");
+      process.exitCode = 1;
+    } else {
+      console.log("✓ STRICT_EVENT_CHECK coverage PASS");
+    }
+  } else {
+    results.push({
+      name: "coverage-warnings",
+      ok: true,
+      coverage: { email: cov.hasEmail, sms: cov.hasSms, kyc: cov.hasKyc, tier: cov.hasTier },
+      warnings,
+    });
+    if (warnings.length) {
+      console.log("Warnings:");
+      for (const w of warnings) console.log(" - " + w);
+    }
+  }
+
+  section("5) Write report");
+  const report = {
+    runAt: new Date().toISOString(),
+    baseUrl: BASE,
+    verifyEndpoint: `${verifyEndpoint.method} ${verifyEndpoint.path}`,
+    listEndpoint: listEndpoint ? `${listEndpoint.method} ${listEndpoint.path}` : null,
+    results,
+    warnings,
+    pass: results.every((r) => r.ok !== false) && (process.exitCode !== 1),
+  };
+
+  fs.writeFileSync("audit-regression-report.json", JSON.stringify(report, null, 2));
+  console.log("Report written to audit-regression-report.json");
+
+  if (process.exitCode === 1) process.exit(1);
+}
+
+main().catch((e) => {
+  console.error("Fatal error:", e);
+  process.exit(1);
+});
+```
+
+---
+
+## Add to `package.json`
+
+```json
+{
+  "scripts": {
+    "test:audit": "node tests/auditTrailRegression.js"
+  },
+  "devDependencies": {
+    "node-fetch": "^3.3.2"
+  }
+}
+```
+
+---
+
+## Run
+
+```bash
+npm install --save-dev node-fetch
+ADMIN_COOKIE="connect.sid=s%3A<admin-session>" npm run test:audit
+```
+
+Optional strict mode (fails if your dataset doesn’t contain EMAIL/SMS/KYC/TIER events in the most recent 200 rows):
+
+```bash
+STRICT_EVENT_CHECK=1 ADMIN_COOKIE="connect.sid=s%3A<admin-session>" npm run test:audit
+```
+
+---
+
+## What this script guarantees
+
+* Your **hash-chain integrity** is verified via the backend’s `verify-chain` endpoint (the correct hedge-fund-grade signal).
+* The audit list is structurally sound (time/type/hash exist).
+* You get an explicit JSON artifact: `audit-regression-report.json` suitable for Agent 3’s final compliance report.
+
+If you want, I can also generate a third script `tests/adminUiWireRegression.js` that checks the **AdminDashboard route wiring** (tabs call the correct endpoints, no placeholder `/kyc-queue` drift).

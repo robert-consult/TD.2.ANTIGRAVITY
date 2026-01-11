@@ -1,0 +1,167 @@
+Perfect — you want:
+
+* **Global limits** = *platform-wide defaults*, managed through the **Trade Settings tab**.
+* **Per-user overrides** = *optional relaxed or stricter rules* for selected traders (from **User Management tab**).
+* **When both exist**, **user settings override global settings**, i.e. *user settings can exceed or undercut global defaults*.
+* Changes made in the **Trade Settings tab** must persist in the DB and automatically take effect platform-wide without restarting the backend.
+
+Below is the **complete inline patch** to implement this logic consistently across backend enforcement and UI persistence.
+
+---
+
+# 1) Revised enforcement policy
+
+**Precedence hierarchy**
+
+| Level | Source               | Purpose                   | Example                               |
+| ----- | -------------------- | ------------------------- | ------------------------------------- |
+| 1     | `user_settings`      | Trader-specific overrides | Exceptional trader allowed 100 lots   |
+| 2     | `global_settings`    | Platform default limits   | Default 50 lots cap                   |
+| 3     | Hard defaults (code) | Safe fallback if DB empty | 5 trades / 3 per instrument / 50 lots |
+
+If a user setting exists, it **replaces** (not capped by) the global default.
+
+---
+
+# 2) Risk middleware (`server/risk.ts`)
+
+Replace your entire `getEffectiveLimits()` with this:
+
+```ts
+async function getEffectiveLimits(userId: number) {
+  const gs =
+    (await db.query.globalSettings.findFirst({
+      where: eq(globalSettings.id, 1),
+    })) ?? null;
+
+  const us = (await storage.getUserSettingsById(userId)) ?? null;
+
+  const effective = {
+    maxTradesPerUser:
+      us?.maxConcurrent ??
+      Number(gs?.maxTradesPerUser ?? DEFAULTS.maxTradesPerUser),
+    maxTradesPerInstrument:
+      us?.maxConcurrentPerInstrument ??
+      Number(gs?.maxTradesPerInstrument ?? DEFAULTS.maxTradesPerInstrument),
+    maxConcurrentLots:
+      us?.maxConcurrentLots ??
+      Number(gs?.maxConcurrentLots ?? DEFAULTS.maxConcurrentLots),
+    dailyLossLimitPct:
+      us?.dailyLossLimitPct ??
+      Number(gs?.dailyLossLimitPct ?? DEFAULTS.dailyLossLimitPct),
+    lifetimeLossLimitPct:
+      us?.lifetimeLossLimitPct ??
+      Number(gs?.lifetimeLossLimitPct ?? DEFAULTS.lifetimeLossLimitPct),
+  };
+
+  return effective;
+}
+```
+
+Now, per-user limits **override** global limits rather than being capped.
+
+---
+
+# 3) Trade placement route (`server/routes.ts`)
+
+In the `/api/trades` handler, **replace** the lines computing `effMaxTradesPerUser` and `effMaxConcurrentLots`:
+
+```diff
+- const effMaxTradesPerUser = Math.min(gMaxTradesPerUser, uMaxTradesPerUser);
+- const effMaxConcurrentLots = Math.min(gMaxConcurrentLots, uMaxConcurrentLots);
++ const effMaxTradesPerUser = uMaxTradesPerUser ?? gMaxTradesPerUser;
++ const effMaxConcurrentLots = uMaxConcurrentLots ?? gMaxConcurrentLots;
+```
+
+This allows a user’s override to **exceed** the global platform default.
+
+---
+
+# 4) Order engine (`server/engine/orderEngine.ts`)
+
+In the section where limits are computed (previously):
+
+```ts
+const maxActiveTrades = Math.min(Number(r.s?.maxConcurrent ?? g.maxTradesPerUser), g.maxTradesPerUser);
+const maxConcurrentLots = Math.min(Number(r.s?.maxConcurrentLots ?? g.maxConcurrentLots), g.maxConcurrentLots);
+const maxPerInstrument = g.maxTradesPerInstrument;
+```
+
+Replace with:
+
+```ts
+const maxActiveTrades = Number(r.s?.maxConcurrent ?? g.maxTradesPerUser);
+const maxConcurrentLots = Number(r.s?.maxConcurrentLots ?? g.maxConcurrentLots);
+const maxPerInstrument = Number(r.s?.maxConcurrentPerInstrument ?? g.maxTradesPerInstrument);
+```
+
+Now, if a user’s settings specify larger limits, they’ll be honored at fill-time too.
+
+---
+
+# 5) Admin Trade Settings (global) — already controls platform defaults
+
+Confirm you have the **`PUT /api/admin/global-settings`** endpoint as corrected previously.
+This endpoint persists updates to the `global_settings` table.
+All trade enforcement code reads these values directly from DB, so updates are live instantly.
+
+---
+
+# 6) Admin User Management tab — confirm user override fields exist
+
+Ensure your `user_settings` table (schema and UI) includes:
+
+```ts
+maxConcurrent          INTEGER
+maxConcurrentPerInstrument INTEGER
+maxConcurrentLots      INTEGER
+dailyLossLimitPct      INTEGER
+lifetimeLossLimitPct   INTEGER
+```
+
+and the user settings editor posts them via `/api/admin/users/:id/settings`.
+
+Those values automatically override global defaults after save (no restart).
+
+---
+
+# 7) Verification scenarios
+
+### A) Platform default behavior
+
+* Admin sets **50-lot cap**, **5 concurrent trades**, **3 per instrument**.
+* All users follow these limits immediately.
+
+### B) Exceptional user override
+
+* In User Management tab, set:
+
+  * MaxConcurrentLots = 100
+  * MaxConcurrent = 10
+  * MaxConcurrentPerInstrument = 5
+* That user can open 10 trades totaling 100 lots; others remain capped at 5 trades / 50 lots.
+
+### C) Admin adjustment propagation
+
+1. Change global limit (e.g., 50 → 60 lots) in Trade Settings.
+2. Press Save.
+3. Refresh and immediately open a new trade — new limit (60) applies instantly to all users who have *no override*.
+
+---
+
+# 8) Summary of persistence & runtime behavior
+
+| Layer                 | Adjusted from       | Stored in         | Read by                                  | Takes effect                       |
+| --------------------- | ------------------- | ----------------- | ---------------------------------------- | ---------------------------------- |
+| **Platform Defaults** | Trade Settings tab  | `global_settings` | `risk.ts`, `orderEngine.ts`, `routes.ts` | Immediately (DB read each request) |
+| **User Overrides**    | User Management tab | `user_settings`   | same                                     | Immediately                        |
+| **Fallbacks**         | Hardcoded in code   | memory constants  | same                                     | Only if DB empty                   |
+
+---
+
+All code shown above is **ready for direct inline insertion**.
+Once these patches are in place, the system will behave as follows:
+
+* **Admins** can adjust global trade guardrails in the Trade Settings tab → updates persist in DB → instantly affect all users.
+* **Admins** can selectively override those guardrails per user in the User Management tab → overrides immediately replace global values for that user.
+* **No service restart** required; enforcement reads live DB settings on every trade placement and fill.

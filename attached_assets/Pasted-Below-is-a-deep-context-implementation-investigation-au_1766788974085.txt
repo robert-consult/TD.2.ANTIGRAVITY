@@ -1,0 +1,751 @@
+Below is a **deep-context implementation investigation + audit checklist** for Replit Agent 3 to validate that the **Grift Detection** subsystem is implemented end-to-end at hedge-fund compliance grade: schema, capture points, analytics, admin surfacing, configuration wiring, exports, and operational safety. This is written to be executed as an **item-by-item verification** with “pass/fail + evidence”.
+
+---
+
+# 0) Audit Objective and Evidence Standard
+
+## Objective
+
+Detect and surface:
+
+1. **Multi-account usage** on same device/network (shared device, shared IP clusters)
+2. **Account delegation / account sharing** (rapid churn of IP/UA/device/geo, concurrent sessions)
+3. **Two-account hedging to beat odds** (BUY vs SELL in same symbol across accounts with same device/IP within time window)
+
+## Evidence required for each checklist item
+
+* **File path + code excerpt** (or function name + line range)
+* **DB proof**: select query showing rows created/updated as expected
+* **UI proof**: screenshot or screen recording + network calls (DevTools) showing endpoints hit
+* **Negative test**: confirm false positives are controlled (dedupe, thresholding)
+
+---
+
+# 1) System Topology Inventory (Agent must confirm these exist)
+
+## 1.1 Backend module inventory
+
+Must exist (exact or equivalent paths):
+
+* `server/grift/griftEngine.ts`
+* `server/grift/griftAdminRouter.ts`
+* `server/grift/griftPublicRouter.ts`
+* `server/grift/ensureGriftSchema.ts`
+* `server/grift/griftScheduler.ts`
+* `server/grift/griftTypes.ts`
+* `server/grift/griftDefaults.ts`
+* `server/grift/griftGeo.ts`
+
+**Pass criteria**
+
+* All modules compile.
+* Routers mount to express under:
+
+  * `/api/grift/*`
+  * `/api/admin/grift/*`
+
+**Fail patterns**
+
+* Router not mounted (UI works but data never collected)
+* Engine exists but never invoked from login/trade flows
+
+---
+
+# 2) Database Layer (Tables, Indices, Constraints, Relationships)
+
+Agent must confirm **table existence**, **columns**, **constraints**, and **indices** (performance + dedupe).
+
+## 2.1 Core Grift tables
+
+Required tables (names must use “grift” not “fraud”):
+
+* `grift_config`
+* `grift_observations`
+* `grift_trade_observations`
+* `grift_devices`
+* `grift_device_users`
+* `grift_signals`
+* `grift_cases`
+* `grift_case_links`
+* `grift_user_scores`
+* `grift_actions_audit`
+
+**Pass criteria**
+
+* All tables exist in SQLite schema.
+* No naming drift (no legacy “fraud_*” tables unless explicitly deprecated).
+
+### 2.1.1 `grift_config` checklist
+
+Verify:
+
+* Exactly one row with `id=1` exists (seeded by ensure schema)
+* Contains all thresholds and scoring knobs
+* `updated_at`, `updated_by_admin_id` present for auditability
+
+**DB checks**
+
+```sql
+SELECT * FROM grift_config WHERE id=1;
+```
+
+### 2.1.2 `grift_signals` checklist
+
+Verify:
+
+* fields for:
+
+  * time (`created_at`, `updated_at`)
+  * `rule_code`, `severity`, `status`
+  * `primary_user_id`, `secondary_user_id`
+  * `device_id`, `ip`, `user_agent`
+  * geo fields (`country`, `region`, `city`, `latitude`, `longitude`)
+  * network fields (`asn`, `org`)
+  * `symbol`, `trade_id`
+  * `points`
+  * `dedupe_key` (UNIQUE)
+  * `evidence_json`
+
+**DB checks**
+
+```sql
+PRAGMA table_info(grift_signals);
+PRAGMA index_list(grift_signals);
+```
+
+Must show a **unique index** on `dedupe_key`.
+
+### 2.1.3 `grift_observations` checklist
+
+Verify:
+
+* Stores **LOGIN_SUCCESS**, **SESSION_PING**, **TRADE_SUBMIT**
+* Captures device/IP/UA/geo/asn/org fields
+
+**DB checks**
+
+```sql
+SELECT event_type, COUNT(*) c
+FROM grift_observations
+GROUP BY event_type;
+```
+
+### 2.1.4 Link tables
+
+`grift_device_users` must support multi-account-on-device detection.
+
+* Verify composite uniqueness or logic that prevents uncontrolled duplicates.
+* Verify `first_seen_at`, `last_seen_at`, `seen_count`.
+
+**DB checks**
+
+```sql
+PRAGMA table_info(grift_device_users);
+SELECT device_id, COUNT(DISTINCT user_id) users
+FROM grift_device_users
+GROUP BY device_id
+HAVING users > 1;
+```
+
+### 2.1.5 `grift_user_scores`
+
+Verify columns for aggregated metrics:
+
+* `score_current`, `tier`
+* `score_7d`, `score_30d`
+* `devices_7d`, `ips_7d`, `user_agents_7d`, `countries_7d`, `asns_7d`
+* `linked_accounts_30d`, `hedge_pairs_7d`
+* `open_signals_count`, `last_evaluated_at`
+
+**DB checks**
+
+```sql
+PRAGMA table_info(grift_user_scores);
+SELECT * FROM grift_user_scores ORDER BY score_current DESC LIMIT 10;
+```
+
+---
+
+# 3) Data Capture Points (Wiring into the App)
+
+This is the most common failure category. Agent must trace: **request → middleware → engine hook → DB rows**.
+
+## 3.1 Auth / req.user presence
+
+Verify:
+
+* `req.user.id` exists for all authenticated calls to `/api/grift/ping`
+* login sets session cookie and server attaches req.user
+
+**Fail pattern**
+
+* Ping endpoint returns 401 always; concurrency detection never triggers.
+
+## 3.2 Device ID capture
+
+Verify:
+
+* Client sets `X-Device-Id` header (or equivalent)
+* Server reads `x-device-id` case-insensitive
+
+**Pass criteria**
+
+* Observations contain non-null `device_id` for logged-in sessions.
+
+**DB check**
+
+```sql
+SELECT COUNT(*) withDevice, COUNT(*) total
+FROM grift_observations
+WHERE device_id IS NOT NULL;
+```
+
+## 3.3 IP capture
+
+Verify precedence order:
+
+* `CF-Connecting-IP` → `X-Forwarded-For` → `X-Real-IP` → socket addr
+
+**Pass criteria**
+
+* `ip` not constantly null in production hosting.
+
+## 3.4 ASN / Org capture
+
+Verify:
+
+* Works with your deployment provider headers (Cloudflare or Vercel)
+* Acceptable null behavior when unavailable
+
+**DB checks**
+
+```sql
+SELECT COUNT(*) total, SUM(CASE WHEN asn IS NOT NULL THEN 1 ELSE 0 END) withAsn
+FROM grift_observations;
+```
+
+## 3.5 Geo capture
+
+Verify:
+
+* Country from headers; coordinates optionally from client ping body
+* Coordinates not mandatory (geo velocity only runs with lat/lon present)
+
+**DB checks**
+
+```sql
+SELECT COUNT(*) total,
+       SUM(CASE WHEN country IS NOT NULL THEN 1 ELSE 0 END) withCountry,
+       SUM(CASE WHEN latitude IS NOT NULL AND longitude IS NOT NULL THEN 1 ELSE 0 END) withCoords
+FROM grift_observations;
+```
+
+---
+
+# 4) Engine Behavior (Rules, Thresholds, Dedupe, Scoring)
+
+Agent must confirm each detector:
+
+* triggers on expected test
+* writes correct evidence
+* is **deduped**
+* updates user scores
+
+## 4.1 Rule coverage list (must exist exactly or equivalent)
+
+* `MULTI_ACCOUNT_DEVICE`
+* `HEDGE_PAIR`
+* `IP_CHURN`
+* `UA_CHURN`
+* `DEVICE_CHURN`
+* `ASN_VOLATILITY`
+* `GEO_VELOCITY`
+* `CONCURRENT_SESSIONS`
+
+**Pass criteria**
+
+* Each rule generates rows in `grift_signals` when stimulated.
+
+### 4.1.1 Dedupe key validation
+
+Verify:
+
+* `grift_signals.dedupe_key` is unique
+* repeated triggers update `updated_at` and `points/evidence_json` instead of duplicating rows
+
+**DB test**
+
+1. trigger same event twice
+2. confirm count doesn’t increase, but `updated_at` changes
+
+```sql
+SELECT rule_code, dedupe_key, created_at, updated_at
+FROM grift_signals
+ORDER BY updated_at DESC
+LIMIT 10;
+```
+
+## 4.2 Multi-account on same device detection
+
+Test scenario:
+
+* Create User A and User B
+* Log in A from device D
+* Log out
+* Log in B from same device D
+
+Expected:
+
+* `grift_device_users` shows device mapped to 2 users
+* `grift_signals` has `MULTI_ACCOUNT_DEVICE` with `primary_user_id` and `secondary_user_id`
+
+**DB checks**
+
+```sql
+SELECT * FROM grift_device_users WHERE device_id = '<device>';
+SELECT * FROM grift_signals WHERE rule_code='MULTI_ACCOUNT_DEVICE' ORDER BY created_at DESC;
+```
+
+## 4.3 Hedge-pair detection (two-account hedge)
+
+Test scenario:
+
+* A opens BUY on XAUUSD
+* B opens SELL on XAUUSD within hedge window
+* same deviceId (or same IP if allowIpMatch enabled)
+
+Expected:
+
+* `grift_trade_observations` has both trades
+* `grift_signals` has `HEDGE_PAIR` with symbol, trade_id, both user ids
+
+**DB checks**
+
+```sql
+SELECT * FROM grift_trade_observations WHERE symbol='XAUUSD' ORDER BY ts DESC;
+SELECT * FROM grift_signals WHERE rule_code='HEDGE_PAIR' ORDER BY created_at DESC;
+```
+
+## 4.4 Churn detection (IP/UA/Device/ASN)
+
+Test scenario:
+
+* For the same user within churn window:
+
+  * vary IP (use VPN/proxy or simulate by header override in dev)
+  * vary UA (change browser/UA header)
+  * vary deviceId (clear localstorage / new device)
+  * vary ASN (harder to test; simulate header in dev)
+
+Expected:
+
+* `IP_CHURN`, `UA_CHURN`, `DEVICE_CHURN`, `ASN_VOLATILITY` signals appear
+* Evidence includes the unique set counts and recent observation sample
+
+**DB check**
+
+```sql
+SELECT rule_code, points, evidence_json
+FROM grift_signals
+WHERE primary_user_id=<id> AND rule_code IN ('IP_CHURN','UA_CHURN','DEVICE_CHURN','ASN_VOLATILITY')
+ORDER BY created_at DESC;
+```
+
+## 4.5 Geo velocity detection
+
+Test scenario:
+
+* Send ping with coords in one city
+* within short time send ping with coords far away
+
+Expected:
+
+* `GEO_VELOCITY` generated with distance/velocity in evidence
+
+**DB check**
+
+```sql
+SELECT * FROM grift_signals WHERE rule_code='GEO_VELOCITY' ORDER BY created_at DESC;
+```
+
+## 4.6 Concurrent sessions detection
+
+Test scenario:
+
+* Same user logged in on device1 and device2 concurrently
+* both clients ping within the concurrent window
+
+Expected:
+
+* `CONCURRENT_SESSIONS` signal with `distinctContexts` evidence
+
+**DB check**
+
+```sql
+SELECT * FROM grift_signals WHERE rule_code='CONCURRENT_SESSIONS' ORDER BY created_at DESC;
+```
+
+---
+
+# 5) Aggregation Layer (User scores & risk measures)
+
+Agent must confirm `recomputeUserAggregates()` is called after:
+
+* login success
+* session ping
+* trade submit
+* scheduler recompute cycles
+
+## 5.1 Score math & tier logic
+
+Verify:
+
+* score_current is derived from **OPEN** signals only (or defined rule)
+* `tier` uses config thresholds (tierMed/high/critical)
+
+**DB checks**
+
+```sql
+SELECT user_id, score_current, tier, open_signals_count, last_evaluated_at
+FROM grift_user_scores
+ORDER BY score_current DESC;
+```
+
+**Fail pattern**
+
+* signals exist but `grift_user_scores` never populated (aggregation not invoked)
+
+---
+
+# 6) Admin Surfacing (User Management tab integration)
+
+## 6.1 New mini-tab placement
+
+Verify:
+
+* In Admin Dashboard → User Management mini-tabs:
+
+  * `Login History`
+  * `Audit Trail`
+  * `Grift Detection` (or “Grift”)
+* “Grift” appears adjacent to the two above (as you specified).
+
+**Pass criteria**
+
+* It loads without console errors and shows data.
+
+## 6.2 Grift UI sub-tabs coverage
+
+Verify sub-tabs exist and load:
+
+* Dashboard
+* Signals
+* Users
+* Pairs
+* Networks
+* Cases
+* Exports
+* Config
+* Audit
+
+**Pass criteria**
+
+* Each tab has at least a placeholder panel with correct endpoint wiring.
+
+## 6.3 Dashboard metrics must include (aggregates)
+
+Required visible metrics:
+
+* Top users by score_current
+* Open signals count
+* Hedge pairs last 7d
+* Linked accounts last 30d
+* IP/UA/Device churn summary
+* Geo velocity hits summary
+* Concurrent session hits summary
+* Filters: tier (LOW/MED/HIGH/CRITICAL), status (OPEN/IN_REVIEW/CLOSED/IGNORED)
+
+**Fail pattern**
+
+* Only raw signals shown; no “who to review first” ranking
+
+---
+
+# 7) Admin Endpoints (Correctness + Security)
+
+Agent must ensure:
+
+* Admin routes are protected behind admin auth middleware
+* Public ping requires auth but not admin
+* No user can read other users’ grift data
+
+## 7.1 Required endpoints list
+
+* `POST /api/grift/ping` (auth required)
+* `GET /api/admin/grift/overview`
+* `GET /api/admin/grift/signals`
+* `GET /api/admin/grift/users`
+* `GET /api/admin/grift/pairs`
+* `GET /api/admin/grift/networks`
+* `POST /api/admin/grift/recompute/:userId`
+* `PATCH /api/admin/grift/config` (admin editable; for now defaults allowed)
+* `GET /api/admin/grift/audit`
+* (optional) cases endpoints if implemented: create/update/assign
+
+## 7.2 Authorization checks
+
+Pass criteria:
+
+* Non-admin cannot access `/api/admin/grift/*` (403/401)
+* Admin can access, with data returned.
+
+---
+
+# 8) Config Edit Wiring (Admin editable placeholders + defaults)
+
+You requested: “enable admin edits in backend placeholders but use defaults for now”.
+
+Agent must verify:
+
+## 8.1 Config table is the source of truth
+
+* Engine uses DB config, not hardcoded defaults
+* Defaults only used to seed `grift_config` if missing
+
+## 8.2 PATCH config endpoint behavior
+
+* Accepts partial updates
+* Validates ranges (no negative windows, no insane thresholds)
+* Writes `updated_at` and `updated_by_admin_id`
+* Adds a record in `grift_actions_audit` (“CONFIG_UPDATED”)
+
+**DB checks**
+
+```sql
+SELECT * FROM grift_config WHERE id=1;
+SELECT * FROM grift_actions_audit ORDER BY ts DESC LIMIT 20;
+```
+
+**Fail pattern**
+
+* UI lets you edit but DB doesn’t change, or engine still uses old values
+
+---
+
+# 9) Scheduler/Batch Health (Operational reliability)
+
+## 9.1 Scheduler actually runs
+
+* `startGriftScheduler({ intervalMinutes: 10, lookbackHours: 24 })` runs on server boot
+* It recomputes aggregates for recently active users
+* It does not lock the DB for long periods
+
+**Pass criteria**
+
+* DB `grift_user_scores.last_evaluated_at` advances over time without manual calls
+
+## 9.2 Backpressure & limits
+
+Verify:
+
+* Observation insert is lightweight
+* Signal insert uses dedupe to prevent blowup
+* Queries have `LIMIT`s and indices exist
+
+**Fail pattern**
+
+* Large observation volume causes admin pages to stall due to missing indices
+
+---
+
+# 10) Export & Audit Trail Integration
+
+## 10.1 Admin exports
+
+If “Exports” tab exists:
+
+* Exports must include:
+
+  * signals with evidence_json
+  * user scores snapshot
+  * network clusters (shared device/IP sets)
+  * config snapshot at export time
+  * export manifest hash (if your platform uses manifest hashing elsewhere)
+
+## 10.2 Actions audit
+
+Any admin action in Grift module must log:
+
+* actor admin id
+* action type (CONFIG_UPDATED, SIGNAL_STATUS_CHANGED, CASE_CREATED, etc.)
+* timestamp
+* payload json
+
+**DB checks**
+
+```sql
+SELECT action_type, COUNT(*) FROM grift_actions_audit GROUP BY action_type;
+```
+
+---
+
+# 11) Data Integrity and Relationship Checks
+
+Agent must verify referential correctness (even without hard FK enforcement in SQLite):
+
+## 11.1 Signal user references
+
+* primary_user_id exists in users table
+* secondary_user_id exists when present
+
+**DB checks**
+
+```sql
+SELECT s.id
+FROM grift_signals s
+LEFT JOIN users u1 ON u1.id=s.primary_user_id
+LEFT JOIN users u2 ON u2.id=s.secondary_user_id
+WHERE u1.id IS NULL OR (s.secondary_user_id IS NOT NULL AND u2.id IS NULL);
+```
+
+Must return zero rows.
+
+## 11.2 Trade references
+
+If trade_id present:
+
+* trade exists
+
+```sql
+SELECT s.id
+FROM grift_signals s
+LEFT JOIN trades t ON t.id=s.trade_id
+WHERE s.trade_id IS NOT NULL AND t.id IS NULL;
+```
+
+---
+
+# 12) UI/UX Verification Checklist (Admin productivity)
+
+## 12.1 Filters and drilldowns
+
+Verify:
+
+* click on user id from Pairs/Networks takes admin to that user’s Grift view
+* signal list has:
+
+  * severity badge
+  * status chip
+  * quick “Open / In Review / Closed / Ignored” controls (if implemented)
+  * view evidence_json (expandable)
+
+## 12.2 Data freshness indicators
+
+* last evaluated time
+* last signal time
+* last observation time
+
+## 12.3 Safe wording
+
+You specified: “replace fraud with grift in all namings”
+Agent must scan:
+
+* UI labels
+* table names
+* route paths
+* code comments
+* variables
+
+**Pass criteria**
+
+* no visible “fraud” string in admin UI or logs (unless legacy/deprecated).
+
+---
+
+# 13) Red-Team Test Suite (Agent must run these)
+
+## Test A: Multi-account same device
+
+* A logs in from device D
+* B logs in from device D
+  Expected: MULTI_ACCOUNT_DEVICE + Networks shared device entry + user scores updated
+
+## Test B: Dual-account hedge
+
+* A BUY EURUSD
+* B SELL EURUSD within 15 minutes, same device or IP
+  Expected: HEDGE_PAIR + Pairs entry + user scores
+
+## Test C: Delegated trading suspicion (churn + concurrent)
+
+* User logs in in Browser1, keep pinging
+* User logs in in Browser2 simultaneously, keep pinging
+* Rotate UA once
+  Expected: CONCURRENT_SESSIONS + UA_CHURN (+ maybe DEVICE_CHURN)
+
+## Test D: Geo velocity
+
+* Ping Denver coords
+* 2 minutes later ping London coords
+  Expected: GEO_VELOCITY signal (if coords enabled)
+
+---
+
+# 14) Performance/Scaling Check (Minimum Standard)
+
+Agent must validate these indices exist or add them:
+
+* `grift_observations(user_id, ts)`
+* `grift_observations(ip, ts)`
+* `grift_observations(device_id, ts)`
+* `grift_trade_observations(symbol, ts)`
+* `grift_trade_observations(user_id, ts)`
+* `grift_device_users(device_id, last_seen_at)`
+* `grift_signals(primary_user_id, created_at)`
+* `grift_signals(secondary_user_id, created_at)`
+* `grift_signals(rule_code, created_at)`
+* `grift_signals(dedupe_key UNIQUE)`
+* `grift_user_scores(score_current)` for ranking lists
+
+**Pass criteria**
+
+* Admin pages load in <1s with thousands of rows (SQLite local test)
+* No full table scans in obvious queries (agent can use EXPLAIN QUERY PLAN)
+
+---
+
+# 15) “Done” Definition (Acceptance Criteria)
+
+System passes when:
+
+1. Every capture path produces observations and device links
+2. Every rule produces signals under controlled stimuli
+3. Signals dedupe correctly
+4. User scores populate and rank correctly
+5. Admin Grift mini-tab + sub-tabs render real data (Pairs + Networks included)
+6. Config edits persist and affect detector behavior
+7. Audit trails capture admin changes
+8. No “fraud” string remains in user-facing/admin surfaces
+
+---
+
+# 16) Agent Execution Output Template (what Replit Agent 3 must return)
+
+For each section above:
+
+* Status: PASS / FAIL / PARTIAL
+* Evidence:
+
+  * file(s)
+  * DB query outputs
+  * endpoint response samples
+  * screenshots
+* Remediation:
+
+  * exact file patch instructions
+  * migration SQL statements
+  * UI route fixes
+
+---
+
+If you want, I can also provide a **single SQL “verification script”** (a set of SELECTs + PRAGMAs) that Agent 3 can run to auto-check 70% of the DB-side items in one shot, and a **frontend click-path test script** (Cypress-style steps) for the admin panel.

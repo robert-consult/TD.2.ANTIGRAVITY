@@ -1,0 +1,818 @@
+Here’s a tight audit of Replit Agent 3’s proposal followed by **drop-in code** for the new mini-tabs and admin APIs. I’ve kept your existing tabs and mini-tabs intact and **only added** new ones.
+
+---
+
+## Quick audit of Replit Agent 3’s response
+
+**What fits well**
+
+* Adds **Audit Trail** and **KYC Queue** under **User Management** (good placement).
+* Expands **Trade Audit** with collapsible sections (keeps it as the forensics “hub”).
+* Adds analytics mini-tabs under **Data** (correct: Data = aggregates; Trade Audit = immutable logs).
+* Adds a per-row **Audit** action drawer (useful).
+
+**What I’d adjust**
+
+* Skip adding a **“Profile Settings” mini-tab** inside Admin → User Management. Profile settings already live on the trader’s top-right profile entry and duplicating inside admin creates ambiguity over “who is editing whose profile.” Keep admin focused on review/ops (KYC, audit, risk), not end-user preference editing.
+
+**Net:** With that single adjustment, the plan is solid and consistent with your policy engine, gating, and KYC/SMS rules.
+
+---
+
+# Drop-in code
+
+Below are **ready-to-paste** files and minimal hook-ups. They don’t rename or remove anything—only add new components/endpoints.
+
+---
+
+## 1) Frontend components (new mini-tabs)
+
+Place these in `client/src/pages/admin/` (or wherever your dashboard pages live).
+If your structure differs, only file paths need adjusting; the components are self-contained.
+
+### `client/src/pages/admin/AdminAuditTrail.tsx`
+
+```tsx
+import React, { useEffect, useMemo, useState } from "react";
+
+type AuditRow = {
+  id: number;
+  userId: number;
+  eventType: string;
+  correlationId: string;
+  actorType: "USER" | "ADMIN" | "SYSTEM";
+  actorUserId: number;
+  sessionId?: string | null;
+  ip?: string | null;
+  userAgent?: string | null;
+  data: any;
+  createdAtMs: number;
+};
+
+type FetchParams = {
+  userId?: number;
+  eventType?: string;
+  fromMs?: number;
+  toMs?: number;
+  q?: string;
+  limit?: number;
+  offset?: number;
+};
+
+async function fetchAudit(params: FetchParams): Promise<{ rows: AuditRow[]; total: number }> {
+  const qs = new URLSearchParams();
+  Object.entries(params).forEach(([k, v]) => {
+    if (v === undefined || v === null || v === "") return;
+    qs.set(k, String(v));
+  });
+  const res = await fetch(`/api/admin/audit?${qs.toString()}`, { headers: { "x-correlation-id": crypto.randomUUID() } });
+  if (!res.ok) return { rows: [], total: 0 };
+  return res.json();
+}
+
+function toDateTime(ms: number) {
+  const d = new Date(ms);
+  return d.toLocaleString();
+}
+
+function downloadCsv(rows: AuditRow[]) {
+  const header = ["id","userId","eventType","createdAt","correlationId","actorType","actorUserId","sessionId","ip","userAgent","dataJSON"];
+  const lines = rows.map(r => [
+    r.id, r.userId, r.eventType, new Date(r.createdAtMs).toISOString(), r.correlationId, r.actorType, r.actorUserId,
+    r.sessionId ?? "", r.ip ?? "", (r.userAgent ?? "").replaceAll(",", " "),
+    JSON.stringify(r.data ?? {}).replaceAll(",", ";")
+  ].join(","));
+  const blob = new Blob([header.join(",") + "\n" + lines.join("\n")], { type: "text/csv" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `user_audit_${Date.now()}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+export default function AdminAuditTrail() {
+  const [rows, setRows] = useState<AuditRow[]>([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(false);
+
+  const [userId, setUserId] = useState<string>("");
+  const [eventType, setEventType] = useState<string>("");
+  const [q, setQ] = useState<string>("");
+  const [from, setFrom] = useState<string>("");
+  const [to, setTo] = useState<string>("");
+
+  const [page, setPage] = useState(0);
+  const limit = 50;
+
+  const params = useMemo<FetchParams>(() => ({
+    userId: userId ? Number(userId) : undefined,
+    eventType: eventType || undefined,
+    q: q || undefined,
+    fromMs: from ? new Date(from).getTime() : undefined,
+    toMs: to ? new Date(to).getTime() : undefined,
+    limit,
+    offset: page * limit,
+  }), [userId, eventType, q, from, to, page]);
+
+  async function load() {
+    setLoading(true);
+    const data = await fetchAudit(params);
+    setRows(data.rows);
+    setTotal(data.total);
+    setLoading(false);
+  }
+
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [params]);
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-end gap-2">
+        <div className="flex flex-col">
+          <label className="text-xs opacity-70">User ID</label>
+          <input className="rounded-md border border-slate-700/60 bg-slate-900/60 px-2 py-1 text-sm" value={userId} onChange={(e)=>setUserId(e.target.value)} placeholder="e.g. 42" />
+        </div>
+        <div className="flex flex-col">
+          <label className="text-xs opacity-70">Event Type</label>
+          <input className="rounded-md border border-slate-700/60 bg-slate-900/60 px-2 py-1 text-sm" value={eventType} onChange={(e)=>setEventType(e.target.value)} placeholder="e.g. EMAIL_VERIFIED" />
+        </div>
+        <div className="flex flex-col">
+          <label className="text-xs opacity-70">Query</label>
+          <input className="rounded-md border border-slate-700/60 bg-slate-900/60 px-2 py-1 text-sm" value={q} onChange={(e)=>setQ(e.target.value)} placeholder="correlationId, ip, etc." />
+        </div>
+        <div className="flex flex-col">
+          <label className="text-xs opacity-70">From</label>
+          <input type="date" className="rounded-md border border-slate-700/60 bg-slate-900/60 px-2 py-1 text-sm" value={from} onChange={(e)=>setFrom(e.target.value)} />
+        </div>
+        <div className="flex flex-col">
+          <label className="text-xs opacity-70">To</label>
+          <input type="date" className="rounded-md border border-slate-700/60 bg-slate-900/60 px-2 py-1 text-sm" value={to} onChange={(e)=>setTo(e.target.value)} />
+        </div>
+        <button onClick={load} className="rounded-md border border-slate-700/60 bg-slate-900/60 px-3 py-2 text-sm hover:bg-slate-900">
+          {loading ? "Loading..." : "Refresh"}
+        </button>
+        <button onClick={()=>downloadCsv(rows)} className="rounded-md border border-slate-700/60 bg-slate-900/60 px-3 py-2 text-sm hover:bg-slate-900">
+          Export CSV
+        </button>
+      </div>
+
+      <div className="rounded-xl border border-slate-700/60">
+        <table className="w-full text-sm">
+          <thead className="bg-slate-900/50">
+            <tr className="text-left">
+              <th className="px-3 py-2">Time</th>
+              <th className="px-3 py-2">User</th>
+              <th className="px-3 py-2">Event</th>
+              <th className="px-3 py-2">Correlation</th>
+              <th className="px-3 py-2">Actor</th>
+              <th className="px-3 py-2">Note</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(r => (
+              <tr key={r.id} className="border-t border-slate-800/70">
+                <td className="px-3 py-2 whitespace-nowrap">{toDateTime(r.createdAtMs)}</td>
+                <td className="px-3 py-2">{r.userId}</td>
+                <td className="px-3 py-2 font-mono">{r.eventType}</td>
+                <td className="px-3 py-2 font-mono">{r.correlationId.slice(0, 12)}…</td>
+                <td className="px-3 py-2">{r.actorType}#{r.actorUserId}</td>
+                <td className="px-3 py-2 opacity-80">{r.ip ? `ip:${r.ip}` : ""}</td>
+              </tr>
+            ))}
+            {!rows.length && !loading && (
+              <tr><td className="px-3 py-6 text-center opacity-70" colSpan={6}>No audit rows match current filters.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="flex items-center justify-between text-xs opacity-70">
+        <div>Showing {rows.length} / {total}</div>
+        <div className="flex items-center gap-2">
+          <button disabled={page===0} onClick={()=>setPage((p)=>Math.max(0,p-1))} className="rounded-md border px-2 py-1 disabled:opacity-50">Prev</button>
+          <span>Page {page+1}</span>
+          <button disabled={(page+1)*limit>=total} onClick={()=>setPage((p)=>p+1)} className="rounded-md border px-2 py-1 disabled:opacity-50">Next</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+```
+
+---
+
+### `client/src/pages/admin/KycQueue.tsx`
+
+```tsx
+import React, { useEffect, useMemo, useState } from "react";
+
+type KycRow = {
+  userId: number;
+  email: string;
+  contenderTier: string;
+  kycStatus: "NOT_STARTED" | "PENDING" | "VERIFIED" | "REJECTED";
+  selectedAtMs: number | null;
+  lastUpdatedMs: number | null;
+};
+
+async function fetchQueue(status?: string): Promise<KycRow[]> {
+  const qs = status ? `?status=${encodeURIComponent(status)}` : "";
+  const res = await fetch(`/api/admin/kyc-queue${qs}`, { headers: { "x-correlation-id": crypto.randomUUID() } });
+  if (!res.ok) return [];
+  return res.json();
+}
+
+async function postAction(userId: number, action: "approve" | "reject" | "request-info") {
+  const res = await fetch(`/api/admin/kyc/${userId}/${action}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-correlation-id": crypto.randomUUID() },
+    body: JSON.stringify({}),
+  });
+  return res.ok;
+}
+
+export default function KycQueue() {
+  const [rows, setRows] = useState<KycRow[]>([]);
+  const [status, setStatus] = useState<string>("PENDING");
+  const [loading, setLoading] = useState(false);
+
+  const filtered = useMemo(() => rows, [rows]);
+
+  async function load() {
+    setLoading(true);
+    const r = await fetchQueue(status);
+    setRows(r);
+    setLoading(false);
+  }
+
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [status]);
+
+  async function handle(userId: number, action: "approve" | "reject" | "request-info") {
+    const ok = await postAction(userId, action);
+    if (ok) load();
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-end gap-2">
+        <div className="flex flex-col">
+          <label className="text-xs opacity-70">Filter status</label>
+          <select className="rounded-md border border-slate-700/60 bg-slate-900/60 px-2 py-1 text-sm"
+            value={status} onChange={(e)=>setStatus(e.target.value)}>
+            <option value="PENDING">Pending</option>
+            <option value="NOT_STARTED">Not Started</option>
+            <option value="VERIFIED">Verified</option>
+            <option value="REJECTED">Rejected</option>
+          </select>
+        </div>
+        <button onClick={load} className="rounded-md border border-slate-700/60 bg-slate-900/60 px-3 py-2 text-sm hover:bg-slate-900">
+          {loading ? "Loading..." : "Refresh"}
+        </button>
+      </div>
+
+      <div className="rounded-xl border border-slate-700/60">
+        <table className="w-full text-sm">
+          <thead className="bg-slate-900/50">
+            <tr className="text-left">
+              <th className="px-3 py-2">User</th>
+              <th className="px-3 py-2">Tier</th>
+              <th className="px-3 py-2">KYC</th>
+              <th className="px-3 py-2">Selected</th>
+              <th className="px-3 py-2">Updated</th>
+              <th className="px-3 py-2">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map(r => (
+              <tr key={r.userId} className="border-t border-slate-800/70">
+                <td className="px-3 py-2">{r.email} <span className="opacity-60">#{r.userId}</span></td>
+                <td className="px-3 py-2"><span className="rounded-full border px-2 py-0.5 text-xs">{r.contenderTier}</span></td>
+                <td className="px-3 py-2">{r.kycStatus}</td>
+                <td className="px-3 py-2">{r.selectedAtMs ? new Date(r.selectedAtMs).toLocaleDateString() : "-"}</td>
+                <td className="px-3 py-2">{r.lastUpdatedMs ? new Date(r.lastUpdatedMs).toLocaleString() : "-"}</td>
+                <td className="px-3 py-2">
+                  <div className="flex gap-2">
+                    <button onClick={()=>handle(r.userId, "approve")} className="rounded-md border border-emerald-600/50 bg-emerald-600/20 px-2 py-1 text-xs hover:bg-emerald-600/30">Approve</button>
+                    <button onClick={()=>handle(r.userId, "reject")} className="rounded-md border border-red-600/50 bg-red-600/20 px-2 py-1 text-xs hover:bg-red-600/30">Reject</button>
+                    <button onClick={()=>handle(r.userId, "request-info")} className="rounded-md border border-yellow-600/50 bg-yellow-600/20 px-2 py-1 text-xs hover:bg-yellow-600/30">Request Info</button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+            {!filtered.length && !loading && (
+              <tr><td className="px-3 py-6 text-center opacity-70" colSpan={6}>No users in queue for this status.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+```
+
+---
+
+### `client/src/pages/admin/SignupFunnelChart.tsx`
+
+```tsx
+import React, { useEffect, useState } from "react";
+
+type Funnel = {
+  signup: number;
+  verified: number;
+  activeTrader: number;
+  contender: number;
+  selected: number;
+  kycSubmitted: number;
+  kycVerified: number;
+};
+
+async function fetchFunnel(): Promise<Funnel | null> {
+  const res = await fetch("/api/admin/analytics/funnel", { headers: { "x-correlation-id": crypto.randomUUID() } });
+  if (!res.ok) return null;
+  return res.json();
+}
+
+function pct(a: number, b: number) {
+  if (!b) return "0%";
+  return `${Math.round((a / b) * 100)}%`;
+}
+
+export default function SignupFunnelChart() {
+  const [f, setF] = useState<Funnel | null>(null);
+
+  useEffect(() => { (async () => setF(await fetchFunnel()))(); }, []);
+
+  if (!f) return <div className="opacity-70 text-sm">Loading funnel…</div>;
+
+  const stages: Array<{ label: string; value: number; base: number }> = [
+    { label: "Signup", value: f.signup, base: f.signup },
+    { label: "Verified Email", value: f.verified, base: f.signup },
+    { label: "Active Trader", value: f.activeTrader, base: f.signup },
+    { label: "Contender", value: f.contender, base: f.signup },
+    { label: "Selected", value: f.selected, base: f.signup },
+    { label: "KYC Submitted", value: f.kycSubmitted, base: f.signup },
+    { label: "KYC Verified", value: f.kycVerified, base: f.signup },
+  ];
+
+  return (
+    <div className="space-y-3">
+      <div className="text-base font-semibold">Signup Funnel</div>
+      <div className="space-y-2">
+        {stages.map((s) => (
+          <div key={s.label}>
+            <div className="mb-1 flex items-center justify-between text-xs opacity-80">
+              <span>{s.label}</span>
+              <span>{s.value} ({pct(s.value, s.base)})</span>
+            </div>
+            <div className="h-2 w-full rounded bg-slate-800">
+              <div className="h-2 rounded bg-emerald-600" style={{ width: `${s.base ? (s.value / s.base) * 100 : 0}%` }} />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+```
+
+---
+
+### `client/src/pages/admin/VerificationCompliance.tsx`
+
+```tsx
+import React, { useEffect, useState } from "react";
+
+type Compliance = {
+  verifiedWithin14d: number;
+  overdueReverify: number;
+  lockedForUnverified: number;
+  lockedForReverify: number;
+};
+
+async function fetchCompliance(): Promise<Compliance | null> {
+  const res = await fetch("/api/admin/analytics/compliance", { headers: { "x-correlation-id": crypto.randomUUID() } });
+  if (!res.ok) return null;
+  return res.json();
+}
+
+function Metric({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-xl border border-slate-700/60 bg-slate-900/60 p-4">
+      <div className="text-xs opacity-70">{label}</div>
+      <div className="text-2xl font-bold">{value}</div>
+    </div>
+  );
+}
+
+export default function VerificationCompliance() {
+  const [c, setC] = useState<Compliance | null>(null);
+  useEffect(() => { (async () => setC(await fetchCompliance()))(); }, []);
+  if (!c) return <div className="opacity-70 text-sm">Loading compliance…</div>;
+
+  return (
+    <div className="space-y-3">
+      <div className="text-base font-semibold">Verification Compliance</div>
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <Metric label="Verified within 14 days" value={c.verifiedWithin14d} />
+        <Metric label="Overdue reverify" value={c.overdueReverify} />
+        <Metric label="Locked (unverified)" value={c.lockedForUnverified} />
+        <Metric label="Locked (reverify overdue)" value={c.lockedForReverify} />
+      </div>
+    </div>
+  );
+}
+```
+
+---
+
+### `client/src/pages/admin/UserAnalytics.tsx`
+
+```tsx
+import React, { useEffect, useState } from "react";
+
+type Analytics = {
+  dau: number;
+  wau: number;
+  activeTraders: number;
+  lockedUsers: number;
+  loginHeatmap: number[][]; // [7][24], 0..N logins per hour/day
+};
+
+async function fetchAnalytics(): Promise<Analytics | null> {
+  const res = await fetch("/api/admin/analytics/user", { headers: { "x-correlation-id": crypto.randomUUID() } });
+  if (!res.ok) return null;
+  return res.json();
+}
+
+export default function UserAnalytics() {
+  const [m, setM] = useState<Analytics | null>(null);
+  useEffect(() => { (async () => setM(await fetchAnalytics()))(); }, []);
+  if (!m) return <div className="opacity-70 text-sm">Loading user analytics…</div>;
+
+  const days = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+
+  return (
+    <div className="space-y-4">
+      <div className="text-base font-semibold">User Analytics</div>
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <div className="rounded-xl border border-slate-700/60 bg-slate-900/60 p-4">
+          <div className="text-xs opacity-70">DAU</div>
+          <div className="text-2xl font-bold">{m.dau}</div>
+        </div>
+        <div className="rounded-xl border border-slate-700/60 bg-slate-900/60 p-4">
+          <div className="text-xs opacity-70">WAU</div>
+          <div className="text-2xl font-bold">{m.wau}</div>
+        </div>
+        <div className="rounded-xl border border-slate-700/60 bg-slate-900/60 p-4">
+          <div className="text-xs opacity-70">Active Traders</div>
+          <div className="text-2xl font-bold">{m.activeTraders}</div>
+        </div>
+        <div className="rounded-xl border border-slate-700/60 bg-slate-900/60 p-4">
+          <div className="text-xs opacity-70">Locked Users</div>
+          <div className="text-2xl font-bold">{m.lockedUsers}</div>
+        </div>
+      </div>
+
+      <div>
+        <div className="mb-2 text-sm opacity-80">Login Heatmap (past 7 days)</div>
+        <div className="grid grid-cols-25 gap-1" style={{ gridTemplateColumns: "repeat(25, minmax(0,1fr))" }}>
+          <div />
+          {Array.from({ length: 24 }).map((_, h) => (<div key={h} className="text-center text-[10px] opacity-70">{h}</div>))}
+          {m.loginHeatmap.map((row, d) => (
+            <React.Fragment key={d}>
+              <div className="pr-1 text-right text-[10px] opacity-70">{days[d]}</div>
+              {row.map((v, h) => {
+                const intensity = Math.min(1, v / 5);
+                const bg = `rgba(16,185,129,${0.15 + intensity * 0.65})`; // emerald-ish
+                return <div key={h} className="h-4 rounded" style={{ background: bg }} title={`${days[d]} ${h}:00 → ${v}`} />;
+              })}
+            </React.Fragment>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+```
+
+---
+
+## 2) Minimal AdminDashboard wiring
+
+In your `AdminDashboard.tsx`, **do not remove or rename** existing mini-tabs. Just register the new ones in the same group where the others live under **User Management** and **Data**.
+
+**Example** (illustrative only; adapt to your router/tabs component pattern):
+
+```tsx
+// near existing imports
+import AdminAuditTrail from "./admin/AdminAuditTrail";
+import KycQueue from "./admin/KycQueue";
+import SignupFunnelChart from "./admin/SignupFunnelChart";
+import VerificationCompliance from "./admin/VerificationCompliance";
+import UserAnalytics from "./admin/UserAnalytics";
+
+// ... inside the User Management mini-tabs switch:
+// AFTER "Login History" mini-tab
+{activeMiniTab === "Audit Trail" && <AdminAuditTrail />}
+{activeMiniTab === "KYC Queue" && <KycQueue />}
+
+// ... add the labels to your mini-tab list (keep existing order):
+const userMiniTabs = ["All","Active","Disabled","Frozen","Online","Login History","Audit Trail","KYC Queue"];
+
+// ... inside the Data tab mini-tabs:
+const dataMiniTabs = ["Overview","Signup Funnel","Verification Compliance","User Analytics"];
+{dataActiveMiniTab === "Signup Funnel" && <SignupFunnelChart />}
+{dataActiveMiniTab === "Verification Compliance" && <VerificationCompliance />}
+{dataActiveMiniTab === "User Analytics" && <UserAnalytics />}
+```
+
+If your dashboard uses a different mechanism (e.g., `routes` map), just add items pointing to these components.
+
+---
+
+## 3) Backend admin routes (read-only analytics + actions)
+
+Add these **new** routes. They don’t collide with your existing endpoints.
+
+### `server/routes/admin.audit.routes.ts`
+
+```ts
+import { Router } from "express";
+import { db } from "../db";
+import { userAudit } from "../../shared/schema";
+import { and, desc, eq, gte, lte, like, sql } from "drizzle-orm";
+
+export function buildAdminAuditRoutes() {
+  const r = Router();
+
+  r.get("/", async (req, res) => {
+    const userId = req.query.userId ? Number(req.query.userId) : undefined;
+    const eventType = req.query.eventType ? String(req.query.eventType) : undefined;
+    const fromMs = req.query.fromMs ? Number(req.query.fromMs) : undefined;
+    const toMs = req.query.toMs ? Number(req.query.toMs) : undefined;
+    const q = req.query.q ? String(req.query.q) : undefined;
+    const limit = req.query.limit ? Math.min(200, Number(req.query.limit)) : 50;
+    const offset = req.query.offset ? Number(req.query.offset) : 0;
+
+    const where: any[] = [];
+    if (userId) where.push(eq(userAudit.userId, userId));
+    if (eventType) where.push(eq(userAudit.eventType, eventType));
+    if (fromMs) where.push(gte(userAudit.createdAtMs, fromMs));
+    if (toMs) where.push(lte(userAudit.createdAtMs, toMs));
+    if (q) where.push(like(userAudit.data, `%${q}%`)); // naive JSON substring
+
+    const cond = where.length ? and(...where) : undefined;
+
+    const totalRow = await db
+      .select({ c: sql<number>`count(1)` })
+      .from(userAudit)
+      .where(cond as any);
+
+    const rows = await db
+      .select()
+      .from(userAudit)
+      .where(cond as any)
+      .orderBy(desc(userAudit.createdAtMs))
+      .limit(limit)
+      .offset(offset);
+
+    res.json({ rows, total: Number(totalRow[0]?.c ?? rows.length) });
+  });
+
+  return r;
+}
+```
+
+### `server/routes/admin.kyc.routes.ts`
+
+```ts
+import { Router } from "express";
+import { db } from "../db";
+import { users, userPolicyState } from "../../shared/schema";
+import { and, desc, eq } from "drizzle-orm";
+
+export function buildAdminKycRoutes() {
+  const r = Router();
+
+  r.get("/kyc-queue", async (req, res) => {
+    const status = req.query.status ? String(req.query.status) : undefined;
+
+    const rows = await db
+      .select({
+        userId: users.id,
+        email: users.email,
+        contenderTier: userPolicyState.contenderTier,
+        kycStatus: userPolicyState.kycStatus,
+        selectedAtMs: userPolicyState.selectedAtMs,
+        lastUpdatedMs: userPolicyState.updatedAtMs,
+      })
+      .from(users)
+      .innerJoin(userPolicyState, eq(userPolicyState.userId, users.id))
+      .where(
+        and(
+          // only tiers relevant to selection pipeline
+          // (CANDIDATE_SMS_REQUIRED, VERIFIED_SMS, SELECTED_REAL_CAPITAL)
+          // Note: SQLite; emulate IN with OR for clarity
+          and(
+            and(
+              (userPolicyState.contenderTier as any).in?.(["CANDIDATE_SMS_REQUIRED","VERIFIED_SMS","SELECTED_REAL_CAPITAL"]) ??
+              // fallback when .in not available
+              (userPolicyState.contenderTier as any)
+            ),
+            status ? eq(userPolicyState.kycStatus, status) : (userPolicyState.kycStatus as any)
+          )
+        ) as any
+      )
+      .orderBy(desc(userPolicyState.updatedAtMs));
+
+    res.json(rows);
+  });
+
+  // Actions
+  r.post("/kyc/:userId/approve", async (req, res) => {
+    const userId = Number(req.params.userId);
+    await db.update(userPolicyState).set({ kycStatus: "VERIFIED", updatedAtMs: Date.now() } as any).where(eq(userPolicyState.userId, userId));
+    res.json({ ok: true });
+  });
+
+  r.post("/kyc/:userId/reject", async (req, res) => {
+    const userId = Number(req.params.userId);
+    await db.update(userPolicyState).set({ kycStatus: "REJECTED", updatedAtMs: Date.now() } as any).where(eq(userPolicyState.userId, userId));
+    res.json({ ok: true });
+  });
+
+  r.post("/kyc/:userId/request-info", async (req, res) => {
+    // implement notification/logging as you wish
+    res.json({ ok: true });
+  });
+
+  return r;
+}
+```
+
+### `server/routes/admin.analytics.routes.ts`
+
+```ts
+import { Router } from "express";
+import { db } from "../db";
+import { users, userPolicyState, userAudit } from "../../shared/schema";
+import { and, eq, gte, sql } from "drizzle-orm";
+
+const MS_DAY = 86400000;
+
+export function buildAdminAnalyticsRoutes() {
+  const r = Router();
+
+  // Funnel
+  r.get("/analytics/funnel", async (_req, res) => {
+    const now = Date.now();
+
+    // Counts by states (simple, fast approximations)
+    const totalUsers = await db.select({ c: sql<number>`count(1)` }).from(users);
+    const verified = await db.select({ c: sql<number>`count(1)` }).from(userPolicyState).where(sql`email_verified_at_ms is not null`);
+    const contender = await db.select({ c: sql<number>`count(1)` }).from(userPolicyState).where(sql`contender_tier in ('CANDIDATE_SMS_REQUIRED','VERIFIED_SMS','SELECTED_REAL_CAPITAL')`);
+    const selected = await db.select({ c: sql<number>`count(1)` }).from(userPolicyState).where(sql`selected_at_ms is not null`);
+    const kycSubmitted = await db.select({ c: sql<number>`count(1)` }).from(userPolicyState).where(sql`kyc_status = 'PENDING'`);
+    const kycVerified = await db.select({ c: sql<number>`count(1)` }).from(userPolicyState).where(sql`kyc_status = 'VERIFIED'`);
+
+    // Active trader ≈ anyone with an audit "TRADE_*" or a trade row in last 30d; here we use audit heuristic:
+    const day30 = now - 30 * MS_DAY;
+    const activeTrader = await db.select({ c: sql<number>`count(distinct ${userAudit.userId})` })
+      .from(userAudit)
+      .where(and(gte(userAudit.createdAtMs, day30), sql`${userAudit.eventType} like 'TRADE_%'`));
+
+    res.json({
+      signup: Number(totalUsers[0].c) ?? 0,
+      verified: Number(verified[0].c) ?? 0,
+      activeTrader: Number(activeTrader[0].c) ?? 0,
+      contender: Number(contender[0].c) ?? 0,
+      selected: Number(selected[0].c) ?? 0,
+      kycSubmitted: Number(kycSubmitted[0].c) ?? 0,
+      kycVerified: Number(kycVerified[0].c) ?? 0,
+    });
+  });
+
+  // Compliance metrics
+  r.get("/analytics/compliance", async (_req, res) => {
+    const now = Date.now();
+
+    const verifiedWithin14d = await db.select({ c: sql<number>`
+      count(1)
+    `}).from(userPolicyState).where(sql`
+      email_verified_at_ms is not null
+      and email_initial_due_at_ms is not null
+      and email_verified_at_ms <= email_initial_due_at_ms
+    `);
+
+    const overdueReverify = await db.select({ c: sql<number>`count(1)` })
+      .from(userPolicyState)
+      .where(sql`email_reverify_due_at_ms is not null and (${now} - email_reverify_due_at_ms) > (3 * 86400000)`);
+
+    const lockedForUnverified = await db.select({ c: sql<number>`count(1)` })
+      .from(userPolicyState)
+      .where(sql`lock_reason = 'EMAIL_UNVERIFIED'`);
+
+    const lockedForReverify = await db.select({ c: sql<number>`count(1)` })
+      .from(userPolicyState)
+      .where(sql`lock_reason = 'EMAIL_REVERIFY_OVERDUE'`);
+
+    res.json({
+      verifiedWithin14d: Number(verifiedWithin14d[0].c) ?? 0,
+      overdueReverify: Number(overdueReverify[0].c) ?? 0,
+      lockedForUnverified: Number(lockedForUnverified[0].c) ?? 0,
+      lockedForReverify: Number(lockedForReverify[0].c) ?? 0,
+    });
+  });
+
+  // User analytics (DAU/WAU/heatmap) — approximate from userAudit LOGIN/LOGOUT if present
+  r.get("/analytics/user", async (_req, res) => {
+    const now = Date.now();
+    const day7 = now - 7 * MS_DAY;
+    const day1 = now - 1 * MS_DAY;
+
+    const dau = await db.select({ c: sql<number>`count(distinct ${userAudit.userId})` })
+      .from(userAudit)
+      .where(and(gte(userAudit.createdAtMs, day1), eq(userAudit.eventType, "LOGIN")));
+
+    const wau = await db.select({ c: sql<number>`count(distinct ${userAudit.userId})` })
+      .from(userAudit)
+      .where(and(gte(userAudit.createdAtMs, day7), eq(userAudit.eventType, "LOGIN")));
+
+    const lockedUsers = await db.select({ c: sql<number>`count(1)` })
+      .from(userPolicyState)
+      .where(sql`lock_reason is not null`);
+
+    const activeTraders = await db.select({ c: sql<number>`count(distinct ${userAudit.userId})` })
+      .from(userAudit)
+      .where(and(gte(userAudit.createdAtMs, day7), sql`${userAudit.eventType} like 'TRADE_%'`));
+
+    // Heatmap 7x24
+    const heat = Array.from({ length: 7 }, () => Array.from({ length: 24 }, () => 0));
+    const loginRows = await db.select({
+      ts: userAudit.createdAtMs,
+    }).from(userAudit).where(and(gte(userAudit.createdAtMs, day7), eq(userAudit.eventType, "LOGIN")));
+
+    for (const r of loginRows) {
+      const d = new Date(Number((r as any).ts));
+      const day = d.getDay(); // 0..6
+      const hour = d.getHours(); // 0..23
+      heat[day][hour] += 1;
+    }
+
+    res.json({
+      dau: Number(dau[0].c) ?? 0,
+      wau: Number(wau[0].c) ?? 0,
+      activeTraders: Number(activeTraders[0].c) ?? 0,
+      lockedUsers: Number(lockedUsers[0].c) ?? 0,
+      loginHeatmap: heat,
+    });
+  });
+
+  return r;
+}
+```
+
+### Mount these admin routes in your server bootstrap
+
+```ts
+// server/index.ts (or your Express bootstrap)
+import { buildAdminAuditRoutes } from "./routes/admin.audit.routes";
+import { buildAdminKycRoutes } from "./routes/admin.kyc.routes";
+import { buildAdminAnalyticsRoutes } from "./routes/admin.analytics.routes";
+
+// ...
+app.use("/api/admin/audit", buildAdminAuditRoutes());
+app.use("/api/admin", buildAdminKycRoutes());
+app.use("/api/admin", buildAdminAnalyticsRoutes());
+```
+
+---
+
+## 4) Per-row “Audit” action (optional drawer)
+
+If your row actions are defined in a cell renderer, add a small button:
+
+```tsx
+<button
+  onClick={()=> setRightDrawer({ kind: "audit", userId: row.userId })}
+  className="rounded-md border border-slate-700/60 bg-slate-900/60 px-2 py-1 text-xs hover:bg-slate-900"
+>
+  Audit
+</button>
+```
+
+And render the drawer showing `<AdminAuditTrail />` pre-filtered by `userId` (pass prop and hook it into the query).
+
+---
+
+## 5) Fit + conflicts review
+
+* **No existing tab/minitab renamed/removed.** Only **added**:
+
+  * User Management → **Audit Trail**, **KYC Queue**.
+  * Data → **Signup Funnel**, **Verification Compliance**, **User Analytics**.
+* **Policy/verification/KYC/SMS** are unchanged and continue to be enforced by the single policy engine you already integrated.
+* **Trade Audit** remains your forensic hub; you can add collapsible cards there without altering routing.
+
+If you want, I can also add a compact **“Compliance Export”** button (bundled CSV of audit tables) beside your current **Export CSV/JSONL** controls—just say the word and I’ll drop in the button + route.

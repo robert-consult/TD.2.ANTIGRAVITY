@@ -1,0 +1,387 @@
+Understood. Below is a consolidated patch that implements your policy:
+
+* **Global limits = platform-wide defaults.**
+* **Per-user overrides may exceed global.**
+* Enforcement always uses **per-user override if defined**, else falls back to **global**.
+* Keeps your **50-lots concurrent cap** logic intact, but allows per-user to exceed global if you set it so.
+* Ensures settings changed in **Trade Settings** (global) and **User Management** (per-user) persist and take effect immediately.
+* Removes any hidden min() capping that previously forced user values under global.
+
+---
+
+# 1) Data model: allow nullable per-user overrides (explicit override vs inherit)
+
+If your `user_settings` already has these columns but with defaults, make them **nullable** so “unset” means “inherit from global.”
+
+```diff
+// shared/schema.ts
+export const userSettings = sqliteTable("user_settings", {
+  userId: integer("user_id").primaryKey(),
+- maxPositionSize: integer("max_position_size").default(100000),
+- maxTradesPerUser: integer("max_trades_per_user").default(5),
+- maxTradesPerInstrument: integer("max_trades_per_instrument").default(3),
+- maxConcurrentLots: integer("max_concurrent_lots").default(50),
+- defaultLeverage: integer("default_leverage").default(50),
+- allowWeekendTrading: integer("allow_weekend_trading", { mode: "boolean" }).default(null),
++ maxPositionSize: integer("max_position_size"),                 // nullable = inherit
++ maxTradesPerUser: integer("max_trades_per_user"),              // nullable = inherit
++ maxTradesPerInstrument: integer("max_trades_per_instrument"),  // nullable = inherit
++ maxConcurrentLots: integer("max_concurrent_lots"),             // nullable = inherit
++ defaultLeverage: integer("default_leverage"),                  // nullable = inherit
++ allowWeekendTrading: integer("allow_weekend_trading", { mode: "boolean" }), // nullable
+  marketOpenTime: text("market_open_time"),
+  marketCloseTime: text("market_close_time"),
+  enableAutoClose: integer("enable_auto_close", { mode: "boolean" }),
+  autoCloseAfterDays: integer("auto_close_after_days"),
+  autoCloseCheckFrequencyMinutes: integer("auto_close_check_frequency_minutes"),
+  enableLossLimits: integer("enable_loss_limits", { mode: "boolean" }),
+  dailyLossLimitPct: integer("daily_loss_limit_pct"),
+  lifetimeLossLimitPct: integer("lifetime_loss_limit_pct"),
+  updatedAt: integer("updated_at", { mode: "timestamp" }),
+});
+```
+
+> If you need a migration, add an ALTER migration to drop defaults and allow NULLs.
+
+---
+
+# 2) Single source of truth for effective limits
+
+Create a small service to resolve **effective** risk limits given a `userId`. User value wins if not `null`/`undefined`, otherwise global.
+
+```ts
+// server/services/settings.ts
+import { db } from "../db";
+import { globalSettings, userSettings } from "../../shared/schema";
+import { eq } from "drizzle-orm";
+
+type RiskLimits = {
+  maxPositionSize: number;
+  maxTradesPerUser: number;
+  maxTradesPerInstrument: number;
+  maxConcurrentLots: number;
+  defaultLeverage: number;
+  allowWeekendTrading: boolean;
+  marketOpenTime: string;
+  marketCloseTime: string;
+  enableAutoClose: boolean;
+  autoCloseAfterDays: number;
+  autoCloseCheckFrequencyMinutes: number;
+  enableLossLimits: boolean;
+  dailyLossLimitPct: number;
+  lifetimeLossLimitPct: number;
+};
+
+const pick = <T>(u: T | null | undefined, g: T): T => (u ?? g);
+
+export async function getEffectiveRiskLimits(userId?: number): Promise<RiskLimits> {
+  const g = await db.query.globalSettings.findFirst({ where: eq(globalSettings.id, 1) });
+  if (!g) throw new Error("Global settings row missing. Initialize via admin.");
+
+  if (!userId) {
+    return {
+      maxPositionSize: g.maxPositionSize!,
+      maxTradesPerUser: g.maxTradesPerUser!,
+      maxTradesPerInstrument: g.maxTradesPerInstrument!,
+      maxConcurrentLots: g.maxConcurrentLots!,
+      defaultLeverage: g.defaultLeverage!,
+      allowWeekendTrading: !!g.allowWeekendTrading,
+      marketOpenTime: g.marketOpenTime!,
+      marketCloseTime: g.marketCloseTime!,
+      enableAutoClose: !!g.enableAutoClose,
+      autoCloseAfterDays: g.autoCloseAfterDays!,
+      autoCloseCheckFrequencyMinutes: g.autoCloseCheckFrequencyMinutes!,
+      enableLossLimits: !!g.enableLossLimits,
+      dailyLossLimitPct: g.dailyLossLimitPct!,
+      lifetimeLossLimitPct: g.lifetimeLossLimitPct!,
+    };
+  }
+
+  const u = await db.query.userSettings.findFirst({ where: eq(userSettings.userId, userId) });
+
+  return {
+    maxPositionSize: pick(u?.maxPositionSize, g.maxPositionSize!),
+    maxTradesPerUser: pick(u?.maxTradesPerUser, g.maxTradesPerUser!),
+    maxTradesPerInstrument: pick(u?.maxTradesPerInstrument, g.maxTradesPerInstrument!),
+    maxConcurrentLots: pick(u?.maxConcurrentLots, g.maxConcurrentLots!),
+    defaultLeverage: pick(u?.defaultLeverage, g.defaultLeverage!),
+    allowWeekendTrading: pick(u?.allowWeekendTrading, !!g.allowWeekendTrading),
+    marketOpenTime: pick(u?.marketOpenTime, g.marketOpenTime!),
+    marketCloseTime: pick(u?.marketCloseTime, g.marketCloseTime!),
+    enableAutoClose: pick(u?.enableAutoClose, !!g.enableAutoClose),
+    autoCloseAfterDays: pick(u?.autoCloseAfterDays, g.autoCloseAfterDays!),
+    autoCloseCheckFrequencyMinutes: pick(u?.autoCloseCheckFrequencyMinutes, g.autoCloseCheckFrequencyMinutes!),
+    enableLossLimits: pick(u?.enableLossLimits, !!g.enableLossLimits),
+    dailyLossLimitPct: pick(u?.dailyLossLimitPct, g.dailyLossLimitPct!),
+    lifetimeLossLimitPct: pick(u?.lifetimeLossLimitPct, g.lifetimeLossLimitPct!),
+  };
+}
+```
+
+---
+
+# 3) Risk middleware uses effective limits (no hidden caps)
+
+```diff
+// server/risk.ts
+-import { db } from "../db";
+-import { globalSettings } from "../../shared/schema";
++import { getEffectiveRiskLimits } from "./services/settings";
+
+app.get("/api/risk/limits", requireAuth, async (req, res) => {
+  try {
+-   const gs = await db.query.globalSettings.findFirst({ where: eq(globalSettings.id, 1) });
+-   // old ad-hoc fallbacks removed
+-   return res.json({
+-     maxTradesPerUser: gs?.maxTradesPerUser ?? 5,
+-     maxTradesPerInstrument: gs?.maxTradesPerInstrument ?? 3,
+-     maxConcurrentLots: gs?.maxConcurrentLots ?? 50,
+-     ...
+-   });
++   const uid = req.user?.id ? Number(req.user.id) : undefined;
++   const eff = await getEffectiveRiskLimits(uid);
++   return res.json(eff);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ message: "Failed to fetch risk limits" });
+  }
+});
+```
+
+---
+
+# 4) Trade placement enforcement: compute effective limits once, remove Math.min()
+
+Replace any logic that clamps user limits under global. Keep the **50-lots** policy as “effective maxConcurrentLots” which may exceed 50 if you set it per-user; if you want an **absolute hard platform cap** at 50 no matter what, see the note after this snippet.
+
+```diff
+// server/routes/trades.ts (or wherever new orders are accepted)
+-import { db } from "../db";
++import { db } from "../db";
+ import { orders } from "../../shared/schema";
++import { getEffectiveRiskLimits } from "../services/settings";
+ import { and, eq } from "drizzle-orm";
+
+ router.post("/api/trades/place", requireAuth, async (req, res) => {
+   try {
+     const userId = Number(req.user.id);
+
++    const limits = await getEffectiveRiskLimits(userId);
++    const {
++      maxTradesPerUser,
++      maxTradesPerInstrument,
++      maxConcurrentLots,
++    } = limits;
+
+     // 1) Count user open trades
+     const openUserTrades = await db.select().from(orders)
+       .where(and(eq(orders.userId, userId), eq(orders.status, "OPEN")));
+
+     if (openUserTrades.length >= maxTradesPerUser) {
+       return res.status(400).json({ message: `Limit reached: max ${maxTradesPerUser} concurrent trades per user.` });
+     }
+
+     // 2) Count user open trades per instrument
+     const { symbol } = req.body;
+     const openInstrumentTrades = openUserTrades.filter(o => o.symbol === symbol);
+     if (openInstrumentTrades.length >= maxTradesPerInstrument) {
+       return res.status(400).json({ message: `Limit reached: max ${maxTradesPerInstrument} concurrent trades on ${symbol}.` });
+     }
+
+     // 3) Concurrent lots across all open positions (user)
+     const currentLots = openUserTrades.reduce((sum, o) => sum + (o.lots ?? 0), 0);
+     const incomingLots = Number(req.body.lots ?? 0);
+     if (!Number.isFinite(incomingLots) || incomingLots <= 0) {
+       return res.status(400).json({ message: "Invalid lots." });
+     }
+
+-    const effectiveMaxLots = Math.min(userMaxLotsOverride ?? globalMaxLots, 50); // old behavior
+-    if (currentLots + incomingLots > effectiveMaxLots) { ... }
++    const effectiveMaxLots = maxConcurrentLots; // per-user may exceed global
++    if (currentLots + incomingLots > effectiveMaxLots) {
++      return res.status(400).json({
++        message: `Lots limit exceeded: ${currentLots}+${incomingLots} > ${effectiveMaxLots}.`,
++      });
++    }
+
+     // proceed to risk price checks, margin, etc.
+     // ...
+   } catch (e) {
+     console.error("place trade error", e);
+     res.status(500).json({ message: "Failed to place trade" });
+   }
+ });
+```
+
+> **Absolute “safety-valve” cap (optional):**
+> If you still want a *non-bypassable* absolute cap, add a constant, e.g. `ABSOLUTE_MAX_CONCURRENT_LOTS = 5000`, and clamp only to that very high safety number, not to the global limit:
+>
+> ```ts
+> const ABSOLUTE_MAX_CONCURRENT_LOTS = 5000;
+> const effectiveMaxLots = Math.min(maxConcurrentLots, ABSOLUTE_MAX_CONCURRENT_LOTS);
+> ```
+
+---
+
+# 5) Order engine fallback uses effective limits
+
+If the order engine reads limits separately, route it through the same service to prevent drift.
+
+```diff
+// server/engine/orderEngine.ts
+-import { db } from "../db";
+-import { globalSettings } from "../../shared/schema";
++import { getEffectiveRiskLimits } from "../services/settings";
+
+-export async function getRiskConfigForUser(userId?: number) {
+-  const gs = await db.query.globalSettings.findFirst({ where: eq(globalSettings.id, 1) });
+-  return {
+-    maxTradesPerUser: gs?.maxTradesPerUser ?? 5,
+-    maxTradesPerInstrument: gs?.maxTradesPerInstrument ?? 3,
+-    maxConcurrentLots: gs?.maxConcurrentLots ?? 50,
+-  };
+-}
++export async function getRiskConfigForUser(userId?: number) {
++  return getEffectiveRiskLimits(userId);
++}
+```
+
+---
+
+# 6) Admin UI: clarify validation (per-user may exceed global)
+
+Remove any form-level validation that capped per-user inputs at global. Allow larger numbers.
+
+```diff
+// client/src/pages/AdminUserSettings.tsx (or similar)
+- <input type="number" max={global.maxConcurrentLots} ... />
++ <input type="number" min={0} ... />  // no max cap; allow > global
+```
+
+Optionally display helper text:
+
+```tsx
+<p className="text-xs text-muted">
+  Overrides here can exceed platform global limits for this user only.
+</p>
+```
+
+Global Trade Settings UI remains unchanged (that’s the platform default screen). It will still persist and apply everywhere there is no per-user override.
+
+---
+
+# 7) Admin API for per-user settings: keep them nullable, parse safely
+
+Ensure PUT does not coerce empty fields; it should **leave them null** so they inherit global.
+
+```diff
+// server/routes/admin.users.ts
+app.put("/api/admin/users/:id/settings", requireAdmin, async (req, res) => {
+  try {
+    const userId = Number(req.params.id);
+    const body = req.body ?? {};
+
+    const numOrNull = (v:any) => (v === "" || v === null || v === undefined) ? null : (Number.isFinite(Number(v)) ? Number(v) : null);
+    const boolOrNull = (v:any) => (v === "" || v === null || v === undefined) ? null
+      : (typeof v === "boolean" ? v
+        : (String(v).toLowerCase() === "true" ? true
+          : (String(v).toLowerCase() === "false" ? false : null)));
+    const timeOrNull = (v:any) => {
+      if (v === "" || v === null || v === undefined) return null;
+      const s = String(v).trim();
+      const m = /^(\d{2}):(\d{2})$/.exec(s);
+      if (!m) return null;
+      const hh = Number(m[1]), mm = Number(m[2]);
+      if (hh < 0 || hh > 23 || mm < 0 || mm > 59) return null;
+      return s;
+    };
+
+    const next = {
+      maxPositionSize: numOrNull(body.maxPositionSize),
+      maxTradesPerUser: numOrNull(body.maxTradesPerUser),
+      maxTradesPerInstrument: numOrNull(body.maxTradesPerInstrument),
+      maxConcurrentLots: numOrNull(body.maxConcurrentLots),
+      defaultLeverage: numOrNull(body.defaultLeverage),
+      allowWeekendTrading: boolOrNull(body.allowWeekendTrading),
+      marketOpenTime: timeOrNull(body.marketOpenTime),
+      marketCloseTime: timeOrNull(body.marketCloseTime),
+      enableAutoClose: boolOrNull(body.enableAutoClose),
+      autoCloseAfterDays: numOrNull(body.autoCloseAfterDays),
+      autoCloseCheckFrequencyMinutes: numOrNull(body.autoCloseCheckFrequencyMinutes),
+      enableLossLimits: boolOrNull(body.enableLossLimits),
+      dailyLossLimitPct: numOrNull(body.dailyLossLimitPct),
+      lifetimeLossLimitPct: numOrNull(body.lifetimeLossLimitPct),
+      updatedAt: new Date(),
+    };
+
+    const existing = await db.query.userSettings.findFirst({ where: eq(userSettings.userId, userId) });
+    if (existing) {
+      await db.update(userSettings).set(next).where(eq(userSettings.userId, userId));
+    } else {
+      await db.insert(userSettings).values({ userId, ...next });
+    }
+
+    const updated = await db.query.userSettings.findFirst({ where: eq(userSettings.userId, userId) });
+    res.json(updated);
+  } catch (e) {
+    console.error("update user settings error", e);
+    res.status(500).json({ message: "Failed to update user settings" });
+  }
+});
+```
+
+---
+
+# 8) Quick runtime checks (manual)
+
+1. **Global only:**
+
+* Set in Trade Settings: `maxTradesPerUser=5`, `maxConcurrentLots=50`.
+* Ensure a user with no overrides is limited to 5 concurrent trades and 50 lots.
+
+2. **Per-user exceeds global:**
+
+* In User Management for a test user, set `maxTradesPerUser=8`, `maxConcurrentLots=120`.
+* Confirm the user can open 8 concurrent trades and up to 120 lots, while another user (no override) remains limited to 5 and 50.
+
+3. **Unset fields inherit:**
+
+* Set only `maxConcurrentLots=120` for the test user; leave others empty.
+* Confirm that only lots differ; other limits equal global.
+
+---
+
+# 9) Optional Jest test to guard policy (example)
+
+```ts
+// server/services/settings.spec.ts
+import { getEffectiveRiskLimits } from "./settings";
+// mock db, return g and u rows as needed
+
+test("inherits global when user overrides are null", async () => {
+  // mock: global { maxTradesPerUser:5, maxConcurrentLots:50 }
+  // mock: user { maxTradesPerUser:null, maxConcurrentLots:null }
+  const eff = await getEffectiveRiskLimits(123);
+  expect(eff.maxTradesPerUser).toBe(5);
+  expect(eff.maxConcurrentLots).toBe(50);
+});
+
+test("user overrides can exceed global", async () => {
+  // mock: global { maxTradesPerUser:5, maxConcurrentLots:50 }
+  // mock: user { maxTradesPerUser:9, maxConcurrentLots:200 }
+  const eff = await getEffectiveRiskLimits(123);
+  expect(eff.maxTradesPerUser).toBe(9);
+  expect(eff.maxConcurrentLots).toBe(200);
+});
+```
+
+---
+
+# 10) Summary of changes you asked for
+
+* Global limits continue to be **managed in Trade Settings** and apply platform-wide by default.
+* **User Management** can set **higher (or lower) overrides** per user that **take precedence** over global.
+* No hidden clamping to global; enforcement consumes **effective** limits from a single service.
+* Persistence paths for both global and per-user settings are robust and take effect immediately for new requests.
+
+If you want me to also add a small **“Inherits from Global”** badge next to empty per-user fields and a one-click “Reset to Inherit” button, say the word and I’ll provide that component patch inline.

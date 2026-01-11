@@ -1,0 +1,595 @@
+Below is a **copy/paste-ready** **Document 1** for embedding into your trader-selection platform signup flow, designed as a **Global Master Agreement** with **country/region addenda** that can be **auto-loaded based on the trader’s selected country**.
+
+This template is drafted to (i) reflect your “opportunity creation” narrative, (ii) implement **ROFO/ROFR + placement-agent rights**, (iii) include a **21-day response window** (with tolling + final notice mechanics to prevent “instant loophole jumps”), and (iv) provide a practical **document-loading classification system**.
+
+You should still have counsel review the **highest-risk jurisdictions** (especially where “restraint of trade” doctrines are strict), because **post-selection lockouts** can be treated as non-compete equivalents and may need localized structure (e.g., converting to non-circumvention + confidentiality + paid garden leave, or limiting scope/duration). International non-compete enforceability varies substantially. ([GoGlobal][1])
+
+---
+
+## A. Implementation approach for signup (recommended)
+
+### Option A (recommended): **One Global Master + Addendum Pack (dynamic assembly)**
+
+* Store:
+
+  1. **GLOBAL MASTER TERMS** (always shown), and
+  2. **Addendum** selected by the user’s country/region (e.g., `ADD-IN`, `ADD-UAE`, `ADD-US`, etc.).
+* Render on signup as:
+  **“Global Master Terms + Applicable Addendum (Country/Region)”**
+* Pros: scalable; consistent core; easy to patch globally.
+* Cons: requires careful “conflict/override” rules (included below).
+
+### Option B (simpler engineering, heavier legal ops): **Full per-country documents**
+
+* Pros: simpler runtime; every document is “as signed”.
+* Cons: harder to maintain at scale; duplicative edits.
+
+Given your footprint, a hybrid works well: **Top-priority countries get dedicated addenda; everyone else uses regional addenda**.
+
+---
+
+# DOCUMENT 1 — PLATFORM PARTICIPATION & OPPORTUNITY RIGHTS AGREEMENT
+
+## (GLOBAL MASTER TERMS + COUNTRY/REGION ADDENDUM FRAMEWORK)
+
+**Version:** 1.0
+**Effective Date:** The date you click “I Agree” (electronic acceptance)
+
+This **Platform Participation & Opportunity Rights Agreement** (the “Agreement”) is between:
+
+1. **Tradequip** (the platform operator), legal entity: **[TRADEQUIP LEGAL NAME]**, organized in **[JURISDICTION]**, with principal place of business at **[ADDRESS]** (“Tradequip,” “we,” “us”), and
+2. **You**, the individual enrolling as a trader participant (“Trader,” “you”).
+
+Tradequip operates a trader growth, discovery, and vetting platform (the “Platform”) that identifies high-performing traders through **virtual performance, behavioral discipline, and rule compliance**, and may offer selected traders opportunities to manage capital and/or become employed by or placed with aligned management companies.
+
+---
+
+## 1) PURPOSE, RECITALS, AND OPPORTUNITY STATEMENT
+
+1.1 **Opportunity Creation.** The Platform is designed to help individuals discover and develop trading ability through structured evaluation, instrumentation, and performance measurement. You acknowledge that:
+(a) Tradequip invests in building and operating the Platform, evaluation systems, and selection funnel;
+(b) Your participation may create opportunities you might not otherwise access; and
+(c) In exchange for access to the Platform and potential selection, you grant Tradequip the **opportunity and placement rights** in this Agreement.
+
+1.2 **No Guarantee.** Participation does not guarantee selection, employment, capital allocation, compensation, or any particular outcome.
+
+---
+
+## 2) DEFINITIONS
+
+2.1 **“Affiliates”** means entities controlling, controlled by, or under common control with Tradequip.
+
+2.2 **“Partner Management Company”** means a third-party asset manager, fund manager, proprietary trading firm, or regulated entity that has a relationship with Tradequip for trader placement and/or capital management.
+
+2.3 **“Selected Trader”** means a Trader designated by Tradequip (in writing or in-Platform notice) as selected for advanced tiers, interviews, placement, employment consideration, capital evaluation, or capital allocation processes.
+
+2.4 **“Opportunity”** means any offer, proposal, invitation, term sheet, letter of intent, recruiter outreach, or arrangement (whether as employee, contractor, consultant, advisor, principal, partner, or otherwise) involving:
+
+* (a) trading for a firm or fund,
+* (b) portfolio management, capital allocation, or investment decision-making,
+* (c) raising or managing third-party capital, or
+* (d) forming, seeding, or operating a fund/managed account program,
+  in each case in the “Trading and Fund Management Industry” as defined below.
+
+2.5 **“Trading and Fund Management Industry”** means trading, investing, market making, proprietary trading, asset management, hedge funds, managed accounts, copy-trading management, signal monetization, or any role involving discretionary execution or investment decision authority over capital.
+
+2.6 **“Platform-Sourced Opportunity”** means an Opportunity that arises from (i) Tradequip, (ii) Tradequip Affiliates, (iii) Partner Management Companies, (iv) introductions made through the Platform, or (v) a counterparty who learned of you through Platform participation, leaderboards, marketing, referrals, or Tradequip/partner networks.
+
+2.7 **“Restricted Bypass Conduct”** means doing any act intended to avoid Tradequip’s rights, including: routing through intermediaries, using alternate titles/entities, presenting an offer as “consulting” to disguise trading, signing via an affiliate, or delaying/withholding notice to run out a response window.
+
+2.8 **“Notice”** means a written notice sent using the method in Section 9 and containing all information in **Schedule E (Notice Form)**.
+
+---
+
+## 3) PLATFORM TERMS (HIGH-LEVEL)
+
+3.1 **Virtual/Evaluation Context.** Unless and until separately documented, Platform trading is for evaluation and training. You are not depositing funds into a regulated brokerage arrangement through this Agreement.
+
+3.2 **Rules and Integrity.** You agree to comply with Platform rules, risk limits, fair-use rules, and anti-manipulation policies. Tradequip may enforce rules, disqualify participants, or adjust tiers.
+
+3.3 **No Investment Advice.** The Platform is not providing individualized investment advice.
+
+---
+
+## 4) CORE GRANT: RIGHT OF FIRST OPPORTUNITY + RIGHT OF FIRST REFUSAL + PLACEMENT AGENCY
+
+This Section is the commercial core of the Agreement.
+
+### 4.1 Right of First Opportunity (ROFO) — Employment / Capital / Placement
+
+If you become a **Selected Trader**, then before you accept any Opportunity in the Trading and Fund Management Industry, you grant Tradequip the **first opportunity** to do one or more of the following (at Tradequip’s election):
+
+* (a) offer you employment with a Tradequip Affiliate or aligned management company;
+* (b) offer you a role managing capital under Tradequip-aligned structures;
+* (c) place you with a Partner Management Company; and/or
+* (d) negotiate a structured pathway (interviews, trials, team assignment, compensation terms).
+
+### 4.2 Right of First Refusal (ROFR) — Matching Third-Party Opportunities
+
+If you receive an Opportunity (including from third parties) and you are a Selected Trader, you must first present it to Tradequip via **Notice**. Tradequip has the right to match or improve the Opportunity (including through a Partner Management Company) subject to Section 5.
+
+### 4.3 Appointment as Placement Agent (Exclusive During “Representation Window”)
+
+If you become a Selected Trader, you appoint Tradequip as your **exclusive representative/placement agent** for Opportunities in the Trading and Fund Management Industry during the **Representation Window**:
+
+* **Representation Window:** begins on the date you are notified you are a Selected Trader, and lasts **6 months** (the “Initial Window”).
+* **Later Moves:** If after being employed/placed through Tradequip or a Partner Management Company you later seek to change firms **within the Trading and Fund Management Industry**, you grant Tradequip an additional **6-month exclusive placement window** commencing upon your written notice that you intend to move (the “Subsequent Window”), unless an Addendum limits or converts exclusivity to non-exclusive representation.
+
+This “agency” concept is used because, in many jurisdictions, broad post-termination non-competes are restricted, and enforceability improves when structured as **representation + non-circumvention + confidentiality** rather than pure restraint. ([GoGlobal][1])
+
+### 4.4 Platform-Sourced Opportunities — Perpetual Priority
+
+For **Platform-Sourced Opportunities**, you grant Tradequip a **perpetual** right to be the presenting/placing party and to receive the benefits of this Agreement (including non-circumvention and remedies), because those Opportunities arise from Tradequip’s infrastructure and network investment.
+
+**If local law does not permit “perpetual” terms**, the relevant Addendum automatically reduces this to the **maximum enforceable period** without invalidating the remainder (see Severability/Reformation).
+
+---
+
+## 5) NOTICE + 21-DAY RESPONSE MECHANISM (ANTI-LOOPHOLE DESIGN)
+
+### 5.1 Mandatory Notice Before Any Acceptance or Negotiation
+
+If you are a Selected Trader and you receive any Opportunity (whether solicited or unsolicited), you must:
+
+* (a) send Tradequip a **complete Notice** within **3 calendar days** of receipt, and
+* (b) refrain from negotiating substantive terms (comp, start date, capital terms, carry, book, seeding, etc.) other than acknowledging receipt and stating: **“Please coordinate through my representative, Tradequip.”**
+
+### 5.2 Tradequip Response Period — 21 Days (Calendar Days)
+
+Upon Tradequip’s confirmed receipt of a **complete Notice**, Tradequip has **21 calendar days** to issue one of the following elections in writing:
+
+* **Match/Engage:** Tradequip elects to match the Opportunity or engage you through Tradequip/Partner Management Company;
+* **Waive:** Tradequip waives in writing for that specific Opportunity;
+* **Request Info:** Tradequip requests missing information (tolls the clock);
+* **Decline:** Tradequip declines (Trader may proceed subject to Section 5.4).
+
+### 5.3 Tolling to Prevent “Starve-the-clock” Loopholes
+
+The 21-day response clock **does not start** until Notice is **complete**. If Tradequip reasonably requests missing information, the clock is **paused** until you provide it.
+
+### 5.4 Final Notice + Cooling-Off (Prevents “Immediate Alternate Employment”)
+
+If Tradequip does not respond within the 21-day period, you must send a **Final Notice** (email + in-app message) stating Tradequip is in non-response status. After Final Notice, you must wait an additional **7 calendar days** before accepting the Opportunity.
+
+This creates a minimum **28-day runway**, eliminating “instant bypass” behavior while preserving fairness.
+
+### 5.5 No Acceptance / No Start / No Side Letters During the Window
+
+Until the earlier of (i) Tradequip waiver/decline, or (ii) expiry of the 21+7 day process, you must not:
+
+* accept the Opportunity,
+* sign any agreement (including “non-binding” LOIs if they contain exclusivity),
+* begin services, shadow-trade, access systems, or receive onboarding credentials,
+* route the Opportunity through an affiliate to disguise it.
+
+Any such act is **Restricted Bypass Conduct** and a material breach.
+
+---
+
+## 6) POST-SELECTION “CAPITAL / FUNDRAISE LOCKOUT” (MODULAR, WITH LOCAL FALLBACKS)
+
+Because enforceability varies globally, this clause is **modular** and may be modified by Addendum.
+
+### 6.1 Trigger: “Protected Benefits”
+
+This Section applies only if you receive any of the following from Tradequip/Affiliates/Partners (“Protected Benefits”):
+
+* (a) access to funded capital programs (real capital allocation, not pure simulation),
+* (b) stipends, guaranteed payments, training stipends, travel support,
+* (c) proprietary playbooks, systems, datasets, execution tooling, or confidential selection metrics,
+* (d) introductions to capital providers, allocators, or seed programs arranged by Tradequip.
+
+### 6.2 Lockout Covenant (Default Global Form)
+
+For **[LOCKOUT_TERM_DEFAULT = 24 months]** after the later of (i) receipt of Protected Benefits, or (ii) last day you had access to Protected Benefits, you agree you will not, without Tradequip’s written consent:
+
+* (a) solicit or raise third-party capital for a trading/fund product,
+* (b) form or operate a fund/managed account program, or
+* (c) manage discretionary third-party capital,
+  **except** through Tradequip or Tradequip-approved counterparties.
+
+### 6.3 Mandatory Local Modifications
+
+If the applicable Addendum (or local law) restricts or voids such lockouts (e.g., as a restraint of trade), then **instead of a prohibition**, the lockout is automatically converted to:
+
+* (i) a strict **non-circumvention** obligation (no Platform-Sourced counterparties),
+* (ii) reinforced **confidentiality + trade secret** protections, and
+* (iii) a **reasonable compensation / liquidated damages** structure tied to demonstrable platform-sourced value (where allowed), without invalidating the rest of the Agreement.
+
+Examples of jurisdictions where post-termination restraint can be heavily limited include India (Section 27 doctrine in employment contexts), and parts of Latin America/Europe where compensation/proportionality is expected for enforceability. ([Desai & Diwanji][2])
+
+---
+
+## 7) NON-CIRCUMVENTION (GLOBAL CORE)
+
+7.1 **No Circumvention of Tradequip / Partners.** You will not, directly or indirectly, circumvent Tradequip’s rights by:
+
+* approaching Partner Management Companies or Platform-introduced contacts outside Tradequip channels,
+* instructing third parties to present offers through alternate routes,
+* using a family member/entity to receive an offer that is intended for you.
+
+7.2 **Platform-Sourced Counterparties.** If you engage any Platform-Sourced counterparty in the Trading and Fund Management Industry outside Tradequip channels within the applicable term, it is presumed circumvention unless you prove otherwise.
+
+---
+
+## 8) CONFIDENTIALITY, IP, AND PUBLICITY
+
+8.1 **Confidential Information** includes Platform selection methods, risk rules, evaluation metrics, identity of partners/allocators, and any non-public technical or commercial information.
+
+8.2 **No Reverse Engineering / No Scraping.** You will not scrape, reverse engineer, or attempt to derive proprietary selection logic.
+
+8.3 **Publicity.** You may not use Tradequip’s name, partner names, or “Selected Trader” status in marketing without written consent, except truthful statements required by law.
+
+---
+
+## 9) NOTICE DELIVERY METHODS
+
+Notices must be sent by:
+
+* **Email:** [[LEGAL@TRADEQUIP.DOMAIN](mailto:LEGAL@TRADEQUIP.DOMAIN)] and **[SECONDARY LEGAL EMAIL]**, and
+* **In-App Notice:** via the Platform notice/submit form (or in-app messaging) when available.
+
+Receipt is the earliest of (i) confirmed email delivery, (ii) in-app timestamp, or (iii) written acknowledgement.
+
+---
+
+## 10) FEES AND DAMAGES (PLACEMENT / CIRCUMVENTION REMEDIES)
+
+### 10.1 No Fee Charged to Trader (Default)
+
+Tradequip does not charge you a fee to participate. Placement fees (if any) are generally paid by hiring/allocating counterparties.
+
+### 10.2 Liquidated Damages for Circumvention (Jurisdiction-Dependent)
+
+If you materially breach Sections 4–7 (Opportunity Rights / Notice / Non-Circumvention), you agree Tradequip may recover **liquidated damages** as a reasonable estimate of harm, as specified in **Schedule F**, plus costs of enforcement, unless prohibited by applicable law (in which case actual damages apply).
+
+Because penalty rules vary, the Addendum may alter this to “actual damages + injunctive relief” or cap amounts to maintain enforceability.
+
+---
+
+## 11) INJUNCTIVE RELIEF / SPECIFIC PERFORMANCE
+
+You agree that breach of Sections 4–8 may cause irreparable harm and that Tradequip may seek injunctive relief where available, in addition to damages.
+
+(Some jurisdictions may limit injunctions for employment restraints; addenda address this.) ([Support Legal][3])
+
+---
+
+## 12) DATA PROTECTION AND PRIVACY (GLOBAL CORE + LOCAL ADDENDA)
+
+12.1 **Controller Role.** Tradequip acts as a data controller for Platform account, evaluation, security, compliance, and selection operations.
+
+12.2 **Lawful Bases (GDPR/UK GDPR where applicable).** Where GDPR/UK GDPR applies, processing typically relies on contractual necessity, legitimate interests (platform integrity, anti-fraud, selection, security), and/or consent for optional marketing. ([European Data Protection Board][4])
+
+12.3 **International Transfers.** Tradequip may transfer data cross-border using appropriate safeguards where required (e.g., **EU Standard Contractual Clauses** and/or the **UK IDTA/Addendum** where applicable). ([EUR-Lex][5])
+
+12.4 **Local Privacy Laws.** Where required, Tradequip will align with local privacy frameworks (e.g., UAE PDPL, Nigeria Data Protection Act, Kenya Data Protection Act, Brazil LGPD, Thailand PDPA, Philippines DPA, etc.) through the applicable Addendum. ([Trade.gov][6])
+
+---
+
+## 13) TERM AND TERMINATION
+
+13.1 **Term.** This Agreement begins upon acceptance and continues while you maintain an account, and afterward to the extent necessary to enforce:
+
+* Platform-Sourced Opportunity rights (Section 4.4),
+* confidentiality/IP,
+* non-circumvention,
+* and any post-selection obligations triggered by Protected Benefits (Section 6).
+
+13.2 **Account Deletion Doesn’t Nullify Rights.** Deleting your account does not terminate obligations for previously accrued rights and restrictions.
+
+---
+
+## 14) GOVERNING LAW / DISPUTE RESOLUTION (SET BY ADDENDUM)
+
+14.1 The governing law and venue are determined by the **Applicable Addendum** for your country/region (Schedule A).
+
+14.2 Mandatory consumer or labor protections in your jurisdiction may apply notwithstanding a chosen law clause (as applicable).
+
+---
+
+## 15) SEVERABILITY, REFORMATION, AND “MAXIMUM ENFORCEABLE” CONSTRUCTION
+
+15.1 **Severability.** If any provision is held invalid, the remainder remains enforceable.
+
+15.2 **Reformation (“Blue Pencil” Where Permitted).** Where a court may narrow an overbroad restriction, the parties request it be reduced to the **minimum scope necessary** to make it enforceable.
+
+15.3 **Maximum Enforceable Term.** If “perpetual” or a stated term is not permitted, it automatically reduces to the maximum enforceable period in that jurisdiction without invalidating the rest.
+
+---
+
+## 16) ELECTRONIC ACCEPTANCE
+
+By clicking “I Agree,” you consent to electronic contracting and acknowledge this Agreement is enforceable as a signed writing, subject to applicable law.
+
+---
+
+# SCHEDULE A — COUNTRY/REGION ADDENDUM SELECTION MATRIX (FOR AUTO-LOADING)
+
+**Rule:** Load the addendum matching the user’s **country of habitual residence** selected at signup. If a country appears in a dedicated addendum, use it; otherwise use the region addendum.
+
+### Dedicated country addenda (priority list you specified)
+
+* United States → **ADD-US**
+* United Arab Emirates → **ADD-UAE**
+* India → **ADD-IN**
+* Kenya → **ADD-KE**
+* Nigeria → **ADD-NG**
+* Bangladesh → **ADD-BD**
+* Thailand → **ADD-TH**
+* Philippines → **ADD-PH**
+* Singapore → **ADD-SG**
+* Hong Kong → **ADD-HK**
+* China (Mainland) → **ADD-CN**
+* Brazil → **ADD-BR**
+* Argentina → **ADD-AR**
+* Colombia → **ADD-CO**
+* Mexico → **ADD-MX**
+* Ethiopia → **ADD-ET**
+* Ghana → **ADD-GH**
+* Angola → **ADD-AO**
+* South Africa → **ADD-ZA**
+* Uganda → **ADD-UG**
+* Tanzania → **ADD-TZ**
+* Russia → **ADD-RU**
+* Ukraine → **ADD-UA**
+* UK → **ADD-UK**
+* Netherlands → **ADD-NL**
+* Germany → **ADD-DE**
+* France → **ADD-FR**
+
+### Regional addenda (fallback)
+
+* West Europe (EEA/Switzerland/UK where not overridden) → **ADD-EEA**
+* East Europe (excluding Russia/Ukraine) → **ADD-EEU**
+* Middle East (excluding UAE) → **ADD-ME**
+* West Africa (excluding Nigeria) → **ADD-WAF**
+* East Africa (excluding KE/UG/TZ/ET) → **ADD-EAF**
+* Southern Africa (excluding ZA) → **ADD-SAF**
+* North Africa → **ADD-NAF**
+* South America (excluding BR/AR/CO) → **ADD-SAM**
+* Central America → **ADD-CAM**
+* North America (excluding US) → **ADD-NAM**
+* SE Asia (excluding SG/TH/PH) → **ADD-SEA**
+* Central Asia → **ADD-CA**
+* Japan → **ADD-JP**
+* South Korea → **ADD-KR**
+* Pakistan → **ADD-PK**
+* Australasia → **ADD-AU**
+* Indian Ocean Islands → **ADD-IOI**
+* Pacific Islands → **ADD-PI**
+
+---
+
+# SCHEDULE E — NOTICE FORM (REQUIRED CONTENT)
+
+A Notice is “complete” only if it contains:
+
+1. Your full legal name + Platform username + email
+2. Counterparty identity (legal name, address, website)
+3. Role description (employee/contractor/PM/trader/etc.)
+4. Comp structure (base/bonus/carry/split) or capital terms (AUM, draw, loss limits)
+5. Start date / effective date / deadlines
+6. Full documents received (offer letter, term sheet, recruiter emails)
+7. How the counterparty found you (and whether Platform-Sourced)
+8. Any exclusivity demanded by the counterparty
+9. Your intended response timeline
+
+---
+
+# SCHEDULE F — REMEDIES (DEFAULT; MAY BE MODIFIED BY ADDENDUM)
+
+**Default (Global):** If you breach Sections 4–7 by circumvention or acceptance without completion of the Notice/ROFR process, Tradequip may seek (where lawful):
+
+* (a) injunctive relief,
+* (b) actual damages, and
+* (c) liquidated damages equal to the lesser of:
+  i) **12 months of your total cash compensation** from the circumvented Opportunity, or
+  ii) **a 20% placement-equivalent fee** on first-year compensation (or, for capital programs, **a 2% equivalent on allocated AUM for 12 months**),
+  plus reasonable enforcement costs.
+
+Where liquidated damages are treated as penalties, the Addendum converts this to **actual damages** plus lawful equitable remedies.
+
+---
+
+# COUNTRY/REGION ADDENDA PACK (CONDENSED OVERRIDES)
+
+**How to read:** Each Addendum **overrides** the Global Master Terms only where it says so. All other sections remain unchanged.
+
+---
+
+## ADD-US — UNITED STATES (STATE-LAW SENSITIVE)
+
+1. **Governing Law / Venue.** Governing law is **[CHOSEN STATE, e.g., Delaware]**, venue **state/federal courts in [COUNTY/STATE]**, unless prohibited by the Trader’s mandatory home-state rules.
+
+2. **ROFR/ROFO Characterization.** Sections 4–7 are intended as **commercial opportunity rights and non-circumvention**, not an employment non-compete.
+
+3. **State Patchwork Acknowledgement.** Non-compete-related enforcement is state-driven and varies materially; Tradequip will enforce restrictions only to the extent permissible in the applicable state. ([Justworks][7])
+
+---
+
+## ADD-UAE — UNITED ARAB EMIRATES
+
+1. **Governing Law / Venue.** UAE federal law and the laws of **[Emirate / Free Zone if applicable]**; disputes in **competent UAE courts** (or DIFC/ADGM courts if the Tradequip entity is established there).
+
+2. **Reasonableness / Duration.** Any restriction resembling non-compete is intended to be reasonable in time/scope and may be limited; UAE employment-law concepts often recognize time/scope limits (often up to two years in employment contexts), but this Agreement’s core is framed as **agency + non-circumvention + confidentiality**. ([Support Legal][3])
+
+3. **UAE PDPL Transfers.** Cross-border transfers may occur subject to UAE PDPL conditions and safeguards. ([Trade.gov][6])
+
+---
+
+## ADD-IN — INDIA
+
+1. **Governing Law / Venue.** Laws of India; courts of **[STATE/CITY]**.
+
+2. **Restraint-of-Trade Fallback.** If any part of Section 6 (Lockout) is found to be an unlawful restraint, it converts automatically to:
+
+* confidentiality + trade secret protections,
+* non-solicitation of Platform-Sourced counterparties, and
+* non-circumvention damages to the extent allowed.
+
+Indian law often scrutinizes post-termination restraints in employment contexts; narrow protections (confidentiality/non-solicit) are generally more defensible than broad “no-work” restrictions. ([Desai & Diwanji][2])
+
+---
+
+## ADD-KE — KENYA
+
+1. **Governing Law / Venue.** Laws of Kenya; courts of **Nairobi** (or as applicable).
+
+2. **Kenya Data Protection.** Tradequip will operate with Kenya Data Protection Act alignment, including cross-border safeguards where required. ([InsightPlus][8])
+
+---
+
+## ADD-NG — NIGERIA
+
+1. **Governing Law / Venue.** Laws of Nigeria; courts of **Lagos** (or as applicable).
+
+2. **Nigeria Data Protection Act 2023.** Cross-border transfers require appropriate mechanisms/adequacy safeguards; Tradequip will implement transfer safeguards and may require Nigeria-local processing arrangements for certain data categories. ([ITIF][9])
+
+---
+
+## ADD-BD — BANGLADESH (COUNTRY-SPECIFIC LIGHT)
+
+1. **Governing Law / Venue.** Laws of Bangladesh; courts in **Dhaka**.
+
+2. **Enforcement Style.** Where restraint doctrines are applied strictly, Section 6 converts to non-circumvention + confidentiality and avoids “blanket no-work” interpretations.
+
+---
+
+## ADD-TH — THAILAND
+
+1. **Governing Law / Venue.** Laws of Thailand; courts in **Bangkok**.
+
+2. **Thailand PDPA Transfers.** Cross-border transfers must satisfy Thailand PDPA mechanisms (adequacy or exceptions); Tradequip will apply contractual safeguards where appropriate. ([Securiti][10])
+
+---
+
+## ADD-PH — PHILIPPINES
+
+1. **Governing Law / Venue.** Laws of the Philippines; courts in **Manila**.
+
+2. **Cross-Border Contractual Clauses Guidance.** Tradequip may rely on model contractual clause approaches recognized by Philippine privacy regulator guidance for cross-border transfers. 
+
+---
+
+## ADD-SG — SINGAPORE
+
+1. **Governing Law / Venue.** Laws of Singapore; courts of Singapore.
+
+2. **PDPA.** Tradequip will implement Singapore PDPA-aligned transfer protection and purpose limitation principles. ([National Privacy Commission][11])
+
+---
+
+## ADD-HK — HONG KONG
+
+1. **Governing Law / Venue.** Laws of Hong Kong; courts of Hong Kong.
+
+2. **PDPO Transfer Protections.** Even where cross-border transfer provisions are evolving, Tradequip will apply contractual protections aligned to PDPO principles and recommended model clauses practices. ([Mayer Brown][12])
+
+---
+
+## ADD-CN — CHINA (MAINLAND)
+
+1. **Governing Law / Venue.** PRC law; courts in **[CITY]**.
+
+2. **PIPL Cross-Border.** Where PIPL applies, Tradequip will implement appropriate mechanisms for cross-border transfers (which may include standardized contracts/security assessments where required). ([hawksford.com][13])
+
+---
+
+## ADD-BR — BRAZIL
+
+1. **Governing Law / Venue.** Laws of Brazil; courts in **São Paulo** (or as applicable).
+
+2. **LGPD.** Data processing and transfers will be managed under LGPD principles and lawful bases. ([mattosfilho.com.br][14])
+
+3. **Lockout Structure.** If a lockout is treated as non-compete equivalent, it must remain proportionate and may require compensation concepts in employment contexts; therefore, Section 6 may be enforced primarily as non-circumvention + confidentiality unless separately compensated under a later agreement. ([GoGlobal][15])
+
+---
+
+## ADD-AR — ARGENTINA
+
+1. **Governing Law / Venue.** Laws of Argentina; courts in **Buenos Aires**.
+
+2. **Cross-Border Transfers.** Transfers may be limited to destinations with adequate protection or appropriate safeguards. ([Digital Policy Alert][16])
+
+---
+
+## ADD-CO — COLOMBIA
+
+1. **Governing Law / Venue.** Laws of Colombia; courts in **Bogotá**.
+
+2. **No Post-Termination “Non-Compete” Equivalent.** To preserve enforceability, Section 6 is automatically interpreted narrowly as non-circumvention + confidentiality, because broad post-termination non-competes are often not recognized; exclusivity is generally more defensible during an active relationship than after it. ([GoGlobal][15])
+
+---
+
+## ADD-MX — MEXICO
+
+1. **Governing Law / Venue.** Laws of Mexico; courts in **Mexico City**.
+
+2. **Updated Private-Sector Data Law.** Privacy notice and processing disclosures will be aligned to Mexico’s updated private-sector personal data framework (and related guidance). ([InsightPlus][17])
+
+---
+
+## ADD-ZA — SOUTH AFRICA
+
+1. **Governing Law / Venue.** Laws of South Africa; courts in **Johannesburg**.
+
+2. **POPIA Transfers.** Tradequip will apply POPIA-aligned processing and transfer safeguards where required. ([Dentons][18])
+
+---
+
+## ADD-UG / ADD-TZ / ADD-ET / ADD-GH / ADD-AO / ADD-RU / ADD-UA
+
+For these, apply:
+
+* **Local governing law/venue** in the capital/primary commercial forum, and
+* If local restraint doctrines are strict, Section 6 converts to **non-circumvention + confidentiality**.
+* If Russia applies, add **data localization** constraints for covered datasets where applicable. ([DLA Piper Data Protection][19])
+  (Angola privacy frameworks exist; apply additional safeguards as needed.) ([CaseGuard][20])
+
+---
+
+## ADD-EEA / ADD-UK / ADD-NL / ADD-DE / ADD-FR (EUROPE—HIGH-LEVEL SIGNUP STAGE)
+
+1. **Governing Law / Venue.** Local country law; local courts as required by mandatory rules.
+
+2. **GDPR/UK GDPR Transfers.** Use EU SCCs and UK IDTA/Addendum as appropriate. ([EUR-Lex][5])
+
+3. **Proportionality.** Any “lockout-like” restriction must be proportionate; if it becomes legally equivalent to a post-employment non-compete, it may require compensation or be narrowed—therefore Section 6 is interpreted conservatively unless later replaced by an employment agreement with the Management Company. ([GoGlobal][21])
+
+---
+
+## What I recommend you do next (without building the algorithm yet)
+
+1. Implement **Option A** (Global + Addendum) now with **dedicated addenda** for your priority list and **regional fallback addenda**.
+2. Have counsel validate: **US, UAE, India, Kenya, Nigeria, Singapore, Hong Kong/China, Brazil, Mexico, South Africa** first (these cover the widest legal variance).
+3. Once validated, we can produce:
+
+   * a clean **JSON map** of `country_code -> addendum_code`, and
+   * a strict “render pack” layout (single-source-of-truth text blocks).
+
+If you want, I can also produce a **shorter “Signup-friendly” version** (2–3 pages) that links to the full legal text, while preserving clickwrap enforceability—useful for conversion without weakening core rights.
+
+[1]: https://goglobal.com/blog/international-hr-consulting/what-you-need-to-know-about-non-compete-clauses/?utm_source=chatgpt.com "Non-Compete Clauses Around the World: What You Need to ..."
+[2]: https://desaidiwanji.com/insights/articles/validity-of-non-solicitation-and-non-compete-clauses-in-employment-agreements "Validity of Non-Solicitation and Non-Compete Clauses in Employment Agreements | Desai & Diwanji"
+[3]: https://www.supportlegal.com/post/uae-restrictive-covenants "UAE: Restrictive Covenants"
+[4]: https://www.edpb.europa.eu/sme-data-protection-guide/process-personal-data-lawfully_en?utm_source=chatgpt.com "Process personal data lawfully"
+[5]: https://eur-lex.europa.eu/eli/dec_impl/2021/914/oj/eng?utm_source=chatgpt.com "Implementing decision - 2021/914 - EN - EUR-Lex"
+[6]: https://www.trade.gov/market-intelligence/united-arab-emirates-allows-cross-border-data-flows-personal-data "United Arab Emirates Allows Cross Border Data Flows of Personal Data"
+[7]: https://www.justworks.com/employment-law-by-state/federal-and-multi-state?utm_source=chatgpt.com "Federal and Multi-State Labor Laws Overview"
+[8]: https://insightplus.bakermckenzie.com/bm/data-technology/mexico-from-2010-to-2025-evolution-of-the-new-federal-law-on-the-protection-of-personal-data-held-by-private-parties?utm_source=chatgpt.com "Mexico: From 2010 to 2025 – Evolution of the new Federal ..."
+[9]: https://itif.org/publications/2025/06/09/nigeria-cross-border-data-transfer-regulation/ "Nigeria’s Cross-Border Data Transfer Regulation | ITIF"
+[10]: https://securiti.ai/thailand-cross-border-personal-data-transfer-overview/ "Thailand Cross Border Data Transfer Legislation - Securiti"
+[11]: https://privacy.gov.ph/data-privacy-act/?utm_source=chatgpt.com "Republic Act 10173 - Data Privacy Act of 2012"
+[12]: https://www.mayerbrown.com/en/insights/publications/2022/06/hong-kongs-2022-guidance-on-cross-border-data-transfers-implications-for-data-users-and-processors "Hong Kong’s 2022 Guidance on Cross-border Data Transfers - Implications for Data Users and Processors | Insights | Mayer Brown"
+[13]: https://www.hawksford.com/insights-and-guides/china-pipl-compliance-guide?utm_source=chatgpt.com "Understanding China's Personal Information Protection ..."
+[14]: https://www.mattosfilho.com.br/en/unico/brazil-data-transfer-regulations/?utm_source=chatgpt.com "Brazil's New International Data Transfer Regulations"
+[15]: https://goglobal.com/blog/global-recruitment/faqs-for-non-compete-agreements-in-the-americas/?utm_source=chatgpt.com "FAQs for Non-Compete Agreements in the Americas - GoGlobal"
+[16]: https://digitalpolicyalert.org/event/13473-entry-into-force-with-grace-period-of-law-25326-on-personal-data-protection-including-cross-border-data-transfer-regulation?utm_source=chatgpt.com "Argentina: Entry into force with grace period of Law 25.326 ..."
+[17]: https://insightplus.bakermckenzie.com/bm/data-technology/mexico-from-2010-to-2025-evolution-of-the-new-federal-law-on-the-protection-of-personal-data-held-by-private-parties "
+		Mexico: From 2010 to 2025 – Evolution of the new Federal Law on the Protection of Personal Data held by Private Parties - Baker McKenzie InsightPlus
+	"
+[18]: https://www.dentons.com/en/insights/articles/2022/october/13/cross-border-data-transfers-under-the-protection-of-personal-information-act-4-of-2013?utm_source=chatgpt.com "Cross-border data transfers under the protection of ..."
+[19]: https://www.dlapiperdataprotection.com/index.html?c=RU&t=about&utm_source=chatgpt.com "Data protection laws in Russia"
+[20]: https://caseguard.com/articles/data-protection-and-privacy-legislation-in-angola/?utm_source=chatgpt.com "Angola's Law 22/11 on the Protection of Personal Data"
+[21]: https://goglobal.com/blog/employer-of-record/navigating-non-compete-clauses-in-europe-a-comprehensive-guide/?utm_source=chatgpt.com "Navigating Non-Compete Clauses in Europe - GoGlobal"

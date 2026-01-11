@@ -1,0 +1,809 @@
+# Replit Agent 3 — Hedge-Fund-Grade Identity, Verification, Gating, KYC, and Audit Implementation Checklist (File-by-File)
+
+This is the **agent-executable** checklist to audit (and close gaps) for the full system you specified: **email verification from signup (Resend) → rolling re-verification → SMS (Twilio Verify) contender gating → tiered access (Profile Settings/KYC/Payout) → sessions/devices termination → admin dashboards (Audit Trail + KYC Queue) → complete end-to-end audit capture**.
+
+It is written to be used **component-by-component, route-by-route, table-by-table**, matching your “progressive confirmations” model and the “hedge-fund-grade” requirement.
+
+---
+
+## 0) Ground Rules and Acceptance Criteria (release-blockers)
+
+### 0.1 Single source of truth
+
+* [ ] **All gating decisions** must flow from `shared/policyDecision.ts` (not duplicated logic across UI/routes).
+* [ ] UI is allowed to *mirror* decisions for UX, but the server must always enforce the same decision.
+
+### 0.2 Deterministic enforcement (must be true always)
+
+* [ ] **Email verification grace window**: allow trading for a fixed grace period from signup (per spec).
+* [ ] **After grace**: block exposure-increasing actions until email verified.
+* [ ] **Rolling re-verification**: after verification, a reverify due date exists; overdue reverify eventually blocks.
+* [ ] **SMS is never required at signup**: only required/available once user meets contender thresholds (tier gating).
+* [ ] **KYC + payout are invite/selected-tier only** (not universal).
+* [ ] **All identity changes and attempts** emit `identity_audit` events with tamper-evident chaining.
+
+### 0.3 UX must be consistent
+
+* [ ] Profile Settings shows real data for:
+
+  * Recent Login Activity (from login history trail)
+  * Active Sessions (from sessions table)
+  * Logout other devices / terminate device session works and immediately invalidates
+* [ ] Timezone list is **canonical**: `(UTC±HH:MM)` prefixed, DST-aware, city-rich.
+* [ ] Language selection is persisted and applied; (full app i18n execution is in a separate checklist item set—still referenced below for tie-in to email/SMS templates).
+
+---
+
+## 1) Data Model Checklist (tables, columns, invariants)
+
+> Primary schema file: `shared/schema.ts`
+> Schema enforcement/patching: `server/db/ensureSchema.ts` (and any ensure helpers used at boot)
+
+### 1.1 `users`
+
+Verify (at minimum) these are present and used end-to-end:
+
+* [ ] `firstName`, `lastName`, `username` (or display name), `email`
+* [ ] `timezone`, `language`, `country`
+* [ ] Tier fields used for progressive confirmations: `userTier` (or equivalent)
+* [ ] Anything used for contender thresholds (starting equity, balance, createdAt, etc.)
+
+**Invariants**
+
+* [ ] Updating timezone/language/country must persist to `users`, and UI must reload it after save.
+* [ ] Username uniqueness enforced (DB + API).
+
+### 1.2 `user_verification`
+
+Verify the identity state machine storage exists:
+
+* [ ] `emailVerifiedAt`
+* [ ] `emailVerificationTokenHash` (hash only; never store raw token)
+* [ ] resend throttles: `emailLastResendAt`, `emailResendCountDay`, `emailResendDayStart`
+* [ ] rolling reverify: `emailReverifyDueAt`
+* [ ] SMS verify: `smsVerifiedAt`
+* [ ] SMS throttles/lock: `smsOtpFailCount`, `smsOtpLockedUntil`, `smsLastSendAt`, `smsSendCountDay`, `smsSendDayStart`
+* [ ] contender tier enum / progression marker (e.g., `contenderTier`)
+
+**Invariants**
+
+* [ ] Changing email resets verification state and issues new token.
+* [ ] email verify success sets `emailReverifyDueAt`.
+
+### 1.3 `user_sessions`
+
+Verify:
+
+* [ ] unique `sessionId` (string), `userId`
+* [ ] `createdAt`, `lastActiveAt` (or lastSeenAt)
+* [ ] `ip`, `userAgent`, optional device parsing fields (`deviceType`, `browser`, `os`)
+* [ ] revocation: `revokedAt`, `revokedByUserId`, `revokeReason`
+
+**Invariants**
+
+* [ ] **Every login** creates a row.
+* [ ] **Every authenticated request** updates `lastActiveAt` (touch).
+* [ ] Revoked/ended sessions are rejected by auth middleware (non-static session enforcement).
+
+### 1.4 `user_login_history`
+
+Verify:
+
+* [ ] `eventAt` (or consistent time field)
+* [ ] `success`, `ip`, `userAgent`, `sessionId`
+* [ ] optional failure reason
+
+**Invariant**
+
+* [ ] both successes and failures recorded.
+
+### 1.5 `identity_audit` (tamper-evident chain)
+
+Verify:
+
+* [ ] `prevHash` and `eventHash`
+* [ ] event taxonomy covers EMAIL/SMS/MFA/KYC/SESSION/ADMIN
+* [ ] event payload supports `actorUserId`, `targetUserId`, `sessionId`, `ip`, `userAgent`, `reason`, and any decision context IDs.
+
+**Invariants**
+
+* [ ] Every verification send/verify attempt produces an audit record (success + failure).
+* [ ] Admin actions produce audit records.
+
+### 1.6 KYC & payout profile
+
+Verify:
+
+* [ ] `user_kyc_profiles` with statuses and timestamps (invited/submitted/reviewed)
+* [ ] `user_payout_profiles` gated behind KYC approval + selected tier
+* [ ] all changes audited
+
+---
+
+## 2) Shared Policy Engine (the gating brain)
+
+### File: `shared/policyDecision.ts`
+
+**Purpose**: define account state, contender tier, and action gating.
+
+Checklist:
+
+* [ ] AccountState includes states like:
+
+  * ACTIVE_GRACE / ACTIVE_VERIFIED
+  * EMAIL_GRACE_EXPIRED / EMAIL_LOCK
+  * EMAIL_REVERIFY_OVERDUE / REVERIFY_LOCK
+  * ADMIN_SUSPENDED / ADMIN_OVERRIDE
+* [ ] Contender tier includes progressive levels (email only → SMS required/eligible → selected/KYC).
+* [ ] Action list includes:
+
+  * trade exposure increase actions (place order / increase)
+  * reduce exposure actions (close / reduce)
+  * modify actions (SL/TP update)
+  * KYC and payout actions
+  * verification actions
+* [ ] `resolveAccountState(...)` and `decidePolicy(...)` enforce:
+
+  * grace window rules
+  * reverify due and overdue lock logic
+  * SMS eligibility rules
+  * KYC/payout gating rules
+
+**Must validate against spec**
+
+* [ ] Grace duration matches your spec.
+* [ ] Reverify cycle duration matches spec.
+* [ ] Contender thresholds match spec (age, trades count, ROI thresholds).
+
+---
+
+## 3) Backend — DB schema safety (SQLite “ensure” pattern)
+
+### File: `server/db/ensureSchema.ts`
+
+Checklist:
+
+* [ ] Ensures new columns exist for:
+
+  * `user_verification` resend counters + reverify due
+  * `user_sessions` revocation fields + device identity
+  * `user_login_history` required columns
+  * `identity_audit` prevHash/eventHash fields
+  * KYC/payout tables
+* [ ] Runs on server boot before routes begin accepting traffic.
+* [ ] Is idempotent (safe to run repeatedly).
+
+---
+
+## 4) Backend — Identity audit writer (tamper evidence)
+
+### File: `server/services/identityAudit.ts`
+
+Checklist:
+
+* [ ] `appendIdentityAudit(...)` computes:
+
+  * `prevHash` from most recent record in chain scope
+  * `eventHash = sha256(prevHash + canonical_event_payload)`
+* [ ] Canonical payload includes stable serialization (no random key order).
+* [ ] Insert happens in a single transaction or in a consistent sequence.
+
+**Audit coverage**
+
+* [ ] Called by:
+
+  * email send / verify / resend / lock events
+  * SMS send / verify / lock events
+  * session revoke / logout / login events
+  * MFA enable/disable events
+  * KYC invite/approve/reject events
+  * Admin overrides (if any)
+
+---
+
+## 5) Backend — Session Trail + “logout other devices” actually invalidates
+
+### File: `server/security/sessionTrail.ts`
+
+Checklist:
+
+* [ ] `createUserSession(...)` writes to `user_sessions` with:
+
+  * sessionId, userId, ip, userAgent
+  * parsed deviceType/browser/os
+  * optional geo inference fields (if implemented)
+* [ ] `touchSession(...)` updates `lastActiveAt`
+* [ ] `endSession(...)` sets ended state (or revocation equivalent)
+* [ ] `revokeSession(...)` sets `revokedAt`, `revokedByUserId`, `revokeReason`
+* [ ] **All of the above emit `identity_audit` events**.
+
+**Hard requirement (non-static sessions)**
+
+* [ ] Auth middleware rejects revoked sessions. If session revoke does not invalidate, the app is non-compliant.
+
+---
+
+## 6) Backend — Auth middleware enforces session validity
+
+### File: `server/middleware/auth.ts` (and/or whichever auth middleware is used)
+
+Checklist:
+
+* [ ] Extracts `req.session.userId` and `req.sessionID`.
+* [ ] For every request under `requireAuth`:
+
+  * [ ] verifies there is a session row in `user_sessions` for that sessionId/userId
+  * [ ] rejects if `revokedAt` is set or if ended/expired
+  * [ ] calls `touchSession(sessionId)` to update lastActiveAt
+* [ ] Returns consistent error codes for UI localization and gating UX.
+
+---
+
+## 7) Backend — Policy enforcement middleware
+
+### File: `server/middleware/requirePolicy.ts`
+
+Checklist:
+
+* [ ] Builds decision context (user + verification + tier + performance inputs).
+* [ ] Applies `shared/policyDecision.ts` decisions.
+* [ ] On deny, returns:
+
+  * [ ] stable `denyCode` (not free-text English)
+  * [ ] optional parameters for UI (e.g., “daysLeft”, “dueAt”)
+* [ ] Denies are logged into `identity_audit` (recommended) and/or trade audit (if action was trade-related).
+
+---
+
+## 8) Backend — Core routes (Auth, login history, profile prefs, KYC)
+
+### File: `server/routes.ts` (large multipurpose routes file)
+
+This file is the high-risk integration hub. Audit these blocks:
+
+#### 8.1 Signup → MUST initialize verification and session correctly
+
+Locate route:
+
+* [ ] `POST /api/auth/register`
+
+Checklist:
+
+* [ ] Creates user.
+* [ ] Creates/ensures `user_verification` row exists.
+* [ ] Starts session (sets `req.session.userId` etc.).
+* [ ] Calls `createUserSession(...)`.
+
+**Critical gap to check**
+
+* [ ] **Does it trigger email verification send?**
+
+  * If **not**, then verify the frontend immediately calls the send endpoint after signup success (must be deterministic).
+  * If neither is true: **FAIL**.
+
+#### 8.2 Login
+
+Locate route:
+
+* [ ] `POST /api/auth/login`
+
+Checklist:
+
+* [ ] On success:
+
+  * [ ] creates a new express session
+  * [ ] calls `createUserSession(...)`
+  * [ ] writes login success to `user_login_history`
+* [ ] On failure:
+
+  * [ ] writes login failure to `user_login_history`
+* [ ] Emits identity audit events (optional but recommended).
+
+#### 8.3 Logout
+
+Locate route:
+
+* [ ] `POST /api/auth/logout`
+
+Checklist:
+
+* [ ] Calls `endSession(...)`
+* [ ] Destroys express session
+* [ ] Audit row created
+
+#### 8.4 Login history API (Profile Settings “Recent Login Activity”)
+
+Locate route:
+
+* [ ] `GET /api/profile/login-history`
+
+Checklist:
+
+* [ ] Returns consistent timestamp field used by UI:
+
+  * choose ONE: `eventAt` (ISO), or `eventAtMs` (epoch ms), or `createdAt` (epoch seconds)
+* [ ] Includes `ip`, `userAgent`, `success`, and ideally `sessionId`.
+
+**Known mismatch to test**
+
+* UI currently renders `new Date(login.createdAt * 1000)`; backend often returns `eventAt`. If mismatch exists: **FAIL**.
+
+#### 8.5 Preferences API
+
+Locate:
+
+* [ ] `GET /api/profile/preferences`
+* [ ] `POST /api/profile/preferences`
+
+Checklist:
+
+* [ ] Reads/writes `users.timezone`, `users.language`, `users.country`
+* [ ] Writes audit event for preference updates (recommended)
+* [ ] Returns updated data used to re-render UI.
+
+#### 8.6 KYC & payout gating routes
+
+Locate:
+
+* [ ] `GET /api/kyc/status` / `POST /api/kyc/submit` (or equivalent)
+* [ ] `GET /api/payout/profile` / `POST /api/payout/profile`
+
+Checklist:
+
+* [ ] Wrapped with `requirePolicy(KYC_VIEW/KYC_SUBMIT/PAYOUT_VIEW/PAYOUT_SUBMIT)`
+* [ ] Returns denyCode and instructions when blocked.
+
+---
+
+## 9) Backend — Verification routes (Resend + Twilio)
+
+### File: `server/routes/verification.ts`
+
+This is your identity engine surface. Audit all routes, and cross-check they map to policy decisions and write audit rows.
+
+#### 9.1 Email send/resend
+
+Checklist:
+
+* [ ] Endpoint exists:
+
+  * [ ] `POST /api/verification/email/send` (or `/email/resend`)
+* [ ] Generates token, stores only `emailVerificationTokenHash` (HMAC/sha256).
+* [ ] Uses Resend API (must succeed with real send).
+* [ ] Enforces:
+
+  * [ ] cooldown
+  * [ ] per-day cap per user
+  * [ ] optional per-IP cap
+* [ ] Emits `identity_audit`:
+
+  * EMAIL_SEND_REQUESTED
+  * EMAIL_SEND_SUCCEEDED / EMAIL_SEND_FAILED
+
+#### 9.2 Email verify
+
+Checklist:
+
+* [ ] Endpoint exists:
+
+  * [ ] `GET /api/verification/email/verify?token=...` (or POST)
+* [ ] Token is compared against stored hash safely.
+* [ ] On success:
+
+  * [ ] set `emailVerifiedAt`
+  * [ ] set `emailReverifyDueAt = now + reverifyInterval`
+  * [ ] clear `emailVerificationTokenHash`
+  * [ ] emit audit EMAIL_VERIFIED
+* [ ] On failure:
+
+  * [ ] emit audit EMAIL_VERIFY_FAILED
+
+#### 9.3 Re-verification
+
+Checklist:
+
+* [ ] There is a reverify path (same verify endpoint is fine, but state must reflect due/overdue).
+* [ ] Policy engine reads due date and blocks when overdue beyond threshold.
+* [ ] Reminders / scheduled nudges exist if included in your spec (see cron section below).
+
+#### 9.4 SMS (Twilio Verify) start
+
+Checklist:
+
+* [ ] Endpoint exists:
+
+  * [ ] `POST /api/verification/sms/start`
+* [ ] Enforced by policy:
+
+  * [ ] Only contender-eligible
+  * [ ] Email must be in good standing (verified and not overdue)
+* [ ] Enforces OTP send caps and cooldown.
+* [ ] Emits audit SMS_SEND_REQUESTED / SMS_SEND_SUCCEEDED / SMS_SEND_FAILED
+
+#### 9.5 SMS (Twilio Verify) confirm
+
+Checklist:
+
+* [ ] Endpoint exists:
+
+  * [ ] `POST /api/verification/sms/confirm`
+* [ ] On success:
+
+  * [ ] set `smsVerifiedAt`
+  * [ ] update contender tier progression (if model includes)
+  * [ ] emit audit SMS_VERIFIED
+* [ ] On failure:
+
+  * [ ] increments fail count
+  * [ ] locks after threshold (`smsOtpLockedUntil`)
+  * [ ] emit audit SMS_VERIFY_FAILED and SMS_LOCKED (when applicable)
+
+---
+
+## 10) Backend — Sessions API for Profile Settings (terminate other devices)
+
+### File: `server/routes/meSessions.ts`
+
+Checklist:
+
+* [ ] `GET /api/me/sessions` returns:
+
+  * [ ] `currentSessionId`
+  * [ ] `rows[]` containing sessionId, createdAt, lastSeen/lastActive, ip, userAgent, deviceType/browser/os, geo fields
+* [ ] `POST /api/me/sessions/logout-others`:
+
+  * [ ] revokes all sessions except current
+  * [ ] emits audit rows per revoked session
+* [ ] `POST /api/me/sessions/:sessionId/revoke`:
+
+  * [ ] revokes target session
+  * [ ] emits audit
+* [ ] `POST /api/me/logout`:
+
+  * [ ] ends current session, destroys express session
+  * [ ] emits audit
+
+**Non-static validation**
+
+* [ ] After revoking a session, the revoked device immediately receives 401 on next API call.
+
+---
+
+## 11) Backend — Meta endpoints (timezone/country/language lists)
+
+### File: `server/routes/meta.ts`
+
+Checklist:
+
+* [ ] `/api/meta/timezones` returns:
+
+  * [ ] `rows[]` with `name` (IANA zone) and **label prefixed with `UTC±HH:MM`**
+  * [ ] label includes city context (mainCities)
+  * [ ] sorting by current offset minutes + label
+* [ ] `/api/meta/countries` (or search) exists and returns canonical country list.
+* [ ] `/api/meta/languages/search` exists with priority languages present:
+
+  * [ ] fr, es, pt, ar, hi
+
+**Timezone UX validation**
+
+* [ ] UI dropdown should display `tz.label` and store `tz.name`.
+
+---
+
+## 12) Backend — MFA (TOTP) and security
+
+### File: `server/routes/profileMfa.ts`
+
+Checklist:
+
+* [ ] Endpoints exist for:
+
+  * [ ] MFA setup start (QR/secret)
+  * [ ] MFA verify/enable
+  * [ ] MFA disable
+  * [ ] recovery codes issuance and rotate (if implemented)
+* [ ] MFA events are written to `identity_audit`.
+* [ ] MFA state is stored in DB (not only memory).
+* [ ] Disable requires code (and/or recovery code).
+
+---
+
+## 13) Backend — Admin: KYC queue + Audit trail
+
+### File: `server/routes/admin.ts`
+
+Checklist:
+
+#### 13.1 Admin security enforcement
+
+* [ ] Every admin route checks `req.session.isAdmin` or equivalent.
+* [ ] Denies are consistent.
+
+#### 13.2 KYC Queue endpoints
+
+* [ ] List queue:
+
+  * [ ] `GET /api/admin/kyc-queue` (or similar)
+* [ ] Invite to KYC:
+
+  * [ ] sets invitedAt/status
+  * [ ] writes audit `KYC_INVITED`
+* [ ] Approve/Reject:
+
+  * [ ] records reviewedAt, reviewer admin id, reason
+  * [ ] writes audit `KYC_APPROVED` / `KYC_REJECTED`
+
+#### 13.3 Identity Audit Trail endpoints
+
+* [ ] `GET /api/admin/identity-audit` supports filtering:
+
+  * [ ] userId
+  * [ ] category/type
+  * [ ] date range
+  * [ ] actorUserId/admin
+* [ ] Export endpoint:
+
+  * [ ] includes `prevHash` and `eventHash` columns
+
+### File: `server/routes/adminSecurity.ts`
+
+Checklist:
+
+* [ ] Logs admin changes (freeze/disable/enable/override) into `identity_audit`.
+* [ ] Any admin override of verification/tier emits audit events.
+
+---
+
+## 14) Frontend — Trader-Facing UI Checklist
+
+### File: `client/src/pages/LoginPage.tsx`
+
+Checklist:
+
+* [ ] On login success:
+
+  * [ ] profile/tier/verification state is fetched
+  * [ ] session-dependent UI (Profile Settings sessions) now populates
+* [ ] On login failure:
+
+  * [ ] shows toast/error
+  * [ ] does not leak whether email exists (optional security)
+
+### File: `client/src/pages/VerifyEmail.tsx`
+
+Checklist:
+
+* [ ] Reads token from URL.
+* [ ] Calls verification endpoint.
+* [ ] Shows success/failure with next steps.
+* [ ] On success, refreshes user/verification state.
+
+### File: `client/src/components/VerificationCards.tsx`
+
+Checklist:
+
+* [ ] Displays:
+
+  * [ ] Email status (verified/unverified/grace/locked)
+  * [ ] Resend button (calls email send endpoint)
+  * [ ] Reverify due countdown and action
+  * [ ] SMS eligibility gating (only when contender eligible)
+  * [ ] KYC invitation gating (only when selected/invited)
+  * [ ] Payout gating tied to KYC approval
+* [ ] All CTAs call real endpoints and refresh state after completion.
+
+### File: `client/src/pages/ProfileSettings.tsx`
+
+Checklist (this is where your screenshots came from):
+
+#### 14.1 Recent Login Activity card must be real and correctly dated
+
+* [ ] Uses `/api/profile/login-history`
+* [ ] Renders timestamp from the field the backend returns (must be consistent)
+* [ ] Does **not** compute invalid dates (must parse ISO/epoch safely)
+
+**Known fail mode to check**
+
+* UI uses `login.createdAt * 1000` but server returns `eventAt`. If so: FAIL.
+
+#### 14.2 Active Sessions card must support device termination
+
+* [ ] Uses `/api/me/sessions`
+* [ ] Shows current session clearly
+* [ ] “Terminate” on other sessions calls revoke endpoint
+* [ ] “Logout other devices” calls logout-others endpoint
+* [ ] “Logout” current ends session and redirects
+
+**Non-static test**
+
+* [ ] Log in on two browsers. Terminate one. Confirm terminated browser is immediately unauthorized.
+
+#### 14.3 Regional Preferences must use canonical meta datasets
+
+* [ ] Timezones list shows `UTC±HH:MM` prefix
+* [ ] Language list includes at minimum: fr, es, pt, ar, hi
+* [ ] Country list is canonical and persists
+
+#### 14.4 Profile core fields and flows
+
+* [ ] First/last/username editable (with validation)
+* [ ] Email change flow triggers reverify (and locks after grace)
+* [ ] Phone flow shows status and only allows SMS verify when eligible
+
+#### 14.5 Security pane
+
+* [ ] Password change works
+* [ ] MFA setup/disable works
+
+### File: `client/src/pages/TradeScreen.tsx` (and other trader surfaces)
+
+Checklist:
+
+* [ ] Exposure-increasing actions are gated by server policy:
+
+  * Place order / increase
+* [ ] UI shows actionable reason when blocked:
+
+  * verify email / reverify / SMS needed / KYC needed
+* [ ] UI does not attempt to “guess” policy; it should display deny codes from server.
+
+---
+
+## 15) Frontend — Admin UI Checklist
+
+### File: `client/src/pages/AdminDashboard.tsx`
+
+Checklist:
+
+* [ ] Tabs/sub-tabs include:
+
+  * [ ] KYC Queue
+  * [ ] Audit Trail (identity audit)
+  * [ ] User lists show labels/badges:
+
+    * Email verified status
+    * SMS verified status (if applicable)
+    * Tier progression
+    * KYC status (invited/submitted/approved/rejected)
+* [ ] Actions (invite KYC, approve/reject) call real endpoints and refresh.
+
+### File: `client/src/pages/AdminTradeAudit.tsx`
+
+Checklist (tie-in requirement):
+
+* [ ] Identity events related to trading actions are still coherent with trade audit (correlationId where applicable).
+* [ ] This is not a replacement for `identity_audit`; it’s complementary.
+
+---
+
+## 16) Cron / Reminder / Revalidation Jobs (if required in your spec)
+
+### Files: `server/cron/*` (e.g., `server/cron/autoClose.ts`) and/or scheduler infrastructure
+
+Checklist:
+
+* [ ] There is a scheduled process for:
+
+  * [ ] email reverify reminders (if included)
+  * [ ] any “nudges” before grace expires (if included)
+* [ ] Reminder sends are rate-limited and audited.
+
+---
+
+## 17) UI vs Implemented — Explicit mismatch tests Agent 3 must run
+
+### 17.1 Signup email send
+
+* [ ] Register a new user.
+* [ ] Confirm **verification email is sent automatically** OR confirm the client immediately calls send endpoint.
+* [ ] Confirm `user_verification.emailVerificationTokenHash` exists after send.
+* [ ] Confirm resend throttles work.
+
+### 17.2 Verify email
+
+* [ ] Click verify link; confirm:
+
+  * `emailVerifiedAt` set
+  * `emailReverifyDueAt` set
+  * token hash cleared
+  * identity audit row inserted
+
+### 17.3 Grace → lock
+
+* [ ] Simulate time passing (or adjust createdAt/verify due):
+
+  * confirm after grace expiration, exposure-increase actions are denied with a stable denyCode.
+
+### 17.4 SMS contender gating
+
+* [ ] Confirm SMS endpoints deny until contender thresholds met.
+* [ ] Once thresholds met:
+
+  * SMS send allowed
+  * verify allowed
+  * smsVerifiedAt set
+  * audit inserted
+  * lockout triggers after repeated wrong OTPs
+
+### 17.5 Sessions/devices revocation
+
+* [ ] Two devices logged in.
+* [ ] Terminate one.
+* [ ] Confirm terminated device receives 401 immediately.
+
+### 17.6 Login history correctness
+
+* [ ] Confirm login history appears and timestamps are not invalid.
+
+### 17.7 Admin KYC queue
+
+* [ ] Invite a user; confirm it appears in queue and is auditable.
+* [ ] Approve/reject; confirm gating changes and audit event exists.
+
+---
+
+## 18) “Proof” Queries Agent 3 should run in SQLite after each test
+
+Use these to prove the system is truly writing state and trails:
+
+```sql
+-- Verification state
+SELECT * FROM user_verification WHERE user_id = ?;
+
+-- Sessions
+SELECT session_id, user_id, created_at, last_active_at, revoked_at, revoke_reason
+FROM user_sessions WHERE user_id = ? ORDER BY last_active_at DESC;
+
+-- Login history (verify timestamp fields align to UI)
+SELECT * FROM user_login_history WHERE user_id = ? ORDER BY event_at DESC LIMIT 20;
+
+-- Identity audit (confirm hash chaining, event taxonomy)
+SELECT id, at, category, type, actor_user_id, target_user_id, prev_hash, event_hash
+FROM identity_audit WHERE target_user_id = ? ORDER BY id DESC LIMIT 50;
+
+-- KYC
+SELECT * FROM user_kyc_profiles WHERE user_id = ?;
+
+-- Payout
+SELECT * FROM user_payout_profiles WHERE user_id = ?;
+```
+
+---
+
+## 19) i18n Tie-In (not the full i18n checklist, but required touchpoints here)
+
+Even if full UI i18n is delivered separately, Agent 3 must confirm:
+
+* [ ] `users.language` persists from Profile Settings.
+* [ ] Email templates (Resend) are selected based on `users.language` (at minimum for fr/es/pt/ar/hi).
+* [ ] SMS messaging (Twilio Verify) either:
+
+  * uses Verify service localization (limited), OR
+  * is replaced with custom messaging for full control.
+* [ ] Deny responses return stable codes (not English strings), so front-end can translate.
+
+---
+
+# Output format Agent 3 should deliver back to you after running this checklist
+
+Require the agent to produce:
+
+1. **A “PASS/FAIL” table** per file section above.
+2. For each FAIL:
+
+   * exact file path
+   * exact function/route/component block name
+   * what was expected vs observed
+   * the minimal corrective action and where it should be applied
+3. Evidence: logs + the SQL query outputs showing state/audit rows.
+
+---
+
+If you respond with **“2”** next, I will produce the **copy/paste patch set** (full file replacements where appropriate) for the highest-impact gaps typically found in this repo:
+
+* deterministic email send on signup,
+* login history timestamp mismatch fix,
+* robust date parsing for sessions/login history,
+* session revocation enforcement in auth middleware,
+* and the minimum scaffolding to connect i18n to verification templates and deny codes.

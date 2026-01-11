@@ -1,0 +1,521 @@
+Below is the **“Diff against current active doc”** upgrade, end-to-end:
+
+* **Backend**: `GET /api/admin/legal-acceptances/:id/diff-current`
+
+  * Resolves the **current** `GLOBAL_MASTER` + **current** `ADDENDUM` for that acceptance (COUNTRY > REGION > DEFAULT/ROW)
+  * Assembles “current combined text”
+  * Produces a **full line diff** (space / - / +) + stats
+* **Frontend**: adds **“Diff vs Current”** button in the acceptance detail modal + a **Diff modal** with:
+
+  * Current doc metadata
+  * Buttons to open the current Global/Addendum in Legal Docs viewer (already exists)
+  * Copyable diff output
+
+This assumes your `legalDocuments` table holds the canonical doc text and you treat “current” as the **latest created** doc per target (the most reliable default). If you later add an explicit `isActive` flag, you only change the `getCurrentDoc()` query.
+
+---
+
+## 1) Backend: Diff utility (new file)
+
+### `server/legal/diffUtils.ts`
+
+```ts
+// FILE: /server/legal/diffUtils.ts
+
+type Op = { type: "equal" | "insert" | "delete"; line: string };
+
+function splitLines(s: string): string[] {
+  // Preserve empty last line semantics by not dropping trailing newline
+  // but also avoid massive memory from \r\n mismatches.
+  return String(s || "").replace(/\r\n/g, "\n").split("\n");
+}
+
+/**
+ * Myers diff (line-based) -> ops
+ * Returns full op stream, not hunks. Suitable for admin/legal diffing.
+ */
+export function myersDiffLines(oldText: string, newText: string): Op[] {
+  const a = splitLines(oldText);
+  const b = splitLines(newText);
+
+  const N = a.length;
+  const M = b.length;
+  const MAX = N + M;
+
+  // V is indexed by diagonal k (x - y), store furthest x
+  let v = new Map<number, number>();
+  v.set(1, 0);
+
+  const trace: Map<number, number>[] = [];
+
+  const getV = (map: Map<number, number>, k: number) => map.get(k) ?? -Infinity;
+
+  for (let d = 0; d <= MAX; d++) {
+    // snapshot
+    trace.push(new Map(v));
+
+    for (let k = -d; k <= d; k += 2) {
+      let x: number;
+
+      // Choose down or right
+      if (k === -d || (k !== d && getV(v, k - 1) < getV(v, k + 1))) {
+        // Down: insertion in a -> take from k+1
+        x = getV(v, k + 1);
+      } else {
+        // Right: deletion from a -> take from k-1 + 1
+        x = getV(v, k - 1) + 1;
+      }
+
+      let y = x - k;
+
+      // Follow diagonal (equal lines)
+      while (x < N && y < M && a[x] === b[y]) {
+        x++;
+        y++;
+      }
+
+      v.set(k, x);
+
+      if (x >= N && y >= M) {
+        return backtrack(trace, a, b);
+      }
+    }
+  }
+
+  // Fallback (should never happen)
+  return fallbackAllChanged(a, b);
+}
+
+function backtrack(trace: Map<number, number>[], a: string[], b: string[]): Op[] {
+  const ops: Op[] = [];
+  let x = a.length;
+  let y = b.length;
+
+  for (let d = trace.length - 1; d >= 0; d--) {
+    const v = trace[d];
+    const k = x - y;
+
+    // Determine the previous diagonal
+    let prevK: number;
+    const vKMinus = v.get(k - 1) ?? -Infinity;
+    const vKPlus = v.get(k + 1) ?? -Infinity;
+
+    const isInsertion = k === -d || (k !== d && vKMinus < vKPlus);
+    prevK = isInsertion ? k + 1 : k - 1;
+
+    const prevX = v.get(prevK) ?? 0;
+    const prevY = prevX - prevK;
+
+    // Emit equal lines on the diagonal
+    while (x > prevX && y > prevY) {
+      ops.push({ type: "equal", line: a[x - 1] });
+      x--;
+      y--;
+    }
+
+    if (d === 0) break;
+
+    // Emit the edit step
+    if (isInsertion) {
+      // Insert b[prevY] (we moved down: y decreased)
+      ops.push({ type: "insert", line: b[prevY] });
+      y = prevY;
+      x = prevX;
+    } else {
+      // Delete a[prevX] (we moved right: x decreased)
+      ops.push({ type: "delete", line: a[prevX] });
+      x = prevX;
+      y = prevY;
+    }
+  }
+
+  ops.reverse();
+  return ops;
+}
+
+function fallbackAllChanged(a: string[], b: string[]): Op[] {
+  const ops: Op[] = [];
+  for (const line of a) ops.push({ type: "delete", line });
+  for (const line of b) ops.push({ type: "insert", line });
+  return ops;
+}
+
+export function renderFullDiff(oldText: string, newText: string) {
+  const ops = myersDiffLines(oldText, newText);
+
+  let inserted = 0;
+  let deleted = 0;
+  let equal = 0;
+
+  const lines: string[] = [];
+  lines.push("--- accepted");
+  lines.push("+++ current");
+
+  for (const op of ops) {
+    if (op.type === "equal") {
+      equal++;
+      lines.push(` ${op.line}`);
+    } else if (op.type === "delete") {
+      deleted++;
+      lines.push(`-${op.line}`);
+    } else {
+      inserted++;
+      lines.push(`+${op.line}`);
+    }
+  }
+
+  return {
+    text: lines.join("\n"),
+    stats: { inserted, deleted, equal, total: ops.length },
+  };
+}
+```
+
+---
+
+## 2) Backend: Add diff endpoint to Admin Legal Acceptances router
+
+### Patch `server/routes/adminLegalAcceptances.ts`
+
+Add imports near top:
+
+```ts
+import { renderFullDiff } from "../legal/diffUtils";
+import { legalDocuments } from "../../shared/schema";
+```
+
+Then add this route (anywhere in the router file, recommended after `/:id` getter):
+
+```ts
+// GET /api/admin/legal-acceptances/:id/diff-current
+adminLegalAcceptancesRouter.get("/:id/diff-current", (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!id) return res.status(400).json({ ok: false, error: "Bad id." });
+
+    const acc = db.select().from(legalAcceptances).where(eq(legalAcceptances.id, id)).get();
+    if (!acc) return res.status(404).json({ ok: false, error: "Not found." });
+
+    // Helper: current doc for a target = newest createdAt for that target.
+    // If later you add explicit isActive, modify this query accordingly.
+    const getCurrentDoc = (target: {
+      docSet: string;
+      docType: string;
+      jurisdictionType: string;
+      jurisdictionKey: string;
+    }) => {
+      return db
+        .select({
+          id: legalDocuments.id,
+          docSet: legalDocuments.docSet,
+          docType: legalDocuments.docType,
+          jurisdictionType: legalDocuments.jurisdictionType,
+          jurisdictionKey: legalDocuments.jurisdictionKey,
+          version: legalDocuments.version,
+          sha256: legalDocuments.sha256,
+          content: legalDocuments.content,
+          createdAt: legalDocuments.createdAt,
+        })
+        .from(legalDocuments)
+        .where(
+          and(
+            eq(legalDocuments.docSet, target.docSet),
+            eq(legalDocuments.docType, target.docType),
+            eq(legalDocuments.jurisdictionType, target.jurisdictionType),
+            eq(legalDocuments.jurisdictionKey, target.jurisdictionKey)
+          ) as any
+        )
+        .orderBy(desc(legalDocuments.createdAt))
+        .limit(1)
+        .get();
+    };
+
+    // Resolve current Global (usually DEFAULT/GLOBAL)
+    const currentGlobal =
+      getCurrentDoc({
+        docSet: "DOC1",
+        docType: "GLOBAL_MASTER",
+        jurisdictionType: "DEFAULT",
+        jurisdictionKey: "GLOBAL",
+      }) ||
+      // fallback (if you used a different key)
+      getCurrentDoc({
+        docSet: "DOC1",
+        docType: "GLOBAL_MASTER",
+        jurisdictionType: "DEFAULT",
+        jurisdictionKey: "ROW",
+      });
+
+    // Resolve current Addendum with same precedence you use in signup assembly:
+    const ISO2 = String(acc.countryIso2 || "").toUpperCase();
+    const RK = acc.regionKey ? String(acc.regionKey) : null;
+
+    const currentAddendum =
+      (ISO2
+        ? getCurrentDoc({
+            docSet: "DOC1",
+            docType: "ADDENDUM",
+            jurisdictionType: "COUNTRY",
+            jurisdictionKey: ISO2,
+          })
+        : null) ||
+      (RK
+        ? getCurrentDoc({
+            docSet: "DOC1",
+            docType: "ADDENDUM",
+            jurisdictionType: "REGION",
+            jurisdictionKey: RK,
+          })
+        : null) ||
+      getCurrentDoc({
+        docSet: "DOC1",
+        docType: "ADDENDUM",
+        jurisdictionType: "DEFAULT",
+        jurisdictionKey: "ROW",
+      });
+
+    const acceptedCombinedText = String(acc.combinedText || "");
+    const acceptedCombinedSha = sha256Hex(acceptedCombinedText);
+
+    const currentGlobalText = String(currentGlobal?.content || "");
+    const currentAddendumText = String(currentAddendum?.content || "");
+
+    // IMPORTANT: choose a stable delimiter for "current combined".
+    // Use the same delimiter your signup assembly uses.
+    const DELIM = "\n\n";
+    const currentCombinedText = [currentGlobalText, currentAddendumText].filter(Boolean).join(DELIM);
+    const currentCombinedSha = sha256Hex(currentCombinedText);
+
+    const diffCombined = renderFullDiff(acceptedCombinedText, currentCombinedText);
+
+    return res.json({
+      ok: true,
+      acceptance: {
+        id: acc.id,
+        userId: acc.userId ?? null,
+        emailAtAcceptance: acc.emailAtAcceptance ?? null,
+        countryIso2: acc.countryIso2,
+        regionKey: acc.regionKey ?? null,
+        acceptedAt: acc.acceptedAt,
+        combinedSha256_stored: acc.combinedSha256,
+        combinedSha256_recomputed: acceptedCombinedSha,
+      },
+      current: {
+        global: currentGlobal
+          ? {
+              id: currentGlobal.id,
+              docSet: currentGlobal.docSet,
+              docType: currentGlobal.docType,
+              jurisdictionType: currentGlobal.jurisdictionType,
+              jurisdictionKey: currentGlobal.jurisdictionKey,
+              version: currentGlobal.version,
+              sha256: currentGlobal.sha256,
+              createdAt: currentGlobal.createdAt,
+            }
+          : null,
+        addendum: currentAddendum
+          ? {
+              id: currentAddendum.id,
+              docSet: currentAddendum.docSet,
+              docType: currentAddendum.docType,
+              jurisdictionType: currentAddendum.jurisdictionType,
+              jurisdictionKey: currentAddendum.jurisdictionKey,
+              version: currentAddendum.version,
+              sha256: currentAddendum.sha256,
+              createdAt: currentAddendum.createdAt,
+            }
+          : null,
+        combinedSha256: currentCombinedSha,
+      },
+      diff: {
+        combined: diffCombined,
+        notes: {
+          delimiter: DELIM,
+          globalResolved: Boolean(currentGlobal),
+          addendumResolved: Boolean(currentAddendum),
+        },
+      },
+    });
+  } catch (e: any) {
+    return res.status(400).json({ ok: false, error: e?.message || "Diff failed." });
+  }
+});
+```
+
+---
+
+## 3) Frontend: Add “Diff vs Current” in Legal Acceptances detail modal
+
+### Patch `client/src/pages/AdminLegalAcceptances.tsx`
+
+#### 3.1 Add state + helper
+
+Inside the component, add:
+
+```tsx
+  const [diffOpen, setDiffOpen] = useState(false);
+  const [diffData, setDiffData] = useState<any>(null);
+  const [diffLoading, setDiffLoading] = useState(false);
+
+  async function runDiffCurrent(acceptanceId: number) {
+    setDiffLoading(true);
+    setDiffData(null);
+    try {
+      const res = await fetch(`/api/admin/legal-acceptances/${acceptanceId}/diff-current`);
+      const data = await res.json();
+      if (!data?.ok) throw new Error(data?.error || "Diff failed.");
+      setDiffData(data);
+      setDiffOpen(true);
+    } catch (e: any) {
+      alert(e?.message || "Diff failed.");
+    } finally {
+      setDiffLoading(false);
+    }
+  }
+```
+
+#### 3.2 Add button in the acceptance detail modal
+
+Inside your **Acceptance detail modal** (near the top is best), add:
+
+```tsx
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <button
+                style={btnSmall}
+                onClick={() => runDiffCurrent(detail.id)}
+                disabled={diffLoading}
+                title="Compare the accepted combined text snapshot with the current active docs for this jurisdiction"
+              >
+                {diffLoading ? "Diffing..." : "Diff vs Current"}
+              </button>
+
+              {resolved?.[detail.id]?.global?.best?.id && (
+                <button style={btnSmall} onClick={() => openLegalDocById(resolved[detail.id].global.best!.id)}>
+                  Open Accepted Global
+                </button>
+              )}
+              {resolved?.[detail.id]?.addendum?.best?.id && (
+                <button style={btnSmall} onClick={() => openLegalDocById(resolved[detail.id].addendum.best!.id)}>
+                  Open Accepted Addendum
+                </button>
+              )}
+            </div>
+```
+
+(Those “Open Accepted …” buttons are optional; keep if you want.)
+
+#### 3.3 Add the Diff modal
+
+Add this **near the bottom** of your component JSX (alongside your other modals):
+
+```tsx
+      <Modal open={diffOpen} onClose={() => setDiffOpen(false)} title="Diff: Accepted vs Current Active Terms">
+        {!diffData ? (
+          <div style={{ fontSize: 12, opacity: 0.75 }}>No diff loaded.</div>
+        ) : (
+          <div style={{ display: "grid", gap: 12, fontSize: 12 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              <div style={{ border: "1px solid rgba(0,0,0,0.12)", borderRadius: 10, padding: 10 }}>
+                <div style={{ fontWeight: 700 }}>Acceptance Snapshot</div>
+                <div>ID: {diffData.acceptance?.id}</div>
+                <div>ISO2: {diffData.acceptance?.countryIso2}</div>
+                <div>Region: {diffData.acceptance?.regionKey ?? "—"}</div>
+                <div style={{ fontFamily: "monospace" }}>
+                  Stored SHA: {String(diffData.acceptance?.combinedSha256_stored || "").slice(0, 18)}…
+                </div>
+                <div style={{ fontFamily: "monospace" }}>
+                  Recomputed SHA: {String(diffData.acceptance?.combinedSha256_recomputed || "").slice(0, 18)}…
+                </div>
+              </div>
+
+              <div style={{ border: "1px solid rgba(0,0,0,0.12)", borderRadius: 10, padding: 10 }}>
+                <div style={{ fontWeight: 700 }}>Current Active Terms</div>
+
+                <div style={{ display: "grid", gap: 6 }}>
+                  <div>
+                    <strong>Global:</strong>{" "}
+                    {diffData.current?.global
+                      ? `#${diffData.current.global.id} v${diffData.current.global.version} (${diffData.current.global.jurisdictionType}/${diffData.current.global.jurisdictionKey})`
+                      : "—"}
+                  </div>
+                  {diffData.current?.global?.id && (
+                    <button style={btnSmall} onClick={() => openLegalDocById(diffData.current.global.id)}>
+                      Open Current Global
+                    </button>
+                  )}
+
+                  <div>
+                    <strong>Addendum:</strong>{" "}
+                    {diffData.current?.addendum
+                      ? `#${diffData.current.addendum.id} v${diffData.current.addendum.version} (${diffData.current.addendum.jurisdictionType}/${diffData.current.addendum.jurisdictionKey})`
+                      : "—"}
+                  </div>
+                  {diffData.current?.addendum?.id && (
+                    <button style={btnSmall} onClick={() => openLegalDocById(diffData.current.addendum.id)}>
+                      Open Current Addendum
+                    </button>
+                  )}
+
+                  <div style={{ fontFamily: "monospace" }}>
+                    Current Combined SHA: {String(diffData.current?.combinedSha256 || "").slice(0, 18)}…
+                  </div>
+                  <div style={{ opacity: 0.75 }}>
+                    Delimiter: {JSON.stringify(diffData.diff?.notes?.delimiter || "\n\n")}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div style={{ border: "1px solid rgba(0,0,0,0.12)", borderRadius: 10, padding: 10 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10 }}>
+                <div>
+                  <div style={{ fontWeight: 700 }}>Combined Diff</div>
+                  <div style={{ opacity: 0.75 }}>
+                    +{diffData.diff?.combined?.stats?.inserted ?? 0} / -{diffData.diff?.combined?.stats?.deleted ?? 0} / ={diffData.diff?.combined?.stats?.equal ?? 0}
+                  </div>
+                </div>
+                <button
+                  style={btnSmall}
+                  onClick={() => {
+                    const t = String(diffData.diff?.combined?.text || "");
+                    navigator.clipboard?.writeText?.(t).catch(() => {});
+                  }}
+                >
+                  Copy Diff
+                </button>
+              </div>
+
+              <pre style={pre}>{String(diffData.diff?.combined?.text || "")}</pre>
+            </div>
+          </div>
+        )}
+      </Modal>
+```
+
+---
+
+## 4) Operational behavior you get
+
+* If a user accepted older terms, you can immediately:
+
+  * see what changed in **Global** and/or **Addendum**
+  * demonstrate evidence of what they accepted (your stored `combinedText`)
+  * show what the “current” terms are today
+* This is crucial for:
+
+  * disputes
+  * compliance reviews
+  * enforcement decisions
+  * migration/legal refresh cycles
+
+---
+
+## Optional tightening (recommended next)
+
+If you want the “current active doc” to be explicit rather than “latest created”, I’ll add:
+
+* `legalDocTargets` table: `(docSet, docType, jurisdictionType, jurisdictionKey, activeDocId)`
+* Admin UI sets active doc explicitly
+* Diff endpoint uses `activeDocId` deterministically
+
+Say “Add targets table” if you want that next.

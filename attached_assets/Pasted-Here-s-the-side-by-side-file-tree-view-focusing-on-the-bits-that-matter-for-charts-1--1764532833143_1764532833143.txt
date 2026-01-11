@@ -1,0 +1,292 @@
+Here’s the side-by-side file-tree view focusing on the bits that matter for **charts**.
+
+---
+
+## 1. Project-level structure (working vs not-working)
+
+### ✅ Working app (`1 works.zip` → `TradingCentral/`)
+
+```text
+TradingCentral/
+├── client/
+│   ├── src/
+│   │   ├── components/
+│   │   ├── hooks/
+│   │   ├── lib/
+│   │   ├── pages/
+│   │   ├── utils/
+│   │   ├── App.tsx
+│   │   ├── index.css
+│   │   └── main.tsx
+│   └── index.html
+├── data/
+│   └── instruments.ts
+├── server/
+│   ├── constants/
+│   ├── cron/
+│   ├── feeds/
+│   ├── lib/
+│   ├── middleware/
+│   ├── routes/
+│   ├── utils/
+│   ├── index.ts
+│   ├── recalcAccount.ts
+│   ├── risk.ts
+│   ├── routes.ts
+│   ├── storage.ts
+│   └── vite.ts
+├── shared/
+│   └── schema.ts
+├── drizzle.config.ts
+├── package.json
+├── tailwind.config.ts
+├── tsconfig.json
+└── vite.config.ts
+```
+
+### ❌ Not-working app (`does not work.zip` → `TradingCentral-2/`)
+
+```text
+TradingCentral-2/
+├── client/
+│   ├── src/
+│   │   ├── components/
+│   │   ├── hooks/
+│   │   ├── lib/
+│   │   ├── modules/        <-- extra layer here
+│   │   ├── pages/
+│   │   ├── utils/
+│   │   ├── App.tsx
+│   │   ├── index.css
+│   │   └── main.tsx
+│   └── index.html
+├── data/
+│   └── instruments.ts
+├── server/
+│   ├── constants/
+│   ├── cron/
+│   ├── feeds/
+│   ├── lib/
+│   ├── middleware/
+│   ├── routes/
+│   ├── utils/
+│   ├── index.ts
+│   ├── recalcAccount.ts
+│   ├── risk.ts
+│   ├── routes.ts
+│   ├── storage.ts
+│   └── vite.ts
+├── shared/
+│   └── schema.ts
+├── drizzle.config.ts
+├── package.json
+├── tailwind.config.ts
+├── tsconfig.json
+└── vite.config.ts
+```
+
+**Key structural difference:**
+The broken app introduces `client/src/modules/tradingview/` and pushes the TradingView implementation into there; the working app integrates TradingView directly in `ChartScreen.tsx` and has **no `modules/` directory**.
+
+---
+
+## 2. Client `src` trees (chart-relevant parts)
+
+### ✅ Working app – `client/src/`
+
+```text
+src/
+├── components/
+│   ├── ui/
+│   │   ├── accordion.tsx
+│   │   ├── alert-dialog.tsx
+│   │   ├── alert.tsx
+│   │   ├── aspect-ratio.tsx
+│   │   ├── avatar.tsx
+│   │   ├── badge.tsx
+│   │   ├── breadcrumb.tsx
+│   │   ├── button.tsx
+│   │   ├── calendar.tsx
+│   │   ├── card.tsx
+│   │   ├── carousel.tsx
+│   │   ├── chart.tsx
+│   │   ├── checkbox.tsx
+│   │   ├── ...
+│   │   ├── toast.tsx
+│   │   ├── toaster.tsx
+│   │   ├── toggle-group.tsx
+│   │   ├── toggle.tsx
+│   │   └── tooltip.tsx
+│   ├── EditTradeModal.tsx
+│   ├── Header.tsx
+│   ├── Leaderboard.tsx
+│   ├── LeaderboardTable.tsx
+│   ├── MiniDonut.tsx
+│   ├── Navigation.tsx
+│   ├── SortableHeader.tsx
+│   ├── SpreadBadge.tsx
+│   └── SymbolSelect.tsx
+├── hooks/
+│   ├── use-auth.tsx
+│   ├── use-balance.tsx
+│   ├── use-dashboardStats.tsx
+│   ├── use-history.tsx
+│   ├── use-quotes.tsx       <-- feeds currentQuote for ChartScreen
+│   ├── use-trades.tsx
+│   ├── use-websocket.tsx
+│   ├── use-websocket.tsx.bak
+│   └── usePendingOrders.ts
+├── lib/
+│   ├── disableWebSockets.ts
+│   ├── queryClient.ts
+│   └── utils.ts
+├── pages/
+│   ├── AdminDashboard.tsx
+│   ├── AdminData.tsx
+│   ├── ChartScreen.tsx      <-- TradingView logic lives *here*
+│   ├── Dashboard.tsx        <-- owns selectedSymbol and activeTab
+│   ├── HistoryScreen.tsx
+│   ├── LoginPage.tsx
+│   ├── not-found.tsx
+│   ├── QuotesScreen.tsx     <-- calls onSelectSymbol
+│   └── TradeScreen.tsx
+├── utils/
+│   └── parseDate.ts
+├── App.tsx
+├── index.css
+└── main.tsx
+```
+
+**Chart-related files in the working app:**
+
+* `pages/Dashboard.tsx` – keeps `selectedSymbol` and `activeTab`.
+* `pages/QuotesScreen.tsx` – lists quotes, calls `onSelectSymbol(quote.symbol)`.
+* `pages/ChartScreen.tsx` –
+
+  * imports `use-quotes`
+  * loads `https://s3.tradingview.com/tv.js`
+  * calls `new window.TradingView.widget({ ... })` directly
+  * recreates/updates widget when `selectedSymbol` or period changes.
+* `hooks/use-quotes.tsx` – unified quote data source for both Quotes and Chart.
+
+There is **no extra `modules/tradingview/` layer** here.
+
+---
+
+### ❌ Not-working app – `client/src/`
+
+```text
+src/
+├── components/
+│   ├── ui/
+│   │   ├── accordion.tsx
+│   │   ├── alert-dialog.tsx
+│   │   ├── alert.tsx
+│   │   ├── aspect-ratio.tsx
+│   │   ├── avatar.tsx
+│   │   ├── badge.tsx
+│   │   ├── breadcrumb.tsx
+│   │   ├── button.tsx
+│   │   ├── calendar.tsx
+│   │   ├── card.tsx
+│   │   ├── carousel.tsx
+│   │   ├── chart.tsx
+│   │   ├── checkbox.tsx
+│   │   ├── ...
+│   │   └── tooltip.tsx
+│   ├── EditTradeModal.tsx
+│   ├── Header.tsx
+│   ├── Leaderboard.tsx
+│   ├── LeaderboardTable.tsx
+│   ├── MiniDonut.tsx
+│   ├── Navigation.tsx
+│   ├── SortableHeader.tsx
+│   ├── SpreadBadge.tsx
+│   └── SymbolSelect.tsx
+├── hooks/
+│   ├── use-auth.tsx
+│   ├── use-balance.tsx
+│   ├── use-dashboardStats.tsx
+│   ├── use-history.tsx
+│   ├── use-quotes.tsx        <-- same pattern as working app
+│   ├── use-trades.tsx
+│   ├── use-websocket.tsx
+│   ├── use-websocket.tsx.bak
+│   └── usePendingOrders.ts
+├── lib/
+│   ├── disableWebSockets.ts
+│   ├── queryClient.ts
+│   └── utils.ts
+├── modules/
+│   └── tradingview/          <-- extra abstraction layer (problem area)
+│       ├── constants.ts
+│       ├── index.ts
+│       └── TradingViewChart.tsx
+├── pages/
+│   ├── AdminDashboard.tsx
+│   ├── AdminData.tsx
+│   ├── ChartScreen.tsx       <-- delegates to modules/tradingview
+│   ├── Dashboard.tsx         <-- owns selectedSymbol and activeTab
+│   ├── HistoryScreen.tsx
+│   ├── LoginPage.tsx
+│   ├── not-found.tsx
+│   ├── QuotesScreen.tsx      <-- calls onSelectSymbol
+│   └── TradeScreen.tsx
+├── utils/
+│   └── parseDate.ts
+├── App.tsx
+├── index.css
+└── main.tsx
+```
+
+**Chart-related files in the not-working app:**
+
+* `pages/Dashboard.tsx` – same role as in the working app.
+
+* `pages/QuotesScreen.tsx` – same role.
+
+* `pages/ChartScreen.tsx` – **does not integrate TradingView itself**; instead imports:
+
+  ```ts
+  import {
+    TradingViewChart,
+    type ChartPeriod,
+    getTradingViewSymbol,
+    getTradingViewInterval,
+  } from "@/modules/tradingview";
+  ```
+
+* `modules/tradingview/`:
+
+  ```text
+  modules/
+  └── tradingview/
+      ├── constants.ts          <-- symbol & period maps
+      ├── index.ts              <-- re-exports
+      └── TradingViewChart.tsx  <-- current broken implementation
+  ```
+
+  Where `TradingViewChart.tsx` (in the current, broken version) is using the **advanced-embed script** (`embed-widget-advanced-chart.js`) with manual `<script>` tag injection instead of `tv.js` + `TradingView.widget`.
+
+---
+
+## 3. Net takeaway for chart behavior
+
+* **Everything above the chart is architecturally the same** in both apps:
+
+  * Same `Dashboard` → `selectedSymbol`.
+  * Same `QuotesScreen` → `onSelectSymbol`.
+  * Same `use-quotes` hook.
+  * Same page structure.
+
+* The **only structural divergence** relevant to charts is:
+
+  * ✅ **Working app:**
+    `ChartScreen.tsx` integrates TradingView **directly** with `tv.js` and `new window.TradingView.widget(...)`.
+
+  * ❌ **Not-working app:**
+    `ChartScreen.tsx` delegates to `modules/tradingview/TradingViewChart.tsx`, which uses the fragile `embed-widget-advanced-chart.js` embed script + DOM script injection, causing the chart to fail or get stuck loading.
+
+So when you tell the Replit agent to “copy the working implementation,” the structural move is:
+
+> **Drop `modules/tradingview/TradingViewChart.tsx`’s advanced embed approach and give it the same `tv.js + TradingView.widget` pattern that lives inside the working app’s `pages/ChartScreen.tsx`, while keeping the rest of this file tree as-is.**

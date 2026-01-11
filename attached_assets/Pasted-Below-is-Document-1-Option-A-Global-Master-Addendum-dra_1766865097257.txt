@@ -1,0 +1,704 @@
+Below is **Document 1 (Option A: Global Master + Addendum)** drafted for embedding into your **TradeQuip trader growth + vetting platform signup flow**, with:
+
+* **21-day response window** (not 10 business days).
+* Stronger **anti-circumvention / no-immediate-switch loophole sealing** (without relying solely on “non-compete” language where unenforceable).
+* **40% placement-equivalent fee** (or **4% of allocated AUM for 12 months**) updated per your instruction.
+* A **complete addendum library** for your priority countries + regional fallbacks.
+* A **JSON country→addendum map** and a **render/assembly model**.
+* The **selection algorithm** (pseudocode) to choose and render the correct addendum at signup.
+
+I am not a law firm; treat this as a high-quality drafting baseline that your counsel should **localize, validate, and finalize**—especially for regulated “employment agency/placement” issues and restrictive covenant enforceability.
+
+---
+
+## DOCUMENT 1 — GLOBAL MASTER
+
+### TRADEQUIP PLATFORM PARTICIPATION + OPPORTUNITY RIGHTS AGREEMENT (GLOBAL MASTER)
+
+**Version:** 1.0
+**Effective Date:** [Auto-filled by system at acceptance]
+**Parties:**
+
+1. **TradeQuip Platform Operator** (“TradeQuip”, “we”, “us”, “our”), and its affiliates, including any **management company** employing traders and any **fund/vehicle** allocating capital (together, the “TradeQuip Group”); and
+2. The individual accepting these terms (“you”, “Trader”, “Member”).
+
+By clicking **“I Accept”**, you agree to this Agreement and any **Country/Region Addendum** that applies based on the country you select during signup.
+
+---
+
+### 1) PURPOSE AND THE OPPORTUNITY YOU RECEIVE
+
+1.1 **Purpose.** TradeQuip operates a trader discovery, training, evaluation, and selection platform designed to identify high-potential trading talent, including individuals who may not have otherwise accessed professional trading or capital allocation opportunities.
+
+1.2 **Why these rights exist.** You acknowledge that:
+(a) the platform provides structured evaluation, ranking, feedback loops, and visibility that can lead to professional opportunities;
+(b) TradeQuip invests in building and operating the platform, evaluation systems, coaching, compliance workflows, and partner networks; and
+(c) in exchange for access to this opportunity pathway, you agree to the **Opportunity Rights** and **Notice/Exclusivity** obligations in this Agreement.
+
+1.3 **No guarantee.** Platform access does not guarantee selection, employment, compensation, funding, or any particular outcome.
+
+---
+
+### 2) DEFINITIONS (CORE)
+
+Key definitions appear here; additional definitions appear in **Schedule A**.
+
+* **“Platform”**: TradeQuip’s trader growth + vetting platform and related services.
+* **“Opportunity”**: any employment, engagement, capital allocation, funded trading seat, portfolio management role, or similar role in the **Trading & Capital Management Industry** that arises from, is connected to, or is influenced by your Platform participation, performance, ranking, visibility, referrals, introductions, or TradeQuip systems.
+* **“Selected Group”**: members formally designated by TradeQuip (written notice) as finalists/selected/shortlisted for hire, placement, or capital allocation.
+* **“Partner Firms”**: third parties with whom TradeQuip has (or is negotiating) a relationship for hiring, placement, or capital programs.
+* **“Restricted Period”**: the period defined in Section 6 (varies by status).
+* **“Notice Period”**: **21 calendar days** from TradeQuip’s confirmed receipt of your Notice (Section 7).
+
+---
+
+### 3) ELIGIBILITY, ACCOUNT INTEGRITY, AND PERFORMANCE DATA
+
+3.1 **Truthful information.** You will provide accurate identity, residency/country selection, and account information and keep it updated.
+
+3.2 **One person, one account (unless permitted).** You will not create multiple accounts to manipulate rankings or eligibility unless TradeQuip authorizes in writing.
+
+3.3 **Evaluation and scoring.** You agree TradeQuip may score, rank, and evaluate your trading behavior, risk behavior, and rule adherence using automated and manual review.
+
+---
+
+### 4) PLATFORM LICENSE + ACCEPTABLE USE
+
+4.1 **License.** TradeQuip grants you a limited, revocable, non-transferable license to use the Platform for your personal participation.
+
+4.2 **Prohibited actions.** You will not:
+(a) reverse engineer or scrape the Platform;
+(b) manipulate performance metrics;
+(c) use bots to simulate trading activity;
+(d) share access credentials;
+(e) publish or disclose TradeQuip proprietary evaluation logic, rule sets, or detection methods.
+
+---
+
+### 5) CONFIDENTIALITY, TRADE SECRETS, AND PLATFORM IP
+
+5.1 **Confidential Information.** Includes non-public: evaluation logic, selection criteria, scoring weights, risk rules, surveillance methods, partner lists, introductions, and any non-public reports.
+
+5.2 **Obligation.** You will protect Confidential Information and not use it except for Platform participation.
+
+5.3 **Trade secret protection.** This Section survives termination indefinitely to the maximum extent allowed by applicable law.
+
+---
+
+## 6) OPPORTUNITY RIGHTS (THE CORE ECONOMIC/CONTROL TERMS)
+
+These provisions are designed to remain enforceable even where “non-compete” clauses are restricted by using (i) **right of first opportunity/refusal**, (ii) **notice**, (iii) **non-circumvention**, and (iv) **liquidated damages/placement-equivalent fees**.
+
+### 6.1 Status Levels That Trigger Obligations
+
+Your obligations depend on your status:
+
+**(A) General Member (default):** You have confidentiality and anti-fraud obligations; no exclusivity yet.
+
+**(B) Opportunity Candidate:** TradeQuip notifies you in writing that you are eligible for introductions, interviews, placement, or capital programs.
+
+**(C) Selected Group:** TradeQuip notifies you in writing that you are shortlisted/selected for hire, placement, or capital allocation.
+
+### 6.2 Right of First Opportunity (ROFO) — Opportunity Candidate
+
+When you become an **Opportunity Candidate**, you grant TradeQuip a **Right of First Opportunity** for **6 months** (the “Candidate Exclusivity Window”):
+
+* TradeQuip has the first right to present you to Partner Firms, negotiate roles, and propose TradeQuip Group employment/capital allocation.
+* During this 6-month window, you must route **Industry Opportunities** (defined in Schedule A) through TradeQuip first (Section 7 notice applies).
+* If a jurisdiction requires licensing for placement/agency, this clause operates only to the extent legally permitted, and TradeQuip may perform through licensed partners (Section 12.7).
+
+### 6.3 Right of First Refusal (ROFR) — Selected Group (and Platform-Linked Opportunities)
+
+When you enter the **Selected Group**, you grant TradeQuip a **Right of First Refusal** on:
+
+* any TradeQuip Group offer; and
+* any **Platform-Linked Opportunity** (any Opportunity connected to Platform participation as defined).
+
+**ROFR Mechanics:**
+
+* You must provide a Notice of the third-party offer (Section 7).
+* TradeQuip has **21 calendar days** to match or present a substantially equivalent offer (compensation or AUM terms, role scope, and reasonable commercial terms).
+* You may not accept, sign, commence work, commence managing capital, or fundraise under that offer until the Notice Period expires or TradeQuip responds in writing earlier.
+
+### 6.4 Limited Post-Selection Industry Lockout (Time-Limited; Addendum Can Modify)
+
+**Default global position (subject to Addendum):** For **12 months** after the later of:
+(i) your entry into the Selected Group, or
+(ii) the end of any TradeQuip Group employment/capital program discussions that you initiated or received via the Platform,
+you agree not to **circumvent** TradeQuip regarding **Industry Opportunities**, meaning:
+
+* you will not accept or commence an Industry Opportunity **without providing Notice** and honoring the ROFR/ROFO process; and
+* if you do accept such an opportunity without compliance, you will owe the fees in Section 9.
+
+This is **not drafted as a blanket “ban from working”**; it is drafted as a **notice + ROFR + anti-circumvention + fee** framework to maximize enforceability.
+
+### 6.5 Fund Formation / Fundraising / Capital Management Controls (Structured as ROFR + Anti-Circumvention)
+
+If you are in the Selected Group (or if the contemplated activity is Platform-Linked), then for the **Capital Control Period** (default **3 years**, Addendum may modify), you agree:
+
+* You will not **fundraise**, **solicit capital**, **market a fund**, **form a fund/vehicle**, or **manage third-party capital** in the Trading & Capital Management Industry **in a manner that circumvents TradeQuip**.
+* You must provide Notice and allow TradeQuip to:
+  (a) employ you via the TradeQuip Group; or
+  (b) place you with a Partner Firm; or
+  (c) endorse a firm/program in writing; or
+  (d) decline in writing.
+
+If you proceed without complying, you owe the fees in Section 9.
+
+---
+
+## 7) NOTICE PROCESS (21 DAYS) + “NO IMMEDIATE SWITCH” SEAL
+
+### 7.1 When Notice is required
+
+You must give Notice if, during a Restricted Period, you:
+(a) receive an Industry Opportunity;
+(b) are invited to interview or negotiate for an Industry Opportunity;
+(c) intend to start a fund/fundraise/manage third-party capital; or
+(d) intend to join a firm in the Trading & Capital Management Industry.
+
+### 7.2 Notice content
+
+Notice must include:
+
+* the legal name of the firm/investor/counterparty;
+* role description;
+* compensation and/or AUM terms;
+* start date;
+* location/country; and
+* all written materials offered (redactions for unrelated personal info allowed).
+
+### 7.3 The Notice Period and standstill
+
+TradeQuip has **21 calendar days** from confirmed receipt to respond. During that period you must not:
+
+* sign/accept the offer;
+* commence work;
+* commence trading or managing capital for that firm;
+* announce fundraising;
+* use an intermediary to “start now and paper later.”
+
+Any attempt to start informally, through an affiliate, through a friend’s vehicle, through a “consulting” wrapper, or through an offshore entity you control is treated as circumvention.
+
+### 7.4 TradeQuip response outcomes
+
+TradeQuip may:
+
+* match the offer (employment or capital);
+* propose a substantially equivalent alternative;
+* approve the third-party opportunity; or
+* decline.
+
+If TradeQuip declines in writing, you may proceed without fee **only if** you do so on the terms disclosed in your Notice.
+
+---
+
+## 8) NON-SOLICITATION + NON-INTERFERENCE (ENFORCEMENT-FRIENDLY CORE)
+
+For **12 months** after your last Platform-Linked Opportunity event (or longer if Addendum allows), you will not:
+
+* solicit TradeQuip employees/contractors to leave;
+* solicit Partner Firms introduced by TradeQuip to bypass TradeQuip;
+* interfere with TradeQuip’s relationships tied to your Platform pathway.
+
+---
+
+## 9) FEES, LIQUIDATED DAMAGES, AND PAYMENT STRUCTURE (UPDATED)
+
+This Section is intended to fairly compensate TradeQuip for discovery/placement value and deter circumvention.
+
+### 9.1 Placement-Equivalent Fee (Employment)
+
+If you breach Sections 6–8 and accept/commence an Industry Opportunity (employment/engagement) without complying, you agree to pay TradeQuip a fee equal to:
+
+* **40% of your first-year total cash compensation**, defined as base salary + guaranteed bonus + sign-on bonus + guaranteed allowances tied to employment, earned or guaranteed within 12 months of start.
+
+### 9.2 Capital Program Equivalent Fee (AUM)
+
+If you breach Sections 6–8 and commence a capital allocation / funded trading / external AUM management arrangement without complying, you agree to pay:
+
+* **4% of allocated AUM for 12 months**, calculated on gross AUM allocated to you (or to a vehicle you manage/control) and payable monthly as **1/12 of 4%**.
+
+### 9.3 Who pays (Trader and/or Firm)
+
+You agree TradeQuip may pursue payment from:
+(a) you, and/or (b) the hiring firm/counterparty, if legally permitted, and/or (c) any entity you control that receives the economics.
+
+### 9.4 Liquidated damages rationale
+
+You agree actual damages are difficult to estimate (lost placement fees, opportunity costs, partner relationship impacts). Fees above are a reasonable estimate, not a penalty, and may be reduced only if a court requires.
+
+### 9.5 Injunctive relief
+
+Breach may cause irreparable harm. TradeQuip may seek injunctive relief in addition to monetary remedies to the extent permitted by law.
+
+---
+
+## 10) TERM, TERMINATION, AND SURVIVAL
+
+10.1 **Term.** This Agreement begins on acceptance and continues while you have an account and thereafter only as needed to enforce surviving provisions.
+
+10.2 **Termination by TradeQuip.** TradeQuip may suspend/terminate for fraud, manipulation, policy breaches, or legal compliance reasons.
+
+10.3 **Survival.** Sections 5–9, 12, and Schedules survive as needed.
+
+---
+
+## 11) DATA PROTECTION AND PRIVACY
+
+11.1 **Data Processing Notice.** TradeQuip processes personal data and performance data for platform delivery, security, compliance, evaluation, and selection. Details appear in **Schedule B** and are supplemented by your Addendum.
+
+11.2 **Cross-border transfers.** Where required, TradeQuip will implement appropriate safeguards (contractual clauses, transfer tools, or equivalent) and/or local hosting where legally required.
+
+---
+
+## 12) GENERAL LEGAL TERMS
+
+12.1 **Addendum controls.** If your Addendum conflicts with this Global Master, the Addendum controls **only for that country/region**.
+
+12.2 **Severability and reformation.** If any provision is unenforceable, it is modified to the minimum extent necessary to be enforceable, and the rest remains effective.
+
+12.3 **Assignment.** TradeQuip may assign to affiliates or successors. You may not assign without consent.
+
+12.4 **Electronic acceptance.** Click acceptance constitutes a valid signature to the maximum extent permitted by law.
+
+12.5 **Language.** English controls unless Addendum requires otherwise.
+
+12.6 **Dispute resolution.** Governing law, venue, arbitration options, and mandatory consumer/employment constraints are addressed in the Addendum.
+
+12.7 **Placement/agency compliance.** If local law regulates employment agency/placement activity, TradeQuip may (a) operate through licensed partners, (b) require additional consent forms, or (c) limit the “agency” aspects while maintaining confidentiality, anti-circumvention, and ROFR/Notice rights to the maximum extent permitted.
+
+---
+
+# SCHEDULE A — EXPANDED DEFINITIONS (CORE)
+
+**“Trading & Capital Management Industry” / “Industry”** includes: proprietary trading firms, hedge funds, asset managers, family offices, banks (markets desks), broker-dealers, CFDs/FX firms, crypto funds, or any role involving trading, portfolio management, execution, risk-taking authority, strategy research intended for trading P&L, or management of client/third-party capital.
+
+**“Industry Opportunity”** includes employment, contractor roles, advisory with trading authority, signal-provision roles where compensation ties to trading performance, PM roles, funded seats, capital allocations, or “launch a pod/team” arrangements.
+
+**“Platform-Linked”** means directly or indirectly arising from Platform participation (rankings, visibility, referrals, TradeQuip introductions, TradeQuip evaluation outputs, or Partner Firm discovery through the Platform).
+
+---
+
+# SCHEDULE B — DATA PROCESSING NOTICE (GLOBAL BASELINE)
+
+TradeQuip may process: identity/contact data, country/region selection, KYC where applicable, device/session security data, trading performance, behavioral analytics, rule violations, audit logs, and communications.
+
+**Purposes:** account creation, security, fraud prevention, evaluation, ranking, selection, compliance, partner placement, dispute handling, and platform improvement.
+
+**Retention:** minimum necessary for platform operation + compliance; extended retention for audit, dispute, and legal defense.
+
+**Sharing:** within TradeQuip Group; with service providers (email/SMS, hosting, analytics); and with Partner Firms **only** when you are an Opportunity Candidate/Selected Group and only as needed for opportunities, subject to safeguards.
+
+---
+
+# SCHEDULE C — STATUS TRIGGERS (OPERATIONAL)
+
+* **Opportunity Candidate Notice**: in-app + email notice stating your Candidate Exclusivity Window start date.
+* **Selected Group Notice**: in-app + email notice stating ROFR start date and Capital Control Period start date.
+
+---
+
+# SCHEDULE D — FEES EXAMPLES (NON-BINDING)
+
+* Employment example: $200k first-year total cash → fee = 40% × 200k = $80k.
+* AUM example: $5,000,000 allocated AUM → fee = 4% × 5,000,000 = $200k paid over 12 months (~$16,666.67/month).
+
+---
+
+# SCHEDULE E — ADDENDUM INCORPORATION
+
+Your Addendum is selected by the country you choose at signup and incorporated by reference.
+
+---
+
+---
+
+## COUNTRY/REGION ADDENDA LIBRARY
+
+**How to use:** You will store each addendum as a separate document fragment and render it after the Global Master. Each addendum includes: (1) governing law/venue, (2) enforceability modifications, (3) data protection specifics, (4) any mandatory consumer rules.
+
+> Note: Data protection laws cited include, among others: EU SCCs ([Eur-Lex][1]), UK IDTA ([ICO][2]), India DPDP Act ([meity.gov.in][3]), UAE PDPL ([UAE Legislation][4]), Kenya DPA ([kentrade.go.ke][5]), Nigeria NDPA ([cert.gov.ng][6]), Mexico’s updated LFPDPPP (effective March 21, 2025) ([Baker McKenzie InsightPlus][7]), Ethiopia PDPP ([DataGuidance][8]), South Africa POPIA ([South Africa Government][9]), Brazil LGPD ([Serviços e Informações do Brasil][10]).
+
+### ADDENDUM-US (UNITED STATES — STATE-LAW DEPENDENT)
+
+1. **Governing law/venue.** Delaware law; courts in Delaware unless prohibited by your state.
+2. **FTC rule status.** The FTC noncompete rule is not in effect/enforceable; noncompetes remain primarily state-driven. ([Federal Trade Commission][11])
+3. **Restrictive covenant adaptation.** If your state bans or materially restricts noncompetes, **Section 6.4 “Industry Lockout” converts automatically** into **notice + ROFR + non-solicitation + non-circumvention only**, and any “lockout” language is severed to the minimum lawful scope.
+4. **Fees preserved.** Sections 9.1–9.3 remain enforceable to the maximum extent permitted (as liquidated damages/placement-equivalent fee), unless your state requires modification.
+5. **Consumer limitations.** If any state law grants additional consumer rights (cooling-off, local venue mandates), those apply.
+
+### ADDENDUM-AE (UNITED ARAB EMIRATES — UAE PDPL)
+
+1. **Governing law/venue.** UAE federal law; Dubai courts, unless mandatory arbitration applies for the dispute type.
+2. **Data protection.** UAE PDPL applies where relevant; TradeQuip will implement safeguards and DPO processes as required. ([UAE Legislation][4])
+3. **Enforceability.** Any restraint-like wording is construed as **anti-circumvention + notice + ROFR** and limited to what is reasonable and legally permitted.
+
+### ADDENDUM-IN (INDIA — HIGH NONCOMPETE RESTRICTION + DPDP)
+
+1. **Governing law/venue.** Laws of India; courts at [State/City placeholder].
+2. **Restrictive covenant adaptation.** Any clause that could be characterized as a post-termination restraint on trade is automatically reduced to:
+
+   * confidentiality/trade secrets;
+   * non-solicitation/non-circumvention;
+   * ROFR/notice process;
+   * reasonable liquidated damages (fees) to the extent permitted.
+3. **Data protection.** DPDP Act applies; TradeQuip will provide notice, consent/legitimate use basis, and security safeguards per DPDP requirements. ([meity.gov.in][3])
+
+### ADDENDUM-KE (KENYA — DATA PROTECTION ACT)
+
+1. **Governing law/venue.** Kenya law; courts of Kenya.
+2. **Data protection.** Kenya Data Protection Act applies; cross-border transfers will use appropriate safeguards/approvals where required. ([kentrade.go.ke][5])
+3. **Enforceability.** “Lockout” provisions construed primarily as notice + ROFR + anti-circumvention and limited to lawful reasonableness.
+
+### ADDENDUM-NG (NIGERIA — NDPA 2023)
+
+1. **Governing law/venue.** Nigeria law; courts of Nigeria.
+2. **Data protection.** Nigeria Data Protection Act 2023 applies; TradeQuip will implement NDPC-aligned safeguards. ([cert.gov.ng][6])
+3. **Enforceability.** Same reasonableness limitation and severability.
+
+### ADDENDUM-BD (BANGLADESH — EMERGING PRIVACY REGIME)
+
+1. **Governing law/venue.** Bangladesh law; courts of Bangladesh.
+2. **Data protection.** TradeQuip will follow baseline global privacy principles; if/when Bangladesh’s data protection regime applies, TradeQuip will implement required notices and safeguards. ([ICTD Portal][12])
+3. **Enforceability.** Anti-circumvention + ROFR emphasized; any overbroad restraint reformed.
+
+### ADDENDUM-TH (THAILAND — PDPA)
+
+1. **Governing law/venue.** Thailand law; courts of Thailand.
+2. **Data protection.** Thailand PDPA cross-border transfer constraints apply; TradeQuip will use appropriate safeguards/adequacy-based transfers as required. ([Data Protection Report][13])
+3. **Enforceability.** Reasonableness + severability.
+
+### ADDENDUM-PH (PHILIPPINES — DATA PRIVACY ACT + NPC CROSS-BORDER CLAUSES)
+
+1. **Governing law/venue.** Philippines law; courts of the Philippines.
+2. **Data protection.** Data Privacy Act and NPC guidance may apply; cross-border transfers may require contractual clauses and safeguards. ([National Privacy Commission][14])
+3. **Enforceability.** Reasonableness + severability.
+
+### ADDENDUM-SG (SINGAPORE — PDPA)
+
+1. **Governing law/venue.** Singapore law; courts of Singapore.
+2. **Data protection.** Singapore PDPA applies where relevant. ([AGC Singapore][15])
+3. **Enforceability.** Restrictive covenants interpreted narrowly to protect legitimate interests; otherwise reduced to non-circumvention + confidentiality.
+
+### ADDENDUM-HK (HONG KONG — PDPO)
+
+1. **Governing law/venue.** Hong Kong law; courts of Hong Kong.
+2. **Data protection.** PDPO applies. ([eLegislation][16])
+3. **Enforceability.** Any “restraint” narrowed to legitimate interest protection; otherwise reduced.
+
+### ADDENDUM-CN (MAINLAND CHINA — PIPL / CROSS-BORDER COMPLEXITY)
+
+1. **Governing law/venue.** PRC law; PRC courts/arbitration as required.
+2. **Data protection.** PIPL cross-border transfer restrictions may require PRC-specific mechanisms; TradeQuip may implement local hosting or PRC-compliant transfer tools as needed. ([DLA Piper Data Protection][17])
+3. **Operational note.** TradeQuip may limit features, require localized consent flows, or require separate PRC terms to ensure compliance.
+
+### ADDENDUM-BR (BRAZIL — LGPD)
+
+1. **Governing law/venue.** Brazil law; courts of Brazil.
+2. **Data protection.** LGPD applies; TradeQuip will implement LGPD-compliant processing and safeguards. ([Serviços e Informações do Brasil][10])
+3. **Enforceability.** Reasonableness + severability.
+
+### ADDENDUM-AR (ARGENTINA — LAW 25,326)
+
+1. **Governing law/venue.** Argentina law; courts of Argentina.
+2. **Data protection.** Law 25,326 applies. ([UNODC][18])
+3. **Enforceability.** Reasonableness + severability.
+
+### ADDENDUM-CO (COLOMBIA — LAW 1581)
+
+1. **Governing law/venue.** Colombia law; courts of Colombia.
+2. **Data protection.** Statutory Law 1581 applies. ([DLA Piper Data Protection][19])
+3. **Enforceability.** Reasonableness + severability.
+
+### ADDENDUM-MX (MEXICO — UPDATED LFPDPPP)
+
+1. **Governing law/venue.** Mexico law; courts of Mexico.
+2. **Data protection.** Mexico’s updated private-sector personal data law came into effect March 21, 2025 (per published commentary). ([Baker McKenzie InsightPlus][7])
+3. **Enforceability.** Reasonableness + severability.
+
+### ADDENDUM-ET (ETHIOPIA — PDPP 1321/2024)
+
+1. **Governing law/venue.** Ethiopia law; courts of Ethiopia.
+2. **Data protection.** Ethiopia Personal Data Protection Proclamation applies. ([DataGuidance][8])
+3. **Enforceability.** Reasonableness + severability.
+
+### ADDENDUM-GH (GHANA — DATA PROTECTION ACT 2012)
+
+1. **Governing law/venue.** Ghana law; courts of Ghana.
+2. **Data protection.** Ghana Data Protection Act 2012 applies. ([nita.gov.gh][20])
+3. **Enforceability.** Reasonableness + severability.
+
+### ADDENDUM-AO (ANGOLA — LAW 22/11)
+
+1. **Governing law/venue.** Angola law; courts of Angola.
+2. **Data protection.** Angola Law 22/11 applies. ([rapdp.org][21])
+3. **Enforceability.** Reasonableness + severability.
+
+### ADDENDUM-ZA (SOUTH AFRICA — POPIA)
+
+1. **Governing law/venue.** South Africa law; courts of South Africa.
+2. **Data protection.** POPIA applies. ([South Africa Government][9])
+3. **Enforceability.** Reasonableness + severability.
+
+### ADDENDUM-UG (UGANDA — DPPA)
+
+1. **Governing law/venue.** Uganda law; courts of Uganda.
+2. **Data protection.** Uganda DPPA applies. ([DLA Piper Data Protection][22])
+3. **Enforceability.** Reasonableness + severability.
+
+### ADDENDUM-TZ (TANZANIA — PDPA 2022)
+
+1. **Governing law/venue.** Tanzania law; courts of Tanzania.
+2. **Data protection.** Tanzania PDPA 2022 applies; cross-border transfers may require approvals/safeguards. ([pdpc.go.tz][23])
+3. **Enforceability.** Reasonableness + severability.
+
+### ADDENDUM-RU (RUSSIA — DATA LOCALIZATION RISK)
+
+1. **Governing law/venue.** Russia law; courts of Russia.
+2. **Data protection.** Russia has data localization requirements for personal data of Russian individuals; TradeQuip may implement localized storage/processing or limit service until compliant. ([DLA Piper Data Protection][24])
+3. **Operational note.** TradeQuip may require separate Russia-specific hosting and consent flows.
+
+### ADDENDUM-UA (UKRAINE — EUROPE-STYLE FALLBACK)
+
+1. **Governing law/venue.** Ukraine law; courts of Ukraine.
+2. **Data protection.** TradeQuip applies GDPR-style safeguards where applicable; if EU transfers occur, SCC-style protections may be used.
+
+---
+
+## REGIONAL FALLBACK ADDENDA (WHERE COUNTRY NOT LISTED)
+
+Use these when you don’t have a dedicated country addendum.
+
+### ADDENDUM-EEA (WEST EUROPE / EAST EUROPE — EEA GDPR)
+
+* GDPR applies; international transfers handled with SCCs where required. ([Eur-Lex][1])
+* Governing law/venue: local mandatory consumer rules + courts where required.
+
+### ADDENDUM-UK (UNITED KINGDOM — UK GDPR)
+
+* UK GDPR applies; restricted transfers may use UK IDTA or UK addendum mechanisms. ([ICO][2])
+* Governing law/venue: England & Wales unless mandatory.
+
+### ADDENDUM-MENA (MIDDLE EAST / NORTH AFRICA — GENERAL)
+
+* Data protection and enforceability per local law; restrictive covenants reformed to maximum lawful scope; TradeQuip may require country-specific terms in certain jurisdictions.
+
+### ADDENDUM-WAF (WEST AFRICA — GENERAL)
+
+* Data protection and enforceability per local law; same reformation.
+
+### ADDENDUM-EAF (EAST AFRICA — GENERAL)
+
+* Data protection and enforceability per local law; same reformation.
+
+### ADDENDUM-SAF (SOUTHERN AFRICA — GENERAL)
+
+* Data protection and enforceability per local law; same reformation.
+
+### ADDENDUM-CAF (CENTRAL AFRICA — GENERAL)
+
+* Data protection and enforceability per local law; same reformation.
+
+### ADDENDUM-SEA (SOUTHEAST ASIA — GENERAL)
+
+* PDPA-style safeguards; cross-border controls; narrow restrictive covenants.
+
+### ADDENDUM-CSA (CENTRAL & SOUTH ASIA — GENERAL)
+
+* High likelihood of noncompete constraints in some jurisdictions; ROFR/notice/non-circumvention emphasized.
+
+### ADDENDUM-EASIA (JAPAN / SOUTH KOREA — GENERAL)
+
+* Local privacy laws + reasonableness; restrictive covenants limited.
+
+### ADDENDUM-NA (NORTH AMERICA — GENERAL)
+
+* State/province-driven; noncompete restrictions vary; ROFR/notice emphasized. ([Federal Trade Commission][11])
+
+### ADDENDUM-CA (CENTRAL AMERICA — GENERAL)
+
+* Local law; reasonableness; ROFR/notice emphasized.
+
+### ADDENDUM-SA (SOUTH AMERICA — GENERAL)
+
+* Local law; LGPD-style safeguards often relevant; reasonableness.
+
+### ADDENDUM-OCE (AUSTRALASIA / PACIFIC ISLANDS)
+
+* Local law; privacy and consumer rules; reasonableness.
+
+### ADDENDUM-IOI (INDIAN OCEAN ISLANDS)
+
+* Local law; privacy and consumer rules; reasonableness.
+
+### ADDENDUM-CEA (CENTRAL ASIA)
+
+* Local law; data localization may apply; feature limitation possible.
+
+---
+
+# JSON MAP — COUNTRY → ADDENDUM (LOAD RULES)
+
+Use ISO 3166-1 alpha-2 country codes.
+
+```json
+{
+  "version": "1.0",
+  "defaultAddendum": "ADDENDUM-NA",
+  "countryAddendum": {
+    "US": "ADDENDUM-US",
+    "AE": "ADDENDUM-AE",
+    "IN": "ADDENDUM-IN",
+    "KE": "ADDENDUM-KE",
+    "NG": "ADDENDUM-NG",
+    "BD": "ADDENDUM-BD",
+    "TH": "ADDENDUM-TH",
+    "PH": "ADDENDUM-PH",
+    "SG": "ADDENDUM-SG",
+    "HK": "ADDENDUM-HK",
+    "CN": "ADDENDUM-CN",
+    "BR": "ADDENDUM-BR",
+    "AR": "ADDENDUM-AR",
+    "CO": "ADDENDUM-CO",
+    "MX": "ADDENDUM-MX",
+    "ET": "ADDENDUM-ET",
+    "GH": "ADDENDUM-GH",
+    "AO": "ADDENDUM-AO",
+    "ZA": "ADDENDUM-ZA",
+    "UG": "ADDENDUM-UG",
+    "TZ": "ADDENDUM-TZ",
+    "RU": "ADDENDUM-RU",
+    "UA": "ADDENDUM-UA",
+    "GB": "ADDENDUM-UK"
+  },
+  "regionFallback": {
+    "WEST_EUROPE": "ADDENDUM-EEA",
+    "EAST_EUROPE": "ADDENDUM-EEA",
+    "S_E_ASIA": "ADDENDUM-SEA",
+    "MIDDLE_EAST": "ADDENDUM-MENA",
+    "NORTH_AFRICA": "ADDENDUM-MENA",
+    "WEST_AFRICA": "ADDENDUM-WAF",
+    "EAST_AFRICA": "ADDENDUM-EAF",
+    "SOUTHERN_AFRICA": "ADDENDUM-SAF",
+    "CENTRAL_AFRICA": "ADDENDUM-CAF",
+    "SOUTH_AMERICA": "ADDENDUM-SA",
+    "CENTRAL_AMERICA": "ADDENDUM-CA",
+    "NORTH_AMERICA": "ADDENDUM-NA",
+    "CENTRAL_ASIA": "ADDENDUM-CEA",
+    "AUSTRALASIA": "ADDENDUM-OCE",
+    "PACIFIC_ISLANDS": "ADDENDUM-OCE",
+    "INDIAN_OCEAN_ISLANDS": "ADDENDUM-IOI",
+    "JAPAN": "ADDENDUM-EASIA",
+    "SOUTH_KOREA": "ADDENDUM-EASIA",
+    "PAKISTAN": "ADDENDUM-CSA"
+  }
+}
+```
+
+---
+
+# RENDER MODEL (WHAT THE USER SEES ON SIGNUP)
+
+**Render order:**
+
+1. **Global Master (Document 1 Global)**
+2. **Country/Region Addendum**
+3. Optional: localized **Privacy Notice** link + **Risk Disclosures** link (separate docs, not required inside the contract text)
+
+**Conflict rule:** Addendum overrides Global Master only for that jurisdiction.
+
+**Acceptance record should store:**
+
+* globalDocVersion, addendumId, addendumVersion
+* countrySelected, regionDerived
+* timestamp, ip/session/device fingerprint (as permitted)
+* hash of rendered HTML/PDF text (tamper evidence)
+
+---
+
+# ALGORITHM (PSEUDOCODE) — SELECT + RENDER + LOG ACCEPTANCE
+
+```text
+INPUTS:
+  userCountry (ISO2 from signup dropdown)
+  userRegion (derived from ISO2 if needed)
+  docs:
+    globalMasterDoc("DOC1_GLOBAL", version)
+    addendumDocs[addendumId](version)
+    addendumMap (JSON above)
+
+FUNCTION pickAddendum(userCountry, userRegion):
+  if userCountry in addendumMap.countryAddendum:
+      return addendumMap.countryAddendum[userCountry]
+  else if userRegion in addendumMap.regionFallback:
+      return addendumMap.regionFallback[userRegion]
+  else:
+      return addendumMap.defaultAddendum
+
+FUNCTION renderAgreement(userCountry, userRegion):
+  addendumId = pickAddendum(userCountry, userRegion)
+  globalText  = load("DOC1_GLOBAL", "1.0")
+  addendumText = load(addendumId, "1.0")
+
+  rendered = concatenate(
+      globalText,
+      "\n\n---\n\n",
+      "COUNTRY/REGION ADDENDUM (Auto-selected): " + addendumId,
+      "\n\n",
+      addendumText
+  )
+
+  return { rendered, addendumId, globalVersion:"1.0", addendumVersion:"1.0" }
+
+ON SIGNUP SCREEN:
+  when user selects country:
+     addendumId = pickAddendum(country, derivedRegion(country))
+     show label: "Terms loaded for: {country} / {addendumId}"
+     render preview (scroll box)
+  on click "I Accept":
+     payload = renderAgreement(country, derivedRegion(country))
+     hash = sha256(payload.rendered)
+     store acceptance:
+        userId, country, region, globalVersion, addendumId, addendumVersion,
+        hash, acceptedAt, ip, userAgent, sessionId
+     proceed to create account
+```
+
+---
+
+## IMPLEMENTATION ADVICE: OPTION A VS OPTION B (PRACTICAL)
+
+* **Option A (Global + Addendum)** is usually best for maintainability: one master contract + localized deltas.
+* **Option B (full doc per country)** is simpler to render (one doc) but becomes operationally heavy (dozens of near-duplicate documents, higher legal update risk).
+
+Given your scale, **Option A is the better long-term system**.
+
+---
+
+If you want the next step after this: I can produce a **clean “document fragment pack” format** (IDs, versions, and markdown/HTML blocks) so your signup renderer can load these from DB or filesystem with deterministic hashing and audit logging.
+
+[1]: https://eur-lex.europa.eu/eli/dec_impl/2021/914/oj/eng?utm_source=chatgpt.com "Implementing decision - 2021/914 - EN - EUR-Lex"
+[2]: https://ico.org.uk/for-organisations/uk-gdpr-guidance-and-resources/international-transfers/international-data-transfer-agreement-and-guidance/?utm_source=chatgpt.com "International data transfer agreement and guidance | ICO"
+[3]: https://www.meity.gov.in/static/uploads/2024/06/2bf1f0e9f04e6fb4f8fef35e82c42aa5.pdf?utm_source=chatgpt.com "THE DIGITAL PERSONAL DATA PROTECTION ACT, 2023 ..."
+[4]: https://uaelegislation.gov.ae/en/legislations/1972/download?utm_source=chatgpt.com "Federal Decree by Law No. (45) of 2021 Concerning the ..."
+[5]: https://www.kentrade.go.ke/wp-content/uploads/2022/09/Data-Protection-Act-1.pdf?utm_source=chatgpt.com "THE DATA PROTECTION ACT"
+[6]: https://cert.gov.ng/ngcert/resources/Nigeria_Data_Protection_Act_2023.pdf?utm_source=chatgpt.com "Nigeria Data Protection Act, 2023"
+[7]: https://insightplus.bakermckenzie.com/bm/data-technology/mexico-from-2010-to-2025-evolution-of-the-new-federal-law-on-the-protection-of-personal-data-held-by-private-parties?utm_source=chatgpt.com "Mexico: From 2010 to 2025 – Evolution of the new Federal ..."
+[8]: https://www.dataguidance.com/sites/default/files/personal_data_protection_proclamation_1321-2024.pdf?utm_source=chatgpt.com "ፌደራል ነጋሪት ጋዜጣ"
+[9]: https://www.gov.za/sites/default/files/gcis_document/201409/3706726-11act4of2013protectionofpersonalinforcorrect.pdf?utm_source=chatgpt.com "Protection of Personal Information Act"
+[10]: https://www.gov.br/anpd/pt-br/centrais-de-conteudo/outros-documentos-e-publicacoes-institucionais/lgpd-en-lei-no-13-709-capa.pdf?utm_source=chatgpt.com "Brazilian Data Protection Law LGPD"
+[11]: https://www.ftc.gov/news-events/news/press-releases/2024/04/ftc-announces-rule-banning-noncompetes?utm_source=chatgpt.com "FTC Announces Rule Banning Noncompetes"
+[12]: https://ictd.portal.gov.bd/sites/default/files/files/ictd.portal.gov.bd/page/6c9773a2_7556_4395_bbec_f132b9d819f0/Data%20Protection%20Bill%20%20v15%28English%29%2016.01.23.docx?utm_source=chatgpt.com "Data Protection Act 2023."
+[13]: https://www.dataprotectionreport.com/2024/01/thailand-the-regulation-with-respect-to-cross-border-transfer-of-personal-data/?utm_source=chatgpt.com "Thailand – The Regulation with respect to Cross-border ..."
+[14]: https://privacy.gov.ph/data-privacy-act/?utm_source=chatgpt.com "Republic Act 10173 - Data Privacy Act of 2012"
+[15]: https://sso.agc.gov.sg/Act/PDPA2012?utm_source=chatgpt.com "Personal Data Protection Act 2012 - Singapore Statutes Online"
+[16]: https://www.elegislation.gov.hk/hk/cap486?utm_source=chatgpt.com "Cap. 486 Personal Data (Privacy) Ordinance"
+[17]: https://www.dlapiperdataprotection.com/countries/china/transfer.html?utm_source=chatgpt.com "Transfer of personal data in China"
+[18]: https://www.unodc.org/cld/uploads/res/uncac/LegalLibrary/Argentina/Laws/Argentina%20Personal%20Data%20Protection%20Act%202000.pdf?utm_source=chatgpt.com "Personal Data Protection Law 25.326"
+[19]: https://www.dlapiperdataprotection.com/index.html?c=CO&t=law&utm_source=chatgpt.com "Data protection laws in Colombia"
+[20]: https://nita.gov.gh/wp-content/uploads/2017/12/Data-Protection-Act-2012-Act-843.pdf?utm_source=chatgpt.com "Data Protection Act, 2012"
+[21]: https://www.rapdp.org/sites/default/files/2021-07/Angolan%20Personal%20Data%20Protection%20Legislation%20-%20Law%2022_11%20of%2017th%20June_0.pdf?utm_source=chatgpt.com "Angolan Personal Data Protection Legislation - Law ..."
+[22]: https://www.dlapiperdataprotection.com/index.html?c=UG&t=law&utm_source=chatgpt.com "Data protection laws in Uganda"
+[23]: https://www.pdpc.go.tz/media/media/THE_PERSONAL_DATA_PROTECTION_ACT.pdf?utm_source=chatgpt.com "ISSN 0856 - 034X THE UNITED REPUBLIC OF TANZANIA ..."
+[24]: https://www.dlapiperdataprotection.com/index.html?c=RU&t=about&utm_source=chatgpt.com "Data protection laws in Russia"

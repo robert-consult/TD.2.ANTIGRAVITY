@@ -1,0 +1,479 @@
+Understood. Here is the **actual patch output** (inline) that enforces **(a) max 5 concurrent trades per user**, **(b) max 3 concurrent trades per instrument**, and **(c) max 50 lots concurrently across all active trades** — using the **existing settings plumbing** (global settings + per-user settings) and **without changing UI layout**.
+
+Key behavior after this patch:
+
+* **Trade placement (`POST /api/trades`) is blocked** if it would violate **trade count caps** or **total-lots cap**.
+* **Pending-order fills (OrderEngine)** are **canceled** if they would violate the same caps (covers “admin lowered limits after order was placed”).
+* Risk middleware is no longer hardcoded at 5/3 for trade-count checks; it uses effective limits derived from settings.
+* Adds a proper `isDisabled` flag (fixes the current “isAdmin as disabled proxy” bug) and blocks disabled users at login + order placement.
+
+---
+
+## 1) `shared/schema.ts` — add `isDisabled` to users
+
+```diff
+--- a/shared/schema.ts
++++ b/shared/schema.ts
+@@
+ export const users = sqliteTable("users", {
+   id: integer("id", { mode: "number" }).primaryKey({ autoIncrement: true }),
+   email: text("email").notNull().unique(),
+   username: text("username").notNull().unique(),
+   passwordHash: text("password_hash").notNull(),
+   balance: text("balance").notNull().default("1000000.00"),
+   createdAt: integer("created_at", { mode: "timestamp" }).notNull().default(sql`(strftime('%s', 'now'))`),
+   isAdmin: integer("is_admin", { mode: "boolean" }).notNull().default(false),
++  // Account status
++  isDisabled: integer("is_disabled", { mode: "boolean" }).notNull().default(false),
+   // Margin-related fields
+   leverage: real("leverage").notNull().default(5), // Default 5x leverage
+   usedMargin: real("used_margin").notNull().default(0), // Margin currently in use
+   equity: real("equity").notNull().default(0), // Balance + floating P/L
+   freeMargin: real("free_margin").notNull().default(0), // Equity - used margin
+ });
+```
+
+---
+
+## 2) `server/db/ensureSchema.ts` — ensure `users.is_disabled` exists
+
+```diff
+--- a/server/db/ensureSchema.ts
++++ b/server/db/ensureSchema.ts
+@@
+ export function ensureGlobalSettingsTable() {
+   const db = getDb();
+   try {
+@@
+   } finally {
+     db.close();
+   }
+ }
++
++export function ensureUsersColumns() {
++  const db = getDb();
++  try {
++    const table = "users";
++    const adds: Array<{ col: string; ddl: string }> = [
++      { col: "is_disabled", ddl: "ALTER TABLE users ADD COLUMN is_disabled INTEGER NOT NULL DEFAULT 0" },
++    ];
++
++    for (const a of adds) {
++      if (!hasColumn(db, table, a.col)) {
++        db.exec(a.ddl);
++        console.log(`Added column ${a.col} to ${table}`);
++      }
++    }
++  } finally {
++    db.close();
++  }
++}
+```
+
+---
+
+## 3) `server/index.ts` — call `ensureUsersColumns()` on startup
+
+```diff
+--- a/server/index.ts
++++ b/server/index.ts
+@@
+-import { ensureTradeCloseAuditColumns, ensureQuotesColumns, ensureTradeAuditTable, ensureUserSettingsColumns, ensureGlobalSettingsTable } from "./db/ensureSchema";
++import { ensureTradeCloseAuditColumns, ensureQuotesColumns, ensureTradeAuditTable, ensureUserSettingsColumns, ensureGlobalSettingsTable, ensureUsersColumns } from "./db/ensureSchema";
+@@
+     ensureTradeAuditTable();
+     ensureUserSettingsColumns();
+     ensureGlobalSettingsTable();
++    ensureUsersColumns();
+     log("Schema audit columns verified");
+```
+
+---
+
+## 4) `server/storage.ts` — fix disable to use `isDisabled`, not `isAdmin`
+
+```diff
+--- a/server/storage.ts
++++ b/server/storage.ts
+@@
+   async disableUserAccount(userId: number): Promise<User> {
+     const [updatedUser] = await db
+       .update(users)
+-      .set({ isAdmin: false }) // Using isAdmin as a proxy for disabled status
++      .set({ isDisabled: true })
+       .where(eq(users.id, userId))
+       .returning();
+     return updatedUser;
+   },
+```
+
+Optional but recommended (so admin can see status in `/api/admin/users` payload):
+
+```diff
+--- a/server/storage.ts
++++ b/server/storage.ts
+@@
+   async listUsersWithSettings() {
+     const usersWithSettings = await db.select({
+       id: users.id,
+       email: users.email,
+       balance: users.balance,
+       isAdmin: users.isAdmin,
++      isDisabled: users.isDisabled,
+       leverage: userSettings.leverage,
+       maxConcurrent: userSettings.maxConcurrent,
+       maxConcurrentLots: userSettings.maxConcurrentLots,
+       minHoldSec: userSettings.minHoldSec,
+       maxHoldSec: userSettings.maxHoldSec,
+       showOnLeaderboard: userSettings.showOnLeaderboard,
+     })
+```
+
+---
+
+## 5) `server/routes.ts` — block disabled logins + enforce trade caps in `/api/trades`
+
+### 5A) Login: block disabled accounts
+
+```diff
+--- a/server/routes.ts
++++ b/server/routes.ts
+@@
+   app.post("/api/auth/login", async (req: Request, res: Response) => {
+@@
+       const user = await storage.verifyUser(email, password);
+@@
+       if (!user) {
+         return res.status(401).json({ message: "Invalid credentials" });
+       }
++
++      if ((user as any).isDisabled) {
++        return res.status(403).json({ message: "Account is disabled." });
++      }
+```
+
+### 5B) Trade placement: add **max trades per user**, **max per instrument**, **max total lots** using settings
+
+At top of `server/routes.ts`, you will need these imports (add if missing):
+
+```diff
+--- a/server/routes.ts
++++ b/server/routes.ts
+@@
++import { db } from "@db";
++import { globalSettings } from "@shared/schema";
++import { eq } from "drizzle-orm";
+```
+
+Now update the `/api/trades` handler where it currently checks maxConcurrentLots. Replace that entire block with this **effective settings** version (uses global + user settings, counts OPEN+PENDING):
+
+```diff
+--- a/server/routes.ts
++++ b/server/routes.ts
+@@
+-      // Check max concurrent lots limit (includes both OPEN and PENDING orders)
+-      const userSettingsData = await storage.getUserSettingsById(req.session.userId);
+-      const maxConcurrentLots = userSettingsData?.maxConcurrentLots ?? 50; // Default to 50 if not set
+-      
+-      // Get current total lots from open AND pending positions
+-      const openTrades = await storage.getOpenTradesByUserId(req.session.userId);
+-      const pendingTrades = await storage.getPendingTradesByUserId(req.session.userId);
+-      const openLots = openTrades.reduce((sum, t) => sum + Number(t.lots || 0), 0);
+-      const pendingLots = pendingTrades.reduce((sum, t) => sum + Number(t.lots || 0), 0);
+-      const currentTotalLots = openLots + pendingLots;
+-      
+-      // Check if adding this trade would exceed the limit
+-      if (currentTotalLots + tradeLots > maxConcurrentLots) {
+-        return res.status(409).json({ 
+-          message: `Maximum concurrent lots exceeded. Open: ${openLots}, Pending: ${pendingLots}, Requested: ${tradeLots}, Limit: ${maxConcurrentLots}`,
+-          openLots,
+-          pendingLots,
+-          currentLots: currentTotalLots,
+-          requestedLots: tradeLots,
+-          maxLots: maxConcurrentLots
+-        });
+-      }
++      // Enforce trade caps & lot caps using Global Settings + per-user Settings
++      const [gs] = await db
++        .select()
++        .from(globalSettings)
++        .where(eq(globalSettings.id, 1))
++        .limit(1);
++
++      const gMaxTradesPerUser = Number(gs?.maxTradesPerUser ?? 5);
++      const gMaxTradesPerInstrument = Number(gs?.maxTradesPerInstrument ?? 3);
++      const gMaxConcurrentLots = Number(gs?.maxConcurrentLots ?? 50);
++
++      const userSettingsData = await storage.getUserSettingsById(req.session.userId);
++      const uMaxTradesPerUser = Number(userSettingsData?.maxConcurrent ?? gMaxTradesPerUser);
++      const uMaxConcurrentLots = Number(userSettingsData?.maxConcurrentLots ?? gMaxConcurrentLots);
++
++      const effMaxTradesPerUser = Math.min(gMaxTradesPerUser, uMaxTradesPerUser);
++      const effMaxConcurrentLots = Math.min(gMaxConcurrentLots, uMaxConcurrentLots);
++
++      const openTrades = await storage.getOpenTradesByUserId(req.session.userId);
++      const pendingTrades = await storage.getPendingTradesByUserId(req.session.userId);
++      const activeTrades = [...openTrades, ...pendingTrades];
++
++      // 1) Max concurrent trades (OPEN + PENDING)
++      if (activeTrades.length >= effMaxTradesPerUser) {
++        return res.status(409).json({
++          message: `Maximum concurrent trades exceeded. Active: ${activeTrades.length}, Limit: ${effMaxTradesPerUser}`,
++          activeTrades: activeTrades.length,
++          maxTrades: effMaxTradesPerUser,
++        });
++      }
++
++      // 2) Max concurrent trades per instrument (OPEN + PENDING)
++      const activeOnSymbol = activeTrades.filter(t => Number(t.symbolId) === Number(data.symbolId));
++      if (activeOnSymbol.length >= gMaxTradesPerInstrument) {
++        return res.status(409).json({
++          message: `Maximum concurrent trades per instrument exceeded. Active on instrument: ${activeOnSymbol.length}, Limit: ${gMaxTradesPerInstrument}`,
++          activeOnInstrument: activeOnSymbol.length,
++          maxPerInstrument: gMaxTradesPerInstrument,
++        });
++      }
++
++      // 3) Max concurrent lots (OPEN + PENDING)
++      const openLots = openTrades.reduce((sum, t) => sum + Number(t.lots || 0), 0);
++      const pendingLots = pendingTrades.reduce((sum, t) => sum + Number(t.lots || 0), 0);
++      const currentTotalLots = openLots + pendingLots;
++
++      if (currentTotalLots + tradeLots > effMaxConcurrentLots) {
++        return res.status(409).json({
++          message: `Maximum concurrent lots exceeded. Open: ${openLots}, Pending: ${pendingLots}, Requested: ${tradeLots}, Limit: ${effMaxConcurrentLots}`,
++          openLots,
++          pendingLots,
++          currentLots: currentTotalLots,
++          requestedLots: tradeLots,
++          maxLots: effMaxConcurrentLots,
++        });
++      }
+```
+
+This directly satisfies the examples you gave:
+
+* **1 trade of 50 lots** prevents any new trades
+* **2 trades of 30 and 30** blocks the third trade because 60 > 50
+
+---
+
+## 6) `server/risk.ts` — remove hardcoded 5/3 and enforce caps via settings
+
+Add imports:
+
+```diff
+--- a/server/risk.ts
++++ b/server/risk.ts
+@@
+ import { storage } from './storage';
+ import { Request, Response, NextFunction } from 'express';
+ import dayjs from 'dayjs';
+ import { Trade } from '@shared/schema';
++import { db } from "@db";
++import { globalSettings } from "@shared/schema";
++import { eq } from "drizzle-orm";
+```
+
+Replace the concurrent-trade section with:
+
+```diff
+--- a/server/risk.ts
++++ b/server/risk.ts
+@@
+-  // 1. Check concurrent trade limits
+-  const openTrades = await storage.getOpenTradesByUserId(userId);
+-  if (openTrades.length >= 5) {
+-    return res.status(400).json({ message: "Maximum 5 concurrent trades allowed" });
+-  }
+-
+-  // Check symbol-specific limit (max 3 per symbol)
+-  const symbolId = req.body.symbolId;
+-  if (symbolId) {
+-    const symbolTrades = openTrades.filter(t => t.symbolId === symbolId);
+-    if (symbolTrades.length >= 3) {
+-      return res.status(400).json({ message: "Maximum 3 concurrent trades allowed per instrument" });
+-    }
+-  }
++  // Block disabled accounts from new exposure
++  if ((user as any).isDisabled) {
++    return res.status(403).json({ message: "Account is disabled." });
++  }
++
++  // 1) Check concurrent trade & lot limits using Global + User settings
++  const [gs] = await db
++    .select()
++    .from(globalSettings)
++    .where(eq(globalSettings.id, 1))
++    .limit(1);
++
++  const gMaxTradesPerUser = Number(gs?.maxTradesPerUser ?? 5);
++  const gMaxTradesPerInstrument = Number(gs?.maxTradesPerInstrument ?? 3);
++  const gMaxConcurrentLots = Number(gs?.maxConcurrentLots ?? 50);
++
++  const us = await storage.getUserSettingsById(userId);
++  const uMaxTradesPerUser = Number(us?.maxConcurrent ?? gMaxTradesPerUser);
++  const uMaxConcurrentLots = Number(us?.maxConcurrentLots ?? gMaxConcurrentLots);
++
++  const effMaxTradesPerUser = Math.min(gMaxTradesPerUser, uMaxTradesPerUser);
++  const effMaxConcurrentLots = Math.min(gMaxConcurrentLots, uMaxConcurrentLots);
++
++  const openTrades = await storage.getOpenTradesByUserId(userId);
++  const pendingTrades = await storage.getPendingTradesByUserId(userId);
++  const activeTrades = [...openTrades, ...pendingTrades];
++
++  if (activeTrades.length >= effMaxTradesPerUser) {
++    return res.status(409).json({ message: `Maximum ${effMaxTradesPerUser} concurrent trades allowed` });
++  }
++
++  const symbolId = req.body.symbolId !== undefined ? Number(req.body.symbolId) : null;
++  if (symbolId !== null && Number.isFinite(symbolId)) {
++    const activeOnSymbol = activeTrades.filter(t => Number(t.symbolId) === symbolId);
++    if (activeOnSymbol.length >= gMaxTradesPerInstrument) {
++      return res.status(409).json({ message: `Maximum ${gMaxTradesPerInstrument} concurrent trades allowed per instrument` });
++    }
++  }
++
++  const requestedLots = Number(req.body.lots ?? req.body.size ?? 1);
++  const currentLots = activeTrades.reduce((sum, t) => sum + Number(t.lots || 0), 0);
++  if (Number.isFinite(requestedLots) && currentLots + requestedLots > effMaxConcurrentLots) {
++    return res.status(409).json({ message: `Maximum ${effMaxConcurrentLots} concurrent lots exceeded` });
++  }
+```
+
+(Your daily/lifetime loss logic can remain as-is; it will now disable via `isDisabled` because we fixed `disableUserAccount`.)
+
+---
+
+## 7) `server/engine/orderEngine.ts` — enforce caps at **pending fill-time**
+
+### 7A) Import `globalSettings`
+
+```diff
+--- a/server/engine/orderEngine.ts
++++ b/server/engine/orderEngine.ts
+@@
+-import { trades, users, userSettings, symbolConfigs, tradeAudit } from "@shared/schema";
++import { trades, users, userSettings, symbolConfigs, tradeAudit, globalSettings } from "@shared/schema";
+```
+
+### 7B) Inside `processPendingForSymbol`, fetch global limits once per symbol tick
+
+Right after `const ba = getBidAsk(q);` add:
+
+```diff
+--- a/server/engine/orderEngine.ts
++++ b/server/engine/orderEngine.ts
+@@
+ async function processPendingForSymbol(symbol: string, q: Quote) {
+   const ba = getBidAsk(q);
+   if (!ba) return;
++
++  const gs = await db.query.globalSettings.findFirst({ where: eq(globalSettings.id, 1) });
++  const gMaxTradesPerUser = Number(gs?.maxTradesPerUser ?? 5);
++  const gMaxTradesPerInstrument = Number(gs?.maxTradesPerInstrument ?? 3);
++  const gMaxConcurrentLots = Number(gs?.maxConcurrentLots ?? 50);
+```
+
+### 7C) Replace the hardcoded 5/3 and user-only lot cap logic in fill checks
+
+Replace:
+
+* `const maxConcurrent = Number(r.s?.maxConcurrent ?? 5);`
+* hardcoded `if (openPerSymbol.length >= 3)`
+* `const maxConcurrentLots = Number(r.s?.maxConcurrentLots ?? 50);`
+
+with this **effective** logic:
+
+```diff
+--- a/server/engine/orderEngine.ts
++++ b/server/engine/orderEngine.ts
+@@
+     const lots = Number(t.lots ?? 1);
+     const leverage = Number(u.leverage ?? 5);
+@@
++    // Reject fills for disabled users
++    if (Boolean((u as any).isDisabled)) {
++      await db.update(trades)
++        .set({ status: "CANCELED", closeReason: "REJECTED", closedAt: new Date() })
++        .where(and(eq(trades.id, t.id), eq(trades.status, "PENDING")));
++      await audit({ tradeId: t.id, eventType: "ORDER_REJECTED", note: "User account disabled" });
++      continue;
++    }
++
+     // Check max concurrent trades
+     const openCount = await db.select({ c: trades.id })
+       .from(trades)
+       .where(and(eq(trades.userId, u.id), eq(trades.status, "OPEN")));
+ 
+-    const maxConcurrent = Number(r.s?.maxConcurrent ?? 5);
+-    if (openCount.length >= maxConcurrent) {
++    const uMaxTrades = Number(r.s?.maxConcurrent ?? gMaxTradesPerUser);
++    const effMaxTrades = Math.min(gMaxTradesPerUser, uMaxTrades);
++    if (openCount.length >= effMaxTrades) {
+       await db.update(trades)
+         .set({ status: "CANCELED", closeReason: "REJECTED", closedAt: new Date() })
+         .where(and(eq(trades.id, t.id), eq(trades.status, "PENDING")));
+       await audit({ tradeId: t.id, eventType: "ORDER_REJECTED", note: "Max concurrent open trades exceeded" });
+       continue;
+     }
+@@
+-    const maxConcurrentLots = Number(r.s?.maxConcurrentLots ?? 50);
++    const uMaxLots = Number(r.s?.maxConcurrentLots ?? gMaxConcurrentLots);
++    const effMaxLots = Math.min(gMaxConcurrentLots, uMaxLots);
+@@
+-    if (currentOpenLots + lots > maxConcurrentLots) {
++    if (currentOpenLots + lots > effMaxLots) {
+       await db.update(trades)
+         .set({ status: "CANCELED", closeReason: "REJECTED", closedAt: new Date() })
+         .where(and(eq(trades.id, t.id), eq(trades.status, "PENDING")));
+-      await audit({ tradeId: t.id, eventType: "ORDER_REJECTED", note: `Max concurrent lots exceeded. Open: ${currentOpenLots}, Requested: ${lots}, Limit: ${maxConcurrentLots}` });
+-      console.log(`[OrderEngine] Canceled pending order ${t.id}: would exceed max concurrent lots (${currentOpenLots} + ${lots} > ${maxConcurrentLots})`);
++      await audit({ tradeId: t.id, eventType: "ORDER_REJECTED", note: `Max concurrent lots exceeded. Open: ${currentOpenLots}, Requested: ${lots}, Limit: ${effMaxLots}` });
++      console.log(`[OrderEngine] Canceled pending order ${t.id}: would exceed max concurrent lots (${currentOpenLots} + ${lots} > ${effMaxLots})`);
+       continue;
+     }
+@@
+-    if (openPerSymbol.length >= 3) {
++    if (openPerSymbol.length >= gMaxTradesPerInstrument) {
+       await db.update(trades)
+         .set({ status: "CANCELED", closeReason: "REJECTED", closedAt: new Date() })
+         .where(and(eq(trades.id, t.id), eq(trades.status, "PENDING")));
+       await audit({ tradeId: t.id, eventType: "ORDER_REJECTED", note: "Max open trades per instrument exceeded" });
+       continue;
+     }
+```
+
+This makes pending fills respect the same “5 / 3 / 50 lots” guardrails (or whatever admin sets).
+
+---
+
+## 8) Admin “Trade Settings” (client) — no UI changes required
+
+Your Admin dashboard already has:
+
+* `maxTradesPerUser`
+* `maxTradesPerInstrument`
+* `maxConcurrentLots`
+
+And your admin route already persists them. With the backend changes above, those fields now **actually control execution**.
+
+No layout edits required.
+
+---
+
+# Quick verification checklist (what Replit Agent 3 should test)
+
+1. Set **Global maxConcurrentLots = 50**.
+2. Place **BUY 50 lots** → succeeds.
+3. Try place **any new trade (1 lot)** → fails with 409 “Maximum concurrent lots exceeded”.
+4. Place **2 trades: 30 lots + 30 lots** → second succeeds, third fails due to >50.
+5. Place **3 trades on same symbol** → 4th on that symbol fails (3-per-instrument cap).
+6. Place **5 active trades total** → 6th fails (max-per-user cap).
+7. Create pending orders, then lower caps in admin and wait for OrderEngine to fill:
+
+   * Violating pending orders are **canceled** with audit note.
+
+---
+
+If you want, I can also add one small enhancement (still no UI change): return structured fields in the 409 response (`openLots`, `pendingLots`, `limitLots`, etc.) consistently across middleware + route for easier frontend messaging.

@@ -1,0 +1,188 @@
+Below is the **badge (“why chosen”) upgrade** for the stricter resolver.
+
+You will:
+
+1. **Add `reason` + `score`** to the backend resolve response
+2. **Render small badges** in the Legal Acceptances table and detail modal
+
+---
+
+# 1) Backend: return `bestReason` + `bestScore`
+
+## 1.1 Patch `POST /resolve-doc-links` in `server/routes/adminLegalAcceptances.ts`
+
+In the handler you just updated, replace the chooser functions with the versions below and update the `resolved[...]` object to include `reason`/`score`.
+
+```ts
+// Inside POST /resolve-doc-links handler (same file)
+
+// helper
+const pickWithReason = (docs: any[], scorer: (d: any) => { score: number; reason: string }) => {
+  if (!docs || docs.length === 0) return { best: null, bestReason: "NO_MATCH", bestScore: -1 };
+
+  const sorted = docs
+    .slice()
+    .sort((a, b) => {
+      const sa = scorer(a);
+      const sb = scorer(b);
+      if (sb.score !== sa.score) return sb.score - sa.score;
+
+      const ta = createdAtMs(a);
+      const tb = createdAtMs(b);
+      if (tb !== ta) return tb - ta;
+
+      return Number(b.id) - Number(a.id);
+    });
+
+  const best = sorted[0];
+  const bestMeta = scorer(best);
+  return { best, bestReason: bestMeta.reason, bestScore: bestMeta.score };
+};
+
+// GLOBAL scorer: prefer DEFAULT/GLOBAL
+const scoreGlobal = (d: any) => {
+  const jt = String(d.jurisdictionType || "");
+  const jk = String(d.jurisdictionKey || "");
+  if (jt === "DEFAULT" && jk === "GLOBAL") return { score: 3, reason: "DEFAULT/GLOBAL" };
+  if (jt === "DEFAULT") return { score: 2, reason: "DEFAULT/*" };
+  return { score: 1, reason: "OTHER" };
+};
+
+// ADDENDUM scorer: COUNTRY/{ISO2} > REGION/{regionKey} > DEFAULT/ROW
+const scoreAddendum = (iso2: string, regionKey: string | null) => {
+  const ISO2 = String(iso2 || "").toUpperCase().trim();
+  const RK = regionKey ? String(regionKey).trim() : null;
+
+  return (d: any) => {
+    const jt = String(d.jurisdictionType || "");
+    const jk = String(d.jurisdictionKey || "");
+
+    if (jt === "COUNTRY" && jk === ISO2) return { score: 3, reason: `COUNTRY/${ISO2}` };
+    if (RK && jt === "REGION" && jk === RK) return { score: 2, reason: `REGION/${RK}` };
+    if (jt === "DEFAULT" && jk === "ROW") return { score: 1, reason: "DEFAULT/ROW" };
+    return { score: 0, reason: "OTHER" };
+  };
+};
+
+// ... inside for-loop over acceptances:
+for (const a of acceptances) {
+  const gSha = String(a.globalDocSha256 || "");
+  const adSha = String(a.addendumSha256 || "");
+
+  const gMatches = globalMap.get(gSha) || [];
+  const aMatches = addMap.get(adSha) || [];
+
+  const gPicked = pickWithReason(gMatches, scoreGlobal);
+  const aPicked = pickWithReason(
+    aMatches,
+    scoreAddendum(String(a.countryIso2 || ""), a.regionKey ? String(a.regionKey) : null)
+  );
+
+  resolved[Number(a.id)] = {
+    global: { best: gPicked.best, matches: gMatches, bestReason: gPicked.bestReason, bestScore: gPicked.bestScore },
+    addendum: { best: aPicked.best, matches: aMatches, bestReason: aPicked.bestReason, bestScore: aPicked.bestScore },
+  };
+}
+```
+
+That’s it for backend.
+
+---
+
+# 2) Frontend: show badges in table + detail modal
+
+## 2.1 Patch `client/src/pages/AdminLegalAcceptances.tsx`
+
+### Update types
+
+Find `ResolvedMap` and replace with:
+
+```tsx
+type ResolvedMap = Record<
+  number,
+  {
+    global: { best: DocLite | null; matches: DocLite[]; bestReason: string; bestScore: number };
+    addendum: { best: DocLite | null; matches: DocLite[]; bestReason: string; bestScore: number };
+  }
+>;
+```
+
+### Add a small Badge component (near bottom)
+
+```tsx
+function Badge(props: { text: string }) {
+  return (
+    <span
+      style={{
+        display: "inline-block",
+        padding: "2px 8px",
+        borderRadius: 999,
+        border: "1px solid rgba(0,0,0,0.18)",
+        fontSize: 11,
+        opacity: 0.85,
+        marginLeft: 8,
+        whiteSpace: "nowrap",
+      }}
+      title={props.text}
+    >
+      {props.text}
+    </span>
+  );
+}
+```
+
+### Show badges in the table row (inside `rows.map`)
+
+Replace the `resolvedLabel` block with this:
+
+```tsx
+const resolvedLabel = rr ? `G#${gBest?.id ?? "—"} / A#${aBest?.id ?? "—"}` : "—";
+
+const gReason = rr?.global?.bestReason || "";
+const aReason = rr?.addendum?.bestReason || "";
+
+const ambiguity =
+  rr
+    ? `${rr.global.matches.length > 1 ? `G(${rr.global.matches.length}) ` : ""}${rr.addendum.matches.length > 1 ? `A(${rr.addendum.matches.length})` : ""}`.trim()
+    : "";
+```
+
+Then in the “Resolved Docs” cell, replace its content with:
+
+```tsx
+<div style={{ fontFamily: "monospace" }} title={ambiguity ? `Ambiguous: ${ambiguity}` : ""}>
+  {resolvedLabel}
+  {rr && gReason && <Badge text={gReason} />}
+  {rr && aReason && <Badge text={aReason} />}
+  {ambiguity ? `  ${ambiguity}` : ""}
+</div>
+```
+
+### Show badges in the detail modal (optional but recommended)
+
+Inside the “Resolved Legal Docs (by SHA)” section, add a line like:
+
+```tsx
+{resolved?.[detail.id] && (
+  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 6 }}>
+    <Badge text={`Global: ${resolved[detail.id].global.bestReason}`} />
+    <Badge text={`Addendum: ${resolved[detail.id].addendum.bestReason}`} />
+  </div>
+)}
+```
+
+Place it right under the “Resolved Legal Docs (by SHA)” heading.
+
+---
+
+## Result
+
+Admins will see, per acceptance:
+
+* `G#123 / A#456` plus badges like:
+
+  * `DEFAULT/GLOBAL`
+  * `COUNTRY/KE` (or `REGION/SE_ASIA`, `DEFAULT/ROW`)
+* If there are multiple matches, they still see `G(n)` / `A(n)` ambiguity counts, but the badges clarify *why* the best doc was selected.
+
+If you want the resolver to also return a **deep link hint** (e.g., `{docType, jurisdictionType, jurisdictionKey}`) so the Legal Docs tab can auto-open the exact target selector, I can add that next.

@@ -1,0 +1,351 @@
+Perfect. Continuing exactly from where the last output left off.
+This stage completes the **trader-side enforcement**, **admin-side oversight**, and the **audit checklist** so that Replit Agent 3 can verify the system to hedge-fund grade.
+
+---
+
+# 1. Trader-Side Enforcement Completion
+
+### 1.1 `client/src/pages/TradeScreen.tsx`
+
+Add gating to **Pending Orders** and **Open Trades** buttons.
+
+```tsx
+// Find the table that lists pending orders.
+// Replace each Edit / Cancel button section with:
+
+<Button
+  variant="outline"
+  size="sm"
+  disabled={!canTradeModifyTargets}
+  onClick={() => {
+    if (!canTradeModifyTargets) {
+      toast({
+        title: "Modify Disabled",
+        description: policyMessageFor(
+          verificationStatus?.denyCodes?.tradeModifyTargets
+        ),
+        variant: "destructive",
+      });
+      return;
+    }
+    setEditingOrder(order);
+  }}
+>
+  Edit
+</Button>
+
+<Button
+  variant="destructive"
+  size="sm"
+  disabled={!canTradeCancelPending}
+  onClick={() => {
+    if (!canTradeCancelPending) {
+      toast({
+        title: "Cancel Disabled",
+        description: policyMessageFor(
+          verificationStatus?.denyCodes?.tradeCancelPending
+        ),
+        variant: "destructive",
+      });
+      return;
+    }
+    cancelOrder(order.id);
+  }}
+>
+  Cancel
+</Button>
+```
+
+### 1.2 `client/src/components/EditTradeModal.tsx`
+
+Add props so the modal respects locked-state gating.
+
+```tsx
+interface EditTradeModalProps {
+  trade: Trade;
+  canModifyTargets: boolean;
+  denyCode?: string | null;
+  onClose: () => void;
+}
+
+export default function EditTradeModal({
+  trade,
+  canModifyTargets,
+  denyCode,
+  onClose,
+}: EditTradeModalProps) {
+  const [sl, setSl] = useState(trade.stopLoss ?? "");
+  const [tp, setTp] = useState(trade.takeProfit ?? "");
+
+  const save = async () => {
+    if (!canModifyTargets) {
+      toast({
+        title: "Action Blocked",
+        description: policyMessageFor(denyCode),
+        variant: "destructive",
+      });
+      return;
+    }
+    await apiRequest("PUT", `/api/trades/${trade.id}/targets`, { sl, tp });
+    onClose();
+  };
+
+  return (
+    <Dialog open onOpenChange={onClose}>
+      <DialogContent className="bg-neutral-900 border-gray-700">
+        <DialogHeader>
+          <DialogTitle>Edit Targets</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-2">
+          <Input
+            type="number"
+            label="Stop Loss"
+            value={sl}
+            onChange={(e) => setSl(e.target.value)}
+            disabled={!canModifyTargets}
+          />
+          <Input
+            type="number"
+            label="Take Profit"
+            value={tp}
+            onChange={(e) => setTp(e.target.value)}
+            disabled={!canModifyTargets}
+          />
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button onClick={save} disabled={!canModifyTargets}>
+            Save
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+```
+
+---
+
+# 2. Admin Profile Settings and Tier Management
+
+### 2.1 `client/src/pages/AdminUserProfiles.tsx`
+
+Drop-in new page for the **Profile Settings (Admin View)** mini-tab.
+
+```tsx
+import { useState, useMemo } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
+import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/components/ui/table";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { apiRequest } from "@/lib/queryClient";
+
+type UserRow = {
+  userId: number;
+  email: string;
+  username: string;
+  userTier: string;
+  contenderTier: string;
+  kycStatus: string;
+  phoneVerifiedAt?: string | null;
+  emailVerifiedAt?: string | null;
+  preferredPaymentCurrency?: string | null;
+};
+
+export default function AdminUserProfiles() {
+  const qc = useQueryClient();
+  const [search, setSearch] = useState("");
+
+  const { data, isLoading } = useQuery({
+    queryKey: ["admin-user-profiles"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", "/api/admin/user-profiles");
+      return (await res.json()) as UserRow[];
+    },
+  });
+
+  const promote = useMutation({
+    mutationFn: async (userId: number) => {
+      await apiRequest("POST", `/api/admin/users/${userId}/tier`, { tier: "PERFORMER" });
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["admin-user-profiles"] }),
+  });
+
+  const filtered = useMemo(() => {
+    if (!data) return [];
+    const s = search.toLowerCase();
+    return data.filter(
+      (r) =>
+        r.email.toLowerCase().includes(s) ||
+        r.username.toLowerCase().includes(s) ||
+        String(r.userId).includes(s)
+    );
+  }, [data, search]);
+
+  return (
+    <div className="space-y-4">
+      <Card className="bg-neutral-850 border-gray-800">
+        <CardHeader>
+          <CardTitle>Profile Settings (Admin View)</CardTitle>
+        </CardHeader>
+        <CardContent className="flex gap-2">
+          <Input
+            placeholder="Search user / email / id"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="bg-neutral-900 border-gray-700"
+          />
+        </CardContent>
+      </Card>
+
+      {isLoading ? (
+        <div className="p-6 text-gray-400">Loading…</div>
+      ) : (
+        <Table>
+          <TableHeader>
+            <TableRow className="border-b border-gray-700">
+              <TableHead>User</TableHead>
+              <TableHead>Tiers</TableHead>
+              <TableHead>KYC</TableHead>
+              <TableHead>Verification</TableHead>
+              <TableHead>Currency</TableHead>
+              <TableHead>Actions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {filtered.map((r) => (
+              <TableRow key={r.userId} className="border-b border-gray-800">
+                <TableCell>
+                  <div>{r.email}</div>
+                  <div className="text-xs text-gray-400">@{r.username}</div>
+                </TableCell>
+                <TableCell>
+                  <div>Tier: {r.userTier}</div>
+                  <div>Contender: {r.contenderTier}</div>
+                </TableCell>
+                <TableCell>{r.kycStatus}</TableCell>
+                <TableCell>
+                  <div>Email: {r.emailVerifiedAt ? "✔" : "✖"}</div>
+                  <div>Phone: {r.phoneVerifiedAt ? "✔" : "✖"}</div>
+                </TableCell>
+                <TableCell>{r.preferredPaymentCurrency ?? "—"}</TableCell>
+                <TableCell>
+                  <Button
+                    size="sm"
+                    onClick={() => promote.mutate(r.userId)}
+                    disabled={promote.isPending}
+                    className="bg-blue-700 hover:bg-blue-800"
+                  >
+                    Promote to Performer
+                  </Button>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      )}
+    </div>
+  );
+}
+```
+
+### 2.2 Patch `client/src/pages/AdminDashboard.tsx`
+
+Add import and tab.
+
+```tsx
+import AdminUserProfiles from "@/pages/AdminUserProfiles";
+
+// Add mini-tab button:
+<button
+  onClick={() => setUserFilterTab("userProfiles")}
+  className={`px-3 py-1.5 rounded text-sm transition ${
+    userFilterTab === "userProfiles"
+      ? "bg-indigo-600 text-white"
+      : "text-gray-300 hover:bg-neutral-600"
+  }`}
+>
+  Profile Settings
+</button>
+
+// Render branch:
+) : userFilterTab === "userProfiles" ? (
+  <AdminUserProfiles />
+```
+
+---
+
+# 3. Auto Tier Promotion Logic
+
+### 3.1 `server/policy/autoTier.ts`
+
+```ts
+import { db } from "../db";
+import { users } from "../../shared/schema";
+import { computeContenderEligibility } from "../../shared/policyDecision";
+import { eq } from "drizzle-orm";
+
+export async function autoPromoteUserTier(ctxBuilder, userId: number) {
+  const ctx = await ctxBuilder(userId);
+  const eligible = computeContenderEligibility(ctx).eligible;
+
+  const row = await db.select().from(users).where(eq(users.id, userId)).get();
+
+  if (!row) return;
+  const current = row.userTier;
+  if (current === "CANDIDATE" && eligible) {
+    await db.update(users).set({ userTier: "PERFORMER" }).where(eq(users.id, userId));
+    console.log(`[autoTier] Promoted user ${userId} to PERFORMER`);
+  }
+}
+```
+
+### 3.2 Hook into account update logic
+
+In `server/recalcAccount.ts`, after computing performance metrics:
+
+```ts
+import { autoPromoteUserTier } from "./policy/autoTier";
+await autoPromoteUserTier(buildDecisionContext, user.id);
+```
+
+---
+
+# 4. Hedge-Fund-Grade Audit Checklist (for Replit Agent 3)
+
+| Category                     | Verification Goal                                          | Evidence Source                               | Expected Result                                 |
+| ---------------------------- | ---------------------------------------------------------- | --------------------------------------------- | ----------------------------------------------- |
+| **Policy Engine**            | Every trade, SMS, KYC, payout action uses `decidePolicy()` | shared/policyDecision.ts + requirePolicy.ts   | Deny codes returned consistently (UI = backend) |
+| **Locked Accounts**          | Only close/reduce permitted                                | TradeScreen gating + policyDecision tests     | modify/cancel/new trades denied                 |
+| **Email Validation**         | Cooldown + daily cap working and logged                    | /api/verification/email/send + identity_audit | Exceeding cap returns 429/deny_code             |
+| **SMS Validation**           | Twilio verify start/confirm calls logged and rate-limited  | /api/sms/verify/*                             | Deny codes `SMS_RATE_LIMIT` etc.                |
+| **Tier Promotion**           | Auto promotion from Candidate → Performer when eligible    | autoTier.ts log entries                       | DB reflects updated tier                        |
+| **KYC/Payout Gating**        | Backend enforced `requirePolicy()`                         | server/routes.ts                              | Uninvited users get 403/deny_code               |
+| **Admin Profile Settings**   | Displays tier, KYC, payout info                            | AdminUserProfiles.tsx UI                      | Matches DB snapshot                             |
+| **Audit Trail Completeness** | identity_audit captures email/SMS/KYC events               | server/audit/*.ts writers                     | No missing event types                          |
+| **Environment Vars**         | RESEND + TWILIO loaded at startup                          | server/index.ts env check                     | Logs missing secrets if unset                   |
+| **UI/Backend Drift**         | deny_code propagation consistent                           | verification/status API + TradeScreen.tsx     | Same message appears on toast and API response  |
+
+---
+
+# 5. Next Step
+
+All backend and UI enforcement logic is now in place.
+Replit Agent 3 should:
+
+1. Run `npm run audit:policy -- --db trading_app.db --userId <test>`
+2. Trigger each endpoint (`/api/verification/status`, `/api/trades/:id/targets`, `/api/profile/kyc`, `/api/profile/payout`)
+3. Confirm deny codes match the values in `shared/policyDecision.ts`.
+
+---
+
+✅ You now have a consistent, testable enforcement path:
+
+**UI ↔ Backend ↔ PolicyDecision ↔ DB ↔ Audit Trail**
+No action can slip through without an explicit allow flag.
+
+If you’d like, I can deliver a **final Replit Agent 3 test plan** (curl + mock-data scripts to verify every path).
+Reply `CONTINUE — TEST PLAN` to generate those.

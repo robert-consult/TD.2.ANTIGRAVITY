@@ -1,0 +1,524 @@
+Got you — here are the **missing “ADD” pieces** to complete hedge-fund-grade Trade Audit upgrades around **cancels, manual closes, admin audit APIs, exports + manifest hashing**, and **risk-middleware DECISION logging** (still **tamper-evident + correlationId** everywhere).
+
+---
+
+# A) Phase 1 ADD — Export manifest table (integrity for allocator exports)
+
+### `/backend/src/db/ensureAuditSchema.ts` (ADD THIS TABLE at bottom of `ensureAuditSchema`)
+
+```ts
+  // ---- audit_export_manifest (evidence of what was exported, with sha256)
+  ensureTable(
+    db,
+    `
+    CREATE TABLE IF NOT EXISTS audit_export_manifest (
+      export_id TEXT PRIMARY KEY,
+      exported_at_utc_ms INTEGER NOT NULL,
+      export_type TEXT NOT NULL,          -- TRADE_AUDIT | ORDER_INTENT
+      export_format TEXT NOT NULL,        -- CSV | JSONL
+      filters_json TEXT NOT NULL,
+      record_count INTEGER NOT NULL,
+      sha256 TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_aem_type_time ON audit_export_manifest(export_type, exported_at_utc_ms);
+    `
+  );
+```
+
+---
+
+# B) Phase 3 ADD — Cancel + Manual Close audit events (with correlation + provenance)
+
+## B1) Cancel route → `ORDER_CANCELED` trade_audit event
+
+### `/backend/src/routes/tradeCancel.ts`
+
+```ts
+import { Router } from "express";
+import type Database from "better-sqlite3";
+import { attachAuditContext } from "../middleware/attachAuditContext";
+import { buildAuditContext } from "../audit/auditContext";
+import { writeTradeAudit } from "../audit/auditWriters";
+
+type DB = Database.Database;
+
+export function tradeCancelRoutes(db: DB) {
+  const r = Router();
+
+  const requireAuth = (req: any, res: any, next: any) => {
+    if (!req.user?.id) return res.status(401).json({ error: "UNAUTHENTICATED" });
+    next();
+  };
+
+  // Adjust to your actual cancel route path
+  r.post("/api/trades/:id/cancel", attachAuditContext, requireAuth, (req: any, res) => {
+    const tradeId = String(req.params.id);
+    const userId = String(req.user.id);
+
+    const t = db.prepare(`SELECT * FROM trades WHERE id = ?`).get(tradeId) as any;
+    if (!t) return res.status(404).json({ error: "NOT_FOUND" });
+
+    // Optional: allow admin cancel; otherwise owner-only
+    const isAdmin = req.user?.role === "ADMIN";
+    if (!isAdmin && String(t.user_id) !== userId) return res.status(403).json({ error: "FORBIDDEN" });
+
+    // Business rule: only cancel pending orders
+    if (t.status !== "PENDING") return res.status(400).json({ error: "NOT_CANCELABLE", status: t.status });
+
+    db.prepare(`UPDATE trades SET status = 'CANCELED' WHERE id = ?`).run(tradeId);
+
+    // Preserve original correlation_id if present
+    const ctx = buildAuditContext(req, {
+      actorType: isAdmin ? "ADMIN" : "USER",
+      actorUserId: userId,
+      userId: String(t.user_id),
+      correlationId: t.correlation_id || req.auditContext!.correlationId,
+    });
+
+    writeTradeAudit(db, {
+      ctx,
+      tradeId,
+      eventCategory: "ORDER",
+      eventCode: "ORDER_CANCELED",
+      symbol: t.symbol ?? null,
+      side: t.side ?? null,
+      orderType: t.order_type ?? null,
+      timeInForce: t.time_in_force ?? null,
+      qtyLots: t.lots ?? null,
+      requestedPrice: t.requested_price ?? null,
+      limitPrice: t.limit_price ?? null,
+      stopPrice: t.stop_price ?? null,
+      note: isAdmin ? "Canceled by admin" : "Canceled by user",
+      payload: {
+        priorStatus: "PENDING",
+        newStatus: "CANCELED",
+      },
+    });
+
+    return res.json({ ok: true, tradeId, correlationId: ctx.correlationId });
+  });
+
+  return r;
+}
+```
+
+## B2) Manual close route → `POSITION_CLOSED` trade_audit event
+
+### `/backend/src/routes/tradeClose.ts`
+
+```ts
+import { Router } from "express";
+import type Database from "better-sqlite3";
+import { attachAuditContext } from "../middleware/attachAuditContext";
+import { buildAuditContext } from "../audit/auditContext";
+import { writeTradeAudit } from "../audit/auditWriters";
+
+type DB = Database.Database;
+
+export function tradeCloseRoutes(db: DB) {
+  const r = Router();
+
+  const requireAuth = (req: any, res: any, next: any) => {
+    if (!req.user?.id) return res.status(401).json({ error: "UNAUTHENTICATED" });
+    next();
+  };
+
+  // Adjust to your actual close route path
+  r.post("/api/trades/:id/close", attachAuditContext, requireAuth, (req: any, res) => {
+    const tradeId = String(req.params.id);
+    const userId = String(req.user.id);
+
+    const t = db.prepare(`SELECT * FROM trades WHERE id = ?`).get(tradeId) as any;
+    if (!t) return res.status(404).json({ error: "NOT_FOUND" });
+
+    const isAdmin = req.user?.role === "ADMIN";
+    if (!isAdmin && String(t.user_id) !== userId) return res.status(403).json({ error: "FORBIDDEN" });
+
+    if (t.status !== "OPEN") return res.status(400).json({ error: "NOT_CLOSABLE", status: t.status });
+
+    // You likely have PnL computation + close price from quote service; plug that in.
+    const closePrice = req.body?.closePrice != null ? Number(req.body.closePrice) : null;
+
+    db.prepare(`UPDATE trades SET status = 'CLOSED' WHERE id = ?`).run(tradeId);
+
+    const ctx = buildAuditContext(req, {
+      actorType: isAdmin ? "ADMIN" : "USER",
+      actorUserId: userId,
+      userId: String(t.user_id),
+      correlationId: t.correlation_id || req.auditContext!.correlationId,
+    });
+
+    writeTradeAudit(db, {
+      ctx,
+      tradeId,
+      eventCategory: "POSITION",
+      eventCode: "POSITION_CLOSED",
+      symbol: t.symbol ?? null,
+      side: t.side ?? null,
+      orderType: t.order_type ?? null,
+      qtyLots: t.lots ?? null,
+      fillPrice: closePrice,
+      note: isAdmin ? "Manually closed by admin" : "Manually closed by user",
+      payload: {
+        priorStatus: "OPEN",
+        newStatus: "CLOSED",
+        closePrice,
+      },
+    });
+
+    return res.json({ ok: true, tradeId, correlationId: ctx.correlationId });
+  });
+
+  return r;
+}
+```
+
+---
+
+# C) Phase 3 ADD — Ensure correlationId exists on *every* order attempt (global hook)
+
+Instead of remembering to add `attachAuditContext` per route, install it once:
+
+### `/backend/src/server.ts` (ADD near app setup)
+
+```ts
+import express from "express";
+import { attachAuditContext } from "./middleware/attachAuditContext";
+
+const app = express();
+app.use(express.json());
+
+// Ensure correlationId + audit context for every request
+app.use(attachAuditContext);
+```
+
+> Keep `attachAuditContext` on specific routes too if you prefer — but global is safer.
+
+---
+
+# D) Phase 3/4 ADD — Risk middleware logs DECISION(REJECT) + includes check/reason evidence
+
+If you already have a `riskMiddleware`, patch it like this pattern:
+
+### `/backend/src/middleware/riskMiddleware.ts` (DROP-IN PATTERN)
+
+```ts
+import type { Request, Response, NextFunction } from "express";
+import type Database from "better-sqlite3";
+import { buildAuditContext } from "../audit/auditContext";
+import { writeOrderIntentAudit } from "../audit/auditWriters";
+
+type DB = Database.Database;
+
+export function riskMiddleware(db: DB) {
+  return (req: any, res: Response, next: NextFunction) => {
+    const ctx = buildAuditContext(req, {
+      actorType: req.user?.role === "ADMIN" ? "ADMIN" : "USER",
+      actorUserId: req.user?.id ? String(req.user.id) : null,
+      userId: req.user?.id ? String(req.user.id) : null,
+    });
+
+    // Your real risk logic returns something like this:
+    // { ok: boolean, check: string, reason: string, limits: {...}, observed: {...}, snapshot: {...} }
+    const risk = runRiskChecks(req); // <-- replace with your existing risk function
+
+    if (!risk.ok) {
+      // DECISION(REJECT) — must be logged BEFORE returning
+      writeOrderIntentAudit(db, {
+        ctx,
+        eventCode: "DECISION",
+        decision: "REJECT",
+        rejectCheck: risk.check,
+        rejectReason: risk.reason,
+        symbol: req.body?.symbol ?? null,
+        side: req.body?.side ?? null,
+        orderType: req.body?.orderType ?? null,
+        timeInForce: req.body?.timeInForce ?? null,
+        qtyLots: req.body?.lots != null ? Number(req.body.lots) : null,
+        requestedPrice: req.body?.requestedPrice != null ? Number(req.body.requestedPrice) : null,
+        limitPrice: req.body?.limitPrice != null ? Number(req.body.limitPrice) : null,
+        stopPrice: req.body?.stopPrice != null ? Number(req.body.stopPrice) : null,
+        takeProfit: req.body?.takeProfit != null ? Number(req.body.takeProfit) : null,
+        stopLoss: req.body?.stopLoss != null ? Number(req.body.stopLoss) : null,
+        riskLimit: risk.limits,
+        riskObserved: risk.observed,
+        riskSnapshot: risk.snapshot,
+      });
+
+      return res.status(400).json({
+        error: "RISK_REJECT",
+        rejectCheck: risk.check,
+        rejectReason: risk.reason,
+        correlationId: ctx.correlationId,
+      });
+    }
+
+    // Optional: also log PASS here, OR log PASS in route after all validations
+    // (don’t double-log PASS unless you want it.)
+    next();
+  };
+}
+
+// Stub signature only — replace with your real checks
+function runRiskChecks(_req: Request): any {
+  return { ok: true };
+}
+```
+
+---
+
+# E) Phase 4 ADD — Admin audit APIs (filters + paging) + Export (CSV/JSONL) + Manifest sha256
+
+## E1) Admin: list trade_audit (filters + paging)
+
+### `/backend/src/routes/adminAudit.ts`
+
+```ts
+import { Router } from "express";
+import type Database from "better-sqlite3";
+import crypto from "node:crypto";
+import { sha256Hex } from "../audit/hash";
+
+type DB = Database.Database;
+
+function csvEscape(v: any): string {
+  const s = v == null ? "" : String(v);
+  return /[",\n]/.test(s) ? `"${s.replaceAll(`"`, `""`)}"` : s;
+}
+
+export function adminAuditRoutes(db: DB) {
+  const r = Router();
+
+  const requireAdmin = (req: any, res: any, next: any) => {
+    if (req.user?.role !== "ADMIN") return res.status(403).json({ error: "FORBIDDEN" });
+    next();
+  };
+
+  // ---- Trade audit list
+  r.get("/api/admin/trade-audit", requireAdmin, (req, res) => {
+    const limit = Math.min(Number(req.query.limit ?? 200), 1000);
+
+    const where: string[] = [];
+    const args: any[] = [];
+
+    if (req.query.tradeId) { where.push("trade_id = ?"); args.push(String(req.query.tradeId)); }
+    if (req.query.correlationId) { where.push("correlation_id = ?"); args.push(String(req.query.correlationId)); }
+    if (req.query.userId) { where.push("user_id = ?"); args.push(String(req.query.userId)); }
+    if (req.query.symbol) { where.push("symbol = ?"); args.push(String(req.query.symbol)); }
+    if (req.query.eventCode) { where.push("event_code = ?"); args.push(String(req.query.eventCode)); }
+    if (req.query.fromMs) { where.push("ts_server_utc_ms >= ?"); args.push(Number(req.query.fromMs)); }
+    if (req.query.toMs) { where.push("ts_server_utc_ms <= ?"); args.push(Number(req.query.toMs)); }
+
+    // Cursor paging: pass cursorTs + cursorId from previous response
+    if (req.query.cursorTs && req.query.cursorId) {
+      where.push("(ts_server_utc_ms < ? OR (ts_server_utc_ms = ? AND audit_event_id < ?))");
+      args.push(Number(req.query.cursorTs), Number(req.query.cursorTs), String(req.query.cursorId));
+    }
+
+    const sql = `
+      SELECT *
+      FROM trade_audit
+      ${where.length ? "WHERE " + where.join(" AND ") : ""}
+      ORDER BY ts_server_utc_ms DESC, audit_event_id DESC
+      LIMIT ?
+    `;
+    const rows = db.prepare(sql).all(...args, limit) as any[];
+
+    const nextCursor = rows.length
+      ? { cursorTs: rows[rows.length - 1].ts_server_utc_ms, cursorId: rows[rows.length - 1].audit_event_id }
+      : null;
+
+    res.json({ rows, nextCursor });
+  });
+
+  // ---- Order intent audit list
+  r.get("/api/admin/order-intent-audit", requireAdmin, (req, res) => {
+    const limit = Math.min(Number(req.query.limit ?? 200), 1000);
+
+    const where: string[] = [];
+    const args: any[] = [];
+
+    if (req.query.correlationId) { where.push("correlation_id = ?"); args.push(String(req.query.correlationId)); }
+    if (req.query.userId) { where.push("user_id = ?"); args.push(String(req.query.userId)); }
+    if (req.query.symbol) { where.push("symbol = ?"); args.push(String(req.query.symbol)); }
+    if (req.query.eventCode) { where.push("event_code = ?"); args.push(String(req.query.eventCode)); }
+    if (req.query.decision) { where.push("decision = ?"); args.push(String(req.query.decision)); }
+    if (req.query.fromMs) { where.push("ts_server_utc_ms >= ?"); args.push(Number(req.query.fromMs)); }
+    if (req.query.toMs) { where.push("ts_server_utc_ms <= ?"); args.push(Number(req.query.toMs)); }
+
+    if (req.query.cursorTs && req.query.cursorId) {
+      where.push("(ts_server_utc_ms < ? OR (ts_server_utc_ms = ? AND audit_event_id < ?))");
+      args.push(Number(req.query.cursorTs), Number(req.query.cursorTs), String(req.query.cursorId));
+    }
+
+    const sql = `
+      SELECT *
+      FROM order_intent_audit
+      ${where.length ? "WHERE " + where.join(" AND ") : ""}
+      ORDER BY ts_server_utc_ms DESC, audit_event_id DESC
+      LIMIT ?
+    `;
+    const rows = db.prepare(sql).all(...args, limit) as any[];
+
+    const nextCursor = rows.length
+      ? { cursorTs: rows[rows.length - 1].ts_server_utc_ms, cursorId: rows[rows.length - 1].audit_event_id }
+      : null;
+
+    res.json({ rows, nextCursor });
+  });
+
+  // ---- Export endpoint (CSV or JSONL) + manifest (sha256)
+  r.get("/api/admin/audit-export", requireAdmin, (req, res) => {
+    const exportType = String(req.query.type || "TRADE_AUDIT"); // TRADE_AUDIT | ORDER_INTENT
+    const format = String(req.query.format || "CSV"); // CSV | JSONL
+
+    const table = exportType === "ORDER_INTENT" ? "order_intent_audit" : "trade_audit";
+
+    // Reuse same filters as list endpoints
+    const where: string[] = [];
+    const args: any[] = [];
+
+    if (req.query.correlationId) { where.push("correlation_id = ?"); args.push(String(req.query.correlationId)); }
+    if (req.query.userId) { where.push("user_id = ?"); args.push(String(req.query.userId)); }
+    if (req.query.symbol) { where.push("symbol = ?"); args.push(String(req.query.symbol)); }
+    if (req.query.fromMs) { where.push("ts_server_utc_ms >= ?"); args.push(Number(req.query.fromMs)); }
+    if (req.query.toMs) { where.push("ts_server_utc_ms <= ?"); args.push(Number(req.query.toMs)); }
+
+    const sql = `
+      SELECT *
+      FROM ${table}
+      ${where.length ? "WHERE " + where.join(" AND ") : ""}
+      ORDER BY ts_server_utc_ms ASC, audit_event_id ASC
+    `;
+    const rows = db.prepare(sql).all(...args) as any[];
+
+    const filtersJson = JSON.stringify({
+      type: exportType,
+      format,
+      correlationId: req.query.correlationId ?? null,
+      userId: req.query.userId ?? null,
+      symbol: req.query.symbol ?? null,
+      fromMs: req.query.fromMs ?? null,
+      toMs: req.query.toMs ?? null,
+    });
+
+    const exportId = crypto.randomUUID();
+    const exportedAt = Date.now();
+
+    // Build output text (simple; if you expect huge exports, we can stream line-by-line)
+    let body = "";
+    if (format === "JSONL") {
+      body = rows.map((r) => JSON.stringify(r)).join("\n") + (rows.length ? "\n" : "");
+      res.setHeader("content-type", "application/x-ndjson; charset=utf-8");
+      res.setHeader("content-disposition", `attachment; filename="${exportType}_${exportId}.jsonl"`);
+    } else {
+      const headers = rows.length ? Object.keys(rows[0]) : [];
+      body += headers.map(csvEscape).join(",") + "\n";
+      for (const row of rows) {
+        body += headers.map((h) => csvEscape(row[h])).join(",") + "\n";
+      }
+      res.setHeader("content-type", "text/csv; charset=utf-8");
+      res.setHeader("content-disposition", `attachment; filename="${exportType}_${exportId}.csv"`);
+    }
+
+    const sha = sha256Hex(body);
+
+    db.prepare(`
+      INSERT INTO audit_export_manifest (
+        export_id, exported_at_utc_ms, export_type, export_format,
+        filters_json, record_count, sha256
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(exportId, exportedAt, exportType, format, filtersJson, rows.length, sha);
+
+    res.setHeader("x-export-id", exportId);
+    res.setHeader("x-export-sha256", sha);
+    res.send(body);
+  });
+
+  // ---- Fetch export manifest (allocator-friendly evidence)
+  r.get("/api/admin/audit-export/:exportId/manifest", requireAdmin, (req, res) => {
+    const exportId = String(req.params.exportId);
+    const row = db.prepare(`SELECT * FROM audit_export_manifest WHERE export_id = ?`).get(exportId);
+    if (!row) return res.status(404).json({ error: "NOT_FOUND" });
+    res.json(row);
+  });
+
+  return r;
+}
+```
+
+---
+
+# F) Phase 5 ADD — Targets update audit already done, but add “before/after + quote snapshot” (better execution context)
+
+In your existing `TARGETS_UPDATED` writer call, add quote snapshot fields if available (you already have payload). Example:
+
+### `/backend/src/routes/tradeTargets.ts` (ADD inside payload)
+
+```ts
+payload: {
+  before,
+  after,
+  quote: {
+    bid: req.body?.quoteBid ?? null,
+    ask: req.body?.quoteAsk ?? null,
+    mid: req.body?.quoteMid ?? null,
+    tsUtcMs: req.body?.quoteTsUtcMs ?? null,
+    isStale: req.body?.quoteIsStale ?? null,
+  }
+}
+```
+
+---
+
+# G) Wiring ADD — Register these routes
+
+### `/backend/src/routes/index.ts` (or wherever you register routers)
+
+```ts
+import { tradesRoutes } from "./trades";
+import { tradeTargetsRoutes } from "./tradeTargets";
+import { tradeCancelRoutes } from "./tradeCancel";
+import { tradeCloseRoutes } from "./tradeClose";
+import { adminAuditRoutes } from "./adminAudit";
+
+export function registerRoutes(app: any, db: any) {
+  app.use(tradesRoutes(db));
+  app.use(tradeTargetsRoutes(db));
+  app.use(tradeCancelRoutes(db));
+  app.use(tradeCloseRoutes(db));
+  app.use(adminAuditRoutes(db));
+}
+```
+
+---
+
+## What this “ADD” completes (your 4 required upgrades)
+
+✅ **correlationId on every order attempt**
+
+* global `attachAuditContext` + stored on trade row + echoed on responses
+
+✅ **order_intent_audit RECEIVED + DECISION(PASS/REJECT)**
+
+* route entry logs `RECEIVED`
+* risk middleware logs `DECISION(REJECT)` before returning
+* route logs `DECISION(PASS)` before trade insert
+
+✅ **trade_audit lifecycle coverage**
+
+* market create: `ORDER_PLACED` + `ORDER_FILLED`
+* pending placement: `ORDER_PLACED`
+* cancel: `ORDER_CANCELED`
+* manual close: `POSITION_CLOSED`
+* targets update: `TARGETS_UPDATED`
+
+✅ **tamper-evident SHA-256 chains**
+
+* both audit tables append-only with `prev_hash → event_hash`
+* plus export manifest sha256 for allocator confidence
+
+---
+
+If you want the next “ADD”, I can drop the **frontend Admin Audit tab UI** (Trade Events vs Order Intents + filters + export buttons + row-expand JSON) to match your original “expandable rows” requirement.

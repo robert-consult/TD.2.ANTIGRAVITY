@@ -1,0 +1,872 @@
+Below is a **single-source-of-truth, drift-proof PolicyDecision module** (shared by backend + frontend) plus the **server-side context builder** and **integration patches** showing exactly where to enforce:
+
+* (a) **Trade actions** (open/increase, pending placement, SL/TP modify, reduce-only close)
+* (b) **SMS start/confirm** (Twilio Verify)
+* (c) **KYC view / payout currency set** (invite/Selected only)
+
+This is aligned to your context invariants: **14-day email grace → lock**, **rolling 30-day re-verify → lock after overdue grace**, **SMS only for serious contenders (performance criteria)**, **KYC/payout only when selected/invited**, and **every deny returns a deterministic `deny_code`**.
+
+---
+
+# 1) Shared, compact “PolicyDecision” module (single source of truth)
+
+Create: `shared/policyDecision.ts`
+
+```ts
+// shared/policyDecision.ts
+// Single source of truth for eligibility + gating decisions.
+// Import this from BOTH server and client to avoid drift.
+
+export type AccountState =
+  | "ACTIVE_UNVERIFIED_GRACE"
+  | "LOCKED_EMAIL_UNVERIFIED"
+  | "ACTIVE_VERIFIED"
+  | "LOCKED_EMAIL_REVERIFY_OVERDUE"
+  | "SUSPENDED_ADMIN";
+
+export type ContenderTier =
+  | "NONE"
+  | "CANDIDATE_SMS_REQUIRED"
+  | "VERIFIED_SMS"
+  | "SELECTED_REAL_CAPITAL";
+
+export type UserTier = "CANDIDATE" | "PERFORMER" | "SELECTED";
+
+export type PolicyAction =
+  // Trading (exposure-affecting)
+  | "TRADE_OPEN_OR_INCREASE"
+  | "TRADE_MODIFY_SLTP"
+  | "TRADE_PLACE_PENDING"
+  | "TRADE_CANCEL_PENDING"
+  // Trading (reduce-only safety)
+  | "TRADE_CLOSE_OR_REDUCE"
+  // Identity & profile
+  | "PROFILE_EDIT_BASIC"
+  | "EMAIL_RESEND_VERIFICATION"
+  | "EMAIL_CHANGE"
+  | "PHONE_VERIFY_START"
+  | "PHONE_VERIFY_CONFIRM"
+  // Compliance
+  | "KYC_VIEW"
+  | "KYC_SUBMIT"
+  | "PREFERRED_PAYMENT_CURRENCY_SET"
+  // Sessions/security
+  | "SESSIONS_VIEW"
+  | "SESSION_TERMINATE"
+  | "MFA_ENABLE"
+  | "MFA_DISABLE"
+  // System jobs (optional)
+  | "JOB_ENFORCE_LOCKS"
+  | "JOB_EVALUATE_CONTENDER_ELIGIBILITY";
+
+export type DenyCode =
+  | "ADMIN_SUSPENDED"
+  | "EMAIL_UNVERIFIED_GRACE_EXPIRED"
+  | "EMAIL_REVERIFY_OVERDUE"
+  | "EMAIL_SEND_RATE_LIMIT"
+  | "EMAIL_SEND_COOLDOWN"
+  | "SMS_NOT_ELIGIBLE"
+  | "SMS_RATE_LIMIT"
+  | "SMS_OTP_TOO_MANY_ATTEMPTS"
+  | "KYC_NOT_SELECTED"
+  | "KYC_STATE_INVALID"
+  | "ACTION_NOT_ALLOWED_IN_STATE";
+
+export type PolicyConfig = {
+  // Verification enforcement
+  emailInitialGraceDays: 14;
+  emailReverifyPeriodDays: 30;
+  emailReverifyOverdueGraceDays: number; // recommended 3–7 (use 5 default)
+
+  // Anti-abuse throttles
+  emailResendCooldownSec: number; // e.g. 60
+  emailDailySendCap: number;      // e.g. 5 per user/day
+  smsDailySendCap: number;        // e.g. 3 per user/day
+  otpMaxAttempts: number;         // e.g. 6 before temporary lock
+
+  // Contender criteria (exact intent)
+  contenderPath1: {
+    minAccountAgeDays: number;     // 30
+    minBalancePctOfStart: number;  // 1.2
+    minTradesLifetime: number;     // 30
+  };
+  contenderPath2: {
+    minAccountAgeDays: number;     // 90
+    lastTradeWithinDays: number;   // 14
+    minReturnLast90d: number;      // 0.10
+    minTradesLast90d: number;      // 20
+  };
+
+  // Reduce-only allowances when locked
+  allowReduceOnlyWhenLocked: boolean;
+  allowCancelPendingWhenLocked: boolean;
+
+  // SL/TP modify policy while locked:
+  // allow only if the modification is risk-reducing (tighten stop / reduce max loss).
+  allowRiskReducingSltpChangeWhenLocked: boolean;
+};
+
+export const DEFAULT_POLICY_CONFIG: PolicyConfig = {
+  emailInitialGraceDays: 14,
+  emailReverifyPeriodDays: 30,
+  emailReverifyOverdueGraceDays: 5,
+
+  emailResendCooldownSec: 60,
+  emailDailySendCap: 5,
+  smsDailySendCap: 3,
+  otpMaxAttempts: 6,
+
+  contenderPath1: {
+    minAccountAgeDays: 30,
+    minBalancePctOfStart: 1.2,
+    minTradesLifetime: 30,
+  },
+  contenderPath2: {
+    minAccountAgeDays: 90,
+    lastTradeWithinDays: 14,
+    minReturnLast90d: 0.10,
+    minTradesLast90d: 20,
+  },
+
+  allowReduceOnlyWhenLocked: true,
+  allowCancelPendingWhenLocked: true,
+  allowRiskReducingSltpChangeWhenLocked: true,
+};
+
+export type DecisionContext = {
+  now: Date;
+
+  user: {
+    id: number;
+    email: string;
+    username?: string | null;
+    createdAt: Date;
+
+    // Admin enforcement
+    suspendedAt?: Date | null; // treat Disabled/Frozen as suspended from policy POV if desired
+
+    // Stored verification timestamps (persisted or derived by server context builder)
+    emailVerifiedAt: Date | null;
+    emailInitialDueAt: Date;     // createdAt + 14d
+    emailReverifyDueAt: Date | null;
+    phoneVerifiedAt: Date | null;
+
+    // Tier signals
+    userTier: UserTier;          // CANDIDATE|PERFORMER|SELECTED
+    contenderTier: ContenderTier;
+
+    // “Selected” can be inferred from userTier or KYC invited state
+    selectedAt?: Date | null;
+  };
+
+  // Performance metrics for contender gating (server must compute; client can display)
+  metrics: {
+    tradesLifetime: number;
+    tradesLast90d: number;
+    accountAgeDays: number;
+    lastTradeDaysAgo: number | null;
+
+    // Must be computed from your equity model; if missing, treat as 0 / 1.0.
+    balancePctOfStart: number; // equity / startingEquity
+    returnLast90d: number;     // 0.10 = +10% last 90 days (equity-based or pnl-based)
+  };
+
+  // Throttle state (server authoritative; client can show “try later”)
+  throttle: {
+    emailSendCountDay: number;
+    emailLastSentAtMs: number | null;
+
+    smsSendCountDay: number;
+    smsLastSentAtMs: number | null;
+
+    otpFailCount: number; // rolling or daily; used for max attempts lock
+  };
+
+  // Compliance state (KYC)
+  kyc: {
+    status: "NOT_STARTED" | "INVITED" | "SUBMITTED" | "APPROVED" | "REJECTED";
+    invitedAtMs: number | null;
+  };
+
+  // Optional trade intent details to determine “risk-reducing” behavior
+  tradeIntent?: {
+    kind:
+      | "OPEN_OR_INCREASE"
+      | "CLOSE_OR_REDUCE"
+      | "PLACE_PENDING"
+      | "CANCEL_PENDING"
+      | "MODIFY_SLTP";
+    side?: "BUY" | "SELL";
+    slBefore?: number | null;
+    slAfter?: number | null;
+  };
+};
+
+export type PolicyDecision = {
+  action: PolicyAction;
+  allowed: boolean;
+  deny_code?: DenyCode;
+
+  // Derived states (so UI + backend agree)
+  accountState: AccountState;
+  contenderEligible: boolean;
+  contenderPath: "PATH1" | "PATH2" | null;
+
+  // UI hints (optional but helps keep UX consistent)
+  ui?: {
+    showLockedBanner?: boolean;
+    redirectTo?: "/verify-email" | "/profile" | "/support" | "/kyc";
+    lockCountdownDays?: number;
+  };
+};
+
+// ---------- Core derivations ----------
+
+export function resolveAccountState(ctx: DecisionContext, cfg: PolicyConfig): AccountState {
+  if (ctx.user.suspendedAt) return "SUSPENDED_ADMIN";
+
+  // Initial verify enforcement
+  if (!ctx.user.emailVerifiedAt) {
+    return (ctx.now < ctx.user.emailInitialDueAt)
+      ? "ACTIVE_UNVERIFIED_GRACE"
+      : "LOCKED_EMAIL_UNVERIFIED";
+  }
+
+  // Monthly re-verify enforcement (only after initial verify)
+  if (ctx.user.emailReverifyDueAt) {
+    const overdueAt = new Date(ctx.user.emailReverifyDueAt.getTime() + cfg.emailReverifyOverdueGraceDays * 86400000);
+    if (ctx.now >= overdueAt) return "LOCKED_EMAIL_REVERIFY_OVERDUE";
+  }
+
+  return "ACTIVE_VERIFIED";
+}
+
+export function computeContenderEligibility(ctx: DecisionContext, cfg: PolicyConfig): {
+  eligible: boolean;
+  path: "PATH1" | "PATH2" | null;
+} {
+  // Global prerequisite: must be ACTIVE_VERIFIED to avoid disposable-email promotion.
+  const state = resolveAccountState(ctx, cfg);
+  if (state !== "ACTIVE_VERIFIED") return { eligible: false, path: null };
+
+  const m = ctx.metrics;
+
+  const path1 =
+    m.accountAgeDays >= cfg.contenderPath1.minAccountAgeDays &&
+    m.balancePctOfStart >= cfg.contenderPath1.minBalancePctOfStart &&
+    m.tradesLifetime >= cfg.contenderPath1.minTradesLifetime;
+
+  const path2 =
+    m.accountAgeDays >= cfg.contenderPath2.minAccountAgeDays &&
+    (m.lastTradeDaysAgo ?? 999999) <= cfg.contenderPath2.lastTradeWithinDays &&
+    m.returnLast90d >= cfg.contenderPath2.minReturnLast90d &&
+    m.tradesLast90d >= cfg.contenderPath2.minTradesLast90d;
+
+  if (path1) return { eligible: true, path: "PATH1" };
+  if (path2) return { eligible: true, path: "PATH2" };
+  return { eligible: false, path: null };
+}
+
+function isExposureIncreasingTradingAction(action: PolicyAction): boolean {
+  return (
+    action === "TRADE_OPEN_OR_INCREASE" ||
+    action === "TRADE_PLACE_PENDING"
+    // TRADE_MODIFY_SLTP is conditionally allowed only if risk-reducing; treat as exposure-affecting by default
+    || action === "TRADE_MODIFY_SLTP"
+  );
+}
+
+function isReduceOnlyTradingAction(action: PolicyAction): boolean {
+  return action === "TRADE_CLOSE_OR_REDUCE" || action === "TRADE_CANCEL_PENDING";
+}
+
+export function isRiskReducingSltpChange(intent?: DecisionContext["tradeIntent"]): boolean {
+  if (!intent || intent.kind !== "MODIFY_SLTP") return false;
+  const side = intent.side;
+  const b = intent.slBefore ?? null;
+  const a = intent.slAfter ?? null;
+
+  // If we can't reason, treat as NOT risk-reducing.
+  if (!side || b == null || a == null) return false;
+
+  // For BUY (long): higher SL reduces risk; lower SL increases risk.
+  if (side === "BUY") return a > b;
+
+  // For SELL (short): lower SL reduces risk; higher SL increases risk.
+  if (side === "SELL") return a < b;
+
+  return false;
+}
+
+// ---------- The decision function ----------
+
+export function decidePolicy(
+  action: PolicyAction,
+  ctx: DecisionContext,
+  cfg: PolicyConfig = DEFAULT_POLICY_CONFIG
+): PolicyDecision {
+  const accountState = resolveAccountState(ctx, cfg);
+  const contender = computeContenderEligibility(ctx, cfg);
+
+  // Common deny helper
+  const deny = (deny_code: DenyCode, ui?: PolicyDecision["ui"]): PolicyDecision => ({
+    action,
+    allowed: false,
+    deny_code,
+    accountState,
+    contenderEligible: contender.eligible,
+    contenderPath: contender.path,
+    ui,
+  });
+
+  const allow = (ui?: PolicyDecision["ui"]): PolicyDecision => ({
+    action,
+    allowed: true,
+    accountState,
+    contenderEligible: contender.eligible,
+    contenderPath: contender.path,
+    ui,
+  });
+
+  // 1) Admin suspension blocks all gated actions
+  if (accountState === "SUSPENDED_ADMIN") {
+    return deny("ADMIN_SUSPENDED", { showLockedBanner: true, redirectTo: "/support" });
+  }
+
+  // 2) Email enforcement locks exposure-increasing actions after grace expiry
+  if (accountState === "LOCKED_EMAIL_UNVERIFIED") {
+    if (isExposureIncreasingTradingAction(action)) {
+      return deny("EMAIL_UNVERIFIED_GRACE_EXPIRED", { showLockedBanner: true, redirectTo: "/verify-email" });
+    }
+
+    // Allow reduce-only (close/reduce/cancel pending) if configured
+    if (isReduceOnlyTradingAction(action)) {
+      if (action === "TRADE_CANCEL_PENDING" && !cfg.allowCancelPendingWhenLocked) {
+        return deny("ACTION_NOT_ALLOWED_IN_STATE", { showLockedBanner: true, redirectTo: "/verify-email" });
+      }
+      return cfg.allowReduceOnlyWhenLocked
+        ? allow({ showLockedBanner: true, redirectTo: "/verify-email" })
+        : deny("ACTION_NOT_ALLOWED_IN_STATE", { showLockedBanner: true, redirectTo: "/verify-email" });
+    }
+
+    // Allow non-trading actions (profile edits, resend, etc.) — subject to specific throttles below.
+  }
+
+  // 3) Re-verify overdue locks exposure-increasing actions
+  if (accountState === "LOCKED_EMAIL_REVERIFY_OVERDUE") {
+    if (isExposureIncreasingTradingAction(action)) {
+      return deny("EMAIL_REVERIFY_OVERDUE", { showLockedBanner: true, redirectTo: "/verify-email" });
+    }
+
+    if (isReduceOnlyTradingAction(action)) {
+      if (action === "TRADE_CANCEL_PENDING" && !cfg.allowCancelPendingWhenLocked) {
+        return deny("ACTION_NOT_ALLOWED_IN_STATE", { showLockedBanner: true, redirectTo: "/verify-email" });
+      }
+      return cfg.allowReduceOnlyWhenLocked
+        ? allow({ showLockedBanner: true, redirectTo: "/verify-email" })
+        : deny("ACTION_NOT_ALLOWED_IN_STATE", { showLockedBanner: true, redirectTo: "/verify-email" });
+    }
+  }
+
+  // 4) Special-case SL/TP modify while locked: allow only if risk-reducing (optional)
+  if (action === "TRADE_MODIFY_SLTP") {
+    if (accountState === "ACTIVE_VERIFIED" || accountState === "ACTIVE_UNVERIFIED_GRACE") return allow();
+    if (cfg.allowRiskReducingSltpChangeWhenLocked && isRiskReducingSltpChange(ctx.tradeIntent)) {
+      return allow({ showLockedBanner: true, redirectTo: "/verify-email" });
+    }
+    return deny("ACTION_NOT_ALLOWED_IN_STATE", { showLockedBanner: true, redirectTo: "/verify-email" });
+  }
+
+  // 5) EMAIL resend throttles (Resend integration enforced here)
+  if (action === "EMAIL_RESEND_VERIFICATION") {
+    const nowMs = ctx.now.getTime();
+    const last = ctx.throttle.emailLastSentAtMs ?? 0;
+    const cooldownMs = cfg.emailResendCooldownSec * 1000;
+
+    if (ctx.throttle.emailSendCountDay >= cfg.emailDailySendCap) {
+      return deny("EMAIL_SEND_RATE_LIMIT");
+    }
+    if (nowMs - last < cooldownMs) {
+      return deny("EMAIL_SEND_COOLDOWN");
+    }
+    return allow();
+  }
+
+  // 6) SMS verify (Twilio) eligibility: only for contenders + active verified
+  if (action === "PHONE_VERIFY_START" || action === "PHONE_VERIFY_CONFIRM") {
+    // Must be ACTIVE_VERIFIED and meet contender eligibility; SMS is not baseline.
+    if (accountState !== "ACTIVE_VERIFIED") {
+      return deny("SMS_NOT_ELIGIBLE", { showLockedBanner: true, redirectTo: "/verify-email" });
+    }
+    if (!contender.eligible && ctx.user.contenderTier !== "VERIFIED_SMS" && ctx.user.contenderTier !== "CANDIDATE_SMS_REQUIRED") {
+      return deny("SMS_NOT_ELIGIBLE");
+    }
+
+    // Throttle for OTP send
+    if (action === "PHONE_VERIFY_START") {
+      const nowMs = ctx.now.getTime();
+      const last = ctx.throttle.smsLastSentAtMs ?? 0;
+      if (ctx.throttle.smsSendCountDay >= cfg.smsDailySendCap) return deny("SMS_RATE_LIMIT");
+      if (nowMs - last < 60_000) return deny("SMS_RATE_LIMIT"); // hard 60s SMS cooldown
+    }
+
+    // Max OTP attempts
+    if (action === "PHONE_VERIFY_CONFIRM") {
+      if (ctx.throttle.otpFailCount >= cfg.otpMaxAttempts) return deny("SMS_OTP_TOO_MANY_ATTEMPTS");
+    }
+
+    return allow();
+  }
+
+  // 7) KYC view/submit + payout currency set: only Selected / invited
+  if (action === "KYC_VIEW" || action === "KYC_SUBMIT" || action === "PREFERRED_PAYMENT_CURRENCY_SET") {
+    const selected =
+      ctx.user.userTier === "SELECTED" ||
+      ctx.user.contenderTier === "SELECTED_REAL_CAPITAL" ||
+      !!ctx.user.selectedAt ||
+      ctx.kyc.status === "INVITED" ||
+      ctx.kyc.status === "SUBMITTED" ||
+      ctx.kyc.status === "APPROVED";
+
+    if (!selected) return deny("KYC_NOT_SELECTED", { redirectTo: "/profile" });
+
+    // Optional: enforce valid KYC state transitions for submit
+    if (action === "KYC_SUBMIT") {
+      if (!(ctx.kyc.status === "INVITED" || ctx.kyc.status === "REJECTED")) {
+        return deny("KYC_STATE_INVALID");
+      }
+    }
+
+    return allow({ redirectTo: "/kyc" });
+  }
+
+  // 8) Trade actions default behavior:
+  // - In ACTIVE_UNVERIFIED_GRACE: allow trading (by design).
+  // - In ACTIVE_VERIFIED: allow trading.
+  // - Locked states already handled above for exposure-increasing.
+  if (action === "TRADE_OPEN_OR_INCREASE" || action === "TRADE_PLACE_PENDING") {
+    // If locked states were not caught, allow.
+    return allow();
+  }
+  if (action === "TRADE_CLOSE_OR_REDUCE" || action === "TRADE_CANCEL_PENDING") {
+    return allow();
+  }
+
+  // 9) Everything else allowed by default unless state locked and you choose otherwise.
+  return allow();
+}
+
+// Convenience for UI: compute a small permission matrix in one call.
+export function decisionMatrix(
+  actions: PolicyAction[],
+  ctx: DecisionContext,
+  cfg: PolicyConfig = DEFAULT_POLICY_CONFIG
+): Record<PolicyAction, PolicyDecision> {
+  const out = {} as Record<PolicyAction, PolicyDecision>;
+  for (const a of actions) out[a] = decidePolicy(a, ctx, cfg);
+  return out;
+}
+
+// Convenience: the exact boolean “feature gating” flags frontend can render.
+export function featureGates(ctx: DecisionContext, cfg: PolicyConfig = DEFAULT_POLICY_CONFIG) {
+  const st = resolveAccountState(ctx, cfg);
+  const contender = computeContenderEligibility(ctx, cfg);
+  const selected =
+    ctx.user.userTier === "SELECTED" ||
+    ctx.user.contenderTier === "SELECTED_REAL_CAPITAL" ||
+    !!ctx.user.selectedAt ||
+    ["INVITED", "SUBMITTED", "APPROVED"].includes(ctx.kyc.status);
+
+  return {
+    accountState: st,
+    contenderEligible: contender.eligible,
+    canTradeOpenOrIncrease: decidePolicy("TRADE_OPEN_OR_INCREASE", ctx, cfg).allowed,
+    canTradeCloseOrReduce: decidePolicy("TRADE_CLOSE_OR_REDUCE", ctx, cfg).allowed,
+    canStartSms: decidePolicy("PHONE_VERIFY_START", ctx, cfg).allowed,
+    canViewKyc: selected && decidePolicy("KYC_VIEW", ctx, cfg).allowed,
+    canSetPreferredPaymentCurrency: selected && decidePolicy("PREFERRED_PAYMENT_CURRENCY_SET", ctx, cfg).allowed,
+  };
+}
+```
+
+---
+
+# 2) Server-side builder: make runtime decisions authoritative (no drift)
+
+Create: `server/policy/buildDecisionContext.ts`
+
+This pulls data from your DB (users + user_verification + user_kyc_profiles + basic trade metrics) and builds the `DecisionContext` used by **every enforcement point**.
+
+```ts
+// server/policy/buildDecisionContext.ts
+import { db } from "../db";
+import { sql } from "drizzle-orm";
+import {
+  userVerification,
+  userKycProfiles,
+  userMfa,
+  // IMPORTANT: your users table is already defined in shared/schema.ts in your repo.
+  // Import it here if you have it exported as `users`.
+  // users,
+} from "../../shared/schema";
+
+import type { DecisionContext, UserTier, ContenderTier } from "../../shared/policyDecision";
+
+// Minimal helpers
+function msToDate(ms: number | null | undefined): Date | null {
+  if (!ms) return null;
+  const d = new Date(ms);
+  return isNaN(d.getTime()) ? null : d;
+}
+function daysBetween(a: Date, b: Date) {
+  return Math.floor((a.getTime() - b.getTime()) / 86400000);
+}
+
+// Compute returnLast90d:
+// If you already have equity snapshots, wire it here.
+// Otherwise, fallback: sum closed PnL in last 90d / startingEquity.
+async function computeReturnLast90d(userId: number, startingEquity: number): Promise<number> {
+  const now = Date.now();
+  const since = now - 90 * 86400000;
+
+  // Adapt these columns if your schema differs.
+  // Assumes `trades` has `user_id`, `closed_at`, `pnl`.
+  const row = await db.get<{ pnl: number | null }>(sql`
+    SELECT COALESCE(SUM(pnl), 0) AS pnl
+    FROM trades
+    WHERE user_id = ${userId}
+      AND closed_at IS NOT NULL
+      AND closed_at >= ${since}
+  `);
+
+  const pnl = Number(row?.pnl ?? 0);
+  if (!startingEquity || startingEquity <= 0) return 0;
+  return pnl / startingEquity;
+}
+
+// Compute balancePctOfStart from your user equity model.
+// If you already track starting equity, use it; else fallback to 1.
+async function computeBalancePctOfStart(userId: number): Promise<number> {
+  // Adapt these columns if your schema differs.
+  // Assumes `users` has `equity` and `starting_equity`.
+  const row = await db.get<{ equity: number | null; starting_equity: number | null }>(sql`
+    SELECT equity AS equity, starting_equity AS starting_equity
+    FROM users
+    WHERE id = ${userId}
+    LIMIT 1
+  `);
+
+  const eq = Number(row?.equity ?? 0);
+  const start = Number(row?.starting_equity ?? 0);
+  if (!start || start <= 0) return 1.0;
+  return eq / start;
+}
+
+// A canonical builder used in every gate.
+export async function buildDecisionContext(params: {
+  userId: number;
+  email: string;
+  username?: string | null;
+  createdAtMs: number; // from req.user or users table
+  userTier: UserTier;  // from req.user or users table
+  suspendedAtMs?: number | null;
+
+  // optional request meta for audit trail (not required for policy)
+  nowMs?: number;
+  otpFailCount?: number; // if you store per-session, pass it
+}): Promise<DecisionContext> {
+  const nowMs = params.nowMs ?? Date.now();
+  const now = new Date(nowMs);
+
+  // Pull verification row
+  const uv = await db
+    .select()
+    .from(userVerification)
+    .where(sql`${userVerification.userId} = ${params.userId}`)
+    .limit(1);
+
+  const uv0 = uv[0] as any | undefined;
+
+  // If not present, policy still must be correct; derive defaults.
+  const createdAt = new Date(params.createdAtMs);
+  const emailInitialDueAt = new Date(createdAt.getTime() + 14 * 86400000);
+
+  const emailVerifiedAt = msToDate(uv0?.emailVerifiedAt ?? null);
+  const emailReverifyDueAt = msToDate(uv0?.emailReverifyDueAt ?? null) ??
+    (emailVerifiedAt ? new Date(emailVerifiedAt.getTime() + 30 * 86400000) : null);
+
+  const phoneVerifiedAt = msToDate(uv0?.smsVerifiedAt ?? null);
+
+  const contenderTier = (uv0?.contenderTier ?? "NONE") as ContenderTier;
+
+  // KYC row
+  const kycRows = await db
+    .select()
+    .from(userKycProfiles)
+    .where(sql`${userKycProfiles.userId} = ${params.userId}`)
+    .limit(1);
+
+  const kyc0 = kycRows[0] as any | undefined;
+
+  // Throttles
+  const emailSendCountDay = Number(uv0?.emailResendCountDay ?? 0);
+  const emailLastSentAtMs = Number(uv0?.emailLastResendAt ?? 0) || null;
+
+  const smsSendCountDay = Number(uv0?.smsSendCountDay ?? 0);
+  const smsLastSentAtMs = Number(uv0?.smsLastSentAt ?? 0) || null;
+
+  const otpFailCount = Number(params.otpFailCount ?? uv0?.smsVerifyFailCount ?? 0);
+
+  // Metrics
+  const tradesLifetime = await db.get<{ n: number }>(sql`
+    SELECT COUNT(1) AS n FROM trades WHERE user_id = ${params.userId}
+  `);
+
+  const tradesLast90d = await db.get<{ n: number }>(sql`
+    SELECT COUNT(1) AS n
+    FROM trades
+    WHERE user_id = ${params.userId}
+      AND COALESCE(closed_at, created_at) >= ${nowMs - 90 * 86400000}
+  `);
+
+  const lastTrade = await db.get<{ t: number | null }>(sql`
+    SELECT MAX(COALESCE(closed_at, created_at)) AS t
+    FROM trades
+    WHERE user_id = ${params.userId}
+  `);
+
+  const lastTradeDaysAgo = lastTrade?.t ? daysBetween(now, new Date(lastTrade.t)) : null;
+
+  const balancePctOfStart = await computeBalancePctOfStart(params.userId);
+
+  // Try to get starting equity for return calc
+  const startEqRow = await db.get<{ starting_equity: number | null }>(sql`
+    SELECT starting_equity AS starting_equity
+    FROM users
+    WHERE id = ${params.userId}
+    LIMIT 1
+  `);
+  const startingEquity = Number(startEqRow?.starting_equity ?? 0) || 0;
+
+  const returnLast90d = await computeReturnLast90d(params.userId, startingEquity);
+
+  const accountAgeDays = daysBetween(now, createdAt);
+
+  return {
+    now,
+    user: {
+      id: params.userId,
+      email: params.email,
+      username: params.username ?? null,
+      createdAt,
+      suspendedAt: msToDate(params.suspendedAtMs ?? null),
+      emailVerifiedAt,
+      emailInitialDueAt,
+      emailReverifyDueAt,
+      phoneVerifiedAt,
+      userTier: params.userTier,
+      contenderTier,
+      selectedAt: null, // set if you store it explicitly
+    },
+    metrics: {
+      tradesLifetime: Number(tradesLifetime?.n ?? 0),
+      tradesLast90d: Number(tradesLast90d?.n ?? 0),
+      accountAgeDays,
+      lastTradeDaysAgo,
+      balancePctOfStart: Number.isFinite(balancePctOfStart) ? balancePctOfStart : 1.0,
+      returnLast90d: Number.isFinite(returnLast90d) ? returnLast90d : 0.0,
+    },
+    throttle: {
+      emailSendCountDay,
+      emailLastSentAtMs,
+      smsSendCountDay,
+      smsLastSentAtMs,
+      otpFailCount,
+    },
+    kyc: {
+      status: (kyc0?.status ?? "NOT_STARTED"),
+      invitedAtMs: Number(kyc0?.invitedAt ?? 0) || null,
+    },
+  };
+}
+```
+
+---
+
+# 3) Enforce policy everywhere (server) — trade, SMS, KYC, email resend
+
+## 3A) Trade engine gate (example patch)
+
+In the route that handles **opening / increasing / placing pending**, add a policy check before any risk-engine checks.
+
+Example: `server/routes/trades.ts` (or wherever your order submit route lives)
+
+```ts
+import { decidePolicy } from "../../shared/policyDecision";
+import { buildDecisionContext } from "../policy/buildDecisionContext";
+import { appendIdentityAudit } from "../services/identityAudit";
+
+app.post("/api/trades/open", requireAuth, async (req, res) => {
+  const u = req.user as any;
+
+  const ctx = await buildDecisionContext({
+    userId: u.id,
+    email: u.email,
+    username: u.username,
+    createdAtMs: u.createdAt,          // ensure req.user has this; else query users table
+    userTier: (u.userTier ?? "CANDIDATE"),
+    suspendedAtMs: u.suspendedAt ?? null,
+  });
+
+  const dec = decidePolicy("TRADE_OPEN_OR_INCREASE", ctx);
+  if (!dec.allowed) {
+    await appendIdentityAudit({
+      userId: u.id,
+      email: u.email,
+      username: u.username,
+      category: "ACCOUNT_EVENT",
+      type: "ACCOUNT_ACTION_DENIED",
+      title: "Trade open denied by policy",
+      description: dec.deny_code ?? "UNKNOWN",
+      ip: (req.headers["x-forwarded-for"] as string) ?? req.ip,
+      userAgent: req.headers["user-agent"] ?? null,
+    });
+    return res.status(403).json({ ok: false, deny_code: dec.deny_code, accountState: dec.accountState });
+  }
+
+  // Continue with existing risk guardrails + order engine logic
+  // ...
+});
+```
+
+### Reduce-only close should always be allowed (even when locked)
+
+At close route:
+
+```ts
+const dec = decidePolicy("TRADE_CLOSE_OR_REDUCE", ctx);
+if (!dec.allowed) return res.status(403).json({ deny_code: dec.deny_code });
+```
+
+### SL/TP modify: pass “risk-reducing” intent if you can
+
+When modifying SLTP:
+
+```ts
+ctx.tradeIntent = {
+  kind: "MODIFY_SLTP",
+  side: req.body.side,      // BUY/SELL
+  slBefore: existing.sl,
+  slAfter: req.body.stopLoss,
+};
+
+const dec = decidePolicy("TRADE_MODIFY_SLTP", ctx);
+if (!dec.allowed) return res.status(403).json({ deny_code: dec.deny_code });
+```
+
+---
+
+## 3B) SMS (Twilio) gate
+
+Before sending OTP:
+
+```ts
+const dec = decidePolicy("PHONE_VERIFY_START", ctx);
+if (!dec.allowed) return res.status(403).json({ deny_code: dec.deny_code, accountState: dec.accountState });
+```
+
+Before confirming OTP:
+
+```ts
+const dec = decidePolicy("PHONE_VERIFY_CONFIRM", ctx);
+if (!dec.allowed) return res.status(403).json({ deny_code: dec.deny_code, accountState: dec.accountState });
+```
+
+---
+
+## 3C) KYC view gate
+
+```ts
+const dec = decidePolicy("KYC_VIEW", ctx);
+if (!dec.allowed) return res.status(403).json({ deny_code: dec.deny_code });
+```
+
+---
+
+## 3D) Email resend gate (Resend)
+
+```ts
+const dec = decidePolicy("EMAIL_RESEND_VERIFICATION", ctx);
+if (!dec.allowed) return res.status(429).json({ deny_code: dec.deny_code });
+```
+
+---
+
+# 4) Frontend gating (no drift)
+
+On the client, call `/api/profile/me` (your existing plan), then compute gates in the UI using the same shared module.
+
+Example inside `ProfileSettings.tsx` after you receive `data`:
+
+```ts
+import { featureGates } from "../../../shared/policyDecision";
+
+const gates = featureGates({
+  now: new Date(),
+  user: {
+    id: data.user.id,
+    email: data.user.email,
+    username: data.user.username,
+    createdAt: new Date(data.user.createdAt ?? Date.now()), // pass server-createdAt if returned
+    emailVerifiedAt: data.verification.emailVerifiedAt ? new Date(data.verification.emailVerifiedAt) : null,
+    emailInitialDueAt: new Date(data.verification.emailInitialDueAt ?? Date.now()),
+    emailReverifyDueAt: data.verification.emailReverifyDueAt ? new Date(data.verification.emailReverifyDueAt) : null,
+    phoneVerifiedAt: data.verification.smsVerifiedAt ? new Date(data.verification.smsVerifiedAt) : null,
+    userTier: data.user.userTier,
+    contenderTier: data.verification.contenderTier,
+    selectedAt: null,
+  },
+  metrics: data.metrics,
+  throttle: data.throttle,
+  kyc: data.kyc,
+});
+```
+
+Then gate UI elements from `gates.canStartSms`, `gates.canViewKyc`, etc.
+
+---
+
+# 5) “Fully functional” performance gating: what makes it correct in production
+
+To be truly “fully functional” (not placeholder), the only part you must ensure is **how you compute**:
+
+* `balancePctOfStart` (equity / startingEquity)
+* `returnLast90d`
+
+Everything else is deterministic.
+
+If your app already persists **equity snapshots**, use them to compute `returnLast90d` precisely. If you do not, the fallback in the builder uses **closed PnL / starting equity**, which is coherent but less accurate than equity curve.
+
+You do **not** need scheduled jobs for enforcement correctness: even if a job misses, the runtime `decidePolicy()` uses derived due dates + metrics.
+
+---
+
+# 6) What Replit Agent 3 must do to finalize integration quickly
+
+1. Add `shared/policyDecision.ts`
+2. Add `server/policy/buildDecisionContext.ts` and adapt the `trades` / `users` column names if they differ
+3. In every trade mutation route:
+
+   * call `buildDecisionContext()`
+   * call `decidePolicy()` with the correct action
+   * deny with `{deny_code}` on failure
+4. In email resend + SMS OTP routes:
+
+   * enforce policy first
+   * only then call Resend/Twilio
+5. In KYC/payout routes:
+
+   * enforce `KYC_VIEW` / `PREFERRED_PAYMENT_CURRENCY_SET`
+6. Add one audit event on denial (already shown) to keep institutional-grade trail
+
+If you paste your current `trades` table column names (created_at / closed_at / pnl / user_id) and your `users` equity fields (equity / starting_equity), I can provide the exact final builder with zero adaptation needed.

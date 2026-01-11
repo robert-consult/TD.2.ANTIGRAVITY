@@ -1,0 +1,706 @@
+Done. Below is the **Admin “Target Coverage” mini-tab** (backend + frontend) that:
+
+* Computes **coverage** for `DOC1`:
+
+  * Global Master (`DEFAULT/GLOBAL`)
+  * Addendum Default (`DEFAULT/ROW`)
+  * Addendum **COUNTRY/{ISO2}**
+  * Addendum **REGION/{regionKey}**
+* Highlights **gaps**:
+
+  * `MISSING_DOC` (no legalDocuments exist for that target)
+  * `MISSING_TARGET` (docs exist but no active target set in `legal_doc_targets`)
+  * `BROKEN_TARGET` (target exists but points to missing doc)
+  * `OK` (target + doc are in good state)
+* Provides actions:
+
+  * **Open Target in Legal Docs** (prefill selector)
+  * **Set Active → Latest** (one click) when applicable
+  * **Open Active Doc** and **Open Latest Doc**
+
+This works with the `legal_doc_targets` table you just added.
+
+---
+
+## 1) Backend: Coverage endpoint
+
+### 1.1 Create `server/routes/adminLegalDocCoverage.ts`
+
+```ts
+// FILE: /server/routes/adminLegalDocCoverage.ts
+import { Router } from "express";
+import { and, desc, eq, inArray } from "drizzle-orm";
+import { db } from "../db";
+import { requireAdmin } from "../middleware/requireAdmin";
+import { legalDocuments, legalDocTargets } from "../../shared/schema";
+
+export const adminLegalDocCoverageRouter = Router();
+adminLegalDocCoverageRouter.use(requireAdmin);
+
+function splitList(raw: any): string[] {
+  const s = String(raw || "").trim();
+  if (!s) return [];
+  return s
+    .split(/[\s,;]+/g)
+    .map((x) => x.trim())
+    .filter(Boolean);
+}
+
+function toUpper2(x: string) {
+  const s = String(x || "").trim().toUpperCase();
+  return /^[A-Z]{2}$/.test(s) ? s : null;
+}
+
+function createdAtMs(v: any): number {
+  if (!v) return 0;
+  if (v instanceof Date) return v.getTime();
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+}
+
+type DocLite = {
+  id: number;
+  docSet: string;
+  docType: string;
+  jurisdictionType: string;
+  jurisdictionKey: string;
+  version: string;
+  sha256: string;
+  createdAt: any;
+};
+
+type TargetLite = {
+  id: number;
+  docSet: string;
+  docType: string;
+  jurisdictionType: string;
+  jurisdictionKey: string;
+  activeDocId: number;
+  updatedAt: any;
+  note: string | null;
+};
+
+const DEFAULT_EXPECTED_ISO2 = [
+  "US","AE","IN","KE","NG","BD","TH","PH","SG","HK","CN",
+  "BR","AR","CO","MX",
+  "ET","GH","AO","ZA","UG","TZ",
+  "RU","UA","GB"
+];
+
+const DEFAULT_EXPECTED_REGIONS = [
+  "SE_ASIA",
+  "SOUTH_AMERICA",
+  "WEST_EUROPE",
+  "EAST_EUROPE",
+  "MIDDLE_EAST",
+  "WEST_AFRICA",
+  "SOUTHERN_AFRICA",
+  "CENTRAL_AFRICA",
+  "NORTH_AFRICA",
+  "CENTRAL_AMERICA",
+  "NORTH_AMERICA",
+  "CENTRAL_ASIA",
+  "INDIAN_OCEAN_ISLANDS",
+  "PACIFIC_ISLANDS",
+  "AUSTRALASIA",
+  "JAPAN",
+  "SOUTH_KOREA",
+  "PAKISTAN"
+];
+
+// GET /api/admin/legal-docs/coverage?docSet=DOC1&expectedIso2=US,KE&expectedRegions=SE_ASIA,MIDDLE_EAST
+adminLegalDocCoverageRouter.get("/", (req, res) => {
+  try {
+    const docSet = String(req.query.docSet || "DOC1").trim() || "DOC1";
+
+    // Expected inputs (optional). If not provided, use defaults.
+    const expectedIso2Raw = splitList(req.query.expectedIso2);
+    const expectedRegionsRaw = splitList(req.query.expectedRegions);
+
+    const expectedIso2 =
+      expectedIso2Raw.length > 0
+        ? Array.from(new Set(expectedIso2Raw.map(toUpper2).filter(Boolean) as string[]))
+        : DEFAULT_EXPECTED_ISO2.slice();
+
+    const expectedRegions =
+      expectedRegionsRaw.length > 0
+        ? Array.from(new Set(expectedRegionsRaw.map((x) => String(x).trim()).filter(Boolean)))
+        : DEFAULT_EXPECTED_REGIONS.slice();
+
+    // Pull docs (DOC1: GLOBAL_MASTER + ADDENDUM)
+    const docs = db
+      .select({
+        id: legalDocuments.id,
+        docSet: legalDocuments.docSet,
+        docType: legalDocuments.docType,
+        jurisdictionType: legalDocuments.jurisdictionType,
+        jurisdictionKey: legalDocuments.jurisdictionKey,
+        version: legalDocuments.version,
+        sha256: legalDocuments.sha256,
+        createdAt: legalDocuments.createdAt,
+      })
+      .from(legalDocuments)
+      .where(
+        and(
+          eq(legalDocuments.docSet, docSet),
+          inArray(legalDocuments.docType, ["GLOBAL_MASTER", "ADDENDUM"])
+        ) as any
+      )
+      .orderBy(desc(legalDocuments.createdAt))
+      .limit(20000)
+      .all() as unknown as DocLite[];
+
+    // Pull targets for DOC1
+    const targets = db
+      .select({
+        id: legalDocTargets.id,
+        docSet: legalDocTargets.docSet,
+        docType: legalDocTargets.docType,
+        jurisdictionType: legalDocTargets.jurisdictionType,
+        jurisdictionKey: legalDocTargets.jurisdictionKey,
+        activeDocId: legalDocTargets.activeDocId,
+        updatedAt: legalDocTargets.updatedAt,
+        note: legalDocTargets.note,
+      })
+      .from(legalDocTargets)
+      .where(eq(legalDocTargets.docSet, docSet))
+      .limit(5000)
+      .all() as unknown as TargetLite[];
+
+    // Build doc map by id
+    const docById = new Map<number, DocLite>();
+    for (const d of docs) docById.set(Number(d.id), d);
+
+    // Latest doc per (docType, jurisdictionType, jurisdictionKey)
+    const latestByKey = new Map<string, DocLite>();
+    const keyOf = (docType: string, jt: string, jk: string) => `${docType}|${jt}|${jk}`;
+
+    for (const d of docs) {
+      const k = keyOf(d.docType, d.jurisdictionType, d.jurisdictionKey);
+      const prev = latestByKey.get(k);
+      if (!prev || createdAtMs(d.createdAt) > createdAtMs(prev.createdAt)) {
+        latestByKey.set(k, d);
+      }
+    }
+
+    // Targets by (docType, jt, jk)
+    const targetByKey = new Map<string, TargetLite>();
+    for (const t of targets) {
+      const k = keyOf(t.docType, t.jurisdictionType, t.jurisdictionKey);
+      targetByKey.set(k, t);
+    }
+
+    // Discover keys present in docs/targets
+    const discoveredIso2 = new Set<string>();
+    const discoveredRegions = new Set<string>();
+
+    for (const d of docs) {
+      if (d.docType !== "ADDENDUM") continue;
+      if (d.jurisdictionType === "COUNTRY") discoveredIso2.add(String(d.jurisdictionKey).toUpperCase());
+      if (d.jurisdictionType === "REGION") discoveredRegions.add(String(d.jurisdictionKey));
+    }
+    for (const t of targets) {
+      if (t.docType !== "ADDENDUM") continue;
+      if (t.jurisdictionType === "COUNTRY") discoveredIso2.add(String(t.jurisdictionKey).toUpperCase());
+      if (t.jurisdictionType === "REGION") discoveredRegions.add(String(t.jurisdictionKey));
+    }
+
+    // Union expected + discovered
+    const allIso2 = Array.from(new Set([...expectedIso2, ...Array.from(discoveredIso2)])).sort();
+    const allRegions = Array.from(new Set([...expectedRegions, ...Array.from(discoveredRegions)])).sort();
+
+    // Helper to build a coverage row
+    const buildRow = (docType: string, jt: string, jk: string) => {
+      const k = keyOf(docType, jt, jk);
+      const latest = latestByKey.get(k) || null;
+      const target = targetByKey.get(k) || null;
+      const activeDoc = target ? (docById.get(Number(target.activeDocId)) || null) : null;
+
+      let status: "OK" | "MISSING_DOC" | "MISSING_TARGET" | "BROKEN_TARGET";
+      if (!latest && !target) status = "MISSING_DOC";
+      else if (latest && !target) status = "MISSING_TARGET";
+      else if (target && !activeDoc) status = "BROKEN_TARGET";
+      else status = "OK";
+
+      return {
+        target: { docSet, docType, jurisdictionType: jt, jurisdictionKey: jk },
+        status,
+        latest,
+        targetRow: target,
+        activeDoc,
+      };
+    };
+
+    // Global / default coverage
+    const global = buildRow("GLOBAL_MASTER", "DEFAULT", "GLOBAL");
+    const addendumDefault = buildRow("ADDENDUM", "DEFAULT", "ROW");
+
+    // Country and region coverage
+    const countries = allIso2.map((iso2) => buildRow("ADDENDUM", "COUNTRY", iso2));
+    const regions = allRegions.map((rk) => buildRow("ADDENDUM", "REGION", rk));
+
+    // Summary
+    const allRows = [global, addendumDefault, ...countries, ...regions];
+    const summary = {
+      total: allRows.length,
+      ok: allRows.filter((r) => r.status === "OK").length,
+      missingDoc: allRows.filter((r) => r.status === "MISSING_DOC").length,
+      missingTarget: allRows.filter((r) => r.status === "MISSING_TARGET").length,
+      brokenTarget: allRows.filter((r) => r.status === "BROKEN_TARGET").length,
+      countries: countries.length,
+      regions: regions.length,
+    };
+
+    return res.json({
+      ok: true,
+      docSet,
+      expected: { iso2: expectedIso2, regions: expectedRegions },
+      discovered: { iso2: Array.from(discoveredIso2).sort(), regions: Array.from(discoveredRegions).sort() },
+      summary,
+      global,
+      addendumDefault,
+      countries,
+      regions,
+    });
+  } catch (e: any) {
+    return res.status(400).json({ ok: false, error: e?.message || "Coverage failed." });
+  }
+});
+```
+
+### 1.2 Mount route in `server/index.ts`
+
+```ts
+// FILE: /server/index.ts
+import { adminLegalDocCoverageRouter } from "./routes/adminLegalDocCoverage";
+
+// ...
+app.use("/api/admin/legal-docs/coverage", adminLegalDocCoverageRouter);
+```
+
+---
+
+## 2) Frontend: Admin mini-tab “Legal Coverage”
+
+### 2.1 Create `client/src/pages/AdminLegalCoverage.tsx`
+
+```tsx
+// FILE: /client/src/pages/AdminLegalCoverage.tsx
+import React, { useEffect, useMemo, useState } from "react";
+import { dispatchAdminNavigate, setLegalDocsPrefill } from "../lib/adminDeepLink";
+
+type DocLite = {
+  id: number;
+  docSet: string;
+  docType: string;
+  jurisdictionType: string;
+  jurisdictionKey: string;
+  version: string;
+  sha256: string;
+  createdAt: any;
+};
+
+type TargetLite = {
+  id: number;
+  docSet: string;
+  docType: string;
+  jurisdictionType: string;
+  jurisdictionKey: string;
+  activeDocId: number;
+  updatedAt: any;
+  note: string | null;
+};
+
+type CoverageRow = {
+  target: { docSet: string; docType: string; jurisdictionType: string; jurisdictionKey: string };
+  status: "OK" | "MISSING_DOC" | "MISSING_TARGET" | "BROKEN_TARGET";
+  latest: DocLite | null;
+  targetRow: TargetLite | null;
+  activeDoc: DocLite | null;
+};
+
+export default function AdminLegalCoverage() {
+  const [docSet, setDocSet] = useState("DOC1");
+
+  const [expectedIso2Text, setExpectedIso2Text] = useState(() =>
+    (localStorage.getItem("legalCoverage_expectedIso2") || "US, AE, IN, KE, NG, BD, TH, PH, SG, HK, CN, BR, AR, CO, MX, ET, GH, AO, ZA, UG, TZ, RU, UA, GB")
+  );
+  const [expectedRegionsText, setExpectedRegionsText] = useState(() =>
+    (localStorage.getItem("legalCoverage_expectedRegions") || "SE_ASIA, SOUTH_AMERICA, WEST_EUROPE, EAST_EUROPE, MIDDLE_EAST, WEST_AFRICA, SOUTHERN_AFRICA")
+  );
+
+  const [data, setData] = useState<any>(null);
+  const [loading, setLoading] = useState(false);
+
+  const expectedIso2 = useMemo(() => expectedIso2Text, [expectedIso2Text]);
+  const expectedRegions = useMemo(() => expectedRegionsText, [expectedRegionsText]);
+
+  async function load() {
+    setLoading(true);
+    try {
+      localStorage.setItem("legalCoverage_expectedIso2", expectedIso2Text);
+      localStorage.setItem("legalCoverage_expectedRegions", expectedRegionsText);
+
+      const qs = new URLSearchParams({
+        docSet,
+        expectedIso2,
+        expectedRegions,
+      });
+
+      const res = await fetch(`/api/admin/legal-docs/coverage?${qs.toString()}`);
+      const j = await res.json();
+      if (!j?.ok) throw new Error(j?.error || "Failed to load coverage.");
+      setData(j);
+    } catch (e: any) {
+      alert(e?.message || "Coverage load failed.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [docSet]);
+
+  function goLegalDocsTarget(target: CoverageRow["target"], openDocumentId?: number | null) {
+    setLegalDocsPrefill({
+      docSet: target.docSet,
+      docType: target.docType as any,
+      jurisdictionType: target.jurisdictionType as any,
+      jurisdictionKey: target.jurisdictionKey,
+      openDocumentId: openDocumentId ?? null,
+      returnTo: null,
+    });
+
+    dispatchAdminNavigate({
+      topTabKey: "systemConfig",
+      systemConfigTabKey: "legalDocs",
+    });
+  }
+
+  async function setActiveToLatest(row: CoverageRow) {
+    if (!row.latest?.id) return;
+    const t = row.target;
+
+    const res = await fetch(`/api/admin/legal-docs/targets/set-active`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        docSet: t.docSet,
+        docType: t.docType,
+        jurisdictionType: t.jurisdictionType,
+        jurisdictionKey: t.jurisdictionKey,
+        activeDocId: Number(row.latest.id),
+        note: "Set Active to Latest via Coverage",
+      }),
+    });
+    const j = await res.json();
+    if (!j?.ok) {
+      alert(j?.error || "Failed to set active.");
+      return;
+    }
+    await load();
+  }
+
+  const summary = data?.summary;
+
+  return (
+    <div style={{ display: "grid", gap: 12 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+        <div>
+          <div style={{ fontSize: 18, fontWeight: 700 }}>Legal Coverage</div>
+          <div style={{ fontSize: 12, opacity: 0.75 }}>
+            Coverage of docs and active targets per jurisdiction. Use this before onboarding new countries/regions.
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button style={btn} onClick={load} disabled={loading}>
+            {loading ? "Refreshing..." : "Refresh"}
+          </button>
+        </div>
+      </div>
+
+      <div style={{ ...card, display: "grid", gap: 10, gridTemplateColumns: "220px 1fr 1fr" }}>
+        <Field label="Doc Set">
+          <select value={docSet} onChange={(e) => setDocSet(e.target.value)} style={input}>
+            {["DOC1"].map((x) => (
+              <option key={x} value={x}>{x}</option>
+            ))}
+          </select>
+        </Field>
+
+        <Field label="Expected Countries (ISO2, comma/space separated)">
+          <textarea
+            value={expectedIso2Text}
+            onChange={(e) => setExpectedIso2Text(e.target.value)}
+            style={{ ...input, height: 74, resize: "vertical" }}
+          />
+        </Field>
+
+        <Field label="Expected Regions (regionKey, comma/space separated)">
+          <textarea
+            value={expectedRegionsText}
+            onChange={(e) => setExpectedRegionsText(e.target.value)}
+            style={{ ...input, height: 74, resize: "vertical" }}
+          />
+        </Field>
+      </div>
+
+      {summary && (
+        <div style={{ ...card, display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 10 }}>
+          <Stat label="Total Targets" value={summary.total} />
+          <Stat label="OK" value={summary.ok} />
+          <Stat label="Missing Doc" value={summary.missingDoc} />
+          <Stat label="Missing Target" value={summary.missingTarget} />
+          <Stat label="Broken Target" value={summary.brokenTarget} />
+          <Stat label="Countries" value={summary.countries} />
+          <Stat label="Regions" value={summary.regions} />
+        </div>
+      )}
+
+      {data && (
+        <>
+          <div style={card}>
+            <div style={{ fontWeight: 700, marginBottom: 8 }}>Core Targets</div>
+            <div style={{ display: "grid", gap: 8 }}>
+              <CoverageRowView row={data.global as CoverageRow} onGo={goLegalDocsTarget} onSetActive={setActiveToLatest} />
+              <CoverageRowView row={data.addendumDefault as CoverageRow} onGo={goLegalDocsTarget} onSetActive={setActiveToLatest} />
+            </div>
+          </div>
+
+          <div style={card}>
+            <div style={{ fontWeight: 700, marginBottom: 8 }}>Countries</div>
+            <div style={{ maxHeight: 420, overflow: "auto", border: "1px solid rgba(0,0,0,0.10)", borderRadius: 10 }}>
+              <CoverageHeader />
+              {(data.countries as CoverageRow[]).map((row) => (
+                <CoverageRowLine key={`C:${row.target.jurisdictionKey}`} row={row} onGo={goLegalDocsTarget} onSetActive={setActiveToLatest} />
+              ))}
+            </div>
+          </div>
+
+          <div style={card}>
+            <div style={{ fontWeight: 700, marginBottom: 8 }}>Regions</div>
+            <div style={{ maxHeight: 420, overflow: "auto", border: "1px solid rgba(0,0,0,0.10)", borderRadius: 10 }}>
+              <CoverageHeader />
+              {(data.regions as CoverageRow[]).map((row) => (
+                <CoverageRowLine key={`R:${row.target.jurisdictionKey}`} row={row} onGo={goLegalDocsTarget} onSetActive={setActiveToLatest} />
+              ))}
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function CoverageHeader() {
+  return (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "90px 120px 260px 180px 180px 280px",
+        padding: 10,
+        background: "rgba(0,0,0,0.04)",
+        fontSize: 12,
+        fontWeight: 700,
+      }}
+    >
+      <div>Status</div>
+      <div>Type</div>
+      <div>Target</div>
+      <div>Latest Doc</div>
+      <div>Active Doc</div>
+      <div>Actions</div>
+    </div>
+  );
+}
+
+function CoverageRowView(props: {
+  row: CoverageRow;
+  onGo: (target: CoverageRow["target"], openDocumentId?: number | null) => void;
+  onSetActive: (row: CoverageRow) => void;
+}) {
+  const r = props.row;
+  return (
+    <div style={{ border: "1px solid rgba(0,0,0,0.10)", borderRadius: 10, padding: 10 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
+        <div style={{ display: "grid", gap: 4 }}>
+          <div style={{ fontWeight: 700 }}>
+            {r.target.docType} / {r.target.jurisdictionType}/{r.target.jurisdictionKey}{" "}
+            <StatusBadge status={r.status} />
+          </div>
+          <div style={{ fontSize: 12, opacity: 0.8 }}>
+            Latest: {r.latest ? `#${r.latest.id} v${r.latest.version}` : "—"} | Active: {r.activeDoc ? `#${r.activeDoc.id} v${r.activeDoc.version}` : "—"}
+          </div>
+        </div>
+
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button style={btnSmall} onClick={() => props.onGo(r.target, null)}>Open Target</button>
+          {r.latest?.id && <button style={btnSmall} onClick={() => props.onGo(r.target, r.latest!.id)}>Open Latest</button>}
+          {r.activeDoc?.id && <button style={btnSmall} onClick={() => props.onGo(r.target, r.activeDoc!.id)}>Open Active</button>}
+          {(r.status === "MISSING_TARGET" || r.status === "BROKEN_TARGET") && r.latest?.id && (
+            <button style={btnSmall} onClick={() => props.onSetActive(r)}>Set Active → Latest</button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CoverageRowLine(props: {
+  row: CoverageRow;
+  onGo: (target: CoverageRow["target"], openDocumentId?: number | null) => void;
+  onSetActive: (row: CoverageRow) => void;
+}) {
+  const r = props.row;
+
+  const targetLabel = `${r.target.jurisdictionType}/${r.target.jurisdictionKey}`;
+  const latestLabel = r.latest ? `#${r.latest.id} v${r.latest.version}` : "—";
+  const activeLabel = r.activeDoc ? `#${r.activeDoc.id} v${r.activeDoc.version}` : "—";
+
+  return (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "90px 120px 260px 180px 180px 280px",
+        padding: 10,
+        borderTop: "1px solid rgba(0,0,0,0.08)",
+        fontSize: 12,
+        alignItems: "center",
+      }}
+    >
+      <div><StatusBadge status={r.status} /></div>
+      <div>{r.target.docType}</div>
+      <div style={{ fontFamily: "monospace" }}>{targetLabel}</div>
+      <div style={{ fontFamily: "monospace" }}>{latestLabel}</div>
+      <div style={{ fontFamily: "monospace" }}>{activeLabel}</div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <button style={btnSmall} onClick={() => props.onGo(r.target, null)}>Open Target</button>
+        {r.latest?.id && <button style={btnSmall} onClick={() => props.onGo(r.target, r.latest!.id)}>Open Latest</button>}
+        {r.activeDoc?.id && <button style={btnSmall} onClick={() => props.onGo(r.target, r.activeDoc!.id)}>Open Active</button>}
+        {(r.status === "MISSING_TARGET" || r.status === "BROKEN_TARGET") && r.latest?.id && (
+          <button style={btnSmall} onClick={() => props.onSetActive(r)}>Set Active → Latest</button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function StatusBadge(props: { status: CoverageRow["status"] }) {
+  const s = props.status;
+  return (
+    <span
+      style={{
+        display: "inline-block",
+        padding: "2px 8px",
+        borderRadius: 999,
+        border: "1px solid rgba(0,0,0,0.18)",
+        fontSize: 11,
+        fontWeight: 700,
+      }}
+      title={s}
+    >
+      {s}
+    </span>
+  );
+}
+
+function Stat(props: { label: string; value: any }) {
+  return (
+    <div style={{ border: "1px solid rgba(0,0,0,0.10)", borderRadius: 10, padding: 10 }}>
+      <div style={{ fontSize: 12, opacity: 0.75 }}>{props.label}</div>
+      <div style={{ fontSize: 16, fontWeight: 800 }}>{String(props.value)}</div>
+    </div>
+  );
+}
+
+function Field(props: { label: string; children: React.ReactNode }) {
+  return (
+    <label style={{ display: "grid", gap: 6 }}>
+      <div style={{ fontSize: 12, opacity: 0.8 }}>{props.label}</div>
+      {props.children}
+    </label>
+  );
+}
+
+const card: React.CSSProperties = {
+  border: "1px solid rgba(0,0,0,0.12)",
+  borderRadius: 12,
+  padding: 12,
+  background: "white",
+};
+
+const input: React.CSSProperties = {
+  width: "100%",
+  padding: "10px 12px",
+  borderRadius: 10,
+  border: "1px solid rgba(0,0,0,0.2)",
+  fontSize: 12,
+};
+
+const btn: React.CSSProperties = {
+  padding: "10px 12px",
+  borderRadius: 10,
+  border: "1px solid rgba(0,0,0,0.25)",
+  background: "white",
+  cursor: "pointer",
+  fontWeight: 700,
+  fontSize: 12,
+};
+
+const btnSmall: React.CSSProperties = {
+  padding: "8px 10px",
+  borderRadius: 10,
+  border: "1px solid rgba(0,0,0,0.2)",
+  background: "white",
+  cursor: "pointer",
+  fontSize: 12,
+};
+```
+
+---
+
+## 3) Add the minitab in AdminDashboard (System Config)
+
+Add a System Config minitab key, e.g. `legalCoverage`, and render this component.
+
+### 3.1 Import
+
+```tsx
+import AdminLegalCoverage from "./AdminLegalCoverage";
+```
+
+### 3.2 Add tab option (where you define System Config minitabs)
+
+```ts
+{ key: "legalCoverage", label: "Legal Coverage" }
+```
+
+### 3.3 Render
+
+```tsx
+if (activeSystemConfigTab === "legalCoverage") return <AdminLegalCoverage />;
+```
+
+---
+
+## 4) Optional: add coverage deep-linking via admin:navigate
+
+If you want the event bus to be able to open this panel, ensure your AdminDashboard’s `admin:navigate` listener can map:
+
+* `topTabKey: "systemConfig"`
+* `systemConfigTabKey: "legalCoverage"`
+
+---
+
+## What this enables immediately
+
+* A single page that tells you, per jurisdiction, whether you can legally onboard:
+
+  * Do we have docs?
+  * Is “active” explicitly set?
+  * Are targets broken?
+* One-click remediation for the common gap: docs exist but no target set.
+
+If you want the next upgrade, say **“Add onboarding gate”** and I’ll add a backend function that refuses signup for jurisdictions where `ADDENDUM` coverage is not `OK` (or allows a strict fallback policy you control in System Config).

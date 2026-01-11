@@ -1,0 +1,225 @@
+To implement this dynamic, compliance-first signup flow, we need a system that tightly couples the **Country Selection** with two distinct logic engines: the **Phone Validation Engine** and the **Legal Terms Assembly Engine**.
+
+Below is the comprehensive **Design Plan & Implementation Algorithm**, broken down into the Frontend Logic (UX), Backend Logic (Compliance/Terms Assembly), and Data Structure mapping.
+
+### **1. High-Level Architecture Strategy**
+
+This signup flow is not static; it is **state-driven**. The user's choice of "Country" is the single source of truth that triggers cascading updates to:
+
+1. **Phone Input UI:** (Prefix, regex mask, max length).
+2. **Legal Contract Assembly:** (Selecting the correct Addendum or resolving the correct Regional Fallback).
+
+This ensures you capture valid data *and* bind the user to the correct jurisdiction-specific legal terms simultaneously.
+
+---
+
+### **2. Frontend Logic & UX Design**
+
+#### **A. UI State Machine**
+
+* **Initial State:**
+* `Country`: Null / Default (e.g., "Select Country").
+* `Phone`: Disabled or Generic (No validation yet).
+* `Terms Link`: Generic "Terms & Conditions" (clicking shows Global Master only).
+* `Submit Button`: Disabled.
+
+
+* **Action: User Selects Country (e.g., "Kenya")**
+* **Trigger 1 (Phone Engine):**
+* Look up `KE` in Phone Rules.
+* Update Phone Field prefix to `+254`.
+* Apply Regex Mask: `^\d{9,10}$` (e.g., 9-10 digits).
+* Update Placeholder: "7XX XXX XXX".
+
+
+* **Trigger 2 (Legal Engine):**
+* Look up `KE` in `AddendumMap`.
+* Found `ADD-KE`? Yes.
+* **Action:** Fetch `DOC1_GLOBAL` + `ADD-KE`.
+* **Update UI:** Change "Terms & Conditions" link behavior. When clicked, it now opens a modal displaying the *dynamically assembled* contract (Global + Kenya Addendum).
+
+
+* **Trigger 3 (Region Fallback - Edge Case):**
+* *Scenario:* User selects "Poland" (PL).
+* Look up `PL` in `AddendumMap`. Not found.
+* Look up `PL` in `RegionMap`. Result: `EAST_EUROPE`.
+* **Action:** Fetch `DOC1_GLOBAL` + `ADD-EAST_EUROPE`.
+* **Update UI:** Terms link now loads Global + East Europe Addendum.
+
+
+
+
+
+#### **B. Form Validation Rules**
+
+| Field | Validation Rule | Error Message |
+| --- | --- | --- |
+| **Email** | Valid email regex, check for disposable domains. | "Please enter a valid professional email." |
+| **Username** | Alphanumeric, 3-20 chars, unique check (debounce). | "Username taken or invalid." |
+| **Country** | Must be selected from ISO-3166 list. | "Please select your country of residence." |
+| **Phone** | Starts with correct country code; matches country specific length/regex. | "Invalid phone number format for [Country]." |
+| **Checkbox** | Must be `true`. | "You must accept the Terms & Conditions to proceed." |
+
+---
+
+### **3. The "Engine" Algorithms (Pseudocode)**
+
+#### **Engine A: Phone Prefix & Format Resolver**
+
+We need a lightweight JSON map for phone rules.
+
+```javascript
+// Data Structure: phone_rules.json
+const PhoneRules = {
+  "US": { "code": "+1", "mask": "(###) ###-####", "regex": /^\d{10}$/ },
+  "KE": { "code": "+254", "mask": "### ### ###", "regex": /^\d{9,10}$/ },
+  "IN": { "code": "+91", "mask": "##### #####", "regex": /^\d{10}$/ },
+  // ... maps to all supported ISO codes
+};
+
+function updatePhoneUI(selectedCountryCode) {
+    const rules = PhoneRules[selectedCountryCode];
+    if (!rules) return setGenericPhoneUI();
+
+    PhoneInput.prefix.text = rules.code;
+    PhoneInput.placeholder = rules.mask;
+    PhoneInput.validationRegex = rules.regex;
+}
+
+```
+
+#### **Engine B: Legal Term Assembly (The "Caveat Function")**
+
+This is the critical compliance step. It resolves the specific contract *before* the user clicks "I Agree".
+
+```javascript
+// Inputs: User's Country ISO (e.g., "PL")
+// Resources: Addendum Map (Source 172), Region Rules (Source 420)
+
+function resolveLegalTerms(countryIso) {
+    let addendumId = null;
+    let addendumText = "";
+
+    // 1. Direct Country Match (High Priority)
+    if (AddendumMap.countryAddenda[countryIso]) {
+        addendumId = AddendumMap.countryAddenda[countryIso].id;
+        addendumText = fetchText(AddendumMap.countryAddenda[countryIso].path);
+    } 
+    
+    // 2. Region Fallback (Medium Priority)
+    else {
+        const regionKey = resolveRegion(countryIso); // See Helper Function below
+        if (regionKey && AddendumMap.regionAddenda[regionKey]) {
+            addendumId = AddendumMap.regionAddenda[regionKey].id;
+            addendumText = fetchText(AddendumMap.regionAddenda[regionKey].path);
+        } else {
+            // 3. Global Fallback (Low Priority - "ROW")
+            addendumId = AddendumMap.defaultAddendum.id; // ADD-ROW
+            addendumText = fetchText(AddendumMap.defaultAddendum.path);
+        }
+    }
+
+    // 4. Assemble Full Document
+    const globalText = fetchText("DOC1_GLOBAL");
+    
+    const fullContract = `${globalText}\n\n---\n\n[SYSTEM AUTO-APPENDED ADDENDUM: ${addendumId}]\n\n${addendumText}`;
+
+    return {
+        fullContractText: fullContract,
+        meta: {
+            country: countryIso,
+            addendumId: addendumId,
+            globalVersion: "1.0",
+            timestamp: new Date().toISOString()
+        }
+    };
+}
+
+// Helper: Region Resolver (based on Source 420 + User Request for Europe)
+function resolveRegion(iso) {
+    // Check specific region lists first
+    if (["PL", "CZ", "HU", "RO", "BG"].includes(iso)) return "EAST_EUROPE";
+    if (["FR", "DE", "ES", "IT", "NL"].includes(iso)) return "WEST_EUROPE";
+    // ... check other arrays from Source 420
+    return null; // Triggers ROW fallback
+}
+
+```
+
+---
+
+### **4. Implementation Guide: The "Agree" Event**
+
+When the user checks the box or clicks "Register", you are not just submitting form data; you are creating a digital signature record.
+
+**The Payload to Backend:**
+
+```json
+{
+  "user": {
+    "email": "trader@example.com",
+    "username": "trader123",
+    "phone": "+254712345678" 
+  },
+  "context": {
+    "ip_address": "192.168.1.1",
+    "user_agent": "Mozilla/5.0...",
+    "selected_country": "KE"
+  },
+  "legal_acceptance": {
+    "accepted": true,
+    "timestamp": "2025-10-27T10:00:00Z",
+    "doc_version_global": "1.0",
+    "doc_addendum_id": "ADD-KE", // The exact addendum presented
+    "doc_hash": "a1b2c3d4..." // Hash of the specific text they viewed
+  }
+}
+
+```
+
+### **5. Database Schema Recommendations**
+
+You need two tables to handle this correctly: `Users` and `LegalAgreements`.
+
+**Table: Users**
+
+* `id` (PK)
+* `email`
+* `phone_e164` (Standardized format)
+* `country_iso`
+* `signup_ip`
+
+**Table: Legal_Acceptances (Audit Log)**
+
+* `id` (PK)
+* `user_id` (FK)
+* `global_doc_version` (e.g., "1.0")
+* `addendum_id` (e.g., "ADD-KE" or "ADD-EAST_EUROPE")
+* `snapshot_hash` (SHA256 of the combined text)
+* `accepted_at` (Timestamp)
+
+---
+
+### **6. Deployment Checklist**
+
+1. **Load Static Files:** Ensure `DOC1_GLOBAL.txt` and all `ADD-XX.txt` files are accessible by the frontend (or served via API) so they load instantly when a country is selected.
+2. **Verify Phone Library:** Use a standard library like `libphonenumber-js` (Google's library) for the phone engine. Do not write your own regex for 195 countries; mapping ISO codes to that library is safer.
+3. **Region Map Update:** Ensure "Europe" is correctly split. The legal document context [Source 420] splits Europe into `WEST_EUROPE` and `EAST_EUROPE`. Ensure your region resolver respects this distinction, as privacy laws (GDPR) apply to both, but local labor enforcement differs.
+4. **Fallback Safety:** Always ensure `ADD-ROW` (Rest of World) loads if the country code is valid but not explicitly mapped.
+
+### **7. Visual Flow Reference**
+
+1. **User:** Opens Signup Page.
+2. **System:** Loads standard form. Terms link is generic.
+3. **User:** Selects "France" (FR).
+4. **System (Background):**
+* Phone Engine: Sets prefix `+33`.
+* Legal Engine: Identifies `FR` -> `WEST_EUROPE` (Region Rule).
+* Fetches `DOC1_GLOBAL` + `ADD-WEST_EUROPE`.
+* Updates "Terms" link to point to this specific combination.
+
+
+5. **User:** Types phone `612345678`.
+6. **System:** Validates as `+33 6 12 34 56 78`.
+7. **User:** Clicks "I Agree & Register".
+8. **Backend:** Saves user + logs acceptance of `DOC1_GLOBAL` + `ADD-WEST_EUROPE`.

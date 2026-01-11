@@ -1,0 +1,603 @@
+You have **two separate issues**:
+
+1. **Sessions are “static”** because you likely **do not bind a `sessionId` to auth** (JWT/cookie) and **do not validate the session row** on each request. Without that, revoking a session in the DB does nothing; the old token continues to work.
+
+2. Timezone labels are not in **UTC/GMT canonical format** because your UI is rendering a label that omits the `"UTC"` prefix and/or doesn’t compute the **current UTC offset (DST-aware)**.
+
+Below is a **drop-in** set of backend + frontend changes that fixes both, plus an implementable **language detection + i18n translation engine** scaffold.
+
+---
+
+# A) Fix Sessions: logout other devices + non-static sessions
+
+## A1) Backend: auth middleware must validate session + touch lastSeenAt
+
+Create (or adapt) `server/middleware/auth.ts`:
+
+```ts
+// server/middleware/auth.ts
+import type { Request, Response, NextFunction } from "express";
+import { db } from "../db";
+import { userSessions } from "../../shared/schema";
+import { eq, and, isNull } from "drizzle-orm";
+import { touchSession } from "../security/sessionTrail";
+
+// Replace with your real token parsing.
+// MUST return { userId, sessionId } where sessionId matches userSessions.id.
+function parseAuth(req: Request): { userId: number; sessionId: string } | null {
+  // Option A: JWT in Authorization header
+  // const token = req.headers.authorization?.replace("Bearer ", "");
+  // const payload = verifyJwt(token);
+  // return { userId: payload.sub, sessionId: payload.sessionId };
+
+  // Option B: cookie-based
+  // const sid = req.cookies?.sid;
+  // const uid = req.cookies?.uid;
+  // return sid && uid ? { userId: Number(uid), sessionId: String(sid) } : null;
+
+  // Placeholder (YOU MUST IMPLEMENT):
+  const userId = (req as any).user?.id ?? (req as any).userId;
+  const sessionId = (req as any).user?.sessionId ?? (req as any).sessionId;
+  if (!userId || !sessionId) return null;
+  return { userId: Number(userId), sessionId: String(sessionId) };
+}
+
+export async function requireAuth(req: Request, res: Response, next: NextFunction) {
+  const auth = parseAuth(req);
+  if (!auth) return res.status(401).json({ error: "unauthorized" });
+
+  // Validate session is still active (this is what makes revoke actually log the user out)
+  const row = db
+    .select({
+      id: userSessions.id,
+      userId: userSessions.userId,
+      endedAt: userSessions.endedAt,
+      revokedAt: userSessions.revokedAt,
+    })
+    .from(userSessions)
+    .where(and(eq(userSessions.id, auth.sessionId), eq(userSessions.userId, auth.userId)))
+    .limit(1)
+    .all()[0];
+
+  if (!row || row.endedAt !== null || row.revokedAt !== null) {
+    return res.status(401).json({ error: "session_expired" });
+  }
+
+  // Attach to req context
+  (req as any).auth = { userId: auth.userId, sessionId: auth.sessionId };
+
+  // Touch lastSeenAt (non-blocking)
+  try {
+    touchSession({ sessionId: auth.sessionId });
+  } catch {
+    // ignore
+  }
+
+  next();
+}
+```
+
+**Critical:** your login handler must create a session row and embed `sessionId` into auth (JWT claim or cookie). If you skip that, “logout other devices” cannot work.
+
+---
+
+## A2) Backend: ME session endpoints (list + revoke + logout others + logout current)
+
+Create `server/routes/meSessions.ts`:
+
+```ts
+// server/routes/meSessions.ts
+import type { Express, Request, Response } from "express";
+import { db } from "../db";
+import { userSessions } from "../../shared/schema";
+import { and, desc, eq, isNull, ne } from "drizzle-orm";
+import { revokeSession, endSession, getClientIp, getUserAgent, appendSecurityEvent } from "../security/sessionTrail";
+import { requireAuth } from "../middleware/auth";
+
+export function registerMeSessionsRoutes(app: Express) {
+  // List sessions (active + currentSessionId for UI)
+  app.get("/api/me/sessions", requireAuth, (req: Request, res: Response) => {
+    const auth = (req as any).auth as { userId: number; sessionId: string };
+    const limit = Math.min(50, Math.max(1, Number(req.query.limit || 10)));
+
+    const rows = db
+      .select({
+        id: userSessions.id,
+        createdAt: userSessions.createdAt,
+        lastSeenAt: userSessions.lastSeenAt,
+        endedAt: userSessions.endedAt,
+        ip: userSessions.ip,
+        userAgent: userSessions.userAgent,
+        countryCode: userSessions.countryCode,
+        region: userSessions.region,
+        city: userSessions.city,
+        inferredTz: userSessions.inferredTz,
+        revokedAt: userSessions.revokedAt,
+      })
+      .from(userSessions)
+      .where(and(eq(userSessions.userId, auth.userId), isNull(userSessions.endedAt)))
+      .orderBy(desc(userSessions.lastSeenAt))
+      .limit(limit)
+      .all();
+
+    res.json({ currentSessionId: auth.sessionId, rows });
+  });
+
+  // Revoke a specific session (including “other devices”)
+  app.post("/api/me/sessions/:sessionId/revoke", requireAuth, (req: Request, res: Response) => {
+    const auth = (req as any).auth as { userId: number; sessionId: string };
+    const targetSessionId = String(req.params.sessionId);
+    const reason = String((req.body as any)?.reason || "User revoked session");
+
+    revokeSession({
+      actorUserId: auth.userId,
+      targetUserId: auth.userId,
+      sessionId: targetSessionId,
+      reason,
+    });
+
+    res.json({ ok: true });
+  });
+
+  // Logout all other devices (revoke all sessions except current)
+  app.post("/api/me/sessions/logout-others", requireAuth, (req: Request, res: Response) => {
+    const auth = (req as any).auth as { userId: number; sessionId: string };
+    const reason = String((req.body as any)?.reason || "User logged out other devices");
+
+    const others = db
+      .select({ id: userSessions.id })
+      .from(userSessions)
+      .where(
+        and(
+          eq(userSessions.userId, auth.userId),
+          isNull(userSessions.endedAt),
+          ne(userSessions.id, auth.sessionId)
+        )
+      )
+      .all();
+
+    for (const s of others) {
+      revokeSession({
+        actorUserId: auth.userId,
+        targetUserId: auth.userId,
+        sessionId: s.id,
+        reason,
+      });
+    }
+
+    res.json({ ok: true, revokedCount: others.length });
+  });
+
+  // Logout current session (end + trail)
+  app.post("/api/me/logout", requireAuth, (req: Request, res: Response) => {
+    const auth = (req as any).auth as { userId: number; sessionId: string };
+
+    const ip = getClientIp(req as any);
+    const userAgent = getUserAgent(req as any);
+
+    // endSession writes LOGOUT trail
+    endSession({ userId: auth.userId, sessionId: auth.sessionId, ip, userAgent });
+
+    // IMPORTANT: client must also clear token/cookie; server returns ok only.
+    res.json({ ok: true });
+  });
+}
+```
+
+Wire it in `server/index.ts`:
+
+```ts
+import { registerMeSessionsRoutes } from "./routes/meSessions";
+registerMeSessionsRoutes(app);
+```
+
+---
+
+## A3) Frontend: fix “Invalid Date” + enable logout other devices
+
+Update your Active Sessions UI to use `currentSessionId` and safe date formatting.
+
+Example component drop-in:
+
+```tsx
+// client/src/components/profile/ActiveSessionsCard.tsx
+import React from "react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+
+type SessionRow = {
+  id: string;
+  createdAt: number;
+  lastSeenAt: number;
+  ip: string;
+  userAgent: string;
+  city?: string | null;
+  region?: string | null;
+  countryCode?: string | null;
+};
+
+function safeFmt(ts: any) {
+  const n = Number(ts);
+  if (!Number.isFinite(n) || n <= 0) return "Unknown";
+  const d = new Date(n);
+  return isNaN(d.getTime()) ? "Unknown" : d.toLocaleString();
+}
+
+function loc(r: { city?: string | null; region?: string | null; countryCode?: string | null }) {
+  const parts = [r.city, r.region, r.countryCode].filter(Boolean);
+  return parts.length ? parts.join(", ") : "Unknown location";
+}
+
+export function ActiveSessionsCard() {
+  const [rows, setRows] = React.useState<SessionRow[]>([]);
+  const [currentSessionId, setCurrentSessionId] = React.useState<string>("");
+
+  const load = React.useCallback(async () => {
+    const res = await fetch("/api/me/sessions?limit=20");
+    const data = await res.json();
+    setRows(data.rows || []);
+    setCurrentSessionId(String(data.currentSessionId || ""));
+  }, []);
+
+  React.useEffect(() => {
+    load();
+  }, [load]);
+
+  const revoke = async (sessionId: string) => {
+    await fetch(`/api/me/sessions/${encodeURIComponent(sessionId)}/revoke`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reason: "User revoked from Profile Settings" }),
+    });
+    await load();
+  };
+
+  const logoutOthers = async () => {
+    await fetch(`/api/me/sessions/logout-others`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reason: "Logout other devices" }),
+    });
+    await load();
+  };
+
+  const logoutCurrent = async () => {
+    await fetch(`/api/me/logout`, { method: "POST" });
+    // Client must clear auth token/cookie and redirect to login.
+    window.location.href = "/login";
+  };
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between">
+        <CardTitle>Active Sessions</CardTitle>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={load}>Refresh</Button>
+          <Button variant="outline" onClick={logoutOthers}>Logout other devices</Button>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {rows.length === 0 ? (
+          <div className="text-muted-foreground">No active sessions</div>
+        ) : (
+          rows.map((s) => {
+            const isCurrent = s.id === currentSessionId;
+            return (
+              <div key={s.id} className="flex items-start justify-between gap-4 border-b pb-3 last:border-b-0 last:pb-0">
+                <div className="min-w-0">
+                  <div className="font-medium">
+                    {isCurrent ? "Electron (Current)" : "Session"}
+                    <span className="text-muted-foreground"> · IP {s.ip}</span>
+                  </div>
+                  <div className="text-sm text-muted-foreground">
+                    Last active: {safeFmt(s.lastSeenAt)} · {loc(s)}
+                  </div>
+                  <div className="text-xs text-muted-foreground font-mono">
+                    {String(s.userAgent || "").slice(0, 120)}
+                  </div>
+                </div>
+
+                {isCurrent ? (
+                  <Button variant="destructive" size="sm" onClick={logoutCurrent}>
+                    Logout
+                  </Button>
+                ) : (
+                  <Button variant="destructive" size="sm" onClick={() => revoke(s.id)}>
+                    Logout device
+                  </Button>
+                )}
+              </div>
+            );
+          })
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+```
+
+**Why your “Invalid Date” happened:** your UI was probably reading a wrong field name (e.g., `lastActiveAt` instead of `lastSeenAt`) or receiving `null/undefined`. The `safeFmt()` guard prevents bad displays even if the backend slips.
+
+---
+
+# B) Fix Timezone list: display in UTC/GMT canonical format (DST-aware)
+
+## B1) Backend: return timezones with `(UTC±HH:MM)` prefix + IANA name
+
+Add helper (server-side) to compute current offset minutes for any IANA zone:
+
+```ts
+// server/utils/tzOffset.ts
+export function getOffsetMinutes(timeZone: string, date = new Date()): number {
+  // Computes offset from UTC in minutes for given IANA zone at given date (DST-aware)
+  const dtf = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hour12: false,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+
+  const parts = dtf.formatToParts(date);
+  const map: any = {};
+  for (const p of parts) if (p.type !== "literal") map[p.type] = p.value;
+
+  // Build a UTC timestamp from the "local time in that zone"
+  const asUtc = Date.UTC(
+    Number(map.year),
+    Number(map.month) - 1,
+    Number(map.day),
+    Number(map.hour),
+    Number(map.minute),
+    Number(map.second)
+  );
+
+  // date.getTime() is actual UTC timestamp; difference gives offset
+  return Math.round((asUtc - date.getTime()) / 60000);
+}
+
+export function fmtUtcOffset(minutes: number): string {
+  const sign = minutes >= 0 ? "+" : "-";
+  const abs = Math.abs(minutes);
+  const hh = String(Math.floor(abs / 60)).padStart(2, "0");
+  const mm = String(abs % 60).padStart(2, "0");
+  return `UTC${sign}${hh}:${mm}`;
+}
+```
+
+Now modify `/api/meta/timezones` so each timezone option contains a **canonical label**:
+
+```ts
+// server/routes/meta.ts
+import type { Express, Request, Response } from "express";
+import { getTimeZones } from "@vvo/tzdb";
+import { getOffsetMinutes, fmtUtcOffset } from "../utils/tzOffset";
+
+export function registerMetaRoutes(app: Express) {
+  app.get("/api/meta/timezones", (req: Request, res: Response) => {
+    const includeUtc = String(req.query.includeUtc || "1") === "1";
+    const now = new Date();
+
+    const tzs: any[] = getTimeZones({ includeUtc }) as any[];
+
+    const rows = tzs.map((t) => {
+      const name = String(t.name);
+      let currentOffsetMinutes = 0;
+      try {
+        currentOffsetMinutes = getOffsetMinutes(name, now);
+      } catch {
+        currentOffsetMinutes = Number(t.rawOffsetInMinutes || 0);
+      }
+
+      const offsetLabel = fmtUtcOffset(currentOffsetMinutes);
+
+      const city = Array.isArray(t.mainCities) && t.mainCities.length ? t.mainCities.slice(0, 4).join(", ") : "";
+      const label = `${offsetLabel} · ${t.alternativeName || name}${city ? ` — ${city}` : ""} (${name})`;
+
+      return {
+        name,
+        label,
+        countryCode: t.countryCode || null,
+        countryName: t.countryName || null,
+        mainCities: t.mainCities || [],
+        abbreviation: t.abbreviation || null,
+        rawOffsetInMinutes: t.rawOffsetInMinutes || 0,
+        currentOffsetMinutes,
+      };
+    });
+
+    // Sort by current offset then label
+    rows.sort((a, b) => (a.currentOffsetMinutes - b.currentOffsetMinutes) || a.label.localeCompare(b.label));
+
+    res.json({ generatedAt: Date.now(), rows });
+  });
+}
+```
+
+## B2) Frontend: use server label directly (already UTC/GMT)
+
+Update your timezone dropdown to render `option.label`. The list will now be canonical like:
+
+`UTC-06:00 · Central Time — Chicago, Dallas (America/Chicago)`
+
+This resolves the “not in GMT/UTC standards” complaint cleanly.
+
+---
+
+# C) Language check + translation engine (implementable)
+
+You want two layers:
+
+1. **UI internationalization (i18n)**: translate all static UI strings.
+2. **Language detection + optional machine translation**: detect what language a user typed, and optionally translate user-generated content or generate missing UI translations.
+
+## C1) i18n (React) with persisted user preference
+
+Install:
+
+```bash
+npm i i18next react-i18next i18next-browser-languagedetector
+```
+
+Create `client/src/i18n.ts`:
+
+```ts
+// client/src/i18n.ts
+import i18n from "i18next";
+import { initReactI18next } from "react-i18next";
+import LanguageDetector from "i18next-browser-languagedetector";
+
+const resources = {
+  en: {
+    translation: {
+      "Active Sessions": "Active Sessions",
+      "Logout other devices": "Logout other devices",
+      "Logout device": "Logout device",
+      "Logout": "Logout",
+      "Regional Preferences": "Regional Preferences",
+      "Timezone": "Timezone",
+      "Language": "Language",
+      "Save Preferences": "Save Preferences",
+    },
+  },
+  sw: {
+    translation: {
+      "Active Sessions": "Vipindi vinavyoendelea",
+      "Logout other devices": "Ondoa vifaa vingine",
+      "Logout device": "Ondoa kifaa",
+      "Logout": "Ondoka",
+      "Regional Preferences": "Mipangilio ya eneo",
+      "Timezone": "Saa za eneo",
+      "Language": "Lugha",
+      "Save Preferences": "Hifadhi mipangilio",
+    },
+  },
+};
+
+i18n
+  .use(LanguageDetector)
+  .use(initReactI18next)
+  .init({
+    resources,
+    fallbackLng: "en",
+    interpolation: { escapeValue: false },
+    detection: {
+      order: ["localStorage", "navigator"],
+      caches: ["localStorage"],
+    },
+  });
+
+export default i18n;
+```
+
+In `client/src/main.tsx` (or equivalent entry), import once:
+
+```ts
+import "./i18n";
+```
+
+Use translations:
+
+```tsx
+import { useTranslation } from "react-i18next";
+const { t } = useTranslation();
+<CardTitle>{t("Active Sessions")}</CardTitle>
+```
+
+Persist user-selected language in your existing `PUT /api/me/preferences` (you already have `language`). After loading preferences, call:
+
+```ts
+import i18n from "@/i18n";
+if (pref?.language) i18n.changeLanguage(pref.language);
+```
+
+---
+
+## C2) Language detection for user-generated text (journal notes, feedback, etc.)
+
+Install:
+
+```bash
+npm i franc-min langs
+```
+
+Backend helper:
+
+```ts
+// server/utils/langDetect.ts
+import { franc } from "franc-min";
+import langs from "langs";
+
+export function detectLanguage(text: string): { iso1: string; confidence: "low" | "medium" | "high" } {
+  const sample = (text || "").trim();
+  if (sample.length < 20) return { iso1: "en", confidence: "low" };
+
+  const iso3 = franc(sample, { minLength: 20 });
+  if (iso3 === "und") return { iso1: "en", confidence: "low" };
+
+  const lang = langs.where("3", iso3);
+  const iso1 = lang?.["1"] || "en";
+
+  // crude confidence heuristic
+  const confidence = sample.length > 200 ? "high" : "medium";
+  return { iso1, confidence };
+}
+```
+
+Use cases:
+
+* When user saves a journal note, detect language and store `note_language`.
+* If user preference differs, you can offer “Translate to my language” button.
+
+---
+
+## C3) Optional “auto-translation engine” (self-host or external)
+
+If you want actual automatic translations without paying a per-call API, use **LibreTranslate** (self-hostable). Implementation pattern:
+
+* Env: `TRANSLATE_URL=http://localhost:5000`
+* Endpoint:
+
+```ts
+// server/routes/translate.ts
+import type { Express, Request, Response } from "express";
+import { requireAuth } from "../middleware/auth";
+
+export function registerTranslateRoutes(app: Express) {
+  app.post("/api/translate", requireAuth, async (req: Request, res: Response) => {
+    const { q, source = "auto", target = "en" } = (req.body || {}) as any;
+    if (!q || typeof q !== "string") return res.status(400).json({ error: "missing_q" });
+
+    const base = process.env.TRANSLATE_URL;
+    if (!base) return res.status(500).json({ error: "TRANSLATE_URL_not_configured" });
+
+    const r = await fetch(`${base}/translate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ q, source, target, format: "text" }),
+    });
+
+    if (!r.ok) return res.status(502).json({ error: "translate_failed" });
+
+    const data = await r.json();
+    res.json({ translatedText: data.translatedText || "" });
+  });
+}
+```
+
+Then the UI can call `/api/translate` when user clicks “Translate”.
+
+---
+
+# What you should implement first (order of operations)
+
+1. **Auth middleware session validation** (A1). This is mandatory for “logout other devices” to work.
+2. **ME session endpoints + UI updates** (A2–A3). Fixes static sessions + adds revoke/other-device logout.
+3. **Timezone meta endpoint with canonical UTC label** (B1–B2). Fixes GMT/UTC complaint.
+4. **i18n + persisted language preference** (C1). Low risk, high UX payoff.
+5. Add **language detection + optional translate** (C2–C3) when you’re ready.
+
+If you paste your current login/auth implementation (JWT vs cookies), I will provide the **exact minimal diff** to ensure `sessionId` is created, embedded, validated, and revoked correctly in your specific codebase.

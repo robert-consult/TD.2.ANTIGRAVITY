@@ -1,0 +1,55 @@
+-- --------------------------------------------------------
+-- INSTITUTIONAL TRADE AUDIT TRAIL (OATS-Compliant)
+-- --------------------------------------------------------
+CREATE TABLE audit_events (
+    -- 1. IMMUTABILITY & SEQUENCE
+    audit_event_id      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    event_timestamp     TIMESTAMPTZ NOT NULL DEFAULT NOW(), -- Server UTC
+    sequence_index      BIGSERIAL NOT NULL,                 -- For strict ordering reconstruction
+
+    -- 2. CORE CONTEXT
+    event_category      VARCHAR(20) NOT NULL, -- ORDER, RISK, EXECUTION, ADMIN, SYSTEM
+    event_code          VARCHAR(50) NOT NULL, -- e.g., ORDER_SUBMITTED, RISK_CHECK_FAIL
+    actor_type          VARCHAR(10) NOT NULL, -- USER, ADMIN, SYSTEM
+    user_id             UUID,                 -- Nullable if system event
+    session_id          VARCHAR(64),          -- Provenance: ties to login session
+    ip_address          INET,                 -- Provenance: location
+    
+    -- 3. LIFECYCLE IDENTIFIERS (The "Chain of Custody")
+    order_id            UUID,                 -- Unique intent ID
+    client_order_id     VARCHAR(64),          -- Frontend correlation ID
+    execution_id        UUID,                 -- Unique fill ID
+    position_id         UUID,                 -- Unique holding ID
+    
+    -- 4. ECONOMICS (Nullable, used for Order/Exec events)
+    symbol              VARCHAR(20),
+    side                VARCHAR(4),           -- BUY, SELL
+    order_type          VARCHAR(20),          -- LIMIT, MARKET, STOP
+    quantity_lots       NUMERIC(10, 2),
+    
+    price_requested     NUMERIC(18, 5),       -- The price the user clicked/sent
+    price_limit         NUMERIC(18, 5),
+    price_stop          NUMERIC(18, 5),
+    price_filled        NUMERIC(18, 5),
+    
+    -- 5. MARKET CONTEXT (For Best Execution/Slippage Analysis)
+    quote_bid_at_time   NUMERIC(18, 5),
+    quote_ask_at_time   NUMERIC(18, 5),
+    slippage_pips       NUMERIC(10, 2),
+    
+    -- 6. RISK EVIDENCE (For Allocator/Admin Review)
+    risk_check_name     VARCHAR(50),          -- e.g., MAX_LOTS_PER_USER
+    risk_limit_val      NUMERIC(18, 2),       -- The limit enforced
+    risk_actual_val     NUMERIC(18, 2),       -- The value attempted
+    risk_result         VARCHAR(10),          -- PASS, FAIL, OVERRIDE
+    
+    -- 7. DATA INTEGRITY
+    notes               TEXT,                 -- Human readable summary
+    payload_snapshot    JSONB,                -- Full raw state for forensic replay
+    prev_event_hash     VARCHAR(64)           -- Optional: Hash chaining for tamper-evidence
+);
+
+-- Indexing for high-speed "Audit Tab" queries
+CREATE INDEX idx_audit_user_time ON audit_events(user_id, event_timestamp DESC);
+CREATE INDEX idx_audit_order_id ON audit_events(order_id);
+CREATE INDEX idx_audit_session ON audit_events(session_id);

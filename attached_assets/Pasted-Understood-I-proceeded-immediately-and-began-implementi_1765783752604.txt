@@ -1,0 +1,219 @@
+Understood. I **proceeded immediately** and began implementing the **full MT5-style Limit/Stop order logic + Trade tab UI changes**, treating **“10 points” as 10 pips**, exactly as you instructed.
+
+However, I need to be explicit: **I have not completed the full consolidated patch ZIP yet** because I hit the tool/runtime cutoff while still mid-edit in `server/routes.ts` (I was in the middle of swapping the old `entryPrice` flow to the new `intendedEntryPrice` flow, and fixing the remaining references).
+
+That said, I have already completed and validated several critical parts, and I can tell you precisely what is done vs. still pending.
+
+---
+
+# ✅ Completed (already implemented in your extracted code)
+
+## 1) MT5-Professional “Option 1” account pricing: **Freeze on stale quotes** (backend)
+
+### File: `server/recalcAccount.ts` — COMPLETELY REWRITTEN
+
+I implemented a **risk-safe** recalc engine that:
+
+* Uses **bid/ask close-out pricing correctly per trade side**
+
+  * BUY MTM uses **BID**
+  * SELL MTM uses **ASK**
+* Fixes the prior **per-symbol single-price cache bug** (BUY+SELL same symbol)
+* Loads quotes **once in a single query** (no per-trade DB open/close)
+* Implements **Option 1**:
+  If **any open position symbol quote is missing or stale**, it returns:
+
+  * `pricingStale: true`
+  * `staleSymbols: [...]`
+    and **does not update** `users.equity/freeMargin/usedMargin` (freezing account values).
+
+It also updates FX conversion reference rates by calling `updateFxRates()` with EURUSD/GBPUSD/USDJPY/USDCAD.
+
+This was one of the most important backend risk fixes.
+
+---
+
+## 2) `/api/account/summary` now reports stale pricing
+
+### File: `server/routes.ts`
+
+I already patched the **Account Summary response** to include:
+
+* `pricingStale`
+* `staleSymbols`
+* `pricingAsOf`
+
+So the frontend can display “P/L frozen due to stale pricing.”
+
+---
+
+## 3) MT5 placement validations for Limit/Stop orders (backend) — MOSTLY IMPLEMENTED
+
+### File: `server/routes.ts` in `POST /api/trades`
+
+I replaced the old “always compute entryPrice from quote” block with a new MT5-style block that enforces:
+
+### ✅ Correct MT5 semantics:
+
+* **BUY LIMIT**: must be **≥10 pips below ASK**
+* **SELL LIMIT**: must be **≥10 pips above BID**
+* **BUY STOP**: must be **≥10 pips above ASK**
+* **SELL STOP**: must be **≥10 pips below BID**
+
+### ✅ Uses 10 pips exactly:
+
+* JPY pairs pip size = `0.01`
+* non-JPY pip size = `0.0001`
+* minDistance = `10 * pipSize`
+
+### ✅ Also validates TP/SL direction + min distance (professional rules):
+
+* BUY: TP ≥ entry + 10 pips; SL ≤ entry − 10 pips
+* SELL: TP ≤ entry − 10 pips; SL ≥ entry + 10 pips
+
+### ✅ Enforces Option 1:
+
+* If quote is stale → **reject placement** (503)
+
+---
+
+# ⚠️ Incomplete (still in-progress edits before packaging ZIP)
+
+These are the exact items I did not finish before cutoff:
+
+## 1) `server/routes.ts` still references `entryPrice` (needs swapping to `intendedEntryPrice`)
+
+In `POST /api/trades`, I already created `intendedEntryPrice` and eliminated the old entry price logic, but I **did not yet replace** the remaining downstream references:
+
+* Margin check currently still uses:
+
+  ```ts
+  requiredMargin(..., entryPrice, ...)
+  ```
+
+  and must be updated to:
+
+  ```ts
+  requiredMargin(..., intendedEntryPrice, ...)
+  ```
+
+* Trade creation currently still sets:
+
+  ```ts
+  openPrice: entryPrice
+  ```
+
+  and must be updated to:
+
+  * Market: `openPrice = intendedEntryPrice` (ask/bid)
+  * Limit/Stop: `openPrice = intendedEntryPrice` (requested price)
+
+This is a straightforward cleanup, but it must be done before compile.
+
+---
+
+## 2) TradeScreen UI transformation is NOT yet applied
+
+I have not yet finished implementing:
+
+* **Limit/Stop minitabs** (BUY LIMIT / SELL LIMIT, BUY STOP / SELL STOP)
+* Replace BUY/SELL market buttons with:
+
+  * **Place BUY LIMIT ORDER @ price**
+  * **Place SELL STOP ORDER @ price**
+* Auto-suggest and tracking behavior for:
+
+  * entry price
+  * TP
+  * SL
+    using **10 pips** and tracking market until user edits
+
+---
+
+## 3) Pending execution engine (PENDING → OPEN) NOT yet added
+
+I did not finish adding:
+
+* new worker in `server/cron/…`
+* import into `server/index.ts`
+* fill logic:
+
+  * Limit triggers on ask/bid conditions
+  * Stop triggers on ask/bid conditions
+  * fill at **ask for BUY**, **bid for SELL**
+  * reject if stale (Option 1)
+  * margin re-check at execution time
+
+---
+
+## 4) TP/SL trigger execution NOT yet added
+
+I planned (and still recommend) implementing TP/SL execution in the same engine:
+
+* BUY closes on BID:
+
+  * TP when bid ≥ TP
+  * SL when bid ≤ SL
+* SELL closes on ASK:
+
+  * TP when ask ≤ TP
+  * SL when ask ≥ SL
+* block if stale (Option 1)
+
+This is necessary for “non-cosmetic” TP/SL.
+
+---
+
+# What you will get once I finish the remaining steps (next response)
+
+In the next message I will deliver a **single consolidated patch ZIP** that includes:
+
+✅ `client/src/pages/TradeScreen.tsx`
+
+* Market: keep BUY/SELL buttons unchanged
+* Limit/Stop: minitabs + Place Order button labels
+* 10-pip auto-suggest + tracking (entry + TP/SL)
+
+✅ `server/routes.ts`
+
+* complete MT5 placement validation wiring
+* remove reliance on client openPrice (server authoritative)
+* stale quote blocking (Option 1)
+
+✅ `server/cron/pendingOrderEngine.ts` (new)
+
+* fills pending orders using MT5 bid/ask trigger rules
+* updates status PENDING → OPEN correctly
+* (and TP/SL closes, if you still want it included—which you indicated you do by asking to complete as suggested)
+
+✅ `server/index.ts`
+
+* import the engine
+
+✅ `client/src/hooks/use-trades.tsx`
+
+* remove `closePrice` sending (server authoritative close)
+
+---
+
+# Immediate question (I will not block progress either way)
+
+To make sure we match your “MT5 & broker apps” expectation:
+When a pending order triggers, do you want the fill price to be:
+
+**A) Strict MT5 “market fill at current bid/ask”** (recommended)
+
+* BUY fills at current ASK
+* SELL fills at current BID
+
+**B) Fill exactly at the pending order’s entry price**
+
+* fills at limitPrice/stopPrice even if market has moved through it
+
+Most brokers behave like **A** (with slippage possible), but some demos behave like **B**.
+
+If you don’t answer, I will implement **A** because it’s more professional and aligns with your risk posture.
+
+---
+
+If you want, I can now continue from where the edit stopped and finalize the full ZIP in one shot in the next response.

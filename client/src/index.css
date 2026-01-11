@@ -1,0 +1,331 @@
+@import "tailwindcss";
+@config "../../tailwind.config.cjs";
+@reference "tailwindcss";
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  :root {
+    --background: 0 0% 7%;
+    --foreground: 0 0% 90%;
+    
+    --card: 0 0% 12%;
+    --card-foreground: 0 0% 90%;
+    
+    --popover: 0 0% 12%;
+    --popover-foreground: 0 0% 90%;
+    
+    --primary: 200 97% 40%;
+    --primary-foreground: 0 0% 100%;
+    
+    --secondary: 0 0% 12%;
+    --secondary-foreground: 0 0% 90%;
+    
+    --muted: 0 0% 24%;
+    --muted-foreground: 0 0% 60%;
+    
+    --accent: 0 0% 15%;
+    --accent-foreground: 0 0% 90%;
+    
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    --success: 142 70% 45%;
+    --success-foreground: 142 100% 90%;
+
+    --danger: 0 84% 60%;
+    --danger-foreground: 0 90% 90%;
+    
+    --border: 0 0% 20%;
+    --input: 0 0% 20%;
+    --ring: 0 0% 20%;
+    
+    --radius: 0.5rem;
+
+    --chart-1: 200 97% 40%;
+    --chart-2: 142 70% 45%;
+    --chart-3: 0 84% 60%;
+    --chart-4: 25 95% 53%;
+    --chart-5: 262 83% 58%;
+
+    --sidebar-background: 0 0% 12%;
+    --sidebar-foreground: 0 0% 90%;
+    --sidebar-primary: 200 97% 40%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 0 0% 15%;
+    --sidebar-accent-foreground: 0 0% 90%;
+    --sidebar-border: 0 0% 20%;
+    --sidebar-ring: 0 0% 20%;
+
+    --export-csv: 142 71% 45%;
+    --export-csv-hover: 142 71% 40%;
+    --export-jsonl: 271 81% 56%;
+    --export-jsonl-hover: 271 81% 48%;
+
+    /* Fluid layout tokens */
+    --page-gutter: clamp(0.75rem, 2vw, 1.5rem);
+    --page-pad-y: clamp(0.75rem, 1.6vw, 1.25rem);
+    --panel-gap: clamp(0.625rem, 1.8vw, 1.125rem);
+    --card-p: clamp(0.75rem, 2vw, 1.125rem);
+    --sidebar-w: clamp(12rem, 18vw, 18rem);
+    --page-max: 96rem;
+
+    /* Fluid type tokens (opt-in via utilities) */
+    --text-sm: clamp(0.85rem, 0.15vw + 0.82rem, 0.95rem);
+    --text-base: clamp(0.95rem, 0.2vw + 0.9rem, 1.05rem);
+    --text-lg: clamp(1.05rem, 0.35vw + 1rem, 1.2rem);
+    --text-xl: clamp(1.2rem, 0.6vw + 1.1rem, 1.5rem);
+  }
+  
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply font-sans antialiased bg-background text-foreground;
+  }
+
+  img,
+  video {
+    max-width: 100%;
+    height: auto;
+  }
+
+  /* Custom scrollbar */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    @apply bg-neutral-900;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-gray-600 rounded-sm;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-gray-500;
+  }
+}
+
+@layer components {
+  /* Button styles for trading */
+  .btn-buy {
+    @apply bg-lime-500 hover:bg-lime-400 text-black font-bold py-2 px-10 rounded transition-colors;
+  }
+
+  .btn-sell {
+    @apply bg-orange-500 hover:bg-orange-400 text-white font-bold py-2 px-10 rounded transition-colors;
+  }
+
+  /* Table styles for trade history */
+  .table-header {
+    @apply bg-gray-800 text-gray-300 text-sm font-medium;
+  }
+
+  .profit-positive {
+    @apply text-lime-400;
+  }
+
+  .profit-negative {
+    @apply text-red-500;
+  }
+
+  .trade-buy {
+    @apply text-sky-400;
+  }
+
+  .trade-sell {
+    @apply text-red-500;
+  }
+}
+
+/* Chart styles */
+.candlestick {
+  display: inline-block;
+  width: 6px;
+  margin: 0 2px;
+  position: relative;
+}
+.candlestick:before, .candlestick:after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  width: 1px;
+  background-color: currentColor;
+}
+.candlestick:before {
+  top: 0;
+  height: 25%;
+}
+.candlestick:after {
+  bottom: 0;
+  height: 25%;
+}
+
+/* App-grade toast styling utilities */
+@layer utilities {
+  /* Dynamic viewport height (mobile-safe) */
+  .min-h-dvh {
+    min-height: 100vh;
+    min-height: 100dvh;
+  }
+
+  .h-dvh {
+    height: 100vh;
+    height: 100dvh;
+  }
+
+  /* Page primitives */
+  .page-container {
+    width: 100%;
+    max-width: var(--page-max);
+    margin-left: auto;
+    margin-right: auto;
+    padding-left: var(--page-gutter);
+    padding-right: var(--page-gutter);
+  }
+
+  .page-pad {
+    padding-left: var(--page-gutter);
+    padding-right: var(--page-gutter);
+    padding-top: var(--page-pad-y);
+    padding-bottom: var(--page-pad-y);
+  }
+
+  .app-scroll {
+    min-height: 0;
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Fluid typography helpers */
+  .text-fluid-sm {
+    font-size: var(--text-sm);
+  }
+  .text-fluid-base {
+    font-size: var(--text-base);
+  }
+  .text-fluid-lg {
+    font-size: var(--text-lg);
+  }
+  .text-fluid-xl {
+    font-size: var(--text-xl);
+  }
+
+  /* Auto-fit grid (no breakpoint hard-coding) */
+  .grid-auto-fit {
+    display: grid;
+    gap: var(--panel-gap);
+    grid-template-columns: repeat(
+      auto-fit,
+      minmax(min(100%, var(--grid-min, 16rem)), 1fr)
+    );
+  }
+
+  .grid-min-14 {
+    --grid-min: 14rem;
+  }
+  .grid-min-16 {
+    --grid-min: 16rem;
+  }
+  .grid-min-18 {
+    --grid-min: 18rem;
+  }
+  .grid-min-20 {
+    --grid-min: 20rem;
+  }
+
+  /* Table wrapper primitive */
+  .table-wrap {
+    width: 100%;
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .toast-viewport {
+    @apply fixed top-4 right-4 z-[100] flex max-h-screen w-[420px] max-w-[calc(100vw-2rem)] flex-col gap-3 outline-none;
+  }
+
+  .toast-premium {
+    @apply relative overflow-hidden rounded-2xl border border-white/10 bg-[#0B0E14]/90 p-4 backdrop-blur-xl shadow-[0_20px_50px_rgba(0,0,0,0.55)];
+    border-left-width: 4px;
+    border-left-color: rgba(255,255,255,0.08);
+  }
+
+  .toast-premium[data-category="ADMIN"] { border-left-color: #A855F7; }
+  .toast-premium[data-category="AUTH"] { border-left-color: #6366F1; }
+  .toast-premium[data-category="JOURNAL"] { border-left-color: #22D3EE; }
+  .toast-premium[data-category="VALIDATION"] { border-left-color: #FBBF24; }
+  .toast-premium[data-category="LIMIT"] { border-left-color: #FBBF24; }
+  .toast-premium[data-category="EXECUTION"] { border-left-color: #F87171; }
+  .toast-premium[data-category="API"] { border-left-color: #FB7185; }
+  .toast-premium[data-category="SUCCESS"] { border-left-color: #22C55E; }
+  .toast-premium[data-category="INFO"] { border-left-color: #3B82F6; }
+
+  .toast-icon {
+    @apply flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl border border-white/10 bg-black/30;
+  }
+
+  .toast-badge {
+    @apply inline-flex items-center rounded-full bg-white/5 px-2 py-0.5 text-[10px] font-black tracking-[0.22em];
+  }
+
+  .toast-code {
+    @apply inline-flex items-center rounded-md border border-white/10 bg-black/30 px-2 py-0.5 text-[10px] font-mono text-gray-300;
+  }
+
+  .toast-title {
+    @apply mt-1 truncate text-sm font-bold tracking-tight text-white;
+  }
+
+  .toast-desc {
+    @apply mt-1 text-xs font-medium leading-relaxed text-gray-300 break-words;
+  }
+
+  .toast-metrics {
+    @apply mt-2 inline-flex w-fit items-center rounded-lg border border-white/10 bg-black/30 px-2 py-1 text-[10px] font-mono text-gray-300;
+  }
+
+  .toast-hint {
+    @apply mt-2 text-[11px] font-medium text-gray-400;
+  }
+
+  .toast-details {
+    @apply mt-3;
+  }
+
+  .toast-details > summary {
+    @apply cursor-pointer select-none text-[10px] font-mono uppercase tracking-widest text-gray-500 hover:text-gray-300;
+  }
+
+  .toast-pre {
+    @apply mt-2 max-h-48 overflow-auto rounded-lg border border-white/10 bg-black/50 p-2 text-[10px] text-gray-300;
+  }
+
+  .toast-close {
+    @apply rounded-md p-1 text-gray-400 hover:text-white hover:bg-white/5 transition-colors;
+  }
+
+  .toast-shimmer {
+    position: absolute;
+    inset: auto 0 0 0;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.25), transparent);
+    transform: translateX(-100%);
+    animation: toast-shimmer 2.2s linear infinite;
+    opacity: 0.45;
+  }
+
+  @keyframes toast-shimmer {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(100%); }
+  }
+
+  .app-card {
+    @apply rounded-2xl border border-white/10 bg-white/5 backdrop-blur-md shadow-[0_20px_50px_rgba(0,0,0,0.45)];
+  }
+}

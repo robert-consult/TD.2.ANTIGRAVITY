@@ -1,0 +1,246 @@
+Below is an audit of the **Trade Audit** tab as shown (columns: **Time, Event, Trade ID, Symbol, User, Fill Price, Slippage, Spread, Note**), against what institutional allocators (hedge funds / FoFs) expect to see when they diligence a platform’s **order audit trail, controls, and record integrity**.
+
+I do not currently have the latest repo ZIP in this session to validate the **actual backend fields being stored vs. merely displayed**. The findings below therefore distinguish between (a) **UI-visible gaps** (certainly missing) and (b) **backend-capture requirements** you should implement even if you do not display all of them in the grid.
+
+---
+
+## 1) What’s good in the current Trade Audit tab (baseline strengths)
+
+* **Event-based log** (ORDER FILLED / ORDER CANCELED / POSITION CLOSED) is the correct direction for an audit trail.
+* **Export CSV** exists, which is required for any allocator-facing workflow.
+* You are already capturing and displaying **spread** and **slippage** (rare in early-stage systems, and valuable for best-execution narratives).
+
+---
+
+## 2) Critical gaps (what’s missing to reach hedge-fund / allocator-grade)
+
+### A) You cannot reconstruct the full order lifecycle (institutional minimum)
+
+Right now the UI shows “high-level outcomes,” but not the **full sequence** an auditor expects: **submit → receive → validate/risk-check → accept/reject → route/sim-execute → partial fills → final fill → position open/modify/close → post-trade**.
+
+FINRA’s OATS specs are explicit that firms must record multiple order event types (new/route/cancel-replace/execution, etc.) and maintain synchronized clocks for accurate event timestamps. ([FINRA][1])
+
+**What to add (capture + optionally display):**
+
+* `ORDER_SUBMITTED`, `ORDER_RECEIVED`, `RISK_CHECK_STARTED`, `RISK_CHECK_PASSED/FAILED`, `ORDER_ACCEPTED/REJECTED`, `ORDER_ROUTED` (even if “routing” is internal), `ORDER_PARTIAL_FILL`, `ORDER_FILLED`, `ORDER_CANCEL_REQUESTED`, `ORDER_CANCELED`, `ORDER_REPLACED`, `STOP_LOSS_SET/UPDATED`, `TAKE_PROFIT_SET/UPDATED`.
+* Distinguish **user action** vs **system action** vs **admin action**.
+
+### B) “Trade ID” is not enough (ID model is ambiguous)
+
+In your screenshot, **Trade ID = 144** is used for both **ORDER FILLED** and **POSITION CLOSED**. That makes it hard to prove a clean chain of custody.
+
+**Institutional-grade requires separate identifiers:**
+
+* `order_id` (unique per order intent)
+* `execution_id` (unique per fill)
+* `position_id` (unique per open position)
+* `trade_group_id` (optional business grouping across events)
+* `client_order_id` / `correlation_id` (ties UI, API, backend logs, and exports together)
+
+This is directly aligned with the concept of “memoranda of orders + modifications/cancellations” required in adviser recordkeeping. ([Legal Information Institute][2])
+
+### C) Missing economic terms of the order (must-have fields)
+
+To satisfy institutional scrutiny, every order/fill event must include (at minimum):
+
+**Must capture (and ideally show in table or row-expand):**
+
+* `side` (BUY/SELL)
+* `quantity_lots` (and/or units), `notional`
+* `order_type` (market/limit/stop/stop-limit)
+* `time_in_force` (GTC/IOC/FOK/day)
+* `limit_price`, `stop_price`
+* `requested_price` (or “arrival/reference price” used to compute slippage)
+* `partial_fill_qty`, `cum_filled_qty`, `avg_fill_price`
+
+SEC broker-dealer ticket guidance highlights that “terms and conditions,” times, and modifications/cancellations must be recorded. ([SEC][3])
+For investment advisers, Rule 204-2 explicitly requires records of each order and any modification/cancellation, showing terms/conditions, account, date, and who placed/recommended. ([Legal Information Institute][2])
+
+### D) Slippage/spread are present but not audit-defensible yet (definition + context missing)
+
+Allocators will ask:
+
+* “Slippage vs what reference price?”
+* “Signed slippage convention for buys vs sells?”
+* “What was bid/ask at decision time and at fill time?”
+
+**You should capture:**
+
+* `quote_bid`, `quote_ask`, `quote_mid` with timestamp at:
+
+  * order receipt
+  * risk-check decision
+  * execution/fill time
+* slippage in **points + pips**, and explicit `slippage_reference` (mid, bid/ask, last, synthetic)
+
+### E) Missing “who/where/how” provenance (security + non-repudiation)
+
+Since you’re already building **login/logout/session length** in the user timeline, Trade Audit must link to that same session context.
+
+**Must capture:**
+
+* `session_id`
+* `login_ip` / `ip_at_order`
+* `user_agent` (browser/app signature)
+* `device_id` (if applicable)
+* `api_key_id` (if API trading is supported later)
+* `actor_type` (USER / ADMIN / SYSTEM)
+
+This directly supports allocator confidence and incident response.
+
+### F) Missing risk-control evidence (this is a deal-breaker for institutional trust)
+
+Your prior requirements (global limits, per-user overrides, max concurrent lots, max concurrent trades, freeze/disable logic) must appear in the audit trail as **machine-verifiable evidence**, not just UI enforcement.
+
+**Every rejected or blocked action must log:**
+
+* `risk_check_name` (e.g., MAX_CONCURRENT_LOTS)
+* `risk_limit_value` (global and effective per-user)
+* `risk_observed_value` (current exposure at decision time)
+* `decision` (PASS/FAIL)
+* `reason_code` (standardized, not free text)
+* `risk_snapshot` (JSON: open positions, lots by symbol, margin/equity)
+
+FINRA’s OATS specs emphasize capturing the relevant order events and timestamps with synchronized clocks; your risk checks become part of that defensible chain. ([FINRA][1])
+
+### G) Export is not allocator-grade yet (format + completeness + integrity)
+
+A “grid export” is not enough. Institutions will request:
+
+* filtered export by date range/user/symbol
+* “raw” event log with stable schema
+* evidence of immutability / tamper resistance
+
+SEC commentary on electronic storage underscores record preservation and integrity as a core purpose of recordkeeping rules. ([SEC][4])
+
+Also, if you’re positioning as an adviser-like platform, retention expectations include maintaining books/records for **not less than five years**, with the first two years easily accessible. ([Legal Information Institute][2])
+
+---
+
+## 3) Recommended “Professional Grade” Trade Audit schema (what to capture)
+
+### Core audit event fields (every row)
+
+* `audit_event_id` (UUID)
+* `ts_server_utc` (ISO 8601 with milliseconds or better)
+* `event_code` (enum)
+* `event_category` (ORDER | EXECUTION | POSITION | RISK | ADMIN | AUTH | SYSTEM)
+* `actor_type`, `actor_user_id` (nullable for system)
+* `account_id`, `user_id`
+* `session_id`, `ip`, `user_agent`, `device_id`
+* `symbol`, `instrument_id`
+
+### Order & execution economics (as applicable)
+
+* `order_id`, `client_order_id`, `parent_order_id`
+* `position_id`, `trade_group_id`
+* `side`, `order_type`, `time_in_force`
+* `qty_lots`, `qty_units`, `notional`
+* `requested_price`, `limit_price`, `stop_price`
+* `fill_price`, `fill_qty`, `cum_fill_qty`, `avg_fill_price`
+
+### Market context (as applicable)
+
+* `bid`, `ask`, `mid`, `spread_points`, `spread_pips`
+* `slippage_points`, `slippage_pips`, `slippage_reference`
+* `markout_1s/5s/60s` (optional but allocator-impressive)
+
+### Risk & account state (as applicable)
+
+* `equity_before/after`, `margin_used_before/after`, `free_margin_before/after`
+* `risk_check_name`, `limit_global`, `limit_user_override`, `effective_limit`
+* `observed_exposure` (e.g., concurrent lots total)
+* `reason_code` (standardized)
+* `risk_snapshot_json`
+
+### Notes & integrity
+
+* `note` (human readable, secondary)
+* `payload_json` (canonical raw event payload)
+* `prev_hash`, `event_hash` (hash-chained, append-only log)
+
+---
+
+## 4) What to add to the table UI (without making it cluttered)
+
+Keep the grid readable, but make it audit-credible with **expandable rows** (or a “Details” drawer) and add these high-signal columns:
+
+**Recommended visible columns:**
+
+* Time (UTC)
+* Event
+* User
+* Account
+* Session/IP (collapsed display; full in expand)
+* Symbol
+* Side
+* Qty (lots)
+* Order Type
+* Requested Price
+* Fill Price
+* Slippage (pips)
+* Spread (pips)
+* Latency (ms) (server-received → executed)
+* Result (OK / REJECTED)
+* Reason Code (if rejected)
+
+Everything else can sit in the row-expand JSON/details view and in exports.
+
+---
+
+## 5) Export upgrades (CSV that institutions will actually accept)
+
+### A) Two export modes
+
+1. **Audit Export (Normalized CSV)**: stable columns, one row per event, includes all key fields above
+2. **Raw Export (JSONL)**: one JSON object per event, exact payload, for forensic replay
+
+### B) Add an “export manifest”
+
+* `export_id`, `exported_at_utc`, `filters_applied`, `record_count`
+* `sha256` of the export file, plus optional signature
+* This is simple but materially increases allocator confidence.
+
+---
+
+## 6) Priority implementation plan (sequenced for maximum credibility)
+
+**Phase 1: Data completeness (immediate credibility)**
+
+* Introduce `order_id`, `execution_id`, `position_id`, `session_id`
+* Add side/qty/order_type/TIF/limit/stop/requested_price
+* Standardize event taxonomy + reason codes
+
+**Phase 2: Risk & controls evidence (allocator trust)**
+
+* Log every risk check as an event (PASS/FAIL + snapshots)
+* Log admin actions (freeze/disable/enable/unfreeze; settings changes)
+
+**Phase 3: Integrity + retention (institutional-grade posture)**
+
+* Append-only audit table + hash chaining
+* Retention policy aligned with adviser-grade expectations (5 years, first 2 easily accessible) ([Legal Information Institute][2])
+* Clock discipline (UTC timestamps; millisecond precision where possible; documented sync approach) ([FINRA][1])
+
+**Phase 4: Best-execution / TCA layer (differentiator)**
+
+* Store bid/ask at receipt and at fill
+* Markouts and execution quality metrics
+
+---
+
+## Next step to make this concrete in your codebase
+
+If you re-upload the **latest TradingCentral ZIP** (backend + frontend), I will produce a **file-by-file, ready-to-drop implementation** for:
+
+* new DB tables (or migrations),
+* backend event-writer middleware (risk checks + order lifecycle hooks),
+* Trade Audit API (filters, paging, export modes),
+* frontend: new columns + row-expand details + upgraded CSV export.
+
+This will let Replit Agent 3 apply the patch directly with minimal interpretation.
+
+[1]: https://www.finra.org/sites/default/files/TechSpec_012017.pdf "OATS Reporting Technical Specifications - January 20, 2017"
+[2]: https://www.law.cornell.edu/cfr/text/17/275.204-2 "17 CFR § 275.204-2 - Books and records to be maintained by investment advisers. | Electronic Code of Federal Regulations (e-CFR) | US Law | LII / Legal Information Institute"
+[3]: https://www.sec.gov/rules-regulations/2001/10/books-records-requirements-brokers-dealers-under-securities-exchange-act-1934 "SEC.gov | Books and Records Requirements for Brokers and Dealers Under the Securities Exchange Act of 1934"
+[4]: https://www.sec.gov/rules-regulations/2003/05/electronic-storage-broker-dealer-records "SEC.gov | Electronic Storage of Broker-Dealer Records"

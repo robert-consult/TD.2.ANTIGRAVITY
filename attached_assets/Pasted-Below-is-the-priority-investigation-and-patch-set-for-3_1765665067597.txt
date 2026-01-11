@@ -1,0 +1,621 @@
+Below is the priority investigation and patch set for **#3 (professional order semantics + integrity)**, followed by a consolidated endpoint-by-endpoint Replit Agent patch plan.
+
+---
+
+# Priority: Fix the order lifecycle to professional semantics (and close the integrity holes)
+
+## What is broken today (from your code)
+
+1. **Pending orders exist in schema** (`orderType`, `limitPrice`, `stopPrice`, `status=PENDING`) and you can fetch/cancel them, but there is **no server-side matching/execution engine** that watches quotes and triggers them.
+2. **Order placement logic does not use orderType** in `server/routes.ts` (it always pulls a quote and uses it as `openPrice`), while `storage.createTrade()` sets `PENDING` only based on `orderType`. This creates inconsistent state: *a pending order has an “openPrice” derived from market at placement time* rather than the requested limit/stop price.
+3. **Integrity risk**: execution can still be influenced by simulated quotes (if the quote endpoint/DB is stale) and (separately) by client-supplied prices in other flows. For professional semantics, **execution must be server-authoritative and quote-gated**.
+
+## Target behavior (professional minimum)
+
+* **Market**: fill immediately at **ask (BUY)** / **bid (SELL)**.
+* **Limit**:
+
+  * BUY limit triggers when **ask ≤ limit**
+  * SELL limit triggers when **bid ≥ limit**
+  * fill at **current ask/bid** (which is “limit or better” when triggered).
+* **Stop**:
+
+  * BUY stop triggers when **ask ≥ stop**
+  * SELL stop triggers when **bid ≤ stop**
+  * fill at **current ask/bid** (slippage possible).
+* **Open positions SL/TP** auto-close:
+
+  * BUY closes at **bid** (SL if bid ≤ SL, TP if bid ≥ TP)
+  * SELL closes at **ask** (SL if ask ≥ SL, TP if ask ≤ TP)
+* **Quote gating**:
+
+  * If quote is **stale** or market **closed**, pending orders **do not trigger** and SL/TP **do not fire** (defer).
+* **Audit trail (backend-only)**:
+
+  * requested_price, trigger_price, fill_price, slippage
+  * fill_quote_ts, fill_source, fill_spread (+ bid/ask/mid)
+* **Trader UI**: only show **close_reason** (e.g., `TP`, `SL`, `MANUAL`, `AUTO_TIME_LIMIT (LIMIT TIME REACHED)`, etc.).
+
+---
+
+# Replit Agent implementation: Order Engine + backend-only audit
+
+## Step 1 — Add a backend-only audit table + close_reason column
+
+### 1A) Update `shared/schema.ts`
+
+Add `closeReason` to `trades` (safe; UI can choose to display only this).
+
+```ts
+// in trades table definition
+closeReason: text("close_reason"), // TP, SL, MANUAL, AUTO_TIME_LIMIT, REJECTED, EXPIRED, MARGIN_CALL
+```
+
+Add a new table (backend-only) `trade_audit`:
+
+```ts
+export const tradeAudit = sqliteTable("trade_audit", {
+  id: integer("id", { mode: "number" }).primaryKey({ autoIncrement: true }),
+  tradeId: integer("trade_id", { mode: "number" }).notNull().references(() => trades.id),
+
+  eventType: text("event_type").notNull(), // ORDER_PLACED, ORDER_FILLED, POSITION_CLOSED, ORDER_CANCELED, ORDER_REJECTED
+  eventAt: integer("event_at", { mode: "timestamp" })
+    .notNull()
+    .default(sql`(strftime('%s', 'now'))`),
+
+  requestedPrice: real("requested_price"),
+  triggerPrice: real("trigger_price"),
+  fillPrice: real("fill_price"),
+  slippage: real("slippage"),
+
+  quoteTs: integer("quote_ts", { mode: "timestamp" }),
+  quoteSource: text("quote_source"),
+  quoteBid: real("quote_bid"),
+  quoteAsk: real("quote_ask"),
+  quoteMid: real("quote_mid"),
+  quoteSpread: real("quote_spread"),
+
+  note: text("note"),
+});
+```
+
+### 1B) Create/ensure table + columns at startup
+
+Create `server/db/ensureSchema.ts`:
+
+```ts
+import { db } from "@db";
+
+function hasColumn(table: string, col: string): boolean {
+  const rows = db.$client.prepare(`PRAGMA table_info(${table})`).all() as any[];
+  return rows.some(r => r.name === col);
+}
+
+export function ensureTradeSchema() {
+  // trades.close_reason
+  if (!hasColumn("trades", "close_reason")) {
+    db.$client.exec(`ALTER TABLE trades ADD COLUMN close_reason TEXT`);
+  }
+
+  // trade_audit
+  db.$client.exec(`
+    CREATE TABLE IF NOT EXISTS trade_audit (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      trade_id INTEGER NOT NULL,
+      event_type TEXT NOT NULL,
+      event_at INTEGER NOT NULL,
+      requested_price REAL,
+      trigger_price REAL,
+      fill_price REAL,
+      slippage REAL,
+      quote_ts INTEGER,
+      quote_source TEXT,
+      quote_bid REAL,
+      quote_ask REAL,
+      quote_mid REAL,
+      quote_spread REAL,
+      note TEXT,
+      FOREIGN KEY(trade_id) REFERENCES trades(id)
+    );
+  `);
+
+  db.$client.exec(`CREATE INDEX IF NOT EXISTS idx_trade_audit_trade_id ON trade_audit(trade_id);`);
+  db.$client.exec(`CREATE INDEX IF NOT EXISTS idx_trade_audit_event_at ON trade_audit(event_at);`);
+}
+```
+
+In `server/index.ts`, call `ensureTradeSchema()` **before** starting feeds/cron/routes:
+
+```ts
+import { ensureTradeSchema } from "./db/ensureSchema";
+
+ensureTradeSchema();
+```
+
+---
+
+## Step 2 — Add a server-side Order Engine that consumes bid/ask and triggers PENDING + SL/TP
+
+Create `server/engine/orderEngine.ts`:
+
+```ts
+import { db } from "@db";
+import { and, eq, desc } from "drizzle-orm";
+import { trades, users, userSettings, symbolConfigs, tradeAudit } from "@shared/schema";
+import { requiredMargin } from "../lib/margin";
+import { recalcAccount } from "../recalcAccount";
+
+/**
+ * IMPORTANT:
+ * - This engine must ONLY act on non-stale quotes.
+ * - It must not use client-supplied prices.
+ */
+
+type Quote = {
+  symbol: string;
+  price?: number;
+  bid?: number | null;
+  ask?: number | null;
+  isStale?: boolean;
+  lastUpdated?: number; // ms
+};
+
+let running = false;
+
+function n(v: any): number | null {
+  const x = Number(v);
+  return Number.isFinite(x) ? x : null;
+}
+
+function getBidAsk(q: Quote): { bid: number; ask: number; mid: number; spread: number } | null {
+  const bid = n(q.bid ?? q.price);
+  const ask = n(q.ask ?? q.price);
+  if (bid === null || ask === null) return null;
+  const mid = (bid + ask) / 2;
+  const spread = ask - bid;
+  return { bid, ask, mid, spread };
+}
+
+// positive = adverse slippage; negative = improvement
+function adverseSlippage(side: "BUY" | "SELL", requested: number, fill: number): number {
+  return side === "BUY" ? (fill - requested) : (requested - fill);
+}
+
+async function audit(params: {
+  tradeId: number;
+  eventType: string;
+  requestedPrice?: number | null;
+  triggerPrice?: number | null;
+  fillPrice?: number | null;
+  slippage?: number | null;
+  quoteTs?: Date | null;
+  quoteSource?: string | null;
+  quoteBid?: number | null;
+  quoteAsk?: number | null;
+  quoteMid?: number | null;
+  quoteSpread?: number | null;
+  note?: string | null;
+}) {
+  await db.insert(tradeAudit).values({
+    tradeId: params.tradeId,
+    eventType: params.eventType,
+    eventAt: new Date(),
+    requestedPrice: params.requestedPrice ?? null,
+    triggerPrice: params.triggerPrice ?? null,
+    fillPrice: params.fillPrice ?? null,
+    slippage: params.slippage ?? null,
+    quoteTs: params.quoteTs ?? null,
+    quoteSource: params.quoteSource ?? null,
+    quoteBid: params.quoteBid ?? null,
+    quoteAsk: params.quoteAsk ?? null,
+    quoteMid: params.quoteMid ?? null,
+    quoteSpread: params.quoteSpread ?? null,
+    note: params.note ?? null,
+  });
+}
+
+async function processPendingForSymbol(symbol: string, q: Quote) {
+  const ba = getBidAsk(q);
+  if (!ba) return;
+
+  const rows = await db
+    .select({
+      t: trades,
+      u: users,
+      s: userSettings,
+      sym: symbolConfigs,
+    })
+    .from(trades)
+    .leftJoin(users, eq(trades.userId, users.id))
+    .leftJoin(userSettings, eq(userSettings.userId, users.id))
+    .leftJoin(symbolConfigs, eq(trades.symbolId, symbolConfigs.id))
+    .where(and(eq(trades.status, "PENDING"), eq(symbolConfigs.symbol, symbol)))
+    .orderBy(desc(trades.openedAt));
+
+  for (const r of rows) {
+    const t = r.t;
+    const u = r.u;
+    if (!u) continue;
+
+    const side = (t.type as "BUY" | "SELL");
+    const orderType = String(t.orderType ?? "Market").toLowerCase();
+
+    // Requested price
+    const requested =
+      orderType.includes("limit") ? n(t.limitPrice) :
+      orderType.includes("stop")  ? n(t.stopPrice)  :
+      null;
+
+    if (requested === null) {
+      // Reject malformed pending order (no requested price)
+      await db.update(trades)
+        .set({ status: "CANCELED", closeReason: "REJECTED", closedAt: new Date() })
+        .where(and(eq(trades.id, t.id), eq(trades.status, "PENDING")));
+      await audit({ tradeId: t.id, eventType: "ORDER_REJECTED", note: "Missing limitPrice/stopPrice" });
+      continue;
+    }
+
+    // Trigger rules
+    let triggered = false;
+    let triggerPrice: number;
+
+    if (orderType.includes("limit")) {
+      if (side === "BUY") { triggered = ba.ask <= requested; triggerPrice = ba.ask; }
+      else { triggered = ba.bid >= requested; triggerPrice = ba.bid; }
+    } else if (orderType.includes("stop")) {
+      if (side === "BUY") { triggered = ba.ask >= requested; triggerPrice = ba.ask; }
+      else { triggered = ba.bid <= requested; triggerPrice = ba.bid; }
+    } else {
+      // Unknown order type in PENDING -> reject
+      await db.update(trades)
+        .set({ status: "CANCELED", closeReason: "REJECTED", closedAt: new Date() })
+        .where(and(eq(trades.id, t.id), eq(trades.status, "PENDING")));
+      await audit({ tradeId: t.id, eventType: "ORDER_REJECTED", note: `Unknown orderType=${t.orderType}` });
+      continue;
+    }
+
+    if (!triggered) continue;
+
+    // Fill price (professional: bid/ask side)
+    const fillPrice =
+      side === "BUY" ? ba.ask : ba.bid;
+
+    // Re-check risk at execution time
+    const lots = Number(t.lots ?? 1);
+    const leverage = Number(u.leverage ?? 5);
+    const neededMargin = requiredMargin(symbol, lots, fillPrice, leverage);
+
+    // open count checks
+    const openCount = await db.select({ c: trades.id })
+      .from(trades)
+      .where(and(eq(trades.userId, u.id), eq(trades.status, "OPEN")));
+
+    const maxConcurrent = Number(r.s?.maxConcurrent ?? 5);
+    if (openCount.length >= maxConcurrent) {
+      await db.update(trades)
+        .set({ status: "CANCELED", closeReason: "REJECTED", closedAt: new Date() })
+        .where(and(eq(trades.id, t.id), eq(trades.status, "PENDING")));
+      await audit({ tradeId: t.id, eventType: "ORDER_REJECTED", note: "Max concurrent open trades exceeded" });
+      continue;
+    }
+
+    // per-instrument open cap (3)
+    const openPerSymbol = await db.select({ c: trades.id })
+      .from(trades)
+      .leftJoin(symbolConfigs, eq(trades.symbolId, symbolConfigs.id))
+      .where(and(eq(trades.userId, u.id), eq(trades.status, "OPEN"), eq(symbolConfigs.symbol, symbol)));
+
+    if (openPerSymbol.length >= 3) {
+      await db.update(trades)
+        .set({ status: "CANCELED", closeReason: "REJECTED", closedAt: new Date() })
+        .where(and(eq(trades.id, t.id), eq(trades.status, "PENDING")));
+      await audit({ tradeId: t.id, eventType: "ORDER_REJECTED", note: "Max open trades per instrument exceeded" });
+      continue;
+    }
+
+    // margin availability (use user's current freeMargin)
+    const freeMargin = Number(u.freeMargin ?? 0);
+    if (freeMargin < neededMargin) {
+      await db.update(trades)
+        .set({ status: "CANCELED", closeReason: "REJECTED", closedAt: new Date() })
+        .where(and(eq(trades.id, t.id), eq(trades.status, "PENDING")));
+      await audit({ tradeId: t.id, eventType: "ORDER_REJECTED", note: "Insufficient free margin at execution" });
+      continue;
+    }
+
+    // Atomically flip PENDING -> OPEN (idempotent condition on status)
+    const updated = await db.update(trades)
+      .set({
+        status: "OPEN",
+        executedAt: new Date(),
+        openPrice: fillPrice,
+      })
+      .where(and(eq(trades.id, t.id), eq(trades.status, "PENDING")))
+      .returning();
+
+    if (updated.length === 0) continue;
+
+    await audit({
+      tradeId: t.id,
+      eventType: "ORDER_FILLED",
+      requestedPrice: requested,
+      triggerPrice,
+      fillPrice,
+      slippage: adverseSlippage(side, requested, fillPrice),
+      quoteTs: q.lastUpdated ? new Date(q.lastUpdated) : new Date(),
+      quoteSource: "quotes_db",
+      quoteBid: ba.bid,
+      quoteAsk: ba.ask,
+      quoteMid: ba.mid,
+      quoteSpread: ba.spread,
+      note: `orderType=${t.orderType}`,
+    });
+
+    await recalcAccount(u.id);
+  }
+}
+
+async function processStopsForOpenTrades(symbol: string, q: Quote) {
+  const ba = getBidAsk(q);
+  if (!ba) return;
+
+  const openRows = await db
+    .select({ t: trades, u: users })
+    .from(trades)
+    .leftJoin(users, eq(trades.userId, users.id))
+    .leftJoin(symbolConfigs, eq(trades.symbolId, symbolConfigs.id))
+    .where(and(eq(trades.status, "OPEN"), eq(symbolConfigs.symbol, symbol)));
+
+  for (const r of openRows) {
+    const t = r.t;
+    const u = r.u;
+    if (!u) continue;
+
+    const side = (t.type as "BUY" | "SELL");
+    const sl = n(t.stopLoss);
+    const tp = n(t.takeProfit);
+
+    // Close price uses correct side:
+    // BUY closes at bid, SELL closes at ask
+    const closePx = side === "BUY" ? ba.bid : ba.ask;
+
+    let reason: "SL" | "TP" | null = null;
+
+    if (side === "BUY") {
+      if (sl !== null && ba.bid <= sl) reason = "SL";
+      else if (tp !== null && ba.bid >= tp) reason = "TP";
+    } else {
+      if (sl !== null && ba.ask >= sl) reason = "SL";
+      else if (tp !== null && ba.ask <= tp) reason = "TP";
+    }
+
+    if (!reason) continue;
+
+    // NOTE: your current profit model elsewhere is inconsistent; keep this minimal here:
+    // profit = (close-open) * contract * lots, converted in your margin lib via FX_RATES.
+    // You should unify all realized P/L later (second priority plan).
+    const lots = Number(t.lots ?? 1);
+    const openPx = Number(t.openPrice);
+    const diff = side === "BUY" ? (closePx - openPx) : (openPx - closePx);
+    const profit = (diff * 100000 * lots).toFixed(2); // placeholder: unify in step-2 plan
+
+    const closed = await db.update(trades)
+      .set({
+        status: "CLOSED",
+        closePrice: closePx,
+        profit,
+        closeReason: reason,
+        closedAt: new Date(),
+      })
+      .where(and(eq(trades.id, t.id), eq(trades.status, "OPEN")))
+      .returning();
+
+    if (closed.length === 0) continue;
+
+    // Update balance
+    const newBalance = (Number(u.balance) + Number(profit)).toFixed(2);
+    await db.update(users).set({ balance: newBalance }).where(eq(users.id, u.id));
+
+    await audit({
+      tradeId: t.id,
+      eventType: "POSITION_CLOSED",
+      fillPrice: closePx,
+      quoteTs: q.lastUpdated ? new Date(q.lastUpdated) : new Date(),
+      quoteSource: "quotes_db",
+      quoteBid: ba.bid,
+      quoteAsk: ba.ask,
+      quoteMid: ba.mid,
+      quoteSpread: ba.spread,
+      note: `closeReason=${reason}`,
+    });
+
+    await recalcAccount(u.id);
+  }
+}
+
+export async function onQuotesUpdated(quotes: Quote[]) {
+  // single-flight to avoid overlapping ticks
+  if (running) return;
+  running = true;
+  try {
+    for (const q of quotes) {
+      if (!q?.symbol) continue;
+      if (q.isStale) continue; // quote gating
+
+      const symbol = String(q.symbol).toUpperCase();
+      await processPendingForSymbol(symbol, q);
+      await processStopsForOpenTrades(symbol, q);
+    }
+  } finally {
+    running = false;
+  }
+}
+```
+
+This gives you:
+
+* Real **PENDING → OPEN** execution for Limit/Stop
+* Real **OPEN → CLOSED** via SL/TP
+* Backend-only audit rows that include requested/trigger/fill/slippage and quote metadata
+
+**Note:** I left a clearly marked placeholder profit calculation inside SL/TP close. In the secondary plan below, we unify realized P/L everywhere using correct quote-currency conversion (so JPY/cross pairs stop being wrong).
+
+---
+
+## Step 3 — Wire the engine into your quote feed (continuous consumption)
+
+Edit `server/feeds/forgeFeed.ts`:
+
+* Import the engine
+* After you persist quotes, call `onQuotesUpdated(transformedData)`
+
+Add near top:
+
+```ts
+import { onQuotesUpdated } from "../engine/orderEngine";
+```
+
+Where you currently do:
+
+```ts
+persist(transformedData);
+```
+
+Change to:
+
+```ts
+persist(transformedData);
+
+// trigger order engine on fresh quote batch (it will ignore stale quotes)
+await onQuotesUpdated(
+  transformedData.map((q: any) => ({
+    symbol: q.symbol,
+    price: q.price,
+    bid: q.bid,
+    ask: q.ask,
+    isStale: q.isStale,
+    lastUpdated: q.lastUpdated
+  }))
+);
+```
+
+This achieves “consumes bid/ask continuously” without introducing a second polling loop.
+
+---
+
+## Step 4 — Fix order placement so pending orders store requested price correctly
+
+Edit `server/routes.ts` in `POST /api/trades`:
+
+Right before you call `storage.createTrade(...)`, normalize and enforce:
+
+* Market:
+
+  * compute `openPrice = ask (BUY) / bid (SELL)`
+* Limit:
+
+  * require `limitPrice`
+  * set `openPrice = limitPrice` (requested)
+  * status remains `PENDING` via `storage.createTrade`
+* Stop:
+
+  * require `stopPrice`
+  * set `openPrice = stopPrice` (requested)
+
+Minimal patch inside that handler:
+
+```ts
+const orderType = String(req.body.orderType ?? "Market");
+const ot = orderType.toLowerCase();
+
+let openPrice: number;
+
+if (ot.includes("market")) {
+  openPrice = data.type === "BUY" ? Number(quote.ask ?? quote.price) : Number(quote.bid ?? quote.price);
+} else if (ot.includes("limit")) {
+  if (data.limitPrice === undefined || data.limitPrice === null) {
+    return res.status(400).json({ message: "limitPrice is required for Limit orders" });
+  }
+  openPrice = Number(data.limitPrice);
+} else if (ot.includes("stop")) {
+  if (data.stopPrice === undefined || data.stopPrice === null) {
+    return res.status(400).json({ message: "stopPrice is required for Stop orders" });
+  }
+  openPrice = Number(data.stopPrice);
+} else {
+  return res.status(400).json({ message: "Unsupported orderType" });
+}
+
+// pass openPrice into createTrade
+const trade = await storage.createTrade({
+  ...data,
+  orderType,
+  openPrice,
+});
+```
+
+Also (recommended) insert an audit row “ORDER_PLACED” here (backend-only), but optional.
+
+---
+
+# Secondary: Consolidated endpoint-by-endpoint patch plan (exact edit order)
+
+This is the full professional-hardening sequence after the above engine is in:
+
+1. **DB/schema first**
+
+   * `shared/schema.ts`: add `trades.closeReason`, add `trade_audit` table
+   * `server/db/ensureSchema.ts`: ensure column + create audit table
+   * `server/index.ts`: call `ensureTradeSchema()` early
+
+2. **Quote integrity**
+
+   * Stop using `axios.get("http://localhost:5000/api/quotes/latest")` inside the server for execution decisions.
+   * Read quotes directly from DB and **gate** on `is_stale` / `last_api_update`.
+   * (If you want, I’ll provide the exact `quoteService.ts` module and replace all execution paths to use it consistently.)
+
+3. **/api/trades (open/place)**
+
+   * Enforce `orderType` semantics at placement (Market vs Limit vs Stop).
+   * For pending orders: do not pretend there’s a live fill—store requested price, status=PENDING.
+   * Write audit `ORDER_PLACED`.
+
+4. **Order Engine**
+
+   * Already implemented above:
+
+     * triggers pending orders
+     * SL/TP closes open positions
+     * writes backend audit rows
+
+5. **/api/trades/:id/close**
+
+   * Remove any client influence on closePrice (server-authoritative close at bid/ask).
+   * Write `close_reason=MANUAL`.
+   * Write audit `POSITION_CLOSED`.
+
+6. **/api/trades/pending + cancel**
+
+   * Keep as-is, but when canceling, set `close_reason=CANCELED` and write audit `ORDER_CANCELED`.
+
+7. **Admin export**
+
+   * Extend `/api/admin/all-trades` to include:
+
+     * `close_reason` (visible to admin + in CSV export)
+   * Add a separate `/api/admin/trade-audit` export (or join audit rows into a “wide” CSV).
+
+8. **Frontend (strictly limited)**
+
+   * Add **only** a `close_reason` column in History:
+
+     * map `AUTO_TIME_LIMIT` → `LIMIT TIME REACHED`
+     * `SL`, `TP`, `MANUAL`, etc.
+   * Do not display any audit details.
+
+---
+
+If you want the next deliverable in this same “#3 priority” thread, I will produce the **exact code edits** for:
+
+* `POST /api/trades` to stop server-calling its own quote endpoint and instead use DB quotes directly (with staleness gating),
+* plus the exact admin export additions to include audit rows in your CSV “Data” tab export without exposing them to traders.

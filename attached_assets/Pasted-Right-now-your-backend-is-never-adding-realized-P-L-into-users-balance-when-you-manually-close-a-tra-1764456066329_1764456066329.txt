@@ -1,0 +1,354 @@
+Right now your backend is never adding realized P/L into users.balance when you manually close a trade – it only updates the trades row. recalcAccount then uses the old balance and only recomputes equity from open trades, so after you close everything your equity snaps back to the original $1,000,000.00 and balance never moves.
+
+Let me walk Replit Agent through a clean, MT5-style fix.
+
+1. What the account math should be (MT5-style)
+
+For a single trade:
+
+BUY profit
+
+profit
+=
+(
+ClosePrice
+−
+OpenPrice
+)
+×
+ContractSize
+×
+Lots
+profit=(ClosePrice−OpenPrice)×ContractSize×Lots
+
+SELL profit
+
+profit
+=
+(
+OpenPrice
+−
+ClosePrice
+)
+×
+ContractSize
+×
+Lots
+profit=(OpenPrice−ClosePrice)×ContractSize×Lots
+
+With ContractSize = 100,000 for FX (1 standard lot).
+
+For the account:
+
+Balance = InitialDeposit + Σ(Realized P/L on CLOSED trades)
+
+FloatingPnL = Σ(unrealizedPnl(open trades))
+
+Equity = Balance + FloatingPnL
+
+UsedMargin = Σ(requiredMargin(open trades))
+
+FreeMargin = Equity − UsedMargin
+
+You already have requiredMargin and unrealizedPnl in server/lib/margin.ts, and server/recalcAccount.ts correctly implements:
+
+const balance = parseFloat(user.balance);
+const equity = balance + floatingProfit;
+const freeMargin = Math.max(0, equity - usedMargin);
+
+
+So the only missing piece is: whenever a trade is closed, we must add its realized P/L into users.balance and then recalc margin.
+
+2. Fix manual close: update balance when /api/trades/:id/close runs
+
+File: server/routes.ts
+Goal: After closing the trade, update users.balance with the realized P/L and then call recalcAccount.
+
+2.1. Keep imports as-is
+
+You already have:
+
+import { recalcAccount } from "./recalcAccount";
+import { requiredMargin } from "./lib/margin";
+
+
+No change needed here.
+
+2.2. Replace the /api/trades/:id/close handler with this version
+
+Find the existing:
+
+app.post("/api/trades/:id/close", async (req: Request, res: Response) => {
+  // ...
+});
+
+
+and replace the whole handler body with this:
+
+app.post("/api/trades/:id/close", async (req: Request, res: Response) => {
+  if (!req.session.userId) {
+    return res.status(401).json({ message: "Not authenticated" });
+  }
+
+  const tradeId = parseInt(req.params.id);
+  if (isNaN(tradeId)) {
+    return res.status(400).json({ message: "Invalid trade ID" });
+  }
+
+  try {
+    // 1. Load trade
+    const trade = await storage.getTradeById(tradeId);
+
+    if (!trade) {
+      return res.status(404).json({ message: "Trade not found" });
+    }
+
+    if (trade.userId !== req.session.userId) {
+      return res.status(403).json({ message: "Not authorized to close this trade" });
+    }
+
+    if (trade.status === "CLOSED") {
+      return res.status(400).json({ message: "Trade is already closed" });
+    }
+
+    // 2. Resolve symbol + latest quotes
+    const symbolConfig = await storage.getSymbolConfigById(trade.symbolId);
+    if (!symbolConfig) {
+      return res.status(404).json({ message: "Symbol configuration not found" });
+    }
+
+    const quotesResponse = await axios.get("http://localhost:5000/api/quotes/latest");
+    const latestQuotes = quotesResponse.data as any[];
+
+    const quoteData = latestQuotes.find(q => q.symbol === symbolConfig.symbol);
+    if (!quoteData) {
+      return res.status(404).json({ message: "Price data not available for this symbol" });
+    }
+
+    const quote = quoteData;
+
+    // 3. Determine the closing price (respecting bid / ask and optional override)
+    let closePrice: number;
+
+    if (req.body && req.body.closePrice !== undefined && req.body.closePrice !== null) {
+      closePrice = parseFloat(String(req.body.closePrice));
+    } else if (quote && quote.bid !== undefined && quote.ask !== undefined) {
+      closePrice =
+        trade.type === "BUY"
+          ? parseFloat(String(quote.bid))
+          : parseFloat(String(quote.ask));
+    } else if (quote && quote.price !== undefined) {
+      closePrice = parseFloat(String(quote.price));
+    } else {
+      return res.status(500).json({ message: "Invalid quote data" });
+    }
+
+    // 4. Calculate realized P/L (same logic as before, but slightly safer)
+    const openPrice = parseFloat(String(trade.openPrice));
+    const isProfitable =
+      trade.type === "BUY" ? closePrice > openPrice : closePrice < openPrice;
+
+    const priceDiff = Math.abs(closePrice - openPrice);
+
+    // Prefer lots; fall back to size / 100000 if needed
+    const CONTRACT_SIZE = 100000;
+    const lots =
+      trade.lots !== null && trade.lots !== undefined
+        ? Number(trade.lots)
+        : Number(trade.size) / CONTRACT_SIZE;
+
+    const symbolName = symbolConfig.symbol || "";
+    const isJpy = symbolName.includes("JPY");
+    const pipMultiplier = isJpy ? 100 : 10000;
+    const pips = priceDiff * pipMultiplier;
+    const dollarPerPip = 10; // $10 per pip per lot
+
+    let profit = pips * dollarPerPip * lots;
+    if (!isProfitable) {
+      profit = -profit;
+    }
+
+    // 5. Persist the closed trade with realized P/L
+    const closedTrade = await storage.closeTrade(
+      tradeId,
+      closePrice,
+      profit.toFixed(2)
+    );
+
+    // 6. ***Update account balance and margin metrics***
+    try {
+      const user = await storage.getUserById(trade.userId);
+      if (user) {
+        const previousBalance = parseFloat(user.balance);
+        const realizedPnL = parseFloat(closedTrade.profit ?? "0");
+        const newBalance = (previousBalance + realizedPnL).toFixed(2);
+
+        await storage.updateUserBalance(user.id, newBalance);
+        await recalcAccount(user.id); // recompute equity, usedMargin, freeMargin
+      }
+    } catch (accountError) {
+      console.error("Failed to update account after closing trade:", accountError);
+      // Trade is already closed; we don't throw here.
+    }
+
+    return res.json(closedTrade);
+  } catch (error) {
+    console.error("Close trade error:", error);
+    return res.status(500).json({ message: "Failed to close trade" });
+  }
+});
+
+
+Effect:
+
+Each manual close now:
+
+Computes realized P/L.
+
+Stores it in trades.profit.
+
+Adds that P/L to users.balance.
+
+Calls recalcAccount(userId) so:
+
+equity = balance + floatingPnL
+
+usedMargin and freeMargin are recomputed based on remaining open trades.
+
+Because the client’s useTrades().closeTrade invalidates "/api/auth/current-user", the TradeScreen account panel will immediately show the new Balance, Equity, Free Margin.
+
+3. Fix auto-close job so it doesn’t add trade.size to balance
+
+Right now server/cron/autoClose.ts does this:
+
+const newBalance = (parseFloat(user.balance) + trade.size + parseFloat(profit)).toFixed(2);
+
+
+That is wrong – it’s adding the notional size of the position on top of the profit, blowing up the balance. It should only add profit.
+
+Let’s fix it and also recalc margin for consistency.
+
+3.1. Add import
+
+At the top of server/cron/autoClose.ts:
+
+import { storage } from '../storage';
+import { log } from '../vite';
+
+
+change to:
+
+import { storage } from '../storage';
+import { log } from '../vite';
+import { recalcAccount } from '../recalcAccount';
+
+3.2. Patch the profit / balance block
+
+Find this block:
+
+// For simplicity, using a 1 pip = 0.0001 for most pairs (0.01 for JPY pairs)
+const pipValue = symbol.symbol.includes('JPY') ? 0.01 : 0.0001;
+const profit = (priceDiff / pipValue * trade.size * 0.0001).toFixed(2);
+
+// Close the trade
+await storage.closeTrade(trade.id, currentPrice, profit);
+
+// Update user balance
+const user = await storage.getUserById(trade.userId);
+if (user) {
+  const newBalance = (parseFloat(user.balance) + trade.size + parseFloat(profit)).toFixed(2);
+  await storage.updateUserBalance(trade.userId, newBalance);
+}
+
+
+Replace with:
+
+// For simplicity, using a 1 pip = 0.0001 for most pairs (0.01 for JPY pairs)
+const pipValue = symbol.symbol.includes('JPY') ? 0.01 : 0.0001;
+const profit = (priceDiff / pipValue * trade.size * 0.0001).toFixed(2);
+
+// Close the trade and persist realized P/L
+const closedTrade = await storage.closeTrade(trade.id, currentPrice, profit);
+
+// Update user balance with realized P/L only
+const user = await storage.getUserById(trade.userId);
+if (user) {
+  const previousBalance = parseFloat(user.balance);
+  const realizedPnL = parseFloat(closedTrade.profit ?? profit);
+  const newBalance = (previousBalance + realizedPnL).toFixed(2);
+
+  await storage.updateUserBalance(trade.userId, newBalance);
+  await recalcAccount(trade.userId);
+}
+
+
+Effect:
+
+Auto-closed trades behave exactly like manual closes:
+
+P/L stored in trades.profit.
+
+Balance adjusted by profit only.
+
+Margin metrics recomputed so equity/free margin always match reality.
+
+4. Why this fixes your “balance never changes” issue
+Before
+
+closeTrade (manual) only did:
+
+trades.status = "CLOSED", trades.closePrice, trades.profit.
+
+Did not touch users.balance.
+
+recalcAccount always did:
+
+balance = parseFloat(user.balance);        // still 1,000,000
+equity  = balance + floatingProfit;        // falls back to 1,000,000 when all trades closed
+
+
+So after you close everything:
+
+floatingProfit = 0 → equity = balance = 1,000,000.
+
+The UI pulls user.balance from /api/auth/current-user → looks unchanged.
+
+After these changes
+
+Every trade close (manual or auto):
+
+Writes realized P/L to the trade.
+
+Adds realized P/L into users.balance.
+
+Recomputes equity/freeMargin/usedMargin.
+
+So:
+
+Close a winner → balance increases.
+
+Close a loser → balance decreases.
+
+With no open trades → equity == balance, usedMargin = 0, freeMargin = balance, just like MT5.
+
+TL;DR for Replit Agent
+
+In server/routes.ts:
+
+Leave imports as-is.
+
+Replace the entire /api/trades/:id/close handler with the version above that:
+
+Computes profit.
+
+Calls storage.closeTrade(...).
+
+Fetches user, adds profit to users.balance, calls recalcAccount.
+
+In server/cron/autoClose.ts:
+
+Add import { recalcAccount } from '../recalcAccount';.
+
+Change balance update so it only adds profit, not trade.size, and call recalcAccount(userId).
+
+Once that’s in, your balance, equity, and margin panel on the Trade screen will behave like a proper MT5-style account instead of a static demo.

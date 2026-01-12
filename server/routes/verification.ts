@@ -386,7 +386,10 @@ router.post("/email/verify", async (req: Request, res: Response) => {
     }
 
     const nowSec = Math.floor(Date.now() / 1000);
-    if (tokenRecord.expiresAt && Number(tokenRecord.expiresAt) < nowSec) {
+    const tokenExpiresAtSec = tokenRecord.expiresAt instanceof Date
+      ? Math.floor(tokenRecord.expiresAt.getTime() / 1000)
+      : Number(tokenRecord.expiresAt);
+    if (tokenExpiresAtSec && tokenExpiresAtSec < nowSec) {
       return res.status(410).json({ message: "Token has expired. Please request a new verification email." });
     }
 
@@ -832,7 +835,10 @@ router.post("/sms/confirm", async (req: Request, res: Response) => {
     if (otpRow.consumedAt) {
       return handleOtpFailure("otp.consumed");
     }
-    if (otpRow.expiresAt && Number(otpRow.expiresAt) < nowSec) {
+    const otpExpiresAtSec = otpRow.expiresAt instanceof Date
+      ? Math.floor(otpRow.expiresAt.getTime() / 1000)
+      : Number(otpRow.expiresAt);
+    if (otpExpiresAtSec && otpExpiresAtSec < nowSec) {
       return handleOtpFailure("otp.expired");
     }
     if (hashOtp(code) !== otpRow.otpHash) {

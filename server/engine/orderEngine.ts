@@ -99,7 +99,7 @@ async function auditRejection(params: {
   quoteAsk: number;
   quoteMid: number;
   quoteSpread: number;
-  quoteTs: Date;
+  quoteTs: number | Date;
   quoteSource?: string;
   sessionId?: string | null;
   ip?: string | null;
@@ -164,7 +164,7 @@ async function auditFill(params: {
   quoteAsk: number;
   quoteMid: number;
   quoteSpread: number;
-  quoteTs: Date;
+  quoteTs: number | Date;
   quoteSource?: string;
   sessionId?: string | null;
   ip?: string | null;
@@ -238,7 +238,7 @@ async function auditClose(params: {
   quoteAsk: number;
   quoteMid: number;
   quoteSpread: number;
-  quoteTs: Date;
+  quoteTs: number | Date;
   quoteSource?: string;
   sessionId?: string | null;
   ip?: string | null;
@@ -307,6 +307,7 @@ async function processPendingForSymbol(symbol: string, q: Quote) {
     const t = r.t;
     const u = r.u;
     if (!u) continue;
+    const nowSec = Math.floor(Date.now() / 1000);
 
     const side = t.type as "BUY" | "SELL";
     const orderType = String(t.orderType ?? "Market");
@@ -337,7 +338,7 @@ async function processPendingForSymbol(symbol: string, q: Quote) {
 
     if (requested === null) {
       await db.update(trades)
-        .set({ status: "CANCELED", closeReason: "ORDER_REJECTED", closedAt: new Date() })
+        .set({ status: "CANCELED", closeReason: "ORDER_REJECTED", closedAt: nowSec })
         .where(and(eq(trades.id, t.id), eq(trades.status, "PENDING")));
       await auditRejection({
         tradeId: t.id,
@@ -375,7 +376,7 @@ async function processPendingForSymbol(symbol: string, q: Quote) {
       else { triggered = ba.bid <= requested; triggerPrice = ba.bid; }
     } else {
       await db.update(trades)
-        .set({ status: "CANCELED", closeReason: "ORDER_REJECTED", closedAt: new Date() })
+        .set({ status: "CANCELED", closeReason: "ORDER_REJECTED", closedAt: nowSec })
         .where(and(eq(trades.id, t.id), eq(trades.status, "PENDING")));
       await auditRejection({
         tradeId: t.id,
@@ -418,7 +419,7 @@ async function processPendingForSymbol(symbol: string, q: Quote) {
       const policyDecision = decidePolicy("TRADE_OPEN_OR_INCREASE", policyCtx, policyConfig);
       if (!policyDecision.allowed) {
         await db.update(trades)
-          .set({ status: "CANCELED", closeReason: "POLICY_DENIED", closedAt: new Date() })
+          .set({ status: "CANCELED", closeReason: "POLICY_DENIED", closedAt: nowSec })
           .where(and(eq(trades.id, t.id), eq(trades.status, "PENDING")));
 
         try {
@@ -485,7 +486,7 @@ async function processPendingForSymbol(symbol: string, q: Quote) {
     const effectiveMaxConcurrent = Number(r.s?.maxConcurrent ?? globalLimits.maxTradesPerUser);
     if (openCount.length >= effectiveMaxConcurrent) {
       await db.update(trades)
-        .set({ status: "CANCELED", closeReason: "ORDER_REJECTED", closedAt: new Date() })
+        .set({ status: "CANCELED", closeReason: "ORDER_REJECTED", closedAt: nowSec })
         .where(and(eq(trades.id, t.id), eq(trades.status, "PENDING")));
       await auditRejection({
         tradeId: t.id,
@@ -523,7 +524,7 @@ async function processPendingForSymbol(symbol: string, q: Quote) {
     
     if (currentOpenLots + lots > effectiveMaxConcurrentLots) {
       await db.update(trades)
-        .set({ status: "CANCELED", closeReason: "ORDER_REJECTED", closedAt: new Date() })
+        .set({ status: "CANCELED", closeReason: "ORDER_REJECTED", closedAt: nowSec })
         .where(and(eq(trades.id, t.id), eq(trades.status, "PENDING")));
       await auditRejection({
         tradeId: t.id,
@@ -577,7 +578,7 @@ async function processPendingForSymbol(symbol: string, q: Quote) {
     // If filling this order would exceed the limit, reject it
     if (activePerSymbol >= effectiveMaxTradesPerInstrument) {
       await db.update(trades)
-        .set({ status: "CANCELED", closeReason: "ORDER_REJECTED", closedAt: new Date() })
+        .set({ status: "CANCELED", closeReason: "ORDER_REJECTED", closedAt: nowSec })
         .where(and(eq(trades.id, t.id), eq(trades.status, "PENDING")));
       await auditRejection({
         tradeId: t.id,
@@ -608,7 +609,7 @@ async function processPendingForSymbol(symbol: string, q: Quote) {
     const freeMargin = Number(u.freeMargin ?? 0);
     if (freeMargin < neededMargin) {
       await db.update(trades)
-        .set({ status: "CANCELED", closeReason: "ORDER_REJECTED", closedAt: new Date() })
+        .set({ status: "CANCELED", closeReason: "ORDER_REJECTED", closedAt: nowSec })
         .where(and(eq(trades.id, t.id), eq(trades.status, "PENDING")));
       await auditRejection({
         tradeId: t.id,
@@ -637,13 +638,12 @@ async function processPendingForSymbol(symbol: string, q: Quote) {
 
     const executionId = generateExecutionId();
     const positionId = (t as any).positionId || generatePositionId();
-    const now = new Date();
 
     // Fill the order
     const updated = await db.update(trades)
       .set({
         status: "OPEN",
-        executedAt: now,
+        executedAt: nowSec,
         openPrice: fillPrice,
         correlationId,
         orderId,
@@ -753,7 +753,7 @@ async function processStopsForOpenTrades(symbol: string, q: Quote) {
     const orderId = (t as any).orderId || generateOrderId();
     const positionId = (t as any).positionId || generatePositionId();
     const executionId = generateExecutionId();
-    const closedAt = new Date();
+    const closedAt = Math.floor(Date.now() / 1000);
 
     const closed = await db.update(trades)
       .set({

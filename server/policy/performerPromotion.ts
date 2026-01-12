@@ -38,7 +38,7 @@ export async function promotePerformerIfEligible(args: {
     return { eligible: contender.eligible, path1: contender.path1, path2: contender.path2, promoted: false };
   }
 
-  const now = new Date();
+  const nowSec = Math.floor(Date.now() / 1000);
   let promoted = false;
   let contenderTierUpdated = false;
 
@@ -53,17 +53,17 @@ export async function promotePerformerIfEligible(args: {
       await db.update(userVerification)
         .set({
           contenderTier: "CANDIDATE_SMS_REQUIRED",
-          contenderEligibleAt: verification.contenderEligibleAt ?? now,
-          updatedAt: now,
+          contenderEligibleAt: verification.contenderEligibleAt ?? nowSec,
+          updatedAt: nowSec,
         })
         .where(eq(userVerification.userId, ctx.user.id));
     } else {
       await db.insert(userVerification).values({
         userId: ctx.user.id,
         contenderTier: "CANDIDATE_SMS_REQUIRED",
-        contenderEligibleAt: now,
-        createdAt: now,
-        updatedAt: now,
+        contenderEligibleAt: nowSec,
+        createdAt: nowSec,
+        updatedAt: nowSec,
       } as any);
     }
   }
@@ -73,7 +73,7 @@ export async function promotePerformerIfEligible(args: {
     await db.update(users)
       .set({
         userTier: "PERFORMER",
-        tierPromotedAt: now,
+        tierPromotedAt: nowSec,
         tierPromotedBy: args.actorUserId ?? null,
       })
       .where(eq(users.id, ctx.user.id));

@@ -1,0 +1,37 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: tradehub
+      POSTGRES_PASSWORD: tradehub_pw
+      POSTGRES_DB: tradehub
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  pgbouncer:
+    image: edoburu/pgbouncer:latest
+    depends_on:
+      - postgres
+    ports:
+      - "6432:5432"
+    environment:
+      DB_USER: tradehub
+      DB_PASSWORD: tradehub_pw
+      DB_HOST: postgres
+      DB_NAME: tradehub
+      AUTH_TYPE: scram-sha-256
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: 2000
+      DEFAULT_POOL_SIZE: 50
+      RESERVE_POOL_SIZE: 20
+      SERVER_RESET_QUERY: DISCARD ALL
+
+  valkey:
+    image: valkey/valkey:latest
+    ports:
+      - "6379:6379"
+
+volumes:
+  pgdata:

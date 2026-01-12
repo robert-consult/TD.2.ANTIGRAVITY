@@ -548,10 +548,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const forgeKeyPresent = Boolean(process.env.FORGE_KEY);
       const forgeKeyLength = process.env.FORGE_KEY?.length || 0;
       
-      // Try to get cache stats from forgeFeed module
+      // Try to get cache stats from quote feed module
       let cacheStats = { cacheSize: 0, lastSuccessfulApiCall: 0, consecutiveApiFailures: 0, staleCount: 0 };
       try {
-        const { getCacheStats } = await import('./feeds/forgeFeed');
+        const { getCacheStats } = await import('./feeds/quoteFeed');
         cacheStats = getCacheStats();
       } catch (e) {
         console.error('Error getting cache stats:', e);
@@ -3893,6 +3893,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         time: fxRolloverTime,
       });
       const nowMs = Date.now();
+      const nowSec = Math.floor(nowMs / 1000);
       const quotesResult = await dbClient.query(
         `
         SELECT
@@ -3920,7 +3921,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           ) AS "prevClose"
         FROM quotes q
         `,
-        [nowMs, currentSessionDay]
+        [nowSec, currentSessionDay]
       );
       const quotes = quotesResult.rows;
 
@@ -4013,14 +4014,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use('/api/admin/system-config', adminSystemConfigRouter); // System config (coverage gate toggle)
   app.use("/api/admin/activity", adminActivityRouter); // Inactive users + bot management
 
+  app.use("/api/admin/i18n", adminI18nRouter); // Admin controls for i18n
   if (!isPostgres) {
     registerGriftRoutes(app);
-    app.use("/api/admin/i18n", adminI18nRouter); // Admin controls for i18n
     app.use("/api/grift", griftPublicRouter);
     app.use('/api/admin/legal-docs', adminLegalRouter); // Admin legal management routes (legacy)
     app.use('/api/admin/migration', adminMigrationRouter); // Migration export/import (backup)
   } else {
-    console.warn("[DB] Postgres mode: grift/i18n/admin migration/legacy legal routes are disabled.");
+    console.warn("[DB] Postgres mode: grift/admin migration/legacy legal routes are disabled.");
   }
 
   // Create HTTP server
@@ -4298,7 +4299,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const existingSymbols = new Set(existingQuotes.map((q) => q.symbol));
 
       const nowSec = Math.floor(Date.now() / 1000);
-      const nowMs = Date.now();
 
       for (const item of defaultSymbols) {
         if (!existingSymbols.has(item.symbol)) {
@@ -4309,7 +4309,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               bid: item.bid,
               ask: item.ask,
               updatedAt: nowSec,
-              lastApiUpdate: nowMs,
+              lastApiUpdate: nowSec,
               isStale: false,
             })
             .onConflictDoNothing();
@@ -4346,7 +4346,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 bid,
                 ask,
                 updatedAt: nowSec,
-                lastApiUpdate: nowMs,
+                lastApiUpdate: nowSec,
                 isStale: false,
               })
               .onConflictDoNothing();
@@ -4380,7 +4380,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         .from(quotes);
 
       const timestamp = Math.floor(Date.now() / 1000);
-      const nowMs = Date.now();
 
       for (const quote of quoteRows) {
         const isJpy = String(quote.symbol).includes("JPY");
@@ -4401,7 +4400,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             bid: newBid,
             ask: newAsk,
             updatedAt: timestamp,
-            lastApiUpdate: nowMs,
+            lastApiUpdate: timestamp,
             isStale: false,
           })
           .where(eq(quotes.symbol, quote.symbol));
@@ -4414,13 +4413,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
   }
   
   // Only run simulated updates if we do NOT have a 1Forge key.
-  // When FORGE_KEY is set, real-time prices come from 1Forge (forgeFeed.ts).
+  // When FORGE_KEY is set, real-time prices come from 1Forge (quoteFeed.ts).
   const hasForgeKey = Boolean(process.env.FORGE_KEY);
   
-  if (!hasForgeKey) {
+  if (!hasForgeKey && !isPostgres) {
     console.log("[Simulation] No FORGE_KEY found - starting simulated price updates");
     setInterval(updateQuotesWithSimulation, UPDATE_INTERVAL);
     updateQuotesWithSimulation().catch(err => console.error("Error in initial quote update:", err));
+  } else if (!hasForgeKey) {
+    console.log("[Simulation] No FORGE_KEY found - quote feed handles simulation");
   } else {
     console.log("[Simulation] FORGE_KEY present - using 1Forge live data, simulation disabled");
   }

@@ -28,7 +28,9 @@ export function resolveCaptchaProvider(
 }
 
 async function getConfig(): Promise<{ enforceSignupCaptcha: boolean; provider: CaptchaProvider }> {
-  const cfg = db.select().from(systemConfig).where(eq(systemConfig.id, 1)).get();
+  const cfg = await db.query.systemConfig.findFirst({
+    where: eq(systemConfig.id, 1),
+  });
   const selectedProvider = String(cfg?.captchaProvider ?? "SLIDER").toUpperCase() as CaptchaProvider;
   const resolved = resolveCaptchaProvider(selectedProvider);
   return {

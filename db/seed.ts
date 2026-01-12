@@ -1,9 +1,15 @@
 import { storage } from "../server/storage";
+import { db } from "@db";
+import { globalSettings, systemConfig } from "@shared/schema";
 
 async function seed() {
   console.log("Seeding database...");
   
   try {
+    // Ensure singleton config rows exist (id=1) with defaults
+    await db.insert(systemConfig).values({ id: 1 }).onConflictDoNothing();
+    await db.insert(globalSettings).values({ id: 1 }).onConflictDoNothing();
+
     // Create admin user if it doesn't exist
     const adminEmail = "admin@local.test";
     const existingAdmin = await storage.getUserByEmail(adminEmail);

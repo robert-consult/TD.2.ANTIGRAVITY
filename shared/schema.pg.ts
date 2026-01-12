@@ -1,4 +1,4 @@
-import { pgTable, text, integer, real, primaryKey, serial, boolean, bigint } from "drizzle-orm/pg-core";
+import { pgTable, text, integer, real, primaryKey, serial, boolean, bigint, index, uniqueIndex } from "drizzle-orm/pg-core";
 import { createInsertSchema, createSelectSchema } from "drizzle-zod";
 import { z } from "zod";
 import { relations } from "drizzle-orm";
@@ -443,6 +443,100 @@ export const systemConfig = pgTable("system_config", {
 });
 
 export const insertSystemConfigSchema = createInsertSchema(systemConfig);
+
+// i18n (dynamic UI translations) tables
+export const i18nManifestVersions = pgTable("i18n_manifest_versions", {
+  id: serial("id").primaryKey(),
+  version: text("version").notNull().unique(),
+  generatedAt: integer("generated_at"),
+  ingestedAt: integer("ingested_at").notNull().default(nowUnix),
+  entryCount: integer("entry_count").notNull().default(0),
+});
+
+export const i18nSourceStrings = pgTable("i18n_source_strings", {
+  stringId: text("string_id").primaryKey(),
+  defaultText: text("default_text").notNull(),
+  checksum: text("checksum").notNull(),
+  file: text("file"),
+  kind: text("kind"),
+  propName: text("prop_name"),
+  line: integer("line"),
+  column: integer("column"),
+  firstSeenAt: integer("first_seen_at").notNull().default(nowUnix),
+  lastSeenAt: integer("last_seen_at").notNull().default(nowUnix),
+  lastModifiedAt: integer("last_modified_at").notNull().default(nowUnix),
+});
+
+export const i18nTranslations = pgTable(
+  "i18n_translations",
+  {
+    stringId: text("string_id").notNull().references(() => i18nSourceStrings.stringId),
+    locale: text("locale").notNull(),
+    translatedText: text("translated_text").notNull(),
+    sourceChecksum: text("source_checksum").notNull(),
+    provider: text("provider"),
+    model: text("model"),
+    createdAt: integer("created_at").notNull().default(nowUnix),
+    updatedAt: integer("updated_at").notNull().default(nowUnix),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.stringId, table.locale] }),
+    localeIdx: index("idx_i18n_tr_locale").on(table.locale, table.updatedAt),
+  }),
+);
+
+export const i18nTranslationJobs = pgTable(
+  "i18n_translation_jobs",
+  {
+    id: serial("id").primaryKey(),
+    stringId: text("string_id").notNull().references(() => i18nSourceStrings.stringId),
+    locale: text("locale").notNull(),
+    status: text("status").notNull().default("PENDING"),
+    attemptCount: integer("attempt_count").notNull().default(0),
+    lastError: text("last_error"),
+    lockedAt: integer("locked_at"),
+    lockedBy: text("locked_by"),
+    createdAt: integer("created_at").notNull().default(nowUnix),
+    updatedAt: integer("updated_at").notNull().default(nowUnix),
+  },
+  (table) => ({
+    uniqueStringLocale: uniqueIndex("idx_i18n_jobs_string_locale").on(table.stringId, table.locale),
+    statusIdx: index("idx_i18n_jobs_status").on(table.status, table.updatedAt),
+  }),
+);
+
+// Market session daily close table
+export const marketDailyClose = pgTable(
+  "market_daily_close",
+  {
+    symbol: text("symbol").notNull(),
+    sessionDay: text("session_day").notNull(),
+    close: real("close").notNull(),
+    closeTsMs: bigint("close_ts_ms", { mode: "number" }).notNull(),
+    updatedAt: integer("updated_at").notNull().default(nowUnix),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.symbol, table.sessionDay] }),
+    symbolDayIdx: index("idx_mdc_symbol_day").on(table.symbol, table.sessionDay),
+  }),
+);
+
+// Daily P&L snapshots (admin analytics)
+export const dailyCloses = pgTable(
+  "daily_closes",
+  {
+    id: serial("id").primaryKey(),
+    date: text("date").notNull(),
+    userId: integer("user_id").notNull().references(() => users.id),
+    balance: real("balance").notNull(),
+    profitDay: real("profit_day"),
+    tradesClosed: integer("trades_closed"),
+    tradesWon: integer("trades_won"),
+  },
+  (table) => ({
+    userDateIdx: index("idx_daily_closes_user_date").on(table.userId, table.date),
+  }),
+);
 
 // --- Signup freeze attempt logging (always recorded when blocked) ---
 export const signupFreezeAttempts = pgTable("signup_freeze_attempts", {

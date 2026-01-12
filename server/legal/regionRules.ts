@@ -193,9 +193,11 @@ export type JurisdictionRestrictionPolicy = {
 };
 
 let cachedJurisdictionPolicy: (JurisdictionRestrictionPolicy & { fetchedAtMs: number }) | null = null;
+let refreshPolicyPromise: Promise<JurisdictionRestrictionPolicy> | null = null;
 
 export function invalidateJurisdictionRestrictionPolicyCache() {
   cachedJurisdictionPolicy = null;
+  refreshPolicyPromise = null;
 }
 
 export function parseRestrictedCountriesCsv(raw: string | null | undefined): string[] {
@@ -215,6 +217,23 @@ export function parseRestrictedCountriesCsv(raw: string | null | undefined): str
   return Array.from(new Set(codes));
 }
 
+async function loadJurisdictionRestrictionPolicy(): Promise<JurisdictionRestrictionPolicy> {
+  const row = await db.query.systemConfig.findFirst({
+    where: eq(systemConfig.id, 1),
+  });
+  const countries = parseRestrictedCountriesCsv((row as any)?.jurisdictionRestrictedIso2Csv);
+  const message = String((row as any)?.jurisdictionRestrictedMessage ?? DEFAULT_RESTRICTED_MESSAGE);
+
+  return {
+    countries,
+    message,
+    jurisdictionBlockSignup: Boolean((row as any)?.jurisdictionBlockSignup ?? true),
+    jurisdictionBlockLogin: Boolean((row as any)?.jurisdictionBlockLogin ?? true),
+    jurisdictionEnforceByIpGeo: Boolean((row as any)?.jurisdictionEnforceByIpGeo ?? false),
+    jurisdictionEnforceBySignupCountry: Boolean((row as any)?.jurisdictionEnforceBySignupCountry ?? true),
+  };
+}
+
 export function getJurisdictionRestrictionPolicy(): JurisdictionRestrictionPolicy {
   const now = Date.now();
   if (cachedJurisdictionPolicy && now - cachedJurisdictionPolicy.fetchedAtMs < RESTRICTED_CONFIG_CACHE_TTL_MS) {
@@ -222,32 +241,34 @@ export function getJurisdictionRestrictionPolicy(): JurisdictionRestrictionPolic
     return rest;
   }
 
-  try {
-    const row = db.select().from(systemConfig).where(eq(systemConfig.id, 1)).get() as any;
-    const countries = parseRestrictedCountriesCsv(row?.jurisdictionRestrictedIso2Csv);
-    const message = String(row?.jurisdictionRestrictedMessage ?? DEFAULT_RESTRICTED_MESSAGE);
-
-    const policy: JurisdictionRestrictionPolicy = {
-      countries,
-      message,
-      jurisdictionBlockSignup: Boolean(row?.jurisdictionBlockSignup ?? true),
-      jurisdictionBlockLogin: Boolean(row?.jurisdictionBlockLogin ?? true),
-      jurisdictionEnforceByIpGeo: Boolean(row?.jurisdictionEnforceByIpGeo ?? false),
-      jurisdictionEnforceBySignupCountry: Boolean(row?.jurisdictionEnforceBySignupCountry ?? true),
-    };
-
-    cachedJurisdictionPolicy = { ...policy, fetchedAtMs: now };
-    return policy;
-  } catch {
-    return {
-      countries: [...DEFAULT_RESTRICTED_ISO2],
-      message: DEFAULT_RESTRICTED_MESSAGE,
-      jurisdictionBlockSignup: true,
-      jurisdictionBlockLogin: true,
-      jurisdictionEnforceByIpGeo: false,
-      jurisdictionEnforceBySignupCountry: true,
-    };
+  void refreshJurisdictionRestrictionPolicy();
+  if (cachedJurisdictionPolicy) {
+    const { fetchedAtMs, ...rest } = cachedJurisdictionPolicy;
+    return rest;
   }
+
+  return {
+    countries: [...DEFAULT_RESTRICTED_ISO2],
+    message: DEFAULT_RESTRICTED_MESSAGE,
+    jurisdictionBlockSignup: true,
+    jurisdictionBlockLogin: true,
+    jurisdictionEnforceByIpGeo: false,
+    jurisdictionEnforceBySignupCountry: true,
+  };
+}
+
+export async function refreshJurisdictionRestrictionPolicy(): Promise<JurisdictionRestrictionPolicy> {
+  if (!refreshPolicyPromise) {
+    refreshPolicyPromise = loadJurisdictionRestrictionPolicy()
+      .then((policy) => {
+        cachedJurisdictionPolicy = { ...policy, fetchedAtMs: Date.now() };
+        return policy;
+      })
+      .finally(() => {
+        refreshPolicyPromise = null;
+      });
+  }
+  return refreshPolicyPromise;
 }
 
 export function getRestrictedCountryPolicy(): { countries: string[]; message: string } {

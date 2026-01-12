@@ -230,39 +230,43 @@ app.use((req, res, next) => {
         console.warn("[DB] Postgres mode: SQLite schema ensure/seed skipped. Apply Postgres migrations before use.");
       }
 
-      if (!isPostgres) {
-        // i18n: ingest built manifest (if present) and start worker
-        try {
-          const ing = await maybeIngestBuiltManifest();
-          if ((ing as any)?.ingested) console.log("[i18n] Ingested built manifest:", ing);
-          else console.log("[i18n] Built manifest ingest skipped:", ing);
-        } catch (e) {
-          console.warn("[i18n] Built manifest ingest failed:", e);
-        }
-        try {
-          startI18nWorker(30_000);
-          console.log("[i18n] Worker started");
-        } catch (e) {
-          console.warn("[i18n] Worker failed to start:", e);
-        }
+      // i18n: ingest built manifest (if present) and start worker
+      try {
+        const ing = await maybeIngestBuiltManifest();
+        if ((ing as any)?.ingested) console.log("[i18n] Ingested built manifest:", ing);
+        else console.log("[i18n] Built manifest ingest skipped:", ing);
+      } catch (e) {
+        console.warn("[i18n] Built manifest ingest failed:", e);
+      }
+      try {
+        startI18nWorker(30_000);
+        console.log("[i18n] Worker started");
+      } catch (e) {
+        console.warn("[i18n] Worker failed to start:", e);
+      }
 
-        // Import feed/cron AFTER schema is ensured
-        try {
+      // Import feed/cron AFTER schema is ensured
+      try {
+        if (isPostgres) {
+          await import("./feeds/quoteFeed");
+        } else {
           await import("./feeds/forgeFeed");
-          await import("./cron/autoClose");
-          log("Price feed and auto-close services initialized");
-        } catch (error) {
-          console.error("Error initializing feed/cron services:", error);
         }
+        await import("./cron/autoClose");
+        log("Price feed and auto-close services initialized");
+      } catch (error) {
+        console.error("Error initializing feed/cron services:", error);
+      }
 
-        // Initialize admin data views and tables
-        try {
-          await setupAdminViews();
-          log("Admin data views and tables initialized successfully");
-        } catch (error) {
-          console.error("Error setting up admin data views:", error);
-        }
-        
+      // Initialize admin data views and tables
+      try {
+        await setupAdminViews();
+        log("Admin data views and tables initialized successfully");
+      } catch (error) {
+        console.error("Error setting up admin views:", error);
+      }
+
+      if (!isPostgres) {
         // Start grift detection scheduler
         try {
           startGriftEvaluationScheduler("./trading_app.db");
@@ -271,7 +275,7 @@ app.use((req, res, next) => {
           console.error("Error starting grift scheduler:", error);
         }
       } else {
-        console.warn("[DB] Postgres mode: SQLite-only i18n/feeds/admin views/grift schedulers are disabled.");
+        console.warn("[DB] Postgres mode: grift schedulers are disabled.");
       }
 
       // Start verification reminder cron

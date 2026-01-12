@@ -11,10 +11,10 @@ i18nRouter.get("/config", (_req, res) => {
 });
 
 // GET /api/i18n/bundle?locale=xx
-i18nRouter.get("/bundle", (req, res) => {
+i18nRouter.get("/bundle", async (req, res) => {
   const requested = String((req.query as any)?.locale || "");
-  const bundle = getBundle(requested);
-  const etag = getBundleEtag(bundle.locale);
+  const bundle = await getBundle(requested);
+  const etag = await getBundleEtag(bundle.locale);
 
   const ifNoneMatch = String(req.headers["if-none-match"] || "");
   if (ifNoneMatch && ifNoneMatch === etag) {
@@ -25,4 +25,3 @@ i18nRouter.get("/bundle", (req, res) => {
   res.setHeader("ETag", etag);
   res.json(bundle);
 });
-

@@ -7,7 +7,7 @@ import { eq, sql, desc, and, gte, inArray, like, or } from "drizzle-orm";
 import { trades, users, symbolConfigs, userSettings } from "@shared/schema";
 import { appendIdentityAudit, getRecentIdentityAudit } from "../services/identityAudit";
 import { scheduleAutoClose } from "../cron/autoClose";
-import { getCacheStats, reloadFeedConfig } from "../feeds/forgeFeed";
+import { getCacheStats, reloadFeedConfig } from "../feeds/quoteFeed";
 import { stringify } from "csv-stringify/sync";
 import { z } from "zod";
 import { sha256, stableStringify } from "../legal/cryptoUtils";
@@ -1271,7 +1271,7 @@ export function registerAdminRoutes(app: Express) {
       
       // Reload feed config immediately so changes take effect without restart
       try {
-        reloadFeedConfig();
+        void reloadFeedConfig();
       } catch (e) {
         console.warn("Could not reload feed config:", e);
       }

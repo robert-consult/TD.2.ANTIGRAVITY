@@ -8,8 +8,10 @@ import { db } from "@db";
 import { eq } from "drizzle-orm";
 import { systemConfig } from "@shared/schema";
 
-function getCaptchaEnabled() {
-  const row = db.select().from(systemConfig).where(eq(systemConfig.id, 1)).get();
+async function getCaptchaEnabled() {
+  const row = await db.query.systemConfig.findFirst({
+    where: eq(systemConfig.id, 1),
+  });
   const enforceSignupCaptcha = Boolean(row?.signupCaptchaEnforce ?? true);
   const selectedProvider = String(row?.captchaProvider ?? "SLIDER").toUpperCase() as any;
   const provider = resolveCaptchaProvider(selectedProvider).provider;
@@ -38,8 +40,8 @@ function logCaptchaEvent(
   }
 }
 
-captchaSliderRouter.post("/slider/start", (req, res) => {
-  const cfg = getCaptchaEnabled();
+captchaSliderRouter.post("/slider/start", async (req, res) => {
+  const cfg = await getCaptchaEnabled();
   if (!cfg.enforceSignupCaptcha || cfg.provider !== "SLIDER") {
     return res.status(400).json({ ok: false, message: "SLIDER_NOT_ENABLED" });
   }
@@ -61,8 +63,8 @@ captchaSliderRouter.post("/slider/start", (req, res) => {
   return res.json({ ok: true, captchaId, expiresInMs: SLIDER_CAPTCHA_ISSUE_TTL_MS });
 });
 
-captchaSliderRouter.post("/slider/complete", (req, res) => {
-  const cfg = getCaptchaEnabled();
+captchaSliderRouter.post("/slider/complete", async (req, res) => {
+  const cfg = await getCaptchaEnabled();
   if (!cfg.enforceSignupCaptcha || cfg.provider !== "SLIDER") {
     return res.status(400).json({ ok: false, message: "SLIDER_NOT_ENABLED" });
   }

@@ -25,10 +25,10 @@ async function createAdminViews() {
       u.username,
       u.email,
       COUNT(t.id) AS total_trades,
-      ROUND(SUM(CASE WHEN t.profit > 0 THEN 1 ELSE 0 END) * 100.0 / NULLIF(COUNT(t.id), 0), 2) AS win_rate,
-      ROUND(SUM(CAST(t.profit AS REAL)), 2) AS profit,
-      ROUND(SUM(CAST(t.profit AS REAL)) * 100.0 / NULLIF(u.balance, 0), 2) AS profit_percent,
-      ROUND(AVG((t.closed_at - t.opened_at) / 3600.0), 2) AS avg_hold_time,
+      ROUND(SUM(CASE WHEN CAST(t.profit AS NUMERIC) > 0 THEN 1 ELSE 0 END) * 100.0 / NULLIF(COUNT(t.id), 0), 2) AS win_rate,
+      ROUND(SUM(CAST(t.profit AS NUMERIC)), 2) AS profit,
+      ROUND(SUM(CAST(t.profit AS NUMERIC)) * 100.0 / NULLIF(CAST(u.balance AS NUMERIC), 0), 2) AS profit_percent,
+      ROUND(AVG((t.closed_at - t.opened_at) / 3600.0)::numeric, 2) AS avg_hold_time,
       MAX(t.closed_at) AS last_trade_date
     FROM users u
     LEFT JOIN trades t ON u.id = t.user_id AND t.status = 'CLOSED'
@@ -41,7 +41,7 @@ async function createAdminViews() {
       u.username,
       u.email,
       COUNT(t.id) AS total_trades,
-      ROUND(SUM(CASE WHEN t.profit > 0 THEN 1 ELSE 0 END) * 100.0 / NULLIF(COUNT(t.id), 0), 2) AS win_rate,
+      ROUND(SUM(CASE WHEN CAST(t.profit AS REAL) > 0 THEN 1 ELSE 0 END) * 100.0 / NULLIF(COUNT(t.id), 0), 2) AS win_rate,
       ROUND(SUM(CAST(t.profit AS REAL)), 2) AS profit,
       ROUND(SUM(CAST(t.profit AS REAL)) * 100.0 / NULLIF(u.balance, 0), 2) AS profit_percent,
       ROUND(AVG((t.closed_at - t.opened_at) / 3600.0), 2) AS avg_hold_time,

@@ -102,7 +102,7 @@ export async function listAdminActivity(opts: {
   const botsOnly = Boolean(opts.botsOnly);
   const limit = Math.max(1, Math.min(5000, Number(opts.limit ?? 2000)));
 
-  const { rows } = await dbClient.query(
+  const { rows: activityRows } = await dbClient.query(
     `
       WITH
       sess AS (
@@ -156,7 +156,7 @@ export async function listAdminActivity(opts: {
     [includeDeleted ? 1 : 0, limit]
   );
 
-  const rowsRaw = rows as any[];
+  const rowsRaw = activityRows as any[];
 
   const rows: AdminActivityRow[] = rowsRaw.map((r) => {
     const last = num(r.lastActiveAt, num(r.createdAt));

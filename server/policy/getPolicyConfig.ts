@@ -50,7 +50,9 @@ export async function loadPolicyConfig(): Promise<PolicyConfig> {
   const now = Date.now();
   if (cached && now - cached.at < CACHE_TTL_MS) return cached.value;
 
-  const row = db.select().from(systemConfig).where(eq(systemConfig.id, 1)).get() as ConfigRow;
+  const row = (await db.query.systemConfig.findFirst({
+    where: eq(systemConfig.id, 1),
+  })) as ConfigRow;
   const merged = mergePolicyConfig(row);
   cached = { at: now, value: merged };
   return merged;

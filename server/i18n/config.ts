@@ -1,5 +1,6 @@
-import { withI18nDb } from "./i18nDb";
-import { isPostgres } from "@db/config";
+import { db } from "@db";
+import { systemConfig } from "@shared/schema";
+import { eq } from "drizzle-orm";
 import type { I18nConfig } from "./types";
 
 const DEFAULT_SUPPORTED = [
@@ -74,62 +75,60 @@ function normalizeLocales(locales: string[], defaultLocale: string): string[] {
   return out;
 }
 
-export function getI18nConfig(): I18nConfig {
-  if (isPostgres) {
-    return {
-      ...DEFAULTS,
-      enabled: false,
-      autoTranslate: false,
-      llmEnabled: false,
-    };
-  }
+let cachedConfig: I18nConfig | null = null;
+let refreshPromise: Promise<I18nConfig> | null = null;
 
+async function loadConfigFromDb(): Promise<I18nConfig> {
   try {
-    return withI18nDb((db) => {
-      const row = db
-        .prepare(
-          `
-          SELECT
-            i18n_enabled,
-            i18n_default_locale,
-            i18n_supported_locales_csv,
-            i18n_auto_translate,
-            i18n_llm_enabled,
-            i18n_llm_provider,
-            i18n_llm_model,
-            i18n_llm_max_batch_size,
-            i18n_llm_max_attempts
-          FROM system_config
-          WHERE id = 1
-        `,
-        )
-        .get() as any;
-
-      const defaultLocale = String(row?.i18n_default_locale || DEFAULTS.defaultLocale);
-      const supportedLocalesRaw = parseCsv(row?.i18n_supported_locales_csv);
-      const supportedLocales = normalizeLocales(
-        supportedLocalesRaw.length ? supportedLocalesRaw : DEFAULTS.supportedLocales,
-        defaultLocale,
-      );
-
-      return {
-        enabled: toBool(row?.i18n_enabled, DEFAULTS.enabled),
-        defaultLocale,
-        supportedLocales,
-        autoTranslate: toBool(row?.i18n_auto_translate, DEFAULTS.autoTranslate),
-        llmEnabled: toBool(row?.i18n_llm_enabled, DEFAULTS.llmEnabled),
-        llmProvider: String(row?.i18n_llm_provider || DEFAULTS.llmProvider),
-        llmModel: String(row?.i18n_llm_model || DEFAULTS.llmModel),
-        llmMaxBatchSize: Math.max(1, Math.min(200, toInt(row?.i18n_llm_max_batch_size, DEFAULTS.llmMaxBatchSize))),
-        llmMaxAttempts: Math.max(1, Math.min(10, toInt(row?.i18n_llm_max_attempts, DEFAULTS.llmMaxAttempts))),
-      };
+    const row = await db.query.systemConfig.findFirst({
+      where: eq(systemConfig.id, 1),
     });
+    if (!row) return DEFAULTS;
+
+    const defaultLocale = String((row as any).i18nDefaultLocale || DEFAULTS.defaultLocale);
+    const supportedLocalesRaw = parseCsv((row as any).i18nSupportedLocalesCsv);
+    const supportedLocales = normalizeLocales(
+      supportedLocalesRaw.length ? supportedLocalesRaw : DEFAULTS.supportedLocales,
+      defaultLocale,
+    );
+
+    return {
+      enabled: toBool((row as any).i18nEnabled, DEFAULTS.enabled),
+      defaultLocale,
+      supportedLocales,
+      autoTranslate: toBool((row as any).i18nAutoTranslate, DEFAULTS.autoTranslate),
+      llmEnabled: toBool((row as any).i18nLlmEnabled, DEFAULTS.llmEnabled),
+      llmProvider: String((row as any).i18nLlmProvider || DEFAULTS.llmProvider),
+      llmModel: String((row as any).i18nLlmModel || DEFAULTS.llmModel),
+      llmMaxBatchSize: Math.max(1, Math.min(200, toInt((row as any).i18nLlmMaxBatchSize, DEFAULTS.llmMaxBatchSize))),
+      llmMaxAttempts: Math.max(1, Math.min(10, toInt((row as any).i18nLlmMaxAttempts, DEFAULTS.llmMaxAttempts))),
+    };
   } catch {
     return DEFAULTS;
   }
 }
 
-export function updateI18nConfig(
+export function getI18nConfig(): I18nConfig {
+  if (cachedConfig) return cachedConfig;
+  void refreshI18nConfig();
+  return DEFAULTS;
+}
+
+export async function refreshI18nConfig(): Promise<I18nConfig> {
+  if (!refreshPromise) {
+    refreshPromise = loadConfigFromDb()
+      .then((cfg) => {
+        cachedConfig = cfg;
+        return cfg;
+      })
+      .finally(() => {
+        refreshPromise = null;
+      });
+  }
+  return refreshPromise;
+}
+
+export async function updateI18nConfig(
   patch: Partial<
     Pick<
       I18nConfig,
@@ -144,118 +143,42 @@ export function updateI18nConfig(
       | "llmMaxAttempts"
     >
   >,
-): I18nConfig {
-  return withI18nDb((db) => {
-    const row = db
-      .prepare(
-        `
-        SELECT
-          i18n_enabled,
-          i18n_default_locale,
-          i18n_supported_locales_csv,
-          i18n_auto_translate,
-          i18n_llm_enabled,
-          i18n_llm_provider,
-          i18n_llm_model,
-          i18n_llm_max_batch_size,
-          i18n_llm_max_attempts
-        FROM system_config
-        WHERE id = 1
-      `,
-      )
-      .get() as any;
+): Promise<I18nConfig> {
+  const cur = cachedConfig ?? (await loadConfigFromDb());
 
-    const cur: I18nConfig = {
-      enabled: toBool(row?.i18n_enabled, DEFAULTS.enabled),
-      defaultLocale: String(row?.i18n_default_locale || DEFAULTS.defaultLocale),
-      supportedLocales: normalizeLocales(
-        parseCsv(row?.i18n_supported_locales_csv).length
-          ? parseCsv(row?.i18n_supported_locales_csv)
-          : DEFAULTS.supportedLocales,
-        String(row?.i18n_default_locale || DEFAULTS.defaultLocale),
-      ),
-      autoTranslate: toBool(row?.i18n_auto_translate, DEFAULTS.autoTranslate),
-      llmEnabled: toBool(row?.i18n_llm_enabled, DEFAULTS.llmEnabled),
-      llmProvider: String(row?.i18n_llm_provider || DEFAULTS.llmProvider),
-      llmModel: String(row?.i18n_llm_model || DEFAULTS.llmModel),
-      llmMaxBatchSize: Math.max(1, Math.min(200, toInt(row?.i18n_llm_max_batch_size, DEFAULTS.llmMaxBatchSize))),
-      llmMaxAttempts: Math.max(1, Math.min(10, toInt(row?.i18n_llm_max_attempts, DEFAULTS.llmMaxAttempts))),
-    };
+  const next: I18nConfig = {
+    ...cur,
+    ...patch,
+    defaultLocale: patch.defaultLocale ? String(patch.defaultLocale) : cur.defaultLocale,
+    supportedLocales: patch.supportedLocales ? patch.supportedLocales.map(String) : cur.supportedLocales,
+  };
 
-    const next: I18nConfig = {
-      ...cur,
-      ...patch,
-      defaultLocale: patch.defaultLocale ? String(patch.defaultLocale) : cur.defaultLocale,
-      supportedLocales: patch.supportedLocales ? patch.supportedLocales.map(String) : cur.supportedLocales,
-    };
+  const supportedLocales = normalizeLocales(next.supportedLocales, next.defaultLocale);
+  const now = Math.floor(Date.now() / 1000);
 
-    const supportedLocales = normalizeLocales(next.supportedLocales, next.defaultLocale);
+  await db.insert(systemConfig).values({ id: 1 }).onConflictDoNothing();
+  await db
+    .update(systemConfig)
+    .set({
+      i18nEnabled: next.enabled,
+      i18nDefaultLocale: next.defaultLocale,
+      i18nSupportedLocalesCsv: supportedLocales.join(","),
+      i18nAutoTranslate: next.autoTranslate,
+      i18nLlmEnabled: next.llmEnabled,
+      i18nLlmProvider: next.llmProvider,
+      i18nLlmModel: next.llmModel,
+      i18nLlmMaxBatchSize: Math.max(1, Math.min(200, toInt(next.llmMaxBatchSize, DEFAULTS.llmMaxBatchSize))),
+      i18nLlmMaxAttempts: Math.max(1, Math.min(10, toInt(next.llmMaxAttempts, DEFAULTS.llmMaxAttempts))),
+      updatedAt: now,
+      updatedBy: "admin_i18n",
+    })
+    .where(eq(systemConfig.id, 1));
 
-    db.prepare(
-      `
-      UPDATE system_config SET
-        i18n_enabled = @i18n_enabled,
-        i18n_default_locale = @i18n_default_locale,
-        i18n_supported_locales_csv = @i18n_supported_locales_csv,
-        i18n_auto_translate = @i18n_auto_translate,
-        i18n_llm_enabled = @i18n_llm_enabled,
-        i18n_llm_provider = @i18n_llm_provider,
-        i18n_llm_model = @i18n_llm_model,
-        i18n_llm_max_batch_size = @i18n_llm_max_batch_size,
-        i18n_llm_max_attempts = @i18n_llm_max_attempts,
-        updated_at = (strftime('%s', 'now'))
-      WHERE id = 1
-    `,
-    ).run({
-      i18n_enabled: next.enabled ? 1 : 0,
-      i18n_default_locale: next.defaultLocale,
-      i18n_supported_locales_csv: supportedLocales.join(","),
-      i18n_auto_translate: next.autoTranslate ? 1 : 0,
-      i18n_llm_enabled: next.llmEnabled ? 1 : 0,
-      i18n_llm_provider: next.llmProvider,
-      i18n_llm_model: next.llmModel,
-      i18n_llm_max_batch_size: next.llmMaxBatchSize,
-      i18n_llm_max_attempts: next.llmMaxAttempts,
-    });
-
-    const updatedRow = db
-      .prepare(
-        `
-        SELECT
-          i18n_enabled,
-          i18n_default_locale,
-          i18n_supported_locales_csv,
-          i18n_auto_translate,
-          i18n_llm_enabled,
-          i18n_llm_provider,
-          i18n_llm_model,
-          i18n_llm_max_batch_size,
-          i18n_llm_max_attempts
-        FROM system_config
-        WHERE id = 1
-      `,
-      )
-      .get() as any;
-
-    const defaultLocale = String(updatedRow?.i18n_default_locale || DEFAULTS.defaultLocale);
-    const supportedLocalesRaw = parseCsv(updatedRow?.i18n_supported_locales_csv);
-    const supportedLocales2 = normalizeLocales(
-      supportedLocalesRaw.length ? supportedLocalesRaw : DEFAULTS.supportedLocales,
-      defaultLocale,
-    );
-
-    return {
-      enabled: toBool(updatedRow?.i18n_enabled, DEFAULTS.enabled),
-      defaultLocale,
-      supportedLocales: supportedLocales2,
-      autoTranslate: toBool(updatedRow?.i18n_auto_translate, DEFAULTS.autoTranslate),
-      llmEnabled: toBool(updatedRow?.i18n_llm_enabled, DEFAULTS.llmEnabled),
-      llmProvider: String(updatedRow?.i18n_llm_provider || DEFAULTS.llmProvider),
-      llmModel: String(updatedRow?.i18n_llm_model || DEFAULTS.llmModel),
-      llmMaxBatchSize: Math.max(1, Math.min(200, toInt(updatedRow?.i18n_llm_max_batch_size, DEFAULTS.llmMaxBatchSize))),
-      llmMaxAttempts: Math.max(1, Math.min(10, toInt(updatedRow?.i18n_llm_max_attempts, DEFAULTS.llmMaxAttempts))),
-    };
-  });
+  cachedConfig = {
+    ...next,
+    supportedLocales,
+  };
+  return cachedConfig;
 }
 
 export function getI18nPublicConfig() {

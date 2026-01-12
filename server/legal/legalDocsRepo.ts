@@ -10,17 +10,20 @@ export interface LegalDocTarget {
   jurisdictionKey: string;
 }
 
-export function createDocumentVersion(params: {
+type DbConn = typeof db;
+
+export async function createDocumentVersion(params: {
   target: LegalDocTarget;
   version: string;
   content: string;
   notes?: string | null;
   adminUserId?: number | null;
-}) {
+}, conn: DbConn = db) {
   const sha = sha256(params.content);
   const now = Date.now();
 
-  db.insert(legalDocuments)
+  const [doc] = await conn
+    .insert(legalDocuments)
     .values({
       docSet: params.target.docSet,
       docType: params.target.docType,
@@ -33,30 +36,14 @@ export function createDocumentVersion(params: {
       createdAt: now,
       createdByAdminUserId: params.adminUserId || null,
     })
-    .run();
+    .returning();
 
-  const doc = db
-    .select()
-    .from(legalDocuments)
-    .where(
-      and(
-        eq(legalDocuments.docSet, params.target.docSet),
-        eq(legalDocuments.docType, params.target.docType),
-        eq(legalDocuments.jurisdictionType, params.target.jurisdictionType),
-        eq(legalDocuments.jurisdictionKey, params.target.jurisdictionKey),
-        eq(legalDocuments.sha256, sha)
-      )
-    )
-    .orderBy(desc(legalDocuments.createdAt))
-    .limit(1)
-    .get();
-  
   if (!doc) throw new Error("Insert failed.");
   return doc;
 }
 
-export function getActiveDoc(target: LegalDocTarget) {
-  const pointer = db
+export async function getActiveDoc(target: LegalDocTarget, conn: DbConn = db) {
+  const [pointer] = await conn
     .select()
     .from(legalDocPointers)
     .where(
@@ -67,21 +54,21 @@ export function getActiveDoc(target: LegalDocTarget) {
         eq(legalDocPointers.jurisdictionKey, target.jurisdictionKey)
       )
     )
-    .get();
+    .limit(1);
 
   if (!pointer || !pointer.activeDocumentId) return { pointer: pointer || null, doc: null };
 
-  const doc = db
+  const [doc] = await conn
     .select()
     .from(legalDocuments)
     .where(eq(legalDocuments.id, pointer.activeDocumentId))
-    .get();
+    .limit(1);
 
   return { pointer, doc: doc || null };
 }
 
-export function getPointer(target: LegalDocTarget) {
-  return db
+export async function getPointer(target: LegalDocTarget, conn: DbConn = db) {
+  const [pointer] = await conn
     .select()
     .from(legalDocPointers)
     .where(
@@ -92,11 +79,13 @@ export function getPointer(target: LegalDocTarget) {
         eq(legalDocPointers.jurisdictionKey, target.jurisdictionKey)
       )
     )
-    .get();
+    .limit(1);
+
+  return pointer;
 }
 
-export function listVersions(target: LegalDocTarget) {
-  return db
+export async function listVersions(target: LegalDocTarget, conn: DbConn = db) {
+  return await conn
     .select()
     .from(legalDocuments)
     .where(
@@ -107,29 +96,29 @@ export function listVersions(target: LegalDocTarget) {
         eq(legalDocuments.jurisdictionKey, target.jurisdictionKey)
       )
     )
-    .orderBy(desc(legalDocuments.createdAt))
-    .all();
+    .orderBy(desc(legalDocuments.createdAt));
 }
 
-export function upsertPointer(params: {
+export async function upsertPointer(params: {
   target: LegalDocTarget;
   activeDocumentId: number;
   adminUserId?: number | null;
-}) {
+}, conn: DbConn = db) {
   const now = Date.now();
-  const existing = getPointer(params.target);
+  const existing = await getPointer(params.target, conn);
 
   if (existing) {
-    db.update(legalDocPointers)
+    await conn
+      .update(legalDocPointers)
       .set({
         activeDocumentId: params.activeDocumentId,
         updatedAt: now,
         updatedByAdminUserId: params.adminUserId || null,
       })
-      .where(eq(legalDocPointers.id, existing.id))
-      .run();
+      .where(eq(legalDocPointers.id, existing.id));
   } else {
-    db.insert(legalDocPointers)
+    await conn
+      .insert(legalDocPointers)
       .values({
         docSet: params.target.docSet,
         docType: params.target.docType,
@@ -138,7 +127,6 @@ export function upsertPointer(params: {
         activeDocumentId: params.activeDocumentId,
         updatedAt: now,
         updatedByAdminUserId: params.adminUserId || null,
-      })
-      .run();
+      });
   }
 }

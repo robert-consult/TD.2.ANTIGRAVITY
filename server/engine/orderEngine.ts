@@ -739,7 +739,7 @@ async function processStopsForOpenTrades(symbol: string, q: Quote) {
     };
 
     // Use proper P/L calculation
-    const pnlUsd = realizedPnlUsd({
+    const pnlUsd = await realizedPnlUsd({
       symbol,
       side,
       lots,

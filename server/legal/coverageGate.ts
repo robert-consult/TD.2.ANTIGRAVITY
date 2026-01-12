@@ -29,9 +29,9 @@ export interface CoverageStats {
 /**
  * Get enforcement toggle from systemConfig
  */
-export function isEnforcementEnabled(): boolean {
+export async function isEnforcementEnabled(): Promise<boolean> {
   try {
-    const config = db.select().from(systemConfig).where(eq(systemConfig.id, 1)).get();
+    const [config] = await db.select().from(systemConfig).where(eq(systemConfig.id, 1)).limit(1);
     return !!config?.legalCoverageEnforce;
   } catch {
     return false;
@@ -41,22 +41,21 @@ export function isEnforcementEnabled(): boolean {
 /**
  * Set enforcement toggle in systemConfig
  */
-export function setEnforcementEnabled(enabled: boolean): void {
-  const now = Date.now();
-  db.update(systemConfig)
+export async function setEnforcementEnabled(enabled: boolean): Promise<void> {
+  const nowSec = Math.floor(Date.now() / 1000);
+  await db.update(systemConfig)
     .set({
       legalCoverageEnforce: enabled,
-      updatedAt: now,
+      updatedAt: nowSec,
     })
-    .where(eq(systemConfig.id, 1))
-    .run();
+    .where(eq(systemConfig.id, 1));
 }
 
 /**
  * Check if an active target exists for a 4-part key
  */
-function hasActiveTarget(docSet: string, docType: string, jurisdictionType: string, jurisdictionKey: string): boolean {
-  const pointer = db
+async function hasActiveTarget(docSet: string, docType: string, jurisdictionType: string, jurisdictionKey: string): Promise<boolean> {
+  const [pointer] = await db
     .select()
     .from(legalDocPointers)
     .where(
@@ -67,11 +66,11 @@ function hasActiveTarget(docSet: string, docType: string, jurisdictionType: stri
         eq(legalDocPointers.jurisdictionKey, jurisdictionKey)
       )
     )
-    .get();
+    .limit(1);
 
   if (!pointer?.activeDocumentId) return false;
 
-  const doc = db.select().from(legalDocuments).where(eq(legalDocuments.id, pointer.activeDocumentId)).get();
+  const [doc] = await db.select().from(legalDocuments).where(eq(legalDocuments.id, pointer.activeDocumentId)).limit(1);
   return !!doc;
 }
 
@@ -83,26 +82,26 @@ function hasActiveTarget(docSet: string, docType: string, jurisdictionType: stri
  * This distinction matters for the UI: COUNTRY/REGION show "Jurisdiction Verified",
  * while DEFAULT/ROW shows "Using Global Terms".
  */
-function checkTermsAvailabilityInternal(countryCode: string): {
+async function checkTermsAvailabilityInternal(countryCode: string): Promise<{
   available: boolean;
   scopeKey: string | null;
   fallback: boolean;
-} {
+}> {
   const normalized = countryCode.toUpperCase();
   const regionKey = getRegionForCountry(normalized);
 
   // Check COUNTRY/{ISO2} first - jurisdiction-specific
-  if (hasActiveTarget("DOC1", "ADDENDUM", "COUNTRY", normalized)) {
+  if (await hasActiveTarget("DOC1", "ADDENDUM", "COUNTRY", normalized)) {
     return { available: true, scopeKey: `COUNTRY/${normalized}`, fallback: false };
   }
 
   // Check REGION/{regionKey} if not ROW - also jurisdiction-specific (NOT a fallback)
-  if (regionKey !== "ROW" && hasActiveTarget("DOC1", "ADDENDUM", "REGION", regionKey)) {
+  if (regionKey !== "ROW" && await hasActiveTarget("DOC1", "ADDENDUM", "REGION", regionKey)) {
     return { available: true, scopeKey: `REGION/${regionKey}`, fallback: false };
   }
 
   // Check DEFAULT/ROW as fallback - this IS a true fallback (generic global terms)
-  if (hasActiveTarget("DOC1", "ADDENDUM", "DEFAULT", "ROW")) {
+  if (await hasActiveTarget("DOC1", "ADDENDUM", "DEFAULT", "ROW")) {
     return { available: true, scopeKey: "DEFAULT/ROW", fallback: true };
   }
 
@@ -112,7 +111,7 @@ function checkTermsAvailabilityInternal(countryCode: string): {
 /**
  * Check if signup is allowed for a country
  */
-export function checkCoverage(countryCode: string): CoverageCheckResult {
+export async function checkCoverage(countryCode: string): Promise<CoverageCheckResult> {
   const normalized = countryCode.toUpperCase();
 
   // Block restricted jurisdictions only when enabled in system config
@@ -130,8 +129,8 @@ export function checkCoverage(countryCode: string): CoverageCheckResult {
   }
 
   // GLOBAL_MASTER is always required - check if it exists with active target
-  const hasGlobal = hasActiveTarget("DOC1", "GLOBAL_MASTER", "DEFAULT", "GLOBAL");
-  const enforced = isEnforcementEnabled();
+  const hasGlobal = await hasActiveTarget("DOC1", "GLOBAL_MASTER", "DEFAULT", "GLOBAL");
+  const enforced = await isEnforcementEnabled();
   
   // Always require GLOBAL_MASTER, regardless of enforcement mode
   if (!hasGlobal) {
@@ -146,7 +145,7 @@ export function checkCoverage(countryCode: string): CoverageCheckResult {
     };
   }
 
-  const availability = checkTermsAvailabilityInternal(normalized);
+  const availability = await checkTermsAvailabilityInternal(normalized);
 
   if (availability.available) {
     return {
@@ -177,7 +176,7 @@ export function checkCoverage(countryCode: string): CoverageCheckResult {
 
   // Not enforced - check if any documents exist at all before allowing
   // This prevents signup without any terms when enforcement is off
-  const hasAnyGlobal = hasActiveTarget("DOC1", "GLOBAL_MASTER", "DEFAULT", "GLOBAL");
+  const hasAnyGlobal = await hasActiveTarget("DOC1", "GLOBAL_MASTER", "DEFAULT", "GLOBAL");
   if (!hasAnyGlobal) {
     return {
       allowed: false,
@@ -205,9 +204,9 @@ export function checkCoverage(countryCode: string): CoverageCheckResult {
 /**
  * Get coverage statistics for admin dashboard
  */
-export function getCoverageStats(): CoverageStats {
+export async function getCoverageStats(): Promise<CoverageStats> {
   // Get all active pointers for DOC1 ADDENDUM
-  const pointers = db
+  const pointers = await db
     .select()
     .from(legalDocPointers)
     .where(
@@ -216,7 +215,6 @@ export function getCoverageStats(): CoverageStats {
         eq(legalDocPointers.docType, "ADDENDUM")
       )
     )
-    .all()
     .filter((p) => p.activeDocumentId != null);
 
   const regionsCovered: string[] = [];
@@ -238,6 +236,6 @@ export function getCoverageStats(): CoverageStats {
     totalCountriesCovered: allCountries.size,
     regionsCovered,
     countriesWithExplicitTerms: countriesWithExplicit,
-    enforcementEnabled: isEnforcementEnabled(),
+    enforcementEnabled: await isEnforcementEnabled(),
   };
 }

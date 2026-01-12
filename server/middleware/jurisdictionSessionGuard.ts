@@ -42,11 +42,11 @@ export async function jurisdictionSessionGuard(req: Request, res: Response, next
       typeof sess.userCountryIso2 === "string" ? String(sess.userCountryIso2).trim().toUpperCase() : undefined;
 
     if (policy.jurisdictionEnforceBySignupCountry && !userCountryIso2) {
-      const row = db
+      const [row] = await db
         .select({ countryIso2: users.countryIso2, country: users.country })
         .from(users)
         .where(eq(users.id, Number(sess.userId)))
-        .get() as any;
+        .limit(1);
 
       userCountryIso2 = row?.countryIso2
         ? String(row.countryIso2).trim().toUpperCase()
@@ -82,7 +82,7 @@ export async function jurisdictionSessionGuard(req: Request, res: Response, next
 
     // Revoke session in user_sessions (best-effort) + destroy cookie session
     try {
-      revokeSession({
+      await revokeSession({
         actorUserId: 0,
         targetUserId: Number(sess.userId),
         sessionId: req.sessionID,
@@ -107,4 +107,3 @@ export async function jurisdictionSessionGuard(req: Request, res: Response, next
     return next(); // fail-open for middleware errors only (policy eval itself fails closed at login/signup)
   }
 }
-

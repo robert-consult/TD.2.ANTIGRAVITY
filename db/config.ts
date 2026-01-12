@@ -6,8 +6,10 @@ const normalizeDialect = (value: string | undefined): DbDialect => {
   return "sqlite";
 };
 
-export const dbDialect: DbDialect = normalizeDialect(process.env.DB_DIALECT ?? "sqlite");
+export const dbDialect: DbDialect = normalizeDialect(process.env.DB_DIALECT ?? "postgres");
+if (dbDialect !== "postgres") {
+  throw new Error("SQLite is no longer supported. Set DB_DIALECT=postgres.");
+}
 
 export const isPostgres = dbDialect === "postgres";
 export const databaseUrl = process.env.DATABASE_URL ?? "";
-export const sqlitePath = process.env.SQLITE_DB_PATH ?? "trading_app.db";

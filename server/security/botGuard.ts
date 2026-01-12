@@ -66,13 +66,14 @@ export async function persistBotAssessmentForUser(args: {
     updatedAtIso: new Date().toISOString(),
   };
 
-  db.insert(botRiskAssessments)
+  const nowSec = Math.floor(Date.now() / 1000);
+  await db.insert(botRiskAssessments)
     .values({
       userId,
       score: newScore,
       label,
       signalsJson: JSON.stringify(signals),
-      updatedAt: new Date(),
+      updatedAt: nowSec,
     })
     .onConflictDoUpdate({
       target: botRiskAssessments.userId,
@@ -80,10 +81,9 @@ export async function persistBotAssessmentForUser(args: {
         score: newScore,
         label,
         signalsJson: JSON.stringify(signals),
-        updatedAt: new Date(),
+        updatedAt: nowSec,
       } as any,
-    })
-    .run();
+    });
 
   return { score: newScore, label };
 }

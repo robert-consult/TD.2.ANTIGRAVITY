@@ -17,13 +17,13 @@ function parsePair(symbol: string): { base: string; quote: string } {
  * P/L = (closePrice - openPrice) * units * direction
  * Then convert from quote currency to USD
  */
-export function realizedPnlUsd(params: {
+export async function realizedPnlUsd(params: {
   symbol: string;
   side: "BUY" | "SELL";
   lots: number;
   openPrice: number;
   closePrice: number;
-}): number {
+}): Promise<number> {
   const { quote } = parsePair(params.symbol);
   const units = params.lots * CONTRACT_SIZE;
 
@@ -35,7 +35,7 @@ export function realizedPnlUsd(params: {
 
   // Convert QUOTE -> USD (platform base currency)
   try {
-    const quoteToUsd = quote === "USD" ? 1 : getConversionRate(quote, "USD");
+    const quoteToUsd = quote === "USD" ? 1 : await getConversionRate(quote, "USD");
     return pnlQuote * quoteToUsd;
   } catch (e) {
     // Fallback to simple calculation if conversion fails

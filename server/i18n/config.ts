@@ -1,4 +1,5 @@
 import { withI18nDb } from "./i18nDb";
+import { isPostgres } from "@db/config";
 import type { I18nConfig } from "./types";
 
 const DEFAULT_SUPPORTED = [
@@ -74,6 +75,15 @@ function normalizeLocales(locales: string[], defaultLocale: string): string[] {
 }
 
 export function getI18nConfig(): I18nConfig {
+  if (isPostgres) {
+    return {
+      ...DEFAULTS,
+      enabled: false,
+      autoTranslate: false,
+      llmEnabled: false,
+    };
+  }
+
   try {
     return withI18nDb((db) => {
       const row = db

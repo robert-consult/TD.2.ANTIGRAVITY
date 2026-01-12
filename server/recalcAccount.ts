@@ -1,8 +1,7 @@
-import { db } from '../db/index';
-import { eq, and } from 'drizzle-orm';
-import { users, trades } from '../shared/schema';
+import { db, dbClient } from '../db/index';
+import { eq, and, inArray } from 'drizzle-orm';
+import { users, trades, quotes } from '../shared/schema';
 import { requiredMargin, unrealizedPnl, updateFxRates } from './lib/margin';
-import Database from 'better-sqlite3';
 import { publishLiveEvent } from './services/liveBus';
 
 // Staleness threshold in milliseconds (5 minutes)
@@ -118,21 +117,17 @@ export async function recalcAccount(
       return result;
     }
     
-    // Check if quotes table exists
-    let hasQuotesTable = false;
-    let dbClient: Database.Database | null = null;
-    
+    // Check if quotes table exists (safety for fresh installs)
+    let hasQuotesTable = true;
     try {
-      dbClient = new Database('./trading_app.db');
-      try { dbClient.pragma("busy_timeout = 5000"); } catch {}
-      const tables = dbClient.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='quotes'").all();
-      hasQuotesTable = tables.length > 0;
+      const result = await dbClient.query("SELECT to_regclass('public.quotes') as table_name");
+      hasQuotesTable = Boolean(result.rows?.[0]?.table_name);
     } catch (error) {
       console.error('Error checking for quotes table:', error);
+      hasQuotesTable = false;
     }
-    
+
     if (!hasQuotesTable) {
-      dbClient?.close();
       // No quotes table = all pricing is stale
       const allSymbols = Array.from(new Set(openTrades.map(t => t.symbol.symbol)));
       const result: RecalcResult = {
@@ -172,45 +167,42 @@ export async function recalcAccount(
     const allRequiredSymbols = Array.from(new Set([...tradeSymbols, ...FX_REFERENCE_PAIRS]));
     
     // Fetch all quotes at once
-    for (const symbol of allRequiredSymbols) {
-      try {
-        const quotesRow = dbClient!.prepare(
-          'SELECT price, bid, ask, updated_at, is_stale FROM quotes WHERE symbol = ?'
-        ).get(symbol) as any;
-        
-        if (quotesRow && quotesRow.price !== null) {
-          const bid = quotesRow.bid !== null ? Number(quotesRow.bid) : null;
-          const ask = quotesRow.ask !== null ? Number(quotesRow.ask) : null;
-          const price = Number(quotesRow.price);
-          const mid = (bid !== null && ask !== null) ? (bid + ask) / 2 : price;
-          
-          // Check staleness
-          let updatedAt = 0;
-          if (quotesRow.updated_at) {
-            updatedAt = new Date(quotesRow.updated_at).getTime();
-          }
-          const isStale = quotesRow.is_stale === 1 || (now - updatedAt > STALE_THRESHOLD_MS);
-          
-          quoteCache.set(symbol, { bid, ask, price, mid, updatedAt, isStale });
-          
-          if (isStale && tradeSymbols.includes(symbol)) {
-            staleSymbols.push(symbol);
-          }
-        } else {
-          // Quote missing
-          if (tradeSymbols.includes(symbol)) {
-            staleSymbols.push(symbol);
-          }
-        }
-      } catch (e) {
-        console.error(`Error fetching quote for ${symbol}:`, e);
-        if (tradeSymbols.includes(symbol)) {
-          staleSymbols.push(symbol);
-        }
+    const quoteRows = await db
+      .select({
+        symbol: quotes.symbol,
+        price: quotes.price,
+        bid: quotes.bid,
+        ask: quotes.ask,
+        updatedAt: quotes.updatedAt,
+        isStale: quotes.isStale,
+        lastApiUpdate: quotes.lastApiUpdate,
+      })
+      .from(quotes)
+      .where(inArray(quotes.symbol, allRequiredSymbols));
+
+    for (const row of quoteRows) {
+      const symbol = String(row.symbol);
+      const bid = row.bid !== null && row.bid !== undefined ? Number(row.bid) : null;
+      const ask = row.ask !== null && row.ask !== undefined ? Number(row.ask) : null;
+      const price = Number(row.price);
+      const mid = (bid !== null && ask !== null) ? (bid + ask) / 2 : price;
+
+      const lastApiRaw = row.lastApiUpdate ?? row.updatedAt;
+      const lastApiMs = lastApiRaw ? (lastApiRaw < 1e12 ? lastApiRaw * 1000 : lastApiRaw) : 0;
+      const isStale = Boolean(row.isStale) || !lastApiMs || (now - lastApiMs > STALE_THRESHOLD_MS);
+
+      quoteCache.set(symbol, { bid, ask, price, mid, updatedAt: lastApiMs, isStale });
+
+      if (isStale && tradeSymbols.includes(symbol)) {
+        staleSymbols.push(symbol);
       }
     }
-    
-    dbClient?.close();
+
+    for (const symbol of tradeSymbols) {
+      if (!quoteCache.has(symbol)) {
+        staleSymbols.push(symbol);
+      }
+    }
     
     // Check FX reference pairs for staleness (needed for cross-pair conversions)
     const fxStale = FX_REFERENCE_PAIRS.some(pair => {

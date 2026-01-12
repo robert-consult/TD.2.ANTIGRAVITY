@@ -140,6 +140,15 @@ function getDayKey(): string {
   return new Date().toISOString().split("T")[0];
 }
 
+function toIsoOrNull(value: any): string | null {
+  if (!value) return null;
+  if (value instanceof Date) return value.toISOString();
+  const n = Number(value);
+  if (!Number.isFinite(n)) return null;
+  const ms = n < 1e12 ? n * 1000 : n;
+  return new Date(ms).toISOString();
+}
+
 // Per-IP rate limiting for email resend (in-memory store with TTL)
 const ipEmailRateLimits: Map<string, { count: number; resetAt: number }> = new Map();
 const IP_EMAIL_RATE_WINDOW_MS = 60 * 60 * 1000; // 1 hour window
@@ -211,6 +220,7 @@ router.post("/email/send", async (req: Request, res: Response) => {
 
   try {
     const now = Date.now();
+    const nowSec = Math.floor(now / 1000);
     const policyConfig = await loadPolicyConfig();
     const ctx = await buildDecisionContext({
       userId,
@@ -264,7 +274,7 @@ router.post("/email/send", async (req: Request, res: Response) => {
     const token = generateSecureToken();
     const tokenHash = hmacToken(token);
     const tokenId = crypto.randomUUID();
-    const expiresAt = new Date(now + VERIFICATION_TOKEN_EXPIRY_HOURS * 3600 * 1000);
+    const expiresAt = nowSec + VERIFICATION_TOKEN_EXPIRY_HOURS * 3600;
 
     const kind: "INITIAL" | "REVERIFY" = ctx.user.emailVerifiedAt ? "REVERIFY" : "INITIAL";
     await db.insert(emailVerificationTokens).values({
@@ -290,7 +300,7 @@ router.post("/email/send", async (req: Request, res: Response) => {
       actorUserId: auditCtx.actorUserId,
       sessionId: auditCtx.sessionId,
       correlationId: auditCtx.correlationId,
-      data: { kind, expiresAt: expiresAt.toISOString() },
+      data: { kind, expiresAt: new Date(expiresAt * 1000).toISOString() },
     });
 
     if (!emailSent) {
@@ -303,27 +313,42 @@ router.post("/email/send", async (req: Request, res: Response) => {
     });
     const dayKey = getDayKey();
     const currentCount = verifyState?.emailResendDayKey === dayKey ? (verifyState?.emailResendCountDay || 0) : 0;
-    const newDayStart = verifyState?.emailResendDayKey === dayKey ? verifyState?.emailResendDayStart : new Date(now);
-    const emailInitialDueAt = ctx.user.emailInitialDueAt ?? new Date(ctx.user.createdAt.getTime() + policyConfig.emailInitialGraceDays * 86400000);
+    const newDayStart =
+      verifyState?.emailResendDayKey === dayKey && verifyState?.emailResendDayStart != null
+        ? Number(verifyState.emailResendDayStart)
+        : nowSec;
+    const createdAtMs =
+      ctx.user.createdAt instanceof Date
+        ? ctx.user.createdAt.getTime()
+        : Number(ctx.user.createdAt) < 1e12
+          ? Number(ctx.user.createdAt) * 1000
+          : Number(ctx.user.createdAt);
+    const existingInitialDueAt = ctx.user.emailInitialDueAt;
+    const emailInitialDueAt =
+      existingInitialDueAt != null
+        ? existingInitialDueAt instanceof Date
+          ? Math.floor(existingInitialDueAt.getTime() / 1000)
+          : Number(existingInitialDueAt)
+        : Math.floor((createdAtMs + policyConfig.emailInitialGraceDays * 86400000) / 1000);
 
     if (verifyState) {
       await db.update(userVerification)
         .set({
-          emailLastResendAt: new Date(now),
+          emailLastResendAt: nowSec,
           emailResendCountDay: currentCount + 1,
           emailResendDayKey: dayKey,
-          emailResendDayStart: newDayStart || new Date(now),
+          emailResendDayStart: newDayStart || nowSec,
           emailInitialDueAt,
-          updatedAt: new Date(),
+          updatedAt: nowSec,
         })
         .where(eq(userVerification.userId, userId));
     } else {
       await db.insert(userVerification).values({
         userId,
-        emailLastResendAt: new Date(now),
+        emailLastResendAt: nowSec,
         emailResendCountDay: 1,
         emailResendDayKey: dayKey,
-        emailResendDayStart: new Date(now),
+        emailResendDayStart: nowSec,
         emailInitialDueAt,
         contenderTier: "NONE",
       });
@@ -360,45 +385,57 @@ router.post("/email/verify", async (req: Request, res: Response) => {
       return res.status(410).json({ message: "Token has already been used." });
     }
 
-    if (tokenRecord.expiresAt && new Date(tokenRecord.expiresAt) < new Date()) {
+    const nowSec = Math.floor(Date.now() / 1000);
+    if (tokenRecord.expiresAt && Number(tokenRecord.expiresAt) < nowSec) {
       return res.status(410).json({ message: "Token has expired. Please request a new verification email." });
     }
 
-    const now = new Date();
-    const reverifyDueAt = new Date(now.getTime() + policyConfig.emailReverifyPeriodDays * 24 * 3600 * 1000);
+    const reverifyDueAt = nowSec + policyConfig.emailReverifyPeriodDays * 24 * 3600;
     const kind = tokenRecord.purpose === "REVERIFY" ? "REVERIFY" : "INITIAL";
 
     await db.update(emailVerificationTokens)
-      .set({ usedAt: now })
+      .set({ usedAt: nowSec })
       .where(eq(emailVerificationTokens.id, tokenRecord.id));
 
     const user = await db.query.users.findFirst({
       where: eq(users.id, tokenRecord.userId),
     });
-    const createdAtMs = user?.createdAt ? new Date(user.createdAt as any).getTime() : now.getTime();
-    const emailInitialDueAt = new Date(createdAtMs + policyConfig.emailInitialGraceDays * 86400000);
+    const createdAtMs = user?.createdAt instanceof Date
+      ? user.createdAt.getTime()
+      : Number(user?.createdAt) < 1e12
+        ? Number(user?.createdAt) * 1000
+        : Number(user?.createdAt ?? Date.now());
+    const emailInitialDueAt = Math.floor((createdAtMs + policyConfig.emailInitialGraceDays * 86400000) / 1000);
 
     let verification = await db.query.userVerification.findFirst({
       where: eq(userVerification.userId, tokenRecord.userId),
     });
 
     if (verification) {
+      const existingInitialDueAt = verification.emailInitialDueAt;
+      const normalizedInitialDueAt =
+        existingInitialDueAt instanceof Date
+          ? Math.floor(existingInitialDueAt.getTime() / 1000)
+          : typeof existingInitialDueAt === "number"
+            ? existingInitialDueAt
+            : null;
+
       await db.update(userVerification)
         .set({
-          emailVerifiedAt: now,
+          emailVerifiedAt: nowSec,
           emailReverifyDueAt: reverifyDueAt,
           emailResendCountDay: 0,
-          emailInitialDueAt: verification.emailInitialDueAt ?? emailInitialDueAt,
+          emailInitialDueAt: normalizedInitialDueAt ?? emailInitialDueAt,
           contenderTier: verification.contenderTier === "NONE" ? "CANDIDATE_EMAIL_ONLY" : verification.contenderTier,
           lockedAt: null,
           lockReason: null,
-          updatedAt: now,
+          updatedAt: nowSec,
         })
         .where(eq(userVerification.userId, tokenRecord.userId));
     } else {
       await db.insert(userVerification).values({
         userId: tokenRecord.userId,
-        emailVerifiedAt: now,
+        emailVerifiedAt: nowSec,
         emailReverifyDueAt: reverifyDueAt,
         emailInitialDueAt,
         contenderTier: "CANDIDATE_EMAIL_ONLY",
@@ -472,11 +509,11 @@ router.get("/status", async (req: Request, res: Response) => {
     res.json({
       accountState: gates.accountState,
       emailVerified: !!ctx.user.emailVerifiedAt,
-      emailVerifiedAt: ctx.user.emailVerifiedAt?.toISOString() || null,
-      emailReverifyDueAt: ctx.user.emailReverifyDueAt?.toISOString() || null,
-      gracePeriodEndsAt: ctx.user.emailInitialDueAt?.toISOString() || null,
+      emailVerifiedAt: toIsoOrNull(ctx.user.emailVerifiedAt),
+      emailReverifyDueAt: toIsoOrNull(ctx.user.emailReverifyDueAt),
+      gracePeriodEndsAt: toIsoOrNull(ctx.user.emailInitialDueAt),
       phoneVerified: !!ctx.user.phoneVerifiedAt,
-      phoneVerifiedAt: ctx.user.phoneVerifiedAt?.toISOString() || null,
+      phoneVerifiedAt: toIsoOrNull(ctx.user.phoneVerifiedAt),
       canStartSms: gates.canStartSms,
       contenderEligible: gates.contenderEligible,
       userTier: ctx.user.userTier,
@@ -519,6 +556,7 @@ router.post("/sms/start", async (req: Request, res: Response) => {
     const auditCtx = buildAuditContext(req);
     const policyConfig = await loadPolicyConfig();
     const nowMs = Date.now();
+    const nowSec = Math.floor(nowMs / 1000);
     const ctx = await buildDecisionContext({
       userId,
       nowMs,
@@ -574,7 +612,7 @@ router.post("/sms/start", async (req: Request, res: Response) => {
 
     const code = generateOtpCode();
     const otpHash = hashOtp(code);
-    const expiresAt = new Date(nowMs + OTP_EXPIRY_MINUTES * 60 * 1000);
+    const expiresAt = nowSec + OTP_EXPIRY_MINUTES * 60;
 
     await db.insert(smsOtpTokens).values({
       userId,
@@ -587,7 +625,7 @@ router.post("/sms/start", async (req: Request, res: Response) => {
       await sendSmsOtp(phoneE164, code);
     } catch (sendErr) {
       await db.update(smsOtpTokens)
-        .set({ consumedAt: new Date() })
+        .set({ consumedAt: nowSec })
         .where(and(eq(smsOtpTokens.userId, userId), eq(smsOtpTokens.phoneE164, phoneE164), eq(smsOtpTokens.otpHash, otpHash)));
       throw sendErr;
     }
@@ -597,8 +635,10 @@ router.post("/sms/start", async (req: Request, res: Response) => {
     });
     const dayKey = getDayKey();
     const currentCount = verifyState?.smsSendDayKey === dayKey ? (verifyState?.smsSendCountDay || 0) : 0;
-    const newDayStart = verifyState?.smsSendDayKey === dayKey ? verifyState?.smsSendDayStart : new Date(nowMs);
-    const nowDate = new Date(nowMs);
+    const newDayStart =
+      verifyState?.smsSendDayKey === dayKey && verifyState?.smsSendDayStart != null
+        ? Number(verifyState.smsSendDayStart)
+        : nowSec;
 
     if (verifyState) {
       await db.update(userVerification)
@@ -606,11 +646,11 @@ router.post("/sms/start", async (req: Request, res: Response) => {
           phoneE164,
           smsSendDayKey: dayKey,
           smsSendCountDay: currentCount + 1,
-          smsLastSentAt: nowDate,
-          smsLastSendAt: nowDate,
-          smsSendDayStart: newDayStart || nowDate,
+          smsLastSentAt: nowSec,
+          smsLastSendAt: nowSec,
+          smsSendDayStart: newDayStart || nowSec,
           smsVerifyFailCount: 0,
-          updatedAt: nowDate,
+          updatedAt: nowSec,
         })
         .where(eq(userVerification.userId, userId));
     } else {
@@ -619,11 +659,11 @@ router.post("/sms/start", async (req: Request, res: Response) => {
         phoneE164,
         smsSendDayKey: dayKey,
         smsSendCountDay: 1,
-        smsLastSentAt: nowDate,
-        smsLastSendAt: nowDate,
-        smsSendDayStart: nowDate,
+        smsLastSentAt: nowSec,
+        smsLastSendAt: nowSec,
+        smsSendDayStart: nowSec,
         contenderTier: "CANDIDATE_SMS_REQUIRED",
-        contenderEligibleAt: nowDate,
+        contenderEligibleAt: nowSec,
       });
     }
 
@@ -641,10 +681,10 @@ router.post("/sms/start", async (req: Request, res: Response) => {
       actorUserId: auditCtx.actorUserId,
       sessionId: auditCtx.sessionId,
       correlationId: auditCtx.correlationId,
-      data: { expiresAt: expiresAt.toISOString() },
+      data: { expiresAt: new Date(expiresAt * 1000).toISOString() },
     });
 
-    res.json({ message: "Verification code sent.", correlationId: auditCtx.correlationId, expiresAt: expiresAt.toISOString() });
+    res.json({ message: "Verification code sent.", correlationId: auditCtx.correlationId, expiresAt: new Date(expiresAt * 1000).toISOString() });
   } catch (error) {
     console.error("Error starting SMS verification:", error);
     res.status(500).json({ message: "Failed to start phone verification." });
@@ -666,8 +706,8 @@ router.post("/sms/confirm", async (req: Request, res: Response) => {
   try {
     const auditCtx = buildAuditContext(req);
     const policyConfig = await loadPolicyConfig();
-    const now = new Date();
-    const nowMs = now.getTime();
+    const nowMs = Date.now();
+    const nowSec = Math.floor(nowMs / 1000);
 
     const verification = await db.query.userVerification.findFirst({
       where: eq(userVerification.userId, userId),
@@ -727,16 +767,16 @@ router.post("/sms/confirm", async (req: Request, res: Response) => {
 
     const handleOtpFailure = async (reason: string) => {
       const newFailCount = (verification.smsVerifyFailCount || 0) + 1;
-      let lockedUntil: Date | null = null;
+      let lockedUntil: number | null = null;
       if (newFailCount >= policyConfig.otpMaxAttempts) {
-        lockedUntil = new Date(nowMs + policyConfig.otpLockMinutes * 60 * 1000);
+        lockedUntil = nowSec + policyConfig.otpLockMinutes * 60;
       }
 
       await db.update(userVerification)
         .set({
           smsVerifyFailCount: newFailCount,
           smsOtpLockedUntil: lockedUntil,
-          updatedAt: now,
+          updatedAt: nowSec,
         })
         .where(eq(userVerification.userId, userId));
 
@@ -747,7 +787,7 @@ router.post("/sms/confirm", async (req: Request, res: Response) => {
           category: "VERIFICATION",
           type: "SMS_OTP_LOCKOUT_TRIGGERED",
           title: "SMS OTP lockout triggered",
-          description: `Failed ${newFailCount} times, locked until ${lockedUntil.toISOString()}`,
+          description: `Failed ${newFailCount} times, locked until ${new Date(lockedUntil * 1000).toISOString()}`,
           ip: auditCtx.ip,
           userAgent: auditCtx.userAgent ?? undefined,
           actorAdminId: auditCtx.actorType === "ADMIN" ? auditCtx.actorUserId ?? null : null,
@@ -778,7 +818,7 @@ router.post("/sms/confirm", async (req: Request, res: Response) => {
         return res.status(429).json({
           message: "Too many failed attempts. Please wait before trying again.",
           deny_code: "SMS_OTP_TOO_MANY_ATTEMPTS",
-          lockedUntil: lockedUntil.toISOString(),
+          lockedUntil: new Date(lockedUntil * 1000).toISOString(),
           correlationId: auditCtx.correlationId,
         });
       }
@@ -792,7 +832,7 @@ router.post("/sms/confirm", async (req: Request, res: Response) => {
     if (otpRow.consumedAt) {
       return handleOtpFailure("otp.consumed");
     }
-    if (otpRow.expiresAt && new Date(otpRow.expiresAt) < now) {
+    if (otpRow.expiresAt && Number(otpRow.expiresAt) < nowSec) {
       return handleOtpFailure("otp.expired");
     }
     if (hashOtp(code) !== otpRow.otpHash) {
@@ -801,7 +841,7 @@ router.post("/sms/confirm", async (req: Request, res: Response) => {
 
     // Success - reset fail count and lockout
     await db.update(smsOtpTokens)
-      .set({ consumedAt: now })
+      .set({ consumedAt: nowSec })
       .where(eq(smsOtpTokens.id, otpRow.id));
 
     const currentTier = String(verification.contenderTier || "NONE");
@@ -809,12 +849,12 @@ router.post("/sms/confirm", async (req: Request, res: Response) => {
 
     await db.update(userVerification)
       .set({
-        smsVerifiedAt: now,
+        smsVerifiedAt: nowSec,
         smsVerifyFailCount: 0,
         smsOtpLockedUntil: null,
         smsEnabled: true,
         contenderTier: nextTier,
-        updatedAt: now,
+        updatedAt: nowSec,
       })
       .where(eq(userVerification.userId, userId));
 

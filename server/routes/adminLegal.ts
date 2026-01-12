@@ -291,15 +291,15 @@ router.get('/coverage/stats', async (req: Request, res: Response) => {
 // ==================== SYSTEM CONFIG ====================
 
 // GET /api/admin/system-config/legal-enforcement - Get enforcement toggle
-router.get('/system-config/enforcement', (req: Request, res: Response) => {
-  res.json({ enforced: isEnforcementEnabled() });
+router.get('/system-config/enforcement', async (req: Request, res: Response) => {
+  res.json({ enforced: await isEnforcementEnabled() });
 });
 
 // PATCH /api/admin/system-config/legal-enforcement - Set enforcement toggle
-router.patch('/system-config/enforcement', (req: Request, res: Response) => {
+router.patch('/system-config/enforcement', async (req: Request, res: Response) => {
   const { enforce } = req.body;
   if (typeof enforce !== 'boolean') return res.status(400).json({ error: 'enforce must be boolean' });
-  setEnforcementEnabled(enforce);
+  await setEnforcementEnabled(enforce);
   res.json({ success: true, enforced: enforce });
 });
 

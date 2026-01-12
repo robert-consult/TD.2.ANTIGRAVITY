@@ -6,16 +6,16 @@ import { onLiveEvent, publishLiveEvent } from "./services/liveBus";
 import { storage } from "./storage";
 import { z } from "zod";
 import axios from "axios";
-import { loginSchema, insertTradeSchema, tradeAudit, trades, globalSettings, userKycProfiles, userPayoutProfiles, emailVerificationTokens, systemConfig, signupFreezeAttempts, signupWaitlist, users, signupFingerprints, userAccountEvents } from "@shared/schema";
+import { loginSchema, insertTradeSchema, tradeAudit, trades, globalSettings, userKycProfiles, userPayoutProfiles, emailVerificationTokens, systemConfig, signupFreezeAttempts, signupWaitlist, users, signupFingerprints, userAccountEvents, userSessions, quotes, symbolConfigs } from "@shared/schema";
 import crypto from "crypto";
 import { appendIdentityAudit } from "./services/identityAudit";
 import { desc, eq } from "drizzle-orm";
-import { db } from "@db";
+import { db, dbClient } from "@db";
+import { isPostgres } from "@db/config";
 import session from "express-session";
 import cookie from "cookie";
 import signature from "cookie-signature";
-import SqliteStore from "better-sqlite3-session-store";
-import BetterSQLite3Database from "better-sqlite3";
+import connectPgSimple from "connect-pg-simple";
 import { registerAdminRoutes } from "./routes/admin";
 import { registerMarketRoutes } from "./routes/market";
 import instrumentsRouter from "./routes/instruments";
@@ -133,9 +133,8 @@ function normalizeLanguagePreference(value: string | undefined): { normalized: s
   return { normalized: defaultLocale, matched: false };
 }
 
-// Create session store with SQLite persistence
-const SessionStore = SqliteStore(session);
-const sessionDb = new BetterSQLite3Database("./sessions.db");
+// Create session store with Postgres persistence
+const SessionStore = connectPgSimple(session);
 const SESSION_COOKIE_NAME = "connect.sid";
 const SESSION_SECRET = process.env.SESSION_SECRET || "trading-platform-secret";
 
@@ -164,19 +163,19 @@ declare module "express-session" {
 }
 
 export async function registerRoutes(app: Express): Promise<Server> {
-  // Configure session with SQLite persistence to prevent session loss on server restart
+  // Configure session with Postgres persistence to prevent session loss on server restart
   app.use(
     session({
       store: new SessionStore({
-        client: sessionDb,
-        expired: {
-          clear: true,
-          intervalMs: 900000 // Clear expired sessions every 15 minutes
-        }
+        pool: dbClient,
+        tableName: "session",
+        createTableIfMissing: true,
+        pruneSessionInterval: 900000,
       }),
       secret: SESSION_SECRET,
       resave: false,
       saveUninitialized: false,
+      name: SESSION_COOKIE_NAME,
       cookie: {
         secure: process.env.NODE_ENV === "production",
         sameSite: (process.env.COOKIE_SAMESITE as "lax" | "strict" | "none") || "lax",
@@ -196,7 +195,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use("/api/captcha", captchaSliderRouter);
 
   // Authentication middleware helper
-  const ensureAuth = (req: Request, res: Response, next: NextFunction) => {
+  const ensureAuth = async (req: Request, res: Response, next: NextFunction) => {
     if (!req.session.userId) {
       return res.status(401).json({ message: "Not authenticated" });
     }
@@ -204,31 +203,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
     // Check if session has been revoked
     const sessionId = req.sessionID;
     if (sessionId) {
-      const sessionDb = new BetterSQLite3("./trading_app.db");
-      try { sessionDb.pragma("busy_timeout = 5000"); } catch {}
+      const [sessionRow] = await db
+        .select({ revokedAt: userSessions.revokedAt })
+        .from(userSessions)
+        .where(and(eq(userSessions.sessionId, sessionId), eq(userSessions.userId, req.session.userId)))
+        .limit(1);
+      
+      if (sessionRow?.revokedAt) {
+        // Session has been revoked - destroy it and reject
+        req.session.destroy(() => {});
+        return res.status(401).json({ 
+          message: "Session has been terminated",
+          code: "SESSION_REVOKED"
+        });
+      }
+      
+      // Touch session to update lastActiveAt (only for non-revoked sessions)
       try {
-        const sessionRow = sessionDb.prepare(`
-          SELECT revoked_at FROM user_sessions 
-          WHERE session_id = ? AND user_id = ?
-        `).get(sessionId, req.session.userId) as { revoked_at: number | null } | undefined;
-        
-        if (sessionRow?.revoked_at) {
-          // Session has been revoked - destroy it and reject
-          req.session.destroy(() => {});
-          return res.status(401).json({ 
-            message: "Session has been terminated",
-            code: "SESSION_REVOKED"
-          });
-        }
-        
-        // Touch session to update lastActiveAt (only for non-revoked sessions)
-        try {
-          touchSession(sessionId);
-        } catch {
-          // Ignore touch errors
-        }
-      } finally {
-        sessionDb.close();
+        await touchSession(sessionId);
+      } catch {
+        // Ignore touch errors
       }
     }
     
@@ -236,15 +230,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
   };
 
   // Legal re-acceptance gate (DOC1): blocks trade actions when terms have changed since last acceptance.
-  const ensureDoc1TermsAccepted = (req: Request, res: Response, next: NextFunction) => {
+  const ensureDoc1TermsAccepted = async (req: Request, res: Response, next: NextFunction) => {
     const userId = req.session.userId;
     if (!userId) return res.status(401).json({ message: "Not authenticated" });
 
     try {
-      const status = computeDoc1ReacceptStatus(userId);
+      const status = await computeDoc1ReacceptStatus(userId);
 
       if (status.blocked) {
-        upsertDoc1ReacceptRequirement({ userId, detectedBy: "TRADE", status });
+        await upsertDoc1ReacceptRequirement({ userId, detectedBy: "TRADE", status });
         (req.session as any).legalReacceptRequired = true;
 
         const code = status.blockedReason || "LEGAL_COVERAGE_BLOCKED";
@@ -255,7 +249,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       if (status.required) {
-        upsertDoc1ReacceptRequirement({ userId, detectedBy: "TRADE", status });
+        await upsertDoc1ReacceptRequirement({ userId, detectedBy: "TRADE", status });
         (req.session as any).legalReacceptRequired = true;
         return res.status(409).json({
           message: "LEGAL_REACCEPT_REQUIRED",
@@ -268,7 +262,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      upsertDoc1ReacceptRequirement({ userId, detectedBy: "TRADE", status });
+      await upsertDoc1ReacceptRequirement({ userId, detectedBy: "TRADE", status });
       (req.session as any).legalReacceptRequired = false;
       return next();
     } catch (e: any) {
@@ -277,8 +271,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   };
 
-  const getSignupPublicConfig = () => {
-    const row = db.select().from(systemConfig).where(eq(systemConfig.id, 1)).get();
+  const getSignupPublicConfig = async () => {
+    const [row] = await db.select().from(systemConfig).where(eq(systemConfig.id, 1)).limit(1);
     const waitlistPolicyContent = String((row as any)?.signupWaitlistPolicyContent ?? "");
     const waitlistPolicyVersion = String((row as any)?.signupWaitlistPolicyVersion ?? "1");
     const waitlistPolicySha256 = sha256(waitlistPolicyContent);
@@ -351,13 +345,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Public signup configuration (captcha + phone enforcement)
-  app.get("/api/auth/signup-config", (_req: Request, res: Response) => {
-    res.json(getSignupPublicConfig());
+  app.get("/api/auth/signup-config", async (_req: Request, res: Response) => {
+    res.json(await getSignupPublicConfig());
   });
 
   // Public waitlist policy (communications privacy notice)
-  app.get("/api/auth/waitlist-policy", (_req: Request, res: Response) => {
-    const row = db.select().from(systemConfig).where(eq(systemConfig.id, 1)).get();
+  app.get("/api/auth/waitlist-policy", async (_req: Request, res: Response) => {
+    const [row] = await db.select().from(systemConfig).where(eq(systemConfig.id, 1)).limit(1);
     const version = String((row as any)?.signupWaitlistPolicyVersion ?? "1");
     const content = String((row as any)?.signupWaitlistPolicyContent ?? "");
     return res.json({ ok: true, version, sha256: sha256(content), content });
@@ -365,7 +359,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Public invite waitlist join (when signups are frozen)
   app.post("/api/waitlist", async (req: Request, res: Response) => {
-    const row = db.select().from(systemConfig).where(eq(systemConfig.id, 1)).get();
+    const [row] = await db.select().from(systemConfig).where(eq(systemConfig.id, 1)).limit(1);
     const signupsFrozen = Boolean((row as any)?.signupFreeze ?? false);
     const waitlistEnabled = Boolean((row as any)?.signupWaitlistEnabled ?? true);
 
@@ -450,20 +444,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.status(409).json({ ok: false, error: "POLICY_CHANGED" });
     }
 
-    const existing = db
+    const [existing] = await db
       .select()
       .from(signupWaitlist)
       .where(eq(signupWaitlist.emailLower, emailLower))
-      .get() as any;
+      .limit(1);
+
+    const [prevRow] = await db
+      .select({ recordHash: signupWaitlist.recordHash })
+      .from(signupWaitlist)
+      .orderBy(desc(signupWaitlist.id))
+      .limit(1);
 
     const prevHash = existing?.recordHash
       ? String(existing.recordHash)
-      : (db
-          .select({ recordHash: signupWaitlist.recordHash })
-          .from(signupWaitlist)
-          .orderBy(desc(signupWaitlist.id))
-          .limit(1)
-          .get() as any)?.recordHash ?? null;
+      : prevRow?.recordHash ?? null;
 
     const consentPayload = {
       emailLower,
@@ -484,7 +479,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     );
 
     if (existing?.id) {
-      db.update(signupWaitlist)
+      await db.update(signupWaitlist)
         .set({
           fullName: consentPayload.fullName,
           email: emailTrimmed,
@@ -500,10 +495,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           recordHash,
           updatedAt: nowSec,
         })
-        .where(eq(signupWaitlist.id, Number(existing.id)))
-        .run();
+        .where(eq(signupWaitlist.id, Number(existing.id)));
     } else {
-      db.insert(signupWaitlist)
+      await db.insert(signupWaitlist)
         .values({
           fullName: consentPayload.fullName,
           email: emailTrimmed,
@@ -522,8 +516,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           inviteSendCount: 0,
           createdAt: nowSec,
           updatedAt: nowSec,
-        })
-        .run();
+        });
     }
 
     try {
@@ -565,33 +558,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       // Get current quotes from database
-      const db = new BetterSQLite3('./trading_app.db');
-      try { db.pragma("busy_timeout = 5000"); } catch {}
-      let quotesInfo = { count: 0, latestUpdate: null as string | null, symbols: [] as string[] };
+      let quotesInfo = { count: 0, latestUpdate: null as number | null, symbols: [] as string[] };
       
       try {
-        const tableExists = db.prepare(
-          "SELECT name FROM sqlite_master WHERE type='table' AND name='quotes'"
-        ).get();
-        
-        if (tableExists) {
-          const quotes = db.prepare(`
-            SELECT symbol, updated_at, is_stale, last_api_update 
-            FROM quotes 
-            ORDER BY updated_at DESC
-          `).all() as any[];
-          
-          quotesInfo = {
-            count: quotes.length,
-            latestUpdate: quotes[0]?.updated_at || null,
-            symbols: quotes.map(q => q.symbol)
-          };
-        }
+        const quoteRows = await db
+          .select({
+            symbol: quotes.symbol,
+            updatedAt: quotes.updatedAt,
+          })
+          .from(quotes)
+          .orderBy(desc(quotes.updatedAt));
+
+        quotesInfo = {
+          count: quoteRows.length,
+          latestUpdate: quoteRows[0]?.updatedAt ?? null,
+          symbols: quoteRows.map(q => q.symbol),
+        };
       } catch (e) {
         console.error('Error getting quotes info:', e);
       }
-      
-      db.close();
       
       // Calculate time since last API update
       const now = Date.now();
@@ -635,7 +620,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const user = await storage.verifyUser(email, password);
 
       if (!user) {
-        recordLoginAttempt({
+        await recordLoginAttempt({
           email,
           ip,
           userAgent,
@@ -647,7 +632,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       if ((user as any).isDeleted) {
-        recordLoginAttempt({
+        await recordLoginAttempt({
           userId: user.id,
           email,
           ip,
@@ -660,7 +645,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       if (user.isDisabled) {
-        recordLoginAttempt({
+        await recordLoginAttempt({
           userId: user.id,
           email,
           ip,
@@ -673,7 +658,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       if ((user as any).isFrozen) {
-        recordLoginAttempt({
+        await recordLoginAttempt({
           userId: user.id,
           email,
           ip,
@@ -719,7 +704,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
 
         if (!loginJ.allowed) {
-          recordLoginAttempt({
+          await recordLoginAttempt({
             userId: user.id,
             email,
             ip,
@@ -752,7 +737,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       req.session.userCountryIso2 = userCountryIso2;
       req.session.ipCountryIso2 = ipCountryIso2;
 
-      const { geo } = createUserSession({
+      const { geo } = await createUserSession({
         sessionId: req.sessionID,
         userId: user.id,
         email: user.email,
@@ -762,47 +747,49 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
 
       let griftAutoEnforcement: any = null;
-      try {
-        const griftCtx = extractGriftContext(req);
-        const griftDb = new BetterSQLite3("./trading_app.db");
-        try { griftDb.pragma("busy_timeout = 5000"); } catch {}
+      if (!isPostgres) {
         try {
-          const griftAuditCtx: GriftAuditContext = {
-            ts: Date.now(),
-            userId: user.id,
-            sessionId: req.sessionID,
-            deviceId: griftCtx.deviceId ?? undefined,
-            deviceIdLegacy: griftCtx.deviceIdLegacy ?? undefined,
-            deviceFp: griftCtx.deviceFp ?? undefined,
-            deviceInstallId: griftCtx.deviceInstallId ?? undefined,
-            clientTz: griftCtx.clientTz ?? undefined,
-            clientLang: griftCtx.clientLang ?? undefined,
-            eventType: "LOGIN_SUCCESS",
-            ip: griftCtx.ip ?? undefined,
-            userAgent: griftCtx.userAgent ?? undefined,
-            geoCountry: griftCtx.geoCountry ?? undefined,
-            geoRegion: griftCtx.geoRegion ?? undefined,
-            geoCity: griftCtx.geoCity ?? undefined,
-            latitude: griftCtx.latitude ?? undefined,
-            longitude: griftCtx.longitude ?? undefined,
-            asn: griftCtx.asn ?? undefined,
-            org: griftCtx.org ?? undefined,
-          };
-
-          // Run all detection rules via onLoginSuccess
-          onLoginSuccess(griftDb, griftAuditCtx);
-
-          // Optional auto-enforcement (freeze/disable) based on admin-configured thresholds.
+          const griftCtx = extractGriftContext(req);
+          const griftDb = new BetterSQLite3("./trading_app.db");
+          try { griftDb.pragma("busy_timeout = 5000"); } catch {}
           try {
-            griftAutoEnforcement = await maybeApplyAutoEnforcement(griftDb, griftAuditCtx);
-          } catch (enfErr) {
-            console.error("[Grift] Auto-enforcement failed:", enfErr);
+            const griftAuditCtx: GriftAuditContext = {
+              ts: Date.now(),
+              userId: user.id,
+              sessionId: req.sessionID,
+              deviceId: griftCtx.deviceId ?? undefined,
+              deviceIdLegacy: griftCtx.deviceIdLegacy ?? undefined,
+              deviceFp: griftCtx.deviceFp ?? undefined,
+              deviceInstallId: griftCtx.deviceInstallId ?? undefined,
+              clientTz: griftCtx.clientTz ?? undefined,
+              clientLang: griftCtx.clientLang ?? undefined,
+              eventType: "LOGIN_SUCCESS",
+              ip: griftCtx.ip ?? undefined,
+              userAgent: griftCtx.userAgent ?? undefined,
+              geoCountry: griftCtx.geoCountry ?? undefined,
+              geoRegion: griftCtx.geoRegion ?? undefined,
+              geoCity: griftCtx.geoCity ?? undefined,
+              latitude: griftCtx.latitude ?? undefined,
+              longitude: griftCtx.longitude ?? undefined,
+              asn: griftCtx.asn ?? undefined,
+              org: griftCtx.org ?? undefined,
+            };
+
+            // Run all detection rules via onLoginSuccess
+            onLoginSuccess(griftDb, griftAuditCtx);
+
+            // Optional auto-enforcement (freeze/disable) based on admin-configured thresholds.
+            try {
+              griftAutoEnforcement = await maybeApplyAutoEnforcement(griftDb, griftAuditCtx);
+            } catch (enfErr) {
+              console.error("[Grift] Auto-enforcement failed:", enfErr);
+            }
+          } finally {
+            griftDb.close();
           }
-        } finally {
-          griftDb.close();
+        } catch (griftErr) {
+          console.error("[Grift] Failed to capture login context:", griftErr);
         }
-      } catch (griftErr) {
-        console.error("[Grift] Failed to capture login context:", griftErr);
       }
 
       if (griftAutoEnforcement?.applied && griftAutoEnforcement?.newStatus && griftAutoEnforcement.newStatus !== "ACTIVE") {
@@ -838,13 +825,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let legalRequiredCombinedSha256: string | null = null;
       let legalLastAcceptedCombinedSha256: string | null = null;
       try {
-        const status = computeDoc1ReacceptStatus(user.id);
+        const status = await computeDoc1ReacceptStatus(user.id);
         legalReacceptRequired = !!status.required;
         legalReacceptBlocked = !!status.blocked;
         legalReacceptBlockedReason = status.blockedReason ?? null;
         legalRequiredCombinedSha256 = status.requiredCombinedSha256 ?? null;
         legalLastAcceptedCombinedSha256 = status.lastAcceptedCombinedSha256 ?? null;
-        upsertDoc1ReacceptRequirement({ userId: user.id, detectedBy: "LOGIN", status });
+        await upsertDoc1ReacceptRequirement({ userId: user.id, detectedBy: "LOGIN", status });
         (req.session as any).legalReacceptRequired = legalReacceptRequired || legalReacceptBlocked;
       } catch (e) {
         console.error("[Legal] Failed to compute re-acceptance status on login:", e);
@@ -884,7 +871,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const ip = getClientIp(req);
       const userAgent = getUserAgent(req);
 
-      const signupCfg = getSignupPublicConfig();
+      const signupCfg = await getSignupPublicConfig();
 
       // Hard stop: when signups are frozen, block registration but still log attempts.
       if (signupCfg.signupsFrozen) {
@@ -894,7 +881,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const emailLower = emailRaw ? emailRaw.trim().toLowerCase() : null;
 
         try {
-          db.insert(signupFreezeAttempts)
+          await db.insert(signupFreezeAttempts)
             .values({
               email: emailRaw || null,
               emailLower,
@@ -902,8 +889,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               ip,
               userAgent,
               createdAt: nowSec,
-            })
-            .run();
+            });
         } catch (e) {
           console.warn("Failed to record signup freeze attempt:", e);
         }
@@ -953,7 +939,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       if (!signupJ.allowed) {
         const nowSec = Math.floor(Date.now() / 1000);
-        recordSignupJurisdictionBlock({
+        await recordSignupJurisdictionBlock({
           email,
           username,
           ip,
@@ -993,7 +979,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
-      const cov = checkCoverage(countryIso2);
+      const cov = await checkCoverage(countryIso2);
       if (cov.enforced && !cov.allowed) {
         return res.status(409).json({ message: "LEGAL_COVERAGE_MISSING" });
       }
@@ -1067,7 +1053,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Record legal acceptance (MANDATORY - already validated above)
       try {
-        recordDoc1Acceptance({
+        await recordDoc1Acceptance({
           userId: user.id,
           emailAtAcceptance: email,
           countryIso2,
@@ -1086,12 +1072,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         // Fail-closed: do not allow an account to exist without an acceptance row.
         try {
-          db.transaction((tx) => {
-            try { tx.delete(signupFingerprints).where(eq(signupFingerprints.userId, user.id)).run(); } catch {}
-            try { tx.delete(userAccountEvents).where(eq(userAccountEvents.userId, user.id)).run(); } catch {}
-            try { tx.delete(userVerification).where(eq(userVerification.userId, user.id)).run(); } catch {}
-            try { tx.delete(emailVerificationTokens).where(eq(emailVerificationTokens.userId, user.id)).run(); } catch {}
-            try { tx.delete(users).where(eq(users.id, user.id)).run(); } catch {}
+          await db.transaction(async (tx) => {
+            try { await tx.delete(signupFingerprints).where(eq(signupFingerprints.userId, user.id)); } catch {}
+            try { await tx.delete(userAccountEvents).where(eq(userAccountEvents.userId, user.id)); } catch {}
+            try { await tx.delete(userVerification).where(eq(userVerification.userId, user.id)); } catch {}
+            try { await tx.delete(emailVerificationTokens).where(eq(emailVerificationTokens.userId, user.id)); } catch {}
+            try { await tx.delete(users).where(eq(users.id, user.id)); } catch {}
           });
         } catch (rollbackErr) {
           console.error("[Legal] Signup rollback failed:", rollbackErr);
@@ -1110,15 +1096,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       try {
         const nowSec = Math.floor(Date.now() / 1000);
         const emailLower = String(email).trim().toLowerCase();
-        db.update(signupWaitlist)
+        await db.update(signupWaitlist)
           .set({
             status: "CONVERTED",
             convertedAt: nowSec,
             convertedUserId: user.id,
             updatedAt: nowSec,
           })
-          .where(eq(signupWaitlist.emailLower, emailLower))
-          .run();
+          .where(eq(signupWaitlist.emailLower, emailLower));
       } catch (e) {
         console.warn("Failed to mark waitlist conversion:", e);
       }
@@ -1156,7 +1141,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           : crypto.createHash("sha256").update(token).digest("hex");
         
         const tokenId = crypto.randomUUID();
-        const expiresAt = new Date(Date.now() + VERIFICATION_TOKEN_EXPIRY_HOURS * 3600 * 1000);
+        const expiresAt = Math.floor(Date.now() / 1000) + VERIFICATION_TOKEN_EXPIRY_HOURS * 3600;
 
         // Store token in email_verification_tokens table
         await db.insert(emailVerificationTokens).values({
@@ -1236,7 +1221,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       req.session.userCountryIso2 = user.countryIso2 || undefined;
       req.session.ipCountryIso2 = ipCountryIso2;
 
-      const { geo } = createUserSession({
+      const { geo } = await createUserSession({
         sessionId: req.sessionID,
         userId: user.id,
         email: user.email,
@@ -1246,45 +1231,47 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
 
       let griftAutoEnforcement: any = null;
-      try {
-        const griftCtx = extractGriftContext(req);
-        const griftDb = new BetterSQLite3("./trading_app.db");
-        try { griftDb.pragma("busy_timeout = 5000"); } catch {}
+      if (!isPostgres) {
         try {
-          const griftAuditCtx: GriftAuditContext = {
-            ts: Date.now(),
-            userId: user.id,
-            sessionId: req.sessionID,
-            deviceId: griftCtx.deviceId ?? undefined,
-            deviceIdLegacy: griftCtx.deviceIdLegacy ?? undefined,
-            deviceFp: griftCtx.deviceFp ?? undefined,
-            deviceInstallId: griftCtx.deviceInstallId ?? undefined,
-            clientTz: griftCtx.clientTz ?? undefined,
-            clientLang: griftCtx.clientLang ?? undefined,
-            eventType: "LOGIN_SUCCESS",
-            ip: griftCtx.ip ?? undefined,
-            userAgent: griftCtx.userAgent ?? undefined,
-            geoCountry: griftCtx.geoCountry ?? undefined,
-            geoRegion: griftCtx.geoRegion ?? undefined,
-            geoCity: griftCtx.geoCity ?? undefined,
-            latitude: griftCtx.latitude ?? undefined,
-            longitude: griftCtx.longitude ?? undefined,
-            asn: griftCtx.asn ?? undefined,
-            org: griftCtx.org ?? undefined,
-          };
-
-          onLoginSuccess(griftDb, griftAuditCtx);
-
+          const griftCtx = extractGriftContext(req);
+          const griftDb = new BetterSQLite3("./trading_app.db");
+          try { griftDb.pragma("busy_timeout = 5000"); } catch {}
           try {
-            griftAutoEnforcement = await maybeApplyAutoEnforcement(griftDb, griftAuditCtx);
-          } catch (enfErr) {
-            console.error("[Grift] Auto-enforcement failed (registration):", enfErr);
+            const griftAuditCtx: GriftAuditContext = {
+              ts: Date.now(),
+              userId: user.id,
+              sessionId: req.sessionID,
+              deviceId: griftCtx.deviceId ?? undefined,
+              deviceIdLegacy: griftCtx.deviceIdLegacy ?? undefined,
+              deviceFp: griftCtx.deviceFp ?? undefined,
+              deviceInstallId: griftCtx.deviceInstallId ?? undefined,
+              clientTz: griftCtx.clientTz ?? undefined,
+              clientLang: griftCtx.clientLang ?? undefined,
+              eventType: "LOGIN_SUCCESS",
+              ip: griftCtx.ip ?? undefined,
+              userAgent: griftCtx.userAgent ?? undefined,
+              geoCountry: griftCtx.geoCountry ?? undefined,
+              geoRegion: griftCtx.geoRegion ?? undefined,
+              geoCity: griftCtx.geoCity ?? undefined,
+              latitude: griftCtx.latitude ?? undefined,
+              longitude: griftCtx.longitude ?? undefined,
+              asn: griftCtx.asn ?? undefined,
+              org: griftCtx.org ?? undefined,
+            };
+
+            onLoginSuccess(griftDb, griftAuditCtx);
+
+            try {
+              griftAutoEnforcement = await maybeApplyAutoEnforcement(griftDb, griftAuditCtx);
+            } catch (enfErr) {
+              console.error("[Grift] Auto-enforcement failed (registration):", enfErr);
+            }
+          } finally {
+            griftDb.close();
           }
-        } finally {
-          griftDb.close();
+        } catch (griftErr) {
+          console.error("[Grift] Failed to capture registration context:", griftErr);
         }
-      } catch (griftErr) {
-        console.error("[Grift] Failed to capture registration context:", griftErr);
       }
 
       if (griftAutoEnforcement?.applied && griftAutoEnforcement?.newStatus && griftAutoEnforcement.newStatus !== "ACTIVE") {
@@ -1341,7 +1328,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     
     if (userId) {
       try {
-        endSession({ userId, sessionId, ip, userAgent });
+        await endSession({ userId, sessionId, ip, userAgent });
       } catch (err) {
         console.error("Error recording logout:", err);
       }
@@ -1395,7 +1382,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
            let legalRequiredCombinedSha256: string | null = null;
            let legalLastAcceptedCombinedSha256: string | null = null;
            try {
-             const reqRow = getDoc1ReacceptRequirement(updatedUser.id);
+             const reqRow = await getDoc1ReacceptRequirement(updatedUser.id);
              if (reqRow) {
                legalReacceptRequired = true;
                legalRequiredCombinedSha256 = reqRow.requiredCombinedSha256;
@@ -1462,7 +1449,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let legalRequiredCombinedSha256: string | null = null;
       let legalLastAcceptedCombinedSha256: string | null = null;
       try {
-        const reqRow = getDoc1ReacceptRequirement(user.id);
+        const reqRow = await getDoc1ReacceptRequirement(user.id);
         if (reqRow) {
           legalReacceptRequired = true;
           legalRequiredCombinedSha256 = reqRow.requiredCombinedSha256;
@@ -1559,7 +1546,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
       
-      const phoneRequired = getSignupPublicConfig().signupPhoneEnforce;
+      const phoneRequired = (await getSignupPublicConfig()).signupPhoneEnforce;
 
       if (phone === undefined && phoneRequired && !existingUser.phone) {
         return res.status(400).json({ message: "PHONE_REQUIRED" });
@@ -1660,7 +1647,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           : crypto.createHash("sha256").update(token).digest("hex");
         
         const tokenId = crypto.randomUUID();
-        const expiresAt = new Date(Date.now() + VERIFICATION_TOKEN_EXPIRY_HOURS * 3600 * 1000);
+        const expiresAt = Math.floor(Date.now() / 1000) + VERIFICATION_TOKEN_EXPIRY_HOURS * 3600;
         
         // 3. Store token hash in email_verification_tokens table
         await db.insert(emailVerificationTokens).values({
@@ -1979,7 +1966,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/profile/login-history", ensureAuth, async (req: Request, res: Response) => {
     try {
       const limit = Math.min(50, Math.max(1, Number(req.query.limit || 10)));
-      const logins = getRecentLoginActivity({ userId: req.session.userId!, limit });
+      const logins = await getRecentLoginActivity({ userId: req.session.userId!, limit });
       res.json(logins);
     } catch (error) {
       console.error("Get login history error:", error);
@@ -1996,19 +1983,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const ip = getClientIp(req);
       const userAgent = getUserAgent(req);
       
-      let sessions = getActiveSessions({ userId, limit });
+      let sessions = await getActiveSessions({ userId, limit });
       
       const currentExists = sessions.some(s => s.sessionId === currentSessionId);
       if (!currentExists) {
         const user = await storage.getUserById(userId);
-        createUserSession({
+        await createUserSession({
           sessionId: currentSessionId,
           userId,
           email: user?.email || "",
           ip,
           userAgent,
         });
-        sessions = getActiveSessions({ userId, limit });
+        sessions = await getActiveSessions({ userId, limit });
       }
       
       const formattedSessions = sessions.map((s) => ({
@@ -2033,7 +2020,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Cannot terminate current session. Use logout instead." });
       }
       
-      revokeSession({
+      await revokeSession({
         actorUserId: req.session.userId!,
         targetUserId: req.session.userId!,
         sessionId,
@@ -2050,11 +2037,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.delete("/api/profile/sessions", ensureAuth, async (req: Request, res: Response) => {
     try {
       const currentSessionId = req.sessionID;
-      const allSessions = getActiveSessions({ userId: req.session.userId!, limit: 100 });
+      const allSessions = await getActiveSessions({ userId: req.session.userId!, limit: 100 });
       
       for (const session of allSessions) {
         if (session.sessionId !== currentSessionId) {
-          revokeSession({
+          await revokeSession({
             actorUserId: req.session.userId!,
             targetUserId: req.session.userId!,
             sessionId: session.sessionId,
@@ -2092,7 +2079,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!user) return res.status(404).json({ message: "User not found" });
 
       // Policy: admin controls timezone editability
-      const cfg = db.select().from(systemConfig).where(eq(systemConfig.id, 1)).get();
+      const [cfg] = await db.select().from(systemConfig).where(eq(systemConfig.id, 1)).limit(1);
       const allowUserTimezoneEdit = cfg ? Boolean((cfg as any).allowUserTimezoneEdit ?? true) : true;
 
       const updateData: Record<string, string> = {};
@@ -2164,7 +2151,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "User not found" });
       }
 
-      const cfg = db.select().from(systemConfig).where(eq(systemConfig.id, 1)).get();
+      const [cfg] = await db.select().from(systemConfig).where(eq(systemConfig.id, 1)).limit(1);
       const allowUserTimezoneEdit = cfg ? Boolean((cfg as any).allowUserTimezoneEdit ?? true) : true;
       const countryRaw = (user as any).countryIso2 || (user as any).country || null;
       const countryIso2 = countryRaw ? String(countryRaw).trim().toUpperCase() : null;
@@ -2267,7 +2254,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
       
-      const now = new Date();
+      const nowSec = Math.floor(Date.now() / 1000);
       
         await db.update(userKycProfiles)
           .set({
@@ -2284,8 +2271,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
             postalCode: postalCode || null,
             country: country || null,
             idDocumentRef: idDocumentRef || documentData || null,
-            submittedAt: now,
-            updatedAt: now,
+            submittedAt: nowSec,
+            updatedAt: nowSec,
           })
           .where(eq(userKycProfiles.userId, userId));
       
@@ -2363,7 +2350,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         await db.update(userPayoutProfiles)
           .set({ 
             preferredPaymentCurrency: currency,
-            updatedAt: new Date(),
+            updatedAt: Math.floor(Date.now() / 1000),
           })
           .where(eq(userPayoutProfiles.userId, req.session.userId!));
       } else {
@@ -2459,7 +2446,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const data = insertTradeSchema.parse({
         ...req.body,
         userId: req.session.userId,
-        openedAt: new Date(), // Use proper Date object instead of timestamp
+        openedAt: Math.floor(Date.now() / 1000),
         lots: orderSize, // Use the unified size parameter
       });
 
@@ -3001,52 +2988,54 @@ export async function registerRoutes(app: Express): Promise<Server> {
       );
 
       // Grift detection: Record trade observation and check for coordinated hedging
-      try {
-        const griftCtx = extractGriftContext(req);
-        const griftDb = new BetterSQLite3("./trading_app.db");
-        try { griftDb.pragma("busy_timeout = 5000"); } catch {}
+      if (!isPostgres) {
         try {
-          const griftAuditCtx: GriftAuditContext = {
-            ts: Date.now(),
-            userId: req.session.userId,
-            sessionId: req.sessionID,
-            deviceId: griftCtx.deviceId ?? undefined,
-            deviceIdLegacy: griftCtx.deviceIdLegacy ?? undefined,
-            deviceFp: griftCtx.deviceFp ?? undefined,
-            deviceInstallId: griftCtx.deviceInstallId ?? undefined,
-            clientTz: griftCtx.clientTz ?? undefined,
-            clientLang: griftCtx.clientLang ?? undefined,
-            eventType: "TRADE_SUBMIT",
-            ip: griftCtx.ip ?? undefined,
-            userAgent: griftCtx.userAgent ?? undefined,
-            geoCountry: griftCtx.geoCountry ?? undefined,
-            geoRegion: griftCtx.geoRegion ?? undefined,
-            geoCity: griftCtx.geoCity ?? undefined,
-            latitude: griftCtx.latitude ?? undefined,
-            longitude: griftCtx.longitude ?? undefined,
-            asn: griftCtx.asn ?? undefined,
-            org: griftCtx.org ?? undefined,
-          };
+          const griftCtx = extractGriftContext(req);
+          const griftDb = new BetterSQLite3("./trading_app.db");
+          try { griftDb.pragma("busy_timeout = 5000"); } catch {}
+          try {
+            const griftAuditCtx: GriftAuditContext = {
+              ts: Date.now(),
+              userId: req.session.userId,
+              sessionId: req.sessionID,
+              deviceId: griftCtx.deviceId ?? undefined,
+              deviceIdLegacy: griftCtx.deviceIdLegacy ?? undefined,
+              deviceFp: griftCtx.deviceFp ?? undefined,
+              deviceInstallId: griftCtx.deviceInstallId ?? undefined,
+              clientTz: griftCtx.clientTz ?? undefined,
+              clientLang: griftCtx.clientLang ?? undefined,
+              eventType: "TRADE_SUBMIT",
+              ip: griftCtx.ip ?? undefined,
+              userAgent: griftCtx.userAgent ?? undefined,
+              geoCountry: griftCtx.geoCountry ?? undefined,
+              geoRegion: griftCtx.geoRegion ?? undefined,
+              geoCity: griftCtx.geoCity ?? undefined,
+              latitude: griftCtx.latitude ?? undefined,
+              longitude: griftCtx.longitude ?? undefined,
+              asn: griftCtx.asn ?? undefined,
+              org: griftCtx.org ?? undefined,
+            };
 
-           onTradeSubmit(
-             griftDb,
-             trade.id,
-             symbolConfig.symbol,
-             data.type,
-             tradeLots,
-             griftAuditCtx
-           );
+            onTradeSubmit(
+              griftDb,
+              trade.id,
+              symbolConfig.symbol,
+              data.type,
+              tradeLots,
+              griftAuditCtx
+            );
 
-           try {
-             await maybeApplyAutoEnforcement(griftDb, griftAuditCtx);
-           } catch (enfErr) {
-             console.error("[Grift] Auto-enforcement failed (trade submit):", enfErr);
-           }
-         } finally {
-           griftDb.close();
-         }
-       } catch (griftErr) {
-        console.error("Error in grift detection onTradeSubmit:", griftErr);
+            try {
+              await maybeApplyAutoEnforcement(griftDb, griftAuditCtx);
+            } catch (enfErr) {
+              console.error("[Grift] Auto-enforcement failed (trade submit):", enfErr);
+            }
+          } finally {
+            griftDb.close();
+          }
+        } catch (griftErr) {
+          console.error("Error in grift detection onTradeSubmit:", griftErr);
+        }
       }
 
       res.status(201).json(trade);
@@ -3153,7 +3142,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Use server-authoritative quote service - NEVER accept client-supplied closePrice
       let q;
       try {
-        q = getExecutionQuote(symbolConfig.symbol, trade.type as "BUY" | "SELL", "CLOSE");
+        q = await getExecutionQuote(symbolConfig.symbol, trade.type as "BUY" | "SELL", "CLOSE");
       } catch (quoteError) {
         return res.status(503).json({ message: "Live price unavailable. Try again shortly." });
       }
@@ -3174,7 +3163,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const lots = typeof trade.lots === "string" ? Number(trade.lots) : Number(trade.lots ?? 1);
 
       // Use proper P/L calculation that handles JPY and cross pairs correctly
-      const pnlUsd = realizedPnlUsd({
+      const pnlUsd = await realizedPnlUsd({
         symbol: q.symbol,
         side: trade.type as "BUY" | "SELL",
         lots,
@@ -3283,45 +3272,47 @@ export async function registerRoutes(app: Express): Promise<Server> {
       );
 
       // Grift detection: record close activity (supports churn/concurrency + identity linking)
-      try {
-        const griftCtx = extractGriftContext(req);
-        const griftDb = new BetterSQLite3("./trading_app.db");
-        try { griftDb.pragma("busy_timeout = 5000"); } catch {}
+      if (!isPostgres) {
         try {
-          const griftAuditCtx: GriftAuditContext = {
-            ts: Date.now(),
-            userId: req.session.userId,
-            sessionId: req.sessionID,
-            deviceId: griftCtx.deviceId ?? undefined,
-            deviceIdLegacy: griftCtx.deviceIdLegacy ?? undefined,
-            deviceFp: griftCtx.deviceFp ?? undefined,
-            deviceInstallId: griftCtx.deviceInstallId ?? undefined,
-            clientTz: griftCtx.clientTz ?? undefined,
-            clientLang: griftCtx.clientLang ?? undefined,
-            eventType: "TRADE_CLOSE",
-            ip: griftCtx.ip ?? undefined,
-            userAgent: griftCtx.userAgent ?? undefined,
-            geoCountry: griftCtx.geoCountry ?? undefined,
-            geoRegion: griftCtx.geoRegion ?? undefined,
-            geoCity: griftCtx.geoCity ?? undefined,
-            latitude: griftCtx.latitude ?? undefined,
-            longitude: griftCtx.longitude ?? undefined,
-            asn: griftCtx.asn ?? undefined,
-            org: griftCtx.org ?? undefined,
-          };
-
-          onSessionActivity(griftDb, griftAuditCtx);
-
+          const griftCtx = extractGriftContext(req);
+          const griftDb = new BetterSQLite3("./trading_app.db");
+          try { griftDb.pragma("busy_timeout = 5000"); } catch {}
           try {
-            await maybeApplyAutoEnforcement(griftDb, griftAuditCtx);
-          } catch (enfErr) {
-            console.error("[Grift] Auto-enforcement failed (trade close):", enfErr);
+            const griftAuditCtx: GriftAuditContext = {
+              ts: Date.now(),
+              userId: req.session.userId,
+              sessionId: req.sessionID,
+              deviceId: griftCtx.deviceId ?? undefined,
+              deviceIdLegacy: griftCtx.deviceIdLegacy ?? undefined,
+              deviceFp: griftCtx.deviceFp ?? undefined,
+              deviceInstallId: griftCtx.deviceInstallId ?? undefined,
+              clientTz: griftCtx.clientTz ?? undefined,
+              clientLang: griftCtx.clientLang ?? undefined,
+              eventType: "TRADE_CLOSE",
+              ip: griftCtx.ip ?? undefined,
+              userAgent: griftCtx.userAgent ?? undefined,
+              geoCountry: griftCtx.geoCountry ?? undefined,
+              geoRegion: griftCtx.geoRegion ?? undefined,
+              geoCity: griftCtx.geoCity ?? undefined,
+              latitude: griftCtx.latitude ?? undefined,
+              longitude: griftCtx.longitude ?? undefined,
+              asn: griftCtx.asn ?? undefined,
+              org: griftCtx.org ?? undefined,
+            };
+
+            onSessionActivity(griftDb, griftAuditCtx);
+
+            try {
+              await maybeApplyAutoEnforcement(griftDb, griftAuditCtx);
+            } catch (enfErr) {
+              console.error("[Grift] Auto-enforcement failed (trade close):", enfErr);
+            }
+          } finally {
+            griftDb.close();
           }
-        } finally {
-          griftDb.close();
+        } catch (griftErr) {
+          console.error("Error in grift detection on trade close:", griftErr);
         }
-      } catch (griftErr) {
-        console.error("Error in grift detection on trade close:", griftErr);
       }
       
       res.json(closedTrade);
@@ -3394,7 +3385,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         let q = null;
         if (symbol) {
           try {
-            q = getExecutionQuote(symbol, trade.type as "BUY" | "SELL", "OPEN");
+            q = await getExecutionQuote(symbol, trade.type as "BUY" | "SELL", "OPEN");
           } catch {}
         }
         
@@ -3435,45 +3426,47 @@ export async function registerRoutes(app: Express): Promise<Server> {
       );
 
       // Grift detection: record modification activity (supports churn/concurrency + identity linking)
-      try {
-        const griftCtx = extractGriftContext(req);
-        const griftDb = new BetterSQLite3("./trading_app.db");
-        try { griftDb.pragma("busy_timeout = 5000"); } catch {}
+      if (!isPostgres) {
         try {
-          const griftAuditCtx: GriftAuditContext = {
-            ts: Date.now(),
-            userId: session.userId,
-            sessionId: req.sessionID,
-            deviceId: griftCtx.deviceId ?? undefined,
-            deviceIdLegacy: griftCtx.deviceIdLegacy ?? undefined,
-            deviceFp: griftCtx.deviceFp ?? undefined,
-            deviceInstallId: griftCtx.deviceInstallId ?? undefined,
-            clientTz: griftCtx.clientTz ?? undefined,
-            clientLang: griftCtx.clientLang ?? undefined,
-            eventType: "TRADE_TARGETS_UPDATE",
-            ip: griftCtx.ip ?? undefined,
-            userAgent: griftCtx.userAgent ?? undefined,
-            geoCountry: griftCtx.geoCountry ?? undefined,
-            geoRegion: griftCtx.geoRegion ?? undefined,
-            geoCity: griftCtx.geoCity ?? undefined,
-            latitude: griftCtx.latitude ?? undefined,
-            longitude: griftCtx.longitude ?? undefined,
-            asn: griftCtx.asn ?? undefined,
-            org: griftCtx.org ?? undefined,
-          };
-
-          onSessionActivity(griftDb, griftAuditCtx);
-
+          const griftCtx = extractGriftContext(req);
+          const griftDb = new BetterSQLite3("./trading_app.db");
+          try { griftDb.pragma("busy_timeout = 5000"); } catch {}
           try {
-            await maybeApplyAutoEnforcement(griftDb, griftAuditCtx);
-          } catch (enfErr) {
-            console.error("[Grift] Auto-enforcement failed (trade targets update):", enfErr);
+            const griftAuditCtx: GriftAuditContext = {
+              ts: Date.now(),
+              userId: session.userId,
+              sessionId: req.sessionID,
+              deviceId: griftCtx.deviceId ?? undefined,
+              deviceIdLegacy: griftCtx.deviceIdLegacy ?? undefined,
+              deviceFp: griftCtx.deviceFp ?? undefined,
+              deviceInstallId: griftCtx.deviceInstallId ?? undefined,
+              clientTz: griftCtx.clientTz ?? undefined,
+              clientLang: griftCtx.clientLang ?? undefined,
+              eventType: "TRADE_TARGETS_UPDATE",
+              ip: griftCtx.ip ?? undefined,
+              userAgent: griftCtx.userAgent ?? undefined,
+              geoCountry: griftCtx.geoCountry ?? undefined,
+              geoRegion: griftCtx.geoRegion ?? undefined,
+              geoCity: griftCtx.geoCity ?? undefined,
+              latitude: griftCtx.latitude ?? undefined,
+              longitude: griftCtx.longitude ?? undefined,
+              asn: griftCtx.asn ?? undefined,
+              org: griftCtx.org ?? undefined,
+            };
+
+            onSessionActivity(griftDb, griftAuditCtx);
+
+            try {
+              await maybeApplyAutoEnforcement(griftDb, griftAuditCtx);
+            } catch (enfErr) {
+              console.error("[Grift] Auto-enforcement failed (trade targets update):", enfErr);
+            }
+          } finally {
+            griftDb.close();
           }
-        } finally {
-          griftDb.close();
+        } catch (griftErr) {
+          console.error("Error in grift detection on trade targets update:", griftErr);
         }
-      } catch (griftErr) {
-        console.error("Error in grift detection on trade targets update:", griftErr);
       }
       
       res.json(updatedTrade);
@@ -3538,7 +3531,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let q = null;
       if (symbol) {
         try {
-          q = getExecutionQuote(symbol, trade.type as "BUY" | "SELL", "OPEN");
+          q = await getExecutionQuote(symbol, trade.type as "BUY" | "SELL", "OPEN");
         } catch {}
       }
       
@@ -3584,45 +3577,47 @@ export async function registerRoutes(app: Express): Promise<Server> {
       );
 
       // Grift detection: record cancel activity (supports churn/concurrency + identity linking)
-      try {
-        const griftCtx = extractGriftContext(req);
-        const griftDb = new BetterSQLite3("./trading_app.db");
-        try { griftDb.pragma("busy_timeout = 5000"); } catch {}
+      if (!isPostgres) {
         try {
-          const griftAuditCtx: GriftAuditContext = {
-            ts: Date.now(),
-            userId: session.userId,
-            sessionId: req.sessionID,
-            deviceId: griftCtx.deviceId ?? undefined,
-            deviceIdLegacy: griftCtx.deviceIdLegacy ?? undefined,
-            deviceFp: griftCtx.deviceFp ?? undefined,
-            deviceInstallId: griftCtx.deviceInstallId ?? undefined,
-            clientTz: griftCtx.clientTz ?? undefined,
-            clientLang: griftCtx.clientLang ?? undefined,
-            eventType: "TRADE_CANCEL_PENDING",
-            ip: griftCtx.ip ?? undefined,
-            userAgent: griftCtx.userAgent ?? undefined,
-            geoCountry: griftCtx.geoCountry ?? undefined,
-            geoRegion: griftCtx.geoRegion ?? undefined,
-            geoCity: griftCtx.geoCity ?? undefined,
-            latitude: griftCtx.latitude ?? undefined,
-            longitude: griftCtx.longitude ?? undefined,
-            asn: griftCtx.asn ?? undefined,
-            org: griftCtx.org ?? undefined,
-          };
-
-          onSessionActivity(griftDb, griftAuditCtx);
-
+          const griftCtx = extractGriftContext(req);
+          const griftDb = new BetterSQLite3("./trading_app.db");
+          try { griftDb.pragma("busy_timeout = 5000"); } catch {}
           try {
-            await maybeApplyAutoEnforcement(griftDb, griftAuditCtx);
-          } catch (enfErr) {
-            console.error("[Grift] Auto-enforcement failed (trade cancel):", enfErr);
+            const griftAuditCtx: GriftAuditContext = {
+              ts: Date.now(),
+              userId: session.userId,
+              sessionId: req.sessionID,
+              deviceId: griftCtx.deviceId ?? undefined,
+              deviceIdLegacy: griftCtx.deviceIdLegacy ?? undefined,
+              deviceFp: griftCtx.deviceFp ?? undefined,
+              deviceInstallId: griftCtx.deviceInstallId ?? undefined,
+              clientTz: griftCtx.clientTz ?? undefined,
+              clientLang: griftCtx.clientLang ?? undefined,
+              eventType: "TRADE_CANCEL_PENDING",
+              ip: griftCtx.ip ?? undefined,
+              userAgent: griftCtx.userAgent ?? undefined,
+              geoCountry: griftCtx.geoCountry ?? undefined,
+              geoRegion: griftCtx.geoRegion ?? undefined,
+              geoCity: griftCtx.geoCity ?? undefined,
+              latitude: griftCtx.latitude ?? undefined,
+              longitude: griftCtx.longitude ?? undefined,
+              asn: griftCtx.asn ?? undefined,
+              org: griftCtx.org ?? undefined,
+            };
+
+            onSessionActivity(griftDb, griftAuditCtx);
+
+            try {
+              await maybeApplyAutoEnforcement(griftDb, griftAuditCtx);
+            } catch (enfErr) {
+              console.error("[Grift] Auto-enforcement failed (trade cancel):", enfErr);
+            }
+          } finally {
+            griftDb.close();
           }
-        } finally {
-          griftDb.close();
+        } catch (griftErr) {
+          console.error("Error in grift detection on trade cancel:", griftErr);
         }
-      } catch (griftErr) {
-        console.error("Error in grift detection on trade cancel:", griftErr);
       }
       
       res.json(canceledTrade);
@@ -3876,31 +3871,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Add endpoint for getting all latest quotes (for REST polling)
   app.get("/api/quotes/latest", async (req: Request, res: Response) => {
     try {
-      const db = new BetterSQLite3("./trading_app.db");
-      try { db.pragma("busy_timeout = 5000"); } catch {}
-
-      const tableExists = db
-        .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='quotes'")
-        .get();
-
-      if (!tableExists) {
-        db.close();
+      await ensureMarketDailyCloseTable();
+      const quotesTable = await dbClient.query("SELECT to_regclass('public.quotes') as table_name");
+      if (!quotesTable.rows?.[0]?.table_name) {
         return res.status(200).json([]);
       }
-
-      ensureMarketDailyCloseTable(db);
       let staleThresholdMs = 30000;
       let fxRolloverTz = "America/New_York";
       let fxRolloverTime = "17:00";
       try {
-        const cfg = db
-          .prepare(
-            `SELECT stale_threshold_ms AS staleMs, fx_rollover_tz AS tz, fx_rollover_time AS time FROM system_config WHERE id = 1`
-          )
-          .get() as any;
-        if (cfg?.staleMs) staleThresholdMs = Number(cfg.staleMs);
-        if (cfg?.tz) fxRolloverTz = String(cfg.tz);
-        if (cfg?.time) fxRolloverTime = String(cfg.time);
+        const cfg = await db.query.systemConfig.findFirst({
+          where: eq(systemConfig.id, 1),
+        });
+        if ((cfg as any)?.staleThresholdMs) staleThresholdMs = Number((cfg as any).staleThresholdMs);
+        if ((cfg as any)?.fxRolloverTz) fxRolloverTz = String((cfg as any).fxRolloverTz);
+        if ((cfg as any)?.fxRolloverTime) fxRolloverTime = String((cfg as any).fxRolloverTime);
       } catch {}
 
       const currentSessionDay = computeCurrentSessionDay({
@@ -3908,37 +3893,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
         time: fxRolloverTime,
       });
       const nowMs = Date.now();
-      const quotes = db
-        .prepare(
-          `
-          SELECT
-            q.symbol,
-            q.bid,
-            q.ask,
-            q.price AS lastPrice,
-            COALESCE(q.is_stale, 0) AS isStale,
-            COALESCE(q.last_api_update, ?) AS lastApiUpdate,
-            COALESCE(
-              (
-                SELECT dc.close
-                FROM market_daily_close dc
-                WHERE dc.symbol = q.symbol AND dc.session_day < ?
-                ORDER BY dc.session_day DESC
-                LIMIT 1
-              ),
-              (
-                SELECT dc2.close
-                FROM market_daily_close dc2
-                WHERE dc2.symbol = q.symbol
-                ORDER BY dc2.session_day DESC
-                LIMIT 1
-              )
-            ) AS prevClose
-          FROM quotes q
-          `
-        )
-        .all(nowMs, currentSessionDay);
-      db.close();
+      const quotesResult = await dbClient.query(
+        `
+        SELECT
+          q.symbol,
+          q.bid,
+          q.ask,
+          q.price AS "lastPrice",
+          COALESCE(q.is_stale, false) AS "isStale",
+          COALESCE(q.last_api_update, $1) AS "lastApiUpdate",
+          COALESCE(
+            (
+              SELECT dc.close
+              FROM market_daily_close dc
+              WHERE dc.symbol = q.symbol AND dc.session_day < $2
+              ORDER BY dc.session_day DESC
+              LIMIT 1
+            ),
+            (
+              SELECT dc2.close
+              FROM market_daily_close dc2
+              WHERE dc2.symbol = q.symbol
+              ORDER BY dc2.session_day DESC
+              LIMIT 1
+            )
+          ) AS "prevClose"
+        FROM quotes q
+        `,
+        [nowMs, currentSessionDay]
+      );
+      const quotes = quotesResult.rows;
 
       const enhancedQuotes = quotes.map((quote: any) => {
         const bid = typeof quote.bid === "number" ? quote.bid : null;
@@ -3955,7 +3939,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
 
         const change = Number.isFinite(midPrice) && prevClose != null ? midPrice - prevClose : 0;
-        const lastUpdate = quote.lastApiUpdate || nowMs;
+        const rawLastUpdate = Number(quote.lastApiUpdate ?? nowMs);
+        const lastUpdate = rawLastUpdate < 1e12 ? rawLastUpdate * 1000 : rawLastUpdate;
         const ageMs = nowMs - lastUpdate;
         const dbIsStale = quote.isStale === 1 || quote.isStale === true;
         const isStale = dbIsStale || ageMs > staleThresholdMs;
@@ -3984,23 +3969,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
   
   // Get individual quote by symbol
-  app.get("/api/quotes/:symbol", (req: Request, res: Response) => {
+  app.get("/api/quotes/:symbol", async (req: Request, res: Response) => {
     const symbol = req.params.symbol.toUpperCase();
     
     try {
-      // Use better-sqlite3 to get the latest quote
-      const db = new BetterSQLite3('./trading_app.db');
-      try { db.pragma("busy_timeout = 5000"); } catch {}
-      const quote = db.prepare('SELECT * FROM quotes WHERE symbol = ?').get(symbol);
-      db.close();
+      const quote = await db.query.quotes.findFirst({
+        where: eq(quotes.symbol, symbol),
+      });
       
       if (quote) {
         // Calculate spread from bid and ask prices
-        if (quote.bid && quote.ask) {
-          quote.spread = Math.abs(quote.ask - quote.bid);
-        }
-        
-        res.json(quote);
+        const bid = typeof quote.bid === "number" ? quote.bid : null;
+        const ask = typeof quote.ask === "number" ? quote.ask : null;
+        const spread = bid != null && ask != null ? Math.abs(ask - bid) : null;
+
+        res.json({ ...quote, spread });
       } else {
         res.status(404).json({ message: `No price data available for ${symbol}` });
       }
@@ -4011,25 +3994,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Register additional routes
-  registerAdminRoutes(app);
+  if (!isPostgres) {
+    registerAdminRoutes(app);
+  } else {
+    console.warn("[DB] Postgres mode: legacy admin routes are disabled pending migration.");
+  }
   registerMarketRoutes(app);
   registerMetaRoutes(app);
   registerMeSessionsRoutes(app);
   registerAdminSecurityRoutes(app);
-  registerGriftRoutes(app);
   app.use("/api/i18n", i18nRouter); // UI translations
-  app.use("/api/admin/i18n", adminI18nRouter); // Admin controls for i18n
-  app.use("/api/grift", griftPublicRouter);
   app.use("/api/instruments", instrumentsRouter);
   app.use(profileMfaRouter); // 2FA MFA routes
   app.use("/api/verification", verificationRouter); // Email & SMS verification routes
   app.use("/api/legal", legalRouter); // Legal terms resolution routes
-  app.use('/api/admin/legal-docs', adminLegalRouter); // Admin legal management routes
   app.use('/api/admin/legal-docs-v2', adminLegalDocsRouter); // DB-first admin legal docs (new)
   app.use('/api/admin/legal-acceptances', adminLegalAcceptancesRouter); // Legal acceptances management
   app.use('/api/admin/system-config', adminSystemConfigRouter); // System config (coverage gate toggle)
-  app.use('/api/admin/migration', adminMigrationRouter); // Migration export/import (backup)
   app.use("/api/admin/activity", adminActivityRouter); // Inactive users + bot management
+
+  if (!isPostgres) {
+    registerGriftRoutes(app);
+    app.use("/api/admin/i18n", adminI18nRouter); // Admin controls for i18n
+    app.use("/api/grift", griftPublicRouter);
+    app.use('/api/admin/legal-docs', adminLegalRouter); // Admin legal management routes (legacy)
+    app.use('/api/admin/migration', adminMigrationRouter); // Migration export/import (backup)
+  } else {
+    console.warn("[DB] Postgres mode: grift/i18n/admin migration/legacy legal routes are disabled.");
+  }
 
   // Create HTTP server
   const httpServer = createServer(app);
@@ -4086,14 +4078,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   }
 
-  function getWsSession(req: any): { sid: string; sess: any } | null {
+  async function getWsSession(req: any): Promise<{ sid: string; sess: any } | null> {
     const sid = getWsSessionIdFromCookies(req);
     if (!sid) return null;
 
     try {
-      const row = sessionDb
-        .prepare("SELECT sess FROM sessions WHERE sid = ? AND datetime('now') < datetime(expire)")
-        .get(sid) as any;
+      const result = await dbClient.query(
+        "SELECT sess FROM session WHERE sid = $1 AND expire > NOW()",
+        [sid]
+      );
+      const row = result.rows[0] as any;
 
       if (!row?.sess) return null;
       const sess = typeof row.sess === "string" ? JSON.parse(row.sess) : row.sess;
@@ -4103,9 +4097,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   }
 
-  function destroyCookieSession(sid: string) {
+  async function destroyCookieSession(sid: string) {
     try {
-      sessionDb.prepare("DELETE FROM sessions WHERE sid = ?").run(sid);
+      await dbClient.query("DELETE FROM session WHERE sid = $1", [sid]);
     } catch {
       // ignore
     }
@@ -4119,7 +4113,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   }
 
-  function wsCloseWithPolicy(socket: WebSocket, client: LiveClient, decision: any) {
+  async function wsCloseWithPolicy(socket: WebSocket, client: LiveClient, decision: any) {
     wsSendJson(socket, {
       type: "ws:error",
       code: decision?.code ?? "JURISDICTION_RESTRICTED",
@@ -4131,7 +4125,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     // Best-effort revoke+destroy so the user is kicked immediately across HTTP + WS
     if (client.sessionId && client.userId) {
       try {
-        revokeSession({
+        await revokeSession({
           actorUserId: 0,
           targetUserId: Number(client.userId),
           sessionId: String(client.sessionId),
@@ -4139,7 +4133,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       } catch {}
 
-      destroyCookieSession(String(client.sessionId));
+      await destroyCookieSession(String(client.sessionId));
     }
 
     try {
@@ -4165,7 +4159,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   }
 
-  wss.on("connection", (socket, req) => {
+  wss.on("connection", async (socket, req) => {
     const client = socket as LiveClient;
     client.userId = undefined;
     client.sessionId = undefined;
@@ -4185,7 +4179,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
     // Bind WS auth to the cookie session (do not trust client-provided userId).
     try {
-      const wsSess = getWsSession(req);
+      const wsSess = await getWsSession(req);
       if (wsSess?.sid && wsSess?.sess) {
         const sess = wsSess.sess as any;
         const sessionUserId = Number(sess?.userId);
@@ -4194,14 +4188,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
           client.isAdmin = Boolean(sess?.isAdmin);
           client.isImpersonating = Boolean(sess?.isImpersonating);
 
-          const userRow = db
+          const [userRow] = await db
             .select({ countryIso2: users.countryIso2, countryLegacy: users.country })
             .from(users)
             .where(eq(users.id, sessionUserId))
-            .get() as any;
+            .limit(1);
 
           if (!userRow) {
-            destroyCookieSession(String(client.sessionId));
+            await destroyCookieSession(String(client.sessionId));
             wsCloseUnauthorized(socket, "USER_NOT_FOUND");
             return;
           }
@@ -4222,7 +4216,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             });
 
             if (!decision.allowed) {
-              wsCloseWithPolicy(socket, client, decision);
+              await wsCloseWithPolicy(socket, client, decision);
               return;
             }
           }
@@ -4291,69 +4285,51 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Initialize price quotes in the database
   async function initializeQuotesDatabase() {
     try {
-      const BetterSQLite3Module = await import('better-sqlite3');
-      const BetterSQLite3 = BetterSQLite3Module.default;
-      const db = new BetterSQLite3('./trading_app.db');
-      try { db.pragma("busy_timeout = 5000"); } catch {}
-      
-      // Check if quotes table exists
-      const tableExists = db.prepare(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name='quotes'"
-      ).get();
-      
-      if (!tableExists) {
-        // Create quotes table
-        db.prepare(`
-          CREATE TABLE quotes (
-            symbol TEXT PRIMARY KEY,
-            price REAL NOT NULL,
-            bid REAL,
-            ask REAL,
-            change REAL DEFAULT 0,
-            timestamp INTEGER NOT NULL
-          )
-        `).run();
-        console.log("Created quotes table");
-      }
-      
-      // Default symbols and prices
       const defaultSymbols = [
-        {symbol: 'EURUSD', price: 1.0942, bid: 1.0940, ask: 1.0944},
-        {symbol: 'USDJPY', price: 144.87, bid: 144.85, ask: 144.89},
-        {symbol: 'GBPUSD', price: 1.2715, bid: 1.2713, ask: 1.2717},
-        {symbol: 'AUDUSD', price: 0.6532, bid: 0.6530, ask: 0.6534},
-        {symbol: 'USDCAD', price: 1.3621, bid: 1.3619, ask: 1.3623},
-        {symbol: 'NZDUSD', price: 0.6021, bid: 0.6019, ask: 0.6023},
+        { symbol: "EURUSD", price: 1.0942, bid: 1.0940, ask: 1.0944 },
+        { symbol: "USDJPY", price: 144.87, bid: 144.85, ask: 144.89 },
+        { symbol: "GBPUSD", price: 1.2715, bid: 1.2713, ask: 1.2717 },
+        { symbol: "AUDUSD", price: 0.6532, bid: 0.6530, ask: 0.6534 },
+        { symbol: "USDCAD", price: 1.3621, bid: 1.3619, ask: 1.3623 },
+        { symbol: "NZDUSD", price: 0.6021, bid: 0.6019, ask: 0.6023 },
       ];
-      
-      // Get all existing quotes
-      const existingQuotes = db.prepare('SELECT symbol FROM quotes').all();
-      const existingSymbols = existingQuotes.map((q: any) => q.symbol);
-      
-      // Insert default quotes for symbols that don't already exist
-      const timestamp = new Date().toISOString();
-      const insertStmt = db.prepare(
-        'INSERT INTO quotes (symbol, price, bid, ask, updated_at) VALUES (?, ?, ?, ?, ?)'
-      );
-      
+
+      const existingQuotes = await db.select({ symbol: quotes.symbol }).from(quotes);
+      const existingSymbols = new Set(existingQuotes.map((q) => q.symbol));
+
+      const nowSec = Math.floor(Date.now() / 1000);
+      const nowMs = Date.now();
+
       for (const item of defaultSymbols) {
-        if (!existingSymbols.includes(item.symbol)) {
-          insertStmt.run(item.symbol, item.price, item.bid, item.ask, timestamp);
+        if (!existingSymbols.has(item.symbol)) {
+          await db.insert(quotes)
+            .values({
+              symbol: item.symbol,
+              price: item.price,
+              bid: item.bid,
+              ask: item.ask,
+              updatedAt: nowSec,
+              lastApiUpdate: nowMs,
+              isStale: false,
+            })
+            .onConflictDoNothing();
           console.log(`Added default price for ${item.symbol}`);
         }
       }
-      
-      // Get symbols from symbol_configs that aren't in quotes yet
+
       try {
-        const enabledSymbols = db.prepare('SELECT symbol FROM symbol_configs WHERE enabled = 1').all();
-        
+        const enabledSymbols = await db
+          .select({ symbol: symbolConfigs.symbol })
+          .from(symbolConfigs)
+          .where(eq(symbolConfigs.enabled, true));
+
         for (const symConfig of enabledSymbols) {
-          if (!existingSymbols.includes(symConfig.symbol)) {
-            // Generate reasonable default price based on the symbol
+          if (!existingSymbols.has(symConfig.symbol)) {
             let basePrice = 1.0;
-            let bid, ask;
-            
-            if (symConfig.symbol.includes('JPY')) {
+            let bid: number;
+            let ask: number;
+
+            if (symConfig.symbol.includes("JPY")) {
               basePrice = 120.0;
               bid = basePrice - 0.02; // 2 pips for JPY
               ask = basePrice + 0.02;
@@ -4362,16 +4338,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
               bid = basePrice - 0.0002; // 2 pips for other pairs
               ask = basePrice + 0.0002;
             }
-            
-            insertStmt.run(symConfig.symbol, basePrice, bid, ask, timestamp);
+
+            await db.insert(quotes)
+              .values({
+                symbol: symConfig.symbol,
+                price: basePrice,
+                bid,
+                ask,
+                updatedAt: nowSec,
+                lastApiUpdate: nowMs,
+                isStale: false,
+              })
+              .onConflictDoNothing();
             console.log(`Added default price for ${symConfig.symbol} from symbol_configs`);
           }
         }
       } catch (error) {
         console.log("Couldn't load from symbol_configs:", error);
       }
-      
-      db.close();
+
       console.log("Price quotes initialized");
     } catch (error) {
       console.error("Error initializing quotes database:", error);
@@ -4387,48 +4372,41 @@ export async function registerRoutes(app: Express): Promise<Server> {
   
   async function updateQuotesWithSimulation() {
     try {
-      const BetterSQLite3Module = await import('better-sqlite3');
-      const BetterSQLite3 = BetterSQLite3Module.default;
-      const db = new BetterSQLite3('./trading_app.db');
-      try { db.pragma("busy_timeout = 5000"); } catch {}
-      
-      // Get all quotes
-      const quotes = db.prepare('SELECT * FROM quotes').all();
+      const quoteRows = await db
+        .select({
+          symbol: quotes.symbol,
+          price: quotes.price,
+        })
+        .from(quotes);
+
       const timestamp = Math.floor(Date.now() / 1000);
-      
-      // Simulate small price movements for each quote
-      for (const quote of quotes) {
-        // Random price movement of +/- 0-2 pips
-        const isJpy = quote.symbol.includes('JPY');
+      const nowMs = Date.now();
+
+      for (const quote of quoteRows) {
+        const isJpy = String(quote.symbol).includes("JPY");
         const pipSize = isJpy ? 0.01 : 0.0001;
         const maxPipMove = 2;
-        
-        // Random movement between -2 and +2 pips
+
         const pipsChange = (Math.random() * maxPipMove * 2) - maxPipMove;
         const priceChange = pipsChange * pipSize;
-        
-        // Apply the change
-        const newPrice = parseFloat(quote.price) + priceChange;
-        
-        // Calculate spread (2 pips)
+        const newPrice = Number(quote.price) + priceChange;
+
         const spread = isJpy ? 0.02 : 0.0002;
         const newBid = newPrice - (spread / 2);
         const newAsk = newPrice + (spread / 2);
-        
-        // Calculate percentage change
-        const percentChange = (priceChange / parseFloat(quote.price)) * 100;
-        
-        // Update the quote
-        db.prepare(`
-          UPDATE quotes 
-          SET price = ?, bid = ?, ask = ?, updated_at = ?
-          WHERE symbol = ?
-        `).run(newPrice, newBid, newAsk, timestamp, quote.symbol);
+
+        await db.update(quotes)
+          .set({
+            price: newPrice,
+            bid: newBid,
+            ask: newAsk,
+            updatedAt: timestamp,
+            lastApiUpdate: nowMs,
+            isStale: false,
+          })
+          .where(eq(quotes.symbol, quote.symbol));
       }
-      
-      db.close();
-      
-      // Broadcast to connected clients that quotes were updated
+
       publishLiveEvent({ type: "quotes:updated" });
     } catch (error) {
       console.error("Error updating quotes:", error);

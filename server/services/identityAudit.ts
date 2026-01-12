@@ -1,20 +1,7 @@
-import Database from "better-sqlite3";
+import { db } from "@db";
+import { identityAudit } from "@shared/schema";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import { sha256Hex } from "./crypto";
-
-function getDb() {
-  const db = new Database("./trading_app.db");
-  // Improve concurrency for audit log writes under load.
-  try {
-    db.pragma("journal_mode = WAL");
-  } catch {}
-  try {
-    db.pragma("busy_timeout = 5000");
-  } catch {}
-  try {
-    db.pragma("foreign_keys = ON");
-  } catch {}
-  return db;
-}
 
 // Canonical JSON serialization with sorted keys for deterministic hashing
 function stableStringify(obj: any): string {
@@ -52,21 +39,19 @@ export type IdentityAuditEvent = {
 };
 
 export function appendIdentityAudit(evt: IdentityAuditEvent): void {
-  const db = getDb();
-  try {
+  void (async () => {
     const atMs = evt.at ?? Date.now();
     const atSec = Math.floor(atMs / 1000);
-    
-    const lastRow = (evt.userId == null
-      ? db.prepare(`
-          SELECT event_hash FROM identity_audit WHERE user_id IS NULL ORDER BY id DESC LIMIT 1
-        `).get()
-      : db.prepare(`
-          SELECT event_hash FROM identity_audit WHERE user_id = ? ORDER BY id DESC LIMIT 1
-        `).get(evt.userId)) as { event_hash?: string } | undefined;
 
-    const prevHash = lastRow?.event_hash ?? null;
-    
+    const [lastRow] = await db
+      .select({ eventHash: identityAudit.eventHash })
+      .from(identityAudit)
+      .where(evt.userId == null ? isNull(identityAudit.userId) : eq(identityAudit.userId, evt.userId))
+      .orderBy(desc(identityAudit.id))
+      .limit(1);
+
+    const prevHash = lastRow?.eventHash ?? null;
+
     const payload = {
       at: atSec,
       userId: evt.userId ?? null,
@@ -86,91 +71,71 @@ export function appendIdentityAudit(evt: IdentityAuditEvent): void {
       data: evt.data ?? null,
       prevHash,
     };
-    
+
     const eventHash = sha256Hex(`${prevHash ?? ""}|${stableStringify(payload)}`);
-    
-    db.prepare(`
-      INSERT INTO identity_audit (
-        at, user_id, email, username, category, type, title, description, ip, user_agent,
-        actor_admin_id, actor_type, actor_user_id, session_id, correlation_id, data_json,
-        prev_hash, event_hash
-      )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      atSec,
-      evt.userId ?? null,
-      evt.email ?? null,
-      evt.username ?? null,
-      evt.category,
-      evt.type,
-      evt.title ?? null,
-      evt.description ?? null,
-      evt.ip ?? null,
-      evt.userAgent ?? null,
-      evt.actorAdminId ?? null,
-      evt.actorType ?? null,
-      evt.actorUserId ?? null,
-      evt.sessionId ?? null,
-      evt.correlationId ?? null,
-      evt.data ? JSON.stringify(evt.data) : null,
+
+    await db.insert(identityAudit).values({
+      at: atSec,
+      userId: evt.userId ?? null,
+      email: evt.email ?? null,
+      username: evt.username ?? null,
+      category: evt.category,
+      type: evt.type,
+      title: evt.title ?? null,
+      description: evt.description ?? null,
+      ip: evt.ip ?? null,
+      userAgent: evt.userAgent ?? null,
+      actorAdminId: evt.actorAdminId ?? null,
+      actorType: evt.actorType ?? null,
+      actorUserId: evt.actorUserId ?? null,
+      sessionId: evt.sessionId ?? null,
+      correlationId: evt.correlationId ?? null,
+      dataJson: evt.data ? JSON.stringify(evt.data) : null,
       prevHash,
-      eventHash
-    );
-  } finally {
-    db.close();
-  }
+      eventHash,
+    });
+  })().catch((err) => {
+    console.error("[IdentityAudit] Failed to append audit event:", err);
+  });
 }
 
-export function getIdentityAuditForUser(
+export async function getIdentityAuditForUser(
   userId: number,
   options?: { limit?: number; offset?: number; category?: string }
-): any[] {
-  const db = getDb();
-  try {
-    const { limit = 100, offset = 0, category } = options ?? {};
-    
-    let sql = `SELECT * FROM identity_audit WHERE user_id = ?`;
-    const params: any[] = [userId];
-    
-    if (category) {
-      sql += ` AND category = ?`;
-      params.push(category);
-    }
-    
-    sql += ` ORDER BY at DESC LIMIT ? OFFSET ?`;
-    params.push(limit, offset);
-    
-    return db.prepare(sql).all(...params) as any[];
-  } finally {
-    db.close();
-  }
+): Promise<any[]> {
+  const { limit = 100, offset = 0, category } = options ?? {};
+  const whereClause = category
+    ? and(eq(identityAudit.userId, userId), eq(identityAudit.category, category))
+    : eq(identityAudit.userId, userId);
+
+  return await db
+    .select()
+    .from(identityAudit)
+    .where(whereClause)
+    .orderBy(desc(identityAudit.at))
+    .limit(limit)
+    .offset(offset);
 }
 
-export function getRecentIdentityAudit(
+export async function getRecentIdentityAudit(
   options?: { limit?: number; offset?: number; category?: string; type?: string }
-): any[] {
-  const db = getDb();
-  try {
-    const { limit = 100, offset = 0, category, type } = options ?? {};
-    
-    let sql = `SELECT * FROM identity_audit WHERE 1=1`;
-    const params: any[] = [];
-    
-    if (category) {
-      sql += ` AND category = ?`;
-      params.push(category);
-    }
-    
-    if (type) {
-      sql += ` AND type = ?`;
-      params.push(type);
-    }
-    
-    sql += ` ORDER BY at DESC LIMIT ? OFFSET ?`;
-    params.push(limit, offset);
-    
-    return db.prepare(sql).all(...params) as any[];
-  } finally {
-    db.close();
+): Promise<any[]> {
+  const { limit = 100, offset = 0, category, type } = options ?? {};
+  const conditions = [];
+  if (category) conditions.push(eq(identityAudit.category, category));
+  if (type) conditions.push(eq(identityAudit.type, type));
+  const whereClause = conditions.length ? and(...conditions) : undefined;
+
+  const query = db
+    .select()
+    .from(identityAudit)
+    .orderBy(desc(identityAudit.at))
+    .limit(limit)
+    .offset(offset);
+
+  if (whereClause) {
+    return await query.where(whereClause);
   }
+
+  return await query;
 }

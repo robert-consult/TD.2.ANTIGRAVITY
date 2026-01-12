@@ -4,8 +4,9 @@ import { sha256, stableStringify } from "./cryptoUtils";
 import { asc, desc } from "drizzle-orm";
 
 type AuditAction = "CREATE_VERSION" | "SET_ACTIVE" | "REPLACE_ACTIVE" | "ROLLBACK";
+type DbConn = typeof db;
 
-export function appendLegalDocChangeAudit(params: {
+export async function appendLegalDocChangeAudit(params: {
   adminUserId: number | null;
   action: AuditAction | string;
   docSet: string;
@@ -15,13 +16,12 @@ export function appendLegalDocChangeAudit(params: {
   oldActiveDocumentId: number | null;
   newActiveDocumentId: number | null;
   note: string | null;
-}) {
-  const last = db
+}, conn: DbConn = db) {
+  const [last] = await conn
     .select({ seq: legalDocChangeAudit.seq, eventHash: legalDocChangeAudit.eventHash })
     .from(legalDocChangeAudit)
     .orderBy(desc(legalDocChangeAudit.seq))
-    .limit(1)
-    .get();
+    .limit(1);
 
   const seq = (last?.seq ?? 0) + 1;
   const prevHash = last?.eventHash ?? "GENESIS";
@@ -44,7 +44,8 @@ export function appendLegalDocChangeAudit(params: {
 
   const eventHash = sha256(`${prevHash}|${stableStringify(payload)}`);
 
-  db.insert(legalDocChangeAudit)
+  await conn
+    .insert(legalDocChangeAudit)
     .values({
       seq,
       prevHash,
@@ -59,19 +60,18 @@ export function appendLegalDocChangeAudit(params: {
       newActiveDocumentId: params.newActiveDocumentId,
       note: params.note,
       createdAtMs: now,
-    })
-    .run();
+    });
 
   return { seq, prevHash, eventHash };
 }
 
-export function verifyLegalDocChangeAuditChain(): {
+export async function verifyLegalDocChangeAuditChain(): Promise<{
   valid: boolean;
   totalEntries: number;
   brokenAtSeq?: number;
   message?: string;
-} {
-  const rows = db.select().from(legalDocChangeAudit).orderBy(asc(legalDocChangeAudit.seq)).all();
+}> {
+  const rows = await db.select().from(legalDocChangeAudit).orderBy(asc(legalDocChangeAudit.seq));
 
   let expectedPrevHash = "GENESIS";
 

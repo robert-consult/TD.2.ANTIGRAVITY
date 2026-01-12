@@ -7,12 +7,12 @@ import { requireAuth } from "../middleware/auth";
 
 export function registerMeSessionsRoutes(app: Express) {
   // List sessions (active + currentSessionId for UI)
-  app.get("/api/me/sessions", requireAuth, (req: Request, res: Response) => {
+  app.get("/api/me/sessions", requireAuth, async (req: Request, res: Response) => {
     const userId = req.session.userId!;
     const currentSessionId = req.sessionID;
     const limit = Math.min(50, Math.max(1, Number(req.query.limit || 20)));
 
-    const rows = db
+    const rows = await db
       .select({
         id: userSessions.sessionId,
         createdAt: userSessions.createdAt,
@@ -31,8 +31,7 @@ export function registerMeSessionsRoutes(app: Express) {
       .from(userSessions)
       .where(and(eq(userSessions.userId, userId), isNull(userSessions.revokedAt)))
       .orderBy(desc(userSessions.lastActiveAt))
-      .limit(limit)
-      .all();
+      .limit(limit);
 
     // Convert dates to timestamps for consistent frontend handling
     const formattedRows = rows.map(r => ({
@@ -45,7 +44,7 @@ export function registerMeSessionsRoutes(app: Express) {
   });
 
   // Revoke a specific session
-  app.post("/api/me/sessions/:sessionId/revoke", requireAuth, (req: Request, res: Response) => {
+  app.post("/api/me/sessions/:sessionId/revoke", requireAuth, async (req: Request, res: Response) => {
     const userId = req.session.userId!;
     const targetSessionId = String(req.params.sessionId);
     const reason = String((req.body as any)?.reason || "User revoked session");
@@ -58,7 +57,7 @@ export function registerMeSessionsRoutes(app: Express) {
       });
     }
 
-    revokeSession({
+    await revokeSession({
       actorUserId: userId,
       targetUserId: userId,
       sessionId: targetSessionId,
@@ -69,12 +68,12 @@ export function registerMeSessionsRoutes(app: Express) {
   });
 
   // Logout all other devices (revoke all sessions except current)
-  app.post("/api/me/sessions/logout-others", requireAuth, (req: Request, res: Response) => {
+  app.post("/api/me/sessions/logout-others", requireAuth, async (req: Request, res: Response) => {
     const userId = req.session.userId!;
     const currentSessionId = req.sessionID;
     const reason = String((req.body as any)?.reason || "User logged out other devices");
 
-    const others = db
+    const others = await db
       .select({ sessionId: userSessions.sessionId })
       .from(userSessions)
       .where(
@@ -83,11 +82,10 @@ export function registerMeSessionsRoutes(app: Express) {
           isNull(userSessions.revokedAt),
           ne(userSessions.sessionId, currentSessionId)
         )
-      )
-      .all();
+      );
 
     for (const s of others) {
-      revokeSession({
+      await revokeSession({
         actorUserId: userId,
         targetUserId: userId,
         sessionId: s.sessionId,
@@ -99,14 +97,14 @@ export function registerMeSessionsRoutes(app: Express) {
   });
 
   // Logout current session
-  app.post("/api/me/logout", requireAuth, (req: Request, res: Response) => {
+  app.post("/api/me/logout", requireAuth, async (req: Request, res: Response) => {
     const userId = req.session.userId!;
     const sessionId = req.sessionID;
     const ip = getClientIp(req);
     const userAgent = getUserAgent(req);
 
     // End the session in our tracking table
-    endSession({ userId, sessionId, ip, userAgent });
+    await endSession({ userId, sessionId, ip, userAgent });
 
     // Destroy express session
     req.session.destroy((err) => {

@@ -195,7 +195,7 @@ export async function riskMiddleware(req: Request, res: Response, next: NextFunc
     });
     
     if (symbolConfig) {
-      const quoteRow = getLatestQuoteRow(symbolConfig.symbol);
+      const quoteRow = await getLatestQuoteRow(symbolConfig.symbol);
       const staleThresholdMs = Number(sysConfig.staleThresholdMs ?? 30000);
       
       // No quote data at all - treat as stale
@@ -208,7 +208,9 @@ export async function riskMiddleware(req: Request, res: Response, next: NextFunc
       }
       
       // Check staleness using configurable threshold (default 30000ms)
-      const lastApiRaw = quoteRow.last_api_update ?? quoteRow.updated_at;
+      const lastApiRaw =
+        (quoteRow as any).lastApiUpdate ?? (quoteRow as any).last_api_update ??
+        (quoteRow as any).updatedAt ?? (quoteRow as any).updated_at;
       
       // Missing or invalid timestamp - treat as stale
       if (lastApiRaw === null || lastApiRaw === undefined || !Number.isFinite(Number(lastApiRaw))) {
@@ -222,7 +224,7 @@ export async function riskMiddleware(req: Request, res: Response, next: NextFunc
       const lastApiNum = Number(lastApiRaw);
       const lastApiMs = lastApiNum < 1e12 ? lastApiNum * 1000 : lastApiNum;
       const now = Date.now();
-      const isStale = Number(quoteRow.is_stale ?? 0) === 1 || (now - lastApiMs) > staleThresholdMs;
+      const isStale = Boolean((quoteRow as any).isStale ?? (quoteRow as any).is_stale) || (now - lastApiMs) > staleThresholdMs;
       
       if (isStale) {
         return res.status(409).json({ 

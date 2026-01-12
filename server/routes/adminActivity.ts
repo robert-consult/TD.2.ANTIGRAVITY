@@ -99,10 +99,9 @@ adminActivityRouter.put("/config", async (req, res) => {
         botValkeyEnabled,
         activityAutoQueueInactive,
         activityAutoSoftDelete,
-        updatedAt: new Date(),
+        updatedAt: Math.floor(Date.now() / 1000),
       } as any)
-      .where(eq(systemConfig.id, 1))
-      .run();
+      .where(eq(systemConfig.id, 1));
     return res.json({ ok: true });
   } catch (e: any) {
     return res.status(400).json({ ok: false, error: e?.message || "Failed to set config." });

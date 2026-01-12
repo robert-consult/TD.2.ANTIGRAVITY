@@ -64,7 +64,7 @@ async function runAutoCloseJob() {
 
         let q;
         try {
-          q = getExecutionQuote(symbolConfig.symbol, trade.type as any, "CLOSE");
+          q = await getExecutionQuote(symbolConfig.symbol, trade.type as any, "CLOSE");
         } catch (quoteError) {
           log(`Quote not available for trade=${trade.id} symbol=${symbolConfig.symbol}: ${quoteError}`);
           continue;
@@ -92,7 +92,7 @@ async function runAutoCloseJob() {
 
         const lots = typeof trade.lots === "string" ? Number(trade.lots) : Number(trade.lots ?? 1);
         
-        const pnlUsd = realizedPnlUsd({
+        const pnlUsd = await realizedPnlUsd({
           symbol: q.symbol,
           side: trade.type as any,
           lots,

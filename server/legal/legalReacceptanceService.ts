@@ -29,23 +29,23 @@ function normalizeCountryIso2(raw: unknown): string | null {
   return v;
 }
 
-function getLatestDoc1Acceptance(userId: number): { id: number; combinedSha256: string } | null {
-  const row = db
+async function getLatestDoc1Acceptance(userId: number): Promise<{ id: number; combinedSha256: string } | null> {
+  const [row] = await db
     .select({ id: legalAcceptances.id, combinedSha256: legalAcceptances.combinedSha256 })
     .from(legalAcceptances)
     .where(eq(legalAcceptances.userId, userId))
     .orderBy(desc(legalAcceptances.id))
     .limit(1)
-    .get();
+    ;
   if (!row) return null;
   return { id: Number(row.id), combinedSha256: String(row.combinedSha256 || "") };
 }
 
-export function getDoc1ReacceptRequirement(userId: number): {
+export async function getDoc1ReacceptRequirement(userId: number): Promise<{
   requiredCombinedSha256: string;
   lastAcceptedCombinedSha256: string | null;
-} | null {
-  const row = db
+} | null> {
+  const [row] = await db
     .select({
       requiredCombinedSha256: legalReacceptRequirements.requiredCombinedSha256,
       lastAcceptedCombinedSha256: legalReacceptRequirements.lastAcceptedCombinedSha256,
@@ -53,7 +53,7 @@ export function getDoc1ReacceptRequirement(userId: number): {
     .from(legalReacceptRequirements)
     .where(and(eq(legalReacceptRequirements.userId, userId), eq(legalReacceptRequirements.docSet, DOC_SET)))
     .limit(1)
-    .get();
+    ;
 
   if (!row) return null;
   return {
@@ -62,32 +62,31 @@ export function getDoc1ReacceptRequirement(userId: number): {
   };
 }
 
-export function clearDoc1ReacceptRequirement(userId: number) {
-  db.delete(legalReacceptRequirements)
-    .where(and(eq(legalReacceptRequirements.userId, userId), eq(legalReacceptRequirements.docSet, DOC_SET)))
-    .run();
+export async function clearDoc1ReacceptRequirement(userId: number): Promise<void> {
+  await db.delete(legalReacceptRequirements)
+    .where(and(eq(legalReacceptRequirements.userId, userId), eq(legalReacceptRequirements.docSet, DOC_SET)));
 }
 
-export function computeDoc1ReacceptStatus(userId: number): Doc1ReacceptStatus {
-  return computeDoc1ReacceptStatusWithTerms(userId).status;
+export async function computeDoc1ReacceptStatus(userId: number): Promise<Doc1ReacceptStatus> {
+  return (await computeDoc1ReacceptStatusWithTerms(userId)).status;
 }
 
-export function computeDoc1ReacceptStatusWithTerms(userId: number): {
+export async function computeDoc1ReacceptStatusWithTerms(userId: number): Promise<{
   status: Doc1ReacceptStatus;
   assembled: AssembleResult | null;
-} {
-  const user = db
+}> {
+  const [user] = await db
     .select({ countryIso2: users.countryIso2, country: users.country })
     .from(users)
     .where(eq(users.id, userId))
     .limit(1)
-    .get();
+    ;
 
   const countryIso2 =
     normalizeCountryIso2(user?.countryIso2) ?? normalizeCountryIso2(user?.country);
 
   if (!countryIso2) {
-    const last = getLatestDoc1Acceptance(userId);
+    const last = await getLatestDoc1Acceptance(userId);
     return {
       assembled: null,
       status: {
@@ -103,10 +102,10 @@ export function computeDoc1ReacceptStatusWithTerms(userId: number): {
     };
   }
 
-  const assembled = assembleDoc1Terms(countryIso2, { purpose: "LOGIN" });
+  const assembled = await assembleDoc1Terms(countryIso2, { purpose: "LOGIN" });
 
   if (assembled.blocked) {
-    const last = getLatestDoc1Acceptance(userId);
+    const last = await getLatestDoc1Acceptance(userId);
     return {
       assembled,
       status: {
@@ -123,7 +122,7 @@ export function computeDoc1ReacceptStatusWithTerms(userId: number): {
   }
 
   const requiredCombinedSha256 = assembled.combined?.sha256 ? String(assembled.combined.sha256) : null;
-  const last = getLatestDoc1Acceptance(userId);
+  const last = await getLatestDoc1Acceptance(userId);
   const lastAcceptedCombinedSha256 = last?.combinedSha256 ?? null;
 
   const required = !lastAcceptedCombinedSha256 || !requiredCombinedSha256 || lastAcceptedCombinedSha256 !== requiredCombinedSha256;
@@ -143,21 +142,21 @@ export function computeDoc1ReacceptStatusWithTerms(userId: number): {
   };
 }
 
-export function upsertDoc1ReacceptRequirement(params: {
+export async function upsertDoc1ReacceptRequirement(params: {
   userId: number;
   detectedBy: ReacceptDetectionSource;
   status?: Doc1ReacceptStatus;
-}) {
-  const status = params.status ?? computeDoc1ReacceptStatus(params.userId);
+}): Promise<void> {
+  const status = params.status ?? (await computeDoc1ReacceptStatus(params.userId));
 
   if (status.blocked || !status.required) {
-    clearDoc1ReacceptRequirement(params.userId);
+    await clearDoc1ReacceptRequirement(params.userId);
     return;
   }
 
   if (!status.countryIso2 || !status.requiredCombinedSha256) return;
 
-  db.insert(legalReacceptRequirements)
+  await db.insert(legalReacceptRequirements)
     .values({
       userId: params.userId,
       docSet: DOC_SET,
@@ -181,5 +180,5 @@ export function upsertDoc1ReacceptRequirement(params: {
         detectedBy: params.detectedBy,
       },
     })
-    .run();
+    ;
 }

@@ -15,12 +15,13 @@ import { invalidateJurisdictionRestrictionPolicyCache, parseRestrictedCountriesC
 
 export const adminSystemConfigRouter = Router();
 adminSystemConfigRouter.use(requireAdmin);
+const nowUnix = () => Math.floor(Date.now() / 1000);
 
 // GET /api/admin/system-config/legal-coverage
 // Returns the current legal coverage enforcement state
-adminSystemConfigRouter.get("/legal-coverage", (_req, res) => {
+adminSystemConfigRouter.get("/legal-coverage", async (_req, res) => {
   try {
-    const config = db.select().from(systemConfig).where(eq(systemConfig.id, 1)).get();
+    const [config] = await db.select().from(systemConfig).where(eq(systemConfig.id, 1)).limit(1);
     
     return res.json({
       ok: true,
@@ -34,21 +35,20 @@ adminSystemConfigRouter.get("/legal-coverage", (_req, res) => {
 
 // POST /api/admin/system-config/legal-coverage
 // body: { enforce: boolean }
-adminSystemConfigRouter.post("/legal-coverage", (req, res) => {
+adminSystemConfigRouter.post("/legal-coverage", async (req, res) => {
   try {
     const enforce = !!req.body?.enforce;
     const adminUserId = Number((req as any).user?.id || 0) || null;
-    const now = new Date();
+    const nowSec = nowUnix();
 
-    db.update(systemConfig)
+    await db.update(systemConfig)
       .set({
         legalCoverageEnforce: enforce,
-        updatedAt: now,
+        updatedAt: nowSec,
       })
-      .where(eq(systemConfig.id, 1))
-      .run();
+      .where(eq(systemConfig.id, 1));
 
-    const updated = db.select().from(systemConfig).where(eq(systemConfig.id, 1)).get();
+    const [updated] = await db.select().from(systemConfig).where(eq(systemConfig.id, 1)).limit(1);
 
     return res.json({
       ok: true,
@@ -63,9 +63,9 @@ adminSystemConfigRouter.post("/legal-coverage", (req, res) => {
 
 // GET /api/admin/system-config/jurisdiction-restrictions
 // Returns restricted ISO2 list + message
-adminSystemConfigRouter.get("/jurisdiction-restrictions", (_req, res) => {
+adminSystemConfigRouter.get("/jurisdiction-restrictions", async (_req, res) => {
   try {
-    const config = db.select().from(systemConfig).where(eq(systemConfig.id, 1)).get() as any;
+    const [config] = await db.select().from(systemConfig).where(eq(systemConfig.id, 1)).limit(1);
     const restrictedCountriesCsv = String(config?.jurisdictionRestrictedIso2Csv ?? "KP,IR,CU,SY");
     const restrictedMessage = String(
       config?.jurisdictionRestrictedMessage ?? "This jurisdiction is not supported due to regulatory restrictions."
@@ -84,7 +84,7 @@ adminSystemConfigRouter.get("/jurisdiction-restrictions", (_req, res) => {
 
 // POST /api/admin/system-config/jurisdiction-restrictions
 // body: { restrictedCountriesCsv: string; restrictedMessage: string }
-adminSystemConfigRouter.post("/jurisdiction-restrictions", (req, res) => {
+adminSystemConfigRouter.post("/jurisdiction-restrictions", async (req, res) => {
   try {
     const restrictedCountriesCsvRaw =
       typeof req.body?.restrictedCountriesCsv === "string" ? String(req.body.restrictedCountriesCsv) : "";
@@ -96,16 +96,15 @@ adminSystemConfigRouter.post("/jurisdiction-restrictions", (req, res) => {
     const restrictedMessage =
       restrictedMessageRaw.trim() || "This jurisdiction is not supported due to regulatory restrictions.";
 
-    db.update(systemConfig)
+    await db.update(systemConfig)
       .set({
         jurisdictionRestrictedIso2Csv: restrictedCountriesCsv,
         jurisdictionRestrictedMessage: restrictedMessage,
-        updatedAt: new Date(),
+        updatedAt: nowUnix(),
       })
-      .where(eq(systemConfig.id, 1))
-      .run();
+      .where(eq(systemConfig.id, 1));
 
-    const updated = db.select().from(systemConfig).where(eq(systemConfig.id, 1)).get() as any;
+    const [updated] = await db.select().from(systemConfig).where(eq(systemConfig.id, 1)).limit(1);
 
     try {
       invalidateJurisdictionRestrictionPolicyCache();
@@ -162,7 +161,7 @@ adminSystemConfigRouter.post("/jurisdiction-enforcement/revoke-active", async (r
 
       if (!decision.allowed) {
         try {
-          revokeSession({
+          await revokeSession({
             actorUserId: adminUserId,
             targetUserId: Number(r.userId),
             sessionId: String(r.sessionId),
@@ -183,9 +182,9 @@ adminSystemConfigRouter.post("/jurisdiction-enforcement/revoke-active", async (r
 
 // GET /api/admin/system-config/all
 // Returns all system config values
-adminSystemConfigRouter.get("/all", (_req, res) => {
+adminSystemConfigRouter.get("/all", async (_req, res) => {
   try {
-    const config = db.select().from(systemConfig).where(eq(systemConfig.id, 1)).get();
+    const [config] = await db.select().from(systemConfig).where(eq(systemConfig.id, 1)).limit(1);
     
     if (!config) {
       return res.json({ ok: true, config: null });
@@ -227,9 +226,9 @@ adminSystemConfigRouter.get("/all", (_req, res) => {
 
 // GET /api/admin/system-config/policy
 // Returns contender thresholds used for performer selection
-adminSystemConfigRouter.get("/policy", (_req, res) => {
+adminSystemConfigRouter.get("/policy", async (_req, res) => {
   try {
-    const config = db.select().from(systemConfig).where(eq(systemConfig.id, 1)).get();
+    const [config] = await db.select().from(systemConfig).where(eq(systemConfig.id, 1)).limit(1);
     if (!config) {
       return res.json({ ok: true, config: null });
     }
@@ -261,7 +260,7 @@ adminSystemConfigRouter.get("/policy", (_req, res) => {
 
 // POST /api/admin/system-config/policy
 // body: { policyContenderPath1MinAgeDays?, policyContenderPath1MinTradesLifetime?, ... }
-adminSystemConfigRouter.post("/policy", (req, res) => {
+adminSystemConfigRouter.post("/policy", async (req, res) => {
   try {
     const body = req.body ?? {};
     const updates: any = {};
@@ -313,14 +312,13 @@ adminSystemConfigRouter.post("/policy", (req, res) => {
       return res.status(400).json({ ok: false, error: "No policy config updates provided." });
     }
 
-    updates.updatedAt = new Date();
+    updates.updatedAt = nowUnix();
 
-    db.update(systemConfig)
+    await db.update(systemConfig)
       .set(updates)
-      .where(eq(systemConfig.id, 1))
-      .run();
+      .where(eq(systemConfig.id, 1));
 
-    const updated = db.select().from(systemConfig).where(eq(systemConfig.id, 1)).get();
+    const [updated] = await db.select().from(systemConfig).where(eq(systemConfig.id, 1)).limit(1);
 
     return res.json({
       ok: true,

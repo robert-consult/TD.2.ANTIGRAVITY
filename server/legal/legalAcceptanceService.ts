@@ -19,7 +19,7 @@ function assertSha256Like(v: string) {
   if (!/^[a-f0-9]{64}$/i.test(v)) throw new LegalAcceptanceError("SHA_INVALID", "Invalid SHA-256 format");
 }
 
-export function recordDoc1Acceptance(params: {
+export async function recordDoc1Acceptance(params: {
   userId: number;
   emailAtAcceptance: string;
   countryIso2: string;
@@ -52,12 +52,11 @@ export function recordDoc1Acceptance(params: {
     throw new LegalAcceptanceError("COMBINED_SHA_MISMATCH", "Combined SHA mismatch");
   }
 
-  const globalDoc = db
+  const [globalDoc] = await db
     .select()
     .from(legalDocuments)
     .where(eq(legalDocuments.id, verified.global.id))
-    .limit(1)
-    .get();
+    .limit(1);
 
   if (!globalDoc) throw new LegalAcceptanceError("GLOBAL_DOC_MISSING", "Global doc missing");
   if (globalDoc.sha256 !== verified.global.sha256) {
@@ -66,7 +65,11 @@ export function recordDoc1Acceptance(params: {
 
   const addendumDoc =
     verified.addendum?.id != null
-      ? db.select().from(legalDocuments).where(eq(legalDocuments.id, verified.addendum.id)).limit(1).get()
+      ? (await db
+          .select()
+          .from(legalDocuments)
+          .where(eq(legalDocuments.id, verified.addendum.id))
+          .limit(1))[0]
       : null;
 
   if (verified.addendum) {
@@ -83,12 +86,12 @@ export function recordDoc1Acceptance(params: {
     throw new LegalAcceptanceError("COMBINED_TEXT_MISMATCH", "Combined text does not hash to provided SHA");
   }
 
-  const acceptedAt = new Date();
-  const acceptedAtMs = acceptedAt.getTime(); // Store exact milliseconds for hash computation
+  const acceptedAtMs = Date.now(); // Store exact milliseconds for hash computation
+  const acceptedAtSec = Math.floor(acceptedAtMs / 1000);
   const regionKey = verified.regionKey ?? null;
 
-  const result = db.transaction((tx) => {
-    const last = tx
+  const result = await db.transaction(async (tx) => {
+    const [last] = await tx
       .select({
         ledgerSeq: legalAcceptances.ledgerSeq,
         ledgerHash: legalAcceptances.ledgerHash,
@@ -97,7 +100,7 @@ export function recordDoc1Acceptance(params: {
       .from(legalAcceptances)
       .orderBy(desc(legalAcceptances.ledgerSeq))
       .limit(1)
-      .get();
+      ;
 
     const ledgerSeq = (last?.ledgerSeq ?? 0) + 1;
     const prevLedgerHash = last?.ledgerHash ?? "GENESIS";
@@ -137,7 +140,7 @@ export function recordDoc1Acceptance(params: {
     });
     const recordHash = sha256(`${prevHash}|${recordPayloadStr}`);
 
-    const ins = tx
+    const [inserted] = await tx
       .insert(legalAcceptances)
       .values({
         ledgerSeq,
@@ -160,7 +163,7 @@ export function recordDoc1Acceptance(params: {
         combinedText,
         combinedSha256: params.combinedSha256,
 
-        acceptedAt,
+        acceptedAt: acceptedAtSec,
         acceptedAtMs, // Store exact milliseconds for hash verification
         ipAddress: params.ipAddress,
         userAgent: params.userAgent,
@@ -174,10 +177,10 @@ export function recordDoc1Acceptance(params: {
         acceptedFromIp: params.ipAddress,
         acceptedUserAgent: params.userAgent,
       })
-      .run();
+      .returning({ id: legalAcceptances.id });
 
     return {
-      acceptanceId: Number(ins.lastInsertRowid),
+      acceptanceId: Number(inserted?.id),
       ledgerSeq,
       ledgerHash,
     };

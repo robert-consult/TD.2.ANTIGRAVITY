@@ -33,13 +33,13 @@ adminLegalDocsRouter.get("/targets", (_req, res) => {
 });
 
 // List pointer for a target
-adminLegalDocsRouter.get("/pointer", (req, res) => {
+adminLegalDocsRouter.get("/pointer", async (req, res) => {
   const docSet = String(req.query.docSet || "DOC1");
   const docType = String(req.query.docType || "");
   const jurisdictionType = String(req.query.jurisdictionType || "");
   const jurisdictionKey = String(req.query.jurisdictionKey || "");
 
-  const pointer = db
+  const [pointer] = await db
     .select()
     .from(legalDocPointers)
     .where(
@@ -50,13 +50,13 @@ adminLegalDocsRouter.get("/pointer", (req, res) => {
         eq(legalDocPointers.jurisdictionKey, jurisdictionKey)
       )
     )
-    .get();
+    .limit(1);
 
   return res.json({ ok: true, pointer: pointer ?? null });
 });
 
 // List versions for a target + active doc
-adminLegalDocsRouter.get("/versions", (req, res) => {
+adminLegalDocsRouter.get("/versions", async (req, res) => {
   const docSet = String(req.query.docSet || "DOC1");
   const docType = String(req.query.docType || "");
   const jurisdictionType = String(req.query.jurisdictionType || "");
@@ -69,12 +69,12 @@ adminLegalDocsRouter.get("/versions", (req, res) => {
     jurisdictionKey,
   };
 
-  const versions = listVersions(target).map((v) => ({
+  const versions = (await listVersions(target)).map((v) => ({
     ...v,
     createdAt: normalizeTimestamp((v as any).createdAt),
     updatedAt: normalizeTimestamp((v as any).updatedAt),
   }));
-  const active = getActiveDoc(target);
+  const active = await getActiveDoc(target);
 
   return res.json({
     ok: true,
@@ -84,9 +84,9 @@ adminLegalDocsRouter.get("/versions", (req, res) => {
 });
 
 // Get document content by id
-adminLegalDocsRouter.get("/document/:id", (req, res) => {
+adminLegalDocsRouter.get("/document/:id", async (req, res) => {
   const id = Number(req.params.id);
-  const doc = db.select().from(legalDocuments).where(eq(legalDocuments.id, id)).get();
+  const [doc] = await db.select().from(legalDocuments).where(eq(legalDocuments.id, id)).limit(1);
   if (!doc) return res.status(404).json({ ok: false, error: "Not found." });
   return res.json({
     ok: true,
@@ -99,7 +99,7 @@ adminLegalDocsRouter.get("/document/:id", (req, res) => {
 });
 
 // Replace active: creates new version and activates it atomically + logs audit chain
-adminLegalDocsRouter.post("/replace-active", (req, res) => {
+adminLegalDocsRouter.post("/replace-active", async (req, res) => {
   const body = req.body || {};
   const target = body.target as {
     docSet: string;
@@ -120,8 +120,8 @@ adminLegalDocsRouter.post("/replace-active", (req, res) => {
   if (!content || content.length < 50) return res.status(400).json({ ok: false, error: "Content too short." });
 
   try {
-    const result = db.transaction((tx) => {
-      const oldPointer = tx
+    const result = await db.transaction(async (tx) => {
+      const [oldPointer] = await tx
         .select()
         .from(legalDocPointers)
         .where(
@@ -132,25 +132,25 @@ adminLegalDocsRouter.post("/replace-active", (req, res) => {
             eq(legalDocPointers.jurisdictionKey, target.jurisdictionKey)
           )
         )
-        .get();
+        .limit(1);
 
       const oldActiveId = oldPointer?.activeDocumentId ?? null;
 
-      const newDoc = createDocumentVersion({
+      const newDoc = await createDocumentVersion({
         target,
         version,
         content,
         notes: note || null,
         adminUserId,
-      });
+      }, tx as any);
 
-      upsertPointer({
+      await upsertPointer({
         target,
         activeDocumentId: Number(newDoc.id),
         adminUserId,
-      });
+      }, tx as any);
 
-      const audit = appendLegalDocChangeAudit({
+      const audit = await appendLegalDocChangeAudit({
         adminUserId,
         action: "REPLACE_ACTIVE",
         docSet: target.docSet,
@@ -160,7 +160,7 @@ adminLegalDocsRouter.post("/replace-active", (req, res) => {
         oldActiveDocumentId: oldActiveId,
         newActiveDocumentId: Number(newDoc.id),
         note: note || null,
-      });
+      }, tx as any);
 
       return { newDoc, audit, oldActiveId };
     });
@@ -172,13 +172,13 @@ adminLegalDocsRouter.post("/replace-active", (req, res) => {
 });
 
 // Set active to an existing version (rollback or switch)
-adminLegalDocsRouter.post("/set-active", (req, res) => {
+adminLegalDocsRouter.post("/set-active", async (req, res) => {
   const { target, documentId, note } = req.body || {};
   const adminUserId = Number((req as any).user?.id || 0) || null;
 
   if (!target || !documentId) return res.status(400).json({ ok: false, error: "Missing target/documentId." });
 
-  const doc = db.select().from(legalDocuments).where(eq(legalDocuments.id, Number(documentId))).get();
+  const [doc] = await db.select().from(legalDocuments).where(eq(legalDocuments.id, Number(documentId))).limit(1);
   if (!doc) return res.status(404).json({ ok: false, error: "Document not found." });
 
   if (
@@ -194,8 +194,8 @@ adminLegalDocsRouter.post("/set-active", (req, res) => {
   }
 
   try {
-    const result = db.transaction((tx) => {
-      const oldPointer = tx
+    const result = await db.transaction(async (tx) => {
+      const [oldPointer] = await tx
         .select()
         .from(legalDocPointers)
         .where(
@@ -206,13 +206,13 @@ adminLegalDocsRouter.post("/set-active", (req, res) => {
             eq(legalDocPointers.jurisdictionKey, target.jurisdictionKey)
           )
         )
-        .get();
+        .limit(1);
 
       const oldActiveId = oldPointer?.activeDocumentId ?? null;
 
-      upsertPointer({ target, activeDocumentId: Number(documentId), adminUserId });
+      await upsertPointer({ target, activeDocumentId: Number(documentId), adminUserId }, tx as any);
 
-      const audit = appendLegalDocChangeAudit({
+      const audit = await appendLegalDocChangeAudit({
         adminUserId,
         action: "SET_ACTIVE",
         docSet: target.docSet,
@@ -222,7 +222,7 @@ adminLegalDocsRouter.post("/set-active", (req, res) => {
         oldActiveDocumentId: oldActiveId,
         newActiveDocumentId: Number(documentId),
         note: String(note || "") || null,
-      });
+      }, tx as any);
 
       return { oldActiveId, newActiveId: Number(documentId), audit };
     });
@@ -234,10 +234,10 @@ adminLegalDocsRouter.post("/set-active", (req, res) => {
 });
 
 // Assemble preview for a country (admin QA)
-adminLegalDocsRouter.post("/preview-assemble", (req, res) => {
+adminLegalDocsRouter.post("/preview-assemble", async (req, res) => {
   const { countryIso2 } = req.body || {};
   try {
-    const assembled = assembleDoc1Terms(String(countryIso2 || ""), { purpose: "ADMIN_VIEW" });
+    const assembled = await assembleDoc1Terms(String(countryIso2 || ""), { purpose: "ADMIN_VIEW" });
     return res.json({
       ok: true,
       countryIso2: assembled.meta.countryIso2,
@@ -254,16 +254,16 @@ adminLegalDocsRouter.post("/preview-assemble", (req, res) => {
 });
 
 // View change audit chain
-adminLegalDocsRouter.get("/change-audit", (req, res) => {
+adminLegalDocsRouter.get("/change-audit", async (req, res) => {
   const limit = Math.min(200, Math.max(1, Number(req.query.limit || 50)));
-  const rows = db.select().from(legalDocChangeAudit).orderBy(desc(legalDocChangeAudit.seq)).limit(limit).all();
+  const rows = await db.select().from(legalDocChangeAudit).orderBy(desc(legalDocChangeAudit.seq)).limit(limit);
   return res.json({ ok: true, rows });
 });
 
 // Verify change audit chain integrity
-adminLegalDocsRouter.get("/change-audit/verify", (_req, res) => {
+adminLegalDocsRouter.get("/change-audit/verify", async (_req, res) => {
   try {
-    const result = verifyLegalDocChangeAuditChain();
+    const result = await verifyLegalDocChangeAuditChain();
     return res.json({ ok: true, ...result });
   } catch (e: any) {
     return res.status(500).json({ ok: false, error: e?.message || "VERIFY_FAILED" });

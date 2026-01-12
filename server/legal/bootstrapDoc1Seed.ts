@@ -4,8 +4,8 @@ import { and, eq } from "drizzle-orm";
 import { sha256 } from "./cryptoUtils";
 import { getDefaultGlobalTerms } from "./doc1Pack";
 
-export function bootstrapDoc1Seed() {
-  const existing = db
+export async function bootstrapDoc1Seed() {
+  const existingRows = await db
     .select({ id: legalDocuments.id })
     .from(legalDocuments)
     .where(
@@ -16,16 +16,15 @@ export function bootstrapDoc1Seed() {
         eq(legalDocuments.jurisdictionKey, "GLOBAL"),
       ),
     )
-    .limit(1)
-    .get();
+    .limit(1);
 
-  if (existing?.id) return;
+  if (existingRows[0]?.id) return;
 
   const { title, body } = getDefaultGlobalTerms();
   const content = `${title}\n\n${body}`;
   const hash = sha256(content);
 
-  const insert = db
+  const [doc] = await db
     .insert(legalDocuments)
     .values({
       docSet: "DOC1",
@@ -37,11 +36,11 @@ export function bootstrapDoc1Seed() {
       content,
       notes: "BOOTSTRAP: default global terms seeded at startup",
     })
-    .run();
+    .returning({ id: legalDocuments.id });
 
-  const docId = Number(insert.lastInsertRowid);
+  const docId = Number(doc?.id || 0);
 
-  const pointer = db
+  const pointerRows = await db
     .select({ id: legalDocPointers.id })
     .from(legalDocPointers)
     .where(
@@ -52,20 +51,19 @@ export function bootstrapDoc1Seed() {
         eq(legalDocPointers.jurisdictionKey, "GLOBAL"),
       ),
     )
-    .limit(1)
-    .get();
+    .limit(1);
 
-  if (!pointer?.id) {
-    db.insert(legalDocPointers)
-      .values({
-        docSet: "DOC1",
-        docType: "GLOBAL_MASTER",
-        jurisdictionType: "DEFAULT",
-        jurisdictionKey: "GLOBAL",
-        activeDocumentId: docId,
-      })
-      .run();
+  if (!pointerRows[0]?.id) {
+    await db.insert(legalDocPointers).values({
+      docSet: "DOC1",
+      docType: "GLOBAL_MASTER",
+      jurisdictionType: "DEFAULT",
+      jurisdictionKey: "GLOBAL",
+      activeDocumentId: docId || null,
+    });
   }
 
-  console.log("DOC1 GLOBAL_MASTER bootstrapped with ID:", docId);
+  if (docId) {
+    console.log("DOC1 GLOBAL_MASTER bootstrapped with ID:", docId);
+  }
 }

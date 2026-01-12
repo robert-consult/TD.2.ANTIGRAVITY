@@ -2338,7 +2338,7 @@ export function registerAdminRoutes(app: Express) {
       const adminActions = await storage.getAdminActions(limit);
       
       // Get identity audit events (verification, KYC, tier changes)
-      const identityEvents = getRecentIdentityAudit({ limit });
+      const identityEvents = await getRecentIdentityAudit({ limit });
       
       res.json({
         signups,
@@ -2356,22 +2356,22 @@ export function registerAdminRoutes(app: Express) {
         identityEvents: identityEvents.map((e: any) => ({
           id: e.id,
           at: e.at,
-          userId: e.user_id,
+          userId: e.userId,
           email: e.email,
           username: e.username,
           category: e.category,
           type: e.type,
           title: e.title,
           description: e.description,
-          actorAdminId: e.actor_admin_id,
-          actorType: e.actor_type,
-          actorUserId: e.actor_user_id,
-          sessionId: e.session_id,
-          correlationId: e.correlation_id,
-          data: e.data_json ? (() => {
-            try { return JSON.parse(e.data_json); } catch { return null; }
+          actorAdminId: e.actorAdminId,
+          actorType: e.actorType,
+          actorUserId: e.actorUserId,
+          sessionId: e.sessionId,
+          correlationId: e.correlationId,
+          data: e.dataJson ? (() => {
+            try { return JSON.parse(e.dataJson); } catch { return null; }
           })() : null,
-          eventHash: e.event_hash,
+          eventHash: e.eventHash,
         }))
       });
     } catch (error) {

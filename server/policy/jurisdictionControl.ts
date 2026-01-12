@@ -99,7 +99,7 @@ export function evaluateLoginJurisdiction(args: {
   };
 }
 
-export function recordSignupJurisdictionBlock(args: {
+export async function recordSignupJurisdictionBlock(args: {
   email?: string | null;
   username?: string | null;
   ip?: string | null;
@@ -113,22 +113,19 @@ export function recordSignupJurisdictionBlock(args: {
   try {
     const email = args.email ? String(args.email) : null;
 
-    db.insert(signupJurisdictionBlocks)
-      .values({
-        email,
-        emailLower: email ? email.toLowerCase() : null,
-        username: args.username ? String(args.username) : null,
-        ip: args.ip ? String(args.ip) : null,
-        userAgent: args.userAgent ? String(args.userAgent) : null,
-        ipCountryIso2: normIso2(args.ipCountryIso2) ?? null,
-        selectedCountryIso2: normIso2(args.selectedCountryIso2) ?? null,
-        reasonCode: args.reasonCode,
-        policySnapshotJson: args.policySnapshot != null ? JSON.stringify(args.policySnapshot) : null,
-        createdAt: args.createdAtSec,
-      })
-      .run();
+    await db.insert(signupJurisdictionBlocks).values({
+      email,
+      emailLower: email ? email.toLowerCase() : null,
+      username: args.username ? String(args.username) : null,
+      ip: args.ip ? String(args.ip) : null,
+      userAgent: args.userAgent ? String(args.userAgent) : null,
+      ipCountryIso2: normIso2(args.ipCountryIso2) ?? null,
+      selectedCountryIso2: normIso2(args.selectedCountryIso2) ?? null,
+      reasonCode: args.reasonCode,
+      policySnapshotJson: args.policySnapshot != null ? JSON.stringify(args.policySnapshot) : null,
+      createdAt: args.createdAtSec,
+    });
   } catch (e) {
     console.warn("[Jurisdiction] Failed to record signup jurisdiction block:", e);
   }
 }
-

@@ -1,19 +1,10 @@
 import crypto from "crypto";
 import { and, desc, eq, isNull } from "drizzle-orm";
-import { db } from "@db";
+import { db, dbClient } from "@db";
 import { userSessions, userLoginHistory } from "@shared/schema";
 import geoip from "geoip-lite";
 import tzlookup from "@photostructure/tz-lookup";
 import { UAParser } from "ua-parser-js";
-import BetterSQLite3 from "better-sqlite3";
-
-const sessionsDb = new BetterSQLite3("./sessions.db");
-try {
-  sessionsDb.pragma("journal_mode = WAL");
-} catch {}
-try {
-  sessionsDb.pragma("busy_timeout = 5000");
-} catch {}
 
 export type GeoContext = {
   countryCode?: string;
@@ -29,6 +20,8 @@ export type DeviceContext = {
   browser?: string;
   os?: string;
 };
+
+const nowUnix = () => Math.floor(Date.now() / 1000);
 
 export function getClientIp(req: any): string {
   const readHeader = (name: string): string | undefined => {
@@ -120,24 +113,24 @@ export function extractClientIdentity(req: any): ClientIdentityContext {
   };
 }
 
-export function createUserSession(args: {
+export async function createUserSession(args: {
   sessionId: string;
   userId: number;
   email: string;
   ip: string;
   userAgent: string;
   identity?: ClientIdentityContext;
-}): { geo: GeoContext; device: DeviceContext } {
-  const now = new Date();
+}): Promise<{ geo: GeoContext; device: DeviceContext }> {
+  const nowSec = nowUnix();
   const geo = buildGeoContext(args.ip);
   const device = parseDevice(args.userAgent);
   const identity = args.identity || {};
 
-  db.insert(userSessions).values({
+  await db.insert(userSessions).values({
     sessionId: args.sessionId,
     userId: args.userId,
-    createdAt: now,
-    lastActiveAt: now,
+    createdAt: nowSec,
+    lastActiveAt: nowSec,
     ip: args.ip,
     userAgent: args.userAgent,
     deviceType: device.deviceType,
@@ -157,7 +150,7 @@ export function createUserSession(args: {
   }).onConflictDoUpdate({
     target: userSessions.sessionId,
     set: {
-      lastActiveAt: now,
+      lastActiveAt: nowSec,
       ip: args.ip,
       userAgent: args.userAgent,
       deviceType: device.deviceType,
@@ -174,15 +167,15 @@ export function createUserSession(args: {
       longitude: geo.longitude ?? null,
       inferredTz: geo.inferredTz || null,
     },
-  }).run();
+  });
 
-  db.insert(userLoginHistory).values({
+  await db.insert(userLoginHistory).values({
     userId: args.userId,
     email: args.email,
     ip: args.ip,
     userAgent: args.userAgent,
     success: true,
-    createdAt: now,
+    createdAt: nowSec,
     countryCode: geo.countryCode || null,
     region: geo.region || null,
     city: geo.city || null,
@@ -194,12 +187,12 @@ export function createUserSession(args: {
     deviceInstallId: identity.deviceInstallId || null,
     clientTz: identity.clientTz || null,
     clientLang: identity.clientLang || null,
-  }).run();
+  });
 
   return { geo, device };
 }
 
-export function recordLoginAttempt(args: {
+export async function recordLoginAttempt(args: {
   userId?: number;
   email: string;
   ip: string;
@@ -208,19 +201,19 @@ export function recordLoginAttempt(args: {
   failureReason?: string;
   sessionId?: string;
   identity?: ClientIdentityContext;
-}): void {
-  const now = new Date();
+}): Promise<void> {
+  const nowSec = nowUnix();
   const geo = buildGeoContext(args.ip);
   const identity = args.identity || {};
 
-  db.insert(userLoginHistory).values({
+  await db.insert(userLoginHistory).values({
     userId: args.userId || null,
     email: args.email,
     ip: args.ip,
     userAgent: args.userAgent,
     success: args.success,
     failureReason: args.failureReason || null,
-    createdAt: now,
+    createdAt: nowSec,
     countryCode: geo.countryCode || null,
     region: geo.region || null,
     city: geo.city || null,
@@ -232,113 +225,111 @@ export function recordLoginAttempt(args: {
     deviceInstallId: identity.deviceInstallId || null,
     clientTz: identity.clientTz || null,
     clientLang: identity.clientLang || null,
-  }).run();
+  });
 }
 
-export function touchSession(sessionId: string): void {
-  db.update(userSessions)
-    .set({ lastActiveAt: new Date() })
-    .where(and(eq(userSessions.sessionId, sessionId), isNull(userSessions.revokedAt)))
-    .run();
+export async function touchSession(sessionId: string): Promise<void> {
+  await db.update(userSessions)
+    .set({ lastActiveAt: nowUnix() })
+    .where(and(eq(userSessions.sessionId, sessionId), isNull(userSessions.revokedAt)));
 }
 
-export function endSession(args: {
+export async function endSession(args: {
   userId: number;
   sessionId: string;
   ip?: string;
   userAgent?: string;
-}): void {
-  const now = new Date();
-  const session = db.select().from(userSessions)
+}): Promise<void> {
+  const nowSec = nowUnix();
+  const [session] = await db.select().from(userSessions)
     .where(eq(userSessions.sessionId, args.sessionId))
-    .get();
+    .limit(1);
 
   if (session) {
-    const sessionLengthSec = session.createdAt 
-      ? Math.floor((now.getTime() - new Date(session.createdAt).getTime()) / 1000)
-      : null;
+    const createdAtSec = typeof session.createdAt === "number"
+      ? session.createdAt
+      : Math.floor(new Date(session.createdAt as any).getTime() / 1000);
+    const sessionLengthSec = createdAtSec ? Math.max(0, nowSec - createdAtSec) : null;
 
-    db.update(userLoginHistory)
+    await db.update(userLoginHistory)
       .set({ 
-        logoutAt: now,
+        logoutAt: nowSec,
         sessionLengthSec,
       })
       .where(and(
         eq(userLoginHistory.sessionId, args.sessionId),
         eq(userLoginHistory.eventType, "LOGIN_SUCCESS")
-      ))
-      .run();
+      ));
   }
 
-  db.delete(userSessions)
+  await db.delete(userSessions)
     .where(and(eq(userSessions.sessionId, args.sessionId), eq(userSessions.userId, args.userId)))
-    .run();
+    ;
 
   const geo = args.ip ? buildGeoContext(args.ip) : {};
-  db.insert(userLoginHistory).values({
+  await db.insert(userLoginHistory).values({
     userId: args.userId,
     email: "",
     ip: args.ip || null,
     userAgent: args.userAgent || null,
     success: true,
-    createdAt: now,
+    createdAt: nowSec,
     countryCode: geo.countryCode || null,
     region: geo.region || null,
     city: geo.city || null,
     sessionId: args.sessionId,
     eventType: "LOGOUT",
-  }).run();
+  });
 }
 
-export function revokeSession(args: {
+export async function revokeSession(args: {
   actorUserId: number;
   targetUserId: number;
   sessionId: string;
   reason?: string;
-}): void {
-  const now = new Date();
+}): Promise<void> {
+  const nowSec = nowUnix();
 
-  db.update(userSessions)
+  await db.update(userSessions)
     .set({
-      revokedAt: now,
+      revokedAt: nowSec,
       revokedByUserId: args.actorUserId,
       revokeReason: args.reason || "revoked",
     })
     .where(and(eq(userSessions.sessionId, args.sessionId), eq(userSessions.userId, args.targetUserId)))
-    .run();
+    ;
 
-  db.insert(userLoginHistory).values({
+  await db.insert(userLoginHistory).values({
     userId: args.targetUserId,
     email: "",
     ip: null,
     userAgent: null,
     success: true,
-    createdAt: now,
+    createdAt: nowSec,
     sessionId: args.sessionId,
     eventType: "SESSION_REVOKED",
-  }).run();
+  });
 
   try {
-    sessionsDb.prepare("DELETE FROM sessions WHERE sid = ?").run(args.sessionId);
+    await dbClient.query("DELETE FROM session WHERE sid = $1", [args.sessionId]);
   } catch (e) {
     console.error("Failed to delete session from session store:", e);
   }
 }
 
-export function revokeAllSessionsForUser(args: {
+export async function revokeAllSessionsForUser(args: {
   actorUserId: number;
   targetUserId: number;
   reason?: string;
-}): { revoked: number } {
-  const sessions = db
+}): Promise<{ revoked: number }> {
+  const sessions = await db
     .select({ sessionId: userSessions.sessionId })
     .from(userSessions)
-    .where(and(eq(userSessions.userId, args.targetUserId), isNull(userSessions.revokedAt)))
-    .all();
+    .where(and(eq(userSessions.userId, args.targetUserId), isNull(userSessions.revokedAt)));
 
   for (const s of sessions) {
     try {
-      revokeSession({
+      await revokeSession({
         actorUserId: args.actorUserId,
         targetUserId: args.targetUserId,
         sessionId: s.sessionId,
@@ -352,8 +343,8 @@ export function revokeAllSessionsForUser(args: {
   return { revoked: sessions.length };
 }
 
-export function getRecentLoginActivity(args: { userId: number; limit: number }) {
-  return db
+export async function getRecentLoginActivity(args: { userId: number; limit: number }) {
+  return await db
     .select({
       id: userLoginHistory.id,
       eventType: userLoginHistory.eventType,
@@ -370,12 +361,11 @@ export function getRecentLoginActivity(args: { userId: number; limit: number }) 
     .from(userLoginHistory)
     .where(eq(userLoginHistory.userId, args.userId))
     .orderBy(desc(userLoginHistory.createdAt))
-    .limit(args.limit)
-    .all();
+    .limit(args.limit);
 }
 
-export function getActiveSessions(args: { userId: number; limit: number }) {
-  return db
+export async function getActiveSessions(args: { userId: number; limit: number }) {
+  return await db
     .select({
       id: userSessions.id,
       sessionId: userSessions.sessionId,
@@ -396,16 +386,15 @@ export function getActiveSessions(args: { userId: number; limit: number }) {
     .from(userSessions)
     .where(and(eq(userSessions.userId, args.userId), isNull(userSessions.revokedAt)))
     .orderBy(desc(userSessions.lastActiveAt))
-    .limit(args.limit)
-    .all();
+    .limit(args.limit);
 }
 
-export function getAllSessions(args: { userId: number; limit: number; includeRevoked?: boolean }) {
+export async function getAllSessions(args: { userId: number; limit: number; includeRevoked?: boolean }) {
   const whereClause = args.includeRevoked
     ? eq(userSessions.userId, args.userId)
     : and(eq(userSessions.userId, args.userId), isNull(userSessions.revokedAt));
 
-  return db
+  return await db
     .select({
       id: userSessions.id,
       sessionId: userSessions.sessionId,
@@ -428,8 +417,7 @@ export function getAllSessions(args: { userId: number; limit: number; includeRev
     .from(userSessions)
     .where(whereClause)
     .orderBy(desc(userSessions.lastActiveAt))
-    .limit(args.limit)
-    .all();
+    .limit(args.limit);
 }
 
 export function formatLocation(row: { city?: string | null; region?: string | null; countryCode?: string | null }): string {

@@ -4,59 +4,61 @@ import { userSessions, users } from "@shared/schema";
 import { eq, and, isNull } from "drizzle-orm";
 import { touchSession } from "../security/sessionTrail";
 
-export function requireAuth(req: Request, res: Response, next: NextFunction) {
-  if (!req.session.userId) return res.status(401).json({ message: "Unauthorized" });
-  
-  const sessionId = req.sessionID;
-  if (sessionId) {
-    // Validate session is still active (not revoked)
-    const row = db
-      .select({
-        id: userSessions.id,
-        userId: userSessions.userId,
-        revokedAt: userSessions.revokedAt,
-      })
-      .from(userSessions)
-      .where(and(eq(userSessions.sessionId, sessionId), eq(userSessions.userId, req.session.userId)))
-      .limit(1)
-      .get();
-    
-    // If session exists and is revoked, reject the request
-    if (row && row.revokedAt !== null) {
-      return res.status(401).json({ 
-        message: "Session has been revoked",
-        code: "SESSION_REVOKED"
-      });
-    }
-    
-    // Touch lastActiveAt (non-blocking)
-    if (row) {
-      try {
-        touchSession(sessionId);
-      } catch {
-        // ignore errors
+export async function requireAuth(req: Request, res: Response, next: NextFunction) {
+  try {
+    if (!req.session.userId) return res.status(401).json({ message: "Unauthorized" });
+
+    const sessionId = req.sessionID;
+    if (sessionId) {
+      // Validate session is still active (not revoked)
+      const [row] = await db
+        .select({
+          id: userSessions.id,
+          userId: userSessions.userId,
+          revokedAt: userSessions.revokedAt,
+        })
+        .from(userSessions)
+        .where(and(eq(userSessions.sessionId, sessionId), eq(userSessions.userId, req.session.userId)))
+        .limit(1);
+
+      // If session exists and is revoked, reject the request
+      if (row && row.revokedAt !== null) {
+        return res.status(401).json({ 
+          message: "Session has been revoked",
+          code: "SESSION_REVOKED"
+        });
+      }
+
+      // Touch lastActiveAt (non-blocking)
+      if (row) {
+        try {
+          await touchSession(sessionId);
+        } catch {
+          // ignore errors
+        }
       }
     }
-  }
 
-  const user = db
-    .select({ id: users.id, isDeleted: users.isDeleted, isDisabled: users.isDisabled })
-    .from(users)
-    .where(eq(users.id, Number(req.session.userId)))
-    .limit(1)
-    .get();
+    const [user] = await db
+      .select({ id: users.id, isDeleted: users.isDeleted, isDisabled: users.isDisabled })
+      .from(users)
+      .where(eq(users.id, Number(req.session.userId)))
+      .limit(1);
 
-  if (!user) {
-    return res.status(401).json({ message: "Unauthorized", code: "USER_NOT_FOUND" });
+    if (!user) {
+      return res.status(401).json({ message: "Unauthorized", code: "USER_NOT_FOUND" });
+    }
+    if (user.isDeleted) {
+      return res.status(403).json({ message: "Account has been deleted", code: "ACCOUNT_DELETED" });
+    }
+    if (user.isDisabled) {
+      return res.status(403).json({ message: "Account is disabled", code: "ACCOUNT_DISABLED" });
+    }
+
+    return next();
+  } catch (err) {
+    return next(err);
   }
-  if (user.isDeleted) {
-    return res.status(403).json({ message: "Account has been deleted", code: "ACCOUNT_DELETED" });
-  }
-  if (user.isDisabled) {
-    return res.status(403).json({ message: "Account is disabled", code: "ACCOUNT_DISABLED" });
-  }
-  
-  next();
 }
 
 export function requireAdmin(req: Request, res: Response, next: NextFunction) {

@@ -85,7 +85,7 @@ export interface TradeAuditParams {
   avgFillPrice?: number | null;
   
   // Market context
-  quoteTs?: Date | null;
+  quoteTs?: number | Date | null;
   quoteSource?: string | null;
   quoteBid?: number | null;
   quoteAsk?: number | null;
@@ -112,8 +112,13 @@ export interface TradeAuditParams {
 
 // Write a trade audit event with hash chaining
 export async function writeTradeAudit(params: TradeAuditParams): Promise<{ eventHash: string; prevHash: string }> {
-  const now = new Date();
   const eventAtMs = Date.now();
+  const eventAt = Math.floor(eventAtMs / 1000);
+  const quoteTs = params.quoteTs == null
+    ? null
+    : typeof params.quoteTs === "number"
+      ? Math.floor(params.quoteTs)
+      : Math.floor(params.quoteTs.getTime() / 1000);
   const correlationId = params.ctx.correlationId || generateCorrelationId();
   
   try {
@@ -176,7 +181,7 @@ export async function writeTradeAudit(params: TradeAuditParams): Promise<{ event
       tradeId: params.tradeId,
       eventType: params.eventType,
       eventCategory: params.eventCategory ?? "TRADE",
-      eventAt: now,
+      eventAt,
       eventAtMs,
       correlationId,
       orderId: params.orderId ?? null,
@@ -198,7 +203,7 @@ export async function writeTradeAudit(params: TradeAuditParams): Promise<{ event
       stopPrice: params.stopPrice ?? null,
       fillPrice: params.fillPrice ?? null,
       avgFillPrice: params.avgFillPrice ?? null,
-      quoteTs: params.quoteTs ?? null,
+      quoteTs,
       quoteSource: params.quoteSource ?? null,
       quoteBid: params.quoteBid ?? null,
       quoteAsk: params.quoteAsk ?? null,
@@ -254,7 +259,7 @@ export interface OrderIntentParams {
   quoteBid?: number | null;
   quoteAsk?: number | null;
   quoteMid?: number | null;
-  quoteTs?: Date | null;
+  quoteTs?: number | Date | null;
   quoteIsStale?: boolean | null;
   
   // Risk evidence
@@ -267,8 +272,13 @@ export interface OrderIntentParams {
 
 // Write an order intent audit event
 export async function writeOrderIntentAudit(params: OrderIntentParams): Promise<{ eventHash: string; prevHash: string }> {
-  const now = new Date();
   const eventAtMs = Date.now();
+  const eventAt = Math.floor(eventAtMs / 1000);
+  const quoteTs = params.quoteTs == null
+    ? null
+    : typeof params.quoteTs === "number"
+      ? Math.floor(params.quoteTs)
+      : Math.floor(params.quoteTs.getTime() / 1000);
   
   try {
     // Get previous hash for this correlation chain
@@ -317,7 +327,7 @@ export async function writeOrderIntentAudit(params: OrderIntentParams): Promise<
     
     await db.insert(orderIntentAudit).values({
       correlationId: params.correlationId,
-      eventAt: now,
+      eventAt,
       eventAtMs,
       eventCode: params.eventCode,
       decision: params.decision ?? null,
@@ -341,7 +351,7 @@ export async function writeOrderIntentAudit(params: OrderIntentParams): Promise<
       quoteBid: params.quoteBid ?? null,
       quoteAsk: params.quoteAsk ?? null,
       quoteMid: params.quoteMid ?? null,
-      quoteTs: params.quoteTs ?? null,
+      quoteTs,
       quoteIsStale: params.quoteIsStale ?? false,
       riskLimitJson: params.riskLimit ? JSON.stringify(params.riskLimit) : null,
       riskObservedJson: params.riskObserved ? JSON.stringify(params.riskObserved) : null,

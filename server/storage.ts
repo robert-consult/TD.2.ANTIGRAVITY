@@ -333,13 +333,14 @@ export const storage = {
     // Case-insensitive check for market orders (handles MARKET, Market, market)
     const isMarketOrder = orderType.toLowerCase() === "market";
     const status = isMarketOrder ? "OPEN" : "PENDING";
+    const nowSec = Math.floor(Date.now() / 1000);
     
     const [trade] = await db
       .insert(trades)
       .values({
         ...data,
         status,
-        executedAt: isMarketOrder ? new Date() : undefined,
+        executedAt: isMarketOrder ? nowSec : undefined,
       })
       .returning();
     return trade;
@@ -390,7 +391,7 @@ export const storage = {
     profit: string,
     audit?: {
       closeReason: string;
-      closeQuoteTs: Date;
+      closeQuoteTs: number | Date;
       closeSource: string;
       closeBid: number;
       closeAsk: number;
@@ -398,16 +399,23 @@ export const storage = {
       closeSpread: number;
     }
   ): Promise<Trade> {
+    const nowSec = Math.floor(Date.now() / 1000);
+    const closeQuoteTs = audit?.closeQuoteTs == null
+      ? undefined
+      : typeof audit.closeQuoteTs === "number"
+        ? Math.floor(audit.closeQuoteTs)
+        : Math.floor(audit.closeQuoteTs.getTime() / 1000);
+
     const [updatedTrade] = await db
       .update(trades)
       .set({
         closePrice,
         profit,
         status: "CLOSED",
-        closedAt: new Date(),
+        closedAt: nowSec,
         ...(audit ? {
           closeReason: audit.closeReason,
-          closeQuoteTs: audit.closeQuoteTs,
+          closeQuoteTs,
           closeSource: audit.closeSource,
           closeBid: audit.closeBid,
           closeAsk: audit.closeAsk,
@@ -558,9 +566,10 @@ export const storage = {
   },
 
   async cancelTrade(id: number): Promise<Trade> {
+    const nowSec = Math.floor(Date.now() / 1000);
     const [t] = await db
       .update(trades)
-      .set({ status: "CANCELED", closeReason: "CANCELED_BY_USER", closedAt: new Date() })
+      .set({ status: "CANCELED", closeReason: "CANCELED_BY_USER", closedAt: nowSec })
       .where(and(eq(trades.id, id), eq(trades.status, "PENDING")))
       .returning();
     return t;
@@ -609,15 +618,15 @@ export const storage = {
     
     if (!latestLogin) return null;
     
-    const logoutTime = new Date();
-    const loginTime = latestLogin.createdAt instanceof Date 
-      ? latestLogin.createdAt 
-      : new Date(Number(latestLogin.createdAt) * 1000);
-    const sessionLengthSec = Math.round((logoutTime.getTime() - loginTime.getTime()) / 1000);
+    const logoutAtSec = Math.floor(Date.now() / 1000);
+    const loginAtSec = latestLogin.createdAt instanceof Date
+      ? Math.floor(latestLogin.createdAt.getTime() / 1000)
+      : Math.floor(Number(latestLogin.createdAt) || 0);
+    const sessionLengthSec = Math.max(0, logoutAtSec - loginAtSec);
     
     const [updated] = await db.update(userLoginHistory)
       .set({ 
-        logoutAt: logoutTime,
+        logoutAt: logoutAtSec,
         sessionLengthSec,
       })
       .where(eq(userLoginHistory.id, latestLogin.id))
@@ -881,7 +890,7 @@ export const storage = {
       reasonCode: data.reasonCode || null,
       reasonText: data.reasonText || null,
       metadata: data.metadata ? JSON.stringify(data.metadata) : null,
-      createdAt: new Date(),
+      createdAt: Math.floor(Date.now() / 1000),
     }).returning();
     try {
       await mirrorAccountEventToTradeAudit({
@@ -1072,10 +1081,11 @@ export const storage = {
   },
 
   async resolveUserNote(noteId: number, adminId: number): Promise<UserAdminNote> {
+    const nowSec = Math.floor(Date.now() / 1000);
     const [updated] = await db.update(userAdminNotes)
       .set({
         isResolved: true,
-        resolvedAt: new Date(),
+        resolvedAt: nowSec,
         resolvedByAdminId: adminId,
       })
       .where(eq(userAdminNotes.id, noteId))
@@ -1092,12 +1102,13 @@ export const storage = {
     reasonText?: string;
     provenance?: AccountActionProvenance;
   }): Promise<User> {
+    const nowSec = Math.floor(Date.now() / 1000);
     const [updated] = await db.update(users)
       .set({
         isFrozen: true,
         freezeReasonCode: params.reasonCode,
         freezeReasonText: params.reasonText || null,
-        frozenAt: new Date(),
+        frozenAt: nowSec,
         frozenBy: params.adminId,
       })
       .where(eq(users.id, params.userId))
@@ -1136,7 +1147,7 @@ export const storage = {
     }
 
     try {
-      revokeAllSessionsForUser({
+      await revokeAllSessionsForUser({
         actorUserId: params.adminId,
         targetUserId: params.userId,
         reason: params.reasonText || params.reasonCode,
@@ -1236,7 +1247,7 @@ export const storage = {
 
     if (disabled) {
       try {
-        revokeAllSessionsForUser({
+        await revokeAllSessionsForUser({
           actorUserId: adminId ?? 0,
           targetUserId: userId,
           reason: "Account disabled",
@@ -1285,7 +1296,7 @@ export const storage = {
 
       if (disabled) {
         try {
-          revokeAllSessionsForUser({
+          await revokeAllSessionsForUser({
             actorUserId: adminId ?? 0,
             targetUserId: userId,
             reason: "Account disabled (bulk)",

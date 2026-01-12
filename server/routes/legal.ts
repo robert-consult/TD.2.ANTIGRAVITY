@@ -21,8 +21,8 @@ function normalizeCountryIso2(raw: unknown): string | null {
   return v;
 }
 
-router.get("/public-config", (req, res) => {
-  const cfg = db.select().from(systemConfig).where(eq(systemConfig.id, 1)).get();
+router.get("/public-config", async (req, res) => {
+  const [cfg] = await db.select().from(systemConfig).where(eq(systemConfig.id, 1)).limit(1);
   const enforceSignupCaptcha = Boolean(cfg?.signupCaptchaEnforce ?? true);
   const selectedCaptchaProvider = String(cfg?.captchaProvider ?? "SLIDER").toUpperCase() as any;
   const captchaProvider = resolveCaptchaProvider(selectedCaptchaProvider).provider;
@@ -39,13 +39,13 @@ router.get("/public-config", (req, res) => {
 
 // GET /api/legal/doc1/reaccept
 // Returns whether current user must re-accept the latest active terms, and includes the current terms payload.
-router.get("/doc1/reaccept", requireAuth, (req, res) => {
+router.get("/doc1/reaccept", requireAuth, async (req, res) => {
   const userId = Number(req.session.userId);
   try {
-    const { status, assembled } = computeDoc1ReacceptStatusWithTerms(userId);
+    const { status, assembled } = await computeDoc1ReacceptStatusWithTerms(userId);
 
     // Keep a durable record of the "required hash" so the UI can surface the state without recomputing on every poll.
-    upsertDoc1ReacceptRequirement({ userId, detectedBy: "STATUS", status });
+    await upsertDoc1ReacceptRequirement({ userId, detectedBy: "STATUS", status });
     (req.session as any).legalReacceptRequired = Boolean(status.required || status.blocked);
 
     const terms =
@@ -82,7 +82,7 @@ router.get("/doc1/reaccept", requireAuth, (req, res) => {
 
 // POST /api/legal/doc1/accept
 // Records a new acceptance for the current user (used for re-acceptance flow).
-router.post("/doc1/accept", requireAuth, (req, res) => {
+router.post("/doc1/accept", requireAuth, async (req, res) => {
   const userId = Number(req.session.userId);
 
   try {
@@ -93,12 +93,11 @@ router.post("/doc1/accept", requireAuth, (req, res) => {
 
     const { termsToken, combinedSha256 } = schema.parse(req.body || {});
 
-    const user = db
+    const [user] = await db
       .select({ email: users.email, countryIso2: users.countryIso2, country: users.country })
       .from(users)
       .where(eq(users.id, userId))
-      .limit(1)
-      .get();
+      .limit(1);
 
     if (!user) return res.status(401).json({ message: "User not found" });
 
@@ -108,7 +107,7 @@ router.post("/doc1/accept", requireAuth, (req, res) => {
       return res.status(409).json({ message: "COUNTRY_REQUIRED" });
     }
 
-    const assembled = assembleDoc1Terms(countryIso2, { purpose: "LOGIN" });
+    const assembled = await assembleDoc1Terms(countryIso2, { purpose: "LOGIN" });
     if (assembled.blocked) {
       const code = assembled.blockedReason || "LEGAL_COVERAGE_BLOCKED";
       return res.status(code === "JURISDICTION_RESTRICTED" ? 403 : 409).json({ message: code, code });
@@ -121,7 +120,7 @@ router.post("/doc1/accept", requireAuth, (req, res) => {
       });
     }
 
-    recordDoc1Acceptance({
+    await recordDoc1Acceptance({
       userId,
       emailAtAcceptance: String(user.email),
       countryIso2,
@@ -132,7 +131,7 @@ router.post("/doc1/accept", requireAuth, (req, res) => {
       combinedSha256,
     });
 
-    clearDoc1ReacceptRequirement(userId);
+    await clearDoc1ReacceptRequirement(userId);
     (req.session as any).legalReacceptRequired = false;
 
     return res.json({ ok: true });
@@ -149,7 +148,7 @@ router.get('/doc1/resolve', async (req, res) => {
     });
     
     const { country } = schema.parse({ country: req.query.country });
-    const result = assembleDoc1Terms(country, { purpose: "SIGNUP" });
+    const result = await assembleDoc1Terms(country, { purpose: "SIGNUP" });
     
     if (result.blocked) {
       return res.status(result.blockedReason === 'JURISDICTION_RESTRICTED' ? 403 : 409).json({
@@ -179,14 +178,14 @@ router.get('/doc1/resolve', async (req, res) => {
   }
 });
 
-router.get('/doc1/availability', (req, res) => {
+router.get('/doc1/availability', async (req, res) => {
   try {
     const schema = z.object({
       country: z.string().length(2).toUpperCase(),
     });
     
     const { country } = schema.parse({ country: req.query.country });
-    const result = checkCoverage(country);
+    const result = await checkCoverage(country);
     
     res.json({
       countryCode: country,
@@ -207,7 +206,7 @@ router.get('/doc1/availability', (req, res) => {
   }
 });
 
-router.get('/doc1/check', (req, res) => {
+router.get('/doc1/check', async (req, res) => {
   try {
     const countryIso2 = String(req.query.countryIso2 || req.query.country || "").trim().toUpperCase();
 
@@ -218,7 +217,7 @@ router.get('/doc1/check', (req, res) => {
       });
     }
 
-    const assembled = assembleDoc1Terms(countryIso2, { purpose: "SIGNUP" });
+    const assembled = await assembleDoc1Terms(countryIso2, { purpose: "SIGNUP" });
 
     if (assembled.blocked) {
       return res.json({

@@ -204,7 +204,7 @@ app.use((req, res, next) => {
           ensureDailyFxClosesSchema();
           ensureI18nSchema();
           ensureAccountLifecycleSchema();
-          bootstrapDoc1Seed();
+          await bootstrapDoc1Seed();
 
           // Offline ASN/Org enrichment
           try {

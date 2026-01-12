@@ -81,19 +81,19 @@ async function sendVerificationEmail(email: string, token: string, kind: "INITIA
   }
 }
 
-async function ensureUserVerificationRow(userId: number, now: Date) {
+async function ensureUserVerificationRow(userId: number, nowSec: number) {
   await db
     .insert(userVerification)
     .values({
       userId,
       contenderTier: "NONE",
-      createdAt: now,
-      updatedAt: now,
+      createdAt: nowSec,
+      updatedAt: nowSec,
     } as any)
     .onConflictDoNothing();
 }
 
-async function upsertDailyEquity(userId: number, equity: number, now: Date) {
+async function upsertDailyEquity(userId: number, equity: number, nowSec: number) {
   const dayKey = getDayKey();
   await db
     .insert(userEquityDaily)
@@ -101,11 +101,11 @@ async function upsertDailyEquity(userId: number, equity: number, now: Date) {
       userId,
       dayKey,
       equity: Number.isFinite(equity) ? equity : 0,
-      createdAt: now,
+      createdAt: nowSec,
     })
     .onConflictDoUpdate({
       target: [userEquityDaily.userId, userEquityDaily.dayKey],
-      set: { equity: Number.isFinite(equity) ? equity : 0, createdAt: now },
+      set: { equity: Number.isFinite(equity) ? equity : 0, createdAt: nowSec },
     });
 }
 
@@ -124,8 +124,9 @@ export function startVerificationReminderCron() {
 
 async function sendVerificationReminders() {
   const policyConfig = await loadPolicyConfig();
-  const now = new Date();
-  const nowMs = now.getTime();
+  const nowMs = Date.now();
+  const nowSec = Math.floor(nowMs / 1000);
+  const nowDate = new Date(nowMs);
 
   const rows = await db.select({
     id: users.id,
@@ -141,10 +142,10 @@ async function sendVerificationReminders() {
     if (user.isAdmin) continue;
     if (!user.email) continue;
 
-    const systemCtx = buildSystemContext(`job-${now.toISOString()}-${user.id}`);
+    const systemCtx = buildSystemContext(`job-${nowDate.toISOString()}-${user.id}`);
 
-    await ensureUserVerificationRow(user.id, now);
-    await upsertDailyEquity(user.id, Number(user.equity ?? 0), now);
+    await ensureUserVerificationRow(user.id, nowSec);
+    await upsertDailyEquity(user.id, Number(user.equity ?? 0), nowSec);
 
     const ctx = await buildDecisionContext({
       userId: user.id,
@@ -165,17 +166,32 @@ async function sendVerificationReminders() {
       actorUserId: null,
     });
 
+    const createdAtMs =
+      ctx.user.createdAt instanceof Date
+        ? ctx.user.createdAt.getTime()
+        : Number(ctx.user.createdAt) < 1e12
+          ? Number(ctx.user.createdAt) * 1000
+          : Number(ctx.user.createdAt);
+    const existingInitialDueAt = ctx.user.emailInitialDueAt;
+    const normalizedInitialDueAt =
+      existingInitialDueAt instanceof Date
+        ? Math.floor(existingInitialDueAt.getTime() / 1000)
+        : typeof existingInitialDueAt === "number"
+          ? existingInitialDueAt < 1e12
+            ? existingInitialDueAt
+            : Math.floor(existingInitialDueAt / 1000)
+          : null;
     const emailInitialDueAt =
-      ctx.user.emailInitialDueAt ?? new Date(ctx.user.createdAt.getTime() + policyConfig.emailInitialGraceDays * MS_DAY);
+      normalizedInitialDueAt ?? Math.floor((createdAtMs + policyConfig.emailInitialGraceDays * MS_DAY) / 1000);
 
     if (!ctx.user.emailInitialDueAt) {
       await db.update(userVerification)
-        .set({ emailInitialDueAt, updatedAt: now })
+        .set({ emailInitialDueAt, updatedAt: nowSec })
         .where(eq(userVerification.userId, user.id));
     }
 
     if (!ctx.user.emailVerifiedAt) {
-      const daysSinceSignup = Math.floor((nowMs - ctx.user.createdAt.getTime()) / MS_DAY);
+      const daysSinceSignup = Math.floor((nowMs - createdAtMs) / MS_DAY);
 
       if (policyConfig.initialVerifyReminderDaysAfterSignup.includes(daysSinceSignup)) {
         const decision = decidePolicy("EMAIL_RESEND_VERIFICATION", ctx, policyConfig);
@@ -196,7 +212,7 @@ async function sendVerificationReminders() {
           const token = generateSecureToken();
           const tokenHash = hmacToken(token);
           const tokenId = crypto.randomUUID();
-          const expiresAt = new Date(nowMs + VERIFICATION_TOKEN_EXPIRY_HOURS * 3600 * 1000);
+          const expiresAt = nowSec + VERIFICATION_TOKEN_EXPIRY_HOURS * 3600;
 
           await db.insert(emailVerificationTokens).values({
             id: tokenId,
@@ -216,7 +232,7 @@ async function sendVerificationReminders() {
             actorType: "SYSTEM",
             actorUserId: null,
             correlationId: systemCtx.correlationId,
-            data: { kind: "INITIAL", expiresAt: expiresAt.toISOString() },
+            data: { kind: "INITIAL", expiresAt: new Date(expiresAt * 1000).toISOString() },
           });
 
           if (emailSent) {
@@ -227,18 +243,21 @@ async function sendVerificationReminders() {
             const currentCount = verifyState?.emailResendDayKey === dayKey
               ? (verifyState?.emailResendCountDay || 0)
               : 0;
-            const newDayStart = verifyState?.emailResendDayKey === dayKey
-              ? verifyState?.emailResendDayStart
-              : now;
+            const newDayStart =
+              verifyState?.emailResendDayKey === dayKey && verifyState?.emailResendDayStart != null
+                ? verifyState.emailResendDayStart instanceof Date
+                  ? Math.floor(verifyState.emailResendDayStart.getTime() / 1000)
+                  : Number(verifyState.emailResendDayStart)
+                : nowSec;
 
             await db.update(userVerification)
               .set({
-                emailLastResendAt: now,
+                emailLastResendAt: nowSec,
                 emailResendCountDay: currentCount + 1,
                 emailResendDayKey: dayKey,
-                emailResendDayStart: newDayStart || now,
+                emailResendDayStart: (newDayStart ?? nowSec),
                 emailInitialDueAt,
-                updatedAt: now,
+                updatedAt: nowSec,
               })
               .where(eq(userVerification.userId, user.id));
 
@@ -259,13 +278,13 @@ async function sendVerificationReminders() {
         }
       }
 
-      if (now >= emailInitialDueAt) {
+      if (nowSec >= emailInitialDueAt) {
         if (!ctx.user.lockedAt || ctx.user.lockReason !== "EMAIL_UNVERIFIED") {
           await db.update(userVerification)
             .set({
-              lockedAt: now,
+              lockedAt: nowSec,
               lockReason: "EMAIL_UNVERIFIED",
-              updatedAt: now,
+              updatedAt: nowSec,
             })
             .where(eq(userVerification.userId, user.id));
 
@@ -275,7 +294,7 @@ async function sendVerificationReminders() {
             category: "VERIFICATION",
             type: "ACCOUNT_LOCKED_EMAIL_UNVERIFIED",
             title: "Account locked (email unverified)",
-            description: `Initial due at ${emailInitialDueAt.toISOString()}`,
+            description: `Initial due at ${new Date(emailInitialDueAt * 1000).toISOString()}`,
             actorType: "SYSTEM",
             actorUserId: null,
             correlationId: systemCtx.correlationId,
@@ -285,16 +304,30 @@ async function sendVerificationReminders() {
       continue;
     }
 
-    let reverifyDueAt = ctx.user.emailReverifyDueAt ?? null;
+    const existingReverifyDueAt = ctx.user.emailReverifyDueAt;
+    let reverifyDueAt =
+      existingReverifyDueAt instanceof Date
+        ? Math.floor(existingReverifyDueAt.getTime() / 1000)
+        : typeof existingReverifyDueAt === "number"
+          ? existingReverifyDueAt < 1e12
+            ? existingReverifyDueAt
+            : Math.floor(existingReverifyDueAt / 1000)
+          : null;
     if (!reverifyDueAt && ctx.user.emailVerifiedAt) {
-      reverifyDueAt = new Date(ctx.user.emailVerifiedAt.getTime() + policyConfig.emailReverifyPeriodDays * MS_DAY);
+      const verifiedAtMs =
+        ctx.user.emailVerifiedAt instanceof Date
+          ? ctx.user.emailVerifiedAt.getTime()
+          : Number(ctx.user.emailVerifiedAt) < 1e12
+            ? Number(ctx.user.emailVerifiedAt) * 1000
+            : Number(ctx.user.emailVerifiedAt);
+      reverifyDueAt = Math.floor((verifiedAtMs + policyConfig.emailReverifyPeriodDays * MS_DAY) / 1000);
       await db.update(userVerification)
-        .set({ emailReverifyDueAt: reverifyDueAt, updatedAt: now })
+        .set({ emailReverifyDueAt: reverifyDueAt, updatedAt: nowSec })
         .where(eq(userVerification.userId, user.id));
     }
 
     if (reverifyDueAt) {
-      const daysToDue = Math.floor((reverifyDueAt.getTime() - nowMs) / MS_DAY);
+      const daysToDue = Math.floor((reverifyDueAt * 1000 - nowMs) / MS_DAY);
       if (policyConfig.reverifyReminderOffsetsDays.includes(daysToDue)) {
         const decision = decidePolicy("EMAIL_RESEND_VERIFICATION", ctx, policyConfig);
         if (!decision.allowed) {
@@ -314,7 +347,7 @@ async function sendVerificationReminders() {
           const token = generateSecureToken();
           const tokenHash = hmacToken(token);
           const tokenId = crypto.randomUUID();
-          const expiresAt = new Date(nowMs + VERIFICATION_TOKEN_EXPIRY_HOURS * 3600 * 1000);
+          const expiresAt = nowSec + VERIFICATION_TOKEN_EXPIRY_HOURS * 3600;
 
           await db.insert(emailVerificationTokens).values({
             id: tokenId,
@@ -334,7 +367,7 @@ async function sendVerificationReminders() {
             actorType: "SYSTEM",
             actorUserId: null,
             correlationId: systemCtx.correlationId,
-            data: { kind: "REVERIFY", expiresAt: expiresAt.toISOString() },
+            data: { kind: "REVERIFY", expiresAt: new Date(expiresAt * 1000).toISOString() },
           });
 
           if (emailSent) {
@@ -345,17 +378,20 @@ async function sendVerificationReminders() {
             const currentCount = verifyState?.emailResendDayKey === dayKey
               ? (verifyState?.emailResendCountDay || 0)
               : 0;
-            const newDayStart = verifyState?.emailResendDayKey === dayKey
-              ? verifyState?.emailResendDayStart
-              : now;
+            const newDayStart =
+              verifyState?.emailResendDayKey === dayKey && verifyState?.emailResendDayStart != null
+                ? verifyState.emailResendDayStart instanceof Date
+                  ? Math.floor(verifyState.emailResendDayStart.getTime() / 1000)
+                  : Number(verifyState.emailResendDayStart)
+                : nowSec;
 
             await db.update(userVerification)
               .set({
-                emailLastResendAt: now,
+                emailLastResendAt: nowSec,
                 emailResendCountDay: currentCount + 1,
                 emailResendDayKey: dayKey,
-                emailResendDayStart: newDayStart || now,
-                updatedAt: now,
+                emailResendDayStart: (newDayStart ?? nowSec),
+                updatedAt: nowSec,
               })
               .where(eq(userVerification.userId, user.id));
 
@@ -365,7 +401,7 @@ async function sendVerificationReminders() {
               category: "VERIFICATION",
               type: "EMAIL_REVERIFY_REMINDER_SENT",
               title: "Reverify reminder sent",
-              description: `Due at ${reverifyDueAt.toISOString()}, offset ${daysToDue} days`,
+              description: `Due at ${new Date(reverifyDueAt * 1000).toISOString()}, offset ${daysToDue} days`,
               actorType: "SYSTEM",
               actorUserId: null,
               correlationId: systemCtx.correlationId,
@@ -376,14 +412,14 @@ async function sendVerificationReminders() {
         }
       }
 
-      const overdueAt = new Date(reverifyDueAt.getTime() + policyConfig.emailReverifyOverdueGraceDays * MS_DAY);
-      if (now >= overdueAt) {
+      const overdueAt = reverifyDueAt + policyConfig.emailReverifyOverdueGraceDays * 86400;
+      if (nowSec >= overdueAt) {
         if (!ctx.user.lockedAt || ctx.user.lockReason !== "EMAIL_REVERIFY_OVERDUE") {
           await db.update(userVerification)
             .set({
-              lockedAt: now,
+              lockedAt: nowSec,
               lockReason: "EMAIL_REVERIFY_OVERDUE",
-              updatedAt: now,
+              updatedAt: nowSec,
             })
             .where(eq(userVerification.userId, user.id));
 
@@ -393,7 +429,7 @@ async function sendVerificationReminders() {
             category: "VERIFICATION",
             type: "ACCOUNT_LOCKED_REVERIFY_OVERDUE",
             title: "Account locked (reverify overdue)",
-            description: `Reverify due at ${reverifyDueAt.toISOString()}`,
+            description: `Reverify due at ${new Date(reverifyDueAt * 1000).toISOString()}`,
             actorType: "SYSTEM",
             actorUserId: null,
             correlationId: systemCtx.correlationId,

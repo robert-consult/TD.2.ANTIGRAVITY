@@ -1,5 +1,5 @@
 import bcrypt from "bcryptjs";
-import { db } from "@db";
+import { db, dbClient } from "@db";
 import { and, eq, inArray } from "drizzle-orm";
 import {
   adminActions,
@@ -102,9 +102,8 @@ export async function listAdminActivity(opts: {
   const botsOnly = Boolean(opts.botsOnly);
   const limit = Math.max(1, Math.min(5000, Number(opts.limit ?? 2000)));
 
-  const rowsRaw = (db as any).$client
-    .prepare(
-      `
+  const { rows } = await dbClient.query(
+    `
       WITH
       sess AS (
         SELECT user_id, MAX(last_active_at) AS last_seen_at
@@ -123,25 +122,25 @@ export async function listAdminActivity(opts: {
         GROUP BY user_id
       )
       SELECT
-        u.id AS userId,
+        u.id AS "userId",
         u.email AS email,
         u.username AS username,
-        u.is_disabled AS isDisabled,
-        u.is_deleted AS isDeleted,
-        u.deletion_exempt AS deletionExempt,
-        u.created_at AS createdAt,
-        max(
+        u.is_disabled AS "isDisabled",
+        u.is_deleted AS "isDeleted",
+        u.deletion_exempt AS "deletionExempt",
+        u.created_at AS "createdAt",
+        GREATEST(
           COALESCE(sess.last_seen_at, 0),
           COALESCE(logins.last_login_at, 0),
           COALESCE(trades_last.last_trade_at, 0),
           u.created_at
-        ) AS lastActiveAt,
-        COALESCE(b.score, 0) AS botScore,
-        COALESCE(b.label, 'OK') AS botLabel,
-        dq.status AS queueStatus,
-        dq.reason AS queueReason,
-        dq.marked_at AS queuedAt,
-        dq.grace_expires_at AS graceExpiresAt
+        ) AS "lastActiveAt",
+        COALESCE(b.score, 0) AS "botScore",
+        COALESCE(b.label, 'OK') AS "botLabel",
+        dq.status AS "queueStatus",
+        dq.reason AS "queueReason",
+        dq.marked_at AS "queuedAt",
+        dq.grace_expires_at AS "graceExpiresAt"
       FROM users u
       LEFT JOIN sess ON sess.user_id = u.id
       LEFT JOIN logins ON logins.user_id = u.id
@@ -150,12 +149,14 @@ export async function listAdminActivity(opts: {
       LEFT JOIN user_deletion_queue dq ON dq.user_id = u.id
       WHERE
         u.is_admin = 0
-        AND (? = 1 OR u.is_deleted = 0)
-      ORDER BY lastActiveAt ASC
-      LIMIT ?;
-    `
-    )
-    .all(includeDeleted ? 1 : 0, limit) as any[];
+        AND ($1::int = 1 OR u.is_deleted = 0)
+      ORDER BY "lastActiveAt" ASC
+      LIMIT $2;
+    `,
+    [includeDeleted ? 1 : 0, limit]
+  );
+
+  const rowsRaw = rows as any[];
 
   const rows: AdminActivityRow[] = rowsRaw.map((r) => {
     const last = num(r.lastActiveAt, num(r.createdAt));
@@ -195,42 +196,43 @@ function anonymizeUsername(userId: number) {
 }
 
 async function computeLastActiveAtSec(userId: number): Promise<number> {
-  const row = (db as any).$client
-    .prepare(
-      `
+  const { rows } = await dbClient.query(
+    `
       WITH
       sess AS (
         SELECT MAX(last_active_at) AS last_seen_at
         FROM user_sessions
-        WHERE user_id = ?
+        WHERE user_id = $1
       ),
       logins AS (
         SELECT MAX(created_at) AS last_login_at
         FROM user_login_history
-        WHERE user_id = ? AND success = 1
+        WHERE user_id = $1 AND success = 1
       ),
       trades_last AS (
         SELECT MAX(COALESCE(closed_at, opened_at)) AS last_trade_at
         FROM trades
-        WHERE user_id = ?
+        WHERE user_id = $1
       )
       SELECT
-        u.created_at AS createdAt,
-        max(
+        u.created_at AS "createdAt",
+        GREATEST(
           COALESCE(sess.last_seen_at, 0),
           COALESCE(logins.last_login_at, 0),
           COALESCE(trades_last.last_trade_at, 0),
           u.created_at
-        ) AS lastActiveAt
+        ) AS "lastActiveAt"
       FROM users u
       LEFT JOIN sess ON 1 = 1
       LEFT JOIN logins ON 1 = 1
       LEFT JOIN trades_last ON 1 = 1
-      WHERE u.id = ?
+      WHERE u.id = $1
       LIMIT 1;
-    `
-    )
-    .get(userId, userId, userId, userId) as any;
+    `,
+    [userId]
+  );
+
+  const row = rows[0] as any;
 
   const last = num(row?.lastActiveAt, num(row?.createdAt, 0));
   return Math.max(0, Math.trunc(last));
@@ -261,14 +263,15 @@ export async function enqueueForDeletion(args: {
 
     const lastActiveAt = await computeLastActiveAtSec(userId);
 
-    db.insert(userDeletionQueue)
+    await db
+      .insert(userDeletionQueue)
       .values({
         userId,
         status: "GRACE",
         reason: args.reason,
-        markedAt: new Date(now * 1000),
-        graceExpiresAt: new Date(graceExpiresAt * 1000),
-        lastActiveAt: new Date(lastActiveAt * 1000),
+        markedAt: now,
+        graceExpiresAt,
+        lastActiveAt,
         note: args.note || null,
       } as any)
       .onConflictDoUpdate({
@@ -276,26 +279,25 @@ export async function enqueueForDeletion(args: {
         set: {
           status: "GRACE",
           reason: args.reason,
-          markedAt: new Date(now * 1000),
-          graceExpiresAt: new Date(graceExpiresAt * 1000),
-          lastActiveAt: new Date(lastActiveAt * 1000),
+          markedAt: now,
+          graceExpiresAt,
+          lastActiveAt,
           executedAt: null,
           executedByAdminId: null,
           note: args.note || null,
         } as any,
-      })
-      .run();
+      });
 
-    db.update(users)
+    await db
+      .update(users)
       .set({
         isDisabled: true,
-        inactivatedAt: new Date(now * 1000),
+        inactivatedAt: now,
       } as any)
-      .where(eq(users.id, userId))
-      .run();
+      .where(eq(users.id, userId));
 
     try {
-      revokeAllSessionsForUser({
+      await revokeAllSessionsForUser({
         actorUserId: actor,
         targetUserId: userId,
         reason: `queued_for_deletion:${args.reason}`,
@@ -304,19 +306,17 @@ export async function enqueueForDeletion(args: {
       console.error("Failed to revoke sessions for queued user:", userId, e);
     }
 
-    db.insert(userAccountEvents)
-      .values({
-        userId,
-        adminId: actor || null,
-        eventType: "DELETION_QUEUED",
-        title: "Account queued for deletion",
-        description: `Reason: ${args.reason}; grace expires at ${new Date(graceExpiresAt * 1000).toISOString()}`,
-        reasonCode: args.reason,
-        reasonText: args.note || null,
-        metadata: JSON.stringify({ graceExpiresAt, lastActiveAt }),
-        createdAt: new Date(now * 1000),
-      } as any)
-      .run();
+    await db.insert(userAccountEvents).values({
+      userId,
+      adminId: actor || null,
+      eventType: "DELETION_QUEUED",
+      title: "Account queued for deletion",
+      description: `Reason: ${args.reason}; grace expires at ${new Date(graceExpiresAt * 1000).toISOString()}`,
+      reasonCode: args.reason,
+      reasonText: args.note || null,
+      metadata: JSON.stringify({ graceExpiresAt, lastActiveAt }),
+      createdAt: now,
+    } as any);
 
     queued++;
   }
@@ -343,7 +343,7 @@ export async function softDeleteUsers(args: {
     if ((user as any).isDeleted) continue;
 
     try {
-      revokeAllSessionsForUser({
+      await revokeAllSessionsForUser({
         actorUserId: actor,
         targetUserId: userId,
         reason: `soft_delete:${args.reason}`,
@@ -356,12 +356,13 @@ export async function softDeleteUsers(args: {
     const email = anonymizeEmail(userId);
     const username = anonymizeUsername(userId);
 
-    db.update(users)
+    await db
+      .update(users)
       .set({
         isDisabled: true,
         isDeleted: true,
-        inactivatedAt: new Date(now * 1000),
-        deletedAt: new Date(now * 1000),
+        inactivatedAt: now,
+        deletedAt: now,
         deletedMode: "SOFT",
         deletedReason: args.reason,
         deletedByAdminId: actor || null,
@@ -374,31 +375,28 @@ export async function softDeleteUsers(args: {
         displayName: null,
         phone: null,
       } as any)
-      .where(eq(users.id, userId))
-      .run();
+      .where(eq(users.id, userId));
 
-    db.update(userDeletionQueue)
+    await db
+      .update(userDeletionQueue)
       .set({
         status: "EXECUTED_SOFT",
-        executedAt: new Date(now * 1000),
+        executedAt: now,
         executedByAdminId: actor || null,
       } as any)
-      .where(eq(userDeletionQueue.userId, userId))
-      .run();
+      .where(eq(userDeletionQueue.userId, userId));
 
-    db.insert(userAccountEvents)
-      .values({
-        userId,
-        adminId: actor || null,
-        eventType: "ACCOUNT_SOFT_DELETED",
-        title: "Account soft-deleted",
-        description: `Reason: ${args.reason}`,
-        reasonCode: "SOFT_DELETE",
-        reasonText: args.reason,
-        metadata: JSON.stringify({ deletedAt: now }),
-        createdAt: new Date(now * 1000),
-      } as any)
-      .run();
+    await db.insert(userAccountEvents).values({
+      userId,
+      adminId: actor || null,
+      eventType: "ACCOUNT_SOFT_DELETED",
+      title: "Account soft-deleted",
+      description: `Reason: ${args.reason}`,
+      reasonCode: "SOFT_DELETE",
+      reasonText: args.reason,
+      metadata: JSON.stringify({ deletedAt: now }),
+      createdAt: now,
+    } as any);
 
     deleted++;
   }
@@ -424,7 +422,7 @@ export async function hardDeleteUsers(args: {
     if (!user) continue;
 
     try {
-      revokeAllSessionsForUser({
+      await revokeAllSessionsForUser({
         actorUserId: actor,
         targetUserId: userId,
         reason: `hard_delete:${args.reason}`,
@@ -440,46 +438,46 @@ export async function hardDeleteUsers(args: {
     const priorEmail = String((user as any).email ?? "");
 
     try {
-      db.transaction((tx) => {
-        const safeDelete = (fn: () => void) => {
+      await db.transaction(async (tx) => {
+        const safeDelete = async (fn: () => Promise<unknown>) => {
           try {
-            fn();
+            await fn();
           } catch {
             // tolerate missing tables/columns across schema versions
           }
         };
 
         // Purge non-ledger / non-essential tables first
-        safeDelete(() => tx.delete(botRiskAssessments).where(eq(botRiskAssessments.userId, userId)).run());
-        safeDelete(() => tx.delete(userSessions).where(eq(userSessions.userId, userId)).run());
-        safeDelete(() => tx.delete(userLoginHistory).where(eq(userLoginHistory.userId, userId)).run());
+        await safeDelete(() => tx.delete(botRiskAssessments).where(eq(botRiskAssessments.userId, userId)));
+        await safeDelete(() => tx.delete(userSessions).where(eq(userSessions.userId, userId)));
+        await safeDelete(() => tx.delete(userLoginHistory).where(eq(userLoginHistory.userId, userId)));
         if (priorEmail) {
-          safeDelete(() => tx.delete(userLoginHistory).where(eq(userLoginHistory.email, priorEmail)).run());
+          await safeDelete(() => tx.delete(userLoginHistory).where(eq(userLoginHistory.email, priorEmail)));
         }
-        safeDelete(() => tx.delete(userAdminNotes).where(eq(userAdminNotes.userId, userId)).run());
-        safeDelete(() => tx.delete(traderJournal).where(eq(traderJournal.userId, userId)).run());
-        safeDelete(() => tx.delete(userSettings).where(eq(userSettings.userId, userId)).run());
-        safeDelete(() => tx.delete(userVerification).where(eq(userVerification.userId, userId)).run());
-        safeDelete(() => tx.delete(emailVerificationTokens).where(eq(emailVerificationTokens.userId, userId)).run());
-        safeDelete(() => tx.delete(smsOtpTokens).where(eq(smsOtpTokens.userId, userId)).run());
-        safeDelete(() => tx.delete(userMfa).where(eq(userMfa.userId, userId)).run());
-        safeDelete(() => tx.delete(signupFingerprints).where(eq(signupFingerprints.userId, userId)).run());
+        await safeDelete(() => tx.delete(userAdminNotes).where(eq(userAdminNotes.userId, userId)));
+        await safeDelete(() => tx.delete(traderJournal).where(eq(traderJournal.userId, userId)));
+        await safeDelete(() => tx.delete(userSettings).where(eq(userSettings.userId, userId)));
+        await safeDelete(() => tx.delete(userVerification).where(eq(userVerification.userId, userId)));
+        await safeDelete(() => tx.delete(emailVerificationTokens).where(eq(emailVerificationTokens.userId, userId)));
+        await safeDelete(() => tx.delete(smsOtpTokens).where(eq(smsOtpTokens.userId, userId)));
+        await safeDelete(() => tx.delete(userMfa).where(eq(userMfa.userId, userId)));
+        await safeDelete(() => tx.delete(signupFingerprints).where(eq(signupFingerprints.userId, userId)));
 
         // Account events and notes are PII-heavy; remove them in hard delete.
-        safeDelete(() => tx.delete(userAccountEvents).where(eq(userAccountEvents.userId, userId)).run());
+        await safeDelete(() => tx.delete(userAccountEvents).where(eq(userAccountEvents.userId, userId)));
 
         // Update/insert queue record to reflect execution.
-        safeDelete(() =>
+        await safeDelete(() =>
           tx
             .insert(userDeletionQueue)
             .values({
               userId,
               status: "EXECUTED_HARD",
               reason: "ADMIN",
-              markedAt: new Date(now * 1000),
-              graceExpiresAt: new Date(now * 1000),
-              lastActiveAt: new Date(lastActiveAt * 1000),
-              executedAt: new Date(now * 1000),
+              markedAt: now,
+              graceExpiresAt: now,
+              lastActiveAt,
+              executedAt: now,
               executedByAdminId: actor || null,
               note: args.reason,
             } as any)
@@ -487,16 +485,16 @@ export async function hardDeleteUsers(args: {
               target: userDeletionQueue.userId,
               set: {
                 status: "EXECUTED_HARD",
-                executedAt: new Date(now * 1000),
+                executedAt: now,
                 executedByAdminId: actor || null,
                 note: args.reason,
               } as any,
             })
-            .run()
         );
 
         // Keep the user row (tombstone) to preserve immutable ledgers (trades/legal acceptances).
-        tx.update(users)
+        await tx
+          .update(users)
           .set({
             isDisabled: true,
             isDeleted: true,
@@ -505,8 +503,8 @@ export async function hardDeleteUsers(args: {
             freezeReasonText: null,
             frozenAt: null,
             frozenBy: null,
-            inactivatedAt: new Date(now * 1000),
-            deletedAt: new Date(now * 1000),
+            inactivatedAt: now,
+            deletedAt: now,
             deletedMode: "HARD",
             deletedReason: args.reason,
             deletedByAdminId: actor || null,
@@ -543,23 +541,19 @@ export async function hardDeleteUsers(args: {
             signupDeviceInstallId: null,
             signupClientLang: null,
           } as any)
-          .where(eq(users.id, userId))
-          .run();
+          .where(eq(users.id, userId));
 
         // Minimal admin audit trail (does not depend on user row being active).
-        safeDelete(() =>
-          tx
-            .insert(adminActions)
-            .values({
-              adminId: actor || 0,
-              userId,
-              actionType: "ACCOUNT_HARD_DELETED",
-              metadata: JSON.stringify({ reason: args.reason }),
-              ip: null,
-              userAgent: null,
-              createdAt: new Date(now * 1000),
-            } as any)
-            .run()
+        await safeDelete(() =>
+          tx.insert(adminActions).values({
+            adminId: actor || 0,
+            userId,
+            actionType: "ACCOUNT_HARD_DELETED",
+            metadata: JSON.stringify({ reason: args.reason }),
+            ip: null,
+            userAgent: null,
+            createdAt: now,
+          } as any)
         );
       });
     } catch (e) {
@@ -583,28 +577,26 @@ export async function cancelDeletionQueue(args: {
   const ids = Array.from(new Set(args.userIds.map((x) => Number(x)).filter((x) => Number.isFinite(x) && x > 0)));
   if (ids.length === 0) return { cancelled: 0 };
 
-  db.update(userDeletionQueue)
+  await db
+    .update(userDeletionQueue)
     .set({
       status: "CANCELLED",
       note: args.note || null,
     } as any)
-    .where(inArray(userDeletionQueue.userId, ids))
-    .run();
+    .where(inArray(userDeletionQueue.userId, ids));
 
   for (const userId of ids) {
-    db.insert(userAccountEvents)
-      .values({
-        userId,
-        adminId: actor || null,
-        eventType: "DELETION_CANCELLED",
-        title: "Deletion cancelled",
-        description: args.note || "Deletion queue cancelled",
-        reasonCode: "CANCELLED",
-        reasonText: args.note || null,
-        metadata: JSON.stringify({ cancelledAt: now }),
-        createdAt: new Date(now * 1000),
-      } as any)
-      .run();
+    await db.insert(userAccountEvents).values({
+      userId,
+      adminId: actor || null,
+      eventType: "DELETION_CANCELLED",
+      title: "Deletion cancelled",
+      description: args.note || "Deletion queue cancelled",
+      reasonCode: "CANCELLED",
+      reasonText: args.note || null,
+      metadata: JSON.stringify({ cancelledAt: now }),
+      createdAt: now,
+    } as any);
   }
 
   return { cancelled: ids.length };
@@ -619,10 +611,10 @@ export async function setDeletionExempt(args: {
   const ids = Array.from(new Set(args.userIds.map((x) => Number(x)).filter((x) => Number.isFinite(x) && x > 0)));
   if (ids.length === 0) return { updated: 0 };
 
-  db.update(users)
+  await db
+    .update(users)
     .set({ deletionExempt: args.exempt } as any)
-    .where(and(inArray(users.id, ids), eq(users.isAdmin, false)))
-    .run();
+    .where(and(inArray(users.id, ids), eq(users.isAdmin, false)));
 
   if (args.exempt) {
     await cancelDeletionQueue({ userIds: ids, actorAdminId: args.actorAdminId, note: args.note || "Marked deletion-exempt" });
@@ -647,25 +639,30 @@ export async function runInactivitySweep(args: {
   const now = nowSec();
   const thresholdSec = cfg.inactivityThresholdDays * 86400;
 
-  const rows = (db as any).$client
-    .prepare(
-      `
+  const rowsResult = await dbClient.query(
+    `
       WITH
       sess AS (SELECT user_id, MAX(last_active_at) AS last_seen_at FROM user_sessions GROUP BY user_id),
       logins AS (SELECT user_id, MAX(created_at) AS last_login_at FROM user_login_history WHERE success=1 GROUP BY user_id),
       trades_last AS (SELECT user_id, MAX(COALESCE(closed_at, opened_at)) AS last_trade_at FROM trades GROUP BY user_id)
       SELECT
-        u.id AS userId,
-        u.deletion_exempt AS deletionExempt,
-        max(COALESCE(sess.last_seen_at,0), COALESCE(logins.last_login_at,0), COALESCE(trades_last.last_trade_at,0), u.created_at) AS lastActiveAt
+        u.id AS "userId",
+        u.deletion_exempt AS "deletionExempt",
+        GREATEST(
+          COALESCE(sess.last_seen_at, 0),
+          COALESCE(logins.last_login_at, 0),
+          COALESCE(trades_last.last_trade_at, 0),
+          u.created_at
+        ) AS "lastActiveAt"
       FROM users u
       LEFT JOIN sess ON sess.user_id=u.id
       LEFT JOIN logins ON logins.user_id=u.id
       LEFT JOIN trades_last ON trades_last.user_id=u.id
       WHERE u.is_admin=0 AND u.is_deleted=0
     `
-    )
-    .all() as any[];
+  );
+
+  const rows = rowsResult.rows as any[];
 
   const inactiveIds = rows
     .filter((r) => !r.deletionExempt)
@@ -673,25 +670,25 @@ export async function runInactivitySweep(args: {
     .map((r) => num(r.userId))
     .filter((x) => x > 0);
 
-  const dueRows = (db as any).$client
-    .prepare(
-      `
-      SELECT user_id AS userId
-      FROM user_deletion_queue
-      WHERE status='GRACE' AND grace_expires_at <= ?
+  const dueRowsResult = await dbClient.query(
     `
-    )
-    .all(now) as any[];
+      SELECT user_id AS "userId"
+      FROM user_deletion_queue
+      WHERE status='GRACE' AND grace_expires_at <= $1
+    `,
+    [now]
+  );
+
+  const dueRows = dueRowsResult.rows as any[];
 
   const dueIds = dueRows.map((d) => num(d.userId)).filter((x) => x > 0);
 
   if (!args.dryRun) {
     if (cfg.autoQueueInactive && inactiveIds.length) {
-      const existing = db
+      const existing = await db
         .select({ userId: userDeletionQueue.userId })
         .from(userDeletionQueue)
-        .where(inArray(userDeletionQueue.userId, inactiveIds))
-        .all();
+        .where(inArray(userDeletionQueue.userId, inactiveIds));
 
       const alreadyQueued = new Set(existing.map((r) => Number(r.userId)).filter((x) => Number.isFinite(x) && x > 0));
       const queueIds = inactiveIds.filter((id) => !alreadyQueued.has(id));

@@ -3,7 +3,9 @@
  * Replaces client-supplied prices with server-side quotes
  */
 
-import Database from "better-sqlite3";
+import { db } from "@db";
+import { quotes } from "@shared/schema";
+import { eq } from "drizzle-orm";
 import { isMarketOpenForSymbol } from "./marketHours";
 
 // Quote freshness: 5 minutes default to accommodate 1Forge refresh intervals
@@ -33,26 +35,17 @@ export type ExecutionQuote = {
 };
 
 // Get a fresh database connection for each query to avoid locking issues
-function getDb() {
-  return new Database("./trading_app.db");
+export async function getLatestQuoteRow(symbol: string): Promise<any | null> {
+  const sym = normalizeSymbol(symbol);
+  const row = await db.query.quotes.findFirst({
+    where: eq(quotes.symbol, sym),
+  });
+  return row || null;
 }
 
-export function getLatestQuoteRow(symbol: string): any | null {
+export async function getExecutionQuote(symbol: string, side: "BUY" | "SELL", action: "OPEN" | "CLOSE"): Promise<ExecutionQuote> {
   const sym = normalizeSymbol(symbol);
-  const sqlite = getDb();
-  try {
-    const row = sqlite.prepare(
-      `SELECT symbol, price, bid, ask, is_stale, last_api_update, updated_at FROM quotes WHERE symbol = ?`
-    ).get(sym) as any;
-    return row || null;
-  } finally {
-    sqlite.close();
-  }
-}
-
-export function getExecutionQuote(symbol: string, side: "BUY" | "SELL", action: "OPEN" | "CLOSE"): ExecutionQuote {
-  const sym = normalizeSymbol(symbol);
-  const row = getLatestQuoteRow(sym);
+  const row = await getLatestQuoteRow(sym);
   if (!row) throw new Error(`QUOTE_NOT_FOUND:${sym}`);
 
   const bid = toNum(row.bid);
@@ -67,13 +60,13 @@ export function getExecutionQuote(symbol: string, side: "BUY" | "SELL", action: 
   const spread = usableAsk - usableBid;
 
   // Handle both timestamp formats (seconds or milliseconds)
-  const lastApiRaw = toNum(row.last_api_update) ?? toNum(row.updated_at);
+  const lastApiRaw = toNum((row as any).lastApiUpdate ?? (row as any).last_api_update) ?? toNum((row as any).updatedAt ?? (row as any).updated_at);
   const lastApiMs =
     lastApiRaw === null ? null : (lastApiRaw < 1e12 ? lastApiRaw * 1000 : lastApiRaw);
 
   const now = Date.now();
   const isStale =
-    Number(row.is_stale ?? 0) === 1 ||
+    Boolean((row as any).isStale ?? (row as any).is_stale) ||
     lastApiMs === null ||
     (now - lastApiMs) > STALE_AFTER_MS;
 
@@ -102,19 +95,19 @@ export function getExecutionQuote(symbol: string, side: "BUY" | "SELL", action: 
 }
 
 // FX conversion (quoteCurrency -> USD) using available pairs in quotes table
-export function getConversionRate(fromCcy: string, toCcy: string): number {
+export async function getConversionRate(fromCcy: string, toCcy: string): Promise<number> {
   const from = fromCcy.toUpperCase();
   const to = toCcy.toUpperCase();
   if (from === to) return 1;
 
-  const direct = getLatestQuoteRow(from + to);
+  const direct = await getLatestQuoteRow(from + to);
   if (direct) {
     const b = toNum(direct.bid) ?? toNum(direct.price);
     const a = toNum(direct.ask) ?? toNum(direct.price);
     if (b !== null && a !== null) return (a + b) / 2;
   }
 
-  const inverse = getLatestQuoteRow(to + from);
+  const inverse = await getLatestQuoteRow(to + from);
   if (inverse) {
     const b = toNum(inverse.bid) ?? toNum(inverse.price);
     const a = toNum(inverse.ask) ?? toNum(inverse.price);
@@ -123,7 +116,7 @@ export function getConversionRate(fromCcy: string, toCcy: string): number {
 
   // Bridge via USD
   if (from !== "USD" && to !== "USD") {
-    return getConversionRate(from, "USD") * getConversionRate("USD", to);
+    return (await getConversionRate(from, "USD")) * (await getConversionRate("USD", to));
   }
 
   // Fallback rates for common currencies if quote not found

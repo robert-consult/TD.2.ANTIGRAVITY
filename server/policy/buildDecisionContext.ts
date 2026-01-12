@@ -1,5 +1,6 @@
-import { db } from "../../db";
+import { db, dbClient } from "../../db";
 import { sql } from "drizzle-orm";
+import { isPostgres } from "../../db/config";
 
 import {
   DEFAULT_POLICY_CONFIG,
@@ -46,6 +47,12 @@ async function rawAll<T = AnyRow>(query: any): Promise<T[]> {
   if (typeof anyDb.$client?.prepare === "function") {
     return anyDb.$client.prepare(query.sql ?? query).all() as T[];
   }
+  if (typeof anyDb.$client?.query === "function") {
+    const sqlText = query?.sql ?? query;
+    const params = Array.isArray(query?.params) ? query.params : undefined;
+    const res = await anyDb.$client.query(sqlText, params);
+    return (res?.rows ?? []) as T[];
+  }
   if (typeof anyDb.all === "function") return anyDb.all(query) as T[];
   if (typeof anyDb.execute === "function") {
     const res = await anyDb.execute(query);
@@ -65,6 +72,13 @@ async function rawGet<T = AnyRow>(query: any): Promise<T | undefined> {
 }
 
 async function tableExists(tableName: string): Promise<boolean> {
+  if (isPostgres) {
+    const res = await dbClient.query(
+      "SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name = $1 LIMIT 1",
+      [tableName]
+    );
+    return res.rowCount > 0;
+  }
   const row = await rawGet<{ name: string }>(
     `SELECT name FROM sqlite_master WHERE type='table' AND name='${tableName}' LIMIT 1`
   );
@@ -82,8 +96,17 @@ async function getTableColumns(tableName: string): Promise<string[]> {
     columnCache.set(tableName, []);
     return [];
   }
-  const rows = await rawAll<ColumnInfo>(`PRAGMA table_info('${tableName.replace(/'/g, "''")}')`);
-  const cols = rows.map((r) => String(r.name));
+  let cols: string[] = [];
+  if (isPostgres) {
+    const res = await dbClient.query(
+      "SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name = $1",
+      [tableName]
+    );
+    cols = res.rows.map((r: any) => String(r.column_name));
+  } else {
+    const rows = await rawAll<ColumnInfo>(`PRAGMA table_info('${tableName.replace(/'/g, "''")}')`);
+    cols = rows.map((r) => String(r.name));
+  }
   columnCache.set(tableName, cols);
   return cols;
 }

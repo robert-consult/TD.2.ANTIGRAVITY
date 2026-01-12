@@ -43,14 +43,14 @@ function buildWhere(params: {
   const fromMs = toMs(params.fromMs);
   const toMsVal = toMs(params.toMs);
 
-  if (fromMs != null) clauses.push(gte(legalAcceptances.acceptedAt, new Date(fromMs)));
-  if (toMsVal != null) clauses.push(lte(legalAcceptances.acceptedAt, new Date(toMsVal)));
+  if (fromMs != null) clauses.push(gte(legalAcceptances.acceptedAt, Math.floor(fromMs / 1000)));
+  if (toMsVal != null) clauses.push(lte(legalAcceptances.acceptedAt, Math.floor(toMsVal / 1000)));
 
   if (clauses.length === 0) return undefined;
   return and(...clauses);
 }
 
-adminLegalAcceptancesRouter.get("/list", (req, res) => {
+adminLegalAcceptancesRouter.get("/list", async (req, res) => {
   try {
     const limit = Math.min(200, Math.max(1, Number(req.query.limit || 50)));
     const offset = Math.max(0, Number(req.query.offset || 0));
@@ -63,13 +63,12 @@ adminLegalAcceptancesRouter.get("/list", (req, res) => {
       toMs: req.query.toMs,
     });
 
-    const totalRow = db
+    const totalRows = await db
       .select({ count: sql<number>`count(*)` })
       .from(legalAcceptances)
-      .where(where as any)
-      .get();
+      .where(where as any);
 
-    const rows = db
+    const rows = await db
       .select({
         id: legalAcceptances.id,
         userId: legalAcceptances.userId,
@@ -84,6 +83,7 @@ adminLegalAcceptancesRouter.get("/list", (req, res) => {
         addendumSha256: legalAcceptances.addendumSha256,
         combinedSha256: legalAcceptances.combinedSha256,
         acceptedAt: legalAcceptances.acceptedAt,
+        acceptedAtMs: legalAcceptances.acceptedAtMs,
         ipAddress: legalAcceptances.ipAddress,
         userAgent: legalAcceptances.userAgent,
         ledgerSeq: legalAcceptances.ledgerSeq,
@@ -94,12 +94,11 @@ adminLegalAcceptancesRouter.get("/list", (req, res) => {
       .where(where as any)
       .orderBy(desc(legalAcceptances.acceptedAt))
       .limit(limit)
-      .offset(offset)
-      .all();
+      .offset(offset);
 
     return res.json({
       ok: true,
-      total: Number(totalRow?.count || 0),
+      total: Number(totalRows[0]?.count || 0),
       limit,
       offset,
       rows,
@@ -110,14 +109,14 @@ adminLegalAcceptancesRouter.get("/list", (req, res) => {
 });
 
 // NOTE: validate :id is digits in handler since path-to-regexp v8 dropped inline regex
-adminLegalAcceptancesRouter.get("/:id", (req, res) => {
+adminLegalAcceptancesRouter.get("/:id", async (req, res) => {
   // Skip if not numeric (let other routes handle it)
   if (!/^\d+$/.test(req.params.id)) return res.status(400).json({ ok: false, error: "Invalid id format." });
   try {
     const id = Number(req.params.id);
     if (!id) return res.status(400).json({ ok: false, error: "Bad id." });
 
-    const row = db.select().from(legalAcceptances).where(eq(legalAcceptances.id, id)).get();
+    const [row] = await db.select().from(legalAcceptances).where(eq(legalAcceptances.id, id)).limit(1);
     if (!row) return res.status(404).json({ ok: false, error: "Not found." });
 
     return res.json({ ok: true, row });
@@ -126,7 +125,7 @@ adminLegalAcceptancesRouter.get("/:id", (req, res) => {
   }
 });
 
-adminLegalAcceptancesRouter.post("/validate-chain", (req, res) => {
+adminLegalAcceptancesRouter.post("/validate-chain", async (req, res) => {
   try {
     const body = req.body || {};
     const mode = String(body.mode || "lastN");
@@ -140,21 +139,19 @@ adminLegalAcceptancesRouter.post("/validate-chain", (req, res) => {
         return res.status(400).json({ ok: false, error: "Invalid seq range." });
       }
 
-      rows = db
+      rows = await db
         .select()
         .from(legalAcceptances)
         .where(and(gte(legalAcceptances.ledgerSeq, fromSeq), lte(legalAcceptances.ledgerSeq, toSeq)) as any)
-        .orderBy(asc(legalAcceptances.ledgerSeq))
-        .all();
+        .orderBy(asc(legalAcceptances.ledgerSeq));
     } else {
       const n = Math.min(5000, Math.max(1, Number(body.n || 500)));
-      rows = db
+      rows = await db
         .select()
         .from(legalAcceptances)
         .orderBy(desc(legalAcceptances.ledgerSeq))
-        .limit(n)
-        .all()
-        .reverse();
+        .limit(n);
+      rows = rows.reverse();
     }
 
     if (rows.length === 0) return res.json({ ok: true, summary: { rows: 0, ok: true }, issues: [] });
@@ -168,11 +165,11 @@ adminLegalAcceptancesRouter.post("/validate-chain", (req, res) => {
     
     if (firstRowSeq > 1) {
       // Fetch the record immediately before our validation range
-      const prevRecord = db
+      const [prevRecord] = await db
         .select({ ledgerSeq: legalAcceptances.ledgerSeq, ledgerHash: legalAcceptances.ledgerHash })
         .from(legalAcceptances)
         .where(eq(legalAcceptances.ledgerSeq, firstRowSeq - 1))
-        .get();
+        .limit(1);
       
       if (prevRecord) {
         prevHash = String(prevRecord.ledgerHash);
@@ -291,14 +288,14 @@ adminLegalAcceptancesRouter.post("/validate-chain", (req, res) => {
   }
 });
 
-adminLegalAcceptancesRouter.get("/:id/diff-current", (req, res) => {
+adminLegalAcceptancesRouter.get("/:id/diff-current", async (req, res) => {
   // Validate :id is numeric
   if (!/^\d+$/.test(req.params.id)) return res.status(400).json({ ok: false, error: "Invalid id format." });
   try {
     const id = Number(req.params.id);
     if (!id) return res.status(400).json({ ok: false, error: "Bad id." });
 
-    const acceptance = db.select().from(legalAcceptances).where(eq(legalAcceptances.id, id)).get();
+    const [acceptance] = await db.select().from(legalAcceptances).where(eq(legalAcceptances.id, id)).limit(1);
     if (!acceptance) return res.status(404).json({ ok: false, error: "Acceptance not found." });
 
     const acceptedText = String(acceptance.combinedText || "");
@@ -311,7 +308,7 @@ adminLegalAcceptancesRouter.get("/:id/diff-current", (req, res) => {
 
     try {
       const { assembleDoc1Terms } = require("../legal/termsEngineDb");
-      const assembled = assembleDoc1Terms(String(acceptance.countryIso2 || ""), { purpose: "ADMIN_VIEW" });
+      const assembled = await assembleDoc1Terms(String(acceptance.countryIso2 || ""), { purpose: "ADMIN_VIEW" });
 
       if (assembled?.blocked) {
         assembleError = String(assembled.blockedReason || "LEGAL_TERMS_BLOCKED");
@@ -360,7 +357,7 @@ adminLegalAcceptancesRouter.get("/:id/diff-current", (req, res) => {
   }
 });
 
-adminLegalAcceptancesRouter.get("/export.csv", (req, res) => {
+adminLegalAcceptancesRouter.get("/export.csv", async (req, res) => {
   try {
     const where = buildWhere({
       countryIso2: req.query.countryIso2,
@@ -372,7 +369,7 @@ adminLegalAcceptancesRouter.get("/export.csv", (req, res) => {
 
     const limit = Math.min(5000, Math.max(1, Number(req.query.limit || 2000)));
 
-    const rows = db
+    const rows = await db
       .select({
         id: legalAcceptances.id,
         userId: legalAcceptances.userId,
@@ -396,8 +393,7 @@ adminLegalAcceptancesRouter.get("/export.csv", (req, res) => {
       .from(legalAcceptances)
       .where(where as any)
       .orderBy(desc(legalAcceptances.acceptedAt))
-      .limit(limit)
-      .all();
+      .limit(limit);
 
     const header = [
       "id","userId","emailAtAcceptance","countryIso2","regionKey",
@@ -418,7 +414,9 @@ adminLegalAcceptancesRouter.get("/export.csv", (req, res) => {
     const lines = [header.join(",")];
 
     for (const r of rows) {
-      const acceptedAtMs = Number(r.acceptedAt);
+      const acceptedAtMs = r.acceptedAtMs != null
+        ? Number(r.acceptedAtMs)
+        : (Number(r.acceptedAt) || 0) * 1000;
 
       lines.push(
         [

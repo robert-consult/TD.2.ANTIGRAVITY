@@ -58,9 +58,9 @@ function normRegion(x: any): string | null {
 /**
  * Check if enforcement is enabled from systemConfig
  */
-export function isEnforcementEnabled(): boolean {
+export async function isEnforcementEnabled(): Promise<boolean> {
   try {
-    const config = db.select().from(systemConfig).where(eq(systemConfig.id, 1)).get();
+    const [config] = await db.select().from(systemConfig).where(eq(systemConfig.id, 1)).limit(1);
     return !!config?.legalCoverageEnforce;
   } catch {
     return false;
@@ -70,8 +70,8 @@ export function isEnforcementEnabled(): boolean {
 /**
  * Get active document for a target (4-part key)
  */
-function getActiveDocForTarget(target: TargetKey): { activeDocId: number | null; doc: ResolvedDoc | null } {
-  const pointer = db
+async function getActiveDocForTarget(target: TargetKey): Promise<{ activeDocId: number | null; doc: ResolvedDoc | null }> {
+  const [pointer] = await db
     .select()
     .from(legalDocPointers)
     .where(
@@ -82,17 +82,17 @@ function getActiveDocForTarget(target: TargetKey): { activeDocId: number | null;
         eq(legalDocPointers.jurisdictionKey, target.jurisdictionKey)
       )
     )
-    .get();
+    .limit(1);
 
   if (!pointer || !pointer.activeDocumentId) {
     return { activeDocId: null, doc: null };
   }
 
-  const doc = db
+  const [doc] = await db
     .select()
     .from(legalDocuments)
     .where(eq(legalDocuments.id, pointer.activeDocumentId))
-    .get();
+    .limit(1);
 
   if (!doc) {
     return { activeDocId: pointer.activeDocumentId, doc: null };
@@ -117,8 +117,8 @@ function getActiveDocForTarget(target: TargetKey): { activeDocId: number | null;
 /**
  * Get latest document for a target (fallback when not enforced)
  */
-function getLatestDocForTarget(target: TargetKey): ResolvedDoc | null {
-  const doc = db
+async function getLatestDocForTarget(target: TargetKey): Promise<ResolvedDoc | null> {
+  const [doc] = await db
     .select()
     .from(legalDocuments)
     .where(
@@ -130,8 +130,7 @@ function getLatestDocForTarget(target: TargetKey): ResolvedDoc | null {
       )
     )
     .orderBy(desc(legalDocuments.createdAt))
-    .limit(1)
-    .get();
+    .limit(1);
 
   if (!doc) return null;
 
@@ -190,10 +189,10 @@ function generateTermsToken(params: {
  */
 export type Doc1AssemblePurpose = "SIGNUP" | "LOGIN" | "ADMIN_VIEW" | "PUBLIC";
 
-export function assembleDoc1Terms(
+export async function assembleDoc1Terms(
   countryIso2: string,
   overrideEnforceOrOpts?: boolean | { overrideEnforce?: boolean; purpose?: Doc1AssemblePurpose }
-): AssembleResult {
+): Promise<AssembleResult> {
   const opts =
     typeof overrideEnforceOrOpts === "object" && overrideEnforceOrOpts !== null
       ? overrideEnforceOrOpts
@@ -204,7 +203,7 @@ export function assembleDoc1Terms(
   const regionKey = getRegionForCountry(ISO2);
   const RK = regionKey !== "ROW" ? regionKey : null;
   
-  const enforce = opts.overrideEnforce ?? isEnforcementEnabled();
+  const enforce = opts.overrideEnforce ?? await isEnforcementEnabled();
   const warnings: string[] = [];
 
   // Check restricted (country selection only; IP geo enforcement lives in jurisdictionControl)
@@ -266,7 +265,7 @@ export function assembleDoc1Terms(
   });
 
   // Resolve GLOBAL
-  const gActive = getActiveDocForTarget(globalTarget);
+  const gActive = await getActiveDocForTarget(globalTarget);
   let globalMode = "ACTIVE_TARGET";
   let globalDoc = gActive.doc;
 
@@ -284,7 +283,7 @@ export function assembleDoc1Terms(
       };
     }
 
-    const latest = getLatestDocForTarget(globalTarget);
+    const latest = await getLatestDocForTarget(globalTarget);
     if (latest) {
       globalMode = "FALLBACK_LATEST";
       globalDoc = latest;
@@ -301,7 +300,7 @@ export function assembleDoc1Terms(
   let addDoc: ResolvedDoc | null = null;
 
   for (const t of addendumTargets) {
-    const aActive = getActiveDocForTarget(t);
+    const aActive = await getActiveDocForTarget(t);
     if (aActive.doc) {
       chosenAddendumTarget = t;
       addMode = "ACTIVE_TARGET";
@@ -313,7 +312,7 @@ export function assembleDoc1Terms(
       continue;
     }
 
-    const latest = getLatestDocForTarget(t);
+    const latest = await getLatestDocForTarget(t);
     if (latest) {
       chosenAddendumTarget = t;
       addMode = "FALLBACK_LATEST";
@@ -402,14 +401,14 @@ export function assembleDoc1Terms(
 /**
  * Check if terms are available for a country (used by signup flow)
  */
-export function checkTermsAvailability(countryCode: string): {
+export async function checkTermsAvailability(countryCode: string): Promise<{
   available: boolean;
   restricted: boolean;
   scopeKey: string | null;
   fallback: boolean;
-} {
+}> {
   const ISO2 = normIso2(countryCode);
-  const result = assembleDoc1Terms(ISO2, { overrideEnforce: false, purpose: "SIGNUP" });
+  const result = await assembleDoc1Terms(ISO2, { overrideEnforce: false, purpose: "SIGNUP" });
 
   if (result.blocked) {
     return {
@@ -436,8 +435,8 @@ export function checkTermsAvailability(countryCode: string): {
 /**
  * Verify document content hash matches
  */
-export function verifyDocumentHash(docId: number, providedHash: string): boolean {
-  const doc = db.select().from(legalDocuments).where(eq(legalDocuments.id, docId)).get();
+export async function verifyDocumentHash(docId: number, providedHash: string): Promise<boolean> {
+  const [doc] = await db.select().from(legalDocuments).where(eq(legalDocuments.id, docId)).limit(1);
   if (!doc) return false;
 
   const computedHash = sha256(doc.content);

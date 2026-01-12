@@ -1,4 +1,4 @@
-import { pgTable, text, integer, real, primaryKey, serial, boolean, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, text, integer, real, primaryKey, serial, boolean, bigint } from "drizzle-orm/pg-core";
 import { createInsertSchema, createSelectSchema } from "drizzle-zod";
 import { z } from "zod";
 import { relations } from "drizzle-orm";
@@ -24,22 +24,22 @@ export const users = pgTable("users", {
   passwordHash: text("password_hash").notNull(),
   balance: text("balance").notNull().default("1000000.00"),
   startingEquity: real("starting_equity").default(1000000), // Initial equity for tier calculations
-  createdAt: timestamp("created_at", { withTimezone: false, mode: "date" }).notNull().defaultNow(),
+  createdAt: integer("created_at").notNull().default(nowUnix),
   isAdmin: boolean("is_admin").notNull().default(false),
   isDisabled: boolean("is_disabled").notNull().default(false), // Account disabled flag
   // Account lifecycle (inactivity + bot actions)
   deletionExempt: boolean("deletion_exempt").notNull().default(false),
   isDeleted: boolean("is_deleted").notNull().default(false),
-  inactivatedAt: timestamp("inactivated_at", { withTimezone: false, mode: "date" }),
-  deletedAt: timestamp("deleted_at", { withTimezone: false, mode: "date" }),
+  inactivatedAt: integer("inactivated_at"),
+  deletedAt: integer("deleted_at"),
   deletedMode: text("deleted_mode"),
   deletedReason: text("deleted_reason"),
   deletedByAdminId: integer("deleted_by_admin_id"),
   // Tiered access system
   userTier: text("user_tier").notNull().default("CANDIDATE"), // CANDIDATE | PERFORMER | SELECTED
-  tierPromotedAt: timestamp("tier_promoted_at", { withTimezone: false, mode: "date" }),
+  tierPromotedAt: integer("tier_promoted_at"),
   tierPromotedBy: integer("tier_promoted_by"),
-  selectedAt: timestamp("selected_at", { withTimezone: false, mode: "date" }),
+  selectedAt: integer("selected_at"),
   // Margin-related fields
   leverage: real("leverage").notNull().default(5), // Default 5x leverage
   usedMargin: real("used_margin").notNull().default(0), // Margin currently in use
@@ -49,7 +49,7 @@ export const users = pgTable("users", {
   isFrozen: boolean("is_frozen").notNull().default(false),
   freezeReasonCode: text("freeze_reason_code"),
   freezeReasonText: text("freeze_reason_text"),
-  frozenAt: timestamp("frozen_at", { withTimezone: false, mode: "date" }),
+  frozenAt: integer("frozen_at"),
   frozenBy: integer("frozen_by"),
   // User preferences
   timezone: text("timezone").default("UTC"),
@@ -60,8 +60,8 @@ export const users = pgTable("users", {
   regionKey: text("region_key"),
   // Verification status for compliance tracking
   kycStatus: text("kyc_status").default("none"), // none, pending, approved, rejected, reverify_required
-  kycVerifiedAt: timestamp("kyc_verified_at", { withTimezone: false, mode: "date" }),
-  kycExpiresAt: timestamp("kyc_expires_at", { withTimezone: false, mode: "date" }),
+  kycVerifiedAt: integer("kyc_verified_at"),
+  kycExpiresAt: integer("kyc_expires_at"),
   
   // Signup fingerprinting (denormalized for quick access)
   signupIp: text("signup_ip"),
@@ -117,7 +117,7 @@ export const signupFingerprints = pgTable("signup_fingerprints", {
   regionKeySelected: text("region_key_selected"), // Region from terms token
   
   // Timestamps
-  createdAt: timestamp("created_at", { withTimezone: false, mode: "date" }).notNull().defaultNow(),
+  createdAt: integer("created_at").notNull().default(nowUnix),
 });
 
 // Active user sessions table (for session management)
@@ -131,9 +131,9 @@ export const userSessions = pgTable("user_sessions", {
   browser: text("browser"),
   os: text("os"),
   isCurrent: boolean("is_current").notNull().default(false),
-  createdAt: timestamp("created_at", { withTimezone: false, mode: "date" }).notNull().defaultNow(),
-  lastActiveAt: timestamp("last_active_at", { withTimezone: false, mode: "date" }).notNull().defaultNow(),
-  expiresAt: timestamp("expires_at", { withTimezone: false, mode: "date" }),
+  createdAt: integer("created_at").notNull().default(nowUnix),
+  lastActiveAt: integer("last_active_at").notNull().default(nowUnix),
+  expiresAt: integer("expires_at"),
   // Device identity columns (for grift detection)
   deviceFp: text("device_fp"), // Hashed browser fingerprint
   deviceInstallId: text("device_install_id"), // LocalStorage UUID
@@ -147,7 +147,7 @@ export const userSessions = pgTable("user_sessions", {
   longitude: real("longitude"),
   inferredTz: text("inferred_tz"), // IANA timezone derived from geo
   // Revocation tracking
-  revokedAt: timestamp("revoked_at", { withTimezone: false, mode: "date" }),
+  revokedAt: integer("revoked_at"),
   revokedByUserId: integer("revoked_by_user_id"),
   revokeReason: text("revoke_reason"),
 });
@@ -164,7 +164,7 @@ export const symbolConfigs = pgTable("symbol_configs", {
   enabled: boolean("enabled").notNull().default(true),
   minLot: integer("min_lot").notNull().default(100000), // 1 standard lot = $100,000
   maxLot: integer("max_lot").notNull().default(5000000), // 50 standard lots
-  createdAt: timestamp("created_at", { withTimezone: false, mode: "date" }).notNull().defaultNow(),
+  createdAt: integer("created_at").notNull().default(nowUnix),
 });
 
 // Trade history
@@ -184,12 +184,12 @@ export const trades = pgTable("trades", {
   stopPrice: real("stop_price"),
   profit: text("profit"),
   status: text("status").notNull().default("PENDING"), // PENDING, OPEN, CLOSED, CANCELED
-  openedAt: timestamp("opened_at", { withTimezone: false, mode: "date" }).notNull().defaultNow(),
-  executedAt: timestamp("executed_at", { withTimezone: false, mode: "date" }),
-  closedAt: timestamp("closed_at", { withTimezone: false, mode: "date" }),
+  openedAt: integer("opened_at").notNull().default(nowUnix),
+  executedAt: integer("executed_at"),
+  closedAt: integer("closed_at"),
   // Audit fields for trade close tracking
   closeReason: text("close_reason"), // e.g. "AUTO_TIME_LIMIT", "MANUAL"
-  closeQuoteTs: timestamp("close_quote_ts", { withTimezone: false, mode: "date" }), // quote timestamp
+  closeQuoteTs: integer("close_quote_ts"), // quote timestamp
   closeSource: text("close_source"), // e.g. "1forge", "quotes_db", "stale:quotes_db"
   closeBid: real("close_bid"),
   closeAsk: real("close_ask"),
@@ -290,6 +290,17 @@ export const userSettings = pgTable("user_settings", {
 
 export const insertUserSettingsSchema = createInsertSchema(userSettings);
 
+// Quotes cache (market data)
+export const quotes = pgTable("quotes", {
+  symbol: text("symbol").primaryKey(),
+  price: real("price").notNull().default(0),
+  bid: real("bid"),
+  ask: real("ask"),
+  updatedAt: integer("updated_at").notNull().default(nowUnix),
+  isStale: boolean("is_stale").notNull().default(false),
+  lastApiUpdate: integer("last_api_update"),
+});
+
 // Global settings table for admin-configured defaults
 export const globalSettings = pgTable("global_settings", {
   id: integer("id").primaryKey().default(1),
@@ -313,7 +324,7 @@ export const globalSettings = pgTable("global_settings", {
   dailyLossLimitPct: real("daily_loss_limit_pct").notNull().default(10),
   lifetimeLossLimitPct: real("lifetime_loss_limit_pct").notNull().default(20),
   // Timestamp
-  updatedAt: timestamp("updated_at", { withTimezone: false, mode: "date" }).defaultNow(),
+  updatedAt: integer("updated_at").default(nowUnix),
 });
 
 export const insertGlobalSettingsSchema = createInsertSchema(globalSettings);
@@ -427,7 +438,7 @@ export const systemConfig = pgTable("system_config", {
   migrationChunkingEnabled: boolean("migration_chunking_enabled").notNull().default(false),
   migrationChunkSizeMb: integer("migration_chunk_size_mb").notNull().default(51200),
   // Timestamp
-  updatedAt: timestamp("updated_at", { withTimezone: false, mode: "date" }).defaultNow(),
+  updatedAt: integer("updated_at").default(nowUnix),
   updatedBy: text("updated_by"),
 });
 
@@ -507,7 +518,7 @@ export const tradeAudit = pgTable("trade_audit", {
   // Event identification
   eventType: text("event_type").notNull(), // ORDER_PLACED, ORDER_FILLED, POSITION_CLOSED, ORDER_CANCELED, ORDER_REJECTED, RISK_CHECK_PASS, RISK_CHECK_FAIL, TARGETS_UPDATED, SL_TRIGGERED, TP_TRIGGERED
   eventCategory: text("event_category").notNull().default("TRADE"), // ORDER, EXECUTION, POSITION, RISK, ADMIN, SYSTEM
-  eventAt: timestamp("event_at", { withTimezone: false, mode: "date" }).notNull().defaultNow(),
+  eventAt: integer("event_at").notNull().default(nowUnix),
   eventAtMs: integer("event_at_ms"), // Millisecond precision timestamp
   
   // Correlation & lifecycle IDs
@@ -539,7 +550,7 @@ export const tradeAudit = pgTable("trade_audit", {
   avgFillPrice: real("avg_fill_price"),
   
   // Market context at event time
-  quoteTs: timestamp("quote_ts", { withTimezone: false, mode: "date" }),
+  quoteTs: integer("quote_ts"),
   quoteSource: text("quote_source"),
   quoteBid: real("quote_bid"),
   quoteAsk: real("quote_ask"),
@@ -581,7 +592,7 @@ export const orderIntentAudit = pgTable("order_intent_audit", {
   correlationId: text("correlation_id").notNull(), // Links to trade_audit events
   
   // Timestamps
-  eventAt: timestamp("event_at", { withTimezone: false, mode: "date" }).notNull().defaultNow(),
+  eventAt: integer("event_at").notNull().default(nowUnix),
   eventAtMs: integer("event_at_ms"), // Millisecond precision
   
   // Event type
@@ -613,7 +624,7 @@ export const orderIntentAudit = pgTable("order_intent_audit", {
   quoteBid: real("quote_bid"),
   quoteAsk: real("quote_ask"),
   quoteMid: real("quote_mid"),
-  quoteTs: timestamp("quote_ts", { withTimezone: false, mode: "date" }),
+  quoteTs: integer("quote_ts"),
   quoteIsStale: boolean("quote_is_stale"),
   
   // Risk evidence snapshot
@@ -636,9 +647,9 @@ export const userLoginHistory = pgTable("user_login_history", {
   userAgent: text("user_agent"),
   success: boolean("success").notNull(),
   failureReason: text("failure_reason"),
-  logoutAt: timestamp("logout_at", { withTimezone: false, mode: "date" }), // When the session ended
+  logoutAt: integer("logout_at"), // When the session ended
   sessionLengthSec: integer("session_length_sec"), // Session duration in seconds
-  createdAt: timestamp("created_at", { withTimezone: false, mode: "date" }).notNull().defaultNow(),
+  createdAt: integer("created_at").notNull().default(nowUnix),
   // Geo-enrichment fields
   countryCode: text("country_code"),
   region: text("region"),
@@ -667,7 +678,7 @@ export const userAccountEvents = pgTable("user_account_events", {
   reasonCode: text("reason_code"),
   reasonText: text("reason_text"),
   metadata: text("metadata"), // JSON string for additional data
-  createdAt: timestamp("created_at", { withTimezone: false, mode: "date" }).notNull().defaultNow(),
+  createdAt: integer("created_at").notNull().default(nowUnix),
 });
 
 // Admin notes/flags on user accounts
@@ -680,9 +691,9 @@ export const userAdminNotes = pgTable("user_admin_notes", {
   flagCode: text("flag_code"), // e.g. COMPLIANCE_REVIEW, SUSPICIOUS_ACTIVITY
   content: text("content").notNull(),
   isResolved: boolean("is_resolved").notNull().default(false),
-  resolvedAt: timestamp("resolved_at", { withTimezone: false, mode: "date" }),
+  resolvedAt: integer("resolved_at"),
   resolvedByAdminId: integer("resolved_by_admin_id"),
-  createdAt: timestamp("created_at", { withTimezone: false, mode: "date" }).notNull().defaultNow(),
+  createdAt: integer("created_at").notNull().default(nowUnix),
 });
 
 // Bot risk assessments (one per user; higher score => more bot-like)
@@ -691,7 +702,7 @@ export const botRiskAssessments = pgTable("bot_risk_assessments", {
   score: integer("score").notNull().default(0),
   label: text("label").notNull().default("OK"), // OK | SUSPICIOUS | HIGH
   signalsJson: text("signals_json").notNull().default("{}"),
-  updatedAt: timestamp("updated_at", { withTimezone: false, mode: "date" }).notNull().defaultNow(),
+  updatedAt: integer("updated_at").notNull().default(nowUnix),
 });
 
 // User deletion queue (one row per user)
@@ -700,10 +711,10 @@ export const userDeletionQueue = pgTable("user_deletion_queue", {
   userId: integer("user_id").notNull().unique(),
   status: text("status").notNull().default("GRACE"), // GRACE | EXECUTED_SOFT | EXECUTED_HARD | CANCELLED
   reason: text("reason").notNull().default("INACTIVE"), // INACTIVE | BOT | ADMIN
-  markedAt: timestamp("marked_at", { withTimezone: false, mode: "date" }).notNull(),
-  graceExpiresAt: timestamp("grace_expires_at", { withTimezone: false, mode: "date" }).notNull(),
-  lastActiveAt: timestamp("last_active_at", { withTimezone: false, mode: "date" }),
-  executedAt: timestamp("executed_at", { withTimezone: false, mode: "date" }),
+  markedAt: integer("marked_at").notNull(),
+  graceExpiresAt: integer("grace_expires_at").notNull(),
+  lastActiveAt: integer("last_active_at"),
+  executedAt: integer("executed_at"),
   executedByAdminId: integer("executed_by_admin_id"),
   note: text("note"),
 });
@@ -723,8 +734,8 @@ export const traderJournal = pgTable("trader_journal", {
   mood: text("mood"), // e.g. "confident", "nervous", "neutral"
   tags: text("tags"), // JSON array stored as string
   attachmentUrl: text("attachment_url"),
-  createdAt: timestamp("created_at", { withTimezone: false, mode: "date" }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: false, mode: "date" }).notNull().defaultNow(),
+  createdAt: integer("created_at").notNull().default(nowUnix),
+  updatedAt: integer("updated_at").notNull().default(nowUnix),
 });
 
 export const insertTraderJournalSchema = createInsertSchema(traderJournal);
@@ -738,7 +749,7 @@ export const adminActions = pgTable("admin_actions", {
   metadata: text("metadata"), // JSON string for additional data
   ip: text("ip"),
   userAgent: text("user_agent"),
-  createdAt: timestamp("created_at", { withTimezone: false, mode: "date" }).notNull().defaultNow(),
+  createdAt: integer("created_at").notNull().default(nowUnix),
 });
 
 export const insertAdminActionSchema = createInsertSchema(adminActions);
@@ -822,37 +833,37 @@ export const userVerification = pgTable("user_verification", {
   userId: integer("user_id").primaryKey().notNull(),
   
   // Email verification lifecycle
-  emailVerifiedAt: timestamp("email_verified_at", { withTimezone: false, mode: "date" }),
-  emailInitialDueAt: timestamp("email_initial_due_at", { withTimezone: false, mode: "date" }),
-  emailReverifyDueAt: timestamp("email_reverify_due_at", { withTimezone: false, mode: "date" }),
+  emailVerifiedAt: integer("email_verified_at"),
+  emailInitialDueAt: integer("email_initial_due_at"),
+  emailReverifyDueAt: integer("email_reverify_due_at"),
   emailResendDayKey: text("email_resend_day_key"), // YYYY-MM-DD for daily rate limit
   emailResendCountDay: integer("email_resend_count_day").default(0),
-  emailLastResendAt: timestamp("email_last_resend_at", { withTimezone: false, mode: "date" }),
-  emailResendDayStart: timestamp("email_resend_day_start", { withTimezone: false, mode: "date" }),
+  emailLastResendAt: integer("email_last_resend_at"),
+  emailResendDayStart: integer("email_resend_day_start"),
   
   // Phone/SMS verification
   phoneE164: text("phone_e164"),
-  smsVerifiedAt: timestamp("sms_verified_at", { withTimezone: false, mode: "date" }),
+  smsVerifiedAt: integer("sms_verified_at"),
   smsSendDayKey: text("sms_send_day_key"),
   smsSendCountDay: integer("sms_send_count_day").default(0),
-  smsLastSentAt: timestamp("sms_last_sent_at", { withTimezone: false, mode: "date" }),
-  smsLastSendAt: timestamp("sms_last_send_at", { withTimezone: false, mode: "date" }),
-  smsSendDayStart: timestamp("sms_send_day_start", { withTimezone: false, mode: "date" }),
+  smsLastSentAt: integer("sms_last_sent_at"),
+  smsLastSendAt: integer("sms_last_send_at"),
+  smsSendDayStart: integer("sms_send_day_start"),
   smsVerifyFailCount: integer("sms_verify_fail_count").default(0),
-  smsOtpLockedUntil: timestamp("sms_otp_locked_until", { withTimezone: false, mode: "date" }),
+  smsOtpLockedUntil: integer("sms_otp_locked_until"),
   smsEnabled: boolean("sms_enabled").default(false),
   
   // Contender tier (progression tracking)
   contenderTier: text("contender_tier").notNull().default("NONE"), // NONE, CANDIDATE_EMAIL_ONLY, CANDIDATE_SMS_REQUIRED, VERIFIED_SMS, SELECTED_REAL_CAPITAL
-  contenderEligibleAt: timestamp("contender_eligible_at", { withTimezone: false, mode: "date" }),
+  contenderEligibleAt: integer("contender_eligible_at"),
 
   // Lock snapshot (policy reporting only; runtime enforcement derives state)
-  lockedAt: timestamp("locked_at", { withTimezone: false, mode: "date" }),
+  lockedAt: integer("locked_at"),
   lockReason: text("lock_reason"),
   
   // Timestamps
-  createdAt: timestamp("created_at", { withTimezone: false, mode: "date" }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: false, mode: "date" }).notNull().defaultNow(),
+  createdAt: integer("created_at").notNull().default(nowUnix),
+  updatedAt: integer("updated_at").notNull().default(nowUnix),
 });
 
 // Email verification tokens
@@ -861,9 +872,9 @@ export const emailVerificationTokens = pgTable("email_verification_tokens", {
   userId: integer("user_id").notNull(),
   tokenHash: text("token_hash").notNull(), // SHA-256 hash of token
   purpose: text("purpose").notNull().default("VERIFY"), // INITIAL | REVERIFY | VERIFY | RESET
-  expiresAt: timestamp("expires_at", { withTimezone: false, mode: "date" }).notNull(),
-  usedAt: timestamp("used_at", { withTimezone: false, mode: "date" }),
-  createdAt: timestamp("created_at", { withTimezone: false, mode: "date" }).notNull().defaultNow(),
+  expiresAt: integer("expires_at").notNull(),
+  usedAt: integer("used_at"),
+  createdAt: integer("created_at").notNull().default(nowUnix),
 });
 
 // SMS OTP tokens (hashed; no plaintext OTP stored)
@@ -872,9 +883,9 @@ export const smsOtpTokens = pgTable("sms_otp_tokens", {
   userId: integer("user_id").notNull(),
   phoneE164: text("phone_e164").notNull(),
   otpHash: text("otp_hash").notNull(),
-  expiresAt: timestamp("expires_at", { withTimezone: false, mode: "date" }).notNull(),
-  consumedAt: timestamp("consumed_at", { withTimezone: false, mode: "date" }),
-  createdAt: timestamp("created_at", { withTimezone: false, mode: "date" }).notNull().defaultNow(),
+  expiresAt: integer("expires_at").notNull(),
+  consumedAt: integer("consumed_at"),
+  createdAt: integer("created_at").notNull().default(nowUnix),
 });
 
 // Daily equity snapshots (deterministic last-90d return)
@@ -884,7 +895,7 @@ export const userEquityDaily = pgTable(
     userId: integer("user_id").notNull(),
     dayKey: text("day_key").notNull(), // YYYY-MM-DD (UTC)
     equity: real("equity").notNull(),
-    createdAt: timestamp("created_at", { withTimezone: false, mode: "date" }).notNull().defaultNow(),
+    createdAt: integer("created_at").notNull().default(nowUnix),
   },
   (t) => ({
     pk: primaryKey({ columns: [t.userId, t.dayKey] }),
@@ -904,14 +915,14 @@ export const userMfa = pgTable("user_mfa", {
   recoveryCodesUsedJson: text("recovery_codes_used_json"), // JSON array of used indices
   
   // Status
-  enabledAt: timestamp("enabled_at", { withTimezone: false, mode: "date" }),
-  disabledAt: timestamp("disabled_at", { withTimezone: false, mode: "date" }),
-  lastVerifiedAt: timestamp("last_verified_at", { withTimezone: false, mode: "date" }),
+  enabledAt: integer("enabled_at"),
+  disabledAt: integer("disabled_at"),
+  lastVerifiedAt: integer("last_verified_at"),
   failedAttempts: integer("failed_attempts").default(0),
   
   // Timestamps
-  createdAt: timestamp("created_at", { withTimezone: false, mode: "date" }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: false, mode: "date" }).notNull().defaultNow(),
+  createdAt: integer("created_at").notNull().default(nowUnix),
+  updatedAt: integer("updated_at").notNull().default(nowUnix),
 });
 
 // KYC profiles (invite-based)
@@ -922,12 +933,12 @@ export const userKycProfiles = pgTable("user_kyc_profiles", {
   status: text("status").notNull().default("NOT_STARTED"),
   
   // Invite tracking
-  invitedAt: timestamp("invited_at", { withTimezone: false, mode: "date" }),
+  invitedAt: integer("invited_at"),
   invitedByAdminId: integer("invited_by_admin_id"),
   inviteNote: text("invite_note"),
   
   // Submission tracking
-  submittedAt: timestamp("submitted_at", { withTimezone: false, mode: "date" }),
+  submittedAt: integer("submitted_at"),
   documentType: text("document_type"), // PASSPORT, DRIVERS_LICENSE, ID_CARD
   documentNumber: text("document_number"), // Encrypted or masked
   legalFirstName: text("legal_first_name"),
@@ -942,14 +953,14 @@ export const userKycProfiles = pgTable("user_kyc_profiles", {
   idDocumentRef: text("id_document_ref"),
   
   // Review tracking
-  reviewedAt: timestamp("reviewed_at", { withTimezone: false, mode: "date" }),
+  reviewedAt: integer("reviewed_at"),
   reviewedByAdminId: integer("reviewed_by_admin_id"),
   reviewerNote: text("reviewer_note"),
   rejectionReason: text("rejection_reason"),
   
   // Timestamps
-  createdAt: timestamp("created_at", { withTimezone: false, mode: "date" }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: false, mode: "date" }).notNull().defaultNow(),
+  createdAt: integer("created_at").notNull().default(nowUnix),
+  updatedAt: integer("updated_at").notNull().default(nowUnix),
 });
 
 // Payout profiles (gated to Selected tier)
@@ -965,11 +976,11 @@ export const userPayoutProfiles = pgTable("user_payout_profiles", {
   
   // Status
   isVerified: boolean("is_verified").default(false),
-  verifiedAt: timestamp("verified_at", { withTimezone: false, mode: "date" }),
+  verifiedAt: integer("verified_at"),
   
   // Timestamps
-  createdAt: timestamp("created_at", { withTimezone: false, mode: "date" }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: false, mode: "date" }).notNull().defaultNow(),
+  createdAt: integer("created_at").notNull().default(nowUnix),
+  updatedAt: integer("updated_at").notNull().default(nowUnix),
 });
 
 // Identity audit trail (hash-chained for tamper evidence)
@@ -977,7 +988,7 @@ export const identityAudit = pgTable("identity_audit", {
   id: serial("id").primaryKey(),
   
   // Event timing
-  at: timestamp("at", { withTimezone: false, mode: "date" }).notNull().defaultNow(),
+  at: integer("at").notNull().default(nowUnix),
   
   // User context
   userId: integer("user_id"),
@@ -1197,7 +1208,7 @@ export const griftObservations = pgTable("grift_observations", {
   longitude: real("longitude"),
   asn: integer("asn"),
   org: text("org"),
-  observedAt: integer("observed_at").notNull().default(nowUnixMs),
+  observedAt: bigint("observed_at", { mode: "number" }).notNull().default(nowUnixMs),
 });
 
 // Grift trade observations (trade telemetry)
@@ -1223,7 +1234,7 @@ export const griftTradeObservations = pgTable("grift_trade_observations", {
   longitude: real("longitude"),
   asn: integer("asn"),
   org: text("org"),
-  observedAt: integer("observed_at").notNull().default(nowUnixMs),
+  observedAt: bigint("observed_at", { mode: "number" }).notNull().default(nowUnixMs),
 });
 
 // Aggregated grift risk scores
@@ -1263,8 +1274,8 @@ export const griftCases = pgTable("grift_cases", {
   createdByAdminId: integer("created_by_admin_id"),
   assignedAdminId: integer("assigned_admin_id"),
   resolution: text("resolution"),
-  createdAt: integer("created_at").notNull().default(nowUnixMs),
-  updatedAt: integer("updated_at").notNull().default(nowUnixMs),
+  createdAt: bigint("created_at", { mode: "number" }).notNull().default(nowUnixMs),
+  updatedAt: bigint("updated_at", { mode: "number" }).notNull().default(nowUnixMs),
   closedAt: integer("closed_at"),
 });
 
@@ -1272,7 +1283,7 @@ export const griftCaseSignals = pgTable("grift_case_signals", {
   id: serial("id").primaryKey(),
   caseId: integer("case_id").notNull(),
   signalId: integer("signal_id").notNull(),
-  addedAt: integer("added_at").notNull().default(nowUnixMs),
+  addedAt: bigint("added_at", { mode: "number" }).notNull().default(nowUnixMs),
 });
 
 export const griftCaseNotes = pgTable("grift_case_notes", {
@@ -1280,7 +1291,7 @@ export const griftCaseNotes = pgTable("grift_case_notes", {
   caseId: integer("case_id").notNull(),
   adminId: integer("admin_id").notNull(),
   note: text("note").notNull(),
-  createdAt: integer("created_at").notNull().default(nowUnixMs),
+  createdAt: bigint("created_at", { mode: "number" }).notNull().default(nowUnixMs),
 });
 
 export const griftCaseLinks = pgTable("grift_case_links", {
@@ -1289,7 +1300,7 @@ export const griftCaseLinks = pgTable("grift_case_links", {
   linkType: text("link_type").notNull(),
   linkId: integer("link_id").notNull(),
   addedByAdminId: integer("added_by_admin_id"),
-  addedAt: integer("added_at").notNull().default(nowUnixMs),
+  addedAt: bigint("added_at", { mode: "number" }).notNull().default(nowUnixMs),
 });
 
 // Grift admin audit entries (tamper-evident)
@@ -1300,7 +1311,7 @@ export const griftAdminActions = pgTable("grift_admin_actions", {
   targetType: text("target_type"),
   targetId: integer("target_id"),
   payloadJson: text("payload_json"),
-  createdAt: integer("created_at").notNull().default(nowUnixMs),
+  createdAt: bigint("created_at", { mode: "number" }).notNull().default(nowUnixMs),
   prevHash: text("prev_hash"),
   eventHash: text("hash"),
 });
@@ -1315,7 +1326,7 @@ export const griftEnforcementLog = pgTable("grift_enforcement_log", {
   adminId: integer("admin_id"),
   reason: text("reason"),
   riskScoreAtAction: integer("risk_score_at_action"),
-  createdAt: integer("created_at").notNull().default(nowUnixMs),
+  createdAt: bigint("created_at", { mode: "number" }).notNull().default(nowUnixMs),
 });
 
 // ================================================================
@@ -1338,7 +1349,7 @@ export const legalDocuments = pgTable("legal_documents", {
   sha256: text("sha256").notNull(), // SHA-256 hash of content
   content: text("content").notNull(), // Full document HTML/Markdown
   notes: text("notes"), // Admin notes about this version
-  createdAt: integer("created_at").notNull().default(nowUnixMs), // timestamp_ms
+  createdAt: bigint("created_at", { mode: "number" }).notNull().default(nowUnixMs), // timestamp_ms
   createdByAdminUserId: integer("created_by_admin_user_id"),
 });
 
@@ -1350,7 +1361,7 @@ export const legalDocPointers = pgTable("legal_doc_pointers", {
   jurisdictionType: text("jurisdiction_type").notNull(), // DEFAULT | COUNTRY | REGION
   jurisdictionKey: text("jurisdiction_key").notNull(), // e.g., "GLOBAL", "US", "EU"
   activeDocumentId: integer("active_document_id").references(() => legalDocuments.id),
-  updatedAt: integer("updated_at").notNull().default(nowUnixMs), // timestamp_ms
+  updatedAt: bigint("updated_at", { mode: "number" }).notNull().default(nowUnixMs), // timestamp_ms
   updatedByAdminUserId: integer("updated_by_admin_user_id"),
 });
 // Note: Unique index on (docSet, docType, jurisdictionType, jurisdictionKey) should be created in ensureSchema.ts
@@ -1400,7 +1411,7 @@ export const legalAcceptances = pgTable("legal_acceptances", {
   prevHash: text("prev_hash"),
   recordHash: text("record_hash"),
   
-  acceptedAt: timestamp("accepted_at", { withTimezone: false, mode: "date" }).notNull().defaultNow(),
+  acceptedAt: integer("accepted_at").notNull().default(nowUnix),
   // Milliseconds precision timestamp for hash computation (not coerced by Drizzle)
   acceptedAtMs: integer("accepted_at_ms"),
 });
@@ -1535,7 +1546,7 @@ export const dailyFxCloses = pgTable("daily_fx_closes", {
   source: text("source").notNull().default("1FORGE"), // Data source
   rolloverTz: text("rollover_tz").notNull(), // TZ used for this calculation
   rolloverTime: text("rollover_time").notNull(), // HH:MM used for this calculation
-  calculatedAt: timestamp("calculated_at", { withTimezone: false, mode: "date" }).notNull().defaultNow(),
+  calculatedAt: integer("calculated_at").notNull().default(nowUnix),
   createdBy: text("created_by"), // "SYSTEM" for cron, admin email for manual
 });
 

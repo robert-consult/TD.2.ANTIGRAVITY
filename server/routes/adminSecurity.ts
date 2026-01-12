@@ -31,25 +31,25 @@ function toCsv(rows: Array<Record<string, any>>): string {
 }
 
 export function registerAdminSecurityRoutes(app: Express) {
-  app.get("/api/admin/users/:userId/login-activity", (req: Request, res: Response) => {
+  app.get("/api/admin/users/:userId/login-activity", async (req: Request, res: Response) => {
     const admin = requireAdmin(req as any, res);
     if (!admin) return;
 
     const userId = Number(req.params.userId);
     const limit = Math.min(200, Math.max(1, Number(req.query.limit || 50)));
 
-    const rows = getRecentLoginActivity({ userId, limit });
+    const rows = await getRecentLoginActivity({ userId, limit });
     res.json({ rows });
   });
 
-  app.get("/api/admin/users/:userId/login-activity.csv", (req: Request, res: Response) => {
+  app.get("/api/admin/users/:userId/login-activity.csv", async (req: Request, res: Response) => {
     const admin = requireAdmin(req as any, res);
     if (!admin) return;
 
     const userId = Number(req.params.userId);
     const limit = Math.min(2000, Math.max(1, Number(req.query.limit || 500)));
 
-    const rows = db
+    const rows = await db
       .select({
         id: userLoginHistory.id,
         eventType: userLoginHistory.eventType,
@@ -66,15 +66,14 @@ export function registerAdminSecurityRoutes(app: Express) {
       .from(userLoginHistory)
       .where(eq(userLoginHistory.userId, userId))
       .orderBy(desc(userLoginHistory.createdAt))
-      .limit(limit)
-      .all();
+      .limit(limit);
 
     res.setHeader("Content-Type", "text/csv; charset=utf-8");
     res.setHeader("Content-Disposition", `attachment; filename="user_${userId}_login_activity.csv"`);
     res.send(toCsv(rows));
   });
 
-  app.get("/api/admin/users/:userId/sessions", (req: Request, res: Response) => {
+  app.get("/api/admin/users/:userId/sessions", async (req: Request, res: Response) => {
     const admin = requireAdmin(req as any, res);
     if (!admin) return;
 
@@ -82,11 +81,11 @@ export function registerAdminSecurityRoutes(app: Express) {
     const limit = Math.min(200, Math.max(1, Number(req.query.limit || 50)));
     const includeRevoked = String(req.query.includeRevoked || "0") === "1";
 
-    const rows = getAllSessions({ userId, limit, includeRevoked });
+    const rows = await getAllSessions({ userId, limit, includeRevoked });
     res.json({ rows });
   });
 
-  app.post("/api/admin/users/:userId/sessions/:sessionId/revoke", (req: Request, res: Response) => {
+  app.post("/api/admin/users/:userId/sessions/:sessionId/revoke", async (req: Request, res: Response) => {
     const admin = requireAdmin(req as any, res);
     if (!admin) return;
 
@@ -94,7 +93,7 @@ export function registerAdminSecurityRoutes(app: Express) {
     const sessionId = String(req.params.sessionId);
     const reason = String((req.body as any)?.reason || "Admin revoked session");
 
-    revokeSession({
+    await revokeSession({
       actorUserId: admin.adminUserId,
       targetUserId: userId,
       sessionId,
@@ -104,7 +103,7 @@ export function registerAdminSecurityRoutes(app: Express) {
     res.json({ ok: true });
   });
 
-  app.get("/api/admin/users/:userId/sessions.csv", (req: Request, res: Response) => {
+  app.get("/api/admin/users/:userId/sessions.csv", async (req: Request, res: Response) => {
     const admin = requireAdmin(req as any, res);
     if (!admin) return;
 
@@ -112,7 +111,7 @@ export function registerAdminSecurityRoutes(app: Express) {
     const limit = Math.min(2000, Math.max(1, Number(req.query.limit || 500)));
     const includeRevoked = String(req.query.includeRevoked || "1") === "1";
 
-    const rows = getAllSessions({ userId, limit, includeRevoked });
+    const rows = await getAllSessions({ userId, limit, includeRevoked });
 
     res.setHeader("Content-Type", "text/csv; charset=utf-8");
     res.setHeader("Content-Disposition", `attachment; filename="user_${userId}_sessions.csv"`);

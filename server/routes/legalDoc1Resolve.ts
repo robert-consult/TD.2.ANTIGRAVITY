@@ -16,7 +16,7 @@ export const legalDoc1ResolveRouter = Router();
  * GET /api/legal/doc1/resolve?countryIso2=KE
  * Resolves legal documents for signup flow
  */
-legalDoc1ResolveRouter.get("/resolve", (req, res) => {
+legalDoc1ResolveRouter.get("/resolve", async (req, res) => {
   try {
     const countryIso2 = String(req.query.countryIso2 || "").trim().toUpperCase();
     const regionKeyOverride = req.query.regionKey != null ? String(req.query.regionKey).trim() : null;
@@ -39,7 +39,7 @@ legalDoc1ResolveRouter.get("/resolve", (req, res) => {
       });
     }
 
-    const assembled = assembleDoc1Terms(countryIso2, { purpose: "SIGNUP" });
+    const assembled = await assembleDoc1Terms(countryIso2, { purpose: "SIGNUP" });
 
     if (assembled.blocked) {
       return res.status(409).json({
@@ -94,7 +94,7 @@ legalDoc1ResolveRouter.get("/resolve", (req, res) => {
  * GET /api/legal/doc1/check?countryIso2=KE
  * Quick availability check (no document content)
  */
-legalDoc1ResolveRouter.get("/check", (req, res) => {
+legalDoc1ResolveRouter.get("/check", async (req, res) => {
   try {
     const countryIso2 = String(req.query.countryIso2 || "").trim().toUpperCase();
 
@@ -117,7 +117,7 @@ legalDoc1ResolveRouter.get("/check", (req, res) => {
       });
     }
 
-    const assembled = assembleDoc1Terms(countryIso2, { purpose: "SIGNUP" });
+    const assembled = await assembleDoc1Terms(countryIso2, { purpose: "SIGNUP" });
 
     if (assembled.blocked) {
       return res.json({

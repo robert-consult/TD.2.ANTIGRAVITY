@@ -1,17 +1,17 @@
 // server/grift/griftScheduler.ts
 import * as cron from "node-cron";
-import Database from "better-sqlite3";
 import { recomputeUserAggregates, getConfig } from "./griftEngine";
 import { maybeApplyAutoEnforcement } from "./griftAutoEnforcement";
 import { enrichIpAsnCacheBatch } from "./griftIpAsn";
 import { runGriftRetention } from "./griftRetention";
 import { appendAuditEntry } from "./griftAdminAudit";
+import { withGriftClient } from "./griftDb";
 
 let scheduledTask: ReturnType<typeof cron.schedule> | null = null;
 let lastRetentionRunAtMs = 0;
 const RETENTION_RUN_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
-export function startGriftEvaluationScheduler(dbPath: string) {
+export function startGriftEvaluationScheduler() {
   if (scheduledTask) {
     console.log("[Grift Scheduler] Already running, skipping initialization");
     return;
@@ -20,7 +20,7 @@ export function startGriftEvaluationScheduler(dbPath: string) {
   // Run every hour at minute 0
   scheduledTask = cron.schedule("0 * * * *", () => {
     console.log("[Grift Scheduler] Running periodic risk re-evaluation...");
-    void runPeriodicEvaluation(dbPath);
+    void runPeriodicEvaluation();
   });
 
   console.log("[Grift Scheduler] Periodic risk evaluation scheduled (hourly)");
@@ -34,20 +34,16 @@ export function stopGriftEvaluationScheduler() {
   }
 }
 
-export async function runPeriodicEvaluation(dbPath: string) {
-  const db = new Database(dbPath);
-  try {
-    db.pragma("busy_timeout = 5000");
-  } catch {}
-  try {
-    const cfg = getConfig(db);
+export async function runPeriodicEvaluation() {
+  return await withGriftClient(async (db) => {
+    const cfg = await getConfig(db);
     // Daily retention pruning (raw telemetry) to prevent unbounded DB growth.
     const nowMs = Date.now();
     if (!lastRetentionRunAtMs || nowMs - lastRetentionRunAtMs >= RETENTION_RUN_INTERVAL_MS) {
       try {
-        const result = runGriftRetention(db, cfg);
+        const result = await runGriftRetention(db, cfg);
         lastRetentionRunAtMs = nowMs;
-        appendAuditEntry(db, 0, "RETENTION_PRUNE", "maintenance", 1, result);
+        await appendAuditEntry(db, 0, "RETENTION_PRUNE", "maintenance", 1, result);
         console.log(
           `[Grift Scheduler] Retention prune: obs=${result.deleted.observations}, tradeObs=${result.deleted.tradeObservations}, auth=${result.deleted.authEvents}, ipAsnCache=${result.deleted.ipAsnCache} (took ${result.tookMs}ms)`
         );
@@ -78,13 +74,13 @@ export async function runPeriodicEvaluation(dbPath: string) {
     }
 
     // Find users with open signals or recent activity
-    const usersWithOpenSignals = db.prepare(`
+    const usersWithOpenSignals = await db.prepare(`
       SELECT DISTINCT user_id as userId FROM grift_signals WHERE status = 'OPEN'
     `).all() as { userId: number }[];
 
     // Also include users with recent observations (last 24 hours)
     const recentCutoff = Date.now() - 24 * 60 * 60 * 1000;
-    const usersWithRecentActivity = db.prepare(`
+    const usersWithRecentActivity = await db.prepare(`
       SELECT DISTINCT user_id as userId FROM grift_observations WHERE observed_at >= ?
     `).all(recentCutoff) as { userId: number }[];
 
@@ -96,7 +92,7 @@ export async function runPeriodicEvaluation(dbPath: string) {
     for (const userId of Array.from(userIds)) {
       try {
         // Recompute all aggregate fields (signals + observations based).
-        recomputeUserAggregates(db, userId);
+        await recomputeUserAggregates(db, userId);
         evaluated++;
 
         // Auto-enforcement (optional and admin-configurable).
@@ -112,12 +108,10 @@ export async function runPeriodicEvaluation(dbPath: string) {
 
     console.log(`[Grift Scheduler] Recomputed aggregates for ${evaluated} users`);
     return { evaluated };
-  } finally {
-    db.close();
-  }
+  });
 }
 
-export function runImmediateEvaluation(dbPath: string) {
+export function runImmediateEvaluation() {
   console.log("[Grift Scheduler] Running immediate risk re-evaluation...");
-  return runPeriodicEvaluation(dbPath);
+  return runPeriodicEvaluation();
 }

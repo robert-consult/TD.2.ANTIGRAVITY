@@ -43,7 +43,6 @@ import { impersonationGuard } from "./middleware/auth";
 import { requirePolicy } from "./middleware/requirePolicy";
 import { recalcAccount } from "./recalcAccount";
 import { requiredMargin } from "./lib/margin";
-import BetterSQLite3 from "better-sqlite3";
 import { getExecutionQuote } from "./services/quoteService";
 import { realizedPnlUsd } from "./lib/realizedPnl";
 import { buildAuditContext, type AuditContext } from "./lib/auditContext";
@@ -69,6 +68,7 @@ import { i18nRouter } from "./routes/i18n";
 import { adminI18nRouter } from "./routes/adminI18n";
 import { botGuard, persistBotAssessmentForUser } from "./security/botGuard";
 import { jurisdictionSessionGuard } from "./middleware/jurisdictionSessionGuard";
+import { withGriftClient } from "./grift/griftDb";
 
 /**
  * Precision-aware price comparison utilities for forex trading.
@@ -747,12 +747,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
 
       let griftAutoEnforcement: any = null;
-      if (!isPostgres) {
+      if (isPostgres) {
         try {
           const griftCtx = extractGriftContext(req);
-          const griftDb = new BetterSQLite3("./trading_app.db");
-          try { griftDb.pragma("busy_timeout = 5000"); } catch {}
-          try {
+          await withGriftClient(async (griftDb) => {
             const griftAuditCtx: GriftAuditContext = {
               ts: Date.now(),
               userId: user.id,
@@ -776,7 +774,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             };
 
             // Run all detection rules via onLoginSuccess
-            onLoginSuccess(griftDb, griftAuditCtx);
+            await onLoginSuccess(griftDb, griftAuditCtx);
 
             // Optional auto-enforcement (freeze/disable) based on admin-configured thresholds.
             try {
@@ -784,9 +782,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             } catch (enfErr) {
               console.error("[Grift] Auto-enforcement failed:", enfErr);
             }
-          } finally {
-            griftDb.close();
-          }
+          });
         } catch (griftErr) {
           console.error("[Grift] Failed to capture login context:", griftErr);
         }
@@ -1231,12 +1227,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
 
       let griftAutoEnforcement: any = null;
-      if (!isPostgres) {
+      if (isPostgres) {
         try {
           const griftCtx = extractGriftContext(req);
-          const griftDb = new BetterSQLite3("./trading_app.db");
-          try { griftDb.pragma("busy_timeout = 5000"); } catch {}
-          try {
+          await withGriftClient(async (griftDb) => {
             const griftAuditCtx: GriftAuditContext = {
               ts: Date.now(),
               userId: user.id,
@@ -1259,16 +1253,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
               org: griftCtx.org ?? undefined,
             };
 
-            onLoginSuccess(griftDb, griftAuditCtx);
+            await onLoginSuccess(griftDb, griftAuditCtx);
 
             try {
               griftAutoEnforcement = await maybeApplyAutoEnforcement(griftDb, griftAuditCtx);
             } catch (enfErr) {
               console.error("[Grift] Auto-enforcement failed (registration):", enfErr);
             }
-          } finally {
-            griftDb.close();
-          }
+          });
         } catch (griftErr) {
           console.error("[Grift] Failed to capture registration context:", griftErr);
         }
@@ -2988,12 +2980,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       );
 
       // Grift detection: Record trade observation and check for coordinated hedging
-      if (!isPostgres) {
+      if (isPostgres) {
         try {
           const griftCtx = extractGriftContext(req);
-          const griftDb = new BetterSQLite3("./trading_app.db");
-          try { griftDb.pragma("busy_timeout = 5000"); } catch {}
-          try {
+          await withGriftClient(async (griftDb) => {
             const griftAuditCtx: GriftAuditContext = {
               ts: Date.now(),
               userId: req.session.userId,
@@ -3016,7 +3006,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               org: griftCtx.org ?? undefined,
             };
 
-            onTradeSubmit(
+            await onTradeSubmit(
               griftDb,
               trade.id,
               symbolConfig.symbol,
@@ -3030,9 +3020,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             } catch (enfErr) {
               console.error("[Grift] Auto-enforcement failed (trade submit):", enfErr);
             }
-          } finally {
-            griftDb.close();
-          }
+          });
         } catch (griftErr) {
           console.error("Error in grift detection onTradeSubmit:", griftErr);
         }
@@ -3272,12 +3260,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       );
 
       // Grift detection: record close activity (supports churn/concurrency + identity linking)
-      if (!isPostgres) {
+      if (isPostgres) {
         try {
           const griftCtx = extractGriftContext(req);
-          const griftDb = new BetterSQLite3("./trading_app.db");
-          try { griftDb.pragma("busy_timeout = 5000"); } catch {}
-          try {
+          await withGriftClient(async (griftDb) => {
             const griftAuditCtx: GriftAuditContext = {
               ts: Date.now(),
               userId: req.session.userId,
@@ -3300,16 +3286,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
               org: griftCtx.org ?? undefined,
             };
 
-            onSessionActivity(griftDb, griftAuditCtx);
+            await onSessionActivity(griftDb, griftAuditCtx);
 
             try {
               await maybeApplyAutoEnforcement(griftDb, griftAuditCtx);
             } catch (enfErr) {
               console.error("[Grift] Auto-enforcement failed (trade close):", enfErr);
             }
-          } finally {
-            griftDb.close();
-          }
+          });
         } catch (griftErr) {
           console.error("Error in grift detection on trade close:", griftErr);
         }
@@ -3426,12 +3410,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       );
 
       // Grift detection: record modification activity (supports churn/concurrency + identity linking)
-      if (!isPostgres) {
+      if (isPostgres) {
         try {
           const griftCtx = extractGriftContext(req);
-          const griftDb = new BetterSQLite3("./trading_app.db");
-          try { griftDb.pragma("busy_timeout = 5000"); } catch {}
-          try {
+          await withGriftClient(async (griftDb) => {
             const griftAuditCtx: GriftAuditContext = {
               ts: Date.now(),
               userId: session.userId,
@@ -3454,16 +3436,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
               org: griftCtx.org ?? undefined,
             };
 
-            onSessionActivity(griftDb, griftAuditCtx);
+            await onSessionActivity(griftDb, griftAuditCtx);
 
             try {
               await maybeApplyAutoEnforcement(griftDb, griftAuditCtx);
             } catch (enfErr) {
               console.error("[Grift] Auto-enforcement failed (trade targets update):", enfErr);
             }
-          } finally {
-            griftDb.close();
-          }
+          });
         } catch (griftErr) {
           console.error("Error in grift detection on trade targets update:", griftErr);
         }
@@ -3577,12 +3557,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       );
 
       // Grift detection: record cancel activity (supports churn/concurrency + identity linking)
-      if (!isPostgres) {
+      if (isPostgres) {
         try {
           const griftCtx = extractGriftContext(req);
-          const griftDb = new BetterSQLite3("./trading_app.db");
-          try { griftDb.pragma("busy_timeout = 5000"); } catch {}
-          try {
+          await withGriftClient(async (griftDb) => {
             const griftAuditCtx: GriftAuditContext = {
               ts: Date.now(),
               userId: session.userId,
@@ -3605,16 +3583,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
               org: griftCtx.org ?? undefined,
             };
 
-            onSessionActivity(griftDb, griftAuditCtx);
+            await onSessionActivity(griftDb, griftAuditCtx);
 
             try {
               await maybeApplyAutoEnforcement(griftDb, griftAuditCtx);
             } catch (enfErr) {
               console.error("[Grift] Auto-enforcement failed (trade cancel):", enfErr);
             }
-          } finally {
-            griftDb.close();
-          }
+          });
         } catch (griftErr) {
           console.error("Error in grift detection on trade cancel:", griftErr);
         }
@@ -3921,7 +3897,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           ) AS "prevClose"
         FROM quotes q
         `,
-        [nowSec, currentSessionDay]
+        [nowMs, currentSessionDay]
       );
       const quotes = quotesResult.rows;
 
@@ -3958,7 +3934,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           isStale,
           lastApiUpdate: lastUpdate,
           dataAge: ageMs,
-          timestamp: Math.floor(nowMs / 1000),
+          timestamp: nowSec,
         };
       });
 
@@ -4015,13 +3991,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use("/api/admin/activity", adminActivityRouter); // Inactive users + bot management
 
   app.use("/api/admin/i18n", adminI18nRouter); // Admin controls for i18n
+  registerGriftRoutes(app);
+  app.use("/api/grift", griftPublicRouter);
+  app.use('/api/admin/migration', adminMigrationRouter); // Migration export/import (backup)
   if (!isPostgres) {
-    registerGriftRoutes(app);
-    app.use("/api/grift", griftPublicRouter);
     app.use('/api/admin/legal-docs', adminLegalRouter); // Admin legal management routes (legacy)
-    app.use('/api/admin/migration', adminMigrationRouter); // Migration export/import (backup)
   } else {
-    console.warn("[DB] Postgres mode: grift/admin migration/legacy legal routes are disabled.");
+    console.warn("[DB] Postgres mode: legacy legal routes remain disabled.");
   }
 
   // Create HTTP server
@@ -4298,7 +4274,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const existingQuotes = await db.select({ symbol: quotes.symbol }).from(quotes);
       const existingSymbols = new Set(existingQuotes.map((q) => q.symbol));
 
-      const nowSec = Math.floor(Date.now() / 1000);
+      const nowMs = Date.now();
+      const nowSec = Math.floor(nowMs / 1000);
 
       for (const item of defaultSymbols) {
         if (!existingSymbols.has(item.symbol)) {
@@ -4309,7 +4286,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               bid: item.bid,
               ask: item.ask,
               updatedAt: nowSec,
-              lastApiUpdate: nowSec,
+              lastApiUpdate: nowMs,
               isStale: false,
             })
             .onConflictDoNothing();
@@ -4346,7 +4323,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 bid,
                 ask,
                 updatedAt: nowSec,
-                lastApiUpdate: nowSec,
+                lastApiUpdate: nowMs,
                 isStale: false,
               })
               .onConflictDoNothing();
@@ -4379,7 +4356,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         })
         .from(quotes);
 
-      const timestamp = Math.floor(Date.now() / 1000);
+      const nowMs = Date.now();
+      const timestamp = Math.floor(nowMs / 1000);
 
       for (const quote of quoteRows) {
         const isJpy = String(quote.symbol).includes("JPY");
@@ -4400,7 +4378,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             bid: newBid,
             ask: newAsk,
             updatedAt: timestamp,
-            lastApiUpdate: timestamp,
+            lastApiUpdate: nowMs,
             isStale: false,
           })
           .where(eq(quotes.symbol, quote.symbol));

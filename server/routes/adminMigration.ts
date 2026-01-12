@@ -5,7 +5,7 @@ import fs from "fs";
 import multer from "multer";
 import { requireAdmin } from "../middleware/requireAdmin";
 import { storage } from "../storage";
-import { db } from "@db";
+import { db, dbClient } from "@db";
 import { migrationExportJobs, migrationImportJobs, migrationIntegrityChecks, migrationJobLogs } from "@shared/schema";
 import { desc, eq } from "drizzle-orm";
 import {
@@ -191,7 +191,7 @@ adminMigrationRouter.post("/export-jobs", async (req, res) => {
 adminMigrationRouter.get("/export-jobs", async (req, res) => {
   try {
     const limit = Math.min(Math.max(1, Number(req.query.limit || 50)), 500);
-    const jobs = listExportJobs(limit);
+    const jobs = await listExportJobs(limit);
     return res.json(jobs.map((j: any) => ({
       ...j,
       totals: parseJsonField(j.totalsJson),
@@ -205,7 +205,7 @@ adminMigrationRouter.get("/export-jobs", async (req, res) => {
 // GET /api/admin/migration/export-jobs/:jobId
 adminMigrationRouter.get("/export-jobs/:jobId", async (req, res) => {
   const jobId = String(req.params.jobId || "");
-  const job = getExportJob(jobId);
+  const job = await getExportJob(jobId);
   if (!job) return res.status(404).json({ message: "Job not found" });
   return res.json({
     ...job,
@@ -217,7 +217,7 @@ adminMigrationRouter.get("/export-jobs/:jobId", async (req, res) => {
 // GET /api/admin/migration/export-jobs/:jobId/manifest
 adminMigrationRouter.get("/export-jobs/:jobId/manifest", async (req, res) => {
   const jobId = String(req.params.jobId || "");
-  const job = getExportJob(jobId) as any;
+  const job = await getExportJob(jobId) as any;
   if (!job) return res.status(404).json({ message: "Job not found" });
   if (job.status !== "READY" || !job.manifestPath) {
     return res.status(409).json({ message: "Export not ready" });
@@ -236,7 +236,7 @@ adminMigrationRouter.get("/export-jobs/:jobId/manifest", async (req, res) => {
 // GET /api/admin/migration/export-jobs/:jobId/data
 adminMigrationRouter.get("/export-jobs/:jobId/data", async (req, res) => {
   const jobId = String(req.params.jobId || "");
-  const job = getExportJob(jobId) as any;
+  const job = await getExportJob(jobId) as any;
   if (!job) return res.status(404).json({ message: "Job not found" });
   if (job.status !== "READY") {
     return res.status(409).json({ message: "Export not ready" });
@@ -284,7 +284,7 @@ adminMigrationRouter.get("/export-jobs/:jobId/data", async (req, res) => {
 // GET /api/admin/migration/export-jobs/:jobId/chunks
 adminMigrationRouter.get("/export-jobs/:jobId/chunks", async (req, res) => {
   const jobId = String(req.params.jobId || "");
-  const job = getExportJob(jobId) as any;
+  const job = await getExportJob(jobId) as any;
   if (!job) return res.status(404).json({ message: "Job not found" });
   if (job.status !== "READY") {
     return res.status(409).json({ message: "Export not ready" });
@@ -324,7 +324,7 @@ adminMigrationRouter.get("/export-jobs/:jobId/chunks/:index", async (req, res) =
     return res.status(400).json({ message: "Invalid chunk index" });
   }
 
-  const job = getExportJob(jobId) as any;
+  const job = await getExportJob(jobId) as any;
   if (!job) return res.status(404).json({ message: "Job not found" });
   if (job.status !== "READY") {
     return res.status(409).json({ message: "Export not ready" });
@@ -454,7 +454,7 @@ adminMigrationRouter.post(
 adminMigrationRouter.get("/import-jobs", async (req, res) => {
   try {
     const limit = Math.min(Math.max(1, Number(req.query.limit || 50)), 500);
-    const jobs = listImportJobs(limit);
+    const jobs = await listImportJobs(limit);
     return res.json(jobs.map((j: any) => ({
       ...j,
       totals: parseJsonField(j.totalsJson),
@@ -467,7 +467,7 @@ adminMigrationRouter.get("/import-jobs", async (req, res) => {
 // GET /api/admin/migration/import-jobs/:jobId
 adminMigrationRouter.get("/import-jobs/:jobId", async (req, res) => {
   const jobId = String(req.params.jobId || "");
-  const job = getImportJob(jobId);
+  const job = await getImportJob(jobId);
   if (!job) return res.status(404).json({ message: "Job not found" });
   return res.json({
     ...job,
@@ -478,7 +478,7 @@ adminMigrationRouter.get("/import-jobs/:jobId", async (req, res) => {
 // DELETE /api/admin/migration/import-jobs/:jobId/files
 adminMigrationRouter.delete("/import-jobs/:jobId/files", async (req, res) => {
   const jobId = String(req.params.jobId || "");
-  const job = getImportJob(jobId) as any;
+  const job = await getImportJob(jobId) as any;
   if (!job) return res.status(404).json({ message: "Job not found" });
   if (job.status === "RUNNING" || job.status === "QUEUED") {
     return res.status(409).json({ message: "Job is still running" });
@@ -555,7 +555,7 @@ adminMigrationRouter.delete("/import-jobs/:jobId/files", async (req, res) => {
 adminMigrationRouter.get("/jobs/:jobId/logs", async (req, res) => {
   const jobId = String(req.params.jobId || "");
   const limit = Math.min(Math.max(1, Number(req.query.limit || 200)), 500);
-  const logs = listJobLogs(jobId, limit);
+  const logs = await listJobLogs(jobId, limit);
   return res.json(logs);
 });
 
@@ -578,7 +578,7 @@ adminMigrationRouter.get("/jobs/:jobId/integrity", async (req, res) => {
 // DELETE /api/admin/migration/export-jobs/:jobId/files
 adminMigrationRouter.delete("/export-jobs/:jobId/files", async (req, res) => {
   const jobId = String(req.params.jobId || "");
-  const job = getExportJob(jobId) as any;
+  const job = await getExportJob(jobId) as any;
   if (!job) return res.status(404).json({ message: "Job not found" });
   if (job.status === "RUNNING" || job.status === "QUEUED") {
     return res.status(409).json({ message: "Job is still running" });
@@ -661,12 +661,14 @@ adminMigrationRouter.post("/export-jobs/purge", async (req, res) => {
     const olderThanDays = Number.isFinite(daysRaw) ? Math.max(1, Math.floor(daysRaw)) : 30;
     const cutoff = nowMs() - olderThanDays * 24 * 60 * 60 * 1000;
 
-    const rows = db.$client.prepare(
-      `SELECT * FROM migration_export_jobs
-       WHERE created_at < ?
+    const { rows } = await dbClient.query(
+      `SELECT *
+       FROM migration_export_jobs
+       WHERE created_at < $1
        AND (data_path IS NOT NULL OR manifest_path IS NOT NULL)
-       ORDER BY created_at DESC`
-    ).all(cutoff) as any[];
+       ORDER BY created_at DESC`,
+      [cutoff]
+    );
 
     let jobsPurged = 0;
     let filesRemoved = 0;
@@ -735,12 +737,14 @@ adminMigrationRouter.post("/import-jobs/purge", async (req, res) => {
     const olderThanDays = Number.isFinite(daysRaw) ? Math.max(1, Math.floor(daysRaw)) : 30;
     const cutoff = nowMs() - olderThanDays * 24 * 60 * 60 * 1000;
 
-    const rows = db.$client.prepare(
-      `SELECT * FROM migration_import_jobs
-       WHERE created_at < ?
+    const { rows } = await dbClient.query(
+      `SELECT *
+       FROM migration_import_jobs
+       WHERE created_at < $1
        AND (data_path IS NOT NULL OR manifest_path IS NOT NULL)
-       ORDER BY created_at DESC`
-    ).all(cutoff) as any[];
+       ORDER BY created_at DESC`,
+      [cutoff]
+    );
 
     let jobsPurged = 0;
     let filesRemoved = 0;
@@ -787,11 +791,11 @@ adminMigrationRouter.post("/import-jobs/purge", async (req, res) => {
     }
 
     const keepFiles = new Set<string>();
-    const activeRows = db.$client.prepare(
-      `SELECT data_path as dataPath, data_parts_json as dataPartsJson, manifest_path as manifestPath
+    const { rows: activeRows } = await dbClient.query(
+      `SELECT data_path as "dataPath", data_parts_json as "dataPartsJson", manifest_path as "manifestPath"
        FROM migration_import_jobs
        WHERE status IN ('RUNNING','QUEUED')`
-    ).all() as any[];
+    );
 
     for (const row of activeRows) {
       if (row?.dataPath) keepFiles.add(path.resolve(row.dataPath));

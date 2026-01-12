@@ -4,7 +4,7 @@ import path from "path";
 import crypto from "crypto";
 import { once } from "events";
 import readline from "readline";
-import { db } from "@db";
+import { db, dbClient } from "@db";
 import { storage } from "../storage";
 import {
   migrationExportJobs,
@@ -27,8 +27,90 @@ const MAX_LOG_CONTEXT = 20_000;
 const BATCH_SIZE = 1000;
 const YIELD_EVERY = 2000;
 
+function convertQuestionMarks(sql: string): string {
+  let out = "";
+  let index = 1;
+  let inSingle = false;
+  let inDouble = false;
+  let inLineComment = false;
+  let inBlockComment = false;
+
+  for (let i = 0; i < sql.length; i++) {
+    const ch = sql[i];
+    const next = i + 1 < sql.length ? sql[i + 1] : "";
+
+    if (inLineComment) {
+      out += ch;
+      if (ch === "\n") inLineComment = false;
+      continue;
+    }
+    if (inBlockComment) {
+      out += ch;
+      if (ch === "*" && next === "/") {
+        out += next;
+        i++;
+        inBlockComment = false;
+      }
+      continue;
+    }
+
+    if (!inSingle && !inDouble) {
+      if (ch === "-" && next === "-") {
+        out += ch + next;
+        i++;
+        inLineComment = true;
+        continue;
+      }
+      if (ch === "/" && next === "*") {
+        out += ch + next;
+        i++;
+        inBlockComment = true;
+        continue;
+      }
+    }
+
+    if (ch === "'" && !inDouble) {
+      out += ch;
+      if (inSingle && next === "'") {
+        out += next;
+        i++;
+      } else {
+        inSingle = !inSingle;
+      }
+      continue;
+    }
+
+    if (ch === "\"" && !inSingle) {
+      out += ch;
+      inDouble = !inDouble;
+      continue;
+    }
+
+    if (!inSingle && !inDouble && ch === "?") {
+      out += `$${index++}`;
+      continue;
+    }
+
+    out += ch;
+  }
+
+  return out;
+}
+
+async function queryAll<T = any>(sql: string, args: any[] = []): Promise<T[]> {
+  const text = convertQuestionMarks(sql);
+  const result = await dbClient.query(text, args);
+  return result.rows as T[];
+}
+
+async function queryOne<T = any>(sql: string, args: any[] = []): Promise<T | undefined> {
+  const rows = await queryAll<T>(sql, args);
+  return rows[0];
+}
+
 const EXCLUDED_TABLES = new Set<string>([
   "sqlite_sequence",
+  "__drizzle_migrations",
   "migration_export_jobs",
   "migration_import_jobs",
   "migration_job_logs",
@@ -172,18 +254,16 @@ async function logJob(jobId: string, level: "INFO" | "WARN" | "ERROR", message: 
   }).run();
 }
 
-function listTables(): string[] {
-  const rows = db.$client
-    .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
-    .all() as Array<{ name: string }>;
+async function listTables(): Promise<string[]> {
+  const rows = await queryAll<{ name: string }>(
+    "SELECT tablename as name FROM pg_tables WHERE schemaname = 'public'"
+  );
   return rows.map((r) => r.name).filter((name) => !EXCLUDED_TABLES.has(name));
 }
 
-function tableExists(table: string): boolean {
-  const row = db.$client
-    .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name = ?")
-    .get(table) as { name?: string } | undefined;
-  return Boolean(row?.name);
+async function tableExists(table: string): Promise<boolean> {
+  const row = await queryOne<{ regclass: string | null }>("SELECT to_regclass(?) as regclass", [`public.${table}`]);
+  return Boolean(row?.regclass);
 }
 
 function orderTables(tables: string[]): string[] {
@@ -199,17 +279,35 @@ function orderTables(tables: string[]): string[] {
   return ordered.concat(remaining);
 }
 
-function getTableColumns(table: string): string[] {
-  const rows = db.$client.prepare(`PRAGMA table_info("${table}")`).all() as Array<{ name: string }>;
-  return rows.map((r) => r.name);
+async function getTableColumns(table: string): Promise<string[]> {
+  const rows = await queryAll<{ column_name: string }>(
+    `
+    SELECT column_name
+    FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = ?
+    ORDER BY ordinal_position
+  `,
+    [table]
+  );
+  return rows.map((r) => r.column_name);
 }
 
-function getPrimaryKeys(table: string): string[] {
-  const rows = db.$client.prepare(`PRAGMA table_info("${table}")`).all() as Array<{ name: string; pk: number }>;
-  return rows
-    .filter((r) => r.pk && r.pk > 0)
-    .sort((a, b) => a.pk - b.pk)
-    .map((r) => r.name);
+async function getPrimaryKeys(table: string): Promise<string[]> {
+  const rows = await queryAll<{ column_name: string; ordinal_position: number }>(
+    `
+    SELECT kcu.column_name, kcu.ordinal_position
+    FROM information_schema.table_constraints tc
+    JOIN information_schema.key_column_usage kcu
+      ON tc.constraint_name = kcu.constraint_name
+     AND tc.table_schema = kcu.table_schema
+    WHERE tc.table_schema = 'public'
+      AND tc.table_name = ?
+      AND tc.constraint_type = 'PRIMARY KEY'
+    ORDER BY kcu.ordinal_position
+  `,
+    [table]
+  );
+  return rows.map((r) => r.column_name);
 }
 
 function findTimeColumn(columns: string[]): { column: string; unit: "ms" | "s" } | null {
@@ -333,30 +431,31 @@ async function computeChunkChain(filePaths: string[]) {
   return { dataSha256: dataHash.digest("hex"), chunks, headLinkHash: prevLinkHash };
 }
 
-export function getExportJob(jobId: string) {
-  return db.select().from(migrationExportJobs).where(eq(migrationExportJobs.id, jobId)).get();
+export async function getExportJob(jobId: string) {
+  const rows = await db.select().from(migrationExportJobs).where(eq(migrationExportJobs.id, jobId)).limit(1);
+  return rows[0];
 }
 
-export function listExportJobs(limit = 50) {
-  return db.select().from(migrationExportJobs).orderBy(desc(migrationExportJobs.createdAt)).limit(limit).all();
+export async function listExportJobs(limit = 50) {
+  return await db.select().from(migrationExportJobs).orderBy(desc(migrationExportJobs.createdAt)).limit(limit);
 }
 
-export function getImportJob(jobId: string) {
-  return db.select().from(migrationImportJobs).where(eq(migrationImportJobs.id, jobId)).get();
+export async function getImportJob(jobId: string) {
+  const rows = await db.select().from(migrationImportJobs).where(eq(migrationImportJobs.id, jobId)).limit(1);
+  return rows[0];
 }
 
-export function listImportJobs(limit = 50) {
-  return db.select().from(migrationImportJobs).orderBy(desc(migrationImportJobs.createdAt)).limit(limit).all();
+export async function listImportJobs(limit = 50) {
+  return await db.select().from(migrationImportJobs).orderBy(desc(migrationImportJobs.createdAt)).limit(limit);
 }
 
-export function listJobLogs(jobId: string, limit = 200) {
-  return db
+export async function listJobLogs(jobId: string, limit = 200) {
+  return await db
     .select()
     .from(migrationJobLogs)
     .where(eq(migrationJobLogs.jobId, jobId))
     .orderBy(desc(migrationJobLogs.ts))
-    .limit(limit)
-    .all();
+    .limit(limit);
 }
 
 export async function createExportJob(params: {
@@ -433,7 +532,7 @@ async function runExportJob(
   let prevLinkHash = "GENESIS";
   let totalSizeBytes = 0;
 
-  const tableList = orderTables(listTables());
+  const tableList = orderTables(await listTables());
   const counts: Record<string, number> = {};
   const skippedTables: string[] = [];
   let totalRows = 0;
@@ -479,7 +578,7 @@ async function runExportJob(
 
   try {
     for (const table of tableList) {
-      const columns = getTableColumns(table);
+      const columns = await getTableColumns(table);
       const query = buildSelectSql({
         scope: params.scope,
         table,
@@ -492,10 +591,8 @@ async function runExportJob(
         continue;
       }
 
-      const stmt = db.$client.prepare(query.sql);
-      const iterator = stmt.iterate(...query.args) as IterableIterator<Record<string, any>>;
-
-      for (const row of iterator) {
+      const rows = await queryAll<Record<string, any>>(query.sql, query.args);
+      for (const row of rows) {
         const payload = JSON.stringify({ t: table, op: "upsert", row });
         const line = `${payload}\n`;
         if (useChunking && partRows > 0 && Buffer.byteLength(line, "utf8") + ws.bytesWritten > chunkSizeBytes) {
@@ -735,12 +832,14 @@ async function runImportJob(
   const tableStates = new Map<string, any>();
   const skippedTables = new Set<string>();
   const counts: Record<string, number> = {};
+  const client = await dbClient.connect();
+  const exec = async (sql: string, args: any[] = []) => client.query(sql, args);
 
-  const getTableState = (table: string, row: Record<string, any>) => {
+  const getTableState = async (table: string, row: Record<string, any>) => {
     let st = tableStates.get(table);
     if (st) return st;
 
-    if (!tableExists(table)) {
+    if (!await tableExists(table)) {
       if (!skippedTables.has(table)) {
         skippedTables.add(table);
         logJob(jobId, "WARN", "Table not found in target, skipping", { table }).catch(() => {});
@@ -748,8 +847,8 @@ async function runImportJob(
       return null;
     }
 
-    const columns = getTableColumns(table);
-    const pkColumns = getPrimaryKeys(table);
+    const columns = await getTableColumns(table);
+    const pkColumns = await getPrimaryKeys(table);
     const rowKeys = Object.keys(row || {});
     const insertColumns = columns.filter((c) => rowKeys.includes(c));
     const updateColumns = insertColumns.filter((c) => !pkColumns.includes(c));
@@ -759,7 +858,7 @@ async function runImportJob(
     }
 
     const colList = insertColumns.map((c) => `"${c}"`).join(", ");
-    const valuesList = insertColumns.map((c) => `@${c}`).join(", ");
+    const valuesList = insertColumns.map((_, idx) => `$${idx + 1}`).join(", ");
     let sql = `INSERT INTO "${table}" (${colList}) VALUES (${valuesList})`;
 
     if (pkColumns.length && updateColumns.length) {
@@ -773,32 +872,26 @@ async function runImportJob(
       columns,
       pkColumns,
       insertColumns,
-      stmt: db.$client.prepare(sql),
+      sql,
       buffer: [] as any[],
     };
     tableStates.set(table, st);
     return st;
   };
 
-  const flushTable = (st: any) => {
+  const flushTable = async (st: any) => {
     if (!st.buffer.length) return;
     const rows = st.buffer.splice(0, st.buffer.length);
-    const run = db.$client.transaction((batch: any[]) => {
-      for (const row of batch) {
-        const params: Record<string, any> = {};
-        for (const col of st.insertColumns) {
-          params[col] = row[col] ?? null;
-        }
-        st.stmt.run(params);
-      }
-    });
-    run(rows);
+    for (const row of rows) {
+      const values = st.insertColumns.map((col: string) => row[col] ?? null);
+      await exec(st.sql, values);
+    }
   };
 
   try {
     let transactionStarted = false;
     if (params.mode !== "DRY_RUN") {
-      db.$client.exec("BEGIN");
+      await exec("BEGIN");
       transactionStarted = true;
     }
 
@@ -858,7 +951,7 @@ async function runImportJob(
           continue;
         }
 
-        const st = getTableState(table, row);
+        const st = await getTableState(table, row);
         if (!st) continue;
         counts[table] = (counts[table] || 0) + 1;
         partRows += 1;
@@ -874,7 +967,7 @@ async function runImportJob(
 
         st.buffer.push(row);
         if (st.buffer.length >= BATCH_SIZE) {
-          flushTable(st);
+          await flushTable(st);
         }
       }
 
@@ -913,20 +1006,20 @@ async function runImportJob(
 
     if (params.mode !== "DRY_RUN") {
       for (const st of tableStates.values()) {
-        flushTable(st);
+        await flushTable(st);
       }
     }
 
     if (transactionStarted) {
-      db.$client.exec("COMMIT");
+      await exec("COMMIT");
       transactionStarted = false;
     }
 
     if (params.mode === "IMPORT") {
-      if (tableExists("trade_audit")) {
+      if (await tableExists("trade_audit")) {
         await verifyTradeAuditIntegrity(jobId);
       }
-      if (tableExists("order_intent_audit")) {
+      if (await tableExists("order_intent_audit")) {
         await verifyOrderIntentIntegrity(jobId);
       }
     }
@@ -971,7 +1064,7 @@ async function runImportJob(
     }
   } catch (err: any) {
     try {
-      db.$client.exec("ROLLBACK");
+      await exec("ROLLBACK");
     } catch {}
     await logJob(jobId, "ERROR", "Import job failed", { error: String(err?.message ?? err) });
     await db
@@ -997,19 +1090,21 @@ async function runImportJob(
       }
     }
     throw err;
+  } finally {
+    client.release();
   }
 }
 
 async function verifyTradeAuditIntegrity(jobId: string) {
   try {
-    const stmt = db.$client.prepare(
+    const rows = await queryAll(
       `SELECT trade_id, prev_hash, event_hash, payload_json
        FROM trade_audit
        ORDER BY trade_id ASC, id ASC`
     );
     let currentTradeId: number | null = null;
     let expectedPrev = "GENESIS";
-    for (const row of stmt.iterate() as IterableIterator<any>) {
+    for (const row of rows) {
       const tradeId = Number(row.trade_id);
       if (currentTradeId !== tradeId) {
         currentTradeId = tradeId;
@@ -1065,14 +1160,14 @@ async function verifyTradeAuditIntegrity(jobId: string) {
 
 async function verifyOrderIntentIntegrity(jobId: string) {
   try {
-    const stmt = db.$client.prepare(
+    const rows = await queryAll(
       `SELECT correlation_id, prev_hash, event_hash, payload_json
        FROM order_intent_audit
        ORDER BY correlation_id ASC, id ASC`
     );
     let currentCorrelation: string | null = null;
     let expectedPrev = "GENESIS";
-    for (const row of stmt.iterate() as IterableIterator<any>) {
+    for (const row of rows) {
       const correlationId = String(row.correlation_id);
       if (currentCorrelation !== correlationId) {
         currentCorrelation = correlationId;

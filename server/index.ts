@@ -10,11 +10,11 @@ import { bootstrapDoc1Seed } from "./legal/bootstrapDoc1Seed";
 import { startGriftEvaluationScheduler } from "./grift/griftScheduler";
 import { startVerificationReminderCron } from "./cron/verificationReminders";
 import { startAccountLifecycleSweepScheduler } from "./services/accountLifecycleSweepScheduler";
-import BetterSQLite3 from "better-sqlite3";
 import { getIp2AsnDatasetPath, maybeImportIp2AsnDataset } from "./grift/griftIp2AsnDataset";
 import { startI18nWorker } from "./i18n/worker";
 import { maybeIngestBuiltManifest } from "./i18n/service";
 import { dbDialect, isPostgres } from "@db/config";
+import { withGriftClient } from "./grift/griftDb";
 
 // Validate required environment variables at startup
 function validateEnvVars() {
@@ -206,20 +206,14 @@ app.use((req, res, next) => {
           ensureAccountLifecycleSchema();
           await bootstrapDoc1Seed();
 
-          // Offline ASN/Org enrichment
+          // Offline ASN/Org enrichment (SQLite)
           try {
             const datasetPath = getIp2AsnDatasetPath();
             if (datasetPath) {
-              const asnDb = new BetterSQLite3("./trading_app.db");
-              try { asnDb.pragma("busy_timeout = 5000"); } catch {}
-              try {
-                await maybeImportIp2AsnDataset(asnDb, { filePath: datasetPath });
-              } finally {
-                asnDb.close();
-              }
+              console.warn("[Grift] ip2asn import skipped in SQLite mode (Postgres-only).");
             }
           } catch (asnErr) {
-            console.error("[Grift] Failed to import ip2asn dataset:", asnErr);
+            console.error("[Grift] Failed to evaluate ip2asn dataset path:", asnErr);
           }
           
           log("Schema audit columns verified (institutional-grade)");
@@ -228,6 +222,17 @@ app.use((req, res, next) => {
         }
       } else {
         console.warn("[DB] Postgres mode: SQLite schema ensure/seed skipped. Apply Postgres migrations before use.");
+        // Offline ASN/Org enrichment (Postgres)
+        try {
+          const datasetPath = getIp2AsnDatasetPath();
+          if (datasetPath) {
+            await withGriftClient(async (db) => {
+              await maybeImportIp2AsnDataset(db, { filePath: datasetPath });
+            });
+          }
+        } catch (asnErr) {
+          console.error("[Grift] Failed to import ip2asn dataset (Postgres):", asnErr);
+        }
       }
 
       // i18n: ingest built manifest (if present) and start worker
@@ -266,16 +271,12 @@ app.use((req, res, next) => {
         console.error("Error setting up admin views:", error);
       }
 
-      if (!isPostgres) {
-        // Start grift detection scheduler
-        try {
-          startGriftEvaluationScheduler("./trading_app.db");
-          log("Grift detection scheduler initialized");
-        } catch (error) {
-          console.error("Error starting grift scheduler:", error);
-        }
-      } else {
-        console.warn("[DB] Postgres mode: grift schedulers are disabled.");
+      // Start grift detection scheduler
+      try {
+        startGriftEvaluationScheduler();
+        log("Grift detection scheduler initialized");
+      } catch (error) {
+        console.error("Error starting grift scheduler:", error);
       }
 
       // Start verification reminder cron

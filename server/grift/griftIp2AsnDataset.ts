@@ -2,7 +2,7 @@ import fs from "fs";
 import path from "path";
 import readline from "readline";
 import net from "net";
-import type Database from "better-sqlite3";
+import type { GriftDb } from "./griftDb";
 
 type Ip2AsnLookup = {
   asn: number | null;
@@ -133,10 +133,10 @@ export function getIp2AsnDatasetPath(): string | null {
   return defaultPath;
 }
 
-function getMeta(db: Database.Database): any | null {
+async function getMeta(db: GriftDb): Promise<any | null> {
   try {
     return (
-      db
+      await db
         .prepare(
           `
           SELECT *
@@ -151,16 +151,16 @@ function getMeta(db: Database.Database): any | null {
   }
 }
 
-function isRangeTablePopulated(db: Database.Database): boolean {
+async function isRangeTablePopulated(db: GriftDb): Promise<boolean> {
   try {
-    const row = db.prepare(`SELECT 1 as ok FROM grift_ip_asn_ranges LIMIT 1`).get() as any;
+    const row = await db.prepare(`SELECT 1 as ok FROM grift_ip_asn_ranges LIMIT 1`).get() as any;
     return !!row?.ok;
   } catch {
     return false;
   }
 }
 
-export function lookupIp2Asn(db: Database.Database, ipRaw: string): Ip2AsnLookup | null {
+export async function lookupIp2Asn(db: GriftDb, ipRaw: string): Promise<Ip2AsnLookup | null> {
   const ip = normalizeIpKey(ipRaw);
   if (!ip) return null;
   const version = net.isIP(ip);
@@ -170,7 +170,7 @@ export function lookupIp2Asn(db: Database.Database, ipRaw: string): Ip2AsnLookup
     if (version === 4) {
       const ipInt = ipv4ToInt(ip);
       if (ipInt == null) return null;
-      const row = db
+      const row = await db
         .prepare(
           `
           SELECT asn, org, country
@@ -194,7 +194,7 @@ export function lookupIp2Asn(db: Database.Database, ipRaw: string): Ip2AsnLookup
 
     const ipHex = ipv6ToHex(ip);
     if (!ipHex) return null;
-    const row = db
+    const row = await db
       .prepare(
         `
         SELECT asn, org, country
@@ -220,7 +220,7 @@ export function lookupIp2Asn(db: Database.Database, ipRaw: string): Ip2AsnLookup
 }
 
 export async function maybeImportIp2AsnDataset(
-  db: Database.Database,
+  db: GriftDb,
   opts?: { filePath?: string; force?: boolean; batchSize?: number; logEvery?: number }
 ): Promise<Ip2AsnImportResult> {
   const filePath = path.resolve(opts?.filePath ?? getIp2AsnDatasetPath() ?? "");
@@ -229,14 +229,14 @@ export async function maybeImportIp2AsnDataset(
   }
 
   const stat = fs.statSync(filePath);
-  const meta = getMeta(db);
+  const meta = await getMeta(db);
   const already =
     !opts?.force &&
     meta &&
     meta.file_path === filePath &&
     Number(meta.file_mtime_ms) === Number(stat.mtimeMs) &&
     Number(meta.file_size) === Number(stat.size) &&
-    isRangeTablePopulated(db);
+    await isRangeTablePopulated(db);
   if (already) {
     return {
       imported: false,
@@ -254,8 +254,8 @@ export async function maybeImportIp2AsnDataset(
   const batchSize = Math.max(500, Math.min(50_000, Number(opts?.batchSize ?? 10_000)));
   const logEvery = Math.max(10_000, Math.min(500_000, Number(opts?.logEvery ?? 100_000)));
 
-  db.exec(`DELETE FROM grift_ip_asn_ranges;`);
-  db.exec(`DELETE FROM grift_ip_asn_dataset_meta;`);
+  await db.query(`DELETE FROM grift_ip_asn_ranges;`);
+  await db.query(`DELETE FROM grift_ip_asn_dataset_meta;`);
 
   const insert = db.prepare(
     `
@@ -264,11 +264,11 @@ export async function maybeImportIp2AsnDataset(
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `
   );
-  const insertBatch = db.transaction((rows: any[]) => {
+  const insertBatch = async (rows: any[]) => {
     for (const r of rows) {
-      insert.run(r.ipVersion, r.startInt, r.endInt, r.startHex, r.endHex, r.asn, r.country, r.org);
+      await insert.run(r.ipVersion, r.startInt, r.endInt, r.startHex, r.endHex, r.asn, r.country, r.org);
     }
-  });
+  };
 
   let rows = 0;
   let ipv4Rows = 0;
@@ -331,7 +331,7 @@ export async function maybeImportIp2AsnDataset(
 
       rows++;
       if (buffer.length >= batchSize) {
-        insertBatch(buffer);
+        await insertBatch(buffer);
         buffer = [];
       }
 
@@ -341,11 +341,11 @@ export async function maybeImportIp2AsnDataset(
     }
 
     if (buffer.length) {
-      insertBatch(buffer);
+      await insertBatch(buffer);
       buffer = [];
     }
 
-    db.prepare(
+    await db.prepare(
       `
       INSERT INTO grift_ip_asn_dataset_meta (
         id, file_path, file_mtime_ms, file_size, imported_at, row_count, ipv4_count, ipv6_count
@@ -370,4 +370,3 @@ export async function maybeImportIp2AsnDataset(
     rl.close();
   }
 }
-

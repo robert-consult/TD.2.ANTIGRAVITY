@@ -1,5 +1,5 @@
 ﻿// server/grift/griftEngine.ts
-import Database from "better-sqlite3";
+import type { GriftDb } from "./griftDb";
 import type { GriftConfig, GriftRuleCode, GriftSeverity, AuditContext, RuleTrigger } from "./griftTypes";
 import { DEFAULT_GRIFT_CONFIG } from "./griftDefaults";
 import { haversineKm, kmh } from "./griftGeo";
@@ -59,12 +59,12 @@ function mapConfigRow(row: any): GriftConfig {
   };
 }
 
-export function getConfig(db: Database.Database): GriftConfig {
+export async function getConfig(db: GriftDb): Promise<GriftConfig> {
   const now = Date.now();
   if (configCache && now - configCache.fetchedAt < CONFIG_TTL_MS) {
     return configCache.cfg;
   }
-  const row = db.prepare("SELECT * FROM grift_config WHERE id=1").get() as any;
+  const row = await db.prepare("SELECT * FROM grift_config WHERE id=1").get() as any;
   const cfg = row ? mapConfigRow(row) : DEFAULT_GRIFT_CONFIG;
   configCache = { cfg, fetchedAt: now };
   return cfg;
@@ -84,15 +84,15 @@ function severity(points: number, cfg: GriftConfig): GriftSeverity {
 // ---------------------------------------------------------------------
 // Signal management with deduplication
 // ---------------------------------------------------------------------
-export function createOrUpdateSignal(
-  db: Database.Database,
+export async function createOrUpdateSignal(
+  db: GriftDb,
   trigger: RuleTrigger,
   dedupeKey: string,
   ctx?: AuditContext,
   meta?: { symbol?: string; tradeId?: number }
-): number {
+): Promise<number> {
   const now = ctx?.ts ?? Date.now();
-  const existing = db.prepare(`
+  const existing = await db.prepare(`
     SELECT id, points, status, severity FROM grift_signals WHERE dedupe_key = ?
   `).get(dedupeKey) as { id: number; points: number; status: string; severity: GriftSeverity } | undefined;
 
@@ -118,7 +118,7 @@ export function createOrUpdateSignal(
     const updatedPoints = isOpen ? Math.max(existing.points, trigger.points) : existing.points;
     const updatedSeverity = isOpen && trigger.points > existing.points ? trigger.severity : existing.severity;
 
-    db.prepare(`
+    await db.prepare(`
       UPDATE grift_signals SET
         points = ?,
         severity = ?,
@@ -167,7 +167,7 @@ export function createOrUpdateSignal(
     return existing.id;
   }
 
-  const result = db.prepare(`
+  const result = await db.prepare(`
     INSERT INTO grift_signals (
       user_id, rule_code, severity, related_user_id, points, evidence_json, status,
       dedupe_key, created_at, updated_at,
@@ -182,6 +182,7 @@ export function createOrUpdateSignal(
       ?, ?, ?, ?, ?, ?, ?, ?, ?,
       ?, ?
     )
+    RETURNING id
   `).run(
     trigger.primaryUserId,
     trigger.ruleCode,
@@ -216,18 +217,18 @@ export function createOrUpdateSignal(
 // ---------------------------------------------------------------------
 // Device tracking
 // ---------------------------------------------------------------------
-export function recordDevice(db: Database.Database, deviceId: string, userId: number, ip?: string, ua?: string) {
+export async function recordDevice(db: GriftDb, deviceId: string, userId: number, ip?: string, ua?: string) {
   const now = Date.now();
 
   // Upsert device - schema uses device_id as PRIMARY KEY
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO grift_devices (device_id, first_seen_at, last_seen_at, first_ip)
     VALUES (?, ?, ?, ?)
     ON CONFLICT(device_id) DO UPDATE SET last_seen_at = ?, first_ip = COALESCE(first_ip, ?)
   `).run(deviceId, now, now, ip ?? null, now, ip ?? null);
 
   // Upsert device-user link
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO grift_device_users (device_id, user_id, first_seen_at, last_seen_at, seen_count)
     VALUES (?, ?, ?, ?, 1)
     ON CONFLICT(device_id, user_id) DO UPDATE SET last_seen_at = ?, seen_count = seen_count + 1
@@ -256,16 +257,16 @@ function stableUserPair(a: number, b: number) {
   return a < b ? ([a, b] as const) : ([b, a] as const);
 }
 
-function upsertIdentityLink(
-  db: Database.Database,
+async function upsertIdentityLink(
+  db: GriftDb,
   userId: number,
   linkType: string,
   linkValue: string,
   metadata?: Record<string, any>
-) {
+): Promise<void> {
   const now = Date.now();
   const metadataJson = metadata ? JSON.stringify(metadata) : null;
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO grift_identity_links (
       user_id, link_type, link_value, first_seen_at, last_seen_at, occurrence_count, metadata_json
     )
@@ -277,46 +278,46 @@ function upsertIdentityLink(
   `).run(userId, linkType, linkValue, now, now, metadataJson);
 }
 
-function recordIdentityLinks(db: Database.Database, ctx: AuditContext) {
+async function recordIdentityLinks(db: GriftDb, ctx: AuditContext): Promise<void> {
   if (!ctx.userId) return;
   const userId = ctx.userId;
 
   if (ctx.deviceInstallId) {
-    upsertIdentityLink(db, userId, "device_install_id", ctx.deviceInstallId);
+    await upsertIdentityLink(db, userId, "device_install_id", ctx.deviceInstallId);
   }
   if (ctx.deviceFp) {
-    upsertIdentityLink(db, userId, "device_fp", ctx.deviceFp);
+    await upsertIdentityLink(db, userId, "device_fp", ctx.deviceFp);
   }
   if (ctx.deviceIdLegacy) {
-    upsertIdentityLink(db, userId, "device_id", ctx.deviceIdLegacy);
+    await upsertIdentityLink(db, userId, "device_id", ctx.deviceIdLegacy);
   } else if (!ctx.deviceInstallId && ctx.deviceId) {
-    upsertIdentityLink(db, userId, "device_id", ctx.deviceId);
+    await upsertIdentityLink(db, userId, "device_id", ctx.deviceId);
   }
   if (ctx.ip) {
     const ip = normalizeIp(ctx.ip);
-    upsertIdentityLink(db, userId, "ip", ip);
+    await upsertIdentityLink(db, userId, "ip", ip);
     const subnet = computeIpSubnet(ip);
     if (subnet) {
-      upsertIdentityLink(db, userId, "ip_subnet", subnet, { ip });
+      await upsertIdentityLink(db, userId, "ip_subnet", subnet, { ip });
     }
   }
   if (ctx.asn != null) {
-    upsertIdentityLink(db, userId, "asn", String(ctx.asn));
+    await upsertIdentityLink(db, userId, "asn", String(ctx.asn));
   }
   if (ctx.org) {
-    upsertIdentityLink(db, userId, "org", ctx.org);
+    await upsertIdentityLink(db, userId, "org", ctx.org);
   }
 }
 
 // ---------------------------------------------------------------------
 // Observation recording
 // ---------------------------------------------------------------------
-export function recordObservation(db: Database.Database, ctx: AuditContext) {
+export async function recordObservation(db: GriftDb, ctx: AuditContext): Promise<void> {
   if (!ctx.userId) return;
   const eventType = ctx.eventType ?? "SESSION_PING";
   const observedAt = ctx.ts ?? Date.now();
 
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO grift_observations (
       user_id, event_type, session_id, device_id, device_fp, device_install_id, client_tz, client_lang,
       ip, user_agent, geo_country, geo_region, geo_city, latitude, longitude, asn, org, observed_at
@@ -343,21 +344,21 @@ export function recordObservation(db: Database.Database, ctx: AuditContext) {
     observedAt
   );
 
-  recordIdentityLinks(db, ctx);
+  await recordIdentityLinks(db, ctx);
 }
 
-export function recordTradeObservation(
-  db: Database.Database,
+export async function recordTradeObservation(
+  db: GriftDb,
   tradeId: number,
   symbol: string,
   direction: string,
   lots: number,
   ctx: AuditContext
-) {
+): Promise<void> {
   if (!ctx.userId) return;
   const observedAt = ctx.ts ?? Date.now();
 
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO grift_trade_observations (
       trade_id, user_id, session_id, device_id, device_fp, device_install_id, client_tz, client_lang,
       ip, user_agent, symbol, direction, lots, geo_country, geo_region, geo_city, latitude, longitude, asn, org, observed_at
@@ -391,19 +392,19 @@ export function recordTradeObservation(
 // ---------------------------------------------------------------------
 // Linked account edge management
 // ---------------------------------------------------------------------
-export function recordLinkedEdge(
-  db: Database.Database,
+export async function recordLinkedEdge(
+  db: GriftDb,
   userIdA: number,
   userIdB: number,
   linkType: "device" | "device_fp" | "ip" | "ip_subnet" | "asn",
   linkValue: string
-) {
+): Promise<void> {
   if (userIdA === userIdB) return;
 
   const now = Date.now();
   const [lo, hi] = userIdA < userIdB ? [userIdA, userIdB] : [userIdB, userIdA];
 
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO grift_linked_account_edges (user_a, user_b, link_type, link_value, confidence, first_linked_at, last_confirmed_at)
     VALUES (?, ?, ?, ?, 1.0, ?, ?)
     ON CONFLICT(user_a, user_b, link_type, link_value) DO UPDATE SET confidence = confidence + 0.1, last_confirmed_at = ?
@@ -413,14 +414,14 @@ export function recordLinkedEdge(
 // ---------------------------------------------------------------------
 // RULE: MULTI_ACCOUNT_DEVICE
 // ---------------------------------------------------------------------
-export function checkMultiAccountDevice(db: Database.Database, ctx: AuditContext): RuleTrigger | null {
+export async function checkMultiAccountDevice(db: GriftDb, ctx: AuditContext): Promise<RuleTrigger | null> {
   if (!ctx.deviceId || !ctx.userId) return null;
-  const cfg = getConfig(db);
+  const cfg = await getConfig(db);
 
   const windowMs = cfg.multiAccountWindowDays * 24 * 60 * 60 * 1000;
   const cutoff = Date.now() - windowMs;
 
-  const users = db.prepare(`
+  const users = await db.prepare(`
     SELECT DISTINCT user_id FROM grift_device_users
     WHERE device_id = ? AND last_seen_at >= ?
   `).all(ctx.deviceId, cutoff) as { user_id: number }[];
@@ -429,7 +430,7 @@ export function checkMultiAccountDevice(db: Database.Database, ctx: AuditContext
   if (otherUsers.length === 0) return null;
 
   for (const other of otherUsers) {
-    recordLinkedEdge(db, ctx.userId, other.user_id, "device", ctx.deviceId);
+    await recordLinkedEdge(db, ctx.userId, other.user_id, "device", ctx.deviceId);
   }
 
   const points = cfg.scoreMultiAccountDevice;
@@ -447,14 +448,14 @@ export function checkMultiAccountDevice(db: Database.Database, ctx: AuditContext
 // ---------------------------------------------------------------------
 // RULE: MULTI_ACCOUNT_FINGERPRINT
 // ---------------------------------------------------------------------
-export function checkMultiAccountFingerprint(db: Database.Database, ctx: AuditContext): RuleTrigger | null {
+export async function checkMultiAccountFingerprint(db: GriftDb, ctx: AuditContext): Promise<RuleTrigger | null> {
   if (!ctx.deviceFp || !ctx.userId) return null;
-  const cfg = getConfig(db);
+  const cfg = await getConfig(db);
 
   const windowMs = cfg.multiAccountWindowDays * 24 * 60 * 60 * 1000;
   const cutoff = Date.now() - windowMs;
 
-  const users = db
+  const users = await db
     .prepare(
       `
       SELECT DISTINCT user_id FROM grift_identity_links
@@ -467,7 +468,7 @@ export function checkMultiAccountFingerprint(db: Database.Database, ctx: AuditCo
   if (otherUsers.length === 0) return null;
 
   for (const other of otherUsers) {
-    recordLinkedEdge(db, ctx.userId, other.user_id, "device_fp", ctx.deviceFp);
+    await recordLinkedEdge(db, ctx.userId, other.user_id, "device_fp", ctx.deviceFp);
   }
 
   const points = cfg.scoreMultiAccountFingerprint;
@@ -489,14 +490,14 @@ export function checkMultiAccountFingerprint(db: Database.Database, ctx: AuditCo
 // ---------------------------------------------------------------------
 // RULE: IP_CHURN
 // ---------------------------------------------------------------------
-export function checkIpChurn(db: Database.Database, ctx: AuditContext): RuleTrigger | null {
+export async function checkIpChurn(db: GriftDb, ctx: AuditContext): Promise<RuleTrigger | null> {
   if (!ctx.userId) return null;
-  const cfg = getConfig(db);
+  const cfg = await getConfig(db);
 
   const windowMs = cfg.churnWindowHours * 60 * 60 * 1000;
   const cutoff = Date.now() - windowMs;
 
-  const ips = db.prepare(`
+  const ips = await db.prepare(`
     SELECT DISTINCT ip FROM grift_observations
     WHERE user_id = ? AND observed_at >= ? AND ip IS NOT NULL
   `).all(ctx.userId, cutoff) as { ip: string }[];
@@ -516,14 +517,14 @@ export function checkIpChurn(db: Database.Database, ctx: AuditContext): RuleTrig
 // ---------------------------------------------------------------------
 // RULE: UA_CHURN
 // ---------------------------------------------------------------------
-export function checkUaChurn(db: Database.Database, ctx: AuditContext): RuleTrigger | null {
+export async function checkUaChurn(db: GriftDb, ctx: AuditContext): Promise<RuleTrigger | null> {
   if (!ctx.userId) return null;
-  const cfg = getConfig(db);
+  const cfg = await getConfig(db);
 
   const windowMs = cfg.churnWindowHours * 60 * 60 * 1000;
   const cutoff = Date.now() - windowMs;
 
-  const uas = db.prepare(`
+  const uas = await db.prepare(`
     SELECT DISTINCT user_agent FROM grift_observations
     WHERE user_id = ? AND observed_at >= ? AND user_agent IS NOT NULL
   `).all(ctx.userId, cutoff) as { user_agent: string }[];
@@ -543,14 +544,14 @@ export function checkUaChurn(db: Database.Database, ctx: AuditContext): RuleTrig
 // ---------------------------------------------------------------------
 // RULE: DEVICE_CHURN
 // ---------------------------------------------------------------------
-export function checkDeviceChurn(db: Database.Database, ctx: AuditContext): RuleTrigger | null {
+export async function checkDeviceChurn(db: GriftDb, ctx: AuditContext): Promise<RuleTrigger | null> {
   if (!ctx.userId) return null;
-  const cfg = getConfig(db);
+  const cfg = await getConfig(db);
 
   const windowMs = cfg.churnWindowHours * 60 * 60 * 1000;
   const cutoff = Date.now() - windowMs;
 
-  const devices = db.prepare(`
+  const devices = await db.prepare(`
     SELECT DISTINCT device_id FROM grift_observations
     WHERE user_id = ? AND observed_at >= ? AND device_id IS NOT NULL
   `).all(ctx.userId, cutoff) as { device_id: string }[];
@@ -570,14 +571,14 @@ export function checkDeviceChurn(db: Database.Database, ctx: AuditContext): Rule
 // ---------------------------------------------------------------------
 // RULE: GEO_VELOCITY (Impossible Travel)
 // ---------------------------------------------------------------------
-export function checkGeoVelocity(db: Database.Database, ctx: AuditContext): RuleTrigger | null {
+export async function checkGeoVelocity(db: GriftDb, ctx: AuditContext): Promise<RuleTrigger | null> {
   if (!ctx.userId || ctx.latitude == null || ctx.longitude == null) return null;
-  const cfg = getConfig(db);
+  const cfg = await getConfig(db);
 
   const windowMs = cfg.geoVelocityMaxHours * 60 * 60 * 1000;
   const cutoff = Date.now() - windowMs;
 
-  const prev = db.prepare(`
+  const prev = await db.prepare(`
     SELECT latitude, longitude, observed_at, geo_country, geo_region, geo_city, device_id, ip, user_agent
     FROM grift_observations
     WHERE user_id = ? AND observed_at >= ? AND observed_at < ? AND latitude IS NOT NULL AND longitude IS NOT NULL
@@ -649,14 +650,14 @@ export function checkGeoVelocity(db: Database.Database, ctx: AuditContext): Rule
 // ---------------------------------------------------------------------
 // RULE: CONCURRENT_SESSIONS
 // ---------------------------------------------------------------------
-export function checkConcurrentSessions(db: Database.Database, ctx: AuditContext): RuleTrigger | null {
+export async function checkConcurrentSessions(db: GriftDb, ctx: AuditContext): Promise<RuleTrigger | null> {
   if (!ctx.userId) return null;
-  const cfg = getConfig(db);
+  const cfg = await getConfig(db);
 
   const windowMs = cfg.concurrentWindowMinutes * 60 * 1000;
   const cutoff = Date.now() - windowMs;
 
-  const observations = db.prepare(`
+  const observations = await db.prepare(`
     SELECT device_id, ip, observed_at, user_agent, geo_country, geo_region, geo_city
     FROM grift_observations
     WHERE user_id = ? AND observed_at >= ?
@@ -712,14 +713,14 @@ export function checkConcurrentSessions(db: Database.Database, ctx: AuditContext
 // ---------------------------------------------------------------------
 // RULE: ASN_VOLATILITY
 // ---------------------------------------------------------------------
-export function checkAsnVolatility(db: Database.Database, ctx: AuditContext): RuleTrigger | null {
+export async function checkAsnVolatility(db: GriftDb, ctx: AuditContext): Promise<RuleTrigger | null> {
   if (!ctx.userId) return null;
-  const cfg = getConfig(db);
+  const cfg = await getConfig(db);
 
   const windowMs = cfg.churnWindowHours * 60 * 60 * 1000;
   const cutoff = Date.now() - windowMs;
 
-  const asns = db.prepare(`
+  const asns = await db.prepare(`
     SELECT DISTINCT asn FROM grift_observations
     WHERE user_id = ? AND observed_at >= ? AND asn IS NOT NULL
   `).all(ctx.userId, cutoff) as { asn: number }[];
@@ -739,14 +740,14 @@ export function checkAsnVolatility(db: Database.Database, ctx: AuditContext): Ru
 // ---------------------------------------------------------------------
 // RULE: SHARED_IPASN_CLUSTER (Multiple users sharing IP+ASN combination)
 // ---------------------------------------------------------------------
-export function checkSharedIpAsnCluster(db: Database.Database, ctx: AuditContext): RuleTrigger | null {
+export async function checkSharedIpAsnCluster(db: GriftDb, ctx: AuditContext): Promise<RuleTrigger | null> {
   if (!ctx.userId || !ctx.ip || !ctx.asn) return null;
-  const cfg = getConfig(db);
+  const cfg = await getConfig(db);
 
   const windowMs = cfg.multiAccountWindowDays * 24 * 60 * 60 * 1000;
   const cutoff = Date.now() - windowMs;
 
-  const cluster = db.prepare(`
+  const cluster = await db.prepare(`
     SELECT DISTINCT user_id FROM grift_observations
     WHERE ip = ? AND asn = ? AND observed_at >= ? AND user_id != ?
   `).all(ctx.ip, ctx.asn, cutoff, ctx.userId) as { user_id: number }[];
@@ -754,9 +755,9 @@ export function checkSharedIpAsnCluster(db: Database.Database, ctx: AuditContext
   if (cluster.length < cfg.clusterMinUsersForIpAsn - 1) return null;
 
   for (const member of cluster) {
-    recordLinkedEdge(db, ctx.userId, member.user_id, "ip", ctx.ip);
+    await recordLinkedEdge(db, ctx.userId, member.user_id, "ip", ctx.ip);
     if (ctx.asn) {
-      recordLinkedEdge(db, ctx.userId, member.user_id, "asn", String(ctx.asn));
+      await recordLinkedEdge(db, ctx.userId, member.user_id, "asn", String(ctx.asn));
     }
   }
 
@@ -779,20 +780,20 @@ export function checkSharedIpAsnCluster(db: Database.Database, ctx: AuditContext
 // ---------------------------------------------------------------------
 // RULE: MULTI_ACCOUNT_LADDERING (Sequential trades across linked accounts)
 // ---------------------------------------------------------------------
-export function checkMultiAccountLaddering(
-  db: Database.Database,
+export async function checkMultiAccountLaddering(
+  db: GriftDb,
   tradeId: number,
   symbol: string,
   direction: string,
   ctx: AuditContext
-): RuleTrigger | null {
+): Promise<RuleTrigger | null> {
   if (!ctx.userId) return null;
-  const cfg = getConfig(db);
+  const cfg = await getConfig(db);
 
   const windowMs = cfg.ladderingWindowDays * 24 * 60 * 60 * 1000;
   const cutoff = Date.now() - windowMs;
 
-  const edges = db.prepare(`
+  const edges = await db.prepare(`
     SELECT user_a, user_b FROM grift_linked_account_edges
     WHERE (user_a = ? OR user_b = ?)
   `).all(ctx.userId, ctx.userId) as { user_a: number; user_b: number }[];
@@ -807,7 +808,7 @@ export function checkMultiAccountLaddering(
   if (linkedUserIds.size < 2) return null;
 
   const placeholders = Array.from(linkedUserIds).map(() => "?").join(",");
-  const recentTrades = db.prepare(`
+  const recentTrades = await db.prepare(`
     SELECT user_id, trade_id, observed_at FROM grift_trade_observations
     WHERE user_id IN (${placeholders})
       AND symbol = ?
@@ -853,21 +854,21 @@ export function checkMultiAccountLaddering(
 // ---------------------------------------------------------------------
 // RULE: HEDGE_PAIR (Coordinated Hedging)
 // ---------------------------------------------------------------------
-export function checkHedgePair(
-  db: Database.Database,
+export async function checkHedgePair(
+  db: GriftDb,
   tradeId: number,
   symbol: string,
   direction: string,
   ctx: AuditContext
-): RuleTrigger | null {
+): Promise<RuleTrigger | null> {
   if (!ctx.userId) return null;
-  const cfg = getConfig(db);
+  const cfg = await getConfig(db);
 
   const windowMs = cfg.hedgeWindowMinutes * 60 * 1000;
   const cutoff = Date.now() - windowMs;
   const oppositeDir = direction === "BUY" ? "SELL" : "BUY";
 
-  const edges = db.prepare(`
+  const edges = await db.prepare(`
     SELECT user_a, user_b FROM grift_linked_account_edges
     WHERE (user_a = ? OR user_b = ?)
   `).all(ctx.userId, ctx.userId) as { user_a: number; user_b: number }[];
@@ -878,7 +879,7 @@ export function checkHedgePair(
     if (e.user_b !== ctx.userId) linkedUserIds.add(e.user_b);
   }
 
-  const candidates = db.prepare(`
+  const candidates = await db.prepare(`
     SELECT user_id, trade_id, device_id, device_fp, device_install_id, ip, observed_at
     FROM grift_trade_observations
     WHERE symbol = ?
@@ -931,10 +932,10 @@ export function checkHedgePair(
 
   // Strengthen the account-link graph for downstream laddering/network views.
   if (ctx.userId) {
-    if (deviceMatch && ctx.deviceId) recordLinkedEdge(db, ctx.userId, best.user_id, "device", ctx.deviceId);
-    if (fpMatch && ctx.deviceFp) recordLinkedEdge(db, ctx.userId, best.user_id, "device_fp", ctx.deviceFp);
-    if (ipMatch && ctx.ip) recordLinkedEdge(db, ctx.userId, best.user_id, "ip", ctx.ip);
-    if (ctx.asn != null) recordLinkedEdge(db, ctx.userId, best.user_id, "asn", String(ctx.asn));
+    if (deviceMatch && ctx.deviceId) await recordLinkedEdge(db, ctx.userId, best.user_id, "device", ctx.deviceId);
+    if (fpMatch && ctx.deviceFp) await recordLinkedEdge(db, ctx.userId, best.user_id, "device_fp", ctx.deviceFp);
+    if (ipMatch && ctx.ip) await recordLinkedEdge(db, ctx.userId, best.user_id, "ip", ctx.ip);
+    if (ctx.asn != null) await recordLinkedEdge(db, ctx.userId, best.user_id, "asn", String(ctx.asn));
   }
 
   const points = cfg.scoreHedgePair;
@@ -976,15 +977,15 @@ export function checkHedgePair(
 // ---------------------------------------------------------------------
 // Auth events logging
 // ---------------------------------------------------------------------
-export function recordAuthEvent(
-  db: Database.Database,
+export async function recordAuthEvent(
+  db: GriftDb,
   eventType: string,
   ctx: AuditContext,
   success: boolean = true,
   failureReason?: string,
   metadata?: Record<string, any>
-) {
-  db.prepare(`
+): Promise<void> {
+  await db.prepare(`
     INSERT INTO auth_events (
       user_id, event_type, session_id, device_id, device_fp, device_install_id, client_tz, client_lang,
       ip, user_agent, geo_country, geo_region, geo_city, latitude, longitude, asn, org,
@@ -1019,14 +1020,14 @@ export function recordAuthEvent(
 // ---------------------------------------------------------------------
 // Main entry points
 // ---------------------------------------------------------------------
-export function onLoginSuccess(db: Database.Database, ctx: AuditContext): RuleTrigger[] {
-  const cfg = getConfig(db);
+export async function onLoginSuccess(db: GriftDb, ctx: AuditContext): Promise<RuleTrigger[]> {
+  const cfg = await getConfig(db);
   if (!cfg.enabled) return [];
 
   const triggers: RuleTrigger[] = [];
   const relatedUserIds = new Set<number>();
   const baseCtx = ctx.eventType ? ctx : { ...ctx, eventType: "LOGIN_SUCCESS" };
-  const resolved = resolveAsnOrg(
+  const resolved = await resolveAsnOrg(
     db,
     { ip: baseCtx.ip ?? null, asn: baseCtx.asn ?? null, org: baseCtx.org ?? null },
     baseCtx.ts ?? Date.now()
@@ -1040,80 +1041,80 @@ export function onLoginSuccess(db: Database.Database, ctx: AuditContext): RuleTr
 
   // Record device and observation
   if (eventCtx.deviceId && eventCtx.userId) {
-    recordDevice(db, eventCtx.deviceId, eventCtx.userId, eventCtx.ip, eventCtx.userAgent);
+    await recordDevice(db, eventCtx.deviceId, eventCtx.userId, eventCtx.ip, eventCtx.userAgent);
   }
-  recordObservation(db, eventCtx);
-  recordAuthEvent(db, "LOGIN_SUCCESS", eventCtx);
+  await recordObservation(db, eventCtx);
+  await recordAuthEvent(db, "LOGIN_SUCCESS", eventCtx);
 
   // Run detection rules
-  const multiAccount = checkMultiAccountDevice(db, eventCtx);
+  const multiAccount = await checkMultiAccountDevice(db, eventCtx);
   if (multiAccount) {
     const [lo, hi] = stableUserPair(multiAccount.primaryUserId, multiAccount.secondaryUserId ?? multiAccount.primaryUserId);
     const key = `MULTI_ACCOUNT_DEVICE:${eventCtx.deviceId}:${lo}:${hi}`;
-    createOrUpdateSignal(db, multiAccount, key, eventCtx);
+    await createOrUpdateSignal(db, multiAccount, key, eventCtx);
     if (multiAccount.secondaryUserId) {
       relatedUserIds.add(multiAccount.secondaryUserId);
     }
     triggers.push(multiAccount);
   }
 
-  const multiAccountFp = checkMultiAccountFingerprint(db, eventCtx);
+  const multiAccountFp = await checkMultiAccountFingerprint(db, eventCtx);
   if (multiAccountFp) {
     const [lo, hi] = stableUserPair(multiAccountFp.primaryUserId, multiAccountFp.secondaryUserId ?? multiAccountFp.primaryUserId);
     const key = `MULTI_ACCOUNT_FINGERPRINT:${eventCtx.deviceFp}:${lo}:${hi}`;
-    createOrUpdateSignal(db, multiAccountFp, key, eventCtx);
+    await createOrUpdateSignal(db, multiAccountFp, key, eventCtx);
     if (multiAccountFp.secondaryUserId) {
       relatedUserIds.add(multiAccountFp.secondaryUserId);
     }
     triggers.push(multiAccountFp);
   }
 
-  const ipChurn = checkIpChurn(db, eventCtx);
+  const ipChurn = await checkIpChurn(db, eventCtx);
   if (ipChurn) {
     const key = `IP_CHURN:${eventCtx.userId}:${Math.floor(Date.now() / (24 * 60 * 60 * 1000))}`;
-    createOrUpdateSignal(db, ipChurn, key, eventCtx);
+    await createOrUpdateSignal(db, ipChurn, key, eventCtx);
     triggers.push(ipChurn);
   }
 
-  const uaChurn = checkUaChurn(db, eventCtx);
+  const uaChurn = await checkUaChurn(db, eventCtx);
   if (uaChurn) {
     const key = `UA_CHURN:${eventCtx.userId}:${Math.floor(Date.now() / (24 * 60 * 60 * 1000))}`;
-    createOrUpdateSignal(db, uaChurn, key, eventCtx);
+    await createOrUpdateSignal(db, uaChurn, key, eventCtx);
     triggers.push(uaChurn);
   }
 
-  const deviceChurn = checkDeviceChurn(db, eventCtx);
+  const deviceChurn = await checkDeviceChurn(db, eventCtx);
   if (deviceChurn) {
     const key = `DEVICE_CHURN:${eventCtx.userId}:${Math.floor(Date.now() / (24 * 60 * 60 * 1000))}`;
-    createOrUpdateSignal(db, deviceChurn, key, eventCtx);
+    await createOrUpdateSignal(db, deviceChurn, key, eventCtx);
     triggers.push(deviceChurn);
   }
 
-  const geoVelocity = checkGeoVelocity(db, eventCtx);
+  const geoVelocity = await checkGeoVelocity(db, eventCtx);
   if (geoVelocity) {
     const key = `GEO_VELOCITY:${eventCtx.userId}:${Math.floor(Date.now() / (60 * 60 * 1000))}`;
-    createOrUpdateSignal(db, geoVelocity, key, eventCtx);
+    await createOrUpdateSignal(db, geoVelocity, key, eventCtx);
     triggers.push(geoVelocity);
   }
 
-  const concurrent = checkConcurrentSessions(db, eventCtx);
+  const concurrent = await checkConcurrentSessions(db, eventCtx);
   if (concurrent) {
     const key = `CONCURRENT_SESSIONS:${eventCtx.userId}:${Math.floor(Date.now() / (60 * 60 * 1000))}`;
-    createOrUpdateSignal(db, concurrent, key, eventCtx);
+    await createOrUpdateSignal(db, concurrent, key, eventCtx);
     triggers.push(concurrent);
   }
 
-  const asnVol = checkAsnVolatility(db, eventCtx);
+  const asnVol = await checkAsnVolatility(db, eventCtx);
   if (asnVol) {
     const key = `ASN_VOLATILITY:${eventCtx.userId}:${Math.floor(Date.now() / (24 * 60 * 60 * 1000))}`;
-    createOrUpdateSignal(db, asnVol, key, eventCtx);
+    await createOrUpdateSignal(db, asnVol, key, eventCtx);
     triggers.push(asnVol);
   }
 
-  const ipAsnCluster = checkSharedIpAsnCluster(db, eventCtx);
+  const ipAsnCluster = await checkSharedIpAsnCluster(db, eventCtx);
   if (ipAsnCluster) {
     const key = `SHARED_IPASN_CLUSTER:${eventCtx.userId}:${eventCtx.ip}:${eventCtx.asn}:${Math.floor(Date.now() / (24 * 60 * 60 * 1000))}`;
-    createOrUpdateSignal(db, ipAsnCluster, key, eventCtx);
+    await createOrUpdateSignal(db, ipAsnCluster, key, eventCtx);
     if (ipAsnCluster.secondaryUserId) {
       relatedUserIds.add(ipAsnCluster.secondaryUserId);
     }
@@ -1122,24 +1123,24 @@ export function onLoginSuccess(db: Database.Database, ctx: AuditContext): RuleTr
 
   // Update user risk score and aggregates
   if (eventCtx.userId) {
-    evaluateUserRisk(db, eventCtx.userId);
+    await evaluateUserRisk(db, eventCtx.userId);
   }
   for (const relatedUserId of relatedUserIds) {
-    evaluateUserRisk(db, relatedUserId);
+    await evaluateUserRisk(db, relatedUserId);
   }
 
   return triggers;
 }
 
 // Session/behavioral telemetry hook (ping + sensitive actions that should refresh risk)
-export function onSessionActivity(db: Database.Database, ctx: AuditContext): RuleTrigger[] {
-  const cfg = getConfig(db);
+export async function onSessionActivity(db: GriftDb, ctx: AuditContext): Promise<RuleTrigger[]> {
+  const cfg = await getConfig(db);
   if (!cfg.enabled) return [];
 
   const triggers: RuleTrigger[] = [];
   const relatedUserIds = new Set<number>();
   const baseCtx = ctx.eventType ? ctx : { ...ctx, eventType: "SESSION_PING" };
-  const resolved = resolveAsnOrg(
+  const resolved = await resolveAsnOrg(
     db,
     { ip: baseCtx.ip ?? null, asn: baseCtx.asn ?? null, org: baseCtx.org ?? null },
     baseCtx.ts ?? Date.now()
@@ -1153,79 +1154,79 @@ export function onSessionActivity(db: Database.Database, ctx: AuditContext): Rul
 
   // Record device and observation (identity links are recorded from observations)
   if (eventCtx.deviceId && eventCtx.userId) {
-    recordDevice(db, eventCtx.deviceId, eventCtx.userId, eventCtx.ip, eventCtx.userAgent);
+    await recordDevice(db, eventCtx.deviceId, eventCtx.userId, eventCtx.ip, eventCtx.userAgent);
   }
-  recordObservation(db, eventCtx);
+  await recordObservation(db, eventCtx);
 
   // Run session-related detection rules (same set as login, minus auth-event logging)
-  const multiAccount = checkMultiAccountDevice(db, eventCtx);
+  const multiAccount = await checkMultiAccountDevice(db, eventCtx);
   if (multiAccount) {
     const [lo, hi] = stableUserPair(multiAccount.primaryUserId, multiAccount.secondaryUserId ?? multiAccount.primaryUserId);
     const key = `MULTI_ACCOUNT_DEVICE:${eventCtx.deviceId}:${lo}:${hi}`;
-    createOrUpdateSignal(db, multiAccount, key, eventCtx);
+    await createOrUpdateSignal(db, multiAccount, key, eventCtx);
     if (multiAccount.secondaryUserId) {
       relatedUserIds.add(multiAccount.secondaryUserId);
     }
     triggers.push(multiAccount);
   }
 
-  const multiAccountFp = checkMultiAccountFingerprint(db, eventCtx);
+  const multiAccountFp = await checkMultiAccountFingerprint(db, eventCtx);
   if (multiAccountFp) {
     const [lo, hi] = stableUserPair(multiAccountFp.primaryUserId, multiAccountFp.secondaryUserId ?? multiAccountFp.primaryUserId);
     const key = `MULTI_ACCOUNT_FINGERPRINT:${eventCtx.deviceFp}:${lo}:${hi}`;
-    createOrUpdateSignal(db, multiAccountFp, key, eventCtx);
+    await createOrUpdateSignal(db, multiAccountFp, key, eventCtx);
     if (multiAccountFp.secondaryUserId) {
       relatedUserIds.add(multiAccountFp.secondaryUserId);
     }
     triggers.push(multiAccountFp);
   }
 
-  const geoVelocity = checkGeoVelocity(db, eventCtx);
+  const geoVelocity = await checkGeoVelocity(db, eventCtx);
   if (geoVelocity) {
     const key = `GEO_VELOCITY:${eventCtx.userId}:${Math.floor(Date.now() / (60 * 60 * 1000))}`;
-    createOrUpdateSignal(db, geoVelocity, key, eventCtx);
+    await createOrUpdateSignal(db, geoVelocity, key, eventCtx);
     triggers.push(geoVelocity);
   }
 
-  const concurrent = checkConcurrentSessions(db, eventCtx);
+  const concurrent = await checkConcurrentSessions(db, eventCtx);
   if (concurrent) {
     const key = `CONCURRENT_SESSIONS:${eventCtx.userId}:${Math.floor(Date.now() / (60 * 60 * 1000))}`;
-    createOrUpdateSignal(db, concurrent, key, eventCtx);
+    await createOrUpdateSignal(db, concurrent, key, eventCtx);
     triggers.push(concurrent);
   }
 
-  const ipChurn = checkIpChurn(db, eventCtx);
+  const ipChurn = await checkIpChurn(db, eventCtx);
   if (ipChurn) {
     const key = `IP_CHURN:${eventCtx.userId}:${Math.floor(Date.now() / (24 * 60 * 60 * 1000))}`;
-    createOrUpdateSignal(db, ipChurn, key, eventCtx);
+    await createOrUpdateSignal(db, ipChurn, key, eventCtx);
     triggers.push(ipChurn);
   }
 
-  const uaChurn = checkUaChurn(db, eventCtx);
+  const uaChurn = await checkUaChurn(db, eventCtx);
   if (uaChurn) {
     const key = `UA_CHURN:${eventCtx.userId}:${Math.floor(Date.now() / (24 * 60 * 60 * 1000))}`;
-    createOrUpdateSignal(db, uaChurn, key, eventCtx);
+    await createOrUpdateSignal(db, uaChurn, key, eventCtx);
     triggers.push(uaChurn);
   }
 
-  const deviceChurn = checkDeviceChurn(db, eventCtx);
+  const deviceChurn = await checkDeviceChurn(db, eventCtx);
   if (deviceChurn) {
     const key = `DEVICE_CHURN:${eventCtx.userId}:${Math.floor(Date.now() / (24 * 60 * 60 * 1000))}`;
-    createOrUpdateSignal(db, deviceChurn, key, eventCtx);
+    await createOrUpdateSignal(db, deviceChurn, key, eventCtx);
     triggers.push(deviceChurn);
   }
 
-  const asnVol = checkAsnVolatility(db, eventCtx);
+  const asnVol = await checkAsnVolatility(db, eventCtx);
   if (asnVol) {
     const key = `ASN_VOLATILITY:${eventCtx.userId}:${Math.floor(Date.now() / (24 * 60 * 60 * 1000))}`;
-    createOrUpdateSignal(db, asnVol, key, eventCtx);
+    await createOrUpdateSignal(db, asnVol, key, eventCtx);
     triggers.push(asnVol);
   }
 
-  const ipAsnCluster = checkSharedIpAsnCluster(db, eventCtx);
+  const ipAsnCluster = await checkSharedIpAsnCluster(db, eventCtx);
   if (ipAsnCluster) {
     const key = `SHARED_IPASN_CLUSTER:${eventCtx.userId}:${eventCtx.ip}:${eventCtx.asn}:${Math.floor(Date.now() / (24 * 60 * 60 * 1000))}`;
-    createOrUpdateSignal(db, ipAsnCluster, key, eventCtx);
+    await createOrUpdateSignal(db, ipAsnCluster, key, eventCtx);
     if (ipAsnCluster.secondaryUserId) {
       relatedUserIds.add(ipAsnCluster.secondaryUserId);
     }
@@ -1234,30 +1235,30 @@ export function onSessionActivity(db: Database.Database, ctx: AuditContext): Rul
 
   // Update user risk score and aggregates
   if (eventCtx.userId) {
-    evaluateUserRisk(db, eventCtx.userId);
+    await evaluateUserRisk(db, eventCtx.userId);
   }
   for (const relatedUserId of relatedUserIds) {
-    evaluateUserRisk(db, relatedUserId);
+    await evaluateUserRisk(db, relatedUserId);
   }
 
   return triggers;
 }
 
-export function onTradeSubmit(
-  db: Database.Database,
+export async function onTradeSubmit(
+  db: GriftDb,
   tradeId: number,
   symbol: string,
   direction: string,
   lots: number,
   ctx: AuditContext
-): RuleTrigger[] {
-  const cfg = getConfig(db);
+): Promise<RuleTrigger[]> {
+  const cfg = await getConfig(db);
   if (!cfg.enabled) return [];
 
   const triggers: RuleTrigger[] = [];
   const relatedUserIds = new Set<number>();
   const baseCtx = ctx.eventType ? ctx : { ...ctx, eventType: "TRADE_SUBMIT" };
-  const resolved = resolveAsnOrg(
+  const resolved = await resolveAsnOrg(
     db,
     { ip: baseCtx.ip ?? null, asn: baseCtx.asn ?? null, org: baseCtx.org ?? null },
     baseCtx.ts ?? Date.now()
@@ -1270,39 +1271,39 @@ export function onTradeSubmit(
   };
 
   // Record trade observation
-  recordTradeObservation(db, tradeId, symbol, direction, lots, eventCtx);
-  recordObservation(db, eventCtx);
+  await recordTradeObservation(db, tradeId, symbol, direction, lots, eventCtx);
+  await recordObservation(db, eventCtx);
   if (eventCtx.deviceId && eventCtx.userId) {
-    recordDevice(db, eventCtx.deviceId, eventCtx.userId, eventCtx.ip, eventCtx.userAgent);
+    await recordDevice(db, eventCtx.deviceId, eventCtx.userId, eventCtx.ip, eventCtx.userAgent);
   }
 
   // Ensure linked-account graph is established even if users haven't logged in since deployment.
-  const multiAccount = checkMultiAccountDevice(db, eventCtx);
+  const multiAccount = await checkMultiAccountDevice(db, eventCtx);
   if (multiAccount) {
     const [lo, hi] = stableUserPair(multiAccount.primaryUserId, multiAccount.secondaryUserId ?? multiAccount.primaryUserId);
     const key = `MULTI_ACCOUNT_DEVICE:${eventCtx.deviceId}:${lo}:${hi}`;
-    createOrUpdateSignal(db, multiAccount, key, eventCtx);
+    await createOrUpdateSignal(db, multiAccount, key, eventCtx);
     if (multiAccount.secondaryUserId) {
       relatedUserIds.add(multiAccount.secondaryUserId);
     }
     triggers.push(multiAccount);
   }
 
-  const multiAccountFp = checkMultiAccountFingerprint(db, eventCtx);
+  const multiAccountFp = await checkMultiAccountFingerprint(db, eventCtx);
   if (multiAccountFp) {
     const [lo, hi] = stableUserPair(multiAccountFp.primaryUserId, multiAccountFp.secondaryUserId ?? multiAccountFp.primaryUserId);
     const key = `MULTI_ACCOUNT_FINGERPRINT:${eventCtx.deviceFp}:${lo}:${hi}`;
-    createOrUpdateSignal(db, multiAccountFp, key, eventCtx);
+    await createOrUpdateSignal(db, multiAccountFp, key, eventCtx);
     if (multiAccountFp.secondaryUserId) {
       relatedUserIds.add(multiAccountFp.secondaryUserId);
     }
     triggers.push(multiAccountFp);
   }
 
-  const ipAsnCluster = checkSharedIpAsnCluster(db, eventCtx);
+  const ipAsnCluster = await checkSharedIpAsnCluster(db, eventCtx);
   if (ipAsnCluster) {
     const key = `SHARED_IPASN_CLUSTER:${eventCtx.userId}:${eventCtx.ip}:${eventCtx.asn}:${Math.floor(Date.now() / (24 * 60 * 60 * 1000))}`;
-    createOrUpdateSignal(db, ipAsnCluster, key, eventCtx);
+    await createOrUpdateSignal(db, ipAsnCluster, key, eventCtx);
     if (ipAsnCluster.secondaryUserId) {
       relatedUserIds.add(ipAsnCluster.secondaryUserId);
     }
@@ -1310,11 +1311,11 @@ export function onTradeSubmit(
   }
 
   // Check for coordinated hedging
-  const hedge = checkHedgePair(db, tradeId, symbol, direction, eventCtx);
+  const hedge = await checkHedgePair(db, tradeId, symbol, direction, eventCtx);
   if (hedge) {
     const [lo, hi] = stableUserPair(hedge.primaryUserId, hedge.secondaryUserId ?? hedge.primaryUserId);
     const key = `HEDGE_PAIR:${symbol}:${lo}:${hi}:${Math.floor(Date.now() / (60 * 60 * 1000))}`;
-    createOrUpdateSignal(db, hedge, key, eventCtx, { symbol, tradeId });
+    await createOrUpdateSignal(db, hedge, key, eventCtx, { symbol, tradeId });
     if (hedge.secondaryUserId) {
       relatedUserIds.add(hedge.secondaryUserId);
     }
@@ -1322,10 +1323,10 @@ export function onTradeSubmit(
   }
 
   // Check for multi-account laddering pattern
-  const laddering = checkMultiAccountLaddering(db, tradeId, symbol, direction, eventCtx);
+  const laddering = await checkMultiAccountLaddering(db, tradeId, symbol, direction, eventCtx);
   if (laddering) {
     const key = `MULTI_ACCOUNT_LADDERING:${symbol}:${eventCtx.userId}:${Math.floor(Date.now() / (24 * 60 * 60 * 1000))}`;
-    createOrUpdateSignal(db, laddering, key, eventCtx, { symbol, tradeId });
+    await createOrUpdateSignal(db, laddering, key, eventCtx, { symbol, tradeId });
     if (laddering.secondaryUserId) {
       relatedUserIds.add(laddering.secondaryUserId);
     }
@@ -1334,10 +1335,10 @@ export function onTradeSubmit(
 
   // Update user risk and aggregates
   if (eventCtx.userId) {
-    evaluateUserRisk(db, eventCtx.userId);
+    await evaluateUserRisk(db, eventCtx.userId);
   }
   for (const relatedUserId of relatedUserIds) {
-    evaluateUserRisk(db, relatedUserId);
+    await evaluateUserRisk(db, relatedUserId);
   }
 
   return triggers;
@@ -1361,14 +1362,14 @@ export interface UserAggregates {
   tier: string;
 }
 
-export function recomputeUserAggregates(db: Database.Database, userId: number): UserAggregates {
-  const cfg = getConfig(db);
+export async function recomputeUserAggregates(db: GriftDb, userId: number): Promise<UserAggregates> {
+  const cfg = await getConfig(db);
   const now = Date.now();
   const d7 = now - 7 * 24 * 60 * 60 * 1000;
   const d30 = now - 30 * 24 * 60 * 60 * 1000;
 
   // Calculate score_current from sum of points on OPEN signals only
-  const openSignals = db.prepare(`
+  const openSignals = await db.prepare(`
     SELECT
       points, created_at, rule_code,
       user_id, related_user_id,
@@ -1440,42 +1441,42 @@ export function recomputeUserAggregates(db: Database.Database, userId: number): 
   }
 
   // Count distinct device_ids from observations last 7 days
-  const devices7dResult = db.prepare(`
+  const devices7dResult = await db.prepare(`
     SELECT COUNT(DISTINCT device_id) as cnt FROM grift_observations
     WHERE user_id = ? AND observed_at >= ? AND device_id IS NOT NULL
   `).get(userId, d7) as { cnt: number } | undefined;
   const devices7d = devices7dResult?.cnt ?? 0;
 
   // Count distinct ips from observations last 7 days
-  const ips7dResult = db.prepare(`
+  const ips7dResult = await db.prepare(`
     SELECT COUNT(DISTINCT ip) as cnt FROM grift_observations
     WHERE user_id = ? AND observed_at >= ? AND ip IS NOT NULL
   `).get(userId, d7) as { cnt: number } | undefined;
   const ips7d = ips7dResult?.cnt ?? 0;
 
   // Count distinct user_agents from observations last 7 days
-  const userAgents7dResult = db.prepare(`
+  const userAgents7dResult = await db.prepare(`
     SELECT COUNT(DISTINCT user_agent) as cnt FROM grift_observations
     WHERE user_id = ? AND observed_at >= ? AND user_agent IS NOT NULL
   `).get(userId, d7) as { cnt: number } | undefined;
   const userAgents7d = userAgents7dResult?.cnt ?? 0;
 
   // Count distinct geo_country from observations last 7 days
-  const countries7dResult = db.prepare(`
+  const countries7dResult = await db.prepare(`
     SELECT COUNT(DISTINCT geo_country) as cnt FROM grift_observations
     WHERE user_id = ? AND observed_at >= ? AND geo_country IS NOT NULL
   `).get(userId, d7) as { cnt: number } | undefined;
   const countries7d = countries7dResult?.cnt ?? 0;
 
   // Count distinct asn from observations last 7 days
-  const asns7dResult = db.prepare(`
+  const asns7dResult = await db.prepare(`
     SELECT COUNT(DISTINCT asn) as cnt FROM grift_observations
     WHERE user_id = ? AND observed_at >= ? AND asn IS NOT NULL
   `).get(userId, d7) as { cnt: number } | undefined;
   const asns7d = asns7dResult?.cnt ?? 0;
 
   // Count linked_accounts_30d from grift_linked_account_edges last 30 days
-  const linkedAccounts30dResult = db.prepare(`
+  const linkedAccounts30dResult = await db.prepare(`
     SELECT COUNT(DISTINCT CASE WHEN user_a = ? THEN user_b ELSE user_a END) as cnt
     FROM grift_linked_account_edges
     WHERE (user_a = ? OR user_b = ?) AND last_confirmed_at >= ?
@@ -1489,12 +1490,12 @@ export function recomputeUserAggregates(db: Database.Database, userId: number): 
   let kycMitigation = 0;
 
   try {
-    const mfa = db.prepare(`SELECT enabled FROM user_mfa WHERE user_id = ?`).get(userId) as { enabled: number } | undefined;
+    const mfa = await db.prepare(`SELECT enabled FROM user_mfa WHERE user_id = ?`).get(userId) as { enabled: number } | undefined;
     if (mfa?.enabled) {
       mfaMitigation = cfg.mitigationMfa ?? 10;
     }
 
-    const kyc = db.prepare(`SELECT status FROM user_kyc_profiles WHERE user_id = ?`).get(userId) as { status: string } | undefined;
+    const kyc = await db.prepare(`SELECT status FROM user_kyc_profiles WHERE user_id = ?`).get(userId) as { status: string } | undefined;
     if (kyc?.status === "APPROVED") {
       kycMitigation = cfg.mitigationKycApproved ?? 15;
     }
@@ -1513,7 +1514,7 @@ export function recomputeUserAggregates(db: Database.Database, userId: number): 
   else tier = "LOW";
 
   // Upsert into grift_user_scores table
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO grift_user_scores (
       user_id, score_current, score_7d, score_30d, tier, 
       devices_7d, ips_7d, user_agents_7d, countries_7d, asns_7d,
@@ -1561,17 +1562,17 @@ export function recomputeUserAggregates(db: Database.Database, userId: number): 
 // ---------------------------------------------------------------------
 // Risk score calculation with MFA/KYC mitigations
 // ---------------------------------------------------------------------
-export function evaluateUserRisk(db: Database.Database, userId: number): { tier: string; totalScore: number } {
+export async function evaluateUserRisk(db: GriftDb, userId: number): Promise<{ tier: string; totalScore: number }> {
   // Delegate to recomputeUserAggregates for full aggregate calculation
-  const aggregates = recomputeUserAggregates(db, userId);
+  const aggregates = await recomputeUserAggregates(db, userId);
   return { tier: aggregates.tier, totalScore: aggregates.scoreCurrent };
 }
 
 // ---------------------------------------------------------------------
 // Query helpers
 // ---------------------------------------------------------------------
-export function getSignals(
-  db: Database.Database,
+export async function getSignals(
+  db: GriftDb,
   filters?: { status?: string; ruleCode?: string; userId?: number; severity?: string; limit?: number }
 ) {
   let sql = "SELECT * FROM grift_signals WHERE 1=1";
@@ -1601,36 +1602,36 @@ export function getSignals(
     params.push(filters.limit);
   }
 
-  return db.prepare(sql).all(...params);
+  return await db.prepare(sql).all(...params);
 }
 
-export function getUserScore(db: Database.Database, userId: number) {
-  return db.prepare(`SELECT * FROM grift_user_scores WHERE user_id = ?`).get(userId);
+export async function getUserScore(db: GriftDb, userId: number) {
+  return await db.prepare(`SELECT * FROM grift_user_scores WHERE user_id = ?`).get(userId);
 }
 
-export function getLinkedAccounts(db: Database.Database, userId: number) {
-  return db.prepare(`
+export async function getLinkedAccounts(db: GriftDb, userId: number) {
+  return await db.prepare(`
     SELECT * FROM grift_linked_account_edges
     WHERE user_a = ? OR user_b = ?
     ORDER BY last_confirmed_at DESC
   `).all(userId, userId);
 }
 
-export function getFlaggedUsers(db: Database.Database, minTier: string = "MED") {
+export async function getFlaggedUsers(db: GriftDb, minTier: string = "MED") {
   const tiers = ["LOW", "MED", "HIGH", "CRITICAL"];
   const minIdx = tiers.indexOf(minTier);
   const validTiers = tiers.slice(minIdx);
 
   const placeholders = validTiers.map(() => "?").join(",");
-  return db.prepare(`
+  return await db.prepare(`
     SELECT * FROM grift_user_scores
     WHERE tier IN (${placeholders})
     ORDER BY score_current DESC
   `).all(...validTiers);
 }
 
-export function getTierCounts(db: Database.Database) {
-  const rows = db.prepare(`
+export async function getTierCounts(db: GriftDb) {
+  const rows = await db.prepare(`
     SELECT tier, COUNT(*) as count FROM grift_user_scores GROUP BY tier
   `).all() as { tier: string; count: number }[];
 
@@ -1644,9 +1645,9 @@ export function getTierCounts(db: Database.Database) {
   return counts;
 }
 
-export function getNetworks(db: Database.Database) {
+export async function getNetworks(db: GriftDb) {
   // Find all linked account clusters using DFS
-  const edges = db.prepare(`
+  const edges = await db.prepare(`
     SELECT user_a, user_b, link_type, confidence FROM grift_linked_account_edges
   `).all() as { user_a: number; user_b: number; link_type: string; confidence: number }[];
 

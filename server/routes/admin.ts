@@ -19,8 +19,8 @@ import { promotePerformerIfEligible } from "../policy/performerPromotion";
 import { buildAuditContext } from "../lib/auditContext";
 import { defaultPaymentCurrencyForCountry } from "../utils/paymentCurrency";
 import type { AccountActionProvenance } from "../lib/accountEventMirror";
-import Database from "better-sqlite3";
 import { appendAuditEntry } from "../grift/griftAdminAudit";
+import { getGriftDb } from "../grift/griftDb";
 import { recalcAccount } from "../recalcAccount";
 import { publishLiveEvent } from "../services/liveBus";
 
@@ -70,13 +70,13 @@ export function registerAdminRoutes(app: Express) {
     };
   };
 
-  const applyGriftEnforcementSyncWithDb = (griftDb: Database.Database, params: {
+  const applyGriftEnforcementSyncWithDb = async (griftDb: ReturnType<typeof getGriftDb>, params: {
     userId: number;
     adminId: number;
     action: "FREEZE" | "UNFREEZE" | "DISABLE" | "ENABLE";
     reason?: string | null;
   }) => {
-    const existing = griftDb.prepare(`
+    const existing = await griftDb.prepare(`
         SELECT frozen_at, frozen_by_admin_id, disabled_at, disabled_by_admin_id, notes
         FROM grift_user_enforcements
         WHERE user_id = ?
@@ -131,7 +131,7 @@ export function registerAdminRoutes(app: Express) {
         return { actionTaken: false, oldStatus, newStatus };
       }
 
-      griftDb.prepare(`
+      await griftDb.prepare(`
         INSERT INTO grift_user_enforcements (
           user_id, frozen_at, frozen_by_admin_id, disabled_at, disabled_by_admin_id, notes
         ) VALUES (?, ?, ?, ?, ?, ?)
@@ -143,17 +143,17 @@ export function registerAdminRoutes(app: Express) {
           notes = excluded.notes
       `).run(params.userId, frozenAt, frozenBy, disabledAt, disabledBy, notes);
 
-      const riskScore = (griftDb.prepare(`
+      const riskScore = (await griftDb.prepare(`
         SELECT score_current as scoreCurrent FROM grift_user_scores WHERE user_id = ?
       `).get(params.userId) as any)?.scoreCurrent ?? null;
 
-      griftDb.prepare(`
+      await griftDb.prepare(`
         INSERT INTO grift_enforcement_log (
           user_id, action, old_status, new_status, admin_id, reason, risk_score_at_action, created_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       `).run(params.userId, params.action, oldStatus, newStatus, params.adminId, normalizedReason || null, riskScore, now);
 
-      appendAuditEntry(griftDb, params.adminId, `ENFORCEMENT_${params.action}`, "user", params.userId, {
+      await appendAuditEntry(griftDb, params.adminId, `ENFORCEMENT_${params.action}`, "user", params.userId, {
         source: "admin_users_endpoint",
         oldStatus,
         newStatus,
@@ -164,18 +164,14 @@ export function registerAdminRoutes(app: Express) {
       return { actionTaken: true, oldStatus, newStatus };
   };
 
-  const applyGriftEnforcementSync = (params: {
+  const applyGriftEnforcementSync = async (params: {
     userId: number;
     adminId: number;
     action: "FREEZE" | "UNFREEZE" | "DISABLE" | "ENABLE";
     reason?: string | null;
   }) => {
-    const griftDb = new Database("./trading_app.db");
-    try {
-      return applyGriftEnforcementSyncWithDb(griftDb, params);
-    } finally {
-      griftDb.close();
-    }
+    const griftDb = getGriftDb();
+    return await applyGriftEnforcementSyncWithDb(griftDb, params);
   };
 
   const toIso = (value: any): string | null => {
@@ -1556,7 +1552,7 @@ export function registerAdminRoutes(app: Express) {
       );
 
       try {
-        applyGriftEnforcementSync({
+        await applyGriftEnforcementSync({
           userId,
           adminId: adminIdNum,
           action: disabled ? "DISABLE" : "ENABLE",
@@ -1597,7 +1593,7 @@ export function registerAdminRoutes(app: Express) {
 
       try {
         const reason = reasonText ? `${reasonCode}: ${reasonText}` : String(reasonCode);
-        applyGriftEnforcementSync({
+        await applyGriftEnforcementSync({
           userId,
           adminId: adminIdNum,
           action: "FREEZE",
@@ -1635,7 +1631,7 @@ export function registerAdminRoutes(app: Express) {
       });
 
       try {
-        applyGriftEnforcementSync({
+        await applyGriftEnforcementSync({
           userId,
           adminId: adminIdNum,
           action: "UNFREEZE",
@@ -1785,21 +1781,20 @@ export function registerAdminRoutes(app: Express) {
 
       try {
         const action = disabled ? "DISABLE" : "ENABLE";
-        const reason = disabled ? `Admin bulk toggle-status: disabled ${userIds.length} users` : `Admin bulk toggle-status: enabled ${userIds.length} users`;
-        const griftDb = new Database("./trading_app.db");
-        try {
-          for (const rawId of userIds) {
-            const userId = Number(rawId);
-            if (!Number.isFinite(userId)) continue;
-            applyGriftEnforcementSyncWithDb(griftDb, {
-              userId,
-              adminId: adminIdNum,
-              action,
-              reason,
-            });
-          }
-        } finally {
-          griftDb.close();
+        const reason =
+          disabled
+            ? `Admin bulk toggle-status: disabled ${userIds.length} users`
+            : `Admin bulk toggle-status: enabled ${userIds.length} users`;
+        const griftDb = getGriftDb();
+        for (const rawId of userIds) {
+          const userId = Number(rawId);
+          if (!Number.isFinite(userId)) continue;
+          await applyGriftEnforcementSyncWithDb(griftDb, {
+            userId,
+            adminId: adminIdNum,
+            action,
+            reason,
+          });
         }
       } catch (griftErr) {
         console.error("[Grift] Failed to sync enforcement (bulk toggle-status):", griftErr);

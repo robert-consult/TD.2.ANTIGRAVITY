@@ -298,7 +298,7 @@ export const quotes = pgTable("quotes", {
   ask: real("ask"),
   updatedAt: integer("updated_at").notNull().default(nowUnix),
   isStale: boolean("is_stale").notNull().default(false),
-  lastApiUpdate: integer("last_api_update"),
+  lastApiUpdate: bigint("last_api_update", { mode: "number" }),
 });
 
 // Global settings table for admin-configured defaults
@@ -1121,8 +1121,7 @@ export const insertIdentityAuditSchema = createInsertSchema(identityAudit);
 
 // ================================================================
 // GRIFT DETECTION TABLES (identity linking, alerts, risk scoring)
-// Note: These tables use raw SQLite via ensureSchema.ts, not Drizzle ORM
-// Schema here is for type inference only - actual tables in ensureSchema.ts
+// Note: These tables are primarily used via raw SQL; schema is for type inference.
 // ================================================================
 
 // Identity links: many-to-many between users and identity keys (device, IP, fingerprint)
@@ -1131,8 +1130,8 @@ export const griftIdentityLinks = pgTable("grift_identity_links", {
   userId: integer("user_id").notNull(),
   linkType: text("link_type").notNull(), // device_install_id | device_fp | device_id | ip | ip_subnet
   linkValue: text("link_value").notNull(),
-  firstSeenAt: integer("first_seen_at").notNull().default(nowUnix),
-  lastSeenAt: integer("last_seen_at").notNull().default(nowUnix),
+  firstSeenAt: bigint("first_seen_at", { mode: "number" }).notNull().default(nowUnixMs),
+  lastSeenAt: bigint("last_seen_at", { mode: "number" }).notNull().default(nowUnixMs),
   occurrenceCount: integer("occurrence_count").notNull().default(1),
   metadataJson: text("metadata_json"),
 });
@@ -1147,8 +1146,8 @@ export const griftAlerts = pgTable("grift_alerts", {
   status: text("status").notNull().default("open"), // open | resolved | dismissed | in_review
   detailsJson: text("details_json"),
   relatedUserId: integer("related_user_id"),
-  createdAt: integer("created_at").notNull().default(nowUnix),
-  reviewedAt: integer("reviewed_at"),
+  createdAt: bigint("created_at", { mode: "number" }).notNull().default(nowUnixMs),
+  reviewedAt: bigint("reviewed_at", { mode: "number" }),
   reviewedBy: integer("reviewed_by"),
   resolutionNote: text("resolution_note"),
 });
@@ -1158,13 +1157,13 @@ export const griftUserRisk = pgTable("grift_user_risk", {
   userId: integer("user_id").primaryKey(),
   riskScore: integer("risk_score").notNull().default(0),
   riskFactorsJson: text("risk_factors_json"),
-  lastEvaluatedAt: integer("last_evaluated_at").notNull().default(nowUnix),
+  lastEvaluatedAt: bigint("last_evaluated_at", { mode: "number" }).notNull().default(nowUnixMs),
   manualOverride: text("manual_override"),
   overrideBy: integer("override_by"),
-  overrideAt: integer("override_at"),
+  overrideAt: bigint("override_at", { mode: "number" }),
   overrideReason: text("override_reason"),
   enforcementStatus: text("enforcement_status").default("ACTIVE"),
-  enforcementAt: integer("enforcement_at"),
+  enforcementAt: bigint("enforcement_at", { mode: "number" }),
   enforcementBy: integer("enforcement_by"),
   enforcementReason: text("enforcement_reason"),
 });
@@ -1177,8 +1176,8 @@ export const griftLinkedAccountEdges = pgTable("grift_linked_account_edges", {
   linkType: text("link_type").notNull(), // SHARED_DEVICE | SHARED_IP | etc.
   linkValue: text("link_value"),
   confidence: real("confidence").notNull().default(1.0),
-  firstLinkedAt: integer("first_linked_at").notNull().default(nowUnix),
-  lastConfirmedAt: integer("last_confirmed_at").notNull().default(nowUnix),
+  firstLinkedAt: bigint("first_linked_at", { mode: "number" }).notNull().default(nowUnixMs),
+  lastConfirmedAt: bigint("last_confirmed_at", { mode: "number" }).notNull().default(nowUnixMs),
   metadataJson: text("metadata_json"),
 });
 
@@ -1221,15 +1220,15 @@ export const griftConfig = pgTable("grift_config", {
   enforcementDisableThreshold: integer("enforcement_disable_threshold").notNull().default(100),
   enforcementAutoFreeze: integer("enforcement_auto_freeze").notNull().default(0),
   enforcementAutoDisable: integer("enforcement_auto_disable").notNull().default(0),
-  updatedAt: integer("updated_at").notNull().default(nowUnix),
+  updatedAt: bigint("updated_at", { mode: "number" }).notNull().default(nowUnixMs),
   updatedByAdminId: integer("updated_by_admin_id"),
 });
 
 // Device rollups (aggregate device info)
 export const griftDevices = pgTable("grift_devices", {
   deviceId: text("device_id").primaryKey(),
-  firstSeenAt: integer("first_seen_at").notNull().default(nowUnix),
-  lastSeenAt: integer("last_seen_at").notNull().default(nowUnix),
+  firstSeenAt: bigint("first_seen_at", { mode: "number" }).notNull().default(nowUnixMs),
+  lastSeenAt: bigint("last_seen_at", { mode: "number" }).notNull().default(nowUnixMs),
   firstIp: text("first_ip"),
   firstGeoCountry: text("first_geo_country"),
   trustLevel: text("trust_level").notNull().default("NEW"), // NEW | TRUSTED | CHALLENGED | BLOCKED
@@ -1242,8 +1241,8 @@ export const griftDeviceUsers = pgTable("grift_device_users", {
   id: serial("id").primaryKey(),
   deviceId: text("device_id").notNull(),
   userId: integer("user_id").notNull(),
-  firstSeenAt: integer("first_seen_at").notNull().default(nowUnix),
-  lastSeenAt: integer("last_seen_at").notNull().default(nowUnix),
+  firstSeenAt: bigint("first_seen_at", { mode: "number" }).notNull().default(nowUnixMs),
+  lastSeenAt: bigint("last_seen_at", { mode: "number" }).notNull().default(nowUnixMs),
   seenCount: integer("seen_count").notNull().default(1),
   linkStrength: real("link_strength").notNull().default(1.0),
 });
@@ -1259,9 +1258,9 @@ export const griftSignals = pgTable("grift_signals", {
   status: text("status").notNull().default("OPEN"), // OPEN | CLOSED
   evidenceJson: text("evidence_json"),
   relatedUserId: integer("related_user_id"),
-  createdAt: integer("created_at").notNull().default(nowUnix),
-  updatedAt: integer("updated_at").notNull().default(nowUnix),
-  closedAt: integer("closed_at"),
+  createdAt: bigint("created_at", { mode: "number" }).notNull().default(nowUnixMs),
+  updatedAt: bigint("updated_at", { mode: "number" }).notNull().default(nowUnixMs),
+  closedAt: bigint("closed_at", { mode: "number" }),
   closedByAdminId: integer("closed_by_admin_id"),
   closureNote: text("closure_note"),
   deviceId: text("device_id"),
@@ -1346,15 +1345,15 @@ export const griftUserScores = pgTable("grift_user_scores", {
   linkedAccounts30d: integer("linked_accounts_30d").notNull().default(0),
   hedgePairs7d: integer("hedge_pairs_7d").notNull().default(0),
   openSignalsCount: integer("open_signals_count").notNull().default(0),
-  lastEvaluatedAt: integer("last_evaluated_at").notNull().default(0),
+  lastEvaluatedAt: bigint("last_evaluated_at", { mode: "number" }).notNull().default(0),
 });
 
 // Grift user enforcement status (freeze/disable)
 export const griftUserEnforcements = pgTable("grift_user_enforcements", {
   userId: integer("user_id").primaryKey(),
-  frozenAt: integer("frozen_at"),
+  frozenAt: bigint("frozen_at", { mode: "number" }),
   frozenByAdminId: integer("frozen_by_admin_id"),
-  disabledAt: integer("disabled_at"),
+  disabledAt: bigint("disabled_at", { mode: "number" }),
   disabledByAdminId: integer("disabled_by_admin_id"),
   notes: text("notes"),
 });
@@ -1370,7 +1369,7 @@ export const griftCases = pgTable("grift_cases", {
   resolution: text("resolution"),
   createdAt: bigint("created_at", { mode: "number" }).notNull().default(nowUnixMs),
   updatedAt: bigint("updated_at", { mode: "number" }).notNull().default(nowUnixMs),
-  closedAt: integer("closed_at"),
+  closedAt: bigint("closed_at", { mode: "number" }),
 });
 
 export const griftCaseSignals = pgTable("grift_case_signals", {
@@ -1421,6 +1420,71 @@ export const griftEnforcementLog = pgTable("grift_enforcement_log", {
   reason: text("reason"),
   riskScoreAtAction: integer("risk_score_at_action"),
   createdAt: bigint("created_at", { mode: "number" }).notNull().default(nowUnixMs),
+});
+
+// Auth events log (append-only)
+export const authEvents = pgTable("auth_events", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id"),
+  eventType: text("event_type").notNull(),
+  sessionId: text("session_id"),
+  deviceId: text("device_id"),
+  deviceFp: text("device_fp"),
+  deviceInstallId: text("device_install_id"),
+  clientTz: text("client_tz"),
+  clientLang: text("client_lang"),
+  ip: text("ip"),
+  userAgent: text("user_agent"),
+  geoCountry: text("geo_country"),
+  geoRegion: text("geo_region"),
+  geoCity: text("geo_city"),
+  latitude: real("latitude"),
+  longitude: real("longitude"),
+  asn: integer("asn"),
+  org: text("org"),
+  success: integer("success").notNull().default(1),
+  failureReason: text("failure_reason"),
+  metadataJson: text("metadata_json"),
+  createdAt: bigint("created_at", { mode: "number" }).notNull().default(nowUnixMs),
+});
+
+// Grift IP -> ASN cache
+export const griftIpAsnCache = pgTable("grift_ip_asn_cache", {
+  ip: text("ip").primaryKey(),
+  asn: integer("asn"),
+  org: text("org"),
+  source: text("source"),
+  fetchedAt: bigint("fetched_at", { mode: "number" }),
+  lastSeenAt: bigint("last_seen_at", { mode: "number" }).notNull().default(nowUnixMs),
+  attemptCount: integer("attempt_count").notNull().default(0),
+  lastAttemptAt: bigint("last_attempt_at", { mode: "number" }),
+  error: text("error"),
+  errorAt: bigint("error_at", { mode: "number" }),
+  nextRetryAt: bigint("next_retry_at", { mode: "number" }),
+});
+
+// Offline ip2asn dataset ranges
+export const griftIpAsnRanges = pgTable("grift_ip_asn_ranges", {
+  id: serial("id").primaryKey(),
+  ipVersion: integer("ip_version").notNull(),
+  startInt: bigint("start_int", { mode: "number" }),
+  endInt: bigint("end_int", { mode: "number" }),
+  startHex: text("start_hex"),
+  endHex: text("end_hex"),
+  asn: integer("asn"),
+  country: text("country"),
+  org: text("org"),
+});
+
+export const griftIpAsnDatasetMeta = pgTable("grift_ip_asn_dataset_meta", {
+  id: integer("id").primaryKey().default(1),
+  filePath: text("file_path").notNull(),
+  fileMtimeMs: bigint("file_mtime_ms", { mode: "number" }).notNull(),
+  fileSize: bigint("file_size", { mode: "number" }).notNull(),
+  importedAt: bigint("imported_at", { mode: "number" }).notNull(),
+  rowCount: bigint("row_count", { mode: "number" }).notNull(),
+  ipv4Count: bigint("ipv4_count", { mode: "number" }).notNull(),
+  ipv6Count: bigint("ipv6_count", { mode: "number" }).notNull(),
 });
 
 // ================================================================

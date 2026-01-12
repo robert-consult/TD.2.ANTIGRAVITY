@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { GriftDb } from "./griftDb";
 import type { GriftConfig } from "./griftTypes";
 
 export type GriftRetentionResult = {
@@ -40,15 +40,15 @@ function clampInt(value: unknown, min: number, max: number, fallback: number) {
   return Math.max(min, Math.min(max, Math.round(n)));
 }
 
-function deleteBatchedById(
-  db: Database.Database,
+async function deleteBatchedById(
+  db: GriftDb,
   table: string,
   idColumn: string,
   tsColumn: string,
   cutoffMs: number,
   batchSize: number,
   maxBatches: number
-) {
+): Promise<{ deleted: number; batches: number }> {
   const stmt = db.prepare(
     `DELETE FROM ${table} WHERE ${idColumn} IN (SELECT ${idColumn} FROM ${table} WHERE ${tsColumn} < ? LIMIT ?)`
   );
@@ -56,7 +56,7 @@ function deleteBatchedById(
   let deleted = 0;
   let batches = 0;
   for (let i = 0; i < maxBatches; i++) {
-    const info = stmt.run(cutoffMs, batchSize) as { changes: number };
+    const info = await stmt.run(cutoffMs, batchSize) as { changes: number };
     const changes = Number(info?.changes ?? 0);
     if (changes <= 0) break;
     deleted += changes;
@@ -66,11 +66,11 @@ function deleteBatchedById(
   return { deleted, batches };
 }
 
-export function runGriftRetention(
-  db: Database.Database,
+export async function runGriftRetention(
+  db: GriftDb,
   cfg: GriftConfig,
   opts?: { nowMs?: number; batchSize?: number; maxBatches?: number }
-): GriftRetentionResult {
+): Promise<GriftRetentionResult> {
   const startedAt = Date.now();
   const nowMs = opts?.nowMs ?? startedAt;
   const batchSize = clampInt(opts?.batchSize, 100, 50_000, 5_000);
@@ -91,7 +91,7 @@ export function runGriftRetention(
   const authEventsBeforeMs = nowMs - daysToMs(effectiveAuthDays);
   const ipAsnCacheBeforeMs = nowMs - daysToMs(effectiveCacheDays);
 
-  const obs = deleteBatchedById(
+  const obs = await deleteBatchedById(
     db,
     "grift_observations",
     "id",
@@ -101,7 +101,7 @@ export function runGriftRetention(
     maxBatches
   );
 
-  const tradeObs = deleteBatchedById(
+  const tradeObs = await deleteBatchedById(
     db,
     "grift_trade_observations",
     "id",
@@ -111,7 +111,7 @@ export function runGriftRetention(
     maxBatches
   );
 
-  const auth = deleteBatchedById(
+  const auth = await deleteBatchedById(
     db,
     "auth_events",
     "id",
@@ -121,7 +121,7 @@ export function runGriftRetention(
     maxBatches
   );
 
-  const cache = deleteBatchedById(
+  const cache = await deleteBatchedById(
     db,
     "grift_ip_asn_cache",
     "ip",
@@ -160,4 +160,3 @@ export function runGriftRetention(
     tookMs: Date.now() - startedAt,
   };
 }
-

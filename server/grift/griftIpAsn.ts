@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { GriftDb } from "./griftDb";
 import { lookupIp2Asn, maybeImportIp2AsnDataset } from "./griftIp2AsnDataset";
 
 export type IpAsnOrg = {
@@ -77,10 +77,10 @@ function backoffMs(attemptCount: number) {
   return Math.min(max, base * Math.pow(2, pow));
 }
 
-export function touchIpAsnCache(db: Database.Database, ipRaw: string, nowMs: number = Date.now()) {
+export async function touchIpAsnCache(db: GriftDb, ipRaw: string, nowMs: number = Date.now()): Promise<void> {
   const ip = normalizeIpKey(ipRaw);
   if (!ip) return;
-  db.prepare(
+  await db.prepare(
     `
     INSERT INTO grift_ip_asn_cache (ip, last_seen_at)
     VALUES (?, ?)
@@ -89,21 +89,21 @@ export function touchIpAsnCache(db: Database.Database, ipRaw: string, nowMs: num
   ).run(ip, nowMs);
 }
 
-export function noteIpAsnFromHeaders(
-  db: Database.Database,
+export async function noteIpAsnFromHeaders(
+  db: GriftDb,
   input: { ip: string; asn?: number | null; org?: string | null },
   nowMs: number = Date.now()
-) {
+): Promise<void> {
   const ip = normalizeIpKey(input.ip);
   if (!ip) return;
   const asn = typeof input.asn === "number" ? input.asn : null;
   const org = typeof input.org === "string" ? input.org : null;
   if (asn == null && !org) {
-    touchIpAsnCache(db, ip, nowMs);
+    await touchIpAsnCache(db, ip, nowMs);
     return;
   }
 
-  db.prepare(
+  await db.prepare(
     `
     INSERT INTO grift_ip_asn_cache (ip, asn, org, source, fetched_at, last_seen_at)
     VALUES (?, ?, ?, 'proxy_header', ?, ?)
@@ -120,17 +120,17 @@ export function noteIpAsnFromHeaders(
   ).run(ip, asn, org, nowMs, nowMs);
 }
 
-export function getCachedIpAsnOrg(
-  db: Database.Database,
+export async function getCachedIpAsnOrg(
+  db: GriftDb,
   ipRaw: string,
   opts?: { nowMs?: number; ttlMs?: number }
-): IpAsnOrg | null {
+): Promise<IpAsnOrg | null> {
   const ip = normalizeIpKey(ipRaw);
   if (!ip) return null;
   const nowMs = opts?.nowMs ?? Date.now();
   const ttlMs = opts?.ttlMs ?? 7 * 24 * 60 * 60 * 1000;
 
-  const row = db
+  const row = await db
     .prepare(
       `
       SELECT ip, asn, org, source, fetched_at, next_retry_at, attempt_count
@@ -153,31 +153,31 @@ export function getCachedIpAsnOrg(
   };
 }
 
-export function resolveAsnOrg(
-  db: Database.Database,
+export async function resolveAsnOrg(
+  db: GriftDb,
   input: { ip?: string | null; asn?: number | null; org?: string | null },
   nowMs: number = Date.now()
-): { ip: string | null; asn: number | null; org: string | null } {
+): Promise<{ ip: string | null; asn: number | null; org: string | null }> {
   const ip = normalizeIpKey(input.ip ?? null);
   if (!ip) return { ip: null, asn: input.asn ?? null, org: input.org ?? null };
 
   // If a proxy/provider already gave ASN/org, treat it as authoritative and cache it.
   if (typeof input.asn === "number" || typeof input.org === "string") {
-    noteIpAsnFromHeaders(db, { ip, asn: input.asn ?? null, org: input.org ?? null }, nowMs);
+    await noteIpAsnFromHeaders(db, { ip, asn: input.asn ?? null, org: input.org ?? null }, nowMs);
     return { ip, asn: input.asn ?? null, org: input.org ?? null };
   }
 
   // Touch so the scheduler can enrich later.
-  touchIpAsnCache(db, ip, nowMs);
+  await touchIpAsnCache(db, ip, nowMs);
 
-  const cached = getCachedIpAsnOrg(db, ip, { nowMs });
+  const cached = await getCachedIpAsnOrg(db, ip, { nowMs });
   if (cached) return { ip, asn: cached.asn ?? null, org: cached.org ?? null };
 
   // Fast offline lookup via ip2asn range table (if imported).
-  const local = lookupIp2Asn(db, ip);
+  const local = await lookupIp2Asn(db, ip);
   if (local) {
-    updateCacheSuccess(db, ip, { asn: local.asn, org: local.org, source: local.source, nowMs });
-    backfillTables(db, ip, local.asn, local.org);
+    await updateCacheSuccess(db, ip, { asn: local.asn, org: local.org, source: local.source, nowMs });
+    await backfillTables(db, ip, local.asn, local.org);
     return { ip, asn: local.asn, org: local.org };
   }
 
@@ -244,13 +244,13 @@ async function fetchIpAsnOrg(ip: string): Promise<{ asn: number | null; org: str
   }
 }
 
-function updateCacheSuccess(
-  db: Database.Database,
+async function updateCacheSuccess(
+  db: GriftDb,
   ip: string,
   result: { asn: number | null; org: string | null; source: string; nowMs: number }
-) {
+): Promise<void> {
   const { asn, org, source, nowMs } = result;
-  db.prepare(
+  await db.prepare(
     `
     UPDATE grift_ip_asn_cache
     SET
@@ -268,14 +268,14 @@ function updateCacheSuccess(
   ).run(asn, org, source, nowMs, nowMs, ip);
 }
 
-function updateCacheError(db: Database.Database, ip: string, err: string, nowMs: number) {
-  const row = db
+async function updateCacheError(db: GriftDb, ip: string, err: string, nowMs: number): Promise<void> {
+  const row = await db
     .prepare(`SELECT attempt_count FROM grift_ip_asn_cache WHERE ip = ?`)
     .get(ip) as { attempt_count?: number } | undefined;
   const attemptCount = Math.max(0, Number(row?.attempt_count ?? 0));
   const nextRetryAt = nowMs + backoffMs(attemptCount);
 
-  db.prepare(
+  await db.prepare(
     `
     UPDATE grift_ip_asn_cache
     SET
@@ -289,7 +289,7 @@ function updateCacheError(db: Database.Database, ip: string, err: string, nowMs:
   ).run(nowMs, err.slice(0, 500), nowMs, nextRetryAt, ip);
 }
 
-function backfillTables(db: Database.Database, ip: string, asn: number | null, org: string | null) {
+async function backfillTables(db: GriftDb, ip: string, asn: number | null, org: string | null): Promise<void> {
   if (asn == null && !org) return;
   // Prefer to only fill missing values; preserve any already-recorded values.
   // Match both normalized and common raw variants (e.g., IPv4-mapped IPv6 "::ffff:1.2.3.4").
@@ -312,7 +312,7 @@ function backfillTables(db: Database.Database, ip: string, asn: number | null, o
   const ipWhere = `(${whereParts.join(" OR ")})`;
 
   try {
-    db.prepare(
+    await db.prepare(
       `
       UPDATE grift_observations
       SET
@@ -325,7 +325,7 @@ function backfillTables(db: Database.Database, ip: string, asn: number | null, o
     // ignore
   }
   try {
-    db.prepare(
+    await db.prepare(
       `
       UPDATE grift_trade_observations
       SET
@@ -338,7 +338,7 @@ function backfillTables(db: Database.Database, ip: string, asn: number | null, o
     // ignore
   }
   try {
-    db.prepare(
+    await db.prepare(
       `
       UPDATE auth_events
       SET
@@ -353,7 +353,7 @@ function backfillTables(db: Database.Database, ip: string, asn: number | null, o
 }
 
 export async function enrichIpAsnCacheBatch(
-  db: Database.Database,
+  db: GriftDb,
   opts?: { limit?: number; lookbackMs?: number; ttlMs?: number }
 ): Promise<{ attempted: number; enriched: number; skipped: boolean; reason?: string }> {
   const nowMs = Date.now();
@@ -369,9 +369,9 @@ export async function enrichIpAsnCacheBatch(
   }
 
   const hasRemoteProvider = !!process.env.GRIFT_IPTOASN_URL_TEMPLATE;
-  const hasLocalDataset = (() => {
+  const hasLocalDataset = await (async () => {
     try {
-      const row = db.prepare(`SELECT 1 as ok FROM grift_ip_asn_ranges LIMIT 1`).get() as any;
+      const row = await db.prepare(`SELECT 1 as ok FROM grift_ip_asn_ranges LIMIT 1`).get() as any;
       return !!row?.ok;
     } catch {
       return false;
@@ -385,7 +385,7 @@ export async function enrichIpAsnCacheBatch(
   // Seed cache with IPs seen recently in observations.
   const since = nowMs - lookbackMs;
   try {
-    const ips = db
+    const ips = await db
       .prepare(
         `
         SELECT DISTINCT ip
@@ -398,14 +398,14 @@ export async function enrichIpAsnCacheBatch(
     for (const r of ips) {
       const ip = normalizeIpKey(r.ip);
       if (!ip) continue;
-      touchIpAsnCache(db, ip, nowMs);
+      await touchIpAsnCache(db, ip, nowMs);
     }
   } catch {
     // ignore
   }
 
   const staleBefore = nowMs - ttlMs;
-  const rows = db
+  const rows = await db
     .prepare(
       `
       SELECT ip, asn, org, fetched_at, next_retry_at
@@ -428,16 +428,16 @@ export async function enrichIpAsnCacheBatch(
     attempted++;
 
     if (isPrivateIp(ip)) {
-      updateCacheError(db, ip, "PRIVATE_IP", nowMs);
+      await updateCacheError(db, ip, "PRIVATE_IP", nowMs);
       continue;
     }
 
     try {
       // Prefer offline dataset for determinism; fall back to remote provider when configured.
-      const local = hasLocalDataset ? lookupIp2Asn(db, ip) : null;
+      const local = hasLocalDataset ? await lookupIp2Asn(db, ip) : null;
       if (local) {
-        updateCacheSuccess(db, ip, { asn: local.asn, org: local.org, source: local.source, nowMs });
-        backfillTables(db, ip, local.asn, local.org);
+        await updateCacheSuccess(db, ip, { asn: local.asn, org: local.org, source: local.source, nowMs });
+        await backfillTables(db, ip, local.asn, local.org);
         enriched++;
         continue;
       }
@@ -445,18 +445,18 @@ export async function enrichIpAsnCacheBatch(
       if (hasRemoteProvider) {
         const result = await fetchIpAsnOrg(ip);
         if (result.asn == null && !result.org) {
-          updateCacheError(db, ip, "NO_DATA", nowMs);
+          await updateCacheError(db, ip, "NO_DATA", nowMs);
           continue;
         }
-        updateCacheSuccess(db, ip, { asn: result.asn, org: result.org, source: "iptoasn", nowMs });
-        backfillTables(db, ip, result.asn, result.org);
+        await updateCacheSuccess(db, ip, { asn: result.asn, org: result.org, source: "iptoasn", nowMs });
+        await backfillTables(db, ip, result.asn, result.org);
         enriched++;
         continue;
       }
 
-      updateCacheError(db, ip, "NO_DATA", nowMs);
+      await updateCacheError(db, ip, "NO_DATA", nowMs);
     } catch (e: any) {
-      updateCacheError(db, ip, String(e?.message ?? e ?? "ENRICH_ERROR"), nowMs);
+      await updateCacheError(db, ip, String(e?.message ?? e ?? "ENRICH_ERROR"), nowMs);
     }
   }
 

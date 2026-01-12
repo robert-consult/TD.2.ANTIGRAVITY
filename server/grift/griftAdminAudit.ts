@@ -1,6 +1,6 @@
 // server/grift/griftAdminAudit.ts
 import crypto from "crypto";
-import Database from "better-sqlite3";
+import type { GriftDb } from "./griftDb";
 
 export type AuditAction =
   | "CONFIG_UPDATE"
@@ -54,18 +54,18 @@ function computeHash(entry: Omit<AuditEntry, "hash" | "id">): string {
   return crypto.createHash("sha256").update(data).digest("hex");
 }
 
-export function appendAuditEntry(
-  db: Database.Database,
+export async function appendAuditEntry(
+  db: GriftDb,
   adminId: number,
   action: AuditAction,
   targetType?: "signal" | "case" | "user" | "config" | "ip2asn" | "maintenance",
   targetId?: number,
   payload?: Record<string, any>
-): AuditEntry {
+): Promise<AuditEntry> {
   const now = Date.now();
 
   // Get previous hash
-  const lastRow = db.prepare(`
+  const lastRow = await db.prepare(`
     SELECT hash FROM grift_admin_actions ORDER BY id DESC LIMIT 1
   `).get() as { hash: string } | undefined;
 
@@ -84,9 +84,10 @@ export function appendAuditEntry(
 
   entry.hash = computeHash(entry);
 
-  const result = db.prepare(`
+  const result = await db.prepare(`
     INSERT INTO grift_admin_actions (admin_id, action, target_type, target_id, payload_json, created_at, prev_hash, hash)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    RETURNING id
   `).run(
     adminId,
     action,
@@ -101,10 +102,10 @@ export function appendAuditEntry(
   return { id: Number(result.lastInsertRowid), ...entry };
 }
 
-export function verifyAuditChain(
-  db: Database.Database
-): { valid: boolean; totalEntries: number; brokenAt?: number; message?: string } {
-  const rows = db.prepare(`
+export async function verifyAuditChain(
+  db: GriftDb
+): Promise<{ valid: boolean; totalEntries: number; brokenAt?: number; message?: string }> {
+  const rows = await db.prepare(`
     SELECT id, admin_id as adminId, action, target_type as targetType, target_id as targetId, payload_json as payload, created_at as createdAt, prev_hash as prevHash, hash
     FROM grift_admin_actions ORDER BY id ASC
   `).all() as AuditEntry[];
@@ -148,8 +149,8 @@ export function verifyAuditChain(
   return { valid: true, totalEntries: rows.length };
 }
 
-export function getAuditLog(
-  db: Database.Database,
+export async function getAuditLog(
+  db: GriftDb,
   filters?: {
     adminId?: number;
     action?: AuditAction;
@@ -157,7 +158,7 @@ export function getAuditLog(
     since?: number;
     limit?: number;
   }
-): AuditEntry[] {
+): Promise<AuditEntry[]> {
   let sql = "SELECT * FROM grift_admin_actions WHERE 1=1";
   const params: any[] = [];
 
@@ -185,7 +186,7 @@ export function getAuditLog(
     params.push(filters.limit);
   }
 
-  const rows = db.prepare(sql).all(...params) as AuditEntry[];
+  const rows = await db.prepare(sql).all(...params) as AuditEntry[];
   return rows.map((r) => ({
     ...r,
     payload: r.payload ? (typeof r.payload === "string" ? JSON.parse(r.payload) : r.payload) : undefined,

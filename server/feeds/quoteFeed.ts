@@ -188,7 +188,8 @@ async function persistQuotes(rows: any[], isStale: boolean) {
   if (!rows.length) return;
   const client = await dbClient.connect();
   const affectedSymbols: string[] = [];
-  const nowSec = Math.floor(Date.now() / 1000);
+  const nowMs = Date.now();
+  const nowSec = Math.floor(nowMs / 1000);
   try {
     await client.query("BEGIN");
 
@@ -196,8 +197,8 @@ async function persistQuotes(rows: any[], isStale: boolean) {
 
     for (const q of rows) {
       if (!q?.symbol) continue;
-      const lastUpdatedMs = typeof q.lastUpdated === "number" ? q.lastUpdated : Date.now();
-      const lastApiUpdateSec = Math.floor(lastUpdatedMs / 1000);
+      const lastUpdatedMs = typeof q.lastUpdated === "number" ? q.lastUpdated : nowMs;
+      const lastApiUpdateMs = Math.trunc(lastUpdatedMs);
 
       await client.query(
         `
@@ -218,7 +219,7 @@ async function persistQuotes(rows: any[], isStale: boolean) {
           q.ask ?? null,
           nowSec,
           isStale,
-          lastApiUpdateSec,
+          lastApiUpdateMs,
         ],
       );
 

@@ -12,19 +12,16 @@ import {
 import type { GriftConfig, GriftSignalStatus, GriftSeverity } from "../grift/griftTypes";
 import { enrichIpAsnCacheBatch } from "../grift/griftIpAsn";
 import { getIp2AsnDatasetPath, maybeImportIp2AsnDataset } from "../grift/griftIp2AsnDataset";
-import Database from "better-sqlite3";
 import { Parser } from "json2csv";
 import { appendAuditEntry, getAuditLog, verifyAuditChain } from "../grift/griftAdminAudit";
 import { storage } from "../storage";
 import { buildAuditContext } from "../lib/auditContext";
 import type { AccountActionProvenance } from "../lib/accountEventMirror";
+import { getGriftDb, withGriftClient } from "../grift/griftDb";
+import type { GriftDb } from "../grift/griftDb";
 
 function getDb() {
-  const db = new Database("./trading_app.db");
-  try {
-    db.pragma("busy_timeout = 5000");
-  } catch {}
-  return db;
+  return getGriftDb();
 }
 
 function resolveTradingDbPath(): string {
@@ -42,32 +39,44 @@ function statFileMaybe(filePath: string): { path: string; exists: boolean; size:
   }
 }
 
-function getDbMaintenanceStats(db: Database.Database) {
-  const dbPath = resolveTradingDbPath();
-  const walPath = `${dbPath}-wal`;
-  const shmPath = `${dbPath}-shm`;
+async function getDbMaintenanceStats(db: GriftDb) {
+  const nameRow = await db.query<{ db_name: string }>("SELECT current_database() AS db_name");
+  const sizeRow = await db.query<{ size_bytes: string | number; size_pretty: string }>(
+    "SELECT pg_database_size(current_database()) AS size_bytes, pg_size_pretty(pg_database_size(current_database())) AS size_pretty"
+  );
+  const statsRow = await db.query(
+    `
+    SELECT
+      numbackends,
+      xact_commit,
+      xact_rollback,
+      blks_read,
+      blks_hit,
+      tup_returned,
+      tup_fetched,
+      tup_inserted,
+      tup_updated,
+      tup_deleted,
+      conflicts,
+      deadlocks
+    FROM pg_stat_database
+    WHERE datname = current_database()
+  `
+  );
 
-  const fileDb = statFileMaybe(dbPath);
-  const fileWal = statFileMaybe(walPath);
-  const fileShm = statFileMaybe(shmPath);
-
-  const pageSize = Number(db.pragma("page_size", { simple: true }) ?? 0);
-  const pageCount = Number(db.pragma("page_count", { simple: true }) ?? 0);
-  const freelistCount = Number(db.pragma("freelist_count", { simple: true }) ?? 0);
-  const journalMode = String(db.pragma("journal_mode", { simple: true }) ?? "");
-  const autoVacuum = Number(db.pragma("auto_vacuum", { simple: true }) ?? 0);
-  const walAutoCheckpoint = Number(db.pragma("wal_autocheckpoint", { simple: true }) ?? 0);
-
-  const dbBytesLogical = pageSize * pageCount;
-  const reclaimableBytes = pageSize * freelistCount;
-  const reclaimablePercent = pageCount > 0 ? Math.round((freelistCount / pageCount) * 1000) / 10 : 0;
-  const totalOnDiskBytes = fileDb.size + fileWal.size + fileShm.size;
+  const dbName = nameRow.rows[0]?.db_name ?? "unknown";
+  const sizeBytesRaw = sizeRow.rows[0]?.size_bytes ?? 0;
+  const sizeBytes = typeof sizeBytesRaw === "string" ? Number(sizeBytesRaw) : Number(sizeBytesRaw);
+  const sizePretty = sizeRow.rows[0]?.size_pretty ?? "";
 
   return {
-    paths: { dbPath, walPath, shmPath },
-    files: { db: fileDb, wal: fileWal, shm: fileShm },
-    pragmas: { pageSize, pageCount, freelistCount, journalMode, autoVacuum, walAutoCheckpoint },
-    derived: { dbBytesLogical, reclaimableBytes, reclaimablePercent, totalOnDiskBytes },
+    engine: "postgres",
+    database: {
+      name: dbName,
+      sizeBytes,
+      sizePretty,
+      stats: statsRow.rows[0] ?? null,
+    },
     generatedAt: Date.now(),
   };
 }
@@ -184,7 +193,7 @@ export function registerGriftRoutes(app: Express) {
     };
   };
   // Offline ip2asn dataset status/ops (admin only)
-  app.get("/api/admin/grift/ip2asn/status", requireAdmin, (_req: Request, res: Response) => {
+  app.get("/api/admin/grift/ip2asn/status", requireAdmin, async (_req: Request, res: Response) => {
     const db = getDb();
     try {
       const datasetPath = getIp2AsnDatasetPath();
@@ -194,7 +203,7 @@ export function registerGriftRoutes(app: Express) {
         file = { path: datasetPath, name: path.basename(datasetPath), size: stat.size, mtimeMs: stat.mtimeMs };
       }
 
-      const meta = db
+      const meta = await db
         .prepare(
           `
           SELECT *
@@ -204,7 +213,7 @@ export function registerGriftRoutes(app: Express) {
         )
         .get() as any | undefined;
 
-      const ranges = db
+      const ranges = await db
         .prepare(
           `
           SELECT
@@ -216,7 +225,7 @@ export function registerGriftRoutes(app: Express) {
         )
         .get() as any;
 
-      const cache = db
+      const cache = await db
         .prepare(
           `
           SELECT
@@ -239,28 +248,27 @@ export function registerGriftRoutes(app: Express) {
       console.error("Grift ip2asn status error:", error);
       res.status(500).json({ message: "Failed to fetch ip2asn status" });
     } finally {
-      db.close();
     }
   });
 
   app.post("/api/admin/grift/ip2asn/reimport", requireAdmin, async (req: Request, res: Response) => {
-    const db = getDb();
     try {
-      const adminId = req.session.userId!;
-      const datasetPath = getIp2AsnDatasetPath();
-      if (!datasetPath || !fs.existsSync(datasetPath)) {
-        return res.status(404).json({ message: "ip2asn dataset TSV not found", datasetPath });
-      }
+      await withGriftClient(async (db) => {
+        const adminId = req.session.userId!;
+        const datasetPath = getIp2AsnDatasetPath();
+        if (!datasetPath || !fs.existsSync(datasetPath)) {
+          res.status(404).json({ message: "ip2asn dataset TSV not found", datasetPath });
+          return;
+        }
 
-      const result = await maybeImportIp2AsnDataset(db, { filePath: datasetPath, force: true });
-      appendAuditEntry(db, adminId, "IP2ASN_REIMPORT", "ip2asn", 1, { datasetPath, result });
+        const result = await maybeImportIp2AsnDataset(db, { filePath: datasetPath, force: true });
+        await appendAuditEntry(db, adminId, "IP2ASN_REIMPORT", "ip2asn", 1, { datasetPath, result });
 
-      res.json({ datasetPath, result });
+        res.json({ datasetPath, result });
+      });
     } catch (error) {
       console.error("Grift ip2asn reimport error:", error);
       res.status(500).json({ message: "Failed to reimport ip2asn dataset" });
-    } finally {
-      db.close();
     }
   });
 
@@ -271,74 +279,63 @@ export function registerGriftRoutes(app: Express) {
       const limit = clampInt((req.body as any)?.limit, 1, 200) ?? 50;
       const lookbackHours = clampInt((req.body as any)?.lookbackHours, 1, 168) ?? 24;
       const result = await enrichIpAsnCacheBatch(db, { limit, lookbackMs: lookbackHours * 60 * 60 * 1000 });
-      appendAuditEntry(db, adminId, "IP2ASN_ENRICH", "ip2asn", 1, { limit, lookbackHours, result });
+      await appendAuditEntry(db, adminId, "IP2ASN_ENRICH", "ip2asn", 1, { limit, lookbackHours, result });
       res.json({ limit, lookbackHours, result });
     } catch (error) {
       console.error("Grift ip2asn enrich error:", error);
       res.status(500).json({ message: "Failed to run ip2asn enrich batch" });
     } finally {
-      db.close();
     }
   });
 
   // Database maintenance (admin only). VACUUM is intentionally manual to avoid long exclusive locks during normal operation.
-  app.get("/api/admin/grift/maintenance/db-stats", requireAdmin, (_req: Request, res: Response) => {
+  app.get("/api/admin/grift/maintenance/db-stats", requireAdmin, async (_req: Request, res: Response) => {
     const db = getDb();
     try {
-      const stats = getDbMaintenanceStats(db);
+      const stats = await getDbMaintenanceStats(db);
       res.json({ stats });
     } catch (error) {
       console.error("Grift db-stats error:", error);
       res.status(500).json({ message: "Failed to read database stats" });
     } finally {
-      db.close();
     }
   });
 
-  app.post("/api/admin/grift/maintenance/checkpoint", requireAdmin, (req: Request, res: Response) => {
+  app.post("/api/admin/grift/maintenance/checkpoint", requireAdmin, async (req: Request, res: Response) => {
     const db = getDb();
     try {
       const adminId = req.session.userId!;
       const modeRaw = (req.body as any)?.mode;
-      const mode = typeof modeRaw === "string" ? modeRaw.toUpperCase() : "TRUNCATE";
-      const allowed = new Set(["PASSIVE", "FULL", "RESTART", "TRUNCATE"]);
-      if (!allowed.has(mode)) {
-        return res.status(400).json({ message: "Invalid checkpoint mode", allowed: Array.from(allowed) });
-      }
-
-      db.pragma("busy_timeout = 30000");
-
-      const before = getDbMaintenanceStats(db);
-      const journalMode = String(before.pragmas.journalMode || "").toLowerCase();
+      const mode = typeof modeRaw === "string" ? modeRaw.toUpperCase() : "DEFAULT";
+      const before = await getDbMaintenanceStats(db);
       let checkpointResult: any = null;
       let skipped: { reason: string } | null = null;
 
-      if (journalMode !== "wal") {
-        skipped = { reason: `journal_mode is '${before.pragmas.journalMode}', WAL checkpoint not applicable` };
-      } else {
-        checkpointResult = db.prepare(`PRAGMA wal_checkpoint(${mode});`).all();
+      try {
+        await db.query("CHECKPOINT");
+        checkpointResult = { ok: true };
+      } catch (err: any) {
+        skipped = { reason: err?.message || "CHECKPOINT not permitted" };
       }
 
-      const after = getDbMaintenanceStats(db);
-      appendAuditEntry(db, adminId, "MAINTENANCE_WAL_CHECKPOINT", "maintenance", 1, {
+      const after = await getDbMaintenanceStats(db);
+      await appendAuditEntry(db, adminId, "MAINTENANCE_WAL_CHECKPOINT", "maintenance", 1, {
         mode,
-        journalMode: before.pragmas.journalMode,
         skipped,
         checkpointResult,
-        before: before.derived,
-        after: after.derived,
+        before,
+        after,
       });
 
-      res.json({ mode, journalMode: before.pragmas.journalMode, skipped, checkpointResult, before, after });
+      res.json({ mode, skipped, checkpointResult, before, after });
     } catch (error) {
       console.error("Grift checkpoint error:", error);
-      res.status(500).json({ message: "Failed to checkpoint WAL" });
+      res.status(500).json({ message: "Failed to checkpoint database" });
     } finally {
-      db.close();
     }
   });
 
-  app.post("/api/admin/grift/maintenance/vacuum", requireAdmin, (req: Request, res: Response) => {
+  app.post("/api/admin/grift/maintenance/vacuum", requireAdmin, async (req: Request, res: Response) => {
     const db = getDb();
     try {
       const adminId = req.session.userId!;
@@ -352,32 +349,30 @@ export function registerGriftRoutes(app: Express) {
 
       const checkpointFirst = (req.body as any)?.checkpointFirst !== false;
 
-      db.pragma("busy_timeout = 60000");
-
-      const before = getDbMaintenanceStats(db);
-      const journalMode = String(before.pragmas.journalMode || "").toLowerCase();
+      const before = await getDbMaintenanceStats(db);
 
       let checkpointResult: any = null;
-      if (checkpointFirst && journalMode === "wal") {
+      if (checkpointFirst) {
         try {
-          checkpointResult = db.prepare("PRAGMA wal_checkpoint(TRUNCATE);").all();
+          await db.query("CHECKPOINT");
+          checkpointResult = { ok: true };
         } catch (error) {
           checkpointResult = { error: String((error as any)?.message ?? error) };
         }
       }
 
       const startedAt = Date.now();
-      db.exec("VACUUM;");
+      await db.query("VACUUM");
       const durationMs = Date.now() - startedAt;
 
-      const after = getDbMaintenanceStats(db);
+      const after = await getDbMaintenanceStats(db);
 
-      appendAuditEntry(db, adminId, "MAINTENANCE_VACUUM", "maintenance", 1, {
+      await appendAuditEntry(db, adminId, "MAINTENANCE_VACUUM", "maintenance", 1, {
         durationMs,
         checkpointFirst,
         checkpointResult,
-        before: before.derived,
-        after: after.derived,
+        before,
+        after,
       });
 
       res.json({ durationMs, checkpointFirst, checkpointResult, before, after });
@@ -385,29 +380,27 @@ export function registerGriftRoutes(app: Express) {
       console.error("Grift vacuum error:", error);
       res.status(500).json({ message: "Failed to VACUUM database" });
     } finally {
-      db.close();
     }
   });
 
-  app.get("/api/admin/grift/config", requireAdmin, (_req: Request, res: Response) => {
+  app.get("/api/admin/grift/config", requireAdmin, async (_req: Request, res: Response) => {
     const db = getDb();
     try {
-      const config = getConfig(db);
+      const config = await getConfig(db);
       res.json({ config });
     } catch (error) {
       console.error("Grift config error:", error);
       res.status(500).json({ message: "Failed to fetch grift config" });
     } finally {
-      db.close();
     }
   });
 
-  app.put("/api/admin/grift/config", requireAdmin, (req: Request, res: Response) => {
+  app.put("/api/admin/grift/config", requireAdmin, async (req: Request, res: Response) => {
     const db = getDb();
     try {
       const adminId = req.session.userId!;
       const updates = sanitizeConfigPatch(req.body);
-      const next = { ...getConfig(db), ...updates };
+      const next = { ...(await getConfig(db)), ...updates };
       const errors: string[] = [];
       if (!(next.tierMed <= next.tierHigh && next.tierHigh <= next.tierCritical)) {
         errors.push("Tier thresholds must be ordered: tierMed <= tierHigh <= tierCritical");
@@ -506,9 +499,10 @@ export function registerGriftRoutes(app: Express) {
 
       for (const field of allowedFields) {
         const raw = updates[field as keyof GriftConfig];
-        if (raw === undefined) continue;        const value = raw;
+        if (raw === undefined) continue;
+        const value = raw;
         if (typeof value !== "number" || !Number.isFinite(value)) continue;
-const column = fieldMap[field];
+        const column = fieldMap[field];
         if (!column) continue;
         setClauses.push(`${column} = ?`);
         values.push(value);
@@ -525,24 +519,23 @@ const column = fieldMap[field];
       values.push(adminId);
       values.push(1);
 
-      db.prepare(`UPDATE grift_config SET ${setClauses.join(", ")} WHERE id = ?`).run(...values);
+      await db.prepare(`UPDATE grift_config SET ${setClauses.join(", ")} WHERE id = ?`).run(...values);
       invalidateConfigCache();
-      const updatedConfig = getConfig(db);
-      appendAuditEntry(db, adminId, "CONFIG_UPDATE", "config", 1, filteredUpdates);
+      const updatedConfig = await getConfig(db);
+      await appendAuditEntry(db, adminId, "CONFIG_UPDATE", "config", 1, filteredUpdates);
 
       res.json({ config: updatedConfig });
     } catch (error) {
       console.error("Grift config update error:", error);
       res.status(500).json({ message: "Failed to update grift config" });
     } finally {
-      db.close();
     }
   });
 
-  app.get("/api/admin/grift/tier-counts", requireAdmin, (_req: Request, res: Response) => {
+  app.get("/api/admin/grift/tier-counts", requireAdmin, async (_req: Request, res: Response) => {
     const db = getDb();
     try {
-      const rows = db.prepare(`
+      const rows = await db.prepare(`
         SELECT tier, COUNT(*) as count FROM grift_user_scores GROUP BY tier
       `).all() as { tier: string; count: number }[];
 
@@ -556,11 +549,10 @@ const column = fieldMap[field];
       console.error("Grift tier counts error:", error);
       res.status(500).json({ message: "Failed to fetch tier counts" });
     } finally {
-      db.close();
     }
   });
 
-  app.get("/api/admin/grift/signals", requireAdmin, (req: Request, res: Response) => {
+  app.get("/api/admin/grift/signals", requireAdmin, async (req: Request, res: Response) => {
     const db = getDb();
     try {
       const status = req.query.status as string | undefined;
@@ -598,17 +590,16 @@ const column = fieldMap[field];
       sql += " ORDER BY s.created_at DESC LIMIT ? OFFSET ?";
       params.push(limit, offset);
 
-      const signals = db.prepare(sql).all(...params);
+      const signals = await db.prepare(sql).all(...params);
       res.json({ signals });
     } catch (error) {
       console.error("Grift signals error:", error);
       res.status(500).json({ message: "Failed to fetch grift signals" });
     } finally {
-      db.close();
     }
   });
 
-  app.post("/api/admin/grift/signals/:id/close", requireAdmin, (req: Request, res: Response) => {
+  app.post("/api/admin/grift/signals/:id/close", requireAdmin, async (req: Request, res: Response) => {
     const signalId = Number(req.params.id);
     if (!signalId || isNaN(signalId)) {
       return res.status(400).json({ message: "Invalid signal ID" });
@@ -620,51 +611,50 @@ const column = fieldMap[field];
       const note = (req.body as any)?.note as string | undefined;
       const now = Date.now();
 
-      const signal = db.prepare(`
+      const signal = await db.prepare(`
         SELECT user_id as userId, related_user_id as relatedUserId
         FROM grift_signals WHERE id = ?
       `).get(signalId) as { userId?: number; relatedUserId?: number } | undefined;
 
-      db.prepare(`
+      await db.prepare(`
         UPDATE grift_signals
         SET status = 'CLOSED', closed_at = ?, closed_by_admin_id = ?, closure_note = ?, updated_at = ?
         WHERE id = ?
       `).run(now, adminId, note ?? null, now, signalId);
 
       if (signal?.userId) {
-        recomputeUserAggregates(db, signal.userId);
+        await recomputeUserAggregates(db, signal.userId);
       }
       if (signal?.relatedUserId) {
-        recomputeUserAggregates(db, signal.relatedUserId);
+        await recomputeUserAggregates(db, signal.relatedUserId);
       }
 
-      appendAuditEntry(db, adminId, "SIGNAL_CLOSE", "signal", signalId, { note });
+      await appendAuditEntry(db, adminId, "SIGNAL_CLOSE", "signal", signalId, { note });
       
       res.json({ ok: true });
     } catch (error) {
       console.error("Close signal error:", error);
       res.status(500).json({ message: "Failed to close signal" });
     } finally {
-      db.close();
     }
   });
 
-  app.get("/api/admin/grift/summary", requireAdmin, (_req: Request, res: Response) => {
+  app.get("/api/admin/grift/summary", requireAdmin, async (_req: Request, res: Response) => {
     const db = getDb();
     try {
-      const openAlerts = (db.prepare(`
+      const openAlerts = (await db.prepare(`
         SELECT COUNT(*) as count FROM grift_signals WHERE status = 'OPEN'
       `).get() as any)?.count || 0;
 
-      const highRiskUsers = (db.prepare(`
+      const highRiskUsers = (await db.prepare(`
         SELECT COUNT(*) as count FROM grift_user_scores WHERE score_current >= 50
       `).get() as any)?.count || 0;
 
-      const linkedClusters = (db.prepare(`
+      const linkedClusters = (await db.prepare(`
         SELECT COUNT(DISTINCT user_a) as count FROM grift_linked_account_edges
       `).get() as any)?.count || 0;
 
-      const tierRows = db.prepare(`
+      const tierRows = await db.prepare(`
         SELECT tier, COUNT(*) as count FROM grift_user_scores GROUP BY tier
       `).all() as { tier: string; count: number }[];
 
@@ -681,11 +671,10 @@ const column = fieldMap[field];
       console.error("Grift summary error:", error);
       res.status(500).json({ message: "Failed to fetch grift summary" });
     } finally {
-      db.close();
     }
   });
 
-  app.get("/api/admin/grift/alerts", requireAdmin, (req: Request, res: Response) => {
+  app.get("/api/admin/grift/alerts", requireAdmin, async (req: Request, res: Response) => {
     const db = getDb();
     try {
       const status = req.query.status as GriftSignalStatus | undefined;
@@ -717,7 +706,7 @@ const column = fieldMap[field];
       sql += " ORDER BY created_at DESC LIMIT ? OFFSET ?";
       params.push(limit, offset);
 
-      const alerts = db.prepare(sql).all(...params).map((row: any) => ({
+      const alerts = (await db.prepare(sql).all(...params)).map((row: any) => ({
         id: row.id,
         rule_type: row.rule_code,
         severity: row.severity,
@@ -734,17 +723,16 @@ const column = fieldMap[field];
       console.error("Grift alerts error:", error);
       res.status(500).json({ message: "Failed to fetch grift alerts" });
     } finally {
-      db.close();
     }
   });
 
-  app.get("/api/admin/grift/flagged-users", requireAdmin, (req: Request, res: Response) => {
+  app.get("/api/admin/grift/flagged-users", requireAdmin, async (req: Request, res: Response) => {
     const db = getDb();
     try {
       const minScore = Math.max(0, Number(req.query.minScore || 25));
       const limit = Math.min(200, Math.max(1, Number(req.query.limit || 100)));
 
-      const users = db.prepare(`
+      const users = await db.prepare(`
         SELECT
           us.user_id,
           u.username,
@@ -771,11 +759,10 @@ const column = fieldMap[field];
       console.error("Grift flagged users error:", error);
       res.status(500).json({ message: "Failed to fetch flagged users" });
     } finally {
-      db.close();
     }
   });
 
-  app.get("/api/admin/users/:userId/grift-profile", requireAdmin, (req: Request, res: Response) => {
+  app.get("/api/admin/users/:userId/grift-profile", requireAdmin, async (req: Request, res: Response) => {
     const db = getDb();
     try {
       const userId = Number(req.params.userId);
@@ -783,7 +770,7 @@ const column = fieldMap[field];
         return res.status(400).json({ message: "Invalid user ID" });
       }
 
-      const scoreRow = db.prepare(`
+      const scoreRow = await db.prepare(`
         SELECT * FROM grift_user_scores WHERE user_id = ?
       `).get(userId) as any;
 
@@ -808,7 +795,7 @@ const column = fieldMap[field];
         risk_factors_json: JSON.stringify(riskFactors),
       } : { risk_score: 0, risk_tier: "LOW", risk_factors_json: "[]" };
 
-      const linkedAccounts = db.prepare(`
+      const linkedAccounts = await db.prepare(`
         SELECT DISTINCT u.id, u.email, u.username
         FROM grift_linked_account_edges e
         JOIN users u ON u.id = CASE WHEN e.user_a = ? THEN e.user_b ELSE e.user_a END
@@ -817,7 +804,7 @@ const column = fieldMap[field];
         LIMIT 200
       `).all(userId, userId, userId);
 
-      const alerts = db.prepare(`
+      const alerts = await db.prepare(`
         SELECT id, rule_code as rule_type, severity, points as score, created_at
         FROM grift_signals
         WHERE (user_id = ? OR related_user_id = ?) AND status = 'OPEN'
@@ -825,7 +812,7 @@ const column = fieldMap[field];
         LIMIT 20
       `).all(userId, userId);
 
-      const signals = db.prepare(`
+      const signals = await db.prepare(`
         SELECT id, rule_code, points as score, status, created_at, evidence_json, related_user_id
         FROM grift_signals
         WHERE user_id = ? OR related_user_id = ?
@@ -833,7 +820,7 @@ const column = fieldMap[field];
         LIMIT 200
       `).all(userId, userId);
 
-      const sessions = db.prepare(`
+      const sessions = await db.prepare(`
         SELECT id, ip, device_fp, device_install_id, country_code, city, created_at as login_time
         FROM user_login_history
         WHERE user_id = ? AND success = 1
@@ -841,7 +828,7 @@ const column = fieldMap[field];
         LIMIT 200
       `).all(userId);
 
-      const devices = db.prepare(`
+      const devices = await db.prepare(`
         SELECT device_fp, device_install_id,
                COUNT(*) as session_count,
                MIN(created_at) as first_seen,
@@ -853,7 +840,7 @@ const column = fieldMap[field];
         LIMIT 200
       `).all(userId);
 
-      const ips = db.prepare(`
+      const ips = await db.prepare(`
         SELECT ip, country_code, city,
                COUNT(*) as session_count,
                MIN(created_at) as first_seen,
@@ -865,7 +852,7 @@ const column = fieldMap[field];
         LIMIT 200
       `).all(userId);
 
-      const enforcement = db.prepare(`
+      const enforcement = await db.prepare(`
         SELECT frozen_at, disabled_at, notes
         FROM grift_user_enforcements
         WHERE user_id = ?
@@ -886,11 +873,10 @@ const column = fieldMap[field];
       console.error("Grift profile error:", error);
       res.status(500).json({ message: "Failed to fetch grift profile" });
     } finally {
-      db.close();
     }
   });
 
-  app.get("/api/admin/users/:userId/linked-accounts", requireAdmin, (req: Request, res: Response) => {
+  app.get("/api/admin/users/:userId/linked-accounts", requireAdmin, async (req: Request, res: Response) => {
     const db = getDb();
     try {
       const userId = Number(req.params.userId);
@@ -898,17 +884,16 @@ const column = fieldMap[field];
         return res.status(400).json({ message: "Invalid user ID" });
       }
 
-      const linkedAccounts = getLinkedAccounts(db, userId);
+      const linkedAccounts = await getLinkedAccounts(db, userId);
       res.json({ linkedAccounts });
     } catch (error) {
       console.error("Linked accounts error:", error);
       res.status(500).json({ message: "Failed to fetch linked accounts" });
     } finally {
-      db.close();
     }
   });
 
-  app.post("/api/admin/grift/alerts/:id/resolve", requireAdmin, (req: Request, res: Response) => {
+  app.post("/api/admin/grift/alerts/:id/resolve", requireAdmin, async (req: Request, res: Response) => {
     const alertId = Number(req.params.id);
     if (!alertId || isNaN(alertId)) {
       return res.status(400).json({ message: "Invalid alert ID" });
@@ -929,7 +914,7 @@ const column = fieldMap[field];
       else if (rawStatus === "IGNORED") status = "IGNORED";
       else return res.status(400).json({ message: "Invalid status" });
 
-      const signal = db.prepare(`
+      const signal = await db.prepare(`
         SELECT user_id as userId, related_user_id as relatedUserId, status as prevStatus
         FROM grift_signals WHERE id = ?
       `).get(alertId) as { userId?: number; relatedUserId?: number; prevStatus?: string } | undefined;
@@ -940,13 +925,13 @@ const column = fieldMap[field];
 
       const now = Date.now();
       if (status === "CLOSED" || status === "IGNORED") {
-        db.prepare(`
+        await db.prepare(`
           UPDATE grift_signals
           SET status = ?, closed_at = ?, closed_by_admin_id = ?, closure_note = ?, updated_at = ?
           WHERE id = ?
         `).run(status, now, adminId, note ?? null, now, alertId);
       } else {
-        db.prepare(`
+        await db.prepare(`
           UPDATE grift_signals
           SET status = ?, updated_at = ?
           WHERE id = ?
@@ -954,17 +939,17 @@ const column = fieldMap[field];
       }
 
       if (signal.userId) {
-        recomputeUserAggregates(db, signal.userId);
+        await recomputeUserAggregates(db, signal.userId);
       }
       if (signal.relatedUserId) {
-        recomputeUserAggregates(db, signal.relatedUserId);
+        await recomputeUserAggregates(db, signal.relatedUserId);
       }
 
       const action =
         status === "IGNORED" ? "SIGNAL_IGNORE" :
         status === "IN_REVIEW" ? "SIGNAL_REVIEW" :
         status === "CLOSED" ? "SIGNAL_CLOSE" : "SIGNAL_REVIEW";
-      appendAuditEntry(db, adminId, action, "signal", alertId, {
+      await appendAuditEntry(db, adminId, action, "signal", alertId, {
         status,
         note,
         previousStatus: signal.prevStatus,
@@ -975,11 +960,10 @@ const column = fieldMap[field];
       console.error("Resolve alert error:", error);
       res.status(500).json({ message: "Failed to resolve alert" });
     } finally {
-      db.close();
     }
   });
 
-  app.post("/api/admin/users/:userId/evaluate-risk", requireAdmin, (req: Request, res: Response) => {
+  app.post("/api/admin/users/:userId/evaluate-risk", requireAdmin, async (req: Request, res: Response) => {
     const userId = Number(req.params.userId);
     if (!userId || isNaN(userId)) {
       return res.status(400).json({ message: "Invalid user ID" });
@@ -988,68 +972,65 @@ const column = fieldMap[field];
     const db = getDb();
     try {
       const adminId = req.session.userId!;
-      const result = evaluateUserRisk(db, userId);
+      const result = await evaluateUserRisk(db, userId);
       
-      appendAuditEntry(db, adminId, "RISK_REEVALUATE", "user", userId, { result });
+      await appendAuditEntry(db, adminId, "RISK_REEVALUATE", "user", userId, { result });
       
       res.json(result);
     } catch (error) {
       console.error("Evaluate risk error:", error);
       res.status(500).json({ message: "Failed to evaluate risk" });
     } finally {
-      db.close();
     }
   });
 
 // ---------------------------------------------------------------------
   // SIGNAL LIFECYCLE (IN_REVIEW, IGNORE)
 // ---------------------------------------------------------------------
-  app.post("/api/admin/grift/signals/:id/review", requireAdmin, (req: Request, res: Response) => {
+  app.post("/api/admin/grift/signals/:id/review", requireAdmin, async (req: Request, res: Response) => {
     const db = getDb();
     try {
       const signalId = Number(req.params.id);
       const adminId = req.session.userId!;
 
-      db.prepare(`UPDATE grift_signals SET status = 'IN_REVIEW', updated_at = ? WHERE id = ?`).run(Date.now(), signalId);
-      appendAuditEntry(db, adminId, "SIGNAL_REVIEW", "signal", signalId);
+      await db.prepare(`UPDATE grift_signals SET status = 'IN_REVIEW', updated_at = ? WHERE id = ?`).run(Date.now(), signalId);
+      await appendAuditEntry(db, adminId, "SIGNAL_REVIEW", "signal", signalId);
 
       res.json({ success: true });
     } catch (error) {
       console.error("Signal review error:", error);
       res.status(500).json({ message: "Failed to set signal to review" });
     } finally {
-      db.close();
     }
   });
 
-  app.post("/api/admin/grift/signals/:id/ignore", requireAdmin, (req: Request, res: Response) => {
+  app.post("/api/admin/grift/signals/:id/ignore", requireAdmin, async (req: Request, res: Response) => {
     const db = getDb();
     try {
       const signalId = Number(req.params.id);
       const adminId = req.session.userId!;
       const { reason } = req.body as { reason?: string };
 
-      db.prepare(`
+      await db.prepare(`
         UPDATE grift_signals
         SET status = 'IGNORED', closed_at = ?, closed_by_admin_id = ?, closure_note = ?, updated_at = ?
         WHERE id = ?
       `).run(Date.now(), adminId, reason || null, Date.now(), signalId);
 
-      appendAuditEntry(db, adminId, "SIGNAL_IGNORE", "signal", signalId, { reason });
+      await appendAuditEntry(db, adminId, "SIGNAL_IGNORE", "signal", signalId, { reason });
 
       res.json({ success: true });
     } catch (error) {
       console.error("Signal ignore error:", error);
       res.status(500).json({ message: "Failed to ignore signal" });
     } finally {
-      db.close();
     }
   });
 
 // ---------------------------------------------------------------------
   // CASES WORKFLOW
 // ---------------------------------------------------------------------
-  app.get("/api/admin/grift/cases", requireAdmin, (req: Request, res: Response) => {
+  app.get("/api/admin/grift/cases", requireAdmin, async (req: Request, res: Response) => {
     const db = getDb();
     try {
       const { status, priority, limit } = req.query;
@@ -1070,24 +1051,23 @@ const column = fieldMap[field];
         params.push(parseInt(limit as string));
       }
 
-      const cases = db.prepare(sql).all(...params);
+      const cases = await db.prepare(sql).all(...params);
       res.json({ cases });
     } catch (error) {
       console.error("Cases fetch error:", error);
       res.status(500).json({ message: "Failed to fetch cases" });
     } finally {
-      db.close();
     }
   });
 
-  app.post("/api/admin/grift/cases", requireAdmin, (req: Request, res: Response) => {
+  app.post("/api/admin/grift/cases", requireAdmin, async (req: Request, res: Response) => {
     const db = getDb();
     try {
       const adminId = req.session.userId!;
       const { title, priority, signalIds } = req.body as { title: string; priority?: string; signalIds?: number[] };
       const now = Date.now();
 
-      const result = db.prepare(`
+      const result = await db.prepare(`
         INSERT INTO grift_cases (title, priority, created_by_admin_id, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?)
       `).run(title, priority || "MEDIUM", adminId, now, now);
@@ -1096,40 +1076,39 @@ const column = fieldMap[field];
 
       if (signalIds && Array.isArray(signalIds)) {
         for (const signalId of signalIds) {
-          db.prepare(`
+          await db.prepare(`
             INSERT OR IGNORE INTO grift_case_signals (case_id, signal_id, added_at) VALUES (?, ?, ?)
           `).run(caseId, signalId, now);
         }
       }
 
-      appendAuditEntry(db, adminId, "CASE_CREATE", "case", caseId, { title, priority, signalIds });
+      await appendAuditEntry(db, adminId, "CASE_CREATE", "case", caseId, { title, priority, signalIds });
 
       res.status(201).json({ id: caseId });
     } catch (error) {
       console.error("Case create error:", error);
       res.status(500).json({ message: "Failed to create case" });
     } finally {
-      db.close();
     }
   });
 
-  app.get("/api/admin/grift/cases/:id", requireAdmin, (req: Request, res: Response) => {
+  app.get("/api/admin/grift/cases/:id", requireAdmin, async (req: Request, res: Response) => {
     const db = getDb();
     try {
       const caseId = Number(req.params.id);
 
-      const caseData = db.prepare(`SELECT * FROM grift_cases WHERE id = ?`).get(caseId);
+      const caseData = await db.prepare(`SELECT * FROM grift_cases WHERE id = ?`).get(caseId);
       if (!caseData) {
         return res.status(404).json({ message: "Case not found" });
       }
 
-      const signals = db.prepare(`
+      const signals = await db.prepare(`
         SELECT s.* FROM grift_signals s
         JOIN grift_case_signals cs ON s.id = cs.signal_id
         WHERE cs.case_id = ?
       `).all(caseId);
 
-      const notes = db.prepare(`
+      const notes = await db.prepare(`
         SELECT * FROM grift_case_notes WHERE case_id = ? ORDER BY created_at DESC
       `).all(caseId);
 
@@ -1138,11 +1117,10 @@ const column = fieldMap[field];
       console.error("Case fetch error:", error);
       res.status(500).json({ message: "Failed to fetch case" });
     } finally {
-      db.close();
     }
   });
 
-  app.put("/api/admin/grift/cases/:id", requireAdmin, (req: Request, res: Response) => {
+  app.put("/api/admin/grift/cases/:id", requireAdmin, async (req: Request, res: Response) => {
     const db = getDb();
     try {
       const caseId = Number(req.params.id);
@@ -1175,48 +1153,46 @@ const column = fieldMap[field];
       }
 
       values.push(caseId);
-      db.prepare(`UPDATE grift_cases SET ${updates.join(", ")} WHERE id = ?`).run(...values);
+      await db.prepare(`UPDATE grift_cases SET ${updates.join(", ")} WHERE id = ?`).run(...values);
 
-      appendAuditEntry(db, adminId, "CASE_UPDATE", "case", caseId, { status, priority, assignedAdminId, resolution });
+      await appendAuditEntry(db, adminId, "CASE_UPDATE", "case", caseId, { status, priority, assignedAdminId, resolution });
 
       res.json({ success: true });
     } catch (error) {
       console.error("Case update error:", error);
       res.status(500).json({ message: "Failed to update case" });
     } finally {
-      db.close();
     }
   });
 
-  app.post("/api/admin/grift/cases/:id/notes", requireAdmin, (req: Request, res: Response) => {
+  app.post("/api/admin/grift/cases/:id/notes", requireAdmin, async (req: Request, res: Response) => {
     const db = getDb();
     try {
       const caseId = Number(req.params.id);
       const adminId = req.session.userId!;
       const { note } = req.body as { note: string };
 
-      const result = db.prepare(`
+      const result = await db.prepare(`
         INSERT INTO grift_case_notes (case_id, admin_id, note, created_at) VALUES (?, ?, ?, ?)
       `).run(caseId, adminId, note, Date.now());
 
-      appendAuditEntry(db, adminId, "CASE_NOTE", "case", caseId, { note: note.substring(0, 100) });
+      await appendAuditEntry(db, adminId, "CASE_NOTE", "case", caseId, { note: note.substring(0, 100) });
 
       res.status(201).json({ id: Number(result.lastInsertRowid) });
     } catch (error) {
       console.error("Case note error:", error);
       res.status(500).json({ message: "Failed to add note" });
     } finally {
-      db.close();
     }
   });
 
-  app.post("/api/admin/grift/cases/:id/signals", requireAdmin, (req: Request, res: Response) => {
+  app.post("/api/admin/grift/cases/:id/signals", requireAdmin, async (req: Request, res: Response) => {
     const db = getDb();
     try {
       const caseId = Number(req.params.id);
       const { signalId } = req.body as { signalId: number };
 
-      db.prepare(`
+      await db.prepare(`
         INSERT OR IGNORE INTO grift_case_signals (case_id, signal_id, added_at) VALUES (?, ?, ?)
       `).run(caseId, signalId, Date.now());
 
@@ -1225,7 +1201,6 @@ const column = fieldMap[field];
       console.error("Case signal link error:", error);
       res.status(500).json({ message: "Failed to link signal" });
     } finally {
-      db.close();
     }
   });
 
@@ -1240,7 +1215,7 @@ const column = fieldMap[field];
       const { notes } = req.body as { notes?: string };
       const now = Date.now();
 
-      const existing = db.prepare(`
+      const existing = await db.prepare(`
         SELECT frozen_at, disabled_at
         FROM grift_user_enforcements
         WHERE user_id = ?
@@ -1252,24 +1227,24 @@ const column = fieldMap[field];
           ? "FROZEN"
           : "ACTIVE";
 
-      db.prepare(`
+      await db.prepare(`
         INSERT INTO grift_user_enforcements (user_id, frozen_at, frozen_by_admin_id, notes)
         VALUES (?, ?, ?, ?)
         ON CONFLICT(user_id) DO UPDATE SET frozen_at = ?, frozen_by_admin_id = ?, notes = COALESCE(?, notes)
       `).run(userId, now, adminId, notes, now, adminId, notes);
 
       const newStatus = Boolean(existing?.disabled_at) ? "DISABLED" : "FROZEN";
-      const riskScore = (db.prepare(`
+      const riskScore = (await db.prepare(`
         SELECT score_current as scoreCurrent FROM grift_user_scores WHERE user_id = ?
       `).get(userId) as any)?.scoreCurrent ?? null;
 
-      db.prepare(`
+      await db.prepare(`
         INSERT INTO grift_enforcement_log (
           user_id, action, old_status, new_status, admin_id, reason, risk_score_at_action, created_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       `).run(userId, "FREEZE", oldStatus, newStatus, adminId, notes ?? null, riskScore, now);
 
-      appendAuditEntry(db, adminId, "ENFORCEMENT_FREEZE", "user", userId, { notes, oldStatus, newStatus, riskScore });
+      await appendAuditEntry(db, adminId, "ENFORCEMENT_FREEZE", "user", userId, { notes, oldStatus, newStatus, riskScore });
 
       await storage.freezeUserAccount({
         userId,
@@ -1284,7 +1259,6 @@ const column = fieldMap[field];
       console.error("User freeze error:", error);
       res.status(500).json({ message: "Failed to freeze user" });
     } finally {
-      db.close();
     }
   });
 
@@ -1295,7 +1269,7 @@ const column = fieldMap[field];
       const adminId = req.session.userId!;
       const now = Date.now();
 
-      const existing = db.prepare(`
+      const existing = await db.prepare(`
         SELECT frozen_at, disabled_at
         FROM grift_user_enforcements
         WHERE user_id = ?
@@ -1307,22 +1281,22 @@ const column = fieldMap[field];
           ? "FROZEN"
           : "ACTIVE";
 
-      db.prepare(`
+      await db.prepare(`
         UPDATE grift_user_enforcements SET frozen_at = NULL, frozen_by_admin_id = NULL WHERE user_id = ?
       `).run(userId);
 
       const newStatus = Boolean(existing?.disabled_at) ? "DISABLED" : "ACTIVE";
-      const riskScore = (db.prepare(`
+      const riskScore = (await db.prepare(`
         SELECT score_current as scoreCurrent FROM grift_user_scores WHERE user_id = ?
       `).get(userId) as any)?.scoreCurrent ?? null;
 
-      db.prepare(`
+      await db.prepare(`
         INSERT INTO grift_enforcement_log (
           user_id, action, old_status, new_status, admin_id, reason, risk_score_at_action, created_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       `).run(userId, "UNFREEZE", oldStatus, newStatus, adminId, "Grift enforcement removal", riskScore, now);
 
-      appendAuditEntry(db, adminId, "ENFORCEMENT_UNFREEZE", "user", userId, { oldStatus, newStatus, riskScore });
+      await appendAuditEntry(db, adminId, "ENFORCEMENT_UNFREEZE", "user", userId, { oldStatus, newStatus, riskScore });
 
       await storage.unfreezeUserAccount({
         userId,
@@ -1336,7 +1310,6 @@ const column = fieldMap[field];
       console.error("User unfreeze error:", error);
       res.status(500).json({ message: "Failed to unfreeze user" });
     } finally {
-      db.close();
     }
   });
 
@@ -1348,7 +1321,7 @@ const column = fieldMap[field];
       const { notes } = req.body as { notes?: string };
       const now = Date.now();
 
-      const existing = db.prepare(`
+      const existing = await db.prepare(`
         SELECT frozen_at, disabled_at
         FROM grift_user_enforcements
         WHERE user_id = ?
@@ -1360,24 +1333,24 @@ const column = fieldMap[field];
           ? "FROZEN"
           : "ACTIVE";
 
-      db.prepare(`
+      await db.prepare(`
         INSERT INTO grift_user_enforcements (user_id, disabled_at, disabled_by_admin_id, notes)
         VALUES (?, ?, ?, ?)
         ON CONFLICT(user_id) DO UPDATE SET disabled_at = ?, disabled_by_admin_id = ?, notes = COALESCE(?, notes)
       `).run(userId, now, adminId, notes, now, adminId, notes);
 
       const newStatus = "DISABLED";
-      const riskScore = (db.prepare(`
+      const riskScore = (await db.prepare(`
         SELECT score_current as scoreCurrent FROM grift_user_scores WHERE user_id = ?
       `).get(userId) as any)?.scoreCurrent ?? null;
 
-      db.prepare(`
+      await db.prepare(`
         INSERT INTO grift_enforcement_log (
           user_id, action, old_status, new_status, admin_id, reason, risk_score_at_action, created_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       `).run(userId, "DISABLE", oldStatus, newStatus, adminId, notes ?? null, riskScore, now);
 
-      appendAuditEntry(db, adminId, "ENFORCEMENT_DISABLE", "user", userId, { notes, oldStatus, newStatus, riskScore });
+      await appendAuditEntry(db, adminId, "ENFORCEMENT_DISABLE", "user", userId, { notes, oldStatus, newStatus, riskScore });
 
       await storage.setUserDisabled(userId, true, adminId, buildProvenance(req, adminId));
 
@@ -1386,7 +1359,6 @@ const column = fieldMap[field];
       console.error("User disable error:", error);
       res.status(500).json({ message: "Failed to disable user" });
     } finally {
-      db.close();
     }
   });
 
@@ -1397,7 +1369,7 @@ const column = fieldMap[field];
       const adminId = req.session.userId!;
       const now = Date.now();
 
-      const existing = db.prepare(`
+      const existing = await db.prepare(`
         SELECT frozen_at, disabled_at
         FROM grift_user_enforcements
         WHERE user_id = ?
@@ -1409,22 +1381,22 @@ const column = fieldMap[field];
           ? "FROZEN"
           : "ACTIVE";
 
-      db.prepare(`
+      await db.prepare(`
         UPDATE grift_user_enforcements SET disabled_at = NULL, disabled_by_admin_id = NULL WHERE user_id = ?
       `).run(userId);
 
       const newStatus = Boolean(existing?.frozen_at) ? "FROZEN" : "ACTIVE";
-      const riskScore = (db.prepare(`
+      const riskScore = (await db.prepare(`
         SELECT score_current as scoreCurrent FROM grift_user_scores WHERE user_id = ?
       `).get(userId) as any)?.scoreCurrent ?? null;
 
-      db.prepare(`
+      await db.prepare(`
         INSERT INTO grift_enforcement_log (
           user_id, action, old_status, new_status, admin_id, reason, risk_score_at_action, created_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       `).run(userId, "ENABLE", oldStatus, newStatus, adminId, "Grift enforcement removal", riskScore, now);
 
-      appendAuditEntry(db, adminId, "ENFORCEMENT_ENABLE", "user", userId, { oldStatus, newStatus, riskScore });
+      await appendAuditEntry(db, adminId, "ENFORCEMENT_ENABLE", "user", userId, { oldStatus, newStatus, riskScore });
 
       await storage.setUserDisabled(userId, false, adminId, buildProvenance(req, adminId));
 
@@ -1433,14 +1405,13 @@ const column = fieldMap[field];
       console.error("User enable error:", error);
       res.status(500).json({ message: "Failed to enable user" });
     } finally {
-      db.close();
     }
   });
 
 // ---------------------------------------------------------------------
   // CSV EXPORTS
 // ---------------------------------------------------------------------
-  app.get("/api/admin/grift/export/signals", requireAdmin, (req: Request, res: Response) => {
+  app.get("/api/admin/grift/export/signals", requireAdmin, async (req: Request, res: Response) => {
     const db = getDb();
     try {
       const { status, ruleCode, since } = req.query;
@@ -1462,7 +1433,7 @@ const column = fieldMap[field];
 
       sql += " ORDER BY created_at DESC";
 
-      const signals = db.prepare(sql).all(...params);
+      const signals = await db.prepare(sql).all(...params);
 
       const fields = [
         "id",
@@ -1503,14 +1474,13 @@ const column = fieldMap[field];
       console.error("Signal export error:", error);
       res.status(500).json({ message: "Failed to export signals" });
     } finally {
-      db.close();
     }
   });
 
-  app.get("/api/admin/grift/export/flagged-users", requireAdmin, (req: Request, res: Response) => {
+  app.get("/api/admin/grift/export/flagged-users", requireAdmin, async (req: Request, res: Response) => {
     const db = getDb();
     try {
-      const users = db.prepare(`
+      const users = await db.prepare(`
         SELECT
           us.user_id,
           us.score_current,
@@ -1542,11 +1512,10 @@ const column = fieldMap[field];
       console.error("Flagged users export error:", error);
       res.status(500).json({ message: "Failed to export flagged users" });
     } finally {
-      db.close();
     }
   });
 
-  app.get("/api/admin/grift/export/observations", requireAdmin, (req: Request, res: Response) => {
+  app.get("/api/admin/grift/export/observations", requireAdmin, async (req: Request, res: Response) => {
     const db = getDb();
     try {
       const { userId, since, limit } = req.query;
@@ -1571,7 +1540,7 @@ const column = fieldMap[field];
         sql += " LIMIT 10000";
       }
 
-      const observations = db.prepare(sql).all(...params);
+      const observations = await db.prepare(sql).all(...params);
 
       const fields = [
         "id",
@@ -1604,18 +1573,17 @@ const column = fieldMap[field];
       console.error("Observations export error:", error);
       res.status(500).json({ message: "Failed to export observations" });
     } finally {
-      db.close();
     }
   });
 
 // ---------------------------------------------------------------------
   // AUDIT LOG
 // ---------------------------------------------------------------------
-  app.get("/api/admin/grift/audit-log", requireAdmin, (req: Request, res: Response) => {
+  app.get("/api/admin/grift/audit-log", requireAdmin, async (req: Request, res: Response) => {
     const db = getDb();
     try {
       const { adminId, action, targetType, since, limit } = req.query;
-      const logs = getAuditLog(db, {
+      const logs = await getAuditLog(db, {
         adminId: adminId ? parseInt(adminId as string) : undefined,
         action: action as any,
         targetType: targetType as string,
@@ -1627,30 +1595,28 @@ const column = fieldMap[field];
       console.error("Audit log error:", error);
       res.status(500).json({ message: "Failed to fetch audit log" });
     } finally {
-      db.close();
     }
   });
 
-  app.get("/api/admin/grift/audit-log/verify", requireAdmin, (req: Request, res: Response) => {
+  app.get("/api/admin/grift/audit-log/verify", requireAdmin, async (req: Request, res: Response) => {
     const db = getDb();
     try {
-      const result = verifyAuditChain(db);
+      const result = await verifyAuditChain(db);
       res.json(result);
     } catch (error) {
       console.error("Audit verify error:", error);
       res.status(500).json({ message: "Failed to verify audit chain" });
     } finally {
-      db.close();
     }
   });
 
 // ---------------------------------------------------------------------
   // LINKED NETWORKS
 // ---------------------------------------------------------------------
-  app.get("/api/admin/grift/networks", requireAdmin, (req: Request, res: Response) => {
+  app.get("/api/admin/grift/networks", requireAdmin, async (req: Request, res: Response) => {
     const db = getDb();
     try {
-      const edges = db.prepare(`
+      const edges = await db.prepare(`
         SELECT user_a, user_b, link_type, confidence FROM grift_linked_account_edges
         ORDER BY confidence DESC LIMIT 500
       `).all() as { user_a: number; user_b: number; link_type: string; confidence: number }[];
@@ -1706,7 +1672,6 @@ const column = fieldMap[field];
       console.error("Networks error:", error);
       res.status(500).json({ message: "Failed to fetch networks" });
     } finally {
-      db.close();
     }
   });
 
@@ -1714,7 +1679,7 @@ const column = fieldMap[field];
   // IDENTITY LINKS (fingerprints / install IDs / IPs)
 // ---------------------------------------------------------------------
 
-  app.get("/api/admin/grift/identity-links", requireAdmin, (req: Request, res: Response) => {
+  app.get("/api/admin/grift/identity-links", requireAdmin, async (req: Request, res: Response) => {
     const db = getDb();
     try {
       const linkType = typeof req.query.linkType === "string" && req.query.linkType ? req.query.linkType : null;
@@ -1748,17 +1713,16 @@ const column = fieldMap[field];
         LIMIT ?
       `;
 
-      const rows = db.prepare(sql).all(...params, minUsers, limit) as any[];
+      const rows = await db.prepare(sql).all(...params, minUsers, limit) as any[];
       res.json({ links: rows, minUsers, limit });
     } catch (error) {
       console.error("Grift identity-links error:", error);
       res.status(500).json({ message: "Failed to fetch identity links" });
     } finally {
-      db.close();
     }
   });
 
-  app.get("/api/admin/grift/identity-links/users", requireAdmin, (req: Request, res: Response) => {
+  app.get("/api/admin/grift/identity-links/users", requireAdmin, async (req: Request, res: Response) => {
     const linkType = typeof req.query.linkType === "string" ? req.query.linkType : "";
     const linkValue = typeof req.query.linkValue === "string" ? req.query.linkValue : "";
     if (!linkType || !linkValue) {
@@ -1790,11 +1754,10 @@ const column = fieldMap[field];
       console.error("Grift identity-links users error:", error);
       res.status(500).json({ message: "Failed to fetch identity link users" });
     } finally {
-      db.close();
     }
   });
 
-  app.get("/api/admin/grift/users/:userId/identity-links", requireAdmin, (req: Request, res: Response) => {
+  app.get("/api/admin/grift/users/:userId/identity-links", requireAdmin, async (req: Request, res: Response) => {
     const userId = Number(req.params.userId);
     if (!userId || isNaN(userId)) {
       return res.status(400).json({ message: "Invalid user ID" });
@@ -1830,7 +1793,6 @@ const column = fieldMap[field];
       console.error("Grift user identity-links error:", error);
       res.status(500).json({ message: "Failed to fetch user identity links" });
     } finally {
-      db.close();
     }
   });
 
@@ -1838,7 +1800,7 @@ const column = fieldMap[field];
   // ENFORCEMENT ACTIONS
 // ---------------------------------------------------------------------
   
-  app.get("/api/admin/grift/users/:userId/enforcement", requireAdmin, (req: Request, res: Response) => {
+  app.get("/api/admin/grift/users/:userId/enforcement", requireAdmin, async (req: Request, res: Response) => {
     const userId = Number(req.params.userId);
     if (!userId || isNaN(userId)) {
       return res.status(400).json({ message: "Invalid user ID" });
@@ -1846,13 +1808,13 @@ const column = fieldMap[field];
 
     const db = getDb();
     try {
-      const enforcement = db.prepare(`
+      const enforcement = await db.prepare(`
         SELECT user_id, frozen_at, frozen_by_admin_id, disabled_at, disabled_by_admin_id, notes
         FROM grift_user_enforcements
         WHERE user_id = ?
       `).get(userId) as any;
 
-      const log = db.prepare(`
+      const log = await db.prepare(`
         SELECT *
         FROM grift_enforcement_log
         WHERE user_id = ?
@@ -1876,7 +1838,6 @@ const column = fieldMap[field];
       console.error("Enforcement status error:", error);
       res.status(500).json({ message: "Failed to fetch enforcement status" });
     } finally {
-      db.close();
     }
   });
 
@@ -1895,7 +1856,7 @@ const column = fieldMap[field];
         return res.status(400).json({ message: "Invalid action. Must be FREEZE, UNFREEZE, DISABLE, or ENABLE" });
       }
 
-      const existing = db.prepare(`
+      const existing = await db.prepare(`
         SELECT frozen_at, frozen_by_admin_id, disabled_at, disabled_by_admin_id, notes
         FROM grift_user_enforcements
         WHERE user_id = ?
@@ -1938,7 +1899,7 @@ const column = fieldMap[field];
       const newStatus = newDisabledAt ? "DISABLED" : newFrozenAt ? "FROZEN" : "ACTIVE";
 
       if (actionTaken) {
-        db.prepare(`
+        await db.prepare(`
           INSERT INTO grift_user_enforcements (
             user_id, frozen_at, frozen_by_admin_id, disabled_at, disabled_by_admin_id, notes
           ) VALUES (?, ?, ?, ?, ?, ?)
@@ -1950,17 +1911,17 @@ const column = fieldMap[field];
             notes = excluded.notes
         `).run(userId, newFrozenAt, newFrozenBy, newDisabledAt, newDisabledBy, newNotes);
 
-        const riskScore = (db.prepare(`
+        const riskScore = (await db.prepare(`
           SELECT score_current as scoreCurrent FROM grift_user_scores WHERE user_id = ?
         `).get(userId) as any)?.scoreCurrent ?? null;
 
-        db.prepare(`
+        await db.prepare(`
           INSERT INTO grift_enforcement_log (
             user_id, action, old_status, new_status, admin_id, reason, risk_score_at_action, created_at
           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         `).run(userId, action, oldStatus, newStatus, adminId, reason ?? null, riskScore, now);
 
-        appendAuditEntry(db, adminId, `ENFORCEMENT_${action}`, "user", userId, {
+        await appendAuditEntry(db, adminId, `ENFORCEMENT_${action}`, "user", userId, {
           oldStatus,
           newStatus,
           riskScore,
@@ -2002,17 +1963,16 @@ const column = fieldMap[field];
       console.error("Enforcement action error:", error);
       res.status(500).json({ message: "Failed to apply enforcement action" });
     } finally {
-      db.close();
     }
   });
 
-  app.get("/api/admin/grift/enforcement/log", requireAdmin, (req: Request, res: Response) => {
+  app.get("/api/admin/grift/enforcement/log", requireAdmin, async (req: Request, res: Response) => {
     const db = getDb();
     try {
       const limit = Math.min(200, Math.max(1, Number(req.query.limit || 50)));
       const offset = Math.max(0, Number(req.query.offset || 0));
 
-      const logs = db.prepare(`
+      const logs = await db.prepare(`
         SELECT el.*, u.email, u.username 
         FROM grift_enforcement_log el
         LEFT JOIN users u ON el.user_id = u.id
@@ -2025,36 +1985,35 @@ const column = fieldMap[field];
       console.error("Enforcement log error:", error);
       res.status(500).json({ message: "Failed to fetch enforcement log" });
     } finally {
-      db.close();
     }
   });
 
 // ---------------------------------------------------------------------
   // DASHBOARD OVERVIEW
 // ---------------------------------------------------------------------
-  app.get("/api/admin/grift/overview", requireAdmin, (_req: Request, res: Response) => {
+  app.get("/api/admin/grift/overview", requireAdmin, async (_req: Request, res: Response) => {
     const db = getDb();
     try {
       const now = Date.now();
       const d7 = now - 7 * 24 * 60 * 60 * 1000;
       const d30 = now - 30 * 24 * 60 * 60 * 1000;
 
-      const openSignalsCount = (db.prepare(`
+      const openSignalsCount = (await db.prepare(`
         SELECT COUNT(*) as cnt FROM grift_signals WHERE status = 'OPEN'
       `).get() as any)?.cnt || 0;
 
-      const hedgePairs7d = (db.prepare(`
+      const hedgePairs7d = (await db.prepare(`
         SELECT COUNT(*) as cnt FROM grift_signals 
         WHERE rule_code = 'HEDGE_PAIR' AND created_at >= ?
       `).get(d7) as any)?.cnt || 0;
 
-      const linkedAccounts30d = (db.prepare(`
+      const linkedAccounts30d = (await db.prepare(`
         SELECT COUNT(DISTINCT user_a || '-' || user_b) as cnt 
         FROM grift_linked_account_edges 
         WHERE last_confirmed_at >= ?
       `).get(d30) as any)?.cnt || 0;
 
-      const topUsersByScore = db.prepare(`
+      const topUsersByScore = await db.prepare(`
         SELECT us.user_id, us.score_current as score_current, us.tier, u.username, u.email
         FROM grift_user_scores us
         LEFT JOIN users u ON us.user_id = u.id
@@ -2062,32 +2021,32 @@ const column = fieldMap[field];
         LIMIT 10
       `).all() as any[];
 
-      const ipChurnHits7d = (db.prepare(`
+      const ipChurnHits7d = (await db.prepare(`
         SELECT COUNT(*) as cnt FROM grift_signals 
         WHERE rule_code = 'IP_CHURN' AND created_at >= ?
       `).get(d7) as any)?.cnt || 0;
 
-      const uaChurnHits7d = (db.prepare(`
+      const uaChurnHits7d = (await db.prepare(`
         SELECT COUNT(*) as cnt FROM grift_signals 
         WHERE rule_code = 'UA_CHURN' AND created_at >= ?
       `).get(d7) as any)?.cnt || 0;
 
-      const deviceChurnHits7d = (db.prepare(`
+      const deviceChurnHits7d = (await db.prepare(`
         SELECT COUNT(*) as cnt FROM grift_signals 
         WHERE rule_code = 'DEVICE_CHURN' AND created_at >= ?
       `).get(d7) as any)?.cnt || 0;
 
-      const geoVelocityHits7d = (db.prepare(`
+      const geoVelocityHits7d = (await db.prepare(`
         SELECT COUNT(*) as cnt FROM grift_signals 
         WHERE rule_code = 'GEO_VELOCITY' AND created_at >= ?
       `).get(d7) as any)?.cnt || 0;
 
-      const concurrentSessionsHits7d = (db.prepare(`
+      const concurrentSessionsHits7d = (await db.prepare(`
         SELECT COUNT(*) as cnt FROM grift_signals 
         WHERE rule_code = 'CONCURRENT_SESSIONS' AND created_at >= ?
       `).get(d7) as any)?.cnt || 0;
 
-      const tierRows = db.prepare(`
+      const tierRows = await db.prepare(`
         SELECT tier, COUNT(*) as count FROM grift_user_scores GROUP BY tier
       `).all() as { tier: string; count: number }[];
 
@@ -2115,20 +2074,19 @@ const column = fieldMap[field];
       console.error("Grift overview error:", error);
       res.status(500).json({ message: "Failed to fetch grift overview" });
     } finally {
-      db.close();
     }
   });
 
 // ---------------------------------------------------------------------
   // HEDGE PAIRS LIST
 // ---------------------------------------------------------------------
-  app.get("/api/admin/grift/pairs", requireAdmin, (req: Request, res: Response) => {
+  app.get("/api/admin/grift/pairs", requireAdmin, async (req: Request, res: Response) => {
     const db = getDb();
     try {
       const limit = Math.min(100, Math.max(1, Number(req.query.limit || 50)));
       const offset = Math.max(0, Number(req.query.offset || 0));
 
-      const pairs = db.prepare(`
+      const pairs = await db.prepare(`
         SELECT 
           s.id, s.user_id, s.related_user_id, s.evidence_json, s.created_at, s.status, s.points, s.severity, s.symbol,
           u1.username as user_username, u1.email as user_email,
@@ -2163,7 +2121,7 @@ const column = fieldMap[field];
         };
       });
 
-      const total = (db.prepare(`
+      const total = (await db.prepare(`
         SELECT COUNT(*) as cnt FROM grift_signals WHERE rule_code = 'HEDGE_PAIR'
       `).get() as any)?.cnt || 0;
 
@@ -2172,14 +2130,13 @@ const column = fieldMap[field];
       console.error("Grift pairs error:", error);
       res.status(500).json({ message: "Failed to fetch hedge pairs" });
     } finally {
-      db.close();
     }
   });
 
 // ---------------------------------------------------------------------
   // FORCE RECOMPUTE USER AGGREGATES
 // ---------------------------------------------------------------------
-  app.post("/api/admin/grift/recompute/:userId", requireAdmin, (req: Request, res: Response) => {
+  app.post("/api/admin/grift/recompute/:userId", requireAdmin, async (req: Request, res: Response) => {
     const userId = Number(req.params.userId);
     if (!userId || isNaN(userId)) {
       return res.status(400).json({ message: "Invalid user ID" });
@@ -2189,11 +2146,11 @@ const column = fieldMap[field];
     try {
       const adminId = req.session.userId!;
 
-      const result = evaluateUserRisk(db, userId);
+      const result = await evaluateUserRisk(db, userId);
 
-      appendAuditEntry(db, adminId, "RISK_RECOMPUTE", "user", userId, { result });
+      await appendAuditEntry(db, adminId, "RISK_RECOMPUTE", "user", userId, { result });
 
-      const updatedScore = db.prepare(`
+      const updatedScore = await db.prepare(`
         SELECT user_id, score_current, score_7d, score_30d, 
                tier, open_signals_count, last_evaluated_at
         FROM grift_user_scores 
@@ -2210,7 +2167,6 @@ const column = fieldMap[field];
       console.error("Grift recompute error:", error);
       res.status(500).json({ message: "Failed to recompute user aggregates" });
     } finally {
-      db.close();
     }
   });
 }

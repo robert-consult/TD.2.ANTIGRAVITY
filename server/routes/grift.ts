@@ -1077,7 +1077,9 @@ export function registerGriftRoutes(app: Express) {
       if (signalIds && Array.isArray(signalIds)) {
         for (const signalId of signalIds) {
           await db.prepare(`
-            INSERT OR IGNORE INTO grift_case_signals (case_id, signal_id, added_at) VALUES (?, ?, ?)
+            INSERT INTO grift_case_signals (case_id, signal_id, added_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT DO NOTHING
           `).run(caseId, signalId, now);
         }
       }
@@ -1193,7 +1195,9 @@ export function registerGriftRoutes(app: Express) {
       const { signalId } = req.body as { signalId: number };
 
       await db.prepare(`
-        INSERT OR IGNORE INTO grift_case_signals (case_id, signal_id, added_at) VALUES (?, ?, ?)
+        INSERT INTO grift_case_signals (case_id, signal_id, added_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT DO NOTHING
       `).run(caseId, signalId, Date.now());
 
       res.json({ success: true });

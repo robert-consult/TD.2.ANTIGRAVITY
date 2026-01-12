@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tradehub-api
+  namespace: tradehub
+  labels:
+    app: tradehub-api
+    role: api
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: tradehub-api
+  template:
+    metadata:
+      labels:
+        app: tradehub-api
+        role: api
+    spec:
+      containers:
+        - name: api
+          image: tradehub/app:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 5000
+          env:
+            - name: APP_ROLE
+              value: "api"
+          envFrom:
+            - configMapRef:
+                name: tradehub-config
+            - secretRef:
+                name: tradehub-secrets
+          readinessProbe:
+            httpGet:
+              path: /api/status
+              port: 5000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 2
+          livenessProbe:
+            httpGet:
+              path: /api/status
+              port: 5000
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            timeoutSeconds: 2
+          resources:
+            requests:
+              cpu: "1000m"
+              memory: "2Gi"
+            limits:
+              cpu: "2000m"
+              memory: "3Gi"
+      terminationGracePeriodSeconds: 30

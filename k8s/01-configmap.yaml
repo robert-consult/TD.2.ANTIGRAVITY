@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tradehub-config
+  namespace: tradehub
+data:
+  NODE_ENV: "production"
+  APP_URL: "https://tradehub.example.com"
+  DB_DIALECT: "postgres"
+  SESSION_STORE: "valkey"
+  COOKIE_SAMESITE: "lax"
+  LIVEBUS_VALKEY_ENABLED: "true"
+  LIVE_ACCOUNT_THROTTLE_MS: "1000"
+  QUOTE_STALE_AFTER_MS: "300000"
+  WS_JURISDICTION_RECHECK_MS: "30000"

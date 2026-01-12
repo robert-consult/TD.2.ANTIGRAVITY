@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { db, dbClient } from "@db";
+import { destroyStoredSession } from "../services/sessionStore";
 import { userSessions, userLoginHistory } from "@shared/schema";
 import geoip from "geoip-lite";
 import tzlookup from "@photostructure/tz-lookup";
@@ -311,7 +312,7 @@ export async function revokeSession(args: {
   });
 
   try {
-    await dbClient.query("DELETE FROM session WHERE sid = $1", [args.sessionId]);
+    await destroyStoredSession(String(args.sessionId));
   } catch (e) {
     console.error("Failed to delete session from session store:", e);
   }

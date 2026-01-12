@@ -1,0 +1,10 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: tradehub-api
+  namespace: tradehub
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: tradehub-api

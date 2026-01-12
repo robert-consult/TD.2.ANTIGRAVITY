@@ -85,6 +85,29 @@ function validateEnvVars() {
 
 validateEnvVars();
 
+function parseRoles(raw: string): Set<string> {
+  const roles = new Set(
+    String(raw || "")
+      .split(",")
+      .map((r) => r.trim().toLowerCase())
+      .filter(Boolean),
+  );
+  if (roles.size === 0) roles.add("monolith");
+  if (roles.has("monolith") || roles.has("all")) {
+    roles.add("api");
+    roles.add("ws");
+    roles.add("ingestor");
+    roles.add("worker");
+  }
+  return roles;
+}
+
+const roles = parseRoles(process.env.APP_ROLE ?? "monolith");
+const RUN_WORKER_TASKS = roles.has("worker");
+const RUN_INGESTOR_TASKS = roles.has("ingestor");
+
+console.log(`[Role] APP_ROLE=${process.env.APP_ROLE ?? "monolith"} => ${[...roles].join(",")}`);
+
 const app = express();
 app.set("trust proxy", 1);
 
@@ -171,128 +194,160 @@ app.use((req, res, next) => {
     setImmediate(async () => {
       // Ensure schema columns exist before starting cron/feeds
       if (!isPostgres) {
-        try {
-          ensureCoreTradingSchema();
-          ensureQuotesColumns();
-          ensureTradeCloseAuditColumns();
-          ensureTradeAuditTable();
-          ensureInstitutionalAuditColumns();
-          ensureOrderIntentAuditTable();
-          ensureUserSettingsColumns();
-          ensureGlobalSettingsTable();
-          ensureUsersColumns();
-          ensureSystemConfigTable();
-          ensureMarketDailyCloseTable();
-          ensureUserLoginHistoryTable();
-          ensureLoginHistorySessionColumns();
-          ensureUserAccountEventsTable();
-          ensureUserAdminNotesTable();
-          ensureTraderJournalTable();
-          ensureAdminActionsTable();
-          ensureUserSessionsTable();
-          ensureUserSessionIdentityColumns();
-          ensureUserSessionGeoColumns();
-          ensureLoginHistoryIdentityColumns();
-          ensureLoginHistoryGeoColumns();
-          ensureTradesProvenanceColumns();
-          ensureAuditExportManifestTable();
-          ensureMigrationTables();
-          ensureTieredAccessSchema();
-          ensureLegalComplianceSchema();
-          ensureSignupFreezeWaitlistSchema();
-          ensureSignupFingerprintSchema();
-          ensureDailyFxClosesSchema();
-          ensureI18nSchema();
-          ensureAccountLifecycleSchema();
-          await bootstrapDoc1Seed();
-
-          // Offline ASN/Org enrichment (SQLite)
+        if (RUN_WORKER_TASKS) {
           try {
-            const datasetPath = getIp2AsnDatasetPath();
-            if (datasetPath) {
-              console.warn("[Grift] ip2asn import skipped in SQLite mode (Postgres-only).");
+            ensureCoreTradingSchema();
+            ensureQuotesColumns();
+            ensureTradeCloseAuditColumns();
+            ensureTradeAuditTable();
+            ensureInstitutionalAuditColumns();
+            ensureOrderIntentAuditTable();
+            ensureUserSettingsColumns();
+            ensureGlobalSettingsTable();
+            ensureUsersColumns();
+            ensureSystemConfigTable();
+            ensureMarketDailyCloseTable();
+            ensureUserLoginHistoryTable();
+            ensureLoginHistorySessionColumns();
+            ensureUserAccountEventsTable();
+            ensureUserAdminNotesTable();
+            ensureTraderJournalTable();
+            ensureAdminActionsTable();
+            ensureUserSessionsTable();
+            ensureUserSessionIdentityColumns();
+            ensureUserSessionGeoColumns();
+            ensureLoginHistoryIdentityColumns();
+            ensureLoginHistoryGeoColumns();
+            ensureTradesProvenanceColumns();
+            ensureAuditExportManifestTable();
+            ensureMigrationTables();
+            ensureTieredAccessSchema();
+            ensureLegalComplianceSchema();
+            ensureSignupFreezeWaitlistSchema();
+            ensureSignupFingerprintSchema();
+            ensureDailyFxClosesSchema();
+            ensureI18nSchema();
+            ensureAccountLifecycleSchema();
+            await bootstrapDoc1Seed();
+
+            // Offline ASN/Org enrichment (SQLite)
+            try {
+              const datasetPath = getIp2AsnDatasetPath();
+              if (datasetPath) {
+                console.warn("[Grift] ip2asn import skipped in SQLite mode (Postgres-only).");
+              }
+            } catch (asnErr) {
+              console.error("[Grift] Failed to evaluate ip2asn dataset path:", asnErr);
             }
-          } catch (asnErr) {
-            console.error("[Grift] Failed to evaluate ip2asn dataset path:", asnErr);
+            
+            log("Schema audit columns verified (institutional-grade)");
+          } catch (error) {
+            console.error("Error ensuring schema columns:", error);
           }
-          
-          log("Schema audit columns verified (institutional-grade)");
-        } catch (error) {
-          console.error("Error ensuring schema columns:", error);
+        } else {
+          log("[Role] Skipping SQLite schema ensure (worker only).");
         }
       } else {
         console.warn("[DB] Postgres mode: SQLite schema ensure/seed skipped. Apply Postgres migrations before use.");
         // Offline ASN/Org enrichment (Postgres)
-        try {
-          const datasetPath = getIp2AsnDatasetPath();
-          if (datasetPath) {
-            await withGriftClient(async (db) => {
-              await maybeImportIp2AsnDataset(db, { filePath: datasetPath });
-            });
+        if (RUN_WORKER_TASKS) {
+          try {
+            const datasetPath = getIp2AsnDatasetPath();
+            if (datasetPath) {
+              await withGriftClient(async (db) => {
+                await maybeImportIp2AsnDataset(db, { filePath: datasetPath });
+              });
+            }
+          } catch (asnErr) {
+            console.error("[Grift] Failed to import ip2asn dataset (Postgres):", asnErr);
           }
-        } catch (asnErr) {
-          console.error("[Grift] Failed to import ip2asn dataset (Postgres):", asnErr);
+        } else {
+          log("[Role] Skipping ip2asn import (worker only).");
         }
       }
 
       // i18n: ingest built manifest (if present) and start worker
-      try {
-        const ing = await maybeIngestBuiltManifest();
-        if ((ing as any)?.ingested) console.log("[i18n] Ingested built manifest:", ing);
-        else console.log("[i18n] Built manifest ingest skipped:", ing);
-      } catch (e) {
-        console.warn("[i18n] Built manifest ingest failed:", e);
-      }
-      try {
-        startI18nWorker(30_000);
-        console.log("[i18n] Worker started");
-      } catch (e) {
-        console.warn("[i18n] Worker failed to start:", e);
+      if (RUN_WORKER_TASKS) {
+        try {
+          const ing = await maybeIngestBuiltManifest();
+          if ((ing as any)?.ingested) console.log("[i18n] Ingested built manifest:", ing);
+          else console.log("[i18n] Built manifest ingest skipped:", ing);
+        } catch (e) {
+          console.warn("[i18n] Built manifest ingest failed:", e);
+        }
+        try {
+          startI18nWorker(30_000);
+          console.log("[i18n] Worker started");
+        } catch (e) {
+          console.warn("[i18n] Worker failed to start:", e);
+        }
+      } else {
+        log("[Role] Skipping i18n worker (worker only).");
       }
 
       // Import feed/cron AFTER schema is ensured
-      try {
-        if (isPostgres) {
-          await import("./feeds/quoteFeed");
-        } else {
-          await import("./feeds/forgeFeed");
+      if (RUN_INGESTOR_TASKS) {
+        try {
+          if (isPostgres) {
+            await import("./feeds/quoteFeed");
+          } else {
+            await import("./feeds/forgeFeed");
+          }
+          await import("./cron/autoClose");
+          log("Price feed and auto-close services initialized");
+        } catch (error) {
+          console.error("Error initializing feed/cron services:", error);
         }
-        await import("./cron/autoClose");
-        log("Price feed and auto-close services initialized");
-      } catch (error) {
-        console.error("Error initializing feed/cron services:", error);
+      } else {
+        log("[Role] Skipping quote feed/auto-close (ingestor only).");
       }
 
       // Initialize admin data views and tables
-      try {
-        await setupAdminViews();
-        log("Admin data views and tables initialized successfully");
-      } catch (error) {
-        console.error("Error setting up admin views:", error);
+      if (RUN_WORKER_TASKS) {
+        try {
+          await setupAdminViews();
+          log("Admin data views and tables initialized successfully");
+        } catch (error) {
+          console.error("Error setting up admin views:", error);
+        }
+      } else {
+        log("[Role] Skipping admin views init (worker only).");
       }
 
       // Start grift detection scheduler
-      try {
-        startGriftEvaluationScheduler();
-        log("Grift detection scheduler initialized");
-      } catch (error) {
-        console.error("Error starting grift scheduler:", error);
+      if (RUN_WORKER_TASKS) {
+        try {
+          startGriftEvaluationScheduler();
+          log("Grift detection scheduler initialized");
+        } catch (error) {
+          console.error("Error starting grift scheduler:", error);
+        }
+      } else {
+        log("[Role] Skipping grift scheduler (worker only).");
       }
 
       // Start verification reminder cron
-      try {
-        startVerificationReminderCron();
-        log("Verification reminder cron initialized");
-      } catch (error) {
-        console.error("Error starting verification reminder cron:", error);
+      if (RUN_WORKER_TASKS) {
+        try {
+          startVerificationReminderCron();
+          log("Verification reminder cron initialized");
+        } catch (error) {
+          console.error("Error starting verification reminder cron:", error);
+        }
+      } else {
+        log("[Role] Skipping verification reminder cron (worker only).");
       }
 
       // Start account lifecycle sweep scheduler (inactive users + deletion grace)
-      try {
-        startAccountLifecycleSweepScheduler();
-        log("Account lifecycle sweep scheduler initialized");
-      } catch (error) {
-        console.error("Error starting account lifecycle sweep scheduler:", error);
+      if (RUN_WORKER_TASKS) {
+        try {
+          startAccountLifecycleSweepScheduler();
+          log("Account lifecycle sweep scheduler initialized");
+        } catch (error) {
+          console.error("Error starting account lifecycle sweep scheduler:", error);
+        }
+      } else {
+        log("[Role] Skipping account lifecycle sweep (worker only).");
       }
       
       log("Deferred initialization complete");

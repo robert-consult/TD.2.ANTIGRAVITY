@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tradehub-ingestor
+  namespace: tradehub
+  labels:
+    app: tradehub-ingestor
+    role: ingestor
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tradehub-ingestor
+  template:
+    metadata:
+      labels:
+        app: tradehub-ingestor
+        role: ingestor
+    spec:
+      containers:
+        - name: ingestor
+          image: tradehub/app:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 5000
+          env:
+            - name: APP_ROLE
+              value: "ingestor"
+          envFrom:
+            - configMapRef:
+                name: tradehub-config
+            - secretRef:
+                name: tradehub-secrets
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "512Mi"
+            limits:
+              cpu: "2"
+              memory: "2Gi"
+      terminationGracePeriodSeconds: 30

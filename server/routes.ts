@@ -15,7 +15,7 @@ import { isPostgres } from "@db/config";
 import session from "express-session";
 import cookie from "cookie";
 import signature from "cookie-signature";
-import connectPgSimple from "connect-pg-simple";
+import { resolveSessionStore } from "./services/sessionStore";
 import { registerAdminRoutes } from "./routes/admin";
 import { registerMarketRoutes } from "./routes/market";
 import instrumentsRouter from "./routes/instruments";
@@ -134,7 +134,6 @@ function normalizeLanguagePreference(value: string | undefined): { normalized: s
 }
 
 // Create session store with Postgres persistence
-const SessionStore = connectPgSimple(session);
 const SESSION_COOKIE_NAME = "connect.sid";
 const SESSION_SECRET = process.env.SESSION_SECRET || "trading-platform-secret";
 
@@ -163,15 +162,14 @@ declare module "express-session" {
 }
 
 export async function registerRoutes(app: Express): Promise<Server> {
-  // Configure session with Postgres persistence to prevent session loss on server restart
+  const sessionStoreResolved = await resolveSessionStore();
+  const sessionStore = sessionStoreResolved.store;
+  console.log(`[Session] store=${sessionStoreResolved.kind}`);
+
+  // Configure session persistence to prevent session loss on server restart
   app.use(
     session({
-      store: new SessionStore({
-        pool: dbClient,
-        tableName: "session",
-        createTableIfMissing: true,
-        pruneSessionInterval: 900000,
-      }),
+      store: sessionStore,
       secret: SESSION_SECRET,
       resave: false,
       saveUninitialized: false,
@@ -4056,15 +4054,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
     if (!sid) return null;
 
     try {
-      const result = await dbClient.query(
-        "SELECT sess FROM session WHERE sid = $1 AND expire > NOW()",
-        [sid]
-      );
-      const row = result.rows[0] as any;
+      const sess = await new Promise<any | null>((resolve) => {
+        if (typeof sessionStore.get !== "function") return resolve(null);
+        sessionStore.get(sid, (err: any, sessionValue: any) => {
+          if (err || !sessionValue) return resolve(null);
+          resolve(sessionValue);
+        });
+      });
 
-      if (!row?.sess) return null;
-      const sess = typeof row.sess === "string" ? JSON.parse(row.sess) : row.sess;
-      return { sid, sess };
+      if (!sess) return null;
+      const resolved = typeof sess === "string" ? JSON.parse(sess) : sess;
+      return { sid, sess: resolved };
     } catch {
       return null;
     }
@@ -4072,7 +4072,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   async function destroyCookieSession(sid: string) {
     try {
-      await dbClient.query("DELETE FROM session WHERE sid = $1", [sid]);
+      await new Promise<void>((resolve) => {
+        if (typeof sessionStore.destroy !== "function") return resolve();
+        sessionStore.destroy(sid, () => resolve());
+      });
     } catch {
       // ignore
     }

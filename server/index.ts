@@ -14,6 +14,7 @@ import BetterSQLite3 from "better-sqlite3";
 import { getIp2AsnDatasetPath, maybeImportIp2AsnDataset } from "./grift/griftIp2AsnDataset";
 import { startI18nWorker } from "./i18n/worker";
 import { maybeIngestBuiltManifest } from "./i18n/service";
+import { dbDialect, isPostgres } from "@db/config";
 
 // Validate required environment variables at startup
 function validateEnvVars() {
@@ -60,6 +61,8 @@ function validateEnvVars() {
   console.log("  - TWILIO_MESSAGING_SERVICE_SID:", process.env.TWILIO_MESSAGING_SERVICE_SID ? "configured" : "MISSING");
   console.log("  - TWILIO_FROM_NUMBER:", process.env.TWILIO_FROM_NUMBER ? "configured" : "MISSING");
   console.log("  - 1Forge API Key:", process.env.FORGE_KEY ? "configured" : "MISSING");
+  console.log("  - DB_DIALECT:", dbDialect);
+  console.log("  - DATABASE_URL:", isPostgres ? (process.env.DATABASE_URL ? "configured" : "MISSING") : "sqlite");
   
   // ALWAYS fail fast on critical security errors (both dev and prod)
   if (criticalErrors.length > 0) {
@@ -167,100 +170,108 @@ app.use((req, res, next) => {
     // This ensures health checks pass quickly during deployment
     setImmediate(async () => {
       // Ensure schema columns exist before starting cron/feeds
-      try {
-        ensureCoreTradingSchema();
-        ensureQuotesColumns();
-        ensureTradeCloseAuditColumns();
-        ensureTradeAuditTable();
-        ensureInstitutionalAuditColumns();
-        ensureOrderIntentAuditTable();
-        ensureUserSettingsColumns();
-        ensureGlobalSettingsTable();
-        ensureUsersColumns();
-        ensureSystemConfigTable();
-        ensureMarketDailyCloseTable();
-        ensureUserLoginHistoryTable();
-        ensureLoginHistorySessionColumns();
-        ensureUserAccountEventsTable();
-        ensureUserAdminNotesTable();
-        ensureTraderJournalTable();
-        ensureAdminActionsTable();
-        ensureUserSessionsTable();
-        ensureUserSessionIdentityColumns();
-        ensureUserSessionGeoColumns();
-        ensureLoginHistoryIdentityColumns();
-        ensureLoginHistoryGeoColumns();
-        ensureTradesProvenanceColumns();
-        ensureAuditExportManifestTable();
-        ensureMigrationTables();
-        ensureTieredAccessSchema();
-        ensureLegalComplianceSchema();
-        ensureSignupFreezeWaitlistSchema();
-        ensureSignupFingerprintSchema();
-        ensureDailyFxClosesSchema();
-        ensureI18nSchema();
-        ensureAccountLifecycleSchema();
-        bootstrapDoc1Seed();
-
-        // Offline ASN/Org enrichment
+      if (!isPostgres) {
         try {
-          const datasetPath = getIp2AsnDatasetPath();
-          if (datasetPath) {
-            const asnDb = new BetterSQLite3("./trading_app.db");
-            try { asnDb.pragma("busy_timeout = 5000"); } catch {}
-            try {
-              await maybeImportIp2AsnDataset(asnDb, { filePath: datasetPath });
-            } finally {
-              asnDb.close();
+          ensureCoreTradingSchema();
+          ensureQuotesColumns();
+          ensureTradeCloseAuditColumns();
+          ensureTradeAuditTable();
+          ensureInstitutionalAuditColumns();
+          ensureOrderIntentAuditTable();
+          ensureUserSettingsColumns();
+          ensureGlobalSettingsTable();
+          ensureUsersColumns();
+          ensureSystemConfigTable();
+          ensureMarketDailyCloseTable();
+          ensureUserLoginHistoryTable();
+          ensureLoginHistorySessionColumns();
+          ensureUserAccountEventsTable();
+          ensureUserAdminNotesTable();
+          ensureTraderJournalTable();
+          ensureAdminActionsTable();
+          ensureUserSessionsTable();
+          ensureUserSessionIdentityColumns();
+          ensureUserSessionGeoColumns();
+          ensureLoginHistoryIdentityColumns();
+          ensureLoginHistoryGeoColumns();
+          ensureTradesProvenanceColumns();
+          ensureAuditExportManifestTable();
+          ensureMigrationTables();
+          ensureTieredAccessSchema();
+          ensureLegalComplianceSchema();
+          ensureSignupFreezeWaitlistSchema();
+          ensureSignupFingerprintSchema();
+          ensureDailyFxClosesSchema();
+          ensureI18nSchema();
+          ensureAccountLifecycleSchema();
+          bootstrapDoc1Seed();
+
+          // Offline ASN/Org enrichment
+          try {
+            const datasetPath = getIp2AsnDatasetPath();
+            if (datasetPath) {
+              const asnDb = new BetterSQLite3("./trading_app.db");
+              try { asnDb.pragma("busy_timeout = 5000"); } catch {}
+              try {
+                await maybeImportIp2AsnDataset(asnDb, { filePath: datasetPath });
+              } finally {
+                asnDb.close();
+              }
             }
+          } catch (asnErr) {
+            console.error("[Grift] Failed to import ip2asn dataset:", asnErr);
           }
-        } catch (asnErr) {
-          console.error("[Grift] Failed to import ip2asn dataset:", asnErr);
+          
+          log("Schema audit columns verified (institutional-grade)");
+        } catch (error) {
+          console.error("Error ensuring schema columns:", error);
+        }
+      } else {
+        console.warn("[DB] Postgres mode: SQLite schema ensure/seed skipped. Apply Postgres migrations before use.");
+      }
+
+      if (!isPostgres) {
+        // i18n: ingest built manifest (if present) and start worker
+        try {
+          const ing = await maybeIngestBuiltManifest();
+          if ((ing as any)?.ingested) console.log("[i18n] Ingested built manifest:", ing);
+          else console.log("[i18n] Built manifest ingest skipped:", ing);
+        } catch (e) {
+          console.warn("[i18n] Built manifest ingest failed:", e);
+        }
+        try {
+          startI18nWorker(30_000);
+          console.log("[i18n] Worker started");
+        } catch (e) {
+          console.warn("[i18n] Worker failed to start:", e);
+        }
+
+        // Import feed/cron AFTER schema is ensured
+        try {
+          await import("./feeds/forgeFeed");
+          await import("./cron/autoClose");
+          log("Price feed and auto-close services initialized");
+        } catch (error) {
+          console.error("Error initializing feed/cron services:", error);
+        }
+
+        // Initialize admin data views and tables
+        try {
+          await setupAdminViews();
+          log("Admin data views and tables initialized successfully");
+        } catch (error) {
+          console.error("Error setting up admin data views:", error);
         }
         
-        log("Schema audit columns verified (institutional-grade)");
-      } catch (error) {
-        console.error("Error ensuring schema columns:", error);
-      }
-
-      // i18n: ingest built manifest (if present) and start worker
-      try {
-        const ing = await maybeIngestBuiltManifest();
-        if ((ing as any)?.ingested) console.log("[i18n] Ingested built manifest:", ing);
-        else console.log("[i18n] Built manifest ingest skipped:", ing);
-      } catch (e) {
-        console.warn("[i18n] Built manifest ingest failed:", e);
-      }
-      try {
-        startI18nWorker(30_000);
-        console.log("[i18n] Worker started");
-      } catch (e) {
-        console.warn("[i18n] Worker failed to start:", e);
-      }
-
-      // Import feed/cron AFTER schema is ensured
-      try {
-        await import("./feeds/forgeFeed");
-        await import("./cron/autoClose");
-        log("Price feed and auto-close services initialized");
-      } catch (error) {
-        console.error("Error initializing feed/cron services:", error);
-      }
-
-      // Initialize admin data views and tables
-      try {
-        await setupAdminViews();
-        log("Admin data views and tables initialized successfully");
-      } catch (error) {
-        console.error("Error setting up admin data views:", error);
-      }
-      
-      // Start grift detection scheduler
-      try {
-        startGriftEvaluationScheduler("./trading_app.db");
-        log("Grift detection scheduler initialized");
-      } catch (error) {
-        console.error("Error starting grift scheduler:", error);
+        // Start grift detection scheduler
+        try {
+          startGriftEvaluationScheduler("./trading_app.db");
+          log("Grift detection scheduler initialized");
+        } catch (error) {
+          console.error("Error starting grift scheduler:", error);
+        }
+      } else {
+        console.warn("[DB] Postgres mode: SQLite-only i18n/feeds/admin views/grift schedulers are disabled.");
       }
 
       // Start verification reminder cron

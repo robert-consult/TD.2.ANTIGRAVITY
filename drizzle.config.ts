@@ -1,13 +1,16 @@
 import { defineConfig } from "drizzle-kit";
 
 const sqliteUrl = process.env.SQLITE_DB_PATH ?? "./trading_app.db";
+const databaseUrl = process.env.DATABASE_URL ?? "";
+const dbDialect = (process.env.DB_DIALECT ?? "sqlite").toLowerCase();
+const isPostgres = dbDialect === "postgres" || dbDialect === "postgresql";
 
 export default defineConfig({
   out: "./db/migrations",
-  schema: "./shared/schema.ts",
-  dialect: "sqlite",
+  schema: isPostgres ? "./shared/schema.pg.ts" : "./shared/schema.ts",
+  dialect: isPostgres ? "postgresql" : "sqlite",
   dbCredentials: {
-    url: sqliteUrl,
+    url: isPostgres ? databaseUrl : sqliteUrl,
   },
   verbose: true,
 });

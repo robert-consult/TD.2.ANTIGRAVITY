@@ -72,7 +72,7 @@ export async function maybeIngestBuiltManifest(): Promise<
 
   const exists = await withI18nClient(async (client) => {
     const res = await client.query("SELECT id FROM i18n_manifest_versions WHERE version = $1", [mf.version]);
-    return res.rowCount > 0;
+    return (res.rowCount ?? 0) > 0;
   });
   if (exists) return { skipped: true, reason: "already-ingested", path: manifestPath, version: mf.version };
 

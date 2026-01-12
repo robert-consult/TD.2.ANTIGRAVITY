@@ -206,16 +206,17 @@ export async function checkCoverage(countryCode: string): Promise<CoverageCheckR
  */
 export async function getCoverageStats(): Promise<CoverageStats> {
   // Get all active pointers for DOC1 ADDENDUM
-  const pointers = await db
-    .select()
-    .from(legalDocPointers)
-    .where(
-      and(
-        eq(legalDocPointers.docSet, "DOC1"),
-        eq(legalDocPointers.docType, "ADDENDUM")
+  const pointers = (
+    await db
+      .select()
+      .from(legalDocPointers)
+      .where(
+        and(
+          eq(legalDocPointers.docSet, "DOC1"),
+          eq(legalDocPointers.docType, "ADDENDUM")
+        )
       )
-    )
-    .filter((p) => p.activeDocumentId != null);
+  ).filter((p) => p.activeDocumentId != null);
 
   const regionsCovered: string[] = [];
   const countriesWithExplicit: string[] = [];

@@ -113,7 +113,7 @@ export async function listAdminActivity(opts: {
       logins AS (
         SELECT user_id, MAX(created_at) AS last_login_at
         FROM user_login_history
-        WHERE success = 1
+        WHERE success = TRUE
         GROUP BY user_id
       ),
       trades_last AS (
@@ -148,8 +148,8 @@ export async function listAdminActivity(opts: {
       LEFT JOIN bot_risk_assessments b ON b.user_id = u.id
       LEFT JOIN user_deletion_queue dq ON dq.user_id = u.id
       WHERE
-        u.is_admin = 0
-        AND ($1::int = 1 OR u.is_deleted = 0)
+        u.is_admin = FALSE
+        AND ($1::int = 1 OR u.is_deleted = FALSE)
       ORDER BY "lastActiveAt" ASC
       LIMIT $2;
     `,
@@ -207,7 +207,7 @@ async function computeLastActiveAtSec(userId: number): Promise<number> {
       logins AS (
         SELECT MAX(created_at) AS last_login_at
         FROM user_login_history
-        WHERE user_id = $1 AND success = 1
+        WHERE user_id = $1 AND success = TRUE
       ),
       trades_last AS (
         SELECT MAX(COALESCE(closed_at, opened_at)) AS last_trade_at

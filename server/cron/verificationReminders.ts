@@ -243,11 +243,11 @@ async function sendVerificationReminders() {
             const currentCount = verifyState?.emailResendDayKey === dayKey
               ? (verifyState?.emailResendCountDay || 0)
               : 0;
+            const rawDayStart = verifyState?.emailResendDayStart;
+            const parsedDayStart = rawDayStart != null ? Number(rawDayStart) : NaN;
             const newDayStart =
-              verifyState?.emailResendDayKey === dayKey && verifyState?.emailResendDayStart != null
-                ? verifyState.emailResendDayStart instanceof Date
-                  ? Math.floor(verifyState.emailResendDayStart.getTime() / 1000)
-                  : Number(verifyState.emailResendDayStart)
+              verifyState?.emailResendDayKey === dayKey && Number.isFinite(parsedDayStart)
+                ? parsedDayStart
                 : nowSec;
 
             await db.update(userVerification)
@@ -378,11 +378,11 @@ async function sendVerificationReminders() {
             const currentCount = verifyState?.emailResendDayKey === dayKey
               ? (verifyState?.emailResendCountDay || 0)
               : 0;
+            const rawDayStart = verifyState?.emailResendDayStart;
+            const parsedDayStart = rawDayStart != null ? Number(rawDayStart) : NaN;
             const newDayStart =
-              verifyState?.emailResendDayKey === dayKey && verifyState?.emailResendDayStart != null
-                ? verifyState.emailResendDayStart instanceof Date
-                  ? Math.floor(verifyState.emailResendDayStart.getTime() / 1000)
-                  : Number(verifyState.emailResendDayStart)
+              verifyState?.emailResendDayKey === dayKey && Number.isFinite(parsedDayStart)
+                ? parsedDayStart
                 : nowSec;
 
             await db.update(userVerification)

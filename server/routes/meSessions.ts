@@ -34,10 +34,14 @@ export function registerMeSessionsRoutes(app: Express) {
       .limit(limit);
 
     // Convert dates to timestamps for consistent frontend handling
+    const toMs = (value: number | null | undefined) => {
+      if (value == null) return null;
+      return value < 1e12 ? value * 1000 : value;
+    };
     const formattedRows = rows.map(r => ({
       ...r,
-      createdAt: r.createdAt instanceof Date ? r.createdAt.getTime() : r.createdAt,
-      lastSeenAt: r.lastSeenAt instanceof Date ? r.lastSeenAt.getTime() : r.lastSeenAt,
+      createdAt: toMs(r.createdAt),
+      lastSeenAt: toMs(r.lastSeenAt),
     }));
 
     res.json({ currentSessionId, rows: formattedRows });

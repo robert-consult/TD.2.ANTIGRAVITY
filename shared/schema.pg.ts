@@ -848,6 +848,25 @@ export const adminActions = pgTable("admin_actions", {
 
 export const insertAdminActionSchema = createInsertSchema(adminActions);
 
+// Audit export manifest table for export integrity hashing
+export const auditExportManifest = pgTable(
+  "audit_export_manifest",
+  {
+    exportId: text("export_id").primaryKey(),
+    exportedAtUtcMs: bigint("exported_at_utc_ms", { mode: "number" }).notNull(),
+    exportType: text("export_type").notNull(),
+    exportFormat: text("export_format").notNull(),
+    filtersJson: text("filters_json").notNull(),
+    recordCount: integer("record_count").notNull(),
+    sha256: text("sha256").notNull(),
+  },
+  (table) => ({
+    byTypeTime: index("idx_aem_type_time").on(table.exportType, table.exportedAtUtcMs),
+  })
+);
+
+export const insertAuditExportManifestSchema = createInsertSchema(auditExportManifest);
+
 // Migration export/import jobs (backup + platform migration)
 export const migrationExportJobs = pgTable("migration_export_jobs", {
   id: text("id").primaryKey(),
@@ -1134,7 +1153,11 @@ export const griftIdentityLinks = pgTable("grift_identity_links", {
   lastSeenAt: bigint("last_seen_at", { mode: "number" }).notNull().default(nowUnixMs),
   occurrenceCount: integer("occurrence_count").notNull().default(1),
   metadataJson: text("metadata_json"),
-});
+}, (t) => ({
+  idxUser: index("idx_grift_identity_user").on(t.userId),
+  idxTypeValue: index("idx_grift_identity_type_value").on(t.linkType, t.linkValue),
+  uniqueUserLink: uniqueIndex("idx_grift_identity_unique").on(t.userId, t.linkType, t.linkValue),
+}));
 
 // Alerts for admin review
 export const griftAlerts = pgTable("grift_alerts", {

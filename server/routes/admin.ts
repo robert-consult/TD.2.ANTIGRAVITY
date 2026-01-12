@@ -2,7 +2,7 @@ import { Express, Request, Response } from "express";
 import { storage } from "../storage";
 import { requireAdmin } from "../middleware/auth";
 import { insertUserSettingsSchema, insertSymbolConfigSchema, tradeAudit, orderIntentAudit, globalSettings, systemConfig, userAdminNotes, userKycProfiles, userVerification, userPayoutProfiles, signupWaitlist } from "@shared/schema";
-import { db } from "../../db";
+import { db, dbClient } from "../../db";
 import { eq, sql, desc, and, gte, inArray, like, or } from "drizzle-orm";
 import { trades, users, symbolConfigs, userSettings } from "@shared/schema";
 import { appendIdentityAudit, getRecentIdentityAudit } from "../services/identityAudit";
@@ -24,7 +24,93 @@ import { getGriftDb } from "../grift/griftDb";
 import { recalcAccount } from "../recalcAccount";
 import { publishLiveEvent } from "../services/liveBus";
 
-async function ensureDefaultPayoutCurrency(user: any, userId: number, now: Date) {
+function convertQuestionMarks(sql: string): string {
+  let out = "";
+  let index = 1;
+  let inSingle = false;
+  let inDouble = false;
+  let inLineComment = false;
+  let inBlockComment = false;
+
+  for (let i = 0; i < sql.length; i++) {
+    const ch = sql[i];
+    const next = i + 1 < sql.length ? sql[i + 1] : "";
+
+    if (inLineComment) {
+      out += ch;
+      if (ch === "\n") inLineComment = false;
+      continue;
+    }
+    if (inBlockComment) {
+      out += ch;
+      if (ch === "*" && next === "/") {
+        out += next;
+        i++;
+        inBlockComment = false;
+      }
+      continue;
+    }
+
+    if (!inSingle && !inDouble) {
+      if (ch === "-" && next === "-") {
+        out += ch + next;
+        i++;
+        inLineComment = true;
+        continue;
+      }
+      if (ch === "/" && next === "*") {
+        out += ch + next;
+        i++;
+        inBlockComment = true;
+        continue;
+      }
+    }
+
+    if (ch === "'" && !inDouble) {
+      out += ch;
+      if (inSingle && next === "'") {
+        out += next;
+        i++;
+      } else {
+        inSingle = !inSingle;
+      }
+      continue;
+    }
+
+    if (ch === "\"" && !inSingle) {
+      out += ch;
+      inDouble = !inDouble;
+      continue;
+    }
+
+    if (!inSingle && !inDouble && ch === "?") {
+      out += `$${index++}`;
+      continue;
+    }
+
+    out += ch;
+  }
+
+  return out;
+}
+
+async function queryAll<T = any>(sql: string, params: any[] = []): Promise<T[]> {
+  const text = convertQuestionMarks(sql);
+  const result = await dbClient.query(text, params);
+  return result.rows as T[];
+}
+
+async function queryOne<T = any>(sql: string, params: any[] = []): Promise<T | undefined> {
+  const rows = await queryAll<T>(sql, params);
+  return rows[0];
+}
+
+async function exec(sql: string, params: any[] = []): Promise<void> {
+  const text = convertQuestionMarks(sql);
+  await dbClient.query(text, params);
+}
+
+async function ensureDefaultPayoutCurrency(user: any, userId: number, nowSec: number) {
   const preferred = defaultPaymentCurrencyForCountry({
     countryIso2: user?.countryIso2 ?? user?.country ?? null,
     regionKey: user?.regionKey ?? null,
@@ -37,7 +123,7 @@ async function ensureDefaultPayoutCurrency(user: any, userId: number, now: Date)
   if (existing) {
     if (!existing.preferredPaymentCurrency) {
       await db.update(userPayoutProfiles)
-        .set({ preferredPaymentCurrency: preferred, updatedAt: now })
+        .set({ preferredPaymentCurrency: preferred, updatedAt: nowSec })
         .where(eq(userPayoutProfiles.userId, userId));
     }
     return existing.preferredPaymentCurrency || preferred;
@@ -46,8 +132,8 @@ async function ensureDefaultPayoutCurrency(user: any, userId: number, now: Date)
   await db.insert(userPayoutProfiles).values({
     userId,
     preferredPaymentCurrency: preferred,
-    createdAt: now,
-    updatedAt: now,
+    createdAt: nowSec,
+    updatedAt: nowSec,
   });
   return preferred;
 }
@@ -184,6 +270,13 @@ export function registerAdminRoutes(app: Express) {
     }
     const parsed = new Date(value);
     return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+  };
+  const toUnixSec = (value: any): number | null => {
+    if (value == null || value === "") return null;
+    if (value instanceof Date) return Math.floor(value.getTime() / 1000);
+    const num = Number(value);
+    if (!Number.isFinite(num)) return null;
+    return num < 1e12 ? Math.floor(num) : Math.floor(num / 1000);
   };
   // SYMBOL MANAGEMENT ROUTES
   
@@ -413,25 +506,22 @@ export function registerAdminRoutes(app: Express) {
     try {
       const days = req.query.days ? parseInt(req.query.days as string) : 30;
       
-      // Query the trader statistics view
+      const params: any[] = [];
       let query = "SELECT * FROM vw_trader_stats";
-      
+
       // If days parameter is provided and not 0 (all time), filter by date
       if (days > 0) {
         const cutoffDate = new Date();
         cutoffDate.setDate(cutoffDate.getDate() - days);
         const cutoffTimestamp = Math.floor(cutoffDate.getTime() / 1000);
-        
-        // Add filtering to base query when days parameter is provided
-        query += ` WHERE last_trade_date > ${cutoffTimestamp}`;
+        params.push(cutoffTimestamp);
+        query += ` WHERE last_trade_date > $${params.length}`;
       }
-      
+
       // Order by profit descending
       query += " ORDER BY profit DESC";
-      
-      // Execute the query
-      const stats = await db.$client.prepare(query).all();
-      
+
+      const stats = (await dbClient.query(query, params)).rows;
       res.json(stats);
     } catch (error) {
       console.error("Error fetching trader statistics:", error);
@@ -482,7 +572,7 @@ export function registerAdminRoutes(app: Express) {
   app.get("/api/admin/daily-pnl", requireAdmin, async (req: Request, res: Response) => {
     try {
       // Get daily P&L data from daily_closes table
-      const dailyData = await db.$client.prepare(`
+      const dailyData = await queryAll(`
         SELECT 
           date,
           SUM(profit_day) as total_profit,
@@ -493,7 +583,7 @@ export function registerAdminRoutes(app: Express) {
         GROUP BY date
         ORDER BY date DESC
         LIMIT 90
-      `).all();
+      `);
       
       res.json(dailyData);
     } catch (error) {
@@ -737,6 +827,8 @@ export function registerAdminRoutes(app: Express) {
         dailyLossLimitPct: parseNum(body.dailyLossLimitPct),
         lifetimeLossLimitPct: parseNum(body.lifetimeLossLimitPct),
       };
+
+      const nowSec = Math.floor(Date.now() / 1000);
       
       // Upsert the global settings (insert or update)
       const existing = await db.query.globalSettings.findFirst({
@@ -761,7 +853,7 @@ export function registerAdminRoutes(app: Express) {
             enableLossLimits: next.enableLossLimits ?? existing.enableLossLimits,
             dailyLossLimitPct: next.dailyLossLimitPct ?? existing.dailyLossLimitPct,
             lifetimeLossLimitPct: next.lifetimeLossLimitPct ?? existing.lifetimeLossLimitPct,
-            updatedAt: new Date()
+            updatedAt: nowSec
           })
           .where(eq(globalSettings.id, 1));
       } else {
@@ -1154,6 +1246,8 @@ export function registerAdminRoutes(app: Express) {
         (next as any).signupWaitlistInviteBatchCap ?? (existing as any)?.signupWaitlistInviteBatchCap ?? 200
       );
       
+      const nowSec = Math.floor(Date.now() / 1000);
+
       if (existing) {
         await db.update(systemConfig)
           .set({
@@ -1208,7 +1302,7 @@ export function registerAdminRoutes(app: Express) {
             migrationChunkSizeMb: Number(
               (next as any).migrationChunkSizeMb ?? (existing as any).migrationChunkSizeMb ?? 51200
             ),
-            updatedAt: new Date(),
+            updatedAt: nowSec,
             updatedBy: adminUser
           })
           .where(eq(systemConfig.id, 1));
@@ -1339,11 +1433,10 @@ export function registerAdminRoutes(app: Express) {
 
       const where = buildWaitlistWhere({ status, q });
 
-      const totalRow = db
+      const totalRow = await db
         .select({ count: sql<number>`count(*)` })
         .from(signupWaitlist)
-        .where(where as any)
-        .get();
+        .where(where as any);
 
       const rows = await db
         .select({
@@ -1381,7 +1474,7 @@ export function registerAdminRoutes(app: Express) {
 
       return res.json({
         ok: true,
-        total: Number(totalRow?.count ?? 0),
+        total: Number(totalRow[0]?.count ?? 0),
         limit,
         offset,
         rows,
@@ -2479,7 +2572,7 @@ export function registerAdminRoutes(app: Express) {
         return res.status(404).json({ message: "User not found" });
       }
       
-      const now = new Date();
+      const nowSec = Math.floor(Date.now() / 1000);
       const existing = await db.query.userKycProfiles.findFirst({
         where: eq(userKycProfiles.userId, userId),
       });
@@ -2489,16 +2582,16 @@ export function registerAdminRoutes(app: Express) {
       if (existing) {
         const updateData: any = {
           status,
-          updatedAt: now,
+          updatedAt: nowSec,
         };
         
         if (status === "INVITED" && !existing.invitedAt) {
-          updateData.invitedAt = now;
+          updateData.invitedAt = nowSec;
           updateData.invitedByAdminId = adminId;
         }
         
         if (status === "APPROVED" || status === "REJECTED") {
-          updateData.reviewedAt = now;
+          updateData.reviewedAt = nowSec;
           updateData.reviewedByAdminId = adminId;
           if (notes) updateData.reviewerNote = notes;
           if (status === "REJECTED") updateData.rejectionReason = notes || "Not specified";
@@ -2511,15 +2604,15 @@ export function registerAdminRoutes(app: Express) {
           await db.insert(userKycProfiles).values({
             userId,
             status,
-            invitedAt: status === "INVITED" ? now : null,
+            invitedAt: status === "INVITED" ? nowSec : null,
             invitedByAdminId: status === "INVITED" ? adminId : null,
             inviteNote: notes || null,
           });
         }
 
         if (status === "INVITED") {
-          const selectedAt = (user as any).selectedAt ?? now;
-          const tierPromotedAt = (user as any).tierPromotedAt ?? now;
+          const selectedAt = toUnixSec((user as any).selectedAt) ?? nowSec;
+          const tierPromotedAt = toUnixSec((user as any).tierPromotedAt) ?? nowSec;
           await db.update(users)
             .set({
               userTier: "SELECTED",
@@ -2536,17 +2629,17 @@ export function registerAdminRoutes(app: Express) {
             await db.update(userVerification)
               .set({
                 contenderTier: "SELECTED_REAL_CAPITAL",
-                updatedAt: now,
+                updatedAt: nowSec,
               })
               .where(eq(userVerification.userId, userId));
           }
 
-          await ensureDefaultPayoutCurrency(user, userId, now);
+          await ensureDefaultPayoutCurrency(user, userId, nowSec);
         }
         
         if (status === "APPROVED") {
-          const selectedAt = (user as any).selectedAt ?? now;
-          const tierPromotedAt = (user as any).tierPromotedAt ?? now;
+          const selectedAt = toUnixSec((user as any).selectedAt) ?? nowSec;
+          const tierPromotedAt = toUnixSec((user as any).tierPromotedAt) ?? nowSec;
           await db.update(users)
             .set({
               userTier: "SELECTED",
@@ -2564,12 +2657,12 @@ export function registerAdminRoutes(app: Express) {
             await db.update(userVerification)
               .set({ 
                 contenderTier: "SELECTED_REAL_CAPITAL",
-                updatedAt: now,
+                updatedAt: nowSec,
               })
               .where(eq(userVerification.userId, userId));
           }
 
-          await ensureDefaultPayoutCurrency(user, userId, now);
+          await ensureDefaultPayoutCurrency(user, userId, nowSec);
         }
       
       await storage.logAdminAction({
@@ -2623,10 +2716,10 @@ export function registerAdminRoutes(app: Express) {
         return res.status(400).json({ message: `User already has KYC status: ${existing.status}` });
       }
       
-        const now = new Date();
+        const nowSec = Math.floor(Date.now() / 1000);
 
-        const selectedAt = (user as any).selectedAt ?? now;
-        const tierPromotedAt = (user as any).tierPromotedAt ?? now;
+        const selectedAt = toUnixSec((user as any).selectedAt) ?? nowSec;
+        const tierPromotedAt = toUnixSec((user as any).tierPromotedAt) ?? nowSec;
 
         if ((user as any).userTier !== "SELECTED" || !(user as any).selectedAt) {
           await db.update(users)
@@ -2646,28 +2739,28 @@ export function registerAdminRoutes(app: Express) {
           await db.update(userVerification)
             .set({
               contenderTier: "SELECTED_REAL_CAPITAL",
-              updatedAt: now,
+              updatedAt: nowSec,
             })
             .where(eq(userVerification.userId, userId));
         }
 
-        await ensureDefaultPayoutCurrency(user, userId, now);
+        await ensureDefaultPayoutCurrency(user, userId, nowSec);
         
         if (existing) {
           await db.update(userKycProfiles)
             .set({
             status: "INVITED",
-            invitedAt: now,
+            invitedAt: nowSec,
             invitedByAdminId: adminId,
             inviteNote: note || null,
-            updatedAt: now,
+            updatedAt: nowSec,
           })
           .where(eq(userKycProfiles.userId, userId));
       } else {
         await db.insert(userKycProfiles).values({
           userId,
           status: "INVITED",
-          invitedAt: now,
+          invitedAt: nowSec,
           invitedByAdminId: adminId,
           inviteNote: note || null,
         });
@@ -2723,22 +2816,22 @@ export function registerAdminRoutes(app: Express) {
         return res.status(400).json({ message: `Cannot review KYC with status: ${kycProfile.status}` });
       }
       
-      const now = new Date();
+      const nowSec = Math.floor(Date.now() / 1000);
       
       await db.update(userKycProfiles)
         .set({
           status: decision,
-          reviewedAt: now,
+          reviewedAt: nowSec,
           reviewedByAdminId: adminId,
           reviewerNote: note || null,
           rejectionReason: decision === "REJECTED" ? (rejectionReason || "Not specified") : null,
-          updatedAt: now,
+          updatedAt: nowSec,
         })
         .where(eq(userKycProfiles.userId, userId));
       
         if (decision === "APPROVED") {
-          const selectedAt = (user as any).selectedAt ?? now;
-          const tierPromotedAt = (user as any).tierPromotedAt ?? now;
+          const selectedAt = toUnixSec((user as any).selectedAt) ?? nowSec;
+          const tierPromotedAt = toUnixSec((user as any).tierPromotedAt) ?? nowSec;
           await db.update(users)
             .set({
               userTier: "SELECTED",
@@ -2756,12 +2849,12 @@ export function registerAdminRoutes(app: Express) {
             await db.update(userVerification)
               .set({ 
                 contenderTier: "SELECTED_REAL_CAPITAL",
-                updatedAt: now,
+                updatedAt: nowSec,
               })
               .where(eq(userVerification.userId, userId));
           }
 
-          await ensureDefaultPayoutCurrency(user, userId, now);
+          await ensureDefaultPayoutCurrency(user, userId, nowSec);
         }
       
       appendIdentityAudit({
@@ -2825,13 +2918,12 @@ export function registerAdminRoutes(app: Express) {
       const isPromotion = ["CANDIDATE", "PERFORMER", "SELECTED"].indexOf(tier) > 
                           ["CANDIDATE", "PERFORMER", "SELECTED"].indexOf(oldTier);
       
-        const now = new Date();
-        const nowSec = Math.floor(now.getTime() / 1000);
+        const nowSec = Math.floor(Date.now() / 1000);
         const updateUserData: any = { userTier: tier };
         if (tier === "SELECTED") {
-          updateUserData.selectedAt = (user as any).selectedAt ?? now;
+          updateUserData.selectedAt = toUnixSec((user as any).selectedAt) ?? nowSec;
           if (isPromotion) {
-            updateUserData.tierPromotedAt = now;
+            updateUserData.tierPromotedAt = nowSec;
             updateUserData.tierPromotedBy = adminId;
           }
         } else if ((user as any).selectedAt) {
@@ -2870,13 +2962,13 @@ export function registerAdminRoutes(app: Express) {
           await db.update(userVerification)
             .set({ 
               contenderTier: newContenderTier,
-              updatedAt: now,
+              updatedAt: nowSec,
             })
             .where(eq(userVerification.userId, userId));
         }
 
         if (tier === "SELECTED") {
-          await ensureDefaultPayoutCurrency(user, userId, now);
+          await ensureDefaultPayoutCurrency(user, userId, nowSec);
         }
       
       appendIdentityAudit({
@@ -3020,8 +3112,8 @@ export function registerAdminRoutes(app: Express) {
             email: user?.email || "",
             username: user?.username || "",
             status: kyc.status,
-            invitedAt: kyc.invitedAt ? (typeof kyc.invitedAt === 'object' ? Math.floor(kyc.invitedAt.getTime() / 1000) : kyc.invitedAt) : null,
-            submittedAt: kyc.submittedAt ? (typeof kyc.submittedAt === 'object' ? Math.floor(kyc.submittedAt.getTime() / 1000) : kyc.submittedAt) : null,
+            invitedAt: toUnixSec(kyc.invitedAt),
+            submittedAt: toUnixSec(kyc.submittedAt),
             documentType: kyc.documentType,
             invitedByAdminId: kyc.invitedByAdminId,
             inviteNote: kyc.inviteNote,
@@ -3336,10 +3428,13 @@ export function registerAdminRoutes(app: Express) {
       
       // Store manifest
       try {
-        await db.$client.prepare(`
+        await exec(
+          `
           INSERT INTO audit_export_manifest (export_id, exported_at_utc_ms, export_type, export_format, filters_json, record_count, sha256)
           VALUES (?, ?, ?, ?, ?, ?, ?)
-        `).run(exportId, Date.now(), "trade_audit", "csv", JSON.stringify(req.query), normalized.length, sha256);
+          `,
+          [exportId, Date.now(), "trade_audit", "csv", JSON.stringify(req.query), normalized.length, sha256]
+        );
       } catch (manifestErr) {
         console.error("Error storing export manifest:", manifestErr);
       }
@@ -3400,10 +3495,13 @@ export function registerAdminRoutes(app: Express) {
       
       // Store manifest
       try {
-        await db.$client.prepare(`
+        await exec(
+          `
           INSERT INTO audit_export_manifest (export_id, exported_at_utc_ms, export_type, export_format, filters_json, record_count, sha256)
           VALUES (?, ?, ?, ?, ?, ?, ?)
-        `).run(exportId, Date.now(), "order_intent_audit", "csv", JSON.stringify(req.query), normalized.length, sha256);
+          `,
+          [exportId, Date.now(), "order_intent_audit", "csv", JSON.stringify(req.query), normalized.length, sha256]
+        );
       } catch (manifestErr) {
         console.error("Error storing export manifest:", manifestErr);
       }
@@ -3454,10 +3552,13 @@ export function registerAdminRoutes(app: Express) {
       
       // Store manifest
       try {
-        await db.$client.prepare(`
+        await exec(
+          `
           INSERT INTO audit_export_manifest (export_id, exported_at_utc_ms, export_type, export_format, filters_json, record_count, sha256)
           VALUES (?, ?, ?, ?, ?, ?, ?)
-        `).run(exportId, Date.now(), "trade_audit", "jsonl", JSON.stringify(req.query), records.length, sha256);
+          `,
+          [exportId, Date.now(), "trade_audit", "jsonl", JSON.stringify(req.query), records.length, sha256]
+        );
       } catch (manifestErr) {
         console.error("Error storing export manifest:", manifestErr);
       }
@@ -3478,11 +3579,11 @@ export function registerAdminRoutes(app: Express) {
   app.get("/api/admin/export-manifests", requireAdmin, async (req: Request, res: Response) => {
     try {
       const limit = Math.min(Math.max(1, parseInt(req.query.limit as string) || 100), 500);
-      const manifests = await db.$client.prepare(`
+      const manifests = await queryAll(`
         SELECT * FROM audit_export_manifest
         ORDER BY exported_at_utc_ms DESC
         LIMIT ?
-      `).all(limit);
+      `, [limit]);
       res.json(manifests);
     } catch (error) {
       console.error("Error fetching export manifests:", error);
@@ -3526,17 +3627,23 @@ export function registerAdminRoutes(app: Express) {
       
       const whereClause = whereClauses.length > 0 ? `WHERE ${whereClauses.join(" AND ")}` : "";
       
-      const events = db.$client.prepare(`
+      const events = await queryAll(
+        `
         SELECT * FROM identity_audit ${whereClause} ORDER BY at DESC LIMIT ? OFFSET ?
-      `).all(...params, limit, offset);
-      
-      const countResult = db.$client.prepare(`
+        `,
+        [...params, limit, offset]
+      );
+
+      const countResult = await queryOne<{ total: number }>(
+        `
         SELECT COUNT(*) as total FROM identity_audit ${whereClause}
-      `).get(...params) as { total: number };
+        `,
+        params
+      );
       
       res.json({
         events,
-        total: countResult.total,
+        total: countResult?.total ?? 0,
         limit,
         offset,
       });
@@ -3548,8 +3655,12 @@ export function registerAdminRoutes(app: Express) {
 
   app.get("/api/admin/identity-audit/categories", requireAdmin, async (req: Request, res: Response) => {
     try {
-      const categories = db.$client.prepare(`SELECT DISTINCT category FROM identity_audit ORDER BY category`).all() as any[];
-      const types = db.$client.prepare(`SELECT DISTINCT type FROM identity_audit ORDER BY type`).all() as any[];
+      const categories = await queryAll<{ category: string }>(
+        `SELECT DISTINCT category FROM identity_audit ORDER BY category`
+      );
+      const types = await queryAll<{ type: string }>(
+        `SELECT DISTINCT type FROM identity_audit ORDER BY type`
+      );
       
       res.json({
         categories: categories.map((c) => c.category),
@@ -3571,17 +3682,23 @@ export function registerAdminRoutes(app: Express) {
       const limit = Math.min(Math.max(1, parseInt(req.query.limit as string) || 50), 500);
       const offset = Math.max(0, parseInt(req.query.offset as string) || 0);
       
-      const events = db.$client.prepare(`
+      const events = await queryAll(
+        `
         SELECT * FROM identity_audit WHERE user_id = ? ORDER BY at DESC LIMIT ? OFFSET ?
-      `).all(userId, limit, offset);
-      
-      const countResult = db.$client.prepare(`
+        `,
+        [userId, limit, offset]
+      );
+
+      const countResult = await queryOne<{ total: number }>(
+        `
         SELECT COUNT(*) as total FROM identity_audit WHERE user_id = ?
-      `).get(userId) as { total: number };
+        `,
+        [userId]
+      );
       
       res.json({
         events,
-        total: countResult.total,
+        total: countResult?.total ?? 0,
         limit,
         offset,
       });
@@ -3595,7 +3712,7 @@ export function registerAdminRoutes(app: Express) {
     try {
       const { sha256Hex } = await import("../services/crypto");
       
-      const events = db.$client.prepare(`SELECT * FROM identity_audit ORDER BY id ASC`).all() as any[];
+      const events = await queryAll<any>(`SELECT * FROM identity_audit ORDER BY id ASC`);
       
       let valid = true;
       let brokenAt: number | null = null;
@@ -3668,20 +3785,26 @@ export function registerAdminRoutes(app: Express) {
         params.push(tradeDate);
       }
       
-      const closes = db.$client.prepare(`
+      const closes = await queryAll(
+        `
         SELECT * FROM daily_fx_closes 
         WHERE ${whereClause}
         ORDER BY trade_date DESC, symbol_name ASC
         LIMIT ? OFFSET ?
-      `).all(...params, limit, offset);
-      
-      const countResult = db.$client.prepare(`
+        `,
+        [...params, limit, offset]
+      );
+
+      const countResult = await queryOne<{ total: number }>(
+        `
         SELECT COUNT(*) as total FROM daily_fx_closes WHERE ${whereClause}
-      `).get(...params) as { total: number };
+        `,
+        params
+      );
       
       res.json({
         rows: closes,
-        total: countResult.total,
+        total: countResult?.total ?? 0,
         limit,
         offset,
       });
@@ -3739,23 +3862,32 @@ export function registerAdminRoutes(app: Express) {
           }
           
           // Check if entry already exists
-          const existing = db.$client.prepare(`
+          const existing = await queryOne<{ id: number }>(
+            `
             SELECT id FROM daily_fx_closes WHERE symbol_id = ? AND trade_date = ?
-          `).get(sym.id, dateToUse);
+            `,
+            [sym.id, dateToUse]
+          );
           
           if (existing) {
             // Update existing entry
-            db.$client.prepare(`
+            await exec(
+              `
               UPDATE daily_fx_closes 
               SET close_price = ?, bid_price = ?, ask_price = ?, calculated_at = ?, created_by = ?
               WHERE symbol_id = ? AND trade_date = ?
-            `).run(quote.mid, quote.bid, quote.ask, Math.floor(Date.now() / 1000), adminUser, sym.id, dateToUse);
+              `,
+              [quote.mid, quote.bid, quote.ask, Math.floor(Date.now() / 1000), adminUser, sym.id, dateToUse]
+            );
           } else {
             // Insert new entry
-            db.$client.prepare(`
+            await exec(
+              `
               INSERT INTO daily_fx_closes (symbol_id, symbol_name, trade_date, close_price, bid_price, ask_price, source, rollover_tz, rollover_time, created_by)
               VALUES (?, ?, ?, ?, ?, ?, '1FORGE', ?, ?, ?)
-            `).run(sym.id, sym.name, dateToUse, quote.mid, quote.bid, quote.ask, rolloverTz, rolloverTime, adminUser);
+              `,
+              [sym.id, sym.name, dateToUse, quote.mid, quote.bid, quote.ask, rolloverTz, rolloverTime, adminUser]
+            );
           }
           inserted++;
         } catch (err: any) {
@@ -3785,12 +3917,12 @@ export function registerAdminRoutes(app: Express) {
         return res.status(400).json({ message: "Invalid ID" });
       }
       
-      const existing = db.$client.prepare(`SELECT * FROM daily_fx_closes WHERE id = ?`).get(id);
+      const existing = await queryOne(`SELECT * FROM daily_fx_closes WHERE id = ?`, [id]);
       if (!existing) {
         return res.status(404).json({ message: "Entry not found" });
       }
-      
-      db.$client.prepare(`DELETE FROM daily_fx_closes WHERE id = ?`).run(id);
+
+      await exec(`DELETE FROM daily_fx_closes WHERE id = ?`, [id]);
       
       res.json({ success: true, message: "Entry deleted" });
     } catch (error) {
@@ -3802,11 +3934,11 @@ export function registerAdminRoutes(app: Express) {
   // Get unique trade dates for filtering
   app.get("/api/admin/daily-fx-closes/dates", requireAdmin, async (req: Request, res: Response) => {
     try {
-      const dates = db.$client.prepare(`
+      const dates = await queryAll<{ trade_date: string }>(`
         SELECT DISTINCT trade_date FROM daily_fx_closes ORDER BY trade_date DESC LIMIT 100
-      `).all() as { trade_date: string }[];
+      `);
       
-      res.json({ dates: dates.map(d => d.trade_date) });
+      res.json({ dates: dates.map((d) => d.trade_date) });
     } catch (error) {
       console.error("Error fetching daily FX close dates:", error);
       res.status(500).json({ message: "Internal server error" });

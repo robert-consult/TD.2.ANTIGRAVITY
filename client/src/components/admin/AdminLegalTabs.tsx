@@ -154,8 +154,8 @@ export function AdminLegalAcceptances() {
 
 export function AdminLegalCoverage() {
   const { toast } = useToast();
-  const { data: stats } = useQuery<any>({ queryKey: ['/api/admin/legal-docs/coverage/stats'] });
-  const { data: enforcement } = useQuery<{ enforced: boolean }>({ queryKey: ['/api/admin/legal-docs/system-config/enforcement'] });
+  const { data: stats } = useQuery<any>({ queryKey: ['/api/admin/legal-docs-v2/coverage/stats'] });
+  const { data: enforcement } = useQuery<{ enforced: boolean }>({ queryKey: ['/api/admin/legal-docs-v2/system-config/enforcement'] });
   const { data: restrictions } = useQuery<any>({ queryKey: ['/api/admin/system-config/jurisdiction-restrictions'] });
 
   const [restrictedCountriesCsv, setRestrictedCountriesCsv] = useState("");
@@ -169,8 +169,8 @@ export function AdminLegalCoverage() {
   }, [restrictions]);
   
   const toggleMutation = useMutation({
-    mutationFn: (enforce: boolean) => apiRequest('PATCH', '/api/admin/legal-docs/system-config/enforcement', { enforce }),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['/api/admin/legal-docs/system-config/enforcement'] }); toast({ title: 'Enforcement updated' }); },
+    mutationFn: (enforce: boolean) => apiRequest('PATCH', '/api/admin/legal-docs-v2/system-config/enforcement', { enforce }),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['/api/admin/legal-docs-v2/system-config/enforcement'] }); toast({ title: 'Enforcement updated' }); },
   });
 
   const saveRestrictionsMutation = useMutation({
@@ -342,8 +342,8 @@ export function AdminLegalPanel() {
       <TabsContent value="documents-v2" className="mt-4"><AdminLegalDocsPage /></TabsContent>
       <TabsContent value="acceptances-v2" className="mt-4"><AdminLegalAcceptancesPage /></TabsContent>
       <TabsContent value="coverage" className="mt-4"><AdminLegalCoverage /></TabsContent>
-      <TabsContent value="documents-legacy" className="mt-4"><AdminLegalDocs /></TabsContent>
-      <TabsContent value="acceptances-legacy" className="mt-4"><AdminLegalAcceptances /></TabsContent>
+      <TabsContent value="documents-legacy" className="mt-4"><AdminLegalDocsPage /></TabsContent>
+      <TabsContent value="acceptances-legacy" className="mt-4"><AdminLegalAcceptancesPage /></TabsContent>
     </Tabs>
   );
 }

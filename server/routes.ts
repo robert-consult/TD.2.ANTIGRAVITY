@@ -3971,11 +3971,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Register additional routes
-  if (!isPostgres) {
-    registerAdminRoutes(app);
-  } else {
-    console.warn("[DB] Postgres mode: legacy admin routes are disabled pending migration.");
-  }
+  registerAdminRoutes(app);
   registerMarketRoutes(app);
   registerMetaRoutes(app);
   registerMeSessionsRoutes(app);

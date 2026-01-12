@@ -149,6 +149,20 @@ function toIsoOrNull(value: any): string | null {
   return new Date(ms).toISOString();
 }
 
+function toUnixSeconds(value: any): number | null {
+  if (value == null || value === "") return null;
+  const num = value instanceof Date ? value.getTime() : Number(value);
+  if (!Number.isFinite(num)) return null;
+  return num < 1e12 ? Math.floor(num) : Math.floor(num / 1000);
+}
+
+function toUnixMs(value: any, fallbackMs?: number): number {
+  if (value == null || value === "") return fallbackMs ?? Date.now();
+  const num = value instanceof Date ? value.getTime() : Number(value);
+  if (!Number.isFinite(num)) return fallbackMs ?? Date.now();
+  return num < 1e12 ? num * 1000 : num;
+}
+
 // Per-IP rate limiting for email resend (in-memory store with TTL)
 const ipEmailRateLimits: Map<string, { count: number; resetAt: number }> = new Map();
 const IP_EMAIL_RATE_WINDOW_MS = 60 * 60 * 1000; // 1 hour window
@@ -317,19 +331,10 @@ router.post("/email/send", async (req: Request, res: Response) => {
       verifyState?.emailResendDayKey === dayKey && verifyState?.emailResendDayStart != null
         ? Number(verifyState.emailResendDayStart)
         : nowSec;
-    const createdAtMs =
-      ctx.user.createdAt instanceof Date
-        ? ctx.user.createdAt.getTime()
-        : Number(ctx.user.createdAt) < 1e12
-          ? Number(ctx.user.createdAt) * 1000
-          : Number(ctx.user.createdAt);
-    const existingInitialDueAt = ctx.user.emailInitialDueAt;
+    const createdAtMs = toUnixMs(ctx.user.createdAt, Date.now());
+    const existingInitialDueAt = toUnixSeconds(ctx.user.emailInitialDueAt);
     const emailInitialDueAt =
-      existingInitialDueAt != null
-        ? existingInitialDueAt instanceof Date
-          ? Math.floor(existingInitialDueAt.getTime() / 1000)
-          : Number(existingInitialDueAt)
-        : Math.floor((createdAtMs + policyConfig.emailInitialGraceDays * 86400000) / 1000);
+      existingInitialDueAt ?? Math.floor((createdAtMs + policyConfig.emailInitialGraceDays * 86400000) / 1000);
 
     if (verifyState) {
       await db.update(userVerification)
@@ -386,9 +391,7 @@ router.post("/email/verify", async (req: Request, res: Response) => {
     }
 
     const nowSec = Math.floor(Date.now() / 1000);
-    const tokenExpiresAtSec = tokenRecord.expiresAt instanceof Date
-      ? Math.floor(tokenRecord.expiresAt.getTime() / 1000)
-      : Number(tokenRecord.expiresAt);
+    const tokenExpiresAtSec = toUnixSeconds(tokenRecord.expiresAt) ?? 0;
     if (tokenExpiresAtSec && tokenExpiresAtSec < nowSec) {
       return res.status(410).json({ message: "Token has expired. Please request a new verification email." });
     }
@@ -403,11 +406,7 @@ router.post("/email/verify", async (req: Request, res: Response) => {
     const user = await db.query.users.findFirst({
       where: eq(users.id, tokenRecord.userId),
     });
-    const createdAtMs = user?.createdAt instanceof Date
-      ? user.createdAt.getTime()
-      : Number(user?.createdAt) < 1e12
-        ? Number(user?.createdAt) * 1000
-        : Number(user?.createdAt ?? Date.now());
+    const createdAtMs = toUnixMs(user?.createdAt, Date.now());
     const emailInitialDueAt = Math.floor((createdAtMs + policyConfig.emailInitialGraceDays * 86400000) / 1000);
 
     let verification = await db.query.userVerification.findFirst({
@@ -415,13 +414,7 @@ router.post("/email/verify", async (req: Request, res: Response) => {
     });
 
     if (verification) {
-      const existingInitialDueAt = verification.emailInitialDueAt;
-      const normalizedInitialDueAt =
-        existingInitialDueAt instanceof Date
-          ? Math.floor(existingInitialDueAt.getTime() / 1000)
-          : typeof existingInitialDueAt === "number"
-            ? existingInitialDueAt
-            : null;
+      const normalizedInitialDueAt = toUnixSeconds(verification.emailInitialDueAt);
 
       await db.update(userVerification)
         .set({
@@ -835,9 +828,7 @@ router.post("/sms/confirm", async (req: Request, res: Response) => {
     if (otpRow.consumedAt) {
       return handleOtpFailure("otp.consumed");
     }
-    const otpExpiresAtSec = otpRow.expiresAt instanceof Date
-      ? Math.floor(otpRow.expiresAt.getTime() / 1000)
-      : Number(otpRow.expiresAt);
+    const otpExpiresAtSec = toUnixSeconds(otpRow.expiresAt) ?? 0;
     if (otpExpiresAtSec && otpExpiresAtSec < nowSec) {
       return handleOtpFailure("otp.expired");
     }

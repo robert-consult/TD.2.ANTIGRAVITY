@@ -7,7 +7,8 @@ import { legalDocuments, legalDocPointers, legalDocChangeAudit } from "../../sha
 import { createDocumentVersion, getActiveDoc, listVersions, upsertPointer } from "../legal/legalDocsRepo";
 import { appendLegalDocChangeAudit, verifyLegalDocChangeAuditChain } from "../legal/legalDocChangeAuditService";
 import { assembleDoc1Terms } from "../legal/termsEngineDb";
-import { REGION_RULES_IN_ORDER } from "../legal/regionRules";
+import { getCoverageStats, isEnforcementEnabled, setEnforcementEnabled } from "../legal/coverageGate";
+import { REGION_RULES_IN_ORDER, REGIONS } from "../legal/regionRules";
 
 export const adminLegalDocsRouter = Router();
 adminLegalDocsRouter.use(requireAdmin);
@@ -251,6 +252,29 @@ adminLegalDocsRouter.post("/preview-assemble", async (req, res) => {
   } catch (e: any) {
     return res.status(400).json({ ok: false, error: e?.message || "Preview failed." });
   }
+});
+
+// Coverage stats for admin dashboard (Postgres)
+adminLegalDocsRouter.get("/coverage/stats", async (_req, res) => {
+  try {
+    const stats = await getCoverageStats();
+    return res.json({ ...stats, regions: Object.values(REGIONS) });
+  } catch (e: any) {
+    return res.status(400).json({ ok: false, error: e?.message || "Failed to get coverage stats." });
+  }
+});
+
+// Get enforcement toggle
+adminLegalDocsRouter.get("/system-config/enforcement", async (_req, res) => {
+  return res.json({ enforced: await isEnforcementEnabled() });
+});
+
+// Set enforcement toggle
+adminLegalDocsRouter.patch("/system-config/enforcement", async (req, res) => {
+  const { enforce } = req.body;
+  if (typeof enforce !== "boolean") return res.status(400).json({ error: "enforce must be boolean" });
+  await setEnforcementEnabled(enforce);
+  return res.json({ success: true, enforced: enforce });
 });
 
 // View change audit chain

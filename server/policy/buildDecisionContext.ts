@@ -77,7 +77,7 @@ async function tableExists(tableName: string): Promise<boolean> {
       "SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name = $1 LIMIT 1",
       [tableName]
     );
-    return res.rowCount > 0;
+    return (res.rowCount ?? 0) > 0;
   }
   const row = await rawGet<{ name: string }>(
     `SELECT name FROM sqlite_master WHERE type='table' AND name='${tableName}' LIMIT 1`
@@ -225,7 +225,7 @@ async function computeReturnLast90d(params: {
 
   const since = nowMs - window * 86400000;
   const q = `
-    SELECT COALESCE(SUM(${tradesPnlCol}), 0) AS pnl
+    SELECT COALESCE(SUM((${tradesPnlCol})::numeric), 0) AS pnl
     FROM ${tradesTable}
     WHERE ${tradesUserIdCol} = ${userId}
       AND ${tradesClosedAtExpr} IS NOT NULL

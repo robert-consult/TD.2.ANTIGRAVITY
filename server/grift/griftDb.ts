@@ -1,17 +1,17 @@
 import { dbClient } from "@db";
-import type { Pool, PoolClient, QueryResult } from "pg";
+import type { Pool, PoolClient, QueryResult, QueryResultRow } from "pg";
 
 export type GriftDbClient = Pool | PoolClient;
 
 export type GriftPreparedStatement = {
-  get<T = any>(...params: any[]): Promise<T | undefined>;
-  all<T = any>(...params: any[]): Promise<T[]>;
+  get<T extends QueryResultRow = QueryResultRow>(...params: any[]): Promise<T | undefined>;
+  all<T extends QueryResultRow = QueryResultRow>(...params: any[]): Promise<T[]>;
   run(...params: any[]): Promise<{ changes: number; lastInsertRowid: number | null }>;
 };
 
 export type GriftDb = {
   prepare(sql: string): GriftPreparedStatement;
-  query<T = any>(sql: string, params?: any[]): Promise<QueryResult<T>>;
+  query<T extends QueryResultRow = QueryResultRow>(sql: string, params?: any[]): Promise<QueryResult<T>>;
 };
 
 function convertQuestionMarks(sql: string): string {
@@ -89,11 +89,11 @@ export function griftDbFromClient(client: GriftDbClient): GriftDb {
     prepare(sql: string) {
       const text = convertQuestionMarks(sql);
       return {
-        async get<T = any>(...params: any[]): Promise<T | undefined> {
+        async get<T extends QueryResultRow = QueryResultRow>(...params: any[]): Promise<T | undefined> {
           const result = await client.query<T>(text, params);
           return result.rows[0];
         },
-        async all<T = any>(...params: any[]): Promise<T[]> {
+        async all<T extends QueryResultRow = QueryResultRow>(...params: any[]): Promise<T[]> {
           const result = await client.query<T>(text, params);
           return result.rows;
         },
@@ -107,7 +107,7 @@ export function griftDbFromClient(client: GriftDbClient): GriftDb {
         },
       };
     },
-    query<T = any>(sql: string, params?: any[]): Promise<QueryResult<T>> {
+    query<T extends QueryResultRow = QueryResultRow>(sql: string, params?: any[]): Promise<QueryResult<T>> {
       return client.query<T>(sql, params ?? []);
     },
   };

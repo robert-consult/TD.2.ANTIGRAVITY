@@ -1,0 +1,6 @@
+[ENV WARNING] RESEND_API_KEY not configured - email verification will fail
+[ENV WARNING] TWILIO_ACCOUNT_SID not configured - SMS verification will fail
+[ENV WARNING] TWILIO_AUTH_TOKEN not configured - SMS verification will fail
+[ENV WARNING] TWILIO_MESSAGING_SERVICE_SID or TWILIO_FROM_NUMBER not configured - SMS verification will fail
+[DB] Postgres mode: legacy legal routes remain disabled.
+[DB] Postgres mode: SQLite schema ensure/seed skipped. Apply Postgres migrations before use.

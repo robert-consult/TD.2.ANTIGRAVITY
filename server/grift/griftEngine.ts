@@ -273,8 +273,8 @@ async function upsertIdentityLink(
     VALUES (?, ?, ?, ?, ?, 1, ?)
     ON CONFLICT(user_id, link_type, link_value) DO UPDATE SET
       last_seen_at = excluded.last_seen_at,
-      occurrence_count = occurrence_count + 1,
-      metadata_json = COALESCE(excluded.metadata_json, metadata_json)
+      occurrence_count = grift_identity_links.occurrence_count + 1,
+      metadata_json = COALESCE(excluded.metadata_json, grift_identity_links.metadata_json)
   `).run(userId, linkType, linkValue, now, now, metadataJson);
 }
 

@@ -34,13 +34,14 @@ async function seed() {
     
     // Create demo user if it doesn't exist
     const demoEmail = "demo@tradingfx.com";
+    const demoPassword = "demo1234";
     const existingDemo = await storage.getUserByEmail(demoEmail);
     
     if (!existingDemo) {
       await storage.createUser({
         email: demoEmail,
         username: "demo",
-        password: "demo123",
+        password: demoPassword,
         isAdmin: false,
         balance: "1000000.00" // Set starting capital to $1,000,000
       });
@@ -51,6 +52,8 @@ async function seed() {
         await storage.updateUserBalance(existingDemo.id, "1000000.00");
         console.log("Updated demo user balance to $1,000,000");
       }
+      await storage.updateUser(existingDemo.id, { password: demoPassword });
+      console.log("Updated demo user password");
       console.log("Demo user already exists");
     }
     

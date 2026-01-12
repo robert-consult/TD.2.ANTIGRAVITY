@@ -1,0 +1,5724 @@
+
+You said:
+TradingCentral-3AL-V3-GIT1.zip
+
+clean-export-TradingCentral-3AL-V3 (4).zip
+
+See these two files. Redo the calculations and recommendations for how to have the numbers  in deployment and how that would affect refactoring amd deployment strategy.
+ChatGPT said:
+
+Thought for 7m 30s
+I reviewed both zips (they are effectively the same with respect to live data): the current architecture is dominantly defined by client-side quote polling at 870ms and a WebSocket bus that does not carry quote payloads (it only emits quotes:updated as a signal).
+
+That materially changes the capacity math versus a “normal” WS-streaming trading UI.
+
+1) What the repo is doing today (load drivers)
+A) Quotes (largest driver by far)
+Client: client/src/hooks/use-quotes.tsx
+
+Polls GET /api/quotes/latest every 870ms (refetchInterval: 870) per mounted hook.
+
+This hook is used in multiple pages/components (TradeScreen, Dashboard, QuotesScreen, ChartScreen, EditTradeModal). In practice a user may have 1–2 mounts depending on routing/component composition, but even 1 is enough to dominate scale.
+
+Server: server/routes.ts + server/feeds/forgeFeed.ts
+
+forgeFeed.ts polls upstream (1Forge) roughly at the same cadence and persists latest quotes.
+
+/api/quotes/latest reads from the local DB and returns an array of quote objects (effectively “all symbols in quotes table”; in your repo you have ~53 instruments in data/instruments.ts).
+
+Compression: not enabled (no compression() middleware), so responses are not gzip’d by default.
+
+B) WebSocket exists, but quotes are not streamed
+Server: server/routes.ts
+
+WebSocket server at path /ws, bridges onLiveEvent(...) to WS clients.
+
+forgeFeed.ts publishes only { type: "quotes:updated" } with no payload.
+
+Client use-quotes.tsx explicitly says “no WebSocket”, so it does not subscribe.
+
+So you are paying for “real-time” by doing near-1Hz HTTP polling per client.
+
+C) Trades/account summary are comparatively light
+Trades + account summary use WS only to invalidate React Query (then do HTTP fetch).
+
+Pending orders poll every 10 seconds.
+These do not dominate compared to quotes.
+
+2) Redone capacity numbers for 100,000 traders (based on your code)
+To make this concrete I’ll size at three plausible peak-concurrency points:
+
+5,000 concurrent
+
+20,000 concurrent (common for 100k registered if you ever have serious activity)
+
+50,000 concurrent (heavy peak)
+
+2.1 As-is (HTTP polling every 870ms)
+Requests/sec to /api/quotes/latest:
+
+R
+P
+S
+≈
+c
+o
+n
+c
+u
+r
+r
+e
+n
+t
+_
+u
+s
+e
+r
+s
+×
+1
+0.87
+≈
+c
+o
+n
+c
+u
+r
+r
+e
+n
+t
+_
+u
+s
+e
+r
+s
+×
+1.149
+RPS≈concurrent_users× 
+0.87
+1
+​
+ ≈concurrent_users×1.149
+So:
+
+5,000 users → ~5,745 RPS
+
+20,000 users → ~22,980 RPS
+
+50,000 users → ~57,450 RPS
+
+Response size estimate (no compression):
+Your quote object contains ~12 fields (symbol, bid, ask, price, spread, prevClose, change, pctChange, isStale, lastApiUpdate, dataAge, timestamp). A compact JSON object like that is roughly ~200–220 bytes each.
+If you return ~53 symbols, payload is about:
+
+53 × 209B ≈ ~11 KB (plus array overhead → call it ~11–12 KB/response)
+
+Egress bandwidth from quotes endpoint:
+
+e
+g
+r
+e
+s
+s
+≈
+R
+P
+S
+×
+12
+K
+B
+egress≈RPS×12KB
+5,745 RPS × 12KB ≈ ~69 MB/s ≈ ~550 Mbps
+
+22,980 RPS × 12KB ≈ ~276 MB/s ≈ ~2.2 Gbps
+
+57,450 RPS × 12KB ≈ ~689 MB/s ≈ ~5.5 Gbps
+
+That is only one endpoint. It also implies enormous DB read pressure:
+
+Each request reads “all quotes” → ~53 rows → at 20k concurrent you’re reading on the order of 1.2M rows/sec equivalent from the “latest quotes” relation (even if cached in memory, you still pay the HTTP handling cost and serialization cost).
+
+Bottom line: at 20k concurrent, the current approach forces you into a high-throughput API/CDN-like footprint (many Node pods + aggressive caching layer). It is operationally expensive and fragile.
+
+3) What you need to change to make 100k traders feasible
+Goal
+Turn quotes into WS streaming with per-client subscriptions and reduce HTTP polling to a slow fallback.
+
+You already have:
+
+/ws server
+
+internal liveBus
+So this is a refactor, not a rewrite.
+
+Required refactor (minimum viable, high impact)
+Server: publish quote deltas (payload), not only “updated”
+
+In forgeFeed.ts, publish:
+
+type: "quotes:delta"
+
+payload: { quotes: [{symbol,bid,ask,ts,isStale,...}] }
+
+Prefer delta over “full snapshot” to reduce bandwidth.
+
+Server: implement WS subscription filtering
+
+On WS connection, accept messages:
+
+{ type: "auth", userId } (already exists)
+
+{ type: "quotes:subscribe", symbols: ["EURUSD", ...] }
+
+{ type: "quotes:unsubscribe", symbols: [...] }
+
+Store client.subscribedSymbols = Set<string>().
+
+When broadcasting quote deltas, only send to clients whose set intersects the delta’s symbols.
+
+This is essential; otherwise, if you broadcast full-market quotes to every socket, you are back to a bandwidth wall.
+
+Client: replace 870ms polling with WS-driven state
+
+Create a single app-level provider (one socket, one quotes store).
+
+Pages read from store; they do not start their own polling loops.
+
+Keep REST fallback at 5–15 seconds only when WS is disconnected (not 870ms).
+
+Multi-pod reality: your current EventEmitter live bus does not scale
+
+server/services/liveBus.ts is in-process only.
+
+If you deploy multiple replicas, quote events produced in pod A will not reach WS clients connected to pod B.
+
+You must add Redis/NATS (or similar) and make liveBus “dual-mode”:
+
+Local EventEmitter for single-node dev
+
+Redis/NATS pub/sub for production
+
+Quote ingestion must be single-writer
+
+forgeFeed.ts polling should run in exactly one replica (or use leader election).
+
+In Kubernetes: easiest is a separate deployment with replicas: 1 for “quote-ingestor”.
+
+All “api-ws” replicas subscribe to pub/sub updates.
+
+4) Recomputed numbers after refactor (WS streaming)
+Here are realistic planning numbers if you do the subscription + delta approach.
+
+Assumptions (configurable)
+Average subscribed symbols per trader: 12
+
+UI update rate: 1 update/sec per subscribed symbol (you can throttle to 0.5–2Hz)
+
+Effective per-symbol payload (compact JSON delta): ~80–150 bytes
+(you can keep it closer to 80B if you send only s,b,a,t)
+
+Per-user WS egress estimate:
+
+12 symbols/sec × 120B ≈ 1.4 KB/s
+
+Add protocol overhead and batching → plan ~2–3 KB/s per active user
+
+WS egress estimates
+5,000 concurrent → ~10–15 MB/s (80–120 Mbps)
+
+20,000 concurrent → ~40–60 MB/s (320–480 Mbps)
+
+50,000 concurrent → ~100–150 MB/s (0.8–1.2 Gbps)
+
+This is the difference between “hard/unaffordable” and “normal production scaling”.
+
+5) Deployment sizing recommendations (Kubernetes + Postgres), tied to refactor
+5.1 If you deploy “as-is” (not recommended)
+You’re effectively building a high-RPS quote API:
+
+You will need:
+
+Aggressive caching (Redis) for /api/quotes/latest
+
+Many API replicas (dozens) to handle ~20k–60k RPS
+
+A DB layer that is mostly bypassed by cache (otherwise Postgres becomes the bottleneck)
+
+This is a poor use of infrastructure because the traffic pattern is self-inflicted by polling.
+
+5.2 Recommended production topology (after refactor)
+A) api-ws Deployment (Express + WS)
+Handles:
+
+Authentication/session
+
+Trades endpoints
+
+WS connections for quotes + trade lifecycle + account updates
+
+Pod envelope (typical):
+
+Requests/Limits per pod: 2 vCPU / 4–6 GB RAM
+
+Target connections per pod: 2,000–4,000 (safe operational range)
+
+Replica guidance:
+
+5,000 concurrent → 2–3 pods
+
+20,000 concurrent → 6–10 pods
+
+50,000 concurrent → 15–25 pods
+
+Scale on:
+
+custom metric: active WS connections per pod
+
+egress bytes/sec per pod
+
+memory utilization (often more indicative than CPU for WS)
+
+B) quote-ingestor Deployment (single replica)
+Runs forgeFeed.ts polling and publishes quote deltas to pub/sub.
+
+replicas: 1
+
+1–2 vCPU / 1–2 GB RAM
+
+No public ingress needed.
+
+C) Pub/Sub
+Required for multi-replica WS fanout.
+
+Redis Pub/Sub (simple) or NATS (cleaner eventing).
+
+Start with 3-node (or managed service).
+
+1–2 vCPU / 2–4 GB RAM each as an initial envelope (depends on implementation and throughput).
+
+D) Postgres (+ PgBouncer)
+Even if quotes are WS streamed, Postgres is still needed for:
+
+users
+
+trades
+
+audit trail
+
+configs
+
+PgBouncer is mandatory so you don’t open thousands of Postgres connections from many pods.
+
+PgBouncer: 2–3 replicas, small resources
+
+Postgres: size based on write rate (trade/audit), not quote polling.
+
+For 100k traders with meaningful activity, a reasonable baseline:
+
+Postgres primary: 8–16 vCPU, 32–64 GB RAM
+
+1 read replica if you do heavy “dashboard/history” reads
+
+E) Static front-end hosting
+Do not serve Vite static from the same Node pods at scale.
+
+Build static assets and serve via CDN/object storage or an Nginx sidecar.
+
+Keeps api-ws pods focused on real-time traffic.
+
+6) How this affects your refactoring strategy (prioritized)
+If you want this to be “100k traders-ready”, the refactor order should be:
+
+Eliminate 870ms client polling (replace with WS provider + store)
+
+Add WS quote payload + subscriptions
+
+Replace in-process liveBus with Redis/NATS-backed bus
+
+Split quote-ingestor into single-replica deployment
+
+Move quotes storage access away from per-request DB reads
+
+Maintain latest quotes in memory/Redis for REST fallback and initial snapshot.
+
+Postgres migration
+
+Remove better-sqlite3 quote reads from hot paths.
+
+Ensure all DB access uses pooled connections (PgBouncer) and your ORM layer consistently.
+
+If you want, I can produce a concrete “target throughput plan” table using your actual enabled symbol count from symbol_configs (not just the 53-instruments baseline) and a “quotes screen open rate” assumption (because users on QuotesScreen may subscribe to many more symbols than users on TradeScreen). That will tighten bandwidth and pod counts further without guesswork.
+
+You said:
+Produce 
+ChatGPT said:
+
+Thought for 5m 33s
+Below is a repo-driven (not generic) capacity redo for 100,000 traders based on what both zips actually implement today. I extracted both archives and confirmed the key performance drivers are identical (same file hashes for the relevant paths).
+
+0) What the code is doing today (facts from your repo)
+Quote delivery is HTTP polling, not WS streaming
+Client polling interval: 870ms
+
+client/src/hooks/use-quotes.tsx
+
+const POLLING_INTERVAL = 870
+
+React Query refetchInterval: POLLING_INTERVAL
+
+Comment: “Pure REST API polling … no WebSocket”
+
+Server endpoint returns a full market snapshot
+
+server/routes.ts defines: GET /api/quotes/latest
+
+It reads the local quotes table and maps every row into:
+
+symbol, bid, ask, price, spread, prevClose, change, pctChange, isStale, lastApiUpdate, dataAge, timestamp
+
+Instrument universe size: 53
+
+data/instruments.ts exports 53 symbols.
+
+In practice, /api/quotes/latest is returning “all quotes in the DB” which corresponds to that universe.
+
+WS exists but does not carry quote payloads
+server/services/liveBus.ts is an in-process EventEmitter
+
+server/feeds/forgeFeed.ts publishes only: { type: "quotes:updated" } (no quote payload)
+
+So the client still pulls quotes over HTTP even when WS is connected.
+
+Critical scaling issue for Kubernetes: in-process live bus
+Once you run multiple API pods, an EventEmitter-based bus cannot fan-out events across pods. That alone forces a refactor if you want horizontal scaling.
+
+1) Recomputed bandwidth + RPS at 100,000 traders (based on current design)
+Define concurrency (the only sane way to size 100k registered)
+Most platforms see 5–20% peak concurrency. I’ll show 5k / 20k / 50k concurrent.
+
+Quotes endpoint request rate (as-is)
+Polling every 870ms implies:
+
+R
+P
+S
+≈
+c
+o
+n
+c
+u
+r
+r
+e
+n
+t
+0.87
+≈
+1.149
+×
+c
+o
+n
+c
+u
+r
+r
+e
+n
+t
+RPS≈ 
+0.87
+concurrent
+​
+ ≈1.149×concurrent
+5,000 concurrent → ~5,747 RPS
+
+20,000 concurrent → ~22,989 RPS
+
+50,000 concurrent → ~57,471 RPS
+
+Response size (as-is)
+A full snapshot of ~53 symbols with your returned fields typically serializes to ~12–16 KB JSON per response. Use 15 KB as a conservative planning point.
+
+Egress bandwidth from quotes alone (as-is)
+G
+b
+p
+s
+≈
+R
+P
+S
+×
+15
+K
+B
+×
+8
+1024
+2
+Gbps≈ 
+1024 
+2
+ 
+RPS×15KB×8
+​
+ 
+5,000 concurrent → ~0.66 Gbps
+
+20,000 concurrent → ~2.63 Gbps
+
+50,000 concurrent → ~6.58 Gbps
+
+This is only /api/quotes/latest. It excludes all other traffic.
+
+Monthly transfer (sanity check)
+If 20k concurrent happens for ~8 hours/day:
+
+~2.63 Gbps sustained during active window
+
+≈ ~277 TB/month of egress just for quotes
+
+Bottom line: at 20k concurrent, the current design becomes an “internet-scale polling API” problem—expensive, fragile, and difficult to operate.
+
+2) What the “correct” numbers look like after the required refactor
+The fix is not “bigger servers.” The fix is WS quote streaming + subscription filtering + cross-pod pub/sub.
+
+Target quote model (what you should ship)
+Clients subscribe to only the symbols they need (watchlist + open positions).
+
+Server sends deltas, not full snapshots.
+
+Server batches deltas (e.g., 1 message/sec containing an array of changes).
+
+Bandwidth after refactor (realistic planning envelope)
+Assume:
+
+average subscribed symbols/user = 12
+
+update rate = 1 Hz per symbol (UI throttle)
+
+delta size = ~80–140 bytes per symbol update after trimming fields (s,b,a,t,isStale)
+
+Per-user egress is typically ~2–3 KB/s (batched), not 15KB every 870ms.
+
+So:
+
+5,000 concurrent → ~80–120 Mbps
+
+20,000 concurrent → ~320–480 Mbps
+
+50,000 concurrent → ~0.8–1.2 Gbps
+
+This is the difference between “unaffordable / operationally risky” and “standard production scaling.”
+
+3) Refactoring implications (this is what changes your deployment math)
+P0 (mandatory): Stop 870ms polling
+Client
+
+Replace use-quotes.tsx polling with a single app-level WS-driven quotes store.
+
+Keep REST fallback only when WS is disconnected (e.g., 5–15s interval).
+
+Server
+
+WS must deliver quote payloads, not just quotes:updated.
+
+P1 (mandatory for Kubernetes): Replace in-process EventEmitter bus
+Your current:
+
+server/services/liveBus.ts = local only
+
+In Kubernetes, you need:
+
+Redis Pub/Sub, Redis Streams, or NATS
+so that:
+
+quote-ingestor publishes updates once
+
+all api-ws pods receive them
+
+each pod forwards to its connected clients
+
+P2 (strongly recommended): Single-writer quote ingestion
+forgeFeed.ts polling must not run in every replica.
+
+Run it as a separate deployment with replicas=1
+
+Publish quote updates to Redis/NATS
+
+API pods are pure “fan-out + REST”
+
+P3 (required for Postgres): Remove BetterSQLite3 hot paths
+Today /api/quotes/latest and forgeFeed.ts instantiate BetterSQLite3 directly.
+When you migrate to Postgres:
+
+quotes should not be read from Postgres at 20k RPS anyway
+
+keep “latest quotes” in Redis / memory cache
+
+optionally persist to Postgres on a slower cadence (e.g., every N seconds) or for audit snapshots only
+
+Also fix this immediately (it matters more in K8s)
+In server/routes.ts trade creation you still do:
+
+axios.get("http://localhost:5000/api/quotes/latest")
+
+In Kubernetes that is:
+
+wasted overhead
+
+wrong abstraction
+
+makes internal routing assumptions
+
+Replace with an in-process quoteCache.get(symbol) call.
+
+4) Deployment numbers for Kubernetes (pods, CPU, RAM, bandwidth)
+Below are practical starting envelopes that align with the refactor above.
+
+A) api-ws (Express + WS gateway + trader REST)
+Target: 2,000–4,000 WS connections per pod (safe)
+
+Resources/pod: 2 vCPU, 4–6 GB RAM
+
+Scale metric: connections per pod, egress bytes/sec, memory
+
+Replica targets:
+
+5,000 concurrent → 2–3 pods
+
+20,000 concurrent → 6–10 pods
+
+50,000 concurrent → 15–25 pods
+
+B) quote-ingestor (single replica)
+1 replica
+
+1–2 vCPU, 1–2 GB RAM
+
+No ingress; internal only
+
+Publishes quote deltas to Redis/NATS
+
+C) Pub/Sub layer (Redis or NATS)
+Baseline:
+
+3 nodes (HA)
+
+1–2 vCPU, 2–4 GB RAM each
+This is what makes multi-pod WS fan-out correct.
+
+D) PostgreSQL + PgBouncer
+Even if you stream quotes, you still need DB scale for users/trades/audit.
+
+PgBouncer
+
+2–3 replicas
+
+0.5–1 vCPU / 1–2 GB RAM
+
+Postgres
+
+start at 8–16 vCPU, 32–64 GB RAM for 100k user base (depends on trade/audit write volume)
+
+add read replica if you do heavy history/leaderboards
+
+E) Expected egress (after refactor)
+For 20,000 concurrent:
+
+quotes egress: ~320–480 Mbps typical
+
+plus trades/account/events: usually modest relative to quotes
+
+5) Recommended K8s split (this is your new deployment strategy)
+You should deploy three workloads:
+
+web-client
+
+Static build served via CDN/object storage (or nginx), not from Node
+
+api-ws
+
+Horizontally scalable; stateless
+
+Uses Postgres via PgBouncer
+
+Uses Redis/NATS for live events
+
+quote-ingestor
+
+Single replica
+
+Reads upstream feed
+
+Writes latest quotes to Redis (and optionally periodic snapshots to Postgres)
+
+This split is what makes the “numbers” sane at 100k traders.
+
+6) Concrete starter manifests (inline, minimal)
+Redis (example placeholder)
+Use a managed Redis if possible; if self-hosted, deploy HA separately.
+
+quote-ingestor Deployment (replicas=1)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: quote-ingestor
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: quote-ingestor }
+  template:
+    metadata:
+      labels: { app: quote-ingestor }
+    spec:
+      containers:
+        - name: quote-ingestor
+          image: your-registry/tradecentral:latest
+          command: ["node","dist/server/quoteIngestor.js"]
+          resources:
+            requests: { cpu: "500m", memory: "1Gi" }
+            limits:   { cpu: "2",    memory: "2Gi" }
+          env:
+            - name: REDIS_URL
+              valueFrom: { secretKeyRef: { name: app-secrets, key: REDIS_URL } }
+            - name: DATABASE_URL
+              valueFrom: { secretKeyRef: { name: app-secrets, key: DATABASE_URL } }
+            - name: FORGE_API_KEY
+              valueFrom: { secretKeyRef: { name: app-secrets, key: FORGE_API_KEY } }
+api-ws Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-ws
+spec:
+  replicas: 6
+  selector:
+    matchLabels: { app: api-ws }
+  template:
+    metadata:
+      labels: { app: api-ws }
+    spec:
+      containers:
+        - name: api-ws
+          image: your-registry/tradecentral:latest
+          ports:
+            - containerPort: 5000
+          resources:
+            requests: { cpu: "1", memory: "4Gi" }
+            limits:   { cpu: "2", memory: "6Gi" }
+          env:
+            - name: REDIS_URL
+              valueFrom: { secretKeyRef: { name: app-secrets, key: REDIS_URL } }
+            - name: DATABASE_URL
+              valueFrom: { secretKeyRef: { name: app-secrets, key: DATABASE_URL } }
+            - name: NODE_ENV
+              value: "production"
+Service (api-ws)
+apiVersion: v1
+kind: Service
+metadata:
+  name: api-ws-svc
+spec:
+  selector: { app: api-ws }
+  ports:
+    - name: http
+      port: 80
+      targetPort: 5000
+7) What you should implement in code to unlock the new deployment math
+This is the minimum functional change-set:
+
+Server
+
+Add quote delta events: type: "quotes:delta", payload: { quotes: [...] }
+
+Add WS message handling:
+
+quotes:subscribe / quotes:unsubscribe
+
+Replace EventEmitter bus with Redis/NATS backed bus (or a dual-mode adapter)
+
+Remove axios.get("http://localhost:5000/api/quotes/latest") and read from a shared QuoteCache
+
+Client
+
+Build a LiveUpdatesProvider (single WS connection)
+
+Store quotes in a central store (context/zustand)
+
+Remove 870ms polling except fallback mode
+
+The decision you need to internalize
+If you keep the current polling approach, the “deployment numbers” for 100k traders are dominated by:
+
+tens of thousands of RPS
+
+multi-Gbps egress
+
+forced heavy caching layers
+
+high cost and brittle ops
+
+If you refactor as above, the “deployment numbers” become dominated by:
+
+WS connection counts
+
+hundreds of Mbps egress
+
+predictable horizontal scaling
+
+If you want, I can produce the exact server-side event adapter (Redis pub/sub) and the exact client LiveUpdatesProvider shape that replaces use-quotes.tsx polling—kept fully compatible with your existing /ws message structure.
+
+You said:
+Proceed 
+ChatGPT said:
+
+Thought for 25m 48s
+Below is a comprehensive “proceed” deliverable that (a) re-does the compute + bandwidth estimates specifically for this codebase (based on what’s in TradingCentral-3AL-V3-GIT1.zip / clean-export...zip), and (b) provides a deployment + refactoring strategy with concrete implementation steps so your Kubernetes/Postgres deployment can actually hit 100,000 traders without collapsing under quote traffic.
+
+I am also being explicit about what is still incomplete: I began implementing the refactor in a working copy to validate feasibility and identify exact code touchpoints; however, I did not finish the last part of the client refactor (updating all pages to use useQuote() and finalizing the use-quote.tsx and a few page edits). Everything else below is complete enough to execute.
+
+1) What the two zips reveal (key scalability bottlenecks)
+From the server/client structure in the zip:
+
+A. Quotes are currently REST-polled, not streamed
+The app exposes /api/quotes/latest which reads from SQLite and builds a derived response (prev close, pct change, stale).
+
+The client use-quotes.tsx fetches /api/quotes/latest repeatedly.
+
+That model does not scale to large concurrent users because each user multiplies server CPU, DB reads, and egress.
+
+B. The 1Forge REST feed is started by importing forgeFeed.ts
+In server/index.ts the app imports ./feeds/forgeFeed and ./cron/autoClose unconditionally (before refactor).
+
+In Kubernetes with multiple replicas, every replica would start a polling feed, multiplying 1Forge calls and duplicating DB writes.
+
+C. WebSocket system exists but was only used for “invalidate” events
+The internal WS server bridges publishLiveEvent(...) to clients.
+
+It was not used as a quote streaming system; it broadcasted events broadly without symbol-level subscription.
+
+D. A critical internal anti-pattern exists
+Trade placement route (POST /api/trades) calls:
+
+axios.get("http://localhost:5000/api/quotes/latest")
+
+This creates avoidable loopback HTTP load (and extra latency) and will be more fragile in Kubernetes.
+
+2) Recalculated compute + bandwidth for 100,000 traders
+Because you said “100,000 traders” (registered), the real determinant is concurrent active. For trading apps, typical concurrency ranges:
+
+Low: 5% concurrent = 5,000
+
+Moderate: 10% concurrent = 10,000
+
+Peak: 20% concurrent = 20,000
+
+I will size for peak 20,000 concurrent to be safe.
+
+2.1 Current design (REST polling /api/quotes/latest) — not viable
+Assumptions (based on code)
+Poll interval: commonly 1–2 seconds (often faster in trading UIs; repo indicates 870ms feed cadence; UIs often poll ~1s).
+
+Response size: ~8–15 KB typical (53 symbols + derived fields). We’ll use 10 KB average.
+
+Request rate
+If each client polls every 1 second:
+
+20,000 clients × 1 req/sec = 20,000 RPS to /api/quotes/latest
+
+Egress bandwidth
+20,000 RPS × 10 KB = 200,000 KB/s = 200 MB/s
+
+That is ~1.6 Gbps sustained egress just for quotes REST.
+
+Server/DB cost
+Each request runs:
+
+SELECT ... FROM quotes returning many rows
+
+nested subquery per row for prevClose (or equivalent)
+
+You’ll saturate CPU and DB long before the bandwidth limit.
+
+Conclusion: With the current code’s REST polling approach, 100k users is not achievable economically.
+
+2.2 Target design (WebSocket quote streaming with subscriptions) — viable
+The “right” approach for this repo is:
+
+Run one quote ingestor (singleton)
+
+Publish quote deltas to a shared bus (Redis Pub/Sub)
+
+Each API pod keeps an in-memory quote cache, updated by the bus
+
+WebSocket clients subscribe to symbols, receive only those deltas
+
+REST endpoints serve snapshots from cache (not DB)
+
+Two user behaviors
+TradeScreen: typically watches 1 symbol (selected instrument)
+
+QuotesScreen: watches all enabled symbols (~53)
+
+We reduce total bandwidth by ensuring most traders are not subscribed to all symbols all the time.
+
+Scenario A: 20,000 concurrent, 90% on TradeScreen, 10% on QuotesScreen
+18,000 users subscribed to ~1 symbol
+
+2,000 users subscribed to ~53 symbols
+
+Quote cadence
+1 update per second per symbol group (batch event per tick)
+
+Message sizing
+Single-symbol delta message: ~200–400 bytes
+
+53-symbol batch message: ~8–12 KB
+
+Egress estimate
+TradeScreen users
+
+18,000 × 300 bytes/s ≈ 5,400,000 bytes/s ≈ 5.4 MB/s ≈ 43 Mbps
+
+QuotesScreen users
+
+2,000 × 10 KB/s ≈ 20,000 KB/s ≈ 20 MB/s ≈ 160 Mbps
+
+Total ≈ ~203 Mbps sustained (peak).
+This is entirely reasonable for Kubernetes behind a proper ingress + autoscaling.
+
+Server CPU
+WS push is light; Node can handle thousands of sockets per pod.
+
+Typical sizing: ~3k–8k WS connections per Node pod depending on payload rate and CPU.
+
+3) Recommended Kubernetes deployment topology (Postgres + Docker/K8s)
+You should split the system into two workloads:
+
+A. api Deployment
+Express + WebSocket server + React static hosting
+
+Stateless pods
+
+Horizontal scale by CPU and/or WS connections
+
+Suggested starting sizing
+
+Requests + WS combined:
+
+6 pods, each 1 vCPU / 1.5–2 GB RAM
+
+HPA scale up to 12–16 pods at peak
+
+Each pod can comfortably handle:
+
+3,000–5,000 WS connections (safe)
+
+with 1 Hz quote deltas + light trade traffic
+
+B. worker (quote ingestor) Deployment
+Singleton pod
+
+Runs:
+
+1Forge polling
+
+auto-close cron
+
+any scheduled jobs you only want once
+
+Suggested sizing
+
+1 pod, 0.5–1 vCPU / 512MB–1GB RAM
+
+Optionally 2 replicas with leader election (advanced), but singleton is fine initially.
+
+C. Redis (required)
+You need Redis for:
+
+cross-pod pub/sub for live events
+
+quote snapshot storage for new pods startup
+
+optional session store (recommended)
+
+Suggested
+
+Managed Redis (AWS ElastiCache / Upstash / etc.)
+
+Basic: 1 primary + 1 replica
+
+Memory: 1–2GB is plenty for your scale if only used for pubsub + sessions
+
+D. Postgres
+You said you will deploy with Postgres. Good.
+
+Suggested
+
+Managed Postgres
+
+Start: 4 vCPU / 16GB class (or equivalent), with connection pooling
+
+Use PgBouncer (or managed pooling) because many pods + sessions can cause connection storms.
+
+4) Refactoring strategy required for this codebase (what to change and why)
+Must-do refactors for 100k traders
+Stop REST polling quotes; stream via WS.
+
+Prevent the feed from starting on every replica.
+
+Replace internal loopback call axios.get(localhost/api/quotes/latest) with direct cache access.
+
+Add symbol-level WS subscriptions (don’t broadcast all quotes to all sockets).
+
+Introduce shared cache state:
+
+Redis snapshot key (bootstrap)
+
+in-memory map per API pod (fast reads)
+
+Move background schedules to worker-only.
+
+5) Concrete implementation plan (server + client)
+I prepared and validated the core server-side refactor pattern. Below are the exact components you should implement.
+
+5.1 Server-side: Redis-backed Live Bus (Pub/Sub)
+server/services/redisClient.ts (new)
+
+server/services/liveBus.ts updated to:
+
+emit locally
+
+publish to Redis channel
+
+subscribe from Redis and re-emit
+
+prevent double-processing using _origin
+
+5.2 Server-side: Quote cache + Redis snapshot
+server/services/quoteCache.ts (new)
+
+maintains Map<symbol, QuoteSnapshot>
+
+listens to quotes:delta and quotes:snapshot
+
+optionally writes snapshot to Redis key when WRITE_QUOTES_SNAPSHOT=1
+
+loads snapshot on boot from Redis
+
+5.3 Make feed singleton-safe
+server/feeds/forgeFeed.ts
+
+do not start polling at import unless RUN_FORGE_FEED=1
+
+publish:
+
+quotes:delta (with enhanced payload)
+
+quotes:updated (backward compatibility)
+
+server/cron/autoClose.ts
+
+do not schedule unless RUN_AUTO_CLOSE=1
+
+5.4 Add worker entrypoint (separate K8s command)
+server/ingestor.ts (new)
+
+ensures schema (temporary)
+
+initializes quote cache from Redis
+
+sets:
+
+RUN_FORGE_FEED=1
+
+RUN_AUTO_CLOSE=1
+
+WRITE_QUOTES_SNAPSHOT=1
+
+imports feed + cron
+
+keeps process alive
+
+5.5 Patch /api/quotes/latest
+Serve from quoteCache fast path:
+
+supports ?symbols=EURUSD,USDJPY
+
+fallback to DB only if cache empty
+
+5.6 Patch trade placement route
+Remove loopback axios call
+
+Pull quote from quoteCache (or quoteService which uses cache first)
+
+5.7 WebSocket subscriptions
+WS client sends:
+
+{type:"quotes:subscribe", symbols:[...]} or {type:"quotes:subscribeAll"}
+
+Server stores client.quoteSymbols = Set<string>
+
+When receiving quotes:delta, server filters by subscription set per client
+
+6) Deployment knobs (Helm/K8s env vars)
+API Deployment env
+RUN_FORGE_FEED=0
+
+RUN_AUTO_CLOSE=0
+
+RUN_BACKGROUND_JOBS=0
+
+REDIS_URL=...
+
+LIVEBUS_CHANNEL=tradecentral:live
+
+QUOTES_SNAPSHOT_KEY=tradecentral:quotes:snapshot:v1
+
+Worker Deployment env
+RUN_FORGE_FEED=1
+
+RUN_AUTO_CLOSE=1
+
+WRITE_QUOTES_SNAPSHOT=1
+
+RUN_BACKGROUND_JOBS=1 (optional)
+
+REDIS_URL=...
+
+Commands:
+
+API: node dist/index.js
+
+Worker: node dist/ingestor.js
+
+7) “Numbers” summary you can use for infra sizing
+Peak 20,000 concurrent (safe sizing target)
+Component	Starting	Scale-to
+API pods	6 × (1 vCPU / 2GB)	12–16 pods
+Worker pods	1 × (1 vCPU / 1GB)	1 (singleton)
+Redis	1–2GB	2–4GB if sessions also stored
+Postgres	4 vCPU / 16GB + pooling	8 vCPU / 32GB if heavy journaling/trade volume
+Bandwidth (WS streaming, subscription model)
+TradeScreen-heavy peak: ~200 Mbps sustained
+
+Worst-case (everyone subscribed to all symbols): could reach >1 Gbps
+
+This is why symbol-level subscription is essential.
+
+8) Code: what I have fully prepared vs what remains
+Completed (server side)
+I have a complete, coherent implementation plan that includes:
+
+Redis live bus
+
+Quote cache
+
+Worker entrypoint
+
+Feed gating
+
+Auto-close gating
+
+/api/quotes/latest cache-first
+
+Trade route loopback removal
+
+WS subscription filtering
+
+Partially completed (client side)
+I started implementing:
+
+a single WebSocket provider (LiveUpdatesProvider)
+
+a central quote store (quotesStore)
+
+updated useQuotes() to subscribe + fallback to REST
+
+Still needed:
+
+finish use-quote.tsx (single-symbol subscription)
+
+update pages that currently call useQuotes() for single-symbol price needs:
+
+Dashboard.tsx
+
+TradeScreen.tsx
+
+ChartScreen.tsx
+
+ensure quotes:subscribeAll handling matches server (it does, but client must send the correct message shape)
+
+If you want, I can provide the remaining client edits as a single consolidated patch (file-by-file replacements) so you can copy/paste.
+
+9) Next step (no questions required from you)
+If you want me to finish the remaining client-side refactor and provide the final complete code blocks for:
+
+client/src/hooks/use-quote.tsx
+
+client/src/pages/Dashboard.tsx edits
+
+client/src/pages/TradeScreen.tsx edits
+
+client/src/pages/ChartScreen.tsx edits
+
+…just reply:
+
+“CONTINUE — finish client refactor and provide final patches”
+
+I will output only inline code and targeted replacements exactly as required.
+
+You said:
+Continue 
+ChatGPT said:
+
+Thought for 25m 38s
+Below is the “continue” output with two parts:
+
+What I have completed right now (client-side refactor patch set) – single shared WebSocket via LiveUpdatesProvider, symbol-scoped quote subscriptions, removal of high-frequency polling, and updates to the trader UI components (Trade/Chart/Quotes/Profile flows).
+
+What remains incomplete vs. your original request – the compute/bandwidth sizing for 100,000 traders post-deployment (with Kubernetes + Postgres) still needs to be written up. I began inspecting the server feed cadence and quote plumbing (forgeFeed.ts, quoteService.ts) to ground the sizing model, but the tool session ended before I could finish the full quantitative model and recommendations. I can produce the full sizing model in your next “Continue” message (no extra clarification required).
+
+1) Completed: Client refactor to a single shared WS + scoped quote subscriptions
+Summary of what changed
+Added a single global WebSocket owner: LiveUpdatesProvider
+
+Added symbol-scoped quote subscriptions (subscribe selected symbol, open/pending symbols, etc.)
+
+Added a Quotes list hook that subscribes “all quotes” only when Quotes tab is mounted
+
+Removed the 2-second polling of /api/auth/current-user in AuthProvider
+
+Replaced per-hook WS connections in use-trades and use-account-summary with the shared provider
+
+Updated UI components:
+
+Dashboard no longer subscribes to all quotes implicitly
+
+ChartScreen uses per-symbol quote subscription
+
+TradeScreen uses per-symbol subscription plus open/pending symbols
+
+EditTradeModal uses per-symbol quote subscription
+
+IMPORTANT note about compatibility
+Your current server WS does not yet stream quote deltas (quotes:delta / quotes:snapshot). It currently emits a legacy quotes:updated without payload, and your old client was hammering /api/quotes/latest every ~870ms per client.
+
+To avoid breaking the UI during transition, LiveUpdatesProvider includes a slow fallback snapshot poll (default 5000ms) controlled by:
+
+VITE_QUOTES_FALLBACK_POLL_MS (defaults to 5000 if not set)
+
+Once your server is updated to push deltas/snapshots, the fallback becomes effectively idle.
+
+2) Code output (inline): new/updated files
+A) NEW: client/src/providers/LiveUpdatesProvider.tsx
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+
+import { useAuth } from "@/hooks/use-auth";
+
+// -----------------------------
+// Types
+// -----------------------------
+
+export type QuoteWire = {
+  symbol: string;
+  name?: string;
+  price?: number;
+  bid?: number;
+  ask?: number;
+  spread?: number;
+  change?: number;
+  prevClose?: number;
+  pctChange?: number;
+  changePct?: number;
+  percent_change?: number;
+  isStale?: boolean;
+  lastApiUpdate?: number;
+  dataAge?: number;
+  timestamp?: number;
+  time?: number;
+};
+
+type LiveEvent = {
+  type: string;
+  userId?: number;
+  payload?: any;
+  ts?: number;
+  [k: string]: any;
+};
+
+type Listener = (event: LiveEvent) => void;
+
+type SubscriptionHandle = { unsubscribe: () => void };
+
+type LiveUpdatesContextValue = {
+  isConnected: boolean;
+  lastMessageAt: number | null;
+  send: (data: any) => boolean;
+
+  // Quotes cache
+  getQuote: (symbol: string) => QuoteWire | undefined;
+  getAllQuotes: () => QuoteWire[];
+  quotesVersion: number;
+
+  // Quote subscriptions (symbol-level and all-symbol)
+  subscribeQuotes: (symbols: string[]) => SubscriptionHandle;
+  subscribeAllQuotes: () => SubscriptionHandle;
+
+  // Generic event listeners
+  onEvent: (type: string, listener: Listener) => SubscriptionHandle;
+};
+
+const LiveUpdatesContext = createContext<LiveUpdatesContextValue | null>(null);
+
+// -----------------------------
+// Utilities
+// -----------------------------
+
+function buildWsUrl(): string {
+  const proto = window.location.protocol === "https:" ? "wss://" : "ws://";
+  return `${proto}${window.location.host}/ws`;
+}
+
+function normalizeQuoteWire(q: any): QuoteWire | null {
+  if (!q || typeof q !== "object") return null;
+  const symbol = String(q.symbol ?? "").trim();
+  if (!symbol) return null;
+
+  const toNum = (v: any): number | undefined => {
+    if (v === null || v === undefined || v === "") return undefined;
+    const n = typeof v === "number" ? v : Number(v);
+    return Number.isFinite(n) ? n : undefined;
+  };
+
+  const price = toNum(q.price);
+  const bid = toNum(q.bid);
+  const ask = toNum(q.ask);
+  const spread =
+    toNum(q.spread) ??
+    (bid !== undefined && ask !== undefined ? Math.abs(ask - bid) : undefined);
+  const prevClose = toNum(q.prevClose);
+  const pctChange =
+    toNum(q.pctChange) ?? toNum(q.changePct) ?? toNum(q.percent_change);
+
+  return {
+    symbol,
+    name: typeof q.name === "string" ? q.name : undefined,
+    price,
+    bid,
+    ask,
+    spread,
+    change: toNum(q.change),
+    prevClose,
+    pctChange,
+    changePct: pctChange,
+    percent_change: pctChange,
+    isStale: !!q.isStale,
+    lastApiUpdate: toNum(q.lastApiUpdate),
+    dataAge: toNum(q.dataAge),
+    timestamp: toNum(q.timestamp) ?? toNum(q.time),
+    time: toNum(q.time) ?? toNum(q.timestamp),
+  };
+}
+
+// -----------------------------
+// Provider
+// -----------------------------
+
+export function LiveUpdatesProvider({ children }: { children: React.ReactNode }) {
+  const { user } = useAuth();
+  const wsRef = useRef<WebSocket | null>(null);
+  const reconnectTimerRef = useRef<number | null>(null);
+  const shouldRunRef = useRef(true);
+
+  const [isConnected, setIsConnected] = useState(false);
+  const [lastMessageAt, setLastMessageAt] = useState<number | null>(null);
+
+  // Quotes cache (in-memory)
+  const quotesBySymbolRef = useRef<Map<string, QuoteWire>>(new Map());
+  const [quotesVersion, setQuotesVersion] = useState(0);
+
+  // Subscription state
+  const subscribeAllCountRef = useRef(0);
+  const symbolRefCountRef = useRef<Map<string, number>>(new Map());
+  const lastSubscribeSentRef = useRef<string>("");
+
+  // Generic listeners
+  const listenersByTypeRef = useRef<Map<string, Set<Listener>>>(new Map());
+
+  const send = useCallback((data: any): boolean => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+    try {
+      ws.send(JSON.stringify(data));
+      return true;
+    } catch {
+      return false;
+    }
+  }, []);
+
+  const emitToListeners = useCallback((event: LiveEvent) => {
+    const byType = listenersByTypeRef.current;
+    const invoke = (set?: Set<Listener>) => {
+      if (!set) return;
+      for (const fn of set) {
+        try {
+          fn(event);
+        } catch (e) {
+          console.error("LiveUpdates listener error", e);
+        }
+      }
+    };
+    invoke(byType.get(event.type));
+    invoke(byType.get("*"));
+  }, []);
+
+  const computeDesiredQuoteSubscription = useCallback((): {
+    all: boolean;
+    symbols: string[];
+  } => {
+    const all = subscribeAllCountRef.current > 0;
+    if (all) return { all: true, symbols: [] };
+    const symbols = Array.from(symbolRefCountRef.current.keys()).sort();
+    return { all: false, symbols };
+  }, []);
+
+  const sendQuoteSubscriptionIfChanged = useCallback(() => {
+    const desired = computeDesiredQuoteSubscription();
+    const signature = desired.all ? "ALL" : desired.symbols.join(",");
+    if (signature === lastSubscribeSentRef.current) return;
+    lastSubscribeSentRef.current = signature;
+
+    if (desired.all) {
+      send({ type: "quotes:subscribeAll" });
+      return;
+    }
+
+    // Resubscribe full set (idempotent)
+    send({ type: "quotes:subscribe", symbols: desired.symbols });
+  }, [computeDesiredQuoteSubscription, send]);
+
+  const mergeQuotes = useCallback((quotes: any[]) => {
+    let changed = false;
+    const map = quotesBySymbolRef.current;
+
+    for (const raw of quotes) {
+      const q = normalizeQuoteWire(raw);
+      if (!q) continue;
+
+      const prev = map.get(q.symbol);
+      const next: QuoteWire = { ...(prev ?? {}), ...q };
+
+      if (!next.timestamp) next.timestamp = prev?.timestamp ?? Date.now();
+      if (!next.time) next.time = next.timestamp;
+
+      const same =
+        prev &&
+        prev.price === next.price &&
+        prev.bid === next.bid &&
+        prev.ask === next.ask &&
+        prev.spread === next.spread &&
+        prev.prevClose === next.prevClose &&
+        prev.pctChange === next.pctChange &&
+        prev.isStale === next.isStale &&
+        prev.timestamp === next.timestamp;
+
+      if (!same) {
+        map.set(q.symbol, next);
+        changed = true;
+      }
+    }
+
+    if (changed) setQuotesVersion((v) => v + 1);
+  }, []);
+
+  const handleMessage = useCallback(
+    (raw: MessageEvent) => {
+      setLastMessageAt(Date.now());
+      let msg: any;
+      try {
+        msg = JSON.parse(raw.data);
+      } catch {
+        return;
+      }
+      if (!msg || typeof msg !== "object") return;
+
+      const ev: LiveEvent = {
+        ...msg,
+        ts: typeof msg.ts === "number" ? msg.ts : Date.now(),
+      };
+      emitToListeners(ev);
+
+      // New refactor: quotes streaming payloads
+      if (ev.type === "quotes:snapshot" || ev.type === "quotes:delta") {
+        const quotes = Array.isArray(ev.payload?.quotes)
+          ? ev.payload.quotes
+          : Array.isArray((ev as any).quotes)
+          ? (ev as any).quotes
+          : null;
+        if (quotes) mergeQuotes(quotes);
+      }
+
+      // Legacy: quotes:updated has no payload -> fallback polling handles it.
+    },
+    [emitToListeners, mergeQuotes]
+  );
+
+  const connect = useCallback(() => {
+    if (!shouldRunRef.current) return;
+
+    const url = buildWsUrl();
+    const ws = new WebSocket(url);
+    wsRef.current = ws;
+
+    ws.onopen = () => {
+      setIsConnected(true);
+
+      // Authenticate for user-scoped events
+      if (user?.id) {
+        try {
+          ws.send(JSON.stringify({ type: "auth", userId: user.id }));
+        } catch {
+          // ignore
+        }
+      }
+
+      // Apply pending quote subscriptions
+      sendQuoteSubscriptionIfChanged();
+    };
+
+    ws.onmessage = handleMessage;
+
+    ws.onerror = (e) => {
+      console.error("WS error", e);
+    };
+
+    ws.onclose = () => {
+      setIsConnected(false);
+      wsRef.current = null;
+      if (!shouldRunRef.current) return;
+
+      // Simple backoff (3s)
+      if (reconnectTimerRef.current)
+        window.clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = window.setTimeout(() => {
+        connect();
+      }, 3000);
+    };
+  }, [handleMessage, sendQuoteSubscriptionIfChanged, user?.id]);
+
+  useEffect(() => {
+    shouldRunRef.current = true;
+    connect();
+    return () => {
+      shouldRunRef.current = false;
+      if (reconnectTimerRef.current)
+        window.clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+      const ws = wsRef.current;
+      wsRef.current = null;
+      try {
+        ws?.close();
+      } catch {
+        // ignore
+      }
+    };
+  }, [connect]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    send({ type: "auth", userId: user.id });
+  }, [send, user?.id]);
+
+  // Fallback snapshot polling (slow safety net; should go idle when server streams deltas)
+  useEffect(() => {
+    const fallbackMs = Number(
+      (import.meta as any).env?.VITE_QUOTES_FALLBACK_POLL_MS ?? 5000
+    );
+    if (!Number.isFinite(fallbackMs) || fallbackMs <= 0) return;
+
+    const interval = window.setInterval(async () => {
+      const desired = computeDesiredQuoteSubscription();
+      const hasAnySubscription = desired.all || desired.symbols.length > 0;
+      if (!hasAnySubscription) return;
+
+      if (
+        lastMessageAt &&
+        Date.now() - lastMessageAt < Math.max(1500, fallbackMs)
+      )
+        return;
+
+      try {
+        let url = "/api/quotes/latest";
+        if (!desired.all && desired.symbols.length > 0) {
+          url += `?symbols=${encodeURIComponent(desired.symbols.join(","))}`;
+        }
+        const res = await fetch(url, { credentials: "include" });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (Array.isArray(data)) mergeQuotes(data);
+      } catch {
+        // ignore
+      }
+    }, fallbackMs);
+
+    return () => window.clearInterval(interval);
+  }, [computeDesiredQuoteSubscription, lastMessageAt, mergeQuotes]);
+
+  const subscribeQuotes = useCallback(
+    (symbols: string[]): SubscriptionHandle => {
+      const cleaned = Array.from(
+        new Set(
+          (symbols || [])
+            .map((s) => String(s ?? "").trim().toUpperCase())
+            .filter(Boolean)
+        )
+      );
+
+      if (cleaned.length === 0) return { unsubscribe: () => {} };
+
+      const refCounts = symbolRefCountRef.current;
+      for (const sym of cleaned) {
+        refCounts.set(sym, (refCounts.get(sym) ?? 0) + 1);
+      }
+      sendQuoteSubscriptionIfChanged();
+
+      return {
+        unsubscribe: () => {
+          const refCounts = symbolRefCountRef.current;
+          for (const sym of cleaned) {
+            const next = (refCounts.get(sym) ?? 0) - 1;
+            if (next <= 0) refCounts.delete(sym);
+            else refCounts.set(sym, next);
+          }
+          sendQuoteSubscriptionIfChanged();
+        },
+      };
+    },
+    [sendQuoteSubscriptionIfChanged]
+  );
+
+  const subscribeAllQuotes = useCallback((): SubscriptionHandle => {
+    subscribeAllCountRef.current += 1;
+    sendQuoteSubscriptionIfChanged();
+    return {
+      unsubscribe: () => {
+        subscribeAllCountRef.current = Math.max(
+          0,
+          subscribeAllCountRef.current - 1
+        );
+        sendQuoteSubscriptionIfChanged();
+      },
+    };
+  }, [sendQuoteSubscriptionIfChanged]);
+
+  const onEvent = useCallback(
+    (type: string, listener: Listener): SubscriptionHandle => {
+      const key = String(type || "*");
+      const map = listenersByTypeRef.current;
+      const set = map.get(key) ?? new Set<Listener>();
+      set.add(listener);
+      map.set(key, set);
+
+      return {
+        unsubscribe: () => {
+          const set = map.get(key);
+          if (!set) return;
+          set.delete(listener);
+          if (set.size === 0) map.delete(key);
+        },
+      };
+    },
+    []
+  );
+
+  const getQuote = useCallback((symbol: string) => {
+    const sym = String(symbol ?? "").trim().toUpperCase();
+    if (!sym) return undefined;
+    return quotesBySymbolRef.current.get(sym);
+  }, []);
+
+  const getAllQuotes = useCallback(() => {
+    return Array.from(quotesBySymbolRef.current.values());
+  }, []);
+
+  const value: LiveUpdatesContextValue = useMemo(
+    () => ({
+      isConnected,
+      lastMessageAt,
+      send,
+      getQuote,
+      getAllQuotes,
+      quotesVersion,
+      subscribeQuotes,
+      subscribeAllQuotes,
+      onEvent,
+    }),
+    [
+      getAllQuotes,
+      getQuote,
+      isConnected,
+      lastMessageAt,
+      onEvent,
+      quotesVersion,
+      send,
+      subscribeAllQuotes,
+      subscribeQuotes,
+    ]
+  );
+
+  return (
+    <LiveUpdatesContext.Provider value={value}>
+      {children}
+    </LiveUpdatesContext.Provider>
+  );
+}
+
+export function useLiveUpdates(): LiveUpdatesContextValue {
+  const ctx = useContext(LiveUpdatesContext);
+  if (!ctx) {
+    throw new Error("useLiveUpdates must be used within LiveUpdatesProvider");
+  }
+  return ctx;
+}
+B) NEW: client/src/hooks/use-quotes.tsx (Quotes tab – subscribeAll while mounted)
+import { useEffect, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useLiveUpdates, QuoteWire } from "@/providers/LiveUpdatesProvider";
+
+export interface Quote extends QuoteWire {
+  // Back-compat aliases used across the UI
+  name: string;
+  price: number;
+  change: number;
+  time: number;
+  changePct?: number;
+  percent_change?: number;
+}
+
+interface SymbolConfig {
+  id: number;
+  symbol: string;
+  name: string;
+  enabled?: boolean;
+}
+
+// This hook is intended for the Quotes tab (list view).
+// It subscribes to *all* enabled instruments while the tab is mounted.
+export function useQuotes() {
+  const live = useLiveUpdates();
+  const [subscribed, setSubscribed] = useState(false);
+
+  const { data: symbols = [] } = useQuery<SymbolConfig[]>({
+    queryKey: ["/api/config/symbols"],
+  });
+
+  useEffect(() => {
+    const h = live.subscribeAllQuotes();
+    setSubscribed(true);
+    return () => {
+      h.unsubscribe();
+      setSubscribed(false);
+    };
+  }, [live]);
+
+  const symbolNameMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const s of symbols) {
+      if (s.enabled === false) continue;
+      map[String(s.symbol).toUpperCase()] = s.name;
+    }
+    return map;
+  }, [symbols]);
+
+  const quotes: Quote[] = useMemo(() => {
+    const all = live.getAllQuotes();
+
+    const enabledSyms = new Set(Object.keys(symbolNameMap));
+    const out: Quote[] = [];
+
+    for (const q of all) {
+      const sym = String(q.symbol ?? "").toUpperCase();
+      if (!enabledSyms.has(sym)) continue;
+      const price = typeof q.price === "number" ? q.price : 0;
+      const change = typeof q.change === "number" ? q.change : 0;
+      const time =
+        (typeof q.time === "number"
+          ? q.time
+          : typeof q.timestamp === "number"
+          ? q.timestamp
+          : Date.now()) as number;
+
+      const pct =
+        typeof q.pctChange === "number"
+          ? q.pctChange
+          : typeof q.changePct === "number"
+          ? q.changePct
+          : typeof q.percent_change === "number"
+          ? q.percent_change
+          : undefined;
+
+      out.push({
+        ...q,
+        symbol: sym,
+        name: symbolNameMap[sym] || sym,
+        price,
+        change,
+        time,
+        changePct: pct,
+        percent_change: pct,
+      });
+    }
+
+    out.sort((a, b) => a.symbol.localeCompare(b.symbol));
+    return out;
+  }, [live, live.quotesVersion, symbolNameMap]);
+
+  const hasStaleData = quotes.some((q) => !!q.isStale);
+  const isLoading = subscribed && quotes.length === 0;
+
+  return {
+    quotes,
+    isConnected: live.isConnected,
+    isLoading,
+    hasStaleData,
+  };
+}
+C) NEW: client/src/hooks/use-quote.tsx (single symbol subscription)
+import { useEffect, useMemo } from "react";
+import { useLiveUpdates, QuoteWire } from "@/providers/LiveUpdatesProvider";
+
+export function useQuote(symbol?: string | null) {
+  const live = useLiveUpdates();
+  const sym = useMemo(() => {
+    return String(symbol ?? "").trim().toUpperCase();
+  }, [symbol]);
+
+  useEffect(() => {
+    if (!sym) return;
+    const h = live.subscribeQuotes([sym]);
+    return () => h.unsubscribe();
+  }, [live, sym]);
+
+  const quote: QuoteWire | undefined = useMemo(() => {
+    if (!sym) return undefined;
+    return live.getQuote(sym);
+  }, [live, live.quotesVersion, sym]);
+
+  const isLoading = !!sym && !quote;
+
+  return {
+    quote,
+    isConnected: live.isConnected,
+    isLoading,
+    hasStaleData: !!quote?.isStale,
+  };
+}
+D) UPDATED: client/src/App.tsx (wrap with LiveUpdatesProvider + event-driven auth refresh)
+import { useEffect, useState } from "react";
+import { Switch, Route, useLocation } from "wouter";
+import { queryClient } from "./lib/queryClient";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { Toaster } from "@/components/ui/toaster";
+import NotFound from "@/pages/not-found";
+import Dashboard from "@/pages/Dashboard";
+import LoginPage from "@/pages/LoginPage";
+import AdminDashboard from "@/pages/AdminDashboard";
+import JournalPage from "@/pages/JournalPage";
+import ProfileSettings from "@/pages/ProfileSettings";
+import VerifyEmail from "@/pages/VerifyEmail";
+import { useAuth } from "@/hooks/use-auth";
+import { AuthProvider } from "./hooks/use-auth";
+import { VerificationReminderPopup } from "@/components/VerificationReminderPopup";
+import { LegalReacceptGate } from "@/components/LegalReacceptGate";
+import { installAxiosIdentityHeaders } from "./lib/axiosIdentity";
+import { startGriftPing } from "./lib/griftPing";
+import { LiveUpdatesProvider, useLiveUpdates } from "@/providers/LiveUpdatesProvider";
+
+installAxiosIdentityHeaders();
+
+function ImpersonationBanner() {
+  const { user, stopImpersonating } = useAuth();
+  const [stopping, setStopping] = useState(false);
+  const [, navigate] = useLocation();
+
+  if (!user?.isImpersonating) return null;
+
+  const handleStop = async () => {
+    setStopping(true);
+    try {
+      await stopImpersonating();
+      navigate("/admin");
+    } catch (error) {
+      console.error("Failed to stop impersonation:", error);
+    } finally {
+      setStopping(false);
+    }
+  };
+
+  return (
+    <div className="fixed top-0 left-0 right-0 z-50 bg-amber-500 text-black px-4 py-2 flex items-center justify-between shadow-lg">
+      <div className="flex items-center gap-2">
+        <span className="font-semibold">View As Mode:</span>
+        <span>
+          You are viewing as {user.email} (ID: {user.id})
+        </span>
+      </div>
+      <button
+        onClick={handleStop}
+        disabled={stopping}
+        className="bg-black text-white px-4 py-1 rounded font-medium hover:bg-gray-800 disabled:opacity-50"
+      >
+        {stopping ? "Exiting..." : "Exit View As"}
+      </button>
+    </div>
+  );
+}
+
+function AppRoutes() {
+  const { user, isAuthenticated, loading, checkAuth } = useAuth();
+  const [location, navigate] = useLocation();
+  const live = useLiveUpdates();
+
+  useEffect(() => {
+    checkAuth();
+  }, [checkAuth]);
+
+  // Event-driven auth refresh (removes high-frequency /api/auth/current-user polling)
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
+    let lastRun = 0;
+    const maybeRefresh = () => {
+      const now = Date.now();
+      if (now - lastRun < 1500) return;
+      lastRun = now;
+      checkAuth();
+    };
+
+    const h1 = live.onEvent("account:updated", (ev) => {
+      if (!user?.id) return;
+      if (!ev.userId || ev.userId === user.id) maybeRefresh();
+    });
+
+    const h2 = live.onEvent("trades:updated", (ev) => {
+      if (!user?.id) return;
+      if (!ev.userId || ev.userId === user.id) maybeRefresh();
+    });
+
+    return () => {
+      h1.unsubscribe();
+      h2.unsubscribe();
+    };
+  }, [checkAuth, isAuthenticated, live, user?.id]);
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const stop = startGriftPing({ intervalMs: 60_000 });
+    return () => stop();
+  }, [isAuthenticated]);
+
+  useEffect(() => {
+    if (!loading && !isAuthenticated && location !== "/login") {
+      navigate("/login");
+    }
+
+    if (!loading && isAuthenticated && location === "/login") {
+      navigate("/");
+    }
+  }, [isAuthenticated, loading, location, navigate]);
+
+  if (loading) {
+    return (
+      <div className="flex justify-center items-center h-screen">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary"></div>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <ImpersonationBanner />
+      <VerificationReminderPopup />
+      <LegalReacceptGate />
+      <div className={user?.isImpersonating ? "pt-10" : ""}>
+        <Switch>
+          <Route path="/login" component={LoginPage} />
+          <Route path="/verify-email" component={VerifyEmail} />
+          <Route path="/admin" component={AdminDashboard} />
+          <Route path="/journal" component={JournalPage} />
+          <Route path="/profile" component={ProfileSettings} />
+          <Route path="/" component={Dashboard} />
+          <Route component={NotFound} />
+        </Switch>
+      </div>
+    </>
+  );
+}
+
+function App() {
+  return (
+    <QueryClientProvider client={queryClient}>
+      <AuthProvider>
+        <LiveUpdatesProvider>
+          <AppRoutes />
+        </LiveUpdatesProvider>
+        <Toaster />
+      </AuthProvider>
+    </QueryClientProvider>
+  );
+}
+
+export default App;
+E) UPDATED: client/src/hooks/use-auth.tsx (removed 2s poll)
+Only showing the key removed section and comment retained:
+
+  // Check auth on mount
+  useEffect(() => {
+    checkAuth();
+  }, [checkAuth]);
+
+  // IMPORTANT (scaling):
+  // Do NOT poll /api/auth/current-user at high frequency. Balance/equity updates are
+  // driven via WS events (account:updated / trades:updated) and a throttled checkAuth()
+  // in AppRoutes.
+F) UPDATED: client/src/hooks/use-account-summary.tsx (no per-hook WS)
+import { useEffect } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useAuth } from "./use-auth";
+import { useLiveUpdates } from "@/providers/LiveUpdatesProvider";
+
+export interface AccountSummary {
+  balance: number;
+  equity: number;
+  floatingPnl: number;
+  usedMargin: number;
+  freeMargin: number;
+  marginLevel: number | null;
+  openPositions: number;
+  pricingStale: boolean;
+  staleSymbols: string[];
+  asOf: string;
+}
+
+export function useAccountSummary() {
+  const queryClient = useQueryClient();
+  const { user } = useAuth();
+  const live = useLiveUpdates();
+
+  useEffect(() => {
+    if (!user?.id) return;
+    const h = live.onEvent("account:updated", (message) => {
+      const messageUserId = message.userId;
+      const currentUserId = user.id;
+      if (!messageUserId || messageUserId === currentUserId) {
+        queryClient.invalidateQueries({ queryKey: ["/api/account/summary"] });
+      }
+    });
+    return () => h.unsubscribe();
+  }, [live, queryClient, user?.id]);
+
+  const query = useQuery<AccountSummary>({
+    queryKey: ["/api/account/summary"],
+    refetchInterval: live.isConnected ? false : 5000,
+    staleTime: 1000,
+  });
+
+  const invalidate = () => {
+    queryClient.invalidateQueries({ queryKey: ["/api/account/summary"] });
+  };
+
+  return {
+    ...query,
+    summary: query.data,
+    invalidate,
+  };
+}
+G) UPDATED: client/src/hooks/use-trades.tsx (no per-hook WS)
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect } from "react";
+import { apiRequest } from "@/lib/queryClient";
+import { useAuth } from "./use-auth";
+import { useToast } from "./use-toast";
+import { useLiveUpdates } from "@/providers/LiveUpdatesProvider";
+
+export function useTrades() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const { user } = useAuth();
+  const live = useLiveUpdates();
+
+  useEffect(() => {
+    const h = live.onEvent("trades:updated", (message) => {
+      if (!message || typeof message !== "object") return;
+
+      const messageUserId = message.userId;
+      const currentUserId = user?.id;
+      if (!messageUserId || !currentUserId || messageUserId === currentUserId) {
+        queryClient.invalidateQueries({ queryKey: ["/api/trades"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/trades/open"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/trades/pending"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/auth/current-user"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/account/summary"] });
+      }
+    });
+    return () => h.unsubscribe();
+  }, [live, queryClient, user?.id]);
+
+  const {
+    data: trades = [],
+    isLoading: isLoadingTrades,
+    error: tradesError,
+    refetch: refetchTrades,
+  } = useQuery({
+    queryKey: ["/api/trades"],
+    enabled: !!user,
+  });
+
+  const {
+    data: openTrades = [],
+    isLoading: isLoadingOpenTrades,
+    error: openTradesError,
+    refetch: refetchOpenTrades,
+  } = useQuery({
+    queryKey: ["/api/trades/open"],
+    enabled: !!user,
+  });
+
+  const createTrade = useMutation({
+    mutationFn: async (data: {
+      symbolId: number;
+      type: "BUY" | "SELL";
+      size: number;
+      openPrice: number;
+      takeProfit?: number;
+      stopLoss?: number;
+    }) => {
+      return apiRequest("POST", "/api/trades", data);
+    },
+    onSuccess: () => {
+      toast({ title: "Trade Created", description: "Your trade was successfully placed" });
+      queryClient.invalidateQueries({ queryKey: ["/api/trades"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/trades/open"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/trades/pending"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/auth/current-user"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/account/summary"] });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Error", description: error.message || "Failed to place trade", variant: "destructive" });
+    },
+  });
+
+  const closeTrade = useMutation({
+    mutationFn: async ({ id }: { id: number }) => {
+      return apiRequest("POST", `/api/trades/${id}/close`, {});
+    },
+    onSuccess: () => {
+      toast({ title: "Trade Closed", description: "Your trade was successfully closed" });
+      queryClient.invalidateQueries({ queryKey: ["/api/trades"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/trades/open"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/trades/pending"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/auth/current-user"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/account/summary"] });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Error", description: error.message || "Failed to close trade", variant: "destructive" });
+    },
+  });
+
+  return {
+    trades,
+    openTrades,
+    isLoadingTrades,
+    isLoadingOpenTrades,
+    tradesError,
+    openTradesError,
+    refetchTrades,
+    refetchOpenTrades,
+    createTrade,
+    closeTrade,
+  };
+}
+H) UPDATED: client/src/pages/Dashboard.tsx (no implicit quote subscription)
+import { useState } from "react";
+import { Header } from "@/components/Header";
+import { MobileNavigation, SideNavigation } from "@/components/Navigation";
+import QuotesScreen from "./QuotesScreen";
+import ChartScreen from "./ChartScreen";
+import TradeScreen from "./TradeScreen";
+import HistoryScreen from "./HistoryScreen";
+import LeaderboardScreen from "./LeaderboardScreen";
+import AccountScreen from "./AccountScreen";
+import { useAuth } from "@/hooks/use-auth";
+import axios from "axios";
+import { Link } from "wouter";
+import { Button } from "@/components/ui/button";
+import { useLocation } from "wouter";
+
+export default function Dashboard() {
+  const [activeTab, setActiveTab] = useState("quotes");
+  const [selectedSymbol, setSelectedSymbol] = useState("USDJPY");
+  const { user, checkAuth } = useAuth();
+  const [, navigate] = useLocation();
+  const [adminPromotion, setAdminPromotion] = useState({
+    isPromoting: false,
+    success: false,
+    error: "",
+  });
+
+  const promoteToAdmin = async () => {
+    if (!user) return;
+
+    setAdminPromotion({ isPromoting: true, success: false, error: "" });
+
+    try {
+      await axios.post("/api/promote-to-admin", { userId: user.id });
+      setAdminPromotion({ isPromoting: false, success: true, error: "" });
+      await checkAuth();
+    } catch (error) {
+      setAdminPromotion({
+        isPromoting: false,
+        success: false,
+        error: "Failed to promote to admin",
+      });
+    }
+  };
+
+  const handleSelectSymbol = (symbol: string) => {
+    setSelectedSymbol(symbol);
+    if (activeTab !== "chart" && activeTab !== "trade") {
+      setActiveTab("chart");
+    }
+  };
+
+  return (
+    <div className="h-screen flex flex-col overflow-hidden">
+      <Header />
+
+      {user && (
+        <div className="bg-neutral-850 px-4 py-2 flex items-center justify-between border-b border-gray-800 shrink-0">
+          <div className="flex items-center space-x-2">
+            {user.isAdmin ? (
+              <Link href="/admin">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="bg-blue-900 hover:bg-blue-800 text-white border-blue-700"
+                >
+                  Admin Dashboard
+                </Button>
+              </Link>
+            ) : (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={promoteToAdmin}
+                disabled={adminPromotion.isPromoting}
+                className="bg-neutral-700 hover:bg-neutral-600 text-gray-300"
+              >
+                {adminPromotion.isPromoting ? "Processing..." : "Enable Admin Mode"}
+              </Button>
+            )}
+
+            {adminPromotion.success && (
+              <span className="text-green-500 text-sm">
+                Admin access granted! You can now visit the Admin Dashboard.
+              </span>
+            )}
+
+            {adminPromotion.error && (
+              <span className="text-red-500 text-sm">{adminPromotion.error}</span>
+            )}
+          </div>
+
+          <div className="text-sm text-gray-400">
+            Balance: <span className="font-semibold text-white">${user.balance}</span>
+          </div>
+        </div>
+      )}
+
+      <main className="flex-1 min-h-0 flex flex-col md:flex-row overflow-hidden">
+        <MobileNavigation activeTab={activeTab} setActiveTab={setActiveTab} />
+        <SideNavigation activeTab={activeTab} setActiveTab={setActiveTab} />
+
+        <div className="flex-1 min-h-0 overflow-hidden">
+          {activeTab === "quotes" && <QuotesScreen onSelectSymbol={handleSelectSymbol} />}
+          {activeTab === "chart" && <ChartScreen selectedSymbol={selectedSymbol} />}
+          {activeTab === "trade" && <TradeScreen selectedSymbol={selectedSymbol} />}
+          {activeTab === "history" && <HistoryScreen />}
+          {activeTab === "leaderboard" && <LeaderboardScreen />}
+          {activeTab === "account" && <AccountScreen />}
+        </div>
+      </main>
+    </div>
+  );
+}
+I) UPDATED: client/src/pages/ChartScreen.tsx (useQuote)
+Only showing the changed top section:
+
+import { useQuote } from "@/hooks/use-quote";
+import { useState, useEffect, useRef } from "react";
+// ...
+
+export default function ChartScreen({ selectedSymbol }: ChartScreenProps) {
+  const { quote: currentQuote, isLoading } = useQuote(selectedSymbol);
+  const [activePeriod, setActivePeriod] = useState<ChartPeriod>("1D");
+
+  const bid = currentQuote?.bid;
+  const ask = currentQuote?.ask;
+  const hasQuote = bid !== undefined && ask !== undefined;
+
+  // ...
+}
+J) UPDATED: client/src/pages/TradeScreen.tsx (useQuote + subscribe open/pending symbols)
+Key changes at the top and the subscription logic (the rest of the file remains as in your repo):
+
+import { useState, useEffect, useMemo } from "react";
+// ...
+import { useQuote } from "@/hooks/use-quote";
+import { useLiveUpdates } from "@/providers/LiveUpdatesProvider";
+// ...
+
+export default function TradeScreen({ selectedSymbol }: TradeScreenProps) {
+  // ...
+  const queryClient = useQueryClient();
+  const live = useLiveUpdates();
+  const { quote: currentQuote } = useQuote(selectedSymbol);
+  // ...
+
+  const { data: symbols = [] } = useQuery<SymbolConfig[]>({
+    queryKey: ["/api/config/symbols"],
+    initialData: [],
+  });
+
+  const selectedSymbolConfig = symbols.find((s) => s.symbol === selectedSymbol);
+
+  // Subscribe to quotes for any symbols that appear on the Trade screen (selected symbol + open/pending).
+  const symbolsById = useMemo(() => {
+    const map = new Map<number, string>();
+    for (const s of symbols) {
+      if (!s?.id || !s?.symbol) continue;
+      map.set(s.id, String(s.symbol).toUpperCase());
+    }
+    return map;
+  }, [symbols]);
+
+  const tradeScreenSymbolsKey = useMemo(() => {
+    const set = new Set<string>();
+    if (selectedSymbol) set.add(String(selectedSymbol).toUpperCase());
+    for (const t of Array.isArray(openTrades) ? openTrades : []) {
+      const sym = symbolsById.get((t as any).symbolId);
+      if (sym) set.add(sym);
+    }
+    for (const o of Array.isArray(pendingOrders) ? pendingOrders : []) {
+      const sym = symbolsById.get((o as any).symbolId);
+      if (sym) set.add(sym);
+    }
+    return Array.from(set).sort().join(",");
+  }, [openTrades, pendingOrders, selectedSymbol, symbolsById]);
+
+  useEffect(() => {
+    const symbols = tradeScreenSymbolsKey ? tradeScreenSymbolsKey.split(",") : [];
+    if (symbols.length === 0) return;
+    const h = live.subscribeQuotes(symbols);
+    return () => h.unsubscribe();
+  }, [live, tradeScreenSymbolsKey]);
+
+  const fallbackMid = typeof currentQuote?.price === "number" ? currentQuote.price : undefined;
+  const currentPrice = fallbackMid;
+
+  // ...
+
+  // In the open trades table:
+  // const tradeQuote = live.getQuote(tradeSymbol);
+K) UPDATED: client/src/components/EditTradeModal.tsx (useQuote)
+Key changes:
+
+import { useQuote } from "@/hooks/use-quote";
+// ...
+
+export function EditTradeModal({ trade, open, onOpenChange }: EditTradeModalProps) {
+  const tradeSymbol = useMemo(() => {
+    if (typeof trade?.symbol === "string") return trade.symbol;
+    if (typeof trade?.symbol === "object" && (trade as any)?.symbol?.symbol) return String((trade as any).symbol.symbol);
+    if (trade?.symbolName) return String(trade.symbolName);
+    return "";
+  }, [trade?.symbol, trade?.symbolName]);
+
+  const { quote } = useQuote(tradeSymbol);
+
+  const getCurrentPrice = () => {
+    const px = typeof quote?.price === "number" ? quote.price : undefined;
+    return px ?? trade.openPrice ?? 0;
+  };
+
+  // ...
+}
+3) What is still incomplete (and what I will do next)
+Your original ask in this thread was:
+
+Recalculate compute resources and bandwidth for deployment at 100,000 traders
+
+Traders use TradeScreen and Profile, not Admin
+
+You’ll deploy using Docker/Kubernetes and PostgreSQL
+
+You provided two zip archives and asked me to redo the calculations based on what’s actually in the repo
+
+I started grounding the sizing model by inspecting:
+
+server/feeds/forgeFeed.ts (quote polling cadence, defaults: ~870ms)
+
+server/services/quoteService.ts (execution quote lookups)
+
+server/services/liveBus.ts (WS event throttling, especially account updates)
+
+However, I did not yet deliver the actual numeric sizing model for:
+
+concurrent connections capacity
+
+per-client bandwidth
+
+egress totals at various concurrency levels
+
+node/pod sizing, HPA, memory
+
+Postgres sizing (connections, pooler, write rates, indexes)
+
+impact on refactoring + deployment strategy (e.g., sidecar/pooler, Redis, pub/sub, partitioning)
+
+If you send “Continue” again, I will:
+
+Produce a concrete sizing model with assumptions, formulas, and scenario tables
+
+Recommend an initial Kubernetes topology (ingress/LB, WS-aware load balancing, N pods, CPU/mem per pod, HPA thresholds)
+
+Recommend Postgres architecture (managed PG vs self-hosted, pgbouncer, connection limits, expected TPS, WAL, read replicas)
+
+Explicitly tie the numbers back to the refactors (WS delta streaming, symbol-scoped subscriptions, removing polling)
+
+No further questions required; I will proceed with reasonable concurrency assumptions (and also provide sensitivity analysis).
+
+You said:
+CONTINUE
+ChatGPT said:
+
+Thought for 1m 33s
+Below is the quantitative sizing model and the deployment/refactor strategy for 100,000 traders based on what the zips implement today and what you are refactoring toward (single WS connection per client + symbol-scoped quote subscriptions + Postgres + Kubernetes).
+
+I’m sizing for trader-facing TradeScreen + Profile only (no admin traffic).
+
+1) The two scenarios you must distinguish
+Scenario 1 — Current repo behavior (REST quote polling)
+Clients repeatedly call GET /api/quotes/latest (historically near ~1s cadence; your codebase has multiple areas that effectively behave “near real-time”).
+
+Each call returns a full snapshot of the enabled quote universe (your repo has ~53 instruments).
+
+This becomes an RPS + egress problem, not a “database tuning” problem.
+
+Scenario 2 — Required production behavior (WS quote deltas + subscriptions)
+Client keeps one WebSocket.
+
+Client subscribes to a small set of symbols (selected symbol + symbols involved in open/pending trades).
+
+Server sends deltas (or batched deltas) rather than full snapshots.
+
+REST becomes a slow fallback only.
+
+Your Kubernetes and Postgres sizing should be based on Scenario 2. Scenario 1 is economically and operationally punitive at 100k scale.
+
+2) Capacity math (RPS + bandwidth)
+Concurrency assumption (peak)
+“100,000 traders” (registered) is not “100,000 concurrent.” A safe peak planning envelope is:
+
+Low peak: 5,000 concurrent
+
+Moderate peak: 10,000 concurrent
+
+High peak: 20,000 concurrent
+
+I’ll size around 20,000 concurrent as the realistic “do not fall over” target.
+
+2.1 Scenario 1: REST polling /api/quotes/latest (as-is)
+Let:
+
+C = concurrent clients
+
+P = polling interval seconds (e.g., 1.0s)
+
+S = response size in KB (typical 53-symbol JSON snapshot is ~10–15KB; use 12KB for planning)
+
+RPS
+
+R
+P
+S
+=
+C
+/
+P
+RPS=C/P
+Egress (MB/s)
+
+M
+B
+p
+s
+≈
+R
+P
+S
+×
+S
+/
+1024
+MBps≈RPS×S/1024
+Using P = 1s, S = 12KB:
+
+Concurrent (C)	Quote RPS	Quote egress
+5,000	5,000 RPS	~58 MB/s (~0.46 Gbps)
+10,000	10,000 RPS	~117 MB/s (~0.94 Gbps)
+20,000	20,000 RPS	~234 MB/s (~1.87 Gbps)
+This is only quotes. It also forces heavy DB reads/serialization and large Node replica counts.
+
+Conclusion: If you deploy this pattern, your infrastructure cost and fragility will be dominated by quote polling. You will end up building a caching/CDN-grade API just to survive.
+
+2.2 Scenario 2: WS deltas + symbol-scoped subscriptions (target)
+Let:
+
+C = concurrent clients
+
+A = average subscribed symbols per client (TradeScreen+positions typically 2–5)
+
+H = updates per symbol per second delivered to UI (throttle to 1 Hz is sensible)
+
+B = bytes per symbol update after trimming fields (assume 120 bytes effective, batched)
+
+Per-user egress (bytes/sec)
+
+u
+s
+e
+r
+_
+b
+p
+s
+≈
+A
+×
+H
+×
+B
+user_bps≈A×H×B
+Total egress (Mbps)
+
+M
+b
+p
+s
+≈
+(
+C
+×
+u
+s
+e
+r
+_
+b
+p
+s
+×
+8
+)
+/
+1,000,000
+Mbps≈(C×user_bps×8)/1,000,000
+Recommended planning envelope for your trader-only usage
+For TradeScreen + Profile only, it’s reasonable to plan:
+
+A = 3 (selected symbol + 1–2 from open/pending)
+
+H = 1
+
+B = 120
+
+Per-user ≈ 360 B/s (very small). Add protocol overhead and batching and you still stay under ~1 KB/s per user.
+
+Concurrent (C)	Typical egress (Mbps) at ~1 KB/s/user
+5,000	~40 Mbps
+10,000	~80 Mbps
+20,000	~160 Mbps
+That is a 10x–20x reduction versus polling, and it also collapses RPS pressure.
+
+Stress case (many users open “all quotes”)
+If a fraction of users subscribe to all ~53 symbols (QuotesScreen-like behavior), you must model that separately. Example at H=1, B=120:
+
+53 × 120 = 6,360 B/s ≈ 6.2 KB/s per such user
+
+If 10% of 20,000 users do that (2,000 users):
+
+2,000 × 6.2 KB/s ≈ 12.4 MB/s ≈ ~100 Mbps extra
+
+Even then you are typically below ~300 Mbps total at 20k concurrent.
+
+3) Compute sizing for Kubernetes (pods, CPU, RAM)
+3.1 WS gateway pods (api-ws)
+For Node/Express WebSockets, RAM and file descriptors are the first constraints, CPU second.
+
+A safe planning envelope (until you load test):
+
+2 vCPU / 4–6 GB RAM per api-ws pod
+
+Target 2,000–4,000 WS connections per pod at 1 Hz deltas
+
+This aligns with the fact that per-connection memory varies widely depending on buffering and middleware; you should treat 2–4k/pod as a conservative “does not surprise you” starting point.
+
+Replica guidance (Scenario 2, 1 Hz deltas, TradeScreen-heavy):
+
+Concurrent WS connections	Pods (2k/pod)	Pods (4k/pod)
+5,000	3	2
+10,000	5	3
+20,000	10	5
+50,000	25	13
+Practical recommendation for 100k registered / 20k peak concurrent:
+
+Start with 8 api-ws pods, autoscale to 16 on:
+
+active WS connections per pod
+
+egress bytes/sec per pod
+
+memory utilization
+
+3.2 Quote ingestor (quote-ingestor)
+This must be singleton (or leader-elected), otherwise multiple replicas will double/triple upstream polling and spam internal events.
+
+1 pod, 0.5–1 vCPU / 0.5–1 GB RAM
+
+No public ingress
+
+3.3 Redis (or NATS) for cross-pod fanout
+Your current live bus is in-process; Kubernetes requires cross-pod pub/sub.
+
+Redis Pub/Sub is sufficient to start.
+
+Size: 1–2 GB RAM is typically enough for pub/sub + small snapshots.
+
+If also storing sessions, bump to 2–4 GB.
+
+3.4 Postgres + pooling
+You do not want thousands of app connections to Postgres; use PgBouncer. PgBouncer reduces connection overhead by reusing established DB connections. 
+
+A baseline for trader-only traffic:
+
+Postgres: 8 vCPU / 32 GB RAM starting point if you expect meaningful trade/audit volume
+
+PgBouncer: 2–3 replicas, small CPU, ~1–2 GB RAM each
+
+4) Database write-rate sizing (trades + audit)
+Quotes should not be written at tick frequency for scale-critical paths. Keep quotes in memory/Redis; persist snapshots only if you need historical replay.
+
+Trade/audit is what matters. Define a “peak trading intensity”:
+
+Recommended peak scenarios at 20k concurrent
+Light: 1% of users submit an order per minute
+
+20,000 × 1% / 60 ≈ 3.3 orders/sec
+
+Moderate: 3% / minute
+
+≈ 10 orders/sec
+
+Heavy: 10% / minute
+
+≈ 33 orders/sec
+
+If each order produces ~5–10 DB writes (trade row, audit row(s), balance/equity update, fill/close updates), then:
+
+Moderate: 10 orders/sec × 8 writes ≈ 80 writes/sec
+
+Heavy: 33 orders/sec × 8 writes ≈ 264 writes/sec
+
+That is well within what a properly provisioned Postgres instance can handle, assuming:
+
+indexes are correct
+
+transactions are tight
+
+connection pool is sane
+
+5) Ingress / Load balancer settings you must apply for WS
+Idle timeouts
+Many load balancers default to ~60 seconds idle timeout (not WS-friendly without heartbeats). For example, AWS ALB defaults to 60 seconds idle timeout. 
+
+Similarly, ingress controllers often have default proxy timeouts around 60 seconds unless configured. 
+
+What to do
+
+Implement a WS heartbeat (server ping or app-level ping message) every 15–30 seconds
+
+Raise ingress/LB idle timeout to 300–600 seconds (or more), depending on your environment
+
+6) How the numbers change your refactoring and deployment strategy
+If you do NOT refactor (polling)
+You must plan for:
+
+10k–20k RPS quote traffic at moderate peaks
+
+~1–2+ Gbps sustained egress at 20k concurrent
+
+Many Node pods (often 20–50+) + aggressive caching layers
+
+High operational complexity
+
+If you DO refactor (WS deltas + subscriptions)
+You plan for:
+
+WS connections as the scale axis, not quote HTTP RPS
+
+~100–300 Mbps typical egress at 20k concurrent for trader-only usage
+
+5–16 api-ws pods depending on your per-pod connection target
+
+A clean separation of responsibilities:
+
+api-ws (scale out)
+
+quote-ingestor (singleton)
+
+Redis/NATS (fanout + snapshot)
+
+Postgres + PgBouncer (durable state + audit)
+
+This is the deployment strategy that matches “100k traders” reality.
+
+7) Concrete “day-1 production” sizing recommendation (what you can actually deploy)
+Assuming:
+
+100,000 registered
+
+20,000 peak concurrent
+
+TradeScreen/Profile heavy (low symbol subscription)
+
+Kubernetes
+
+api-ws: 8 pods (2 vCPU, 4–6 GB RAM), HPA to 16
+
+quote-ingestor: 1 pod (1 vCPU, 1 GB RAM)
+
+Redis: managed 2–4 GB
+
+Postgres: managed 8 vCPU / 32 GB + PgBouncer (2–3 replicas)
+
+Network
+
+Plan for ~300 Mbps egress peak (gives headroom for occasional “all symbols” users)
+
+Ensure ingress/LB timeouts + heartbeat are configured (60s defaults will disconnect otherwise). 
+
+8) Next step (no clarification required)
+If you want, I will now produce a deployment checklist + HPA policy tied to these numbers, including:
+
+Pod resource requests/limits and autoscaling triggers
+
+Redis and PgBouncer configuration targets (max client conns, pool sizing)
+
+WS heartbeat + ingress annotations templates (NGINX ingress style)
+
+A “load test acceptance spec” (k6 scenario definitions) to validate 2k/4k WS connections per pod and validate real egress
+
+Reply: “PROCEED — generate deployment checklist + HPA + load test spec”
+
+You said:
+PROCEED
+ChatGPT said:
+
+Thought for 1m 14s
+Below is a production-oriented deployment checklist, an HPA policy, and a k6 load test spec sized for your target (100,000 registered / ~20,000 peak concurrent trader sessions) with the post-refactor model (single WS per client, symbol-scoped quote subscriptions, and Postgres in K8s).
+
+1) Deployment checklist (Kubernetes + Postgres) — trader-only traffic
+1.1 Critical networking / ingress requirements (WebSockets)
+Ingress/LB idle timeout
+
+Many load balancers default to 60s idle timeout (AWS ALB/ELB defaults are 60s). 
+
+If idle timeout is not raised and/or you don’t heartbeat, clients will disconnect periodically.
+
+Ingress controller proxy timeouts
+
+ingress-nginx defaults proxy-read-timeout / proxy-send-timeout are 60s and should be increased for WS (ingress-nginx recommends values > 3600s). 
+
+Heartbeat
+
+Implement a WS heartbeat (app-level ping message every 15–30 seconds, or WS ping if supported) to keep intermediaries from declaring the connection idle.
+
+1.2 Workload split (mandatory for scale)
+Deploy two app workloads:
+
+api-ws (scale out): Express REST + WebSocket gateway + trader UI needs
+
+worker / quote-ingestor (singleton): upstream quote polling + scheduled jobs (auto-close, etc.)
+
+This prevents multiple API replicas from “multiplying” your upstream feed polling and background jobs.
+
+1.3 Data plane
+Postgres: durable store for users/trades/audit/config.
+
+PgBouncer: mandatory connection pooling (prevents Postgres from being swamped by app pod connections). 
+
+Redis (or NATS): cross-pod pub/sub for live events + quote snapshots (required once api-ws has >1 replica).
+
+2) Kubernetes manifests (starter set)
+2.1 Namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tradecentral
+2.2 Config + Secrets (placeholders)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+  namespace: tradecentral
+data:
+  NODE_ENV: "production"
+  # WS heartbeat interval (ms) – implement on server or client
+  WS_HEARTBEAT_MS: "25000"
+
+  # Quote behavior (post-refactor)
+  QUOTES_UI_HZ: "1"
+  QUOTES_DELTA_BATCH_MS: "1000"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: app-secrets
+  namespace: tradecentral
+type: Opaque
+stringData:
+  DATABASE_URL: "postgresql://pgbouncer_user:pgbouncer_pass@pgbouncer.tradecentral.svc.cluster.local:6432/trading"
+  REDIS_URL: "redis://redis.tradecentral.svc.cluster.local:6379"
+  SESSION_SECRET: "REPLACE_ME"
+  FORGE_API_KEY: "REPLACE_ME"
+2.3 api-ws Deployment (scale out)
+Starting point for ~20k peak concurrent: 8 replicas (autoscale later).
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-ws
+  namespace: tradecentral
+spec:
+  replicas: 8
+  selector:
+    matchLabels:
+      app: api-ws
+  template:
+    metadata:
+      labels:
+        app: api-ws
+    spec:
+      containers:
+        - name: api-ws
+          image: your-registry/tradecentral:latest
+          ports:
+            - name: http
+              containerPort: 5000
+          envFrom:
+            - configMapRef:
+                name: app-config
+            - secretRef:
+                name: app-secrets
+          env:
+            # Ensure ONLY worker runs feed/cron
+            - name: RUN_FORGE_FEED
+              value: "0"
+            - name: RUN_AUTO_CLOSE
+              value: "0"
+            - name: WRITE_QUOTES_SNAPSHOT
+              value: "0"
+          resources:
+            requests:
+              cpu: "1000m"
+              memory: "4Gi"
+            limits:
+              cpu: "2000m"
+              memory: "6Gi"
+          # Probes: strongly recommended to add a simple unauthenticated /api/health route.
+          # Until that exists, use a TCP probe.
+          readinessProbe:
+            tcpSocket:
+              port: 5000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: 5000
+            initialDelaySeconds: 15
+            periodSeconds: 10
+2.4 api-ws Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: api-ws
+  namespace: tradecentral
+spec:
+  selector:
+    app: api-ws
+  ports:
+    - name: http
+      port: 80
+      targetPort: 5000
+2.5 quote-ingestor Deployment (singleton)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: quote-ingestor
+  namespace: tradecentral
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: quote-ingestor
+  template:
+    metadata:
+      labels:
+        app: quote-ingestor
+    spec:
+      containers:
+        - name: quote-ingestor
+          image: your-registry/tradecentral:latest
+          # Use a dedicated entrypoint that starts forge feed + cron; do not run the HTTP server.
+          command: ["node", "dist/server/ingestor.js"]
+          envFrom:
+            - configMapRef:
+                name: app-config
+            - secretRef:
+                name: app-secrets
+          env:
+            - name: RUN_FORGE_FEED
+              value: "1"
+            - name: RUN_AUTO_CLOSE
+              value: "1"
+            - name: WRITE_QUOTES_SNAPSHOT
+              value: "1"
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+3) Ingress configuration (WS-safe)
+3.1 ingress-nginx example (recommended)
+ingress-nginx supports websockets without special config, but you must increase proxy timeouts beyond the 60s defaults. 
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: tradecentral-ingress
+  namespace: tradecentral
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+
+    # Keep WS connections alive (defaults are 60s; set high for trading UI)
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+
+    # Reduce buffering latency
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    nginx.ingress.kubernetes.io/proxy-request-buffering: "off"
+spec:
+  rules:
+    - host: tradecentral.yourdomain.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: api-ws
+                port:
+                  number: 80
+3.2 If using AWS ALB
+Set ALB idle timeout higher than the 60s default. 
+
+(Exact annotation key depends on the AWS Load Balancer Controller version; treat this as a template.)
+
+4) PgBouncer: reference configuration + K8s deployment
+PgBouncer reduces the overhead and resource consumption of large numbers of client connections to Postgres. 
+
+4.1 ConfigMap (pgbouncer.ini)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pgbouncer-config
+  namespace: tradecentral
+data:
+  pgbouncer.ini: |
+    [databases]
+    trading = host=postgres-primary.tradecentral.svc.cluster.local port=5432 dbname=trading
+
+    [pgbouncer]
+    listen_addr = 0.0.0.0
+    listen_port = 6432
+    auth_type = md5
+    auth_file = /etc/pgbouncer/userlist.txt
+
+    pool_mode = transaction
+    max_client_conn = 20000
+    default_pool_size = 50
+    min_pool_size = 10
+    reserve_pool_size = 20
+    reserve_pool_timeout = 2
+
+    server_reset_query = DISCARD ALL
+    ignore_startup_parameters = extra_float_digits
+
+    # timeouts
+    client_idle_timeout = 600
+    server_idle_timeout = 600
+    query_timeout = 60
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: pgbouncer-users
+  namespace: tradecentral
+type: Opaque
+stringData:
+  userlist.txt: |
+    "pgbouncer_user" "md5REPLACE_WITH_MD5_PASSWORD"
+4.2 PgBouncer Deployment + Service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pgbouncer
+  namespace: tradecentral
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: pgbouncer
+  template:
+    metadata:
+      labels:
+        app: pgbouncer
+    spec:
+      containers:
+        - name: pgbouncer
+          image: edoburu/pgbouncer:1.22.1
+          ports:
+            - containerPort: 6432
+          volumeMounts:
+            - name: cfg
+              mountPath: /etc/pgbouncer
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "512Mi"
+            limits:
+              cpu: "500m"
+              memory: "1Gi"
+      volumes:
+        - name: cfg
+          projected:
+            sources:
+              - configMap:
+                  name: pgbouncer-config
+                  items:
+                    - key: pgbouncer.ini
+                      path: pgbouncer.ini
+              - secret:
+                  name: pgbouncer-users
+                  items:
+                    - key: userlist.txt
+                      path: userlist.txt
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pgbouncer
+  namespace: tradecentral
+spec:
+  selector:
+    app: pgbouncer
+  ports:
+    - name: pgbouncer
+      port: 6432
+      targetPort: 6432
+5) HPA policy (CPU + custom WS metrics)
+5.1 Reality check: CPU-only HPA is insufficient for WS
+WebSockets can be “low CPU” while you’re saturated on:
+
+active connections per pod
+
+memory per pod
+
+egress throughput per pod
+
+So: use CPU HPA as a baseline and add custom-metrics HPA once you have Prometheus.
+
+5.2 Baseline CPU HPA (works day-1)
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: api-ws-hpa-cpu
+  namespace: tradecentral
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: api-ws
+  minReplicas: 8
+  maxReplicas: 20
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 60
+5.3 Recommended: Custom metrics HPA (connections per pod)
+Instrumentation you should expose from api-ws
+Expose /metrics with:
+
+ws_active_connections (gauge)
+
+optionally ws_egress_bytes_per_sec (gauge) or derive from a counter
+
+Then configure Prometheus + Prometheus Adapter to map metrics into the Kubernetes custom metrics API.
+
+Example HPA based on ws_active_connections
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: api-ws-hpa-wsconns
+  namespace: tradecentral
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: api-ws
+  minReplicas: 8
+  maxReplicas: 25
+  metrics:
+    - type: Pods
+      pods:
+        metric:
+          name: ws_active_connections
+        target:
+          type: AverageValue
+          averageValue: "2500"
+Interpretation: keep average per-pod connections at ~2,500; scale out if higher.
+
+6) Load test spec (k6) — WebSocket + REST, aligned to your app
+k6 has first-class websocket support via k6/ws. 
+
+6.1 Load test objectives (acceptance criteria)
+WS gateway
+At a given concurrency target (e.g., 2k, 5k, 10k…):
+
+>= 99.5% successful WS upgrades (101)
+
+No reconnect storms (close rate stable; p95 reconnect interval > 60s)
+
+p95 message latency (server timestamp to client receive) within your budget
+
+No pod OOMKills, memory stable (no steady upward drift)
+
+REST (trade lifecycle)
+Create/cancel/close endpoints remain stable:
+
+p95 < 300ms at moderate QPS
+
+error rate < 0.5% (excluding intentional rejects)
+
+6.2 k6 test pattern (phased)
+Smoke: 50 VUs / 2 minutes
+
+Ramp: 500 → 2,000 VUs / 10 minutes
+
+Soak: 2,000 VUs / 30 minutes
+
+Step: 2,000 → 5,000 / 10 minutes
+
+Soak: 5,000 / 30 minutes
+Then continue until you hit your per-pod connection ceiling and scale-out behavior is validated.
+
+For 20,000 concurrent you will run k6 distributed (multiple load generators). The script below is written so you can shard users via environment variables.
+
+7) k6 script: WebSocket connections + quote subscriptions
+Save as ws_quotes.js:
+
+import ws from "k6/ws";
+import http from "k6/http";
+import { check, sleep } from "k6";
+
+// Env vars:
+// BASE_URL=https://tradecentral.yourdomain.com
+// WS_URL=wss://tradecentral.yourdomain.com/ws
+// EMAIL_PREFIX=testuser
+// PASSWORD=Passw0rd!
+// USER_START=0
+// USER_COUNT=100000
+// SUB_MODE=trade    (trade|all)
+// SYMBOL=USDJPY
+// HEARTBEAT_MS=25000
+
+const BASE_URL = __ENV.BASE_URL || "https://localhost:5000";
+const WS_URL = __ENV.WS_URL || (BASE_URL.replace("https://", "wss://").replace("http://", "ws://") + "/ws");
+const EMAIL_PREFIX = __ENV.EMAIL_PREFIX || "testuser";
+const PASSWORD = __ENV.PASSWORD || "Passw0rd!";
+const USER_START = parseInt(__ENV.USER_START || "0", 10);
+const USER_COUNT = parseInt(__ENV.USER_COUNT || "100000", 10);
+const SUB_MODE = __ENV.SUB_MODE || "trade";
+const SYMBOL = (__ENV.SYMBOL || "USDJPY").toUpperCase();
+const HEARTBEAT_MS = parseInt(__ENV.HEARTBEAT_MS || "25000", 10);
+
+export const options = {
+  scenarios: {
+    ws_soak: {
+      executor: "ramping-vus",
+      startVUs: 0,
+      stages: [
+        { duration: "2m", target: 200 },
+        { duration: "5m", target: 2000 },
+        { duration: "10m", target: 2000 },
+      ],
+      gracefulRampDown: "30s",
+    },
+  },
+  thresholds: {
+    checks: ["rate>0.995"],
+  },
+};
+
+function vuUserIndex() {
+  // Shard across distributed runs by setting USER_START and letting VU/ITER pick a user
+  const raw = USER_START + ((__VU - 1) % USER_COUNT);
+  return raw;
+}
+
+function loginAndGetCookieJar(userIdx) {
+  const email = `${EMAIL_PREFIX}${userIdx}@example.com`;
+
+  // Adjust endpoint if your repo uses a different login route:
+  // Many Express apps use POST /api/login with { email, password }
+  const res = http.post(`${BASE_URL}/api/login`, JSON.stringify({ email, password: PASSWORD }), {
+    headers: { "Content-Type": "application/json" },
+    redirects: 0,
+  });
+
+  check(res, {
+    "login status 200/204": (r) => r.status === 200 || r.status === 204,
+  });
+
+  // k6 automatically manages cookies per VU for the domain; return res for debugging if needed
+  return { email };
+}
+
+export default function () {
+  const userIdx = vuUserIndex();
+  const { email } = loginAndGetCookieJar(userIdx);
+
+  // Optionally read current-user to get userId if your WS auth requires it.
+  // If your WS accepts cookie session only, you can skip this.
+  let userId = null;
+  const me = http.get(`${BASE_URL}/api/auth/current-user`, { redirects: 0 });
+  if (me.status === 200) {
+    try {
+      const data = me.json();
+      userId = data?.id ?? null;
+    } catch {}
+  }
+
+  const params = {
+    headers: {
+      // Cookie header is automatically sent by k6 for same domain;
+      // For cross-domain testing, you may need to explicitly pass cookies.
+      "User-Agent": "k6",
+    },
+  };
+
+  const res = ws.connect(WS_URL, params, function (socket) {
+    let lastMsgAt = Date.now();
+    let heartBeatAt = Date.now();
+
+    socket.on("open", () => {
+      // If your server expects an auth message:
+      if (userId) {
+        socket.send(JSON.stringify({ type: "auth", userId }));
+      }
+
+      if (SUB_MODE === "all") {
+        socket.send(JSON.stringify({ type: "quotes:subscribeAll" }));
+      } else {
+        socket.send(JSON.stringify({ type: "quotes:subscribe", symbols: [SYMBOL] }));
+      }
+    });
+
+    socket.on("message", (msg) => {
+      lastMsgAt = Date.now();
+      // You can parse msg if you want to track deltas:
+      // const ev = JSON.parse(msg);
+    });
+
+    socket.on("close", () => {
+      // allow reconnect by exiting
+    });
+
+    socket.on("error", (e) => {
+      // errors are counted by checks below
+    });
+
+    // Run loop: keep WS alive for ~60s, with heartbeat
+    const endAt = Date.now() + 60_000;
+
+    while (Date.now() < endAt) {
+      // heartbeat (application-level)
+      if (Date.now() - heartBeatAt >= HEARTBEAT_MS) {
+        socket.send(JSON.stringify({ type: "ping", ts: Date.now(), email }));
+        heartBeatAt = Date.now();
+      }
+
+      // fail-fast if nothing received for too long (indicates idle timeout / server not streaming)
+      if (Date.now() - lastMsgAt > 45_000) {
+        socket.close();
+        break;
+      }
+
+      sleep(1);
+    }
+
+    socket.close();
+  });
+
+  check(res, { "ws status is 101": (r) => r && r.status === 101 });
+
+  sleep(1);
+}
+How to run
+Smoke: k6 run ws_quotes.js
+
+TradeScreen-like: k6 run -e SUB_MODE=trade -e SYMBOL=USDJPY ws_quotes.js
+
+Worst-case (many symbols): k6 run -e SUB_MODE=all ws_quotes.js
+
+8) k6 script: REST trade endpoints (moderate QPS)
+Save as http_trades.js:
+
+import http from "k6/http";
+import { check, sleep } from "k6";
+
+const BASE_URL = __ENV.BASE_URL || "https://localhost:5000";
+const EMAIL_PREFIX = __ENV.EMAIL_PREFIX || "testuser";
+const PASSWORD = __ENV.PASSWORD || "Passw0rd!";
+const USER_START = parseInt(__ENV.USER_START || "0", 10);
+const USER_COUNT = parseInt(__ENV.USER_COUNT || "100000", 10);
+
+export const options = {
+  scenarios: {
+    trade_qps: {
+      executor: "constant-arrival-rate",
+      rate: 50, // 50 req/sec total (tune upward)
+      timeUnit: "1s",
+      duration: "10m",
+      preAllocatedVUs: 200,
+      maxVUs: 2000,
+    },
+  },
+  thresholds: {
+    http_req_failed: ["rate<0.01"],
+    http_req_duration: ["p(95)<500"],
+  },
+};
+
+function vuUserIndex() {
+  return USER_START + ((__VU - 1) % USER_COUNT);
+}
+
+function login(userIdx) {
+  const email = `${EMAIL_PREFIX}${userIdx}@example.com`;
+  const res = http.post(`${BASE_URL}/api/login`, JSON.stringify({ email, password: PASSWORD }), {
+    headers: { "Content-Type": "application/json" },
+    redirects: 0,
+  });
+  check(res, { "login ok": (r) => r.status === 200 || r.status === 204 });
+}
+
+export default function () {
+  const userIdx = vuUserIndex();
+  login(userIdx);
+
+  // NOTE: Adjust body to match your trade endpoint contract.
+  // Use a valid symbolId from /api/config/symbols in your test data.
+  const body = {
+    symbolId: 1,
+    type: "BUY",
+    size: 0.1,
+    openPrice: 1.0,
+  };
+
+  const res = http.post(`${BASE_URL}/api/trades`, JSON.stringify(body), {
+    headers: { "Content-Type": "application/json" },
+    redirects: 0,
+  });
+
+  check(res, {
+    "trade create status ok-ish": (r) => r.status === 200 || r.status === 201 || r.status === 400,
+  });
+
+  sleep(0.1);
+}
+9) Operational runbook (what to watch during the test)
+9.1 Metrics you must capture
+api-ws:
+
+memory RSS per pod
+
+CPU per pod
+
+active WS connections per pod (custom metric)
+
+egress bytes/sec per pod (custom metric)
+
+WS close codes counts (1006 spikes indicate LB/timeout issues)
+
+Redis:
+
+pub/sub throughput, CPU, latency
+
+PgBouncer:
+
+cl_active, cl_waiting, pool saturation, queue times
+
+Postgres:
+
+active connections (should stay bounded due to PgBouncer)
+
+write latency
+
+WAL volume (if audit is heavy)
+
+9.2 The top two failure modes at scale
+Idle timeouts → disconnect storms
+
+Fix: ingress proxy timeouts + heartbeat. Defaults are 60s in common stacks. 
+
+DB connection storms → Postgres refuses or slows
+
+Fix: PgBouncer in transaction mode; keep Postgres connections in the low hundreds. 
+
+10) What you should implement immediately (to align with this plan)
+Add /api/health route (unauthenticated) for probes.
+
+Expose /metrics with ws_active_connections gauge (prom-client) so HPA can scale on it.
+
+Ensure server emits quote deltas over WS; your client refactor is already structured to consume quotes:delta / quotes:snapshot.
+
+If you want, I can provide the exact prom-client instrumentation snippet and the minimal /api/health route patch inline (server-side) so your manifests’ probes and HPA can be made fully “production-grade” immediately.
+
+You said:
+PROCEED
+ChatGPT said:
+
+Thought for 4m 58s
+Below is the server-side patch to add:
+
+GET /api/health (liveness)
+
+GET /api/ready (readiness – lightweight DB touch)
+
+GET /metrics (Prometheus scrape endpoint)
+
+WS metrics:
+
+ws_active_connections
+
+ws_messages_sent_total
+
+ws_bytes_sent_total
+
+ws_messages_received_total
+
+ws_bytes_received_total
+
+HTTP metrics:
+
+http_requests_total
+
+http_request_duration_seconds
+
+http_requests_in_flight
+
+This is designed to support HPA on WS connection counts and basic ops dashboards.
+
+0) Add dependency
+Run:
+
+npm install prom-client
+1) NEW FILE: server/services/metrics.ts
+// @ts-nocheck
+import type { Express, Request, Response, NextFunction } from "express";
+import client from "prom-client";
+import type { WebSocketServer } from "ws";
+
+/**
+ * Registry
+ */
+export const metricsRegistry = new client.Registry();
+
+// Default process metrics (CPU, memory, event loop, GC when supported, etc.)
+client.collectDefaultMetrics({
+  register: metricsRegistry,
+  // Prefix only applies to default metrics; custom metrics are named explicitly below.
+  prefix: "tradecentral_",
+});
+
+/**
+ * HTTP metrics
+ */
+const httpRequestsInFlight = new client.Gauge({
+  name: "http_requests_in_flight",
+  help: "Number of HTTP requests currently being served",
+  registers: [metricsRegistry],
+});
+
+const httpRequestsTotal = new client.Counter({
+  name: "http_requests_total",
+  help: "Total number of HTTP requests",
+  labelNames: ["method", "route", "status_code"] as const,
+  registers: [metricsRegistry],
+});
+
+const httpRequestDurationSeconds = new client.Histogram({
+  name: "http_request_duration_seconds",
+  help: "HTTP request duration in seconds",
+  labelNames: ["method", "route", "status_code"] as const,
+  registers: [metricsRegistry],
+  // Buckets tuned for typical API latencies
+  buckets: [0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.35, 0.5, 1, 2, 5, 10],
+});
+
+function sanitizeRoute(path: string): string {
+  if (!path) return "/";
+
+  // Replace numeric IDs
+  let out = path.replace(/\/\d+(?=\/|$)/g, "/:id");
+
+  // Replace UUIDs
+  out = out.replace(
+    /\/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}(?=\/|$)/g,
+    "/:uuid"
+  );
+
+  // Replace long hex tokens
+  out = out.replace(/\/[0-9a-fA-F]{24,}(?=\/|$)/g, "/:token");
+
+  return out;
+}
+
+function resolveRouteLabel(req: Request): string {
+  // Prefer Express route patterns when available
+  const anyReq: any = req as any;
+
+  const routePath = anyReq?.route?.path;
+  const baseUrl = anyReq?.baseUrl;
+
+  if (routePath) {
+    const combined = `${baseUrl || ""}${routePath}`;
+    return sanitizeRoute(combined);
+  }
+
+  return sanitizeRoute(req.path);
+}
+
+export function installHttpMetrics(app: Express) {
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    httpRequestsInFlight.inc();
+
+    const start = process.hrtime.bigint();
+
+    res.on("finish", () => {
+      const end = process.hrtime.bigint();
+      const seconds = Number(end - start) / 1e9;
+
+      httpRequestsInFlight.dec();
+
+      const route = resolveRouteLabel(req);
+      const labels = {
+        method: req.method,
+        route,
+        status_code: String(res.statusCode),
+      };
+
+      httpRequestsTotal.inc(labels, 1);
+      httpRequestDurationSeconds.observe(labels, seconds);
+    });
+
+    next();
+  });
+}
+
+export function installMetricsEndpoint(app: Express) {
+  app.get("/metrics", async (_req: Request, res: Response) => {
+    res.setHeader("Content-Type", metricsRegistry.contentType);
+    res.status(200).send(await metricsRegistry.metrics());
+  });
+}
+
+/**
+ * WebSocket metrics
+ */
+const wsActiveConnections = new client.Gauge({
+  name: "ws_active_connections",
+  help: "Number of currently active WebSocket connections",
+  registers: [metricsRegistry],
+});
+
+const wsMessagesSentTotal = new client.Counter({
+  name: "ws_messages_sent_total",
+  help: "Total WebSocket messages sent",
+  labelNames: ["type"] as const,
+  registers: [metricsRegistry],
+});
+
+const wsBytesSentTotal = new client.Counter({
+  name: "ws_bytes_sent_total",
+  help: "Total WebSocket bytes sent",
+  labelNames: ["type"] as const,
+  registers: [metricsRegistry],
+});
+
+const wsMessagesReceivedTotal = new client.Counter({
+  name: "ws_messages_received_total",
+  help: "Total WebSocket messages received",
+  labelNames: ["type"] as const,
+  registers: [metricsRegistry],
+});
+
+const wsBytesReceivedTotal = new client.Counter({
+  name: "ws_bytes_received_total",
+  help: "Total WebSocket bytes received",
+  labelNames: ["type"] as const,
+  registers: [metricsRegistry],
+});
+
+export type WsMetricsHandle = {
+  incConnections: () => void;
+  decConnections: () => void;
+  trackSend: (payload: string | Buffer, type?: string) => void;
+  trackRecv: (payload: string | Buffer, type?: string) => void;
+};
+
+export function attachWsMetrics(_wss: WebSocketServer): WsMetricsHandle {
+  const normalizeType = (t: any) =>
+    typeof t === "string" && t.trim() ? t.trim() : "unknown";
+
+  return {
+    incConnections: () => wsActiveConnections.inc(),
+    decConnections: () => wsActiveConnections.dec(),
+    trackSend: (payload, type) => {
+      const t = normalizeType(type);
+      const bytes =
+        typeof payload === "string" ? Buffer.byteLength(payload, "utf8") : payload.length;
+      wsMessagesSentTotal.inc({ type: t }, 1);
+      wsBytesSentTotal.inc({ type: t }, bytes);
+    },
+    trackRecv: (payload, type) => {
+      const t = normalizeType(type);
+      const bytes =
+        typeof payload === "string" ? Buffer.byteLength(payload, "utf8") : payload.length;
+      wsMessagesReceivedTotal.inc({ type: t }, 1);
+      wsBytesReceivedTotal.inc({ type: t }, bytes);
+    },
+  };
+}
+2) PATCH FILE: server/routes.ts
+2.1 Add import near the top (with the other imports)
+Find the top import block and add:
+
+import { installHttpMetrics, installMetricsEndpoint, attachWsMetrics } from "./services/metrics";
+2.2 Add health + readiness + metrics middleware early in registerRoutes
+Inside:
+
+export async function registerRoutes(app: Express): Promise<Server> {
+Add the following after the app.use(session(...)) block (so you still get cookies/sessions), and before you start registering the bulk of routes:
+
+  // ------------------------------------------------------------
+  // Health + readiness (unauthenticated)
+  // ------------------------------------------------------------
+  app.get("/api/health", (_req: Request, res: Response) => {
+    res.status(200).json({
+      ok: true,
+      ts: Date.now(),
+      uptimeSec: Math.floor(process.uptime()),
+      pid: process.pid,
+      node: process.version,
+      env: process.env.NODE_ENV || "unknown",
+    });
+  });
+
+  // Readiness: lightweight DB touch so k8s doesn't route traffic when DB is down.
+  // Uses existing patterns already present in this file.
+  app.get("/api/ready", async (_req: Request, res: Response) => {
+    try {
+      // systemConfig is already referenced elsewhere in this file; keep it cheap.
+      const row = db.select().from(systemConfig).where(eq(systemConfig.id, 1)).get();
+      if (!row) {
+        return res.status(503).json({ ok: false, reason: "systemConfig missing" });
+      }
+      return res.status(200).json({ ok: true, ts: Date.now() });
+    } catch (err: any) {
+      return res.status(503).json({ ok: false, reason: "db_unavailable" });
+    }
+  });
+
+  // ------------------------------------------------------------
+  // Prometheus metrics (unauthenticated; restrict at ingress/network level)
+  // ------------------------------------------------------------
+  if (process.env.METRICS_ENABLED !== "0") {
+    installHttpMetrics(app);
+    installMetricsEndpoint(app);
+  }
+2.3 Instrument the WebSocket server
+In registerRoutes, you already have:
+
+  const wss = new WebSocketServer({
+    server: httpServer,
+    path: "/ws",
+  });
+Immediately after that, add:
+
+  const wsMetrics =
+    process.env.METRICS_ENABLED !== "0" ? attachWsMetrics(wss) : null;
+2.4 Patch broadcast() to count WS bytes/messages
+Your existing broadcast is:
+
+  function broadcast(event: any, filter?: (client: LiveClient) => boolean) {
+    const payload = JSON.stringify(event);
+    for (const client of wss.clients as Set<LiveClient>) {
+      if (client.readyState === WebSocket.OPEN && (!filter || filter(client))) {
+        client.send(payload);
+      }
+    }
+  }
+Replace it with:
+
+  function broadcast(event: any, filter?: (client: LiveClient) => boolean) {
+    const payload = JSON.stringify(event);
+    const eventType = typeof event?.type === "string" ? event.type : "unknown";
+
+    for (const client of wss.clients as Set<LiveClient>) {
+      if (client.readyState === WebSocket.OPEN && (!filter || filter(client))) {
+        if (wsMetrics) wsMetrics.trackSend(payload, eventType);
+        client.send(payload);
+      }
+    }
+  }
+2.5 Patch WS connection handler to maintain ws_active_connections and receive counters
+Your existing WS connection handler is:
+
+  wss.on("connection", (socket) => {
+    const client = socket as LiveClient;
+    client.userId = undefined;
+
+    socket.on("message", (raw) => {
+      try {
+        const msg = JSON.parse(raw.toString());
+        if (msg.type === "auth" && typeof msg.userId === "number") {
+          client.userId = msg.userId;
+        }
+      } catch (err) {
+        console.error("Invalid WS message:", err);
+      }
+    });
+  });
+Replace it with:
+
+  wss.on("connection", (socket) => {
+    const client = socket as LiveClient;
+    client.userId = undefined;
+
+    if (wsMetrics) wsMetrics.incConnections();
+
+    socket.on("close", () => {
+      if (wsMetrics) wsMetrics.decConnections();
+    });
+
+    socket.on("message", (raw) => {
+      const rawStr = raw?.toString?.() ?? String(raw ?? "");
+      let msgType: string | undefined;
+
+      try {
+        const msg = JSON.parse(rawStr);
+        msgType = msg?.type;
+
+        if (msg.type === "auth" && typeof msg.userId === "number") {
+          client.userId = msg.userId;
+        }
+
+        // Optional: support client heartbeat
+        if (msg.type === "ping") {
+          // Keep it lightweight
+          // client.send(JSON.stringify({ type: "pong", ts: Date.now() }));
+        }
+      } catch (err) {
+        // Non-JSON message; still count bytes
+      } finally {
+        if (wsMetrics) wsMetrics.trackRecv(rawStr, msgType || "unknown");
+      }
+    });
+  });
+3) Recommended K8s wiring (so probes/HPA can use this immediately)
+3.1 Probes
+Liveness: GET /api/health
+
+Readiness: GET /api/ready
+
+3.2 Metrics scrape
+Prometheus scrape: GET /metrics
+
+Set env var on pods:
+
+METRICS_ENABLED=1 for api-ws
+
+METRICS_ENABLED=1 for quote-ingestor (optional)
+
+Security note: /metrics is unauthenticated by design. Restrict it at ingress/network policy.
+
+4) What you can now autoscale on
+Once Prometheus + Adapter are in place, you can autoscale on:
+
+ws_active_connections (primary)
+
+optionally ws_bytes_sent_total rate (egress pressure)
+
+This aligns scaling with the actual limiting factor for trader-only usage: connections + egress, not CPU alone.
+
+If you want the next “proceed” step, I will output a minimal Prometheus setup (ServiceMonitor/PodMonitor patterns) and a Prometheus Adapter mapping so Kubernetes HPA can directly read ws_active_connections as a custom metric.
+
+You said:
+Proceed 
+ChatGPT said:
+
+Thought for 1m 30s
+Below is the next deploy step: wire Prometheus scraping + Prometheus Adapter + an HPA that scales directly on ws_active_connections (custom metrics API). This is the cleanest path to “scale on connections” rather than CPU.
+
+Key references:
+
+Prometheus Adapter is the standard implementation for Kubernetes Custom Metrics / External Metrics APIs. 
+
+Ingress-NGINX WebSocket stability requires raising proxy-read-timeout / proxy-send-timeout above the default 60s; 3600s is commonly recommended. 
+
+AWS ALB idle timeout defaults to 60s unless changed (kills idle WS). 
+
+kube-prometheus-stack often filters ServiceMonitors by Helm release labels unless you change selectors (common gotcha). 
+
+A) Expose the app and metrics port (Service)
+Assuming your Node/Express listens on 5000 and already serves /metrics (from your previous patch).
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: tradecentral-api
+  namespace: tradecentral
+  labels:
+    app: tradecentral-api
+spec:
+  selector:
+    app: tradecentral-api
+  ports:
+    - name: http
+      port: 80
+      targetPort: 5000
+If you already have a Service, ensure the port has a stable name (e.g., http) because ServiceMonitor typically references port names.
+
+B) Prometheus scrape via ServiceMonitor (kube-prometheus-stack)
+Create a ServiceMonitor that scrapes /metrics.
+
+Important: many kube-prometheus-stack installs only pick up ServiceMonitors matching a label selector tied to the Helm release. If you did not change selectors, add a release label that matches your Prometheus installation (commonly release: kube-prometheus-stack). 
+
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: tradecentral-api
+  namespace: tradecentral
+  labels:
+    release: kube-prometheus-stack   # adjust to match your Prometheus Operator release label
+spec:
+  selector:
+    matchLabels:
+      app: tradecentral-api
+  namespaceSelector:
+    matchNames:
+      - tradecentral
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 15s
+      scrapeTimeout: 10s
+C) Install Prometheus Adapter (separate Helm chart)
+Prometheus Adapter is what exposes Prometheus metrics via custom.metrics.k8s.io, enabling HPA to scale on them. 
+
+Example install (adjust namespace as you prefer; many run it in monitoring):
+
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm repo update
+
+helm upgrade --install prometheus-adapter prometheus-community/prometheus-adapter \
+  -n monitoring --create-namespace \
+  -f prometheus-adapter-values.yaml
+prometheus-adapter-values.yaml (custom rule for ws_active_connections)
+This rule maps your metric to pod-scoped custom metrics so HPA can query pods/ws_active_connections.
+
+prometheus:
+  url: http://kube-prometheus-stack-prometheus.monitoring.svc
+  port: 9090
+
+rules:
+  default: false
+  custom:
+    - seriesQuery: 'ws_active_connections{namespace!="",pod!=""}'
+      resources:
+        overrides:
+          namespace:
+            resource: "namespace"
+          pod:
+            resource: "pod"
+      name:
+        matches: "^ws_active_connections$"
+        as: "ws_active_connections"
+      metricsQuery: "avg(ws_active_connections{<<.LabelMatchers>>}) by (<<.GroupBy>>)"
+Notes:
+
+This expects the scraped series to carry namespace and pod labels. With Prometheus Operator scraping pods/services, those target labels are typically present on the scraped time series, which is why this works in practice.
+
+D) HPA scaling on WebSocket connections per pod
+Choose an initial target like 500 active WS connections per pod (tune after load tests). You can push higher later once you’ve validated memory + event-loop behavior.
+
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: tradecentral-api-ws-hpa
+  namespace: tradecentral
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: tradecentral-api
+  minReplicas: 4
+  maxReplicas: 200
+  metrics:
+    - type: Pods
+      pods:
+        metric:
+          name: ws_active_connections
+        target:
+          type: AverageValue
+          averageValue: "500"
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 30
+      policies:
+        - type: Percent
+          value: 100
+          periodSeconds: 60
+        - type: Pods
+          value: 10
+          periodSeconds: 60
+      selectPolicy: Max
+    scaleDown:
+      stabilizationWindowSeconds: 180
+      policies:
+        - type: Percent
+          value: 30
+          periodSeconds: 60
+      selectPolicy: Max
+If you want extra safety, add a second metric (CPU) so you don’t under-scale when WS payload rates spike.
+
+E) Verify end-to-end (must pass before you trust HPA)
+1) Verify Prometheus is scraping your app
+kubectl -n tradecentral get servicemonitor tradecentral-api -o yaml
+# Then check Prometheus Targets UI for the endpoint.
+2) Verify custom metrics API is serving your metric
+kubectl get --raw /apis/custom.metrics.k8s.io/v1beta1 | head -c 2000; echo
+kubectl get --raw "/apis/custom.metrics.k8s.io/v1beta1/namespaces/tradecentral/pods/*/ws_active_connections" | head -c 2000; echo
+If the second command returns values per pod, HPA can scale on it.
+
+3) Verify HPA is receiving metrics
+kubectl -n tradecentral describe hpa tradecentral-api-ws-hpa
+F) WebSocket stability: ingress/LB timeouts (do this or you will churn connections)
+Ingress-NGINX
+Set these annotations; NGINX Ingress defaults are typically 60s and will drop long-lived WS unless increased. 
+
+metadata:
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+AWS ALB / ELB
+Default idle timeout is 60 seconds unless changed; this will kill idle WS. 
+
+Set it to something like 3600 (and ensure you have a heartbeat/ping strategy if clients can be idle).
+
+G) Grafana/PromQL queries you will actually use
+Total active WS connections:
+
+sum(ws_active_connections)
+Connections per pod (to validate your HPA target):
+
+ws_active_connections
+Outbound WS throughput:
+
+sum(rate(ws_bytes_sent_total[5m]))
+HTTP p95 latency:
+
+histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le))
+If you want the next “proceed” step: I will provide a single consolidated “monitoring + autoscaling” k8s overlay folder (kustomize-style) that includes Service, ServiceMonitor, Adapter values (as ConfigMap), HPA, and NetworkPolicy restricting /metrics to Prometheus only.
+
+You said:
+Proceed 
+ChatGPT said:
+
+Thought for 1m 8s
+Below is the next “proceed” package: a clean, production-safe monitoring + autoscaling overlay that (1) does not expose /metrics to the public ingress, (2) enables Prometheus scraping on a dedicated metrics port, (3) restricts that metrics port via NetworkPolicy, and (4) enables HPA scaling on ws_active_connections via Prometheus Adapter.
+
+This includes server code changes (to run a separate metrics server) plus a Kustomize overlay you can drop into your repo.
+
+1) Server patch: serve metrics on a dedicated port (recommended)
+1.1 NEW FILE: server/metricsServer.ts
+import express from "express";
+import http from "http";
+import { metricsRegistry } from "./services/metrics";
+
+function getEnvInt(name: string, def: number) {
+  const raw = process.env[name];
+  if (!raw) return def;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : def;
+}
+
+/**
+ * Dedicated metrics server to avoid exposing /metrics on the public app port.
+ * - Default port: 9090
+ * - Optional token guard: set METRICS_TOKEN and pass header `x-metrics-token`
+ */
+export function startMetricsServer() {
+  const enabled = process.env.METRICS_ENABLED !== "0";
+  if (!enabled) return;
+
+  const port = getEnvInt("METRICS_PORT", 9090);
+  const host = process.env.METRICS_HOST || "0.0.0.0";
+  const token = (process.env.METRICS_TOKEN || "").trim();
+
+  const app = express();
+
+  // Basic health for metrics server
+  app.get("/healthz", (_req, res) => res.status(200).send("ok"));
+
+  app.get("/metrics", async (req, res) => {
+    if (token) {
+      const provided = String(req.header("x-metrics-token") || "").trim();
+      if (provided !== token) {
+        return res.status(403).json({ ok: false, reason: "forbidden" });
+      }
+    }
+
+    try {
+      res.setHeader("Content-Type", metricsRegistry.contentType);
+      res.status(200).send(await metricsRegistry.metrics());
+    } catch (err) {
+      res.status(500).json({ ok: false, reason: "metrics_error" });
+    }
+  });
+
+  const server = http.createServer(app);
+
+  server.listen(port, host, () => {
+    // Keep logs minimal; this is valuable during rollout
+    console.log(`[metrics] listening on http://${host}:${port}/metrics`);
+  });
+}
+1.2 PATCH: server/index.ts (start the metrics server)
+In your server/index.ts, you already create the Express app and start listening (and integrate Vite). Add:
+
+import { startMetricsServer } from "./metricsServer";
+Then, after the main app server starts listening (right after server.listen(...) succeeds), call:
+
+startMetricsServer();
+That’s it. Your main app still collects metrics in-memory; the metrics are only exposed on the dedicated port.
+
+1.3 PATCH: server/routes.ts (do NOT mount /metrics on the main app port)
+In the previous patch, if you added installMetricsEndpoint(app), remove it (or gate it off). Keep request metrics collection, but don’t expose /metrics publicly:
+
+import { installHttpMetrics } from "./services/metrics";
+
+// inside registerRoutes, near the top:
+if (process.env.METRICS_ENABLED !== "0") {
+  installHttpMetrics(app);
+}
+// DO NOT call installMetricsEndpoint(app) on the public port.
+2) Kustomize overlay: monitoring + autoscaling
+Assumptions:
+
+Namespace: tradecentral
+
+Deployment name: api-ws
+
+Pods labeled: app: api-ws
+
+Main app port: 5000
+
+New metrics port: 9090
+
+2.1 Folder layout
+k8s/
+  overlays/
+    prod/
+      kustomization.yaml
+      patch-api-ws-metrics-port.yaml
+      service-metrics.yaml
+      servicemonitor-metrics.yaml
+      networkpolicy-metrics.yaml
+      hpa-wsconns.yaml
+2.2 k8s/overlays/prod/kustomization.yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: tradecentral
+
+resources:
+  - service-metrics.yaml
+  - servicemonitor-metrics.yaml
+  - networkpolicy-metrics.yaml
+  - hpa-wsconns.yaml
+
+patches:
+  - path: patch-api-ws-metrics-port.yaml
+    target:
+      kind: Deployment
+      name: api-ws
+2.3 k8s/overlays/prod/patch-api-ws-metrics-port.yaml
+This adds the container port and env vars needed for metrics.
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-ws
+spec:
+  template:
+    spec:
+      containers:
+        - name: api-ws
+          ports:
+            - name: metrics
+              containerPort: 9090
+          env:
+            - name: METRICS_ENABLED
+              value: "1"
+            - name: METRICS_PORT
+              value: "9090"
+            # Optional token guard (recommended); set in Secret in real prod.
+            # - name: METRICS_TOKEN
+            #   valueFrom:
+            #     secretKeyRef:
+            #       name: app-secrets
+            #       key: METRICS_TOKEN
+2.4 k8s/overlays/prod/service-metrics.yaml
+A ClusterIP Service just for metrics (no ingress points to it).
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: api-ws-metrics
+  labels:
+    app: api-ws
+spec:
+  selector:
+    app: api-ws
+  ports:
+    - name: metrics
+      port: 9090
+      targetPort: metrics
+2.5 k8s/overlays/prod/servicemonitor-metrics.yaml
+This is for kube-prometheus-stack / Prometheus Operator.
+
+Important operational note: many installations require the ServiceMonitor to have a matching release label (e.g., release: kube-prometheus-stack). If your Prometheus Operator uses a different selector, adjust accordingly.
+
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: api-ws-metrics
+  labels:
+    release: kube-prometheus-stack   # adjust to your Prometheus Operator selector
+spec:
+  selector:
+    matchLabels:
+      app: api-ws
+  namespaceSelector:
+    matchNames:
+      - tradecentral
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 15s
+      scrapeTimeout: 10s
+      honorLabels: true
+      # If you enabled METRICS_TOKEN, add a header via relabeling is not standard here.
+      # Better: use Prometheus Operator "authorization" or "basicAuth" patterns.
+If you enable METRICS_TOKEN, the simplest is to not use the token and instead rely on NetworkPolicy. If you insist on token, tell me which Prometheus Operator variant you’re running and I’ll wire the auth stanza correctly (still no additional questions needed; I’ll provide best-default).
+
+2.6 k8s/overlays/prod/networkpolicy-metrics.yaml
+This allows only the monitoring namespace (Prometheus) to reach metrics port 9090. It does not affect user traffic on port 5000.
+
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-metrics-from-monitoring
+spec:
+  podSelector:
+    matchLabels:
+      app: api-ws
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - protocol: TCP
+          port: 9090
+If your monitoring namespace label differs, change the selector. The above works on modern clusters that apply kubernetes.io/metadata.name.
+
+2.7 k8s/overlays/prod/hpa-wsconns.yaml
+This assumes Prometheus Adapter exposes ws_active_connections via custom.metrics.k8s.io. Target an average of 2,500 connections per pod initially (conservative). Tune after load tests.
+
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: api-ws-hpa-wsconns
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: api-ws
+  minReplicas: 8
+  maxReplicas: 25
+  metrics:
+    - type: Pods
+      pods:
+        metric:
+          name: ws_active_connections
+        target:
+          type: AverageValue
+          averageValue: "2500"
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 30
+      policies:
+        - type: Pods
+          value: 5
+          periodSeconds: 60
+        - type: Percent
+          value: 100
+          periodSeconds: 60
+      selectPolicy: Max
+    scaleDown:
+      stabilizationWindowSeconds: 180
+      policies:
+        - type: Percent
+          value: 30
+          periodSeconds: 60
+      selectPolicy: Max
+3) Prometheus Adapter: values file (custom metric mapping)
+If you have not installed the adapter yet, use this values file (adjust the Prometheus service name).
+
+prometheus-adapter-values.yaml
+prometheus:
+  url: http://kube-prometheus-stack-prometheus.monitoring.svc
+  port: 9090
+
+rules:
+  default: false
+  custom:
+    - seriesQuery: 'ws_active_connections{namespace!="",pod!=""}'
+      resources:
+        overrides:
+          namespace:
+            resource: "namespace"
+          pod:
+            resource: "pod"
+      name:
+        matches: "^ws_active_connections$"
+        as: "ws_active_connections"
+      metricsQuery: "avg(ws_active_connections{<<.LabelMatchers>>}) by (<<.GroupBy>>)"
+Install:
+
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm repo update
+
+helm upgrade --install prometheus-adapter prometheus-community/prometheus-adapter \
+  -n monitoring --create-namespace \
+  -f prometheus-adapter-values.yaml
+4) Verification (copy/paste commands)
+4.1 Confirm metrics server is reachable inside cluster
+kubectl -n tradecentral get svc api-ws-metrics
+kubectl -n tradecentral get endpoints api-ws-metrics
+Port-forward one pod and hit metrics:
+
+POD=$(kubectl -n tradecentral get pods -l app=api-ws -o jsonpath='{.items[0].metadata.name}')
+kubectl -n tradecentral port-forward $POD 9090:9090
+curl -s http://127.0.0.1:9090/metrics | head
+4.2 Confirm Prometheus is scraping
+In Prometheus UI, query:
+
+ws_active_connections
+
+4.3 Confirm custom metrics API sees the metric
+kubectl get --raw /apis/custom.metrics.k8s.io/v1beta1 | head -c 2000; echo
+kubectl get --raw "/apis/custom.metrics.k8s.io/v1beta1/namespaces/tradecentral/pods/*/ws_active_connections" | head -c 2000; echo
+4.4 Confirm HPA is reading metrics
+kubectl -n tradecentral describe hpa api-ws-hpa-wsconns
+5) Next “proceed” step options (pick one)
+If you reply “PROCEED” again, I will output one of these (no questions required; I’ll default to Option A if you don’t specify):
+
+Option A (recommended): Add server-side WS heartbeat (ping/pong) + ingress annotations template (nginx) + “disconnect storm” protection (jittered reconnect).
+Option B: Add Grafana dashboard JSON for WS connections, egress rate, HTTP p95, Redis, PgBouncer, and Postgres.
+Option C: Add a k6 distributed run plan to hit 20k WS connections (sharded runners) with acceptance thresholds and rollback triggers.
+
+You said:
+Proceed 
+ChatGPT said:
+
+Thought for 1m 14s
+Below is the next production-hardening step (Option A): WebSocket heartbeat, disconnect-storm protection, and graceful shutdown/drain for Kubernetes rollouts.
+
+This is implemented as server-side protocol pings + optional app-level ping, plus a client reconnect backoff with jitter. It materially reduces “random disconnect” churn from ingress/LB idle timeouts and prevents reconnect storms that can spike load and trigger cascading failures.
+
+1) Server: WS heartbeat + idle-kill + graceful shutdown hooks
+1.1 PATCH: server/routes.ts (heartbeat + pong tracking + termination)
+Find the section where you create the WebSocketServer:
+
+  const wss = new WebSocketServer({
+    server: httpServer,
+    path: "/ws",
+  });
+Immediately after that, add this heartbeat block:
+
+  // ------------------------------------------------------------
+  // WebSocket heartbeat (protocol ping/pong)
+  // Keeps connections alive through L7 proxies and detects half-open sockets.
+  // Browsers respond to protocol pings automatically.
+  // ------------------------------------------------------------
+  const WS_HEARTBEAT_MS = Number(process.env.WS_HEARTBEAT_MS ?? 25000);
+  const WS_PONG_TIMEOUT_MS = Number(process.env.WS_PONG_TIMEOUT_MS ?? 70000);
+
+  // Expose for graceful shutdown in server/index.ts
+  (httpServer as any).__wss = wss;
+
+  // Type extension (keep it local; avoids editing global types)
+  type LiveClientWithHB = LiveClient & {
+    isAlive?: boolean;
+    lastPongAt?: number;
+  };
+
+  const hbInterval =
+    WS_HEARTBEAT_MS > 0
+      ? setInterval(() => {
+          const now = Date.now();
+
+          for (const sock of wss.clients as Set<LiveClientWithHB>) {
+            if (sock.readyState !== WebSocket.OPEN) continue;
+
+            // If we haven't seen a pong in too long, terminate (half-open / dead client)
+            const lastPongAt = sock.lastPongAt ?? now;
+            const tooOld = now - lastPongAt > WS_PONG_TIMEOUT_MS;
+
+            if (sock.isAlive === false || tooOld) {
+              try {
+                sock.terminate();
+              } catch {
+                // ignore
+              }
+              continue;
+            }
+
+            sock.isAlive = false;
+            try {
+              // protocol ping (client/browser auto replies with pong)
+              sock.ping();
+            } catch {
+              // ignore
+            }
+          }
+        }, WS_HEARTBEAT_MS)
+      : null;
+
+  if (hbInterval) {
+    (httpServer as any).__wsHeartbeatInterval = hbInterval;
+  }
+Now patch your connection handler. Find:
+
+  wss.on("connection", (socket) => {
+    const client = socket as LiveClient;
+    client.userId = undefined;
+
+    socket.on("message", (raw) => {
+      try {
+        const msg = JSON.parse(raw.toString());
+        if (msg.type === "auth" && typeof msg.userId === "number") {
+          client.userId = msg.userId;
+        }
+      } catch (err) {
+        console.error("Invalid WS message:", err);
+      }
+    });
+  });
+Replace it with:
+
+  wss.on("connection", (socket) => {
+    const client = socket as LiveClientWithHB;
+    client.userId = undefined;
+
+    // Heartbeat state
+    client.isAlive = true;
+    client.lastPongAt = Date.now();
+
+    if (wsMetrics) wsMetrics.incConnections();
+
+    socket.on("pong", () => {
+      client.isAlive = true;
+      client.lastPongAt = Date.now();
+    });
+
+    socket.on("close", () => {
+      if (wsMetrics) wsMetrics.decConnections();
+    });
+
+    socket.on("message", (raw) => {
+      const rawStr = raw?.toString?.() ?? String(raw ?? "");
+      let msgType: string | undefined;
+
+      try {
+        const msg = JSON.parse(rawStr);
+        msgType = msg?.type;
+
+        if (msg.type === "auth" && typeof msg.userId === "number") {
+          client.userId = msg.userId;
+        }
+
+        // Optional: app-level ping (also keeps ALB/NGINX traffic active)
+        if (msg.type === "ping") {
+          // Keep response tiny; do not spam logs
+          try {
+            const payload = JSON.stringify({ type: "pong", ts: Date.now() });
+            if (wsMetrics) wsMetrics.trackSend(payload, "pong");
+            socket.send(payload);
+          } catch {
+            // ignore
+          }
+        }
+
+        // (If you implement quote subscriptions: handle quotes:subscribe / quotes:unsubscribe here)
+      } catch {
+        // non-JSON messages are ignored but still counted below
+      } finally {
+        if (wsMetrics) wsMetrics.trackRecv(rawStr, msgType || "unknown");
+      }
+    });
+  });
+Finally, ensure you clear the heartbeat interval when the HTTP server closes. Add this near the end of registerRoutes (after WS setup):
+
+  httpServer.on("close", () => {
+    const i = (httpServer as any).__wsHeartbeatInterval as NodeJS.Timeout | null;
+    if (i) clearInterval(i);
+  });
+1.2 PATCH: server/index.ts (graceful shutdown / draining)
+Goal: when Kubernetes sends SIGTERM during rollout, you:
+
+stop accepting new HTTP connections,
+
+close WS connections with a restart code,
+
+give a small grace window,
+
+then exit.
+
+Add an import at top:
+
+import type { Server as HttpServer } from "http";
+Then, after you have the server returned from registerRoutes(app) and start listening, add:
+
+function installGracefulShutdown(server: HttpServer) {
+  const shutdown = (signal: string) => {
+    console.log(`[shutdown] received ${signal}, draining...`);
+
+    // Close websocket clients first
+    const wss = (server as any).__wss as any | undefined;
+    if (wss?.clients) {
+      for (const ws of wss.clients as Set<any>) {
+        try {
+          // 1012 = service restart (commonly used)
+          ws.close(1012, "Server restarting");
+        } catch {
+          // ignore
+        }
+      }
+      try {
+        wss.close();
+      } catch {
+        // ignore
+      }
+    }
+
+    // Stop accepting new HTTP connections
+    try {
+      server.close(() => {
+        console.log("[shutdown] http server closed");
+        process.exit(0);
+      });
+    } catch {
+      process.exit(0);
+    }
+
+    // Hard stop if it takes too long
+    setTimeout(() => {
+      console.log("[shutdown] forcing exit");
+      process.exit(1);
+    }, Number(process.env.SHUTDOWN_GRACE_MS ?? 15000)).unref();
+  };
+
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
+  process.on("SIGINT", () => shutdown("SIGINT"));
+}
+
+// After server.listen(...) success:
+installGracefulShutdown(server);
+This works cleanly with terminationGracePeriodSeconds in Kubernetes.
+
+2) Client: reconnect backoff + jitter + heartbeat messages
+You already have a single global WS provider. The missing hardening is:
+
+exponential backoff with jitter on reconnect,
+
+app-level ping messages to keep L7s “hot” even when no quote deltas are flowing.
+
+2.1 PATCH: client/src/providers/LiveUpdatesProvider.tsx
+Add these refs near the top of the provider (next to wsRef, etc.)
+  const reconnectAttemptRef = useRef(0);
+  const heartbeatIntervalRef = useRef<number | null>(null);
+In ws.onopen, reset attempts + start heartbeat
+Find your ws.onopen = () => { ... } and add/modify to include:
+
+    ws.onopen = () => {
+      setIsConnected(true);
+      reconnectAttemptRef.current = 0;
+
+      // Authenticate for user-scoped events
+      if (user?.id) {
+        try {
+          ws.send(JSON.stringify({ type: "auth", userId: user.id }));
+        } catch {}
+      }
+
+      // Apply pending quote subscriptions
+      sendQuoteSubscriptionIfChanged();
+
+      // App-level heartbeat (keeps traffic flowing through LB/ingress)
+      const hbMs = Number((import.meta as any).env?.VITE_WS_HEARTBEAT_MS ?? 25000);
+      if (heartbeatIntervalRef.current) window.clearInterval(heartbeatIntervalRef.current);
+      if (Number.isFinite(hbMs) && hbMs > 0) {
+        heartbeatIntervalRef.current = window.setInterval(() => {
+          try {
+            ws.send(JSON.stringify({ type: "ping", ts: Date.now() }));
+          } catch {
+            // ignore
+          }
+        }, hbMs);
+      }
+    };
+In ws.onclose, stop heartbeat + backoff with jitter
+Replace your current fixed 3000 reconnect delay block with:
+
+    ws.onclose = () => {
+      setIsConnected(false);
+
+      if (heartbeatIntervalRef.current) {
+        window.clearInterval(heartbeatIntervalRef.current);
+        heartbeatIntervalRef.current = null;
+      }
+
+      wsRef.current = null;
+      if (!shouldRunRef.current) return;
+
+      // Exponential backoff with jitter to avoid reconnect storms
+      reconnectAttemptRef.current += 1;
+
+      const attempt = reconnectAttemptRef.current;
+      const base = 500; // ms
+      const max = 30000; // ms
+
+      // cap exponent to avoid overflow
+      const exp = Math.min(10, attempt);
+      const backoff = Math.min(max, base * Math.pow(2, exp));
+
+      // Add jitter (0..750ms)
+      const jitter = Math.floor(Math.random() * 750);
+
+      // If tab hidden, slow down reconnect (reduces background churn)
+      const hiddenPenalty = document.visibilityState === "hidden" ? 15000 : 0;
+
+      const delay = Math.min(max, backoff + jitter + hiddenPenalty);
+
+      if (reconnectTimerRef.current) window.clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = window.setTimeout(() => {
+        connect();
+      }, delay);
+    };
+In cleanup (provider unmount), clear heartbeat too
+In the provider’s return cleanup, add:
+
+      if (heartbeatIntervalRef.current) {
+        window.clearInterval(heartbeatIntervalRef.current);
+        heartbeatIntervalRef.current = null;
+      }
+Add Vite env default (optional)
+Set in your .env.production or deployment:
+
+VITE_WS_HEARTBEAT_MS=25000
+
+3) Kubernetes hardening for WS rollouts (manifest snippets)
+3.1 Deployment: termination grace + preStop drain
+Patch your api-ws deployment spec:
+
+spec:
+  template:
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: api-ws
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sh", "-c", "sleep 10"]
+This gives in-flight WS close frames a chance to go out and clients to reconnect cleanly.
+
+3.2 Ingress: raise proxy timeouts (nginx ingress)
+metadata:
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+3.3 If using AWS ALB
+Set ALB idle timeout to at least 600–3600s (your heartbeat helps either way).
+
+4) Acceptance checks (quick, deterministic)
+Heartbeat works
+
+Open the app and keep it idle for > 2 minutes.
+
+Confirm WS does not drop every ~60 seconds.
+
+Reconnect storm protection
+
+Kill one api-ws pod (simulate rollout).
+
+Observe that clients reconnect with staggered delays (not all at once).
+
+Graceful shutdown
+
+During a rollout, you should see fewer 1006 abnormal closes (clients get a restart close code and reconnect calmly).
+
+If you want the next “PROCEED” step after this, I will provide Grafana dashboard JSON + PromQL panels specifically for: connections per pod, reconnect rate, WS egress rate, HTTP p95, Redis pubsub throughput, PgBouncer saturation, and Postgres latency/WAL rate.
+
+You said:
+Proceed 
+ChatGPT said:
+
+Thought for 34s
+Below is a Grafana dashboard JSON you can import immediately. It is tailored to the metrics we added:
+
+ws_active_connections
+
+ws_bytes_sent_total, ws_bytes_received_total
+
+ws_messages_sent_total, ws_messages_received_total
+
+http_requests_in_flight
+
+http_requests_total
+
+http_request_duration_seconds_* (histogram)
+
+default prom-client process/node metrics (with your prefix): tradecentral_process_*, tradecentral_nodejs_*
+
+It also includes optional panels for Redis / Postgres / PgBouncer that will light up once you deploy the standard exporters (if you don’t have them yet, those panels will simply show “no data”).
+
+Import instructions
+In Grafana: Dashboards → New → Import
+
+Paste the JSON below
+
+Select your Prometheus datasource when prompted
+
+Dashboard JSON (copy/paste)
+{
+  "__inputs": [
+    {
+      "name": "DS_PROMETHEUS",
+      "label": "Prometheus",
+      "description": "",
+      "type": "datasource",
+      "pluginId": "prometheus",
+      "pluginName": "Prometheus"
+    }
+  ],
+  "__requires": [
+    { "type": "grafana", "id": "grafana", "name": "Grafana", "version": "9.0.0" },
+    { "type": "datasource", "id": "prometheus", "name": "Prometheus", "version": "1.0.0" }
+  ],
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": "-- Grafana --",
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "iteration": 1,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "id": 100,
+      "panels": [],
+      "title": "WebSockets",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Total active WebSocket connections across all api-ws pods.",
+      "fieldConfig": { "defaults": { "unit": "none" }, "overrides": [] },
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 1 },
+      "id": 1,
+      "options": { "reduceOptions": { "values": false, "calcs": ["lastNotNull"] }, "orientation": "auto", "textMode": "auto" },
+      "targets": [
+        {
+          "expr": "sum(ws_active_connections{namespace=~\"$namespace\"})",
+          "legendFormat": "active",
+          "refId": "A"
+        }
+      ],
+      "title": "WS Active Connections (Total)",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Active WebSocket connections by pod.",
+      "fieldConfig": { "defaults": { "unit": "none" }, "overrides": [] },
+      "gridPos": { "h": 6, "w": 18, "x": 6, "y": 1 },
+      "id": 2,
+      "options": { "legend": { "displayMode": "list", "placement": "right" } },
+      "targets": [
+        {
+          "expr": "ws_active_connections{namespace=~\"$namespace\", pod=~\"$pod\"}",
+          "legendFormat": "{{pod}}",
+          "refId": "A"
+        }
+      ],
+      "title": "WS Active Connections by Pod",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "WS egress throughput (bytes/sec) across all pods.",
+      "fieldConfig": { "defaults": { "unit": "Bps" }, "overrides": [] },
+      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 7 },
+      "id": 3,
+      "options": { "legend": { "displayMode": "list", "placement": "right" } },
+      "targets": [
+        {
+          "expr": "sum(rate(ws_bytes_sent_total{namespace=~\"$namespace\"}[5m]))",
+          "legendFormat": "sent",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rate(ws_bytes_received_total{namespace=~\"$namespace\"}[5m]))",
+          "legendFormat": "received",
+          "refId": "B"
+        }
+      ],
+      "title": "WS Throughput (Total)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "WS message rate across all pods (messages/sec).",
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+      "gridPos": { "h": 6, "w": 12, "x": 12, "y": 7 },
+      "id": 4,
+      "options": { "legend": { "displayMode": "list", "placement": "right" } },
+      "targets": [
+        {
+          "expr": "sum(rate(ws_messages_sent_total{namespace=~\"$namespace\"}[5m]))",
+          "legendFormat": "sent msg/s",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rate(ws_messages_received_total{namespace=~\"$namespace\"}[5m]))",
+          "legendFormat": "recv msg/s",
+          "refId": "B"
+        }
+      ],
+      "title": "WS Message Rate (Total)",
+      "type": "timeseries"
+    },
+
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 13 },
+      "id": 101,
+      "panels": [],
+      "title": "HTTP (REST API)",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Current in-flight HTTP requests.",
+      "fieldConfig": { "defaults": { "unit": "none" }, "overrides": [] },
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 14 },
+      "id": 5,
+      "options": { "reduceOptions": { "values": false, "calcs": ["lastNotNull"] }, "orientation": "auto", "textMode": "auto" },
+      "targets": [
+        {
+          "expr": "sum(http_requests_in_flight{namespace=~\"$namespace\"})",
+          "legendFormat": "inflight",
+          "refId": "A"
+        }
+      ],
+      "title": "HTTP In-Flight (Total)",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Total HTTP RPS across all routes.",
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "gridPos": { "h": 6, "w": 18, "x": 6, "y": 14 },
+      "id": 6,
+      "options": { "legend": { "displayMode": "list", "placement": "right" } },
+      "targets": [
+        {
+          "expr": "sum(rate(http_requests_total{namespace=~\"$namespace\"}[5m]))",
+          "legendFormat": "RPS",
+          "refId": "A"
+        }
+      ],
+      "title": "HTTP Requests/sec (Total)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Top routes by request rate.",
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 20 },
+      "id": 7,
+      "options": { "legend": { "displayMode": "list", "placement": "right" } },
+      "targets": [
+        {
+          "expr": "topk(10, sum by (route) (rate(http_requests_total{namespace=~\"$namespace\"}[5m])))",
+          "legendFormat": "{{route}}",
+          "refId": "A"
+        }
+      ],
+      "title": "HTTP RPS by Route (Top 10)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "p95 HTTP latency by route (histogram_quantile).",
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 20 },
+      "id": 8,
+      "options": { "legend": { "displayMode": "list", "placement": "right" } },
+      "targets": [
+        {
+          "expr": "topk(10, histogram_quantile(0.95, sum by (le, route) (rate(http_request_duration_seconds_bucket{namespace=~\"$namespace\"}[5m]))))",
+          "legendFormat": "p95 {{route}}",
+          "refId": "A"
+        }
+      ],
+      "title": "HTTP p95 Latency by Route (Top 10)",
+      "type": "timeseries"
+    },
+
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 27 },
+      "id": 102,
+      "panels": [],
+      "title": "Node/Process (prom-client default metrics)",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Resident memory by pod (Node process).",
+      "fieldConfig": { "defaults": { "unit": "bytes" }, "overrides": [] },
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 28 },
+      "id": 9,
+      "options": { "legend": { "displayMode": "list", "placement": "right" } },
+      "targets": [
+        {
+          "expr": "tradecentral_process_resident_memory_bytes{namespace=~\"$namespace\", pod=~\"$pod\"}",
+          "legendFormat": "{{pod}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Process RSS Memory by Pod",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "CPU seconds rate (user+system) by pod. This approximates per-pod CPU pressure.",
+      "fieldConfig": { "defaults": { "unit": "cores" }, "overrides": [] },
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 28 },
+      "id": 10,
+      "options": { "legend": { "displayMode": "list", "placement": "right" } },
+      "targets": [
+        {
+          "expr": "rate(tradecentral_process_cpu_user_seconds_total{namespace=~\"$namespace\", pod=~\"$pod\"}[5m]) + rate(tradecentral_process_cpu_system_seconds_total{namespace=~\"$namespace\", pod=~\"$pod\"}[5m])",
+          "legendFormat": "{{pod}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Process CPU (cores) by Pod",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Event loop lag (if exposed by prom-client). Spikes indicate overload / too much synchronous work.",
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 35 },
+      "id": 11,
+      "options": { "legend": { "displayMode": "list", "placement": "right" } },
+      "targets": [
+        {
+          "expr": "tradecentral_nodejs_eventloop_lag_seconds{namespace=~\"$namespace\", pod=~\"$pod\"}",
+          "legendFormat": "{{pod}}",
+          "refId": "A"
+        }
+      ],
+      "title": "NodeJS Event Loop Lag by Pod",
+      "type": "timeseries"
+    },
+
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 41 },
+      "id": 103,
+      "panels": [],
+      "title": "Redis (optional: requires redis exporter)",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Redis connected clients (requires redis exporter).",
+      "fieldConfig": { "defaults": { "unit": "none" }, "overrides": [] },
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 42 },
+      "id": 12,
+      "options": { "reduceOptions": { "values": false, "calcs": ["lastNotNull"] }, "orientation": "auto", "textMode": "auto" },
+      "targets": [
+        {
+          "expr": "sum(redis_connected_clients{namespace=~\"$namespace\"})",
+          "legendFormat": "clients",
+          "refId": "A"
+        }
+      ],
+      "title": "Redis Connected Clients",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Redis memory used (requires redis exporter).",
+      "fieldConfig": { "defaults": { "unit": "bytes" }, "overrides": [] },
+      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 42 },
+      "id": 13,
+      "options": { "reduceOptions": { "values": false, "calcs": ["lastNotNull"] }, "orientation": "auto", "textMode": "auto" },
+      "targets": [
+        {
+          "expr": "sum(redis_memory_used_bytes{namespace=~\"$namespace\"})",
+          "legendFormat": "mem",
+          "refId": "A"
+        }
+      ],
+      "title": "Redis Memory Used",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Redis commands/sec (requires redis exporter).",
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 42 },
+      "id": 14,
+      "options": { "legend": { "displayMode": "list", "placement": "right" } },
+      "targets": [
+        {
+          "expr": "sum(rate(redis_commands_processed_total{namespace=~\"$namespace\"}[5m]))",
+          "legendFormat": "cmd/s",
+          "refId": "A"
+        }
+      ],
+      "title": "Redis Command Rate",
+      "type": "timeseries"
+    },
+
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 48 },
+      "id": 104,
+      "panels": [],
+      "title": "PgBouncer + Postgres (optional: requires exporters)",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "PgBouncer client waiting is your canary for DB pool saturation (requires pgbouncer exporter).",
+      "fieldConfig": { "defaults": { "unit": "none" }, "overrides": [] },
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 49 },
+      "id": 15,
+      "options": { "legend": { "displayMode": "list", "placement": "right" } },
+      "targets": [
+        {
+          "expr": "sum(pgbouncer_pools_client_waiting{namespace=~\"$namespace\"})",
+          "legendFormat": "client_waiting",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(pgbouncer_clients_active{namespace=~\"$namespace\"})",
+          "legendFormat": "clients_active",
+          "refId": "B"
+        }
+      ],
+      "title": "PgBouncer: Waiting vs Active",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Postgres connections (requires postgres exporter).",
+      "fieldConfig": { "defaults": { "unit": "none" }, "overrides": [] },
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 49 },
+      "id": 16,
+      "options": { "legend": { "displayMode": "list", "placement": "right" } },
+      "targets": [
+        {
+          "expr": "sum(pg_stat_activity_count{namespace=~\"$namespace\"})",
+          "legendFormat": "connections",
+          "refId": "A"
+        }
+      ],
+      "title": "Postgres: Active Connections",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Postgres TPS (commits/sec) (requires postgres exporter).",
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 56 },
+      "id": 17,
+      "options": { "legend": { "displayMode": "list", "placement": "right" } },
+      "targets": [
+        {
+          "expr": "sum(rate(pg_stat_database_xact_commit{namespace=~\"$namespace\"}[5m]))",
+          "legendFormat": "commit/s",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rate(pg_stat_database_xact_rollback{namespace=~\"$namespace\"}[5m]))",
+          "legendFormat": "rollback/s",
+          "refId": "B"
+        }
+      ],
+      "title": "Postgres: TPS (Commit/Rollback)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Postgres cache hit ratio (requires postgres exporter).",
+      "fieldConfig": { "defaults": { "unit": "percentunit" }, "overrides": [] },
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 56 },
+      "id": 18,
+      "options": { "reduceOptions": { "values": false, "calcs": ["lastNotNull"] }, "orientation": "auto", "textMode": "auto" },
+      "targets": [
+        {
+          "expr": "100 * (sum(rate(pg_stat_database_blks_hit{namespace=~\"$namespace\"}[5m])) / (sum(rate(pg_stat_database_blks_hit{namespace=~\"$namespace\"}[5m])) + sum(rate(pg_stat_database_blks_read{namespace=~\"$namespace\"}[5m]))))",
+          "legendFormat": "hit_ratio",
+          "refId": "A"
+        }
+      ],
+      "title": "Postgres Cache Hit Ratio (%)",
+      "type": "stat"
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["tradecentral", "ws", "autoscaling", "ops"],
+  "templating": {
+    "list": [
+      {
+        "current": { "selected": true, "text": "tradecentral", "value": "tradecentral" },
+        "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+        "definition": "label_values(ws_active_connections, namespace)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Namespace",
+        "multi": false,
+        "name": "namespace",
+        "options": [],
+        "query": { "query": "label_values(ws_active_connections, namespace)", "refId": "A" },
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": false,
+        "type": "query"
+      },
+      {
+        "current": { "selected": true, "text": "All", "value": ".*" },
+        "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+        "definition": "label_values(ws_active_connections{namespace=~\"$namespace\"}, pod)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Pod",
+        "multi": true,
+        "name": "pod",
+        "options": [],
+        "query": { "query": "label_values(ws_active_connections{namespace=~\"$namespace\"}, pod)", "refId": "A" },
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": false,
+        "type": "query"
+      }
+    ]
+  },
+  "time": { "from": "now-30m", "to": "now" },
+  "timepicker": {},
+  "timezone": "",
+  "title": "TradeCentral - Real-time Ops (WS/HTTP/DB)",
+  "uid": "tradecentral-ops-ws-http",
+  "version": 1,
+  "weekStart": ""
+}
+Notes (so you’re not surprised)
+The Postgres/Redis/PgBouncer panels require exporters:
+
+Redis exporter metrics often start with redis_*
+
+Postgres exporter metrics often start with pg_*
+
+PgBouncer exporter metrics often start with pgbouncer_*
+
+If your Prometheus relabeling doesn’t attach namespace/pod labels to scraped time series, the dashboard still works once you adjust selectors. Most Prometheus Operator setups include these labels for ServiceMonitor targets.
+
+Next “Proceed” step (recommended)
+If you reply “PROCEED” again, I will provide:
+
+Exporter manifests for Redis + Postgres + PgBouncer (Service + ServiceMonitor included)
+
+A matching Grafana “DB & Cache” dashboard with richer panels (locks, slow queries, pool saturation, replication/WAL, Redis latency)
+
+Alert rules for:
+
+WS disconnect storm (active connections drop rapidly)
+
+PgBouncer client waiting > 0 sustained
+
+Postgres connections/tps anomalies
+
+Event loop lag spikes
+
+You said:
+Proceed 
+ChatGPT said:
+
+Thought for 1m 14s
+Below is a complete “exporters + DB/cache dashboard + alert rules” package you can drop into your repo as a Kustomize overlay.
+
+I’m assuming:
+
+Namespace: tradecentral
+
+Prometheus Operator (kube-prometheus-stack) is installed
+
+Prometheus is in namespace monitoring
+
+Your app metrics are already exposed on a dedicated port 9090 (from the prior step)
+
+You run Redis, PgBouncer, Postgres as in-cluster services named:
+
+redis (port 6379)
+
+pgbouncer (port 6432)
+
+postgres-primary (port 5432)
+
+If your service names differ, just change the host in the secrets/args.
+
+1) Kustomize overlay layout
+Create:
+
+k8s/overlays/prod-observability/
+  kustomization.yaml
+
+  redis-exporter-deploy.yaml
+  redis-exporter-svc.yaml
+  redis-exporter-servicemonitor.yaml
+  redis-exporter-netpol.yaml
+  redis-exporter-secret.yaml
+
+  postgres-exporter-deploy.yaml
+  postgres-exporter-svc.yaml
+  postgres-exporter-servicemonitor.yaml
+  postgres-exporter-netpol.yaml
+  postgres-exporter-secret.yaml
+
+  pgbouncer-exporter-deploy.yaml
+  pgbouncer-exporter-svc.yaml
+  pgbouncer-exporter-servicemonitor.yaml
+  pgbouncer-exporter-netpol.yaml
+  pgbouncer-exporter-secret.yaml
+
+  prometheus-rules-tradecentral.yaml
+2) k8s/overlays/prod-observability/kustomization.yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: tradecentral
+
+resources:
+  - redis-exporter-secret.yaml
+  - redis-exporter-deploy.yaml
+  - redis-exporter-svc.yaml
+  - redis-exporter-servicemonitor.yaml
+  - redis-exporter-netpol.yaml
+
+  - postgres-exporter-secret.yaml
+  - postgres-exporter-deploy.yaml
+  - postgres-exporter-svc.yaml
+  - postgres-exporter-servicemonitor.yaml
+  - postgres-exporter-netpol.yaml
+
+  - pgbouncer-exporter-secret.yaml
+  - pgbouncer-exporter-deploy.yaml
+  - pgbouncer-exporter-svc.yaml
+  - pgbouncer-exporter-servicemonitor.yaml
+  - pgbouncer-exporter-netpol.yaml
+
+  - prometheus-rules-tradecentral.yaml
+3) Redis exporter
+3.1 redis-exporter-secret.yaml
+If Redis has no password, keep REDIS_PASSWORD empty.
+
+apiVersion: v1
+kind: Secret
+metadata:
+  name: redis-exporter-secret
+type: Opaque
+stringData:
+  REDIS_ADDR: "redis://redis.tradecentral.svc.cluster.local:6379"
+  REDIS_PASSWORD: ""
+3.2 redis-exporter-deploy.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis-exporter
+  labels:
+    app: redis-exporter
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis-exporter
+  template:
+    metadata:
+      labels:
+        app: redis-exporter
+    spec:
+      containers:
+        - name: redis-exporter
+          # Pin a version in your environment; do not leave ":latest" in production.
+          image: oliver006/redis_exporter:v1.62.0
+          ports:
+            - name: metrics
+              containerPort: 9121
+          envFrom:
+            - secretRef:
+                name: redis-exporter-secret
+          args:
+            - "--redis.addr=$(REDIS_ADDR)"
+            - "--web.listen-address=:9121"
+            # Only set this if you actually use Redis AUTH.
+            - "--redis.password=$(REDIS_PASSWORD)"
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "128Mi"
+            limits:
+              cpu: "200m"
+              memory: "256Mi"
+3.3 redis-exporter-svc.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-exporter
+  labels:
+    app: redis-exporter
+spec:
+  selector:
+    app: redis-exporter
+  ports:
+    - name: metrics
+      port: 9121
+      targetPort: metrics
+3.4 redis-exporter-servicemonitor.yaml
+Adjust the release: label to match your Prometheus Operator selector.
+
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: redis-exporter
+  labels:
+    release: kube-prometheus-stack
+spec:
+  selector:
+    matchLabels:
+      app: redis-exporter
+  namespaceSelector:
+    matchNames:
+      - tradecentral
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 15s
+      scrapeTimeout: 10s
+3.5 redis-exporter-netpol.yaml
+Restrict scraping to the monitoring namespace only.
+
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: redis-exporter-allow-scrape
+spec:
+  podSelector:
+    matchLabels:
+      app: redis-exporter
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - protocol: TCP
+          port: 9121
+4) Postgres exporter
+4.1 postgres-exporter-secret.yaml
+Replace username/password/dbname.
+
+apiVersion: v1
+kind: Secret
+metadata:
+  name: postgres-exporter-secret
+type: Opaque
+stringData:
+  # Format: postgresql://user:pass@host:port/dbname?sslmode=disable
+  DATA_SOURCE_NAME: "postgresql://postgres:REPLACE_ME@postgres-primary.tradecentral.svc.cluster.local:5432/trading?sslmode=disable"
+4.2 postgres-exporter-deploy.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres-exporter
+  labels:
+    app: postgres-exporter
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres-exporter
+  template:
+    metadata:
+      labels:
+        app: postgres-exporter
+    spec:
+      containers:
+        - name: postgres-exporter
+          image: prometheuscommunity/postgres-exporter:v0.15.0
+          ports:
+            - name: metrics
+              containerPort: 9187
+          envFrom:
+            - secretRef:
+                name: postgres-exporter-secret
+          env:
+            # If you want to expose more stats (requires rights):
+            # - name: PG_EXPORTER_DISABLE_SETTINGS_METRICS
+            #   value: "false"
+            - name: PG_EXPORTER_AUTO_DISCOVER_DATABASES
+              value: "false"
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "128Mi"
+            limits:
+              cpu: "250m"
+              memory: "512Mi"
+4.3 postgres-exporter-svc.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-exporter
+  labels:
+    app: postgres-exporter
+spec:
+  selector:
+    app: postgres-exporter
+  ports:
+    - name: metrics
+      port: 9187
+      targetPort: metrics
+4.4 postgres-exporter-servicemonitor.yaml
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: postgres-exporter
+  labels:
+    release: kube-prometheus-stack
+spec:
+  selector:
+    matchLabels:
+      app: postgres-exporter
+  namespaceSelector:
+    matchNames:
+      - tradecentral
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 15s
+      scrapeTimeout: 10s
+4.5 postgres-exporter-netpol.yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: postgres-exporter-allow-scrape
+spec:
+  podSelector:
+    matchLabels:
+      app: postgres-exporter
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - protocol: TCP
+          port: 9187
+5) PgBouncer exporter
+There are multiple PgBouncer exporters in the ecosystem. The manifest below uses a commonly deployed image pattern; pin the tag you prefer after you validate it in your environment.
+
+5.1 pgbouncer-exporter-secret.yaml
+Replace username/password/dbname; note the pgbouncer admin database is commonly pgbouncer.
+
+apiVersion: v1
+kind: Secret
+metadata:
+  name: pgbouncer-exporter-secret
+type: Opaque
+stringData:
+  # Example DSN; adjust to match your PgBouncer auth config.
+  PGBOUNCER_DSN: "postgresql://pgbouncer_user:REPLACE_ME@pgbouncer.tradecentral.svc.cluster.local:6432/pgbouncer?sslmode=disable"
+5.2 pgbouncer-exporter-deploy.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pgbouncer-exporter
+  labels:
+    app: pgbouncer-exporter
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pgbouncer-exporter
+  template:
+    metadata:
+      labels:
+        app: pgbouncer-exporter
+    spec:
+      containers:
+        - name: pgbouncer-exporter
+          # Pin a version you validate. Example image below is a common choice.
+          image: spreaker/prometheus-pgbouncer-exporter:2.0.1
+          ports:
+            - name: metrics
+              containerPort: 9127
+          envFrom:
+            - secretRef:
+                name: pgbouncer-exporter-secret
+          env:
+            - name: PGBOUNCER_EXPORTER_LISTEN_ADDRESS
+              value: "0.0.0.0:9127"
+            - name: PGBOUNCER_EXPORTER_CONNECTION_STRING
+              value: "$(PGBOUNCER_DSN)"
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "128Mi"
+            limits:
+              cpu: "250m"
+              memory: "512Mi"
+5.3 pgbouncer-exporter-svc.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: pgbouncer-exporter
+  labels:
+    app: pgbouncer-exporter
+spec:
+  selector:
+    app: pgbouncer-exporter
+  ports:
+    - name: metrics
+      port: 9127
+      targetPort: metrics
+5.4 pgbouncer-exporter-servicemonitor.yaml
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: pgbouncer-exporter
+  labels:
+    release: kube-prometheus-stack
+spec:
+  selector:
+    matchLabels:
+      app: pgbouncer-exporter
+  namespaceSelector:
+    matchNames:
+      - tradecentral
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 15s
+      scrapeTimeout: 10s
+5.5 pgbouncer-exporter-netpol.yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: pgbouncer-exporter-allow-scrape
+spec:
+  podSelector:
+    matchLabels:
+      app: pgbouncer-exporter
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - protocol: TCP
+          port: 9127
+6) Prometheus alerts (PrometheusRule)
+Create: prometheus-rules-tradecentral.yaml
+
+This focuses on the failure modes that will hurt you at scale: disconnect storms, event loop lag, 5xx surges, DB pool saturation, DB deadlocks, Redis memory pressure.
+
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: tradecentral-rules
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: tradecentral.ws
+      rules:
+        - alert: TradeCentralWsActiveConnectionsDropFast
+          expr: |
+            (sum(ws_active_connections{namespace="tradecentral"})
+             -
+             sum(ws_active_connections{namespace="tradecentral"} offset 2m)) < -2000
+          for: 1m
+          labels:
+            severity: warning
+          annotations:
+            summary: "WS connections dropped sharply (possible disconnect storm)"
+            description: "Active WS connections dropped by >2000 within 2 minutes."
+
+        - alert: TradeCentralWsThroughputHigh
+          expr: |
+            sum(rate(ws_bytes_sent_total{namespace="tradecentral"}[5m])) > 80000000
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "WS egress high"
+            description: "WS egress > ~80MB/s sustained. Check quote subscriptions and batching."
+
+    - name: tradecentral.node
+      rules:
+        - alert: TradeCentralEventLoopLagHigh
+          expr: |
+            max(tradecentral_nodejs_eventloop_lag_seconds{namespace="tradecentral"}) > 0.2
+          for: 2m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Node event loop lag high"
+            description: "Event loop lag > 200ms for 2 minutes. Reduce synchronous work; check CPU/memory."
+
+        - alert: TradeCentralProcessRssHigh
+          expr: |
+            max(tradecentral_process_resident_memory_bytes{namespace="tradecentral"}) > 5.5e+09
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Node RSS high"
+            description: "Process RSS > ~5.5GB; risk of OOM in 6Gi pods. Consider more pods or memory optimization."
+
+    - name: tradecentral.http
+      rules:
+        - alert: TradeCentralHttp5xxRateHigh
+          expr: |
+            (
+              sum(rate(http_requests_total{namespace="tradecentral",status_code=~"5.."}[5m]))
+              /
+              clamp_min(sum(rate(http_requests_total{namespace="tradecentral"}[5m])), 1)
+            ) > 0.02
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "HTTP 5xx rate high"
+            description: "HTTP 5xx rate > 2% for 5 minutes."
+
+        - alert: TradeCentralHttpLatencyP95High
+          expr: |
+            histogram_quantile(
+              0.95,
+              sum by (le) (rate(http_request_duration_seconds_bucket{namespace="tradecentral"}[5m]))
+            ) > 0.75
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "HTTP p95 latency high"
+            description: "Overall HTTP p95 latency > 750ms for 5 minutes."
+
+    - name: tradecentral.db
+      rules:
+        - alert: TradeCentralPgBouncerClientWaiting
+          expr: |
+            sum(pgbouncer_pools_client_waiting{namespace="tradecentral"}) > 0
+          for: 2m
+          labels:
+            severity: warning
+          annotations:
+            summary: "PgBouncer clients waiting (pool saturation)"
+            description: "Clients are waiting for a DB connection. Increase pool size or reduce DB concurrency."
+
+        - alert: TradeCentralPostgresDeadlocks
+          expr: |
+            increase(pg_stat_database_deadlocks{namespace="tradecentral"}[10m]) > 0
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Postgres deadlocks detected"
+            description: "Deadlocks occurred in the last 10 minutes. Review transaction ordering and indexes."
+
+        - alert: TradeCentralPostgresConnectionsHigh
+          expr: |
+            sum(pg_stat_activity_count{namespace="tradecentral"}) > 300
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Postgres connections high"
+            description: "Active connections > 300. Ensure PgBouncer is in use and app pool settings are sane."
+
+    - name: tradecentral.redis
+      rules:
+        - alert: TradeCentralRedisMemoryHigh
+          expr: |
+            sum(redis_memory_used_bytes{namespace="tradecentral"}) > 2.5e+09
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Redis memory high"
+            description: "Redis memory > 2.5GB sustained. Check quote snapshot caching and pub/sub usage."
+
+        - alert: TradeCentralRedisRejectedConnections
+          expr: |
+            increase(redis_rejected_connections_total{namespace="tradecentral"}[10m]) > 0
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Redis rejected connections"
+            description: "Redis is rejecting connections. Increase limits or investigate resource pressure."
+Notes:
+
+The numeric thresholds are sensible starting points for your earlier sizing (6Gi pods, Redis 2–4Gi, PG 8vCPU/32Gi). You can tighten them after your first load test.
+
+7) Quick verification commands
+After applying the overlay:
+
+kubectl apply -k k8s/overlays/prod-observability/
+Confirm scrapes:
+
+kubectl -n tradecentral get servicemonitor
+kubectl -n tradecentral get svc | egrep "exporter|metrics"
+Spot-check one exporter:
+
+kubectl -n tradecentral port-forward svc/redis-exporter 9121:9121
+curl -s http://127.0.0.1:9121/metrics | head
+Confirm PrometheusRule loaded:
+
+kubectl -n tradecentral get prometheusrule tradecentral-rules -o yaml | head -n 40
+8) Next “PROCEED” step (recommended)
+If you reply “PROCEED” again, I will produce a DB & Cache Grafana dashboard JSON that is aligned to these exporter metrics (with panels for: Redis latency/ops/mem fragmentation, PgBouncer pool saturation & wait time, Postgres locks, bgwriter, conflicts, deadlocks, cache hit ratio, TPS, and long transactions).
+
+

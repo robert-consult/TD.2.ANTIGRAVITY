@@ -13,6 +13,9 @@
     "db:schema:dump": "tsx scripts/dbDumpSchema.ts",
     "db:push": "npm run db:ensure",
     "db:seed": "tsx db/seed.ts",
+    "db:bootstrap:drizzle": "dotenv -e .env -- tsx scripts/drizzleBootstrap.ts",
+    "db:migrate:drizzle": "dotenv -e .env -- tsx scripts/drizzleMigrate.ts",
+    "db:generate": "dotenv -e .env -- drizzle-kit generate",
     "audit:activity": "tsx scripts/activityAuditVerify.ts"
   },
   "dependencies": {

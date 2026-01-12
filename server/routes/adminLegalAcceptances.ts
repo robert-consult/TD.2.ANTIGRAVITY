@@ -384,6 +384,7 @@ adminLegalAcceptancesRouter.get("/export.csv", async (req, res) => {
         addendumSha256: legalAcceptances.addendumSha256,
         combinedSha256: legalAcceptances.combinedSha256,
         acceptedAt: legalAcceptances.acceptedAt,
+        acceptedAtMs: legalAcceptances.acceptedAtMs,
         ipAddress: legalAcceptances.ipAddress,
         userAgent: legalAcceptances.userAgent,
         ledgerSeq: legalAcceptances.ledgerSeq,

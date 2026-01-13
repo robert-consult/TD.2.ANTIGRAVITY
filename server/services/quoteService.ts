@@ -7,6 +7,7 @@ import { db } from "@db";
 import { quotes } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import { isMarketOpenForSymbol } from "./marketHours";
+import { getQuote, getValkeyQuoteRows } from "./quoteHub";
 
 // Quote freshness: 5 minutes default to accommodate 1Forge refresh intervals
 const STALE_AFTER_MS = Number(process.env.QUOTE_STALE_AFTER_MS ?? 300_000);
@@ -37,6 +38,29 @@ export type ExecutionQuote = {
 // Get a fresh database connection for each query to avoid locking issues
 export async function getLatestQuoteRow(symbol: string): Promise<any | null> {
   const sym = normalizeSymbol(symbol);
+  const hubQuote = getQuote(sym);
+  if (hubQuote) {
+    return {
+      symbol: sym,
+      bid: hubQuote.bid,
+      ask: hubQuote.ask,
+      price: hubQuote.price,
+      lastApiUpdate: hubQuote.lastApiUpdate,
+      isStale: hubQuote.isStale,
+    };
+  }
+  const valkeyRows = await getValkeyQuoteRows([sym]);
+  if (valkeyRows.length) {
+    const cached = valkeyRows[0];
+    return {
+      symbol: sym,
+      bid: cached.bid,
+      ask: cached.ask,
+      price: cached.price,
+      lastApiUpdate: cached.lastApiUpdate,
+      isStale: cached.isStale,
+    };
+  }
   const row = await db.query.quotes.findFirst({
     where: eq(quotes.symbol, sym),
   });

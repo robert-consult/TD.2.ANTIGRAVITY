@@ -3,50 +3,39 @@ import { useEffect } from "react";
 import { apiRequest } from "@/lib/queryClient";
 import { useAuth } from "./use-auth";
 import { useToast } from "./use-toast";
-import { useWebSocket } from "./use-websocket";
+import { useLiveUpdates } from "@/live/LiveUpdatesProvider";
 
 export function useTrades() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const { user } = useAuth();
 
-  // Build WebSocket URL
-  const wsUrl =
-    (window.location.protocol === "https:" ? "wss://" : "ws://") +
-    window.location.host +
-    "/ws";
+  const { isConnected: isTradeWsConnected, sendMessage, subscribe } = useLiveUpdates();
 
-  // Connect to WebSocket for live trade updates
-  // Server filters by userId but also sends to unauthenticated clients for new tabs
-  const { isConnected: isTradeWsConnected, sendMessage } = useWebSocket(wsUrl, {
-    onMessage: (message) => {
-      if (!message || typeof message !== "object") return;
-
-      if (message.type === "trades:updated") {
-        // Check if this message is for our user (or if no userId filter is present)
-        // This handles: 1) matching userId, 2) no userId in message, 3) user not yet loaded
-        const messageUserId = message.userId;
-        const currentUserId = user?.id;
-        
-        // Refetch immediately if: no filter in message, or we don't know our userId yet, or it matches
-        if (!messageUserId || !currentUserId || messageUserId === currentUserId) {
-          // Use refetchQueries for instant UI updates on trade close/open
-          queryClient.refetchQueries({ queryKey: ["/api/trades"], type: "active" });
-          queryClient.refetchQueries({ queryKey: ["/api/trades/open"], type: "active" });
-          queryClient.refetchQueries({ queryKey: ["/api/trades/pending"], type: "active" });
-          queryClient.refetchQueries({ queryKey: ["/api/auth/current-user"], type: "active" });
-          queryClient.refetchQueries({ queryKey: ["/api/account/summary"], type: "active" });
-        }
-      }
-    },
-  });
-
-  // Send auth info to server so it can filter by userId
   useEffect(() => {
-    if (user && sendMessage) {
-      sendMessage({ type: "auth", userId: user.id });
-    }
-  }, [user, sendMessage]);
+    if (!user || !isTradeWsConnected) return;
+    sendMessage({ type: "trades:subscribe" });
+    return () => {
+      sendMessage({ type: "trades:unsubscribe" });
+    };
+  }, [user?.id, isTradeWsConnected, sendMessage]);
+
+  useEffect(() => {
+    return subscribe((message) => {
+      if (!message || typeof message !== "object") return;
+      if (message.type !== "trades:updated" && message.type !== "trades:update") return;
+
+      const messageUserId = message.userId;
+      const currentUserId = user?.id;
+      if (!messageUserId || !currentUserId || messageUserId === currentUserId) {
+        queryClient.refetchQueries({ queryKey: ["/api/trades"], type: "active" });
+        queryClient.refetchQueries({ queryKey: ["/api/trades/open"], type: "active" });
+        queryClient.refetchQueries({ queryKey: ["/api/trades/pending"], type: "active" });
+        queryClient.refetchQueries({ queryKey: ["/api/auth/current-user"], type: "active" });
+        queryClient.refetchQueries({ queryKey: ["/api/account/summary"], type: "active" });
+      }
+    });
+  }, [queryClient, subscribe, user?.id]);
 
   // Get all trades
   const { 

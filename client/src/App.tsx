@@ -18,6 +18,7 @@ import { installAxiosIdentityHeaders } from "./lib/axiosIdentity";
 import { startGriftPing } from "./lib/griftPing";
 import { I18nProvider } from "@/i18n/I18nProvider";
 import { useI18n } from "@/i18n";
+import { LiveUpdatesProvider } from "@/live/LiveUpdatesProvider";
 
 installAxiosIdentityHeaders();
 
@@ -119,8 +120,10 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
         <I18nProvider>
-          <AppRoutes />
-          <Toaster />
+          <LiveUpdatesProvider>
+            <AppRoutes />
+            <Toaster />
+          </LiveUpdatesProvider>
         </I18nProvider>
       </AuthProvider>
     </QueryClientProvider>

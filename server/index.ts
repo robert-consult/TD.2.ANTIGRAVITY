@@ -14,6 +14,8 @@ import { getIp2AsnDatasetPath, maybeImportIp2AsnDataset } from "./grift/griftIp2
 import { startI18nWorker } from "./i18n/worker";
 import { maybeIngestBuiltManifest } from "./i18n/service";
 import { dbDialect, isPostgres } from "@db/config";
+import { dbClient } from "@db";
+import { getValkey } from "./services/valkey";
 import { withGriftClient } from "./grift/griftDb";
 
 // Validate required environment variables at startup
@@ -123,6 +125,41 @@ app.get("/", (req, res, next) => {
   next();
 });
 
+app.get("/health", (_req, res) => {
+  res.status(200).json({ ok: true });
+});
+
+app.get("/ready", async (_req, res) => {
+  const checks = {
+    db: false,
+    valkey: false,
+  };
+  try {
+    await dbClient.query("SELECT 1");
+    checks.db = true;
+  } catch {
+    checks.db = false;
+  }
+
+  const needsValkey = Boolean(process.env.VALKEY_URL);
+  if (!needsValkey) {
+    checks.valkey = true;
+  } else {
+    try {
+      const v = getValkey();
+      if (v) {
+        await v.ping();
+        checks.valkey = true;
+      }
+    } catch {
+      checks.valkey = false;
+    }
+  }
+
+  const ok = checks.db && checks.valkey;
+  res.status(ok ? 200 : 503).json({ ok, ...checks });
+});
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
@@ -192,6 +229,16 @@ app.use((req, res, next) => {
     // DEFERRED INITIALIZATION: Run expensive operations AFTER server is listening
     // This ensures health checks pass quickly during deployment
     setImmediate(async () => {
+      if (roles.has("api") || roles.has("ws")) {
+        try {
+          const { bootstrapQuoteHub } = await import("./services/quoteHub");
+          const loaded = await bootstrapQuoteHub();
+          log(`[QuoteHub] Bootstrap ${loaded ? "loaded" : "skipped"} from Valkey snapshot`);
+        } catch (e) {
+          console.warn("[QuoteHub] Bootstrap failed:", e);
+        }
+      }
+
       // Ensure schema columns exist before starting cron/feeds
       if (!isPostgres) {
         if (RUN_WORKER_TASKS) {

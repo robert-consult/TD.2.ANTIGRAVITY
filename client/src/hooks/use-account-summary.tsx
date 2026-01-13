@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "./use-auth";
-import { useWebSocket } from "./use-websocket";
+import { useLiveUpdates } from "@/live/LiveUpdatesProvider";
 
 export interface AccountSummary {
   balance: number;
@@ -20,30 +20,28 @@ export function useAccountSummary() {
   const queryClient = useQueryClient();
   const { user } = useAuth();
 
-  const wsUrl =
-    (window.location.protocol === "https:" ? "wss://" : "ws://") +
-    window.location.host +
-    "/ws";
+  const { isConnected: isWsConnected, sendMessage, subscribe } = useLiveUpdates();
 
-  const { isConnected: isWsConnected, sendMessage } = useWebSocket(wsUrl, {
-    onMessage: (message) => {
+  useEffect(() => {
+    if (!user || !isWsConnected) return;
+    sendMessage({ type: "account:subscribe" });
+    return () => {
+      sendMessage({ type: "account:unsubscribe" });
+    };
+  }, [user?.id, isWsConnected, sendMessage]);
+
+  useEffect(() => {
+    return subscribe((message) => {
       if (!message || typeof message !== "object") return;
-      if (message.type !== "account:updated") return;
+      if (message.type !== "account:updated" && message.type !== "account:update") return;
 
       const messageUserId = message.userId;
       const currentUserId = user?.id;
       if (!messageUserId || !currentUserId || messageUserId === currentUserId) {
-        // Use refetchQueries for instant UI updates
         queryClient.refetchQueries({ queryKey: ["/api/account/summary"], type: "active" });
       }
-    },
-  });
-
-  useEffect(() => {
-    if (user && sendMessage) {
-      sendMessage({ type: "auth", userId: user.id });
-    }
-  }, [user, sendMessage]);
+    });
+  }, [queryClient, subscribe, user?.id]);
   
   const query = useQuery<AccountSummary>({
     queryKey: ["/api/account/summary"],

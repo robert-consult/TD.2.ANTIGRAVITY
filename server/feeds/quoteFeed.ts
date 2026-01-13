@@ -10,6 +10,7 @@ import { recalcAccount } from "../recalcAccount";
 import { onQuotesUpdated } from "../engine/orderEngine";
 import { computeSessionDayForQuote, ensureMarketDailyCloseTable } from "../utils/marketDailyClose";
 import { publishLiveEvent } from "../services/liveBus";
+import { getValkey } from "../services/valkey";
 
 const API_KEY = process.env.FORGE_KEY;
 
@@ -17,10 +18,18 @@ const REST_LIMIT_PER_DAY = 100000;
 const MAX_PER_REQ = 100;
 const DEFAULT_POLL_MS = 870;
 const DEFAULT_STALE_MS = 30000;
+const QUOTE_SNAPSHOT_KEY = process.env.QUOTE_SNAPSHOT_KEY ?? "quotes:latest:v1";
+const QUOTE_SNAPSHOT_TTL_SEC = Number(process.env.QUOTE_SNAPSHOT_TTL_SEC ?? 30);
+const QUOTE_SYMBOL_TTL_SEC = Number(process.env.QUOTE_SYMBOL_TTL_SEC ?? 60);
 const DEFAULT_SYMBOL_REFRESH_MS = 30000;
 const SYMBOL_REFRESH_MS = Number(process.env.QUOTE_SYMBOL_REFRESH_MS ?? DEFAULT_SYMBOL_REFRESH_MS);
 const SYMBOL_REFRESH_INTERVAL_MS =
   Number.isFinite(SYMBOL_REFRESH_MS) && SYMBOL_REFRESH_MS > 0 ? SYMBOL_REFRESH_MS : DEFAULT_SYMBOL_REFRESH_MS;
+const QUOTE_DB_WRITE_MODE = String(process.env.QUOTE_DB_WRITE_MODE ?? "off").toLowerCase();
+const QUOTE_DB_WRITE_INTERVAL_MS = Number(process.env.QUOTE_DB_WRITE_INTERVAL_MS ?? 60_000);
+const DAILY_CLOSE_WRITE_INTERVAL_MS = Number(process.env.DAILY_CLOSE_WRITE_INTERVAL_MS ?? 60_000);
+const ACCOUNT_RECALC_THROTTLE_MS = Number(process.env.ACCOUNT_RECALC_THROTTLE_MS ?? 3000);
+const ACCOUNT_RECALC_BATCH_INTERVAL_MS = Number(process.env.ACCOUNT_RECALC_BATCH_INTERVAL_MS ?? 1000);
 
 let dynamicConfig = {
   pollIntervalMs: DEFAULT_POLL_MS,
@@ -31,6 +40,11 @@ let dynamicConfig = {
 
 let pollTimerId: ReturnType<typeof setTimeout> | null = null;
 let lastDynamicSetRefresh = 0;
+let quotesSeq = 0;
+let lastQuoteDbWriteMs = 0;
+let lastDailyCloseWriteMs = 0;
+let lastAccountBatchMs = 0;
+const lastAccountRecalcByUser = new Map<number, number>();
 
 // In-memory cache for quote snapshots with timestamps
 interface QuoteSnapshot {
@@ -223,6 +237,76 @@ function buildFallbackQuotes(symbols: string[]) {
   return [...cached, ...simulated];
 }
 
+type LiveQuoteRow = {
+  symbol: string;
+  bid: number | null;
+  ask: number | null;
+  price: number | null;
+  lastApiUpdate: number;
+  isStale: boolean;
+};
+
+function toLiveQuoteRows(rows: any[], asOf: number, isStaleDefault: boolean): LiveQuoteRow[] {
+  return rows
+    .map((q) => {
+      if (!q?.symbol) return null;
+      const bid = typeof q.bid === "number" ? q.bid : null;
+      const ask = typeof q.ask === "number" ? q.ask : null;
+      const price =
+        typeof q.price === "number"
+          ? q.price
+          : bid != null && ask != null
+          ? (bid + ask) / 2
+          : null;
+      const lastApiUpdateRaw = typeof q.lastUpdated === "number" ? q.lastUpdated : typeof q.lastApiUpdate === "number" ? q.lastApiUpdate : asOf;
+      const lastApiUpdate = lastApiUpdateRaw < 1e12 ? lastApiUpdateRaw * 1000 : lastApiUpdateRaw;
+      return {
+        symbol: String(q.symbol),
+        bid,
+        ask,
+        price,
+        lastApiUpdate,
+        isStale: Boolean(q.isStale ?? isStaleDefault),
+      };
+    })
+    .filter((row): row is LiveQuoteRow => Boolean(row && row.symbol));
+}
+
+async function persistSnapshotToValkey(rows: LiveQuoteRow[], meta: { seq: number; asOf: number; source: string }) {
+  const v = getValkey();
+  if (!v) return;
+  const snapshotTtl = Number.isFinite(QUOTE_SNAPSHOT_TTL_SEC) && QUOTE_SNAPSHOT_TTL_SEC > 0 ? QUOTE_SNAPSHOT_TTL_SEC : 30;
+  const symbolTtl = Number.isFinite(QUOTE_SYMBOL_TTL_SEC) && QUOTE_SYMBOL_TTL_SEC > 0 ? QUOTE_SYMBOL_TTL_SEC : 60;
+  const payload = {
+    seq: meta.seq,
+    asOf: meta.asOf,
+    source: meta.source,
+    rows,
+  };
+  try {
+    const pipeline = v.pipeline();
+    pipeline.set(QUOTE_SNAPSHOT_KEY, JSON.stringify(payload), "EX", snapshotTtl);
+    for (const row of rows) {
+      pipeline.set(`q:v1:${row.symbol}`, JSON.stringify(row), "EX", symbolTtl);
+    }
+    await pipeline.exec();
+  } catch {
+    // ignore cache write failures
+  }
+}
+
+async function publishQuoteUpdate(rows: any[], source: string, isStaleDefault: boolean) {
+  const asOf = Date.now();
+  const seq = ++quotesSeq;
+  const liveRows = toLiveQuoteRows(rows, asOf, isStaleDefault);
+  if (!liveRows.length) return;
+  publishLiveEvent({
+    type: "quotes:update",
+    payload: { seq, asOf, source, rows: liveRows },
+  });
+  await persistSnapshotToValkey(liveRows, { seq, asOf, source });
+}
+
 async function refreshDynamicSet(force = false) {
   const now = Date.now();
   if (!force && now - lastDynamicSetRefresh < SYMBOL_REFRESH_INTERVAL_MS) return;
@@ -231,17 +315,22 @@ async function refreshDynamicSet(force = false) {
   lastDynamicSetRefresh = now;
 }
 
+function uniqueSymbols(rows: any[]): string[] {
+  const set = new Set<string>();
+  for (const row of rows) {
+    if (!row?.symbol) continue;
+    set.add(String(row.symbol));
+  }
+  return [...set];
+}
+
 async function persistQuotes(rows: any[], isStale: boolean) {
   if (!rows.length) return;
   const client = await dbClient.connect();
-  const affectedSymbols: string[] = [];
   const nowMs = Date.now();
   const nowSec = Math.floor(nowMs / 1000);
   try {
     await client.query("BEGIN");
-
-    await ensureMarketDailyCloseTable();
-
     for (const q of rows) {
       if (!q?.symbol) continue;
       const lastUpdatedMs = typeof q.lastUpdated === "number" ? q.lastUpdated : nowMs;
@@ -269,34 +358,7 @@ async function persistQuotes(rows: any[], isStale: boolean) {
           lastApiUpdateMs,
         ],
       );
-
-      try {
-        const bid = typeof q.bid === "number" ? q.bid : null;
-        const ask = typeof q.ask === "number" ? q.ask : null;
-        const mid = bid != null && ask != null ? (bid + ask) / 2 : typeof q.price === "number" ? q.price : null;
-        if (Number.isFinite(mid) && mid > 0) {
-          const sessionDay = computeSessionDayForQuote(lastUpdatedMs, {
-            rolloverTz: dynamicConfig.rolloverTz,
-            rolloverTime: dynamicConfig.rolloverTime,
-          });
-          await client.query(
-            `
-            INSERT INTO market_daily_close (symbol, session_day, close, close_ts_ms, updated_at)
-            VALUES ($1, $2, $3, $4, $5)
-            ON CONFLICT (symbol, session_day) DO NOTHING
-            `,
-            [q.symbol, sessionDay, mid, lastUpdatedMs, nowSec],
-          );
-        }
-      } catch (e) {
-        console.warn("[market_daily_close] upsert failed:", e);
-      }
-
-      if (!affectedSymbols.includes(q.symbol)) {
-        affectedSymbols.push(q.symbol);
-      }
     }
-
     await client.query("COMMIT");
   } catch (error) {
     await client.query("ROLLBACK");
@@ -304,32 +366,101 @@ async function persistQuotes(rows: any[], isStale: boolean) {
   } finally {
     client.release();
   }
+}
+
+async function persistDailyClose(rows: any[]) {
+  if (!rows.length) return;
+  const client = await dbClient.connect();
+  const nowMs = Date.now();
+  const nowSec = Math.floor(nowMs / 1000);
+  try {
+    await client.query("BEGIN");
+    for (const q of rows) {
+      if (!q?.symbol) continue;
+      const lastUpdatedMs = typeof q.lastUpdated === "number" ? q.lastUpdated : nowMs;
+      const bid = typeof q.bid === "number" ? q.bid : null;
+      const ask = typeof q.ask === "number" ? q.ask : null;
+      const mid = bid != null && ask != null ? (bid + ask) / 2 : typeof q.price === "number" ? q.price : null;
+      if (!Number.isFinite(mid) || (mid as number) <= 0) continue;
+      const sessionDay = computeSessionDayForQuote(lastUpdatedMs, {
+        rolloverTz: dynamicConfig.rolloverTz,
+        rolloverTime: dynamicConfig.rolloverTime,
+      });
+      await client.query(
+        `
+        INSERT INTO market_daily_close (symbol, session_day, close, close_ts_ms, updated_at)
+        VALUES ($1, $2, $3, $4, $5)
+        ON CONFLICT (symbol, session_day) DO NOTHING
+        `,
+        [q.symbol, sessionDay, mid, lastUpdatedMs, nowSec],
+      );
+    }
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    console.warn("[market_daily_close] upsert failed:", error);
+  } finally {
+    client.release();
+  }
+}
+
+async function maybePersistDailyClose(rows: any[]) {
+  if (!rows.length) return;
+  if (!Number.isFinite(DAILY_CLOSE_WRITE_INTERVAL_MS) || DAILY_CLOSE_WRITE_INTERVAL_MS <= 0) return;
+  const now = Date.now();
+  if (now - lastDailyCloseWriteMs < DAILY_CLOSE_WRITE_INTERVAL_MS) return;
+  lastDailyCloseWriteMs = now;
+  await persistDailyClose(rows);
+}
+
+async function maybePersistQuotes(rows: any[], isStale: boolean) {
+  if (!rows.length) return;
+  const mode = QUOTE_DB_WRITE_MODE;
+  if (mode === "off" || mode === "false" || mode === "0") return;
+  const now = Date.now();
+  if (mode === "interval") {
+    if (!Number.isFinite(QUOTE_DB_WRITE_INTERVAL_MS) || QUOTE_DB_WRITE_INTERVAL_MS <= 0) return;
+    if (now - lastQuoteDbWriteMs < QUOTE_DB_WRITE_INTERVAL_MS) return;
+  }
+  lastQuoteDbWriteMs = now;
+  await persistQuotes(rows, isStale);
+}
+
+async function notifyAccountsForSymbols(rows: any[], reason: string) {
+  const affectedSymbols = uniqueSymbols(rows);
+  if (!affectedSymbols.length) return;
+  const now = Date.now();
+  if (Number.isFinite(ACCOUNT_RECALC_BATCH_INTERVAL_MS) && ACCOUNT_RECALC_BATCH_INTERVAL_MS > 0) {
+    if (now - lastAccountBatchMs < ACCOUNT_RECALC_BATCH_INTERVAL_MS) return;
+  }
+  lastAccountBatchMs = now;
 
   try {
-    if (affectedSymbols.length > 0) {
-      const userIdsRes = await dbClient.query(
-        `
-        SELECT DISTINCT t.user_id AS "userId"
-        FROM trades t
-        JOIN symbol_configs sc ON t.symbol_id = sc.id
-        WHERE t.status = 'OPEN' AND sc.symbol = ANY($1::text[])
-        `,
-        [affectedSymbols],
-      );
-      const userIds = userIdsRes.rows.map((r: any) => Number(r.userId)).filter((n: number) => Number.isFinite(n));
-      for (const userId of userIds) {
-        try {
-          void recalcAccount(userId, { emit: true, reason: "QUOTE_TICK" });
-        } catch (err) {
-          console.error(`Error recalculating account ${userId}:`, err);
-        }
+    const userIdsRes = await dbClient.query(
+      `
+      SELECT DISTINCT t.user_id AS "userId"
+      FROM trades t
+      JOIN symbol_configs sc ON t.symbol_id = sc.id
+      WHERE t.status = 'OPEN' AND sc.symbol = ANY($1::text[])
+      `,
+      [affectedSymbols],
+    );
+    const userIds = userIdsRes.rows.map((r: any) => Number(r.userId)).filter((n: number) => Number.isFinite(n));
+    for (const userId of userIds) {
+      const last = lastAccountRecalcByUser.get(userId) ?? 0;
+      if (Number.isFinite(ACCOUNT_RECALC_THROTTLE_MS) && ACCOUNT_RECALC_THROTTLE_MS > 0) {
+        if (now - last < ACCOUNT_RECALC_THROTTLE_MS) continue;
+      }
+      lastAccountRecalcByUser.set(userId, now);
+      try {
+        void recalcAccount(userId, { emit: true, reason });
+      } catch (err) {
+        console.error(`Error recalculating account ${userId}:`, err);
       }
     }
   } catch (error) {
     console.error("[Feed] Error processing account updates:", error);
   }
-
-  publishLiveEvent({ type: "quotes:updated" });
 }
 
 async function pullBatch() {
@@ -344,7 +475,10 @@ async function pullBatch() {
     if (!API_KEY) {
       const simulated = generateSimulatedQuotes(slice);
       updateSnapshotCache(simulated);
-      await persistQuotes(simulated, false);
+      await maybePersistDailyClose(simulated);
+      await maybePersistQuotes(simulated, false);
+      await publishQuoteUpdate(simulated, "simulated", false);
+      await notifyAccountsForSymbols(simulated, "QUOTE_TICK");
       await onQuotesUpdated(
         simulated.map((q: any) => ({
           symbol: q.symbol,
@@ -395,7 +529,10 @@ async function pullBatch() {
         .filter((q: any) => q.symbol && q.price);
 
       updateSnapshotCache(transformedData);
-      await persistQuotes(transformedData, false);
+      await maybePersistDailyClose(transformedData);
+      await maybePersistQuotes(transformedData, false);
+      await publishQuoteUpdate(transformedData, "1forge", false);
+      await notifyAccountsForSymbols(transformedData, "QUOTE_TICK");
       await onQuotesUpdated(
         transformedData.map((q: any) => ({
           symbol: q.symbol,
@@ -415,7 +552,10 @@ async function pullBatch() {
         continue;
       }
       updateSnapshotCache(fallbackQuotes, { markSuccess: false });
-      await persistQuotes(fallbackQuotes, true);
+      await maybePersistDailyClose(fallbackQuotes);
+      await maybePersistQuotes(fallbackQuotes, true);
+      await publishQuoteUpdate(fallbackQuotes, "fallback_cache", true);
+      await notifyAccountsForSymbols(fallbackQuotes, "QUOTE_STALE");
       await onQuotesUpdated(
         fallbackQuotes.map((q: any) => ({
           symbol: q.symbol,

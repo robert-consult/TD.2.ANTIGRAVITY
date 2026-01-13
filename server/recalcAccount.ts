@@ -1,8 +1,9 @@
-import { db, dbClient } from '../db/index';
+import { db } from '../db/index';
 import { eq, and, inArray } from 'drizzle-orm';
 import { users, trades, quotes } from '../shared/schema';
 import { requiredMargin, unrealizedPnl, updateFxRates } from './lib/margin';
 import { publishLiveEvent } from './services/liveBus';
+import { getQuoteSnapshot, getValkeyQuoteRows } from './services/quoteHub';
 
 // Staleness threshold in milliseconds (5 minutes)
 const STALE_THRESHOLD_MS = 5 * 60 * 1000;
@@ -117,19 +118,49 @@ export async function recalcAccount(
       return result;
     }
     
-    // Check if quotes table exists (safety for fresh installs)
-    let hasQuotesTable = true;
-    try {
-      const result = await dbClient.query("SELECT to_regclass('public.quotes') as table_name");
-      hasQuotesTable = Boolean(result.rows?.[0]?.table_name);
-    } catch (error) {
-      console.error('Error checking for quotes table:', error);
-      hasQuotesTable = false;
+    // Cache quotes with full bid/ask/mid data per symbol
+    const quoteCache = new Map<string, QuoteData>();
+    const staleSymbols: string[] = [];
+    const now = Date.now();
+    
+    // Collect all required symbols (trade symbols + FX reference pairs)
+    const tradeSymbols = Array.from(
+      new Set(openTrades.map((t) => String(t.symbol.symbol).replace("/", "").toUpperCase()))
+    );
+    const allRequiredSymbols = Array.from(new Set([...tradeSymbols, ...FX_REFERENCE_PAIRS]));
+    
+    // Prefer in-memory QuoteHub or Valkey snapshot; fall back to DB only if needed.
+    let quoteRows: any[] = [];
+    const hubSnapshot = getQuoteSnapshot(allRequiredSymbols);
+    if (hubSnapshot.rows.length) {
+      quoteRows = hubSnapshot.rows;
     }
 
-    if (!hasQuotesTable) {
-      // No quotes table = all pricing is stale
-      const allSymbols = Array.from(new Set(openTrades.map(t => t.symbol.symbol)));
+    if (!quoteRows.length) {
+      quoteRows = await getValkeyQuoteRows(allRequiredSymbols);
+    }
+
+    if (!quoteRows.length) {
+      try {
+        quoteRows = await db
+          .select({
+            symbol: quotes.symbol,
+            price: quotes.price,
+            bid: quotes.bid,
+            ask: quotes.ask,
+            updatedAt: quotes.updatedAt,
+            isStale: quotes.isStale,
+            lastApiUpdate: quotes.lastApiUpdate,
+          })
+          .from(quotes)
+          .where(inArray(quotes.symbol, allRequiredSymbols));
+      } catch (error) {
+        console.error('Error fetching quotes for recalc:', error);
+        quoteRows = [];
+      }
+    }
+
+    if (!quoteRows.length) {
       const result: RecalcResult = {
         balance,
         usedMargin: user.usedMargin ?? 0,
@@ -139,7 +170,7 @@ export async function recalcAccount(
         marginLevel: null,
         openPositions: openTrades.length,
         pricingStale: true,
-        staleSymbols: allSymbols,
+        staleSymbols: tradeSymbols,
         asOf,
       };
       if (opts?.emit) {
@@ -156,29 +187,6 @@ export async function recalcAccount(
       }
       return result;
     }
-    
-    // Cache quotes with full bid/ask/mid data per symbol
-    const quoteCache = new Map<string, QuoteData>();
-    const staleSymbols: string[] = [];
-    const now = Date.now();
-    
-    // Collect all required symbols (trade symbols + FX reference pairs)
-    const tradeSymbols = Array.from(new Set(openTrades.map(t => t.symbol.symbol)));
-    const allRequiredSymbols = Array.from(new Set([...tradeSymbols, ...FX_REFERENCE_PAIRS]));
-    
-    // Fetch all quotes at once
-    const quoteRows = await db
-      .select({
-        symbol: quotes.symbol,
-        price: quotes.price,
-        bid: quotes.bid,
-        ask: quotes.ask,
-        updatedAt: quotes.updatedAt,
-        isStale: quotes.isStale,
-        lastApiUpdate: quotes.lastApiUpdate,
-      })
-      .from(quotes)
-      .where(inArray(quotes.symbol, allRequiredSymbols));
 
     for (const row of quoteRows) {
       const symbol = String(row.symbol);
@@ -187,7 +195,7 @@ export async function recalcAccount(
       const price = Number(row.price);
       const mid = (bid !== null && ask !== null) ? (bid + ask) / 2 : price;
 
-      const lastApiRaw = row.lastApiUpdate ?? row.updatedAt;
+      const lastApiRaw = row.lastApiUpdate ?? row.last_api_update ?? row.updatedAt ?? row.updated_at;
       const lastApiMs = lastApiRaw ? (lastApiRaw < 1e12 ? lastApiRaw * 1000 : lastApiRaw) : 0;
       const isStale = Boolean(row.isStale) || !lastApiMs || (now - lastApiMs > STALE_THRESHOLD_MS);
 

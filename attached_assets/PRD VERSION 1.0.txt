@@ -1,0 +1,1162 @@
+
+According to a set of project documents dated January 12, 2026 (including the “Gemini PRD v2.0” and the deep-context migration/compute/mobile notes), the current trajectory is a WebSocket-first, role-split Node/Express platform targeting Linux bare metal + K3s + Postgres + PgBouncer + Valkey, with Capacitor wrappers now and a future path to native Android/iOS. 
+
+GEMINI PRD MIGRATION AND VERSIO…
+
+GEMINI PRD MIGRATION AND VERSIO…
+
+Below are (1) a critique of the Gemini PRD and (2) a unified, deep-context PRD designed for a coder agent to implement, integrate, and validate production readiness locally and on K3s—while optimizing compute and bandwidth for 100k+ concurrent users.
+
+Source corpus used (your uploaded docs)
+
+GEMINI PRD MIGRATION AND VERSIO…
+
+ Gemini PRD v2.0
+
+TRADE HUB - MIGRATION ENVIRONME…
+
+ Migration + environment + efficient compute + Capacitor refactor doc
+
+TRADE HUB - Cost-effective Stac…
+
+ Cost-effective stack implementation doc
+
+COMPUTE RESOURCES ESTIMATION AN…
+
+ Compute resources estimation + K8s tuning + HPA + load tests
+
+WEB NATIVE TO ANDROID-IOS
+
+ Web native → Android/iOS (WS auth + mobile constraints)
+
+1) Critique of “Gemini PRD v2.0” (what’s strong, what must be corrected)
+What it gets right (keep)
+
+Correct “anti-polling” direction: it explicitly targets eliminating client polling storms and moving to a Pub/Sub + WS fanout architecture. 
+
+GEMINI PRD MIGRATION AND VERSIO…
+
+Correct production shape: api-ws replicas + singleton ingestor + singleton/worker pattern, backed by Postgres + PgBouncer + Valkey. 
+
+GEMINI PRD MIGRATION AND VERSIO…
+
+Correct cross-pod live event concept: a Valkey Pub/Sub “Live Bus” re-emitted locally to WS handlers (right primitive for K8s fanout). 
+
+GEMINI PRD MIGRATION AND VERSIO…
+
+What is missing or risky (must be added for “agent-grade” execution)
+
+WS protocol is under-specified: it doesn’t fully define message types, sequencing, replay rules, snapshot/delta semantics, per-scope authorization, backpressure, heartbeats, reconnect behavior, and versioning. Without this, agents implement incompatible clients/servers and you get reconnect storms at scale.
+
+Mobile auth reality is under-handled: the PRD mentions Capacitor but does not lock down the canonical auth method(s) for mobile WS (session cookies vs token query param) and how to rotate/revoke tokens. Your mobile WS section in other docs does tighten this and should be the standard. 
+
+WEB NATIVE TO ANDROID-IOS
+
+WEB NATIVE TO ANDROID-IOS
+
+Migration plan lacks “cutover mechanics”: it doesn’t fully specify dual-write, backfill, validation queries, rollback, and how to handle “audit/legal ledger immutability” during migration (hash-chain continuity). The cost-effective doc hints at migration job and acceptance criteria, but not the full runbook. 
+
+TRADE HUB - Cost-effective Stac…
+
+Non-functional requirements (NFRs) need hard targets: SLOs, p95 latency budgets, WS upgrade success %, maximum per-pod connection targets, memory ceilings, and egress budgets must be explicit. Your compute doc contains the right acceptance bars and should be promoted to first-class PRD requirements. 
+
+COMPUTE RESOURCES ESTIMATION AN…
+
+COMPUTE RESOURCES ESTIMATION AN…
+
+Build and packaging spec needs repo-accurate paths: the Gemini PRD’s Dockerfile fragments may not match actual build outputs; the cost-effective doc’s approach (separate web-static image + api image + immutable caching) is closer to what you want long-term. 
+
+TRADE HUB - Cost-effective Stac…
+
+Summary of critique
+
+Treat the Gemini PRD as a good directional blueprint, but not yet “agent-executable.” The unified PRD below closes the gaps by: (a) formalizing the WS/API contracts, (b) locking down mobile auth and WS stability rules, (c) specifying migration cutover steps, and (d) embedding load/soak testing and K8s scaling criteria as required deliverables.
+
+2) Unified Deep-Context PRD (Agent-Executable)
+2.1 Document control
+
+Product: TradeHub / TradingCentral (TradeQuip)
+PRD Version: Unified v2.1 (Agent-Executable)
+Date: January 12, 2026 (aligned to source corpus) 
+
+GEMINI PRD MIGRATION AND VERSIO…
+
+
+Target runtime: Linux bare metal + K3s (Kubernetes) + Postgres + PgBouncer + Valkey + WebSockets
+Near-term mobile: Capacitor wrapper (Android/iOS) 
+
+TRADE HUB - MIGRATION ENVIRONME…
+
+
+Long-term mobile: native apps using same API/WS contracts
+
+2.2 Product vision and constraints
+Vision
+
+A compute-efficient, bandwidth-efficient trading platform where:
+
+Server is the single source of truth; clients render state + send intents. 
+
+GEMINI PRD MIGRATION AND VERSIO…
+
+Quotes are ingested once and distributed via WS fanout (no client polling storms). 
+
+GEMINI PRD MIGRATION AND VERSIO…
+
+Production deployment is open-source and budget-constrained.
+
+Hard constraints (non-negotiable)
+
+Must run on Linux bare metal with K3s.
+
+Must use Postgres (primary persistence) and Valkey (cache + pubsub + sessions/ratelimits).
+
+Must support 100k+ concurrent users with efficiency-first design.
+
+Must support Capacitor wrappers now and preserve a clean path to native apps.
+
+Must be production-testable locally (compose/k3d) before deploying to bare metal.
+
+2.3 Scope and non-scope
+In scope (v2.1)
+
+Role-split backend processes: api-ws, quote-ingestor, worker. 
+
+GEMINI PRD MIGRATION AND VERSIO…
+
+TRADE HUB - MIGRATION ENVIRONME…
+
+WS-based live updates: quotes + per-user events; secure auth handshake (session or token). 
+
+WEB NATIVE TO ANDROID-IOS
+
+Valkey “LiveBus” for cross-pod event fanout. 
+
+GEMINI PRD MIGRATION AND VERSIO…
+
+Quote cache design: Valkey snapshot keys + per-symbol keys + TTL. 
+
+TRADE HUB - MIGRATION ENVIRONME…
+
+Deployment packaging: multi-stage Docker, Nginx static caching, K8s manifests, health/readiness endpoints. 
+
+TRADE HUB - Cost-effective Stac…
+
+TRADE HUB - Cost-effective Stac…
+
+Load testing + scaling policies, including HPA based on ws_active_connections. 
+
+COMPUTE RESOURCES ESTIMATION AN…
+
+Capacitor initialization and dev workflow. 
+
+TRADE HUB - MIGRATION ENVIRONME…
+
+Explicitly out of scope (v2.1)
+
+Full rewrite to native mobile UI (future phase; only enforce stable contracts now).
+
+Full admin UX revamp (only ensure backend controls and live updates are correct/stable).
+
+Exotic market data vendor swaps beyond an adapter interface (vendor may change later).
+
+3) System architecture (authoritative)
+3.1 Role-split services (mandatory)
+api-ws (horizontally scalable)
+
+Responsibilities:
+
+REST API
+
+WS upgrades and client fanout
+
+Auth/session validation
+
+Subscriptions and per-scope routing
+Constraints:
+
+Must never poll external quote providers.
+
+quote-ingestor (singleton)
+
+Responsibilities:
+
+Poll external quote API(s)
+
+Normalize quote payloads into canonical format
+
+Write “latest snapshot” to Valkey
+
+Publish deltas to Valkey LiveBus (quotes:update)
+
+worker (singleton or small scale)
+
+Responsibilities:
+
+Cron/sweeps: auto-close, retention, exports, compliance batch jobs
+
+Background tasks and scoring
+
+This shape is explicitly aligned with your docs’ K8s role split. 
+
+GEMINI PRD MIGRATION AND VERSIO…
+
+TRADE HUB - MIGRATION ENVIRONME…
+
+3.2 Data plane
+Postgres (system of record)
+
+Users, trades, audit trail, legal acceptances, configuration, performance history
+
+Access via PgBouncer in prod (transaction pooling). 
+
+TRADE HUB - Cost-effective Stac…
+
+COMPUTE RESOURCES ESTIMATION AN…
+
+Valkey (distributed memory + bus)
+
+Use cases:
+
+Pub/Sub LiveBus for cross-pod fanout. 
+
+GEMINI PRD MIGRATION AND VERSIO…
+
+Latest quote snapshot + per-symbol quote keys (TTL). 
+
+TRADE HUB - MIGRATION ENVIRONME…
+
+Session store (mandatory for K8s replicas to prevent session drops). 
+
+TRADE HUB - MIGRATION ENVIRONME…
+
+Rate/behavior windows (grift/bot scoring, per-device/IP windows) (planned but architecturally reserved).
+
+4) Canonical API + WebSocket contracts (must be versioned and stable)
+4.1 Contract versioning rules
+
+Introduce protocolVersion (integer) on WS hello/auth responses and in server “snapshot” responses.
+
+Clients must send clientVersion and protocolVersion they support.
+
+Server may reject unsupported versions with actionable error codes.
+
+4.2 WebSocket: authentication (authoritative)
+
+Rule: Client must never send userId over WS. Auth is server-determined via session or token. 
+
+WEB NATIVE TO ANDROID-IOS
+
+Allowed methods:
+
+Session cookie (web)
+
+Token query param (mobile / API clients), validated server-side. 
+
+WEB NATIVE TO ANDROID-IOS
+
+WEB NATIVE TO ANDROID-IOS
+
+WS server must support scope separation (quotes/trades/account/audit/admin/global). 
+
+WEB NATIVE TO ANDROID-IOS
+
+4.3 WebSocket: message types (minimum required)
+Client → Server
+
+auth:hello (optional if using cookie; required if using token; can be implicit via ?token=)
+
+quotes:subscribe { symbols?: string[] }
+
+quotes:unsubscribe { symbols?: string[] }
+
+trades:subscribe (user scope)
+
+account:subscribe (user scope)
+
+ping (optional; server should also ping)
+
+Server → Client
+
+auth:ok { userIdMasked, isAdmin, scopes, protocolVersion }
+
+auth:error { code, message }
+
+quotes:snapshot { protocolVersion, asOf, rows:[...] }
+
+quotes:update { seq, asOf, rows:[{symbol, bid, ask, price, ...}] }
+
+trades:update { correlationId, clientRequestId?, status, ... } (reserve now for native apps)
+
+account:update { balance, equity, freeMargin, ... }
+
+error { code, message, recoverable }
+
+4.4 Sequencing + replay (required for stability at scale)
+
+seq is monotonically increasing per ingestor stream.
+
+api-ws pods may optionally provide best-effort replay of last N deltas if they maintain a small in-memory ring buffer per pod. (If not, client falls back to snapshot.)
+
+Client reconnect flow: re-auth → request snapshot → apply deltas only if seq continuity holds.
+
+This is how you prevent reconnect storms and keep mobile stable.
+
+5) Quote ingestion and “in-memory quote serve” (efficiency-critical)
+5.1 Canonical quote record
+
+Minimum fields (normalized):
+
+symbol
+
+bid/ask/price
+
+prevClose, change, pctChange
+
+lastApiUpdate timestamp
+
+isStale + dataAge
+
+Your quote cache type already encodes the intended shape. 
+
+TRADE HUB - MIGRATION ENVIRONME…
+
+5.2 Storage and caching strategy
+Valkey keys (required)
+
+quotes:latest:v1 = array snapshot (TTL)
+
+q:v1:${SYMBOL} = per-symbol record (TTL) 
+
+TRADE HUB - MIGRATION ENVIRONME…
+
+api-ws in-memory layer (required)
+
+Each api-ws pod maintains:
+
+An in-memory map of latest quotes (fast serve for snapshot requests and per-socket fanout).
+
+An optional ring buffer of deltas for best-effort replay.
+
+Why: reduces Valkey read amplification and lowers latency under 100k concurrency.
+
+5.3 Ingestor behavior
+
+Poll external provider at configured Hz (e.g., 2 Hz baseline) only for active symbol set.
+
+Compute normalized quote record.
+
+Write snapshot + per-symbol values to Valkey (TTL).
+
+Publish quotes:update deltas to LiveBus.
+
+6) Deployment and packaging requirements (Linux bare metal + K3s)
+6.1 Images
+
+Two primary images:
+
+tradehub-api (node runtime)
+
+tradehub-web (nginx static, immutable caching)
+
+The immutable caching + SPA fallback are required for bandwidth efficiency. 
+
+TRADE HUB - Cost-effective Stac…
+
+6.2 Health/readiness endpoints (required)
+
+GET /health (process alive)
+
+GET /ready (DB reachable via PgBouncer + Valkey reachable) 
+
+TRADE HUB - Cost-effective Stac…
+
+6.3 K8s timeouts and scaling primitives
+
+Ingress WS timeouts (read/send 3600s). 
+
+TRADE HUB - MIGRATION ENVIRONME…
+
+HPA baseline CPU, and custom metrics HPA targeting ws_active_connections (~2,500 avg per pod starting point). 
+
+COMPUTE RESOURCES ESTIMATION AN…
+
+PDB for api-ws.
+
+6.4 Node tuning (required)
+
+On bare metal nodes:
+
+ulimit -n (nofile) increased
+
+TCP backlog tuning
+
+WS proxy buffers/timeouts sized for long-lived connections
+
+Your migration doc explicitly calls out file descriptor and socket backlog tuning as required. 
+
+TRADE HUB - MIGRATION ENVIRONME…
+
+7) Postgres migration requirements (SQLite → Postgres)
+7.1 Migration deliverables (agent must produce)
+
+npm run db:migrate works inside container
+
+A K8s Job manifest to run migrations
+
+Index plan for high-cardinality tables and proof via EXPLAIN ANALYZE that key queries avoid seq scans. 
+
+TRADE HUB - Cost-effective Stac…
+
+7.2 Cutover rules (required)
+
+Migration must be reversible until final cutover is complete.
+
+Data integrity checks must be codified (row counts, checksums for critical tables, audit/legal ledger continuity checks).
+
+8) Mobile requirements (Capacitor now; native later)
+8.1 Capacitor wrapper (required now)
+
+Agent must implement the minimal, repeatable workflow:
+
+Install capacitor packages
+
+npx cap init ...
+
+Emulator dev with server.url set to host mapping (e.g., Android emulator 10.0.2.2) 
+
+TRADE HUB - MIGRATION ENVIRONME…
+
+8.2 Mobile networking constraints
+
+Must not rely on window.location.host for WS URL in wrapper contexts; must use an explicit WS URL resolver (getWsUrl). 
+
+TRADE HUB - MIGRATION ENVIRONME…
+
+Prefer token-based WS auth for mobile to avoid brittle cookie behavior in WebViews. 
+
+WEB NATIVE TO ANDROID-IOS
+
+8.3 Future native apps (requirements now)
+
+Lock down and document:
+
+OpenAPI spec for REST
+
+AsyncAPI spec for WS (or equivalent typed schema)
+
+Correlation IDs for all trade lifecycle events (so native apps can reconcile without REST loops)
+
+9) Observability + load testing (required for production readiness)
+9.1 Metrics and HPA requirements
+
+api-ws must expose /metrics including ws_active_connections.
+
+HPA must be capable of scaling by connection count (not CPU only). 
+
+COMPUTE RESOURCES ESTIMATION AN…
+
+9.2 Load testing (k6) must be shipped as part of the repo
+
+The compute doc already defines success criteria and a phased ramp/soak pattern; this becomes mandatory acceptance criteria in this PRD (WS upgrade success, reconnect storm avoidance, p95 endpoint latency). 
+
+COMPUTE RESOURCES ESTIMATION AN…
+
+COMPUTE RESOURCES ESTIMATION AN…
+
+10) Local “production-like” readiness (must work on a developer laptop)
+10.1 Local dev workflow (required)
+
+Runs in browser locally via npm run dev (Express+Vite)
+
+Runs with local Valkey (required) and optionally Postgres/PgBouncer for parity. 
+
+TRADE HUB - MIGRATION ENVIRONME…
+
+10.2 Local verification (required)
+
+Agent must provide (and pass) a smoke test that proves:
+
+Valkey quote cache is populated
+
+WS subscription receives snapshot then deltas
+
+Client no longer hammers /api/quotes/latest (rare fallback only) 
+
+TRADE HUB - MIGRATION ENVIRONME…
+
+TRADE HUB - MIGRATION ENVIRONME…
+
+11) Agent implementation plan (workstreams + Definition of Done)
+Workstream A — Contracts and protocol hardening (highest priority)
+
+Deliverables
+
+WS protocol spec in-repo (types + message schema)
+
+Server enforcement of scope-based routing
+
+Mobile-safe WS URL and auth flows
+
+DoD
+
+WS reconnect does not cause storms under load test
+
+Unauthorized scope attempts are rejected (no data leakage)
+
+Workstream B — Quote pipeline + “in-memory serve”
+
+Deliverables
+
+quote-ingestor produces deltas + snapshots
+
+api-ws maintains in-memory cache and serves snapshots fast
+
+Valkey keys and TTL policy implemented
+
+DoD
+
+Under 10k WS connections, Valkey ops remain stable and do not scale linearly with connection count
+
+Workstream C — Postgres migration scaffolding + PgBouncer wiring
+
+Deliverables
+
+Migration jobs, indices, acceptance checks
+
+DATABASE_URL points to PgBouncer in prod. 
+
+TRADE HUB - Cost-effective Stac…
+
+DoD
+
+Fresh DB migrates cleanly end-to-end. 
+
+TRADE HUB - Cost-effective Stac…
+
+Workstream D — K3s bare-metal deployment pack
+
+Deliverables
+
+k8s manifests: Deployments, Services, Ingress, HPA, PDB
+
+Node tuning checklist embedded in repo docs
+
+DoD
+
+Rolling deploy does not drop sessions (sessions are shared store). 
+
+TRADE HUB - MIGRATION ENVIRONME…
+
+Workstream E — Capacitor wrapper readiness
+
+Deliverables
+
+capacitor config, scripts, env variable strategy, emulator runbook
+
+DoD
+
+Android emulator connects to local backend, WS works, login persists
+
+12) Deep “Agent Sweep” Checklist (what agents must verify before calling it done)
+12.1 Efficiency (bandwidth + compute)
+
+Web assets are immutable-cached; index.html is not cached aggressively. 
+
+TRADE HUB - Cost-effective Stac…
+
+WS sends deltas, not full snapshots continuously.
+
+Subscription filtering exists (only symbols in view; no global broadcast unless configured).
+
+REST quote endpoint is fallback only (no polling loops).
+
+12.2 Reliability
+
+WS heartbeat strategy implemented
+
+Backpressure policy: slow clients are throttled or dropped safely
+
+Reconnect logic does not synchronize (jitter/backoff)
+
+12.3 Security
+
+WS auth is server-determined; client never provides userId. 
+
+WEB NATIVE TO ANDROID-IOS
+
+Token bounds checks and validation exist. 
+
+WEB NATIVE TO ANDROID-IOS
+
+Session cookies have correct secure and sameSite behavior in prod. 
+
+WEB NATIVE TO ANDROID-IOS
+
+12.4 Scalability / K8s
+
+Ingress timeouts set for WS. 
+
+TRADE HUB - MIGRATION ENVIRONME…
+
+HPA based on ws_active_connections is configured (or queued as next step once metrics exist). 
+
+COMPUTE RESOURCES ESTIMATION AN…
+
+12.5 Validation testing
+
+k6 soak test scripts exist and run
+
+Acceptance thresholds match the compute doc (upgrade success %, latency, error rates). 
+
+COMPUTE RESOURCES ESTIMATION AN…
+
+What I would have the coder agent implement first (ordered to minimize risk)
+
+Finalize WS contract + auth (cookie + token), scope routing, and “no userId over WS” enforcement. 
+
+WEB NATIVE TO ANDROID-IOS
+
+Single connection model (one WS per client session; no per-hook WS fanout) and ensure /api/quotes/latest becomes fallback only. 
+
+TRADE HUB - MIGRATION ENVIRONME…
+
+Quote cache + ingestor→Valkey→LiveBus path, then api-ws in-memory serve. 
+
+TRADE HUB - MIGRATION ENVIRONME…
+
+GEMINI PRD MIGRATION AND VERSIO…
+
+Metrics + ws_active_connections + HPA hooks. 
+
+COMPUTE RESOURCES ESTIMATION AN…
+
+Docker + Nginx web-static caching for bandwidth efficiency. 
+
+TRADE HUB - Cost-effective Stac…
+
+Capacitor wrapper using explicit WS URL resolver and emulator runbook. 
+
+TRADE HUB - MIGRATION ENVIRONME…
+
+TRADE HUB - MIGRATION ENVIRONME…
+
+If you want, I can convert this PRD into an agent “execution map” (a numbered, file-by-file patch itinerary with exact acceptance tests after each tranche) using the same structure as your migration doc’s verification sections (wscat smoke test, Valkey key checks, etc.).
+
+CONVERT
+Thought for 10m 30s
+
+Below is the conversion of (a) the current repo state in /mnt/data/antigravity/TD.1.11.ANTIGRAVITY-main plus (b) your uploaded conversation/requirements TXT files into a single, unified Deep-Context PRD + Coder-Agent Execution Map.
+
+This is written so an editor/agent can “sweep the repo” and implement without guessing: what to build, where to build it, in what order, and how to verify it tranche-by-tranche.
+
+TD.1.11.ANTIGRAVITY — Unified Deep-Context PRD + Execution Map (Coder Agent Playbook)
+
+Version: 2.1 (Linux Bare Metal + K8s + Postgres + Valkey + WS + In-Memory Quote Serve + Capacitor)
+Date: 2026-01-12
+Primary Constraint: 100K+ concurrent with strict compute + bandwidth efficiency
+Primary Platform: Web (React/Vite) served by Node/Express, deployed on K3s/Kubernetes (bare metal)
+Data Plane: Valkey for hot quote cache + pubsub; Postgres for durable state/audit/history
+Transport: WebSocket for live updates; REST for initial snapshot + control plane
+
+1) Product Outcomes (What “Done” Means)
+1.1 Mandatory outcomes
+
+No polling storm: UI must not require high-frequency REST polling to stay live.
+
+Single-ingest / fan-out: market quotes are ingested once (ingestor role) and distributed efficiently (WS role).
+
+In-memory quote serve: API/WS pods serve quotes from memory first, then Valkey, not Postgres.
+
+Kubernetes-ready roles: runtime cleanly supports api+ws, ingestor, and worker roles with correct process behavior (no wasted listeners).
+
+Mobile now, native later: the web app is deployable as:
+
+PWA / installable web app
+
+Capacitor wrapper for Android/iOS using the same backend + single source of truth
+
+Production local parity: a developer can bring up a “production-like” stack locally (Postgres + Valkey + the three roles) and run verification and load tests.
+
+1.2 Non-negotiable efficiency rules
+
+Quotes must not be written to Postgres at tick frequency.
+
+WS quote delivery must be subscription-based, not broadcast-to-all.
+
+Internal “loopback HTTP” calls inside the server must be eliminated (e.g., axios.get("http://localhost:5000/api/quotes/latest")).
+
+2) Current Repo Reality (What’s Already There)
+
+This repo already includes major building blocks you should preserve:
+
+Postgres-first DB layer via Drizzle + @db Pool; schema in shared/schema.pg.ts.
+
+Valkey client wrapper at server/services/valkey.ts.
+
+Live event bus bridging to Valkey pubsub at server/services/liveBus.ts.
+
+WebSocket server already mounted at /ws inside server/routes.ts, and it already understands auth messages and can filter by userId.
+
+Quote feed (Postgres mode) at server/feeds/quoteFeed.ts:
+
+polls 1Forge
+
+writes quotes to Postgres (quotes table)
+
+emits publishLiveEvent({ type: "quotes:updated" })
+
+calls onQuotesUpdated() for the order engine
+
+2.1 Known architectural gaps (must be fixed)
+
+API currently serves quotes by querying Postgres (/api/quotes/latest does a DB scan + subqueries).
+
+Client currently uses WS only as a “refetch trigger” (quotes:updated → refetch REST).
+
+There is at least one internal loopback HTTP call in trade creation path:
+
+server/routes.ts (trade placement) calls http://localhost:5000/api/quotes/latest to find the quote.
+
+3) Target Architecture (Production)
+3.1 Runtime roles (single container image, role-driven behavior)
+
+Role A: api+ws
+
+Serves REST + WS
+
+Maintains in-memory quote cache fed by Valkey pubsub / live bus
+
+Broadcasts quotes via WS using subscriptions
+
+Reads/writes durable state in Postgres
+
+Role B: ingestor
+
+Polls upstream quote provider (1Forge)
+
+Writes latest quotes to Valkey hot cache (hash)
+
+Publishes quote tick events to Valkey pubsub (via live bus)
+
+Calls trade engine tick handler (onQuotesUpdated) for stops/pending evaluation
+
+Does not serve HTTP/WS
+
+Role C: worker
+
+Runs background jobs (i18n ingestion/worker, grift evaluation schedulers, admin view setup, cron)
+
+Does not serve HTTP/WS
+
+3.2 Data flow (quotes)
+flowchart LR
+  QP[Upstream Quote Provider] --> IN[Ingestor: quoteFeed]
+  IN --> VK[(Valkey Hot Cache)]
+  IN --> PUB[(Valkey PubSub)]
+  PUB --> API[API+WS Pods: liveBus subscriber]
+  API --> MEM[(In-Memory Quote Cache)]
+  MEM --> WS[WS Push: subscription-based]
+  MEM --> REST[/api/quotes/latest snapshot/]
+
+4) Quote System Spec (Hot Cache + Memory Serve)
+4.1 Valkey key schema (required)
+
+qh:latest (HASH)
+
+field: SYMBOL (e.g., EURUSD)
+
+value: JSON { symbol, bid, ask, mid, lastUpdatedMs, isStale, src }
+
+qh:meta (STRING/JSON)
+
+{ lastBatchMs, consecutiveApiFailures, staleCount, pollMs }
+
+qh:prevClose:{sessionDay} (HASH)
+
+field: SYMBOL
+
+value: numeric close
+
+TTL: 36h (safe across rollover)
+
+4.2 In-memory cache (api+ws only)
+
+Map<string, QuoteTick> kept hot
+
+Updated from:
+
+WS tick events (from Valkey pubsub via liveBus)
+
+REST bootstrap fetch (optional) if starting cold
+
+4.3 REST contract
+
+GET /api/quotes/latest
+
+Purpose: bootstrap snapshot (initial page load), not high-frequency polling
+
+Source priority:
+
+in-memory cache (fast path)
+
+Valkey hash (fallback)
+
+Postgres (last resort / dev fallback only)
+
+5) WebSocket Spec (Subscription-Based Quotes)
+5.1 Client → Server messages
+
+Authenticate user association (already present, keep):
+
+{ "type": "auth", "userId": 123 }
+
+
+Subscribe to quotes by symbols:
+
+{ "type": "quotes:subscribe", "symbols": ["EURUSD","USDJPY","XAUUSD"] }
+
+
+Unsubscribe (optional but recommended):
+
+{ "type": "quotes:unsubscribe", "symbols": ["XAUUSD"] }
+
+5.2 Server → Client messages
+
+Quote ticks (delta):
+
+{
+  "type": "quotes:ticks",
+  "ts": 1730000000000,
+  "quotes": [
+    { "symbol":"EURUSD","bid":1.1,"ask":1.1002,"mid":1.1001,"lastUpdatedMs":1730000000000,"isStale":false }
+  ]
+}
+
+
+Control-plane keepalive (optional):
+
+{ "type": "ping", "ts": 1730000000000 }
+
+5.3 Server-side scaling rule (critical)
+
+Do not scan all WS clients for each tick. Use a subscription index:
+
+Map<symbol, Set<client>>
+
+Build a per-tick send list from only affected symbols.
+
+6) Mobile Spec (Capacitor Wrapper Now)
+6.1 Capacitor principles
+
+Single source of truth: same backend, same auth/session model.
+
+“Wrapper-first” approach:
+
+Use Capacitor to ship the web UI as a mobile app now.
+
+Later replace UI modules with native screens incrementally (keep REST/WS contracts stable).
+
+6.2 Minimum mobile requirements
+
+App loads either:
+
+bundled web assets (offline-friendly), or
+
+remote hosted app URL (fast iteration)
+
+WS must work behind mobile networks:
+
+reconnect logic already exists in client/src/hooks/use-websocket.tsx (keep, tighten)
+
+7) Execution Map (File-by-File Patch Itinerary + Acceptance Tests)
+Phase 0 — Local “Production-like” Stack Bring-Up
+
+Goal: one command runs Postgres + Valkey + roles locally.
+
+Patch list
+
+Add docker-compose.yml (root)
+
+services: postgres, valkey, api, ingestor, worker
+
+Add .env.local template documenting required envs (do not commit secrets)
+
+Acceptance tests
+docker compose up -d
+curl -sS http://localhost:5000/api/status
+
+Phase 1 — Fix Role Semantics (No Wasted Servers)
+
+Goal: ingestor and worker must not bind port 5000.
+
+Patch list
+
+server/index.ts
+
+Implement RUN_HTTP = roles.has("api") || roles.has("ws") || roles.has("monolith")
+
+If !RUN_HTTP: do not call registerRoutes() or server.listen()
+
+Start only the deferred background initializers relevant to roles (ingestor/worker)
+
+Keep process alive with setInterval(() => {}, 60_000)
+
+server/index.ts (role parsing)
+
+If role includes api, imply ws (and vice versa) unless explicitly disabled.
+
+k8s/10-api-deployment.yaml
+
+APP_ROLE: "api,ws"
+
+k8s/11-ingestor-deployment.yaml, k8s/12-worker-deployment.yaml
+
+Remove container ports stanza (or keep but irrelevant); ensure they have no Service anyway.
+
+Acceptance tests
+# api role binds
+APP_ROLE=api,ws npm run dev
+
+# ingestor role does NOT bind
+APP_ROLE=ingestor node dist/index.js
+# verify no listener:
+ss -lntp | grep 5000 || echo "OK: no port 5000"
+
+# worker role does NOT bind
+APP_ROLE=worker node dist/index.js
+ss -lntp | grep 5000 || echo "OK: no port 5000"
+
+Phase 2 — Valkey Quote Hot Cache + Remove Postgres Tick Writes
+
+Goal: ingest once, cache in Valkey, publish ticks, serve from memory/Valkey.
+
+Patch list
+
+New: server/services/quoteHub.ts
+
+putQuotesToValkey(quotes)
+
+publishQuoteTicks(quotes) via publishLiveEvent({ type:"quotes:ticks", payload:{ quotes, symbols } })
+
+getQuotesSnapshot(symbols?) (Valkey read)
+
+server/feeds/quoteFeed.ts
+
+Replace persistQuotes() tick write path:
+
+Do not upsert Postgres quotes table on every tick
+
+Write to Valkey qh:latest hash
+
+Publish quotes:ticks payload
+
+Keep market_daily_close updates (that’s daily/session-level, not tick storm)
+
+server/routes.ts → GET /api/quotes/latest
+
+Change source priority:
+
+in-memory cache (from api+ws role)
+
+Valkey
+
+Postgres fallback (optional)
+
+server/services/quoteService.ts
+
+Replace DB query with:
+
+in-memory/Valkey read for symbol
+
+fallback to Postgres only if Valkey not configured
+
+Acceptance tests
+# Verify Valkey is receiving hot quotes
+redis-cli -u "$VALKEY_URL" HLEN qh:latest
+redis-cli -u "$VALKEY_URL" HGET qh:latest EURUSD
+
+# Verify /api/quotes/latest returns without scanning Postgres quotes table
+curl -sS http://localhost:5000/api/quotes/latest | jq '.[0]'
+
+Phase 3 — Remove Loopback HTTP Calls (Shared In-Process Quote Access)
+
+Goal: no internal axios-to-self.
+
+Patch list
+
+server/routes.ts (trade placement path)
+
+Remove:
+
+axios.get("http://localhost:5000/api/quotes/latest")
+
+Replace with:
+
+getExecutionQuote() / quoteHub.getQuote(symbol) directly (in-process)
+
+Acceptance tests
+# Place trade and confirm no localhost call is needed
+grep -R "http://localhost:5000/api/quotes/latest" -n server || echo "OK: removed"
+
+Phase 4 — WS Quote Streaming with Subscriptions (No REST Refetch)
+
+Goal: client receives quotes:ticks and updates UI without refetch polling.
+
+Patch list
+
+server/routes.ts WS handler
+
+Add quotes:subscribe / quotes:unsubscribe
+
+Add subscription index:
+
+const subsBySymbol = new Map<string, Set<LiveClient>>()
+
+On liveBus event quotes:ticks, deliver only to subscribed clients.
+
+client/src/hooks/use-quotes.tsx
+
+On WS open: send quotes:subscribe with enabled symbols.
+
+On receiving quotes:ticks: update local state + optionally prime React Query cache
+
+Reduce REST polling to:
+
+only if WS disconnected (fallback)
+
+Optional: add client/src/hooks/use-quote-stream.tsx as a shared provider if multiple pages need it.
+
+Acceptance tests
+# In browser devtools network: confirm /api/quotes/latest is not repeatedly called while WS is connected.
+
+# WS protocol smoke (using wscat)
+npx wscat -c ws://localhost:5000/ws
+> {"type":"quotes:subscribe","symbols":["EURUSD","USDJPY"]}
+# expect ticks after ingestor runs:
+< {"type":"quotes:ticks", ...}
+
+Phase 5 — Bandwidth & Compute Optimizations (Must-Haves)
+
+Goal: reduce payload sizes and wasted CPU.
+
+Patch list
+
+server/index.ts
+
+Add compression middleware (gzip/br) for REST responses (quotes snapshot, config)
+
+Ensure WS messages are compact deltas (only changed symbols)
+
+client
+
+Ensure quote rendering doesn’t trigger full re-renders for all rows unnecessarily:
+
+normalize quote state by symbol key
+
+memoize row components (React)
+
+K8s ingress tuning (already partially present)
+
+confirm timeouts + buffering off are correct for WS
+
+Acceptance tests
+# Verify compressed REST:
+curl -H "Accept-Encoding: gzip" -I http://localhost:5000/api/quotes/latest | grep -i content-encoding
+
+# Verify WS sends only subscribed symbols:
+subscribe to 2 symbols; ensure ticks only contain those symbols.
+
+Phase 6 — Capacitor Wrapper (Android/iOS)
+
+Goal: build and run mobile wrapper against the same backend.
+
+Patch list
+
+Add Capacitor scaffolding
+
+npm i @capacitor/core @capacitor/cli @capacitor/android @capacitor/ios
+
+npx cap init
+
+Add capacitor.config.ts (root or client/ depending on structure)
+
+Ensure Vite build outputs stable dist for capacitor sync
+
+Add environment strategy
+
+APP_URL / VITE_API_BASE for remote vs bundled
+
+Acceptance tests
+npm run build
+npx cap sync android
+npx cap run android
+# Verify login + WS connectivity on device/emulator.
+
+Phase 7 — Production Readiness Verification (Local + K8s)
+
+Goal: deterministic checks that system is deployable and resilient.
+
+Patch list
+
+Add scripts/verify-e2e.sh
+
+health checks
+
+valkey quote presence
+
+ws subscribe + ticks
+
+place trade (market) and verify audit trail + account update event
+
+Add load test harness
+
+k6 script for:
+
+5k/10k REST bootstrap
+
+N WS clients subscribe to small symbol set
+
+measure CPU and bandwidth
+
+Acceptance tests
+bash scripts/verify-e2e.sh
+k6 run scripts/load/ws_quotes.js
+
+8) Definition of Done (Global)
+
+The implementation is “done” only if all are true:
+
+With WS connected, the UI does not refetch /api/quotes/latest repeatedly.
+
+Ingestor tick writes go to Valkey, not Postgres.
+
+API/WS serves quotes from memory/Valkey, not Postgres scans.
+
+Worker and ingestor do not bind HTTP ports.
+
+WS quote delivery is subscription-indexed (no O(N_clients) scan per tick).
+
+Capacitor app can log in, subscribe, and receive ticks.
+
+9) Coder Agent Sweep Checklist (What to Search for Before Calling It “Complete”)
+
+Use these grep checks as a final sweep:
+
+# No loopback HTTP
+grep -R "http://localhost:5000" -n server && echo "FAIL" || echo "OK"
+
+# No tick writes to quotes table (except optional periodic snapshot job)
+grep -R "INSERT INTO quotes\\|UPDATE quotes\\|FROM quotes" -n server/feeds server/services && echo "CHECK MANUALLY"
+
+# WS supports subscribe messages
+grep -R "quotes:subscribe" -n server client || echo "FAIL"
+
+# Client handles ticks
+grep -R "quotes:ticks" -n client || echo "FAIL"
+
+# Role gating prevents HTTP listeners for worker/ingestor
+grep -R "RUN_HTTP\\|APP_ROLE" -n server/index.ts || echo "FAIL"
+
+
+If you want the next step to be even more “agent-executable,” tell me which agent environment you’re using right now (Codex editor agent vs Replit agent vs local VS Code agent), and I will rewrite the Phase plan into exact sequential commits (Commit 1..N) with precise patch blocks per file.

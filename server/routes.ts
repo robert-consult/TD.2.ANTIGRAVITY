@@ -5,7 +5,7 @@ import { WebSocketServer, WebSocket } from "ws";
 import { onLiveEvent, publishLiveEvent } from "./services/liveBus";
 import { storage } from "./storage";
 import { z } from "zod";
-import axios from "axios";
+import { applyQuoteUpdate, getQuote, getQuoteMeta, getQuoteSnapshot, getValkeyQuoteRows, getValkeySnapshot } from "./services/quoteHub";
 import { loginSchema, insertTradeSchema, tradeAudit, trades, globalSettings, userKycProfiles, userPayoutProfiles, emailVerificationTokens, systemConfig, signupFreezeAttempts, signupWaitlist, users, signupFingerprints, userAccountEvents, userSessions, quotes, symbolConfigs } from "@shared/schema";
 import crypto from "crypto";
 import { appendIdentityAudit } from "./services/identityAudit";
@@ -2447,21 +2447,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Symbol configuration not found" });
       }
       
-      // Get the latest quotes data from our latest endpoint
-      const quotesResponse = await axios.get(`http://localhost:5000/api/quotes/latest`);
-      const latestQuotes = quotesResponse.data;
-      
-      // Find the quote for this symbol
-      const quote = latestQuotes.find(q => q.symbol === symbolConfig.symbol);
-      
-      if (!quote) {
-        return res.status(404).json({ message: "Symbol price not found" });
-      }
+      const executionQuote = await getExecutionQuote(symbolConfig.symbol, data.type, "OPEN");
+      const quote = {
+        symbol: executionQuote.symbol,
+        bid: executionQuote.bid,
+        ask: executionQuote.ask,
+        mid: executionQuote.mid,
+        price: executionQuote.mid,
+        isStale: executionQuote.isStale,
+        lastApiUpdate: executionQuote.quoteTs.getTime(),
+        source: executionQuote.source,
+      };
 
-      const quoteTs = quote?.lastApiUpdate
-        ? new Date(Number(quote.lastApiUpdate))
-        : (quote?.timestamp ? new Date(Number(quote.timestamp) * 1000) : null);
-      const quoteSource = quote?.source ?? "quotes_latest";
+      const quoteTs = executionQuote.quoteTs ?? null;
+      const quoteSource = executionQuote.source ?? "quote_service";
       
       // AUDIT: Write ORDER_RECEIVED event immediately after we have quote context
       try {
@@ -3841,102 +3840,189 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  async function loadQuoteSnapshotConfig() {
+    let staleThresholdMs = 30000;
+    let fxRolloverTz = "America/New_York";
+    let fxRolloverTime = "17:00";
+    try {
+      const cfg = await db.query.systemConfig.findFirst({
+        where: eq(systemConfig.id, 1),
+      });
+      if ((cfg as any)?.staleThresholdMs) staleThresholdMs = Number((cfg as any).staleThresholdMs);
+      if ((cfg as any)?.fxRolloverTz) fxRolloverTz = String((cfg as any).fxRolloverTz);
+      if ((cfg as any)?.fxRolloverTime) fxRolloverTime = String((cfg as any).fxRolloverTime);
+    } catch {}
+    return { staleThresholdMs, fxRolloverTz, fxRolloverTime };
+  }
+
+  async function loadPrevCloseMap(symbols: string[], currentSessionDay: string) {
+    const map = new Map<string, number>();
+    if (!symbols.length) return map;
+    const prevRows = await dbClient.query(
+      `
+      SELECT DISTINCT ON (symbol) symbol, close
+      FROM market_daily_close
+      WHERE symbol = ANY($1::text[]) AND session_day < $2
+      ORDER BY symbol, session_day DESC
+      `,
+      [symbols, currentSessionDay],
+    );
+    for (const row of prevRows.rows) {
+      if (!row?.symbol) continue;
+      const close = Number(row.close);
+      if (Number.isFinite(close)) map.set(String(row.symbol), close);
+    }
+    const missing = symbols.filter((sym) => !map.has(sym));
+    if (!missing.length) return map;
+    const fallbackRows = await dbClient.query(
+      `
+      SELECT DISTINCT ON (symbol) symbol, close
+      FROM market_daily_close
+      WHERE symbol = ANY($1::text[])
+      ORDER BY symbol, session_day DESC
+      `,
+      [missing],
+    );
+    for (const row of fallbackRows.rows) {
+      if (!row?.symbol) continue;
+      const close = Number(row.close);
+      if (Number.isFinite(close)) map.set(String(row.symbol), close);
+    }
+    return map;
+  }
+
+  function buildQuoteView(quote: any, prevCloseMap: Map<string, number>, nowMs: number, staleThresholdMs: number) {
+    const bid = typeof quote.bid === "number" ? quote.bid : null;
+    const ask = typeof quote.ask === "number" ? quote.ask : null;
+    const lastPrice = typeof quote.price === "number" ? quote.price : typeof quote.lastPrice === "number" ? quote.lastPrice : null;
+    const midPrice = bid != null && ask != null ? (bid + ask) / 2 : lastPrice;
+    const spread = bid != null && ask != null ? Math.abs(ask - bid) : null;
+    const prevClose = prevCloseMap.get(String(quote.symbol)) ?? (typeof quote.prevClose === "number" ? quote.prevClose : null);
+
+    let pctChange = 0;
+    if (prevClose != null && prevClose > 0 && Number.isFinite(midPrice)) {
+      pctChange = ((midPrice - prevClose) / prevClose) * 100;
+      pctChange = Math.round(pctChange * 100) / 100;
+    }
+
+    const change = Number.isFinite(midPrice) && prevClose != null ? midPrice - prevClose : 0;
+    const rawLastUpdate = Number(quote.lastApiUpdate ?? quote.last_api_update ?? nowMs);
+    const lastUpdate = rawLastUpdate < 1e12 ? rawLastUpdate * 1000 : rawLastUpdate;
+    const ageMs = nowMs - lastUpdate;
+    const dbIsStale = quote.isStale === 1 || quote.isStale === true;
+    const isStale = dbIsStale || ageMs > staleThresholdMs;
+
+    return {
+      symbol: quote.symbol,
+      bid,
+      ask,
+      price: midPrice,
+      spread,
+      prevClose: prevClose ?? midPrice,
+      change,
+      pctChange,
+      isStale,
+      lastApiUpdate: lastUpdate,
+      dataAge: ageMs,
+    };
+  }
+
+  async function buildQuoteSnapshotResponse(symbols?: string[]) {
+    await ensureMarketDailyCloseTable();
+    const { staleThresholdMs, fxRolloverTz, fxRolloverTime } = await loadQuoteSnapshotConfig();
+    const currentSessionDay = computeCurrentSessionDay({
+      tz: fxRolloverTz,
+      time: fxRolloverTime,
+    });
+    const nowMs = Date.now();
+    const nowSec = Math.floor(nowMs / 1000);
+
+    const hubMeta = getQuoteMeta();
+    if (hubMeta.size > 0) {
+      const hubSnapshot = getQuoteSnapshot(symbols);
+      const symbolList = hubSnapshot.rows.map((row) => String(row.symbol));
+      const prevCloseMap = await loadPrevCloseMap(symbolList, currentSessionDay);
+      const enhancedQuotes = hubSnapshot.rows.map((quote) => ({
+        ...buildQuoteView(quote, prevCloseMap, nowMs, staleThresholdMs),
+        timestamp: nowSec,
+      }));
+      return { rows: enhancedQuotes, seq: hubSnapshot.seq, asOf: hubSnapshot.asOf };
+    }
+
+    const valkeySnapshot = await getValkeySnapshot(symbols);
+    if (valkeySnapshot?.rows?.length) {
+      const symbolList = valkeySnapshot.rows.map((row) => String(row.symbol));
+      const prevCloseMap = await loadPrevCloseMap(symbolList, currentSessionDay);
+      const enhancedQuotes = valkeySnapshot.rows.map((quote) => ({
+        ...buildQuoteView(quote, prevCloseMap, nowMs, staleThresholdMs),
+        timestamp: nowSec,
+      }));
+      return { rows: enhancedQuotes, seq: valkeySnapshot.seq ?? 0, asOf: valkeySnapshot.asOf ?? nowMs };
+    }
+
+    const quotesTable = await dbClient.query("SELECT to_regclass('public.quotes') as table_name");
+    if (!quotesTable.rows?.[0]?.table_name) {
+      return { rows: [], seq: 0, asOf: nowMs };
+    }
+
+    const params: any[] = [nowMs, currentSessionDay];
+    const filterClause = symbols?.length ? "WHERE q.symbol = ANY($3::text[])" : "";
+    if (symbols?.length) params.push(symbols);
+
+    const quotesResult = await dbClient.query(
+      `
+      SELECT
+        q.symbol,
+        q.bid,
+        q.ask,
+        q.price AS "lastPrice",
+        COALESCE(q.is_stale, false) AS "isStale",
+        COALESCE(q.last_api_update, $1) AS "lastApiUpdate",
+        COALESCE(
+          (
+            SELECT dc.close
+            FROM market_daily_close dc
+            WHERE dc.symbol = q.symbol AND dc.session_day < $2
+            ORDER BY dc.session_day DESC
+            LIMIT 1
+          ),
+          (
+            SELECT dc2.close
+            FROM market_daily_close dc2
+            WHERE dc2.symbol = q.symbol
+            ORDER BY dc2.session_day DESC
+            LIMIT 1
+          )
+        ) AS "prevClose"
+      FROM quotes q
+      ${filterClause}
+      `,
+      params,
+    );
+    const quotes = quotesResult.rows;
+    const symbolList = quotes.map((row: any) => String(row.symbol));
+    const prevCloseMap = await loadPrevCloseMap(symbolList, currentSessionDay);
+    const enhancedQuotes = quotes.map((quote: any) => ({
+      ...buildQuoteView(quote, prevCloseMap, nowMs, staleThresholdMs),
+      timestamp: nowSec,
+    }));
+
+    return { rows: enhancedQuotes, seq: 0, asOf: nowMs };
+  }
+
   // Quotes endpoint for getting real-time price data
   // Add endpoint for getting all latest quotes (for REST polling)
   app.get("/api/quotes/latest", async (req: Request, res: Response) => {
     try {
-      await ensureMarketDailyCloseTable();
-      const quotesTable = await dbClient.query("SELECT to_regclass('public.quotes') as table_name");
-      if (!quotesTable.rows?.[0]?.table_name) {
-        return res.status(200).json([]);
-      }
-      let staleThresholdMs = 30000;
-      let fxRolloverTz = "America/New_York";
-      let fxRolloverTime = "17:00";
-      try {
-        const cfg = await db.query.systemConfig.findFirst({
-          where: eq(systemConfig.id, 1),
-        });
-        if ((cfg as any)?.staleThresholdMs) staleThresholdMs = Number((cfg as any).staleThresholdMs);
-        if ((cfg as any)?.fxRolloverTz) fxRolloverTz = String((cfg as any).fxRolloverTz);
-        if ((cfg as any)?.fxRolloverTime) fxRolloverTime = String((cfg as any).fxRolloverTime);
-      } catch {}
-
-      const currentSessionDay = computeCurrentSessionDay({
-        tz: fxRolloverTz,
-        time: fxRolloverTime,
-      });
-      const nowMs = Date.now();
-      const nowSec = Math.floor(nowMs / 1000);
-      const quotesResult = await dbClient.query(
-        `
-        SELECT
-          q.symbol,
-          q.bid,
-          q.ask,
-          q.price AS "lastPrice",
-          COALESCE(q.is_stale, false) AS "isStale",
-          COALESCE(q.last_api_update, $1) AS "lastApiUpdate",
-          COALESCE(
-            (
-              SELECT dc.close
-              FROM market_daily_close dc
-              WHERE dc.symbol = q.symbol AND dc.session_day < $2
-              ORDER BY dc.session_day DESC
-              LIMIT 1
-            ),
-            (
-              SELECT dc2.close
-              FROM market_daily_close dc2
-              WHERE dc2.symbol = q.symbol
-              ORDER BY dc2.session_day DESC
-              LIMIT 1
-            )
-          ) AS "prevClose"
-        FROM quotes q
-        `,
-        [nowMs, currentSessionDay]
-      );
-      const quotes = quotesResult.rows;
-
-      const enhancedQuotes = quotes.map((quote: any) => {
-        const bid = typeof quote.bid === "number" ? quote.bid : null;
-        const ask = typeof quote.ask === "number" ? quote.ask : null;
-        const lastPrice = typeof quote.lastPrice === "number" ? quote.lastPrice : null;
-        const midPrice = bid != null && ask != null ? (bid + ask) / 2 : lastPrice;
-        const spread = bid != null && ask != null ? Math.abs(ask - bid) : null;
-        const prevClose = typeof quote.prevClose === "number" ? quote.prevClose : null;
-
-        let pctChange = 0;
-        if (prevClose != null && prevClose > 0 && Number.isFinite(midPrice)) {
-          pctChange = ((midPrice - prevClose) / prevClose) * 100;
-          pctChange = Math.round(pctChange * 100) / 100;
-        }
-
-        const change = Number.isFinite(midPrice) && prevClose != null ? midPrice - prevClose : 0;
-        const rawLastUpdate = Number(quote.lastApiUpdate ?? nowMs);
-        const lastUpdate = rawLastUpdate < 1e12 ? rawLastUpdate * 1000 : rawLastUpdate;
-        const ageMs = nowMs - lastUpdate;
-        const dbIsStale = quote.isStale === 1 || quote.isStale === true;
-        const isStale = dbIsStale || ageMs > staleThresholdMs;
-
-        return {
-          symbol: quote.symbol,
-          bid,
-          ask,
-          price: midPrice,
-          spread,
-          prevClose: prevClose ?? midPrice,
-          change,
-          pctChange,
-          isStale,
-          lastApiUpdate: lastUpdate,
-          dataAge: ageMs,
-          timestamp: nowSec,
-        };
-      });
-
-      return res.json(enhancedQuotes);
+      const rawSymbols = String(req.query.symbols ?? "").trim();
+      const symbols = rawSymbols
+        ? rawSymbols
+            .split(",")
+            .map((s) => s.trim().toUpperCase())
+            .filter(Boolean)
+        : undefined;
+      const snapshot = await buildQuoteSnapshotResponse(symbols);
+      return res.json(snapshot.rows);
     } catch (error) {
       console.error("Error fetching latest quotes:", error);
       return res.status(500).json({ message: "Failed to fetch quotes" });
@@ -3948,9 +4034,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const symbol = req.params.symbol.toUpperCase();
     
     try {
-      const quote = await db.query.quotes.findFirst({
-        where: eq(quotes.symbol, symbol),
-      });
+      let quote: any | null = getQuote(symbol);
+
+      if (!quote) {
+        const valkeyRows = await getValkeyQuoteRows([symbol]);
+        if (valkeyRows.length) quote = valkeyRows[0];
+      }
+
+      if (!quote) {
+        quote = await db.query.quotes.findFirst({
+          where: eq(quotes.symbol, symbol),
+        });
+      }
       
       if (quote) {
         // Calculate spread from bid and ask prices
@@ -3999,6 +4094,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
     path: "/ws",
   });
 
+  app.get("/metrics", (_req, res) => {
+    const quoteMeta = getQuoteMeta();
+    const wsCount = wss.clients ? wss.clients.size : 0;
+    res.setHeader("Content-Type", "text/plain; version=0.0.4");
+    res.send(
+      [
+        "# HELP ws_active_connections Number of active websocket connections",
+        "# TYPE ws_active_connections gauge",
+        `ws_active_connections ${wsCount}`,
+        "# HELP quotehub_size Number of quotes held in memory",
+        "# TYPE quotehub_size gauge",
+        `quotehub_size ${quoteMeta.size}`,
+        "# HELP quotehub_seq Latest quote sequence number",
+        "# TYPE quotehub_seq gauge",
+        `quotehub_seq ${quoteMeta.seq}`,
+        "# HELP quotehub_asof Latest quote snapshot timestamp (ms)",
+        "# TYPE quotehub_asof gauge",
+        `quotehub_asof ${quoteMeta.asOf}`,
+        "",
+      ].join("\n"),
+    );
+  });
+
+  const WS_PROTOCOL_VERSION = 1;
+
   // Helper type for WebSocket clients
   type LiveClient = WebSocket & {
     userId?: number;
@@ -4007,6 +4127,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     isImpersonating?: boolean;
     ipCountryIso2?: string;
     userCountryIso2?: string;
+    quoteSymbols?: Set<string>;
+    wantsQuotesAll?: boolean;
+    wantsTrades?: boolean;
+    wantsAccount?: boolean;
   };
 
   function normIso2(v: any): string | undefined {
@@ -4131,6 +4255,39 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   }
 
+  function normalizeSymbolsInput(raw: any): string[] {
+    if (!raw) return [];
+    const list = Array.isArray(raw) ? raw : String(raw).split(",");
+    return list
+      .map((s) => String(s).trim().toUpperCase())
+      .filter(Boolean);
+  }
+
+  function maskUserId(userId?: number): string | null {
+    if (!userId || !Number.isFinite(userId)) return null;
+    const raw = String(userId);
+    if (raw.length <= 2) return `**`;
+    return `${raw.slice(0, 1)}***${raw.slice(-1)}`;
+  }
+
+  async function sendQuoteSnapshot(socket: WebSocket, symbols?: string[]) {
+    const snapshot = await buildQuoteSnapshotResponse(symbols);
+    wsSendJson(socket, {
+      type: "quotes:snapshot",
+      protocolVersion: WS_PROTOCOL_VERSION,
+      seq: snapshot.seq,
+      asOf: snapshot.asOf,
+      rows: snapshot.rows,
+    });
+  }
+
+  function filterQuoteRowsForClient(rows: any[], client: LiveClient) {
+    if (client.wantsQuotesAll) return rows;
+    const symbols = client.quoteSymbols;
+    if (!symbols || symbols.size === 0) return [];
+    return rows.filter((row) => row?.symbol && symbols.has(String(row.symbol).toUpperCase()));
+  }
+
   wss.on("connection", async (socket, req) => {
     const client = socket as LiveClient;
     client.userId = undefined;
@@ -4139,6 +4296,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     client.isImpersonating = false;
     client.ipCountryIso2 = undefined;
     client.userCountryIso2 = undefined;
+    client.quoteSymbols = new Set();
+    client.wantsQuotesAll = false;
+    client.wantsTrades = false;
+    client.wantsAccount = false;
 
     // Resolve IP country once at connect time (proxy headers preferred).
     try {
@@ -4200,11 +4361,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.warn("[WS] Failed to bind session to websocket:", e);
     }
 
-    socket.on("message", (raw) => {
+    socket.on("message", async (raw) => {
       try {
         const msg = JSON.parse(raw.toString());
-        if (msg?.type === "auth" && typeof msg.userId === "number") {
-          const requested = Number(msg.userId);
+        if (!msg || typeof msg !== "object") return;
+        const type = String((msg as any).type ?? "");
+
+        if (type === "auth" && typeof (msg as any).userId === "number") {
+          const requested = Number((msg as any).userId);
 
           // If we have a session-bound userId, require it to match.
           if (client.userId && requested === client.userId) {
@@ -4213,6 +4377,79 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
           // Otherwise, do not allow client-controlled user binding.
           return wsCloseUnauthorized(socket, "AUTH_MISMATCH");
+        }
+
+        if (type === "auth:hello") {
+          const scopes = [
+            "quotes",
+            client.userId ? "trades" : null,
+            client.userId ? "account" : null,
+            client.isAdmin ? "admin" : null,
+          ].filter(Boolean);
+          return wsSendJson(socket, {
+            type: "auth:ok",
+            userIdMasked: maskUserId(client.userId),
+            isAdmin: client.isAdmin,
+            scopes,
+            protocolVersion: WS_PROTOCOL_VERSION,
+          });
+        }
+
+        if (type === "quotes:subscribe") {
+          const symbols = normalizeSymbolsInput((msg as any).symbols);
+          if (!symbols.length) {
+            client.wantsQuotesAll = true;
+          } else {
+            client.wantsQuotesAll = false;
+            for (const symbol of symbols) {
+              client.quoteSymbols?.add(symbol);
+            }
+          }
+          const snapshotSymbols = client.wantsQuotesAll ? undefined : Array.from(client.quoteSymbols ?? []);
+          await sendQuoteSnapshot(socket, snapshotSymbols);
+          return;
+        }
+
+        if (type === "quotes:unsubscribe") {
+          const symbols = normalizeSymbolsInput((msg as any).symbols);
+          if (!symbols.length) {
+            client.wantsQuotesAll = false;
+            client.quoteSymbols?.clear();
+            return;
+          }
+          for (const symbol of symbols) {
+            client.quoteSymbols?.delete(symbol);
+          }
+          if ((client.quoteSymbols?.size ?? 0) === 0) {
+            client.wantsQuotesAll = false;
+          }
+          return;
+        }
+
+        if (type === "trades:subscribe") {
+          if (!client.userId) return wsCloseUnauthorized(socket, "AUTH_REQUIRED");
+          client.wantsTrades = true;
+          return;
+        }
+
+        if (type === "trades:unsubscribe") {
+          client.wantsTrades = false;
+          return;
+        }
+
+        if (type === "account:subscribe") {
+          if (!client.userId) return wsCloseUnauthorized(socket, "AUTH_REQUIRED");
+          client.wantsAccount = true;
+          return;
+        }
+
+        if (type === "account:unsubscribe") {
+          client.wantsAccount = false;
+          return;
+        }
+
+        if (type === "ping") {
+          return wsSendJson(socket, { type: "pong" });
         }
       } catch (err) {
         console.error("Invalid WS message:", err);
@@ -4243,12 +4480,51 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Bridge internal live events to WebSocket clients (user-scoped when userId is present)
   onLiveEvent((event) => {
-    const userId = (event as any)?.userId;
-    if (typeof userId === "number") {
-      broadcast(event, (client) => client.userId === userId);
+    const ev = event as any;
+    if (ev?.type === "quotes:update" && Array.isArray(ev?.payload?.rows)) {
+      const seq = Number(ev.payload?.seq ?? 0);
+      const asOf = Number(ev.payload?.asOf ?? Date.now());
+      applyQuoteUpdate(ev.payload.rows, { seq, asOf });
+      for (const ws of wss.clients as Set<LiveClient>) {
+        if (ws.readyState !== WebSocket.OPEN) continue;
+        const client = ws as LiveClient;
+        const filteredRows = filterQuoteRowsForClient(ev.payload.rows, client);
+        if (!filteredRows.length) continue;
+        wsSendJson(ws, {
+          type: "quotes:update",
+          protocolVersion: WS_PROTOCOL_VERSION,
+          seq,
+          asOf,
+          rows: filteredRows,
+        });
+      }
       return;
     }
-    broadcast(event);
+
+    const userId = ev?.userId;
+    if (ev?.type === "trades:updated" || ev?.type === "trades:update") {
+      if (typeof userId === "number") {
+        broadcast(ev, (client) => client.userId === userId && client.wantsTrades);
+      } else {
+        broadcast(ev, (client) => client.wantsTrades);
+      }
+      return;
+    }
+
+    if (ev?.type === "account:updated" || ev?.type === "account:update") {
+      if (typeof userId === "number") {
+        broadcast(ev, (client) => client.userId === userId && client.wantsAccount);
+      } else {
+        broadcast(ev, (client) => client.wantsAccount);
+      }
+      return;
+    }
+
+    if (typeof userId === "number") {
+      broadcast(ev, (client) => client.userId === userId);
+      return;
+    }
+    broadcast(ev);
   });
 
   // REST API configuration for 1Forge Starter tier
@@ -4354,6 +4630,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const nowMs = Date.now();
       const timestamp = Math.floor(nowMs / 1000);
 
+      const updatedRows: Array<{ symbol: string; price: number; bid: number; ask: number }> = [];
+
       for (const quote of quoteRows) {
         const isJpy = String(quote.symbol).includes("JPY");
         const pipSize = isJpy ? 0.01 : 0.0001;
@@ -4377,9 +4655,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
             isStale: false,
           })
           .where(eq(quotes.symbol, quote.symbol));
+
+        updatedRows.push({
+          symbol: quote.symbol,
+          price: newPrice,
+          bid: newBid,
+          ask: newAsk,
+        });
       }
 
-      publishLiveEvent({ type: "quotes:updated" });
+      if (updatedRows.length) {
+        publishLiveEvent({
+          type: "quotes:update",
+          payload: {
+            seq: nowMs,
+            asOf: nowMs,
+            source: "simulation",
+            rows: updatedRows.map((quote) => ({
+              symbol: quote.symbol,
+              price: quote.price,
+              bid: quote.bid,
+              ask: quote.ask,
+              lastApiUpdate: nowMs,
+              isStale: false,
+            })),
+          },
+        });
+      }
     } catch (error) {
       console.error("Error updating quotes:", error);
     }

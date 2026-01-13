@@ -55,6 +55,13 @@ function getCloseReasonBadgeClass(variant: CloseReasonUiVariant): string {
   }
 }
 
+function toMs(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+  const num = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(num)) return null;
+  return num < 1e12 ? num * 1000 : num;
+}
+
 export default function HistoryScreen() {
   const { locale } = useI18n();
   const [symbolFilter, setSymbolFilter] = useState("all");
@@ -78,8 +85,13 @@ export default function HistoryScreen() {
   // Filter trades based on selected filters and only show closed trades
   const filteredTrades = trades
     .filter((trade: any) => {
-      // Only include closed trades (trades with a closePrice)
-      if (!trade.closePrice) {
+      const isClosed =
+        String(trade.status ?? "").toUpperCase() === "CLOSED" ||
+        trade.closePrice !== null && trade.closePrice !== undefined ||
+        trade.closedAt !== null && trade.closedAt !== undefined;
+
+      // Only include closed trades
+      if (!isClosed) {
         return false;
       }
       
@@ -110,7 +122,9 @@ export default function HistoryScreen() {
       }
 
       // Time filter
-      const tradeDate = new Date(trade.openedAt);
+      const tradeDateMs = toMs(trade.closedAt ?? trade.openedAt);
+      if (!tradeDateMs) return false;
+      const tradeDate = new Date(tradeDateMs);
       const now = new Date();
       
       if (timeFilter === "today") {
@@ -406,10 +420,16 @@ export default function HistoryScreen() {
                     <div className="font-medium text-white">{trade.symbol?.symbol}</div>
                   </TableCell>
                   <TableCell className="text-sm text-gray-400">
-                    {new Date(trade.openedAt).toLocaleString(locale)}
+                    {(() => {
+                      const openedAtMs = toMs(trade.openedAt);
+                      return openedAtMs ? new Date(openedAtMs).toLocaleString(locale) : "—";
+                    })()}
                   </TableCell>
                   <TableCell className="text-sm text-gray-400">
-                    {trade.closedAt ? new Date(trade.closedAt).toLocaleString(locale) : "—"}
+                    {(() => {
+                      const closedAtMs = toMs(trade.closedAt);
+                      return closedAtMs ? new Date(closedAtMs).toLocaleString(locale) : "—";
+                    })()}
                   </TableCell>
                   <TableCell>
                     <span
@@ -426,15 +446,17 @@ export default function HistoryScreen() {
                     {trade.lots ? trade.lots.toLocaleString() : trade.size.toLocaleString()}
                   </TableCell>
                   <TableCell className="font-mono">
-                    {trade.openPrice.toFixed(
-                      trade.symbol?.symbol.includes("JPY") ? 2 : 5
-                    )}
+                    {(() => {
+                      const isJpy = trade.symbol?.symbol?.includes("JPY");
+                      return trade.openPrice.toFixed(isJpy ? 2 : 5);
+                    })()}
                   </TableCell>
                   <TableCell className="font-mono">
                     {trade.closePrice
-                      ? trade.closePrice.toFixed(
-                          trade.symbol?.symbol.includes("JPY") ? 2 : 5
-                        )
+                      ? (() => {
+                          const isJpy = trade.symbol?.symbol?.includes("JPY");
+                          return trade.closePrice.toFixed(isJpy ? 2 : 5);
+                        })()
                       : "—"}
                   </TableCell>
                   <TableCell>

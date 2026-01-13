@@ -28,11 +28,11 @@ export function useTrades() {
       const messageUserId = message.userId;
       const currentUserId = user?.id;
       if (!messageUserId || !currentUserId || messageUserId === currentUserId) {
-        queryClient.refetchQueries({ queryKey: ["/api/trades"], type: "active" });
-        queryClient.refetchQueries({ queryKey: ["/api/trades/open"], type: "active" });
-        queryClient.refetchQueries({ queryKey: ["/api/trades/pending"], type: "active" });
-        queryClient.refetchQueries({ queryKey: ["/api/auth/current-user"], type: "active" });
-        queryClient.refetchQueries({ queryKey: ["/api/account/summary"], type: "active" });
+        queryClient.invalidateQueries({ queryKey: ["/api/trades"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/trades/open"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/trades/pending"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/auth/current-user"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/account/summary"] });
       }
     });
   }, [queryClient, subscribe, user?.id]);
@@ -97,7 +97,8 @@ export function useTrades() {
   // Close a trade (server determines close price from authoritative quotes)
   const closeTrade = useMutation({
     mutationFn: async ({ id }: { id: number }) => {
-      return apiRequest("POST", `/api/trades/${id}/close`, {});
+      const res = await apiRequest("POST", `/api/trades/${id}/close`, {});
+      return res.json();
     },
     onMutate: async ({ id }) => {
       // Cancel any outgoing refetches so they don't overwrite our optimistic update
@@ -114,17 +115,42 @@ export function useTrades() {
       
       return { previousOpenTrades };
     },
-    onSuccess: () => {
+    onSuccess: (closedTrade: any, _vars, context) => {
       toast({
         title: "Trade Closed",
         description: "Your trade was successfully closed",
       });
-      // Force immediate refetch to get updated data from server
-      queryClient.refetchQueries({ queryKey: ["/api/trades"], type: "active" });
-      queryClient.refetchQueries({ queryKey: ["/api/trades/open"], type: "active" });
-      queryClient.refetchQueries({ queryKey: ["/api/trades/pending"], type: "active" });
-      queryClient.refetchQueries({ queryKey: ["/api/auth/current-user"], type: "active" });
-      queryClient.refetchQueries({ queryKey: ["/api/account/summary"], type: "active" });
+      // Update cached trade history immediately so History tab reflects the close instantly.
+      if (closedTrade?.id) {
+        const previousOpenTrades = Array.isArray(context?.previousOpenTrades)
+          ? context?.previousOpenTrades
+          : [];
+        const previousTrade = previousOpenTrades.find((trade: any) => trade?.id === closedTrade.id);
+        const mergedTrade = previousTrade
+          ? { ...previousTrade, ...closedTrade, symbol: previousTrade.symbol ?? closedTrade.symbol }
+          : closedTrade;
+
+        queryClient.setQueryData(["/api/trades"], (old: any[] | undefined) => {
+          if (!Array.isArray(old)) return old;
+          let found = false;
+          const next = old.map((trade) => {
+            if (trade?.id !== closedTrade.id) return trade;
+            found = true;
+            return { ...trade, ...mergedTrade, symbol: trade.symbol ?? mergedTrade.symbol };
+          });
+          if (!found) {
+            return [{ ...mergedTrade }, ...next];
+          }
+          return next;
+        });
+      }
+
+      // Mark queries stale so active views refetch and background tabs stay ready.
+      queryClient.invalidateQueries({ queryKey: ["/api/trades"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/trades/open"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/trades/pending"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/auth/current-user"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/account/summary"] });
     },
     onError: (error: Error, _variables, context) => {
       // Rollback to the previous value on error

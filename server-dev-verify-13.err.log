@@ -3,3 +3,33 @@
 [ENV WARNING] TWILIO_AUTH_TOKEN not configured - SMS verification will fail
 [ENV WARNING] TWILIO_MESSAGING_SERVICE_SID or TWILIO_FROM_NUMBER not configured - SMS verification will fail
 [DB] Postgres mode: SQLite schema ensure/seed skipped. Apply Postgres migrations before use.
+
+A PostCSS plugin did not pass the `from` option to `postcss.parse`. This may cause imported assets to be incorrectly transformed. If you've recently added a PostCSS plugin that raised this warning, please contact the package author to fix the issue.
+Error in grift detection onTradeSubmit: error: column reference "confidence" is ambiguous
+    at /home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/pg/lib/client.js:545:17
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async Object.run (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftDb.ts:101:26)
+    at async recordLinkedEdge (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftEngine.ts:411:3)
+    at async checkHedgePair (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftEngine.ts:941:28)
+    at async onTradeSubmit (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftEngine.ts:1318:17)
+    at async <anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/server/routes.ts:3006:13)
+    at async withGriftClient (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftDb.ts:126:12)
+    at async <anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/server/routes.ts:2983:11) {
+  length: 112,
+  severity: 'ERROR',
+  code: '42702',
+  detail: undefined,
+  hint: undefined,
+  position: '256',
+  internalPosition: undefined,
+  internalQuery: undefined,
+  where: undefined,
+  schema: undefined,
+  table: undefined,
+  column: undefined,
+  dataType: undefined,
+  constraint: undefined,
+  file: 'parse_relation.c',
+  line: '913',
+  routine: 'colNameToVar'
+}

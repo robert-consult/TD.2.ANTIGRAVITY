@@ -184,3 +184,29 @@
   routine: 'ExecConstraints'
 }
 [2026-01-13T05:00:02.435Z] [PID: 664302] [32m[NODE-CRON][32m [33m[WARN][0m missed execution at Mon Jan 12 2026 23:00:00 GMT-0600 (Central Standard Time)! Possible blocking IO or high CPU user at the same process used by node-cron.
+[Grift Scheduler] Error evaluating user undefined: error: null value in column "user_id" of relation "grift_user_scores" violates not-null constraint
+    at /home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/pg/lib/client.js:545:17
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async Object.run (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftDb.ts:101:26)
+    at async recomputeUserAggregates (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftEngine.ts:1517:3)
+    at async <anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftScheduler.ts:95:9)
+    at async withGriftClient (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftDb.ts:126:12)
+    at async runPeriodicEvaluation (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftScheduler.ts:38:10) {
+  length: 273,
+  severity: 'ERROR',
+  code: '23502',
+  detail: 'Failing row contains (null, 0, 0, 0, LOW, 0, 0, 0, 0, 0, 0, 0, 0, 1768287276524).',
+  hint: undefined,
+  position: undefined,
+  internalPosition: undefined,
+  internalQuery: undefined,
+  where: undefined,
+  schema: 'public',
+  table: 'grift_user_scores',
+  column: 'user_id',
+  dataType: undefined,
+  constraint: undefined,
+  file: 'execMain.c',
+  line: '2057',
+  routine: 'ExecConstraints'
+}

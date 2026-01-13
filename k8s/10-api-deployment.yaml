@@ -19,7 +19,7 @@ spec:
     spec:
       containers:
         - name: api
-          image: tradehub/app:latest
+          image: registry.equitywaves.com/tradehub/app:local-20260113-001036
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 5000

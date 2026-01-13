@@ -1,0 +1,259 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tradehub-prometheus
+  namespace: tradehub
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tradehub-prometheus-adapter
+  namespace: tradehub
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tradehub-prometheus-config
+  namespace: tradehub
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s
+      evaluation_interval: 15s
+    scrape_configs:
+      - job_name: "tradehub-api"
+        metrics_path: /metrics
+        kubernetes_sd_configs:
+          - role: endpoints
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_service_name, __meta_kubernetes_endpoint_port_name]
+            action: keep
+            regex: tradehub;tradehub-api;http
+          - source_labels: [__meta_kubernetes_namespace]
+            target_label: namespace
+          - source_labels: [__meta_kubernetes_pod_name]
+            target_label: pod
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tradehub-prometheus
+  namespace: tradehub
+  labels:
+    app: tradehub-prometheus
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tradehub-prometheus
+  template:
+    metadata:
+      labels:
+        app: tradehub-prometheus
+    spec:
+      serviceAccountName: tradehub-prometheus
+      containers:
+        - name: prometheus
+          image: prom/prometheus:v2.51.0
+          args:
+            - "--config.file=/etc/prometheus/prometheus.yml"
+            - "--storage.tsdb.path=/prometheus"
+            - "--storage.tsdb.retention.time=24h"
+          ports:
+            - containerPort: 9090
+          volumeMounts:
+            - name: config
+              mountPath: /etc/prometheus
+            - name: storage
+              mountPath: /prometheus
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+      volumes:
+        - name: config
+          configMap:
+            name: tradehub-prometheus-config
+        - name: storage
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tradehub-prometheus
+  namespace: tradehub
+  labels:
+    app: tradehub-prometheus
+spec:
+  type: ClusterIP
+  selector:
+    app: tradehub-prometheus
+  ports:
+    - name: http
+      port: 9090
+      targetPort: 9090
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tradehub-prometheus-adapter-config
+  namespace: tradehub
+data:
+  config.yaml: |
+    rules:
+      - seriesQuery: 'ws_active_connections{namespace!="",pod!=""}'
+        resources:
+          overrides:
+            namespace: {resource: "namespace"}
+            pod: {resource: "pod"}
+        name:
+          matches: "^ws_active_connections$"
+          as: "ws_active_connections"
+        metricsQuery: 'avg(<<.Series>>{<<.LabelMatchers>>}) by (<<.GroupBy>>)'
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tradehub-prometheus-adapter
+  namespace: tradehub
+  labels:
+    app: tradehub-prometheus-adapter
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tradehub-prometheus-adapter
+  template:
+    metadata:
+      labels:
+        app: tradehub-prometheus-adapter
+    spec:
+      serviceAccountName: tradehub-prometheus-adapter
+      containers:
+        - name: adapter
+          image: registry.k8s.io/prometheus-adapter/prometheus-adapter:v0.12.0
+          args:
+            - /adapter
+            - --secure-port=6443
+            - --cert-dir=/tmp
+            - --prometheus-url=http://tradehub-prometheus.tradehub.svc:9090
+            - --metrics-relist-interval=30s
+            - --config=/etc/adapter/config.yaml
+          ports:
+            - containerPort: 6443
+          volumeMounts:
+            - name: config
+              mountPath: /etc/adapter
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "300m"
+              memory: "256Mi"
+      volumes:
+        - name: config
+          configMap:
+            name: tradehub-prometheus-adapter-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tradehub-prometheus-adapter
+  namespace: tradehub
+  labels:
+    app: tradehub-prometheus-adapter
+spec:
+  selector:
+    app: tradehub-prometheus-adapter
+  ports:
+    - name: https
+      port: 443
+      targetPort: 6443
+---
+apiVersion: apiregistration.k8s.io/v1
+kind: APIService
+metadata:
+  name: v1beta1.custom.metrics.k8s.io
+spec:
+  service:
+    name: tradehub-prometheus-adapter
+    namespace: tradehub
+  group: custom.metrics.k8s.io
+  version: v1beta1
+  insecureSkipTLSVerify: true
+  groupPriorityMinimum: 100
+  versionPriority: 100
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: tradehub-prometheus
+rules:
+  - apiGroups: [""]
+    resources: ["nodes", "nodes/metrics", "nodes/proxy", "services", "endpoints", "pods", "namespaces"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: tradehub-prometheus
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: tradehub-prometheus
+subjects:
+  - kind: ServiceAccount
+    name: tradehub-prometheus
+    namespace: tradehub
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: tradehub-prometheus-adapter
+rules:
+  - apiGroups: [""]
+    resources: ["nodes", "nodes/metrics", "nodes/proxy", "services", "endpoints", "pods", "namespaces"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["custom.metrics.k8s.io"]
+    resources: ["*"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["external.metrics.k8s.io"]
+    resources: ["*"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["authentication.k8s.io"]
+    resources: ["tokenreviews"]
+    verbs: ["create"]
+  - apiGroups: ["authorization.k8s.io"]
+    resources: ["subjectaccessreviews"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: tradehub-prometheus-adapter
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: tradehub-prometheus-adapter
+subjects:
+  - kind: ServiceAccount
+    name: tradehub-prometheus-adapter
+    namespace: tradehub
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: tradehub-prometheus-adapter-auth-reader
+  namespace: kube-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: extension-apiserver-authentication-reader
+subjects:
+  - kind: ServiceAccount
+    name: tradehub-prometheus-adapter
+    namespace: tradehub

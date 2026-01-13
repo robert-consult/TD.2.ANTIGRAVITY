@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useWebSocket } from "./use-websocket";
 
 interface Quote {
   symbol: string;
@@ -25,25 +26,37 @@ interface SymbolConfig {
   enabled?: boolean;
 }
 
-// Polling interval for quotes (milliseconds) - matches Trade Settings configuration
-// Pure REST API polling from 1Forge feed - no WebSocket dependency
-const POLLING_INTERVAL = 870; // 870ms as configured in trade settings
+// Fallback REST polling interval when WebSocket isn't available.
+const FALLBACK_POLL_INTERVAL = 5000;
 
 export function useQuotes() {
   const [quotes, setQuotes] = useState<Quote[]>([]);
   const [isConnected, setIsConnected] = useState(false);
+  const queryClient = useQueryClient();
+
+  const wsUrl =
+    (window.location.protocol === "https:" ? "wss://" : "ws://") +
+    window.location.host +
+    "/ws";
+
+  const { isConnected: isWsConnected } = useWebSocket(wsUrl, {
+    onMessage: (message) => {
+      if (!message || typeof message !== "object") return;
+      if (message.type !== "quotes:updated") return;
+      queryClient.refetchQueries({ queryKey: ["/api/quotes/latest"], type: "active" });
+    },
+  });
 
   // Fetch available symbols
   const { data: symbols = [] } = useQuery<SymbolConfig[]>({
     queryKey: ["/api/config/symbols"],
   });
 
-  // Pure REST API polling for 1Forge feed - no WebSocket
-  // Polls at 870ms interval as configured in trade settings
+  // REST polling is a fallback; WS messages trigger immediate refetches.
   const { data: latestQuotesData, isLoading, isError } = useQuery({
     queryKey: ["/api/quotes/latest"],
     enabled: true,
-    refetchInterval: POLLING_INTERVAL,
+    refetchInterval: isWsConnected ? false : FALLBACK_POLL_INTERVAL,
     refetchOnMount: 'always',
     refetchOnWindowFocus: true,
     staleTime: 0
@@ -51,8 +64,8 @@ export function useQuotes() {
   
   // Update connection status based on REST API response only
   useEffect(() => {
-    setIsConnected(!isError && !!latestQuotesData);
-  }, [latestQuotesData, isError]);
+    setIsConnected(isWsConnected || (!isError && !!latestQuotesData));
+  }, [isWsConnected, latestQuotesData, isError]);
 
   // Helper function to calculate percentage change
   const calculatePctChange = (current: number, previous: number): number => {

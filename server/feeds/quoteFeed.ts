@@ -17,6 +17,10 @@ const REST_LIMIT_PER_DAY = 100000;
 const MAX_PER_REQ = 100;
 const DEFAULT_POLL_MS = 870;
 const DEFAULT_STALE_MS = 30000;
+const DEFAULT_SYMBOL_REFRESH_MS = 30000;
+const SYMBOL_REFRESH_MS = Number(process.env.QUOTE_SYMBOL_REFRESH_MS ?? DEFAULT_SYMBOL_REFRESH_MS);
+const SYMBOL_REFRESH_INTERVAL_MS =
+  Number.isFinite(SYMBOL_REFRESH_MS) && SYMBOL_REFRESH_MS > 0 ? SYMBOL_REFRESH_MS : DEFAULT_SYMBOL_REFRESH_MS;
 
 let dynamicConfig = {
   pollIntervalMs: DEFAULT_POLL_MS,
@@ -26,6 +30,7 @@ let dynamicConfig = {
 };
 
 let pollTimerId: ReturnType<typeof setTimeout> | null = null;
+let lastDynamicSetRefresh = 0;
 
 // In-memory cache for quote snapshots with timestamps
 interface QuoteSnapshot {
@@ -86,11 +91,12 @@ export async function reloadFeedConfig() {
   }
 }
 
-function updateSnapshotCache(quotes: any[]) {
+function updateSnapshotCache(quotes: any[], options: { markSuccess?: boolean } = {}) {
   const now = Date.now();
   for (const quote of quotes) {
     if (!quote?.symbol) continue;
     const updatedAt = typeof quote.lastUpdated === "number" ? quote.lastUpdated : now;
+    const consecutiveFailures = typeof quote.consecutiveFailures === "number" ? quote.consecutiveFailures : 0;
     quoteSnapshotCache.set(quote.symbol, {
       symbol: quote.symbol,
       price: quote.price,
@@ -98,11 +104,13 @@ function updateSnapshotCache(quotes: any[]) {
       ask: quote.ask,
       lastUpdated: updatedAt,
       isStale: Boolean(quote.isStale),
-      consecutiveFailures: 0,
+      consecutiveFailures,
     });
   }
-  lastSuccessfulApiCall = now;
-  consecutiveApiFailures = 0;
+  if (options.markSuccess !== false) {
+    lastSuccessfulApiCall = now;
+    consecutiveApiFailures = 0;
+  }
 }
 
 async function getActiveInstruments(): Promise<string[]> {
@@ -179,9 +187,48 @@ function generateSimulatedQuotes(symbols: string[]) {
   });
 }
 
-async function refreshDynamicSet() {
+function buildFallbackQuotes(symbols: string[]) {
+  const now = Date.now();
+  const cached: any[] = [];
+  const missing: string[] = [];
+
+  for (const symbol of symbols) {
+    const cachedQuote = quoteSnapshotCache.get(symbol);
+    if (!cachedQuote) {
+      missing.push(symbol);
+      continue;
+    }
+
+    const lastUpdated = typeof cachedQuote.lastUpdated === "number" ? cachedQuote.lastUpdated : now;
+    cached.push({
+      symbol,
+      price: cachedQuote.price,
+      bid: cachedQuote.bid,
+      ask: cachedQuote.ask,
+      timestamp: Math.floor(lastUpdated / 1000),
+      lastUpdated,
+      isStale: true,
+      consecutiveFailures: consecutiveApiFailures,
+    });
+  }
+
+  const simulated = missing.length
+    ? generateSimulatedQuotes(missing).map((quote) => ({
+        ...quote,
+        isStale: true,
+        consecutiveFailures: consecutiveApiFailures,
+      }))
+    : [];
+
+  return [...cached, ...simulated];
+}
+
+async function refreshDynamicSet(force = false) {
+  const now = Date.now();
+  if (!force && now - lastDynamicSetRefresh < SYMBOL_REFRESH_INTERVAL_MS) return;
   const symbols = await getActiveInstruments();
   dynamicSet = new Set(symbols.length ? symbols : ALL.slice(0, MAX_PER_REQ));
+  lastDynamicSetRefresh = now;
 }
 
 async function persistQuotes(rows: any[], isStale: boolean) {
@@ -362,11 +409,15 @@ async function pullBatch() {
     } catch (e: any) {
       consecutiveApiFailures++;
       console.error("[1Forge] API failure:", e?.message || e);
-      const simulated = generateSimulatedQuotes(slice);
-      updateSnapshotCache(simulated.map((q) => ({ ...q, isStale: true })));
-      await persistQuotes(simulated, true);
+      const fallbackQuotes = buildFallbackQuotes(slice);
+      if (!fallbackQuotes.length) {
+        console.warn("[1Forge] No fallback cache available; skipping quote persistence.");
+        continue;
+      }
+      updateSnapshotCache(fallbackQuotes, { markSuccess: false });
+      await persistQuotes(fallbackQuotes, true);
       await onQuotesUpdated(
-        simulated.map((q: any) => ({
+        fallbackQuotes.map((q: any) => ({
           symbol: q.symbol,
           price: q.price,
           bid: q.bid,
@@ -390,7 +441,7 @@ async function startQuoteFeed() {
   dynamicConfig = await loadFeedConfig();
   console.log(`[FeedConfig] Initial: poll=${dynamicConfig.pollIntervalMs}ms, stale=${dynamicConfig.staleThresholdMs}ms`);
   await ensureMarketDailyCloseTable();
-  await refreshDynamicSet();
+  await refreshDynamicSet(true);
   void pullBatch();
   schedulePoll();
 }

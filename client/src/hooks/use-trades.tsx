@@ -57,6 +57,7 @@ export function useTrades() {
   } = useQuery({
     queryKey: ["/api/trades"],
     enabled: !!user,
+    refetchInterval: isTradeWsConnected ? false : 5000,
   });
 
   // Get open trades
@@ -68,6 +69,7 @@ export function useTrades() {
   } = useQuery({
     queryKey: ["/api/trades/open"],
     enabled: !!user,
+    refetchInterval: isTradeWsConnected ? false : 5000,
   });
 
   // Create a new trade

@@ -103,6 +103,37 @@ export default function JournalPage() {
   const [selectedTradeIds, setSelectedTradeIds] = useState<number[]>([]);
   const [tradeSearchQuery, setTradeSearchQuery] = useState("");
 
+  const toMs = (value: unknown): number | null => {
+    if (value === null || value === undefined) return null;
+    if (value instanceof Date) return value.getTime();
+    if (typeof value === "number") {
+      return Number.isFinite(value) ? (value < 1e12 ? value * 1000 : value) : null;
+    }
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (!trimmed) return null;
+      const asNum = Number(trimmed);
+      if (Number.isFinite(asNum)) return asNum < 1e12 ? asNum * 1000 : asNum;
+      const asDate = new Date(trimmed);
+      return Number.isFinite(asDate.getTime()) ? asDate.getTime() : null;
+    }
+    return null;
+  };
+
+  const formatDate = (timestamp: unknown) => {
+    const ms = toMs(timestamp);
+    if (ms === null) return "Unknown date";
+    const date = new Date(ms);
+    if (isNaN(date.getTime())) return "Invalid date";
+    return date.toLocaleString(locale, {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  };
+
   const { data: entries = [], isLoading, isError } = useQuery<JournalEntry[]>({
     queryKey: ["/api/journal"],
     enabled: !!user,
@@ -114,25 +145,31 @@ export default function JournalPage() {
     enabled: !!user,
   });
 
-  // Filter to only closed trades (those with closePrice)
-  const closedTrades = trades.filter((t: any) => t.closePrice);
+  // Filter to only closed trades
+  const closedTrades = trades.filter((t: any) => {
+    const status = String(t.status ?? "").toUpperCase();
+    const hasClosePrice = t.closePrice !== null && t.closePrice !== undefined;
+    const hasClosedAt = t.closedAt !== null && t.closedAt !== undefined;
+    return status === "CLOSED" || hasClosePrice || hasClosedAt;
+  });
   
   // Filter trades based on search and sort by most recent first
   const filteredTrades = closedTrades
     .filter((trade: any) => {
       if (!tradeSearchQuery) return true;
       const symbol = trade.symbol?.symbol || trade.symbol || "";
+      const side = String(trade.side ?? trade.type ?? "");
       const searchLower = tradeSearchQuery.toLowerCase();
       return symbol.toLowerCase().includes(searchLower) ||
-             trade.side?.toLowerCase().includes(searchLower) ||
+             side.toLowerCase().includes(searchLower) ||
              String(trade.profit || "").includes(searchLower);
     })
     .sort((a: any, b: any) => {
       // Sort by close time, most recent first
-      const aTime = a.closedAt || a.closeTime || a.updatedAt || 0;
-      const bTime = b.closedAt || b.closeTime || b.updatedAt || 0;
-      const aTs = typeof aTime === 'number' ? aTime : new Date(aTime).getTime();
-      const bTs = typeof bTime === 'number' ? bTime : new Date(bTime).getTime();
+      const aTime = toMs(a.closedAt ?? a.closeTime ?? a.updatedAt ?? a.openedAt) ?? 0;
+      const bTime = toMs(b.closedAt ?? b.closeTime ?? b.updatedAt ?? b.openedAt) ?? 0;
+      const aTs = aTime;
+      const bTs = bTime;
       return bTs - aTs;
     })
     .slice(0, 20); // Limit to 20 for performance
@@ -250,7 +287,7 @@ export default function JournalPage() {
     const symbol = trade.symbol?.symbol || trade.symbol || "Unknown";
     const profit = parseFloat(trade.profit || 0);
     const profitColor = profit >= 0 ? "text-green-500" : "text-red-500";
-    const side = trade.side || "?";
+    const side = trade.side || trade.type || "?";
     return { symbol, profit, profitColor, side };
   };
 
@@ -298,33 +335,6 @@ export default function JournalPage() {
 
   const getMoodLabel = (mood: string | null) => {
     return moodOptions.find((m) => m.value === mood)?.label || mood || "No mood";
-  };
-
-  const formatDate = (timestamp: number | string | Date) => {
-    try {
-      // Handle Date objects, ISO strings, or Unix timestamps
-      let date: Date;
-      if (timestamp instanceof Date) {
-        date = timestamp;
-      } else if (typeof timestamp === 'string') {
-        date = new Date(timestamp);
-      } else if (typeof timestamp === 'number') {
-        // If it's a small number (Unix seconds), multiply by 1000
-        date = new Date(timestamp < 10000000000 ? timestamp * 1000 : timestamp);
-      } else {
-        return 'Unknown date';
-      }
-      if (isNaN(date.getTime())) return 'Invalid date';
-      return date.toLocaleString(locale, {
-        year: "numeric",
-        month: "short",
-        day: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-      });
-    } catch {
-      return 'Invalid date';
-    }
   };
 
   const parseTags = (tags: string | null): string[] => {
@@ -664,8 +674,8 @@ export default function JournalPage() {
                           const linkedTrade = trades.find((t: any) => t.id === tradeId);
                           if (!linkedTrade) return null;
                           const { symbol, profit, profitColor, side } = formatTradeOption(linkedTrade);
-                          const openTime = linkedTrade.openedAt ? new Date(linkedTrade.openedAt).toLocaleString(locale) : "N/A";
-                          const closeTime = linkedTrade.closedAt ? new Date(linkedTrade.closedAt).toLocaleString(locale) : "N/A";
+                          const openTime = linkedTrade.openedAt ? formatDate(linkedTrade.openedAt) : "N/A";
+                          const closeTime = linkedTrade.closedAt ? formatDate(linkedTrade.closedAt) : "N/A";
                           const openPrice = linkedTrade.openPrice ? Number(linkedTrade.openPrice).toFixed(5) : "N/A";
                           const closePrice = linkedTrade.closePrice ? Number(linkedTrade.closePrice).toFixed(5) : "N/A";
                           const lots = linkedTrade.lots || linkedTrade.size || "N/A";

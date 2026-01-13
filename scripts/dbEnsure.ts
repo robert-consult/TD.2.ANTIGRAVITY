@@ -31,58 +31,61 @@ import {
   ensureUserSessionsTable,
   ensureUserSettingsColumns,
   ensureUsersColumns,
+  shutdownEnsureSchemaPool,
 } from "../server/db/ensureSchema";
 import { bootstrapDoc1Seed } from "../server/legal/bootstrapDoc1Seed";
 
 async function main() {
   try {
-    ensureCoreTradingSchema();
+    await ensureCoreTradingSchema();
 
-    ensureSystemConfigTable();
-    ensureGlobalSettingsTable();
-    ensureAccountLifecycleSchema();
+    await ensureSystemConfigTable();
+    await ensureGlobalSettingsTable();
+    await ensureAccountLifecycleSchema();
 
-    ensureQuotesColumns();
-    ensureUserSettingsColumns();
-    ensureUsersColumns();
+    await ensureQuotesColumns();
+    await ensureUserSettingsColumns();
+    await ensureUsersColumns();
 
-    ensureUserLoginHistoryTable();
-    ensureLoginHistorySessionColumns();
-    ensureUserAccountEventsTable();
-    ensureUserAdminNotesTable();
+    await ensureUserLoginHistoryTable();
+    await ensureLoginHistorySessionColumns();
+    await ensureUserAccountEventsTable();
+    await ensureUserAdminNotesTable();
 
-    ensureUserSessionsTable();
-    ensureUserSessionIdentityColumns();
-    ensureUserSessionGeoColumns();
-    ensureLoginHistoryIdentityColumns();
-    ensureLoginHistoryGeoColumns();
+    await ensureUserSessionsTable();
+    await ensureUserSessionIdentityColumns();
+    await ensureUserSessionGeoColumns();
+    await ensureLoginHistoryIdentityColumns();
+    await ensureLoginHistoryGeoColumns();
 
-    ensureTradeAuditTable();
-    ensureInstitutionalAuditColumns();
-    ensureOrderIntentAuditTable();
-    ensureTradeCloseAuditColumns();
-    ensureTradesProvenanceColumns();
+    await ensureTradeAuditTable();
+    await ensureInstitutionalAuditColumns();
+    await ensureOrderIntentAuditTable();
+    await ensureTradeCloseAuditColumns();
+    await ensureTradesProvenanceColumns();
 
-    ensureTraderJournalTable();
-    ensureAdminActionsTable();
-    ensureAuditExportManifestTable();
-    ensureMigrationTables();
+    await ensureTraderJournalTable();
+    await ensureAdminActionsTable();
+    await ensureAuditExportManifestTable();
+    await ensureMigrationTables();
 
-    ensureTieredAccessSchema();
-    ensureLegalComplianceSchema();
-    ensureSignupFreezeWaitlistSchema();
-    ensureSignupFingerprintSchema();
+    await ensureTieredAccessSchema();
+    await ensureLegalComplianceSchema();
+    await ensureSignupFreezeWaitlistSchema();
+    await ensureSignupFingerprintSchema();
 
-    ensureMarketDailyCloseTable();
-    ensureDailyFxClosesSchema();
-    ensureI18nSchema();
+    await ensureMarketDailyCloseTable();
+    await ensureDailyFxClosesSchema();
+    await ensureI18nSchema();
 
-    bootstrapDoc1Seed();
+    await bootstrapDoc1Seed();
 
     console.log("[db] Schema ensure complete");
   } catch (e) {
     console.error("[db] Schema ensure failed:", e);
     process.exitCode = 1;
+  } finally {
+    await shutdownEnsureSchemaPool();
   }
 }
 

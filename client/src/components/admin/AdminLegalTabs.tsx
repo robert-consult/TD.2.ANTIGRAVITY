@@ -342,8 +342,8 @@ export function AdminLegalPanel() {
       <TabsContent value="documents-v2" className="mt-4"><AdminLegalDocsPage /></TabsContent>
       <TabsContent value="acceptances-v2" className="mt-4"><AdminLegalAcceptancesPage /></TabsContent>
       <TabsContent value="coverage" className="mt-4"><AdminLegalCoverage /></TabsContent>
-      <TabsContent value="documents-legacy" className="mt-4"><AdminLegalDocsPage /></TabsContent>
-      <TabsContent value="acceptances-legacy" className="mt-4"><AdminLegalAcceptancesPage /></TabsContent>
+      <TabsContent value="documents-legacy" className="mt-4"><AdminLegalDocs /></TabsContent>
+      <TabsContent value="acceptances-legacy" className="mt-4"><AdminLegalAcceptances /></TabsContent>
     </Tabs>
   );
 }

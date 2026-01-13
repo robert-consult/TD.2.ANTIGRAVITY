@@ -9,7 +9,7 @@
     "start": "NODE_ENV=production node dist/index.js",
     "check": "tsc",
     "db:audit": "tsx scripts/dbAudit.ts",
-    "db:ensure": "tsx scripts/dbEnsure.ts",
+    "db:ensure": "dotenv -e .env -- tsx scripts/dbEnsure.ts",
     "db:schema:dump": "tsx scripts/dbDumpSchema.ts",
     "db:push": "npm run db:ensure",
     "db:seed": "tsx db/seed.ts",

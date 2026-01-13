@@ -3988,11 +3988,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   registerGriftRoutes(app);
   app.use("/api/grift", griftPublicRouter);
   app.use('/api/admin/migration', adminMigrationRouter); // Migration export/import (backup)
-  if (!isPostgres) {
-    app.use('/api/admin/legal-docs', adminLegalRouter); // Admin legal management routes (legacy)
-  } else {
-    console.warn("[DB] Postgres mode: legacy legal routes remain disabled.");
-  }
+  app.use('/api/admin/legal-docs', adminLegalRouter); // Admin legal management routes (legacy)
 
   // Create HTTP server
   const httpServer = createServer(app);

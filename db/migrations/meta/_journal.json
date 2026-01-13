@@ -22,6 +22,13 @@
       "when": 1768239322888,
       "tag": "0002_grift_postgres",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1768259307926,
+      "tag": "0003_legal_doc_legacy_fields",
+      "breakpoints": true
     }
   ]
 }

@@ -1530,6 +1530,10 @@ export const legalDocuments = pgTable("legal_documents", {
   sha256: text("sha256").notNull(), // SHA-256 hash of content
   content: text("content").notNull(), // Full document HTML/Markdown
   notes: text("notes"), // Admin notes about this version
+  title: text("title"), // Legacy admin title
+  locale: text("locale"), // Legacy admin locale
+  updatedAt: bigint("updated_at", { mode: "number" }),
+  updatedByAdminUserId: integer("updated_by_admin_user_id"),
   createdAt: bigint("created_at", { mode: "number" }).notNull().default(nowUnixMs), // timestamp_ms
   createdByAdminUserId: integer("created_by_admin_user_id"),
 });

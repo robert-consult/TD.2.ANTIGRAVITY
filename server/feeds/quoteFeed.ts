@@ -2,14 +2,13 @@
 import "dotenv/config";
 import axios from "axios";
 import pThrottle from "p-throttle";
-import { instruments } from "../../data/instruments";
 import { db, dbClient } from "@db";
 import { eq } from "drizzle-orm";
 import { systemConfig } from "@shared/schema";
 import { recalcAccount } from "../recalcAccount";
 import { onQuotesUpdated } from "../engine/orderEngine";
 import { computeSessionDayForQuote, ensureMarketDailyCloseTable } from "../utils/marketDailyClose";
-import { publishLiveEvent } from "../services/liveBus";
+import { onLiveEvent, publishLiveEvent } from "../services/liveBus";
 import { getValkey } from "../services/valkey";
 
 const API_KEY = process.env.FORGE_KEY;
@@ -133,7 +132,7 @@ async function getActiveInstruments(): Promise<string[]> {
     return rows.rows.map((r: any) => String(r.symbol));
   } catch (error) {
     console.error("[Feed] Error getting active instruments:", error);
-    return ["EURUSD", "GBPUSD", "USDJPY", "EURJPY", "GBPJPY"];
+    return [];
   }
 }
 
@@ -159,12 +158,9 @@ function formatSymbolsForForgeAPI(symbols: string[]): string {
     })
     .filter((s) => s.includes("/"));
 
-  const requiredPairs = ["EUR/USD", "GBP/USD", "USD/JPY", "GBP/JPY", "EUR/JPY"];
-  const allPairs = [...new Set([...formattedSymbols, ...requiredPairs])];
-  return allPairs.join(",");
+  return [...new Set(formattedSymbols)].join(",");
 }
 
-const ALL = instruments.map((i) => i.symbol);
 let dynamicSet = new Set<string>();
 const throttle = pThrottle({ limit: REST_LIMIT_PER_DAY, interval: 86_400_000 });
 
@@ -311,8 +307,28 @@ async function refreshDynamicSet(force = false) {
   const now = Date.now();
   if (!force && now - lastDynamicSetRefresh < SYMBOL_REFRESH_INTERVAL_MS) return;
   const symbols = await getActiveInstruments();
-  dynamicSet = new Set(symbols.length ? symbols : ALL.slice(0, MAX_PER_REQ));
+  if (symbols.length) {
+    dynamicSet = new Set(symbols);
+  } else {
+    dynamicSet = new Set();
+    console.warn("[Feed] No enabled symbols found in symbol_configs; quote fetch paused.");
+  }
   lastDynamicSetRefresh = now;
+}
+
+let symbolsRefreshInFlight: Promise<void> | null = null;
+
+async function refreshSymbolsAndPull(reason: string) {
+  if (symbolsRefreshInFlight) return symbolsRefreshInFlight;
+  symbolsRefreshInFlight = (async () => {
+    await refreshDynamicSet(true);
+    if (dynamicSet.size === 0) return;
+    console.log(`[Feed] symbols:updated (${reason}) -> refreshed ${dynamicSet.size} symbols`);
+    await throttle(pullBatch)();
+  })().finally(() => {
+    symbolsRefreshInFlight = null;
+  });
+  return symbolsRefreshInFlight;
 }
 
 function uniqueSymbols(rows: any[]): string[] {
@@ -465,7 +481,8 @@ async function notifyAccountsForSymbols(rows: any[], reason: string) {
 
 async function pullBatch() {
   await refreshDynamicSet();
-  const wanted = [...new Set([...dynamicSet, ...ALL.slice(0, MAX_PER_REQ)])];
+  const wanted = [...new Set([...dynamicSet])];
+  if (wanted.length === 0) return;
   const chunks: string[][] = [];
   for (let i = 0; i < wanted.length; i += MAX_PER_REQ) {
     chunks.push(wanted.slice(i, i + MAX_PER_REQ));
@@ -585,6 +602,11 @@ async function startQuoteFeed() {
   void pullBatch();
   schedulePoll();
 }
+
+onLiveEvent((event) => {
+  if (event?.type !== "symbols:updated") return;
+  void refreshSymbolsAndPull(String(event?.payload?.action ?? "updated"));
+});
 
 void startQuoteFeed();
 

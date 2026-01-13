@@ -613,7 +613,7 @@ export const tradeAudit = pgTable("trade_audit", {
   eventType: text("event_type").notNull(), // ORDER_PLACED, ORDER_FILLED, POSITION_CLOSED, ORDER_CANCELED, ORDER_REJECTED, RISK_CHECK_PASS, RISK_CHECK_FAIL, TARGETS_UPDATED, SL_TRIGGERED, TP_TRIGGERED
   eventCategory: text("event_category").notNull().default("TRADE"), // ORDER, EXECUTION, POSITION, RISK, ADMIN, SYSTEM
   eventAt: integer("event_at").notNull().default(nowUnix),
-  eventAtMs: integer("event_at_ms"), // Millisecond precision timestamp
+  eventAtMs: bigint("event_at_ms", { mode: "number" }), // Millisecond precision timestamp
   
   // Correlation & lifecycle IDs
   correlationId: text("correlation_id"), // Links related events across the order lifecycle
@@ -687,7 +687,7 @@ export const orderIntentAudit = pgTable("order_intent_audit", {
   
   // Timestamps
   eventAt: integer("event_at").notNull().default(nowUnix),
-  eventAtMs: integer("event_at_ms"), // Millisecond precision
+  eventAtMs: bigint("event_at_ms", { mode: "number" }), // Millisecond precision
   
   // Event type
   eventCode: text("event_code").notNull(), // ORDER_RECEIVED, ORDER_VALIDATED, RISK_CHECK, DECISION
@@ -1260,15 +1260,21 @@ export const griftDevices = pgTable("grift_devices", {
 });
 
 // Device-to-user link graph
-export const griftDeviceUsers = pgTable("grift_device_users", {
-  id: serial("id").primaryKey(),
-  deviceId: text("device_id").notNull(),
-  userId: integer("user_id").notNull(),
-  firstSeenAt: bigint("first_seen_at", { mode: "number" }).notNull().default(nowUnixMs),
-  lastSeenAt: bigint("last_seen_at", { mode: "number" }).notNull().default(nowUnixMs),
-  seenCount: integer("seen_count").notNull().default(1),
-  linkStrength: real("link_strength").notNull().default(1.0),
-});
+export const griftDeviceUsers = pgTable(
+  "grift_device_users",
+  {
+    id: serial("id").primaryKey(),
+    deviceId: text("device_id").notNull(),
+    userId: integer("user_id").notNull(),
+    firstSeenAt: bigint("first_seen_at", { mode: "number" }).notNull().default(nowUnixMs),
+    lastSeenAt: bigint("last_seen_at", { mode: "number" }).notNull().default(nowUnixMs),
+    seenCount: integer("seen_count").notNull().default(1),
+    linkStrength: real("link_strength").notNull().default(1.0),
+  },
+  (t) => ({
+    uniqueDeviceUser: uniqueIndex("idx_grift_device_users_device_user").on(t.deviceId, t.userId),
+  }),
+);
 
 // Open/closed signals per user (individual rule triggers)
 export const griftSignals = pgTable("grift_signals", {
@@ -1298,7 +1304,7 @@ export const griftSignals = pgTable("grift_signals", {
   geoCity: text("geo_city"),
   latitude: real("latitude"),
   longitude: real("longitude"),
-  asn: integer("asn"),
+  asn: bigint("asn", { mode: "number" }),
   org: text("org"),
   symbol: text("symbol"),
   tradeId: integer("trade_id"),
@@ -1322,7 +1328,7 @@ export const griftObservations = pgTable("grift_observations", {
   geoCity: text("geo_city"),
   latitude: real("latitude"),
   longitude: real("longitude"),
-  asn: integer("asn"),
+  asn: bigint("asn", { mode: "number" }),
   org: text("org"),
   observedAt: bigint("observed_at", { mode: "number" }).notNull().default(nowUnixMs),
 });
@@ -1348,7 +1354,7 @@ export const griftTradeObservations = pgTable("grift_trade_observations", {
   geoCity: text("geo_city"),
   latitude: real("latitude"),
   longitude: real("longitude"),
-  asn: integer("asn"),
+  asn: bigint("asn", { mode: "number" }),
   org: text("org"),
   observedAt: bigint("observed_at", { mode: "number" }).notNull().default(nowUnixMs),
 });
@@ -1463,7 +1469,7 @@ export const authEvents = pgTable("auth_events", {
   geoCity: text("geo_city"),
   latitude: real("latitude"),
   longitude: real("longitude"),
-  asn: integer("asn"),
+  asn: bigint("asn", { mode: "number" }),
   org: text("org"),
   success: integer("success").notNull().default(1),
   failureReason: text("failure_reason"),
@@ -1474,7 +1480,7 @@ export const authEvents = pgTable("auth_events", {
 // Grift IP -> ASN cache
 export const griftIpAsnCache = pgTable("grift_ip_asn_cache", {
   ip: text("ip").primaryKey(),
-  asn: integer("asn"),
+  asn: bigint("asn", { mode: "number" }),
   org: text("org"),
   source: text("source"),
   fetchedAt: bigint("fetched_at", { mode: "number" }),
@@ -1494,7 +1500,7 @@ export const griftIpAsnRanges = pgTable("grift_ip_asn_ranges", {
   endInt: bigint("end_int", { mode: "number" }),
   startHex: text("start_hex"),
   endHex: text("end_hex"),
-  asn: integer("asn"),
+  asn: bigint("asn", { mode: "number" }),
   country: text("country"),
   org: text("org"),
 });
@@ -1598,7 +1604,7 @@ export const legalAcceptances = pgTable("legal_acceptances", {
   
   acceptedAt: integer("accepted_at").notNull().default(nowUnix),
   // Milliseconds precision timestamp for hash computation (not coerced by Drizzle)
-  acceptedAtMs: integer("accepted_at_ms"),
+  acceptedAtMs: bigint("accepted_at_ms", { mode: "number" }),
 });
 
 // Re-acceptance requirements (when active terms change after last user acceptance)
@@ -1618,7 +1624,7 @@ export const legalReacceptRequirements = pgTable("legal_reaccept_requirements", 
   lastAcceptedCombinedSha256: text("last_accepted_combined_sha256"),
   lastAcceptanceId: integer("last_acceptance_id").references(() => legalAcceptances.id),
 
-  detectedAtMs: integer("detected_at_ms").notNull(),
+  detectedAtMs: bigint("detected_at_ms", { mode: "number" }).notNull(),
   detectedBy: text("detected_by").notNull().default("LOGIN"), // LOGIN | TRADE | STATUS
 });
 
@@ -1665,7 +1671,7 @@ export const legalDocChangeAudit = pgTable("legal_doc_change_audit_chain", {
   note: text("note"),
 
   // Millisecond precision timestamp used in the hash payload (must be stored for verifiability).
-  createdAtMs: integer("created_at_ms").notNull(),
+  createdAtMs: bigint("created_at_ms", { mode: "number" }).notNull(),
 });
 
 // Legal document relations

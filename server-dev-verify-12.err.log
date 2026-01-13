@@ -1,0 +1,59 @@
+[ENV WARNING] RESEND_API_KEY not configured - email verification will fail
+[ENV WARNING] TWILIO_ACCOUNT_SID not configured - SMS verification will fail
+[ENV WARNING] TWILIO_AUTH_TOKEN not configured - SMS verification will fail
+[ENV WARNING] TWILIO_MESSAGING_SERVICE_SID or TWILIO_FROM_NUMBER not configured - SMS verification will fail
+[DB] Postgres mode: SQLite schema ensure/seed skipped. Apply Postgres migrations before use.
+[Grift] Ping error: error: there is no unique or exclusion constraint matching the ON CONFLICT specification
+    at /home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/pg/lib/client.js:545:17
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async Object.run (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftDb.ts:101:26)
+    at async recordDevice (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftEngine.ts:233:3)
+    at async onSessionActivity (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftEngine.ts:1161:5)
+    at async <anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftPublicRouter.ts:42:7)
+    at async withGriftClient (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftDb.ts:126:12)
+    at async <anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftPublicRouter.ts:41:5) {
+  length: 148,
+  severity: 'ERROR',
+  code: '42P10',
+  detail: undefined,
+  hint: undefined,
+  position: undefined,
+  internalPosition: undefined,
+  internalQuery: undefined,
+  where: undefined,
+  schema: undefined,
+  table: undefined,
+  column: undefined,
+  dataType: undefined,
+  constraint: undefined,
+  file: 'plancat.c',
+  line: '920',
+  routine: 'infer_arbiter_indexes'
+}
+[Grift] Ping error: error: there is no unique or exclusion constraint matching the ON CONFLICT specification
+    at /home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/pg/lib/client.js:545:17
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async Object.run (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftDb.ts:101:26)
+    at async recordDevice (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftEngine.ts:233:3)
+    at async onSessionActivity (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftEngine.ts:1161:5)
+    at async <anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftPublicRouter.ts:42:7)
+    at async withGriftClient (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftDb.ts:126:12)
+    at async <anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftPublicRouter.ts:41:5) {
+  length: 148,
+  severity: 'ERROR',
+  code: '42P10',
+  detail: undefined,
+  hint: undefined,
+  position: undefined,
+  internalPosition: undefined,
+  internalQuery: undefined,
+  where: undefined,
+  schema: undefined,
+  table: undefined,
+  column: undefined,
+  dataType: undefined,
+  constraint: undefined,
+  file: 'plancat.c',
+  line: '920',
+  routine: 'infer_arbiter_indexes'
+}

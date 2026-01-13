@@ -6,10 +6,10 @@ import { onLiveEvent, publishLiveEvent } from "./services/liveBus";
 import { storage } from "./storage";
 import { z } from "zod";
 import { applyQuoteUpdate, getQuote, getQuoteMeta, getQuoteSnapshot, getValkeyQuoteRows, getValkeySnapshot } from "./services/quoteHub";
-import { loginSchema, insertTradeSchema, tradeAudit, trades, globalSettings, userKycProfiles, userPayoutProfiles, emailVerificationTokens, systemConfig, signupFreezeAttempts, signupWaitlist, users, signupFingerprints, userAccountEvents, userSessions, quotes, symbolConfigs } from "@shared/schema";
+import { loginSchema, insertTradeSchema, tradeAudit, trades, globalSettings, userKycProfiles, userPayoutProfiles, emailVerificationTokens, systemConfig, signupFreezeAttempts, signupWaitlist, users, signupFingerprints, userAccountEvents, userSessions, quotes } from "@shared/schema";
 import crypto from "crypto";
 import { appendIdentityAudit } from "./services/identityAudit";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { db, dbClient } from "@db";
 import { isPostgres } from "@db/config";
 import session from "express-session";
@@ -1791,7 +1791,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         where: eq(userPayoutProfiles.userId, userId),
       });
 
-      const settings = await storage.getUserSettings(userId);
+      const settings = await storage.getUserSettingsById(userId);
       const auditCtx = buildAuditContext(req);
       const policyConfig = await loadPolicyConfig();
       const decisionCtx = await buildDecisionContext({
@@ -4527,180 +4527,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     broadcast(ev);
   });
 
-  // REST API configuration for 1Forge Starter tier
-  const forgeApiKey = process.env.FORGE_KEY;
-
-  // Initialize price quotes in the database
-  async function initializeQuotesDatabase() {
-    try {
-      const defaultSymbols = [
-        { symbol: "EURUSD", price: 1.0942, bid: 1.0940, ask: 1.0944 },
-        { symbol: "USDJPY", price: 144.87, bid: 144.85, ask: 144.89 },
-        { symbol: "GBPUSD", price: 1.2715, bid: 1.2713, ask: 1.2717 },
-        { symbol: "AUDUSD", price: 0.6532, bid: 0.6530, ask: 0.6534 },
-        { symbol: "USDCAD", price: 1.3621, bid: 1.3619, ask: 1.3623 },
-        { symbol: "NZDUSD", price: 0.6021, bid: 0.6019, ask: 0.6023 },
-      ];
-
-      const existingQuotes = await db.select({ symbol: quotes.symbol }).from(quotes);
-      const existingSymbols = new Set(existingQuotes.map((q) => q.symbol));
-
-      const nowMs = Date.now();
-      const nowSec = Math.floor(nowMs / 1000);
-
-      for (const item of defaultSymbols) {
-        if (!existingSymbols.has(item.symbol)) {
-          await db.insert(quotes)
-            .values({
-              symbol: item.symbol,
-              price: item.price,
-              bid: item.bid,
-              ask: item.ask,
-              updatedAt: nowSec,
-              lastApiUpdate: nowMs,
-              isStale: false,
-            })
-            .onConflictDoNothing();
-          console.log(`Added default price for ${item.symbol}`);
-        }
-      }
-
-      try {
-        const enabledSymbols = await db
-          .select({ symbol: symbolConfigs.symbol })
-          .from(symbolConfigs)
-          .where(eq(symbolConfigs.enabled, true));
-
-        for (const symConfig of enabledSymbols) {
-          if (!existingSymbols.has(symConfig.symbol)) {
-            let basePrice = 1.0;
-            let bid: number;
-            let ask: number;
-
-            if (symConfig.symbol.includes("JPY")) {
-              basePrice = 120.0;
-              bid = basePrice - 0.02; // 2 pips for JPY
-              ask = basePrice + 0.02;
-            } else {
-              basePrice = 1.0;
-              bid = basePrice - 0.0002; // 2 pips for other pairs
-              ask = basePrice + 0.0002;
-            }
-
-            await db.insert(quotes)
-              .values({
-                symbol: symConfig.symbol,
-                price: basePrice,
-                bid,
-                ask,
-                updatedAt: nowSec,
-                lastApiUpdate: nowMs,
-                isStale: false,
-              })
-              .onConflictDoNothing();
-            console.log(`Added default price for ${symConfig.symbol} from symbol_configs`);
-          }
-        }
-      } catch (error) {
-        console.log("Couldn't load from symbol_configs:", error);
-      }
-
-      console.log("Price quotes initialized");
-    } catch (error) {
-      console.error("Error initializing quotes database:", error);
-    }
-  }
-  
-  // Initialize quote data
-  await initializeQuotesDatabase();
-  
-  // Update quote data periodically - respecting 1Forge Starter tier rate limits
-  // 5,000 calls/day = ~3.5 calls/minute, so we'll do it every 20 seconds
-  const UPDATE_INTERVAL = 20 * 1000; // 20 seconds
-  
-  async function updateQuotesWithSimulation() {
-    try {
-      const quoteRows = await db
-        .select({
-          symbol: quotes.symbol,
-          price: quotes.price,
-        })
-        .from(quotes);
-
-      const nowMs = Date.now();
-      const timestamp = Math.floor(nowMs / 1000);
-
-      const updatedRows: Array<{ symbol: string; price: number; bid: number; ask: number }> = [];
-
-      for (const quote of quoteRows) {
-        const isJpy = String(quote.symbol).includes("JPY");
-        const pipSize = isJpy ? 0.01 : 0.0001;
-        const maxPipMove = 2;
-
-        const pipsChange = (Math.random() * maxPipMove * 2) - maxPipMove;
-        const priceChange = pipsChange * pipSize;
-        const newPrice = Number(quote.price) + priceChange;
-
-        const spread = isJpy ? 0.02 : 0.0002;
-        const newBid = newPrice - (spread / 2);
-        const newAsk = newPrice + (spread / 2);
-
-        await db.update(quotes)
-          .set({
-            price: newPrice,
-            bid: newBid,
-            ask: newAsk,
-            updatedAt: timestamp,
-            lastApiUpdate: nowMs,
-            isStale: false,
-          })
-          .where(eq(quotes.symbol, quote.symbol));
-
-        updatedRows.push({
-          symbol: quote.symbol,
-          price: newPrice,
-          bid: newBid,
-          ask: newAsk,
-        });
-      }
-
-      if (updatedRows.length) {
-        publishLiveEvent({
-          type: "quotes:update",
-          payload: {
-            seq: nowMs,
-            asOf: nowMs,
-            source: "simulation",
-            rows: updatedRows.map((quote) => ({
-              symbol: quote.symbol,
-              price: quote.price,
-              bid: quote.bid,
-              ask: quote.ask,
-              lastApiUpdate: nowMs,
-              isStale: false,
-            })),
-          },
-        });
-      }
-    } catch (error) {
-      console.error("Error updating quotes:", error);
-    }
-  }
-  
-  // Only run simulated updates if we do NOT have a 1Forge key.
-  // When FORGE_KEY is set, real-time prices come from 1Forge (quoteFeed.ts).
-  const hasForgeKey = Boolean(process.env.FORGE_KEY);
-  
-  if (!hasForgeKey && !isPostgres) {
-    console.log("[Simulation] No FORGE_KEY found - starting simulated price updates");
-    setInterval(updateQuotesWithSimulation, UPDATE_INTERVAL);
-    updateQuotesWithSimulation().catch(err => console.error("Error in initial quote update:", err));
-  } else if (!hasForgeKey) {
-    console.log("[Simulation] No FORGE_KEY found - quote feed handles simulation");
-  } else {
-    console.log("[Simulation] FORGE_KEY present - using 1Forge live data, simulation disabled");
-  }
-
-  // Return the HTTP server without WebSocket setup - REST API only for 1Forge Starter tier
+  // Quote ingestion/simulation is handled by the ingestor role (quoteFeed.ts).
   return httpServer;
 }

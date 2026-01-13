@@ -1,0 +1,324 @@
+
+> rest-express@1.0.0 dev
+> dotenv -e .env -- tsx server/index.ts
+
+Environment validation complete:
+  - LEGAL_TERMS_HMAC_SECRET: configured
+  - RESEND_API_KEY: MISSING
+  - TWILIO_ACCOUNT_SID: MISSING
+  - TWILIO_AUTH_TOKEN: MISSING
+  - TWILIO_MESSAGING_SERVICE_SID: MISSING
+  - TWILIO_FROM_NUMBER: MISSING
+  - 1Forge API Key: configured
+  - DB_DIALECT: postgres
+  - DATABASE_URL: configured
+[Role] APP_ROLE=monolith => monolith,api,ws,ingestor,worker
+[Session] store=postgres
+3:25:42 AM [express] serving on port 5000
+3:25:42 AM [express] [QuoteHub] Bootstrap loaded from Valkey snapshot
+3:25:42 AM [express] Auto-close scheduled to run every 60 minutes
+[FeedConfig] Initial: poll=870ms, stale=30000ms
+Trade 5 SELL EURUSD: openPrice=1.16453 mtmPrice=1.16676 pnl=-223.00
+Trade 6 SELL USDJPY: openPrice=157.631 mtmPrice=158.928 pnl=-816.12
+Trade 7 SELL EURJPY: openPrice=183.569 mtmPrice=185.433 pnl=-1172.90
+Trade 8 BUY EURJPY: openPrice=183.582 mtmPrice=185.418 pnl=1155.28
+Trade 9 SELL EURJPY: openPrice=183.57 mtmPrice=185.433 pnl=-1172.27
+User 8 margin metrics recalculated:
+      Balance: $999989.30
+      Floating P/L: $-2229.02
+      Equity: $997760.28
+      Used margin: $113342.37
+      Free margin: $884417.91
+      Margin level: 880.31%
+Trade 5 SELL EURUSD: openPrice=1.16453 mtmPrice=1.16676 pnl=-223.00
+Trade 6 SELL USDJPY: openPrice=157.631 mtmPrice=158.929 pnl=-816.75
+Trade 7 SELL EURJPY: openPrice=183.569 mtmPrice=185.425 pnl=-1167.86
+Trade 8 BUY EURJPY: openPrice=183.582 mtmPrice=185.418 pnl=1155.28
+Trade 9 SELL EURJPY: openPrice=183.57 mtmPrice=185.425 pnl=-1167.23
+User 8 margin metrics recalculated:
+      Balance: $999989.30
+      Floating P/L: $-2219.56
+      Equity: $997769.74
+      Used margin: $113339.92
+      Free margin: $884429.82
+      Margin level: 880.33%
+3:25:50 AM [express] GET /api/auth/current-user 304 in 144ms :: {"id":14,"email":"asto@asto.com","us…
+Trade 5 SELL EURUSD: openPrice=1.16453 mtmPrice=1.16676 pnl=-223.00
+Trade 6 SELL USDJPY: openPrice=157.631 mtmPrice=158.93 pnl=-817.37
+Trade 7 SELL EURJPY: openPrice=183.569 mtmPrice=185.424 pnl=-1167.22
+Trade 8 BUY EURJPY: openPrice=183.582 mtmPrice=185.418 pnl=1155.27
+Trade 9 SELL EURJPY: openPrice=183.57 mtmPrice=185.424 pnl=-1166.60
+User 8 margin metrics recalculated:
+      Balance: $999989.30
+      Floating P/L: $-2218.92
+      Equity: $997770.38
+      Used margin: $113339.23
+      Free margin: $884431.15
+      Margin level: 880.34%
+Trade 5 SELL EURUSD: openPrice=1.16453 mtmPrice=1.16675 pnl=-222.00
+Trade 6 SELL USDJPY: openPrice=157.631 mtmPrice=158.93 pnl=-817.37
+Trade 7 SELL EURJPY: openPrice=183.569 mtmPrice=185.428 pnl=-1169.74
+Trade 8 BUY EURJPY: openPrice=183.582 mtmPrice=185.414 pnl=1152.75
+Trade 9 SELL EURJPY: openPrice=183.57 mtmPrice=185.428 pnl=-1169.11
+User 8 margin metrics recalculated:
+      Balance: $999989.30
+      Floating P/L: $-2225.47
+      Equity: $997763.83
+      Used margin: $113339.53
+      Free margin: $884424.30
+      Margin level: 880.33%
+Trade 5 SELL EURUSD: openPrice=1.16453 mtmPrice=1.16676 pnl=-223.00
+Trade 6 SELL USDJPY: openPrice=157.631 mtmPrice=158.928 pnl=-816.12
+Trade 7 SELL EURJPY: openPrice=183.569 mtmPrice=185.421 pnl=-1165.35
+Trade 8 BUY EURJPY: openPrice=183.582 mtmPrice=185.418 pnl=1155.28
+Trade 9 SELL EURJPY: openPrice=183.57 mtmPrice=185.421 pnl=-1164.72
+User 8 margin metrics recalculated:
+      Balance: $999989.30
+      Floating P/L: $-2213.91
+      Equity: $997775.39
+      Used margin: $113339.13
+      Free margin: $884436.26
+      Margin level: 880.35%
+Trade 5 SELL EURUSD: openPrice=1.16453 mtmPrice=1.16676 pnl=-223.00
+Trade 6 SELL USDJPY: openPrice=157.631 mtmPrice=158.925 pnl=-814.24
+Trade 7 SELL EURJPY: openPrice=183.569 mtmPrice=185.44 pnl=-1177.32
+Trade 8 BUY EURJPY: openPrice=183.582 mtmPrice=185.4 pnl=1143.97
+Trade 9 SELL EURJPY: openPrice=183.57 mtmPrice=185.44 pnl=-1176.69
+User 8 margin metrics recalculated:
+      Balance: $999989.30
+      Floating P/L: $-2247.28
+      Equity: $997742.02
+      Used margin: $113342.53
+      Free margin: $884399.49
+      Margin level: 880.29%
+Trade 5 SELL EURUSD: openPrice=1.16453 mtmPrice=1.16674 pnl=-221.00
+Trade 6 SELL USDJPY: openPrice=157.631 mtmPrice=158.93 pnl=-817.36
+Trade 7 SELL EURJPY: openPrice=183.569 mtmPrice=185.421 pnl=-1165.33
+Trade 8 BUY EURJPY: openPrice=183.582 mtmPrice=185.418 pnl=1155.26
+Trade 9 SELL EURJPY: openPrice=183.57 mtmPrice=185.421 pnl=-1164.70
+User 8 margin metrics recalculated:
+      Balance: $999989.30
+      Floating P/L: $-2213.13
+      Equity: $997776.17
+      Used margin: $113337.41
+      Free margin: $884438.76
+      Margin level: 880.36%
+Trade 5 SELL EURUSD: openPrice=1.16453 mtmPrice=1.16675 pnl=-222.00
+Trade 6 SELL USDJPY: openPrice=157.631 mtmPrice=158.929 pnl=-816.74
+Trade 7 SELL EURJPY: openPrice=183.569 mtmPrice=185.425 pnl=-1167.85
+Trade 8 BUY EURJPY: openPrice=183.582 mtmPrice=185.41 pnl=1150.23
+Trade 9 SELL EURJPY: openPrice=183.57 mtmPrice=185.425 pnl=-1167.22
+User 8 margin metrics recalculated:
+      Balance: $999989.30
+      Floating P/L: $-2223.57
+      Equity: $997765.73
+      Used margin: $113337.83
+      Free margin: $884427.90
+      Margin level: 880.35%
+Trade 5 SELL EURUSD: openPrice=1.16453 mtmPrice=1.16676 pnl=-223.00
+Trade 6 SELL USDJPY: openPrice=157.631 mtmPrice=158.929 pnl=-816.75
+Trade 7 SELL EURJPY: openPrice=183.569 mtmPrice=185.426 pnl=-1168.49
+Trade 8 BUY EURJPY: openPrice=183.582 mtmPrice=185.41 pnl=1150.24
+Trade 9 SELL EURJPY: openPrice=183.57 mtmPrice=185.426 pnl=-1167.86
+User 8 margin metrics recalculated:
+      Balance: $999989.30
+      Floating P/L: $-2225.85
+      Equity: $997763.45
+      Used margin: $113338.94
+      Free margin: $884424.51
+      Margin level: 880.34%
+Trade 5 SELL EURUSD: openPrice=1.16453 mtmPrice=1.16681 pnl=-228.00
+Trade 6 SELL USDJPY: openPrice=157.631 mtmPrice=158.931 pnl=-817.99
+Trade 7 SELL EURJPY: openPrice=183.569 mtmPrice=185.44 pnl=-1177.27
+Trade 8 BUY EURJPY: openPrice=183.582 mtmPrice=185.4 pnl=1143.93
+Trade 9 SELL EURJPY: openPrice=183.57 mtmPrice=185.44 pnl=-1176.64
+User 8 margin metrics recalculated:
+      Balance: $999989.30
+      Floating P/L: $-2255.98
+      Equity: $997733.32
+      Used margin: $113340.89
+      Free margin: $884392.43
+      Margin level: 880.29%
+3:26:14 AM [express] POST /api/grift/ping 500 in 161ms :: {"message":"Failed to record session ping"}
+Trade 5 SELL EURUSD: openPrice=1.16453 mtmPrice=1.16682 pnl=-229.00
+Trade 6 SELL USDJPY: openPrice=157.631 mtmPrice=158.931 pnl=-817.99
+Trade 7 SELL EURJPY: openPrice=183.569 mtmPrice=185.44 pnl=-1177.28
+Trade 8 BUY EURJPY: openPrice=183.582 mtmPrice=185.422 pnl=1157.78
+Trade 9 SELL EURJPY: openPrice=183.57 mtmPrice=185.44 pnl=-1176.65
+User 8 margin metrics recalculated:
+      Balance: $999989.30
+      Floating P/L: $-2243.15
+      Equity: $997746.15
+      Used margin: $113344.30
+      Free margin: $884401.85
+      Margin level: 880.28%
+Trade 5 SELL EURUSD: openPrice=1.16453 mtmPrice=1.16681 pnl=-228.00
+Trade 6 SELL USDJPY: openPrice=157.631 mtmPrice=158.93 pnl=-817.36
+Trade 7 SELL EURJPY: openPrice=183.569 mtmPrice=185.43 pnl=-1170.99
+Trade 8 BUY EURJPY: openPrice=183.582 mtmPrice=185.39 pnl=1137.64
+Trade 9 SELL EURJPY: openPrice=183.57 mtmPrice=185.43 pnl=-1170.36
+User 8 margin metrics recalculated:
+      Balance: $999989.30
+      Floating P/L: $-2249.07
+      Equity: $997740.23
+      Used margin: $113337.55
+      Free margin: $884402.67
+      Margin level: 880.33%
+Trade 5 SELL EURUSD: openPrice=1.16453 mtmPrice=1.16684 pnl=-231.00
+Trade 6 SELL USDJPY: openPrice=157.631 mtmPrice=158.93 pnl=-817.37
+Trade 7 SELL EURJPY: openPrice=183.569 mtmPrice=185.46 pnl=-1189.87
+Trade 8 BUY EURJPY: openPrice=183.582 mtmPrice=185.42 pnl=1156.52
+Trade 9 SELL EURJPY: openPrice=183.57 mtmPrice=185.46 pnl=-1189.24
+User 8 margin metrics recalculated:
+      Balance: $999989.30
+      Floating P/L: $-2270.96
+      Equity: $997718.34
+      Used margin: $113349.70
+      Free margin: $884368.64
+      Margin level: 880.21%
+3:26:25 AM [express] POST /api/auth/login 200 in 493ms :: {"id":8,"email":"allinfini.ai@gmail.com","…
+3:26:25 AM [express] GET /api/config/symbols 200 in 16ms :: [{"id":4,"symbol":"AUDUSD","name":"Austr…
+3:26:25 AM [express] POST /api/trades 428 in 134ms :: {"code":"BOT_CHALLENGE_REQUIRED","message":"Pr…
+Trade 5 SELL EURUSD: openPrice=1.16453 mtmPrice=1.16687 pnl=-234.00
+Trade 6 SELL USDJPY: openPrice=157.631 mtmPrice=158.93 pnl=-817.37
+Trade 7 SELL EURJPY: openPrice=183.569 mtmPrice=185.447 pnl=-1181.69
+Trade 8 BUY EURJPY: openPrice=183.582 mtmPrice=185.43 pnl=1162.82
+Trade 9 SELL EURJPY: openPrice=183.57 mtmPrice=185.447 pnl=-1181.06
+User 8 margin metrics recalculated:
+      Balance: $999989.30
+      Floating P/L: $-2251.31
+      Equity: $997737.99
+      Used margin: $113348.51
+      Free margin: $884389.48
+      Margin level: 880.24%
+Trade 5 SELL EURUSD: openPrice=1.16453 mtmPrice=1.16687 pnl=-234.00
+Trade 6 SELL USDJPY: openPrice=157.631 mtmPrice=158.93 pnl=-817.37
+Trade 7 SELL EURJPY: openPrice=183.569 mtmPrice=185.447 pnl=-1181.69
+Trade 8 BUY EURJPY: openPrice=183.582 mtmPrice=185.43 pnl=1162.82
+Trade 9 SELL EURJPY: openPrice=183.57 mtmPrice=185.447 pnl=-1181.06
+User 8 margin metrics recalculated:
+      Balance: $999989.30
+      Floating P/L: $-2251.31
+      Equity: $997737.99
+      Used margin: $113348.51
+      Free margin: $884389.48
+      Margin level: 880.24%
+Trade 5 SELL EURUSD: openPrice=1.16453 mtmPrice=1.16687 pnl=-234.00
+Trade 6 SELL USDJPY: openPrice=157.631 mtmPrice=158.93 pnl=-817.37
+Trade 7 SELL EURJPY: openPrice=183.569 mtmPrice=185.447 pnl=-1181.69
+Trade 8 BUY EURJPY: openPrice=183.582 mtmPrice=185.43 pnl=1162.82
+Trade 9 SELL EURJPY: openPrice=183.57 mtmPrice=185.447 pnl=-1181.06
+Trade 10 BUY AUDUSD: openPrice=0.67034 mtmPrice=0.67029 pnl=-5.00
+User 8 margin metrics recalculated:
+      Balance: $999989.30
+      Floating P/L: $-2256.31
+      Equity: $997732.99
+      Used margin: $126754.31
+      Free margin: $870978.68
+      Margin level: 787.14%
+3:26:26 AM [express] POST /api/trades 201 in 436ms :: {"id":10,"userId":8,"symbolId":4,"type":"BUY",…
+Trade 5 SELL EURUSD: openPrice=1.16453 mtmPrice=1.16687 pnl=-234.00
+Trade 6 SELL USDJPY: openPrice=157.631 mtmPrice=158.93 pnl=-817.37
+Trade 7 SELL EURJPY: openPrice=183.569 mtmPrice=185.444 pnl=-1179.81
+Trade 8 BUY EURJPY: openPrice=183.582 mtmPrice=185.43 pnl=1162.82
+Trade 9 SELL EURJPY: openPrice=183.57 mtmPrice=185.444 pnl=-1179.18
+Trade 10 BUY AUDUSD: openPrice=0.67034 mtmPrice=0.67029 pnl=-5.00
+User 8 margin metrics recalculated:
+      Balance: $999989.30
+      Floating P/L: $-2252.53
+      Equity: $997736.77
+      Used margin: $126753.55
+      Free margin: $870983.21
+      Margin level: 787.15%
+Trade 5 SELL EURUSD: openPrice=1.16453 mtmPrice=1.16685 pnl=-232.00
+Trade 6 SELL USDJPY: openPrice=157.631 mtmPrice=158.93 pnl=-817.36
+Trade 7 SELL EURJPY: openPrice=183.569 mtmPrice=185.446 pnl=-1181.05
+Trade 8 BUY EURJPY: openPrice=183.582 mtmPrice=185.43 pnl=1162.80
+Trade 9 SELL EURJPY: openPrice=183.57 mtmPrice=185.446 pnl=-1180.42
+Trade 10 BUY AUDUSD: openPrice=0.67034 mtmPrice=0.67029 pnl=-5.00
+User 8 margin metrics recalculated:
+      Balance: $999989.30
+      Floating P/L: $-2253.02
+      Equity: $997736.28
+      Used margin: $126752.55
+      Free margin: $870983.73
+      Margin level: 787.15%
+Trade 5 SELL EURUSD: openPrice=1.16453 mtmPrice=1.16684 pnl=-231.00
+Trade 6 SELL USDJPY: openPrice=157.631 mtmPrice=158.93 pnl=-817.37
+Trade 7 SELL EURJPY: openPrice=183.569 mtmPrice=185.439 pnl=-1176.67
+Trade 8 BUY EURJPY: openPrice=183.582 mtmPrice=185.425 pnl=1159.68
+Trade 9 SELL EURJPY: openPrice=183.57 mtmPrice=185.439 pnl=-1176.04
+Trade 10 BUY AUDUSD: openPrice=0.67034 mtmPrice=0.67029 pnl=-5.00
+User 8 margin metrics recalculated:
+      Balance: $999989.30
+      Floating P/L: $-2246.40
+      Equity: $997742.90
+      Used margin: $126751.50
+      Free margin: $870991.40
+      Margin level: 787.16%
+Trade 5 SELL EURUSD: openPrice=1.16453 mtmPrice=1.16684 pnl=-231.00
+Trade 6 SELL USDJPY: openPrice=157.631 mtmPrice=158.92 pnl=-811.13
+Trade 7 SELL EURJPY: openPrice=183.569 mtmPrice=185.46 pnl=-1189.94
+Trade 8 BUY EURJPY: openPrice=183.582 mtmPrice=185.42 pnl=1156.59
+Trade 9 SELL EURJPY: openPrice=183.57 mtmPrice=185.46 pnl=-1189.32
+Trade 10 BUY AUDUSD: openPrice=0.67034 mtmPrice=0.67029 pnl=-5.00
+User 8 margin metrics recalculated:
+      Balance: $999989.30
+      Floating P/L: $-2269.79
+      Equity: $997719.51
+      Used margin: $126759.90
+      Free margin: $870959.60
+      Margin level: 787.09%
+Trade 5 SELL EURUSD: openPrice=1.16453 mtmPrice=1.16679 pnl=-226.00
+Trade 6 SELL USDJPY: openPrice=157.631 mtmPrice=158.92 pnl=-811.12
+Trade 7 SELL EURJPY: openPrice=183.569 mtmPrice=185.421 pnl=-1165.40
+Trade 8 BUY EURJPY: openPrice=183.582 mtmPrice=185.406 pnl=1147.78
+Trade 9 SELL EURJPY: openPrice=183.57 mtmPrice=185.421 pnl=-1164.77
+Trade 10 BUY AUDUSD: openPrice=0.67034 mtmPrice=0.6703 pnl=-4.00
+User 8 margin metrics recalculated:
+      Balance: $999989.30
+      Floating P/L: $-2223.51
+      Equity: $997765.79
+      Used margin: $126747.31
+      Free margin: $871018.48
+      Margin level: 787.21%
+Trade 5 SELL EURUSD: openPrice=1.16453 mtmPrice=1.16679 pnl=-226.00
+Trade 6 SELL USDJPY: openPrice=157.631 mtmPrice=158.92 pnl=-811.13
+Trade 7 SELL EURJPY: openPrice=183.569 mtmPrice=185.419 pnl=-1164.14
+Trade 8 BUY EURJPY: openPrice=183.582 mtmPrice=185.404 pnl=1146.52
+Trade 9 SELL EURJPY: openPrice=183.57 mtmPrice=185.419 pnl=-1163.52
+Trade 10 BUY AUDUSD: openPrice=0.67034 mtmPrice=0.67029 pnl=-5.00
+User 8 margin metrics recalculated:
+      Balance: $999989.30
+      Floating P/L: $-2223.26
+      Equity: $997766.04
+      Used margin: $126746.57
+      Free margin: $871019.47
+      Margin level: 787.21%
+Trade 5 SELL EURUSD: openPrice=1.16453 mtmPrice=1.16683 pnl=-230.00
+Trade 6 SELL USDJPY: openPrice=157.631 mtmPrice=158.915 pnl=-808.00
+Trade 7 SELL EURJPY: openPrice=183.569 mtmPrice=185.424 pnl=-1167.32
+Trade 8 BUY EURJPY: openPrice=183.582 mtmPrice=185.408 pnl=1149.07
+Trade 9 SELL EURJPY: openPrice=183.57 mtmPrice=185.424 pnl=-1166.69
+Trade 10 BUY AUDUSD: openPrice=0.67034 mtmPrice=0.67029 pnl=-5.00
+User 8 margin metrics recalculated:
+      Balance: $999989.30
+      Floating P/L: $-2227.95
+      Equity: $997761.35
+      Used margin: $126751.12
+      Free margin: $871010.24
+      Margin level: 787.18%
+3:26:50 AM [express] GET /api/auth/current-user 304 in 238ms :: {"id":14,"email":"asto@asto.com","us…
+Trade 5 SELL EURUSD: openPrice=1.16453 mtmPrice=1.16682 pnl=-229.00
+Trade 6 SELL USDJPY: openPrice=157.631 mtmPrice=158.918 pnl=-809.88
+Trade 7 SELL EURJPY: openPrice=183.569 mtmPrice=185.423 pnl=-1166.68
+Trade 8 BUY EURJPY: openPrice=183.582 mtmPrice=185.408 pnl=1149.06
+Trade 9 SELL EURJPY: openPrice=183.57 mtmPrice=185.423 pnl=-1166.05
+Trade 10 BUY AUDUSD: openPrice=0.67034 mtmPrice=0.67029 pnl=-5.00
+User 8 margin metrics recalculated:
+      Balance: $999989.30
+      Floating P/L: $-2227.56
+      Equity: $997761.74
+      Used margin: $126750.00
+      Free margin: $871011.74
+      Margin level: 787.19%

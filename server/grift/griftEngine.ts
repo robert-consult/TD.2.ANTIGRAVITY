@@ -224,14 +224,18 @@ export async function recordDevice(db: GriftDb, deviceId: string, userId: number
   await db.prepare(`
     INSERT INTO grift_devices (device_id, first_seen_at, last_seen_at, first_ip)
     VALUES (?, ?, ?, ?)
-    ON CONFLICT(device_id) DO UPDATE SET last_seen_at = ?, first_ip = COALESCE(first_ip, ?)
-  `).run(deviceId, now, now, ip ?? null, now, ip ?? null);
+    ON CONFLICT(device_id) DO UPDATE
+      SET last_seen_at = ?,
+          first_ip = COALESCE(grift_devices.first_ip, EXCLUDED.first_ip)
+  `).run(deviceId, now, now, ip ?? null, now);
 
   // Upsert device-user link
   await db.prepare(`
     INSERT INTO grift_device_users (device_id, user_id, first_seen_at, last_seen_at, seen_count)
     VALUES (?, ?, ?, ?, 1)
-    ON CONFLICT(device_id, user_id) DO UPDATE SET last_seen_at = ?, seen_count = seen_count + 1
+    ON CONFLICT(device_id, user_id) DO UPDATE
+      SET last_seen_at = ?,
+          seen_count = grift_device_users.seen_count + 1
   `).run(deviceId, userId, now, now, now);
 }
 

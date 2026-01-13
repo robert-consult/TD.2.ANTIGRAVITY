@@ -477,12 +477,11 @@ export const storage = {
 
   // Risk management functions for Phase-2
   async getClosedTradesByDateRange(userId: number, startTimestamp: number): Promise<Trade[]> {
-    const startDate = new Date(startTimestamp * 1000);
     return await db.query.trades.findMany({
       where: and(
         eq(trades.userId, userId),
         eq(trades.status, "CLOSED"),
-        gte(trades.closedAt, startDate)
+        gte(trades.closedAt, startTimestamp)
       ),
       orderBy: [desc(trades.closedAt)]
     });
@@ -498,11 +497,10 @@ export const storage = {
   },
 
   async getOldOpenTrades(olderThanTimestamp: number): Promise<Trade[]> {
-    const olderThanDate = new Date(olderThanTimestamp * 1000);
     return await db.query.trades.findMany({
       where: and(
         eq(trades.status, "OPEN"),
-        lt(trades.openedAt, olderThanDate)
+        lt(trades.openedAt, olderThanTimestamp)
       ),
       orderBy: [asc(trades.openedAt)]
     });

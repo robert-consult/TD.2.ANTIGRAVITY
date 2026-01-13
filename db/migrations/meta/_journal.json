@@ -29,6 +29,20 @@
       "when": 1768259307926,
       "tag": "0003_legal_doc_legacy_fields",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1768295269698,
+      "tag": "0004_bigint_ms",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1768296537602,
+      "tag": "0005_grift_device_users_unique",
+      "breakpoints": true
     }
   ]
 }

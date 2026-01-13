@@ -992,3 +992,110 @@ params: OPEN,Fri Jan 09 2026 00:10:00 GMT-0600 (Central Standard Time)
 [i18n] Worker tick skipped: missing-openai-key
 [Grift Scheduler] Running periodic risk re-evaluation...
 [i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+1:10:01 AM [express] Running auto-close check for trades > 4 days old
+1:10:01 AM [express] Error in auto-close job: Error: Failed query: select "id", "user_id", "symbol_id", "type", "order_type", "size", "lots", "open_price", "close_price", "take_profit", "stop_loss", "limit_price", "stop_price", "profit", "status", "opened_at", "executed_at", "closed_at", "close_reason", "close_quote_ts", "close_source", "close_bid", "close_ask", "close_mid", "close_spread", "correlation_id", "order_id", "position_id", "last_execution_id", "last_actor_user_id", "last_actor_session_id", "last_actor_ip", "last_actor_user_agent", "last_actor_type", "last_actor_device_id" from "trades" "trades" where ("trades"."status" = $1 and "trades"."opened_at" < $2) order by "trades"."opened_at" asc
+params: OPEN,Fri Jan 09 2026 01:10:01 GMT-0600 (Central Standard Time)
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[Grift] ip2asn import progress: 100000 rows...
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[Grift] ip2asn import progress: 200000 rows...
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[Grift Scheduler] IP→ASN enrichment: attempted 0, enriched 0
+[Grift Scheduler] Recomputed aggregates for 0 users
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+1:41:06 AM [vite] (client) hmr update /src/index.css
+1:41:07 AM [vite] (client) hmr update /src/index.css
+1:41:07 AM [vite] (client) hmr update /src/index.css
+1:41:09 AM [vite] (client) hmr update /src/index.css
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+1:43:50 AM [express] GET /api/config/symbols 200 in 27ms :: [{"id":4,"symbol":"AUDUSD","name":"Austr…
+1:44:01 AM [express] GET /api/config/symbols 200 in 6ms :: [{"id":4,"symbol":"AUDUSD","name":"Austra…
+[i18n] Worker tick skipped: missing-openai-key
+1:44:33 AM [express] GET /api/config/symbols 200 in 10ms :: [{"id":4,"symbol":"AUDUSD","name":"Austr…
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+[i18n] Worker tick skipped: missing-openai-key
+1:45:55 AM [express] GET /api/config/symbols 200 in 7ms :: [{"id":4,"symbol":"AUDUSD","name":"Austra…
+[i18n] Worker tick skipped: missing-openai-key

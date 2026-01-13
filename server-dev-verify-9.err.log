@@ -1,0 +1,1560 @@
+[ENV WARNING] RESEND_API_KEY not configured - email verification will fail
+[ENV WARNING] TWILIO_ACCOUNT_SID not configured - SMS verification will fail
+[ENV WARNING] TWILIO_AUTH_TOKEN not configured - SMS verification will fail
+[ENV WARNING] TWILIO_MESSAGING_SERVICE_SID or TWILIO_FROM_NUMBER not configured - SMS verification will fail
+[DB] Postgres mode: SQLite schema ensure/seed skipped. Apply Postgres migrations before use.
+
+A PostCSS plugin did not pass the `from` option to `postcss.parse`. This may cause imported assets to be incorrectly transformed. If you've recently added a PostCSS plugin that raised this warning, please contact the package author to fix the issue.
+[Grift] Failed to capture login context: error: column reference "first_ip" is ambiguous
+    at /home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/pg/lib/client.js:545:17
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async Object.run (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftDb.ts:101:26)
+    at async recordDevice (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftEngine.ts:224:3)
+    at async onLoginSuccess (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftEngine.ts:1044:5)
+    at async <anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/server/routes.ts:775:13)
+    at async withGriftClient (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftDb.ts:126:12)
+    at async <anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/server/routes.ts:751:11) {
+  length: 110,
+  severity: 'ERROR',
+  code: '42702',
+  detail: undefined,
+  hint: undefined,
+  position: '191',
+  internalPosition: undefined,
+  internalQuery: undefined,
+  where: undefined,
+  schema: undefined,
+  table: undefined,
+  column: undefined,
+  dataType: undefined,
+  constraint: undefined,
+  file: 'parse_relation.c',
+  line: '913',
+  routine: 'colNameToVar'
+}
+[Grift] Ping error: error: column reference "first_ip" is ambiguous
+    at /home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/pg/lib/client.js:545:17
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async Object.run (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftDb.ts:101:26)
+    at async recordDevice (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftEngine.ts:224:3)
+    at async onSessionActivity (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftEngine.ts:1157:5)
+    at async <anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftPublicRouter.ts:42:7)
+    at async withGriftClient (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftDb.ts:126:12)
+    at async <anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftPublicRouter.ts:41:5) {
+  length: 110,
+  severity: 'ERROR',
+  code: '42702',
+  detail: undefined,
+  hint: undefined,
+  position: '191',
+  internalPosition: undefined,
+  internalQuery: undefined,
+  where: undefined,
+  schema: undefined,
+  table: undefined,
+  column: undefined,
+  dataType: undefined,
+  constraint: undefined,
+  file: 'parse_relation.c',
+  line: '913',
+  routine: 'colNameToVar'
+}
+[Grift] Ping error: error: column reference "first_ip" is ambiguous
+    at /home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/pg/lib/client.js:545:17
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async Object.run (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftDb.ts:101:26)
+    at async recordDevice (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftEngine.ts:224:3)
+    at async onSessionActivity (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftEngine.ts:1157:5)
+    at async <anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftPublicRouter.ts:42:7)
+    at async withGriftClient (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftDb.ts:126:12)
+    at async <anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftPublicRouter.ts:41:5) {
+  length: 110,
+  severity: 'ERROR',
+  code: '42702',
+  detail: undefined,
+  hint: undefined,
+  position: '191',
+  internalPosition: undefined,
+  internalQuery: undefined,
+  where: undefined,
+  schema: undefined,
+  table: undefined,
+  column: undefined,
+  dataType: undefined,
+  constraint: undefined,
+  file: 'parse_relation.c',
+  line: '913',
+  routine: 'colNameToVar'
+}
+[Grift] Ping error: error: column reference "first_ip" is ambiguous
+    at /home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/pg/lib/client.js:545:17
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async Object.run (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftDb.ts:101:26)
+    at async recordDevice (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftEngine.ts:224:3)
+    at async onSessionActivity (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftEngine.ts:1157:5)
+    at async <anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftPublicRouter.ts:42:7)
+    at async withGriftClient (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftDb.ts:126:12)
+    at async <anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftPublicRouter.ts:41:5) {
+  length: 110,
+  severity: 'ERROR',
+  code: '42702',
+  detail: undefined,
+  hint: undefined,
+  position: '191',
+  internalPosition: undefined,
+  internalQuery: undefined,
+  where: undefined,
+  schema: undefined,
+  table: undefined,
+  column: undefined,
+  dataType: undefined,
+  constraint: undefined,
+  file: 'parse_relation.c',
+  line: '913',
+  routine: 'colNameToVar'
+}
+Error writing trade audit: DrizzleQueryError: Failed query: insert into "trade_audit" ("id", "trade_id", "event_type", "event_category", "event_at", "event_at_ms", "correlation_id", "order_id", "execution_id", "position_id", "actor_type", "actor_user_id", "session_id", "ip", "user_agent", "symbol", "side", "order_type", "time_in_force", "qty_lots", "requested_price", "trigger_price", "limit_price", "stop_price", "fill_price", "avg_fill_price", "quote_ts", "quote_source", "quote_bid", "quote_ask", "quote_mid", "quote_spread", "spread_pips", "slippage", "slippage_pips", "slippage_reference", "latency_ms", "risk_check_name", "risk_limit_value", "risk_observed_value", "risk_result", "reason_code", "payload_json", "prev_hash", "event_hash", "note") values (default, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45)
+params: 9,ACCOUNT_FROZEN,ACCOUNT,1768293761,1768293761059,609c4781-cd0d-47ca-8e06-18c8d87e7d32,ORD-1767949823611-15117548,,POS-1767949823611-d178076b,ADMIN,12,XQaNkozz0KsvlBSdAJKJFZnS4nr04Rp9,127.0.0.1,Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Agency/97.8.7510.73,EURJPY,SELL,,,,,,,,,,,,,,,,,,,,,,,,,SUSPICIOUS_ACTIVITY,{"actorType":"ADMIN","actorUserId":12,"avgFillPrice":null,"correlationId":"609c4781-cd0d-47ca-8e06-18c8d87e7d32","eventAtMs":1768293761059,"eventCategory":"ACCOUNT","eventType":"ACCOUNT_FROZEN","executionId":null,"fillPrice":null,"ip":"127.0.0.1","latencyMs":null,"limitPrice":null,"note":"ACCOUNT_EVENT[33]: Account frozen","orderId":"ORD-1767949823611-15117548","orderType":null,"payload":{"accountEventId":33,"accountWaveCorrelationId":"8b1c1d13-d23a-4f8a-aceb-8c4c109897f0","actorAdminId":12,"description":"SUSPICIOUS_ACTIVITY","impactedUserId":8,"metadata":null,"mirrorType":"ACCOUNT_EVENT","provenance":{"actorType":"ADMIN","actorUserId":12,"ip":"127.0.0.1","sessionId":"XQaNkozz0KsvlBSdAJKJFZnS4nr04Rp9","userAgent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Agency/97.8.7510.73"},"reasonCode":"SUSPICIOUS_ACTIVITY","reasonText":null,"title":"Account frozen"},"positionId":"POS-1767949823611-d178076b","qtyLots":null,"quoteAsk":null,"quoteBid":null,"quoteMid":null,"quoteSpread":null,"reasonCode":"SUSPICIOUS_ACTIVITY","requestedPrice":null,"riskCheckName":null,"riskLimitValue":null,"riskObservedValue":null,"riskResult":null,"sessionId":"XQaNkozz0KsvlBSdAJKJFZnS4nr04Rp9","side":"SELL","slippage":null,"slippagePips":null,"slippageReference":null,"spreadPips":null,"stopPrice":null,"symbol":"EURJPY","timeInForce":null,"tradeId":9,"triggerPrice":null,"userAgent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Agency/97.8.7510.73"},c648696d3f09cd66d5cca8b4f68f3825ef75a741cb1a9d3a035d163863757b96,8c4809594e4a9f25e592e2f1fab425e75ad3033f99e84a770b26ef9bab89b184,ACCOUNT_EVENT[33]: Account frozen
+    at NodePgPreparedQuery.queryWithCache (/home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/src/pg-core/session.ts:73:11)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async writeTradeAudit (/home/bcodex/TD.1.11.ANTIGRAVITY/server/lib/auditWriter.ts:180:5)
+    ... 3 lines matching cause stack trace ...
+    at async <anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/server/routes/admin.ts:1679:20) {
+  query: 'insert into "trade_audit" ("id", "trade_id", "event_type", "event_category", "event_at", "event_at_ms", "correlation_id", "order_id", "execution_id", "position_id", "actor_type", "actor_user_id", "session_id", "ip", "user_agent", "symbol", "side", "order_type", "time_in_force", "qty_lots", "requested_price", "trigger_price", "limit_price", "stop_price", "fill_price", "avg_fill_price", "quote_ts", "quote_source", "quote_bid", "quote_ask", "quote_mid", "quote_spread", "spread_pips", "slippage", "slippage_pips", "slippage_reference", "latency_ms", "risk_check_name", "risk_limit_value", "risk_observed_value", "risk_result", "reason_code", "payload_json", "prev_hash", "event_hash", "note") values (default, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45)',
+  params: [
+    9,
+    'ACCOUNT_FROZEN',
+    'ACCOUNT',
+    1768293761,
+    1768293761059,
+    '609c4781-cd0d-47ca-8e06-18c8d87e7d32',
+    'ORD-1767949823611-15117548',
+    null,
+    'POS-1767949823611-d178076b',
+    'ADMIN',
+    12,
+    'XQaNkozz0KsvlBSdAJKJFZnS4nr04Rp9',
+    '127.0.0.1',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Agency/97.8.7510.73',
+    'EURJPY',
+    'SELL',
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    'SUSPICIOUS_ACTIVITY',
+    '{"actorType":"ADMIN","actorUserId":12,"avgFillPrice":null,"correlationId":"609c4781-cd0d-47ca-8e06-18c8d87e7d32","eventAtMs":1768293761059,"eventCategory":"ACCOUNT","eventType":"ACCOUNT_FROZEN","executionId":null,"fillPrice":null,"ip":"127.0.0.1","latencyMs":null,"limitPrice":null,"note":"ACCOUNT_EVENT[33]: Account frozen","orderId":"ORD-1767949823611-15117548","orderType":null,"payload":{"accountEventId":33,"accountWaveCorrelationId":"8b1c1d13-d23a-4f8a-aceb-8c4c109897f0","actorAdminId":12,"description":"SUSPICIOUS_ACTIVITY","impactedUserId":8,"metadata":null,"mirrorType":"ACCOUNT_EVENT","provenance":{"actorType":"ADMIN","actorUserId":12,"ip":"127.0.0.1","sessionId":"XQaNkozz0KsvlBSdAJKJFZnS4nr04Rp9","userAgent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Agency/97.8.7510.73"},"reasonCode":"SUSPICIOUS_ACTIVITY","reasonText":null,"title":"Account frozen"},"positionId":"POS-1767949823611-d178076b","qtyLots":null,"quoteAsk":null,"quoteBid":null,"quoteMid":null,"quoteSpread":null,"reasonCode":"SUSPICIOUS_ACTIVITY","requestedPrice":null,"riskCheckName":null,"riskLimitValue":null,"riskObservedValue":null,"riskResult":null,"sessionId":"XQaNkozz0KsvlBSdAJKJFZnS4nr04Rp9","side":"SELL","slippage":null,"slippagePips":null,"slippageReference":null,"spreadPips":null,"stopPrice":null,"symbol":"EURJPY","timeInForce":null,"tradeId":9,"triggerPrice":null,"userAgent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Agency/97.8.7510.73"}',
+    'c648696d3f09cd66d5cca8b4f68f3825ef75a741cb1a9d3a035d163863757b96',
+    '8c4809594e4a9f25e592e2f1fab425e75ad3033f99e84a770b26ef9bab89b184',
+    'ACCOUNT_EVENT[33]: Account frozen'
+  ],
+  cause: error: value "1768293761059" is out of range for type integer
+      at /home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/pg-pool/index.js:45:11
+      at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+      at async <anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/src/node-postgres/session.ts:149:14)
+      at async NodePgPreparedQuery.queryWithCache (/home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/src/pg-core/session.ts:71:12)
+      at async writeTradeAudit (/home/bcodex/TD.1.11.ANTIGRAVITY/server/lib/auditWriter.ts:180:5)
+      at async mirrorAccountEventToTradeAudit (/home/bcodex/TD.1.11.ANTIGRAVITY/server/lib/accountEventMirror.ts:127:5)
+      at async Object.recordAccountEvent (/home/bcodex/TD.1.11.ANTIGRAVITY/server/storage.ts:896:7)
+      at async Object.freezeUserAccount (/home/bcodex/TD.1.11.ANTIGRAVITY/server/storage.ts:1122:5)
+      at async <anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/server/routes/admin.ts:1679:20) {
+    length: 156,
+    severity: 'ERROR',
+    code: '22003',
+    detail: undefined,
+    hint: undefined,
+    position: undefined,
+    internalPosition: undefined,
+    internalQuery: undefined,
+    where: "unnamed portal parameter $5 = '...'",
+    schema: undefined,
+    table: undefined,
+    column: undefined,
+    dataType: undefined,
+    constraint: undefined,
+    file: 'numutils.c',
+    line: '611',
+    routine: 'pg_strtoint32_safe'
+  }
+}
+[audit] mirrorAccountEventToTradeAudit failed: DrizzleQueryError: Failed query: insert into "trade_audit" ("id", "trade_id", "event_type", "event_category", "event_at", "event_at_ms", "correlation_id", "order_id", "execution_id", "position_id", "actor_type", "actor_user_id", "session_id", "ip", "user_agent", "symbol", "side", "order_type", "time_in_force", "qty_lots", "requested_price", "trigger_price", "limit_price", "stop_price", "fill_price", "avg_fill_price", "quote_ts", "quote_source", "quote_bid", "quote_ask", "quote_mid", "quote_spread", "spread_pips", "slippage", "slippage_pips", "slippage_reference", "latency_ms", "risk_check_name", "risk_limit_value", "risk_observed_value", "risk_result", "reason_code", "payload_json", "prev_hash", "event_hash", "note") values (default, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45)
+params: 9,ACCOUNT_FROZEN,ACCOUNT,1768293761,1768293761059,609c4781-cd0d-47ca-8e06-18c8d87e7d32,ORD-1767949823611-15117548,,POS-1767949823611-d178076b,ADMIN,12,XQaNkozz0KsvlBSdAJKJFZnS4nr04Rp9,127.0.0.1,Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Agency/97.8.7510.73,EURJPY,SELL,,,,,,,,,,,,,,,,,,,,,,,,,SUSPICIOUS_ACTIVITY,{"actorType":"ADMIN","actorUserId":12,"avgFillPrice":null,"correlationId":"609c4781-cd0d-47ca-8e06-18c8d87e7d32","eventAtMs":1768293761059,"eventCategory":"ACCOUNT","eventType":"ACCOUNT_FROZEN","executionId":null,"fillPrice":null,"ip":"127.0.0.1","latencyMs":null,"limitPrice":null,"note":"ACCOUNT_EVENT[33]: Account frozen","orderId":"ORD-1767949823611-15117548","orderType":null,"payload":{"accountEventId":33,"accountWaveCorrelationId":"8b1c1d13-d23a-4f8a-aceb-8c4c109897f0","actorAdminId":12,"description":"SUSPICIOUS_ACTIVITY","impactedUserId":8,"metadata":null,"mirrorType":"ACCOUNT_EVENT","provenance":{"actorType":"ADMIN","actorUserId":12,"ip":"127.0.0.1","sessionId":"XQaNkozz0KsvlBSdAJKJFZnS4nr04Rp9","userAgent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Agency/97.8.7510.73"},"reasonCode":"SUSPICIOUS_ACTIVITY","reasonText":null,"title":"Account frozen"},"positionId":"POS-1767949823611-d178076b","qtyLots":null,"quoteAsk":null,"quoteBid":null,"quoteMid":null,"quoteSpread":null,"reasonCode":"SUSPICIOUS_ACTIVITY","requestedPrice":null,"riskCheckName":null,"riskLimitValue":null,"riskObservedValue":null,"riskResult":null,"sessionId":"XQaNkozz0KsvlBSdAJKJFZnS4nr04Rp9","side":"SELL","slippage":null,"slippagePips":null,"slippageReference":null,"spreadPips":null,"stopPrice":null,"symbol":"EURJPY","timeInForce":null,"tradeId":9,"triggerPrice":null,"userAgent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Agency/97.8.7510.73"},c648696d3f09cd66d5cca8b4f68f3825ef75a741cb1a9d3a035d163863757b96,8c4809594e4a9f25e592e2f1fab425e75ad3033f99e84a770b26ef9bab89b184,ACCOUNT_EVENT[33]: Account frozen
+    at NodePgPreparedQuery.queryWithCache (/home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/src/pg-core/session.ts:73:11)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async writeTradeAudit (/home/bcodex/TD.1.11.ANTIGRAVITY/server/lib/auditWriter.ts:180:5)
+    ... 3 lines matching cause stack trace ...
+    at async <anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/server/routes/admin.ts:1679:20) {
+  query: 'insert into "trade_audit" ("id", "trade_id", "event_type", "event_category", "event_at", "event_at_ms", "correlation_id", "order_id", "execution_id", "position_id", "actor_type", "actor_user_id", "session_id", "ip", "user_agent", "symbol", "side", "order_type", "time_in_force", "qty_lots", "requested_price", "trigger_price", "limit_price", "stop_price", "fill_price", "avg_fill_price", "quote_ts", "quote_source", "quote_bid", "quote_ask", "quote_mid", "quote_spread", "spread_pips", "slippage", "slippage_pips", "slippage_reference", "latency_ms", "risk_check_name", "risk_limit_value", "risk_observed_value", "risk_result", "reason_code", "payload_json", "prev_hash", "event_hash", "note") values (default, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45)',
+  params: [
+    9,
+    'ACCOUNT_FROZEN',
+    'ACCOUNT',
+    1768293761,
+    1768293761059,
+    '609c4781-cd0d-47ca-8e06-18c8d87e7d32',
+    'ORD-1767949823611-15117548',
+    null,
+    'POS-1767949823611-d178076b',
+    'ADMIN',
+    12,
+    'XQaNkozz0KsvlBSdAJKJFZnS4nr04Rp9',
+    '127.0.0.1',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Agency/97.8.7510.73',
+    'EURJPY',
+    'SELL',
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    'SUSPICIOUS_ACTIVITY',
+    '{"actorType":"ADMIN","actorUserId":12,"avgFillPrice":null,"correlationId":"609c4781-cd0d-47ca-8e06-18c8d87e7d32","eventAtMs":1768293761059,"eventCategory":"ACCOUNT","eventType":"ACCOUNT_FROZEN","executionId":null,"fillPrice":null,"ip":"127.0.0.1","latencyMs":null,"limitPrice":null,"note":"ACCOUNT_EVENT[33]: Account frozen","orderId":"ORD-1767949823611-15117548","orderType":null,"payload":{"accountEventId":33,"accountWaveCorrelationId":"8b1c1d13-d23a-4f8a-aceb-8c4c109897f0","actorAdminId":12,"description":"SUSPICIOUS_ACTIVITY","impactedUserId":8,"metadata":null,"mirrorType":"ACCOUNT_EVENT","provenance":{"actorType":"ADMIN","actorUserId":12,"ip":"127.0.0.1","sessionId":"XQaNkozz0KsvlBSdAJKJFZnS4nr04Rp9","userAgent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Agency/97.8.7510.73"},"reasonCode":"SUSPICIOUS_ACTIVITY","reasonText":null,"title":"Account frozen"},"positionId":"POS-1767949823611-d178076b","qtyLots":null,"quoteAsk":null,"quoteBid":null,"quoteMid":null,"quoteSpread":null,"reasonCode":"SUSPICIOUS_ACTIVITY","requestedPrice":null,"riskCheckName":null,"riskLimitValue":null,"riskObservedValue":null,"riskResult":null,"sessionId":"XQaNkozz0KsvlBSdAJKJFZnS4nr04Rp9","side":"SELL","slippage":null,"slippagePips":null,"slippageReference":null,"spreadPips":null,"stopPrice":null,"symbol":"EURJPY","timeInForce":null,"tradeId":9,"triggerPrice":null,"userAgent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Agency/97.8.7510.73"}',
+    'c648696d3f09cd66d5cca8b4f68f3825ef75a741cb1a9d3a035d163863757b96',
+    '8c4809594e4a9f25e592e2f1fab425e75ad3033f99e84a770b26ef9bab89b184',
+    'ACCOUNT_EVENT[33]: Account frozen'
+  ],
+  cause: error: value "1768293761059" is out of range for type integer
+      at /home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/pg-pool/index.js:45:11
+      at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+      at async <anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/src/node-postgres/session.ts:149:14)
+      at async NodePgPreparedQuery.queryWithCache (/home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/src/pg-core/session.ts:71:12)
+      at async writeTradeAudit (/home/bcodex/TD.1.11.ANTIGRAVITY/server/lib/auditWriter.ts:180:5)
+      at async mirrorAccountEventToTradeAudit (/home/bcodex/TD.1.11.ANTIGRAVITY/server/lib/accountEventMirror.ts:127:5)
+      at async Object.recordAccountEvent (/home/bcodex/TD.1.11.ANTIGRAVITY/server/storage.ts:896:7)
+      at async Object.freezeUserAccount (/home/bcodex/TD.1.11.ANTIGRAVITY/server/storage.ts:1122:5)
+      at async <anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/server/routes/admin.ts:1679:20) {
+    length: 156,
+    severity: 'ERROR',
+    code: '22003',
+    detail: undefined,
+    hint: undefined,
+    position: undefined,
+    internalPosition: undefined,
+    internalQuery: undefined,
+    where: "unnamed portal parameter $5 = '...'",
+    schema: undefined,
+    table: undefined,
+    column: undefined,
+    dataType: undefined,
+    constraint: undefined,
+    file: 'numutils.c',
+    line: '611',
+    routine: 'pg_strtoint32_safe'
+  }
+}
+Error writing trade audit: DrizzleQueryError: Failed query: insert into "trade_audit" ("id", "trade_id", "event_type", "event_category", "event_at", "event_at_ms", "correlation_id", "order_id", "execution_id", "position_id", "actor_type", "actor_user_id", "session_id", "ip", "user_agent", "symbol", "side", "order_type", "time_in_force", "qty_lots", "requested_price", "trigger_price", "limit_price", "stop_price", "fill_price", "avg_fill_price", "quote_ts", "quote_source", "quote_bid", "quote_ask", "quote_mid", "quote_spread", "spread_pips", "slippage", "slippage_pips", "slippage_reference", "latency_ms", "risk_check_name", "risk_limit_value", "risk_observed_value", "risk_result", "reason_code", "payload_json", "prev_hash", "event_hash", "note") values (default, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45)
+params: 9,ACCOUNT_DISABLED,ACCOUNT,1768293766,1768293766506,609c4781-cd0d-47ca-8e06-18c8d87e7d32,ORD-1767949823611-15117548,,POS-1767949823611-d178076b,ADMIN,12,XQaNkozz0KsvlBSdAJKJFZnS4nr04Rp9,127.0.0.1,Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Agency/97.8.7510.73,EURJPY,SELL,,,,,,,,,,,,,,,,,,,,,,,,,STATUS_CHANGE,{"actorType":"ADMIN","actorUserId":12,"avgFillPrice":null,"correlationId":"609c4781-cd0d-47ca-8e06-18c8d87e7d32","eventAtMs":1768293766506,"eventCategory":"ACCOUNT","eventType":"ACCOUNT_DISABLED","executionId":null,"fillPrice":null,"ip":"127.0.0.1","latencyMs":null,"limitPrice":null,"note":"ACCOUNT_EVENT[34]: Account disabled","orderId":"ORD-1767949823611-15117548","orderType":null,"payload":{"accountEventId":34,"accountWaveCorrelationId":"b0e7abc6-e929-438d-be7e-3ded124d62db","actorAdminId":12,"description":"Trading privileges revoked","impactedUserId":8,"metadata":null,"mirrorType":"ACCOUNT_EVENT","provenance":{"actorType":"ADMIN","actorUserId":12,"ip":"127.0.0.1","sessionId":"XQaNkozz0KsvlBSdAJKJFZnS4nr04Rp9","userAgent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Agency/97.8.7510.73"},"reasonCode":null,"reasonText":null,"title":"Account disabled"},"positionId":"POS-1767949823611-d178076b","qtyLots":null,"quoteAsk":null,"quoteBid":null,"quoteMid":null,"quoteSpread":null,"reasonCode":"STATUS_CHANGE","requestedPrice":null,"riskCheckName":null,"riskLimitValue":null,"riskObservedValue":null,"riskResult":null,"sessionId":"XQaNkozz0KsvlBSdAJKJFZnS4nr04Rp9","side":"SELL","slippage":null,"slippagePips":null,"slippageReference":null,"spreadPips":null,"stopPrice":null,"symbol":"EURJPY","timeInForce":null,"tradeId":9,"triggerPrice":null,"userAgent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Agency/97.8.7510.73"},c648696d3f09cd66d5cca8b4f68f3825ef75a741cb1a9d3a035d163863757b96,f6810ce598c837db0559ed193eec4e2f91febe94b146d8b94232f76755011d88,ACCOUNT_EVENT[34]: Account disabled
+    at NodePgPreparedQuery.queryWithCache (/home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/src/pg-core/session.ts:73:11)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async writeTradeAudit (/home/bcodex/TD.1.11.ANTIGRAVITY/server/lib/auditWriter.ts:180:5)
+    ... 3 lines matching cause stack trace ...
+    at async <anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/server/routes/admin.ts:1640:20) {
+  query: 'insert into "trade_audit" ("id", "trade_id", "event_type", "event_category", "event_at", "event_at_ms", "correlation_id", "order_id", "execution_id", "position_id", "actor_type", "actor_user_id", "session_id", "ip", "user_agent", "symbol", "side", "order_type", "time_in_force", "qty_lots", "requested_price", "trigger_price", "limit_price", "stop_price", "fill_price", "avg_fill_price", "quote_ts", "quote_source", "quote_bid", "quote_ask", "quote_mid", "quote_spread", "spread_pips", "slippage", "slippage_pips", "slippage_reference", "latency_ms", "risk_check_name", "risk_limit_value", "risk_observed_value", "risk_result", "reason_code", "payload_json", "prev_hash", "event_hash", "note") values (default, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45)',
+  params: [
+    9,
+    'ACCOUNT_DISABLED',
+    'ACCOUNT',
+    1768293766,
+    1768293766506,
+    '609c4781-cd0d-47ca-8e06-18c8d87e7d32',
+    'ORD-1767949823611-15117548',
+    null,
+    'POS-1767949823611-d178076b',
+    'ADMIN',
+    12,
+    'XQaNkozz0KsvlBSdAJKJFZnS4nr04Rp9',
+    '127.0.0.1',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Agency/97.8.7510.73',
+    'EURJPY',
+    'SELL',
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    'STATUS_CHANGE',
+    '{"actorType":"ADMIN","actorUserId":12,"avgFillPrice":null,"correlationId":"609c4781-cd0d-47ca-8e06-18c8d87e7d32","eventAtMs":1768293766506,"eventCategory":"ACCOUNT","eventType":"ACCOUNT_DISABLED","executionId":null,"fillPrice":null,"ip":"127.0.0.1","latencyMs":null,"limitPrice":null,"note":"ACCOUNT_EVENT[34]: Account disabled","orderId":"ORD-1767949823611-15117548","orderType":null,"payload":{"accountEventId":34,"accountWaveCorrelationId":"b0e7abc6-e929-438d-be7e-3ded124d62db","actorAdminId":12,"description":"Trading privileges revoked","impactedUserId":8,"metadata":null,"mirrorType":"ACCOUNT_EVENT","provenance":{"actorType":"ADMIN","actorUserId":12,"ip":"127.0.0.1","sessionId":"XQaNkozz0KsvlBSdAJKJFZnS4nr04Rp9","userAgent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Agency/97.8.7510.73"},"reasonCode":null,"reasonText":null,"title":"Account disabled"},"positionId":"POS-1767949823611-d178076b","qtyLots":null,"quoteAsk":null,"quoteBid":null,"quoteMid":null,"quoteSpread":null,"reasonCode":"STATUS_CHANGE","requestedPrice":null,"riskCheckName":null,"riskLimitValue":null,"riskObservedValue":null,"riskResult":null,"sessionId":"XQaNkozz0KsvlBSdAJKJFZnS4nr04Rp9","side":"SELL","slippage":null,"slippagePips":null,"slippageReference":null,"spreadPips":null,"stopPrice":null,"symbol":"EURJPY","timeInForce":null,"tradeId":9,"triggerPrice":null,"userAgent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Agency/97.8.7510.73"}',
+    'c648696d3f09cd66d5cca8b4f68f3825ef75a741cb1a9d3a035d163863757b96',
+    'f6810ce598c837db0559ed193eec4e2f91febe94b146d8b94232f76755011d88',
+    'ACCOUNT_EVENT[34]: Account disabled'
+  ],
+  cause: error: value "1768293766506" is out of range for type integer
+      at /home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/pg-pool/index.js:45:11
+      at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+      at async <anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/src/node-postgres/session.ts:149:14)
+      at async NodePgPreparedQuery.queryWithCache (/home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/src/pg-core/session.ts:71:12)
+      at async writeTradeAudit (/home/bcodex/TD.1.11.ANTIGRAVITY/server/lib/auditWriter.ts:180:5)
+      at async mirrorAccountEventToTradeAudit (/home/bcodex/TD.1.11.ANTIGRAVITY/server/lib/accountEventMirror.ts:127:5)
+      at async Object.recordAccountEvent (/home/bcodex/TD.1.11.ANTIGRAVITY/server/storage.ts:896:7)
+      at async Object.setUserDisabled (/home/bcodex/TD.1.11.ANTIGRAVITY/server/storage.ts:1225:7)
+      at async <anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/server/routes/admin.ts:1640:20) {
+    length: 156,
+    severity: 'ERROR',
+    code: '22003',
+    detail: undefined,
+    hint: undefined,
+    position: undefined,
+    internalPosition: undefined,
+    internalQuery: undefined,
+    where: "unnamed portal parameter $5 = '...'",
+    schema: undefined,
+    table: undefined,
+    column: undefined,
+    dataType: undefined,
+    constraint: undefined,
+    file: 'numutils.c',
+    line: '611',
+    routine: 'pg_strtoint32_safe'
+  }
+}
+[audit] mirrorAccountEventToTradeAudit failed: DrizzleQueryError: Failed query: insert into "trade_audit" ("id", "trade_id", "event_type", "event_category", "event_at", "event_at_ms", "correlation_id", "order_id", "execution_id", "position_id", "actor_type", "actor_user_id", "session_id", "ip", "user_agent", "symbol", "side", "order_type", "time_in_force", "qty_lots", "requested_price", "trigger_price", "limit_price", "stop_price", "fill_price", "avg_fill_price", "quote_ts", "quote_source", "quote_bid", "quote_ask", "quote_mid", "quote_spread", "spread_pips", "slippage", "slippage_pips", "slippage_reference", "latency_ms", "risk_check_name", "risk_limit_value", "risk_observed_value", "risk_result", "reason_code", "payload_json", "prev_hash", "event_hash", "note") values (default, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45)
+params: 9,ACCOUNT_DISABLED,ACCOUNT,1768293766,1768293766506,609c4781-cd0d-47ca-8e06-18c8d87e7d32,ORD-1767949823611-15117548,,POS-1767949823611-d178076b,ADMIN,12,XQaNkozz0KsvlBSdAJKJFZnS4nr04Rp9,127.0.0.1,Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Agency/97.8.7510.73,EURJPY,SELL,,,,,,,,,,,,,,,,,,,,,,,,,STATUS_CHANGE,{"actorType":"ADMIN","actorUserId":12,"avgFillPrice":null,"correlationId":"609c4781-cd0d-47ca-8e06-18c8d87e7d32","eventAtMs":1768293766506,"eventCategory":"ACCOUNT","eventType":"ACCOUNT_DISABLED","executionId":null,"fillPrice":null,"ip":"127.0.0.1","latencyMs":null,"limitPrice":null,"note":"ACCOUNT_EVENT[34]: Account disabled","orderId":"ORD-1767949823611-15117548","orderType":null,"payload":{"accountEventId":34,"accountWaveCorrelationId":"b0e7abc6-e929-438d-be7e-3ded124d62db","actorAdminId":12,"description":"Trading privileges revoked","impactedUserId":8,"metadata":null,"mirrorType":"ACCOUNT_EVENT","provenance":{"actorType":"ADMIN","actorUserId":12,"ip":"127.0.0.1","sessionId":"XQaNkozz0KsvlBSdAJKJFZnS4nr04Rp9","userAgent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Agency/97.8.7510.73"},"reasonCode":null,"reasonText":null,"title":"Account disabled"},"positionId":"POS-1767949823611-d178076b","qtyLots":null,"quoteAsk":null,"quoteBid":null,"quoteMid":null,"quoteSpread":null,"reasonCode":"STATUS_CHANGE","requestedPrice":null,"riskCheckName":null,"riskLimitValue":null,"riskObservedValue":null,"riskResult":null,"sessionId":"XQaNkozz0KsvlBSdAJKJFZnS4nr04Rp9","side":"SELL","slippage":null,"slippagePips":null,"slippageReference":null,"spreadPips":null,"stopPrice":null,"symbol":"EURJPY","timeInForce":null,"tradeId":9,"triggerPrice":null,"userAgent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Agency/97.8.7510.73"},c648696d3f09cd66d5cca8b4f68f3825ef75a741cb1a9d3a035d163863757b96,f6810ce598c837db0559ed193eec4e2f91febe94b146d8b94232f76755011d88,ACCOUNT_EVENT[34]: Account disabled
+    at NodePgPreparedQuery.queryWithCache (/home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/src/pg-core/session.ts:73:11)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async writeTradeAudit (/home/bcodex/TD.1.11.ANTIGRAVITY/server/lib/auditWriter.ts:180:5)
+    ... 3 lines matching cause stack trace ...
+    at async <anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/server/routes/admin.ts:1640:20) {
+  query: 'insert into "trade_audit" ("id", "trade_id", "event_type", "event_category", "event_at", "event_at_ms", "correlation_id", "order_id", "execution_id", "position_id", "actor_type", "actor_user_id", "session_id", "ip", "user_agent", "symbol", "side", "order_type", "time_in_force", "qty_lots", "requested_price", "trigger_price", "limit_price", "stop_price", "fill_price", "avg_fill_price", "quote_ts", "quote_source", "quote_bid", "quote_ask", "quote_mid", "quote_spread", "spread_pips", "slippage", "slippage_pips", "slippage_reference", "latency_ms", "risk_check_name", "risk_limit_value", "risk_observed_value", "risk_result", "reason_code", "payload_json", "prev_hash", "event_hash", "note") values (default, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45)',
+  params: [
+    9,
+    'ACCOUNT_DISABLED',
+    'ACCOUNT',
+    1768293766,
+    1768293766506,
+    '609c4781-cd0d-47ca-8e06-18c8d87e7d32',
+    'ORD-1767949823611-15117548',
+    null,
+    'POS-1767949823611-d178076b',
+    'ADMIN',
+    12,
+    'XQaNkozz0KsvlBSdAJKJFZnS4nr04Rp9',
+    '127.0.0.1',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Agency/97.8.7510.73',
+    'EURJPY',
+    'SELL',
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    'STATUS_CHANGE',
+    '{"actorType":"ADMIN","actorUserId":12,"avgFillPrice":null,"correlationId":"609c4781-cd0d-47ca-8e06-18c8d87e7d32","eventAtMs":1768293766506,"eventCategory":"ACCOUNT","eventType":"ACCOUNT_DISABLED","executionId":null,"fillPrice":null,"ip":"127.0.0.1","latencyMs":null,"limitPrice":null,"note":"ACCOUNT_EVENT[34]: Account disabled","orderId":"ORD-1767949823611-15117548","orderType":null,"payload":{"accountEventId":34,"accountWaveCorrelationId":"b0e7abc6-e929-438d-be7e-3ded124d62db","actorAdminId":12,"description":"Trading privileges revoked","impactedUserId":8,"metadata":null,"mirrorType":"ACCOUNT_EVENT","provenance":{"actorType":"ADMIN","actorUserId":12,"ip":"127.0.0.1","sessionId":"XQaNkozz0KsvlBSdAJKJFZnS4nr04Rp9","userAgent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Agency/97.8.7510.73"},"reasonCode":null,"reasonText":null,"title":"Account disabled"},"positionId":"POS-1767949823611-d178076b","qtyLots":null,"quoteAsk":null,"quoteBid":null,"quoteMid":null,"quoteSpread":null,"reasonCode":"STATUS_CHANGE","requestedPrice":null,"riskCheckName":null,"riskLimitValue":null,"riskObservedValue":null,"riskResult":null,"sessionId":"XQaNkozz0KsvlBSdAJKJFZnS4nr04Rp9","side":"SELL","slippage":null,"slippagePips":null,"slippageReference":null,"spreadPips":null,"stopPrice":null,"symbol":"EURJPY","timeInForce":null,"tradeId":9,"triggerPrice":null,"userAgent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Agency/97.8.7510.73"}',
+    'c648696d3f09cd66d5cca8b4f68f3825ef75a741cb1a9d3a035d163863757b96',
+    'f6810ce598c837db0559ed193eec4e2f91febe94b146d8b94232f76755011d88',
+    'ACCOUNT_EVENT[34]: Account disabled'
+  ],
+  cause: error: value "1768293766506" is out of range for type integer
+      at /home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/pg-pool/index.js:45:11
+      at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+      at async <anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/src/node-postgres/session.ts:149:14)
+      at async NodePgPreparedQuery.queryWithCache (/home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/src/pg-core/session.ts:71:12)
+      at async writeTradeAudit (/home/bcodex/TD.1.11.ANTIGRAVITY/server/lib/auditWriter.ts:180:5)
+      at async mirrorAccountEventToTradeAudit (/home/bcodex/TD.1.11.ANTIGRAVITY/server/lib/accountEventMirror.ts:127:5)
+      at async Object.recordAccountEvent (/home/bcodex/TD.1.11.ANTIGRAVITY/server/storage.ts:896:7)
+      at async Object.setUserDisabled (/home/bcodex/TD.1.11.ANTIGRAVITY/server/storage.ts:1225:7)
+      at async <anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/server/routes/admin.ts:1640:20) {
+    length: 156,
+    severity: 'ERROR',
+    code: '22003',
+    detail: undefined,
+    hint: undefined,
+    position: undefined,
+    internalPosition: undefined,
+    internalQuery: undefined,
+    where: "unnamed portal parameter $5 = '...'",
+    schema: undefined,
+    table: undefined,
+    column: undefined,
+    dataType: undefined,
+    constraint: undefined,
+    file: 'numutils.c',
+    line: '611',
+    routine: 'pg_strtoint32_safe'
+  }
+}
+Error writing trade audit: DrizzleQueryError: Failed query: insert into "trade_audit" ("id", "trade_id", "event_type", "event_category", "event_at", "event_at_ms", "correlation_id", "order_id", "execution_id", "position_id", "actor_type", "actor_user_id", "session_id", "ip", "user_agent", "symbol", "side", "order_type", "time_in_force", "qty_lots", "requested_price", "trigger_price", "limit_price", "stop_price", "fill_price", "avg_fill_price", "quote_ts", "quote_source", "quote_bid", "quote_ask", "quote_mid", "quote_spread", "spread_pips", "slippage", "slippage_pips", "slippage_reference", "latency_ms", "risk_check_name", "risk_limit_value", "risk_observed_value", "risk_result", "reason_code", "payload_json", "prev_hash", "event_hash", "note") values (default, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45)
+params: 9,ACCOUNT_ENABLED,ACCOUNT,1768293769,1768293769843,609c4781-cd0d-47ca-8e06-18c8d87e7d32,ORD-1767949823611-15117548,,POS-1767949823611-d178076b,ADMIN,12,XQaNkozz0KsvlBSdAJKJFZnS4nr04Rp9,127.0.0.1,Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Agency/97.8.7510.73,EURJPY,SELL,,,,,,,,,,,,,,,,,,,,,,,,,STATUS_CHANGE,{"actorType":"ADMIN","actorUserId":12,"avgFillPrice":null,"correlationId":"609c4781-cd0d-47ca-8e06-18c8d87e7d32","eventAtMs":1768293769843,"eventCategory":"ACCOUNT","eventType":"ACCOUNT_ENABLED","executionId":null,"fillPrice":null,"ip":"127.0.0.1","latencyMs":null,"limitPrice":null,"note":"ACCOUNT_EVENT[35]: Account enabled","orderId":"ORD-1767949823611-15117548","orderType":null,"payload":{"accountEventId":35,"accountWaveCorrelationId":"fc761247-96ad-483b-b1ca-e461dba35660","actorAdminId":12,"description":"Trading privileges restored","impactedUserId":8,"metadata":null,"mirrorType":"ACCOUNT_EVENT","provenance":{"actorType":"ADMIN","actorUserId":12,"ip":"127.0.0.1","sessionId":"XQaNkozz0KsvlBSdAJKJFZnS4nr04Rp9","userAgent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Agency/97.8.7510.73"},"reasonCode":null,"reasonText":null,"title":"Account enabled"},"positionId":"POS-1767949823611-d178076b","qtyLots":null,"quoteAsk":null,"quoteBid":null,"quoteMid":null,"quoteSpread":null,"reasonCode":"STATUS_CHANGE","requestedPrice":null,"riskCheckName":null,"riskLimitValue":null,"riskObservedValue":null,"riskResult":null,"sessionId":"XQaNkozz0KsvlBSdAJKJFZnS4nr04Rp9","side":"SELL","slippage":null,"slippagePips":null,"slippageReference":null,"spreadPips":null,"stopPrice":null,"symbol":"EURJPY","timeInForce":null,"tradeId":9,"triggerPrice":null,"userAgent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Agency/97.8.7510.73"},c648696d3f09cd66d5cca8b4f68f3825ef75a741cb1a9d3a035d163863757b96,cb8c8d841960ce32d63b8371e4449de6827ace24904d0161fd76315b7967a0f1,ACCOUNT_EVENT[35]: Account enabled
+    at NodePgPreparedQuery.queryWithCache (/home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/src/pg-core/session.ts:73:11)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async writeTradeAudit (/home/bcodex/TD.1.11.ANTIGRAVITY/server/lib/auditWriter.ts:180:5)
+    ... 3 lines matching cause stack trace ...
+    at async <anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/server/routes/admin.ts:1640:20) {
+  query: 'insert into "trade_audit" ("id", "trade_id", "event_type", "event_category", "event_at", "event_at_ms", "correlation_id", "order_id", "execution_id", "position_id", "actor_type", "actor_user_id", "session_id", "ip", "user_agent", "symbol", "side", "order_type", "time_in_force", "qty_lots", "requested_price", "trigger_price", "limit_price", "stop_price", "fill_price", "avg_fill_price", "quote_ts", "quote_source", "quote_bid", "quote_ask", "quote_mid", "quote_spread", "spread_pips", "slippage", "slippage_pips", "slippage_reference", "latency_ms", "risk_check_name", "risk_limit_value", "risk_observed_value", "risk_result", "reason_code", "payload_json", "prev_hash", "event_hash", "note") values (default, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45)',
+  params: [
+    9,
+    'ACCOUNT_ENABLED',
+    'ACCOUNT',
+    1768293769,
+    1768293769843,
+    '609c4781-cd0d-47ca-8e06-18c8d87e7d32',
+    'ORD-1767949823611-15117548',
+    null,
+    'POS-1767949823611-d178076b',
+    'ADMIN',
+    12,
+    'XQaNkozz0KsvlBSdAJKJFZnS4nr04Rp9',
+    '127.0.0.1',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Agency/97.8.7510.73',
+    'EURJPY',
+    'SELL',
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    'STATUS_CHANGE',
+    '{"actorType":"ADMIN","actorUserId":12,"avgFillPrice":null,"correlationId":"609c4781-cd0d-47ca-8e06-18c8d87e7d32","eventAtMs":1768293769843,"eventCategory":"ACCOUNT","eventType":"ACCOUNT_ENABLED","executionId":null,"fillPrice":null,"ip":"127.0.0.1","latencyMs":null,"limitPrice":null,"note":"ACCOUNT_EVENT[35]: Account enabled","orderId":"ORD-1767949823611-15117548","orderType":null,"payload":{"accountEventId":35,"accountWaveCorrelationId":"fc761247-96ad-483b-b1ca-e461dba35660","actorAdminId":12,"description":"Trading privileges restored","impactedUserId":8,"metadata":null,"mirrorType":"ACCOUNT_EVENT","provenance":{"actorType":"ADMIN","actorUserId":12,"ip":"127.0.0.1","sessionId":"XQaNkozz0KsvlBSdAJKJFZnS4nr04Rp9","userAgent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Agency/97.8.7510.73"},"reasonCode":null,"reasonText":null,"title":"Account enabled"},"positionId":"POS-1767949823611-d178076b","qtyLots":null,"quoteAsk":null,"quoteBid":null,"quoteMid":null,"quoteSpread":null,"reasonCode":"STATUS_CHANGE","requestedPrice":null,"riskCheckName":null,"riskLimitValue":null,"riskObservedValue":null,"riskResult":null,"sessionId":"XQaNkozz0KsvlBSdAJKJFZnS4nr04Rp9","side":"SELL","slippage":null,"slippagePips":null,"slippageReference":null,"spreadPips":null,"stopPrice":null,"symbol":"EURJPY","timeInForce":null,"tradeId":9,"triggerPrice":null,"userAgent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Agency/97.8.7510.73"}',
+    'c648696d3f09cd66d5cca8b4f68f3825ef75a741cb1a9d3a035d163863757b96',
+    'cb8c8d841960ce32d63b8371e4449de6827ace24904d0161fd76315b7967a0f1',
+    'ACCOUNT_EVENT[35]: Account enabled'
+  ],
+  cause: error: value "1768293769843" is out of range for type integer
+      at /home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/pg-pool/index.js:45:11
+      at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+      at async <anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/src/node-postgres/session.ts:149:14)
+      at async NodePgPreparedQuery.queryWithCache (/home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/src/pg-core/session.ts:71:12)
+      at async writeTradeAudit (/home/bcodex/TD.1.11.ANTIGRAVITY/server/lib/auditWriter.ts:180:5)
+      at async mirrorAccountEventToTradeAudit (/home/bcodex/TD.1.11.ANTIGRAVITY/server/lib/accountEventMirror.ts:127:5)
+      at async Object.recordAccountEvent (/home/bcodex/TD.1.11.ANTIGRAVITY/server/storage.ts:896:7)
+      at async Object.setUserDisabled (/home/bcodex/TD.1.11.ANTIGRAVITY/server/storage.ts:1225:7)
+      at async <anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/server/routes/admin.ts:1640:20) {
+    length: 156,
+    severity: 'ERROR',
+    code: '22003',
+    detail: undefined,
+    hint: undefined,
+    position: undefined,
+    internalPosition: undefined,
+    internalQuery: undefined,
+    where: "unnamed portal parameter $5 = '...'",
+    schema: undefined,
+    table: undefined,
+    column: undefined,
+    dataType: undefined,
+    constraint: undefined,
+    file: 'numutils.c',
+    line: '611',
+    routine: 'pg_strtoint32_safe'
+  }
+}
+[audit] mirrorAccountEventToTradeAudit failed: DrizzleQueryError: Failed query: insert into "trade_audit" ("id", "trade_id", "event_type", "event_category", "event_at", "event_at_ms", "correlation_id", "order_id", "execution_id", "position_id", "actor_type", "actor_user_id", "session_id", "ip", "user_agent", "symbol", "side", "order_type", "time_in_force", "qty_lots", "requested_price", "trigger_price", "limit_price", "stop_price", "fill_price", "avg_fill_price", "quote_ts", "quote_source", "quote_bid", "quote_ask", "quote_mid", "quote_spread", "spread_pips", "slippage", "slippage_pips", "slippage_reference", "latency_ms", "risk_check_name", "risk_limit_value", "risk_observed_value", "risk_result", "reason_code", "payload_json", "prev_hash", "event_hash", "note") values (default, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45)
+params: 9,ACCOUNT_ENABLED,ACCOUNT,1768293769,1768293769843,609c4781-cd0d-47ca-8e06-18c8d87e7d32,ORD-1767949823611-15117548,,POS-1767949823611-d178076b,ADMIN,12,XQaNkozz0KsvlBSdAJKJFZnS4nr04Rp9,127.0.0.1,Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Agency/97.8.7510.73,EURJPY,SELL,,,,,,,,,,,,,,,,,,,,,,,,,STATUS_CHANGE,{"actorType":"ADMIN","actorUserId":12,"avgFillPrice":null,"correlationId":"609c4781-cd0d-47ca-8e06-18c8d87e7d32","eventAtMs":1768293769843,"eventCategory":"ACCOUNT","eventType":"ACCOUNT_ENABLED","executionId":null,"fillPrice":null,"ip":"127.0.0.1","latencyMs":null,"limitPrice":null,"note":"ACCOUNT_EVENT[35]: Account enabled","orderId":"ORD-1767949823611-15117548","orderType":null,"payload":{"accountEventId":35,"accountWaveCorrelationId":"fc761247-96ad-483b-b1ca-e461dba35660","actorAdminId":12,"description":"Trading privileges restored","impactedUserId":8,"metadata":null,"mirrorType":"ACCOUNT_EVENT","provenance":{"actorType":"ADMIN","actorUserId":12,"ip":"127.0.0.1","sessionId":"XQaNkozz0KsvlBSdAJKJFZnS4nr04Rp9","userAgent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Agency/97.8.7510.73"},"reasonCode":null,"reasonText":null,"title":"Account enabled"},"positionId":"POS-1767949823611-d178076b","qtyLots":null,"quoteAsk":null,"quoteBid":null,"quoteMid":null,"quoteSpread":null,"reasonCode":"STATUS_CHANGE","requestedPrice":null,"riskCheckName":null,"riskLimitValue":null,"riskObservedValue":null,"riskResult":null,"sessionId":"XQaNkozz0KsvlBSdAJKJFZnS4nr04Rp9","side":"SELL","slippage":null,"slippagePips":null,"slippageReference":null,"spreadPips":null,"stopPrice":null,"symbol":"EURJPY","timeInForce":null,"tradeId":9,"triggerPrice":null,"userAgent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Agency/97.8.7510.73"},c648696d3f09cd66d5cca8b4f68f3825ef75a741cb1a9d3a035d163863757b96,cb8c8d841960ce32d63b8371e4449de6827ace24904d0161fd76315b7967a0f1,ACCOUNT_EVENT[35]: Account enabled
+    at NodePgPreparedQuery.queryWithCache (/home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/src/pg-core/session.ts:73:11)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async writeTradeAudit (/home/bcodex/TD.1.11.ANTIGRAVITY/server/lib/auditWriter.ts:180:5)
+    ... 3 lines matching cause stack trace ...
+    at async <anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/server/routes/admin.ts:1640:20) {
+  query: 'insert into "trade_audit" ("id", "trade_id", "event_type", "event_category", "event_at", "event_at_ms", "correlation_id", "order_id", "execution_id", "position_id", "actor_type", "actor_user_id", "session_id", "ip", "user_agent", "symbol", "side", "order_type", "time_in_force", "qty_lots", "requested_price", "trigger_price", "limit_price", "stop_price", "fill_price", "avg_fill_price", "quote_ts", "quote_source", "quote_bid", "quote_ask", "quote_mid", "quote_spread", "spread_pips", "slippage", "slippage_pips", "slippage_reference", "latency_ms", "risk_check_name", "risk_limit_value", "risk_observed_value", "risk_result", "reason_code", "payload_json", "prev_hash", "event_hash", "note") values (default, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45)',
+  params: [
+    9,
+    'ACCOUNT_ENABLED',
+    'ACCOUNT',
+    1768293769,
+    1768293769843,
+    '609c4781-cd0d-47ca-8e06-18c8d87e7d32',
+    'ORD-1767949823611-15117548',
+    null,
+    'POS-1767949823611-d178076b',
+    'ADMIN',
+    12,
+    'XQaNkozz0KsvlBSdAJKJFZnS4nr04Rp9',
+    '127.0.0.1',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Agency/97.8.7510.73',
+    'EURJPY',
+    'SELL',
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    'STATUS_CHANGE',
+    '{"actorType":"ADMIN","actorUserId":12,"avgFillPrice":null,"correlationId":"609c4781-cd0d-47ca-8e06-18c8d87e7d32","eventAtMs":1768293769843,"eventCategory":"ACCOUNT","eventType":"ACCOUNT_ENABLED","executionId":null,"fillPrice":null,"ip":"127.0.0.1","latencyMs":null,"limitPrice":null,"note":"ACCOUNT_EVENT[35]: Account enabled","orderId":"ORD-1767949823611-15117548","orderType":null,"payload":{"accountEventId":35,"accountWaveCorrelationId":"fc761247-96ad-483b-b1ca-e461dba35660","actorAdminId":12,"description":"Trading privileges restored","impactedUserId":8,"metadata":null,"mirrorType":"ACCOUNT_EVENT","provenance":{"actorType":"ADMIN","actorUserId":12,"ip":"127.0.0.1","sessionId":"XQaNkozz0KsvlBSdAJKJFZnS4nr04Rp9","userAgent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Agency/97.8.7510.73"},"reasonCode":null,"reasonText":null,"title":"Account enabled"},"positionId":"POS-1767949823611-d178076b","qtyLots":null,"quoteAsk":null,"quoteBid":null,"quoteMid":null,"quoteSpread":null,"reasonCode":"STATUS_CHANGE","requestedPrice":null,"riskCheckName":null,"riskLimitValue":null,"riskObservedValue":null,"riskResult":null,"sessionId":"XQaNkozz0KsvlBSdAJKJFZnS4nr04Rp9","side":"SELL","slippage":null,"slippagePips":null,"slippageReference":null,"spreadPips":null,"stopPrice":null,"symbol":"EURJPY","timeInForce":null,"tradeId":9,"triggerPrice":null,"userAgent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Agency/97.8.7510.73"}',
+    'c648696d3f09cd66d5cca8b4f68f3825ef75a741cb1a9d3a035d163863757b96',
+    'cb8c8d841960ce32d63b8371e4449de6827ace24904d0161fd76315b7967a0f1',
+    'ACCOUNT_EVENT[35]: Account enabled'
+  ],
+  cause: error: value "1768293769843" is out of range for type integer
+      at /home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/pg-pool/index.js:45:11
+      at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+      at async <anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/src/node-postgres/session.ts:149:14)
+      at async NodePgPreparedQuery.queryWithCache (/home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/src/pg-core/session.ts:71:12)
+      at async writeTradeAudit (/home/bcodex/TD.1.11.ANTIGRAVITY/server/lib/auditWriter.ts:180:5)
+      at async mirrorAccountEventToTradeAudit (/home/bcodex/TD.1.11.ANTIGRAVITY/server/lib/accountEventMirror.ts:127:5)
+      at async Object.recordAccountEvent (/home/bcodex/TD.1.11.ANTIGRAVITY/server/storage.ts:896:7)
+      at async Object.setUserDisabled (/home/bcodex/TD.1.11.ANTIGRAVITY/server/storage.ts:1225:7)
+      at async <anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/server/routes/admin.ts:1640:20) {
+    length: 156,
+    severity: 'ERROR',
+    code: '22003',
+    detail: undefined,
+    hint: undefined,
+    position: undefined,
+    internalPosition: undefined,
+    internalQuery: undefined,
+    where: "unnamed portal parameter $5 = '...'",
+    schema: undefined,
+    table: undefined,
+    column: undefined,
+    dataType: undefined,
+    constraint: undefined,
+    file: 'numutils.c',
+    line: '611',
+    routine: 'pg_strtoint32_safe'
+  }
+}
+Error writing trade audit: DrizzleQueryError: Failed query: insert into "trade_audit" ("id", "trade_id", "event_type", "event_category", "event_at", "event_at_ms", "correlation_id", "order_id", "execution_id", "position_id", "actor_type", "actor_user_id", "session_id", "ip", "user_agent", "symbol", "side", "order_type", "time_in_force", "qty_lots", "requested_price", "trigger_price", "limit_price", "stop_price", "fill_price", "avg_fill_price", "quote_ts", "quote_source", "quote_bid", "quote_ask", "quote_mid", "quote_spread", "spread_pips", "slippage", "slippage_pips", "slippage_reference", "latency_ms", "risk_check_name", "risk_limit_value", "risk_observed_value", "risk_result", "reason_code", "payload_json", "prev_hash", "event_hash", "note") values (default, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45)
+params: 9,ACCOUNT_UNFROZEN,ACCOUNT,1768293772,1768293772437,609c4781-cd0d-47ca-8e06-18c8d87e7d32,ORD-1767949823611-15117548,,POS-1767949823611-d178076b,ADMIN,12,XQaNkozz0KsvlBSdAJKJFZnS4nr04Rp9,127.0.0.1,Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Agency/97.8.7510.73,EURJPY,SELL,,,,,,,,,,,,,,,,,,,,,,,,,UNFREEZE,{"actorType":"ADMIN","actorUserId":12,"avgFillPrice":null,"correlationId":"609c4781-cd0d-47ca-8e06-18c8d87e7d32","eventAtMs":1768293772437,"eventCategory":"ACCOUNT","eventType":"ACCOUNT_UNFROZEN","executionId":null,"fillPrice":null,"ip":"127.0.0.1","latencyMs":null,"limitPrice":null,"note":"ACCOUNT_EVENT[36]: Account unfrozen","orderId":"ORD-1767949823611-15117548","orderType":null,"payload":{"accountEventId":36,"accountWaveCorrelationId":"3ef03fd7-9422-451d-b475-585947a9f6b1","actorAdminId":12,"description":"Account access restored","impactedUserId":8,"metadata":null,"mirrorType":"ACCOUNT_EVENT","provenance":{"actorType":"ADMIN","actorUserId":12,"ip":"127.0.0.1","sessionId":"XQaNkozz0KsvlBSdAJKJFZnS4nr04Rp9","userAgent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Agency/97.8.7510.73"},"reasonCode":null,"reasonText":null,"title":"Account unfrozen"},"positionId":"POS-1767949823611-d178076b","qtyLots":null,"quoteAsk":null,"quoteBid":null,"quoteMid":null,"quoteSpread":null,"reasonCode":"UNFREEZE","requestedPrice":null,"riskCheckName":null,"riskLimitValue":null,"riskObservedValue":null,"riskResult":null,"sessionId":"XQaNkozz0KsvlBSdAJKJFZnS4nr04Rp9","side":"SELL","slippage":null,"slippagePips":null,"slippageReference":null,"spreadPips":null,"stopPrice":null,"symbol":"EURJPY","timeInForce":null,"tradeId":9,"triggerPrice":null,"userAgent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Agency/97.8.7510.73"},c648696d3f09cd66d5cca8b4f68f3825ef75a741cb1a9d3a035d163863757b96,444a50973508075d0ee2e4115f43fe7035fb7b869ba7ea27af7be61760e2f8bd,ACCOUNT_EVENT[36]: Account unfrozen
+    at NodePgPreparedQuery.queryWithCache (/home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/src/pg-core/session.ts:73:11)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async writeTradeAudit (/home/bcodex/TD.1.11.ANTIGRAVITY/server/lib/auditWriter.ts:180:5)
+    ... 3 lines matching cause stack trace ...
+    at async <anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/server/routes/admin.ts:1719:20) {
+  query: 'insert into "trade_audit" ("id", "trade_id", "event_type", "event_category", "event_at", "event_at_ms", "correlation_id", "order_id", "execution_id", "position_id", "actor_type", "actor_user_id", "session_id", "ip", "user_agent", "symbol", "side", "order_type", "time_in_force", "qty_lots", "requested_price", "trigger_price", "limit_price", "stop_price", "fill_price", "avg_fill_price", "quote_ts", "quote_source", "quote_bid", "quote_ask", "quote_mid", "quote_spread", "spread_pips", "slippage", "slippage_pips", "slippage_reference", "latency_ms", "risk_check_name", "risk_limit_value", "risk_observed_value", "risk_result", "reason_code", "payload_json", "prev_hash", "event_hash", "note") values (default, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45)',
+  params: [
+    9,
+    'ACCOUNT_UNFROZEN',
+    'ACCOUNT',
+    1768293772,
+    1768293772437,
+    '609c4781-cd0d-47ca-8e06-18c8d87e7d32',
+    'ORD-1767949823611-15117548',
+    null,
+    'POS-1767949823611-d178076b',
+    'ADMIN',
+    12,
+    'XQaNkozz0KsvlBSdAJKJFZnS4nr04Rp9',
+    '127.0.0.1',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Agency/97.8.7510.73',
+    'EURJPY',
+    'SELL',
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    'UNFREEZE',
+    '{"actorType":"ADMIN","actorUserId":12,"avgFillPrice":null,"correlationId":"609c4781-cd0d-47ca-8e06-18c8d87e7d32","eventAtMs":1768293772437,"eventCategory":"ACCOUNT","eventType":"ACCOUNT_UNFROZEN","executionId":null,"fillPrice":null,"ip":"127.0.0.1","latencyMs":null,"limitPrice":null,"note":"ACCOUNT_EVENT[36]: Account unfrozen","orderId":"ORD-1767949823611-15117548","orderType":null,"payload":{"accountEventId":36,"accountWaveCorrelationId":"3ef03fd7-9422-451d-b475-585947a9f6b1","actorAdminId":12,"description":"Account access restored","impactedUserId":8,"metadata":null,"mirrorType":"ACCOUNT_EVENT","provenance":{"actorType":"ADMIN","actorUserId":12,"ip":"127.0.0.1","sessionId":"XQaNkozz0KsvlBSdAJKJFZnS4nr04Rp9","userAgent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Agency/97.8.7510.73"},"reasonCode":null,"reasonText":null,"title":"Account unfrozen"},"positionId":"POS-1767949823611-d178076b","qtyLots":null,"quoteAsk":null,"quoteBid":null,"quoteMid":null,"quoteSpread":null,"reasonCode":"UNFREEZE","requestedPrice":null,"riskCheckName":null,"riskLimitValue":null,"riskObservedValue":null,"riskResult":null,"sessionId":"XQaNkozz0KsvlBSdAJKJFZnS4nr04Rp9","side":"SELL","slippage":null,"slippagePips":null,"slippageReference":null,"spreadPips":null,"stopPrice":null,"symbol":"EURJPY","timeInForce":null,"tradeId":9,"triggerPrice":null,"userAgent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Agency/97.8.7510.73"}',
+    'c648696d3f09cd66d5cca8b4f68f3825ef75a741cb1a9d3a035d163863757b96',
+    '444a50973508075d0ee2e4115f43fe7035fb7b869ba7ea27af7be61760e2f8bd',
+    'ACCOUNT_EVENT[36]: Account unfrozen'
+  ],
+  cause: error: value "1768293772437" is out of range for type integer
+      at /home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/pg-pool/index.js:45:11
+      at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+      at async <anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/src/node-postgres/session.ts:149:14)
+      at async NodePgPreparedQuery.queryWithCache (/home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/src/pg-core/session.ts:71:12)
+      at async writeTradeAudit (/home/bcodex/TD.1.11.ANTIGRAVITY/server/lib/auditWriter.ts:180:5)
+      at async mirrorAccountEventToTradeAudit (/home/bcodex/TD.1.11.ANTIGRAVITY/server/lib/accountEventMirror.ts:127:5)
+      at async Object.recordAccountEvent (/home/bcodex/TD.1.11.ANTIGRAVITY/server/storage.ts:896:7)
+      at async Object.unfreezeUserAccount (/home/bcodex/TD.1.11.ANTIGRAVITY/server/storage.ts:1184:5)
+      at async <anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/server/routes/admin.ts:1719:20) {
+    length: 156,
+    severity: 'ERROR',
+    code: '22003',
+    detail: undefined,
+    hint: undefined,
+    position: undefined,
+    internalPosition: undefined,
+    internalQuery: undefined,
+    where: "unnamed portal parameter $5 = '...'",
+    schema: undefined,
+    table: undefined,
+    column: undefined,
+    dataType: undefined,
+    constraint: undefined,
+    file: 'numutils.c',
+    line: '611',
+    routine: 'pg_strtoint32_safe'
+  }
+}
+[audit] mirrorAccountEventToTradeAudit failed: DrizzleQueryError: Failed query: insert into "trade_audit" ("id", "trade_id", "event_type", "event_category", "event_at", "event_at_ms", "correlation_id", "order_id", "execution_id", "position_id", "actor_type", "actor_user_id", "session_id", "ip", "user_agent", "symbol", "side", "order_type", "time_in_force", "qty_lots", "requested_price", "trigger_price", "limit_price", "stop_price", "fill_price", "avg_fill_price", "quote_ts", "quote_source", "quote_bid", "quote_ask", "quote_mid", "quote_spread", "spread_pips", "slippage", "slippage_pips", "slippage_reference", "latency_ms", "risk_check_name", "risk_limit_value", "risk_observed_value", "risk_result", "reason_code", "payload_json", "prev_hash", "event_hash", "note") values (default, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45)
+params: 9,ACCOUNT_UNFROZEN,ACCOUNT,1768293772,1768293772437,609c4781-cd0d-47ca-8e06-18c8d87e7d32,ORD-1767949823611-15117548,,POS-1767949823611-d178076b,ADMIN,12,XQaNkozz0KsvlBSdAJKJFZnS4nr04Rp9,127.0.0.1,Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Agency/97.8.7510.73,EURJPY,SELL,,,,,,,,,,,,,,,,,,,,,,,,,UNFREEZE,{"actorType":"ADMIN","actorUserId":12,"avgFillPrice":null,"correlationId":"609c4781-cd0d-47ca-8e06-18c8d87e7d32","eventAtMs":1768293772437,"eventCategory":"ACCOUNT","eventType":"ACCOUNT_UNFROZEN","executionId":null,"fillPrice":null,"ip":"127.0.0.1","latencyMs":null,"limitPrice":null,"note":"ACCOUNT_EVENT[36]: Account unfrozen","orderId":"ORD-1767949823611-15117548","orderType":null,"payload":{"accountEventId":36,"accountWaveCorrelationId":"3ef03fd7-9422-451d-b475-585947a9f6b1","actorAdminId":12,"description":"Account access restored","impactedUserId":8,"metadata":null,"mirrorType":"ACCOUNT_EVENT","provenance":{"actorType":"ADMIN","actorUserId":12,"ip":"127.0.0.1","sessionId":"XQaNkozz0KsvlBSdAJKJFZnS4nr04Rp9","userAgent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Agency/97.8.7510.73"},"reasonCode":null,"reasonText":null,"title":"Account unfrozen"},"positionId":"POS-1767949823611-d178076b","qtyLots":null,"quoteAsk":null,"quoteBid":null,"quoteMid":null,"quoteSpread":null,"reasonCode":"UNFREEZE","requestedPrice":null,"riskCheckName":null,"riskLimitValue":null,"riskObservedValue":null,"riskResult":null,"sessionId":"XQaNkozz0KsvlBSdAJKJFZnS4nr04Rp9","side":"SELL","slippage":null,"slippagePips":null,"slippageReference":null,"spreadPips":null,"stopPrice":null,"symbol":"EURJPY","timeInForce":null,"tradeId":9,"triggerPrice":null,"userAgent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Agency/97.8.7510.73"},c648696d3f09cd66d5cca8b4f68f3825ef75a741cb1a9d3a035d163863757b96,444a50973508075d0ee2e4115f43fe7035fb7b869ba7ea27af7be61760e2f8bd,ACCOUNT_EVENT[36]: Account unfrozen
+    at NodePgPreparedQuery.queryWithCache (/home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/src/pg-core/session.ts:73:11)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async writeTradeAudit (/home/bcodex/TD.1.11.ANTIGRAVITY/server/lib/auditWriter.ts:180:5)
+    ... 3 lines matching cause stack trace ...
+    at async <anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/server/routes/admin.ts:1719:20) {
+  query: 'insert into "trade_audit" ("id", "trade_id", "event_type", "event_category", "event_at", "event_at_ms", "correlation_id", "order_id", "execution_id", "position_id", "actor_type", "actor_user_id", "session_id", "ip", "user_agent", "symbol", "side", "order_type", "time_in_force", "qty_lots", "requested_price", "trigger_price", "limit_price", "stop_price", "fill_price", "avg_fill_price", "quote_ts", "quote_source", "quote_bid", "quote_ask", "quote_mid", "quote_spread", "spread_pips", "slippage", "slippage_pips", "slippage_reference", "latency_ms", "risk_check_name", "risk_limit_value", "risk_observed_value", "risk_result", "reason_code", "payload_json", "prev_hash", "event_hash", "note") values (default, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45)',
+  params: [
+    9,
+    'ACCOUNT_UNFROZEN',
+    'ACCOUNT',
+    1768293772,
+    1768293772437,
+    '609c4781-cd0d-47ca-8e06-18c8d87e7d32',
+    'ORD-1767949823611-15117548',
+    null,
+    'POS-1767949823611-d178076b',
+    'ADMIN',
+    12,
+    'XQaNkozz0KsvlBSdAJKJFZnS4nr04Rp9',
+    '127.0.0.1',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Agency/97.8.7510.73',
+    'EURJPY',
+    'SELL',
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    'UNFREEZE',
+    '{"actorType":"ADMIN","actorUserId":12,"avgFillPrice":null,"correlationId":"609c4781-cd0d-47ca-8e06-18c8d87e7d32","eventAtMs":1768293772437,"eventCategory":"ACCOUNT","eventType":"ACCOUNT_UNFROZEN","executionId":null,"fillPrice":null,"ip":"127.0.0.1","latencyMs":null,"limitPrice":null,"note":"ACCOUNT_EVENT[36]: Account unfrozen","orderId":"ORD-1767949823611-15117548","orderType":null,"payload":{"accountEventId":36,"accountWaveCorrelationId":"3ef03fd7-9422-451d-b475-585947a9f6b1","actorAdminId":12,"description":"Account access restored","impactedUserId":8,"metadata":null,"mirrorType":"ACCOUNT_EVENT","provenance":{"actorType":"ADMIN","actorUserId":12,"ip":"127.0.0.1","sessionId":"XQaNkozz0KsvlBSdAJKJFZnS4nr04Rp9","userAgent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Agency/97.8.7510.73"},"reasonCode":null,"reasonText":null,"title":"Account unfrozen"},"positionId":"POS-1767949823611-d178076b","qtyLots":null,"quoteAsk":null,"quoteBid":null,"quoteMid":null,"quoteSpread":null,"reasonCode":"UNFREEZE","requestedPrice":null,"riskCheckName":null,"riskLimitValue":null,"riskObservedValue":null,"riskResult":null,"sessionId":"XQaNkozz0KsvlBSdAJKJFZnS4nr04Rp9","side":"SELL","slippage":null,"slippagePips":null,"slippageReference":null,"spreadPips":null,"stopPrice":null,"symbol":"EURJPY","timeInForce":null,"tradeId":9,"triggerPrice":null,"userAgent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Agency/97.8.7510.73"}',
+    'c648696d3f09cd66d5cca8b4f68f3825ef75a741cb1a9d3a035d163863757b96',
+    '444a50973508075d0ee2e4115f43fe7035fb7b869ba7ea27af7be61760e2f8bd',
+    'ACCOUNT_EVENT[36]: Account unfrozen'
+  ],
+  cause: error: value "1768293772437" is out of range for type integer
+      at /home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/pg-pool/index.js:45:11
+      at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+      at async <anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/src/node-postgres/session.ts:149:14)
+      at async NodePgPreparedQuery.queryWithCache (/home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/src/pg-core/session.ts:71:12)
+      at async writeTradeAudit (/home/bcodex/TD.1.11.ANTIGRAVITY/server/lib/auditWriter.ts:180:5)
+      at async mirrorAccountEventToTradeAudit (/home/bcodex/TD.1.11.ANTIGRAVITY/server/lib/accountEventMirror.ts:127:5)
+      at async Object.recordAccountEvent (/home/bcodex/TD.1.11.ANTIGRAVITY/server/storage.ts:896:7)
+      at async Object.unfreezeUserAccount (/home/bcodex/TD.1.11.ANTIGRAVITY/server/storage.ts:1184:5)
+      at async <anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/server/routes/admin.ts:1719:20) {
+    length: 156,
+    severity: 'ERROR',
+    code: '22003',
+    detail: undefined,
+    hint: undefined,
+    position: undefined,
+    internalPosition: undefined,
+    internalQuery: undefined,
+    where: "unnamed portal parameter $5 = '...'",
+    schema: undefined,
+    table: undefined,
+    column: undefined,
+    dataType: undefined,
+    constraint: undefined,
+    file: 'numutils.c',
+    line: '611',
+    routine: 'pg_strtoint32_safe'
+  }
+}
+[Grift] Ping error: error: column reference "first_ip" is ambiguous
+    at /home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/pg/lib/client.js:545:17
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async Object.run (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftDb.ts:101:26)
+    at async recordDevice (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftEngine.ts:224:3)
+    at async onSessionActivity (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftEngine.ts:1157:5)
+    at async <anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftPublicRouter.ts:42:7)
+    at async withGriftClient (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftDb.ts:126:12)
+    at async <anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftPublicRouter.ts:41:5) {
+  length: 110,
+  severity: 'ERROR',
+  code: '42702',
+  detail: undefined,
+  hint: undefined,
+  position: '191',
+  internalPosition: undefined,
+  internalQuery: undefined,
+  where: undefined,
+  schema: undefined,
+  table: undefined,
+  column: undefined,
+  dataType: undefined,
+  constraint: undefined,
+  file: 'parse_relation.c',
+  line: '913',
+  routine: 'colNameToVar'
+}
+[Grift] Ping error: error: column reference "first_ip" is ambiguous
+    at /home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/pg/lib/client.js:545:17
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async Object.run (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftDb.ts:101:26)
+    at async recordDevice (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftEngine.ts:224:3)
+    at async onSessionActivity (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftEngine.ts:1157:5)
+    at async <anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftPublicRouter.ts:42:7)
+    at async withGriftClient (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftDb.ts:126:12)
+    at async <anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftPublicRouter.ts:41:5) {
+  length: 110,
+  severity: 'ERROR',
+  code: '42702',
+  detail: undefined,
+  hint: undefined,
+  position: '191',
+  internalPosition: undefined,
+  internalQuery: undefined,
+  where: undefined,
+  schema: undefined,
+  table: undefined,
+  column: undefined,
+  dataType: undefined,
+  constraint: undefined,
+  file: 'parse_relation.c',
+  line: '913',
+  routine: 'colNameToVar'
+}
+[Grift] Ping error: error: column reference "first_ip" is ambiguous
+    at /home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/pg/lib/client.js:545:17
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async Object.run (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftDb.ts:101:26)
+    at async recordDevice (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftEngine.ts:224:3)
+    at async onSessionActivity (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftEngine.ts:1157:5)
+    at async <anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftPublicRouter.ts:42:7)
+    at async withGriftClient (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftDb.ts:126:12)
+    at async <anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftPublicRouter.ts:41:5) {
+  length: 110,
+  severity: 'ERROR',
+  code: '42702',
+  detail: undefined,
+  hint: undefined,
+  position: '191',
+  internalPosition: undefined,
+  internalQuery: undefined,
+  where: undefined,
+  schema: undefined,
+  table: undefined,
+  column: undefined,
+  dataType: undefined,
+  constraint: undefined,
+  file: 'parse_relation.c',
+  line: '913',
+  routine: 'colNameToVar'
+}
+[Grift] Ping error: error: column reference "first_ip" is ambiguous
+    at /home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/pg/lib/client.js:545:17
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async Object.run (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftDb.ts:101:26)
+    at async recordDevice (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftEngine.ts:224:3)
+    at async onSessionActivity (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftEngine.ts:1157:5)
+    at async <anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftPublicRouter.ts:42:7)
+    at async withGriftClient (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftDb.ts:126:12)
+    at async <anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftPublicRouter.ts:41:5) {
+  length: 110,
+  severity: 'ERROR',
+  code: '42702',
+  detail: undefined,
+  hint: undefined,
+  position: '191',
+  internalPosition: undefined,
+  internalQuery: undefined,
+  where: undefined,
+  schema: undefined,
+  table: undefined,
+  column: undefined,
+  dataType: undefined,
+  constraint: undefined,
+  file: 'parse_relation.c',
+  line: '913',
+  routine: 'colNameToVar'
+}
+[Grift] Ping error: error: column reference "first_ip" is ambiguous
+    at /home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/pg/lib/client.js:545:17
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async Object.run (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftDb.ts:101:26)
+    at async recordDevice (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftEngine.ts:224:3)
+    at async onSessionActivity (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftEngine.ts:1157:5)
+    at async <anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftPublicRouter.ts:42:7)
+    at async withGriftClient (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftDb.ts:126:12)
+    at async <anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftPublicRouter.ts:41:5) {
+  length: 110,
+  severity: 'ERROR',
+  code: '42702',
+  detail: undefined,
+  hint: undefined,
+  position: '191',
+  internalPosition: undefined,
+  internalQuery: undefined,
+  where: undefined,
+  schema: undefined,
+  table: undefined,
+  column: undefined,
+  dataType: undefined,
+  constraint: undefined,
+  file: 'parse_relation.c',
+  line: '913',
+  routine: 'colNameToVar'
+}
+[Grift] Ping error: error: column reference "first_ip" is ambiguous
+    at /home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/pg/lib/client.js:545:17
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async Object.run (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftDb.ts:101:26)
+    at async recordDevice (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftEngine.ts:224:3)
+    at async onSessionActivity (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftEngine.ts:1157:5)
+    at async <anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftPublicRouter.ts:42:7)
+    at async withGriftClient (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftDb.ts:126:12)
+    at async <anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftPublicRouter.ts:41:5) {
+  length: 110,
+  severity: 'ERROR',
+  code: '42702',
+  detail: undefined,
+  hint: undefined,
+  position: '191',
+  internalPosition: undefined,
+  internalQuery: undefined,
+  where: undefined,
+  schema: undefined,
+  table: undefined,
+  column: undefined,
+  dataType: undefined,
+  constraint: undefined,
+  file: 'parse_relation.c',
+  line: '913',
+  routine: 'colNameToVar'
+}
+Express error handler: DrizzleQueryError: Failed query: select "id", "user_id", "symbol_id", "type", "order_type", "size", "lots", "open_price", "close_price", "take_profit", "stop_loss", "limit_price", "stop_price", "profit", "status", "opened_at", "executed_at", "closed_at", "close_reason", "close_quote_ts", "close_source", "close_bid", "close_ask", "close_mid", "close_spread", "correlation_id", "order_id", "position_id", "last_execution_id", "last_actor_user_id", "last_actor_session_id", "last_actor_ip", "last_actor_user_agent", "last_actor_type", "last_actor_device_id" from "trades" "trades" where ("trades"."user_id" = $1 and "trades"."status" = $2 and "trades"."closed_at" >= $3) order by "trades"."closed_at" desc
+params: 12,CLOSED,Tue Jan 13 2026 00:00:00 GMT-0600 (Central Standard Time)
+    at NodePgPreparedQuery.queryWithCache (/home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/src/pg-core/session.ts:73:11)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async <anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/src/node-postgres/session.ts:154:19)
+    at async Object.getClosedTradesByDateRange (/home/bcodex/TD.1.11.ANTIGRAVITY/server/storage.ts:481:12)
+    at async riskMiddleware (/home/bcodex/TD.1.11.ANTIGRAVITY/server/risk.ts:298:25) {
+  query: 'select "id", "user_id", "symbol_id", "type", "order_type", "size", "lots", "open_price", "close_price", "take_profit", "stop_loss", "limit_price", "stop_price", "profit", "status", "opened_at", "executed_at", "closed_at", "close_reason", "close_quote_ts", "close_source", "close_bid", "close_ask", "close_mid", "close_spread", "correlation_id", "order_id", "position_id", "last_execution_id", "last_actor_user_id", "last_actor_session_id", "last_actor_ip", "last_actor_user_agent", "last_actor_type", "last_actor_device_id" from "trades" "trades" where ("trades"."user_id" = $1 and "trades"."status" = $2 and "trades"."closed_at" >= $3) order by "trades"."closed_at" desc',
+  params: [ 12, 'CLOSED', 2026-01-13T06:00:00.000Z ],
+  cause: error: invalid input syntax for type integer: "2026-01-13T00:00:00.000-06:00"
+      at /home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/pg-pool/index.js:45:11
+      at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+      at async <anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/src/node-postgres/session.ts:161:13)
+      at async NodePgPreparedQuery.queryWithCache (/home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/src/pg-core/session.ts:71:12)
+      at async <anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/src/node-postgres/session.ts:154:19)
+      at async Object.getClosedTradesByDateRange (/home/bcodex/TD.1.11.ANTIGRAVITY/server/storage.ts:481:12)
+      at async riskMiddleware (/home/bcodex/TD.1.11.ANTIGRAVITY/server/risk.ts:298:25) {
+    length: 172,
+    severity: 'ERROR',
+    code: '22P02',
+    detail: undefined,
+    hint: undefined,
+    position: undefined,
+    internalPosition: undefined,
+    internalQuery: undefined,
+    where: "unnamed portal parameter $3 = '...'",
+    schema: undefined,
+    table: undefined,
+    column: undefined,
+    dataType: undefined,
+    constraint: undefined,
+    file: 'numutils.c',
+    line: '617',
+    routine: 'pg_strtoint32_safe'
+  }
+}
+Express error handler: DrizzleQueryError: Failed query: select "id", "user_id", "symbol_id", "type", "order_type", "size", "lots", "open_price", "close_price", "take_profit", "stop_loss", "limit_price", "stop_price", "profit", "status", "opened_at", "executed_at", "closed_at", "close_reason", "close_quote_ts", "close_source", "close_bid", "close_ask", "close_mid", "close_spread", "correlation_id", "order_id", "position_id", "last_execution_id", "last_actor_user_id", "last_actor_session_id", "last_actor_ip", "last_actor_user_agent", "last_actor_type", "last_actor_device_id" from "trades" "trades" where ("trades"."user_id" = $1 and "trades"."status" = $2 and "trades"."closed_at" >= $3) order by "trades"."closed_at" desc
+params: 12,CLOSED,Tue Jan 13 2026 00:00:00 GMT-0600 (Central Standard Time)
+    at NodePgPreparedQuery.queryWithCache (/home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/src/pg-core/session.ts:73:11)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async <anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/src/node-postgres/session.ts:154:19)
+    at async Object.getClosedTradesByDateRange (/home/bcodex/TD.1.11.ANTIGRAVITY/server/storage.ts:481:12)
+    at async riskMiddleware (/home/bcodex/TD.1.11.ANTIGRAVITY/server/risk.ts:298:25) {
+  query: 'select "id", "user_id", "symbol_id", "type", "order_type", "size", "lots", "open_price", "close_price", "take_profit", "stop_loss", "limit_price", "stop_price", "profit", "status", "opened_at", "executed_at", "closed_at", "close_reason", "close_quote_ts", "close_source", "close_bid", "close_ask", "close_mid", "close_spread", "correlation_id", "order_id", "position_id", "last_execution_id", "last_actor_user_id", "last_actor_session_id", "last_actor_ip", "last_actor_user_agent", "last_actor_type", "last_actor_device_id" from "trades" "trades" where ("trades"."user_id" = $1 and "trades"."status" = $2 and "trades"."closed_at" >= $3) order by "trades"."closed_at" desc',
+  params: [ 12, 'CLOSED', 2026-01-13T06:00:00.000Z ],
+  cause: error: invalid input syntax for type integer: "2026-01-13T00:00:00.000-06:00"
+      at /home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/pg-pool/index.js:45:11
+      at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+      at async <anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/src/node-postgres/session.ts:161:13)
+      at async NodePgPreparedQuery.queryWithCache (/home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/src/pg-core/session.ts:71:12)
+      at async <anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/src/node-postgres/session.ts:154:19)
+      at async Object.getClosedTradesByDateRange (/home/bcodex/TD.1.11.ANTIGRAVITY/server/storage.ts:481:12)
+      at async riskMiddleware (/home/bcodex/TD.1.11.ANTIGRAVITY/server/risk.ts:298:25) {
+    length: 172,
+    severity: 'ERROR',
+    code: '22P02',
+    detail: undefined,
+    hint: undefined,
+    position: undefined,
+    internalPosition: undefined,
+    internalQuery: undefined,
+    where: "unnamed portal parameter $3 = '...'",
+    schema: undefined,
+    table: undefined,
+    column: undefined,
+    dataType: undefined,
+    constraint: undefined,
+    file: 'numutils.c',
+    line: '617',
+    routine: 'pg_strtoint32_safe'
+  }
+}
+[Grift] Ping error: error: column reference "first_ip" is ambiguous
+    at /home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/pg/lib/client.js:545:17
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async Object.run (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftDb.ts:101:26)
+    at async recordDevice (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftEngine.ts:224:3)
+    at async onSessionActivity (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftEngine.ts:1157:5)
+    at async <anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftPublicRouter.ts:42:7)
+    at async withGriftClient (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftDb.ts:126:12)
+    at async <anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftPublicRouter.ts:41:5) {
+  length: 110,
+  severity: 'ERROR',
+  code: '42702',
+  detail: undefined,
+  hint: undefined,
+  position: '191',
+  internalPosition: undefined,
+  internalQuery: undefined,
+  where: undefined,
+  schema: undefined,
+  table: undefined,
+  column: undefined,
+  dataType: undefined,
+  constraint: undefined,
+  file: 'parse_relation.c',
+  line: '913',
+  routine: 'colNameToVar'
+}
+Express error handler: DrizzleQueryError: Failed query: select "id", "user_id", "symbol_id", "type", "order_type", "size", "lots", "open_price", "close_price", "take_profit", "stop_loss", "limit_price", "stop_price", "profit", "status", "opened_at", "executed_at", "closed_at", "close_reason", "close_quote_ts", "close_source", "close_bid", "close_ask", "close_mid", "close_spread", "correlation_id", "order_id", "position_id", "last_execution_id", "last_actor_user_id", "last_actor_session_id", "last_actor_ip", "last_actor_user_agent", "last_actor_type", "last_actor_device_id" from "trades" "trades" where ("trades"."user_id" = $1 and "trades"."status" = $2 and "trades"."closed_at" >= $3) order by "trades"."closed_at" desc
+params: 12,CLOSED,Tue Jan 13 2026 00:00:00 GMT-0600 (Central Standard Time)
+    at NodePgPreparedQuery.queryWithCache (/home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/src/pg-core/session.ts:73:11)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async <anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/src/node-postgres/session.ts:154:19)
+    at async Object.getClosedTradesByDateRange (/home/bcodex/TD.1.11.ANTIGRAVITY/server/storage.ts:481:12)
+    at async riskMiddleware (/home/bcodex/TD.1.11.ANTIGRAVITY/server/risk.ts:298:25) {
+  query: 'select "id", "user_id", "symbol_id", "type", "order_type", "size", "lots", "open_price", "close_price", "take_profit", "stop_loss", "limit_price", "stop_price", "profit", "status", "opened_at", "executed_at", "closed_at", "close_reason", "close_quote_ts", "close_source", "close_bid", "close_ask", "close_mid", "close_spread", "correlation_id", "order_id", "position_id", "last_execution_id", "last_actor_user_id", "last_actor_session_id", "last_actor_ip", "last_actor_user_agent", "last_actor_type", "last_actor_device_id" from "trades" "trades" where ("trades"."user_id" = $1 and "trades"."status" = $2 and "trades"."closed_at" >= $3) order by "trades"."closed_at" desc',
+  params: [ 12, 'CLOSED', 2026-01-13T06:00:00.000Z ],
+  cause: error: invalid input syntax for type integer: "2026-01-13T00:00:00.000-06:00"
+      at /home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/pg-pool/index.js:45:11
+      at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+      at async <anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/src/node-postgres/session.ts:161:13)
+      at async NodePgPreparedQuery.queryWithCache (/home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/src/pg-core/session.ts:71:12)
+      at async <anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/src/node-postgres/session.ts:154:19)
+      at async Object.getClosedTradesByDateRange (/home/bcodex/TD.1.11.ANTIGRAVITY/server/storage.ts:481:12)
+      at async riskMiddleware (/home/bcodex/TD.1.11.ANTIGRAVITY/server/risk.ts:298:25) {
+    length: 172,
+    severity: 'ERROR',
+    code: '22P02',
+    detail: undefined,
+    hint: undefined,
+    position: undefined,
+    internalPosition: undefined,
+    internalQuery: undefined,
+    where: "unnamed portal parameter $3 = '...'",
+    schema: undefined,
+    table: undefined,
+    column: undefined,
+    dataType: undefined,
+    constraint: undefined,
+    file: 'numutils.c',
+    line: '617',
+    routine: 'pg_strtoint32_safe'
+  }
+}
+Express error handler: DrizzleQueryError: Failed query: select "id", "user_id", "symbol_id", "type", "order_type", "size", "lots", "open_price", "close_price", "take_profit", "stop_loss", "limit_price", "stop_price", "profit", "status", "opened_at", "executed_at", "closed_at", "close_reason", "close_quote_ts", "close_source", "close_bid", "close_ask", "close_mid", "close_spread", "correlation_id", "order_id", "position_id", "last_execution_id", "last_actor_user_id", "last_actor_session_id", "last_actor_ip", "last_actor_user_agent", "last_actor_type", "last_actor_device_id" from "trades" "trades" where ("trades"."user_id" = $1 and "trades"."status" = $2 and "trades"."closed_at" >= $3) order by "trades"."closed_at" desc
+params: 12,CLOSED,Tue Jan 13 2026 00:00:00 GMT-0600 (Central Standard Time)
+    at NodePgPreparedQuery.queryWithCache (/home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/src/pg-core/session.ts:73:11)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async <anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/src/node-postgres/session.ts:154:19)
+    at async Object.getClosedTradesByDateRange (/home/bcodex/TD.1.11.ANTIGRAVITY/server/storage.ts:481:12)
+    at async riskMiddleware (/home/bcodex/TD.1.11.ANTIGRAVITY/server/risk.ts:298:25) {
+  query: 'select "id", "user_id", "symbol_id", "type", "order_type", "size", "lots", "open_price", "close_price", "take_profit", "stop_loss", "limit_price", "stop_price", "profit", "status", "opened_at", "executed_at", "closed_at", "close_reason", "close_quote_ts", "close_source", "close_bid", "close_ask", "close_mid", "close_spread", "correlation_id", "order_id", "position_id", "last_execution_id", "last_actor_user_id", "last_actor_session_id", "last_actor_ip", "last_actor_user_agent", "last_actor_type", "last_actor_device_id" from "trades" "trades" where ("trades"."user_id" = $1 and "trades"."status" = $2 and "trades"."closed_at" >= $3) order by "trades"."closed_at" desc',
+  params: [ 12, 'CLOSED', 2026-01-13T06:00:00.000Z ],
+  cause: error: invalid input syntax for type integer: "2026-01-13T00:00:00.000-06:00"
+      at /home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/pg-pool/index.js:45:11
+      at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+      at async <anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/src/node-postgres/session.ts:161:13)
+      at async NodePgPreparedQuery.queryWithCache (/home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/src/pg-core/session.ts:71:12)
+      at async <anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/src/node-postgres/session.ts:154:19)
+      at async Object.getClosedTradesByDateRange (/home/bcodex/TD.1.11.ANTIGRAVITY/server/storage.ts:481:12)
+      at async riskMiddleware (/home/bcodex/TD.1.11.ANTIGRAVITY/server/risk.ts:298:25) {
+    length: 172,
+    severity: 'ERROR',
+    code: '22P02',
+    detail: undefined,
+    hint: undefined,
+    position: undefined,
+    internalPosition: undefined,
+    internalQuery: undefined,
+    where: "unnamed portal parameter $3 = '...'",
+    schema: undefined,
+    table: undefined,
+    column: undefined,
+    dataType: undefined,
+    constraint: undefined,
+    file: 'numutils.c',
+    line: '617',
+    routine: 'pg_strtoint32_safe'
+  }
+}
+[Grift] Failed to capture login context: error: column reference "first_ip" is ambiguous
+    at /home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/pg/lib/client.js:545:17
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async Object.run (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftDb.ts:101:26)
+    at async recordDevice (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftEngine.ts:224:3)
+    at async onLoginSuccess (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftEngine.ts:1044:5)
+    at async <anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/server/routes.ts:775:13)
+    at async withGriftClient (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftDb.ts:126:12)
+    at async <anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/server/routes.ts:751:11) {
+  length: 110,
+  severity: 'ERROR',
+  code: '42702',
+  detail: undefined,
+  hint: undefined,
+  position: '191',
+  internalPosition: undefined,
+  internalQuery: undefined,
+  where: undefined,
+  schema: undefined,
+  table: undefined,
+  column: undefined,
+  dataType: undefined,
+  constraint: undefined,
+  file: 'parse_relation.c',
+  line: '913',
+  routine: 'colNameToVar'
+}
+[Grift] Ping error: error: column reference "first_ip" is ambiguous
+    at /home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/pg/lib/client.js:545:17
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async Object.run (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftDb.ts:101:26)
+    at async recordDevice (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftEngine.ts:224:3)
+    at async onSessionActivity (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftEngine.ts:1157:5)
+    at async <anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftPublicRouter.ts:42:7)
+    at async withGriftClient (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftDb.ts:126:12)
+    at async <anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftPublicRouter.ts:41:5) {
+  length: 110,
+  severity: 'ERROR',
+  code: '42702',
+  detail: undefined,
+  hint: undefined,
+  position: '191',
+  internalPosition: undefined,
+  internalQuery: undefined,
+  where: undefined,
+  schema: undefined,
+  table: undefined,
+  column: undefined,
+  dataType: undefined,
+  constraint: undefined,
+  file: 'parse_relation.c',
+  line: '913',
+  routine: 'colNameToVar'
+}
+[Grift] Failed to import ip2asn dataset (Postgres): error: value "4230120000" is out of range for type integer
+    at /home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/pg/lib/client.js:545:17
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async Object.run (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftDb.ts:101:26)
+    at async insertBatch (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftIp2AsnDataset.ts:269:7)
+    at async maybeImportIp2AsnDataset (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftIp2AsnDataset.ts:334:9)
+    at async <anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/server/index.ts:305:17)
+    at async withGriftClient (/home/bcodex/TD.1.11.ANTIGRAVITY/server/grift/griftDb.ts:126:12)
+    at async Immediate.<anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/server/index.ts:304:15) {
+  length: 153,
+  severity: 'ERROR',
+  code: '22003',
+  detail: undefined,
+  hint: undefined,
+  position: undefined,
+  internalPosition: undefined,
+  internalQuery: undefined,
+  where: "unnamed portal parameter $6 = '...'",
+  schema: undefined,
+  table: undefined,
+  column: undefined,
+  dataType: undefined,
+  constraint: undefined,
+  file: 'numutils.c',
+  line: '611',
+  routine: 'pg_strtoint32_safe'
+}
+[Legal] Failed to record acceptance. Rolling back signup: LEGAL_ACCEPTANCE_RECORD_FAILED Failed query: insert into "legal_acceptances" ("id", "user_id", "email_at_acceptance", "country_iso2", "region_key", "global_doc_id", "global_doc_version", "global_doc_sha256", "addendum_id", "addendum_version", "addendum_sha256", "combined_sha256", "combined_text", "ledger_seq", "prev_ledger_hash", "ledger_hash", "ip_address", "user_agent", "session_id", "doc_id", "doc_version", "doc_content_hash", "terms_token", "terms_token_verified", "accepted_from_ip", "accepted_user_agent", "prev_hash", "record_hash", "accepted_at", "accepted_at_ms") values (default, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, default, default, default, $19, $20, $21, $22, $23, $24, $25, $26) returning "id"
+params: 13,tend@tend.com,CA,NORTH_AMERICA,1,1.0.0,d3a39e6420028770c302c2227e31c39c2d3f0ce4d389e228a742f4b9edd02a21,39,1.0.0,2d18b9a194fcc5b4f60f44c5a7fca1148f411ee7e82c638e06c985a10bec1d73,6e98e056d8ea94ac7ec8c439c22cb5506266a40564469e47f620569a56a0b889,TradeQuip Global Terms of Service
+
+# TradeQuip Global Terms of Service
+
+**Effective Date:** [Effective Date]
+**Version:** 1.0.0
+
+## 1. Acceptance of Terms
+
+By accessing or using the TradeQuip platform ("Platform"), you agree to be bound by these Terms of Service ("Terms"). If you do not agree to these Terms, you may not access or use the Platform.
+
+## 2. Eligibility
+
+You must be at least 18 years old and legally capable of entering into binding contracts to use this Platform. By using the Platform, you represent and warrant that you meet these requirements.
+
+## 3. Account Registration
+
+To access certain features, you must register an account. You agree to:
+- Provide accurate and complete information
+- Maintain the security of your account credentials
+- Accept responsibility for all activities under your account
+- Notify us immediately of any unauthorized access
+
+## 4. Trading Services
+
+The Platform provides simulated trading services for educational and evaluation purposes. All trades are executed with virtual funds unless explicitly stated otherwise.
+
+## 5. Prohibited Activities
+
+You agree not to:
+- Violate any applicable laws or regulations
+- Manipulate or abuse the trading system
+- Use automated systems without authorization
+- Impersonate others or misrepresent your identity
+
+## 6. Intellectual Property
+
+All content, trademarks, and intellectual property on the Platform are owned by TradeQuip or its licensors.
+
+## 7. Limitation of Liability
+
+TO THE MAXIMUM EXTENT PERMITTED BY LAW, TRADEQUIP SHALL NOT BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, OR PUNITIVE DAMAGES.
+
+## 8. Governing Law
+
+These Terms shall be governed by and construed in accordance with the laws of [Jurisdiction].
+
+## 9. Changes to Terms
+
+We reserve the right to modify these Terms at any time. Continued use of the Platform after changes constitutes acceptance.
+
+## 10. Contact
+
+For questions about these Terms, contact us at legal@tradequip.com.
+
+---
+
+REGION ADDENDUM — NORTH AMERICA (ADD-NORTH_AMERICA)
+Version: 1.0
+Applies if your selected country is classified as North America (excluding US) and no dedicated country Addendum is available.
+
+Law/venue: your country of habitual residence.
+Enforceability: maximum enforceable scope; construed as notice + anti-circumvention for Platform-Linked Opportunities; confidentiality.
+Privacy: local privacy safeguards as required.
+
+END OF ADD-NORTH_AMERICA,3,19f879a478967d29c5c54e0e1c754975243ff56be5b27c861bb918b71f028e3e,9e7d84e2315c8c1b81a29614d62d6e1c900daebac307666db1c59c2a4eac1373,127.0.0.1,Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Agency/97.8.7510.73,4R7Z8D0JIPYDa4DOiN9UZYtYQNOcltxu,eyJhZGRlbmR1bSI6eyJpZCI6MzksInNoYTI1NiI6IjJkMThiOWExOTRmY2M1YjRmNjBmNDRjNWE3ZmNhMTE0OGY0MTFlZTdlODJjNjM4ZTA2Yzk4NWExMGJlYzFkNzMiLCJ2ZXJzaW9uIjoiMS4wLjAifSwiY29tYmluZWRTaGEyNTYiOiI2ZTk4ZTA1NmQ4ZWE5NGFjN2VjOGM0MzljMjJjYjU1MDYyNjZhNDA1NjQ0NjllNDdmNjIwNTY5YTU2YTBiODg5IiwiY291bnRyeUlzbzIiOiJDQSIsImdsb2JhbCI6eyJpZCI6MSwic2hhMjU2IjoiZDNhMzllNjQyMDAyODc3MGMzMDJjMjIyN2UzMWMzOWMyZDNmMGNlNGQzODllMjI4YTc0MmY0YjllZGQwMmEyMSIsInZlcnNpb24iOiIxLjAuMCJ9LCJyZWdpb25LZXkiOiJOT1JUSF9BTUVSSUNBIiwidHMiOjE3NjgyOTQ2MDcwODUsInYiOjF9.d5d13566849fffeb9ed59603737c9962cbd687b9fcc91ccd3661dd8eb74f4852,true,127.0.0.1,Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Agency/97.8.7510.73,f80203242557d5a486fd9e1d8f13381690ee21c81556c250fd8e97d46e6d62a5,22d69a6e0293479cf237e2dbac3f475c76857f7591d5885a7389d5cfa5765237,1768294701,1768294701248
+[Legal] Full error details: DrizzleQueryError: Failed query: insert into "legal_acceptances" ("id", "user_id", "email_at_acceptance", "country_iso2", "region_key", "global_doc_id", "global_doc_version", "global_doc_sha256", "addendum_id", "addendum_version", "addendum_sha256", "combined_sha256", "combined_text", "ledger_seq", "prev_ledger_hash", "ledger_hash", "ip_address", "user_agent", "session_id", "doc_id", "doc_version", "doc_content_hash", "terms_token", "terms_token_verified", "accepted_from_ip", "accepted_user_agent", "prev_hash", "record_hash", "accepted_at", "accepted_at_ms") values (default, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, default, default, default, $19, $20, $21, $22, $23, $24, $25, $26) returning "id"
+params: 13,tend@tend.com,CA,NORTH_AMERICA,1,1.0.0,d3a39e6420028770c302c2227e31c39c2d3f0ce4d389e228a742f4b9edd02a21,39,1.0.0,2d18b9a194fcc5b4f60f44c5a7fca1148f411ee7e82c638e06c985a10bec1d73,6e98e056d8ea94ac7ec8c439c22cb5506266a40564469e47f620569a56a0b889,TradeQuip Global Terms of Service
+
+# TradeQuip Global Terms of Service
+
+**Effective Date:** [Effective Date]
+**Version:** 1.0.0
+
+## 1. Acceptance of Terms
+
+By accessing or using the TradeQuip platform ("Platform"), you agree to be bound by these Terms of Service ("Terms"). If you do not agree to these Terms, you may not access or use the Platform.
+
+## 2. Eligibility
+
+You must be at least 18 years old and legally capable of entering into binding contracts to use this Platform. By using the Platform, you represent and warrant that you meet these requirements.
+
+## 3. Account Registration
+
+To access certain features, you must register an account. You agree to:
+- Provide accurate and complete information
+- Maintain the security of your account credentials
+- Accept responsibility for all activities under your account
+- Notify us immediately of any unauthorized access
+
+## 4. Trading Services
+
+The Platform provides simulated trading services for educational and evaluation purposes. All trades are executed with virtual funds unless explicitly stated otherwise.
+
+## 5. Prohibited Activities
+
+You agree not to:
+- Violate any applicable laws or regulations
+- Manipulate or abuse the trading system
+- Use automated systems without authorization
+- Impersonate others or misrepresent your identity
+
+## 6. Intellectual Property
+
+All content, trademarks, and intellectual property on the Platform are owned by TradeQuip or its licensors.
+
+## 7. Limitation of Liability
+
+TO THE MAXIMUM EXTENT PERMITTED BY LAW, TRADEQUIP SHALL NOT BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, OR PUNITIVE DAMAGES.
+
+## 8. Governing Law
+
+These Terms shall be governed by and construed in accordance with the laws of [Jurisdiction].
+
+## 9. Changes to Terms
+
+We reserve the right to modify these Terms at any time. Continued use of the Platform after changes constitutes acceptance.
+
+## 10. Contact
+
+For questions about these Terms, contact us at legal@tradequip.com.
+
+---
+
+REGION ADDENDUM — NORTH AMERICA (ADD-NORTH_AMERICA)
+Version: 1.0
+Applies if your selected country is classified as North America (excluding US) and no dedicated country Addendum is available.
+
+Law/venue: your country of habitual residence.
+Enforceability: maximum enforceable scope; construed as notice + anti-circumvention for Platform-Linked Opportunities; confidentiality.
+Privacy: local privacy safeguards as required.
+
+END OF ADD-NORTH_AMERICA,3,19f879a478967d29c5c54e0e1c754975243ff56be5b27c861bb918b71f028e3e,9e7d84e2315c8c1b81a29614d62d6e1c900daebac307666db1c59c2a4eac1373,127.0.0.1,Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Agency/97.8.7510.73,4R7Z8D0JIPYDa4DOiN9UZYtYQNOcltxu,eyJhZGRlbmR1bSI6eyJpZCI6MzksInNoYTI1NiI6IjJkMThiOWExOTRmY2M1YjRmNjBmNDRjNWE3ZmNhMTE0OGY0MTFlZTdlODJjNjM4ZTA2Yzk4NWExMGJlYzFkNzMiLCJ2ZXJzaW9uIjoiMS4wLjAifSwiY29tYmluZWRTaGEyNTYiOiI2ZTk4ZTA1NmQ4ZWE5NGFjN2VjOGM0MzljMjJjYjU1MDYyNjZhNDA1NjQ0NjllNDdmNjIwNTY5YTU2YTBiODg5IiwiY291bnRyeUlzbzIiOiJDQSIsImdsb2JhbCI6eyJpZCI6MSwic2hhMjU2IjoiZDNhMzllNjQyMDAyODc3MGMzMDJjMjIyN2UzMWMzOWMyZDNmMGNlNGQzODllMjI4YTc0MmY0YjllZGQwMmEyMSIsInZlcnNpb24iOiIxLjAuMCJ9LCJyZWdpb25LZXkiOiJOT1JUSF9BTUVSSUNBIiwidHMiOjE3NjgyOTQ2MDcwODUsInYiOjF9.d5d13566849fffeb9ed59603737c9962cbd687b9fcc91ccd3661dd8eb74f4852,true,127.0.0.1,Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Agency/97.8.7510.73,f80203242557d5a486fd9e1d8f13381690ee21c81556c250fd8e97d46e6d62a5,22d69a6e0293479cf237e2dbac3f475c76857f7591d5885a7389d5cfa5765237,1768294701,1768294701248
+    at NodePgPreparedQuery.queryWithCache (/home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/src/pg-core/session.ts:73:11)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async <anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/src/node-postgres/session.ts:154:19)
+    ... 3 lines matching cause stack trace ...
+    at async <anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/server/routes.ts:1050:9) {
+  query: 'insert into "legal_acceptances" ("id", "user_id", "email_at_acceptance", "country_iso2", "region_key", "global_doc_id", "global_doc_version", "global_doc_sha256", "addendum_id", "addendum_version", "addendum_sha256", "combined_sha256", "combined_text", "ledger_seq", "prev_ledger_hash", "ledger_hash", "ip_address", "user_agent", "session_id", "doc_id", "doc_version", "doc_content_hash", "terms_token", "terms_token_verified", "accepted_from_ip", "accepted_user_agent", "prev_hash", "record_hash", "accepted_at", "accepted_at_ms") values (default, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, default, default, default, $19, $20, $21, $22, $23, $24, $25, $26) returning "id"',
+  params: [
+    13,
+    'tend@tend.com',
+    'CA',
+    'NORTH_AMERICA',
+    1,
+    '1.0.0',
+    'd3a39e6420028770c302c2227e31c39c2d3f0ce4d389e228a742f4b9edd02a21',
+    39,
+    '1.0.0',
+    '2d18b9a194fcc5b4f60f44c5a7fca1148f411ee7e82c638e06c985a10bec1d73',
+    '6e98e056d8ea94ac7ec8c439c22cb5506266a40564469e47f620569a56a0b889',
+    'TradeQuip Global Terms of Service\n' +
+      '\n' +
+      '# TradeQuip Global Terms of Service\n' +
+      '\n' +
+      '**Effective Date:** [Effective Date]\n' +
+      '**Version:** 1.0.0\n' +
+      '\n' +
+      '## 1. Acceptance of Terms\n' +
+      '\n' +
+      'By accessing or using the TradeQuip platform ("Platform"), you agree to be bound by these Terms of Service ("Terms"). If you do not agree to these Terms, you may not access or use the Platform.\n' +
+      '\n' +
+      '## 2. Eligibility\n' +
+      '\n' +
+      'You must be at least 18 years old and legally capable of entering into binding contracts to use this Platform. By using the Platform, you represent and warrant that you meet these requirements.\n' +
+      '\n' +
+      '## 3. Account Registration\n' +
+      '\n' +
+      'To access certain features, you must register an account. You agree to:\n' +
+      '- Provide accurate and complete information\n' +
+      '- Maintain the security of your account credentials\n' +
+      '- Accept responsibility for all activities under your account\n' +
+      '- Notify us immediately of any unauthorized access\n' +
+      '\n' +
+      '## 4. Trading Services\n' +
+      '\n' +
+      'The Platform provides simulated trading services for educational and evaluation purposes. All trades are executed with virtual funds unless explicitly stated otherwise.\n' +
+      '\n' +
+      '## 5. Prohibited Activities\n' +
+      '\n' +
+      'You agree not to:\n' +
+      '- Violate any applicable laws or regulations\n' +
+      '- Manipulate or abuse the trading system\n' +
+      '- Use automated systems without authorization\n' +
+      '- Impersonate others or misrepresent your identity\n' +
+      '\n' +
+      '## 6. Intellectual Property\n' +
+      '\n' +
+      'All content, trademarks, and intellectual property on the Platform are owned by TradeQuip or its licensors.\n' +
+      '\n' +
+      '## 7. Limitation of Liability\n' +
+      '\n' +
+      'TO THE MAXIMUM EXTENT PERMITTED BY LAW, TRADEQUIP SHALL NOT BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, OR PUNITIVE DAMAGES.\n' +
+      '\n' +
+      '## 8. Governing Law\n' +
+      '\n' +
+      'These Terms shall be governed by and construed in accordance with the laws of [Jurisdiction].\n' +
+      '\n' +
+      '## 9. Changes to Terms\n' +
+      '\n' +
+      'We reserve the right to modify these Terms at any time. Continued use of the Platform after changes constitutes acceptance.\n' +
+      '\n' +
+      '## 10. Contact\n' +
+      '\n' +
+      'For questions about these Terms, contact us at legal@tradequip.com.\n' +
+      '\n' +
+      '---\n' +
+      '\n' +
+      'REGION ADDENDUM — NORTH AMERICA (ADD-NORTH_AMERICA)\n' +
+      'Version: 1.0\n' +
+      'Applies if your selected country is classified as North America (excluding US) and no dedicated country Addendum is available.\n' +
+      '\n' +
+      'Law/venue: your country of habitual residence.\n' +
+      'Enforceability: maximum enforceable scope; construed as notice + anti-circumvention for Platform-Linked Opportunities; confidentiality.\n' +
+      'Privacy: local privacy safeguards as required.\n' +
+      '\n' +
+      'END OF ADD-NORTH_AMERICA',
+    3,
+    '19f879a478967d29c5c54e0e1c754975243ff56be5b27c861bb918b71f028e3e',
+    '9e7d84e2315c8c1b81a29614d62d6e1c900daebac307666db1c59c2a4eac1373',
+    '127.0.0.1',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Agency/97.8.7510.73',
+    '4R7Z8D0JIPYDa4DOiN9UZYtYQNOcltxu',
+    'eyJhZGRlbmR1bSI6eyJpZCI6MzksInNoYTI1NiI6IjJkMThiOWExOTRmY2M1YjRmNjBmNDRjNWE3ZmNhMTE0OGY0MTFlZTdlODJjNjM4ZTA2Yzk4NWExMGJlYzFkNzMiLCJ2ZXJzaW9uIjoiMS4wLjAifSwiY29tYmluZWRTaGEyNTYiOiI2ZTk4ZTA1NmQ4ZWE5NGFjN2VjOGM0MzljMjJjYjU1MDYyNjZhNDA1NjQ0NjllNDdmNjIwNTY5YTU2YTBiODg5IiwiY291bnRyeUlzbzIiOiJDQSIsImdsb2JhbCI6eyJpZCI6MSwic2hhMjU2IjoiZDNhMzllNjQyMDAyODc3MGMzMDJjMjIyN2UzMWMzOWMyZDNmMGNlNGQzODllMjI4YTc0MmY0YjllZGQwMmEyMSIsInZlcnNpb24iOiIxLjAuMCJ9LCJyZWdpb25LZXkiOiJOT1JUSF9BTUVSSUNBIiwidHMiOjE3NjgyOTQ2MDcwODUsInYiOjF9.d5d13566849fffeb9ed59603737c9962cbd687b9fcc91ccd3661dd8eb74f4852',
+    true,
+    '127.0.0.1',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Agency/97.8.7510.73',
+    'f80203242557d5a486fd9e1d8f13381690ee21c81556c250fd8e97d46e6d62a5',
+    '22d69a6e0293479cf237e2dbac3f475c76857f7591d5885a7389d5cfa5765237',
+    1768294701,
+    1768294701248
+  ],
+  cause: error: value "1768294701248" is out of range for type integer
+      at /home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/pg/lib/client.js:545:17
+      at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+      at async <anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/src/node-postgres/session.ts:161:13)
+      at async NodePgPreparedQuery.queryWithCache (/home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/src/pg-core/session.ts:71:12)
+      at async <anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/src/node-postgres/session.ts:154:19)
+      at async <anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/server/legal/legalAcceptanceService.ts:143:24)
+      at async NodePgSession.transaction (/home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/src/node-postgres/session.ts:259:19)
+      at async recordDoc1Acceptance (/home/bcodex/TD.1.11.ANTIGRAVITY/server/legal/legalAcceptanceService.ts:93:18)
+      at async <anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/server/routes.ts:1050:9) {
+    length: 157,
+    severity: 'ERROR',
+    code: '22003',
+    detail: undefined,
+    hint: undefined,
+    position: undefined,
+    internalPosition: undefined,
+    internalQuery: undefined,
+    where: "unnamed portal parameter $26 = '...'",
+    schema: undefined,
+    table: undefined,
+    column: undefined,
+    dataType: undefined,
+    constraint: undefined,
+    file: 'numutils.c',
+    line: '611',
+    routine: 'pg_strtoint32_safe'
+  }
+}
+[Legal] Stack trace: Error: Failed query: insert into "legal_acceptances" ("id", "user_id", "email_at_acceptance", "country_iso2", "region_key", "global_doc_id", "global_doc_version", "global_doc_sha256", "addendum_id", "addendum_version", "addendum_sha256", "combined_sha256", "combined_text", "ledger_seq", "prev_ledger_hash", "ledger_hash", "ip_address", "user_agent", "session_id", "doc_id", "doc_version", "doc_content_hash", "terms_token", "terms_token_verified", "accepted_from_ip", "accepted_user_agent", "prev_hash", "record_hash", "accepted_at", "accepted_at_ms") values (default, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, default, default, default, $19, $20, $21, $22, $23, $24, $25, $26) returning "id"
+params: 13,tend@tend.com,CA,NORTH_AMERICA,1,1.0.0,d3a39e6420028770c302c2227e31c39c2d3f0ce4d389e228a742f4b9edd02a21,39,1.0.0,2d18b9a194fcc5b4f60f44c5a7fca1148f411ee7e82c638e06c985a10bec1d73,6e98e056d8ea94ac7ec8c439c22cb5506266a40564469e47f620569a56a0b889,TradeQuip Global Terms of Service
+
+# TradeQuip Global Terms of Service
+
+**Effective Date:** [Effective Date]
+**Version:** 1.0.0
+
+## 1. Acceptance of Terms
+
+By accessing or using the TradeQuip platform ("Platform"), you agree to be bound by these Terms of Service ("Terms"). If you do not agree to these Terms, you may not access or use the Platform.
+
+## 2. Eligibility
+
+You must be at least 18 years old and legally capable of entering into binding contracts to use this Platform. By using the Platform, you represent and warrant that you meet these requirements.
+
+## 3. Account Registration
+
+To access certain features, you must register an account. You agree to:
+- Provide accurate and complete information
+- Maintain the security of your account credentials
+- Accept responsibility for all activities under your account
+- Notify us immediately of any unauthorized access
+
+## 4. Trading Services
+
+The Platform provides simulated trading services for educational and evaluation purposes. All trades are executed with virtual funds unless explicitly stated otherwise.
+
+## 5. Prohibited Activities
+
+You agree not to:
+- Violate any applicable laws or regulations
+- Manipulate or abuse the trading system
+- Use automated systems without authorization
+- Impersonate others or misrepresent your identity
+
+## 6. Intellectual Property
+
+All content, trademarks, and intellectual property on the Platform are owned by TradeQuip or its licensors.
+
+## 7. Limitation of Liability
+
+TO THE MAXIMUM EXTENT PERMITTED BY LAW, TRADEQUIP SHALL NOT BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, OR PUNITIVE DAMAGES.
+
+## 8. Governing Law
+
+These Terms shall be governed by and construed in accordance with the laws of [Jurisdiction].
+
+## 9. Changes to Terms
+
+We reserve the right to modify these Terms at any time. Continued use of the Platform after changes constitutes acceptance.
+
+## 10. Contact
+
+For questions about these Terms, contact us at legal@tradequip.com.
+
+---
+
+REGION ADDENDUM — NORTH AMERICA (ADD-NORTH_AMERICA)
+Version: 1.0
+Applies if your selected country is classified as North America (excluding US) and no dedicated country Addendum is available.
+
+Law/venue: your country of habitual residence.
+Enforceability: maximum enforceable scope; construed as notice + anti-circumvention for Platform-Linked Opportunities; confidentiality.
+Privacy: local privacy safeguards as required.
+
+END OF ADD-NORTH_AMERICA,3,19f879a478967d29c5c54e0e1c754975243ff56be5b27c861bb918b71f028e3e,9e7d84e2315c8c1b81a29614d62d6e1c900daebac307666db1c59c2a4eac1373,127.0.0.1,Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Agency/97.8.7510.73,4R7Z8D0JIPYDa4DOiN9UZYtYQNOcltxu,eyJhZGRlbmR1bSI6eyJpZCI6MzksInNoYTI1NiI6IjJkMThiOWExOTRmY2M1YjRmNjBmNDRjNWE3ZmNhMTE0OGY0MTFlZTdlODJjNjM4ZTA2Yzk4NWExMGJlYzFkNzMiLCJ2ZXJzaW9uIjoiMS4wLjAifSwiY29tYmluZWRTaGEyNTYiOiI2ZTk4ZTA1NmQ4ZWE5NGFjN2VjOGM0MzljMjJjYjU1MDYyNjZhNDA1NjQ0NjllNDdmNjIwNTY5YTU2YTBiODg5IiwiY291bnRyeUlzbzIiOiJDQSIsImdsb2JhbCI6eyJpZCI6MSwic2hhMjU2IjoiZDNhMzllNjQyMDAyODc3MGMzMDJjMjIyN2UzMWMzOWMyZDNmMGNlNGQzODllMjI4YTc0MmY0YjllZGQwMmEyMSIsInZlcnNpb24iOiIxLjAuMCJ9LCJyZWdpb25LZXkiOiJOT1JUSF9BTUVSSUNBIiwidHMiOjE3NjgyOTQ2MDcwODUsInYiOjF9.d5d13566849fffeb9ed59603737c9962cbd687b9fcc91ccd3661dd8eb74f4852,true,127.0.0.1,Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Agency/97.8.7510.73,f80203242557d5a486fd9e1d8f13381690ee21c81556c250fd8e97d46e6d62a5,22d69a6e0293479cf237e2dbac3f475c76857f7591d5885a7389d5cfa5765237,1768294701,1768294701248
+    at NodePgPreparedQuery.queryWithCache (/home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/src/pg-core/session.ts:73:11)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async <anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/src/node-postgres/session.ts:154:19)
+    at async <anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/server/legal/legalAcceptanceService.ts:143:24)
+    at async NodePgSession.transaction (/home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/src/node-postgres/session.ts:259:19)
+    at async recordDoc1Acceptance (/home/bcodex/TD.1.11.ANTIGRAVITY/server/legal/legalAcceptanceService.ts:93:18)
+    at async <anonymous> (/home/bcodex/TD.1.11.ANTIGRAVITY/server/routes.ts:1050:9)
+[AccountLifecycle] Sweep failed: error: operator does not exist: boolean = integer
+    at /home/bcodex/TD.1.11.ANTIGRAVITY/node_modules/pg-pool/index.js:45:11
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async runInactivitySweep (/home/bcodex/TD.1.11.ANTIGRAVITY/server/services/accountLifecycle.ts:642:22)
+    at async run (/home/bcodex/TD.1.11.ANTIGRAVITY/server/services/accountLifecycleSweepScheduler.ts:11:7) {
+  length: 203,
+  severity: 'ERROR',
+  code: '42883',
+  detail: undefined,
+  hint: 'No operator matches the given name and argument types. You might need to add explicit type casts.',
+  position: '221',
+  internalPosition: undefined,
+  internalQuery: undefined,
+  where: undefined,
+  schema: undefined,
+  table: undefined,
+  column: undefined,
+  dataType: undefined,
+  constraint: undefined,
+  file: 'parse_oper.c',
+  line: '647',
+  routine: 'op_error'
+}

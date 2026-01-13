@@ -1,5 +1,6 @@
 // @ts-nocheck
-import BetterSQLite3 from 'better-sqlite3';
+import { ensureMarketDailyCloseTable } from "./marketDailyClose";
+import { cachePrevClose, getCachedPrevClose, normalizePrevCloseSymbol } from "./prevCloseStore";
 
 /**
  * Simple utility to calculate percentage changes using cached prices
@@ -9,72 +10,37 @@ import BetterSQLite3 from 'better-sqlite3';
 /**
  * Initialize cache table for storing previous closing prices
  */
-export function initCache(): void {
-  const db = new BetterSQLite3('./trading_app.db');
-  
-  try {
-    // Create cache table if it doesn't exist
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS daily_prices (
-        symbol TEXT PRIMARY KEY,
-        price REAL NOT NULL,
-        timestamp INTEGER NOT NULL
-      )
-    `);
-    console.log("Daily prices cache initialized");
-  } catch (error) {
-    console.error("Failed to initialize daily prices cache:", error);
-  } finally {
-    db.close();
-  }
+export async function initCache(): Promise<void> {
+  await ensureMarketDailyCloseTable();
+  console.log("Market daily close cache ready");
 }
 
 /**
  * Cache current prices once per day to use as reference
  * for percentage change calculations
  */
-export function updateDailyPrices(quotes: Array<{symbol: string, price?: number, bid?: number, ask?: number}>): void {
+export async function updateDailyPrices(
+  quotes: Array<{ symbol: string; price?: number; bid?: number; ask?: number }>
+): Promise<void> {
   if (!quotes || quotes.length === 0) return;
-  
-  const db = new BetterSQLite3('./trading_app.db');
-  const now = Math.floor(Date.now() / 1000);
-  const oneDayAgo = now - 86400; // 24 hours in seconds
-  
+
+  await ensureMarketDailyCloseTable();
+
   try {
-    // First check when we last updated prices
-    const stmt = db.prepare('SELECT MAX(timestamp) as last_update FROM daily_prices');
-    const result = stmt.get();
-    
-    // Only update once per day
-    if (!result || !result.last_update || result.last_update < oneDayAgo) {
-      console.log("Updating daily reference prices for percentage change calculations");
-      
-      // Start a transaction for batch updates
-      const insertStmt = db.prepare(
-        'INSERT OR REPLACE INTO daily_prices (symbol, price, timestamp) VALUES (?, ?, ?)'
-      );
-      
-      db.transaction(() => {
-        for (const quote of quotes) {
-          if (!quote.symbol) continue;
-          
-          // Calculate mid price if we have bid/ask
-          const price = quote.price || 
-            (quote.bid && quote.ask ? (quote.bid + quote.ask) / 2 : null);
-          
-          if (price) {
-            insertStmt.run(quote.symbol, price, now);
-            console.log(`Saved daily reference price for ${quote.symbol}: ${price}`);
-          }
-        }
-      })();
-      
-      console.log("Daily reference prices updated");
+    console.log("Updating daily reference prices for percentage change calculations");
+    for (const quote of quotes) {
+      if (!quote.symbol) continue;
+      const sym = normalizePrevCloseSymbol(quote.symbol);
+      const price =
+        quote.price ??
+        (quote.bid != null && quote.ask != null ? (quote.bid + quote.ask) / 2 : null);
+      if (price != null && Number.isFinite(price)) {
+        await cachePrevClose(sym, Number(price));
+      }
     }
+    console.log("Daily reference prices updated");
   } catch (error) {
     console.error("Error updating daily prices:", error);
-  } finally {
-    db.close();
   }
 }
 
@@ -82,30 +48,23 @@ export function updateDailyPrices(quotes: Array<{symbol: string, price?: number,
  * Calculate percentage change between current price and previous reference
  */
 export async function calculatePercentChange(symbol: string, currentPrice: number): Promise<number> {
-  const db = new BetterSQLite3('./trading_app.db');
-  
   try {
-    const stmt = db.prepare('SELECT price FROM daily_prices WHERE symbol = ?');
-    const result = stmt.get(symbol);
-    
-    if (result && result.price && result.price > 0) {
-      const change = ((currentPrice - result.price) / result.price) * 100;
+    const sym = normalizePrevCloseSymbol(symbol);
+    const prev = await getCachedPrevClose(sym);
+    if (prev != null && prev > 0) {
+      const change = ((currentPrice - prev) / prev) * 100;
       // Round to 2 decimal places
       return Math.round(change * 100) / 100;
     }
     
     // If no reference price exists yet, store current price and return 0
-    const insertStmt = db.prepare(
-      'INSERT OR REPLACE INTO daily_prices (symbol, price, timestamp) VALUES (?, ?, ?)'
-    );
-    insertStmt.run(symbol, currentPrice, Math.floor(Date.now() / 1000));
-    
+    if (Number.isFinite(currentPrice)) {
+      await cachePrevClose(sym, currentPrice);
+    }
     return 0;
   } catch (error) {
     console.error(`Error calculating percentage change for ${symbol}:`, error);
     return 0;
-  } finally {
-    db.close();
   }
 }
 

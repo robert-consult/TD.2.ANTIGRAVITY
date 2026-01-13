@@ -9,7 +9,7 @@ spec:
     kind: Deployment
     name: tradehub-api
   minReplicas: 2
-  maxReplicas: 10
+  maxReplicas: 16
   metrics:
     - type: Resource
       resource:
@@ -17,3 +17,10 @@ spec:
         target:
           type: Utilization
           averageUtilization: 70
+    - type: Pods
+      pods:
+        metric:
+          name: ws_active_connections
+        target:
+          type: AverageValue
+          averageValue: "2500"

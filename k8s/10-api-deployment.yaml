@@ -33,14 +33,14 @@ spec:
                 name: tradehub-secrets
           readinessProbe:
             httpGet:
-              path: /api/status
+              path: /ready
               port: 5000
             initialDelaySeconds: 5
             periodSeconds: 10
             timeoutSeconds: 2
           livenessProbe:
             httpGet:
-              path: /api/status
+              path: /health
               port: 5000
             initialDelaySeconds: 15
             periodSeconds: 20

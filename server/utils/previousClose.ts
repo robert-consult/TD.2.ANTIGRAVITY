@@ -1,40 +1,18 @@
 // @ts-nocheck
 import axios from "axios";
-import BetterSQLite3 from 'better-sqlite3';
+import { ensureMarketDailyCloseTable } from "./marketDailyClose";
+import { cachePrevClose, getCachedPrevClose, getFallbackQuotePrice, normalizePrevCloseSymbol } from "./prevCloseStore";
 import { SYMBOLS } from "../constants/symbols";
 
 const ONE_DAY = 86400; // seconds
 const KEY_1FORGE = process.env.API_KEY_1FORGE;
 
 /**
- * Helper function to get database connection
- */
-function getDb() {
-  return new BetterSQLite3('./trading_app.db');
-}
-
-/**
  * Initialize cache table for storing previous closing prices
  */
-export function initPrevCloseCache() {
-  const db = getDb();
-  
-  try {
-    // Create cache table if it doesn't exist
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS price_history (
-        symbol TEXT NOT NULL,
-        date TEXT NOT NULL,
-        close_price REAL NOT NULL,
-        PRIMARY KEY (symbol, date)
-      )
-    `);
-    console.log("Price history cache initialized");
-  } catch (error) {
-    console.error("Failed to initialize price history cache:", error);
-  } finally {
-    db.close();
-  }
+export async function initPrevCloseCache() {
+  await ensureMarketDailyCloseTable();
+  console.log("Market daily close cache ready");
 }
 
 /**
@@ -76,55 +54,41 @@ async function fetch1ForgeClose(pair: string): Promise<number | null> {
  * @returns Previous day's close price
  */
 export async function getPrevClose(pair: string): Promise<number> {
-  const db = getDb();
+  await ensureMarketDailyCloseTable();
+  const sym = normalizePrevCloseSymbol(pair);
   
   try {
     // 1) Check cache first
-    const yesterday = new Date();
-    yesterday.setDate(yesterday.getDate() - 1);
-    const yesterdayStr = yesterday.toISOString().split('T')[0]; // YYYY-MM-DD
-    
-    const cacheQuery = db.prepare('SELECT close_price FROM price_history WHERE symbol = ? AND date = ?');
-    const cached = cacheQuery.get(pair, yesterdayStr);
-    
-    if (cached && cached.close_price) {
-      console.log(`Using cached previous close for ${pair}: ${cached.close_price}`);
-      return Number(cached.close_price);
+    const cached = await getCachedPrevClose(sym);
+    if (cached != null) {
+      console.log(`Using cached previous close for ${sym}: ${cached}`);
+      return Number(cached);
     }
     
     // 2) Try to get from 1Forge API
-    const close = await fetch1ForgeClose(pair);
+    const close = await fetch1ForgeClose(sym);
     
     if (close && typeof close === 'number' && !isNaN(close)) {
       // Cache the result
-      const insertStmt = db.prepare(
-        'INSERT OR REPLACE INTO price_history (symbol, date, close_price) VALUES (?, ?, ?)'
-      );
-      insertStmt.run(pair, yesterdayStr, close);
-      
-      console.log(`Stored previous close for ${pair}: ${close}`);
+      await cachePrevClose(sym, close);
+      console.log(`Stored previous close for ${sym}: ${close}`);
       return close;
     }
     
     // 3) Fallback - use current price in quotes table
-    const fallbackQuery = db.prepare('SELECT price FROM quotes WHERE symbol = ?');
-    const current = fallbackQuery.get(pair);
-    
-    if (current && current.price) {
-      // Use current price as approximate previous close (better than nothing)
-      console.log(`Using current price as fallback for ${pair}: ${current.price}`);
-      return Number(current.price);
+    const fallback = await getFallbackQuotePrice(sym);
+    if (fallback != null) {
+      console.log(`Using current price as fallback for ${sym}: ${fallback}`);
+      return fallback;
     }
     
     // 4) Last resort - return a reasonable default based on the pair
-    console.log(`No previous close available for ${pair}, using default value`);
-    return pair.includes('JPY') ? 140.0 : 1.0;
+    console.log(`No previous close available for ${sym}, using default value`);
+    return sym.includes('JPY') ? 140.0 : 1.0;
   } catch (error) {
-    console.error(`Error getting previous close for ${pair}:`, error);
+    console.error(`Error getting previous close for ${sym}:`, error);
     // Return a sensible default if everything fails
-    return pair.includes('JPY') ? 140.0 : 1.0;
-  } finally {
-    db.close();
+    return sym.includes('JPY') ? 140.0 : 1.0;
   }
 }
 

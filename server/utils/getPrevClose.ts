@@ -1,6 +1,7 @@
 // @ts-nocheck
 import axios from "axios";
-import BetterSQLite3 from 'better-sqlite3';
+import { ensureMarketDailyCloseTable } from "./marketDailyClose";
+import { cachePrevClose, getCachedPrevClose, getFallbackQuotePrice, normalizePrevCloseSymbol } from "./prevCloseStore";
 
 const ONE_DAY = 86400; // seconds
 const KEY = process.env.FORGE_KEY;
@@ -11,16 +12,18 @@ const KEY = process.env.FORGE_KEY;
  * @returns Previous day's close price
  */
 export async function getPrevClose(symbol: string): Promise<number> {
+  await ensureMarketDailyCloseTable();
+  const sym = normalizePrevCloseSymbol(symbol);
   // Check cache first
-  const cachedValue = getFromCache(symbol);
+  const cachedValue = await getCachedPrevClose(sym);
   if (cachedValue !== null) {
-    console.log(`Using cached previous close for ${symbol}: ${cachedValue}`);
+    console.log(`Using cached previous close for ${sym}: ${cachedValue}`);
     return cachedValue;
   }
   
   try {
     // Format pair for 1Forge API (EUR/USD instead of EURUSD)
-    const pair = symbol.slice(0, 3) + "/" + symbol.slice(3);
+    const pair = sym.slice(0, 3) + "/" + sym.slice(3);
     
     // Make API request to 1Forge
     console.log(`Fetching historical data for ${pair} from 1Forge`);
@@ -29,123 +32,42 @@ export async function getPrevClose(symbol: string): Promise<number> {
     const { data } = await axios.get(url, { timeout: 5000 });
     
     if (!Array.isArray(data) || data.length < 2) {
-      console.warn(`Not enough candles for ${symbol}, got ${data?.length || 0}`);
-      return fallbackPrice(symbol);
+      console.warn(`Not enough candles for ${sym}, got ${data?.length || 0}`);
+      return fallbackPrice(sym);
     }
     
     // Get yesterday's close (second to last candle)
     const yesterdayClose = Number(data[data.length - 2].close);
-    console.log(`Found yesterday's close for ${symbol}: ${yesterdayClose}`);
+    console.log(`Found yesterday's close for ${sym}: ${yesterdayClose}`);
     
     // Cache the result
-    saveToCache(symbol, yesterdayClose);
+    await cachePrevClose(sym, yesterdayClose);
     
     return yesterdayClose;
   } catch (error) {
-    console.error(`Error fetching historical data for ${symbol}:`, error);
-    return fallbackPrice(symbol);
+    console.error(`Error fetching historical data for ${sym}:`, error);
+    return fallbackPrice(sym);
   }
 }
 
 /**
  * Initialize cache table for storing previous closing prices
  */
-export function initCache(): void {
-  const db = new BetterSQLite3('./trading_app.db');
-  
-  try {
-    // Create cache table if it doesn't exist
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS price_history (
-        symbol TEXT NOT NULL,
-        date TEXT NOT NULL,
-        close_price REAL NOT NULL,
-        PRIMARY KEY (symbol, date)
-      )
-    `);
-    console.log("Price history cache initialized");
-  } catch (error) {
-    console.error("Failed to initialize price history cache:", error);
-  } finally {
-    db.close();
-  }
-}
-
-/**
- * Get cached close price if available
- */
-function getFromCache(symbol: string): number | null {
-  const db = new BetterSQLite3('./trading_app.db');
-  
-  try {
-    const yesterday = new Date();
-    yesterday.setDate(yesterday.getDate() - 1);
-    const yesterdayStr = yesterday.toISOString().split('T')[0]; // YYYY-MM-DD
-    
-    const stmt = db.prepare('SELECT close_price FROM price_history WHERE symbol = ? AND date = ?');
-    const result = stmt.get(symbol, yesterdayStr);
-    
-    if (result && result.close_price) {
-      return Number(result.close_price);
-    }
-    
-    return null;
-  } catch (error) {
-    console.error(`Error getting cached price for ${symbol}:`, error);
-    return null;
-  } finally {
-    db.close();
-  }
-}
-
-/**
- * Save close price to cache
- */
-function saveToCache(symbol: string, closePrice: number): void {
-  const db = new BetterSQLite3('./trading_app.db');
-  
-  try {
-    const yesterday = new Date();
-    yesterday.setDate(yesterday.getDate() - 1);
-    const yesterdayStr = yesterday.toISOString().split('T')[0]; // YYYY-MM-DD
-    
-    const stmt = db.prepare(
-      'INSERT OR REPLACE INTO price_history (symbol, date, close_price) VALUES (?, ?, ?)'
-    );
-    stmt.run(symbol, yesterdayStr, closePrice);
-    
-    console.log(`Cached previous close for ${symbol}: ${closePrice}`);
-  } catch (error) {
-    console.error(`Error caching price for ${symbol}:`, error);
-  } finally {
-    db.close();
-  }
+export async function initCache(): Promise<void> {
+  await ensureMarketDailyCloseTable();
+  console.log("Market daily close cache ready");
 }
 
 /**
  * Get fallback price when API fails
  */
-function fallbackPrice(symbol: string): number {
-  const db = new BetterSQLite3('./trading_app.db');
-  
-  try {
-    // Try to get current price from quotes table
-    const stmt = db.prepare('SELECT (bid + ask)/2 as price FROM quotes WHERE symbol = ?');
-    const result = stmt.get(symbol);
-    
-    if (result && result.price) {
-      console.log(`Using current price as fallback for ${symbol}: ${result.price}`);
-      return Number(result.price);
-    }
-    
-    // Return sensible default if all else fails
-    return symbol.includes('JPY') ? 140.0 : 1.0;
-  } catch (error) {
-    console.error(`Error getting fallback price for ${symbol}:`, error);
-    return symbol.includes('JPY') ? 140.0 : 1.0;
-  } finally {
-    db.close();
+async function fallbackPrice(symbol: string): Promise<number> {
+  const fallback = await getFallbackQuotePrice(symbol);
+  if (fallback != null) {
+    console.log(`Using current price as fallback for ${symbol}: ${fallback}`);
+    return fallback;
   }
+  return symbol.includes("JPY") ? 140.0 : 1.0;
 }
 
 /**

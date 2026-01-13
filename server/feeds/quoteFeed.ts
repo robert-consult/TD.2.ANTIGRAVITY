@@ -164,6 +164,45 @@ function formatSymbolsForForgeAPI(symbols: string[]): string {
 let dynamicSet = new Set<string>();
 const throttle = pThrottle({ limit: REST_LIMIT_PER_DAY, interval: 86_400_000 });
 
+async function fetchForgeQuotes(symbols: string[]) {
+  const formattedSymbols = formatSymbolsForForgeAPI(symbols);
+  if (!formattedSymbols) return [];
+  const response = await axios.get(
+    `https://api.1forge.com/quotes?pairs=${formattedSymbols}&api_key=${API_KEY}`,
+  );
+  let quotesData = response.data;
+  if (quotesData && typeof quotesData === "object" && !Array.isArray(quotesData)) {
+    if (quotesData.error || quotesData.message) {
+      throw new Error(quotesData.error || quotesData.message);
+    }
+    if (quotesData.quotes) quotesData = quotesData.quotes;
+  }
+
+  if (!Array.isArray(quotesData) || quotesData.length === 0) {
+    throw new Error("Empty 1Forge response");
+  }
+
+  return quotesData
+    .map((quote: any) => {
+      const formattedSymbol = quote.s ? quote.s.replace("/", "") : quote.symbol ? quote.symbol.replace("/", "") : null;
+      const price = quote.p ?? quote.price ?? quote.mid ?? 0;
+      const bid = quote.b ?? quote.bid ?? price * 0.9999;
+      const ask = quote.a ?? quote.ask ?? price * 1.0001;
+      const apiTimestamp = typeof quote.t === "number" ? quote.t : typeof quote.timestamp === "number" ? quote.timestamp : null;
+      const lastUpdated = apiTimestamp != null ? (apiTimestamp > 1e12 ? apiTimestamp : apiTimestamp * 1000) : Date.now();
+      return {
+        symbol: formattedSymbol,
+        price,
+        bid,
+        ask,
+        timestamp: Math.floor(lastUpdated / 1000),
+        lastUpdated,
+        isStale: false,
+      };
+    })
+    .filter((q: any) => q.symbol && q.price);
+}
+
 function generateSimulatedQuotes(symbols: string[]) {
   const basePrices: Record<string, number> = {
     EURUSD: 1.09421,
@@ -301,6 +340,30 @@ async function publishQuoteUpdate(rows: any[], source: string, isStaleDefault: b
     payload: { seq, asOf, source, rows: liveRows },
   });
   await persistSnapshotToValkey(liveRows, { seq, asOf, source });
+}
+
+async function handleQuoteBatch(
+  rows: any[],
+  source: string,
+  isStaleDefault: boolean,
+  options: { markSuccess?: boolean; reason?: string } = {},
+) {
+  if (!rows.length) return;
+  updateSnapshotCache(rows, { markSuccess: options.markSuccess });
+  await maybePersistDailyClose(rows);
+  await maybePersistQuotes(rows, isStaleDefault);
+  await publishQuoteUpdate(rows, source, isStaleDefault);
+  await notifyAccountsForSymbols(rows, options.reason ?? (isStaleDefault ? "QUOTE_STALE" : "QUOTE_TICK"));
+  await onQuotesUpdated(
+    rows.map((q: any) => ({
+      symbol: q.symbol,
+      price: q.price,
+      bid: q.bid,
+      ask: q.ask,
+      isStale: Boolean(q.isStale ?? isStaleDefault),
+      lastUpdated: q.lastUpdated,
+    })),
+  );
 }
 
 async function refreshDynamicSet(force = false) {
@@ -483,83 +546,33 @@ async function pullBatch() {
   await refreshDynamicSet();
   const wanted = [...new Set([...dynamicSet])];
   if (wanted.length === 0) return;
+
+  if (!API_KEY) {
+    const simulated = generateSimulatedQuotes(wanted);
+    await handleQuoteBatch(simulated, "simulated", false);
+    return;
+  }
+
+  // Prefer a single batched request for all enabled symbols.
+  try {
+    const batchQuotes = await fetchForgeQuotes(wanted);
+    await handleQuoteBatch(batchQuotes, "1forge", false);
+    return;
+  } catch (e: any) {
+    consecutiveApiFailures++;
+    console.error("[1Forge] API failure (batched):", e?.message || e);
+  }
+
+  // Fallback: chunk requests if the batch is rejected (URL length / API limits).
   const chunks: string[][] = [];
   for (let i = 0; i < wanted.length; i += MAX_PER_REQ) {
     chunks.push(wanted.slice(i, i + MAX_PER_REQ));
   }
 
   for (const slice of chunks) {
-    if (!API_KEY) {
-      const simulated = generateSimulatedQuotes(slice);
-      updateSnapshotCache(simulated);
-      await maybePersistDailyClose(simulated);
-      await maybePersistQuotes(simulated, false);
-      await publishQuoteUpdate(simulated, "simulated", false);
-      await notifyAccountsForSymbols(simulated, "QUOTE_TICK");
-      await onQuotesUpdated(
-        simulated.map((q: any) => ({
-          symbol: q.symbol,
-          price: q.price,
-          bid: q.bid,
-          ask: q.ask,
-          isStale: false,
-          lastUpdated: q.lastUpdated,
-        })),
-      );
-      return;
-    }
-
     try {
-      const formattedSymbols = formatSymbolsForForgeAPI(slice);
-      const response = await axios.get(`https://api.1forge.com/quotes?pairs=${formattedSymbols}&api_key=${API_KEY}`);
-      let quotesData = response.data;
-      if (quotesData && typeof quotesData === "object" && !Array.isArray(quotesData)) {
-        if (quotesData.error || quotesData.message) {
-          console.error("[1Forge] API Error:", quotesData.error || quotesData.message);
-          continue;
-        }
-        if (quotesData.quotes) quotesData = quotesData.quotes;
-      }
-
-      if (!Array.isArray(quotesData) || quotesData.length === 0) {
-        throw new Error("Empty 1Forge response");
-      }
-
-      const transformedData = quotesData
-        .map((quote: any) => {
-          const formattedSymbol = quote.s ? quote.s.replace("/", "") : quote.symbol ? quote.symbol.replace("/", "") : null;
-          const price = quote.p ?? quote.price ?? quote.mid ?? 0;
-          const bid = quote.b ?? quote.bid ?? price * 0.9999;
-          const ask = quote.a ?? quote.ask ?? price * 1.0001;
-          const apiTimestamp = typeof quote.t === "number" ? quote.t : typeof quote.timestamp === "number" ? quote.timestamp : null;
-          const lastUpdated = apiTimestamp != null ? (apiTimestamp > 1e12 ? apiTimestamp : apiTimestamp * 1000) : Date.now();
-          return {
-            symbol: formattedSymbol,
-            price,
-            bid,
-            ask,
-            timestamp: Math.floor(lastUpdated / 1000),
-            lastUpdated,
-            isStale: false,
-          };
-        })
-        .filter((q: any) => q.symbol && q.price);
-
-      updateSnapshotCache(transformedData);
-      await maybePersistDailyClose(transformedData);
-      await maybePersistQuotes(transformedData, false);
-      await publishQuoteUpdate(transformedData, "1forge", false);
-      await notifyAccountsForSymbols(transformedData, "QUOTE_TICK");
-      await onQuotesUpdated(
-        transformedData.map((q: any) => ({
-          symbol: q.symbol,
-          price: q.price,
-          bid: q.bid,
-          ask: q.ask,
-          isStale: false,
-          lastUpdated: q.lastUpdated,
-        })),
-      );
+      const sliceQuotes = await fetchForgeQuotes(slice);
+      await handleQuoteBatch(sliceQuotes, "1forge", false);
     } catch (e: any) {
       consecutiveApiFailures++;
       console.error("[1Forge] API failure:", e?.message || e);
@@ -568,21 +581,7 @@ async function pullBatch() {
         console.warn("[1Forge] No fallback cache available; skipping quote persistence.");
         continue;
       }
-      updateSnapshotCache(fallbackQuotes, { markSuccess: false });
-      await maybePersistDailyClose(fallbackQuotes);
-      await maybePersistQuotes(fallbackQuotes, true);
-      await publishQuoteUpdate(fallbackQuotes, "fallback_cache", true);
-      await notifyAccountsForSymbols(fallbackQuotes, "QUOTE_STALE");
-      await onQuotesUpdated(
-        fallbackQuotes.map((q: any) => ({
-          symbol: q.symbol,
-          price: q.price,
-          bid: q.bid,
-          ask: q.ask,
-          isStale: true,
-          lastUpdated: q.lastUpdated,
-        })),
-      );
+      await handleQuoteBatch(fallbackQuotes, "fallback_cache", true, { markSuccess: false, reason: "QUOTE_STALE" });
     }
   }
 }

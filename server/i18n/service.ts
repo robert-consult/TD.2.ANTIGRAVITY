@@ -118,7 +118,7 @@ export async function maybeIngestBuiltManifest(): Promise<
         `
         INSERT INTO i18n_source_strings (
           string_id, default_text, checksum,
-          file, kind, prop_name, line, column,
+          file, kind, prop_name, line, "column",
           first_seen_at, last_seen_at, last_modified_at
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9, $9)
         ON CONFLICT (string_id) DO UPDATE SET
@@ -128,7 +128,7 @@ export async function maybeIngestBuiltManifest(): Promise<
           kind = EXCLUDED.kind,
           prop_name = EXCLUDED.prop_name,
           line = EXCLUDED.line,
-          column = EXCLUDED.column,
+          "column" = EXCLUDED."column",
           last_seen_at = EXCLUDED.last_seen_at,
           last_modified_at = CASE
             WHEN i18n_source_strings.checksum <> EXCLUDED.checksum THEN EXCLUDED.last_seen_at

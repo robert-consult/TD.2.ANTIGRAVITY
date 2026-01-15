@@ -61,6 +61,17 @@ interface AuditRecord {
 }
 
 export default function AdminTradeAudit() {
+  const sideLabels: Record<string, { label: string }> = {
+    BUY: { label: "Buy" },
+    SELL: { label: "Sell" },
+  };
+
+  const getSideLabel = (side: unknown) => {
+    const key = String(side ?? "").trim().toUpperCase();
+    if (!key) return "-";
+    return sideLabels[key]?.label ?? key;
+  };
+
   const [auditRecords, setAuditRecords] = useState<AuditRecord[]>([]);
   const [filteredRecords, setFilteredRecords] = useState<AuditRecord[]>([]);
   const [loading, setLoading] = useState(false);
@@ -216,7 +227,7 @@ export default function AdminTradeAudit() {
     if (!side) return "-";
     return (
       <span className={side === "BUY" ? "text-green-400 font-bold" : "text-red-400 font-bold"}>
-        {side}
+        {getSideLabel(side)}
       </span>
     );
   };

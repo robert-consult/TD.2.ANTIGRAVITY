@@ -64,6 +64,16 @@ function toMs(value: unknown): number | null {
 
 export default function HistoryScreen() {
   const { locale } = useI18n();
+  const sideLabels: Record<string, { label: string }> = {
+    BUY: { label: "Buy" },
+    SELL: { label: "Sell" },
+  };
+
+  const getSideLabel = (side: unknown) => {
+    const key = String(side ?? "").trim().toUpperCase();
+    if (!key) return "—";
+    return sideLabels[key]?.label ?? key;
+  };
   const [symbolFilter, setSymbolFilter] = useState("all");
   const [timeFilter, setTimeFilter] = useState("7days");
   const [closeReasonFilter, setCloseReasonFilter] = useState("all");
@@ -439,7 +449,7 @@ export default function HistoryScreen() {
                           : "bg-red-900 text-red-300"
                       }`}
                     >
-                      {trade.type}
+                      {getSideLabel(trade.type)}
                     </span>
                   </TableCell>
                   <TableCell className="font-mono">

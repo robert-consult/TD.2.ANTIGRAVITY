@@ -136,6 +136,48 @@ export default function ProfileSettings() {
     const baseMatch = supportedLocales.find((locale) => locale.toLowerCase() === base);
     return baseMatch ?? fallback;
   };
+
+  const prefetchI18nBundle = async (nextLocale: string) => {
+    const normalized = normalizeLanguage(nextLocale);
+    return queryClient.fetchQuery({
+      queryKey: ["i18nBundle", normalized],
+      queryFn: async () => {
+        const res = await fetch(`/api/i18n/bundle?locale=${encodeURIComponent(normalized)}`);
+        if (res.status === 304) {
+          const cached = queryClient.getQueryData(["i18nBundle", normalized]);
+          if (cached) return cached;
+        }
+        if (!res.ok) {
+          const body = await res.text().catch(() => "");
+          throw new Error(`Failed to load i18n bundle (${res.status}): ${body}`);
+        }
+        const data = (await res.json()) as any;
+        return {
+          locale: String(data?.locale || normalized),
+          strings: (data?.strings && typeof data.strings === "object") ? data.strings : {},
+          etag: res.headers.get("ETag") ?? undefined,
+        };
+      },
+      staleTime: 5 * 60_000,
+    });
+  };
+
+  const handleLanguageChange = async (value: string) => {
+    const normalized = normalizeLanguage(value);
+    previousLanguageRef.current = preferences.language;
+    previousLocaleRef.current = locale;
+    setPreferences((prev) => ({ ...prev, language: normalized }));
+
+    try {
+      await prefetchI18nBundle(normalized);
+    } catch (error) {
+      console.warn("[i18n] Prefetch failed:", error);
+    }
+
+    setLocale(normalized);
+    updateUser({ language: normalized });
+    languageMutation.mutate(normalized);
+  };
   
   const mfaSetupMutation = useMutation({
     mutationFn: async () => {
@@ -507,11 +549,14 @@ export default function ProfileSettings() {
       }
       return response.json();
     },
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
       toast({ title: "Preferences saved", description: "Your preferences have been updated" });
       queryClient.invalidateQueries({ queryKey: ["/api/profile/preferences"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/auth/current-user"] });
-      checkAuth();
+      if (variables.language) {
+        const normalized = normalizeLanguage(variables.language);
+        updateUser({ language: normalized });
+        setLocale(normalized);
+      }
     },
     onError: (error: Error) => {
       toast({ title: "Error", description: error.message, variant: "destructive" });
@@ -1005,13 +1050,7 @@ export default function ProfileSettings() {
                   <Select
                     value={preferences.language}
                     onValueChange={(value) => {
-                      const normalized = normalizeLanguage(value);
-                      previousLanguageRef.current = preferences.language;
-                      previousLocaleRef.current = locale;
-                      setPreferences((prev) => ({ ...prev, language: normalized }));
-                      updateUser({ language: normalized });
-                      setLocale(normalized);
-                      languageMutation.mutate(normalized);
+                      void handleLanguageChange(value);
                     }}
                   >
                     <SelectTrigger className="bg-neutral-700 border-gray-600">
@@ -1301,4 +1340,3 @@ export default function ProfileSettings() {
     </div>
   );
 }
-

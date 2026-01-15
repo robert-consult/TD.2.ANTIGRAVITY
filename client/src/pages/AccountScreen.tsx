@@ -9,6 +9,28 @@ import { Button } from "@/components/ui/button";
 import { useLocation } from "wouter";
 
 export default function AccountScreen() {
+  const sideLabels: Record<string, { label: string }> = {
+    BUY: { label: "Buy" },
+    SELL: { label: "Sell" },
+  };
+
+  const bestSideLabels: Record<string, { label: string }> = {
+    BUY: { label: "📈 Long (Buy)" },
+    SELL: { label: "📉 Short (Sell)" },
+  };
+
+  const getSideLabel = (side: unknown) => {
+    const key = String(side ?? "").trim().toUpperCase();
+    if (!key) return "—";
+    return sideLabels[key]?.label ?? key;
+  };
+
+  const getBestSideLabel = (side: unknown) => {
+    const key = String(side ?? "").trim().toUpperCase();
+    if (!key) return "—";
+    return bestSideLabels[key]?.label ?? getSideLabel(key);
+  };
+
   const { user } = useAuth();
   const [, navigate] = useLocation();
   
@@ -434,7 +456,7 @@ export default function AccountScreen() {
                       {insights.bestSide ? (
                         <div>
                           <div className="text-lg font-bold text-white">
-                            {insights.bestSide.side === 'BUY' ? '📈 Long (Buy)' : insights.bestSide.side === 'SELL' ? '📉 Short (Sell)' : insights.bestSide.side}
+                            {getBestSideLabel(insights.bestSide.side)}
                           </div>
                           <div className="flex gap-3 text-xs text-gray-400 mt-1">
                             <span className={insights.bestSide.profit >= 0 ? 'text-green-400' : 'text-red-400'}>

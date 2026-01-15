@@ -40,6 +40,16 @@ export function EditTradeModal({ trade, open, onOpenChange }: EditTradeModalProp
   const queryClient = useQueryClient();
   const { quotes } = useQuotes();
   const [validationMessages, setValidationMessages] = useState<{tp?: string; sl?: string}>({});
+  const sideLabels: Record<string, { label: string }> = {
+    BUY: { label: "Buy" },
+    SELL: { label: "Sell" },
+  };
+
+  const getSideLabel = (side: unknown) => {
+    const key = String(side ?? "").trim().toUpperCase();
+    if (!key) return "?";
+    return sideLabels[key]?.label ?? key;
+  };
 
   // Per-symbol preset persistence
   const getSymbolStorageKey = (t: any) => {
@@ -304,7 +314,7 @@ export function EditTradeModal({ trade, open, onOpenChange }: EditTradeModalProp
         <DialogHeader>
           <DialogTitle>Edit Take Profit & Stop Loss</DialogTitle>
           <DialogDescription>
-            {trade.status === 'PENDING' ? 'Order price' : 'Current price'}: {safeRefPrice} | Trade: {trade.type} {trade.lots} lots {tradeSymbol}
+            {trade.status === 'PENDING' ? 'Order price' : 'Current price'}: {safeRefPrice} | Trade: {getSideLabel(trade.type)} {trade.lots} lots {tradeSymbol}
           </DialogDescription>
         </DialogHeader>
         

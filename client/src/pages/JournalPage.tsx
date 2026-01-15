@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { queryClient, apiRequest } from "@/lib/queryClient";
+import { queryClient, apiRequest, ApiError } from "@/lib/queryClient";
 import { useAuth } from "@/hooks/use-auth";
 import { useLocation } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -61,6 +61,16 @@ export default function JournalPage() {
   const [, navigate] = useLocation();
   const { toast } = useToast();
   const { locale } = useI18n();
+  const sideLabels: Record<string, { label: string }> = {
+    BUY: { label: "Buy" },
+    SELL: { label: "Sell" },
+  };
+
+  const getSideLabel = (side: unknown) => {
+    const key = String(side ?? "").trim().toUpperCase();
+    if (!key) return "?";
+    return sideLabels[key]?.label ?? key;
+  };
 
   const moodOptions = [
     { value: "confident", label: "Confident", color: "bg-green-500" },
@@ -199,8 +209,11 @@ export default function JournalPage() {
       resetForm();
       toast({ title: "Entry updated", description: "Journal entry updated successfully" });
     },
-    onError: () => {
-      toast({ title: "Error", description: "Failed to update entry", variant: "destructive" });
+    onError: (error: Error) => {
+      const message = error instanceof ApiError && error.message
+        ? error.message
+        : "Failed to update entry";
+      toast({ title: "Error", description: message, variant: "destructive" });
     },
   });
 
@@ -287,7 +300,7 @@ export default function JournalPage() {
     const symbol = trade.symbol?.symbol || trade.symbol || "Unknown";
     const profit = parseFloat(trade.profit || 0);
     const profitColor = profit >= 0 ? "text-green-500" : "text-red-500";
-    const side = trade.side || trade.type || "?";
+    const side = getSideLabel(trade.side || trade.type);
     return { symbol, profit, profitColor, side };
   };
 

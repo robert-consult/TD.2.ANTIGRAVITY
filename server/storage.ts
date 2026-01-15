@@ -1406,7 +1406,7 @@ export const storage = {
     tradeId?: number | null;
     tradeIds?: number[] | null;
   }): Promise<TraderJournal | null> {
-    const updates: any = { updatedAt: sql`(strftime('%s', 'now'))` };
+    const updates: any = { updatedAt: Math.floor(Date.now() / 1000) };
     if (data.note !== undefined) updates.note = data.note;
     if (data.mood !== undefined) updates.mood = data.mood;
     if (data.tags !== undefined) updates.tags = data.tags ? JSON.stringify(data.tags) : null;

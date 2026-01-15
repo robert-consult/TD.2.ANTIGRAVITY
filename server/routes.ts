@@ -3727,10 +3727,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const { note, mood, tags, attachmentUrl, tradeId, tradeIds } = req.body;
+      const noteClean = note !== undefined ? String(note || "").trim() : undefined;
+      const moodClean =
+        mood !== undefined ? (mood ? String(mood).trim().toLowerCase() : null) : undefined;
       
       // Validate note if provided
-      if (note !== undefined) {
-        const noteClean = String(note || "").trim();
+      if (noteClean !== undefined) {
         if (!noteClean || noteClean.length < 3) {
           return res.status(400).json({ message: "Note must be at least 3 characters" });
         }
@@ -3740,21 +3742,48 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Validate mood if provided
-      if (mood !== undefined && mood !== null) {
-        const moodClean = String(mood).trim().toLowerCase();
+      if (moodClean !== undefined && moodClean !== null) {
         if (moodClean && !VALID_MOODS.includes(moodClean)) {
           return res.status(400).json({ message: `Invalid mood. Valid options: ${VALID_MOODS.join(", ")}` });
         }
       }
 
+      let tradeIdsInput: unknown = tradeIds;
+      if (typeof tradeIdsInput === "string") {
+        const trimmed = tradeIdsInput.trim();
+        if (!trimmed) {
+          tradeIdsInput = [];
+        } else {
+          try {
+            tradeIdsInput = JSON.parse(trimmed);
+          } catch {
+            tradeIdsInput = trimmed.split(",").map((v) => v.trim()).filter(Boolean);
+          }
+        }
+      }
+
+      let tagsInput: unknown = tags;
+      if (typeof tagsInput === "string") {
+        const trimmed = tagsInput.trim();
+        if (!trimmed) {
+          tagsInput = [];
+        } else {
+          try {
+            tagsInput = JSON.parse(trimmed);
+          } catch {
+            tagsInput = trimmed.split(",").map((v) => v.trim()).filter(Boolean);
+          }
+        }
+      }
+
       // Validate tradeIds array if provided - all must belong to user
       let validatedTradeIds: number[] | null | undefined = undefined;
-      if (tradeIds !== undefined) {
-        if (tradeIds === null || (Array.isArray(tradeIds) && tradeIds.length === 0)) {
+      if (tradeIdsInput !== undefined) {
+        if (tradeIdsInput === null || (Array.isArray(tradeIdsInput) && tradeIdsInput.length === 0)) {
           validatedTradeIds = null;
-        } else if (Array.isArray(tradeIds)) {
+        } else if (Array.isArray(tradeIdsInput)) {
           validatedTradeIds = [];
-          for (const tid of tradeIds.slice(0, 20)) {
+          for (const tid of tradeIdsInput.slice(0, 20)) {
             const tradeIdNum = parseInt(tid);
             if (isNaN(tradeIdNum)) continue;
             const trade = await storage.getTradeById(tradeIdNum);
@@ -3784,13 +3813,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Validate tags if provided
       let validatedTags: string[] | undefined = undefined;
-      if (tags !== undefined) {
-        if (tags === null) {
+      if (tagsInput !== undefined) {
+        if (tagsInput === null) {
           validatedTags = [];
-        } else if (!Array.isArray(tags)) {
+        } else if (!Array.isArray(tagsInput)) {
           return res.status(400).json({ message: "Tags must be an array" });
         } else {
-          validatedTags = tags
+          validatedTags = tagsInput
             .filter((t: any) => typeof t === "string" && t.trim().length > 0)
             .map((t: string) => t.trim().toLowerCase().slice(0, 50))
             .slice(0, 20);
@@ -3799,8 +3828,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Storage layer ensures only entries belonging to req.session.userId can be updated
       const updated = await storage.updateJournalEntry(entryId, req.session.userId!, {
-        note: note?.trim(),
-        mood: mood !== undefined ? (mood ? String(mood).trim().toLowerCase() : null) : undefined,
+        note: noteClean,
+        mood: moodClean,
         tags: validatedTags,
         attachmentUrl: attachmentUrl !== undefined ? (attachmentUrl ? String(attachmentUrl).slice(0, 2000) : null) : undefined,
         tradeId: validatedTradeId,
@@ -3813,8 +3842,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       res.json(updated);
     } catch (error) {
-      console.error("Update journal entry error:", error);
-      res.status(500).json({ message: "Failed to update journal entry" });
+      const body = req.body ?? {};
+      console.error("Update journal entry error:", {
+        entryId: req.params.id,
+        userId: req.session.userId ?? null,
+        bodyKeys: Object.keys(body),
+        noteLen: typeof body.note === "string" ? body.note.trim().length : null,
+        tagsType: Array.isArray(body.tags) ? "array" : body.tags === null ? "null" : typeof body.tags,
+        tradeIdsType: Array.isArray(body.tradeIds) ? "array" : body.tradeIds === null ? "null" : typeof body.tradeIds,
+        error,
+      });
+      const message = "Failed to update journal entry";
+      const detail =
+        process.env.NODE_ENV !== "production"
+          ? (error instanceof Error ? error.message : String(error))
+          : undefined;
+      res.status(500).json(detail ? { message, detail } : { message });
     }
   });
 

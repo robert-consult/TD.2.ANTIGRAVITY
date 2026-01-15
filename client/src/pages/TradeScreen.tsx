@@ -64,6 +64,52 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
   const { summary: accountSummary, isLoading: isLoadingAccountSummary } = useAccountSummary();
   const { pendingOrders = [], isLoading: isLoadingPending, cancelOrder } = usePendingOrders();
 
+  const sideLabels: Record<string, { label: string }> = {
+    BUY: { label: "Buy" },
+    SELL: { label: "Sell" },
+  };
+
+  const orderTypeLabels: Record<string, { label: string }> = {
+    market: { label: "Market" },
+    limit: { label: "Limit" },
+    stop: { label: "Stop" },
+    unknown: { label: "Unknown" },
+  };
+
+  const pendingOrderLabels: Record<string, Record<string, { label: string }>> = {
+    BUY: {
+      limit: { label: "Buy Limit" },
+      stop: { label: "Buy Stop" },
+    },
+    SELL: {
+      limit: { label: "Sell Limit" },
+      stop: { label: "Sell Stop" },
+    },
+  };
+
+  const getSideLabel = (side: unknown): string => {
+    const key = String(side ?? "").trim().toUpperCase();
+    if (!key) return "—";
+    return sideLabels[key]?.label ?? key;
+  };
+
+  const getOrderTypeLabel = (type: unknown): string => {
+    const raw = String(type ?? "").trim();
+    if (!raw) return orderTypeLabels.unknown.label;
+    const key = raw.toLowerCase();
+    return orderTypeLabels[key]?.label ?? raw;
+  };
+
+  const getPendingOrderLabel = (side: "BUY" | "SELL", type: unknown): string => {
+    const sideKey = String(side ?? "").trim().toUpperCase();
+    const typeKey = String(type ?? "").trim().toLowerCase();
+    const direct = pendingOrderLabels[sideKey]?.[typeKey]?.label;
+    if (direct) return direct;
+    const sideLabel = getSideLabel(sideKey);
+    const typeLabel = getOrderTypeLabel(typeKey);
+    return `${sideLabel} ${typeLabel}`.trim();
+  };
+
   // Define symbol config type
   interface SymbolConfig {
     id: number;
@@ -183,15 +229,20 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
     return kind === "TP" ? target < entry : target > entry;
   };
 
+  const targetHintText: Record<"BUY" | "SELL", Record<"TP" | "SL", { text: string }>> = {
+    BUY: {
+      TP: { text: "Warning: For Buy, TP should be above entry." },
+      SL: { text: "Warning: For Buy, SL should be below entry." },
+    },
+    SELL: {
+      TP: { text: "Warning: For Sell, TP should be below entry." },
+      SL: { text: "Warning: For Sell, SL should be above entry." },
+    },
+  };
+
   const targetHint = (side: "BUY" | "SELL", kind: "TP" | "SL"): string => {
-    if (side === "BUY") {
-      return kind === "TP"
-        ? "Warning: For BUY, TP should be above entry."
-        : "Warning: For BUY, SL should be below entry.";
-    }
-    return kind === "TP"
-      ? "Warning: For SELL, TP should be below entry."
-      : "Warning: For SELL, SL should be above entry.";
+    const sideKey = side === "SELL" ? "SELL" : "BUY";
+    return targetHintText[sideKey][kind].text;
   };
 
   const renderTargetPill = (
@@ -218,15 +269,15 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
     );
   };
 
-  const orderTypeHelp = (t: string) => {
-    switch (t) {
-      case "stop":
-        return "Stop (trigger): Executes when market reaches your stop price. Commonly used for breakout entries.";
-      case "limit":
-        return "Limit (passive): Executes at your limit price or better. Commonly used for pullback entries.";
-      default:
-        return "Order mechanism (Stop/Limit).";
-    }
+  const orderTypeHelpText: Record<string, { text: string }> = {
+    stop: { text: "Stop (trigger): Executes when market reaches your stop price. Commonly used for breakout entries." },
+    limit: { text: "Limit (passive): Executes at your limit price or better. Commonly used for pullback entries." },
+    default: { text: "Order mechanism (Stop/Limit)." },
+  };
+
+  const getOrderTypeHelp = (t: string): string => {
+    const key = String(t ?? "").trim().toLowerCase();
+    return orderTypeHelpText[key]?.text ?? orderTypeHelpText.default.text;
   };
 
   const editIconButtonClass =
@@ -636,7 +687,7 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
                             }`}
                             onClick={() => setOrderType("Market")}
                           >
-                            Market
+                            {getOrderTypeLabel("Market")}
                           </Button>
                           <Button
                             type="button"
@@ -648,7 +699,7 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
                             }`}
                             onClick={() => setOrderType("Limit")}
                           >
-                            Limit
+                            {getOrderTypeLabel("Limit")}
                           </Button>
                           <Button
                             type="button"
@@ -660,7 +711,7 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
                             }`}
                             onClick={() => setOrderType("Stop")}
                           >
-                            Stop
+                            {getOrderTypeLabel("Stop")}
                           </Button>
                         </div>
                       </div>
@@ -678,7 +729,7 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
                             }`}
                             onClick={() => setPendingSide("BUY")}
                           >
-                            BUY {orderType.toUpperCase()}
+                            {getPendingOrderLabel("BUY", orderType)}
                           </Button>
                           <Button
                             type="button"
@@ -690,7 +741,7 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
                             }`}
                             onClick={() => setPendingSide("SELL")}
                           >
-                            SELL {orderType.toUpperCase()}
+                            {getPendingOrderLabel("SELL", orderType)}
                           </Button>
                         </div>
                       )}
@@ -945,7 +996,7 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
                             {executeTrade.isPending ? (
                               <div className="animate-spin mr-2 h-4 w-4 border-t-2 rounded-full inline-block"></div>
                             ) : null}
-                            Place {pendingSide} {orderType.toUpperCase()}
+                            Place {getPendingOrderLabel(pendingSide, orderType)}
                             {(() => {
                               const entryPrice = orderType === "Limit" 
                                 ? form.getValues("limitPrice") 
@@ -960,28 +1011,28 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
                           <div className="flex space-x-3">
                           <Button
                             type="submit"
-                            className="btn-sell flex-1 py-3 px-4 text-white font-bold bg-orange-500 hover:bg-orange-600 shadow-md transition-all"
+                            className="btn-sell flex-1 py-3 px-4 text-white font-bold bg-orange-500 hover:bg-orange-600 shadow-md transition-all uppercase"
                             disabled={executeTrade.isPending || !currentPrice}
                             onClick={() => setTradeDirection("SELL")}
                           >
                             {executeTrade.isPending && tradeDirection === "SELL" ? (
                               <div className="animate-spin mr-2 h-4 w-4 border-t-2 border-white rounded-full"></div>
                             ) : null}
-                            SELL
+                            {getSideLabel("SELL")}
                             {bidPrice && (
                               <span className="text-xs block">@ {bidPrice.toFixed(selectedSymbol.includes("JPY") ? 2 : 4)}</span>
                             )}
                           </Button>
                           <Button
                             type="submit"
-                            className="btn-buy flex-1 py-3 px-4 text-black font-bold bg-lime-500 hover:bg-lime-600 shadow-md transition-all"
+                            className="btn-buy flex-1 py-3 px-4 text-black font-bold bg-lime-500 hover:bg-lime-600 shadow-md transition-all uppercase"
                             disabled={executeTrade.isPending || !currentPrice}
                             onClick={() => setTradeDirection("BUY")}
                           >
                             {executeTrade.isPending && tradeDirection === "BUY" ? (
                               <div className="animate-spin mr-2 h-4 w-4 border-t-2 border-black rounded-full"></div>
                             ) : null}
-                            BUY
+                            {getSideLabel("BUY")}
                             {askPrice && (
                               <span className="text-xs block">@ {askPrice.toFixed(selectedSymbol.includes("JPY") ? 2 : 4)}</span>
                             )}
@@ -1068,7 +1119,7 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
                           >
                             <TableCell>{tradeSymbol}</TableCell>
                             <TableCell className={`uppercase font-semibold ${trade.type === 'BUY' ? 'text-lime-500 font-medium' : 'text-orange-500 font-medium'}`}>
-                              {trade.type}
+                              {getSideLabel(trade.type)}
                             </TableCell>
                             <TableCell>{trade.lots} Lot{trade.lots > 1 ? 's' : ''}</TableCell>
                             <TableCell>
@@ -1217,7 +1268,8 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
                           orderTypeKey === "stop" ? Zap :
                           orderTypeKey === "limit" ? Layers :
                           null;
-                        const helpText = orderTypeHelp(orderTypeKey);
+                        const helpText = getOrderTypeHelp(orderTypeKey);
+                        const orderTypeDisplay = getOrderTypeLabel(orderTypeLabel);
 
                         return (
                           <TableRow
@@ -1230,7 +1282,7 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
                               <span
                                 className={`uppercase font-semibold ${order.type === "BUY" ? "text-lime-500" : "text-orange-500"}`}
                               >
-                                {order.type}
+                                {getSideLabel(order.type)}
                               </span>
                             </TableCell>
 
@@ -1240,7 +1292,7 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
                                 className={`inline-flex items-center rounded-md border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${orderTypePillClass(orderTypeLabel)}`}
                               >
                                 {OrderTypeIcon ? <OrderTypeIcon className="h-3 w-3 mr-1" /> : null}
-                                {orderTypeLabel}
+                                {orderTypeDisplay}
                               </span>
                             </TableCell>
 

@@ -27,6 +27,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { EditTradeModal } from "@/components/EditTradeModal";
 import { Pencil, X, Zap, Layers, AlertTriangle } from "lucide-react";
+import { useTranslation } from "@/i18n";
 
 interface TradeScreenProps {
   selectedSymbol: string;
@@ -59,10 +60,17 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
   const { toast } = useToast();
   const { user } = useAuth();
   const queryClient = useQueryClient();
+  const { bundle } = useTranslation();
   const { quotes } = useQuotes();
   const { openTrades = [], isLoadingOpenTrades, closeTrade } = useTrades();
   const { summary: accountSummary, isLoading: isLoadingAccountSummary } = useAccountSummary();
   const { pendingOrders = [], isLoading: isLoadingPending, cancelOrder } = usePendingOrders();
+
+  const formatTemplate = (template: string, vars: Record<string, string | number | boolean | null | undefined>) =>
+    template.replace(/\{([a-zA-Z0-9_]+)\}/g, (_m, key: string) => {
+      const v = vars?.[key];
+      return v === null || v === undefined ? "" : String(v);
+    });
 
   const sideLabels: Record<string, { label: string }> = {
     BUY: { label: "Buy" },
@@ -85,6 +93,9 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
       limit: { label: "Sell Limit" },
       stop: { label: "Sell Stop" },
     },
+  };
+  const toastTemplates = {
+    orderPlaced: { text: "Successfully placed a {side} order for {symbol}" },
   };
 
   const getSideLabel = (side: unknown): string => {
@@ -365,7 +376,10 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
       
       toast({
         title: "Trade Executed",
-        description: `Successfully placed a ${tradeDirection} order for ${selectedSymbol}`,
+        description: formatTemplate(toastTemplates.orderPlaced.text, {
+          side: tradeDirection ? getSideLabel(tradeDirection) : "—",
+          symbol: selectedSymbol,
+        }),
       });
       
       // Reset form and direction

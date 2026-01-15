@@ -17,35 +17,11 @@ import { useQuotes } from "@/hooks/use-quotes";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronUp, Check } from "lucide-react";
 import { fetchWithIdentity } from "@/lib/fetchWithIdentity";
+import { useTranslation } from "@/i18n";
 
 // Platform rule: minimum TP/SL distance = 20 points
 const MIN_POINTS = 20;
 const AUTO_FIX_PRESETS = [20, 50, 100, 150, 200] as const;
-const textTemplates = {
-  priceLabelOrder: { text: "order price" },
-  priceLabelCurrent: { text: "current price" },
-  priceLabelOrderShort: { text: "Order" },
-  priceLabelCurrentShort: { text: "Current" },
-  pricePlaceholder: { text: "{label}: {price}" },
-  tpAboveOrder: { text: "Take Profit must be at least {delta} ({points}) above order price of {price}" },
-  tpAboveCurrent: { text: "Take Profit must be at least {delta} ({points}) above current price of {price}" },
-  tpBelowOrder: { text: "Take Profit must be at least {delta} ({points}) below order price of {price}" },
-  tpBelowCurrent: { text: "Take Profit must be at least {delta} ({points}) below current price of {price}" },
-  slAboveOrder: { text: "Stop Loss must be at least {delta} ({points}) above order price of {price}" },
-  slAboveCurrent: { text: "Stop Loss must be at least {delta} ({points}) above current price of {price}" },
-  slBelowOrder: { text: "Stop Loss must be at least {delta} ({points}) below order price of {price}" },
-  slBelowCurrent: { text: "Stop Loss must be at least {delta} ({points}) below current price of {price}" },
-  targetsInvalidOrder: { text: "One or more targets are invalid relative to the order price." },
-  targetsInvalidCurrent: { text: "One or more targets are invalid relative to the current price." },
-  quickPresetsOrder: { text: "Quick presets: set TP/SL relative to the order price." },
-  quickPresetsCurrent: { text: "Quick presets: set TP/SL relative to the current price." },
-  presetAppliedTitle: { text: "TP/SL preset applied" },
-  presetAppliedDescOrder: { text: "Set targets to ±{points} points from the order price." },
-  presetAppliedDescCurrent: { text: "Set targets to ±{points} points from the current price." },
-  applyPresetTitle: { text: "Apply TP/SL using the current preset (±{points} points)" },
-  invalidTargetsError: { text: "Please correct the Take Profit and Stop Loss values according to the validation messages." },
-  targetsUpdated: { text: "Trade targets updated successfully" },
-};
 
 const formatTemplate = (template: string, vars: Record<string, string | number | boolean | null | undefined>) =>
   template.replace(/\{([a-zA-Z0-9_]+)\}/g, (_m, key: string) => {
@@ -70,7 +46,33 @@ export function EditTradeModal({ trade, open, onOpenChange }: EditTradeModalProp
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const { quotes } = useQuotes();
+  const { bundle } = useTranslation();
   const [validationMessages, setValidationMessages] = useState<{tp?: string; sl?: string}>({});
+  const textTemplates = {
+    priceLabelOrder: { text: "order price" },
+    priceLabelCurrent: { text: "current price" },
+    priceLabelOrderShort: { text: "Order" },
+    priceLabelCurrentShort: { text: "Current" },
+    pricePlaceholder: { text: "{label}: {price}" },
+    tpAboveOrder: { text: "Take Profit must be at least {delta} ({points}) above order price of {price}" },
+    tpAboveCurrent: { text: "Take Profit must be at least {delta} ({points}) above current price of {price}" },
+    tpBelowOrder: { text: "Take Profit must be at least {delta} ({points}) below order price of {price}" },
+    tpBelowCurrent: { text: "Take Profit must be at least {delta} ({points}) below current price of {price}" },
+    slAboveOrder: { text: "Stop Loss must be at least {delta} ({points}) above order price of {price}" },
+    slAboveCurrent: { text: "Stop Loss must be at least {delta} ({points}) above current price of {price}" },
+    slBelowOrder: { text: "Stop Loss must be at least {delta} ({points}) below order price of {price}" },
+    slBelowCurrent: { text: "Stop Loss must be at least {delta} ({points}) below current price of {price}" },
+    targetsInvalidOrder: { text: "One or more targets are invalid relative to the order price." },
+    targetsInvalidCurrent: { text: "One or more targets are invalid relative to the current price." },
+    quickPresetsOrder: { text: "Quick presets: set TP/SL relative to the order price." },
+    quickPresetsCurrent: { text: "Quick presets: set TP/SL relative to the current price." },
+    presetAppliedTitle: { text: "TP/SL preset applied" },
+    presetAppliedDescOrder: { text: "Set targets to ±{points} points from the order price." },
+    presetAppliedDescCurrent: { text: "Set targets to ±{points} points from the current price." },
+    applyPresetTitle: { text: "Apply TP/SL using the current preset (±{points} points)" },
+    invalidTargetsError: { text: "Please correct the Take Profit and Stop Loss values according to the validation messages." },
+    targetsUpdated: { text: "Trade targets updated successfully" },
+  };
   const sideLabels: Record<string, { label: string }> = {
     BUY: { label: "Buy" },
     SELL: { label: "Sell" },
@@ -251,6 +253,17 @@ export function EditTradeModal({ trade, open, onOpenChange }: EditTradeModalProp
     setValidationMessages(messages);
     return Object.keys(messages).length === 0;
   };
+
+  // Refresh validation messages when translations change
+  useEffect(() => {
+    if (!open) return;
+    if (!referencePrice || referencePrice <= 0) return;
+    const tpRaw = form.getValues("takeProfit");
+    const slRaw = form.getValues("stopLoss");
+    const tp = typeof tpRaw === "number" && Number.isFinite(tpRaw) ? tpRaw : null;
+    const sl = typeof slRaw === "number" && Number.isFinite(slRaw) ? slRaw : null;
+    validateTPSL(tp, sl);
+  }, [bundle?.locale, open, referencePrice, trade?.type]);
 
   // Run validation immediately on modal open (only when referencePrice is valid)
   useEffect(() => {

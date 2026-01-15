@@ -83,18 +83,18 @@ export default function JournalPage() {
   ];
 
   const commonTagOptions = [
-    { value: "breakout", label: "breakout" },
-    { value: "trend-following", label: "trend-following" },
-    { value: "reversal", label: "reversal" },
-    { value: "scalp", label: "scalp" },
-    { value: "swing", label: "swing" },
-    { value: "news-driven", label: "news-driven" },
-    { value: "technical", label: "technical" },
-    { value: "fundamental", label: "fundamental" },
-    { value: "lesson-learned", label: "lesson-learned" },
-    { value: "mistake", label: "mistake" },
-    { value: "profitable", label: "profitable" },
-    { value: "loss", label: "loss" },
+    { value: "breakout", label: "Breakout" },
+    { value: "trend-following", label: "Trend following" },
+    { value: "reversal", label: "Reversal" },
+    { value: "scalp", label: "Scalp" },
+    { value: "swing", label: "Swing" },
+    { value: "news-driven", label: "News-driven" },
+    { value: "technical", label: "Technical" },
+    { value: "fundamental", label: "Fundamental" },
+    { value: "lesson-learned", label: "Lesson learned" },
+    { value: "mistake", label: "Mistake" },
+    { value: "profitable", label: "Profitable" },
+    { value: "loss", label: "Loss" },
   ];
 
   const tagLabel = (tag: string) => {

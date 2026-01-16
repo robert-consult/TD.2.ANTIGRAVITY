@@ -159,9 +159,10 @@ export function useTrades() {
       if (context?.previousOpenTrades) {
         queryClient.setQueryData(["/api/trades/open"], context.previousOpenTrades);
       }
+      const { title, description } = getTradeErrorToast(error);
       toast({
-        title: "Error",
-        description: error.message || "Failed to close trade",
+        title,
+        description,
         variant: "destructive",
       });
     },

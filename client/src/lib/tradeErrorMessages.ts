@@ -11,6 +11,8 @@ const templates = {
   maxConcurrentLotsDesc: { text: "Maximum concurrent lots exceeded (OPEN + PENDING). Current={currentLots}, Requested={requestedLots}, Limit={limit}." },
   dailyLossLimitDesc: { text: "Daily loss limit of {limit}% reached. Try again tomorrow." },
   lifetimeLossLimitDesc: { text: "Lifetime loss limit of {limit}% reached. Account has been disabled." },
+  maxPositionSizeDesc: { text: "Position size {positionSize} exceeds maximum allowed ({maxPositionSize})." },
+  minHoldTimeDesc: { text: "Trade must be held for at least {minHoldSec} seconds. {remainingSec} seconds remaining." },
 };
 
 type TemplateVars = Record<string, string | number | boolean | null | undefined>;
@@ -27,6 +29,11 @@ const toNumber = (value: unknown): number | null => {
     return Number(value);
   }
   return null;
+};
+
+const formatUsd = (value: number | null): string => {
+  if (value === null) return "";
+  return `$${value.toLocaleString()}`;
 };
 
 export type TradeErrorToast = {
@@ -49,6 +56,10 @@ export function getTradeErrorToast(
   const limit = toNumber(data.limit);
   const currentLots = toNumber(data.currentLots);
   const requestedLots = toNumber(data.requestedLots);
+  const positionSize = toNumber(data.positionSize);
+  const maxPositionSize = toNumber(data.maxPositionSize);
+  const minHoldSec = toNumber(data.minHoldSec);
+  const remainingSec = toNumber(data.remainingSec);
 
   let description = "";
 
@@ -79,6 +90,16 @@ export function getTradeErrorToast(
   } else if (code === "LIFETIME_LOSS_LIMIT") {
     description = formatTemplate(templates.lifetimeLossLimitDesc.text, {
       limit: limit ?? data.limit ?? "",
+    });
+  } else if (code === "MAX_POSITION_SIZE") {
+    description = formatTemplate(templates.maxPositionSizeDesc.text, {
+      positionSize: formatUsd(positionSize),
+      maxPositionSize: formatUsd(maxPositionSize),
+    });
+  } else if (code === "MIN_HOLD_TIME") {
+    description = formatTemplate(templates.minHoldTimeDesc.text, {
+      minHoldSec: minHoldSec ?? data.minHoldSec ?? "",
+      remainingSec: remainingSec ?? data.remainingSec ?? "",
     });
   }
 

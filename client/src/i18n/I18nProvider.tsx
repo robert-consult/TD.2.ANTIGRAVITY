@@ -157,6 +157,20 @@ export function I18nProvider({ children }: { children: React.ReactNode }) {
     if (!currentUserLang) return;
 
     const normalized = normalizeLocale(currentUserLang, config.supportedLocales, config.defaultLocale);
+    let storedLocale: string | null = null;
+    try {
+      storedLocale = localStorage.getItem("i18n.locale");
+    } catch {}
+    const storedNormalized = storedLocale
+      ? normalizeLocale(storedLocale, config.supportedLocales, config.defaultLocale)
+      : null;
+
+    // If the server reports the default locale but the user previously selected a different locale,
+    // keep the locally chosen language to avoid unwanted resets.
+    if (storedNormalized && storedNormalized !== normalized && normalized === config.defaultLocale) {
+      return;
+    }
+
     if (normalized !== locale) {
       _setLocale(normalized);
     }

@@ -2609,6 +2609,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           console.error("Error writing DECISION REJECT audit:", auditErr);
         }
         return res.status(400).json({ 
+          code: "MAX_POSITION_SIZE",
           message: `Position size $${positionSize.toLocaleString()} exceeds maximum allowed ($${maxPositionSize.toLocaleString()}).`,
           positionSize,
           maxPositionSize,
@@ -3112,6 +3113,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           if (holdDurationSec < minHoldSec) {
             const remainingSec = Math.ceil(minHoldSec - holdDurationSec);
             return res.status(403).json({ 
+              code: "MIN_HOLD_TIME",
               message: `Trade must be held for at least ${minHoldSec} seconds. ${remainingSec} seconds remaining.`,
               minHoldSec,
               holdDurationSec: Math.floor(holdDurationSec),

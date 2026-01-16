@@ -72,6 +72,7 @@ export function EditTradeModal({ trade, open, onOpenChange }: EditTradeModalProp
     applyPresetTitle: { text: "Apply TP/SL using the current preset (±{points} points)" },
     invalidTargetsError: { text: "Please correct the Take Profit and Stop Loss values according to the validation messages." },
     targetsUpdated: { text: "Trade targets updated successfully" },
+    modalTitle: { text: "Edit Take Profit & Stop Loss" },
   };
   const sideLabels: Record<string, { label: string }> = {
     BUY: { label: "Buy" },
@@ -391,7 +392,7 @@ export function EditTradeModal({ trade, open, onOpenChange }: EditTradeModalProp
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Edit Take Profit & Stop Loss</DialogTitle>
+          <DialogTitle>{textTemplates.modalTitle.text}</DialogTitle>
           <DialogDescription>
             {trade.status === 'PENDING' ? 'Order price' : 'Current price'}: {safeRefPrice} | Trade: {getSideLabel(trade.type)} {trade.lots} lots {tradeSymbol}
           </DialogDescription>

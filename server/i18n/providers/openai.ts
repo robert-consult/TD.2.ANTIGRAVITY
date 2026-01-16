@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { applyGlossary } from "../glossary";
 
 type OpenAiTranslateItem = { id: string; text: string };
 
@@ -32,7 +33,7 @@ export async function translateWithOpenAi(params: {
       {
         role: "system",
         content:
-          "You are a translation engine for a trading dashboard UI. Return ONLY valid JSON. Preserve placeholders like {name}, {{name}}, %{name}, ${name}, and do not translate currency pair symbols (e.g., EURUSD).",
+          "You are a translation engine for a trading dashboard UI. Return ONLY valid JSON. Preserve placeholders like {name}, {{name}}, %{name}, ${name}. Translate all UI words even if short or ALL CAPS; do not leave English unless it is a currency pair symbol/ticker (e.g., EURUSD), a product name, or a placeholder. Translate trading terms like Buy, Sell, Order, Lots, Stop Loss, Take Profit, Market, Limit, Stop, Error, Validation, Journal, Risk Guardrail, Admin / Security, No Bots. Keep abbreviations like TP/SL but translate surrounding words.",
       },
       {
         role: "user",
@@ -82,7 +83,8 @@ export async function translateWithOpenAi(params: {
 
   const out: Record<string, string> = {};
   for (const [k, v] of Object.entries(parsed)) {
-    out[String(k)] = String(v);
+    const raw = String(v);
+    out[String(k)] = applyGlossary(params.locale, raw);
   }
   return out;
 }
@@ -91,4 +93,3 @@ export function stableBatchKey(locale: string, items: Array<{ id: string; text: 
   const payload = JSON.stringify([locale, items.map((i) => [i.id, i.text])]);
   return createHash("sha256").update(payload).digest("hex");
 }
-

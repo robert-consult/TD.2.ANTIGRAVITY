@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useAuth } from "@/hooks/use-auth";
 import { Link } from "wouter";
-import { User, Settings, LogOut, ChevronDown, Shield } from "lucide-react";
+import { User, Settings, LogOut, ChevronDown } from "lucide-react";
 import { TierBadge } from "@/components/TierBadge";
 import type { UserTier } from "@shared/schema";
 
@@ -98,14 +98,6 @@ export function Header({ title = "TradeQuip" }: HeaderProps) {
                     >
                       <Settings className="h-4 w-4" />
                       Profile Settings
-                    </Link>
-                    <Link 
-                      href="/profile"
-                      onClick={() => setDropdownOpen(false)}
-                      className="flex items-center gap-3 px-3 py-2.5 text-sm text-gray-300 hover:text-white hover:bg-white/5 rounded-lg transition-colors"
-                    >
-                      <Shield className="h-4 w-4" />
-                      Security
                     </Link>
                     
                     <div className="h-px bg-white/5 my-2" />

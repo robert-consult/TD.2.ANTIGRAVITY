@@ -283,9 +283,10 @@ interface DbFileStat {
 }
 
 interface DbMaintenanceStats {
-  paths: { dbPath: string; walPath: string; shmPath: string };
-  files: { db: DbFileStat; wal: DbFileStat; shm: DbFileStat };
-  pragmas: {
+  engine?: "sqlite" | "postgres";
+  paths?: { dbPath: string; walPath: string; shmPath: string };
+  files?: { db: DbFileStat; wal: DbFileStat; shm: DbFileStat };
+  pragmas?: {
     pageSize: number;
     pageCount: number;
     freelistCount: number;
@@ -293,11 +294,17 @@ interface DbMaintenanceStats {
     autoVacuum: number;
     walAutoCheckpoint: number;
   };
-  derived: {
+  derived?: {
     dbBytesLogical: number;
     reclaimableBytes: number;
     reclaimablePercent: number;
     totalOnDiskBytes: number;
+  };
+  database?: {
+    name: string;
+    sizeBytes: number;
+    sizePretty: string;
+    stats: Record<string, number | string> | null;
   };
   generatedAt: number;
 }
@@ -1910,9 +1917,14 @@ function ConfigTab() {
   ];
 
   const dbStats = dbStatsData?.stats;
-  const reclaimable = dbStats?.derived?.reclaimableBytes ?? 0;
-  const reclaimablePct = dbStats?.derived?.reclaimablePercent ?? 0;
-  const shouldVacuum = reclaimablePct >= 10;
+  const isPostgres = dbStats?.engine === "postgres" || !!dbStats?.database;
+  const derived = dbStats?.derived;
+  const reclaimable = derived?.reclaimableBytes ?? 0;
+  const reclaimablePct = derived?.reclaimablePercent ?? 0;
+  const hasVacuumStats = !!derived;
+  const shouldVacuum = hasVacuumStats && reclaimablePct >= 10;
+  const totalOnDiskBytes = derived?.totalOnDiskBytes ?? dbStats?.database?.sizeBytes ?? 0;
+  const dbSizePretty = dbStats?.database?.sizePretty ?? (totalOnDiskBytes ? formatBytes(totalOnDiskBytes) : "—");
   const vacuumResult = vacuumMutation.data as any | undefined;
 
   return (
@@ -2067,35 +2079,62 @@ function ConfigTab() {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-sm">
-            <div>
-              <div className="text-xs text-gray-400">DB File Size</div>
-              <div className="font-mono text-xs">{formatBytes(dbStats?.files?.db?.size ?? 0)}</div>
-              <div className="text-xs text-gray-500">
-                {dbStats?.files?.db?.mtimeMs ? formatTimestamp(dbStats.files.db.mtimeMs) : "—"}
+          {isPostgres ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-sm">
+              <div>
+                <div className="text-xs text-gray-400">Database</div>
+                <div className="font-mono text-xs">{dbStats?.database?.name ?? "—"}</div>
+                <div className="text-xs text-gray-500">engine: {dbStats?.engine ?? "postgres"}</div>
+              </div>
+              <div>
+                <div className="text-xs text-gray-400">Size</div>
+                <div className="font-mono text-xs">{dbSizePretty}</div>
+                <div className="text-xs text-gray-500">bytes: {formatBytes(dbStats?.database?.sizeBytes ?? 0)}</div>
+              </div>
+              <div>
+                <div className="text-xs text-gray-400">Activity</div>
+                <div className="text-xs text-gray-500">
+                  connections: {dbStats?.database?.stats?.numbackends ?? "—"} • commits: {dbStats?.database?.stats?.xact_commit ?? "—"}
+                </div>
+                <div className="text-xs text-gray-500">
+                  rollbacks: {dbStats?.database?.stats?.xact_rollback ?? "—"} • conflicts: {dbStats?.database?.stats?.conflicts ?? "—"}
+                </div>
               </div>
             </div>
-            <div>
-              <div className="text-xs text-gray-400">WAL / SHM</div>
-              <div className="font-mono text-xs">
-                {formatBytes(dbStats?.files?.wal?.size ?? 0)} / {formatBytes(dbStats?.files?.shm?.size ?? 0)}
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-sm">
+              <div>
+                <div className="text-xs text-gray-400">DB File Size</div>
+                <div className="font-mono text-xs">{formatBytes(dbStats?.files?.db?.size ?? 0)}</div>
+                <div className="text-xs text-gray-500">
+                  {dbStats?.files?.db?.mtimeMs ? formatTimestamp(dbStats.files.db.mtimeMs) : "—"}
+                </div>
               </div>
-              <div className="text-xs text-gray-500">journal_mode: {dbStats?.pragmas?.journalMode ?? "—"}</div>
+              <div>
+                <div className="text-xs text-gray-400">WAL / SHM</div>
+                <div className="font-mono text-xs">
+                  {formatBytes(dbStats?.files?.wal?.size ?? 0)} / {formatBytes(dbStats?.files?.shm?.size ?? 0)}
+                </div>
+                <div className="text-xs text-gray-500">journal_mode: {dbStats?.pragmas?.journalMode ?? "—"}</div>
+              </div>
+              <div>
+                <div className="text-xs text-gray-400">Reclaimable (Freelist)</div>
+                <div className="font-mono text-xs">
+                  {formatBytes(reclaimable)} ({reclaimablePct}%)
+                </div>
+                <div className="text-xs text-gray-500">
+                  page_size: {dbStats?.pragmas?.pageSize ?? "—"} • freelist: {dbStats?.pragmas?.freelistCount ?? 0}/{dbStats?.pragmas?.pageCount ?? 0}
+                </div>
+              </div>
             </div>
-            <div>
-              <div className="text-xs text-gray-400">Reclaimable (Freelist)</div>
-              <div className="font-mono text-xs">
-                {formatBytes(reclaimable)} ({reclaimablePct}%)
-              </div>
-              <div className="text-xs text-gray-500">
-                page_size: {dbStats?.pragmas?.pageSize ?? "—"} • freelist: {dbStats?.pragmas?.freelistCount ?? 0}/{dbStats?.pragmas?.pageCount ?? 0}
-              </div>
-            </div>
-          </div>
+          )}
 
           {dbStats ? (
             <div className="text-xs text-gray-400">
-              Total on disk (db+wal+shm): {formatBytes(dbStats.derived.totalOnDiskBytes)} • last checked: {formatTimestamp(dbStats.generatedAt)}
+              {isPostgres
+                ? `Database size: ${dbSizePretty}`
+                : `Total on disk (db+wal+shm): ${formatBytes(totalOnDiskBytes)}`}{" "}
+              • last checked: {formatTimestamp(dbStats.generatedAt)}
             </div>
           ) : (
             <div className="text-xs text-gray-400">No DB stats loaded yet.</div>
@@ -2105,7 +2144,11 @@ function ConfigTab() {
             <div className="flex items-center gap-2">
               <AlertCircle className="h-4 w-4 text-amber-300" />
               <span>
-                Recommendation: {shouldVacuum ? "VACUUM recommended (≥10% reclaimable pages)" : "VACUUM optional (low reclaimable pages)"}
+                Recommendation: {hasVacuumStats
+                  ? shouldVacuum
+                    ? "VACUUM recommended (≥10% reclaimable pages)"
+                    : "VACUUM optional (low reclaimable pages)"
+                  : "VACUUM optional (stats unavailable)"}
               </span>
             </div>
             <div>Gold standard: run VACUUM only during a planned maintenance window and after a recent backup.</div>

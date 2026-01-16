@@ -2,7 +2,7 @@ import type { Express, Request, Response } from "express";
 import { db } from "@db";
 import { userSessions } from "@shared/schema";
 import { and, desc, eq, isNull, ne } from "drizzle-orm";
-import { revokeSession, endSession, getClientIp, getUserAgent, touchSession } from "../security/sessionTrail";
+import { revokeSession, endSession, getClientIp, getUserAgent, touchSession, buildGeoContext, extractGeoHints } from "../security/sessionTrail";
 import { requireAuth } from "../middleware/auth";
 
 export function registerMeSessionsRoutes(app: Express) {
@@ -108,7 +108,7 @@ export function registerMeSessionsRoutes(app: Express) {
     const userAgent = getUserAgent(req);
 
     // End the session in our tracking table
-    await endSession({ userId, sessionId, ip, userAgent });
+    await endSession({ userId, sessionId, ip, userAgent, geo: buildGeoContext(ip, extractGeoHints(req)) });
 
     // Destroy express session
     req.session.destroy((err) => {

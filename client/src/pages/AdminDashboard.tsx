@@ -282,7 +282,10 @@ interface LoginHistoryEntry {
   email?: string;
   username?: string;
   ipAddress: string | null;
+  ip?: string | null;
+  ip_address?: string | null;
   userAgent: string | null;
+  user_agent?: string | null;
   success: boolean;
   failureReason: string | null;
   createdAt: number;
@@ -2994,62 +2997,66 @@ export default function AdminDashboard() {
                             </TableCell>
                           </TableRow>
                         ) : (
-                          allLoginHistory.map((entry) => (
-                            <TableRow key={entry.id} className={`border-b border-gray-700 ${!entry.success ? 'bg-red-900/20' : ''}`}>
-                              <TableCell className="py-3 px-4">
-                                <div>
-                                  <div className="font-medium">{entry.email}</div>
-                                  <div className="text-xs text-gray-400">{entry.username || `User #${entry.userId}`}</div>
-                                </div>
-                              </TableCell>
-                              <TableCell className="py-3 px-4">
-                                <span className="font-mono text-sm">{entry.ipAddress || 'Unknown'}</span>
-                              </TableCell>
-                              <TableCell className="py-3 px-4">
-                                <span className="text-xs text-gray-400 max-w-xs truncate block" title={entry.userAgent || ''}>
-                                  {entry.userAgent ? (entry.userAgent.length > 50 ? entry.userAgent.substring(0, 50) + '...' : entry.userAgent) : 'Unknown'}
-                                </span>
-                              </TableCell>
-                              <TableCell className="py-3 px-4">
-                                {entry.success ? (
-                                  <span className="text-xs px-2 py-0.5 rounded bg-green-600 text-white">Success</span>
-                                ) : (
+                          allLoginHistory.map((entry) => {
+                            const ipValue = entry.ipAddress ?? entry.ip ?? entry.ip_address;
+                            const userAgentValue = entry.userAgent ?? entry.user_agent;
+                            return (
+                              <TableRow key={entry.id} className={`border-b border-gray-700 ${!entry.success ? 'bg-red-900/20' : ''}`}>
+                                <TableCell className="py-3 px-4">
                                   <div>
-                                    <span className="text-xs px-2 py-0.5 rounded bg-red-600 text-white">Failed</span>
-                                    {entry.failureReason && (
-                                      <div className="text-xs text-red-400 mt-1">{entry.failureReason}</div>
-                                    )}
+                                    <div className="font-medium">{entry.email}</div>
+                                    <div className="text-xs text-gray-400">{entry.username || `User #${entry.userId}`}</div>
                                   </div>
-                                )}
-                              </TableCell>
-                              <TableCell className="py-3 px-4">
-                                <span className="text-sm text-gray-400">
-                                  {(() => {
-                                    if (!entry.createdAt) return 'N/A';
-                                    const ts = entry.createdAt;
-                                    // Handle string ISO dates
-                                    if (typeof ts === 'string') {
-                                      const d = new Date(ts);
-                                      if (!isNaN(d.getTime())) return d.toLocaleString();
-                                      // Try as numeric string
-                                      const num = Number(ts);
-                                      if (!isNaN(num)) {
-                                        const d2 = new Date(num > 1e12 ? num : num * 1000);
-                                        return isNaN(d2.getTime()) ? 'Invalid Date' : d2.toLocaleString();
+                                </TableCell>
+                                <TableCell className="py-3 px-4">
+                                  <span className="font-mono text-sm">{ipValue || 'Unknown'}</span>
+                                </TableCell>
+                                <TableCell className="py-3 px-4">
+                                  <span className="text-xs text-gray-400 max-w-xs truncate block" title={userAgentValue || ''}>
+                                    {userAgentValue ? (userAgentValue.length > 50 ? userAgentValue.substring(0, 50) + '...' : userAgentValue) : 'Unknown'}
+                                  </span>
+                                </TableCell>
+                                <TableCell className="py-3 px-4">
+                                  {entry.success ? (
+                                    <span className="text-xs px-2 py-0.5 rounded bg-green-600 text-white">Success</span>
+                                  ) : (
+                                    <div>
+                                      <span className="text-xs px-2 py-0.5 rounded bg-red-600 text-white">Failed</span>
+                                      {entry.failureReason && (
+                                        <div className="text-xs text-red-400 mt-1">{entry.failureReason}</div>
+                                      )}
+                                    </div>
+                                  )}
+                                </TableCell>
+                                <TableCell className="py-3 px-4">
+                                  <span className="text-sm text-gray-400">
+                                    {(() => {
+                                      if (!entry.createdAt) return 'N/A';
+                                      const ts = entry.createdAt;
+                                      // Handle string ISO dates
+                                      if (typeof ts === 'string') {
+                                        const d = new Date(ts);
+                                        if (!isNaN(d.getTime())) return d.toLocaleString();
+                                        // Try as numeric string
+                                        const num = Number(ts);
+                                        if (!isNaN(num)) {
+                                          const d2 = new Date(num > 1e12 ? num : num * 1000);
+                                          return isNaN(d2.getTime()) ? 'Invalid Date' : d2.toLocaleString();
+                                        }
+                                        return ts;
                                       }
-                                      return ts;
-                                    }
-                                    // Handle numeric timestamps
-                                    if (typeof ts === 'number') {
-                                      const d = new Date(ts > 1e12 ? ts : ts * 1000);
-                                      return isNaN(d.getTime()) ? 'Invalid Date' : d.toLocaleString();
-                                    }
-                                    return String(ts);
-                                  })()}
-                                </span>
-                              </TableCell>
-                            </TableRow>
-                          ))
+                                      // Handle numeric timestamps
+                                      if (typeof ts === 'number') {
+                                        const d = new Date(ts > 1e12 ? ts : ts * 1000);
+                                        return isNaN(d.getTime()) ? 'Invalid Date' : d.toLocaleString();
+                                      }
+                                      return String(ts);
+                                    })()}
+                                  </span>
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })
                         )}
                       </TableBody>
                     </Table>
@@ -3141,19 +3148,23 @@ export default function AdminDashboard() {
                                       device: [s.signupDeviceType, s.signupBrowser, s.signupOs].filter(Boolean).join(' / ') || parseUserAgent(s.signupUserAgent),
                                       userAgent: s.signupUserAgent || null,
                                     })) || []),
-                                    ...(auditTrailData?.logins?.map((l: any) => ({
-                                      type: l.success ? 'LOGIN_SUCCESS' as const : 'LOGIN_FAIL' as const,
-                                      time: l.createdAt,
-                                      email: l.email,
-                                      detail: l.success ? 'Successful login' : 'Failed login attempt',
-                                      id: `login-${l.id}`,
-                                      ip: l.ip || null,
-                                      location: [l.city, l.region, l.countryCode].filter(Boolean).join(', ') || null,
-                                      coords: l.latitude && l.longitude ? `${Number(l.latitude).toFixed(2)}, ${Number(l.longitude).toFixed(2)}` : null,
-                                      timezone: l.clientTz || null,
-                                      device: parseUserAgent(l.userAgent),
-                                      userAgent: l.userAgent || null,
-                                    })) || []),
+                                    ...(auditTrailData?.logins?.map((l: any) => {
+                                      const loginIp = l.ip ?? l.ipAddress ?? l.ip_address ?? null;
+                                      const loginUa = l.userAgent ?? l.user_agent ?? null;
+                                      return {
+                                        type: l.success ? 'LOGIN_SUCCESS' as const : 'LOGIN_FAIL' as const,
+                                        time: l.createdAt,
+                                        email: l.email,
+                                        detail: l.success ? 'Successful login' : 'Failed login attempt',
+                                        id: `login-${l.id}`,
+                                        ip: loginIp,
+                                        location: [l.city, l.region, l.countryCode].filter(Boolean).join(', ') || null,
+                                        coords: l.latitude && l.longitude ? `${Number(l.latitude).toFixed(2)}, ${Number(l.longitude).toFixed(2)}` : null,
+                                        timezone: l.clientTz || null,
+                                        device: parseUserAgent(loginUa),
+                                        userAgent: loginUa,
+                                      };
+                                    }) || []),
                                     ...(auditTrailData?.adminActions?.map((a: any) => ({
                                       type: 'ADMIN_ACTION' as const,
                                       time: a.createdAt,

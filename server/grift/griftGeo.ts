@@ -116,20 +116,30 @@ export function extractOrg(req: Request): string | null {
 // Extract country from headers
 export function extractCountry(req: Request): string | null {
   const country =
-    headerString(req, "cf-ipcountry") ?? headerString(req, "x-vercel-ip-country") ?? headerString(req, "x-country");
+    headerString(req, "cf-ipcountry") ??
+    headerString(req, "x-vercel-ip-country") ??
+    headerString(req, "x-appengine-country") ??
+    headerString(req, "x-country");
   return cleanString(country ?? null, 32);
 }
 
 // Extract city from headers
 export function extractCity(req: Request): string | null {
-  const city = headerString(req, "cf-ipcity") ?? headerString(req, "x-vercel-ip-city") ?? headerString(req, "x-city");
+  const city =
+    headerString(req, "cf-ipcity") ??
+    headerString(req, "x-vercel-ip-city") ??
+    headerString(req, "x-appengine-city") ??
+    headerString(req, "x-city");
   return cleanString(city ?? null, 128);
 }
 
 // Extract region from headers
 export function extractRegion(req: Request): string | null {
   const region =
-    headerString(req, "cf-region") ?? headerString(req, "x-vercel-ip-country-region") ?? headerString(req, "x-region");
+    headerString(req, "cf-region") ??
+    headerString(req, "x-vercel-ip-country-region") ??
+    headerString(req, "x-appengine-region") ??
+    headerString(req, "x-region");
   return cleanString(region ?? null, 128);
 }
 

@@ -23,6 +23,14 @@ const formatTemplate = (template: string, vars: TemplateVars) =>
     return v === null || v === undefined ? "" : String(v);
   });
 
+const toTemplateVar = (value: unknown): string | number | boolean | null | undefined => {
+  if (value === null || value === undefined) return value;
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return value;
+  }
+  return undefined;
+};
+
 const toNumber = (value: unknown): number | null => {
   if (typeof value === "number" && Number.isFinite(value)) return value;
   if (typeof value === "string" && value.trim() !== "" && !Number.isNaN(Number(value))) {
@@ -62,6 +70,12 @@ export function getTradeErrorToast(
   const minHoldSec = toNumber(data.minHoldSec);
   const remainingSec = toNumber(data.remainingSec);
 
+  const limitVar = limit ?? toTemplateVar(data.limit) ?? "";
+  const currentLotsVar = currentLots ?? toTemplateVar(data.currentLots) ?? "";
+  const requestedLotsVar = requestedLots ?? toTemplateVar(data.requestedLots) ?? "";
+  const minHoldSecVar = minHoldSec ?? toTemplateVar(data.minHoldSec) ?? "";
+  const remainingSecVar = remainingSec ?? toTemplateVar(data.remainingSec) ?? "";
+
   let description = "";
 
   if (code === "QUOTE_DATA_MISSING") {
@@ -72,25 +86,25 @@ export function getTradeErrorToast(
     description = formatTemplate(templates.quoteStaleDesc.text, { symbol });
   } else if (code === "MAX_CONCURRENT_TRADES") {
     description = formatTemplate(templates.maxConcurrentTradesDesc.text, {
-      limit: limit ?? data.limit ?? "",
+      limit: limitVar,
     });
   } else if (code === "MAX_TRADES_PER_INSTRUMENT") {
     description = formatTemplate(templates.maxTradesPerInstrumentDesc.text, {
-      limit: limit ?? data.limit ?? "",
+      limit: limitVar,
     });
   } else if (code === "MAX_CONCURRENT_LOTS") {
     description = formatTemplate(templates.maxConcurrentLotsDesc.text, {
-      currentLots: currentLots ?? data.currentLots ?? "",
-      requestedLots: requestedLots ?? data.requestedLots ?? "",
-      limit: limit ?? data.limit ?? "",
+      currentLots: currentLotsVar,
+      requestedLots: requestedLotsVar,
+      limit: limitVar,
     });
   } else if (code === "DAILY_LOSS_LIMIT") {
     description = formatTemplate(templates.dailyLossLimitDesc.text, {
-      limit: limit ?? data.limit ?? "",
+      limit: limitVar,
     });
   } else if (code === "LIFETIME_LOSS_LIMIT") {
     description = formatTemplate(templates.lifetimeLossLimitDesc.text, {
-      limit: limit ?? data.limit ?? "",
+      limit: limitVar,
     });
   } else if (code === "MAX_POSITION_SIZE") {
     description = formatTemplate(templates.maxPositionSizeDesc.text, {
@@ -99,8 +113,8 @@ export function getTradeErrorToast(
     });
   } else if (code === "MIN_HOLD_TIME") {
     description = formatTemplate(templates.minHoldTimeDesc.text, {
-      minHoldSec: minHoldSec ?? data.minHoldSec ?? "",
-      remainingSec: remainingSec ?? data.remainingSec ?? "",
+      minHoldSec: minHoldSecVar,
+      remainingSec: remainingSecVar,
     });
   }
 

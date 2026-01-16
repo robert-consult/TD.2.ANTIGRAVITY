@@ -2,7 +2,7 @@ import type { Request, Response, NextFunction } from "express";
 import { db } from "@db";
 import { users } from "@shared/schema";
 import { eq } from "drizzle-orm";
-import { buildGeoContext, getClientIp, revokeSession } from "../security/sessionTrail";
+import { buildGeoContext, extractGeoHints, getClientIp, revokeSession } from "../security/sessionTrail";
 import { evaluateLoginJurisdiction } from "../policy/jurisdictionControl";
 import { getJurisdictionRestrictionPolicy } from "../legal/regionRules";
 
@@ -66,7 +66,7 @@ export async function jurisdictionSessionGuard(req: Request, res: Response, next
         readHeaderIso2(req) ??
         (() => {
           const ip = getClientIp(req);
-          const geo = buildGeoContext(ip);
+          const geo = buildGeoContext(ip, extractGeoHints(req));
           return geo.countryCode ? String(geo.countryCode).trim().toUpperCase() : undefined;
         })();
 

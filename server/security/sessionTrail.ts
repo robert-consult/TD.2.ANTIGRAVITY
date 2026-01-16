@@ -6,6 +6,7 @@ import { userSessions, userLoginHistory } from "@shared/schema";
 import geoip from "geoip-lite";
 import tzlookup from "@photostructure/tz-lookup";
 import { UAParser } from "ua-parser-js";
+import { normalizeIpKey } from "../grift/griftIpAsn";
 
 export type GeoContext = {
   countryCode?: string;
@@ -24,31 +25,152 @@ export type DeviceContext = {
 
 const nowUnix = () => Math.floor(Date.now() / 1000);
 
-export function getClientIp(req: any): string {
-  const readHeader = (name: string): string | undefined => {
-    const v = req.headers?.[name] ?? req.headers?.[name.toLowerCase()];
-    if (!v) return undefined;
-    if (Array.isArray(v)) return String(v[0] ?? "");
-    return String(v);
+function readHeader(req: any, name: string): string | undefined {
+  const v = req.headers?.[name] ?? req.headers?.[name.toLowerCase()];
+  if (!v) return undefined;
+  if (Array.isArray(v)) return String(v[0] ?? "");
+  return String(v);
+}
+
+function cleanString(value: string | undefined, maxLen: number): string | undefined {
+  if (!value) return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  return trimmed.length > maxLen ? trimmed.slice(0, maxLen) : trimmed;
+}
+
+function parseHeaderNumber(value: string | undefined): number | undefined {
+  if (!value) return undefined;
+  const parsed = parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function normalizeCountryCode(value: string | undefined): string | undefined {
+  const trimmed = cleanString(value, 8);
+  if (!trimmed) return undefined;
+  const upper = trimmed.toUpperCase();
+  return /^[A-Z]{2}$/.test(upper) ? upper : undefined;
+}
+
+function isPrivateIp(ip: string): boolean {
+  const key = normalizeIpKey(ip) ?? ip;
+  if (!key) return true;
+  if (key === "::1") return true;
+  if (key.startsWith("fe80:")) return true;
+  if (key.startsWith("fc") || key.startsWith("fd")) return true;
+
+  const m = key.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (!m) return false;
+  const a = Number(m[1]);
+  const b = Number(m[2]);
+  if (a === 10) return true;
+  if (a === 127) return true;
+  if (a === 169 && b === 254) return true;
+  if (a === 192 && b === 168) return true;
+  if (a === 172 && b >= 16 && b <= 31) return true;
+  return false;
+}
+
+function parseForwardedFor(value: string | undefined): string[] {
+  if (!value) return [];
+  const forMatches = value.match(/for=([^;,\s]+)/gi);
+  if (!forMatches) return [];
+  return forMatches
+    .map((part) => part.replace(/for=/i, "").replace(/"/g, "").trim())
+    .filter(Boolean);
+}
+
+export function extractGeoHints(req: any): Partial<GeoContext> {
+  const countryCode = normalizeCountryCode(
+    readHeader(req, "cf-ipcountry") ??
+      readHeader(req, "x-vercel-ip-country") ??
+      readHeader(req, "x-appengine-country") ??
+      readHeader(req, "x-country")
+  );
+  const region = cleanString(
+    readHeader(req, "cf-region") ??
+      readHeader(req, "x-vercel-ip-country-region") ??
+      readHeader(req, "x-appengine-region") ??
+      readHeader(req, "x-region"),
+    128
+  );
+  const city = cleanString(
+    readHeader(req, "cf-ipcity") ??
+      readHeader(req, "x-vercel-ip-city") ??
+      readHeader(req, "x-appengine-city") ??
+      readHeader(req, "x-city"),
+    128
+  );
+  const latitude = parseHeaderNumber(
+    readHeader(req, "cf-iplat") ??
+      readHeader(req, "x-vercel-ip-latitude") ??
+      readHeader(req, "x-lat") ??
+      readHeader(req, "x-geo-lat")
+  );
+  const longitude = parseHeaderNumber(
+    readHeader(req, "cf-iplon") ??
+      readHeader(req, "x-vercel-ip-longitude") ??
+      readHeader(req, "x-lon") ??
+      readHeader(req, "x-geo-lon")
+  );
+
+  return {
+    countryCode,
+    region,
+    city,
+    latitude,
+    longitude,
   };
+}
 
-  const cfIp = readHeader("cf-connecting-ip");
-  if (cfIp) return cfIp;
+export function getClientIp(req: any): string {
+  const candidates: string[] = [];
+  const cfIp = readHeader(req, "cf-connecting-ip");
+  if (cfIp) candidates.push(cfIp);
 
-  const xff = readHeader("x-forwarded-for");
+  const trueClientIp = readHeader(req, "true-client-ip") ?? readHeader(req, "x-client-ip");
+  if (trueClientIp) candidates.push(trueClientIp);
+
+  const xff = readHeader(req, "x-forwarded-for");
   if (xff) {
-    const first = xff.split(",")[0]?.trim();
-    if (first) return first;
+    candidates.push(
+      ...xff
+        .split(",")
+        .map((part) => part.trim())
+        .filter(Boolean)
+    );
   }
 
-  const xRealIp = readHeader("x-real-ip");
-  if (xRealIp) return xRealIp;
+  const forwarded = readHeader(req, "forwarded");
+  if (forwarded) {
+    candidates.push(...parseForwardedFor(forwarded));
+  }
 
-  return req.ip || req.socket?.remoteAddress || "0.0.0.0";
+  const xRealIp = readHeader(req, "x-real-ip");
+  if (xRealIp) candidates.push(xRealIp);
+
+  if (req.ip) candidates.push(String(req.ip));
+  if (req.socket?.remoteAddress) candidates.push(String(req.socket.remoteAddress));
+
+  const normalized = candidates
+    .map((ip) => normalizeIpKey(ip))
+    .filter(Boolean) as string[];
+
+  if (normalized.length === 0) return candidates[0] ?? "0.0.0.0";
+  const publicIp = normalized.find((ip) => !isPrivateIp(ip));
+  return publicIp || normalized[0];
 }
 
 export function getUserAgent(req: any): string {
-  return String(req.headers?.["user-agent"] || "unknown");
+  const ua = cleanString(readHeader(req, "user-agent"), 512);
+  if (ua) return ua;
+  const chUa = cleanString(readHeader(req, "sec-ch-ua"), 512);
+  const platform = cleanString(readHeader(req, "sec-ch-ua-platform"), 128);
+  const mobile = cleanString(readHeader(req, "sec-ch-ua-mobile"), 16);
+  const fallback = [chUa, platform ? `platform=${platform}` : null, mobile ? `mobile=${mobile}` : null]
+    .filter(Boolean)
+    .join(" ");
+  return fallback || "unknown";
 }
 
 export function parseDevice(userAgent: string): DeviceContext {
@@ -66,15 +188,18 @@ export function parseDevice(userAgent: string): DeviceContext {
   };
 }
 
-export function buildGeoContext(ip: string): GeoContext {
-  const g = geoip.lookup(ip);
-  if (!g) return {};
+export function buildGeoContext(ip: string, hints?: Partial<GeoContext>): GeoContext {
+  const ipKey = normalizeIpKey(ip) ?? ip;
+  const g = ipKey ? geoip.lookup(ipKey) : null;
 
-  const latitude = Array.isArray(g.ll) ? Number(g.ll[0]) : undefined;
-  const longitude = Array.isArray(g.ll) ? Number(g.ll[1]) : undefined;
+  const baseLat = Array.isArray(g?.ll) ? Number(g?.ll?.[0]) : undefined;
+  const baseLon = Array.isArray(g?.ll) ? Number(g?.ll?.[1]) : undefined;
 
-  let inferredTz: string | undefined;
-  if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
+  const latitude = hints?.latitude ?? baseLat;
+  const longitude = hints?.longitude ?? baseLon;
+  let inferredTz = hints?.inferredTz;
+
+  if (!inferredTz && Number.isFinite(latitude) && Number.isFinite(longitude)) {
     try {
       inferredTz = tzlookup(latitude!, longitude!);
     } catch {
@@ -83,9 +208,9 @@ export function buildGeoContext(ip: string): GeoContext {
   }
 
   return {
-    countryCode: g.country,
-    region: g.region,
-    city: g.city,
+    countryCode: hints?.countryCode ?? g?.country,
+    region: hints?.region ?? g?.region,
+    city: hints?.city ?? g?.city,
     latitude,
     longitude,
     inferredTz,
@@ -100,17 +225,11 @@ export type ClientIdentityContext = {
 };
 
 export function extractClientIdentity(req: any): ClientIdentityContext {
-  const readHeader = (name: string): string | undefined => {
-    const v = req.headers?.[name] ?? req.headers?.[name.toLowerCase()];
-    if (!v) return undefined;
-    if (Array.isArray(v)) return String(v[0] ?? "");
-    return String(v);
-  };
   return {
-    deviceFp: readHeader("x-device-fp"),
-    deviceInstallId: readHeader("x-device-install-id"),
-    clientTz: readHeader("x-client-tz"),
-    clientLang: readHeader("x-client-lang"),
+    deviceFp: cleanString(readHeader(req, "x-device-fp"), 256),
+    deviceInstallId: cleanString(readHeader(req, "x-device-install-id"), 128),
+    clientTz: cleanString(readHeader(req, "x-client-tz"), 64),
+    clientLang: cleanString(readHeader(req, "x-client-lang"), 32),
   };
 }
 
@@ -121,9 +240,10 @@ export async function createUserSession(args: {
   ip: string;
   userAgent: string;
   identity?: ClientIdentityContext;
+  geo?: GeoContext;
 }): Promise<{ geo: GeoContext; device: DeviceContext }> {
   const nowSec = nowUnix();
-  const geo = buildGeoContext(args.ip);
+  const geo = args.geo ?? buildGeoContext(args.ip);
   const device = parseDevice(args.userAgent);
   const identity = args.identity || {};
 
@@ -202,9 +322,10 @@ export async function recordLoginAttempt(args: {
   failureReason?: string;
   sessionId?: string;
   identity?: ClientIdentityContext;
+  geo?: GeoContext;
 }): Promise<void> {
   const nowSec = nowUnix();
-  const geo = buildGeoContext(args.ip);
+  const geo = args.geo ?? buildGeoContext(args.ip);
   const identity = args.identity || {};
 
   await db.insert(userLoginHistory).values({
@@ -240,6 +361,7 @@ export async function endSession(args: {
   sessionId: string;
   ip?: string;
   userAgent?: string;
+  geo?: GeoContext;
 }): Promise<void> {
   const nowSec = nowUnix();
   const [session] = await db.select().from(userSessions)
@@ -267,7 +389,7 @@ export async function endSession(args: {
     .where(and(eq(userSessions.sessionId, args.sessionId), eq(userSessions.userId, args.userId)))
     ;
 
-  const geo = args.ip ? buildGeoContext(args.ip) : {};
+  const geo = args.geo ?? (args.ip ? buildGeoContext(args.ip) : {});
   await db.insert(userLoginHistory).values({
     userId: args.userId,
     email: "",

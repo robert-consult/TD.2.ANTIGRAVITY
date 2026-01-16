@@ -36,7 +36,7 @@ import { griftPublicRouter } from "./grift/griftPublicRouter";
 import { extractGriftContext } from "./grift/griftGeo";
 import { onLoginSuccess, onSessionActivity, onTradeSubmit } from "./grift/griftEngine";
 import { maybeApplyAutoEnforcement } from "./grift/griftAutoEnforcement";
-import { getRecentLoginActivity, getActiveSessions, createUserSession, touchSession, recordLoginAttempt, endSession, revokeSession, getClientIp, getUserAgent, buildGeoContext, parseDevice, extractClientIdentity } from "./security/sessionTrail";
+import { getRecentLoginActivity, getActiveSessions, createUserSession, touchSession, recordLoginAttempt, endSession, revokeSession, getClientIp, getUserAgent, buildGeoContext, parseDevice, extractClientIdentity, extractGeoHints } from "./security/sessionTrail";
 import type { AuditContext as GriftAuditContext } from "./grift/griftTypes";
 import { riskMiddleware, getEffectiveMinHoldSec } from "./risk";
 import { impersonationGuard } from "./middleware/auth";
@@ -399,7 +399,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const ip = getClientIp(req);
     const userAgent = getUserAgent(req);
 
-    const geo = buildGeoContext(ip);
+    const geo = buildGeoContext(ip, extractGeoHints(req));
 
     // Prefer CDN header if present (useful in production behind Cloudflare/Vercel)
     const headerCountry =
@@ -611,6 +611,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const ip = getClientIp(req);
       const userAgent = getUserAgent(req);
       const clientIdentity = extractClientIdentity(req);
+      const geoHints = extractGeoHints(req);
+      const geoContext = buildGeoContext(ip, geoHints);
 
       const bg = await botGuard(req, res, { action: "LOGIN", email });
       if (!bg.allowed) return;
@@ -623,6 +625,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           ip,
           userAgent,
           identity: clientIdentity,
+          geo: geoContext,
           success: false,
           failureReason: "Invalid credentials",
         });
@@ -636,6 +639,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           ip,
           userAgent,
           identity: clientIdentity,
+          geo: geoContext,
           success: false,
           failureReason: "Account deleted",
         });
@@ -649,6 +653,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           ip,
           userAgent,
           identity: clientIdentity,
+          geo: geoContext,
           success: false,
           failureReason: "Account disabled",
         });
@@ -662,6 +667,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           ip,
           userAgent,
           identity: clientIdentity,
+          geo: geoContext,
           success: false,
           failureReason: "Account frozen",
         });
@@ -672,8 +678,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Jurisdiction control (sanctions / restricted countries)
-      const geoContext = buildGeoContext(ip);
-
       // Prefer CDN header if present (useful in production behind Cloudflare/Vercel)
       const headerCountry =
         (req.get("cf-ipcountry") ||
@@ -708,6 +712,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             ip,
             userAgent,
             identity: clientIdentity,
+            geo: geoContext,
             success: false,
             failureReason: loginJ.reasonCode,
           });
@@ -742,6 +747,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ip,
         userAgent,
         identity: clientIdentity,
+        geo: geoContext,
       });
 
       let griftAutoEnforcement: any = null;
@@ -911,7 +917,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const clientIdentity = extractClientIdentity(req);
 
       // Jurisdiction control (sanctions / restricted countries)
-      const jurisGeoContext = buildGeoContext(ip);
+      const geoHints = extractGeoHints(req);
+      const geoContext = buildGeoContext(ip, geoHints);
 
       // Prefer CDN header if present
       const headerCountry =
@@ -922,8 +929,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const ipCountryIso2 =
         headerCountry && /^[A-Za-z]{2}$/.test(headerCountry.trim())
           ? headerCountry.trim().toUpperCase()
-          : jurisGeoContext.countryCode
-            ? jurisGeoContext.countryCode.toUpperCase()
+          : geoContext.countryCode
+            ? geoContext.countryCode.toUpperCase()
             : undefined;
 
       const signupJ = evaluateSignupJurisdiction({
@@ -1005,7 +1012,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Build signup fingerprint data for grift detection and audit
-      const geoContext = buildGeoContext(ip);
       const deviceContext = parseDevice(userAgent);
       const signupFingerprint = {
         requestId: crypto.randomUUID(),
@@ -1222,6 +1228,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ip,
         userAgent,
         identity: clientIdentity,
+        geo: geoContext,
       });
 
       let griftAutoEnforcement: any = null;
@@ -1318,7 +1325,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     
     if (userId) {
       try {
-        await endSession({ userId, sessionId, ip, userAgent });
+        await endSession({ userId, sessionId, ip, userAgent, geo: buildGeoContext(ip, extractGeoHints(req)) });
       } catch (err) {
         console.error("Error recording logout:", err);
       }
@@ -1972,6 +1979,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const userId = req.session.userId!;
       const ip = getClientIp(req);
       const userAgent = getUserAgent(req);
+      const geoContext = buildGeoContext(ip, extractGeoHints(req));
       
       let sessions = await getActiveSessions({ userId, limit });
       
@@ -1984,6 +1992,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           email: user?.email || "",
           ip,
           userAgent,
+          geo: geoContext,
         });
         sessions = await getActiveSessions({ userId, limit });
       }
@@ -4352,7 +4361,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     // Resolve IP country once at connect time (proxy headers preferred).
     try {
       const ip = getClientIp(req as any);
-      const geo = buildGeoContext(ip);
+      const geo = buildGeoContext(ip, extractGeoHints(req as any));
       client.ipCountryIso2 = readWsHeaderIso2(req) ?? (geo?.countryCode ? normIso2(geo.countryCode) : undefined);
     } catch {
       client.ipCountryIso2 = readWsHeaderIso2(req);

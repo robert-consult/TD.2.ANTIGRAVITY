@@ -21,7 +21,13 @@ function Calendar({
         months: "flex flex-col sm:flex-row space-y-4 sm:space-x-4 sm:space-y-0",
         month: "space-y-4",
         month_caption: "flex justify-center pt-1 relative items-center",
-        caption_label: "text-sm font-medium",
+        caption_label:
+          "relative z-0 inline-flex items-center gap-1 text-sm font-medium text-white",
+        dropdowns: "flex items-center gap-2",
+        dropdown_root:
+          "relative inline-flex items-center gap-1 rounded-md border border-gray-700 bg-neutral-850 px-2 py-1 text-sm text-white",
+        dropdown:
+          "calendar-select absolute inset-0 z-10 h-full w-full cursor-pointer bg-neutral-900 text-white opacity-0",
         nav: "space-x-1 flex items-center",
         button_previous: cn(
           buttonVariants({ variant: "outline" }),
@@ -31,6 +37,7 @@ function Calendar({
           buttonVariants({ variant: "outline" }),
           "absolute right-1 h-7 w-7 bg-transparent p-0 opacity-60 hover:opacity-100"
         ),
+        chevron: "text-gray-300",
         month_grid: "w-full border-collapse space-y-1",
         weekdays: "flex",
         weekday:

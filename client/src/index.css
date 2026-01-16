@@ -112,6 +112,27 @@
 }
 
 @layer components {
+  .rdp-root {
+    color-scheme: dark;
+  }
+
+  .rdp-root select,
+  .rdp-root option {
+    color: hsl(var(--popover-foreground));
+    background-color: hsl(var(--popover));
+  }
+
+  .calendar-select {
+    color: hsl(var(--popover-foreground));
+    background-color: hsl(var(--popover));
+    color-scheme: dark;
+  }
+
+  .calendar-select option {
+    color: hsl(var(--popover-foreground));
+    background-color: hsl(var(--popover));
+  }
+
   /* Button styles for trading */
   .btn-buy {
     @apply bg-lime-500 hover:bg-lime-400 text-black font-bold py-2 px-10 rounded transition-colors;

@@ -6,6 +6,12 @@ import { Calendar } from "@/components/ui/calendar";
 import { format } from "date-fns";
 import { DateRange } from "react-day-picker";
 import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -84,6 +90,19 @@ export default function HistoryScreen() {
   const [customDateRange, setCustomDateRange] = useState<DateRange | undefined>(undefined);
   const [isDateRangeOpen, setIsDateRangeOpen] = useState(false);
   const isMobile = useMobile();
+  const today = new Date();
+  const todayEnd = new Date(today);
+  todayEnd.setHours(23, 59, 59, 999);
+  const calendarStartMonth = new Date(2000, 0, 1);
+  const calendarEndMonth = today;
+  const [startCalendarMonth, setStartCalendarMonth] = useState<Date>(() => {
+    const base = new Date(today.getFullYear(), today.getMonth(), 1);
+    base.setMonth(base.getMonth() - 1);
+    return base;
+  });
+  const [endCalendarMonth, setEndCalendarMonth] = useState<Date>(() => {
+    return new Date(today.getFullYear(), today.getMonth(), 1);
+  });
   
   // Get trader-facing close reasons for filter dropdown
   const traderCloseReasons = listTraderFacingCloseReasons();
@@ -291,52 +310,159 @@ export default function HistoryScreen() {
 
       {/* Calendar for custom date range */}
       {timeFilter === "custom" && isDateRangeOpen && (
-        <div className="px-gutter py-3 border-b border-gray-800" id="dateRangeCollapsible">
-          <h3 className="text-sm font-medium text-gray-400 mb-2">Select date range:</h3>
-          <div className="bg-neutral-850 rounded-md p-3 inline-block md:w-auto w-full">
-            <Calendar
-              mode="range"
-              selected={customDateRange}
-              onSelect={handleCustomRangeSelect}
-              className="bg-neutral-850 text-white border-none"
-              disabled={(date) => date > new Date()}
-              fixedWeeks
-              numberOfMonths={isMobile ? 1 : 2}
-              initialFocus
-            />
-            <div className="mt-3 flex justify-end gap-2">
-              <button 
-                className="px-3 py-1 bg-neutral-700 hover:bg-neutral-600 rounded text-white text-sm"
-                onClick={() => {
-                  setTimeFilter(lastTimeFilter);
-                  setCustomDateRange(undefined);
-                  setIsDateRangeOpen(false);
-                  setCurrentPage(1);
-                }}
+        <>
+          {isMobile ? (
+            <Sheet
+              open={isDateRangeOpen}
+              onOpenChange={(open) => setIsDateRangeOpen(open)}
+            >
+              <SheetContent
+                side="bottom"
+                className="bg-neutral-900 border-gray-800 px-4 py-5 sm:max-w-none max-h-[90vh] overflow-y-auto"
               >
-                Cancel
-              </button>
-              <button 
-                className="px-3 py-1 bg-blue-600 hover:bg-blue-500 rounded text-white text-sm"
-                onClick={() => {
-                  if (customDateRange?.from && customDateRange?.to) {
-                    setIsDateRangeOpen(false);
-                  }
-                }}
-                disabled={!customDateRange?.from || !customDateRange?.to}
-              >
-                Apply
-              </button>
+                <SheetHeader className="text-left">
+                  <SheetTitle className="text-white">Select date range</SheetTitle>
+                </SheetHeader>
+                <div className="mt-4 rounded-md border border-gray-800 bg-neutral-850 p-3">
+                  <Calendar
+                    mode="range"
+                    selected={customDateRange}
+                    onSelect={handleCustomRangeSelect}
+                    className="bg-neutral-850 text-white border-none"
+                    captionLayout="dropdown"
+                    startMonth={calendarStartMonth}
+                    endMonth={calendarEndMonth}
+                    reverseYears
+                    pagedNavigation={false}
+                    navLayout="around"
+                    disabled={(date) => date > todayEnd}
+                    fixedWeeks
+                    numberOfMonths={1}
+                    month={endCalendarMonth}
+                    onMonthChange={setEndCalendarMonth}
+                    initialFocus
+                  />
+                  <div className="mt-3 flex justify-end gap-2">
+                    <button
+                      className="px-3 py-1 bg-neutral-700 hover:bg-neutral-600 rounded text-white text-sm"
+                      onClick={() => {
+                        setTimeFilter(lastTimeFilter);
+                        setCustomDateRange(undefined);
+                        setIsDateRangeOpen(false);
+                        setCurrentPage(1);
+                      }}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      className="px-3 py-1 bg-blue-600 hover:bg-blue-500 rounded text-white text-sm"
+                      onClick={() => {
+                        if (customDateRange?.from && customDateRange?.to) {
+                          setIsDateRangeOpen(false);
+                        }
+                      }}
+                      disabled={!customDateRange?.from || !customDateRange?.to}
+                    >
+                      Apply
+                    </button>
+                  </div>
+                </div>
+                <div className="mt-3 text-sm text-gray-400">
+                  {customDateRange && customDateRange.from && customDateRange.to && (
+                    <span>
+                      Showing trades from {format(customDateRange.from, "MMM d, yyyy")} to{" "}
+                      {format(customDateRange.to, "MMM d, yyyy")}
+                    </span>
+                  )}
+                </div>
+              </SheetContent>
+            </Sheet>
+          ) : (
+            <div className="px-gutter py-3 border-b border-gray-800" id="dateRangeCollapsible">
+              <h3 className="text-sm font-medium text-gray-400 mb-2">Select date range:</h3>
+              <div className="bg-neutral-850 rounded-md p-3 inline-block md:w-auto w-full">
+                <div className="flex flex-col gap-4 md:flex-row md:gap-6">
+                  <div>
+                    <div className="mb-2 text-xs font-medium uppercase tracking-wide text-gray-400">
+                      Start date
+                    </div>
+                    <Calendar
+                      mode="range"
+                      selected={customDateRange}
+                      onSelect={handleCustomRangeSelect}
+                      className="bg-neutral-850 text-white border-none"
+                      captionLayout="dropdown"
+                      startMonth={calendarStartMonth}
+                      endMonth={calendarEndMonth}
+                      reverseYears
+                      pagedNavigation={false}
+                      navLayout="around"
+                      disabled={(date) => date > todayEnd}
+                      fixedWeeks
+                      numberOfMonths={1}
+                      month={startCalendarMonth}
+                      onMonthChange={setStartCalendarMonth}
+                    />
+                  </div>
+                  <div>
+                    <div className="mb-2 text-xs font-medium uppercase tracking-wide text-gray-400">
+                      End date
+                    </div>
+                    <Calendar
+                      mode="range"
+                      selected={customDateRange}
+                      onSelect={handleCustomRangeSelect}
+                      className="bg-neutral-850 text-white border-none"
+                      captionLayout="dropdown"
+                      startMonth={calendarStartMonth}
+                      endMonth={calendarEndMonth}
+                      reverseYears
+                      pagedNavigation={false}
+                      navLayout="around"
+                      disabled={(date) => date > todayEnd}
+                      fixedWeeks
+                      numberOfMonths={1}
+                      month={endCalendarMonth}
+                      onMonthChange={setEndCalendarMonth}
+                    />
+                  </div>
+                </div>
+                <div className="mt-3 flex justify-end gap-2">
+                  <button
+                    className="px-3 py-1 bg-neutral-700 hover:bg-neutral-600 rounded text-white text-sm"
+                    onClick={() => {
+                      setTimeFilter(lastTimeFilter);
+                      setCustomDateRange(undefined);
+                      setIsDateRangeOpen(false);
+                      setCurrentPage(1);
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    className="px-3 py-1 bg-blue-600 hover:bg-blue-500 rounded text-white text-sm"
+                    onClick={() => {
+                      if (customDateRange?.from && customDateRange?.to) {
+                        setIsDateRangeOpen(false);
+                      }
+                    }}
+                    disabled={!customDateRange?.from || !customDateRange?.to}
+                  >
+                    Apply
+                  </button>
+                </div>
+              </div>
+              <div className="mt-2 text-sm text-gray-400">
+                {customDateRange && customDateRange.from && customDateRange.to && (
+                  <span>
+                    Showing trades from {format(customDateRange.from, "MMM d, yyyy")} to{" "}
+                    {format(customDateRange.to, "MMM d, yyyy")}
+                  </span>
+                )}
+              </div>
             </div>
-          </div>
-          <div className="mt-2 text-sm text-gray-400">
-            {customDateRange && customDateRange.from && customDateRange.to && (
-              <span>
-                Showing trades from {format(customDateRange.from, 'MMM d, yyyy')} to {format(customDateRange.to, 'MMM d, yyyy')}
-              </span>
-            )}
-          </div>
-        </div>
+          )}
+        </>
       )}
       
       {/* Date range display when calendar is collapsed */}

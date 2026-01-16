@@ -66,10 +66,23 @@ export default function JournalPage() {
     SELL: { label: "Sell" },
   };
 
+  const getSideKey = (side: unknown) => String(side ?? "").trim().toUpperCase();
+
   const getSideLabel = (side: unknown) => {
-    const key = String(side ?? "").trim().toUpperCase();
+    const key = getSideKey(side);
     if (!key) return "?";
     return sideLabels[key]?.label ?? key;
+  };
+
+  const getSideBadgeClass = (side: unknown) => {
+    const key = getSideKey(side);
+    if (key === "BUY") {
+      return "border-emerald-500/40 bg-emerald-500/15 text-emerald-300";
+    }
+    if (key === "SELL") {
+      return "border-red-500/40 bg-red-500/15 text-red-300";
+    }
+    return "border-muted-foreground/40 bg-muted/20 text-muted-foreground";
   };
 
   const moodOptions = [
@@ -300,8 +313,10 @@ export default function JournalPage() {
     const symbol = trade.symbol?.symbol || trade.symbol || "Unknown";
     const profit = parseFloat(trade.profit || 0);
     const profitColor = profit >= 0 ? "text-green-500" : "text-red-500";
-    const side = getSideLabel(trade.side || trade.type);
-    return { symbol, profit, profitColor, side };
+    const sideKey = getSideKey(trade.side || trade.type);
+    const side = getSideLabel(sideKey);
+    const sideBadgeClass = getSideBadgeClass(sideKey);
+    return { symbol, profit, profitColor, side, sideBadgeClass };
   };
 
   // Toggle trade selection
@@ -438,12 +453,12 @@ export default function JournalPage() {
                   {selectedTrades.length > 0 && (
                     <div className="space-y-2 mb-2">
                       {selectedTrades.map((trade: any) => {
-                        const { symbol, profit, profitColor, side } = formatTradeOption(trade);
+                        const { symbol, profit, profitColor, side, sideBadgeClass } = formatTradeOption(trade);
                         return (
                           <div key={trade.id} className="flex items-center gap-2 p-2 border rounded-md bg-muted/50">
                             <div className="flex-1 flex items-center gap-2">
                               <span className="font-medium">{symbol}</span>
-                              <Badge variant="outline" className="text-xs">{side}</Badge>
+                              <Badge variant="outline" className={`text-xs ${sideBadgeClass}`}>{side}</Badge>
                               <span className={profitColor}>${profit.toFixed(2)}</span>
                               <span className="text-xs text-muted-foreground">#{trade.id}</span>
                             </div>
@@ -475,7 +490,7 @@ export default function JournalPage() {
                             </p>
                           ) : (
                             filteredTrades.map((trade: any) => {
-                              const { symbol, profit, profitColor, side } = formatTradeOption(trade);
+                              const { symbol, profit, profitColor, side, sideBadgeClass } = formatTradeOption(trade);
                               const isSelected = selectedTradeIds.includes(trade.id);
                               return (
                                 <div
@@ -485,7 +500,7 @@ export default function JournalPage() {
                                 >
                                   <div className="flex items-center gap-2">
                                     <span className="font-medium">{symbol}</span>
-                                    <Badge variant="outline" className="text-xs">{side}</Badge>
+                                    <Badge variant="outline" className={`text-xs ${sideBadgeClass}`}>{side}</Badge>
                                   </div>
                                   <span className={profitColor}>${profit.toFixed(2)}</span>
                                 </div>
@@ -686,7 +701,7 @@ export default function JournalPage() {
                         {entryTradeIds.map((tradeId) => {
                           const linkedTrade = trades.find((t: any) => t.id === tradeId);
                           if (!linkedTrade) return null;
-                          const { symbol, profit, profitColor, side } = formatTradeOption(linkedTrade);
+                          const { symbol, profit, profitColor, side, sideBadgeClass } = formatTradeOption(linkedTrade);
                           const openTime = linkedTrade.openedAt ? formatDate(linkedTrade.openedAt) : "N/A";
                           const closeTime = linkedTrade.closedAt ? formatDate(linkedTrade.closedAt) : "N/A";
                           const openPrice = linkedTrade.openPrice ? Number(linkedTrade.openPrice).toFixed(5) : "N/A";
@@ -697,7 +712,7 @@ export default function JournalPage() {
                               <div className="flex items-center gap-2">
                                 <Link2 className="h-4 w-4 text-muted-foreground" />
                                 <span className="font-medium">{symbol}</span>
-                                <Badge variant="outline" className="text-xs">{side}</Badge>
+                                <Badge variant="outline" className={`text-xs ${sideBadgeClass}`}>{side}</Badge>
                                 <span className={`font-semibold ${profitColor}`}>${profit.toFixed(2)}</span>
                                 <span className="text-xs text-muted-foreground ml-auto">#{linkedTrade.id}</span>
                               </div>
@@ -753,12 +768,12 @@ export default function JournalPage() {
                 {selectedTrades.length > 0 && (
                   <div className="space-y-2 mb-2">
                     {selectedTrades.map((trade: any) => {
-                      const { symbol, profit, profitColor, side } = formatTradeOption(trade);
+                      const { symbol, profit, profitColor, side, sideBadgeClass } = formatTradeOption(trade);
                       return (
                         <div key={trade.id} className="flex items-center gap-2 p-2 border rounded-md bg-muted/50">
                           <div className="flex-1 flex items-center gap-2">
                             <span className="font-medium">{symbol}</span>
-                            <Badge variant="outline" className="text-xs">{side}</Badge>
+                            <Badge variant="outline" className={`text-xs ${sideBadgeClass}`}>{side}</Badge>
                             <span className={profitColor}>${profit.toFixed(2)}</span>
                             <span className="text-xs text-muted-foreground">#{trade.id}</span>
                           </div>
@@ -790,7 +805,7 @@ export default function JournalPage() {
                           </p>
                         ) : (
                           filteredTrades.map((trade: any) => {
-                            const { symbol, profit, profitColor, side } = formatTradeOption(trade);
+                            const { symbol, profit, profitColor, side, sideBadgeClass } = formatTradeOption(trade);
                             const isSelected = selectedTradeIds.includes(trade.id);
                             return (
                               <div
@@ -800,7 +815,7 @@ export default function JournalPage() {
                               >
                                 <div className="flex items-center gap-2">
                                   <span className="font-medium">{symbol}</span>
-                                  <Badge variant="outline" className="text-xs">{side}</Badge>
+                                  <Badge variant="outline" className={`text-xs ${sideBadgeClass}`}>{side}</Badge>
                                 </div>
                                 <span className={profitColor}>${profit.toFixed(2)}</span>
                               </div>

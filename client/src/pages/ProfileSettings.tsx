@@ -137,6 +137,46 @@ export default function ProfileSettings() {
     return baseMatch ?? fallback;
   };
 
+  const formatDateTime = (
+    value: unknown,
+    options?: Intl.DateTimeFormatOptions,
+    fallback = "N/A",
+  ) => {
+    if (value === null || value === undefined) return fallback;
+    const toLocale = (d: Date) => d.toLocaleString(locale || "en", options);
+    const coerceNumber = (n: number) => {
+      const ms = n < 1e12 ? n * 1000 : n;
+      const d = new Date(ms);
+      return Number.isNaN(d.getTime()) ? null : d;
+    };
+
+    if (typeof value === "number" && Number.isFinite(value)) {
+      if (value <= 0) return fallback;
+      const d = coerceNumber(value);
+      return d ? toLocale(d) : fallback;
+    }
+
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (!trimmed) return fallback;
+      if (/^\d+$/.test(trimmed)) {
+        const num = Number(trimmed);
+        if (!Number.isFinite(num) || num <= 0) return fallback;
+        const d = Number.isFinite(num) ? coerceNumber(num) : null;
+        return d ? toLocale(d) : fallback;
+      }
+      const d = new Date(trimmed);
+      return Number.isNaN(d.getTime()) ? fallback : toLocale(d);
+    }
+
+    if (value instanceof Date) {
+      return Number.isNaN(value.getTime()) ? fallback : toLocale(value);
+    }
+
+    const d = new Date(value as any);
+    return Number.isNaN(d.getTime()) ? fallback : toLocale(d);
+  };
+
   const prefetchI18nBundle = async (nextLocale: string) => {
     const normalized = normalizeLanguage(nextLocale);
     return queryClient.fetchQuery({
@@ -775,13 +815,17 @@ export default function ProfileSettings() {
                           <div>
                               <div className="font-medium">Member Since</div>
                               <div className="text-sm text-gray-400">
-                              {user?.createdAt ? new Date(user.createdAt).toLocaleString(locale, {
-                                year: 'numeric', 
-                                month: 'long', 
-                                day: 'numeric',
-                                hour: '2-digit',
-                                minute: '2-digit'
-                              }) : "N/A"}
+                              {formatDateTime(
+                                user?.createdAt,
+                                {
+                                  year: "numeric",
+                                  month: "long",
+                                  day: "numeric",
+                                  hour: "2-digit",
+                                  minute: "2-digit",
+                                },
+                                "N/A",
+                              )}
                             </div>
                           </div>
                         </div>
@@ -1015,18 +1059,7 @@ export default function ProfileSettings() {
                                 <div className="text-xs text-gray-500 mt-1">
                                   {(() => {
                                     const raw = (login as any).eventAt ?? (login as any).createdAt ?? (login as any).at;
-                                    if (!raw) return "Unknown";
-                                    let d: Date;
-                                    if (typeof raw === "number") {
-                                      // Handle epoch seconds vs milliseconds
-                                      d = new Date(raw < 1e12 ? raw * 1000 : raw);
-                                    } else if (typeof raw === "string") {
-                                      // Handle ISO strings
-                                      d = new Date(raw);
-                                    } else {
-                                      d = new Date(raw);
-                                    }
-                                    return isNaN(d.getTime()) ? "Unknown" : d.toLocaleString(locale);
+                                    return formatDateTime(raw, undefined, "Unknown");
                                   })()}
                                 </div>
                               </div>

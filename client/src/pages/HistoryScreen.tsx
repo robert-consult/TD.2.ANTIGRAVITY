@@ -37,6 +37,7 @@ import {
   PaginationPrevious,
 } from "@/components/ui/pagination";
 import { useI18n } from "@/i18n";
+import { useMobile } from "@/hooks/use-mobile";
 
 // Get variant-based badge styles for close reason
 function getCloseReasonBadgeClass(variant: CloseReasonUiVariant): string {
@@ -76,10 +77,13 @@ export default function HistoryScreen() {
   };
   const [symbolFilter, setSymbolFilter] = useState("all");
   const [timeFilter, setTimeFilter] = useState("7days");
+  const [lastTimeFilter, setLastTimeFilter] = useState("7days");
   const [closeReasonFilter, setCloseReasonFilter] = useState("all");
   const [search, setSearch] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const [customDateRange, setCustomDateRange] = useState<DateRange | undefined>(undefined);
+  const [isDateRangeOpen, setIsDateRangeOpen] = useState(false);
+  const isMobile = useMobile();
   
   // Get trader-facing close reasons for filter dropdown
   const traderCloseReasons = listTraderFacingCloseReasons();
@@ -176,6 +180,13 @@ export default function HistoryScreen() {
     currentPage * itemsPerPage
   );
 
+  const handleCustomRangeSelect = (range: DateRange | undefined) => {
+    setCustomDateRange(range);
+    if (range?.from && range?.to) {
+      setCurrentPage(1);
+    }
+  };
+
   return (
     <div className="h-full flex flex-col bg-neutral-900">
       <div className="px-gutter py-3 border-b border-gray-800">
@@ -234,9 +245,14 @@ export default function HistoryScreen() {
           onValueChange={(val) => {
             setTimeFilter(val);
             setCurrentPage(1); // Reset pagination when time filter changes
-            if (val !== 'custom') {
-              setCustomDateRange(undefined);
+            if (val === "custom") {
+              setIsDateRangeOpen(true);
+              return;
             }
+
+            setIsDateRangeOpen(false);
+            setLastTimeFilter(val);
+            setCustomDateRange(undefined);
           }}
         >
           <SelectTrigger className="w-[160px] bg-neutral-850 border-gray-700 text-white">
@@ -274,24 +290,28 @@ export default function HistoryScreen() {
       </div>
 
       {/* Calendar for custom date range */}
-      {timeFilter === 'custom' && (
+      {timeFilter === "custom" && isDateRangeOpen && (
         <div className="px-gutter py-3 border-b border-gray-800" id="dateRangeCollapsible">
           <h3 className="text-sm font-medium text-gray-400 mb-2">Select date range:</h3>
           <div className="bg-neutral-850 rounded-md p-3 inline-block md:w-auto w-full">
             <Calendar
               mode="range"
               selected={customDateRange}
-              onSelect={setCustomDateRange}
+              onSelect={handleCustomRangeSelect}
               className="bg-neutral-850 text-white border-none"
               disabled={(date) => date > new Date()}
+              fixedWeeks
+              numberOfMonths={isMobile ? 1 : 2}
               initialFocus
             />
             <div className="mt-3 flex justify-end gap-2">
               <button 
                 className="px-3 py-1 bg-neutral-700 hover:bg-neutral-600 rounded text-white text-sm"
                 onClick={() => {
-                  setTimeFilter("30days");
+                  setTimeFilter(lastTimeFilter);
                   setCustomDateRange(undefined);
+                  setIsDateRangeOpen(false);
+                  setCurrentPage(1);
                 }}
               >
                 Cancel
@@ -299,12 +319,8 @@ export default function HistoryScreen() {
               <button 
                 className="px-3 py-1 bg-blue-600 hover:bg-blue-500 rounded text-white text-sm"
                 onClick={() => {
-                  // If valid date range is selected, hide the calendar component
                   if (customDateRange?.from && customDateRange?.to) {
-                    const dateSelector = document.getElementById('dateRangeCollapsible');
-                    if (dateSelector) {
-                      dateSelector.style.display = 'none';
-                    }
+                    setIsDateRangeOpen(false);
                   }
                 }}
                 disabled={!customDateRange?.from || !customDateRange?.to}
@@ -324,7 +340,7 @@ export default function HistoryScreen() {
       )}
       
       {/* Date range display when calendar is collapsed */}
-      {timeFilter === 'custom' && customDateRange?.from && customDateRange?.to && (
+      {timeFilter === "custom" && customDateRange?.from && customDateRange?.to && !isDateRangeOpen && (
         <div id="dateRangeSummary" className="px-gutter py-2 border-b border-gray-800 flex justify-between items-center">
           <div className="text-sm text-white">
             <span className="text-gray-400 mr-2">Custom range:</span>
@@ -333,10 +349,7 @@ export default function HistoryScreen() {
           <button 
             className="text-blue-400 hover:text-blue-300 text-sm"
             onClick={() => {
-              const dateSelector = document.getElementById('dateRangeCollapsible');
-              if (dateSelector) {
-                dateSelector.style.display = 'block';
-              }
+              setIsDateRangeOpen(true);
             }}
           >
             Change

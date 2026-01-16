@@ -2748,32 +2748,32 @@ export default function AdminDashboard() {
         <CardContent className="p-0">
           <Tabs defaultValue="users" value={activeTab} onValueChange={setActiveTab} className="w-full">
             <TabsList className="flex w-full bg-neutral-700 rounded-none h-auto p-1 gap-0.5 overflow-x-auto">
-              <TabsTrigger value="users" className="shrink-0 text-[10px] sm:text-xs md:text-sm data-[state=active]:bg-neutral-800 px-1.5 sm:px-2 py-1.5">
+              <TabsTrigger value="users" className="shrink-0 text-[10px] sm:text-xs md:text-sm data-[state=active]:bg-blue-600/60 data-[state=active]:text-white px-1.5 sm:px-2 py-1.5">
                 <span className="hidden md:inline">User Management</span>
                 <span className="md:hidden">Users</span>
               </TabsTrigger>
-              <TabsTrigger value="view-as" className="shrink-0 text-[10px] sm:text-xs md:text-sm data-[state=active]:bg-purple-800 px-1.5 sm:px-2 py-1.5">
+              <TabsTrigger value="view-as" className="shrink-0 text-[10px] sm:text-xs md:text-sm data-[state=active]:bg-purple-600/60 data-[state=active]:text-white px-1.5 sm:px-2 py-1.5">
                 <span className="hidden md:inline">View as Trader</span>
                 <span className="md:hidden">View As</span>
               </TabsTrigger>
-              <TabsTrigger value="trades" className="shrink-0 text-[10px] sm:text-xs md:text-sm data-[state=active]:bg-neutral-800 px-1.5 sm:px-2 py-1.5">
+              <TabsTrigger value="trades" className="shrink-0 text-[10px] sm:text-xs md:text-sm data-[state=active]:bg-indigo-600/60 data-[state=active]:text-white px-1.5 sm:px-2 py-1.5">
                 <span className="hidden md:inline">Trade Settings</span>
                 <span className="md:hidden">Trades</span>
               </TabsTrigger>
-              <TabsTrigger value="instruments" className="shrink-0 text-[10px] sm:text-xs md:text-sm data-[state=active]:bg-neutral-800 px-1.5 sm:px-2 py-1.5">
+              <TabsTrigger value="instruments" className="shrink-0 text-[10px] sm:text-xs md:text-sm data-[state=active]:bg-emerald-600/60 data-[state=active]:text-white px-1.5 sm:px-2 py-1.5">
                 <span className="hidden md:inline">Instruments</span>
                 <span className="md:hidden">Instr</span>
               </TabsTrigger>
-              <TabsTrigger value="data" className="shrink-0 text-[10px] sm:text-xs md:text-sm data-[state=active]:bg-neutral-800 px-1.5 sm:px-2 py-1.5">Data</TabsTrigger>
-              <TabsTrigger value="audit" className="shrink-0 text-[10px] sm:text-xs md:text-sm data-[state=active]:bg-neutral-800 px-1.5 sm:px-2 py-1.5">
+              <TabsTrigger value="data" className="shrink-0 text-[10px] sm:text-xs md:text-sm data-[state=active]:bg-teal-600/60 data-[state=active]:text-white px-1.5 sm:px-2 py-1.5">Data</TabsTrigger>
+              <TabsTrigger value="audit" className="shrink-0 text-[10px] sm:text-xs md:text-sm data-[state=active]:bg-amber-600/60 data-[state=active]:text-white px-1.5 sm:px-2 py-1.5">
                 <span className="hidden md:inline">Trade Audit</span>
                 <span className="md:hidden">Audit</span>
               </TabsTrigger>
-              <TabsTrigger value="system" className="shrink-0 text-[10px] sm:text-xs md:text-sm data-[state=active]:bg-neutral-800 px-1.5 sm:px-2 py-1.5">
+              <TabsTrigger value="system" className="shrink-0 text-[10px] sm:text-xs md:text-sm data-[state=active]:bg-slate-600/60 data-[state=active]:text-white px-1.5 sm:px-2 py-1.5">
                 <span className="hidden md:inline">System Config</span>
                 <span className="md:hidden">Config</span>
               </TabsTrigger>
-              <TabsTrigger value="legal" className="shrink-0 text-[10px] sm:text-xs md:text-sm data-[state=active]:bg-neutral-800 px-1.5 sm:px-2 py-1.5">
+              <TabsTrigger value="legal" className="shrink-0 text-[10px] sm:text-xs md:text-sm data-[state=active]:bg-rose-600/60 data-[state=active]:text-white px-1.5 sm:px-2 py-1.5">
                 Legal
               </TabsTrigger>
             </TabsList>

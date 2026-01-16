@@ -38,19 +38,25 @@ export default function SymbolSelect({ onSelected, defaultSymbol }: Props) {
       onChange={(opt) => opt && onSelected(opt as Option)}
       styles={{
         container: (s) => ({ ...s, flex: 1 }),
-        menu: (s) => ({ ...s, zIndex: 5 }),
-        control: (s) => ({ ...s, backgroundColor: 'var(--background)', borderColor: 'var(--border)' }),
+        menu: (s) => ({ ...s, zIndex: 5, backgroundColor: "hsl(var(--popover))" }),
+        menuList: (s) => ({ ...s, backgroundColor: "hsl(var(--popover))" }),
+        control: (s) => ({
+          ...s,
+          backgroundColor: "hsl(var(--background))",
+          borderColor: "hsl(var(--border))",
+        }),
         option: (s, { isFocused, isSelected }) => ({
           ...s,
-          backgroundColor: isSelected 
-            ? 'var(--primary)' 
-            : isFocused 
-              ? 'var(--accent)' 
-              : 'var(--background)',
-          color: isSelected ? 'white' : 'var(--foreground)'
+          backgroundColor: isSelected
+            ? "hsl(var(--primary))"
+            : isFocused
+              ? "hsl(var(--accent))"
+              : "hsl(var(--popover))",
+          color: "hsl(var(--foreground))",
         }),
-        singleValue: (s) => ({ ...s, color: 'var(--foreground)' }),
-        input: (s) => ({ ...s, color: 'var(--foreground)' }),
+        singleValue: (s) => ({ ...s, color: "hsl(var(--foreground))" }),
+        input: (s) => ({ ...s, color: "hsl(var(--foreground))" }),
+        placeholder: (s) => ({ ...s, color: "hsl(var(--muted-foreground))" }),
       }}
     />
   );

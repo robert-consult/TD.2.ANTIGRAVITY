@@ -2517,6 +2517,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           console.error("Error writing DECISION REJECT audit:", auditErr);
         }
         return res.status(503).json({ 
+          code: "QUOTE_STALE",
           message: "Quote is stale. Cannot open trade until fresh quotes are available.",
           symbol: symbolConfig.symbol,
           isStale: true
@@ -2825,12 +2826,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
           console.error("Error writing DECISION REJECT audit:", auditErr);
         }
         return res.status(409).json({ 
+          code: "MAX_CONCURRENT_LOTS",
           message: `Maximum concurrent lots exceeded. Open: ${openLots}, Pending: ${pendingLots}, Requested: ${tradeLots}, Limit: ${effectiveMaxConcurrentLots}`,
           openLots,
           pendingLots,
           currentLots: currentTotalLots,
           requestedLots: tradeLots,
-          maxLots: effectiveMaxConcurrentLots
+          maxLots: effectiveMaxConcurrentLots,
+          limit: effectiveMaxConcurrentLots
         });
       }
       

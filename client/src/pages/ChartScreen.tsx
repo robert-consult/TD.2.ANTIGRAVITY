@@ -6,6 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { toast } from "@/hooks/use-toast";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
+import { getTradeErrorToast } from "@/lib/tradeErrorMessages";
 
 // Declare TradingView type for TypeScript
 declare global {
@@ -362,9 +363,10 @@ export default function ChartScreen({ selectedSymbol }: ChartScreenProps) {
     },
     onError: (error: any) => {
       console.error("Trade execution error:", error);
+      const { title, description } = getTradeErrorToast(error, { symbol: selectedSymbol });
       toast({
-        title: "Trade Failed",
-        description: error.message || "Failed to execute trade. Please try again.",
+        title,
+        description,
         variant: "destructive",
       });
     }

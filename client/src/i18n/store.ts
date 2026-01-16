@@ -19,14 +19,69 @@ type I18nState = {
   version: number;
 };
 
+const listeners = new Set<Listener>();
+const BUNDLE_STORAGE_PREFIX = "i18n.bundle.";
+
+function baseLocale(locale: string | null | undefined): string {
+  if (!locale) return "en";
+  return String(locale).trim().toLowerCase().split("-")[0] || "en";
+}
+
+function parseBundle(raw: string | null): I18nBundle | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as any;
+    if (!parsed || typeof parsed !== "object") return null;
+    if (typeof parsed.locale !== "string") return null;
+    if (!parsed.strings || typeof parsed.strings !== "object") return null;
+    return {
+      locale: String(parsed.locale),
+      etag: typeof parsed.etag === "string" ? parsed.etag : undefined,
+      strings: parsed.strings as Record<string, string>,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function getCachedBundle(locale: string): I18nBundle | null {
+  if (typeof window === "undefined") return null;
+  const normalized = String(locale || "").trim();
+  if (!normalized) return null;
+
+  const keys = [normalized, baseLocale(normalized)];
+  for (const key of keys) {
+    const cached = parseBundle(window.localStorage.getItem(`${BUNDLE_STORAGE_PREFIX}${key}`));
+    if (cached) return cached;
+  }
+  return null;
+}
+
+function persistBundle(bundle: I18nBundle) {
+  if (typeof window === "undefined") return;
+  if (!bundle?.locale) return;
+  try {
+    window.localStorage.setItem(
+      `${BUNDLE_STORAGE_PREFIX}${bundle.locale}`,
+      JSON.stringify(bundle)
+    );
+  } catch {
+    // best-effort cache
+  }
+}
+
+const initialLocale =
+  typeof window !== "undefined"
+    ? (window.localStorage.getItem("i18n.locale") || "en")
+    : "en";
+const initialBundle = getCachedBundle(initialLocale);
+
 let state: I18nState = {
-  locale: "en",
-  bundle: null,
+  locale: initialLocale,
+  bundle: initialBundle,
   config: null,
   version: 0,
 };
-
-const listeners = new Set<Listener>();
 
 export function getI18nState(): I18nState {
   return state;
@@ -46,6 +101,7 @@ export function setI18nLocale(locale: string) {
 
 export function setI18nBundle(bundle: I18nBundle | null) {
   state = { ...state, bundle, version: state.version + 1 };
+  if (bundle) persistBundle(bundle);
   for (const l of listeners) l();
 }
 
@@ -53,4 +109,3 @@ export function setI18nConfig(config: I18nConfig | null) {
   state = { ...state, config };
   for (const l of listeners) l();
 }
-

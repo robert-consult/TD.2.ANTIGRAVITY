@@ -1,7 +1,7 @@
 import React, { createContext, useCallback, useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
-import { getI18nState, setI18nBundle, setI18nConfig, setI18nLocale, type I18nBundle, type I18nConfig } from "./store";
+import { getCachedBundle, getI18nState, setI18nBundle, setI18nConfig, setI18nLocale, type I18nBundle, type I18nConfig } from "./store";
 
 export type I18nContextValue = {
   locale: string;
@@ -202,12 +202,14 @@ export function I18nProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    // Keep the current bundle if it matches the current locale.
-    // This prevents language "falling back to default" during cache clears (logout) and brief refetch gaps.
-    const cur = getI18nState().bundle;
-    if (cur?.locale && baseLocale(cur.locale) === baseLocale(locale)) return;
+    const cached = getCachedBundle(locale);
+    if (cached) {
+      setI18nBundle(cached);
+      return;
+    }
 
-    setI18nBundle(null);
+    // Keep the current bundle to avoid a brief English fallback while fetching a new locale.
+    // The bundle will update as soon as the network response arrives.
   }, [bundleQuery.data, config.enabled, locale]);
 
   const setLocale = useCallback(

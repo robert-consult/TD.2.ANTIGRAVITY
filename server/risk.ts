@@ -201,6 +201,7 @@ export async function riskMiddleware(req: Request, res: Response, next: NextFunc
       // No quote data at all - treat as stale
       if (!quoteRow) {
         return res.status(409).json({ 
+          code: "QUOTE_DATA_MISSING",
           message: `Cannot open trade: no quote data available for ${symbolConfig.symbol}. Please wait for market data.`,
           symbol: symbolConfig.symbol,
           staleThresholdMs
@@ -215,6 +216,7 @@ export async function riskMiddleware(req: Request, res: Response, next: NextFunc
       // Missing or invalid timestamp - treat as stale
       if (lastApiRaw === null || lastApiRaw === undefined || !Number.isFinite(Number(lastApiRaw))) {
         return res.status(409).json({ 
+          code: "QUOTE_TIMESTAMP_INVALID",
           message: `Cannot open trade: quote data for ${symbolConfig.symbol} has no valid timestamp. Please wait for fresh market data.`,
           symbol: symbolConfig.symbol,
           staleThresholdMs
@@ -228,6 +230,7 @@ export async function riskMiddleware(req: Request, res: Response, next: NextFunc
       
       if (isStale) {
         return res.status(409).json({ 
+          code: "QUOTE_STALE",
           message: `Cannot open trade: quote data for ${symbolConfig.symbol} is stale. Please wait for fresh market data.`,
           symbol: symbolConfig.symbol,
           staleThresholdMs
@@ -258,6 +261,7 @@ export async function riskMiddleware(req: Request, res: Response, next: NextFunc
   // 1. Check max concurrent trades per user (OPEN + PENDING)
   if (activeTrades.length >= limits.maxTradesPerUser) {
     return res.status(400).json({
+      code: "MAX_CONCURRENT_TRADES",
       message: `Maximum ${limits.maxTradesPerUser} concurrent trades allowed (OPEN + PENDING).`,
       activeTrades: activeTrades.length,
       limit: limits.maxTradesPerUser,
@@ -270,6 +274,7 @@ export async function riskMiddleware(req: Request, res: Response, next: NextFunc
     const activePerSymbol = activeTrades.filter(t => Number(t.symbolId) === Number(symbolId)).length;
     if (activePerSymbol >= limits.maxTradesPerInstrument) {
       return res.status(400).json({
+        code: "MAX_TRADES_PER_INSTRUMENT",
         message: `Maximum ${limits.maxTradesPerInstrument} concurrent trades allowed per instrument (OPEN + PENDING).`,
         symbolId,
         activePerSymbol,
@@ -284,6 +289,7 @@ export async function riskMiddleware(req: Request, res: Response, next: NextFunc
     const currentLots = activeTrades.reduce((sum, t) => sum + Number((t as any).lots ?? 0), 0);
     if (currentLots + requestedLots > limits.maxConcurrentLots) {
       return res.status(409).json({
+        code: "MAX_CONCURRENT_LOTS",
         message: `Maximum concurrent lots exceeded (OPEN + PENDING). Current=${currentLots}, Requested=${requestedLots}, Limit=${limits.maxConcurrentLots}.`,
         currentLots,
         requestedLots,
@@ -308,6 +314,7 @@ export async function riskMiddleware(req: Request, res: Response, next: NextFunc
 
     if (dailyLossPercent >= limits.dailyLossLimitPct) {
       return res.status(403).json({
+        code: "DAILY_LOSS_LIMIT",
         message: `Daily loss limit of ${limits.dailyLossLimitPct}% reached. Try again tomorrow.`,
         dailyLossPercent,
         limit: limits.dailyLossLimitPct,
@@ -321,6 +328,7 @@ export async function riskMiddleware(req: Request, res: Response, next: NextFunc
     if (lifetimeLossPercent >= limits.lifetimeLossLimitPct) {
       await storage.disableUserAccount(userId);
       return res.status(403).json({
+        code: "LIFETIME_LOSS_LIMIT",
         message: `Lifetime loss limit of ${limits.lifetimeLossLimitPct}% reached. Account has been disabled.`,
         lifetimeLossPercent,
         limit: limits.lifetimeLossLimitPct,

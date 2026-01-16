@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { apiRequest } from "@/lib/queryClient";
+import { getTradeErrorToast } from "@/lib/tradeErrorMessages";
 import { useAuth } from "./use-auth";
 import { useToast } from "./use-toast";
 import { useLiveUpdates } from "@/live/LiveUpdatesProvider";
@@ -86,9 +87,10 @@ export function useTrades() {
       queryClient.invalidateQueries({ queryKey: ["/api/account/summary"] });
     },
     onError: (error: Error) => {
+      const { title, description } = getTradeErrorToast(error);
       toast({
-        title: "Error",
-        description: error.message || "Failed to place trade",
+        title,
+        description,
         variant: "destructive",
       });
     },

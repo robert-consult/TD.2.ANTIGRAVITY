@@ -4,10 +4,14 @@ import { solveBotChallenge } from "./botProof";
 
 export class ApiError extends Error {
   status: number;
-  
-  constructor(message: string, status: number) {
+  code?: string;
+  data?: unknown;
+
+  constructor(message: string, status: number, data?: unknown) {
     super(message);
     this.status = status;
+    this.code = (data as any)?.code ?? (data as any)?.errorCode;
+    this.data = data;
     this.name = "ApiError";
   }
 }
@@ -32,7 +36,7 @@ async function throwIfResNotOk(res: Response) {
         // ignore dispatch failures
       }
     }
-    throw new ApiError(message, res.status);
+    throw new ApiError(message, res.status, errorData ?? undefined);
   }
 }
 

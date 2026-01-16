@@ -28,6 +28,7 @@ import { useToast } from "@/hooks/use-toast";
 import { EditTradeModal } from "@/components/EditTradeModal";
 import { Pencil, X, Zap, Layers, AlertTriangle } from "lucide-react";
 import { useTranslation } from "@/i18n";
+import { getTradeErrorToast } from "@/lib/tradeErrorMessages";
 
 interface TradeScreenProps {
   selectedSymbol: string;
@@ -96,6 +97,13 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
   };
   const toastTemplates = {
     orderPlaced: { text: "Successfully placed a {side} order for {symbol}" },
+    tradeExecutedTitle: { text: "Trade Executed" },
+    tradeErrorTitle: { text: "Trade Error" },
+    missingTradeInfo: { text: "Missing required trade information" },
+    marketPriceMissing: { text: "Current price is not available for market order" },
+    limitPriceMissing: { text: "Please enter a valid limit price" },
+    stopPriceMissing: { text: "Please enter a valid stop price" },
+    invalidOrderType: { text: "Invalid order type" },
   };
 
   const getSideLabel = (side: unknown): string => {
@@ -375,7 +383,7 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
       queryClient.invalidateQueries({ queryKey: ["/api/account/summary"] });
       
       toast({
-        title: "Trade Executed",
+        title: toastTemplates.tradeExecutedTitle.text,
         description: formatTemplate(toastTemplates.orderPlaced.text, {
           side: tradeDirection ? getSideLabel(tradeDirection) : "—",
           symbol: selectedSymbol,
@@ -396,9 +404,11 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
       setActiveTab("active-positions");
     },
     onError: (error) => {
+      const { title, description } = getTradeErrorToast(error, { symbol: selectedSymbol });
+
       toast({
-        title: "Trade Failed",
-        description: error.message || "Failed to execute trade",
+        title,
+        description,
         variant: "destructive",
       });
     },
@@ -407,8 +417,8 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
   const onSubmit = (values: TradeFormValues) => {
     if (!tradeDirection || !selectedSymbolConfig) {
       toast({
-        title: "Trade Error",
-        description: "Missing required trade information",
+        title: toastTemplates.tradeErrorTitle.text,
+        description: toastTemplates.missingTradeInfo.text,
         variant: "destructive",
       });
       return;
@@ -425,8 +435,8 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
       case "Market":
         if (!currentPrice) {
           toast({
-            title: "Trade Error",
-            description: "Current price is not available for market order",
+            title: toastTemplates.tradeErrorTitle.text,
+            description: toastTemplates.marketPriceMissing.text,
             variant: "destructive",
           });
           return;
@@ -437,8 +447,8 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
       case "Limit":
         if (!values.limitPrice || isNaN(Number(values.limitPrice))) {
           toast({
-            title: "Trade Error",
-            description: "Please enter a valid limit price",
+            title: toastTemplates.tradeErrorTitle.text,
+            description: toastTemplates.limitPriceMissing.text,
             variant: "destructive",
           });
           return;
@@ -449,8 +459,8 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
       case "Stop":
         if (!values.stopPrice || isNaN(Number(values.stopPrice))) {
           toast({
-            title: "Trade Error",
-            description: "Please enter a valid stop price",
+            title: toastTemplates.tradeErrorTitle.text,
+            description: toastTemplates.stopPriceMissing.text,
             variant: "destructive",
           });
           return;
@@ -460,8 +470,8 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
         
       default:
         toast({
-          title: "Trade Error",
-          description: "Invalid order type",
+          title: toastTemplates.tradeErrorTitle.text,
+          description: toastTemplates.invalidOrderType.text,
           variant: "destructive",
         });
         return;

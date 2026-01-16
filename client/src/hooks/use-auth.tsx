@@ -69,6 +69,26 @@ const AuthContext = createContext<AuthContextType>({
   stopImpersonating: async () => {},
 });
 
+function baseLocale(value?: string | null): string {
+  return String(value || "").trim().toLowerCase().split("-")[0] || "";
+}
+
+function applyStoredLocale(user: User | null): User | null {
+  if (!user || typeof window === "undefined") return user;
+  try {
+    const stored = localStorage.getItem("i18n.locale");
+    if (!stored) return user;
+    const storedBase = baseLocale(stored);
+    const userBase = baseLocale(user.language);
+    if (!userBase || (userBase === "en" && storedBase && storedBase !== "en")) {
+      return { ...user, language: stored };
+    }
+  } catch {
+    // ignore storage failures
+  }
+  return user;
+}
+
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
@@ -82,7 +102,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       setLoading(true);
       const res = await apiRequest("GET", "/api/auth/current-user");
       const data = await res.json();
-      setUser(data);
+      setUser(applyStoredLocale(data));
     } catch (error) {
       setUser(null);
     } finally {
@@ -95,7 +115,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       setLoading(true);
       const res = await apiRequest("POST", "/api/auth/login", { email, password });
       const data = await res.json();
-      setUser(data);
+      setUser(applyStoredLocale(data));
       queryClient.invalidateQueries();
     } catch (error) {
       throw error;
@@ -114,7 +134,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         ...(opts || {}),
       });
       const data = await res.json();
-      setUser(data);
+      setUser(applyStoredLocale(data));
       queryClient.invalidateQueries();
     } catch (error) {
       throw error;
@@ -171,7 +191,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       try {
         const res = await apiRequest("GET", "/api/auth/current-user");
         const data = await res.json();
-        setUser(data);
+        setUser(applyStoredLocale(data));
       } catch (error) {
         // Silently fail - don't log out on polling errors
       }

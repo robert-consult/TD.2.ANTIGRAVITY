@@ -34,6 +34,7 @@ const TRANSLATABLE_JSX_ATTRS = new Set([
 
 const TRANSLATABLE_OBJECT_KEYS = new Set([
   "title",
+  "titleOverride",
   "description",
   "label",
   "shortLabel",

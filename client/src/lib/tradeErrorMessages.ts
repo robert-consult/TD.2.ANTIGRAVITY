@@ -1,6 +1,6 @@
 import { ApiError } from "@/lib/queryClient";
 
-const templates = {
+const getTemplates = () => ({
   tradeFailedTitle: { text: "Trade Failed" },
   fallbackTradeError: { text: "Failed to execute trade" },
   quoteMissingDesc: { text: "Cannot open trade: no quote data available for {symbol}. Please wait for market data." },
@@ -13,7 +13,7 @@ const templates = {
   lifetimeLossLimitDesc: { text: "Lifetime loss limit of {limit}% reached. Account has been disabled." },
   maxPositionSizeDesc: { text: "Position size {positionSize} exceeds maximum allowed ({maxPositionSize})." },
   minHoldTimeDesc: { text: "Trade must be held for at least {minHoldSec} seconds. {remainingSec} seconds remaining." },
-};
+});
 
 type TemplateVars = Record<string, string | number | boolean | null | undefined>;
 
@@ -45,6 +45,7 @@ export function getTradeErrorToast(
   error: unknown,
   opts?: { symbol?: string }
 ): TradeErrorToast {
+  const templates = getTemplates();
   const apiError = error instanceof ApiError ? error : null;
   const data = (apiError?.data ?? {}) as Record<string, unknown>;
   const code = apiError?.code;

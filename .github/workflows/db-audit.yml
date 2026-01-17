@@ -1,0 +1,33 @@
+name: DB Audit
+
+on:
+  pull_request:
+    paths:
+      - "db/**"
+      - "shared/schema*.ts"
+      - "drizzle.config.ts"
+      - "trading_app.db"
+      - "scripts/dbAudit.ts"
+      - "scripts/dbDumpSchema.ts"
+      - "db/schema.sql"
+  push:
+    paths:
+      - "db/**"
+      - "shared/schema*.ts"
+      - "drizzle.config.ts"
+      - "trading_app.db"
+      - "scripts/dbAudit.ts"
+      - "scripts/dbDumpSchema.ts"
+      - "db/schema.sql"
+
+jobs:
+  db-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+      - run: npm ci
+      - run: npm run db:audit:auto

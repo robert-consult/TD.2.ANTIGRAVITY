@@ -6,7 +6,7 @@ CREATE TABLE users (
     balance TEXT NOT NULL DEFAULT '10000.00',
     created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
     is_admin INTEGER NOT NULL DEFAULT 0
-  , is_disabled INTEGER NOT NULL DEFAULT 0, is_frozen INTEGER NOT NULL DEFAULT 0, freeze_reason_code TEXT, freeze_reason_text TEXT, frozen_at INTEGER, frozen_by INTEGER, name TEXT, phone TEXT, timezone TEXT DEFAULT 'UTC', language TEXT DEFAULT 'en', country TEXT, kyc_status TEXT DEFAULT 'none', kyc_verified_at INTEGER, kyc_expires_at INTEGER, first_name TEXT, last_name TEXT, display_name TEXT, starting_equity REAL DEFAULT 1000000, user_tier TEXT NOT NULL DEFAULT 'CANDIDATE', tier_promoted_at INTEGER, tier_promoted_by INTEGER, selected_at INTEGER, country_iso2 TEXT, region_key TEXT, signup_ip TEXT, signup_ip_hash TEXT, signup_user_agent TEXT, signup_country_code TEXT, signup_region TEXT, signup_city TEXT, signup_latitude REAL, signup_longitude REAL, signup_device_type TEXT, signup_browser TEXT, signup_os TEXT, signup_client_tz TEXT, signup_inferred_tz TEXT, signup_device_fp TEXT, signup_device_install_id TEXT, signup_client_lang TEXT, leverage REAL DEFAULT 50, used_margin REAL DEFAULT 0, equity REAL, free_margin REAL, margin_level REAL, currency TEXT DEFAULT "USD");
+  , is_disabled INTEGER NOT NULL DEFAULT 0, is_frozen INTEGER NOT NULL DEFAULT 0, freeze_reason_code TEXT, freeze_reason_text TEXT, frozen_at INTEGER, frozen_by INTEGER, name TEXT, phone TEXT, timezone TEXT DEFAULT 'UTC', language TEXT DEFAULT 'en', country TEXT, kyc_status TEXT DEFAULT 'none', kyc_verified_at INTEGER, kyc_expires_at INTEGER, first_name TEXT, last_name TEXT, display_name TEXT, starting_equity REAL DEFAULT 1000000, user_tier TEXT NOT NULL DEFAULT 'CANDIDATE', tier_promoted_at INTEGER, tier_promoted_by INTEGER, selected_at INTEGER, country_iso2 TEXT, region_key TEXT, signup_ip TEXT, signup_ip_hash TEXT, signup_user_agent TEXT, signup_country_code TEXT, signup_region TEXT, signup_city TEXT, signup_latitude REAL, signup_longitude REAL, signup_device_type TEXT, signup_browser TEXT, signup_os TEXT, signup_client_tz TEXT, signup_inferred_tz TEXT, signup_device_fp TEXT, signup_device_install_id TEXT, signup_client_lang TEXT, leverage REAL DEFAULT 50, used_margin REAL DEFAULT 0, equity REAL, free_margin REAL, margin_level REAL, currency TEXT DEFAULT "USD", deletion_exempt INTEGER NOT NULL DEFAULT 0, is_deleted INTEGER NOT NULL DEFAULT 0, inactivated_at INTEGER, deleted_at INTEGER, deleted_mode TEXT, deleted_reason TEXT, deleted_by_admin_id INTEGER);
 CREATE TABLE sqlite_sequence(name,seq);
 CREATE TABLE symbol_configs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -89,7 +89,7 @@ Retention:
 - We retain waitlist records until you are invited or you opt out
 
 Opt-out:
-- You can opt out by replying to an invite email or contacting support.', i18n_enabled INTEGER NOT NULL DEFAULT 1, i18n_default_locale TEXT NOT NULL DEFAULT 'en', i18n_supported_locales_csv TEXT NOT NULL DEFAULT 'en,fr,pt,es,de,ar,hi,id,zh,ms,tl,ko,ja,sw,th,bn,tr', i18n_auto_translate INTEGER NOT NULL DEFAULT 1, i18n_llm_enabled INTEGER NOT NULL DEFAULT 1, i18n_llm_provider TEXT NOT NULL DEFAULT 'openai', i18n_llm_model TEXT NOT NULL DEFAULT 'gpt-4o-mini', i18n_llm_max_batch_size INTEGER NOT NULL DEFAULT 50, i18n_llm_max_attempts INTEGER NOT NULL DEFAULT 3);
+- You can opt out by replying to an invite email or contacting support.', i18n_enabled INTEGER NOT NULL DEFAULT 1, i18n_default_locale TEXT NOT NULL DEFAULT 'en', i18n_supported_locales_csv TEXT NOT NULL DEFAULT 'en,fr,pt,es,de,ar,hi,id,zh,ms,tl,ko,ja,sw,th,bn,tr', i18n_auto_translate INTEGER NOT NULL DEFAULT 1, i18n_llm_enabled INTEGER NOT NULL DEFAULT 1, i18n_llm_provider TEXT NOT NULL DEFAULT 'openai', i18n_llm_model TEXT NOT NULL DEFAULT 'gpt-4o-mini', i18n_llm_max_batch_size INTEGER NOT NULL DEFAULT 50, i18n_llm_max_attempts INTEGER NOT NULL DEFAULT 3, inactivity_threshold_days INTEGER NOT NULL DEFAULT 90, deletion_grace_days INTEGER NOT NULL DEFAULT 30, activity_auto_queue_inactive INTEGER NOT NULL DEFAULT 1, activity_auto_soft_delete INTEGER NOT NULL DEFAULT 0, bot_score_threshold INTEGER NOT NULL DEFAULT 40, bot_pow_enabled INTEGER NOT NULL DEFAULT 1, bot_pow_enforce_signup INTEGER NOT NULL DEFAULT 1, bot_pow_enforce_login INTEGER NOT NULL DEFAULT 0, bot_pow_challenge_score INTEGER NOT NULL DEFAULT 25, bot_pow_base_difficulty INTEGER NOT NULL DEFAULT 14, bot_pow_max_difficulty INTEGER NOT NULL DEFAULT 20, bot_pow_ttl_sec INTEGER NOT NULL DEFAULT 120, bot_valkey_enabled INTEGER NOT NULL DEFAULT 1, migration_chunking_enabled INTEGER NOT NULL DEFAULT 0, migration_chunk_size_mb INTEGER NOT NULL DEFAULT 51200, jurisdiction_enforce_by_ip_geo INTEGER NOT NULL DEFAULT 0, jurisdiction_enforce_by_signup_country INTEGER NOT NULL DEFAULT 1, jurisdiction_block_signup INTEGER NOT NULL DEFAULT 1, jurisdiction_block_login INTEGER NOT NULL DEFAULT 1);
 CREATE TABLE trade_audit (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         trade_id INTEGER NOT NULL,
@@ -284,7 +284,7 @@ CREATE TABLE migration_export_jobs (
         data_path TEXT,
         manifest_path TEXT,
         error TEXT
-      );
+      , data_parts_json TEXT, chunking_enabled INTEGER, chunk_size_mb INTEGER);
 CREATE TABLE migration_import_jobs (
         id TEXT PRIMARY KEY,
         mode TEXT NOT NULL,
@@ -300,7 +300,7 @@ CREATE TABLE migration_import_jobs (
         manifest_path TEXT,
         totals_json TEXT NOT NULL DEFAULT '{}',
         error TEXT
-      );
+      , data_parts_json TEXT);
 CREATE TABLE migration_job_logs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         job_id TEXT NOT NULL,
@@ -1094,8 +1094,7 @@ CREATE VIEW vw_trader_stats AS
       MAX(t.closed_at) AS last_trade_date
     FROM users u
     LEFT JOIN trades t ON u.id = t.user_id AND t.status = 'CLOSED'
-    GROUP BY u.id
-/* vw_trader_stats(user_id,username,email,total_trades,win_rate,profit,profit_percent,avg_hold_time,last_trade_date) */;
+    GROUP BY u.id;
 CREATE TABLE daily_closes (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       date TEXT NOT NULL,
@@ -1106,8 +1105,7 @@ CREATE TABLE daily_closes (
       trades_won INTEGER,
       FOREIGN KEY (user_id) REFERENCES users(id)
     );
-CREATE INDEX idx_daily_closes_user_date ON daily_closes(user_id, date)
-  ;
+CREATE INDEX idx_daily_closes_user_date ON daily_closes(user_id, date);
 CREATE TABLE quotes (
     symbol TEXT PRIMARY KEY,
     price REAL NOT NULL,
@@ -1120,4 +1118,43 @@ CREATE TABLE quotes (
     mid REAL,
     spread REAL
   );
+CREATE TABLE bot_risk_assessments (
+        user_id INTEGER PRIMARY KEY,
+        score INTEGER NOT NULL DEFAULT 0,
+        label TEXT NOT NULL DEFAULT 'OK',
+        signals_json TEXT NOT NULL DEFAULT '{}',
+        updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+        FOREIGN KEY(user_id) REFERENCES users(id)
+      );
+CREATE TABLE user_deletion_queue (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL UNIQUE,
+        status TEXT NOT NULL DEFAULT 'GRACE',
+        reason TEXT NOT NULL DEFAULT 'INACTIVE',
+        marked_at INTEGER NOT NULL,
+        grace_expires_at INTEGER NOT NULL,
+        last_active_at INTEGER,
+        executed_at INTEGER,
+        executed_by_admin_id INTEGER,
+        note TEXT,
+        FOREIGN KEY(user_id) REFERENCES users(id)
+      );
+CREATE INDEX idx_bot_risk_score ON bot_risk_assessments(score, updated_at);
+CREATE INDEX idx_user_deletion_queue_status ON user_deletion_queue(status, grace_expires_at);
+CREATE INDEX idx_user_deletion_queue_grace ON user_deletion_queue(grace_expires_at);
+CREATE TABLE signup_jurisdiction_blocks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        email TEXT,
+        email_lower TEXT,
+        username TEXT,
+        ip TEXT,
+        user_agent TEXT,
+        ip_country_iso2 TEXT,
+        selected_country_iso2 TEXT,
+        reason_code TEXT NOT NULL,
+        policy_snapshot_json TEXT,
+        created_at INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER))
+      );
+CREATE INDEX idx_signup_jurisdiction_blocks_email_lower ON signup_jurisdiction_blocks(email_lower);
+CREATE INDEX idx_signup_jurisdiction_blocks_created_at ON signup_jurisdiction_blocks(created_at);
 CREATE UNIQUE INDEX idx_grift_edges_unique ON grift_linked_account_edges(user_a, user_b, link_type, link_value);

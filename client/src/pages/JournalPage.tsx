@@ -106,6 +106,7 @@ export default function JournalPage() {
     { value: "fundamental", label: "Fundamental" },
     { value: "lesson-learned", label: "Lesson learned" },
     { value: "mistake", label: "Mistake" },
+    { value: "over-trading", label: "Over trading" },
     { value: "profitable", label: "Profitable" },
     { value: "loss", label: "Loss" },
   ];

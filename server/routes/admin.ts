@@ -592,6 +592,402 @@ export function registerAdminRoutes(app: Express) {
     }
   });
 
+  const parseDaysParam = (value: unknown, fallback: number) => {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return fallback;
+    return Math.max(0, Math.trunc(parsed));
+  };
+
+  const buildDeactivatedAccountsCte = (cutoff: number | null, params: any[]) => {
+    let cutoffClause = "";
+    if (cutoff !== null) {
+      params.push(cutoff);
+      cutoffClause = `AND e.created_at >= $${params.length}`;
+    }
+
+    return `
+      WITH latest_events AS (
+        SELECT
+          e.user_id AS "userId",
+          e.event_type AS "eventType",
+          e.reason_code AS "reasonCode",
+          e.reason_text AS "reasonText",
+          e.created_at AS "actionAt",
+          ROW_NUMBER() OVER (PARTITION BY e.user_id ORDER BY e.created_at DESC) AS rn
+        FROM user_account_events e
+        WHERE e.event_type IN ('ACCOUNT_SELF_DEACTIVATED', 'ACCOUNT_SELF_DELETED')
+        ${cutoffClause}
+      ),
+      latest AS (
+        SELECT * FROM latest_events WHERE rn = 1
+      ),
+      trade_stats AS (
+        SELECT
+          t.user_id AS "userId",
+          COUNT(*) FILTER (WHERE t.status = 'CLOSED') AS "closedTrades",
+          SUM(
+            CASE
+              WHEN t.status = 'CLOSED' THEN COALESCE(NULLIF(t.profit, '')::numeric, 0)
+              ELSE 0
+            END
+          ) AS "profit",
+          SUM(
+            CASE
+              WHEN t.status = 'CLOSED' AND COALESCE(NULLIF(t.profit, '')::numeric, 0) > 0 THEN 1
+              ELSE 0
+            END
+          ) AS "winningTrades"
+        FROM trades t
+        GROUP BY t.user_id
+      )
+    `;
+  };
+
+  app.get("/api/admin/deactivated-accounts/summary", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const days = parseDaysParam(req.query.days, 30);
+      const nowSec = Math.floor(Date.now() / 1000);
+      const cutoff = days > 0 ? nowSec - (days * 24 * 60 * 60) : null;
+
+      const summaryParams: any[] = [];
+      const summaryCte = buildDeactivatedAccountsCte(cutoff, summaryParams);
+      const summarySql = `
+        ${summaryCte}
+        SELECT
+          COUNT(*) AS total,
+          SUM(CASE WHEN l."eventType" = 'ACCOUNT_SELF_DEACTIVATED' THEN 1 ELSE 0 END) AS deactivated,
+          SUM(CASE WHEN l."eventType" = 'ACCOUNT_SELF_DELETED' THEN 1 ELSE 0 END) AS deleted,
+          COALESCE(AVG(COALESCE(ts."profit", 0)), 0) AS avg_profit,
+          COALESCE(AVG(COALESCE(ts."closedTrades", 0)), 0) AS avg_trades,
+          COALESCE(
+            AVG(
+              CASE
+                WHEN COALESCE(ts."closedTrades", 0) > 0
+                  THEN (COALESCE(ts."winningTrades", 0)::float / ts."closedTrades") * 100
+                ELSE 0
+              END
+            ),
+            0
+          ) AS avg_win_rate
+        FROM latest l
+        LEFT JOIN trade_stats ts ON ts."userId" = l."userId";
+      `;
+      const summaryRow = (await dbClient.query(summarySql, summaryParams)).rows[0] ?? {};
+
+      const reasonsParams: any[] = [];
+      const reasonsCte = buildDeactivatedAccountsCte(cutoff, reasonsParams);
+      const reasonsSql = `
+        ${reasonsCte}
+        SELECT
+          l."reasonCode" AS "reasonCode",
+          l."reasonText" AS "reasonText",
+          COUNT(*) AS count
+        FROM latest l
+        GROUP BY l."reasonCode", l."reasonText"
+        ORDER BY COUNT(*) DESC;
+      `;
+      const reasonsRows = (await dbClient.query(reasonsSql, reasonsParams)).rows ?? [];
+
+      const topParams: any[] = [];
+      const topCte = buildDeactivatedAccountsCte(cutoff, topParams);
+      const topSql = `
+        ${topCte}
+        SELECT
+          l."userId" AS "userId",
+          u.username AS username,
+          u.email AS email,
+          l."eventType" AS "eventType",
+          l."reasonCode" AS "reasonCode",
+          l."reasonText" AS "reasonText",
+          l."actionAt" AS "actionAt",
+          COALESCE(ts."profit", 0) AS "profit",
+          COALESCE(ts."closedTrades", 0) AS "trades",
+          CASE
+            WHEN COALESCE(ts."closedTrades", 0) > 0
+              THEN ROUND((COALESCE(ts."winningTrades", 0)::float / ts."closedTrades") * 100, 2)
+            ELSE 0
+          END AS "winRate"
+        FROM latest l
+        JOIN users u ON u.id = l."userId"
+        LEFT JOIN trade_stats ts ON ts."userId" = l."userId"
+        ORDER BY "profit" DESC NULLS LAST, l."actionAt" DESC
+        LIMIT 5;
+      `;
+      const topRows = (await dbClient.query(topSql, topParams)).rows ?? [];
+
+      res.json({
+        totals: {
+          total: Number(summaryRow.total || 0),
+          deactivated: Number(summaryRow.deactivated || 0),
+          deleted: Number(summaryRow.deleted || 0),
+        },
+        averages: {
+          profitUsd: Number(summaryRow.avg_profit || 0),
+          trades: Number(summaryRow.avg_trades || 0),
+          winRatePct: Number(summaryRow.avg_win_rate || 0),
+        },
+        reasons: reasonsRows.map((row: any) => ({
+          reasonCode: row.reasonCode ? String(row.reasonCode) : null,
+          reasonText: row.reasonText ? String(row.reasonText) : null,
+          count: Number(row.count || 0),
+        })),
+        top: topRows.map((row: any) => ({
+          userId: Number(row.userId),
+          username: row.username ? String(row.username) : null,
+          email: row.email ? String(row.email) : null,
+          mode: row.eventType === "ACCOUNT_SELF_DELETED" ? "DELETED" : "DEACTIVATED",
+          reasonCode: row.reasonCode ? String(row.reasonCode) : null,
+          reasonText: row.reasonText ? String(row.reasonText) : null,
+          profitUsd: Number(row.profit || 0),
+          trades: Number(row.trades || 0),
+          winRatePct: Number(row.winRate || 0),
+          actionAt: row.actionAt ? Number(row.actionAt) : null,
+        })),
+      });
+    } catch (error) {
+      console.error("Deactivated accounts summary error:", error);
+      res.status(500).json({ message: "Failed to load deactivated account summary" });
+    }
+  });
+
+  app.get("/api/admin/deactivated-accounts/export", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const formatRaw = String(req.query.format || "csv").toLowerCase();
+      const format = formatRaw === "jsonl" ? "jsonl" : "csv";
+      const includeTrades = req.query.includeTrades ? String(req.query.includeTrades) !== "0" : true;
+      const days = parseDaysParam(req.query.days, 0);
+      const nowSec = Math.floor(Date.now() / 1000);
+      const cutoff = days > 0 ? nowSec - (days * 24 * 60 * 60) : null;
+
+      const userParams: any[] = [];
+      const userCte = buildDeactivatedAccountsCte(cutoff, userParams);
+      const userSql = `
+        ${userCte}
+        SELECT
+          l."userId" AS "userId",
+          u.username AS username,
+          u.email AS email,
+          l."eventType" AS "eventType",
+          l."reasonCode" AS "reasonCode",
+          l."reasonText" AS "reasonText",
+          l."actionAt" AS "actionAt",
+          COALESCE(ts."profit", 0) AS "profit",
+          COALESCE(ts."closedTrades", 0) AS "trades",
+          CASE
+            WHEN COALESCE(ts."closedTrades", 0) > 0
+              THEN ROUND((COALESCE(ts."winningTrades", 0)::float / ts."closedTrades") * 100, 2)
+            ELSE 0
+          END AS "winRate"
+        FROM latest l
+        JOIN users u ON u.id = l."userId"
+        LEFT JOIN trade_stats ts ON ts."userId" = l."userId"
+        ORDER BY l."actionAt" DESC;
+      `;
+      const userRows = (await dbClient.query(userSql, userParams)).rows as any[];
+
+      const exportUsers = userRows.map((row: any) => ({
+        userId: Number(row.userId),
+        username: row.username ? String(row.username) : null,
+        email: row.email ? String(row.email) : null,
+        actionType: row.eventType === "ACCOUNT_SELF_DELETED" ? "DELETED" : "DEACTIVATED",
+        reasonCode: row.reasonCode ? String(row.reasonCode) : null,
+        reasonText: row.reasonText ? String(row.reasonText) : null,
+        actionAt: row.actionAt ? Number(row.actionAt) : null,
+        profitUsd: Number(row.profit || 0),
+        trades: Number(row.trades || 0),
+        winRatePct: Number(row.winRate || 0),
+      }));
+
+      const userIds = exportUsers.map((row) => row.userId).filter((id) => Number.isFinite(id));
+      const userLookup = new Map(exportUsers.map((row) => [row.userId, row]));
+      const tradesByUser = new Map<number, any[]>();
+
+      if (includeTrades && userIds.length > 0) {
+        const tradesSql = `
+          SELECT
+            t.id AS "tradeId",
+            t.user_id AS "userId",
+            s.symbol AS symbol,
+            t.type AS type,
+            t.status AS status,
+            t.lots AS lots,
+            t.open_price AS "openPrice",
+            t.close_price AS "closePrice",
+            t.profit AS profit,
+            t.opened_at AS "openedAt",
+            t.closed_at AS "closedAt"
+          FROM trades t
+          LEFT JOIN symbol_configs s ON s.id = t.symbol_id
+          WHERE t.user_id = ANY($1::int[])
+          ORDER BY t.user_id, t.opened_at DESC;
+        `;
+
+        const tradeRows = (await dbClient.query(tradesSql, [userIds])).rows as any[];
+        for (const row of tradeRows) {
+          const userId = Number(row.userId);
+          if (!tradesByUser.has(userId)) tradesByUser.set(userId, []);
+          tradesByUser.get(userId)!.push(row);
+        }
+      }
+
+      const filename = `deactivated_accounts_${Date.now()}.${format === "jsonl" ? "jsonl" : "csv"}`;
+      if (format === "jsonl") {
+        res.setHeader("Content-Type", "application/x-ndjson");
+      } else {
+        res.setHeader("Content-Type", "text/csv");
+      }
+      res.setHeader("Content-Disposition", `attachment; filename=${filename}`);
+
+      if (format === "jsonl") {
+        const exportedAt = new Date().toISOString();
+        res.write(JSON.stringify({
+          type: "meta",
+          exportedAt,
+          totalUsers: exportUsers.length,
+          totalTrades: Array.from(tradesByUser.values()).reduce((sum, rows) => sum + rows.length, 0),
+          includeTrades,
+        }) + "\n");
+
+        for (const user of exportUsers) {
+          res.write(JSON.stringify({
+            type: "user",
+            ...user,
+            actionAtIso: user.actionAt ? new Date(user.actionAt * 1000).toISOString() : null,
+            exportedAt,
+          }) + "\n");
+        }
+
+        if (includeTrades) {
+          for (const [userId, trades] of tradesByUser.entries()) {
+            const user = userLookup.get(userId);
+            for (const trade of trades) {
+              res.write(JSON.stringify({
+                type: "trade",
+                userId,
+                username: user?.username ?? null,
+                email: user?.email ?? null,
+                actionType: user?.actionType ?? null,
+                reasonCode: user?.reasonCode ?? null,
+                reasonText: user?.reasonText ?? null,
+                actionAt: user?.actionAt ?? null,
+                tradeId: Number(trade.tradeId),
+                symbol: trade.symbol ? String(trade.symbol) : null,
+                tradeType: trade.type ? String(trade.type) : null,
+                status: trade.status ? String(trade.status) : null,
+                lots: trade.lots != null ? Number(trade.lots) : null,
+                openPrice: trade.openPrice != null ? Number(trade.openPrice) : null,
+                closePrice: trade.closePrice != null ? Number(trade.closePrice) : null,
+                profit: trade.profit != null ? Number(trade.profit) : null,
+                openedAt: trade.openedAt != null ? Number(trade.openedAt) : null,
+                closedAt: trade.closedAt != null ? Number(trade.closedAt) : null,
+                exportedAt,
+              }) + "\n");
+            }
+          }
+        }
+        res.end();
+        return;
+      }
+
+      const csvEscape = (value: any) => {
+        if (value === null || value === undefined) return "";
+        const text = String(value);
+        if (/["\n,]/.test(text)) {
+          return `"${text.replace(/"/g, '""')}"`;
+        }
+        return text;
+      };
+
+      const columns = [
+        "user_id",
+        "username",
+        "email",
+        "action_type",
+        "action_at",
+        "reason_code",
+        "reason_text",
+        "total_profit_usd",
+        "total_trades",
+        "win_rate_pct",
+        "trade_id",
+        "symbol",
+        "trade_type",
+        "trade_status",
+        "lots",
+        "open_price",
+        "close_price",
+        "profit",
+        "opened_at",
+        "closed_at",
+      ];
+
+      res.write(columns.join(",") + "\n");
+
+      for (const user of exportUsers) {
+        const userTrades = includeTrades ? (tradesByUser.get(user.userId) ?? []) : [];
+        const actionAtIso = user.actionAt ? new Date(user.actionAt * 1000).toISOString() : "";
+
+        if (userTrades.length === 0) {
+          const row = [
+            user.userId,
+            user.username || "",
+            user.email || "",
+            user.actionType,
+            actionAtIso,
+            user.reasonCode || "",
+            user.reasonText || "",
+            user.profitUsd,
+            user.trades,
+            user.winRatePct,
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+          ];
+          res.write(row.map(csvEscape).join(",") + "\n");
+          continue;
+        }
+
+        for (const trade of userTrades) {
+          const row = [
+            user.userId,
+            user.username || "",
+            user.email || "",
+            user.actionType,
+            actionAtIso,
+            user.reasonCode || "",
+            user.reasonText || "",
+            user.profitUsd,
+            user.trades,
+            user.winRatePct,
+            Number(trade.tradeId),
+            trade.symbol || "",
+            trade.type || "",
+            trade.status || "",
+            trade.lots ?? "",
+            trade.openPrice ?? "",
+            trade.closePrice ?? "",
+            trade.profit ?? "",
+            trade.openedAt ?? "",
+            trade.closedAt ?? "",
+          ];
+          res.write(row.map(csvEscape).join(",") + "\n");
+        }
+      }
+
+      res.end();
+    } catch (error) {
+      console.error("Deactivated accounts export error:", error);
+      res.status(500).json({ message: "Failed to export deactivated accounts" });
+    }
+  });
+
   // Get trade audit records for admin analysis - INSTITUTIONAL GRADE
   app.get("/api/admin/trade-audit", requireAdmin, async (req: Request, res: Response) => {
     try {

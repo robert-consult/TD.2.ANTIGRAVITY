@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useCallback, useEffect } from "react";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, ApiError } from "@/lib/queryClient";
 import { useQueryClient } from "@tanstack/react-query";
 
 interface User {
@@ -193,7 +193,10 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         const data = await res.json();
         setUser(applyStoredLocale(data));
       } catch (error) {
-        // Silently fail - don't log out on polling errors
+        if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
+          setUser(null);
+          queryClient.clear();
+        }
       }
     }, 2000);
 

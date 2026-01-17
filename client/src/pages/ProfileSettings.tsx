@@ -3,6 +3,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { Header } from "@/components/Header";
@@ -21,7 +22,7 @@ import { fetchWithIdentity } from "@/lib/fetchWithIdentity";
 import { useI18n } from "@/i18n";
 
 export default function ProfileSettings() {
-  const { user, checkAuth, updateUser } = useAuth();
+  const { user, checkAuth, updateUser, logout } = useAuth();
   const { toast } = useToast();
   const { locale, setLocale, supportedLocales } = useI18n();
   
@@ -45,6 +46,12 @@ export default function ProfileSettings() {
     newPassword: false,
     confirmPassword: false,
   });
+
+  const [accountAction, setAccountAction] = useState<"deactivate" | "delete" | null>(null);
+  const [accountReasonCode, setAccountReasonCode] = useState("TAKING_BREAK");
+  const [accountReasonText, setAccountReasonText] = useState("");
+  const [accountPassword, setAccountPassword] = useState("");
+  const [accountConfirm, setAccountConfirm] = useState("");
   
   const [notifications, setNotifications] = useState({
     tradeExecuted: true,
@@ -115,6 +122,17 @@ export default function ProfileSettings() {
   }>({
     queryKey: ["/api/meta/languages"],
   });
+
+  const accountReasonOptions = [
+    { value: "TAKING_BREAK", label: "Taking a break" },
+    { value: "RISK_MANAGEMENT", label: "Risk management concerns" },
+    { value: "POOR_PERFORMANCE", label: "Performance not meeting goals" },
+    { value: "SWITCHING_PLATFORM", label: "Switching platforms" },
+    { value: "SUPPORT_ISSUES", label: "Support or product issues" },
+    { value: "OTHER", label: "Other" },
+  ];
+  const accountActionLabel = accountAction === "delete" ? "Delete" : "Deactivate";
+  const accountConfirmToken = accountAction === "delete" ? "DELETE" : "DEACTIVATE";
 
   const supportedLocaleSet = useMemo(() => {
     return new Set(supportedLocales.map((locale) => locale.toLowerCase()));
@@ -525,6 +543,85 @@ export default function ProfileSettings() {
       newPassword: passwordData.newPassword,
     });
   };
+
+  const resetAccountAction = () => {
+    setAccountAction(null);
+    setAccountReasonCode("TAKING_BREAK");
+    setAccountReasonText("");
+    setAccountPassword("");
+    setAccountConfirm("");
+  };
+
+  const accountActionMutation = useMutation({
+    mutationFn: async (payload: {
+      action: "deactivate" | "delete";
+      reasonCode: string;
+      reasonText: string | null;
+      password: string;
+      confirm: string;
+    }) => {
+      const endpoint = payload.action === "delete"
+        ? "/api/profile/account/delete"
+        : "/api/profile/account/deactivate";
+      const response = await fetchWithIdentity(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          reasonCode: payload.reasonCode,
+          reasonText: payload.reasonText,
+          password: payload.password,
+          confirm: payload.confirm,
+        }),
+      });
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || "Failed to update account status");
+      }
+      return response.json();
+    },
+    onSuccess: async (_data, variables) => {
+      toast({
+        title: variables.action === "delete" ? "Account deleted" : "Account deactivated",
+        description: "You have been logged out.",
+      });
+      resetAccountAction();
+      try {
+        await logout();
+      } catch (error) {
+        console.warn("Logout after account action failed:", error);
+      }
+      window.location.href = "/login";
+    },
+    onError: (error: Error) => {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const handleAccountAction = () => {
+    if (!accountAction) return;
+    if (!accountReasonCode.trim()) {
+      toast({ title: "Reason required", description: "Select a reason before continuing.", variant: "destructive" });
+      return;
+    }
+    if (!accountPassword.trim()) {
+      toast({ title: "Password required", description: "Enter your password to continue.", variant: "destructive" });
+      return;
+    }
+    if (accountConfirm.trim().toUpperCase() !== accountConfirmToken) {
+      toast({ title: "Confirmation required", description: `Type ${accountConfirmToken} to confirm.`, variant: "destructive" });
+      return;
+    }
+
+    const trimmedReasonText = accountReasonText.trim();
+    accountActionMutation.mutate({
+      action: accountAction,
+      reasonCode: accountReasonCode,
+      reasonText: trimmedReasonText ? trimmedReasonText : null,
+      password: accountPassword,
+      confirm: accountConfirm,
+    });
+  };
   
   // Session termination mutation (using new /api/me/sessions endpoint)
   const terminateSessionMutation = useMutation({
@@ -668,6 +765,11 @@ export default function ProfileSettings() {
     { key: "devices", label: "Devices & Activity", icon: Monitor },
     { key: "preferences", label: "Preferences", icon: Globe },
   ] as const;
+  const accountConfirmMatches = accountConfirm.trim().toUpperCase() === accountConfirmToken;
+  const accountActionDisabled = accountActionMutation.isPending
+    || !accountReasonCode.trim()
+    || !accountPassword.trim()
+    || !accountConfirmMatches;
 
   return (
     <div className="min-h-screen min-h-dvh bg-neutral-900 text-white flex flex-col">
@@ -952,6 +1054,37 @@ export default function ProfileSettings() {
                           {loading ? "Updating..." : "Change Password"}
                         </Button>
                       </form>
+                    </CardContent>
+                  </Card>
+
+                  <Card className="bg-neutral-800 border-gray-700">
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        <AlertTriangle className="h-5 w-5 text-amber-500" />
+                        Account Deactivation & Deletion
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="space-y-2 text-sm text-gray-400">
+                        <p>Deactivation disables access immediately and hides you from trader-facing views.</p>
+                        <p>Deletion is a permanent request that disables access while retaining data for audit.</p>
+                      </div>
+                      <div className="flex flex-col sm:flex-row gap-2 mt-4">
+                        <Button
+                          variant="outline"
+                          className="text-amber-400 border-amber-600 hover:bg-amber-900/30"
+                          onClick={() => setAccountAction("deactivate")}
+                        >
+                          Deactivate Account
+                        </Button>
+                        <Button
+                          variant="outline"
+                          className="text-red-400 border-red-600 hover:bg-red-900/30"
+                          onClick={() => setAccountAction("delete")}
+                        >
+                          Delete Account
+                        </Button>
+                      </div>
                     </CardContent>
                   </Card>
                 </>
@@ -1411,6 +1544,97 @@ export default function ProfileSettings() {
               </Button>
             </DialogFooter>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={accountAction !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            resetAccountAction();
+          }
+        }}
+      >
+        <DialogContent className="bg-neutral-800 border-gray-700 max-w-lg">
+          <DialogHeader>
+            <DialogTitle
+              className={`flex items-center gap-2 ${accountAction === "delete" ? "text-red-400" : "text-amber-400"}`}
+            >
+              <AlertTriangle className="h-5 w-5" />
+              {accountActionLabel} Account
+            </DialogTitle>
+            <DialogDescription>
+              {accountAction === "delete"
+                ? "This request disables access and marks the account as deleted. Data is retained for audit."
+                : "This disables access immediately and logs you out on all devices."}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Reason</Label>
+              <Select value={accountReasonCode} onValueChange={setAccountReasonCode}>
+                <SelectTrigger className="bg-neutral-700 border-gray-600">
+                  <SelectValue placeholder="Select a reason" />
+                </SelectTrigger>
+                <SelectContent>
+                  {accountReasonOptions.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="account-reason-text">Additional details (optional)</Label>
+              <Textarea
+                id="account-reason-text"
+                value={accountReasonText}
+                onChange={(e) => setAccountReasonText(e.target.value)}
+                className="bg-neutral-700 border-gray-600"
+                rows={3}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="account-password">Password</Label>
+              <Input
+                id="account-password"
+                type="password"
+                value={accountPassword}
+                onChange={(e) => setAccountPassword(e.target.value)}
+                className="bg-neutral-700 border-gray-600"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="account-confirm">Type {accountConfirmToken} to confirm</Label>
+              <Input
+                id="account-confirm"
+                value={accountConfirm}
+                onChange={(e) => setAccountConfirm(e.target.value)}
+                className="bg-neutral-700 border-gray-600"
+              />
+            </div>
+          </div>
+
+          <DialogFooter className="flex gap-2">
+            <Button variant="outline" onClick={resetAccountAction}>
+              Cancel
+            </Button>
+            <Button
+              variant="outline"
+              className={accountAction === "delete"
+                ? "text-red-400 border-red-600 hover:bg-red-900/30"
+                : "text-amber-400 border-amber-600 hover:bg-amber-900/30"}
+              onClick={handleAccountAction}
+              disabled={accountActionDisabled}
+            >
+              {accountActionMutation.isPending ? "Working..." : `${accountActionLabel} Account`}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

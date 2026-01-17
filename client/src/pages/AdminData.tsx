@@ -20,6 +20,36 @@ interface KPIData {
   avgWinRate: number;
 }
 
+interface DeactivatedSummary {
+  totals: {
+    total: number;
+    deactivated: number;
+    deleted: number;
+  };
+  averages: {
+    profitUsd: number;
+    trades: number;
+    winRatePct: number;
+  };
+  reasons: Array<{
+    reasonCode: string | null;
+    reasonText: string | null;
+    count: number;
+  }>;
+  top: Array<{
+    userId: number;
+    username: string | null;
+    email: string | null;
+    mode: "DEACTIVATED" | "DELETED";
+    reasonCode: string | null;
+    reasonText: string | null;
+    profitUsd: number;
+    trades: number;
+    winRatePct: number;
+    actionAt: number | null;
+  }>;
+}
+
 function formatCompactNumber(value: number): string {
   const absValue = Math.abs(value);
   if (absValue >= 1_000_000_000) {
@@ -34,13 +64,20 @@ function formatCompactNumber(value: number): string {
   return value.toLocaleString();
 }
 
+function formatSignedCurrency(value: number): string {
+  const sign = value < 0 ? "-" : "";
+  return `${sign}${formatCurrency(value)}`;
+}
+
 export default function AdminData() {
   const [dateRange, setDateRange] = useState("30"); // days
-  const [dataTab, setDataTab] = useState<"stats" | "funnel" | "analytics" | "compliance">("stats");
+  const [dataTab, setDataTab] = useState<"stats" | "funnel" | "analytics" | "compliance" | "deactivated">("stats");
   const [traderStats, setTraderStats] = useState<any[]>([]);
   const [filteredStats, setFilteredStats] = useState<any[]>([]);
   const [filterValue, setFilterValue] = useState("");
   const [loading, setLoading] = useState(false);
+  const [deactivatedSummary, setDeactivatedSummary] = useState<DeactivatedSummary | null>(null);
+  const [deactivatedLoading, setDeactivatedLoading] = useState(false);
   const [aggStats, setAggStats] = useState({
     profitPercent: 0,
     winRate: 0,
@@ -176,6 +213,25 @@ export default function AdminData() {
     };
     fetchComplianceData();
   }, [dataTab]);
+
+  useEffect(() => {
+    const fetchDeactivatedSummary = async () => {
+      if (dataTab !== "deactivated") return;
+      setDeactivatedLoading(true);
+      try {
+        const response = await fetchWithIdentity(`/api/admin/deactivated-accounts/summary?days=${dateRange}`);
+        if (response.ok) {
+          const data = await response.json();
+          setDeactivatedSummary(data);
+        }
+      } catch (error) {
+        console.error("Error fetching deactivated account summary:", error);
+      } finally {
+        setDeactivatedLoading(false);
+      }
+    };
+    fetchDeactivatedSummary();
+  }, [dataTab, dateRange]);
 
   // Generate and download CSV data
   const downloadCSV = (type: 'traders' | 'trades' | 'daily') => {
@@ -316,6 +372,14 @@ export default function AdminData() {
     }
   };
 
+  const downloadDeactivatedExport = (format: "csv" | "jsonl") => {
+    const params = new URLSearchParams();
+    params.set("format", format);
+    params.set("days", dateRange);
+    params.set("includeTrades", "1");
+    window.open(`/api/admin/deactivated-accounts/export?${params.toString()}`, "_blank");
+  };
+
   // Format duration in hours to a readable string
   const formatDuration = (hours: number) => {
     if (hours < 1) {
@@ -382,6 +446,12 @@ export default function AdminData() {
           className={`px-3 py-1.5 rounded text-sm transition ${dataTab === "compliance" ? "bg-rose-600 text-white" : "text-gray-300 hover:bg-neutral-600"}`}
         >
           Verification Compliance
+        </button>
+        <button
+          onClick={() => setDataTab("deactivated")}
+          className={`px-3 py-1.5 rounded text-sm transition ${dataTab === "deactivated" ? "bg-amber-600 text-white" : "text-gray-300 hover:bg-neutral-600"}`}
+        >
+          Deactivated Accounts
         </button>
       </div>
 
@@ -823,6 +893,182 @@ export default function AdminData() {
               </div>
             </CardContent>
           </Card>
+        </div>
+      ) : dataTab === "deactivated" ? (
+        <div className="space-y-6">
+          {deactivatedLoading ? (
+            <div className="flex justify-center py-8">
+              <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-amber-400"></div>
+            </div>
+          ) : (
+            <>
+              <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4">
+                <Card className="bg-gradient-to-br from-amber-900/50 to-amber-800/30 border-amber-700">
+                  <CardContent className="p-4">
+                    <div className="text-xs text-amber-300 mb-1">Total Accounts</div>
+                    <div className="text-3xl font-bold text-amber-400">
+                      {deactivatedSummary?.totals.total ?? 0}
+                    </div>
+                    <div className="text-xs text-gray-400 mt-1">Deactivated or deleted</div>
+                  </CardContent>
+                </Card>
+
+                <Card className="bg-gradient-to-br from-orange-900/50 to-orange-800/30 border-orange-700">
+                  <CardContent className="p-4">
+                    <div className="text-xs text-orange-300 mb-1">Deactivated</div>
+                    <div className="text-3xl font-bold text-orange-400">
+                      {deactivatedSummary?.totals.deactivated ?? 0}
+                    </div>
+                    <div className="text-xs text-gray-400 mt-1">Self deactivation</div>
+                  </CardContent>
+                </Card>
+
+                <Card className="bg-gradient-to-br from-red-900/50 to-red-800/30 border-red-700">
+                  <CardContent className="p-4">
+                    <div className="text-xs text-red-300 mb-1">Deleted</div>
+                    <div className="text-3xl font-bold text-red-400">
+                      {deactivatedSummary?.totals.deleted ?? 0}
+                    </div>
+                    <div className="text-xs text-gray-400 mt-1">Self deletion</div>
+                  </CardContent>
+                </Card>
+
+                <Card className="bg-gradient-to-br from-slate-900/50 to-slate-800/30 border-slate-700">
+                  <CardContent className="p-4">
+                    <div className="text-xs text-slate-300 mb-1">Avg Profit</div>
+                    <div className="text-2xl font-bold text-white">
+                      {formatSignedCurrency(deactivatedSummary?.averages.profitUsd ?? 0)}
+                    </div>
+                    <div className="text-xs text-gray-400 mt-1">Closed trades only</div>
+                  </CardContent>
+                </Card>
+
+                <Card className="bg-gradient-to-br from-slate-900/50 to-slate-800/30 border-slate-700">
+                  <CardContent className="p-4">
+                    <div className="text-xs text-slate-300 mb-1">Avg Trades</div>
+                    <div className="text-2xl font-bold text-white">
+                      {(deactivatedSummary?.averages.trades ?? 0).toFixed(1)}
+                    </div>
+                    <div className="text-xs text-gray-400 mt-1">Closed trades</div>
+                  </CardContent>
+                </Card>
+
+                <Card className="bg-gradient-to-br from-slate-900/50 to-slate-800/30 border-slate-700">
+                  <CardContent className="p-4">
+                    <div className="text-xs text-slate-300 mb-1">Avg Win Rate</div>
+                    <div className="text-2xl font-bold text-white">
+                      {(deactivatedSummary?.averages.winRatePct ?? 0).toFixed(1)}%
+                    </div>
+                    <div className="text-xs text-gray-400 mt-1">Closed trades</div>
+                  </CardContent>
+                </Card>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <Card className="bg-neutral-800 border-gray-600">
+                  <CardHeader>
+                    <CardTitle className="text-base text-amber-400">Top Reasons</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-3">
+                      {(deactivatedSummary?.reasons ?? []).length === 0 ? (
+                        <div className="text-sm text-gray-400">No reasons recorded.</div>
+                      ) : (
+                        (deactivatedSummary?.reasons ?? []).slice(0, 10).map((r, index) => (
+                          <div key={`${r.reasonCode || "NONE"}-${index}`} className="flex items-start justify-between gap-3">
+                            <div className="text-sm text-gray-200">
+                              <div className="font-medium">{r.reasonCode || "UNSPECIFIED"}</div>
+                              {r.reasonText ? (
+                                <div className="text-xs text-gray-400">{r.reasonText}</div>
+                              ) : null}
+                            </div>
+                            <div className="text-sm text-gray-300">{r.count}</div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="bg-neutral-800 border-gray-600 lg:col-span-2">
+                  <CardHeader>
+                    <CardTitle className="text-base text-amber-400">Top 5 Deactivated Accounts</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="text-left text-gray-300">
+                            <th className="py-2 pr-4">User</th>
+                            <th className="py-2 pr-4">Action</th>
+                            <th className="py-2 pr-4">Profit</th>
+                            <th className="py-2 pr-4">Trades</th>
+                            <th className="py-2 pr-4">Win %</th>
+                            <th className="py-2 pr-4">Reason</th>
+                            <th className="py-2 pr-4">Date</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(deactivatedSummary?.top ?? []).length === 0 ? (
+                            <tr>
+                              <td colSpan={7} className="py-3 text-gray-400">
+                                No accounts in range.
+                              </td>
+                            </tr>
+                          ) : (
+                            (deactivatedSummary?.top ?? []).map((u) => {
+                              const actionDate = u.actionAt ? parseDate(u.actionAt) : null;
+                              return (
+                                <tr key={u.userId} className="border-t border-gray-700">
+                                  <td className="py-2 pr-4 text-gray-200">
+                                    <div className="font-medium">{u.username || "(no username)"}</div>
+                                    <div className="text-xs text-gray-400">{u.email || "no-email"}</div>
+                                  </td>
+                                  <td className="py-2 pr-4 text-gray-200">
+                                    {u.mode === "DELETED" ? "Delete" : "Deactivate"}
+                                  </td>
+                                  <td className="py-2 pr-4 text-gray-200">
+                                    {formatSignedCurrency(u.profitUsd)}
+                                  </td>
+                                  <td className="py-2 pr-4 text-gray-200">{u.trades}</td>
+                                  <td className="py-2 pr-4 text-gray-200">{u.winRatePct.toFixed(1)}%</td>
+                                  <td className="py-2 pr-4 text-gray-200">
+                                    {u.reasonCode || "UNSPECIFIED"}
+                                  </td>
+                                  <td className="py-2 pr-4 text-gray-400">
+                                    {actionDate ? actionDate.toLocaleDateString() : "N/A"}
+                                  </td>
+                                </tr>
+                              );
+                            })
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+
+              <Card className="bg-neutral-800 border-gray-600">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-base text-amber-400">Exports</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <Button variant="csv" size="sm" onClick={() => downloadDeactivatedExport("csv")}>
+                      Export CSV
+                    </Button>
+                    <Button variant="jsonl" size="sm" onClick={() => downloadDeactivatedExport("jsonl")}>
+                      Export JSONL
+                    </Button>
+                    <span className="text-xs text-gray-400">
+                      Includes deactivated accounts and related trades.
+                    </span>
+                  </div>
+                </CardContent>
+              </Card>
+            </>
+          )}
         </div>
       ) : null}
     </div>

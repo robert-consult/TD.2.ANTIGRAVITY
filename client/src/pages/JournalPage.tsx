@@ -106,7 +106,7 @@ export default function JournalPage() {
     { value: "fundamental", label: "Fundamental" },
     { value: "lesson-learned", label: "Lesson learned" },
     { value: "mistake", label: "Mistake" },
-    { value: "over-trading", label: "Over trading" },
+    { value: "over trading", label: "Over trading" },
     { value: "profitable", label: "Profitable" },
     { value: "loss", label: "Loss" },
   ];
@@ -114,6 +114,24 @@ export default function JournalPage() {
   const tagLabel = (tag: string) => {
     const known = commonTagOptions.find((t) => t.value === tag);
     return known?.label ?? tag;
+  };
+
+  const normalizeTagValue = (tag: string) => {
+    const cleaned = tag.trim().toLowerCase().replace(/\s+/g, " ");
+    if (!cleaned) return "";
+    if (cleaned === "over-trading") return "over trading";
+    return cleaned;
+  };
+
+  const parseTags = (tags: string | null): string[] => {
+    if (!tags) return [];
+    try {
+      const parsed = JSON.parse(tags);
+      if (!Array.isArray(parsed)) return [];
+      return parsed.map((t) => normalizeTagValue(String(t))).filter(Boolean);
+    } catch {
+      return [];
+    }
   };
 
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -302,11 +320,7 @@ export default function JournalPage() {
     setNewNote(entry.note);
     setNewMood(entry.mood || "");
     setSelectedTradeIds(parseEntryTradeIds(entry));
-    try {
-      setNewTags(entry.tags ? JSON.parse(entry.tags) : []);
-    } catch {
-      setNewTags([]);
-    }
+    setNewTags(parseTags(entry.tags));
   };
 
   // Helper to format trade for display
@@ -338,7 +352,7 @@ export default function JournalPage() {
   const selectedTrades = closedTrades.filter((t: any) => selectedTradeIds.includes(t.id));
 
   const addTag = (tag: string) => {
-    const tagClean = tag.trim().toLowerCase();
+    const tagClean = normalizeTagValue(tag);
     if (tagClean && !newTags.includes(tagClean) && newTags.length < 20) {
       setNewTags([...newTags, tagClean]);
     }
@@ -350,9 +364,10 @@ export default function JournalPage() {
   };
 
   const filteredEntries = entries.filter((entry) => {
+    const tagsText = parseTags(entry.tags).join(" ");
     const matchesSearch = searchQuery
       ? entry.note.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (entry.tags && entry.tags.toLowerCase().includes(searchQuery.toLowerCase()))
+        tagsText.toLowerCase().includes(searchQuery.toLowerCase())
       : true;
     const matchesMood = moodFilter !== "all_moods" ? entry.mood === moodFilter : true;
     return matchesSearch && matchesMood;
@@ -364,15 +379,6 @@ export default function JournalPage() {
 
   const getMoodLabel = (mood: string | null) => {
     return moodOptions.find((m) => m.value === mood)?.label || mood || "No mood";
-  };
-
-  const parseTags = (tags: string | null): string[] => {
-    if (!tags) return [];
-    try {
-      return JSON.parse(tags);
-    } catch {
-      return [];
-    }
   };
 
   // Loading state while checking authentication

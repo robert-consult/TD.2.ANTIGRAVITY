@@ -71,6 +71,20 @@ function toMs(value: unknown): number | null {
 
 export default function HistoryScreen() {
   const { locale } = useI18n();
+  const calendarMonthOptions = [
+    { value: 0, label: "January" },
+    { value: 1, label: "February" },
+    { value: 2, label: "March" },
+    { value: 3, label: "April" },
+    { value: 4, label: "May" },
+    { value: 5, label: "June" },
+    { value: 6, label: "July" },
+    { value: 7, label: "August" },
+    { value: 8, label: "September" },
+    { value: 9, label: "October" },
+    { value: 10, label: "November" },
+    { value: 11, label: "December" },
+  ];
   const sideLabels: Record<string, { label: string }> = {
     BUY: { label: "Buy" },
     SELL: { label: "Sell" },
@@ -103,6 +117,13 @@ export default function HistoryScreen() {
   const [endCalendarMonth, setEndCalendarMonth] = useState<Date>(() => {
     return new Date(today.getFullYear(), today.getMonth(), 1);
   });
+  const formatCalendarMonth = (month: Date) => {
+    const label = calendarMonthOptions[month.getMonth()]?.label;
+    return label ?? format(month, "MMMM");
+  };
+  const calendarFormatters = {
+    formatMonthDropdown: (month: Date) => formatCalendarMonth(month),
+  };
   
   // Get trader-facing close reasons for filter dropdown
   const traderCloseReasons = listTraderFacingCloseReasons();
@@ -329,6 +350,7 @@ export default function HistoryScreen() {
                     selected={customDateRange}
                     onSelect={handleCustomRangeSelect}
                     className="bg-neutral-850 text-white border-none"
+                    formatters={calendarFormatters}
                     captionLayout="dropdown"
                     startMonth={calendarStartMonth}
                     endMonth={calendarEndMonth}
@@ -391,6 +413,7 @@ export default function HistoryScreen() {
                       selected={customDateRange}
                       onSelect={handleCustomRangeSelect}
                       className="bg-neutral-850 text-white border-none"
+                      formatters={calendarFormatters}
                       captionLayout="dropdown"
                       startMonth={calendarStartMonth}
                       endMonth={calendarEndMonth}
@@ -413,6 +436,7 @@ export default function HistoryScreen() {
                       selected={customDateRange}
                       onSelect={handleCustomRangeSelect}
                       className="bg-neutral-850 text-white border-none"
+                      formatters={calendarFormatters}
                       captionLayout="dropdown"
                       startMonth={calendarStartMonth}
                       endMonth={calendarEndMonth}

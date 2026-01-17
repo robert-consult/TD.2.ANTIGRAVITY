@@ -34,13 +34,16 @@ async function resolveManifestPath(): Promise<string | null> {
     path.resolve(process.cwd(), "client", "i18n-manifest.json"),
   ];
 
+  const available: Array<{ path: string; mtimeMs: number }> = [];
   for (const p of candidates) {
     try {
-      await fs.access(p);
-      return p;
+      const st = await fs.stat(p);
+      available.push({ path: p, mtimeMs: st.mtimeMs });
     } catch {}
   }
-  return null;
+  if (!available.length) return null;
+  available.sort((a, b) => b.mtimeMs - a.mtimeMs);
+  return available[0].path;
 }
 
 async function readManifestFromDisk(p: string): Promise<I18nManifestFile> {

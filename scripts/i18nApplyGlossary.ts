@@ -21,15 +21,20 @@ async function resolveManifestPath(): Promise<string> {
     path.resolve(process.cwd(), "dist", "public", "i18n-manifest.json"),
     path.resolve(process.cwd(), "client", "i18n-manifest.json"),
   ];
+  const available: Array<{ path: string; mtimeMs: number }> = [];
   for (const candidate of candidates) {
     try {
-      await fs.access(candidate);
-      return candidate;
+      const st = await fs.stat(candidate);
+      available.push({ path: candidate, mtimeMs: st.mtimeMs });
     } catch {
       // try next
     }
   }
-  throw new Error("i18n-manifest.json not found (run npm run build first)");
+  if (!available.length) {
+    throw new Error("i18n-manifest.json not found (run npm run build first)");
+  }
+  available.sort((a, b) => b.mtimeMs - a.mtimeMs);
+  return available[0].path;
 }
 
 async function main() {

@@ -2,11 +2,11 @@
 
 Assumptions:
 - API base: `http://localhost:5000`
-- DB file: `trading_app.db`
+- Postgres: `DATABASE_URL` is set
 - PowerShell terminal
 - Seeded users from `npm run db:seed`:
   - Admin: `admin@local.test` / `changeme`
-  - Demo: `demo@tradingfx.com` / `demo123`
+  - Demo: `demo@tradingfx.com` / `demo1234`
 
 ## 0) Pre-flight (schema + seed + server)
 
@@ -21,9 +21,14 @@ npm run dev
 
 ```powershell
 @'
-const Database = require("better-sqlite3");
-const db = new Database("./trading_app.db");
-const cols = db.prepare("PRAGMA table_info(system_config);").all().map(r => r.name);
+import { Client } from "pg";
+const url = process.env.DATABASE_URL;
+if (!url) throw new Error("DATABASE_URL is required");
+const db = new Client({ connectionString: url });
+await db.connect();
+const cols = (await db.query(
+  "SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name='system_config'"
+)).rows.map(r => String(r.column_name));
 const need = [
   "jurisdiction_restricted_iso2_csv",
   "jurisdiction_restricted_message",
@@ -33,8 +38,8 @@ const need = [
   "jurisdiction_block_login",
 ];
 console.log("missing:", need.filter(n => !cols.includes(n)));
-db.close();
-'@ | node
+await db.end();
+'@ | node --input-type=module
 ```
 
 Expected: `missing: []`
@@ -92,12 +97,21 @@ Confirm user NOT created + block audit row inserted:
 
 ```powershell
 @'
-const Database = require("better-sqlite3");
-const db = new Database("./trading_app.db");
-console.log("users:", db.prepare("SELECT id,email,country_iso2 FROM users WHERE email=?").all("blocked_ir_signup@example.com"));
-console.log("blocks:", db.prepare("SELECT reason_code, ip_country_iso2, selected_country_iso2, created_at FROM signup_jurisdiction_blocks WHERE email_lower=? ORDER BY id DESC LIMIT 3").all("blocked_ir_signup@example.com"));
-db.close();
-'@ | node
+import { Client } from "pg";
+const url = process.env.DATABASE_URL;
+if (!url) throw new Error("DATABASE_URL is required");
+const db = new Client({ connectionString: url });
+await db.connect();
+console.log("users:", (await db.query(
+  "SELECT id,email,country_iso2 FROM users WHERE email=$1",
+  ["blocked_ir_signup@example.com"]
+)).rows);
+console.log("blocks:", (await db.query(
+  "SELECT reason_code, ip_country_iso2, selected_country_iso2, created_at FROM signup_jurisdiction_blocks WHERE email_lower=$1 ORDER BY id DESC LIMIT 3",
+  ["blocked_ir_signup@example.com"]
+)).rows);
+await db.end();
+'@ | node --input-type=module
 ```
 
 ## 5) Signup blocked by IP geo (header simulation)
@@ -122,18 +136,21 @@ Expected: `403` with `blockedBy:["IP_GEO"]`.
 
 ```powershell
 @'
-const Database = require("better-sqlite3");
-const db = new Database("./trading_app.db");
-db.prepare("UPDATE users SET country_iso2=? WHERE email=?").run("IR","demo@tradingfx.com");
-db.close();
-'@ | node
+import { Client } from "pg";
+const url = process.env.DATABASE_URL;
+if (!url) throw new Error("DATABASE_URL is required");
+const db = new Client({ connectionString: url });
+await db.connect();
+await db.query("UPDATE users SET country_iso2=$1 WHERE email=$2", ["IR", "demo@tradingfx.com"]);
+await db.end();
+'@ | node --input-type=module
 
 $cfg.jurisdictionEnforceBySignupCountry = $true
 $cfg.jurisdictionEnforceByIpGeo = $false
 Invoke-RestMethod "$base/api/admin/system-config" -Method Put -ContentType "application/json" -Body ($cfg | ConvertTo-Json) -WebSession $admin
 
 try {
-  Invoke-RestMethod "$base/api/auth/login" -Method Post -ContentType "application/json" -Body (@{ email="demo@tradingfx.com"; password="demo123" } | ConvertTo-Json)
+  Invoke-RestMethod "$base/api/auth/login" -Method Post -ContentType "application/json" -Body (@{ email="demo@tradingfx.com"; password="demo1234" } | ConvertTo-Json)
 } catch {
   $_.Exception.Response.StatusCode.value__
   (New-Object IO.StreamReader($_.Exception.Response.GetResponseStream())).ReadToEnd()
@@ -146,11 +163,14 @@ Expected: `403` with `code:"JURISDICTION_RESTRICTED"`.
 
 ```powershell
 @'
-const Database = require("better-sqlite3");
-const db = new Database("./trading_app.db");
-db.prepare("UPDATE users SET country_iso2=? WHERE email=?").run("IR","admin@local.test");
-db.close();
-'@ | node
+import { Client } from "pg";
+const url = process.env.DATABASE_URL;
+if (!url) throw new Error("DATABASE_URL is required");
+const db = new Client({ connectionString: url });
+await db.connect();
+await db.query("UPDATE users SET country_iso2=$1 WHERE email=$2", ["IR", "admin@local.test"]);
+await db.end();
+'@ | node --input-type=module
 
 $admin2 = New-Object Microsoft.PowerShell.Commands.WebRequestSession
 Invoke-RestMethod "$base/api/auth/login" -Method Post -ContentType "application/json" -Body (@{ email="admin@local.test"; password="changeme" } | ConvertTo-Json) -WebSession $admin2
@@ -167,7 +187,7 @@ $cfg.jurisdictionRestrictedIso2Csv = "KP"
 Invoke-RestMethod "$base/api/admin/system-config" -Method Put -ContentType "application/json" -Body ($cfg | ConvertTo-Json) -WebSession $admin
 
 $demo = New-Object Microsoft.PowerShell.Commands.WebRequestSession
-Invoke-RestMethod "$base/api/auth/login" -Method Post -ContentType "application/json" -Body (@{ email="demo@tradingfx.com"; password="demo123" } | ConvertTo-Json) -WebSession $demo
+Invoke-RestMethod "$base/api/auth/login" -Method Post -ContentType "application/json" -Body (@{ email="demo@tradingfx.com"; password="demo1234" } | ConvertTo-Json) -WebSession $demo
 
 # Re-enable IR restriction
 $cfg.jurisdictionRestrictedIso2Csv = "IR,KP"
@@ -208,7 +228,7 @@ const wsUrl = "ws://localhost:5000/ws";
 const loginRes = await fetch(base + "/api/auth/login", {
   method: "POST",
   headers: { "content-type": "application/json" },
-  body: JSON.stringify({ email: "demo@tradingfx.com", password: "demo123" }),
+  body: JSON.stringify({ email: "demo@tradingfx.com", password: "demo1234" }),
 });
 const setCookie = loginRes.headers.get("set-cookie") || "";
 const m = setCookie.match(/connect\\.sid=([^;]+)/);
@@ -232,4 +252,3 @@ Invoke-RestMethod "$base/api/admin/system-config" -Method Put -ContentType "appl
 
 Expected within ~30s:
 - server emits `ws:error` then closes with `4403` and reason `JURISDICTION_BLOCKED`.
-

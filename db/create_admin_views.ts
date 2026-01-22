@@ -1,12 +1,7 @@
 import { dbClient } from "./index";
-import { dbDialect } from "./config";
 
 const execSql = async (statement: string) => {
-  if (dbDialect === "postgres") {
-    await (dbClient as any).query(statement);
-  } else {
-    (dbClient as any).exec(statement);
-  }
+  await dbClient.query(statement);
 };
 
 /**
@@ -16,9 +11,7 @@ async function createAdminViews() {
   console.log("Creating admin data views...");
 
   // Create a view for trader statistics
-  const viewStatement =
-    dbDialect === "postgres"
-      ? `
+  const viewStatement = `
     CREATE OR REPLACE VIEW vw_trader_stats AS
     SELECT 
       u.id AS user_id,
@@ -33,30 +26,12 @@ async function createAdminViews() {
     FROM users u
     LEFT JOIN trades t ON u.id = t.user_id AND t.status = 'CLOSED'
     GROUP BY u.id
-  `
-      : `
-    CREATE VIEW IF NOT EXISTS vw_trader_stats AS
-    SELECT 
-      u.id AS user_id,
-      u.username,
-      u.email,
-      COUNT(t.id) AS total_trades,
-      ROUND(SUM(CASE WHEN CAST(t.profit AS REAL) > 0 THEN 1 ELSE 0 END) * 100.0 / NULLIF(COUNT(t.id), 0), 2) AS win_rate,
-      ROUND(SUM(CAST(t.profit AS REAL)), 2) AS profit,
-      ROUND(SUM(CAST(t.profit AS REAL)) * 100.0 / NULLIF(u.balance, 0), 2) AS profit_percent,
-      ROUND(AVG((t.closed_at - t.opened_at) / 3600.0), 2) AS avg_hold_time,
-      MAX(t.closed_at) AS last_trade_date
-    FROM users u
-    LEFT JOIN trades t ON u.id = t.user_id AND t.status = 'CLOSED'
-    GROUP BY u.id
   `;
 
   await execSql(viewStatement);
 
   // Create a table for daily P&L tracking if it doesn't exist
-  const dailyClosesStatement =
-    dbDialect === "postgres"
-      ? `
+  const dailyClosesStatement = `
     CREATE TABLE IF NOT EXISTS daily_closes (
       id SERIAL PRIMARY KEY,
       date TEXT NOT NULL,
@@ -65,18 +40,6 @@ async function createAdminViews() {
       profit_day REAL,
       trades_closed INTEGER,
       trades_won INTEGER
-    )
-  `
-      : `
-    CREATE TABLE IF NOT EXISTS daily_closes (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      date TEXT NOT NULL,
-      user_id INTEGER NOT NULL,
-      balance REAL NOT NULL,
-      profit_day REAL,
-      trades_closed INTEGER,
-      trades_won INTEGER,
-      FOREIGN KEY (user_id) REFERENCES users(id)
     )
   `;
 

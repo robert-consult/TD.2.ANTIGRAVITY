@@ -109,7 +109,6 @@ async function queryOne<T = any>(sql: string, args: any[] = []): Promise<T | und
 }
 
 const EXCLUDED_TABLES = new Set<string>([
-  "sqlite_sequence",
   "__drizzle_migrations",
   "migration_export_jobs",
   "migration_import_jobs",

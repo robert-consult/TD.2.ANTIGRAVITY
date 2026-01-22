@@ -4544,78 +4544,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   wss.on("connection", async (socket, req) => {
     const client = socket as LiveClient;
-    client.userId = undefined;
-    client.sessionId = undefined;
-    client.isAdmin = false;
-    client.isImpersonating = false;
-    client.ipCountryIso2 = undefined;
-    client.userCountryIso2 = undefined;
-    client.quoteSymbols = new Set();
-    client.wantsQuotesAll = false;
-    client.wantsTrades = false;
-    client.wantsAccount = false;
+    const pendingMessages: any[] = [];
+    let wsReady = false;
 
-    // Resolve IP country once at connect time (proxy headers preferred).
-    try {
-      const ip = getClientIp(req as any);
-      const geo = buildGeoContext(ip, extractGeoHints(req as any));
-      client.ipCountryIso2 = readWsHeaderIso2(req) ?? (geo?.countryCode ? normIso2(geo.countryCode) : undefined);
-    } catch {
-      client.ipCountryIso2 = readWsHeaderIso2(req);
-    }
-
-    // Bind WS auth to the cookie session (do not trust client-provided userId).
-    try {
-      const wsSess = await getWsSession(req);
-      if (wsSess?.sid && wsSess?.sess) {
-        const sess = wsSess.sess as any;
-        const sessionUserId = Number(sess?.userId);
-        if (Number.isFinite(sessionUserId) && sessionUserId > 0) {
-          client.sessionId = String(wsSess.sid);
-          client.isAdmin = Boolean(sess?.isAdmin);
-          client.isImpersonating = Boolean(sess?.isImpersonating);
-
-          const [userRow] = await db
-            .select({ countryIso2: users.countryIso2, countryLegacy: users.country })
-            .from(users)
-            .where(eq(users.id, sessionUserId))
-            .limit(1);
-
-          if (!userRow) {
-            await destroyCookieSession(String(client.sessionId));
-            wsCloseUnauthorized(socket, "USER_NOT_FOUND");
-            return;
-          }
-
-          const userCountryIso2 =
-            normIso2(userRow?.countryIso2) ??
-            (typeof userRow?.countryLegacy === "string" && userRow.countryLegacy.trim().length === 2
-              ? normIso2(userRow.countryLegacy)
-              : undefined);
-
-          client.userCountryIso2 = userCountryIso2;
-
-          // Enforce jurisdiction login policy for WS connections (admins cannot be locked out).
-          if (!(client.isAdmin && !client.isImpersonating)) {
-            const decision = evaluateLoginJurisdiction({
-              ipCountryIso2: client.ipCountryIso2 ?? null,
-              userCountryIso2: userCountryIso2 ?? null,
-            });
-
-            if (!decision.allowed) {
-              await wsCloseWithPolicy(socket, client, decision);
-              return;
-            }
-          }
-
-          client.userId = sessionUserId;
-        }
-      }
-    } catch (e) {
-      console.warn("[WS] Failed to bind session to websocket:", e);
-    }
-
-    socket.on("message", async (raw) => {
+    const handleMessage = async (raw: any) => {
       try {
         const msg = JSON.parse(raw.toString());
         if (!msg || typeof msg !== "object") return;
@@ -4708,7 +4640,96 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } catch (err) {
         console.error("Invalid WS message:", err);
       }
+    };
+
+    // Attach immediately so we don't drop messages sent right after the handshake.
+    socket.on("message", (raw) => {
+      if (!wsReady) {
+        if (pendingMessages.length < 50) pendingMessages.push(raw);
+        else wsCloseUnauthorized(socket, "WS_BACKPRESSURE");
+        return;
+      }
+      void handleMessage(raw);
     });
+    client.userId = undefined;
+    client.sessionId = undefined;
+    client.isAdmin = false;
+    client.isImpersonating = false;
+    client.ipCountryIso2 = undefined;
+    client.userCountryIso2 = undefined;
+    client.quoteSymbols = new Set();
+    client.wantsQuotesAll = false;
+    client.wantsTrades = false;
+    client.wantsAccount = false;
+
+    // Resolve IP country once at connect time (proxy headers preferred).
+    try {
+      const ip = getClientIp(req as any);
+      const geo = buildGeoContext(ip, extractGeoHints(req as any));
+      client.ipCountryIso2 = readWsHeaderIso2(req) ?? (geo?.countryCode ? normIso2(geo.countryCode) : undefined);
+    } catch {
+      client.ipCountryIso2 = readWsHeaderIso2(req);
+    }
+
+    // Bind WS auth to the cookie session (do not trust client-provided userId).
+    try {
+      const wsSess = await getWsSession(req);
+      if (wsSess?.sid && wsSess?.sess) {
+        const sess = wsSess.sess as any;
+        const sessionUserId = Number(sess?.userId);
+        if (Number.isFinite(sessionUserId) && sessionUserId > 0) {
+          client.sessionId = String(wsSess.sid);
+          client.isAdmin = Boolean(sess?.isAdmin);
+          client.isImpersonating = Boolean(sess?.isImpersonating);
+
+          const [userRow] = await db
+            .select({ countryIso2: users.countryIso2, countryLegacy: users.country })
+            .from(users)
+            .where(eq(users.id, sessionUserId))
+            .limit(1);
+
+          if (!userRow) {
+            await destroyCookieSession(String(client.sessionId));
+            wsCloseUnauthorized(socket, "USER_NOT_FOUND");
+            return;
+          }
+
+          const userCountryIso2 =
+            normIso2(userRow?.countryIso2) ??
+            (typeof userRow?.countryLegacy === "string" && userRow.countryLegacy.trim().length === 2
+              ? normIso2(userRow.countryLegacy)
+              : undefined);
+
+          client.userCountryIso2 = userCountryIso2;
+
+          // Enforce jurisdiction login policy for WS connections (admins cannot be locked out).
+          if (!(client.isAdmin && !client.isImpersonating)) {
+            const decision = evaluateLoginJurisdiction({
+              ipCountryIso2: client.ipCountryIso2 ?? null,
+              userCountryIso2: userCountryIso2 ?? null,
+            });
+
+            if (!decision.allowed) {
+              await wsCloseWithPolicy(socket, client, decision);
+              return;
+            }
+          }
+
+          client.userId = sessionUserId;
+        }
+      }
+    } catch (e) {
+      console.warn("[WS] Failed to bind session to websocket:", e);
+    }
+
+    wsReady = true;
+    if (pendingMessages.length) {
+      const queued = pendingMessages.splice(0);
+      for (const raw of queued) {
+        if (socket.readyState !== WebSocket.OPEN) break;
+        await handleMessage(raw);
+      }
+    }
   });
 
   // Periodically re-check the login jurisdiction policy for connected clients.

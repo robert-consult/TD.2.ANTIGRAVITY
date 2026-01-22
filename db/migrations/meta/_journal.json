@@ -43,6 +43,13 @@
       "when": 1768296537602,
       "tag": "0005_grift_device_users_unique",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1768890902851,
+      "tag": "0006_legal_reaccept_requirements_unique",
+      "breakpoints": true
     }
   ]
 }

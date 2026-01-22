@@ -6,7 +6,7 @@ let migrateOnce: Promise<void> | null = null;
 
 async function ensurePostgresSchema(): Promise<void> {
   if (!isPostgres) {
-    throw new Error("SQLite is no longer supported. Set DB_DIALECT=postgres.");
+    throw new Error("Non-Postgres databases are no longer supported.");
   }
   if (!migrateOnce) {
     migrateOnce = migrate(db, {

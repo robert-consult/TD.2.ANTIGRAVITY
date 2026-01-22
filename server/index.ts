@@ -4,8 +4,6 @@ import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 // Import and initialize admin data views
 import { main as setupAdminViews } from "../db/create_admin_views";
-// Import schema migration helper
-import { ensureCoreTradingSchema, ensureTradeCloseAuditColumns, ensureQuotesColumns, ensureTradeAuditTable, ensureUserSettingsColumns, ensureGlobalSettingsTable, ensureUsersColumns, ensureSystemConfigTable, ensureMarketDailyCloseTable, ensureUserLoginHistoryTable, ensureUserAccountEventsTable, ensureUserAdminNotesTable, ensureLoginHistorySessionColumns, ensureTraderJournalTable, ensureAdminActionsTable, ensureInstitutionalAuditColumns, ensureOrderIntentAuditTable, ensureTradesProvenanceColumns, ensureAuditExportManifestTable, ensureMigrationTables, ensureUserSessionsTable, ensureTieredAccessSchema, ensureUserSessionGeoColumns, ensureLoginHistoryGeoColumns, ensureUserSessionIdentityColumns, ensureLoginHistoryIdentityColumns, ensureLegalComplianceSchema, ensureSignupFreezeWaitlistSchema, ensureSignupFingerprintSchema, ensureDailyFxClosesSchema, ensureI18nSchema, ensureAccountLifecycleSchema } from "./db/ensureSchema";
 import { bootstrapDoc1Seed } from "./legal/bootstrapDoc1Seed";
 import { startGriftEvaluationScheduler } from "./grift/griftScheduler";
 import { startVerificationReminderCron } from "./cron/verificationReminders";
@@ -13,7 +11,7 @@ import { startAccountLifecycleSweepScheduler } from "./services/accountLifecycle
 import { getIp2AsnDatasetPath, maybeImportIp2AsnDataset } from "./grift/griftIp2AsnDataset";
 import { startI18nWorker } from "./i18n/worker";
 import { maybeIngestBuiltManifest } from "./i18n/service";
-import { dbDialect, isPostgres } from "@db/config";
+import { dbDialect } from "@db/config";
 import { dbClient } from "@db";
 import { getValkey } from "./services/valkey";
 import { withGriftClient } from "./grift/griftDb";
@@ -64,7 +62,7 @@ function validateEnvVars() {
   console.log("  - TWILIO_FROM_NUMBER:", process.env.TWILIO_FROM_NUMBER ? "configured" : "MISSING");
   console.log("  - 1Forge API Key:", process.env.FORGE_KEY ? "configured" : "MISSING");
   console.log("  - DB_DIALECT:", dbDialect);
-  console.log("  - DATABASE_URL:", isPostgres ? (process.env.DATABASE_URL ? "configured" : "MISSING") : "sqlite");
+  console.log("  - DATABASE_URL:", process.env.DATABASE_URL ? "configured" : "MISSING");
   
   // ALWAYS fail fast on critical security errors (both dev and prod)
   if (criticalErrors.length > 0) {
@@ -239,78 +237,32 @@ app.use((req, res, next) => {
         }
       }
 
-      // Ensure schema columns exist before starting cron/feeds
-      if (!isPostgres) {
-        if (RUN_WORKER_TASKS) {
-          try {
-            ensureCoreTradingSchema();
-            ensureQuotesColumns();
-            ensureTradeCloseAuditColumns();
-            ensureTradeAuditTable();
-            ensureInstitutionalAuditColumns();
-            ensureOrderIntentAuditTable();
-            ensureUserSettingsColumns();
-            ensureGlobalSettingsTable();
-            ensureUsersColumns();
-            ensureSystemConfigTable();
-            ensureMarketDailyCloseTable();
-            ensureUserLoginHistoryTable();
-            ensureLoginHistorySessionColumns();
-            ensureUserAccountEventsTable();
-            ensureUserAdminNotesTable();
-            ensureTraderJournalTable();
-            ensureAdminActionsTable();
-            ensureUserSessionsTable();
-            ensureUserSessionIdentityColumns();
-            ensureUserSessionGeoColumns();
-            ensureLoginHistoryIdentityColumns();
-            ensureLoginHistoryGeoColumns();
-            ensureTradesProvenanceColumns();
-            ensureAuditExportManifestTable();
-            ensureMigrationTables();
-            ensureTieredAccessSchema();
-            ensureLegalComplianceSchema();
-            ensureSignupFreezeWaitlistSchema();
-            ensureSignupFingerprintSchema();
-            ensureDailyFxClosesSchema();
-            ensureI18nSchema();
-            ensureAccountLifecycleSchema();
-            await bootstrapDoc1Seed();
+      // Seed baseline legal terms + kick off ip2asn import (worker only)
+      if (RUN_WORKER_TASKS) {
+        try {
+          await bootstrapDoc1Seed();
+        } catch (e) {
+          console.warn("[Legal] DOC1 bootstrap failed:", e);
+        }
 
-            // Offline ASN/Org enrichment (SQLite)
-            try {
-              const datasetPath = getIp2AsnDatasetPath();
-              if (datasetPath) {
-                console.warn("[Grift] ip2asn import skipped in SQLite mode (Postgres-only).");
+        try {
+          const datasetPath = getIp2AsnDatasetPath();
+          if (datasetPath) {
+            void (async () => {
+              try {
+                await withGriftClient(async (db) => {
+                  await maybeImportIp2AsnDataset(db, { filePath: datasetPath });
+                });
+              } catch (err) {
+                console.error("[Grift] Failed to import ip2asn dataset:", err);
               }
-            } catch (asnErr) {
-              console.error("[Grift] Failed to evaluate ip2asn dataset path:", asnErr);
-            }
-            
-            log("Schema audit columns verified (institutional-grade)");
-          } catch (error) {
-            console.error("Error ensuring schema columns:", error);
+            })();
           }
-        } else {
-          log("[Role] Skipping SQLite schema ensure (worker only).");
+        } catch (asnErr) {
+          console.error("[Grift] Failed to evaluate/import ip2asn dataset:", asnErr);
         }
       } else {
-        console.warn("[DB] Postgres mode: SQLite schema ensure/seed skipped. Apply Postgres migrations before use.");
-        // Offline ASN/Org enrichment (Postgres)
-        if (RUN_WORKER_TASKS) {
-          try {
-            const datasetPath = getIp2AsnDatasetPath();
-            if (datasetPath) {
-              await withGriftClient(async (db) => {
-                await maybeImportIp2AsnDataset(db, { filePath: datasetPath });
-              });
-            }
-          } catch (asnErr) {
-            console.error("[Grift] Failed to import ip2asn dataset (Postgres):", asnErr);
-          }
-        } else {
-          log("[Role] Skipping ip2asn import (worker only).");
-        }
+        log("[Role] Skipping bootstrap tasks (worker only).");
       }
 
       // i18n: ingest built manifest (if present) and start worker
@@ -335,12 +287,10 @@ app.use((req, res, next) => {
       // Import feed/cron AFTER schema is ensured
       if (RUN_INGESTOR_TASKS) {
         try {
-          if (isPostgres) {
-            await import("./feeds/quoteFeed");
-          } else {
-            await import("./feeds/forgeFeed");
-          }
-          await import("./cron/autoClose");
+          const { startQuoteFeed } = await import("./feeds/quoteFeed");
+          await startQuoteFeed();
+          const { startAutoCloseScheduler } = await import("./cron/autoClose");
+          await startAutoCloseScheduler();
           log("Price feed and auto-close services initialized");
         } catch (error) {
           console.error("Error initializing feed/cron services:", error);

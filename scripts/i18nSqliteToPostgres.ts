@@ -1,7 +1,6 @@
 import "dotenv/config";
-import fs from "fs";
-import path from "path";
-import Database from "better-sqlite3";
+import fs from "node:fs";
+import path from "node:path";
 import { Client } from "pg";
 
 const SQLITE_DB_PATH = process.env.SQLITE_DB_PATH ?? "trading_app.db";
@@ -12,8 +11,21 @@ function log(message: string) {
   console.log(`[i18n-migrate] ${message}`);
 }
 
+async function loadBetterSqlite3(): Promise<any> {
+  try {
+    const mod = await import("better-sqlite3");
+    return (mod as any).default ?? mod;
+  } catch {
+    throw new Error(
+      "Missing optional dependency 'better-sqlite3'. Install it temporarily to run this migration: npm i -D better-sqlite3",
+    );
+  }
+}
+
 function normalizeLocale(raw: unknown): string | null {
-  const s = String(raw ?? "").trim().toLowerCase();
+  const s = String(raw ?? "")
+    .trim()
+    .toLowerCase();
   if (!s) return null;
   if (!/^[a-z]{2,3}(-[a-z0-9]+)?$/.test(s)) return null;
   return s;
@@ -118,7 +130,9 @@ async function upsertTranslations(client: Client, rows: any[]) {
   const params: any[] = [];
   let idx = 1;
   for (const r of rows) {
-    values.push(`($${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++})`);
+    values.push(
+      `($${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++})`,
+    );
     params.push(
       r.string_id,
       r.locale,
@@ -197,7 +211,8 @@ async function main() {
     throw new Error(`SQLite database not found: ${sqlitePath}`);
   }
 
-  const sqlite = new Database(sqlitePath, { readonly: true });
+  const BetterSqlite3 = await loadBetterSqlite3();
+  const sqlite = new BetterSqlite3(sqlitePath, { readonly: true });
   const client = new Client({ connectionString: process.env.DATABASE_URL });
   await client.connect();
 
@@ -315,3 +330,4 @@ main().catch((err) => {
   log(`FAILED: ${err instanceof Error ? err.message : String(err)}`);
   process.exit(1);
 });
+

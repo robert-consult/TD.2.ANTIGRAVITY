@@ -44,6 +44,9 @@ let lastQuoteDbWriteMs = 0;
 let lastDailyCloseWriteMs = 0;
 let lastAccountBatchMs = 0;
 const lastAccountRecalcByUser = new Map<number, number>();
+let started = false;
+let startPromise: Promise<void> | null = null;
+let unsubscribeLiveBus: (() => void) | null = null;
 
 // In-memory cache for quote snapshots with timestamps
 interface QuoteSnapshot {
@@ -593,20 +596,43 @@ function schedulePoll() {
   }, dynamicConfig.pollIntervalMs);
 }
 
-async function startQuoteFeed() {
-  dynamicConfig = await loadFeedConfig();
-  console.log(`[FeedConfig] Initial: poll=${dynamicConfig.pollIntervalMs}ms, stale=${dynamicConfig.staleThresholdMs}ms`);
-  await ensureMarketDailyCloseTable();
-  await refreshDynamicSet(true);
-  void pullBatch();
-  schedulePoll();
+export async function startQuoteFeed(): Promise<void> {
+  if (started) return;
+  if (startPromise) return startPromise;
+
+  startPromise = (async () => {
+    dynamicConfig = await loadFeedConfig();
+    console.log(
+      `[FeedConfig] Initial: poll=${dynamicConfig.pollIntervalMs}ms, stale=${dynamicConfig.staleThresholdMs}ms`,
+    );
+
+    await ensureMarketDailyCloseTable();
+    await refreshDynamicSet(true);
+
+    if (!unsubscribeLiveBus) {
+      unsubscribeLiveBus = onLiveEvent((event) => {
+        if (!event || typeof event !== "object") return;
+        if (event.type === "symbols:updated") {
+          void refreshSymbolsAndPull(String(event?.payload?.action ?? "updated"));
+          return;
+        }
+        if (event.type === "feed:config-updated") {
+          void reloadFeedConfig();
+          return;
+        }
+      });
+    }
+
+    void pullBatch();
+    schedulePoll();
+    started = true;
+  })().catch((err) => {
+    startPromise = null;
+    started = false;
+    throw err;
+  });
+
+  return startPromise;
 }
-
-onLiveEvent((event) => {
-  if (event?.type !== "symbols:updated") return;
-  void refreshSymbolsAndPull(String(event?.payload?.action ?? "updated"));
-});
-
-void startQuoteFeed();
 
 export default { pullBatch };

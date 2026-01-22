@@ -5,6 +5,114 @@ import { isOpenAiConfigured, translateWithOpenAi } from "./providers/openai";
 
 type PlaceholderToken = string;
 
+function baseLocale(locale: string): string {
+  return String(locale || "")
+    .trim()
+    .toLowerCase()
+    .split("-")[0] || "en";
+}
+
+function looksSwedish(text: string): boolean {
+  const s = String(text || "").toLowerCase();
+  if (!s) return false;
+  if (/[åäö]/.test(s)) return true;
+
+  const strongSignals = [
+    "handels",
+    "handel",
+    "inställ",
+    "spara",
+    "slutförd",
+    "rekommendation",
+    "vänligen",
+    "måste",
+    "ställt",
+    "ställ",
+    "kör",
+    "lång",
+    "kort",
+    "senaste",
+    "förlust",
+    "lönsam",
+    "sväng",
+    "lärdom",
+    "dödlägen",
+    "köp",
+    "sälj",
+  ];
+  for (const w of strongSignals) {
+    if (new RegExp(`\\b${w}`, "i").test(s)) return true;
+  }
+
+  const stopwords = [
+    "och",
+    "att",
+    "för",
+    "inte",
+    "det",
+    "den",
+    "som",
+    "med",
+    "till",
+    "från",
+    "dina",
+    "din",
+    "du",
+    "vi",
+    "är",
+    "kan",
+    "ska",
+  ];
+  const hits = stopwords.reduce((n, w) => (new RegExp(`\\b${w}\\b`, "i").test(s) ? n + 1 : n), 0);
+  return hits >= 2;
+}
+
+function hasLatinDiacritics(text: string): boolean {
+  return /[àáâãäåæçèéêëìíîïñòóôõöøùúûüýÿćčđğħıļńőśşšţțűž]/i.test(String(text || ""));
+}
+
+function looksAlbanian(text: string): boolean {
+  const s = String(text || "").toLowerCase();
+  if (!s) return false;
+
+  if (/[ëç]/.test(s)) return true;
+
+  const strongSignals = [
+    "tregt",
+    "ekzekutuar",
+    "ftes",
+    "kërko",
+    "regjistr",
+    "llogari",
+    "siguri",
+    "dësht",
+    "zgjidh",
+    "mirëmbajt",
+    "bazës",
+    "të dhën",
+    "ju lutemi",
+    "nuk është",
+  ];
+  for (const w of strongSignals) {
+    if (s.includes(w)) return true;
+  }
+
+  const stopwords = ["dhe", "të", "është", "për", "nuk", "ju", "lutemi", "tani"];
+  const hits = stopwords.reduce((n, w) => (new RegExp(`\\b${w}\\b`, "i").test(s) ? n + 1 : n), 0);
+  return hits >= 2;
+}
+
+function languageValidationError(locale: string, translated: string): string | null {
+  const base = baseLocale(locale);
+  if (!translated || !String(translated).trim()) return "empty";
+  if (base === "sw") {
+    if (looksSwedish(translated)) return "sw-not-swahili:swedish";
+    if (looksAlbanian(translated)) return "sw-not-swahili:albanian";
+    if (hasLatinDiacritics(translated)) return "sw-not-swahili:diacritics";
+  }
+  return null;
+}
+
 function extractPlaceholderTokens(text: string): Set<PlaceholderToken> {
   const s = new Set<PlaceholderToken>();
   const src = String(text || "");
@@ -182,6 +290,20 @@ export async function runI18nWorkerTick() {
               WHERE id = $4
               `,
               [status, `missing-placeholders:${missing.join(",")}`, now, j.id],
+            );
+            continue;
+          }
+
+          const langErr = languageValidationError(j.locale, String(translated));
+          if (langErr) {
+            const status = j.attempt_count >= cfg.llmMaxAttempts ? "FAILED" : "PENDING";
+            await client.query(
+              `
+              UPDATE i18n_translation_jobs
+              SET status = $1, last_error = $2, locked_at = NULL, locked_by = NULL, updated_at = $3
+              WHERE id = $4
+              `,
+              [status, `bad-language:${langErr}`, now, j.id],
             );
             continue;
           }

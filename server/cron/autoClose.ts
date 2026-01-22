@@ -17,7 +17,7 @@ import { eq } from "drizzle-orm";
 import { globalSettings, trades } from "@shared/schema";
 import { writeTradeAudit, generateCorrelationId, generateOrderId, generateExecutionId, generatePositionId, calculateSpreadPips } from "../lib/auditWriter";
 import type { CloseReasonCode } from "@shared/closeReasons";
-import { publishLiveEvent } from "../services/liveBus";
+import { onLiveEvent, publishLiveEvent } from "../services/liveBus";
 
 const STALE_DEFER_MAX_MIN = Number(process.env.AUTOCLOSE_STALE_DEFER_MAX_MIN ?? 60);
 const ALLOW_STALE_CLOSE = String(process.env.AUTOCLOSE_ALLOW_STALE_CLOSE ?? "true") === "true";
@@ -205,8 +205,16 @@ async function runAutoCloseJob() {
 
 // Schedule recurring job (default: every 60 minutes, configured via global_settings)
 let currentIntervalId: ReturnType<typeof setInterval> | null = null;
+let started = false;
+let startPromise: Promise<void> | null = null;
+let unsubscribeLiveBus: (() => void) | null = null;
 
 export async function scheduleAutoClose() {
+  if (!started) {
+    log("[Auto-close] schedule requested but scheduler not started; skipping");
+    return;
+  }
+
   const settings = await getAutoCloseSettings();
   const intervalMs = settings.autoCloseCheckFrequencyMinutes * 60 * 1000;
 
@@ -218,5 +226,28 @@ export async function scheduleAutoClose() {
   currentIntervalId = setInterval(runAutoCloseJob, intervalMs);
 }
 
-// Initialize the schedule
-scheduleAutoClose();
+export async function startAutoCloseScheduler(): Promise<void> {
+  if (started) return;
+  if (startPromise) return startPromise;
+
+  startPromise = (async () => {
+    started = true;
+
+    if (!unsubscribeLiveBus) {
+      unsubscribeLiveBus = onLiveEvent((event) => {
+        if (!event || typeof event !== "object") return;
+        if (event.type === "autoclose:reschedule" || event.type === "global-settings:updated") {
+          void scheduleAutoClose();
+        }
+      });
+    }
+
+    await scheduleAutoClose();
+  })().catch((err) => {
+    started = false;
+    startPromise = null;
+    throw err;
+  });
+
+  return startPromise;
+}

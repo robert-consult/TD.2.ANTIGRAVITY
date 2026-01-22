@@ -1,5 +1,3 @@
-import "./quoteFeed";
-
-export { getCacheStats, getQuoteSnapshotCache, reloadFeedConfig } from "./quoteFeed";
+export { getCacheStats, getQuoteSnapshotCache, reloadFeedConfig, startQuoteFeed } from "./quoteFeed";
 
 export default {};

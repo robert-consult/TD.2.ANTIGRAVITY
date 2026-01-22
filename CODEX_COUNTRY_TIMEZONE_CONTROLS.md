@@ -62,5 +62,5 @@ Ensure Country/Region is set once at signup (jurisdiction selection) and reflect
 - Toggle persists via /api/admin/system-config and affects Profile Settings after refresh.
 
 ## Notes
-- Do not commit sqlite db files; rely on ensureSchema migrations.
+- Do not commit local database files; rely on migrations.
 - Keep diffs minimal and avoid unrelated refactors.

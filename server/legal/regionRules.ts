@@ -11,6 +11,7 @@
 import { db } from "@db";
 import { systemConfig } from "@shared/schema";
 import { eq } from "drizzle-orm";
+import { onLiveEvent } from "../services/liveBus";
 
 // Region definitions matching database addenda jurisdiction_key values
 // NOTE: Single-country "regions" like JAPAN, SOUTH_KOREA, PAKISTAN are removed
@@ -199,6 +200,14 @@ export function invalidateJurisdictionRestrictionPolicyCache() {
   cachedJurisdictionPolicy = null;
   refreshPolicyPromise = null;
 }
+
+// Multi-node: invalidate cached policy across all instances when admin updates system config.
+onLiveEvent((event) => {
+  if (!event || typeof event !== "object") return;
+  if (event.type === "jurisdiction-policy:invalidate" || event.type === "system-config:updated") {
+    invalidateJurisdictionRestrictionPolicyCache();
+  }
+});
 
 export function parseRestrictedCountriesCsv(raw: string | null | undefined): string[] {
   if (!raw) return [...DEFAULT_RESTRICTED_ISO2];

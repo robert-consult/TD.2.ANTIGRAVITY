@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { db } from "@db";
+import { db, dbClient } from "@db";
 import { eq, and, or, desc, sql, asc, lt, gt, gte, lte, isNull, inArray } from "drizzle-orm";
 import bcrypt from "bcryptjs";
 import {
@@ -508,46 +508,65 @@ export const storage = {
 
   // Leaderboard operations
   async getLeaderboard(limit = 10): Promise<any[]> {
-    // For SQLite we'll use a simpler approach
-    const allUsers = await db.query.users.findMany();
-    const allSettings = await db.query.userSettings.findMany();
-    const allTrades = await db.query.trades.findMany({
-      where: eq(trades.status, "CLOSED")
-    });
-    
-    // Calculate profits and win rate for each user
-    const userProfits = allUsers.map(user => {
-      // Check if user should be shown on leaderboard
-      const userSettings = allSettings.find(setting => setting.userId === user.id);
-      if (userSettings && !userSettings.showOnLeaderboard) {
-        return null;
-      }
-      
-      const userTrades = allTrades.filter(trade => trade.userId === user.id);
-      const totalProfit = userTrades.reduce((sum, trade) => {
-        return sum + (trade.profit ? parseFloat(trade.profit) : 0);
-      }, 0);
-      
-      // Calculate win rate
-      const winningTrades = userTrades.filter(trade => trade.profit && parseFloat(trade.profit) > 0);
-      const winRate = userTrades.length > 0 
-        ? (winningTrades.length / userTrades.length) * 100 
-        : 0;
-      
-      return {
-        userId: user.id,
-        username: user.username,
-        profit: totalProfit,
-        winRate: winRate,
-        totalTrades: userTrades.length
-      };
-    });
-    
-    // Filter out null entries, sort by profit and limit
-    return userProfits
-      .filter(entry => entry !== null)
-      .sort((a, b) => b!.profit - a!.profit)
-      .slice(0, limit);
+    const capped = Math.min(100, Math.max(1, Number(limit) || 10));
+
+    const res = await dbClient.query(
+      `
+      WITH closed AS (
+        SELECT
+          t.user_id,
+          CASE
+            WHEN t.profit IS NULL OR btrim(t.profit) = '' THEN 0::numeric
+            WHEN t.profit ~ '^-?\\d+(\\.\\d+)?$' THEN t.profit::numeric
+            ELSE 0::numeric
+          END AS profit_num
+        FROM trades t
+        WHERE t.status = 'CLOSED'
+      )
+      SELECT
+        u.id AS "userId",
+        u.username AS "username",
+        COALESCE(SUM(c.profit_num), 0)::float8 AS "profit",
+        COALESCE(
+          ROUND(
+            (
+              COALESCE(SUM(c.profit_num), 0)
+              / NULLIF(COALESCE(u.starting_equity, 1000000)::numeric, 0)
+            ) * 100,
+            1
+          ),
+          0
+        )::float8 AS "profitPct",
+        COALESCE(
+          ROUND(
+            (
+              SUM(CASE WHEN c.profit_num > 0 THEN 1 ELSE 0 END)::numeric
+              / NULLIF(COUNT(c.profit_num), 0)::numeric
+            ) * 100,
+            1
+          ),
+          0
+        )::float8 AS "winRate",
+        COUNT(c.profit_num)::int AS "totalTrades"
+      FROM users u
+      LEFT JOIN user_settings us ON us.user_id = u.id
+      LEFT JOIN closed c ON c.user_id = u.id
+      WHERE COALESCE(us.show_lb, true) = true
+      GROUP BY u.id, u.username, u.starting_equity
+      ORDER BY "profit" DESC
+      LIMIT $1
+      `,
+      [capped],
+    );
+
+    return res.rows.map((r: any) => ({
+      userId: Number(r.userId),
+      username: String(r.username ?? ""),
+      profit: Number(r.profit ?? 0),
+      profitPct: Number(r.profitPct ?? 0),
+      winRate: Number(r.winRate ?? 0),
+      totalTrades: Number(r.totalTrades ?? 0),
+    }));
   },
 
   async updateTradeTargets(

@@ -1161,7 +1161,7 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
                                     return timestamp.toLocaleString();
                                   }
                                   
-                                  // For Unix timestamps in seconds (standard in SQLite)
+                                  // For Unix timestamps in seconds
                                   if (typeof timestamp === 'number' && timestamp < 10000000000) {
                                     return new Date(timestamp * 1000).toLocaleString();
                                   }

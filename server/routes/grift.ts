@@ -24,12 +24,6 @@ function getDb() {
   return getGriftDb();
 }
 
-function resolveTradingDbPath(): string {
-  const cwdPath = path.resolve(process.cwd(), "trading_app.db");
-  if (fs.existsSync(cwdPath)) return cwdPath;
-  return path.resolve(__dirname, "..", "..", "trading_app.db");
-}
-
 function statFileMaybe(filePath: string): { path: string; exists: boolean; size: number; mtimeMs: number | null } {
   try {
     const stat = fs.statSync(filePath);

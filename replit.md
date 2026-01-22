@@ -17,7 +17,7 @@ Preferred communication style: Simple, everyday language.
 
 ### Backend
 - **Runtime**: Node.js with Express.js REST API
-- **Database**: SQLite with Drizzle ORM
+- **Database**: Postgres with Drizzle ORM
 - **Authentication**: Express sessions, bcrypt, TOTP-based MFA, tiered access control (CANDIDATE → PERFORMER → SELECTED).
 - **Validation**: Zod schemas
 - **Background Tasks**: Node-cron for automated jobs.
@@ -27,7 +27,7 @@ Preferred communication style: Simple, everyday language.
 - **Security**: Geo-enriched session tracking, multi-account abuse detection (Grift Detection System) with point-based risk scoring, impossible travel detection, and a comprehensive signal management system for grift investigation.
 
 ### Data Storage
-- **Primary**: SQLite (better-sqlite3 driver)
+- **Primary**: Postgres (pg)
 - **Schema**: Drizzle ORM (TypeScript-first)
 - **Key Entities**: Users, Trades, Symbols, User Settings, Quote data, Trader Journal, Admin Actions, Tier Progression, Email & MFA tokens, KYC/Payout profiles, Identity Audit, and Grift-related tables (identity links, alerts, user risk, linked accounts, signals, cases, observations, admin actions).
 
@@ -76,7 +76,6 @@ Preferred communication style: Simple, everyday language.
 
 ### Database & ORM
 - **Drizzle Kit**: Database migrations.
-- **Better SQLite3**: High-performance SQLite driver.
 
 ### Security
 - **Speakeasy**: TOTP-based 2FA.

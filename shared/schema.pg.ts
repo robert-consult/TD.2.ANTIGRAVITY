@@ -1608,25 +1608,31 @@ export const legalAcceptances = pgTable("legal_acceptances", {
 });
 
 // Re-acceptance requirements (when active terms change after last user acceptance)
-export const legalReacceptRequirements = pgTable("legal_reaccept_requirements", {
-  id: serial("id").primaryKey(),
-  userId: integer("user_id").notNull().references(() => users.id),
+export const legalReacceptRequirements = pgTable(
+  "legal_reaccept_requirements",
+  {
+    id: serial("id").primaryKey(),
+    userId: integer("user_id").notNull().references(() => users.id),
 
-  docSet: text("doc_set").notNull(), // e.g. "DOC1"
+    docSet: text("doc_set").notNull(), // e.g. "DOC1"
 
-  // Jurisdiction snapshot for the required hash
-  countryIso2: text("country_iso2").notNull(),
-  regionKey: text("region_key"),
+    // Jurisdiction snapshot for the required hash
+    countryIso2: text("country_iso2").notNull(),
+    regionKey: text("region_key"),
 
-  requiredCombinedSha256: text("required_combined_sha256").notNull(),
+    requiredCombinedSha256: text("required_combined_sha256").notNull(),
 
-  // Snapshot of the last known acceptance at the time this requirement was detected
-  lastAcceptedCombinedSha256: text("last_accepted_combined_sha256"),
-  lastAcceptanceId: integer("last_acceptance_id").references(() => legalAcceptances.id),
+    // Snapshot of the last known acceptance at the time this requirement was detected
+    lastAcceptedCombinedSha256: text("last_accepted_combined_sha256"),
+    lastAcceptanceId: integer("last_acceptance_id").references(() => legalAcceptances.id),
 
-  detectedAtMs: bigint("detected_at_ms", { mode: "number" }).notNull(),
-  detectedBy: text("detected_by").notNull().default("LOGIN"), // LOGIN | TRADE | STATUS
-});
+    detectedAtMs: bigint("detected_at_ms", { mode: "number" }).notNull(),
+    detectedBy: text("detected_by").notNull().default("LOGIN"), // LOGIN | TRADE | STATUS
+  },
+  (t) => ({
+    uniqueUserDocSet: uniqueIndex("idx_legal_reaccept_requirements_user_docset").on(t.userId, t.docSet),
+  }),
+);
 
 // Legacy (pre-chain) change audit table used by legacy admin routes.
 // Kept to avoid breaking the legacy legal-docs system.

@@ -1,6 +1,5 @@
-import fs from "fs";
-import path from "path";
-import Database from "better-sqlite3";
+import fs from "node:fs";
+import path from "node:path";
 import { Client } from "pg";
 
 const SQLITE_DB_PATH = process.env.SQLITE_DB_PATH ?? "trading_app.db";
@@ -85,6 +84,17 @@ function log(message: string) {
   console.log(`[sqlite->pg] ${message}`);
 }
 
+async function loadBetterSqlite3(): Promise<any> {
+  try {
+    const mod = await import("better-sqlite3");
+    return (mod as any).default ?? mod;
+  } catch {
+    throw new Error(
+      "Missing optional dependency 'better-sqlite3'. Install it temporarily to run this migration: npm i -D better-sqlite3",
+    );
+  }
+}
+
 function quoteIdent(name: string) {
   return `"${name.replace(/"/g, '""')}"`;
 }
@@ -121,11 +131,11 @@ function normalizeInteger(value: any) {
   return Math.trunc(num);
 }
 
-function getSqliteTables(db: Database.Database) {
+function getSqliteTables(db: any) {
   const rows = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all();
   return rows
     .map((r: any) => String(r.name))
-    .filter((name) => !name.startsWith("sqlite_") && !EXCLUDED_TABLES.has(name));
+    .filter((name: string) => !name.startsWith("sqlite_") && !EXCLUDED_TABLES.has(name));
 }
 
 async function getPostgresTables(client: Client) {
@@ -149,7 +159,7 @@ async function getPostgresColumns(client: Client, table: string) {
   }));
 }
 
-function getSqliteColumns(db: Database.Database, table: string) {
+function getSqliteColumns(db: any, table: string) {
   const rows = db.prepare(`PRAGMA table_info(${quoteIdent(table)})`).all();
   return rows.map((r: any) => String(r.name));
 }
@@ -177,19 +187,16 @@ async function main() {
     throw new Error(`SQLite database not found: ${sqlitePath}`);
   }
 
-  const sqlite = new Database(sqlitePath, { readonly: true });
+  const BetterSqlite3 = await loadBetterSqlite3();
+  const sqlite = new BetterSqlite3(sqlitePath, { readonly: true });
   const client = new Client({ connectionString: process.env.DATABASE_URL });
   await client.connect();
 
   const sqliteTables = new Set(getSqliteTables(sqlite));
   const postgresTables = await getPostgresTables(client);
 
-  const ordered = TABLE_ORDER.filter(
-    (t) => sqliteTables.has(t) && postgresTables.has(t),
-  );
-  const extras = [...sqliteTables].filter(
-    (t) => postgresTables.has(t) && !TABLE_ORDER.includes(t),
-  );
+  const ordered = TABLE_ORDER.filter((t) => sqliteTables.has(t) && postgresTables.has(t));
+  const extras = [...sqliteTables].filter((t) => postgresTables.has(t) && !TABLE_ORDER.includes(t));
   const tables = [...ordered, ...extras.sort()];
 
   log(`SQLite: ${sqliteTables.size} tables, Postgres: ${postgresTables.size} tables`);
@@ -197,11 +204,8 @@ async function main() {
 
   for (const table of tables) {
     const pgColumns = await getPostgresColumns(client, table);
-    const pgColumnNames = new Set(pgColumns.map((c) => c.name));
     const sqliteColumns = getSqliteColumns(sqlite, table);
-    const columns = pgColumns
-      .map((c) => c.name)
-      .filter((c) => sqliteColumns.includes(c));
+    const columns = pgColumns.map((c) => c.name).filter((c) => sqliteColumns.includes(c));
 
     if (!columns.length) {
       log(`Skip ${table}: no shared columns`);
@@ -210,7 +214,7 @@ async function main() {
 
     const typeByColumn = new Map(pgColumns.map((c) => [c.name, c.type]));
     const selectSql = `SELECT ${columns.map(quoteIdent).join(", ")} FROM ${quoteIdent(table)}`;
-    let stmt;
+    let stmt: any;
     try {
       stmt = sqlite.prepare(selectSql);
     } catch (err) {
@@ -242,9 +246,7 @@ async function main() {
         });
         values.push(...rowValues);
         const offset = values.length - rowValues.length;
-        const placeholders = rowValues
-          .map((_, i) => `$${offset + i + 1}`)
-          .join(", ");
+        const placeholders = rowValues.map((_, i) => `$${offset + i + 1}`).join(", ");
         valueGroups.push(`(${placeholders})`);
       }
 
@@ -280,3 +282,4 @@ main().catch((err) => {
   console.error(`[sqlite->pg] FAIL: ${err instanceof Error ? err.message : String(err)}`);
   process.exit(1);
 });
+

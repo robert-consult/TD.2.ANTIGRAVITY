@@ -6,14 +6,9 @@ if [ -z "$changed_files" ]; then
   exit 0
 fi
 
-if echo "$changed_files" | grep -E -q '^(db/|shared/schema(\.pg|\.sqlite)?\.ts|shared/schema\.ts|drizzle\.config\.ts|trading_app\.db)'; then
+if echo "$changed_files" | grep -E -q '^(db/|shared/schema\.pg\.ts|shared/schema\.ts|drizzle\.config\.ts|scripts/db(Audit|DumpSchema)\.ts)'; then
   echo "[hook] DB-related changes detected. Running db audit..."
-  npm run db:audit:auto
-
-  if ! git diff --quiet -- db/schema.sql; then
-    echo "[hook] db/schema.sql changed. Please stage the updated file and re-commit."
-    exit 1
-  fi
+  npm run db:audit
 else
   echo "[hook] No DB-related changes detected. Skipping db audit."
 fi

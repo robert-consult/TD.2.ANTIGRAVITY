@@ -1,50 +1,6 @@
-import fs from "node:fs";
 import path from "node:path";
-import Database from "better-sqlite3";
-import { getTableConfig } from "drizzle-orm/sqlite-core";
-import * as codeSchema from "../shared/schema";
 
 type TableColumns = Map<string, Set<string>>;
-
-function quoteIdent(name: string): string {
-  return `"${name.replace(/"/g, '""')}"`;
-}
-
-function getDbTableColumns(db: Database.Database, table: string): Set<string> {
-  const rows = db.prepare(`PRAGMA table_info(${quoteIdent(table)})`).all() as Array<{ name: string }>;
-  return new Set(rows.map((r) => r.name));
-}
-
-function getDbTables(db: Database.Database): string[] {
-  const rows = db
-    .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
-    .all() as Array<{ name: string }>;
-  return rows.map((r) => r.name).filter((name) => !name.startsWith("sqlite_"));
-}
-
-function collectDbColumns(db: Database.Database): TableColumns {
-  const tables = getDbTables(db);
-  const out: TableColumns = new Map();
-  for (const t of tables) out.set(t, getDbTableColumns(db, t));
-  return out;
-}
-
-function collectCodeColumns(): TableColumns {
-  const out: TableColumns = new Map();
-
-  for (const exported of Object.values(codeSchema)) {
-    try {
-      const cfg = getTableConfig(exported as any);
-      const tableName = cfg.name;
-      const columnNames = Object.values(cfg.columns).map((c) => c.name);
-      out.set(tableName, new Set(columnNames));
-    } catch {
-      // Not a Drizzle table export; ignore.
-    }
-  }
-
-  return out;
-}
 
 function diff(expected: Set<string>, actual: Set<string>): { missing: string[]; extra: string[] } {
   const missing: string[] = [];
@@ -98,62 +54,75 @@ function audit(expected: TableColumns, actual: TableColumns, label: string): num
   return issues;
 }
 
-function buildSchemaDumpDb(dumpSql: string): Database.Database {
-  const mem = new Database(":memory:");
-  try {
-    mem.pragma("foreign_keys = ON");
-  } catch {}
+async function collectCodeColumnsPg(): Promise<TableColumns> {
+  const { getTableConfig } = await import("drizzle-orm/pg-core");
+  const codeSchema = await import("../shared/schema.pg");
 
-  // sqlite_sequence is an internal table and cannot be created directly.
-  const sanitized = dumpSql.replace(/^CREATE TABLE sqlite_sequence\(name,seq\);\s*$/gm, "");
-  mem.exec(sanitized);
-  return mem;
+  const out: TableColumns = new Map();
+  for (const exported of Object.values(codeSchema)) {
+    try {
+      const cfg = getTableConfig(exported as any);
+      const tableName = cfg.name;
+      const columnNames = Object.values(cfg.columns).map((c: any) => c.name);
+      out.set(tableName, new Set(columnNames));
+    } catch {
+      // Not a Drizzle table export; ignore.
+    }
+  }
+  return out;
 }
 
-function main() {
-  const repoRoot = path.resolve(import.meta.dirname, "..");
-  const dbPath = path.resolve(repoRoot, "trading_app.db");
-  const schemaDumpPath = path.resolve(repoRoot, "db", "schema.sql");
+async function collectDbColumnsPg(): Promise<TableColumns> {
+  const { dbClient } = await import("../db");
 
-  const codeColumns = collectCodeColumns();
+  const tablesRes = await dbClient.query(
+    `
+    SELECT table_name
+    FROM information_schema.tables
+    WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
+    ORDER BY table_name
+    `,
+  );
+  const tables = tablesRes.rows.map((r: any) => String(r.table_name));
+  if (!tables.length) return new Map();
 
-  const db = new Database(dbPath, { readonly: true, fileMustExist: true });
-  try {
-    const dbColumns = collectDbColumns(db);
+  const colsRes = await dbClient.query(
+    `
+    SELECT table_name, column_name
+    FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = ANY($1::text[])
+    ORDER BY table_name, ordinal_position
+    `,
+    [tables],
+  );
 
-    console.log(`[audit] Tables in code schema: ${codeColumns.size}`);
-    console.log(`[audit] Tables in trading_app.db: ${dbColumns.size}`);
+  const out: TableColumns = new Map();
+  for (const t of tables) out.set(t, new Set());
+  for (const row of colsRes.rows) {
+    const t = String(row.table_name);
+    const c = String(row.column_name);
+    if (!out.has(t)) out.set(t, new Set());
+    out.get(t)!.add(c);
+  }
 
-    let issues = 0;
-    issues += audit(codeColumns, dbColumns, "trading_app.db");
+  await dbClient.end();
+  return out;
+}
 
-    if (fs.existsSync(schemaDumpPath)) {
-      const dumpSql = fs.readFileSync(schemaDumpPath, "utf8");
-      let dumpDb: Database.Database | null = null;
-      try {
-        dumpDb = buildSchemaDumpDb(dumpSql);
-        const dumpColumns = collectDbColumns(dumpDb);
-        console.log(`[audit] Tables in db/schema.sql: ${dumpColumns.size}`);
-        issues += audit(dbColumns, dumpColumns, "db/schema.sql");
-      } catch (e) {
-        issues += 1;
-        console.error("[audit] Failed to load db/schema.sql into SQLite:", e);
-      } finally {
-        dumpDb?.close();
-      }
-    } else {
-      console.warn("[audit] db/schema.sql not found; skipping schema dump check");
-    }
+async function main() {
+  const codeColumns = await collectCodeColumnsPg();
+  const dbColumns = await collectDbColumnsPg();
 
-    if (issues === 0) {
-      console.log("[audit] OK");
-    } else {
-      console.error(`[audit] Found ${issues} issue(s)`);
-      process.exitCode = 1;
-    }
-  } finally {
-    db.close();
+  console.log(`[audit] Tables in code schema: ${codeColumns.size}`);
+  console.log(`[audit] Tables in Postgres (public): ${dbColumns.size}`);
+  const issues = audit(codeColumns, dbColumns, "postgres");
+
+  if (issues === 0) {
+    console.log("[audit] OK");
+  } else {
+    console.error(`[audit] Found ${issues} issue(s)`);
+    process.exitCode = 1;
   }
 }
 
-main();
+void main();

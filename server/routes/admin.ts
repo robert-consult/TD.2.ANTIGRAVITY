@@ -1277,8 +1277,16 @@ export function registerAdminRoutes(app: Express) {
         where: eq(globalSettings.id, 1)
       });
       
-      // Reschedule auto-close with new frequency
-      await scheduleAutoClose();
+      // Propagate changes (multi-role deployments) + reschedule if scheduler is running locally.
+      try {
+        publishLiveEvent({ type: "global-settings:updated", payload: { updatedAt: nowSec } });
+        publishLiveEvent({ type: "autoclose:reschedule", payload: { updatedAt: nowSec } });
+      } catch {}
+      try {
+        await scheduleAutoClose();
+      } catch (e) {
+        console.warn("Could not reschedule auto-close:", e);
+      }
       
       res.json(updated);
     } catch (error) {
@@ -1761,6 +1769,13 @@ export function registerAdminRoutes(app: Express) {
       } catch (e) {
         console.warn("Could not reload feed config:", e);
       }
+
+      // Broadcast config invalidations so other nodes refresh cached policy/feed settings.
+      try {
+        publishLiveEvent({ type: "system-config:updated", payload: { updatedAt: nowSec } });
+        publishLiveEvent({ type: "feed:config-updated", payload: { updatedAt: nowSec } });
+        publishLiveEvent({ type: "jurisdiction-policy:invalidate", payload: { updatedAt: nowSec } });
+      } catch {}
       
       let autoInviteSummary: any = null;
       const isUnfreezingNow = prevFreeze === true && nextFreeze === false;

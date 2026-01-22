@@ -8,11 +8,7 @@ yarn.lock
 .vscode
 .idea
 *.log
-trading_app.db*
-sessions.db*
-*.sqlite
-*.sqlite3
-*.sqlite3-journal
+*.db*
 attached_assets
 migration_exports
 migration_imports

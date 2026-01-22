@@ -4,26 +4,11 @@ dist
 server/public
 vite.config.ts.*
 client/i18n-manifest.json
+*.log
+.tmp/
 
-# --- Databases / backups ---
-# By default, ignore SQLite DBs to avoid accidental bloat, but TRACK the core
-# TradingCentral artifacts explicitly (main DB, session DB, WAL/SHM, backups).
-*.db
-
-# Core DBs to TRACK
-!trading_app.db
-!sessions.db
-
-# SQLite WAL-mode temp files to TRACK
-!*.db-wal
-!*.db-shm
-
-# Database schema dump - TRACKED for team review
-!db/schema.sql
-
-# Database backups folder - TRACKED
-!db_backups/
-!db_backups/**
-
-# Backup archive formats - TRACKED
-!*.tar.gz
+# --- Database artifacts / dumps ---
+*.db*
+db_backups/
+db/schema*.sql
+db_dump*.sql

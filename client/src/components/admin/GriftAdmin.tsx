@@ -283,23 +283,7 @@ interface DbFileStat {
 }
 
 interface DbMaintenanceStats {
-  engine?: "sqlite" | "postgres";
-  paths?: { dbPath: string; walPath: string; shmPath: string };
-  files?: { db: DbFileStat; wal: DbFileStat; shm: DbFileStat };
-  pragmas?: {
-    pageSize: number;
-    pageCount: number;
-    freelistCount: number;
-    journalMode: string;
-    autoVacuum: number;
-    walAutoCheckpoint: number;
-  };
-  derived?: {
-    dbBytesLogical: number;
-    reclaimableBytes: number;
-    reclaimablePercent: number;
-    totalOnDiskBytes: number;
-  };
+  engine?: "postgres";
   database?: {
     name: string;
     sizeBytes: number;
@@ -1762,19 +1746,19 @@ function ConfigTab() {
 
   const checkpointMutation = useMutation({
     mutationFn: async () => {
-      const res = await apiRequest("POST", "/api/admin/grift/maintenance/checkpoint", { mode: "TRUNCATE" });
+      const res = await apiRequest("POST", "/api/admin/grift/maintenance/checkpoint", {});
       return res.json();
     },
     onSuccess: (payload: any) => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/grift/maintenance/db-stats"] });
       toast({
-        title: "WAL checkpoint completed",
+        title: "CHECKPOINT completed",
         description: payload?.skipped?.reason ?? "Checkpoint executed",
       });
     },
     onError: (error: any) => {
       toast({
-        title: "Failed to checkpoint WAL",
+        title: "Failed to CHECKPOINT",
         description: error?.message ?? undefined,
         variant: "destructive",
       });
@@ -1917,14 +1901,7 @@ function ConfigTab() {
   ];
 
   const dbStats = dbStatsData?.stats;
-  const isPostgres = dbStats?.engine === "postgres" || !!dbStats?.database;
-  const derived = dbStats?.derived;
-  const reclaimable = derived?.reclaimableBytes ?? 0;
-  const reclaimablePct = derived?.reclaimablePercent ?? 0;
-  const hasVacuumStats = !!derived;
-  const shouldVacuum = hasVacuumStats && reclaimablePct >= 10;
-  const totalOnDiskBytes = derived?.totalOnDiskBytes ?? dbStats?.database?.sizeBytes ?? 0;
-  const dbSizePretty = dbStats?.database?.sizePretty ?? (totalOnDiskBytes ? formatBytes(totalOnDiskBytes) : "—");
+  const dbSizePretty = dbStats?.database?.sizePretty ?? "—";
   const vacuumResult = vacuumMutation.data as any | undefined;
 
   return (
@@ -2033,7 +2010,7 @@ function ConfigTab() {
             Database Maintenance (Manual VACUUM)
           </CardTitle>
           <CardDescription>
-            Retention pruning deletes rows but does not reclaim `trading_app.db` file size until VACUUM runs. VACUUM requires an exclusive lock and can pause trading/logins while it runs; use a maintenance window.
+            Postgres VACUUM reclaims table bloat (space reuse) and updates planner stats. Run during low traffic; it can be I/O heavy.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -2047,13 +2024,13 @@ function ConfigTab() {
               size="sm"
               disabled={checkpointMutation.isPending}
               onClick={() => {
-                const ok = window.confirm("Run WAL checkpoint (TRUNCATE)? This is usually quick and can shrink the -wal file.");
+                const ok = window.confirm("Run database CHECKPOINT? This flushes WAL and can be I/O heavy.");
                 if (!ok) return;
                 checkpointMutation.mutate();
               }}
             >
               <Activity className="h-4 w-4 mr-2" />
-              Checkpoint WAL
+              CHECKPOINT
             </Button>
             <div className="flex items-center gap-2">
               <Input
@@ -2068,7 +2045,7 @@ function ConfigTab() {
                 className="bg-red-600 border-red-500 text-white hover:bg-red-700 hover:border-red-600"
                 disabled={vacuumMutation.isPending || vacuumConfirm !== "VACUUM"}
                 onClick={() => {
-                  const ok = window.confirm("VACUUM will take an exclusive lock and may pause trading/logins. Run now?");
+                  const ok = window.confirm("Run VACUUM now? This can be I/O heavy; prefer a maintenance window.");
                   if (!ok) return;
                   vacuumMutation.mutate();
                 }}
@@ -2079,62 +2056,33 @@ function ConfigTab() {
             </div>
           </div>
 
-          {isPostgres ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-sm">
-              <div>
-                <div className="text-xs text-gray-400">Database</div>
-                <div className="font-mono text-xs">{dbStats?.database?.name ?? "—"}</div>
-                <div className="text-xs text-gray-500">engine: {dbStats?.engine ?? "postgres"}</div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-sm">
+            <div>
+              <div className="text-xs text-gray-400">Database</div>
+              <div className="font-mono text-xs">{dbStats?.database?.name ?? "—"}</div>
+              <div className="text-xs text-gray-500">engine: {dbStats?.engine ?? "postgres"}</div>
+            </div>
+            <div>
+              <div className="text-xs text-gray-400">Size</div>
+              <div className="font-mono text-xs">{dbSizePretty}</div>
+              <div className="text-xs text-gray-500">bytes: {formatBytes(dbStats?.database?.sizeBytes ?? 0)}</div>
+            </div>
+            <div>
+              <div className="text-xs text-gray-400">Activity</div>
+              <div className="text-xs text-gray-500">
+                connections: {dbStats?.database?.stats?.numbackends ?? "—"} • commits:{" "}
+                {dbStats?.database?.stats?.xact_commit ?? "—"}
               </div>
-              <div>
-                <div className="text-xs text-gray-400">Size</div>
-                <div className="font-mono text-xs">{dbSizePretty}</div>
-                <div className="text-xs text-gray-500">bytes: {formatBytes(dbStats?.database?.sizeBytes ?? 0)}</div>
-              </div>
-              <div>
-                <div className="text-xs text-gray-400">Activity</div>
-                <div className="text-xs text-gray-500">
-                  connections: {dbStats?.database?.stats?.numbackends ?? "—"} • commits: {dbStats?.database?.stats?.xact_commit ?? "—"}
-                </div>
-                <div className="text-xs text-gray-500">
-                  rollbacks: {dbStats?.database?.stats?.xact_rollback ?? "—"} • conflicts: {dbStats?.database?.stats?.conflicts ?? "—"}
-                </div>
+              <div className="text-xs text-gray-500">
+                rollbacks: {dbStats?.database?.stats?.xact_rollback ?? "—"} • deadlocks:{" "}
+                {dbStats?.database?.stats?.deadlocks ?? "—"}
               </div>
             </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-sm">
-              <div>
-                <div className="text-xs text-gray-400">DB File Size</div>
-                <div className="font-mono text-xs">{formatBytes(dbStats?.files?.db?.size ?? 0)}</div>
-                <div className="text-xs text-gray-500">
-                  {dbStats?.files?.db?.mtimeMs ? formatTimestamp(dbStats.files.db.mtimeMs) : "—"}
-                </div>
-              </div>
-              <div>
-                <div className="text-xs text-gray-400">WAL / SHM</div>
-                <div className="font-mono text-xs">
-                  {formatBytes(dbStats?.files?.wal?.size ?? 0)} / {formatBytes(dbStats?.files?.shm?.size ?? 0)}
-                </div>
-                <div className="text-xs text-gray-500">journal_mode: {dbStats?.pragmas?.journalMode ?? "—"}</div>
-              </div>
-              <div>
-                <div className="text-xs text-gray-400">Reclaimable (Freelist)</div>
-                <div className="font-mono text-xs">
-                  {formatBytes(reclaimable)} ({reclaimablePct}%)
-                </div>
-                <div className="text-xs text-gray-500">
-                  page_size: {dbStats?.pragmas?.pageSize ?? "—"} • freelist: {dbStats?.pragmas?.freelistCount ?? 0}/{dbStats?.pragmas?.pageCount ?? 0}
-                </div>
-              </div>
-            </div>
-          )}
+          </div>
 
           {dbStats ? (
             <div className="text-xs text-gray-400">
-              {isPostgres
-                ? `Database size: ${dbSizePretty}`
-                : `Total on disk (db+wal+shm): ${formatBytes(totalOnDiskBytes)}`}{" "}
-              • last checked: {formatTimestamp(dbStats.generatedAt)}
+              Database size: {dbSizePretty} • last checked: {formatTimestamp(dbStats.generatedAt)}
             </div>
           ) : (
             <div className="text-xs text-gray-400">No DB stats loaded yet.</div>
@@ -2143,32 +2091,25 @@ function ConfigTab() {
           <div className="rounded border border-neutral-700 bg-neutral-900 p-3 text-xs text-gray-400 space-y-1">
             <div className="flex items-center gap-2">
               <AlertCircle className="h-4 w-4 text-amber-300" />
-              <span>
-                Recommendation: {hasVacuumStats
-                  ? shouldVacuum
-                    ? "VACUUM recommended (≥10% reclaimable pages)"
-                    : "VACUUM optional (low reclaimable pages)"
-                  : "VACUUM optional (stats unavailable)"}
-              </span>
+              <span>Recommendation: VACUUM during low-traffic (this runs plain `VACUUM`, not `VACUUM FULL`).</span>
             </div>
             <div>Gold standard: run VACUUM only during a planned maintenance window and after a recent backup.</div>
-            <div>Checkpoint WAL first to reclaim `-wal` growth without rebuilding the full database.</div>
+            <div>CHECKPOINT can be useful after incident-level WAL churn, but it is not a space-reclamation tool.</div>
           </div>
 
-          {vacuumResult?.before?.derived?.totalOnDiskBytes != null && vacuumResult?.after?.derived?.totalOnDiskBytes != null ? (
+          {vacuumResult?.before?.database?.sizeBytes != null && vacuumResult?.after?.database?.sizeBytes != null ? (
             <div className="rounded border border-neutral-700 bg-neutral-900 p-3 text-xs text-gray-300">
               <div className="font-semibold mb-1">Last VACUUM Result</div>
               <div>
-                Before: {formatBytes(Number(vacuumResult.before.derived.totalOnDiskBytes) || 0)} • After:{" "}
-                {formatBytes(Number(vacuumResult.after.derived.totalOnDiskBytes) || 0)}
+                Before: {formatBytes(Number(vacuumResult.before.database.sizeBytes) || 0)} • After:{" "}
+                {formatBytes(Number(vacuumResult.after.database.sizeBytes) || 0)}
               </div>
               <div>
                 Reclaimed:{" "}
                 {formatBytes(
                   Math.max(
                     0,
-                    Number(vacuumResult.before.derived.totalOnDiskBytes || 0) -
-                      Number(vacuumResult.after.derived.totalOnDiskBytes || 0)
+                    Number(vacuumResult.before.database.sizeBytes || 0) - Number(vacuumResult.after.database.sizeBytes || 0)
                   )
                 )}
               </div>

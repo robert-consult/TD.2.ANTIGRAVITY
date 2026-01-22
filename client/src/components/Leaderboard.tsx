@@ -5,6 +5,7 @@ type LeaderboardItem = {
   userId: number;
   username: string;
   profit: number;
+  profitPct?: number;
 };
 
 export function Leaderboard() {
@@ -38,25 +39,31 @@ export function Leaderboard() {
         )}
 
         {leaderboard &&
-          leaderboard.map((leader: LeaderboardItem, index: number) => (
-            <div
-              key={leader.userId}
-              className="flex items-center px-3 py-2 text-sm text-gray-300"
-            >
-              <div className="mr-2 w-5 text-center font-medium text-gray-500">
-                {index + 1}
-              </div>
-              <div className="flex-1 truncate">{leader.username}</div>
+          leaderboard.map((leader: LeaderboardItem, index: number) => {
+            const pct = Number.isFinite(leader.profitPct)
+              ? Number(leader.profitPct)
+              : (Number(leader.profit) / 1_000_000) * 100;
+
+            return (
               <div
-                className={`font-mono ${
-                  leader.profit >= 0 ? "text-success-500" : "text-danger-500"
-                }`}
+                key={leader.userId}
+                className="flex items-center px-3 py-2 text-sm text-gray-300"
               >
-                {leader.profit >= 0 ? "+" : ""}
-                {leader.profit.toFixed(1)}%
+                <div className="mr-2 w-5 text-center font-medium text-gray-500">
+                  {index + 1}
+                </div>
+                <div className="flex-1 truncate">{leader.username}</div>
+                <div
+                  className={`font-mono ${
+                    pct >= 0 ? "text-success-500" : "text-danger-500"
+                  }`}
+                >
+                  {pct >= 0 ? "+" : ""}
+                  {pct.toFixed(1)}%
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
 
         {leaderboard && leaderboard.length === 0 && (
           <div className="text-center py-4 text-sm text-gray-400">

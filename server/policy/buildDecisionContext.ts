@@ -1,6 +1,5 @@
 import { db, dbClient } from "../../db";
 import { sql } from "drizzle-orm";
-import { isPostgres } from "../../db/config";
 
 import {
   DEFAULT_POLICY_CONFIG,
@@ -72,20 +71,12 @@ async function rawGet<T = AnyRow>(query: any): Promise<T | undefined> {
 }
 
 async function tableExists(tableName: string): Promise<boolean> {
-  if (isPostgres) {
-    const res = await dbClient.query(
-      "SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name = $1 LIMIT 1",
-      [tableName]
-    );
-    return (res.rowCount ?? 0) > 0;
-  }
-  const row = await rawGet<{ name: string }>(
-    `SELECT name FROM sqlite_master WHERE type='table' AND name='${tableName}' LIMIT 1`
+  const res = await dbClient.query(
+    "SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name = $1 LIMIT 1",
+    [tableName],
   );
-  return !!row?.name;
+  return (res.rowCount ?? 0) > 0;
 }
-
-type ColumnInfo = { name: string; type?: string | null };
 
 const columnCache = new Map<string, string[]>();
 
@@ -96,17 +87,11 @@ async function getTableColumns(tableName: string): Promise<string[]> {
     columnCache.set(tableName, []);
     return [];
   }
-  let cols: string[] = [];
-  if (isPostgres) {
-    const res = await dbClient.query(
-      "SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name = $1",
-      [tableName]
-    );
-    cols = res.rows.map((r: any) => String(r.column_name));
-  } else {
-    const rows = await rawAll<ColumnInfo>(`PRAGMA table_info('${tableName.replace(/'/g, "''")}')`);
-    cols = rows.map((r) => String(r.name));
-  }
+  const res = await dbClient.query(
+    "SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name = $1",
+    [tableName],
+  );
+  const cols = res.rows.map((r: any) => String(r.column_name));
   columnCache.set(tableName, cols);
   return cols;
 }

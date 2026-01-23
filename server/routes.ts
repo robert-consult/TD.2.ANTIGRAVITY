@@ -4390,9 +4390,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
     userCountryIso2?: string;
     quoteSymbols?: Set<string>;
     wantsQuotesAll?: boolean;
+    quoteKey?: string;
     wantsTrades?: boolean;
     wantsAccount?: boolean;
   };
+
+  function computeQuoteKey(symbols: Set<string> | undefined, wantsAll: boolean | undefined): string {
+    if (wantsAll) return "*";
+    if (!symbols || symbols.size === 0) return "";
+    return Array.from(symbols)
+      .map((s) => String(s).toUpperCase())
+      .filter(Boolean)
+      .sort()
+      .join(",");
+  }
+
+  function syncClientQuoteKey(client: LiveClient) {
+    client.quoteKey = computeQuoteKey(client.quoteSymbols, client.wantsQuotesAll);
+  }
 
   function normIso2(v: any): string | undefined {
     const s = String(v ?? "").trim().toUpperCase();
@@ -4598,6 +4613,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               client.quoteSymbols?.add(symbol);
             }
           }
+          syncClientQuoteKey(client);
           const snapshotSymbols = client.wantsQuotesAll ? undefined : Array.from(client.quoteSymbols ?? []);
           await sendQuoteSnapshot(socket, snapshotSymbols);
           return;
@@ -4608,6 +4624,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           if (!symbols.length) {
             client.wantsQuotesAll = false;
             client.quoteSymbols?.clear();
+            syncClientQuoteKey(client);
             return;
           }
           for (const symbol of symbols) {
@@ -4616,6 +4633,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           if ((client.quoteSymbols?.size ?? 0) === 0) {
             client.wantsQuotesAll = false;
           }
+          syncClientQuoteKey(client);
           return;
         }
 
@@ -4693,6 +4711,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     client.userCountryIso2 = undefined;
     client.quoteSymbols = new Set();
     client.wantsQuotesAll = false;
+    client.quoteKey = "";
     client.wantsTrades = false;
     client.wantsAccount = false;
 
@@ -4794,18 +4813,62 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const seq = Number(ev.payload?.seq ?? 0);
       const asOf = Number(ev.payload?.asOf ?? Date.now());
       applyQuoteUpdate(ev.payload.rows, { seq, asOf });
+
+      // Pre-serialize per subscription key to avoid per-socket JSON.stringify work.
+      const groups = new Map<string, LiveClient[]>();
       for (const ws of wss.clients as Set<LiveClient>) {
         if (ws.readyState !== WebSocket.OPEN) continue;
         const client = ws as LiveClient;
-        const filteredRows = filterQuoteRowsForClient(ev.payload.rows, client);
-        if (!filteredRows.length) continue;
-        wsSendJson(ws, {
-          type: "quotes:update",
-          protocolVersion: WS_PROTOCOL_VERSION,
-          seq,
-          asOf,
-          rows: filteredRows,
-        });
+        const key = client.quoteKey ?? computeQuoteKey(client.quoteSymbols, client.wantsQuotesAll);
+        if (!key) continue;
+        const list = groups.get(key);
+        if (list) list.push(client);
+        else groups.set(key, [client]);
+      }
+
+      if (groups.size === 0) return;
+
+      const rowsWithSymbols = ev.payload.rows
+        .map((row: any) => {
+          if (!row?.symbol) return null;
+          return { row, symbol: String(row.symbol).toUpperCase() };
+        })
+        .filter(Boolean) as Array<{ row: any; symbol: string }>;
+
+      for (const [key, clients] of groups.entries()) {
+        let rowsForGroup: any[] = [];
+        if (key === "*") {
+          rowsForGroup = ev.payload.rows;
+        } else {
+          const symbols = clients[0]?.quoteSymbols;
+          if (!symbols || symbols.size === 0) continue;
+          for (const item of rowsWithSymbols) {
+            if (symbols.has(item.symbol)) rowsForGroup.push(item.row);
+          }
+          if (rowsForGroup.length === 0) continue;
+        }
+
+        let serialized = "";
+        try {
+          serialized = JSON.stringify({
+            type: "quotes:update",
+            protocolVersion: WS_PROTOCOL_VERSION,
+            seq,
+            asOf,
+            rows: rowsForGroup,
+          });
+        } catch {
+          continue;
+        }
+
+        for (const client of clients) {
+          if (client.readyState !== WebSocket.OPEN) continue;
+          try {
+            client.send(serialized);
+          } catch {
+            // ignore
+          }
+        }
       }
       return;
     }

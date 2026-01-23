@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "./use-auth";
 import { useLiveUpdates } from "@/live/LiveUpdatesProvider";
+import { recommendedPollIntervalMs } from "@/lib/perfHints";
 
 export interface AccountSummary {
   balance: number;
@@ -16,9 +17,14 @@ export interface AccountSummary {
   asOf: string;
 }
 
-export function useAccountSummary() {
+type UseAccountSummaryOptions = {
+  enabled?: boolean;
+};
+
+export function useAccountSummary(options: UseAccountSummaryOptions = {}) {
   const queryClient = useQueryClient();
   const { user } = useAuth();
+  const enabled = options.enabled ?? true;
 
   const { isConnected: isWsConnected, sendMessage, subscribe } = useLiveUpdates();
 
@@ -33,20 +39,25 @@ export function useAccountSummary() {
   useEffect(() => {
     return subscribe((message) => {
       if (!message || typeof message !== "object") return;
-      if (message.type !== "account:updated" && message.type !== "account:update") return;
+      if (message.type !== "account:updated" && message.type !== "account:update" && message.type !== "account:snapshot") return;
 
       const messageUserId = message.userId;
       const currentUserId = user?.id;
-      if (!messageUserId || !currentUserId || messageUserId === currentUserId) {
-        queryClient.refetchQueries({ queryKey: ["/api/account/summary"], type: "active" });
+      if (messageUserId && currentUserId && messageUserId !== currentUserId) return;
+
+      const summary = (message as any)?.payload?.summary;
+      if (summary && typeof summary === "object") {
+        queryClient.setQueryData(["/api/account/summary"], summary);
+      } else {
+        queryClient.invalidateQueries({ queryKey: ["/api/account/summary"] });
       }
     });
   }, [queryClient, subscribe, user?.id]);
   
   const query = useQuery<AccountSummary>({
     queryKey: ["/api/account/summary"],
-    refetchInterval: isWsConnected ? false : 2000, // Refresh every 2 seconds when WS is unavailable
-    staleTime: 1000, // Consider data stale after 1 second
+    enabled: enabled && !!user,
+    refetchInterval: isWsConnected ? false : recommendedPollIntervalMs(7000),
   });
 
   const invalidate = () => {

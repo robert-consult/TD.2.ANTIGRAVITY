@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef } from "react";
 import { useWebSocket } from "@/hooks/use-websocket";
 import { getWsUrl } from "@/lib/wsUrl";
+import { useAuth } from "@/hooks/use-auth";
 
 type LiveUpdateMessage = Record<string, any>;
 type LiveUpdateListener = (message: LiveUpdateMessage) => void;
@@ -15,10 +16,14 @@ type LiveUpdatesClient = {
 const LiveUpdatesContext = createContext<LiveUpdatesClient | null>(null);
 
 export function LiveUpdatesProvider({ children }: { children: ReactNode }) {
+  const { isAuthenticated } = useAuth();
   const listenersRef = useRef(new Set<LiveUpdateListener>());
   const wsUrl = getWsUrl();
 
   const { isConnected, sendMessage } = useWebSocket(wsUrl, {
+    enabled: isAuthenticated,
+    reconnectInterval: 1500,
+    reconnectAttempts: 50,
     onMessage: (message) => {
       if (!message || typeof message !== "object") return;
       for (const listener of listenersRef.current) {

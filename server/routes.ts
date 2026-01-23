@@ -167,6 +167,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   const sessionStore = sessionStoreResolved.store;
   console.log(`[Session] store=${sessionStoreResolved.kind}`);
 
+  const cookieSecure =
+    process.env.COOKIE_SECURE === "true"
+      ? true
+      : process.env.COOKIE_SECURE === "false"
+        ? false
+        : process.env.NODE_ENV === "production";
+
   // Configure session persistence to prevent session loss on server restart
   app.use(
     session({
@@ -176,7 +183,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       saveUninitialized: false,
       name: SESSION_COOKIE_NAME,
       cookie: {
-        secure: process.env.NODE_ENV === "production",
+        secure: cookieSecure,
         sameSite: (process.env.COOKIE_SAMESITE as "lax" | "strict" | "none") || "lax",
         maxAge: 24 * 60 * 60 * 1000, // 24 hours
       },
@@ -4626,6 +4633,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (type === "account:subscribe") {
           if (!client.userId) return wsCloseUnauthorized(socket, "AUTH_REQUIRED");
           client.wantsAccount = true;
+          try {
+            const { recalcAccount } = await import("./recalcAccount");
+            const metrics = await recalcAccount(client.userId);
+            if (metrics) {
+              wsSendJson(socket, {
+                type: "account:snapshot",
+                protocolVersion: WS_PROTOCOL_VERSION,
+                userId: client.userId,
+                payload: {
+                  summary: {
+                    balance: metrics.balance,
+                    equity: metrics.equity,
+                    floatingPnl: metrics.floatingPnl,
+                    usedMargin: metrics.usedMargin,
+                    freeMargin: metrics.freeMargin,
+                    marginLevel: metrics.marginLevel,
+                    openPositions: metrics.openPositions,
+                    pricingStale: metrics.pricingStale,
+                    staleSymbols: metrics.staleSymbols,
+                    asOf: metrics.asOf.toISOString(),
+                  },
+                },
+              });
+            }
+          } catch (e) {
+            console.warn("[WS] Failed to send account snapshot:", e);
+          }
           return;
         }
 

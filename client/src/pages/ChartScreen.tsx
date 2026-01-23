@@ -7,6 +7,7 @@ import { toast } from "@/hooks/use-toast";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { getTradeErrorToast } from "@/lib/tradeErrorMessages";
+import { useLiveUpdates } from "@/live/LiveUpdatesProvider";
 
 // Declare TradingView type for TypeScript
 declare global {
@@ -46,12 +47,28 @@ const periodIntervalMap: Record<ChartPeriod, string> = {
 
 let tradingViewScriptPromise: Promise<void> | null = null;
 
+function ensureResourceHint(rel: string, href: string, crossOrigin?: string) {
+  if (typeof document === "undefined") return;
+  const selector = `link[rel="${rel}"][href="${href}"]`;
+  if (document.head.querySelector(selector)) return;
+  const link = document.createElement("link");
+  link.rel = rel;
+  link.href = href;
+  if (crossOrigin) link.crossOrigin = crossOrigin;
+  document.head.appendChild(link);
+}
+
 function loadTradingViewScript(): Promise<void> {
   if (typeof window === "undefined") return Promise.reject(new Error("No window"));
   if (window.TradingView?.widget) return Promise.resolve();
   if (tradingViewScriptPromise) return tradingViewScriptPromise;
 
   tradingViewScriptPromise = new Promise<void>((resolve, reject) => {
+    ensureResourceHint("preconnect", "https://s3.tradingview.com", "anonymous");
+    ensureResourceHint("dns-prefetch", "https://s3.tradingview.com");
+    ensureResourceHint("preconnect", "https://www.tradingview.com", "anonymous");
+    ensureResourceHint("dns-prefetch", "https://www.tradingview.com");
+
     const existing = document.getElementById("tradingview-script") as HTMLScriptElement | null;
     let pollId: number | undefined;
 
@@ -142,6 +159,7 @@ export default function ChartScreen({ selectedSymbol }: ChartScreenProps) {
   const widgetInstanceRef = useRef<any>(null);
 
   const queryClient = useQueryClient();
+  const { isConnected: isWsConnected } = useLiveUpdates();
 
   // Trade controls
   const [lots, setLots] = useState<number>(1);
@@ -354,7 +372,9 @@ export default function ChartScreen({ selectedSymbol }: ChartScreenProps) {
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["/api/trades"] });
       await queryClient.invalidateQueries({ queryKey: ["/api/trades/open"] });
-      await queryClient.invalidateQueries({ queryKey: ["/api/auth/current-user"] });
+      if (!isWsConnected) {
+        await queryClient.invalidateQueries({ queryKey: ["/api/account/summary"] });
+      }
 
       toast({
         title: "Trade Executed",

@@ -1,9 +1,10 @@
 import { storage } from "../server/storage";
 import { db } from "@db";
-import { globalSettings, systemConfig } from "@shared/schema";
+import { globalSettings, systemConfig, userVerification } from "@shared/schema";
 
 async function seed() {
   console.log("Seeding database...");
+  const nowSec = Math.floor(Date.now() / 1000);
   
   try {
     // Ensure singleton config rows exist (id=1) with defaults
@@ -15,12 +16,16 @@ async function seed() {
     const existingAdmin = await storage.getUserByEmail(adminEmail);
     
     if (!existingAdmin) {
-      await storage.createUser({
+      const admin = await storage.createUser({
         email: adminEmail,
         username: "admin",
         password: "changeme",
         isAdmin: true,
         balance: "1000000.00" // Set starting capital to $1,000,000
+      });
+      await db.insert(userVerification).values({ userId: admin.id, emailVerifiedAt: nowSec, updatedAt: nowSec }).onConflictDoUpdate({
+        target: userVerification.userId,
+        set: { emailVerifiedAt: nowSec, updatedAt: nowSec },
       });
       console.log("Admin user created successfully");
     } else {
@@ -30,6 +35,10 @@ async function seed() {
         console.log("Updated admin user balance to $1,000,000");
       }
       console.log("Admin user already exists");
+      await db.insert(userVerification).values({ userId: existingAdmin.id, emailVerifiedAt: nowSec, updatedAt: nowSec }).onConflictDoUpdate({
+        target: userVerification.userId,
+        set: { emailVerifiedAt: nowSec, updatedAt: nowSec },
+      });
     }
     
     // Create demo user if it doesn't exist
@@ -38,12 +47,16 @@ async function seed() {
     const existingDemo = await storage.getUserByEmail(demoEmail);
     
     if (!existingDemo) {
-      await storage.createUser({
+      const demo = await storage.createUser({
         email: demoEmail,
         username: "demo",
         password: demoPassword,
         isAdmin: false,
         balance: "1000000.00" // Set starting capital to $1,000,000
+      });
+      await db.insert(userVerification).values({ userId: demo.id, emailVerifiedAt: nowSec, updatedAt: nowSec }).onConflictDoUpdate({
+        target: userVerification.userId,
+        set: { emailVerifiedAt: nowSec, updatedAt: nowSec },
       });
       console.log("Demo user created successfully");
     } else {
@@ -55,6 +68,11 @@ async function seed() {
       await storage.updateUser(existingDemo.id, { password: demoPassword });
       console.log("Updated demo user password");
       console.log("Demo user already exists");
+
+      await db.insert(userVerification).values({ userId: existingDemo.id, emailVerifiedAt: nowSec, updatedAt: nowSec }).onConflictDoUpdate({
+        target: userVerification.userId,
+        set: { emailVerifiedAt: nowSec, updatedAt: nowSec },
+      });
     }
     
     // Ensure we have all required symbol configurations with proper spreads

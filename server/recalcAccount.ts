@@ -104,6 +104,18 @@ export async function recalcAccount(
         .where(eq(users.id, userId));
       
       if (opts?.emit) {
+        const summary = {
+          balance: result.balance,
+          equity: result.equity,
+          floatingPnl: result.floatingPnl,
+          usedMargin: result.usedMargin,
+          freeMargin: result.freeMargin,
+          marginLevel: result.marginLevel,
+          openPositions: result.openPositions,
+          pricingStale: result.pricingStale,
+          staleSymbols: result.staleSymbols,
+          asOf: result.asOf.toISOString(),
+        };
         publishLiveEvent({
           type: "account:updated",
           userId,
@@ -112,6 +124,7 @@ export async function recalcAccount(
             pricingStale: result.pricingStale,
             staleSymbols: result.staleSymbols,
             asOf: result.asOf.toISOString(),
+            summary,
           },
         });
       }
@@ -174,6 +187,18 @@ export async function recalcAccount(
         asOf,
       };
       if (opts?.emit) {
+        const summary = {
+          balance: result.balance,
+          equity: result.equity,
+          floatingPnl: result.floatingPnl,
+          usedMargin: result.usedMargin,
+          freeMargin: result.freeMargin,
+          marginLevel: result.marginLevel,
+          openPositions: result.openPositions,
+          pricingStale: result.pricingStale,
+          staleSymbols: result.staleSymbols,
+          asOf: result.asOf.toISOString(),
+        };
         publishLiveEvent({
           type: "account:updated",
           userId,
@@ -182,6 +207,7 @@ export async function recalcAccount(
             pricingStale: result.pricingStale,
             staleSymbols: result.staleSymbols,
             asOf: result.asOf.toISOString(),
+            summary,
           },
         });
       }
@@ -237,6 +263,18 @@ export async function recalcAccount(
         asOf,
       };
       if (opts?.emit) {
+        const summary = {
+          balance: result.balance,
+          equity: result.equity,
+          floatingPnl: result.floatingPnl,
+          usedMargin: result.usedMargin,
+          freeMargin: result.freeMargin,
+          marginLevel: result.marginLevel,
+          openPositions: result.openPositions,
+          pricingStale: result.pricingStale,
+          staleSymbols: result.staleSymbols,
+          asOf: result.asOf.toISOString(),
+        };
         publishLiveEvent({
           type: "account:updated",
           userId,
@@ -245,6 +283,7 @@ export async function recalcAccount(
             pricingStale: result.pricingStale,
             staleSymbols: result.staleSymbols,
             asOf: result.asOf.toISOString(),
+            summary,
           },
         });
       }
@@ -349,6 +388,18 @@ export async function recalcAccount(
       asOf,
     };
     if (opts?.emit) {
+      const summary = {
+        balance: result.balance,
+        equity: result.equity,
+        floatingPnl: result.floatingPnl,
+        usedMargin: result.usedMargin,
+        freeMargin: result.freeMargin,
+        marginLevel: result.marginLevel,
+        openPositions: result.openPositions,
+        pricingStale: result.pricingStale,
+        staleSymbols: result.staleSymbols,
+        asOf: result.asOf.toISOString(),
+      };
       publishLiveEvent({
         type: "account:updated",
         userId,
@@ -357,6 +408,7 @@ export async function recalcAccount(
           pricingStale: result.pricingStale,
           staleSymbols: result.staleSymbols,
           asOf: result.asOf.toISOString(),
+          summary,
         },
       });
     }

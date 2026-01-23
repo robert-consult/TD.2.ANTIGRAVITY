@@ -5,6 +5,7 @@ import { getTradeErrorToast } from "@/lib/tradeErrorMessages";
 import { useAuth } from "./use-auth";
 import { useToast } from "./use-toast";
 import { useLiveUpdates } from "@/live/LiveUpdatesProvider";
+import { recommendedPollIntervalMs } from "@/lib/perfHints";
 
 export function useTrades() {
   const queryClient = useQueryClient();
@@ -32,8 +33,6 @@ export function useTrades() {
         queryClient.invalidateQueries({ queryKey: ["/api/trades"] });
         queryClient.invalidateQueries({ queryKey: ["/api/trades/open"] });
         queryClient.invalidateQueries({ queryKey: ["/api/trades/pending"] });
-        queryClient.invalidateQueries({ queryKey: ["/api/auth/current-user"] });
-        queryClient.invalidateQueries({ queryKey: ["/api/account/summary"] });
       }
     });
   }, [queryClient, subscribe, user?.id]);
@@ -47,7 +46,7 @@ export function useTrades() {
   } = useQuery({
     queryKey: ["/api/trades"],
     enabled: !!user,
-    refetchInterval: isTradeWsConnected ? false : 5000,
+    refetchInterval: isTradeWsConnected ? false : recommendedPollIntervalMs(7000),
   });
 
   // Get open trades
@@ -59,7 +58,7 @@ export function useTrades() {
   } = useQuery({
     queryKey: ["/api/trades/open"],
     enabled: !!user,
-    refetchInterval: isTradeWsConnected ? false : 5000,
+    refetchInterval: isTradeWsConnected ? false : recommendedPollIntervalMs(7000),
   });
 
   // Create a new trade
@@ -83,8 +82,9 @@ export function useTrades() {
       queryClient.invalidateQueries({ queryKey: ["/api/trades"] });
       queryClient.invalidateQueries({ queryKey: ["/api/trades/open"] });
       queryClient.invalidateQueries({ queryKey: ["/api/trades/pending"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/auth/current-user"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/account/summary"] });
+      if (!isTradeWsConnected) {
+        queryClient.invalidateQueries({ queryKey: ["/api/account/summary"] });
+      }
     },
     onError: (error: Error) => {
       const { title, description } = getTradeErrorToast(error);
@@ -151,8 +151,9 @@ export function useTrades() {
       queryClient.invalidateQueries({ queryKey: ["/api/trades"] });
       queryClient.invalidateQueries({ queryKey: ["/api/trades/open"] });
       queryClient.invalidateQueries({ queryKey: ["/api/trades/pending"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/auth/current-user"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/account/summary"] });
+      if (!isTradeWsConnected) {
+        queryClient.invalidateQueries({ queryKey: ["/api/account/summary"] });
+      }
     },
     onError: (error: Error, _variables, context) => {
       // Rollback to the previous value on error

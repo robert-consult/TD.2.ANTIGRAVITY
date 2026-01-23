@@ -6,6 +6,9 @@ vite.config.ts.*
 client/i18n-manifest.json
 *.log
 .tmp/
+test-results/
+playwright-report/
+*.code-workspace
 
 # --- Database artifacts / dumps ---
 *.db*

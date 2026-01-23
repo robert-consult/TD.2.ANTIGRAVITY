@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef } from "react";
+import { computeWsReconnectDelayMs } from "@/lib/perfHints";
 
 interface UseWebSocketOptions {
   enabled?: boolean;
@@ -8,6 +9,7 @@ interface UseWebSocketOptions {
   onError?: (error: Event) => void;
   reconnectInterval?: number;
   reconnectAttempts?: number;
+  debug?: boolean;
 }
 
 export function useWebSocket(url: string, options: UseWebSocketOptions = {}) {
@@ -29,8 +31,12 @@ export function useWebSocket(url: string, options: UseWebSocketOptions = {}) {
     onClose,
     onError,
     reconnectInterval = 3000,
-    reconnectAttempts = 10
+    reconnectAttempts = 10,
+    debug = false,
   } = options;
+
+  const isDev = Boolean((import.meta as any)?.env?.DEV);
+  const shouldLog = debug || isDev;
 
   useEffect(() => {
     enabledRef.current = enabled;
@@ -63,12 +69,16 @@ export function useWebSocket(url: string, options: UseWebSocketOptions = {}) {
   const connect = useCallback(() => {
     if (!enabledRef.current) return;
     clearReconnectTimer();
-    console.log(`Connecting to WebSocket at: "${url}"`);
+    if (shouldLog) {
+      console.log(`Connecting to WebSocket at: "${url}"`);
+    }
     const ws = new WebSocket(url);
     socketRef.current = ws;
     
     ws.onopen = () => {
-      console.log("WebSocket connected successfully");
+      if (shouldLog) {
+        console.log("WebSocket connected successfully");
+      }
       setIsConnected(true);
       setError(null);
       reconnectAttemptsRef.current = 0;
@@ -81,12 +91,16 @@ export function useWebSocket(url: string, options: UseWebSocketOptions = {}) {
         const data = JSON.parse(event.data);
         onMessageRef.current?.(data);
       } catch (parseError) {
-        console.error("WebSocket message parse error:", parseError, event.data);
+        if (shouldLog) {
+          console.error("WebSocket message parse error:", parseError, event.data);
+        }
       }
     };
     
     ws.onclose = (event) => {
-      console.log(`WebSocket disconnected:`, event.code, event.reason);
+      if (shouldLog) {
+        console.log(`WebSocket disconnected:`, event.code, event.reason);
+      }
       setIsConnected(false);
       
       onCloseRef.current?.();
@@ -97,8 +111,10 @@ export function useWebSocket(url: string, options: UseWebSocketOptions = {}) {
       if (attemptsSoFar >= reconnectAttempts) return;
 
       reconnectAttemptsRef.current = attemptsSoFar + 1;
-      const nextAttemptDelay = reconnectInterval;
-      console.log(`Will attempt to reconnect in ${nextAttemptDelay}ms`);
+      const nextAttemptDelay = computeWsReconnectDelayMs(attemptsSoFar, reconnectInterval);
+      if (shouldLog) {
+        console.log(`Will attempt to reconnect in ${nextAttemptDelay}ms`);
+      }
 
       reconnectTimerRef.current = setTimeout(() => {
         if (!enabledRef.current) return;
@@ -107,12 +123,14 @@ export function useWebSocket(url: string, options: UseWebSocketOptions = {}) {
     };
     
     ws.onerror = (event) => {
-      console.error("WebSocket error:", event);
+      if (shouldLog) {
+        console.error("WebSocket error:", event);
+      }
       setError(event);
       
       onErrorRef.current?.(event);
     };
-  }, [clearReconnectTimer, reconnectAttempts, reconnectInterval, url]);
+  }, [clearReconnectTimer, reconnectAttempts, reconnectInterval, shouldLog, url]);
   
   // Connect on mount
   useEffect(() => {

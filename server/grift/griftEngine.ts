@@ -409,10 +409,10 @@ export async function recordLinkedEdge(
   const [lo, hi] = userIdA < userIdB ? [userIdA, userIdB] : [userIdB, userIdA];
 
   await db.prepare(`
-    INSERT INTO grift_linked_account_edges (user_a, user_b, link_type, link_value, confidence, first_linked_at, last_confirmed_at)
+    INSERT INTO grift_linked_account_edges AS edges (user_a, user_b, link_type, link_value, confidence, first_linked_at, last_confirmed_at)
     VALUES (?, ?, ?, ?, 1.0, ?, ?)
-    ON CONFLICT(user_a, user_b, link_type, link_value) DO UPDATE SET confidence = confidence + 0.1, last_confirmed_at = ?
-  `).run(lo, hi, linkType, linkValue, now, now, now);
+    ON CONFLICT(user_a, user_b, link_type, link_value) DO UPDATE SET confidence = edges.confidence + 0.1, last_confirmed_at = EXCLUDED.last_confirmed_at
+  `).run(lo, hi, linkType, linkValue, now, now);
 }
 
 // ---------------------------------------------------------------------

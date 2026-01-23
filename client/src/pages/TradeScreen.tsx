@@ -29,6 +29,7 @@ import { EditTradeModal } from "@/components/EditTradeModal";
 import { Pencil, X, Zap, Layers, AlertTriangle } from "lucide-react";
 import { useTranslation } from "@/i18n";
 import { getTradeErrorToast } from "@/lib/tradeErrorMessages";
+import { useLiveUpdates } from "@/live/LiveUpdatesProvider";
 
 interface TradeScreenProps {
   selectedSymbol: string;
@@ -61,6 +62,7 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
   const { toast } = useToast();
   const { user } = useAuth();
   const queryClient = useQueryClient();
+  const { isConnected: isWsConnected } = useLiveUpdates();
   const { bundle } = useTranslation();
   const { quotes } = useQuotes();
   const { openTrades = [], isLoadingOpenTrades, closeTrade } = useTrades();
@@ -376,11 +378,13 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
       return apiRequest("POST", "/api/trades", data);
     },
     onSuccess: () => {
-      // ✅ Ensure both history and open positions refresh
-      queryClient.invalidateQueries({ queryKey: ["/api/trades"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/trades/open"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/auth/current-user"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/account/summary"] });
+      // WS-first: only hit REST when WS is unavailable.
+      if (!isWsConnected) {
+        queryClient.invalidateQueries({ queryKey: ["/api/trades"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/trades/open"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/trades/pending"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/account/summary"] });
+      }
       
       toast({
         title: toastTemplates.tradeExecutedTitle.text,

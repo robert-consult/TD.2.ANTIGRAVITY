@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useCallback, useEffect } from "react";
-import { apiRequest, ApiError } from "@/lib/queryClient";
+import { apiRequest } from "@/lib/queryClient";
 import { useQueryClient } from "@tanstack/react-query";
 
 interface User {
@@ -116,7 +116,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       const res = await apiRequest("POST", "/api/auth/login", { email, password });
       const data = await res.json();
       setUser(applyStoredLocale(data));
-      queryClient.invalidateQueries();
+      queryClient.clear();
     } catch (error) {
       throw error;
     } finally {
@@ -135,7 +135,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       });
       const data = await res.json();
       setUser(applyStoredLocale(data));
-      queryClient.invalidateQueries();
+      queryClient.clear();
     } catch (error) {
       throw error;
     } finally {
@@ -168,7 +168,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       if (data.success) {
         // Refresh user data to get back to admin session
         await checkAuth();
-        queryClient.invalidateQueries();
+        queryClient.clear();
       }
     } catch (error) {
       console.error("Stop impersonation error:", error);
@@ -182,26 +182,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   useEffect(() => {
     checkAuth();
   }, [checkAuth]);
-
-  // Poll balance every 2 seconds when authenticated
-  useEffect(() => {
-    if (!user) return;
-    
-    const interval = setInterval(async () => {
-      try {
-        const res = await apiRequest("GET", "/api/auth/current-user");
-        const data = await res.json();
-        setUser(applyStoredLocale(data));
-      } catch (error) {
-        if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
-          setUser(null);
-          queryClient.clear();
-        }
-      }
-    }, 2000);
-
-    return () => clearInterval(interval);
-  }, [user?.id]);
 
   return (
     <AuthContext.Provider

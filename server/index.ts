@@ -1,5 +1,6 @@
 // @ts-nocheck
 import express, { type Request, Response, NextFunction } from "express";
+import compression from "compression";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 // Import and initialize admin data views
@@ -110,6 +111,9 @@ console.log(`[Role] APP_ROLE=${process.env.APP_ROLE ?? "monolith"} => ${[...role
 
 const app = express();
 app.set("trust proxy", 1);
+if (app.get("env") !== "development") {
+  app.use(compression());
+}
 
 // Lightweight health check - responds immediately before any middleware
 // This ensures deployment health checks pass quickly

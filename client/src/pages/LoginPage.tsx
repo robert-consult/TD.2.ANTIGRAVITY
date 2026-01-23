@@ -1,7 +1,7 @@
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { useState, useCallback, useEffect, useMemo, useRef } from "react";
+import { Suspense, useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,10 +14,14 @@ import { useToast } from "@/hooks/use-toast";
 import { SignupAvailabilityGate } from "@/components/SignupAvailabilityGate";
 import { TermsModal } from "@/components/TermsModal";
 import { CaptchaTurnstile } from "@/components/CaptchaTurnstile";
-import { PhoneNumberInput } from "@/components/PhoneNumberInput";
 import { SliderCaptcha } from "@/components/SliderCaptcha";
 import { FileText, Loader2 } from "lucide-react";
 import { fetchWithIdentity } from "@/lib/fetchWithIdentity";
+import { lazyWithPing } from "@/lib/lazyWithPing";
+
+const LazyPhoneNumberInput = lazyWithPing(() =>
+  import("@/components/PhoneNumberInput").then((m) => ({ default: m.PhoneNumberInput })),
+);
 
 const loginSchema = z.object({
   email: z.string().email("Please enter a valid email"),
@@ -702,16 +706,20 @@ export default function LoginPage() {
                   />
 
                   {signupCountry && isCountryAvailable && (
-                    <PhoneNumberInput
-                      countryIso2={signupCountry}
-                      value={phone}
-                      onChange={(e164, valid) => {
-                        setPhone(e164);
-                        setPhoneValid(valid);
-                      }}
-                      disabled={!signupCountry}
-                      required={phoneRequired}
-                    />
+                    <Suspense
+                      fallback={<div className="text-xs text-muted-foreground">Loading phone input…</div>}
+                    >
+                      <LazyPhoneNumberInput
+                        countryIso2={signupCountry}
+                        value={phone}
+                        onChange={(e164, valid) => {
+                          setPhone(e164);
+                          setPhoneValid(valid);
+                        }}
+                        disabled={!signupCountry}
+                        required={phoneRequired}
+                      />
+                    </Suspense>
                   )}
 
                   {phoneRequired && (

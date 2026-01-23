@@ -5,9 +5,13 @@
   "license": "MIT",
   "scripts": {
     "dev": "dotenv -e .env -- tsx server/index.ts",
-    "build": "vite build && esbuild server/index.ts --platform=node --packages=external --bundle --format=esm --outdir=dist",
+    "build": "vite build && tsx scripts/precompressAssets.ts && esbuild server/index.ts --platform=node --packages=external --bundle --format=esm --outdir=dist",
     "start": "NODE_ENV=production node dist/index.js",
+    "start:e2e": "dotenv -e .env -- env NODE_ENV=production COOKIE_SECURE=false RESEND_API_KEY=dummy RESEND_FROM=dummy TWILIO_ACCOUNT_SID=dummy TWILIO_AUTH_TOKEN=dummy TWILIO_FROM_NUMBER=+10000000000 node dist/index.js",
     "check": "tsc",
+    "e2e:install": "playwright install chromium",
+    "e2e:deps": "tsx scripts/playwrightDeps.ts",
+    "e2e": "npm run e2e:deps && npm run db:ensure && npm run build && npm run db:seed && playwright test",
     "db:audit": "dotenv -e .env -- tsx scripts/dbAudit.ts",
     "db:audit:auto": "npm run db:schema:dump && npm run db:audit",
     "db:ensure": "dotenv -e .env -- tsx scripts/dbEnsure.ts",
@@ -23,7 +27,9 @@
     "db:import:sqlite": "dotenv -e .env -- tsx scripts/sqliteToPostgres.ts",
     "i18n:import:sqlite": "dotenv -e .env -- tsx scripts/i18nSqliteToPostgres.ts",
     "i18n:repair": "dotenv -e .env -- tsx scripts/i18nRepairLocale.ts",
-    "i18n:run": "dotenv -e .env -- tsx scripts/i18nRunWorker.ts"
+    "i18n:run": "dotenv -e .env -- tsx scripts/i18nRunWorker.ts",
+    "loadtest:publish-quotes": "dotenv -e .env -- tsx scripts/loadtest/publishQuotes.ts",
+    "loadtest:ws-fanout": "tsx scripts/loadtest/wsFanout.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",
@@ -77,6 +83,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
+    "compression": "^1.8.1",
     "connect-pg-simple": "^10.0.0",
     "connect-redis": "^9.0.0",
     "csv-stringify": "^6.6.0",
@@ -145,6 +152,7 @@
     "@types/react-dom": "^19.2.3",
     "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^5.1.2",
+    "@playwright/test": "^1.51.1",
     "autoprefixer": "^10.4.23",
     "drizzle-kit": "^0.31.8",
     "esbuild": "^0.27.2",

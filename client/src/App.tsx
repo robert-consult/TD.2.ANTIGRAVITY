@@ -1,17 +1,9 @@
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { Switch, Route, useLocation } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
-import NotFound from "@/pages/not-found";
-import Dashboard from "@/pages/Dashboard";
-import LoginPage from "@/pages/LoginPage";
-import AdminDashboard from "@/pages/AdminDashboard";
-import JournalPage from "@/pages/JournalPage";
-import ProfileSettings from "@/pages/ProfileSettings";
-import VerifyEmail from "@/pages/VerifyEmail";
-import { useAuth } from "@/hooks/use-auth";
-import { AuthProvider } from "./hooks/use-auth";
+import { AuthProvider, useAuth } from "@/hooks/use-auth";
 import { VerificationReminderPopup } from "@/components/VerificationReminderPopup";
 import { LegalReacceptGate } from "@/components/LegalReacceptGate";
 import { installAxiosIdentityHeaders } from "./lib/axiosIdentity";
@@ -19,8 +11,20 @@ import { startGriftPing } from "./lib/griftPing";
 import { I18nProvider } from "@/i18n/I18nProvider";
 import { useI18n } from "@/i18n";
 import { LiveUpdatesProvider } from "@/live/LiveUpdatesProvider";
+import { AccountSummarySync } from "@/live/AccountSummarySync";
+import { QuotesProvider } from "@/live/QuotesProvider";
+import { ConfigSync } from "@/live/ConfigSync";
+import { lazyWithPing, useLazyPing } from "@/lib/lazyWithPing";
 
 installAxiosIdentityHeaders();
+
+const NotFound = lazyWithPing(() => import("@/pages/not-found"));
+const Dashboard = lazyWithPing(() => import("@/pages/Dashboard"));
+const LoginPage = lazyWithPing(() => import("@/pages/LoginPage"));
+const AdminDashboard = lazyWithPing(() => import("@/pages/AdminDashboard"));
+const JournalPage = lazyWithPing(() => import("@/pages/JournalPage"));
+const ProfileSettings = lazyWithPing(() => import("@/pages/ProfileSettings"));
+const VerifyEmail = lazyWithPing(() => import("@/pages/VerifyEmail"));
 
 function ImpersonationBanner() {
   const { user, stopImpersonating } = useAuth();
@@ -61,15 +65,41 @@ function ImpersonationBanner() {
   );
 }
 
+function FullScreenLoading() {
+  return (
+    <div className="flex justify-center items-center min-h-screen min-h-dvh">
+      <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary"></div>
+    </div>
+  );
+}
+
+function AdminRoute() {
+  const { user } = useAuth();
+  const [, navigate] = useLocation();
+
+  useEffect(() => {
+    if (!user) return;
+    if (!user.isAdmin) navigate("/");
+  }, [navigate, user]);
+
+  if (!user?.isAdmin) {
+    return (
+      <div className="flex justify-center items-center min-h-screen min-h-dvh">
+        <div className="text-sm text-muted-foreground">Not authorized</div>
+      </div>
+    );
+  }
+
+  return <AdminDashboard />;
+}
+
 function AppRoutes() {
   // Subscribe so i18n bundle/locale changes re-render the app.
   useI18n();
-  const { user, isAuthenticated, loading, checkAuth } = useAuth();
+  // Subscribe so lazy-loaded route chunks can trigger a retry render when they resolve.
+  useLazyPing();
+  const { user, isAuthenticated, loading } = useAuth();
   const [location, navigate] = useLocation();
-
-  useEffect(() => {
-    checkAuth();
-  }, [checkAuth]);
 
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -88,28 +118,28 @@ function AppRoutes() {
   }, [isAuthenticated, loading, location, navigate]);
 
   if (loading) {
-    return (
-      <div className="flex justify-center items-center min-h-screen min-h-dvh">
-        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary"></div>
-      </div>
-    );
+    return <FullScreenLoading />;
   }
 
   return (
     <>
       <ImpersonationBanner />
+      <ConfigSync />
+      <AccountSummarySync />
       <VerificationReminderPopup />
       <LegalReacceptGate />
       <div className={user?.isImpersonating ? "pt-10" : ""}>
-        <Switch>
-          <Route path="/login" component={LoginPage} />
-          <Route path="/verify-email" component={VerifyEmail} />
-          <Route path="/admin" component={AdminDashboard} />
-          <Route path="/journal" component={JournalPage} />
-          <Route path="/profile" component={ProfileSettings} />
-          <Route path="/" component={Dashboard} />
-          <Route component={NotFound} />
-        </Switch>
+        <Suspense fallback={<FullScreenLoading />}>
+          <Switch>
+            <Route path="/login" component={LoginPage} />
+            <Route path="/verify-email" component={VerifyEmail} />
+            <Route path="/admin" component={AdminRoute} />
+            <Route path="/journal" component={JournalPage} />
+            <Route path="/profile" component={ProfileSettings} />
+            <Route path="/" component={Dashboard} />
+            <Route component={NotFound} />
+          </Switch>
+        </Suspense>
       </div>
     </>
   );
@@ -121,8 +151,10 @@ function App() {
       <AuthProvider>
         <I18nProvider>
           <LiveUpdatesProvider>
-            <AppRoutes />
-            <Toaster />
+            <QuotesProvider>
+              <AppRoutes />
+              <Toaster />
+            </QuotesProvider>
           </LiveUpdatesProvider>
         </I18nProvider>
       </AuthProvider>

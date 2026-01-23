@@ -90,12 +90,95 @@ export function serveStatic(app: Express) {
     );
   }
 
-  app.use(express.static(distPath));
+  const textExtensions = new Set([".css", ".html", ".js", ".json", ".map", ".svg", ".txt"]);
+
+  const setStaticHeaders = (res: any, urlPath: string) => {
+    res.setHeader("Vary", "Accept-Encoding");
+    if (urlPath.startsWith("/assets/")) {
+      res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+      return;
+    }
+    res.setHeader("Cache-Control", "no-cache");
+  };
+
+  // Serve precompressed assets when present (Brotli preferred over gzip).
+  app.use((req, res, next) => {
+    if (req.method !== "GET" && req.method !== "HEAD") return next();
+    const urlPath = req.path || "/";
+    const ext = path.extname(urlPath).toLowerCase();
+    if (!textExtensions.has(ext)) return next();
+
+    const accept = String(req.headers["accept-encoding"] || "");
+    if (!accept) return next();
+
+    let absPath: string;
+    try {
+      absPath = path.resolve(distPath, "." + urlPath);
+    } catch {
+      return next();
+    }
+    if (!absPath.startsWith(distPath)) return next();
+    if (!fs.existsSync(absPath)) return next();
+
+    const contentTypeExt = ext.startsWith(".") ? ext.slice(1) : ext;
+    if (accept.includes("br") && fs.existsSync(absPath + ".br")) {
+      setStaticHeaders(res, urlPath);
+      res.setHeader("Content-Encoding", "br");
+      res.type(contentTypeExt);
+      return res.sendFile(absPath + ".br");
+    }
+    if (accept.includes("gzip") && fs.existsSync(absPath + ".gz")) {
+      setStaticHeaders(res, urlPath);
+      res.setHeader("Content-Encoding", "gzip");
+      res.type(contentTypeExt);
+      return res.sendFile(absPath + ".gz");
+    }
+    next();
+  });
+
+  const assetsDir = path.resolve(distPath, "assets");
+  if (fs.existsSync(assetsDir)) {
+    app.use(
+      "/assets",
+      express.static(assetsDir, {
+        immutable: true,
+        maxAge: "1y",
+        setHeaders: (res) => {
+          res.setHeader("Vary", "Accept-Encoding");
+        },
+      }),
+    );
+  }
+
+  app.use(
+    express.static(distPath, {
+      maxAge: 0,
+      setHeaders: (res, filePath) => {
+        const rel = "/" + path.relative(distPath, filePath).replaceAll(path.sep, "/");
+        setStaticHeaders(res, rel === "/index.html" ? "/index.html" : rel);
+      },
+    }),
+  );
 
   // fall through to index.html if the file doesn't exist
   // Express 5 (path-to-regexp) no longer accepts "*" as a path pattern.
   // Omitting the path matches all remaining requests (catch-all).
-  app.use((_req, res) => {
+  app.use((req, res) => {
+    const accept = String(req.headers["accept-encoding"] || "");
+    const indexPath = path.resolve(distPath, "index.html");
+    if (accept.includes("br") && fs.existsSync(indexPath + ".br")) {
+      setStaticHeaders(res, "/index.html");
+      res.setHeader("Content-Encoding", "br");
+      res.type("html");
+      return res.sendFile("index.html.br", { root: distPath });
+    }
+    if (accept.includes("gzip") && fs.existsSync(indexPath + ".gz")) {
+      setStaticHeaders(res, "/index.html");
+      res.setHeader("Content-Encoding", "gzip");
+      res.type("html");
+      return res.sendFile("index.html.gz", { root: distPath });
+    }
+    setStaticHeaders(res, "/index.html");
     // Express 5 + Windows: `res.sendFile(absolutePath)` can incorrectly 404.
     // Using `root` + relative path avoids the issue.
     res.sendFile("index.html", { root: distPath });

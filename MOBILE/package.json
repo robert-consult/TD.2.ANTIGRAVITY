@@ -4,12 +4,13 @@
     "description": "TradeQuip Mobile - Capacitor Android App",
     "type": "module",
     "scripts": {
+        "install:jdk": "bash scripts/install-jdk17.sh",
         "sync": "cd .. && npm run build && cd MOBILE && npx cap sync",
         "open:android": "npx cap open android",
-        "run:android": "npx cap run android",
-        "build:android": "cd android && ./gradlew assembleDebug",
-        "build:android:release": "cd android && ./gradlew assembleRelease",
-        "doctor": "npx cap doctor"
+        "run:android": "bash scripts/with-jdk17.sh npx cap run android",
+        "build:android": "bash scripts/with-jdk17.sh ./android/gradlew assembleDebug",
+        "build:android:release": "bash scripts/with-jdk17.sh ./android/gradlew assembleRelease",
+        "doctor": "bash scripts/with-jdk17.sh npx cap doctor"
     },
     "dependencies": {
         "@capacitor/android": "^7.2.0",

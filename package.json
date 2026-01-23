@@ -39,8 +39,8 @@
     "mobile:install": "cd MOBILE && npm install",
     "mobile:sync": "npm run build && cd MOBILE && npx cap sync",
     "mobile:android": "cd MOBILE && npx cap open android",
-    "mobile:run:android": "cd MOBILE && npx cap run android",
-    "mobile:doctor": "cd MOBILE && npx cap doctor"
+    "mobile:run:android": "cd MOBILE && bash scripts/with-jdk17.sh npx cap run android",
+    "mobile:doctor": "cd MOBILE && bash scripts/with-jdk17.sh npx cap doctor"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",

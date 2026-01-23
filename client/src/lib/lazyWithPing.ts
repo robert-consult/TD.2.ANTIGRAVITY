@@ -40,7 +40,9 @@ export function useLazyPing() {
     listeners.add(listener);
     // Catch any pings that happened before we subscribed.
     setValue(version);
-    return () => listeners.delete(listener);
+    return () => {
+      listeners.delete(listener);
+    };
   }, []);
 
   return value;

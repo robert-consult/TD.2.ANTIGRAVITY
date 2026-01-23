@@ -1,11 +1,15 @@
 import axios, { AxiosHeaders } from "axios";
 import { getIdentityHeaders } from "./identity";
+import { getApiBaseUrl } from "./appUrl";
 
 let installed = false;
 
 export function installAxiosIdentityHeaders() {
   if (installed) return;
   installed = true;
+
+  axios.defaults.baseURL = getApiBaseUrl();
+  axios.defaults.withCredentials = true;
 
   axios.interceptors.request.use(async (config) => {
     const headers = await getIdentityHeaders();

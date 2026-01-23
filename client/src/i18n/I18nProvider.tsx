@@ -2,6 +2,7 @@ import React, { createContext, useCallback, useEffect, useMemo, useState } from 
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
 import { getCachedBundle, getI18nState, setI18nBundle, setI18nConfig, setI18nLocale, type I18nBundle, type I18nConfig } from "./store";
+import { resolveApiUrl } from "@/lib/appUrl";
 
 export type I18nContextValue = {
   locale: string;
@@ -84,7 +85,7 @@ function getInitialLocale(): string {
 }
 
 async function fetchConfig(): Promise<I18nConfig> {
-  const res = await fetch("/api/i18n/config");
+  const res = await fetch(resolveApiUrl("/api/i18n/config"));
   if (!res.ok) {
     return FALLBACK_CONFIG;
   }
@@ -102,7 +103,7 @@ async function fetchBundle(locale: string, etag?: string): Promise<I18nBundle> {
   const headers: Record<string, string> = {};
   if (etag) headers["If-None-Match"] = etag;
 
-  const res = await fetch(`/api/i18n/bundle?locale=${encodeURIComponent(locale)}`, { headers });
+  const res = await fetch(resolveApiUrl(`/api/i18n/bundle?locale=${encodeURIComponent(locale)}`), { headers });
 
   if (res.status === 304) {
     const cur = getI18nState().bundle;

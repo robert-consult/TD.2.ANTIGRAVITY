@@ -1,6 +1,7 @@
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
 import { getIdentityHeaders } from "./identity";
 import { solveBotChallenge } from "./botProof";
+import { resolveApiUrl } from "./appUrl";
 
 export class ApiError extends Error {
   status: number;
@@ -52,7 +53,7 @@ export async function apiRequest(
   };
 
   const doFetch = (extra?: Record<string, string>) =>
-    fetch(url, {
+    fetch(resolveApiUrl(url), {
       method,
       headers: { ...baseHeaders, ...(extra ?? {}) },
       body: data ? JSON.stringify(data) : undefined,
@@ -88,8 +89,9 @@ export const getQueryFn: <T>(options: {
   ({ on401: unauthorizedBehavior }) =>
   async ({ queryKey }) => {
     const identityHeaders = await getIdentityHeaders();
+    const url = resolveApiUrl(queryKey[0] as string);
     
-    const res = await fetch(queryKey[0] as string, {
+    const res = await fetch(url, {
       credentials: "include",
       headers: identityHeaders,
     });

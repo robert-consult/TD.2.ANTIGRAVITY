@@ -1,0 +1,61 @@
+import type { CapacitorConfig } from "@capacitor/cli";
+
+/**
+ * Capacitor configuration for TradeQuip Mobile App
+ * 
+ * This uses REMOTE URL MODE to wrap the web application.
+ * Set CAPACITOR_SERVER_URL environment variable to your backend URL.
+ * 
+ * Examples:
+ *   - Android Emulator: http://10.0.2.2:5000
+ *   - Physical Device: http://192.168.x.x:5000
+ *   - Production: https://your-domain.com
+ */
+
+const serverUrl = String(process.env.CAPACITOR_SERVER_URL || "").trim();
+
+const config: CapacitorConfig = {
+  appId: "com.tradequip.app",
+  appName: "TradeQuip",
+  webDir: "../dist/public",
+
+  // Server configuration for remote URL mode
+  ...(serverUrl
+    ? {
+      server: {
+        url: serverUrl,
+        cleartext: serverUrl.startsWith("http://"),
+        androidScheme: serverUrl.startsWith("https://") ? "https" : "http",
+      },
+    }
+    : {}),
+
+  // Android-specific configuration
+  android: {
+    allowMixedContent: false,
+    captureInput: true,
+    webContentsDebuggingEnabled: process.env.NODE_ENV !== "production",
+  },
+
+  // Plugin configuration
+  plugins: {
+    SplashScreen: {
+      launchShowDuration: 2000,
+      launchAutoHide: true,
+      backgroundColor: "#0a1628",
+      showSpinner: true,
+      spinnerColor: "#3b82f6",
+      androidScaleType: "CENTER_CROP",
+    },
+    StatusBar: {
+      style: "Dark",
+      backgroundColor: "#0a1628",
+    },
+    Keyboard: {
+      resize: "body",
+      resizeOnFullScreen: true,
+    },
+  },
+};
+
+export default config;

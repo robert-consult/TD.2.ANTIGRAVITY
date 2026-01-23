@@ -1,0 +1,27 @@
+{
+    "name": "tradequip-mobile",
+    "version": "1.0.0",
+    "description": "TradeQuip Mobile - Capacitor Android App",
+    "type": "module",
+    "scripts": {
+        "sync": "cd .. && npm run build && cd MOBILE && npx cap sync",
+        "open:android": "npx cap open android",
+        "run:android": "npx cap run android",
+        "build:android": "cd android && ./gradlew assembleDebug",
+        "build:android:release": "cd android && ./gradlew assembleRelease",
+        "doctor": "npx cap doctor"
+    },
+    "dependencies": {
+        "@capacitor/android": "^7.2.0",
+        "@capacitor/app": "^7.0.1",
+        "@capacitor/core": "^7.2.0",
+        "@capacitor/haptics": "^7.0.1",
+        "@capacitor/keyboard": "^7.0.1",
+        "@capacitor/network": "^7.0.1",
+        "@capacitor/splash-screen": "^7.0.1",
+        "@capacitor/status-bar": "^7.0.1"
+    },
+    "devDependencies": {
+        "@capacitor/cli": "^7.2.0"
+    }
+}

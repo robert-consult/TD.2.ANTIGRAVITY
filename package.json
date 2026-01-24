@@ -34,6 +34,7 @@
     "i18n:import:sqlite": "dotenv -e .env -- tsx scripts/i18nSqliteToPostgres.ts",
     "i18n:repair": "dotenv -e .env -- tsx scripts/i18nRepairLocale.ts",
     "i18n:run": "dotenv -e .env -- tsx scripts/i18nRunWorker.ts",
+    "legal:seed:doc2": "dotenv -e .env -- tsx scripts/legalSeedDoc2.ts",
     "loadtest:publish-quotes": "dotenv -e .env -- tsx scripts/loadtest/publishQuotes.ts",
     "loadtest:ws-fanout": "tsx scripts/loadtest/wsFanout.ts",
     "mobile:install": "cd MOBILE && npm install",

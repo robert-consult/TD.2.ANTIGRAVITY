@@ -1,5 +1,9 @@
 {
     "chatgpt.openOnStartup": true,
     "chatgpt.commentCodeLensEnabled": true,
-    "remote.WSL.debug": true
+    "remote.WSL.debug": true,
+    "terminal.integrated.env.linux": {
+        "JAVA_HOME": "${env:HOME}/.local/share/jdks/temurin-17",
+        "PATH": "${env:HOME}/.local/share/jdks/temurin-17/bin:${env:PATH}"
+    }
 }

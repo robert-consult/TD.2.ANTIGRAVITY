@@ -118,9 +118,14 @@ CLASSPATH="\\\"\\\""
 
 
 # Determine the Java command to use to start the JVM.
-if [ -z "${JAVA_HOME:-}" ] && [ -n "${HOME:-}" ] && [ -x "${HOME}/.local/share/jdks/temurin-17/bin/java" ] ; then
-    JAVA_HOME="${HOME}/.local/share/jdks/temurin-17"
-    export JAVA_HOME
+if [ -z "${JAVA_HOME:-}" ] && [ -n "${HOME:-}" ] ; then
+    if [ -x "${HOME}/.local/share/jdks/temurin-21/bin/java" ] ; then
+        JAVA_HOME="${HOME}/.local/share/jdks/temurin-21"
+        export JAVA_HOME
+    elif [ -x "${HOME}/.local/share/jdks/temurin-17/bin/java" ] ; then
+        JAVA_HOME="${HOME}/.local/share/jdks/temurin-17"
+        export JAVA_HOME
+    fi
 fi
 
 if [ -n "$JAVA_HOME" ] ; then

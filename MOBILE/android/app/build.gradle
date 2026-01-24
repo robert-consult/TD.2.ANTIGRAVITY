@@ -1,5 +1,12 @@
 apply plugin: 'com.android.application'
 
+// Load signing config from key.properties
+def keystorePropertiesFile = rootProject.file("key.properties")
+def keystoreProperties = new Properties()
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+}
+
 android {
     namespace = "com.tradequip.app"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -16,10 +23,32 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    
+    // Signing configuration for release builds
+    signingConfigs {
+        release {
+            if (keystorePropertiesFile.exists()) {
+                keyAlias keystoreProperties['keyAlias']
+                keyPassword keystoreProperties['keyPassword']
+                storeFile file(keystoreProperties['storeFile'])
+                storePassword keystoreProperties['storePassword']
+            }
+        }
+    }
+    
+    packaging {
+        resources {
+            excludes += ['**/*.gz', '**/*.br']
+        }
+    }
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            // Use signing config for release builds
+            if (keystorePropertiesFile.exists()) {
+                signingConfig signingConfigs.release
+            }
         }
     }
 }
@@ -28,6 +57,15 @@ repositories {
     flatDir{
         dirs '../capacitor-cordova-android-plugins/src/main/libs', 'libs'
     }
+}
+
+// Capacitor sync may copy precompressed (.gz/.br) web assets. Android's asset merge
+// strips these extensions, which causes duplicate asset names and fails the build.
+tasks.register("prunePrecompressedWebAssets", Delete) {
+    delete fileTree(dir: "src/main/assets/public", includes: ["**/*.gz", "**/*.br"])
+}
+tasks.named("preBuild").configure {
+    dependsOn("prunePrecompressedWebAssets")
 }
 
 dependencies {

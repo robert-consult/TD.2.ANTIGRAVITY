@@ -13,11 +13,11 @@ The mobile app uses **Remote URL Mode** - it wraps the existing web application 
 ## Prerequisites
 
 - **Node.js 18+**
-- **JDK 17+** (for Android builds)
+- **JDK 21+** (for Android builds)
 - **Android Studio** with SDK 34+
 - **Android Emulator** or physical device
 
-If you don't have sudo/admin access (or you're in WSL), you can install a user-space JDK 17:
+If you don't have sudo/admin access (or you're in WSL), you can install a user-space JDK:
 
 ```bash
 cd MOBILE

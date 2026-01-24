@@ -3,7 +3,9 @@
     "chatgpt.commentCodeLensEnabled": true,
     "remote.WSL.debug": true,
     "terminal.integrated.env.linux": {
-        "JAVA_HOME": "${env:HOME}/.local/share/jdks/temurin-17",
-        "PATH": "${env:HOME}/.local/share/jdks/temurin-17/bin:${env:PATH}"
+        "JAVA_HOME": "${env:HOME}/.local/share/jdks/temurin-21",
+        "ANDROID_SDK_ROOT": "${env:HOME}/Android/Sdk",
+        "ANDROID_HOME": "${env:HOME}/Android/Sdk",
+        "PATH": "${env:HOME}/.local/share/jdks/temurin-21/bin:${env:HOME}/Android/Sdk/platform-tools:${env:HOME}/Android/Sdk/cmdline-tools/latest/bin:${env:PATH}"
     }
 }

@@ -70,6 +70,7 @@ import { adminI18nRouter } from "./routes/adminI18n";
 import { botGuard, persistBotAssessmentForUser } from "./security/botGuard";
 import { jurisdictionSessionGuard } from "./middleware/jurisdictionSessionGuard";
 import { withGriftClient } from "./grift/griftDb";
+import { isMarketOpenForSymbol } from "./services/marketHours";
 
 /**
  * Precision-aware price comparison utilities for forex trading.
@@ -4171,7 +4172,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const lastUpdate = rawLastUpdate < 1e12 ? rawLastUpdate * 1000 : rawLastUpdate;
     const ageMs = nowMs - lastUpdate;
     const dbIsStale = quote.isStale === 1 || quote.isStale === true;
-    const isStale = dbIsStale || ageMs > staleThresholdMs;
+    const marketOpen = isMarketOpenForSymbol(String(quote.symbol), new Date(nowMs));
+    const isStale = dbIsStale || (marketOpen && ageMs > staleThresholdMs);
 
     return {
       symbol: quote.symbol,
@@ -4182,6 +4184,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       prevClose: prevClose ?? midPrice,
       change,
       pctChange,
+      marketOpen,
       isStale,
       lastApiUpdate: lastUpdate,
       dataAge: ageMs,

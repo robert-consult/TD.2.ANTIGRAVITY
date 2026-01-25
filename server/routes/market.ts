@@ -2,7 +2,8 @@ import axios from "axios";
 import { Express } from "express";
 
 export function registerMarketRoutes(app: Express) {
-  const base = "https://forex.1forge.com/1.0.1";
+  // NOTE: `forex.1forge.com` is not reliably resolvable in some environments; `api.1forge.com` is.
+  const base = "https://api.1forge.com";
   const apiKey = process.env.FORGE_KEY!;
 
   app.get("/api/market/quotes", async (req, res) => {

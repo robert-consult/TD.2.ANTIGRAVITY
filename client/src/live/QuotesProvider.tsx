@@ -20,6 +20,7 @@ interface Quote {
   isStale?: boolean;
   lastApiUpdate?: number;
   dataAge?: number;
+  marketOpen?: boolean;
 }
 
 interface SymbolConfig {
@@ -202,6 +203,8 @@ export function QuotesProvider({ children }: { children: ReactNode }) {
         const lastApiUpdate = toNumber(row.lastApiUpdate) ?? existing?.lastApiUpdate;
         const dataAge = toNumber(row.dataAge) ?? (lastApiUpdate ? Date.now() - lastApiUpdate : undefined);
         const isStale = Boolean(row.isStale ?? existing?.isStale ?? false);
+        const marketOpen =
+          typeof row.marketOpen === "boolean" ? row.marketOpen : existing?.marketOpen;
 
         nextMap.set(symbol, {
           symbol,
@@ -218,6 +221,7 @@ export function QuotesProvider({ children }: { children: ReactNode }) {
           isStale,
           lastApiUpdate: lastApiUpdate ?? undefined,
           dataAge: dataAge ?? undefined,
+          marketOpen,
         });
       }
 

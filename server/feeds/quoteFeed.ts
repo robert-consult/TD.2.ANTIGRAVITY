@@ -10,6 +10,7 @@ import { onQuotesUpdated } from "../engine/orderEngine";
 import { computeSessionDayForQuote, ensureMarketDailyCloseTable } from "../utils/marketDailyClose";
 import { onLiveEvent, publishLiveEvent } from "../services/liveBus";
 import { getValkey } from "../services/valkey";
+import { isMarketOpenForSymbol } from "../services/marketHours";
 
 const API_KEY = process.env.FORGE_KEY;
 
@@ -168,6 +169,12 @@ let dynamicSet = new Set<string>();
 const throttle = pThrottle({ limit: REST_LIMIT_PER_DAY, interval: 86_400_000 });
 
 async function fetchForgeQuotes(symbols: string[]) {
+  const nowMs = Date.now();
+  const staleThresholdMs =
+    Number.isFinite(dynamicConfig.staleThresholdMs) && dynamicConfig.staleThresholdMs > 0
+      ? dynamicConfig.staleThresholdMs
+      : DEFAULT_STALE_MS;
+
   const formattedSymbols = formatSymbolsForForgeAPI(symbols);
   if (!formattedSymbols) return [];
   const response = await axios.get(
@@ -193,6 +200,8 @@ async function fetchForgeQuotes(symbols: string[]) {
       const ask = quote.a ?? quote.ask ?? price * 1.0001;
       const apiTimestamp = typeof quote.t === "number" ? quote.t : typeof quote.timestamp === "number" ? quote.timestamp : null;
       const lastUpdated = apiTimestamp != null ? (apiTimestamp > 1e12 ? apiTimestamp : apiTimestamp * 1000) : Date.now();
+      const ageMs = nowMs - lastUpdated;
+      const marketOpen = isMarketOpenForSymbol(formattedSymbol, new Date(nowMs));
       return {
         symbol: formattedSymbol,
         price,
@@ -200,7 +209,7 @@ async function fetchForgeQuotes(symbols: string[]) {
         ask,
         timestamp: Math.floor(lastUpdated / 1000),
         lastUpdated,
-        isStale: false,
+        isStale: marketOpen && ageMs > staleThresholdMs,
       };
     })
     .filter((q: any) => q.symbol && q.price);

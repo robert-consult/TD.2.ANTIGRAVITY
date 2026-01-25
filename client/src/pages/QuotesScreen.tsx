@@ -5,7 +5,7 @@ import SpreadBadge from "@/components/SpreadBadge";
 import { useAuth } from "@/hooks/use-auth";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Search, ArrowUpDown, AlertTriangle } from "lucide-react";
+import { Search, ArrowUpDown, AlertTriangle, Clock } from "lucide-react";
 
 interface QuotesScreenProps {
   onSelectSymbol: (symbol: string) => void;
@@ -24,6 +24,8 @@ export default function QuotesScreen({ onSelectSymbol }: QuotesScreenProps) {
   useEffect(() => {
     if (hasStaleData) {
       setConnectionStatus("stale");
+    } else if (quotes.length > 0 && quotes.every((q) => q.marketOpen === false)) {
+      setConnectionStatus("market_closed");
     } else if (isConnected) {
       setConnectionStatus("connected");
     } else if (isLoading) {
@@ -31,7 +33,7 @@ export default function QuotesScreen({ onSelectSymbol }: QuotesScreenProps) {
     } else {
       setConnectionStatus("disconnected");
     }
-  }, [isConnected, isLoading, hasStaleData]);
+  }, [hasStaleData, isConnected, isLoading, quotes]);
   
   // Filter and sort quotes
   const filteredAndSortedQuotes = quotes
@@ -80,6 +82,8 @@ export default function QuotesScreen({ onSelectSymbol }: QuotesScreenProps) {
           <div className="flex items-center">
             {connectionStatus === "stale" ? (
               <AlertTriangle className="w-3 h-3 mr-1.5 text-orange-400" />
+            ) : connectionStatus === "market_closed" ? (
+              <Clock className="w-3 h-3 mr-1.5 text-sky-400" />
             ) : (
               <span 
                 className={`w-2 h-2 rounded-full mr-2 ${
@@ -91,11 +95,20 @@ export default function QuotesScreen({ onSelectSymbol }: QuotesScreenProps) {
                 }`}>
               </span>
             )}
-            <span className={`text-xs ${connectionStatus === "stale" ? "text-orange-400" : "text-gray-400"}`}>
+            <span
+              className={`text-xs ${
+                connectionStatus === "stale"
+                  ? "text-orange-400"
+                  : connectionStatus === "market_closed"
+                    ? "text-sky-400"
+                    : "text-gray-400"
+              }`}>
               {connectionStatus === "connected" 
                 ? "Real-time Data"
-                : connectionStatus === "stale"
-                  ? "Cached Prices"
+                : connectionStatus === "market_closed"
+                  ? "Market Closed"
+                  : connectionStatus === "stale"
+                    ? "Cached Prices"
                   : connectionStatus === "connecting" 
                     ? "Connecting..." 
                     : "Offline"}

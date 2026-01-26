@@ -35,3 +35,13 @@
   - `CODEX_COUNTRY_TIMEZONE_CONTROLS.md`
 - Update `PROJECT_STRUCTURE.md` if you added/renamed major modules or scripts.
 
+## Checklist Confirmation (recommended)
+Before creating a PR or finalizing changes, confirm you have reviewed the applicable checklists:
+
+- [ ] `@/.agents/performance.md` (if touching hot paths)
+- [ ] `@/.agents/security.md` (if touching auth/trading/compliance)
+- [ ] `@/.agents/vuln-db.md` (if changing dependencies or security boundaries)
+- [ ] `@/.agents/observability.md` (if behavior changes)
+
+**Note**: This is a self-check. Consider adding a pre-commit hook or PR template to enforce.
+

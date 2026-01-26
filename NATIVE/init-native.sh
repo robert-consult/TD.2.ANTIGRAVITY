@@ -1,5 +1,5 @@
 #!/bin/bash
-# TradeQuip ANDROID - React Native Initialization Script
+# TradeQuip NATIVE - React Native Initialization Script
 # Run this script from WSL to set up the React Native project
 
 set -e
@@ -60,9 +60,19 @@ NATIVE_DIR="$PARENT_DIR/ANDROID_NATIVE"
 # Clean up any previous temp directory
 rm -rf "$TEMP_DIR"
 
+# Debug & Fix environment
+# Source NVM to ensure we have the correct Node/NPM/NPX in Linux
+export NVM_DIR="$HOME/.nvm"
+[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+
+echo "Node: $(which node)"
+echo "NPM: $(which npm)"
+echo "NPX: $(which npx)"
+
 # Initialize RN project
 cd "$PARENT_DIR"
-npx -y react-native@latest init TradeQuipNative_temp --template react-native-template-typescript --skip-git-init --skip-install
+# Use the community CLI directly to avoid deprecation warnings and ensure better compatibility
+npx -y @react-native-community/cli@latest init TradeQuipNative_temp --template react-native-template-typescript --skip-git-init --skip-install --verbose
 
 # Step 3: Copy source files
 echo ""

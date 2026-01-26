@@ -76,6 +76,11 @@ TD.2.ANTIGRAVITY/                    ← Root workspace
 │       │   └── theme/               # Design tokens
 │       └── node_modules/            ← NATIVE-specific deps
 │
+│   ⚠️ NOTE: If an ANDROID/ folder exists at root level,
+│      it is LEGACY from early development. Active React Native
+│      development now happens in NATIVE/. Do not add new code
+│      to ANDROID/; migrate to NATIVE/ instead.
+│
 ├── 🛠️ INFRASTRUCTURE
 │   ├── k8s/                         ← Kubernetes manifests
 │   ├── scripts/                     ← Build & utility scripts

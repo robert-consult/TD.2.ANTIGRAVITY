@@ -2,10 +2,17 @@
 
 A fully native Android trading application built with React Native, featuring the TradeQuip premium dark glassmorphism theme with real API integration.
 
+## Governance & Security
+
+**Crucial**: Before contributing, read [`AGENTS.md`](./AGENTS.md).
+- **No Secrets**: Never commit API keys.
+- **Biometrics**: Use `api.ts` handles for identity.
+- **Performance**: Strict render cycle management.
+
 ## Architecture
 
 ```
-ANDROID/                     ← Source code (this folder)
+NATIVE/                      ← Source code (this folder)
 ├── src/
 │   ├── components/          # Reusable UI components
 │   ├── hooks/               # React Query + WebSocket hooks
@@ -18,7 +25,7 @@ ANDROID/                     ← Source code (this folder)
 ANDROID_NATIVE/              ← Generated RN project (after running init-native.sh)
 ├── android/                 # Android build files
 ├── ios/                     # iOS build files
-└── src/                     # Copied from ANDROID/src
+└── src/                     # Copied from NATIVE/src
 ```
 
 ## Features
@@ -72,7 +79,7 @@ GET  /api/account/summary
 ### 1. Initialize React Native Project
 
 ```bash
-cd /home/bcodex/TD.2.ANTIGRAVITY/ANDROID
+cd /home/bcodex/TD.2.ANTIGRAVITY/NATIVE
 chmod +x init-native.sh
 ./init-native.sh
 ```

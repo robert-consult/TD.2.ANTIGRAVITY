@@ -1,75 +1,26 @@
 /**
  * TradeQuip Android - History Screen
- * Based on mockup: history_revised.png
+ * Uses real API hooks for trade history
  */
 
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
     View,
     Text,
     StyleSheet,
     FlatList,
     TouchableOpacity,
+    RefreshControl,
+    ActivityIndicator,
+    Alert,
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
+import { format } from 'date-fns';
 
 import { colors, typography, spacing } from '../../theme';
-
-// Mock data
-const historyData = [
-    {
-        id: '1',
-        symbol: 'AAPL',
-        company: 'Apple Inc.',
-        action: 'sell',
-        shares: 50,
-        date: 'Oct 25, 2023',
-        price: 170.50,
-        pnl: -120.00,
-    },
-    {
-        id: '2',
-        symbol: 'TSLA',
-        company: 'Tesla, Inc.',
-        action: 'buy',
-        shares: 20,
-        date: 'Oct 24, 2023',
-        price: 215.00,
-        pnl: 85.00,
-    },
-    {
-        id: '3',
-        symbol: 'GOOGL',
-        company: 'Alphabet Inc.',
-        action: 'buy',
-        shares: 10,
-        date: 'Oct 23, 2023',
-        price: 135.20,
-        pnl: 40.00,
-    },
-    {
-        id: '4',
-        symbol: 'MSFT',
-        company: 'Microsoft Corp.',
-        action: 'sell',
-        shares: 30,
-        date: 'Oct 20, 2023',
-        price: 330.10,
-        pnl: -55.00,
-    },
-    {
-        id: '5',
-        symbol: 'AMZN',
-        company: 'Amazon.com, Inc.',
-        action: 'buy',
-        shares: 15,
-        date: 'Oct 18, 2023',
-        price: 128.50,
-        pnl: 60.00,
-    },
-];
+import { useTrades, Trade } from '../../hooks/useTrades';
 
 const tabs = ['Positions', 'Pending', 'History'];
 
@@ -77,15 +28,44 @@ interface HistoryScreenProps {
     navigation: any;
 }
 
-const TradeHistoryCard = ({ item }: { item: typeof historyData[0] }) => {
-    const isBuy = item.action === 'buy';
-    const isProfitable = item.pnl >= 0;
+const TradeCard = ({
+    trade,
+    onClose,
+    onCancel,
+    isClosing,
+    type,
+}: {
+    trade: Trade;
+    onClose?: () => void;
+    onCancel?: () => void;
+    isClosing?: boolean;
+    type: 'open' | 'pending' | 'closed';
+}) => {
+    const isBuy = trade.type === 'BUY';
+    const isProfitable = (trade.profit || 0) >= 0;
+    const symbolName = trade.symbol?.displayName || trade.symbol?.name || `Symbol #${trade.symbolId}`;
+
+    const formatCurrency = (value: number) => {
+        return new Intl.NumberFormat('en-US', {
+            style: 'currency',
+            currency: 'USD',
+            minimumFractionDigits: 2,
+        }).format(value);
+    };
+
+    const formatDate = (dateStr: string) => {
+        try {
+            return format(new Date(dateStr), 'MMM dd, yyyy HH:mm');
+        } catch {
+            return dateStr;
+        }
+    };
 
     return (
         <View style={styles.card}>
             <View style={styles.cardHeader}>
                 <View style={styles.symbolContainer}>
-                    <Text style={styles.symbol}>{item.symbol}</Text>
+                    <Text style={styles.symbol}>{symbolName}</Text>
                     <Icon
                         name={isBuy ? 'arrow-up-right' : 'arrow-down-right'}
                         size={16}
@@ -93,38 +73,166 @@ const TradeHistoryCard = ({ item }: { item: typeof historyData[0] }) => {
                     />
                 </View>
                 <Text style={[styles.actionText, isBuy ? styles.buyText : styles.sellText]}>
-                    {isBuy ? 'Buy' : 'Sell'} {item.shares} Shares
+                    {trade.type} {trade.size} Lots
                 </Text>
             </View>
-            <Text style={styles.companyName}>{item.company}</Text>
 
             <View style={styles.cardDetails}>
                 <View style={styles.detailColumn}>
-                    <Text style={styles.detailLabel}>Date</Text>
-                    <Text style={styles.detailValue}>{item.date}</Text>
+                    <Text style={styles.detailLabel}>
+                        {type === 'closed' ? 'Closed' : 'Opened'}
+                    </Text>
+                    <Text style={styles.detailValue}>
+                        {formatDate(type === 'closed' && trade.closedAt ? trade.closedAt : trade.openedAt)}
+                    </Text>
                 </View>
                 <View style={styles.detailColumn}>
-                    <Text style={styles.detailLabel}>Price</Text>
-                    <Text style={styles.detailValue}>${item.price.toFixed(2)}</Text>
+                    <Text style={styles.detailLabel}>Open Price</Text>
+                    <Text style={styles.detailValue}>{trade.openPrice.toFixed(5)}</Text>
                 </View>
+                {type === 'closed' && trade.closePrice && (
+                    <View style={styles.detailColumn}>
+                        <Text style={styles.detailLabel}>Close Price</Text>
+                        <Text style={styles.detailValue}>{trade.closePrice.toFixed(5)}</Text>
+                    </View>
+                )}
                 <View style={styles.detailColumn}>
-                    <Text style={styles.detailLabel}>Profit/Loss</Text>
+                    <Text style={styles.detailLabel}>
+                        {type === 'closed' ? 'Profit/Loss' : 'Unrealized P/L'}
+                    </Text>
                     <Text
                         style={[
                             styles.pnlValue,
                             isProfitable ? styles.positive : styles.negative,
                         ]}
                     >
-                        {isProfitable ? '+' : ''}${item.pnl.toFixed(2)}
+                        {isProfitable ? '+' : ''}
+                        {formatCurrency(trade.profit || 0)}
                     </Text>
                 </View>
             </View>
+
+            {/* Action buttons for open positions */}
+            {type === 'open' && onClose && (
+                <TouchableOpacity
+                    style={styles.closeButton}
+                    onPress={onClose}
+                    disabled={isClosing}
+                >
+                    {isClosing ? (
+                        <ActivityIndicator size="small" color={colors.error} />
+                    ) : (
+                        <>
+                            <Icon name="x-circle" size={16} color={colors.error} />
+                            <Text style={styles.closeButtonText}>Close Position</Text>
+                        </>
+                    )}
+                </TouchableOpacity>
+            )}
+
+            {/* Cancel button for pending orders */}
+            {type === 'pending' && onCancel && (
+                <TouchableOpacity
+                    style={styles.closeButton}
+                    onPress={onCancel}
+                >
+                    <Icon name="x-circle" size={16} color={colors.warning} />
+                    <Text style={[styles.closeButtonText, { color: colors.warning }]}>
+                        Cancel Order
+                    </Text>
+                </TouchableOpacity>
+            )}
         </View>
     );
 };
 
-export const HistoryScreen: React.FC<HistoryScreenProps> = () => {
-    const [activeTab, setActiveTab] = useState('History');
+export const HistoryScreen: React.FC<HistoryScreenProps> = ({ navigation }) => {
+    const [activeTab, setActiveTab] = useState('Positions');
+    const [closingTradeId, setClosingTradeId] = useState<number | null>(null);
+
+    const {
+        trades,
+        openTrades,
+        pendingOrders,
+        isLoadingTrades,
+        isLoadingOpenTrades,
+        isLoadingPending,
+        refetchTrades,
+        refetchOpenTrades,
+        refetchPending,
+        closeTrade,
+        cancelOrder,
+        isClosingTrade,
+        isCancellingOrder,
+    } = useTrades();
+
+    const [refreshing, setRefreshing] = useState(false);
+
+    const onRefresh = useCallback(async () => {
+        setRefreshing(true);
+        await Promise.all([refetchTrades(), refetchOpenTrades(), refetchPending()]);
+        setRefreshing(false);
+    }, [refetchTrades, refetchOpenTrades, refetchPending]);
+
+    const handleCloseTrade = useCallback(async (trade: Trade) => {
+        Alert.alert(
+            'Close Position',
+            `Are you sure you want to close your ${trade.type} position on ${trade.symbol?.displayName || trade.symbol?.name}?`,
+            [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                    text: 'Close',
+                    style: 'destructive',
+                    onPress: async () => {
+                        setClosingTradeId(trade.id);
+                        try {
+                            await closeTrade(trade.id);
+                            Alert.alert('Position Closed', 'Your position has been closed successfully.');
+                        } catch (error: any) {
+                            Alert.alert('Error', error.message || 'Failed to close position');
+                        } finally {
+                            setClosingTradeId(null);
+                        }
+                    },
+                },
+            ]
+        );
+    }, [closeTrade]);
+
+    const handleCancelOrder = useCallback(async (trade: Trade) => {
+        Alert.alert(
+            'Cancel Order',
+            `Are you sure you want to cancel this pending order?`,
+            [
+                { text: 'No', style: 'cancel' },
+                {
+                    text: 'Cancel Order',
+                    style: 'destructive',
+                    onPress: async () => {
+                        try {
+                            await cancelOrder(trade.id);
+                            Alert.alert('Order Cancelled', 'Your pending order has been cancelled.');
+                        } catch (error: any) {
+                            Alert.alert('Error', error.message || 'Failed to cancel order');
+                        }
+                    },
+                },
+            ]
+        );
+    }, [cancelOrder]);
+
+    // Get current list based on active tab
+    const currentList = activeTab === 'Positions'
+        ? openTrades
+        : activeTab === 'Pending'
+            ? pendingOrders
+            : trades.filter((t) => t.status === 'CLOSED');
+
+    const isLoading = activeTab === 'Positions'
+        ? isLoadingOpenTrades
+        : activeTab === 'Pending'
+            ? isLoadingPending
+            : isLoadingTrades;
 
     return (
         <LinearGradient
@@ -136,8 +244,8 @@ export const HistoryScreen: React.FC<HistoryScreenProps> = () => {
                 <View style={styles.header}>
                     <Text style={styles.logoText}>TradeQuip</Text>
                     <Text style={styles.headerTitle}>History</Text>
-                    <TouchableOpacity style={styles.filterButton}>
-                        <Icon name="filter" size={22} color={colors.textSecondary} />
+                    <TouchableOpacity style={styles.filterButton} onPress={onRefresh}>
+                        <Icon name="refresh-cw" size={22} color={colors.textSecondary} />
                     </TouchableOpacity>
                 </View>
 
@@ -156,20 +264,81 @@ export const HistoryScreen: React.FC<HistoryScreenProps> = () => {
                                 ]}
                             >
                                 {tab}
+                                {tab === 'Positions' && openTrades.length > 0 && (
+                                    <Text> ({openTrades.length})</Text>
+                                )}
+                                {tab === 'Pending' && pendingOrders.length > 0 && (
+                                    <Text> ({pendingOrders.length})</Text>
+                                )}
                             </Text>
                         </TouchableOpacity>
                     ))}
                 </View>
 
-                {/* History List */}
-                <FlatList
-                    data={historyData}
-                    keyExtractor={(item) => item.id}
-                    renderItem={({ item }) => <TradeHistoryCard item={item} />}
-                    contentContainerStyle={styles.listContent}
-                    showsVerticalScrollIndicator={false}
-                    ItemSeparatorComponent={() => <View style={styles.separator} />}
-                />
+                {/* Loading State */}
+                {isLoading && currentList.length === 0 ? (
+                    <View style={styles.loadingContainer}>
+                        <ActivityIndicator size="large" color={colors.accent} />
+                        <Text style={styles.loadingText}>Loading...</Text>
+                    </View>
+                ) : (
+                    /* List */
+                    <FlatList
+                        data={currentList}
+                        keyExtractor={(item) => String(item.id)}
+                        renderItem={({ item }) => (
+                            <TradeCard
+                                trade={item}
+                                type={
+                                    activeTab === 'Positions'
+                                        ? 'open'
+                                        : activeTab === 'Pending'
+                                            ? 'pending'
+                                            : 'closed'
+                                }
+                                onClose={
+                                    activeTab === 'Positions'
+                                        ? () => handleCloseTrade(item)
+                                        : undefined
+                                }
+                                onCancel={
+                                    activeTab === 'Pending'
+                                        ? () => handleCancelOrder(item)
+                                        : undefined
+                                }
+                                isClosing={closingTradeId === item.id}
+                            />
+                        )}
+                        contentContainerStyle={styles.listContent}
+                        showsVerticalScrollIndicator={false}
+                        ItemSeparatorComponent={() => <View style={styles.separator} />}
+                        refreshControl={
+                            <RefreshControl
+                                refreshing={refreshing}
+                                onRefresh={onRefresh}
+                                tintColor={colors.accent}
+                                colors={[colors.accent]}
+                            />
+                        }
+                        ListEmptyComponent={
+                            <View style={styles.emptyContainer}>
+                                <Icon name="inbox" size={48} color={colors.textMuted} />
+                                <Text style={styles.emptyText}>
+                                    {activeTab === 'Positions'
+                                        ? 'No open positions'
+                                        : activeTab === 'Pending'
+                                            ? 'No pending orders'
+                                            : 'No trade history'}
+                                </Text>
+                                {activeTab === 'Positions' && (
+                                    <TouchableOpacity onPress={() => navigation.navigate('Trade')}>
+                                        <Text style={styles.emptyLink}>Start trading →</Text>
+                                    </TouchableOpacity>
+                                )}
+                            </View>
+                        }
+                    />
+                )}
             </SafeAreaView>
         </LinearGradient>
     );
@@ -225,6 +394,16 @@ const styles = StyleSheet.create({
         color: colors.bgPrimary,
         fontWeight: '600',
     },
+    loadingContainer: {
+        flex: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    loadingText: {
+        ...typography.body,
+        color: colors.textSecondary,
+        marginTop: spacing.md,
+    },
     listContent: {
         paddingHorizontal: spacing.screenPadding,
         paddingBottom: spacing.tabBarHeight + spacing.xl,
@@ -240,7 +419,7 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-        marginBottom: spacing.xxs,
+        marginBottom: spacing.sm,
     },
     symbolContainer: {
         flexDirection: 'row',
@@ -261,19 +440,16 @@ const styles = StyleSheet.create({
     sellText: {
         color: colors.error,
     },
-    companyName: {
-        ...typography.bodySmall,
-        color: colors.textMuted,
-        marginBottom: spacing.sm,
-    },
     cardDetails: {
         flexDirection: 'row',
+        flexWrap: 'wrap',
         borderTopWidth: 1,
         borderTopColor: colors.border,
         paddingTop: spacing.sm,
     },
     detailColumn: {
-        flex: 1,
+        width: '50%',
+        marginBottom: spacing.xs,
     },
     detailLabel: {
         ...typography.labelSmall,
@@ -294,8 +470,38 @@ const styles = StyleSheet.create({
     negative: {
         color: colors.error,
     },
+    closeButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: spacing.xs,
+        marginTop: spacing.sm,
+        paddingVertical: spacing.sm,
+        borderTopWidth: 1,
+        borderTopColor: colors.border,
+    },
+    closeButtonText: {
+        ...typography.buttonSmall,
+        color: colors.error,
+    },
     separator: {
         height: spacing.sm,
+    },
+    emptyContainer: {
+        flex: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingVertical: spacing.xxxl,
+    },
+    emptyText: {
+        ...typography.body,
+        color: colors.textMuted,
+        marginTop: spacing.md,
+    },
+    emptyLink: {
+        ...typography.body,
+        color: colors.accent,
+        marginTop: spacing.sm,
     },
 });
 

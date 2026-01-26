@@ -1,96 +1,175 @@
 /**
  * TradeQuip Android - Quotes Hook
- * Handles real-time quote updates via WebSocket
+ * Real-time quotes with WebSocket support
  */
 
+import { useEffect, useCallback } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useRef } from 'react';
-import { tradingApi } from '../services/api';
+import { quotesApi } from '../services/api';
+import { wsService } from '../services/websocket';
+import { useAuth } from './useAuth';
 
-interface Quote {
+export interface Symbol {
+    id: number;
+    name: string;
+    displayName: string;
+    category: string;
+    pipSize: number;
+    contractSize: number;
+    minLotSize: number;
+    maxLotSize: number;
+    lotStep: number;
+}
+
+export interface Quote {
+    symbolId: number;
     symbol: string;
     bid: number;
     ask: number;
-    price: number;
+    spread: number;
     change: number;
     changePercent: number;
+    high24h?: number;
+    low24h?: number;
+    volume24h?: number;
     timestamp: number;
 }
 
-export const useQuotes = () => {
+export function useQuotes() {
     const queryClient = useQueryClient();
-    const wsRef = useRef<WebSocket | null>(null);
+    const { isAuthenticated } = useAuth();
 
-    const {
-        data: quotes,
-        isLoading,
-        error,
-        refetch,
-    } = useQuery<Quote[]>({
-        queryKey: ['quotes'],
-        queryFn: async () => {
-            const response = await tradingApi.getQuotes();
-            return response.quotes || [];
-        },
-        staleTime: 1000, // 1 second
-        refetchInterval: 5000, // Fallback polling every 5 seconds
-    });
-
-    // WebSocket connection for real-time updates
+    // Subscribe to quote updates via WebSocket
     useEffect(() => {
-        const connectWebSocket = () => {
-            // TODO: Replace with actual WebSocket URL
-            const ws = new WebSocket('wss://your-api-domain.com/ws/quotes');
+        if (!isAuthenticated) return;
 
-            ws.onopen = () => {
-                console.log('WebSocket connected');
-            };
+        // Subscribe when connected
+        const unsubConnect = wsService.onConnect(() => {
+            wsService.subscribeQuotes();
+        });
 
-            ws.onmessage = (event) => {
-                try {
-                    const data = JSON.parse(event.data);
-                    if (data.type === 'quote') {
-                        // Update the specific quote in cache
-                        queryClient.setQueryData<Quote[]>(['quotes'], (oldQuotes) => {
-                            if (!oldQuotes) return [data.quote];
-                            return oldQuotes.map((q) =>
-                                q.symbol === data.quote.symbol ? data.quote : q
-                            );
-                        });
-                    }
-                } catch (error) {
-                    console.error('WebSocket message parse error:', error);
+        // Handle quote update messages
+        const unsubMessage = wsService.onMessage((message) => {
+            if (!message || typeof message !== 'object') return;
+
+            if (message.type === 'quote' || message.type === 'quotes:update') {
+                // Update specific quote in cache
+                if (message.quote) {
+                    queryClient.setQueryData(['quotes'], (oldQuotes: Quote[] | undefined) => {
+                        if (!oldQuotes) return [message.quote];
+                        return oldQuotes.map((q) =>
+                            q.symbolId === message.quote.symbolId ? { ...q, ...message.quote } : q
+                        );
+                    });
                 }
-            };
 
-            ws.onerror = (error) => {
-                console.error('WebSocket error:', error);
-            };
+                // Batch update
+                if (message.quotes && Array.isArray(message.quotes)) {
+                    queryClient.setQueryData(['quotes'], (oldQuotes: Quote[] | undefined) => {
+                        if (!oldQuotes) return message.quotes;
+                        const quoteMap = new Map(message.quotes.map((q: Quote) => [q.symbolId, q]));
+                        return oldQuotes.map((q) => quoteMap.has(q.symbolId) ? { ...q, ...quoteMap.get(q.symbolId) } : q);
+                    });
+                }
+            }
+        });
 
-            ws.onclose = () => {
-                console.log('WebSocket disconnected, reconnecting...');
-                // Reconnect after 3 seconds
-                setTimeout(connectWebSocket, 3000);
-            };
-
-            wsRef.current = ws;
-        };
-
-        connectWebSocket();
+        // If already connected, subscribe immediately
+        if (wsService.isConnected()) {
+            wsService.subscribeQuotes();
+        }
 
         return () => {
-            if (wsRef.current) {
-                wsRef.current.close();
-            }
+            wsService.unsubscribeQuotes();
+            unsubConnect();
+            unsubMessage();
         };
-    }, [queryClient]);
+    }, [isAuthenticated, queryClient]);
+
+    // Get symbols configuration
+    const {
+        data: symbols = [],
+        isLoading: isLoadingSymbols,
+        error: symbolsError,
+    } = useQuery<Symbol[]>({
+        queryKey: ['symbols'],
+        queryFn: quotesApi.getSymbols,
+        enabled: isAuthenticated,
+        staleTime: 60000, // Symbols rarely change
+    });
+
+    // Get current quotes
+    const {
+        data: quotes = [],
+        isLoading: isLoadingQuotes,
+        error: quotesError,
+        refetch: refetchQuotes,
+    } = useQuery<Quote[]>({
+        queryKey: ['quotes'],
+        queryFn: quotesApi.getQuotes,
+        enabled: isAuthenticated,
+        staleTime: 1000,
+        refetchInterval: wsService.isConnected() ? false : 3000,
+    });
+
+    // Get quote by symbol name
+    const getQuote = useCallback(
+        (symbolName: string): Quote | undefined => {
+            return quotes.find((q) => q.symbol === symbolName);
+        },
+        [quotes]
+    );
+
+    // Get quote by symbol ID
+    const getQuoteById = useCallback(
+        (symbolId: number): Quote | undefined => {
+            return quotes.find((q) => q.symbolId === symbolId);
+        },
+        [quotes]
+    );
+
+    // Get symbol by ID
+    const getSymbol = useCallback(
+        (symbolId: number): Symbol | undefined => {
+            return symbols.find((s) => s.id === symbolId);
+        },
+        [symbols]
+    );
+
+    // Get symbol by name
+    const getSymbolByName = useCallback(
+        (name: string): Symbol | undefined => {
+            return symbols.find((s) => s.name === name || s.displayName === name);
+        },
+        [symbols]
+    );
 
     return {
-        quotes: quotes || [],
-        isLoading,
-        error,
-        refetch,
+        // Data
+        quotes,
+        symbols,
+
+        // Loading states
+        isLoadingQuotes,
+        isLoadingSymbols,
+        isLoading: isLoadingQuotes || isLoadingSymbols,
+
+        // Errors
+        quotesError,
+        symbolsError,
+
+        // Actions
+        refetchQuotes,
+
+        // Helpers
+        getQuote,
+        getQuoteById,
+        getSymbol,
+        getSymbolByName,
+
+        // WebSocket status
+        isLive: wsService.isConnected(),
     };
-};
+}
 
 export default useQuotes;

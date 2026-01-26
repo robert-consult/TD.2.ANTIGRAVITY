@@ -1,15 +1,17 @@
 /**
  * TradeQuip Android - Trade Execution Screen
- * Based on mockup: trade_execution_theme_polish.png
+ * Uses real API hooks for order execution
  */
 
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
     View,
     Text,
     StyleSheet,
     ScrollView,
     TouchableOpacity,
+    Alert,
+    ActivityIndicator,
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -18,32 +20,122 @@ import Icon from 'react-native-vector-icons/Feather';
 import { colors, typography, spacing } from '../../theme';
 import { GlassCard } from '../../components/cards/GlassCard';
 import { Button } from '../../components/Button';
+import { useQuotes, Symbol, Quote } from '../../hooks/useQuotes';
+import { useTrades } from '../../hooks/useTrades';
+import { useAccountSummary } from '../../hooks/useAccountSummary';
 
 interface TradeScreenProps {
     navigation: any;
-    route?: { params?: { symbol?: string; side?: 'buy' | 'sell' } };
+    route?: { params?: { symbol?: string; symbolId?: number; side?: 'BUY' | 'SELL' } };
 }
 
 export const TradeScreen: React.FC<TradeScreenProps> = ({
-    navigation: _navigation,
+    navigation,
     route,
 }) => {
-    const symbol = route?.params?.symbol || 'AAPL';
-    const initialSide = route?.params?.side || 'buy';
+    const initialSymbol = route?.params?.symbol || 'BTC/USD';
+    const initialSymbolId = route?.params?.symbolId;
+    const initialSide = route?.params?.side || 'BUY';
 
-    const [side, setSide] = useState<'buy' | 'sell'>(initialSide);
-    const [orderType, _setOrderType] = useState('limit');
-    const [quantity, setQuantity] = useState(100);
-    const [limitPrice, setLimitPrice] = useState(175.45);
-    const [timeInForce, _setTimeInForce] = useState('day');
+    const { quotes, symbols, getQuote, getSymbolByName, isLoading: isLoadingQuotes } = useQuotes();
+    const { createTrade, isCreatingTrade, createTradeError } = useTrades();
+    const { freeMargin, leverage } = useAccountSummary();
 
-    const currentPrice = 175.45;
-    const changeAmount = 2.10;
-    const changePercent = 1.21;
-    const bidPrice = 175.40;
-    const askPrice = 175.50;
-    const buyingPower = 50000;
-    const estimatedTotal = quantity * limitPrice;
+    const [selectedSymbolName, setSelectedSymbolName] = useState(initialSymbol);
+    const [side, setSide] = useState<'BUY' | 'SELL'>(initialSide);
+    const [orderType, setOrderType] = useState<'market' | 'limit'>('market');
+    const [quantity, setQuantity] = useState(0.1);
+    const [limitPrice, setLimitPrice] = useState(0);
+
+    // Get current symbol and quote
+    const symbol = getSymbolByName(selectedSymbolName);
+    const quote = getQuote(selectedSymbolName);
+
+    // Calculate prices
+    const currentPrice = orderType === 'limit'
+        ? limitPrice
+        : (side === 'BUY' ? quote?.ask : quote?.bid) || 0;
+
+    const bidPrice = quote?.bid || 0;
+    const askPrice = quote?.ask || 0;
+    const spread = quote?.spread || (askPrice - bidPrice);
+    const changePercent = quote?.changePercent || 0;
+
+    // Calculate estimated values
+    const contractSize = symbol?.contractSize || 100000;
+    const estimatedTotal = quantity * contractSize * currentPrice;
+    const requiredMargin = estimatedTotal / leverage;
+
+    // Initialize limit price from current price
+    React.useEffect(() => {
+        if (quote && limitPrice === 0) {
+            setLimitPrice(side === 'BUY' ? quote.ask : quote.bid);
+        }
+    }, [quote, side, limitPrice]);
+
+    // Handle quantity changes
+    const adjustQuantity = useCallback((delta: number) => {
+        const step = symbol?.lotStep || 0.01;
+        const minLot = symbol?.minLotSize || 0.01;
+        const maxLot = symbol?.maxLotSize || 100;
+        const newQty = Math.max(minLot, Math.min(maxLot, quantity + delta));
+        setQuantity(Number(newQty.toFixed(2)));
+    }, [quantity, symbol]);
+
+    // Handle price changes
+    const adjustPrice = useCallback((delta: number) => {
+        const pipSize = symbol?.pipSize || 0.0001;
+        setLimitPrice(prev => Number((prev + delta * pipSize * 10).toFixed(5)));
+    }, [symbol]);
+
+    // Execute trade
+    const handleExecuteTrade = useCallback(async (tradeSide: 'BUY' | 'SELL') => {
+        if (!symbol || !quote) {
+            Alert.alert('Error', 'Please select a valid symbol');
+            return;
+        }
+
+        if (requiredMargin > freeMargin) {
+            Alert.alert('Insufficient Margin', 'You do not have enough buying power for this trade.');
+            return;
+        }
+
+        const executePrice = tradeSide === 'BUY' ? quote.ask : quote.bid;
+
+        try {
+            await createTrade({
+                symbolId: symbol.id,
+                type: tradeSide,
+                size: quantity,
+                openPrice: orderType === 'limit' ? limitPrice : executePrice,
+            });
+
+            Alert.alert(
+                'Trade Executed',
+                `Successfully placed ${tradeSide} order for ${quantity} ${symbol.displayName}`,
+                [
+                    { text: 'View Positions', onPress: () => navigation.navigate('History') },
+                    { text: 'OK' },
+                ]
+            );
+        } catch (error: any) {
+            Alert.alert('Trade Failed', error.message || 'Failed to execute trade');
+        }
+    }, [symbol, quote, quantity, orderType, limitPrice, requiredMargin, freeMargin, createTrade, navigation]);
+
+    const formatCurrency = (value: number, decimals = 2) => {
+        return new Intl.NumberFormat('en-US', {
+            style: 'currency',
+            currency: 'USD',
+            minimumFractionDigits: decimals,
+            maximumFractionDigits: decimals,
+        }).format(value);
+    };
+
+    const formatPrice = (value: number) => {
+        const decimals = symbol?.pipSize ? Math.max(0, Math.ceil(-Math.log10(symbol.pipSize))) : 5;
+        return value.toFixed(decimals);
+    };
 
     return (
         <LinearGradient
@@ -64,140 +156,132 @@ export const TradeScreen: React.FC<TradeScreenProps> = ({
                     {/* Symbol Card */}
                     <GlassCard style={styles.symbolCard}>
                         <View style={styles.symbolRow}>
-                            <Text style={styles.symbolName}>{symbol}</Text>
-                            <Text style={styles.companyName}>| Apple Inc.</Text>
+                            <Text style={styles.symbolName}>{symbol?.displayName || selectedSymbolName}</Text>
+                            {quote && (
+                                <View style={styles.liveIndicator}>
+                                    <View style={styles.liveDot} />
+                                    <Text style={styles.liveText}>LIVE</Text>
+                                </View>
+                            )}
                         </View>
                         <View style={styles.priceRow}>
                             <Text style={styles.currentPrice}>
-                                Last: ${currentPrice.toFixed(2)}
+                                Last: {formatPrice(quote?.bid || 0)}
                             </Text>
                             <Text style={styles.priceChange}>
                                 Change:{' '}
-                                <Text style={styles.positive}>
-                                    +${changeAmount.toFixed(2)} (+{changePercent.toFixed(2)}%)
+                                <Text style={changePercent >= 0 ? styles.positive : styles.negative}>
+                                    {changePercent >= 0 ? '+' : ''}{changePercent.toFixed(2)}%
                                 </Text>
                             </Text>
                         </View>
                         <View style={styles.bidAskRow}>
-                            <Text style={styles.bidAsk}>Bid: ${bidPrice.toFixed(2)}</Text>
-                            <Text style={styles.bidAsk}>Ask: ${askPrice.toFixed(2)}</Text>
+                            <Text style={styles.bidAsk}>Bid: {formatPrice(bidPrice)}</Text>
+                            <Text style={styles.bidAsk}>Spread: {formatPrice(spread)}</Text>
+                            <Text style={styles.bidAsk}>Ask: {formatPrice(askPrice)}</Text>
                         </View>
                     </GlassCard>
 
                     {/* Order Form Card */}
                     <GlassCard style={styles.formCard}>
-                        {/* Buy/Sell Toggle */}
+                        {/* Order Type Toggle */}
                         <View style={styles.toggleContainer}>
                             <TouchableOpacity
                                 style={[
                                     styles.toggleButton,
-                                    side === 'buy' && styles.buyToggleActive,
+                                    orderType === 'market' && styles.orderTypeActive,
                                 ]}
-                                onPress={() => setSide('buy')}
+                                onPress={() => setOrderType('market')}
                             >
                                 <Text
                                     style={[
                                         styles.toggleText,
-                                        side === 'buy' && styles.toggleTextActive,
+                                        orderType === 'market' && styles.orderTypeTextActive,
                                     ]}
                                 >
-                                    Buy
+                                    Market
                                 </Text>
                             </TouchableOpacity>
                             <TouchableOpacity
                                 style={[
                                     styles.toggleButton,
-                                    side === 'sell' && styles.sellToggleActive,
+                                    orderType === 'limit' && styles.orderTypeActive,
                                 ]}
-                                onPress={() => setSide('sell')}
+                                onPress={() => setOrderType('limit')}
                             >
                                 <Text
                                     style={[
                                         styles.toggleText,
-                                        side === 'sell' && styles.toggleTextSell,
+                                        orderType === 'limit' && styles.orderTypeTextActive,
                                     ]}
                                 >
-                                    Sell
+                                    Limit
                                 </Text>
                             </TouchableOpacity>
                         </View>
 
-                        {/* Order Type & Quantity */}
+                        {/* Quantity */}
                         <View style={styles.formRow}>
                             <View style={styles.formField}>
-                                <Text style={styles.fieldLabel}>Order Type</Text>
-                                <TouchableOpacity style={styles.dropdown}>
-                                    <Text style={styles.dropdownText}>
-                                        {orderType.charAt(0).toUpperCase() + orderType.slice(1)}
-                                    </Text>
-                                    <Icon name="chevron-down" size={18} color={colors.textMuted} />
-                                </TouchableOpacity>
-                            </View>
-                            <View style={styles.formField}>
-                                <Text style={styles.fieldLabel}>Quantity</Text>
+                                <Text style={styles.fieldLabel}>Lot Size</Text>
                                 <View style={styles.quantityInput}>
                                     <TouchableOpacity
                                         style={styles.quantityButton}
-                                        onPress={() => setQuantity(Math.max(1, quantity - 10))}
+                                        onPress={() => adjustQuantity(-0.1)}
                                     >
                                         <Icon name="minus" size={16} color={colors.textSecondary} />
                                     </TouchableOpacity>
-                                    <Text style={styles.quantityValue}>{quantity}</Text>
+                                    <Text style={styles.quantityValue}>{quantity.toFixed(2)}</Text>
                                     <TouchableOpacity
                                         style={styles.quantityButton}
-                                        onPress={() => setQuantity(quantity + 10)}
+                                        onPress={() => adjustQuantity(0.1)}
                                     >
                                         <Icon name="plus" size={16} color={colors.textSecondary} />
                                     </TouchableOpacity>
                                 </View>
                             </View>
-                        </View>
 
-                        {/* Limit Price & Time in Force */}
-                        <View style={styles.formRow}>
-                            <View style={styles.formField}>
-                                <Text style={styles.fieldLabel}>Limit Price</Text>
-                                <View style={styles.quantityInput}>
-                                    <TouchableOpacity
-                                        style={styles.quantityButton}
-                                        onPress={() => setLimitPrice(limitPrice - 0.05)}
-                                    >
-                                        <Icon name="minus" size={16} color={colors.textSecondary} />
-                                    </TouchableOpacity>
-                                    <Text style={styles.quantityValue}>
-                                        ${limitPrice.toFixed(2)}
-                                    </Text>
-                                    <TouchableOpacity
-                                        style={styles.quantityButton}
-                                        onPress={() => setLimitPrice(limitPrice + 0.05)}
-                                    >
-                                        <Icon name="plus" size={16} color={colors.textSecondary} />
-                                    </TouchableOpacity>
+                            {/* Limit Price (only for limit orders) */}
+                            {orderType === 'limit' && (
+                                <View style={styles.formField}>
+                                    <Text style={styles.fieldLabel}>Limit Price</Text>
+                                    <View style={styles.quantityInput}>
+                                        <TouchableOpacity
+                                            style={styles.quantityButton}
+                                            onPress={() => adjustPrice(-1)}
+                                        >
+                                            <Icon name="minus" size={16} color={colors.textSecondary} />
+                                        </TouchableOpacity>
+                                        <Text style={styles.quantityValue}>
+                                            {formatPrice(limitPrice)}
+                                        </Text>
+                                        <TouchableOpacity
+                                            style={styles.quantityButton}
+                                            onPress={() => adjustPrice(1)}
+                                        >
+                                            <Icon name="plus" size={16} color={colors.textSecondary} />
+                                        </TouchableOpacity>
+                                    </View>
                                 </View>
-                            </View>
-                            <View style={styles.formField}>
-                                <Text style={styles.fieldLabel}>Time in Force</Text>
-                                <TouchableOpacity style={styles.dropdown}>
-                                    <Text style={styles.dropdownText}>
-                                        {timeInForce === 'day' ? 'Day' : timeInForce}
-                                    </Text>
-                                    <Icon name="chevron-down" size={18} color={colors.textMuted} />
-                                </TouchableOpacity>
-                            </View>
+                            )}
                         </View>
 
                         {/* Action Buttons */}
                         <View style={styles.actionButtons}>
                             <Button
-                                title="BUY ↗"
+                                title={isCreatingTrade ? 'PLACING...' : 'BUY ↗'}
                                 variant="buy"
-                                onPress={() => console.log('Buy order')}
+                                onPress={() => handleExecuteTrade('BUY')}
+                                disabled={isCreatingTrade || !quote}
+                                loading={isCreatingTrade && side === 'BUY'}
                                 style={styles.actionButton}
                             />
                             <Button
-                                title="SELL ↘"
+                                title={isCreatingTrade ? 'PLACING...' : 'SELL ↘'}
                                 variant="sell"
-                                onPress={() => console.log('Sell order')}
+                                onPress={() => handleExecuteTrade('SELL')}
+                                disabled={isCreatingTrade || !quote}
+                                loading={isCreatingTrade && side === 'SELL'}
                                 style={styles.actionButton}
                             />
                         </View>
@@ -206,18 +290,43 @@ export const TradeScreen: React.FC<TradeScreenProps> = ({
                     {/* Summary Card */}
                     <GlassCard style={styles.summaryCard}>
                         <View style={styles.summaryRow}>
-                            <Text style={styles.summaryLabel}>Estimated Total</Text>
+                            <Text style={styles.summaryLabel}>Contract Value</Text>
                             <Text style={styles.summaryValue}>
-                                ${estimatedTotal.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                                {formatCurrency(estimatedTotal)}
                             </Text>
                         </View>
                         <View style={styles.summaryRow}>
-                            <Text style={styles.summaryLabel}>Buying Power</Text>
+                            <Text style={styles.summaryLabel}>Required Margin</Text>
+                            <Text style={[
+                                styles.summarySubvalue,
+                                requiredMargin > freeMargin && styles.negative,
+                            ]}>
+                                {formatCurrency(requiredMargin)}
+                            </Text>
+                        </View>
+                        <View style={styles.summaryRow}>
+                            <Text style={styles.summaryLabel}>Available Margin</Text>
                             <Text style={styles.summarySubvalue}>
-                                ${buyingPower.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                                {formatCurrency(freeMargin)}
+                            </Text>
+                        </View>
+                        <View style={styles.summaryRow}>
+                            <Text style={styles.summaryLabel}>Leverage</Text>
+                            <Text style={styles.summarySubvalue}>
+                                1:{leverage}
                             </Text>
                         </View>
                     </GlassCard>
+
+                    {/* Error display */}
+                    {createTradeError && (
+                        <View style={styles.errorContainer}>
+                            <Icon name="alert-circle" size={16} color={colors.error} />
+                            <Text style={styles.errorText}>
+                                {(createTradeError as Error).message || 'Trade execution failed'}
+                            </Text>
+                        </View>
+                    )}
                 </ScrollView>
             </SafeAreaView>
         </LinearGradient>
@@ -252,17 +361,28 @@ const styles = StyleSheet.create({
     },
     symbolRow: {
         flexDirection: 'row',
-        alignItems: 'baseline',
+        alignItems: 'center',
+        justifyContent: 'space-between',
         marginBottom: spacing.xs,
     },
     symbolName: {
         ...typography.h4,
         color: colors.textPrimary,
     },
-    companyName: {
-        ...typography.body,
-        color: colors.textSecondary,
-        marginLeft: spacing.xs,
+    liveIndicator: {
+        flexDirection: 'row',
+        alignItems: 'center',
+    },
+    liveDot: {
+        width: 8,
+        height: 8,
+        borderRadius: 4,
+        backgroundColor: colors.success,
+        marginRight: 4,
+    },
+    liveText: {
+        ...typography.labelSmall,
+        color: colors.success,
     },
     priceRow: {
         flexDirection: 'row',
@@ -280,9 +400,12 @@ const styles = StyleSheet.create({
     positive: {
         color: colors.success,
     },
+    negative: {
+        color: colors.error,
+    },
     bidAskRow: {
         flexDirection: 'row',
-        gap: spacing.lg,
+        justifyContent: 'space-between',
     },
     bidAsk: {
         ...typography.bodySmall,
@@ -304,21 +427,15 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         borderRadius: 10,
     },
-    buyToggleActive: {
-        backgroundColor: colors.buy,
-    },
-    sellToggleActive: {
-        backgroundColor: colors.sell,
+    orderTypeActive: {
+        backgroundColor: colors.accent,
     },
     toggleText: {
         ...typography.button,
         color: colors.textSecondary,
     },
-    toggleTextActive: {
-        color: colors.textPrimary,
-    },
-    toggleTextSell: {
-        color: colors.textPrimary,
+    orderTypeTextActive: {
+        color: colors.bgPrimary,
     },
     formRow: {
         flexDirection: 'row',
@@ -331,21 +448,6 @@ const styles = StyleSheet.create({
     fieldLabel: {
         ...typography.label,
         marginBottom: spacing.xs,
-    },
-    dropdown: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        backgroundColor: colors.glassBg,
-        borderRadius: 10,
-        borderWidth: 1,
-        borderColor: colors.border,
-        paddingHorizontal: spacing.md,
-        height: 44,
-    },
-    dropdownText: {
-        ...typography.body,
-        color: colors.textPrimary,
     },
     quantityInput: {
         flexDirection: 'row',
@@ -396,6 +498,19 @@ const styles = StyleSheet.create({
     summarySubvalue: {
         ...typography.body,
         color: colors.textSecondary,
+    },
+    errorContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: colors.errorLight,
+        borderRadius: spacing.inputRadius,
+        padding: spacing.md,
+        gap: spacing.sm,
+    },
+    errorText: {
+        ...typography.bodySmall,
+        color: colors.error,
+        flex: 1,
     },
 });
 

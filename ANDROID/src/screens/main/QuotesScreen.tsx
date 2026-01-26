@@ -1,74 +1,148 @@
 /**
  * TradeQuip Android - Quotes Screen
- * Based on mockup: quotes_revised.png
+ * Uses real API hooks for live quotes
  */
 
-import React from 'react';
+import React, { useState, useCallback } from 'react';
 import {
     View,
     Text,
     StyleSheet,
     FlatList,
     TouchableOpacity,
+    RefreshControl,
+    ActivityIndicator,
+    TextInput,
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
 
 import { colors, typography, spacing } from '../../theme';
-
-// Mock data
-const quotes = [
-    { symbol: 'EUR/USD', bid: 1.1234, ask: 1.1236, change: 0.05, positive: true },
-    { symbol: 'GBP/USD', bid: 1.1234, ask: 1.1236, change: -0.12, positive: false },
-    { symbol: 'USD/JPY', bid: 1.1234, ask: 1.1238, change: 0.23, positive: true },
-    { symbol: 'AUD/USD', bid: 1.1232, ask: 1.1236, change: -0.08, positive: false },
-    { symbol: 'USD/CAD', bid: 1.1234, ask: 1.1236, change: 0.15, positive: true },
-    { symbol: 'NZD/USD', bid: 1.1348, ask: 1.1358, change: 0.32, positive: true },
-    { symbol: 'USD/CHF', bid: 1.1225, ask: 1.1226, change: -0.04, positive: false },
-    { symbol: 'BTC/USD', bid: 1.1233, ask: 1.1232, change: 2.45, positive: true },
-];
+import { useQuotes, Quote, Symbol } from '../../hooks/useQuotes';
 
 interface QuotesScreenProps {
     navigation: any;
 }
 
+interface QuoteRowData extends Quote {
+    symbolInfo?: Symbol;
+}
+
 const QuoteRow = ({
     item,
     onPress,
+    onBuyPress,
+    onSellPress,
 }: {
-    item: typeof quotes[0];
+    item: QuoteRowData;
     onPress: () => void;
-}) => (
-    <TouchableOpacity onPress={onPress} activeOpacity={0.7}>
-        <View style={styles.quoteRow}>
-            <View style={styles.quoteLeft}>
-                <Text style={styles.quoteSymbol}>{item.symbol}</Text>
-                {/* Sparkline placeholder */}
-                <View style={styles.sparkline}>
-                    <View
-                        style={[
-                            styles.sparklineBar,
-                            { backgroundColor: item.positive ? colors.success : colors.error },
-                        ]}
-                    />
+    onBuyPress: () => void;
+    onSellPress: () => void;
+}) => {
+    const formatPrice = (value: number) => {
+        // Auto-detect decimal places based on value
+        const decimals = value < 10 ? 5 : value < 1000 ? 4 : 2;
+        return value.toFixed(decimals);
+    };
+
+    return (
+        <TouchableOpacity onPress={onPress} activeOpacity={0.7}>
+            <View style={styles.quoteRow}>
+                <View style={styles.quoteLeft}>
+                    <Text style={styles.quoteSymbol}>{item.symbol}</Text>
+                    <View style={styles.changeContainer}>
+                        <Text
+                            style={[
+                                styles.quoteChange,
+                                item.changePercent >= 0 ? styles.positive : styles.negative,
+                            ]}
+                        >
+                            {item.changePercent >= 0 ? '+' : ''}
+                            {item.changePercent.toFixed(2)}%
+                        </Text>
+                    </View>
+                </View>
+                <View style={styles.quoteRight}>
+                    <TouchableOpacity
+                        style={[styles.priceButton, styles.bidButton]}
+                        onPress={onSellPress}
+                    >
+                        <Text style={styles.priceLabel}>Bid</Text>
+                        <Text style={styles.priceValue}>{formatPrice(item.bid)}</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                        style={[styles.priceButton, styles.askButton]}
+                        onPress={onBuyPress}
+                    >
+                        <Text style={styles.priceLabel}>Ask</Text>
+                        <Text style={styles.priceValue}>{formatPrice(item.ask)}</Text>
+                    </TouchableOpacity>
                 </View>
             </View>
-            <View style={styles.quoteRight}>
-                <TouchableOpacity style={[styles.priceButton, styles.bidButton]}>
-                    <Text style={styles.priceLabel}>Bid</Text>
-                    <Text style={styles.priceValue}>{item.bid.toFixed(4)}</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={[styles.priceButton, styles.askButton]}>
-                    <Text style={styles.priceLabel}>Ask</Text>
-                    <Text style={styles.priceValue}>{item.ask.toFixed(4)}</Text>
-                </TouchableOpacity>
-            </View>
-        </View>
-    </TouchableOpacity>
-);
+        </TouchableOpacity>
+    );
+};
 
 export const QuotesScreen: React.FC<QuotesScreenProps> = ({ navigation }) => {
+    const { quotes, symbols, isLoading, refetchQuotes, isLive } = useQuotes();
+    const [refreshing, setRefreshing] = useState(false);
+    const [searchQuery, setSearchQuery] = useState('');
+    const [showSearch, setShowSearch] = useState(false);
+
+    const onRefresh = useCallback(async () => {
+        setRefreshing(true);
+        await refetchQuotes();
+        setRefreshing(false);
+    }, [refetchQuotes]);
+
+    // Combine quotes with symbol info and filter by search
+    const quotesWithInfo: QuoteRowData[] = quotes
+        .map((quote) => ({
+            ...quote,
+            symbolInfo: symbols.find((s) => s.id === quote.symbolId),
+        }))
+        .filter((quote) => {
+            if (!searchQuery) return true;
+            const search = searchQuery.toLowerCase();
+            return (
+                quote.symbol.toLowerCase().includes(search) ||
+                quote.symbolInfo?.displayName.toLowerCase().includes(search)
+            );
+        });
+
+    const handleQuotePress = useCallback(
+        (quote: QuoteRowData) => {
+            navigation.navigate('Charts', {
+                symbol: quote.symbol,
+                symbolId: quote.symbolId,
+            });
+        },
+        [navigation]
+    );
+
+    const handleBuyPress = useCallback(
+        (quote: QuoteRowData) => {
+            navigation.navigate('Trade', {
+                symbol: quote.symbol,
+                symbolId: quote.symbolId,
+                side: 'BUY',
+            });
+        },
+        [navigation]
+    );
+
+    const handleSellPress = useCallback(
+        (quote: QuoteRowData) => {
+            navigation.navigate('Trade', {
+                symbol: quote.symbol,
+                symbolId: quote.symbolId,
+                side: 'SELL',
+            });
+        },
+        [navigation]
+    );
+
     return (
         <LinearGradient
             colors={[colors.bgPrimary, colors.bgSecondary]}
@@ -78,26 +152,87 @@ export const QuotesScreen: React.FC<QuotesScreenProps> = ({ navigation }) => {
                 {/* Header */}
                 <View style={styles.header}>
                     <Text style={styles.logoText}>TradeQuip</Text>
-                    <Text style={styles.headerTitle}>Quotes</Text>
-                    <TouchableOpacity style={styles.searchButton}>
-                        <Icon name="search" size={22} color={colors.textSecondary} />
+                    <View style={styles.headerCenter}>
+                        <Text style={styles.headerTitle}>Quotes</Text>
+                        {isLive && (
+                            <View style={styles.liveIndicator}>
+                                <View style={styles.liveDot} />
+                                <Text style={styles.liveText}>LIVE</Text>
+                            </View>
+                        )}
+                    </View>
+                    <TouchableOpacity
+                        style={styles.searchButton}
+                        onPress={() => setShowSearch(!showSearch)}
+                    >
+                        <Icon
+                            name={showSearch ? 'x' : 'search'}
+                            size={22}
+                            color={colors.textSecondary}
+                        />
                     </TouchableOpacity>
                 </View>
 
-                {/* Quote List */}
-                <FlatList
-                    data={quotes}
-                    keyExtractor={(item) => item.symbol}
-                    renderItem={({ item }) => (
-                        <QuoteRow
-                            item={item}
-                            onPress={() => navigation.navigate('Charts', { symbol: item.symbol })}
+                {/* Search Bar */}
+                {showSearch && (
+                    <View style={styles.searchContainer}>
+                        <Icon name="search" size={18} color={colors.textMuted} />
+                        <TextInput
+                            style={styles.searchInput}
+                            placeholder="Search symbols..."
+                            placeholderTextColor={colors.textMuted}
+                            value={searchQuery}
+                            onChangeText={setSearchQuery}
+                            autoFocus
                         />
-                    )}
-                    contentContainerStyle={styles.listContent}
-                    showsVerticalScrollIndicator={false}
-                    ItemSeparatorComponent={() => <View style={styles.separator} />}
-                />
+                        {searchQuery.length > 0 && (
+                            <TouchableOpacity onPress={() => setSearchQuery('')}>
+                                <Icon name="x" size={18} color={colors.textMuted} />
+                            </TouchableOpacity>
+                        )}
+                    </View>
+                )}
+
+                {/* Loading State */}
+                {isLoading && quotes.length === 0 ? (
+                    <View style={styles.loadingContainer}>
+                        <ActivityIndicator size="large" color={colors.accent} />
+                        <Text style={styles.loadingText}>Loading quotes...</Text>
+                    </View>
+                ) : (
+                    /* Quote List */
+                    <FlatList
+                        data={quotesWithInfo}
+                        keyExtractor={(item) => item.symbol}
+                        renderItem={({ item }) => (
+                            <QuoteRow
+                                item={item}
+                                onPress={() => handleQuotePress(item)}
+                                onBuyPress={() => handleBuyPress(item)}
+                                onSellPress={() => handleSellPress(item)}
+                            />
+                        )}
+                        contentContainerStyle={styles.listContent}
+                        showsVerticalScrollIndicator={false}
+                        ItemSeparatorComponent={() => <View style={styles.separator} />}
+                        refreshControl={
+                            <RefreshControl
+                                refreshing={refreshing}
+                                onRefresh={onRefresh}
+                                tintColor={colors.accent}
+                                colors={[colors.accent]}
+                            />
+                        }
+                        ListEmptyComponent={
+                            <View style={styles.emptyContainer}>
+                                <Icon name="inbox" size={48} color={colors.textMuted} />
+                                <Text style={styles.emptyText}>
+                                    {searchQuery ? 'No symbols match your search' : 'No quotes available'}
+                                </Text>
+                            </View>
+                        }
+                    />
+                )}
             </SafeAreaView>
         </LinearGradient>
     );
@@ -121,12 +256,60 @@ const styles = StyleSheet.create({
         ...typography.h4,
         color: colors.accent,
     },
+    headerCenter: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: spacing.sm,
+    },
     headerTitle: {
         ...typography.h4,
         color: colors.textPrimary,
     },
+    liveIndicator: {
+        flexDirection: 'row',
+        alignItems: 'center',
+    },
+    liveDot: {
+        width: 8,
+        height: 8,
+        borderRadius: 4,
+        backgroundColor: colors.success,
+        marginRight: 4,
+    },
+    liveText: {
+        ...typography.labelSmall,
+        color: colors.success,
+    },
     searchButton: {
         padding: spacing.xs,
+    },
+    searchContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: colors.bgCard,
+        marginHorizontal: spacing.screenPadding,
+        marginBottom: spacing.md,
+        paddingHorizontal: spacing.md,
+        borderRadius: spacing.inputRadius,
+        borderWidth: 1,
+        borderColor: colors.border,
+        height: 44,
+        gap: spacing.sm,
+    },
+    searchInput: {
+        flex: 1,
+        ...typography.body,
+        color: colors.textPrimary,
+    },
+    loadingContainer: {
+        flex: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    loadingText: {
+        ...typography.body,
+        color: colors.textSecondary,
+        marginTop: spacing.md,
     },
     listContent: {
         paddingHorizontal: spacing.screenPadding,
@@ -143,26 +326,25 @@ const styles = StyleSheet.create({
         padding: spacing.md,
     },
     quoteLeft: {
-        flexDirection: 'row',
-        alignItems: 'center',
         flex: 1,
     },
     quoteSymbol: {
         ...typography.body,
         fontWeight: '600',
         color: colors.textPrimary,
-        width: 80,
     },
-    sparkline: {
-        width: 60,
-        height: 24,
-        justifyContent: 'center',
-        marginLeft: spacing.sm,
+    changeContainer: {
+        marginTop: 2,
     },
-    sparklineBar: {
-        height: 2,
-        width: '100%',
-        borderRadius: 1,
+    quoteChange: {
+        ...typography.bodySmall,
+        fontWeight: '600',
+    },
+    positive: {
+        color: colors.success,
+    },
+    negative: {
+        color: colors.error,
     },
     quoteRight: {
         flexDirection: 'row',
@@ -173,7 +355,7 @@ const styles = StyleSheet.create({
         paddingHorizontal: spacing.md,
         borderRadius: 8,
         alignItems: 'center',
-        minWidth: 70,
+        minWidth: 80,
     },
     bidButton: {
         backgroundColor: colors.errorLight,
@@ -196,6 +378,17 @@ const styles = StyleSheet.create({
     },
     separator: {
         height: spacing.sm,
+    },
+    emptyContainer: {
+        flex: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingVertical: spacing.xxxl,
+    },
+    emptyText: {
+        ...typography.body,
+        color: colors.textMuted,
+        marginTop: spacing.md,
     },
 });
 

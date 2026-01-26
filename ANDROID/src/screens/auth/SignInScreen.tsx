@@ -1,6 +1,6 @@
 /**
  * TradeQuip Android - Sign In Screen
- * Based on mockup: signin_mockup.png
+ * Uses real API hooks for authentication
  */
 
 import React, { useState } from 'react';
@@ -12,6 +12,8 @@ import {
     Platform,
     ScrollView,
     TouchableOpacity,
+    Alert,
+    ActivityIndicator,
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -24,10 +26,11 @@ import { colors, typography, spacing } from '../../theme';
 import { GlassCard } from '../../components/cards/GlassCard';
 import { Button } from '../../components/Button';
 import { Input } from '../../components/Input';
+import { useAuth } from '../../hooks/useAuth';
 
 const loginSchema = z.object({
     email: z.string().email('Please enter a valid email'),
-    password: z.string().min(8, 'Password must be at least 8 characters'),
+    password: z.string().min(6, 'Password must be at least 6 characters'),
 });
 
 type LoginFormData = z.infer<typeof loginSchema>;
@@ -37,7 +40,7 @@ interface SignInScreenProps {
 }
 
 export const SignInScreen: React.FC<SignInScreenProps> = ({ navigation }) => {
-    const [isLoading, setIsLoading] = useState(false);
+    const { login, isLoading, error, clearError } = useAuth();
 
     const {
         control,
@@ -45,18 +48,19 @@ export const SignInScreen: React.FC<SignInScreenProps> = ({ navigation }) => {
         formState: { errors },
     } = useForm<LoginFormData>({
         resolver: zodResolver(loginSchema),
+        defaultValues: {
+            email: '',
+            password: '',
+        },
     });
 
     const onSubmit = async (data: LoginFormData) => {
-        setIsLoading(true);
         try {
-            // TODO: Implement login API call
-            console.log('Login:', data);
-            // navigation.navigate('Main');
-        } catch (error) {
-            console.error('Login error:', error);
-        } finally {
-            setIsLoading(false);
+            clearError();
+            await login(data.email, data.password);
+            // Navigation handled by App.tsx based on auth state
+        } catch (err: any) {
+            // Error is already set in the auth store
         }
     };
 
@@ -73,6 +77,7 @@ export const SignInScreen: React.FC<SignInScreenProps> = ({ navigation }) => {
                     <ScrollView
                         contentContainerStyle={styles.scrollContent}
                         keyboardShouldPersistTaps="handled"
+                        showsVerticalScrollIndicator={false}
                     >
                         {/* Logo */}
                         <View style={styles.logoContainer}>
@@ -82,6 +87,17 @@ export const SignInScreen: React.FC<SignInScreenProps> = ({ navigation }) => {
 
                         {/* Login Card */}
                         <GlassCard style={styles.card}>
+                            {/* Error Alert */}
+                            {error && (
+                                <View style={styles.errorContainer}>
+                                    <Icon name="alert-circle" size={16} color={colors.error} />
+                                    <Text style={styles.errorText}>{error}</Text>
+                                    <TouchableOpacity onPress={clearError}>
+                                        <Icon name="x" size={16} color={colors.error} />
+                                    </TouchableOpacity>
+                                </View>
+                            )}
+
                             {/* Email Input */}
                             <Controller
                                 control={control}
@@ -97,6 +113,7 @@ export const SignInScreen: React.FC<SignInScreenProps> = ({ navigation }) => {
                                         onBlur={onBlur}
                                         error={errors.email?.message}
                                         leftIcon="mail"
+                                        editable={!isLoading}
                                     />
                                 )}
                             />
@@ -114,33 +131,44 @@ export const SignInScreen: React.FC<SignInScreenProps> = ({ navigation }) => {
                                         onBlur={onBlur}
                                         error={errors.password?.message}
                                         leftIcon="lock"
+                                        editable={!isLoading}
                                     />
                                 )}
                             />
 
                             {/* Sign In Button */}
                             <Button
-                                title="Sign In"
+                                title={isLoading ? 'Signing In...' : 'Sign In'}
                                 onPress={handleSubmit(onSubmit)}
                                 loading={isLoading}
+                                disabled={isLoading}
                                 style={styles.signInButton}
                             />
 
-                            {/* Forgot Password */}
+                            {/* Forgot Password & Social Login */}
                             <View style={styles.forgotContainer}>
                                 <TouchableOpacity
                                     onPress={() => navigation.navigate('ForgotPassword')}
+                                    disabled={isLoading}
                                 >
                                     <Text style={styles.forgotText}>Forgot Password?</Text>
                                 </TouchableOpacity>
 
                                 {/* Social Login */}
                                 <View style={styles.socialContainer}>
-                                    <TouchableOpacity style={styles.socialButton}>
+                                    <TouchableOpacity
+                                        style={styles.socialButton}
+                                        disabled={isLoading}
+                                        onPress={() => Alert.alert('Coming Soon', 'Google login coming soon!')}
+                                    >
                                         <Icon name="chrome" size={24} color={colors.textSecondary} />
                                     </TouchableOpacity>
-                                    <TouchableOpacity style={styles.socialButton}>
-                                        <Icon name="apple" size={24} color={colors.textSecondary} />
+                                    <TouchableOpacity
+                                        style={styles.socialButton}
+                                        disabled={isLoading}
+                                        onPress={() => Alert.alert('Coming Soon', 'Apple login coming soon!')}
+                                    >
+                                        <Icon name="smartphone" size={24} color={colors.textSecondary} />
                                     </TouchableOpacity>
                                 </View>
                             </View>
@@ -149,9 +177,20 @@ export const SignInScreen: React.FC<SignInScreenProps> = ({ navigation }) => {
                         {/* Sign Up Link */}
                         <View style={styles.signUpContainer}>
                             <Text style={styles.signUpText}>Don't have an account? </Text>
-                            <TouchableOpacity onPress={() => navigation.navigate('SignUp')}>
+                            <TouchableOpacity
+                                onPress={() => navigation.navigate('SignUp')}
+                                disabled={isLoading}
+                            >
                                 <Text style={styles.signUpLink}>Sign Up</Text>
                             </TouchableOpacity>
+                        </View>
+
+                        {/* Demo Mode Note */}
+                        <View style={styles.demoNote}>
+                            <Icon name="info" size={14} color={colors.textMuted} />
+                            <Text style={styles.demoNoteText}>
+                                Demo mode: Use any email/password to test
+                            </Text>
                         </View>
                     </ScrollView>
                 </KeyboardAvoidingView>
@@ -194,6 +233,20 @@ const styles = StyleSheet.create({
         paddingVertical: spacing.xl,
         paddingHorizontal: spacing.lg,
     },
+    errorContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: colors.errorLight,
+        borderRadius: spacing.inputRadius,
+        padding: spacing.md,
+        marginBottom: spacing.md,
+        gap: spacing.sm,
+    },
+    errorText: {
+        ...typography.bodySmall,
+        color: colors.error,
+        flex: 1,
+    },
     signInButton: {
         marginTop: spacing.md,
         width: '100%',
@@ -235,6 +288,17 @@ const styles = StyleSheet.create({
         ...typography.body,
         color: colors.accent,
         fontWeight: '600',
+    },
+    demoNote: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: spacing.xs,
+        marginTop: spacing.lg,
+    },
+    demoNoteText: {
+        ...typography.labelSmall,
+        color: colors.textMuted,
     },
 });
 

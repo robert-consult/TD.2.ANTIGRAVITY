@@ -1,15 +1,17 @@
 /**
  * TradeQuip Android - Dashboard Screen
- * Based on mockup: dashboard_revised.png
+ * Uses real API hooks for live data
  */
 
-import React from 'react';
+import React, { useEffect } from 'react';
 import {
     View,
     Text,
     StyleSheet,
     ScrollView,
     TouchableOpacity,
+    ActivityIndicator,
+    RefreshControl,
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -18,28 +20,41 @@ import Icon from 'react-native-vector-icons/Feather';
 import { colors, typography, spacing } from '../../theme';
 import { GlassCard } from '../../components/cards/GlassCard';
 import { Button } from '../../components/Button';
-
-// Mock data
-const portfolioData = {
-    totalValue: 124500.25,
-    changePercent: 1.2,
-    equity: 89200,
-    margin: 35300,
-    todayPnL: 1500,
-    buyingPower: 15000,
-};
-
-const positions = [
-    { symbol: 'AAPL', change: 2.5, positive: true },
-    { symbol: 'TSLA', change: -1.1, positive: false },
-    { symbol: 'GOOGL', change: 0.8, positive: true },
-];
+import { useAuth } from '../../hooks/useAuth';
+import { useAccountSummary } from '../../hooks/useAccountSummary';
+import { useTrades } from '../../hooks/useTrades';
 
 interface DashboardScreenProps {
     navigation: any;
 }
 
 export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
+    const { user } = useAuth();
+    const {
+        portfolioValue,
+        equity,
+        usedMargin,
+        freeMargin,
+        todayPnl,
+        pnlPercentage,
+        isLoading: isLoadingSummary,
+        refetch: refetchSummary,
+    } = useAccountSummary();
+
+    const {
+        openTrades,
+        isLoadingOpenTrades,
+        refetchOpenTrades,
+    } = useTrades();
+
+    const [refreshing, setRefreshing] = React.useState(false);
+
+    const onRefresh = React.useCallback(async () => {
+        setRefreshing(true);
+        await Promise.all([refetchSummary(), refetchOpenTrades()]);
+        setRefreshing(false);
+    }, [refetchSummary, refetchOpenTrades]);
+
     const formatCurrency = (value: number) => {
         return new Intl.NumberFormat('en-US', {
             style: 'currency',
@@ -47,6 +62,22 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
             minimumFractionDigits: 2,
         }).format(value);
     };
+
+    const isLoading = isLoadingSummary && !portfolioValue;
+
+    if (isLoading) {
+        return (
+            <LinearGradient
+                colors={[colors.bgPrimary, colors.bgSecondary]}
+                style={styles.gradient}
+            >
+                <SafeAreaView style={styles.loadingContainer}>
+                    <ActivityIndicator size="large" color={colors.accent} />
+                    <Text style={styles.loadingText}>Loading dashboard...</Text>
+                </SafeAreaView>
+            </LinearGradient>
+        );
+    }
 
     return (
         <LinearGradient
@@ -74,6 +105,14 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
                     style={styles.content}
                     contentContainerStyle={styles.scrollContent}
                     showsVerticalScrollIndicator={false}
+                    refreshControl={
+                        <RefreshControl
+                            refreshing={refreshing}
+                            onRefresh={onRefresh}
+                            tintColor={colors.accent}
+                            colors={[colors.accent]}
+                        />
+                    }
                 >
                     {/* Portfolio Hero Card */}
                     <LinearGradient
@@ -84,18 +123,16 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
                     >
                         <Text style={styles.heroLabel}>Portfolio Value</Text>
                         <Text style={styles.heroValue}>
-                            {formatCurrency(portfolioData.totalValue)}
+                            {formatCurrency(portfolioValue)}
                         </Text>
                         <Text
                             style={[
                                 styles.heroChange,
-                                portfolioData.changePercent >= 0
-                                    ? styles.positive
-                                    : styles.negative,
+                                pnlPercentage >= 0 ? styles.positive : styles.negative,
                             ]}
                         >
-                            {portfolioData.changePercent >= 0 ? '+' : ''}
-                            {portfolioData.changePercent.toFixed(1)}%
+                            {pnlPercentage >= 0 ? '+' : ''}
+                            {pnlPercentage.toFixed(2)}%
                         </Text>
                     </LinearGradient>
 
@@ -104,13 +141,13 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
                         <GlassCard style={styles.statCard}>
                             <Text style={styles.statLabel}>Equity</Text>
                             <Text style={styles.statValue}>
-                                {formatCurrency(portfolioData.equity)}
+                                {formatCurrency(equity)}
                             </Text>
                         </GlassCard>
                         <GlassCard style={styles.statCard}>
-                            <Text style={styles.statLabel}>Margin</Text>
+                            <Text style={styles.statLabel}>Used Margin</Text>
                             <Text style={styles.statValue}>
-                                {formatCurrency(portfolioData.margin)}
+                                {formatCurrency(usedMargin)}
                             </Text>
                         </GlassCard>
                         <GlassCard style={styles.statCard}>
@@ -118,17 +155,17 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
                             <Text
                                 style={[
                                     styles.statValue,
-                                    portfolioData.todayPnL >= 0 ? styles.positive : styles.negative,
+                                    todayPnl >= 0 ? styles.positive : styles.negative,
                                 ]}
                             >
-                                {portfolioData.todayPnL >= 0 ? '+' : ''}
-                                {formatCurrency(portfolioData.todayPnL)}
+                                {todayPnl >= 0 ? '+' : ''}
+                                {formatCurrency(todayPnl)}
                             </Text>
                         </GlassCard>
                         <GlassCard style={styles.statCard}>
                             <Text style={styles.statLabel}>Buying Power</Text>
                             <Text style={styles.statValue}>
-                                {formatCurrency(portfolioData.buyingPower)}
+                                {formatCurrency(freeMargin)}
                             </Text>
                         </GlassCard>
                     </View>
@@ -142,31 +179,72 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
 
                     {/* Active Positions */}
                     <GlassCard style={styles.positionsCard}>
-                        <Text style={styles.sectionTitle}>Active Positions</Text>
-                        {positions.map((position, index) => (
-                            <TouchableOpacity
-                                key={position.symbol}
-                                style={[
-                                    styles.positionRow,
-                                    index < positions.length - 1 && styles.positionBorder,
-                                ]}
-                                onPress={() =>
-                                    navigation.navigate('Charts', { symbol: position.symbol })
-                                }
-                            >
-                                <Text style={styles.positionSymbol}>{position.symbol}</Text>
-                                <View style={styles.sparklinePlaceholder} />
-                                <Text
+                        <View style={styles.sectionHeader}>
+                            <Text style={styles.sectionTitle}>Active Positions</Text>
+                            <Text style={styles.positionCount}>
+                                {openTrades.length} {openTrades.length === 1 ? 'Position' : 'Positions'}
+                            </Text>
+                        </View>
+
+                        {isLoadingOpenTrades && openTrades.length === 0 ? (
+                            <View style={styles.emptyPositions}>
+                                <ActivityIndicator size="small" color={colors.accent} />
+                            </View>
+                        ) : openTrades.length === 0 ? (
+                            <View style={styles.emptyPositions}>
+                                <Icon name="inbox" size={32} color={colors.textMuted} />
+                                <Text style={styles.emptyText}>No open positions</Text>
+                                <TouchableOpacity onPress={() => navigation.navigate('Trade')}>
+                                    <Text style={styles.emptyLink}>Start trading →</Text>
+                                </TouchableOpacity>
+                            </View>
+                        ) : (
+                            openTrades.slice(0, 5).map((trade, index) => (
+                                <TouchableOpacity
+                                    key={trade.id}
                                     style={[
-                                        styles.positionChange,
-                                        position.positive ? styles.positive : styles.negative,
+                                        styles.positionRow,
+                                        index < Math.min(openTrades.length, 5) - 1 && styles.positionBorder,
                                     ]}
+                                    onPress={() =>
+                                        navigation.navigate('Charts', { symbol: trade.symbol?.name || 'BTC/USD' })
+                                    }
                                 >
-                                    {position.positive ? '+' : ''}
-                                    {position.change.toFixed(1)}%
+                                    <View style={styles.positionLeft}>
+                                        <Text style={styles.positionSymbol}>
+                                            {trade.symbol?.displayName || trade.symbol?.name || `Symbol #${trade.symbolId}`}
+                                        </Text>
+                                        <Text style={[
+                                            styles.positionType,
+                                            trade.type === 'BUY' ? styles.buyText : styles.sellText
+                                        ]}>
+                                            {trade.type} {trade.size}
+                                        </Text>
+                                    </View>
+                                    <View style={styles.sparklinePlaceholder} />
+                                    <Text
+                                        style={[
+                                            styles.positionPnl,
+                                            (trade.profit || 0) >= 0 ? styles.positive : styles.negative,
+                                        ]}
+                                    >
+                                        {(trade.profit || 0) >= 0 ? '+' : ''}
+                                        {formatCurrency(trade.profit || 0)}
+                                    </Text>
+                                </TouchableOpacity>
+                            ))
+                        )}
+
+                        {openTrades.length > 5 && (
+                            <TouchableOpacity
+                                style={styles.viewAllButton}
+                                onPress={() => navigation.navigate('History')}
+                            >
+                                <Text style={styles.viewAllText}>
+                                    View all {openTrades.length} positions →
                                 </Text>
                             </TouchableOpacity>
-                        ))}
+                        )}
                     </GlassCard>
                 </ScrollView>
             </SafeAreaView>
@@ -180,6 +258,16 @@ const styles = StyleSheet.create({
     },
     container: {
         flex: 1,
+    },
+    loadingContainer: {
+        flex: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    loadingText: {
+        ...typography.body,
+        color: colors.textSecondary,
+        marginTop: spacing.md,
     },
     header: {
         flexDirection: 'row',
@@ -270,11 +358,35 @@ const styles = StyleSheet.create({
         padding: 0,
         overflow: 'hidden',
     },
-    sectionTitle: {
-        ...typography.h4,
+    sectionHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
         padding: spacing.md,
         borderBottomWidth: 1,
         borderBottomColor: colors.border,
+    },
+    sectionTitle: {
+        ...typography.h4,
+    },
+    positionCount: {
+        ...typography.bodySmall,
+        color: colors.textMuted,
+    },
+    emptyPositions: {
+        padding: spacing.xl,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    emptyText: {
+        ...typography.body,
+        color: colors.textMuted,
+        marginTop: spacing.sm,
+    },
+    emptyLink: {
+        ...typography.body,
+        color: colors.accent,
+        marginTop: spacing.sm,
     },
     positionRow: {
         flexDirection: 'row',
@@ -286,10 +398,22 @@ const styles = StyleSheet.create({
         borderBottomWidth: 1,
         borderBottomColor: colors.border,
     },
+    positionLeft: {
+        flex: 1,
+    },
     positionSymbol: {
         ...typography.body,
         fontWeight: '600',
-        flex: 1,
+    },
+    positionType: {
+        ...typography.labelSmall,
+        marginTop: 2,
+    },
+    buyText: {
+        color: colors.success,
+    },
+    sellText: {
+        color: colors.error,
     },
     sparklinePlaceholder: {
         width: 60,
@@ -298,11 +422,21 @@ const styles = StyleSheet.create({
         borderRadius: 4,
         marginHorizontal: spacing.md,
     },
-    positionChange: {
+    positionPnl: {
         ...typography.body,
         fontWeight: '600',
         textAlign: 'right',
-        minWidth: 60,
+        minWidth: 80,
+    },
+    viewAllButton: {
+        padding: spacing.md,
+        alignItems: 'center',
+        borderTopWidth: 1,
+        borderTopColor: colors.border,
+    },
+    viewAllText: {
+        ...typography.body,
+        color: colors.accent,
     },
 });
 

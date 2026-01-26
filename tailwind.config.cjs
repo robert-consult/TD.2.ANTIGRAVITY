@@ -24,6 +24,10 @@ module.exports = {
         md: "calc(var(--radius) - 2px)",
         sm: "calc(var(--radius) - 4px)",
       },
+      boxShadow: {
+        "glass-xl": "0 20px 50px rgba(0,0,0,0.55)",
+        "glass-lg": "0 20px 50px rgba(0,0,0,0.45)",
+      },
       colors: {
         background: "hsl(var(--background))",
         foreground: "hsl(var(--foreground))",

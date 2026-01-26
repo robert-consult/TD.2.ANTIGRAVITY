@@ -16,7 +16,6 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
 
 import { colors, typography, spacing } from '../../theme';
-import { GlassCard } from '../../components/cards/GlassCard';
 
 // Mock data
 const quotes = [

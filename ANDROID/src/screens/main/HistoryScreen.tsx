@@ -123,7 +123,7 @@ const TradeHistoryCard = ({ item }: { item: typeof historyData[0] }) => {
     );
 };
 
-export const HistoryScreen: React.FC<HistoryScreenProps> = ({ navigation }) => {
+export const HistoryScreen: React.FC<HistoryScreenProps> = () => {
     const [activeTab, setActiveTab] = useState('History');
 
     return (

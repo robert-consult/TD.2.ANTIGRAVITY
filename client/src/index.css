@@ -289,7 +289,7 @@
   }
 
   .toast-premium {
-    @apply relative overflow-hidden rounded-2xl border border-white/10 bg-[#0B0E14]/90 p-4 backdrop-blur-xl shadow-[0_20px_50px_rgba(0,0,0,0.55)];
+    @apply relative overflow-hidden rounded-2xl border border-white/10 bg-[#0B0E14]/90 p-4 backdrop-blur-xl shadow-glass-xl;
     border-left-width: 4px;
     border-left-color: rgba(255, 255, 255, 0.08);
   }
@@ -395,6 +395,6 @@
   }
 
   .app-card {
-    @apply rounded-2xl border border-white/10 bg-white/5 backdrop-blur-md shadow-[0_20px_50px_rgba(0,0,0,0.45)];
+    @apply rounded-2xl border border-white/10 bg-white/5 backdrop-blur-md shadow-glass-lg;
   }
 }

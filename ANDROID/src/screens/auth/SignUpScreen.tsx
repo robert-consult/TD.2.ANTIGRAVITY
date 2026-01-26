@@ -43,7 +43,11 @@ interface SignUpScreenProps {
 
 export const SignUpScreen: React.FC<SignUpScreenProps> = ({ navigation }) => {
     const [isLoading, setIsLoading] = useState(false);
-    const [country, setCountry] = useState({ code: 'US', name: 'United States', dial: '+1' });
+    const [country, _setCountry] = useState({
+        code: 'US',
+        name: 'United States',
+        dial: '+1',
+    });
     const [agreedToTerms, setAgreedToTerms] = useState(false);
     const [agreedToPrivacy, setAgreedToPrivacy] = useState(false);
 

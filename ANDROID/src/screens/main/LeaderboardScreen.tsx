@@ -16,9 +16,7 @@ import LinearGradient from 'react-native-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
 
-import { colors, typography, spacing, shadows } from '../../theme';
-import { GlassCard } from '../../components/cards/GlassCard';
-import { Button } from '../../components/Button';
+import { colors, typography, spacing } from '../../theme';
 
 // Mock data
 const topTraders = [
@@ -109,7 +107,7 @@ const RankingRow = ({ item }: { item: typeof rankings[0] }) => (
 );
 
 export const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({
-    navigation,
+    navigation: _navigation,
 }) => {
     return (
         <LinearGradient

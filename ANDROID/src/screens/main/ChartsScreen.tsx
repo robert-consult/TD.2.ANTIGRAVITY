@@ -10,7 +10,6 @@ import {
     StyleSheet,
     TouchableOpacity,
     ScrollView,
-    Dimensions,
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -18,8 +17,6 @@ import Icon from 'react-native-vector-icons/Feather';
 
 import { colors, typography, spacing } from '../../theme';
 import { Button } from '../../components/Button';
-
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 const timeframes = ['1M', '5M', '15M', '1H', '4H', 'D1', 'W1'];
 

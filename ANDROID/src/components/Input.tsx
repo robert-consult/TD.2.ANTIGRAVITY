@@ -13,7 +13,7 @@ import {
     TouchableOpacity,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
-import { colors, typography, spacing } from '../../theme';
+import { colors, typography, spacing } from '../theme';
 
 interface InputProps extends TextInputProps {
     label?: string;

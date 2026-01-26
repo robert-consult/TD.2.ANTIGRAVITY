@@ -18,7 +18,6 @@ import Icon from 'react-native-vector-icons/Feather';
 import { colors, typography, spacing } from '../../theme';
 import { GlassCard } from '../../components/cards/GlassCard';
 import { Button } from '../../components/Button';
-import { Input } from '../../components/Input';
 
 interface TradeScreenProps {
     navigation: any;
@@ -26,17 +25,17 @@ interface TradeScreenProps {
 }
 
 export const TradeScreen: React.FC<TradeScreenProps> = ({
-    navigation,
+    navigation: _navigation,
     route,
 }) => {
     const symbol = route?.params?.symbol || 'AAPL';
     const initialSide = route?.params?.side || 'buy';
 
     const [side, setSide] = useState<'buy' | 'sell'>(initialSide);
-    const [orderType, setOrderType] = useState('limit');
+    const [orderType, _setOrderType] = useState('limit');
     const [quantity, setQuantity] = useState(100);
     const [limitPrice, setLimitPrice] = useState(175.45);
-    const [timeInForce, setTimeInForce] = useState('day');
+    const [timeInForce, _setTimeInForce] = useState('day');
 
     const currentPrice = 175.45;
     const changeAmount = 2.10;
@@ -179,7 +178,9 @@ export const TradeScreen: React.FC<TradeScreenProps> = ({
                             <View style={styles.formField}>
                                 <Text style={styles.fieldLabel}>Time in Force</Text>
                                 <TouchableOpacity style={styles.dropdown}>
-                                    <Text style={styles.dropdownText}>Day</Text>
+                                    <Text style={styles.dropdownText}>
+                                        {timeInForce === 'day' ? 'Day' : timeInForce}
+                                    </Text>
                                     <Icon name="chevron-down" size={18} color={colors.textMuted} />
                                 </TouchableOpacity>
                             </View>

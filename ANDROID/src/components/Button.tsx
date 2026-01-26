@@ -9,12 +9,11 @@ import {
     Text,
     StyleSheet,
     ViewStyle,
-    TextStyle,
     ActivityIndicator,
     View,
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
-import { colors, typography, spacing, shadows } from '../../theme';
+import { colors, typography, spacing, shadows } from '../theme';
 
 interface ButtonProps {
     title: string;

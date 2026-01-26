@@ -8,14 +8,14 @@ import { View, TouchableOpacity, Text, StyleSheet } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import Icon from 'react-native-vector-icons/Feather';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { colors, typography, spacing } from '../../theme';
+import { colors, typography, spacing } from '../theme';
 
 // Screen imports (will be created)
-import { QuotesScreen } from '../../screens/main/QuotesScreen';
-import { ChartsScreen } from '../../screens/main/ChartsScreen';
-import { TradeScreen } from '../../screens/main/TradeScreen';
-import { HistoryScreen } from '../../screens/main/HistoryScreen';
-import { AccountScreen } from '../../screens/main/AccountScreen';
+import { QuotesScreen } from '../screens/main/QuotesScreen';
+import { ChartsScreen } from '../screens/main/ChartsScreen';
+import { TradeScreen } from '../screens/main/TradeScreen';
+import { HistoryScreen } from '../screens/main/HistoryScreen';
+import { AccountScreen } from '../screens/main/AccountScreen';
 
 const Tab = createBottomTabNavigator();
 

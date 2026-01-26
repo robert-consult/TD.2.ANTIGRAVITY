@@ -1,0 +1,59 @@
+version: 1
+entries:
+  - id: TQ-API-001
+    title: Missing server-side policy gating on trading actions
+    impact: Unauthorized trading actions (open/close/modify/cancel) bypassing account state controls.
+    exploit_scenario: >
+      A route that changes trade state is added/modified without requirePolicy() checks,
+      allowing users in locked/reduce-only states to open or modify positions.
+    detection:
+      heuristics:
+        - "Any route that changes trades must use requirePolicy()."
+      grep:
+        - 'rg -n "POST \\\"/api/trades\\\"|/api/trades/.*close|targets|cancel" server/routes.ts server/routes'
+        - 'rg -n "requirePolicy\\(" server/middleware/requirePolicy.ts server/routes.ts server/routes'
+    mitigation:
+      - "Use server/middleware/requirePolicy.ts on all trade lifecycle routes."
+      - "Update AUDIT_REPORT.md if new policy actions are introduced."
+    required_tests:
+      - "e2e: locked account cannot open/increase; reduce-only can close/reduce"
+    done_criteria:
+      - "All trade mutation routes are policy-gated and covered by tests/runbook."
+
+  - id: TQ-API-002
+    title: Admin authz bypass (missing requireAdmin / improper impersonation guard)
+    impact: Privilege escalation to admin controls (system config, user controls, audit tooling).
+    exploit_scenario: >
+      An admin route is added without requireAdmin or is reachable via an impersonated session
+      without proper guardrails.
+    detection:
+      grep:
+        - 'rg -n "api/admin" server/routes.ts server/routes'
+        - 'rg -n "requireAdmin\\(" server/middleware server/routes'
+        - 'rg -n "impersonation" server'
+    mitigation:
+      - "All /api/admin/* routes must enforce admin authorization server-side."
+      - "Preserve impersonation boundaries (see server/middleware/auth.ts)."
+    required_tests:
+      - "e2e or script-based admin smoke for affected routes (npm run smoke:admin)"
+    done_criteria:
+      - "Admin routes require admin authz and are covered by smoke/e2e checks."
+
+  - id: TQ-API-003
+    title: Verification abuse (email/SMS) due to missing throttles or replay resistance
+    impact: Cost blowup, account takeover, or denial-of-service against verification providers.
+    exploit_scenario: >
+      Rate limiting or replay protections are weakened on verification endpoints,
+      enabling attackers to spam email/SMS sends or brute-force OTP codes.
+    detection:
+      grep:
+        - 'rg -n "/api/verification" server/routes/verification.ts'
+        - 'rg -n "rate|cooldown|count" server/routes/verification.ts'
+    mitigation:
+      - "Preserve daily caps, cooldowns, and failure attempt tracking."
+      - "Never log raw verification tokens or codes."
+    required_tests:
+      - "Run verification-related E2E paths with dummy secrets where possible"
+    done_criteria:
+      - "Rate limits remain enforced and verified for modified endpoints."
+

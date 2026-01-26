@@ -1,0 +1,40 @@
+version: 1
+entries:
+  - id: TQ-DATA-001
+    title: PII/secrets leakage via logs or API responses
+    impact: Credential/session compromise; regulatory/compliance incident.
+    exploit_scenario: >
+      Server logs (or metrics) accidentally include emails, phone numbers, tokens, session cookies,
+      or third-party API keys during error handling or request logging.
+    detection:
+      heuristics:
+        - "Review new logs in server/index.ts request logger and any console.log additions."
+      grep:
+        - 'rg -n "console\\.(log|warn|error)" server scripts'
+        - 'rg -n "password|token|cookie|authorization|twilio|resend|hmac" server scripts -S'
+    mitigation:
+      - "Log only high-level event codes and correlation IDs; redact sensitive fields."
+      - "Preserve log truncation behavior and avoid logging full JSON responses."
+    required_tests:
+      - "Manual review of logs during affected flows; add regression test if practical"
+    done_criteria:
+      - "No secrets/PII added to logs or responses; redaction documented where needed."
+
+  - id: TQ-DATA-002
+    title: Audit trail mutability (identity/trade audits editable or deletable)
+    impact: Loss of forensic integrity; institutional audit failure.
+    exploit_scenario: >
+      Code changes allow updating or deleting audit records, or stop writing required fields
+      (timestamps, correlation IDs, provenance).
+    detection:
+      grep:
+        - 'rg -n "identity_audit|trade_audit|writeTradeAudit|appendIdentityAudit" server shared'
+        - 'rg -n "\\.update\\(.*audit|DELETE FROM .*audit" -S server db scripts'
+    mitigation:
+      - "Treat audit tables as append-only; changes require explicit design and review."
+      - "Preserve provenance fields and correlation IDs."
+    required_tests:
+      - "Activity audit verify: npm run audit:activity"
+    done_criteria:
+      - "Audit records remain append-only and verification scripts still pass."
+

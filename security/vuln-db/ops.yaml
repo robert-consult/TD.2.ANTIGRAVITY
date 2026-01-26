@@ -1,0 +1,36 @@
+version: 1
+entries:
+  - id: TQ-OPS-001
+    title: Missing or unsafe k8s resource/probe configuration
+    impact: Unstable deployments, throttling hot paths, cascading failures under load.
+    exploit_scenario: >
+      A deployment removes requests/limits or misconfigures readiness/liveness probes,
+      causing traffic to hit unready pods or causing CPU starvation during WS fanout peaks.
+    detection:
+      grep:
+        - 'rg -n "resources:|livenessProbe|readinessProbe" k8s'
+        - 'rg -n "\\/health|\\/ready|\\/metrics" k8s server/index.ts server/routes.ts'
+    mitigation:
+      - "Set requests/limits for each container and keep probes lightweight."
+      - "Confirm probe endpoints exist and respond quickly."
+    required_tests:
+      - "kubectl dry-run apply + smoke test /health and /ready"
+    done_criteria:
+      - "Requests/limits and probes are present and aligned with server endpoints."
+
+  - id: TQ-OPS-002
+    title: Supply chain scanning skipped for dependency/build changes
+    impact: Shipping known vulnerable dependencies or compromised build inputs.
+    exploit_scenario: >
+      Dependencies are updated without running any vulnerability scan,
+      allowing known CVEs/OSV advisories into production.
+    detection:
+      heuristics:
+        - "Any change to package.json / package-lock.json (root or subprojects) triggers scans."
+    mitigation:
+      - "Run OSV (preferred) and/or npm audit and document outcomes."
+    required_tests:
+      - "osv-scanner lockfile scan (or npm audit fallback)"
+    done_criteria:
+      - "Scan results reviewed; waivers documented with rationale."
+

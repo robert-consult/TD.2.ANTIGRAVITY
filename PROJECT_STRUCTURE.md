@@ -23,6 +23,11 @@
 ```
 TD.2.ANTIGRAVITY/                    ← Root workspace
 │
+├── 🤖 AGENT GUIDANCE
+│   ├── AGENTS.md                    ← Repo-wide agent router (non-negotiables)
+│   ├── .agents/                     ← Agent checklists + deep-context map
+│   └── security/vuln-db/            ← Repo-local vulnerability DB (YAML)
+│
 ├── 🌐 WEB APPLICATION
 │   ├── client/                      ← React frontend (Vite)
 │   │   ├── src/

@@ -1,0 +1,47 @@
+version: 1
+entries:
+  - id: TQ-WEB-001
+    title: Cookie/session flag misconfiguration (Secure/SameSite)
+    impact: Session hijack or CSRF-style request forgery; users unintentionally logged out on mobile/webview.
+    exploit_scenario: >
+      A deployment changes cookie flags (Secure/SameSite) or mixes origins (mobile/webview),
+      causing cookies to be sent unexpectedly (CSRF) or not sent (forced logouts). Attackers
+      can leverage lax SameSite with GET/POST endpoints if CSRF protections are missing.
+    detection:
+      heuristics:
+        - "Review session cookie configuration and any CORS/cookie changes."
+        - "Search for COOKIE_* env usage and session setup in server/routes.ts and server/index.ts."
+      grep:
+        - 'rg -n "express-session|cookie" server/routes.ts server/index.ts'
+        - 'rg -n "COOKIE_(SECURE|SAMESITE|DOMAIN|PATH)" -S'
+    mitigation:
+      - "Keep cookie sessions same-origin when possible (Capacitor remote URL mode)."
+      - "Do not relax production cookie defaults; confine test overrides to npm run start:e2e."
+      - "If cross-origin is unavoidable, document cookie/CORS settings and add regression tests."
+    required_tests:
+      - "e2e auth/login flows (web)"
+      - "mobile remote URL mode sanity (MOBILE/README.md quick start)"
+    done_criteria:
+      - "Cookie flags reviewed for prod + e2e paths; no unintended cross-origin behavior."
+
+  - id: TQ-WEB-002
+    title: XSS via dynamic/admin-provided content (i18n, legal docs, admin fields)
+    impact: Account takeover via session theft, trade tampering, admin privilege abuse.
+    exploit_scenario: >
+      Malicious HTML/JS enters translation strings, legal document content, or admin-managed fields
+      and is rendered unsafely in the client.
+    detection:
+      heuristics:
+        - "Any use of dangerouslySetInnerHTML or raw HTML rendering requires explicit review."
+        - "Review client i18n rendering and legal doc rendering paths."
+      grep:
+        - 'rg -n "dangerouslySetInnerHTML" client/src'
+        - 'rg -n "innerHTML\\s*=|document\\.write" client/src'
+    mitigation:
+      - "Render untrusted content as text; sanitize only with an approved library and strict policy."
+      - "Keep legal/i18n content DB-backed but rendered safely."
+    required_tests:
+      - "Add/extend a unit/e2e test that asserts HTML is escaped for the affected surface."
+    done_criteria:
+      - "No new untrusted HTML render path without sanitization + regression tests."
+

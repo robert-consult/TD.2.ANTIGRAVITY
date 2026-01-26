@@ -1,0 +1,58 @@
+version: 1
+entries:
+  - id: TQ-TRD-001
+    title: Invalid trade/order state transitions
+    impact: Broken accounting, incorrect PnL, and audit inconsistencies; potential user balance corruption.
+    exploit_scenario: >
+      A bug allows moving trades from CLOSED back to OPEN, filling a canceled order, or double-filling
+      an order due to concurrent engine execution.
+    detection:
+      heuristics:
+        - "Review all writes to trades.status and execution fields for explicit allowed transitions."
+      grep:
+        - 'rg -n "status\\s*:\\s*\\\"(PENDING|OPEN|CLOSED|CANCELED)\\\"" server shared'
+        - 'rg -n "ORDER_FILLED|ORDER_REJECTED|TRADE_" server/lib/auditWriter.ts server/engine'
+    mitigation:
+      - "Centralize transition rules; enforce with DB predicates (WHERE status=...) when updating."
+      - "Keep order engine single-runner or add locking/guards (see server/engine/orderEngine.ts)."
+    required_tests:
+      - "e2e trade open/close flows"
+      - "If engine logic changed, add a deterministic unit test for transitions"
+    done_criteria:
+      - "No path can double-fill or perform invalid transitions; audited events remain consistent."
+
+  - id: TQ-TRD-002
+    title: Execution on stale or unverified quotes
+    impact: Users get fills/prices on outdated data; regulatory/audit risk; potential PnL manipulation.
+    exploit_scenario: >
+      Risk middleware or close logic stops validating quote freshness or source provenance,
+      allowing trade opens/closes using stale cached quotes.
+    detection:
+      grep:
+        - 'rg -n "stale|staleThresholdMs|blockOpenOnStaleQuotes" server/risk.ts'
+        - 'rg -n "getLatestQuoteRow|getExecutionQuote" server/services'
+    mitigation:
+      - "Preserve stale threshold enforcement and document any overrides in system config."
+      - "Record quote source and timestamp in audit logs (see server/lib/auditWriter.ts)."
+    required_tests:
+      - "Add/extend a test/runbook step for stale quote blocking when enabled"
+    done_criteria:
+      - "Stale quote controls remain enforceable and audited."
+
+  - id: TQ-TRD-003
+    title: Price precision / float comparison bugs
+    impact: Incorrect trigger/fill logic (SL/TP, limit/stop), leading to wrong executions.
+    exploit_scenario: >
+      Floating-point comparisons treat 0.67 as 0.6700 incorrectly or mishandle JPY precision,
+      triggering orders at the wrong price.
+    detection:
+      grep:
+        - 'rg -n "toTicks\\(|getPrecision\\(" server/routes.ts'
+        - 'rg -n "Math\\.round\\(|\\* Math\\.pow\\(" server'
+    mitigation:
+      - "Use tick/integer comparisons for order triggers; preserve symbol precision rules."
+    required_tests:
+      - "Add deterministic tests around trigger comparisons for JPY and non-JPY pairs"
+    done_criteria:
+      - "Trigger comparisons are precision-safe and covered by tests."
+

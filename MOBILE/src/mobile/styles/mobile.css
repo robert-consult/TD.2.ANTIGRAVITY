@@ -9,19 +9,45 @@
   --safe-area-inset-bottom: env(safe-area-inset-bottom, 0px);
   --safe-area-inset-left: env(safe-area-inset-left, 0px);
   --safe-area-inset-right: env(safe-area-inset-right, 0px);
-  
+
   /* Mobile-specific spacing */
   --mobile-touch-target: 48px;
   --mobile-bottom-nav-height: 64px;
   --mobile-header-height: 56px;
-  
-  /* Mobile colors (dark theme optimized for OLED) */
-  --mobile-bg-primary: #0a1628;
-  --mobile-bg-secondary: #111d2e;
-  --mobile-bg-card: rgba(17, 29, 46, 0.8);
-  --mobile-border: rgba(255, 255, 255, 0.08);
-  --mobile-accent: #3b82f6;
-  --mobile-accent-glow: rgba(59, 130, 246, 0.3);
+
+  /* ===== TradeQuip Premium Theme ===== */
+  /* Background Colors (Deep Navy/Black - NO GREEN BACKGROUNDS) */
+  --mobile-bg-primary: #050914;
+  --mobile-bg-secondary: #0e1a35;
+  --mobile-bg-card: rgba(14, 26, 53, 0.85);
+  --mobile-border: rgba(255, 255, 255, 0.1);
+
+  /* Accent Colors */
+  --mobile-accent: #00E5FF;
+  --mobile-accent-secondary: #2979FF;
+  --mobile-accent-glow: rgba(0, 229, 255, 0.3);
+  --mobile-gradient: linear-gradient(135deg, #00E5FF, #2979FF);
+
+  /* Semantic Colors (Text/Icons ONLY - no backgrounds) */
+  --mobile-success: #00E676;
+  --mobile-error: #FF5252;
+  --mobile-warning: #FFD740;
+
+  /* Glassmorphism */
+  --glass-bg: rgba(255, 255, 255, 0.05);
+  --glass-border: rgba(255, 255, 255, 0.1);
+  --glass-blur: blur(12px);
+  --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.37);
+
+  /* Typography */
+  --text-primary: #FFFFFF;
+  --text-secondary: rgba(176, 190, 197, 0.8);
+  --text-muted: rgba(84, 110, 122, 0.6);
+
+  /* Smooth Transitions */
+  --transition-fast: 0.15s ease;
+  --transition-normal: 0.25s ease;
+  --transition-smooth: 0.35s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 /* Mobile viewport fixes */
@@ -370,6 +396,7 @@
     opacity: 0;
     transform: translateY(10px);
   }
+
   to {
     opacity: 1;
     transform: translateY(0);
@@ -387,4 +414,339 @@
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+/* ===== TradeQuip Premium Components ===== */
+
+/* Glassmorphism Card Base */
+.tq-glass-card {
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-border);
+  border-radius: 20px;
+  box-shadow: var(--glass-shadow);
+  transition: transform var(--transition-smooth), box-shadow var(--transition-smooth);
+}
+
+.tq-glass-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+}
+
+/* Hero Portfolio Card */
+.tq-hero-card {
+  background: linear-gradient(135deg, rgba(0, 229, 255, 0.15), rgba(41, 121, 255, 0.1));
+  border: 1px solid rgba(0, 229, 255, 0.25);
+  border-radius: 24px;
+  padding: 28px 24px;
+  text-align: center;
+  position: relative;
+  overflow: hidden;
+}
+
+.tq-hero-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+}
+
+.tq-hero-value {
+  font-size: 42px;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: -0.02em;
+  margin: 8px 0;
+}
+
+.tq-hero-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.tq-hero-change {
+  font-size: 16px;
+  font-weight: 600;
+  margin-top: 4px;
+}
+
+.tq-hero-change.positive {
+  color: var(--mobile-success);
+}
+
+.tq-hero-change.negative {
+  color: var(--mobile-error);
+}
+
+/* Buy/Sell Trade Buttons */
+.tq-btn-buy {
+  background: linear-gradient(135deg, #00C853, #00E676);
+  color: white;
+  border: none;
+  border-radius: 14px;
+  padding: 16px 32px;
+  font-size: 18px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+  transition: all var(--transition-normal);
+  box-shadow: 0 4px 20px rgba(0, 200, 83, 0.35);
+}
+
+.tq-btn-buy:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 25px rgba(0, 200, 83, 0.5);
+}
+
+.tq-btn-buy:active {
+  transform: scale(0.98);
+}
+
+.tq-btn-sell {
+  background: linear-gradient(135deg, #D50000, #FF5252);
+  color: white;
+  border: none;
+  border-radius: 14px;
+  padding: 16px 32px;
+  font-size: 18px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+  transition: all var(--transition-normal);
+  box-shadow: 0 4px 20px rgba(213, 0, 0, 0.35);
+}
+
+.tq-btn-sell:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 25px rgba(213, 0, 0, 0.5);
+}
+
+.tq-btn-sell:active {
+  transform: scale(0.98);
+}
+
+/* Primary Action Button (Cyan Gradient) */
+.tq-btn-primary {
+  background: var(--mobile-gradient);
+  color: white;
+  border: none;
+  border-radius: 14px;
+  padding: 16px 28px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition-normal);
+  box-shadow: 0 4px 20px var(--mobile-accent-glow);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.tq-btn-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 30px var(--mobile-accent-glow);
+}
+
+.tq-btn-primary:active {
+  transform: scale(0.98);
+}
+
+/* Quote Row */
+.tq-quote-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  background: var(--mobile-bg-card);
+  border: 1px solid var(--mobile-border);
+  border-radius: 14px;
+  margin-bottom: 10px;
+  transition: all var(--transition-fast);
+}
+
+.tq-quote-row:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+.tq-quote-symbol {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.tq-quote-sparkline {
+  width: 60px;
+  height: 24px;
+}
+
+.tq-quote-prices {
+  display: flex;
+  gap: 8px;
+}
+
+.tq-quote-bid,
+.tq-quote-ask {
+  padding: 8px 14px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  min-width: 70px;
+  text-align: center;
+  transition: all var(--transition-fast);
+}
+
+.tq-quote-bid {
+  background: rgba(213, 0, 0, 0.15);
+  color: var(--mobile-error);
+  border: 1px solid rgba(213, 0, 0, 0.3);
+}
+
+.tq-quote-ask {
+  background: rgba(0, 200, 83, 0.15);
+  color: var(--mobile-success);
+  border: 1px solid rgba(0, 200, 83, 0.3);
+}
+
+/* Position/Trade Card */
+.tq-position-card {
+  background: var(--mobile-bg-card);
+  border: 1px solid var(--mobile-border);
+  border-radius: 16px;
+  padding: 16px;
+  margin-bottom: 12px;
+}
+
+.tq-position-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.tq-position-symbol {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.tq-position-pnl {
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.tq-position-pnl.positive {
+  color: var(--mobile-success);
+}
+
+.tq-position-pnl.negative {
+  color: var(--mobile-error);
+}
+
+.tq-position-details {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+/* Settings List Item */
+.tq-settings-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px;
+  background: var(--mobile-bg-card);
+  border: 1px solid var(--mobile-border);
+  border-radius: 14px;
+  margin-bottom: 10px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.tq-settings-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.tq-settings-item-left {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.tq-settings-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: rgba(0, 229, 255, 0.1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--mobile-accent);
+}
+
+.tq-settings-label {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.tq-settings-chevron {
+  color: var(--text-muted);
+}
+
+/* Input Fields */
+.tq-input {
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid var(--glass-border);
+  border-radius: 12px;
+  padding: 14px 16px;
+  font-size: 16px;
+  color: var(--text-primary);
+  width: 100%;
+  transition: all var(--transition-fast);
+}
+
+.tq-input::placeholder {
+  color: var(--text-muted);
+}
+
+.tq-input:focus {
+  outline: none;
+  border-color: var(--mobile-accent);
+  box-shadow: 0 0 0 3px var(--mobile-accent-glow);
+}
+
+/* Smooth Page Transitions */
+@keyframes tq-slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.tq-page-enter {
+  animation: tq-slide-up 0.4s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+/* Glow Effect for Active Nav */
+.tq-nav-active {
+  color: var(--mobile-accent) !important;
+  text-shadow: 0 0 10px var(--mobile-accent-glow);
 }

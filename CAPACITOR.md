@@ -18,10 +18,10 @@ npm run cap:add:android
 npm run cap:open:android
 ```
 
-Common local dev URLs:
-- Android emulator → `http://10.0.2.2:5000`
+Common local dev URLs (secure context required for WebCrypto-based identity):
+- Android emulator/device (recommended) → `http://localhost:5000` (after `adb reverse tcp:5000 tcp:5000`)
+- Android emulator/device (trusted HTTPS tunnel) → `https://<random>.trycloudflare.com`
 - iOS simulator → `http://localhost:5000` (macOS only)
-- Physical device → `http://<YOUR_LAN_IP>:5000`
 
 ## Bundled assets mode (optional)
 If you **do not** set `CAPACITOR_SERVER_URL`, Capacitor loads `dist/public` locally. In that mode you must point API/WS at a backend explicitly:
@@ -33,4 +33,3 @@ Note: because the app uses **cookie sessions**, cross-origin REST/WS requires ca
 ## Native toolchains (not in this repo)
 - Android builds require: JDK + Android Studio/SDK + emulator/device setup
 - iOS builds require: macOS + Xcode (+ CocoaPods, typically)
-

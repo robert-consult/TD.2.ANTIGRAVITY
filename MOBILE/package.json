@@ -10,6 +10,7 @@
         "run:android": "bash scripts/with-jdk.sh npx cap run android",
         "build:android": "bash scripts/with-jdk.sh ./android/gradlew assembleDebug",
         "build:android:release": "bash scripts/with-jdk.sh ./android/gradlew assembleRelease",
+        "tunnel:android": "bash scripts/trycloudflare-tunnel.sh",
         "doctor": "bash scripts/with-jdk.sh npx cap doctor"
     },
     "dependencies": {

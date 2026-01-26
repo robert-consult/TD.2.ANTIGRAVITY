@@ -96,8 +96,12 @@ cd MOBILE && ./build-android.sh
 cd MOBILE && ./build-release.sh
 
 # Run on emulator
-export CAPACITOR_SERVER_URL="http://10.0.2.2:5000"
+adb reverse tcp:5000 tcp:5000
+export CAPACITOR_SERVER_URL="http://localhost:5000"
 npx cap run android
+
+# Or (trusted HTTPS tunnel; no emulator CA work)
+npm run tunnel:android
 ```
 
 ---

@@ -317,7 +317,7 @@ Add mobile-specific scripts:
 > **Backend URL Decision**: The mobile app requires a publicly accessible backend URL for production. Should we:
 > 1. Use the existing deployment at `https://YOUR_DOMAIN`?
 > 2. Set up a separate mobile API subdomain?
-> 3. Continue with `http://10.0.2.2:5000` for development only?
+> 3. Use `http://localhost:5000` for development (via `adb reverse tcp:5000 tcp:5000`) or a trusted HTTPS tunnel?
 
 > [!WARNING]
 > **API Keys in .env**: The `.env` file contains `OPENAI_API_KEY` which should remain server-side only. Verify this is not exposed to the client bundle.

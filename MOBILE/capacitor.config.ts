@@ -7,9 +7,12 @@ import type { CapacitorConfig } from "@capacitor/cli";
  * Set CAPACITOR_SERVER_URL environment variable to your backend URL.
  * 
  * Examples:
- *   - Android Emulator: http://10.0.2.2:5000
- *   - Physical Device: http://192.168.x.x:5000
+ *   - Android Emulator/Device (recommended): http://localhost:5000 (after `adb reverse tcp:5000 tcp:5000`)
+ *   - Android Emulator/Device (trusted HTTPS tunnel): https://<random>.trycloudflare.com
  *   - Production: https://your-domain.com
+ *
+ * Note: This app relies on WebCrypto (`crypto.subtle`) for identity/bot-proof. WebCrypto requires a secure
+ * context, so `http://10.0.2.2:5000` / `http://192.168.x.x:5000` will break login on Android WebView.
  */
 
 const serverUrl = String(process.env.CAPACITOR_SERVER_URL || "").trim();

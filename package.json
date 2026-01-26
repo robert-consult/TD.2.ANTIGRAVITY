@@ -41,6 +41,7 @@
     "mobile:sync": "npm run build && cd MOBILE && npx cap sync",
     "mobile:android": "cd MOBILE && npx cap open android",
     "mobile:run:android": "cd MOBILE && bash scripts/with-jdk.sh npx cap run android",
+    "mobile:tunnel:android": "cd MOBILE && npm run tunnel:android",
     "mobile:doctor": "cd MOBILE && bash scripts/with-jdk.sh npx cap doctor"
   },
   "dependencies": {

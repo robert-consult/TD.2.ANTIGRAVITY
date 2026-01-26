@@ -1,4 +1,4 @@
-# TradeQuip ANDROID - Native Trading App
+# TradeQuip NATIVE - Native Trading App (Android + iOS)
 
 A fully native Android trading application built with React Native, featuring the TradeQuip premium dark glassmorphism theme with real API integration.
 

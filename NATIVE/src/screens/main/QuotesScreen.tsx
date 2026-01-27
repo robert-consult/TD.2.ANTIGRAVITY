@@ -29,6 +29,8 @@ interface QuoteRowData extends Quote {
     symbolInfo?: SymbolConfig;
 }
 
+const QuoteListSeparator = () => <View style={styles.separator} />;
+
 const QuoteRow = ({
     item,
     onPress,
@@ -204,24 +206,24 @@ export const QuotesScreen: React.FC<QuotesScreenProps> = ({ navigation }) => {
                     </View>
                 ) : (
                     /* Quote List */
-                    <FlatList
-                        data={quotesWithInfo}
-                        keyExtractor={(item) => item.symbol}
-                        renderItem={({ item }) => (
-                            <QuoteRow
-                                item={item}
-                                onPress={() => handleQuotePress(item)}
-                                onBuyPress={() => handleBuyPress(item)}
-                                onSellPress={() => handleSellPress(item)}
-                            />
-                        )}
-                        contentContainerStyle={styles.listContent}
-                        showsVerticalScrollIndicator={false}
-                        ItemSeparatorComponent={() => <View style={styles.separator} />}
-                        refreshControl={
-                            <RefreshControl
-                                refreshing={refreshing}
-                                onRefresh={onRefresh}
+	                    <FlatList
+	                        data={quotesWithInfo}
+	                        keyExtractor={(item) => item.symbol}
+	                        renderItem={({ item }) => (
+	                            <QuoteRow
+	                                item={item}
+	                                onPress={() => handleQuotePress(item)}
+	                                onBuyPress={() => handleBuyPress(item)}
+	                                onSellPress={() => handleSellPress(item)}
+	                            />
+	                        )}
+	                        contentContainerStyle={styles.listContent}
+	                        showsVerticalScrollIndicator={false}
+	                        ItemSeparatorComponent={QuoteListSeparator}
+	                        refreshControl={
+	                            <RefreshControl
+	                                refreshing={refreshing}
+	                                onRefresh={onRefresh}
                                 tintColor={colors.accent}
                                 colors={[colors.accent]}
                             />

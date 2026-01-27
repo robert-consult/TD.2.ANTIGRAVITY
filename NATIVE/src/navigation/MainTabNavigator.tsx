@@ -7,7 +7,6 @@ import React from 'react';
 import { View, TouchableOpacity, Text, StyleSheet } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import Icon from 'react-native-vector-icons/Feather';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, typography, spacing } from '../theme';
 
 // Screen imports (will be created)
@@ -27,11 +26,10 @@ const TabBarIcon = ({ name, focused }: { name: string; focused: boolean }) => (
     />
 );
 
-const CustomTabBar = ({ state, descriptors, navigation }: any) => {
-    const insets = useSafeAreaInsets();
-
+const CustomTabBar = ({ state, descriptors, navigation, insets }: any) => {
+    const bottomInset = insets?.bottom ?? 0;
     return (
-        <View style={[styles.tabBar, { paddingBottom: insets.bottom }]}>
+        <View style={[styles.tabBar, { paddingBottom: bottomInset }]}>
             {state.routes.map((route: any, index: number) => {
                 const { options } = descriptors[route.key];
                 const label = options.tabBarLabel ?? route.name;
@@ -103,7 +101,7 @@ const CustomTabBar = ({ state, descriptors, navigation }: any) => {
 export const MainTabNavigator = () => {
     return (
         <Tab.Navigator
-            tabBar={(props) => <CustomTabBar {...props} />}
+            tabBar={CustomTabBar}
             screenOptions={{
                 headerShown: false,
             }}

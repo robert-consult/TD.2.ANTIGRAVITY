@@ -28,6 +28,8 @@ interface HistoryScreenProps {
     navigation: any;
 }
 
+const TradeListSeparator = () => <View style={styles.separator} />;
+
 const TradeCard = ({
     trade,
     onClose,
@@ -303,11 +305,11 @@ export const HistoryScreen: React.FC<HistoryScreenProps> = ({ navigation }) => {
                     </View>
                 ) : (
                     /* List */
-                    <FlatList
-                        data={currentList}
-                        keyExtractor={(item) => String(item.id)}
-                        renderItem={({ item }) => (
-                            <TradeCard
+	                    <FlatList
+	                        data={currentList}
+	                        keyExtractor={(item) => String(item.id)}
+	                        renderItem={({ item }) => (
+	                            <TradeCard
                                 trade={item}
                                 type={
                                     activeTab === 'Positions'
@@ -328,14 +330,14 @@ export const HistoryScreen: React.FC<HistoryScreenProps> = ({ navigation }) => {
                                 }
                                 isClosing={closingTradeId === item.id}
                             />
-                        )}
-                        contentContainerStyle={styles.listContent}
-                        showsVerticalScrollIndicator={false}
-                        ItemSeparatorComponent={() => <View style={styles.separator} />}
-                        refreshControl={
-                            <RefreshControl
-                                refreshing={refreshing}
-                                onRefresh={onRefresh}
+	                        )}
+	                        contentContainerStyle={styles.listContent}
+	                        showsVerticalScrollIndicator={false}
+	                        ItemSeparatorComponent={TradeListSeparator}
+	                        refreshControl={
+	                            <RefreshControl
+	                                refreshing={refreshing}
+	                                onRefresh={onRefresh}
                                 tintColor={colors.accent}
                                 colors={[colors.accent]}
                             />

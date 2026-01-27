@@ -29,6 +29,8 @@ type LeaderboardItem = {
     totalTrades: number;
 };
 
+const LeaderboardListSeparator = () => <View style={styles.separator} />;
+
 const formatCurrency = (value: number) => {
     const n = Number(value || 0);
     const abs = Math.abs(n);
@@ -160,21 +162,21 @@ export const LeaderboardScreen: React.FC<{ navigation: any }> = () => {
                         }
                         contentContainerStyle={styles.listContent}
                         showsVerticalScrollIndicator={false}
-                        refreshControl={
-                            <RefreshControl
-                                refreshing={isRefetching}
-                                onRefresh={() => {
-                                    refetch().catch(() => undefined);
-                                }}
-                                tintColor={colors.accent}
-                                colors={[colors.accent]}
-                            />
-                        }
-                        ItemSeparatorComponent={() => <View style={styles.separator} />}
-                        ListEmptyComponent={
-                            !isLoading ? (
-                                <View style={styles.empty}>
-                                    <Icon name="award" size={32} color={colors.textMuted} />
+	                        refreshControl={
+	                            <RefreshControl
+	                                refreshing={isRefetching}
+	                                onRefresh={() => {
+	                                    refetch().catch(() => undefined);
+	                                }}
+	                                tintColor={colors.accent}
+	                                colors={[colors.accent]}
+	                            />
+	                        }
+	                        ItemSeparatorComponent={LeaderboardListSeparator}
+	                        ListEmptyComponent={
+	                            !isLoading ? (
+	                                <View style={styles.empty}>
+	                                    <Icon name="award" size={32} color={colors.textMuted} />
                                     <Text style={styles.emptyText}>No traders on the leaderboard yet</Text>
                                 </View>
                             ) : null

@@ -47,6 +47,8 @@
 	</dict>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>TradeQuip uses location for regulatory compliance and fraud prevention.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>TradeQuip may connect to local network services for development and diagnostics.</string>
 	<key>NSFaceIDUsageDescription</key>
 	<string>TradeQuip uses Face ID for secure and quick login to your trading account.</string>
 	<key>NSCameraUsageDescription</key>

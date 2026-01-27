@@ -19,14 +19,14 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
 
 import { colors, typography, spacing } from '../../theme';
-import { useQuotes, Quote, Symbol } from '../../hooks/useQuotes';
+import { useQuotes, Quote, SymbolConfig } from '../../hooks/useQuotes';
 
 interface QuotesScreenProps {
     navigation: any;
 }
 
 interface QuoteRowData extends Quote {
-    symbolInfo?: Symbol;
+    symbolInfo?: SymbolConfig;
 }
 
 const QuoteRow = ({
@@ -46,6 +46,9 @@ const QuoteRow = ({
         return value.toFixed(decimals);
     };
 
+    const bid = item.bid ?? item.price;
+    const ask = item.ask ?? item.price;
+
     return (
         <TouchableOpacity onPress={onPress} activeOpacity={0.7}>
             <View style={styles.quoteRow}>
@@ -55,11 +58,11 @@ const QuoteRow = ({
                         <Text
                             style={[
                                 styles.quoteChange,
-                                item.changePercent >= 0 ? styles.positive : styles.negative,
+                                item.changePct >= 0 ? styles.positive : styles.negative,
                             ]}
                         >
-                            {item.changePercent >= 0 ? '+' : ''}
-                            {item.changePercent.toFixed(2)}%
+                            {item.changePct >= 0 ? '+' : ''}
+                            {item.changePct.toFixed(2)}%
                         </Text>
                     </View>
                 </View>
@@ -69,14 +72,14 @@ const QuoteRow = ({
                         onPress={onSellPress}
                     >
                         <Text style={styles.priceLabel}>Bid</Text>
-                        <Text style={styles.priceValue}>{formatPrice(item.bid)}</Text>
+                        <Text style={styles.priceValue}>{formatPrice(bid)}</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
                         style={[styles.priceButton, styles.askButton]}
                         onPress={onBuyPress}
                     >
                         <Text style={styles.priceLabel}>Ask</Text>
-                        <Text style={styles.priceValue}>{formatPrice(item.ask)}</Text>
+                        <Text style={styles.priceValue}>{formatPrice(ask)}</Text>
                     </TouchableOpacity>
                 </View>
             </View>
@@ -107,7 +110,7 @@ export const QuotesScreen: React.FC<QuotesScreenProps> = ({ navigation }) => {
             const search = searchQuery.toLowerCase();
             return (
                 quote.symbol.toLowerCase().includes(search) ||
-                quote.symbolInfo?.displayName.toLowerCase().includes(search)
+                quote.symbolInfo?.name.toLowerCase().includes(search)
             );
         });
 

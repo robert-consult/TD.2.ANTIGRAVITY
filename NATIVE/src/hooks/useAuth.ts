@@ -4,11 +4,8 @@
  */
 
 import { create } from 'zustand';
-import { MMKV } from 'react-native-mmkv';
 import { authApi } from '../services/api';
 import { wsService } from '../services/websocket';
-
-const storage = new MMKV();
 
 // User interface matching webapp User type
 export interface User {
@@ -26,6 +23,10 @@ export interface User {
     leverage?: number;
     isAdmin?: boolean;
     createdAt?: string;
+    // View As impersonation fields (web parity; not currently exposed in native UI)
+    isImpersonating?: boolean;
+    realAdminId?: number | null;
+    realAdminEmail?: string | null;
     // Tier system
     userTier?: 'CANDIDATE' | 'PERFORMER' | 'SELECTED';
     contenderTier?: string;
@@ -34,6 +35,12 @@ export interface User {
     emailVerifiedAt?: number | null;
     inGracePeriod?: boolean;
     gracePeriodEndsAt?: number | null;
+    // Legal re-acceptance gate (DOC1)
+    legalReacceptRequired?: boolean;
+    legalReacceptBlocked?: boolean;
+    legalReacceptBlockedReason?: string | null;
+    legalRequiredCombinedSha256?: string | null;
+    legalLastAcceptedCombinedSha256?: string | null;
 }
 
 interface RegisterOptions {
@@ -119,7 +126,6 @@ export const useAuth = create<AuthState>((set, get) => ({
             console.warn('Logout API error:', error);
         } finally {
             // Always clear local state
-            storage.delete('authToken');
             wsService.disable();
             set({
                 user: null,
@@ -131,12 +137,6 @@ export const useAuth = create<AuthState>((set, get) => ({
     },
 
     checkAuth: async () => {
-        const token = storage.getString('authToken');
-        if (!token) {
-            set({ isLoading: false, isAuthenticated: false, user: null });
-            return;
-        }
-
         set({ isLoading: true });
         try {
             const data = await authApi.getCurrentUser();
@@ -147,7 +147,6 @@ export const useAuth = create<AuthState>((set, get) => ({
             });
             wsService.enable();
         } catch {
-            storage.delete('authToken');
             wsService.disable();
             set({
                 user: null,

@@ -17,18 +17,22 @@ export interface Trade {
     symbol?: {
         id: number;
         name: string;
-        displayName: string;
+        symbol?: string;
     };
     type: 'BUY' | 'SELL';
-    size: number;
+    orderType?: string;
+    status: 'OPEN' | 'CLOSED' | 'PENDING' | 'CANCELED';
+    size?: number;
+    lots?: number;
     openPrice: number;
-    closePrice?: number;
+    closePrice?: number | null;
     takeProfit?: number;
     stopLoss?: number;
-    profit?: number;
-    status: 'OPEN' | 'CLOSED' | 'PENDING';
-    openedAt: string;
-    closedAt?: string;
+    limitPrice?: number | null;
+    stopPrice?: number | null;
+    profit?: string | number | null;
+    openedAt: number | string;
+    closedAt?: number | string | null;
 }
 
 export function useTrades() {

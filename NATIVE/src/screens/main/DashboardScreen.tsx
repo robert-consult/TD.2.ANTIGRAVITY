@@ -33,7 +33,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
         equity,
         usedMargin,
         freeMargin,
-        todayPnl,
+        totalPnl,
         pnlPercentage,
         isLoading: isLoadingSummary,
         refetch: refetchSummary,
@@ -149,15 +149,15 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
                             </Text>
                         </GlassCard>
                         <GlassCard style={styles.statCard}>
-                            <Text style={styles.statLabel}>Today's P&L</Text>
+                            <Text style={styles.statLabel}>Floating P/L</Text>
                             <Text
                                 style={[
                                     styles.statValue,
-                                    todayPnl >= 0 ? styles.positive : styles.negative,
+                                    totalPnl >= 0 ? styles.positive : styles.negative,
                                 ]}
                             >
-                                {todayPnl >= 0 ? '+' : ''}
-                                {formatCurrency(todayPnl)}
+                                {totalPnl >= 0 ? '+' : ''}
+                                {formatCurrency(totalPnl)}
                             </Text>
                         </GlassCard>
                         <GlassCard style={styles.statCard}>
@@ -197,7 +197,15 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
                                 </TouchableOpacity>
                             </View>
                         ) : (
-                            openTrades.slice(0, 5).map((trade, index) => (
+                            openTrades.slice(0, 5).map((trade, index) => {
+                                const profitValue = typeof trade.profit === 'number'
+                                    ? trade.profit
+                                    : Number.parseFloat(String(trade.profit ?? 0)) || 0;
+                                const lotsValue = Number(trade.lots ?? 0) || 0;
+                                const symbolCode = trade.symbol?.symbol || trade.symbol?.name || `Symbol #${trade.symbolId}`;
+                                const symbolLabel = trade.symbol?.name || symbolCode;
+
+                                return (
                                 <TouchableOpacity
                                     key={trade.id}
                                     style={[
@@ -205,32 +213,33 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
                                         index < Math.min(openTrades.length, 5) - 1 && styles.positionBorder,
                                     ]}
                                     onPress={() =>
-                                        navigation.navigate('Charts', { symbol: trade.symbol?.name || 'BTC/USD' })
+                                        navigation.navigate('Charts', { symbol: symbolCode, symbolId: trade.symbolId })
                                     }
                                 >
                                     <View style={styles.positionLeft}>
                                         <Text style={styles.positionSymbol}>
-                                            {trade.symbol?.displayName || trade.symbol?.name || `Symbol #${trade.symbolId}`}
+                                            {symbolLabel}
                                         </Text>
                                         <Text style={[
                                             styles.positionType,
                                             trade.type === 'BUY' ? styles.buyText : styles.sellText
                                         ]}>
-                                            {trade.type} {trade.size}
+                                            {trade.type} {lotsValue} Lots
                                         </Text>
                                     </View>
                                     <View style={styles.sparklinePlaceholder} />
                                     <Text
                                         style={[
                                             styles.positionPnl,
-                                            (trade.profit || 0) >= 0 ? styles.positive : styles.negative,
+                                            profitValue >= 0 ? styles.positive : styles.negative,
                                         ]}
                                     >
-                                        {(trade.profit || 0) >= 0 ? '+' : ''}
-                                        {formatCurrency(trade.profit || 0)}
+                                        {profitValue >= 0 ? '+' : ''}
+                                        {formatCurrency(profitValue)}
                                     </Text>
                                 </TouchableOpacity>
-                            ))
+                                );
+                            })
                         )}
 
                         {openTrades.length > 5 && (

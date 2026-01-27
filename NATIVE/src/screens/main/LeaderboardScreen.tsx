@@ -1,145 +1,186 @@
 /**
- * TradeQuip Android - Leaderboard Screen
- * Based on mockup: leaderboard_mockup.png
+ * TradeQuip Native - Leaderboard Screen
+ * Fetches /api/leaderboard (same data as web)
  */
 
-import React from 'react';
+import React, { useMemo } from 'react';
 import {
     View,
     Text,
     StyleSheet,
     FlatList,
-    TouchableOpacity,
-    Image,
+    ActivityIndicator,
+    RefreshControl,
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
+import { useQuery } from '@tanstack/react-query';
 
 import { colors, typography, spacing } from '../../theme';
+import { leaderboardApi } from '../../services/api';
 
-// Mock data
-const topTraders = [
-    { id: '1', name: 'Alex T.', profit: 145, rank: 1, avatar: null },
-    { id: '2', name: 'Sarah K.', profit: 98, rank: 2, avatar: null },
-    { id: '3', name: 'John D.', profit: 82, rank: 3, avatar: null },
-];
+type LeaderboardItem = {
+    userId: number;
+    username: string;
+    profit: number;
+    profitPct?: number;
+    winRate: number;
+    totalTrades: number;
+};
 
-const rankings = [
-    { id: '4', name: 'Mike D.', country: '🇺🇸', profit: 75, rank: 4 },
-    { id: '5', name: 'Emma W.', country: '🇬🇧', profit: 72, rank: 5 },
-    { id: '6', name: 'Carlos M.', country: '🇲🇽', profit: 68, rank: 6 },
-    { id: '7', name: 'Yuki T.', country: '🇯🇵', profit: 65, rank: 7 },
-    { id: '8', name: 'Anna S.', country: '🇩🇪', profit: 61, rank: 8 },
-];
+const formatCurrency = (value: number) => {
+    const n = Number(value || 0);
+    const abs = Math.abs(n);
+    const formatted = new Intl.NumberFormat('en-US', {
+        style: 'currency',
+        currency: 'USD',
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+    }).format(abs);
+    return `${n >= 0 ? '+' : '-'}${formatted}`;
+};
 
-interface LeaderboardScreenProps {
-    navigation: any;
-}
+const getTrophyColor = (rank: number) => {
+    switch (rank) {
+        case 1:
+            return colors.gold;
+        case 2:
+            return colors.silver;
+        case 3:
+            return colors.bronze;
+        default:
+            return colors.textMuted;
+    }
+};
 
 const PodiumItem = ({
-    trader,
-    position,
+    item,
+    rank,
 }: {
-    trader: typeof topTraders[0];
-    position: 'left' | 'center' | 'right';
+    item: LeaderboardItem;
+    rank: number;
 }) => {
-    const getGlowColor = () => {
-        switch (trader.rank) {
-            case 1:
-                return colors.gold;
-            case 2:
-                return colors.silver;
-            case 3:
-                return colors.bronze;
-            default:
-                return colors.accent;
-        }
-    };
-
     return (
-        <View style={[styles.podiumItem, position === 'center' && styles.podiumCenter]}>
-            <View
-                style={[
-                    styles.podiumAvatar,
-                    { borderColor: getGlowColor() },
-                    position === 'center' && styles.podiumAvatarCenter,
-                ]}
-            >
-                {trader.avatar ? (
-                    <Image source={{ uri: trader.avatar }} style={styles.avatarImage} />
-                ) : (
-                    <Icon
-                        name="user"
-                        size={position === 'center' ? 32 : 24}
-                        color={colors.textSecondary}
-                    />
-                )}
+        <View style={[styles.podiumItem, rank === 1 && styles.podiumCenter]}>
+            <View style={[styles.podiumAvatar, rank === 1 && styles.podiumAvatarCenter, { borderColor: getTrophyColor(rank) }]}>
+                <Icon name="user" size={rank === 1 ? 32 : 24} color={colors.textSecondary} />
             </View>
             <Text style={styles.podiumRank}>
-                {trader.rank === 1 ? '1st' : trader.rank === 2 ? '2nd' : '3rd'} Place
+                {rank === 1 ? '1st' : rank === 2 ? '2nd' : '3rd'} Place
             </Text>
-            <Text style={styles.podiumName}>{trader.name}</Text>
-            <Text style={[styles.podiumProfit, { color: colors.success }]}>
-                +{trader.profit}%
+            <Text style={styles.podiumName} numberOfLines={1}>{item.username}</Text>
+            <Text style={[styles.podiumProfit, { color: item.profit >= 0 ? colors.success : colors.error }]}>
+                {formatCurrency(item.profit)}
             </Text>
             <Text style={styles.podiumProfitLabel}>Profit</Text>
         </View>
     );
 };
 
-const RankingRow = ({ item }: { item: typeof rankings[0] }) => (
+const RankingRow = ({ item, rank }: { item: LeaderboardItem; rank: number }) => (
     <View style={styles.rankingRow}>
-        <Text style={styles.rankNumber}>{item.rank}</Text>
+        <View style={styles.rankNumberWrap}>
+            {rank <= 3 ? (
+                <Icon name="award" size={16} color={getTrophyColor(rank)} />
+            ) : (
+                <Text style={styles.rankNumber}>{rank}</Text>
+            )}
+        </View>
+
         <View style={styles.rankAvatar}>
             <Icon name="user" size={18} color={colors.textSecondary} />
         </View>
+
         <View style={styles.rankInfo}>
-            <Text style={styles.rankName}>
-                {item.name} {item.country}
+            <Text style={styles.rankName} numberOfLines={1}>{item.username}</Text>
+            <Text style={styles.rankMeta}>
+                Win rate {Number(item.winRate || 0).toFixed(1)}% · {item.totalTrades} trades
             </Text>
         </View>
-        <Text style={styles.rankProfit}>+{item.profit}% Profit</Text>
-        <TouchableOpacity style={styles.copyButton}>
-            <Text style={styles.copyButtonText}>Copy</Text>
-        </TouchableOpacity>
+
+        <Text style={[styles.rankProfit, { color: item.profit >= 0 ? colors.success : colors.error }]}>
+            {formatCurrency(item.profit)}
+        </Text>
     </View>
 );
 
-export const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({
-    navigation: _navigation,
-}) => {
+export const LeaderboardScreen: React.FC<{ navigation: any }> = () => {
+    const {
+        data: leaderboard = [],
+        isLoading,
+        refetch,
+        isRefetching,
+    } = useQuery<LeaderboardItem[]>({
+        queryKey: ['leaderboard'],
+        queryFn: leaderboardApi.getTopTraders,
+        refetchInterval: 30000,
+    });
+
+    const { topThree, rest } = useMemo(() => {
+        const rows = Array.isArray(leaderboard) ? leaderboard : [];
+        return {
+            topThree: rows.slice(0, 3),
+            rest: rows.slice(3),
+        };
+    }, [leaderboard]);
+
     return (
-        <LinearGradient
-            colors={[colors.bgPrimary, colors.bgSecondary]}
-            style={styles.gradient}
-        >
+        <LinearGradient colors={[colors.bgPrimary, colors.bgSecondary]} style={styles.gradient}>
             <SafeAreaView style={styles.container} edges={['top']}>
-                {/* Header */}
                 <View style={styles.header}>
                     <Text style={styles.logoText}>TradeQuip</Text>
-                    <Text style={styles.headerTitle}>Top Traders</Text>
+                    <Text style={styles.headerTitle}>Leaderboard</Text>
                     <View style={styles.headerRight} />
                 </View>
 
-                <FlatList
-                    data={rankings}
-                    keyExtractor={(item) => item.id}
-                    renderItem={({ item }) => <RankingRow item={item} />}
-                    ListHeaderComponent={
-                        <>
-                            {/* Podium */}
-                            <View style={styles.podiumContainer}>
-                                <PodiumItem trader={topTraders[1]} position="left" />
-                                <PodiumItem trader={topTraders[0]} position="center" />
-                                <PodiumItem trader={topTraders[2]} position="right" />
-                            </View>
-                        </>
-                    }
-                    contentContainerStyle={styles.listContent}
-                    showsVerticalScrollIndicator={false}
-                    ItemSeparatorComponent={() => <View style={styles.separator} />}
-                />
+                {isLoading && !leaderboard.length ? (
+                    <View style={styles.loading}>
+                        <ActivityIndicator size="large" color={colors.accent} />
+                        <Text style={styles.loadingText}>Loading leaderboard…</Text>
+                    </View>
+                ) : (
+                    <FlatList
+                        data={rest}
+                        keyExtractor={(item) => String(item.userId)}
+                        renderItem={({ item, index }) => <RankingRow item={item} rank={index + 4} />}
+                        ListHeaderComponent={
+                            topThree.length ? (
+                                <View style={styles.podiumContainer}>
+                                    {topThree[1] && <PodiumItem item={topThree[1]} rank={2} />}
+                                    {topThree[0] && <PodiumItem item={topThree[0]} rank={1} />}
+                                    {topThree[2] && <PodiumItem item={topThree[2]} rank={3} />}
+                                </View>
+                            ) : (
+                                <View style={styles.empty}>
+                                    <Icon name="award" size={32} color={colors.textMuted} />
+                                    <Text style={styles.emptyText}>No traders on the leaderboard yet</Text>
+                                </View>
+                            )
+                        }
+                        contentContainerStyle={styles.listContent}
+                        showsVerticalScrollIndicator={false}
+                        refreshControl={
+                            <RefreshControl
+                                refreshing={isRefetching}
+                                onRefresh={() => {
+                                    refetch().catch(() => undefined);
+                                }}
+                                tintColor={colors.accent}
+                                colors={[colors.accent]}
+                            />
+                        }
+                        ItemSeparatorComponent={() => <View style={styles.separator} />}
+                        ListEmptyComponent={
+                            !isLoading ? (
+                                <View style={styles.empty}>
+                                    <Icon name="award" size={32} color={colors.textMuted} />
+                                    <Text style={styles.emptyText}>No traders on the leaderboard yet</Text>
+                                </View>
+                            ) : null
+                        }
+                    />
+                )}
             </SafeAreaView>
         </LinearGradient>
     );
@@ -169,6 +210,16 @@ const styles = StyleSheet.create({
     },
     headerRight: {
         width: 60,
+    },
+    loading: {
+        flex: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: spacing.md,
+    },
+    loadingText: {
+        ...typography.bodySmall,
+        color: colors.textSecondary,
     },
     listContent: {
         paddingHorizontal: spacing.screenPadding,
@@ -204,11 +255,6 @@ const styles = StyleSheet.create({
         borderRadius: 40,
         borderWidth: 4,
     },
-    avatarImage: {
-        width: '100%',
-        height: '100%',
-        borderRadius: 30,
-    },
     podiumRank: {
         ...typography.labelSmall,
         color: colors.textSecondary,
@@ -218,6 +264,7 @@ const styles = StyleSheet.create({
         ...typography.body,
         fontWeight: '600',
         color: colors.textPrimary,
+        maxWidth: 100,
     },
     podiumProfit: {
         ...typography.h4,
@@ -236,11 +283,16 @@ const styles = StyleSheet.create({
         borderColor: colors.border,
         padding: spacing.md,
     },
+    rankNumberWrap: {
+        width: 28,
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginRight: spacing.xs,
+    },
     rankNumber: {
         ...typography.body,
         fontWeight: '600',
         color: colors.textSecondary,
-        width: 24,
     },
     rankAvatar: {
         width: 36,
@@ -253,31 +305,33 @@ const styles = StyleSheet.create({
     },
     rankInfo: {
         flex: 1,
+        minWidth: 0,
     },
     rankName: {
         ...typography.body,
         color: colors.textPrimary,
     },
+    rankMeta: {
+        ...typography.caption,
+        color: colors.textMuted,
+        marginTop: 2,
+    },
     rankProfit: {
-        ...typography.bodySmall,
-        color: colors.success,
-        fontWeight: '600',
-        marginRight: spacing.sm,
-    },
-    copyButton: {
-        paddingVertical: spacing.xs,
-        paddingHorizontal: spacing.md,
-        backgroundColor: colors.glassBg,
-        borderRadius: 8,
-        borderWidth: 1,
-        borderColor: colors.border,
-    },
-    copyButtonText: {
-        ...typography.buttonSmall,
-        color: colors.textPrimary,
+        ...typography.bodyBold,
+        marginLeft: spacing.sm,
     },
     separator: {
         height: spacing.sm,
+    },
+    empty: {
+        paddingVertical: spacing.xl * 2,
+        alignItems: 'center',
+        gap: spacing.sm,
+    },
+    emptyText: {
+        ...typography.body,
+        color: colors.textMuted,
+        textAlign: 'center',
     },
 });
 

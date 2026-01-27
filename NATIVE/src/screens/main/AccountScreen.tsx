@@ -11,21 +11,20 @@ import {
     ScrollView,
     TouchableOpacity,
     Image,
+    Alert,
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
 
 import { colors, typography, spacing } from '../../theme';
+import { useAuth } from '../../hooks/useAuth';
+import { useAccountSummary } from '../../hooks/useAccountSummary';
 
 const settingsItems = [
-    { id: 'personal', icon: 'user', label: 'Personal Info', screen: 'ProfileSettings' },
+    { id: 'profile', icon: 'user', label: 'Profile & Security', screen: 'ProfileSettings' },
     { id: 'journal', icon: 'book', label: 'Trading Journal', screen: 'Journal' },
-    { id: 'security', icon: 'shield', label: 'Security & Password', screen: 'ProfileSettings' },
-    { id: 'notifications', icon: 'bell', label: 'Notifications', screen: 'ProfileSettings' },
-    { id: 'data', icon: 'database', label: 'Data Usage', screen: 'DataUsage' },
-    { id: 'payment', icon: 'credit-card', label: 'Payment Methods', screen: 'PaymentMethods' },
-    { id: 'support', icon: 'help-circle', label: 'Support & Feedback', screen: 'Support' },
+    { id: 'leaderboard', icon: 'award', label: 'Leaderboard', screen: 'Leaderboard' },
 ];
 
 interface AccountScreenProps {
@@ -53,15 +52,23 @@ const SettingsListItem = ({
 );
 
 export const AccountScreen: React.FC<AccountScreenProps> = ({ navigation }) => {
-    const user = {
-        name: 'Alex Chen',
-        email: 'alexchen@gmail.com',
-        avatar: null,
-    };
+    const { user, logout } = useAuth();
+    const { summary } = useAccountSummary();
 
     const handleSignOut = () => {
-        // TODO: Implement sign out
-        console.log('Sign out');
+        Alert.alert('Sign out', 'Are you sure you want to sign out?', [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Sign Out', style: 'destructive', onPress: () => logout() },
+        ]);
+    };
+
+    const formatCurrency = (value: number | null | undefined) => {
+        const n = Number(value || 0);
+        return new Intl.NumberFormat('en-US', {
+            style: 'currency',
+            currency: 'USD',
+            minimumFractionDigits: 2,
+        }).format(n);
     };
 
     return (
@@ -84,12 +91,23 @@ export const AccountScreen: React.FC<AccountScreenProps> = ({ navigation }) => {
                     contentContainerStyle={styles.scrollContent}
                     showsVerticalScrollIndicator={false}
                 >
+                    {/* Stale pricing warning */}
+                    {summary?.pricingStale && (
+                        <View style={styles.warningBox}>
+                            <Icon name="alert-triangle" size={16} color={colors.warning} />
+                            <Text style={styles.warningText} numberOfLines={3}>
+                                Pricing is stale. Trading and closing may be blocked until fresh quotes are available.
+                                {summary?.staleSymbols?.length ? ` (${summary.staleSymbols.join(', ')})` : ''}
+                            </Text>
+                        </View>
+                    )}
+
                     {/* Profile Section */}
                     <Text style={styles.sectionTitle}>Profile</Text>
                     <View style={styles.profileCard}>
                         <View style={styles.avatarContainer}>
-                            {user.avatar ? (
-                                <Image source={{ uri: user.avatar }} style={styles.avatar} />
+                            {(user as any)?.avatar ? (
+                                <Image source={{ uri: (user as any).avatar }} style={styles.avatar} />
                             ) : (
                                 <View style={styles.avatarPlaceholder}>
                                     <Icon name="user" size={32} color={colors.textSecondary} />
@@ -97,12 +115,40 @@ export const AccountScreen: React.FC<AccountScreenProps> = ({ navigation }) => {
                             )}
                         </View>
                         <View style={styles.profileInfo}>
-                            <Text style={styles.profileName}>{user.name}</Text>
-                            <Text style={styles.profileEmail}>{user.email}</Text>
+                            <Text style={styles.profileName}>{user?.username || user?.email || '—'}</Text>
+                            <Text style={styles.profileEmail}>{user?.email || '—'}</Text>
                         </View>
-                        <TouchableOpacity style={styles.editButton}>
-                            <Icon name="edit-2" size={18} color={colors.accent} />
+                        <TouchableOpacity
+                            style={styles.editButton}
+                            onPress={() => navigation.navigate('ProfileSettings')}
+                        >
+                            <Icon name="settings" size={18} color={colors.accent} />
                         </TouchableOpacity>
+                    </View>
+
+                    {/* Account Summary */}
+                    <Text style={styles.sectionTitle}>Account</Text>
+                    <View style={styles.summaryCard}>
+                        <View style={styles.summaryRow}>
+                            <Text style={styles.summaryLabel}>Balance</Text>
+                            <Text style={styles.summaryValue}>{formatCurrency(summary?.balance)}</Text>
+                        </View>
+                        <View style={styles.summaryRow}>
+                            <Text style={styles.summaryLabel}>Equity</Text>
+                            <Text style={styles.summaryValue}>{formatCurrency(summary?.equity)}</Text>
+                        </View>
+                        <View style={styles.summaryRow}>
+                            <Text style={styles.summaryLabel}>Floating P/L</Text>
+                            <Text style={styles.summaryValue}>{formatCurrency(summary?.floatingPnl)}</Text>
+                        </View>
+                        <View style={styles.summaryRow}>
+                            <Text style={styles.summaryLabel}>Free Margin</Text>
+                            <Text style={styles.summaryValue}>{formatCurrency(summary?.freeMargin)}</Text>
+                        </View>
+                        <View style={styles.summaryRow}>
+                            <Text style={styles.summaryLabel}>Used Margin</Text>
+                            <Text style={styles.summaryValue}>{formatCurrency(summary?.usedMargin)}</Text>
+                        </View>
                     </View>
 
                     {/* Settings List */}
@@ -221,6 +267,44 @@ const styles = StyleSheet.create({
     settingsList: {
         gap: spacing.sm,
         marginBottom: spacing.xl,
+    },
+    summaryCard: {
+        backgroundColor: colors.bgCard,
+        borderRadius: spacing.cardRadiusSmall,
+        borderWidth: 1,
+        borderColor: colors.border,
+        padding: spacing.md,
+        marginBottom: spacing.lg,
+    },
+    summaryRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        paddingVertical: 6,
+    },
+    summaryLabel: {
+        ...typography.bodySmall,
+        color: colors.textSecondary,
+    },
+    summaryValue: {
+        ...typography.bodySmall,
+        color: colors.textPrimary,
+        fontWeight: '600',
+    },
+    warningBox: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: spacing.sm,
+        backgroundColor: 'rgba(255, 215, 64, 0.12)',
+        borderRadius: spacing.cardRadiusSmall,
+        borderWidth: 1,
+        borderColor: colors.border,
+        padding: spacing.md,
+        marginBottom: spacing.lg,
+    },
+    warningText: {
+        ...typography.bodySmall,
+        color: colors.textSecondary,
+        flex: 1,
     },
     settingsItem: {
         flexDirection: 'row',

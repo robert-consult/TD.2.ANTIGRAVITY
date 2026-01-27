@@ -22,6 +22,7 @@ import { Button } from '../../components/Button';
 import { useQuotes } from '../../hooks/useQuotes';
 import { useTrades } from '../../hooks/useTrades';
 import { useAccountSummary } from '../../hooks/useAccountSummary';
+import { useAuth } from '../../hooks/useAuth';
 
 interface TradeScreenProps {
     navigation: any;
@@ -32,17 +33,19 @@ export const TradeScreen: React.FC<TradeScreenProps> = ({
     navigation,
     route,
 }) => {
-    const initialSymbol = route?.params?.symbol || 'BTC/USD';
+    const initialSymbol = route?.params?.symbol || 'USDJPY';
     const initialSide = route?.params?.side || 'BUY';
 
-    const { getQuote, getSymbolByName } = useQuotes();
+    const { getQuote, getSymbolBySymbol } = useQuotes();
     const { createTrade, isCreatingTrade, createTradeError } = useTrades();
-    const { freeMargin, leverage } = useAccountSummary();
+    const { freeMargin } = useAccountSummary();
+    const { user } = useAuth();
+    const leverage = Number(user?.leverage ?? 50) || 50;
 
     const [selectedSymbolName, setSelectedSymbolName] = useState(initialSymbol);
     const [side, setSide] = useState<'BUY' | 'SELL'>(initialSide);
-    const [orderType, setOrderType] = useState<'market' | 'limit'>('market');
-    const [quantity, setQuantity] = useState(0.1);
+    const [orderType, setOrderType] = useState<'Market' | 'Limit'>('Market');
+    const [lots, setLots] = useState(1);
     const [limitPrice, setLimitPrice] = useState(0);
 
     // Sync symbol when navigating in with params
@@ -53,44 +56,44 @@ export const TradeScreen: React.FC<TradeScreenProps> = ({
     }, [route?.params?.symbol, selectedSymbolName]);
 
     // Get current symbol and quote
-    const symbol = getSymbolByName(selectedSymbolName);
+    const symbol = getSymbolBySymbol(selectedSymbolName);
     const quote = getQuote(selectedSymbolName);
 
     // Calculate prices
-    const currentPrice = orderType === 'limit'
+    const bidPrice = quote?.bid ?? quote?.price ?? 0;
+    const askPrice = quote?.ask ?? quote?.price ?? 0;
+    const spread = quote?.spread ?? (askPrice && bidPrice ? Math.abs(askPrice - bidPrice) : 0);
+    const changePct = quote?.changePct ?? 0;
+
+    const currentPrice = orderType === 'Limit'
         ? limitPrice
-        : (side === 'BUY' ? quote?.ask : quote?.bid) || 0;
+        : (side === 'BUY' ? askPrice : bidPrice) || 0;
 
-    const bidPrice = quote?.bid || 0;
-    const askPrice = quote?.ask || 0;
-    const spread = quote?.spread || (askPrice - bidPrice);
-    const changePercent = quote?.changePercent || 0;
-
-    // Calculate estimated values
-    const contractSize = symbol?.contractSize || 100000;
-    const estimatedTotal = quantity * contractSize * currentPrice;
-    const requiredMargin = estimatedTotal / leverage;
+    // Calculate estimated values (server uses 1 lot = $100,000 notional)
+    const contractSize = 100000;
+    const estimatedTotal = lots * contractSize * currentPrice;
+    const safeLeverage = Number.isFinite(leverage) && leverage > 0 ? leverage : 50;
+    const requiredMargin = estimatedTotal / safeLeverage;
 
     // Initialize limit price from current price
     React.useEffect(() => {
         if (quote && limitPrice === 0) {
-            setLimitPrice(side === 'BUY' ? quote.ask : quote.bid);
+            const px = side === 'BUY' ? askPrice : bidPrice;
+            if (px) setLimitPrice(px);
         }
-    }, [quote, side, limitPrice]);
+    }, [askPrice, bidPrice, limitPrice, quote, side]);
 
-    // Handle quantity changes
-    const adjustQuantity = useCallback((delta: number) => {
-        const minLot = symbol?.minLotSize || 0.01;
-        const maxLot = symbol?.maxLotSize || 100;
-        const newQty = Math.max(minLot, Math.min(maxLot, quantity + delta));
-        setQuantity(Number(newQty.toFixed(2)));
-    }, [quantity, symbol]);
+    // Handle lots changes (server enforces whole-number lots 1..50)
+    const adjustLots = useCallback((delta: number) => {
+        const next = Math.max(1, Math.min(50, Math.trunc(lots + delta)));
+        setLots(next);
+    }, [lots]);
 
     // Handle price changes
     const adjustPrice = useCallback((delta: number) => {
-        const pipSize = symbol?.pipSize || 0.0001;
-        setLimitPrice(prev => Number((prev + delta * pipSize * 10).toFixed(5)));
-    }, [symbol]);
+        const pipSize = String(selectedSymbolName).toUpperCase().includes('JPY') ? 0.01 : 0.0001;
+        setLimitPrice((prev) => Number((prev + delta * pipSize * 10).toFixed(pipSize === 0.01 ? 2 : 4)));
+    }, [selectedSymbolName]);
 
     // Execute trade
     const handleExecuteTrade = useCallback(async (tradeSide: 'BUY' | 'SELL') => {
@@ -106,28 +109,46 @@ export const TradeScreen: React.FC<TradeScreenProps> = ({
             return;
         }
 
-        const executePrice = tradeSide === 'BUY' ? quote.ask : quote.bid;
+        const executePrice = tradeSide === 'BUY' ? askPrice : bidPrice;
 
         try {
-            await createTrade({
-                symbolId: symbol.id,
-                type: tradeSide,
-                size: quantity,
-                openPrice: orderType === 'limit' ? limitPrice : executePrice,
-            });
-
-            Alert.alert(
-                'Trade Executed',
-                `Successfully placed ${tradeSide} order for ${quantity} ${symbol.displayName}`,
-                [
-                    { text: 'View Positions', onPress: () => navigation.navigate('History') },
-                    { text: 'OK' },
-                ]
-            );
+            if (orderType === 'Market') {
+                await createTrade({
+                    symbolId: symbol.id,
+                    type: tradeSide,
+                    lots,
+                    orderType: 'Market',
+                    openPrice: executePrice,
+                });
+                Alert.alert(
+                    'Trade Executed',
+                    `Successfully placed a ${tradeSide} market order (${lots} lots) on ${symbol.name}`,
+                    [
+                        { text: 'View Positions', onPress: () => navigation.navigate('History') },
+                        { text: 'OK' },
+                    ]
+                );
+            } else {
+                await createTrade({
+                    symbolId: symbol.id,
+                    type: tradeSide,
+                    lots,
+                    orderType: 'Limit',
+                    limitPrice,
+                });
+                Alert.alert(
+                    'Order Placed',
+                    `Successfully placed a ${tradeSide} limit order (${lots} lots) on ${symbol.name}`,
+                    [
+                        { text: 'View Orders', onPress: () => navigation.navigate('History') },
+                        { text: 'OK' },
+                    ]
+                );
+            }
         } catch (error: any) {
             Alert.alert('Trade Failed', error.message || 'Failed to execute trade');
         }
-    }, [symbol, quote, quantity, orderType, limitPrice, requiredMargin, freeMargin, createTrade, navigation]);
+    }, [askPrice, bidPrice, createTrade, freeMargin, limitPrice, lots, navigation, orderType, quote, requiredMargin, symbol]);
 
     const formatCurrency = (value: number, decimals = 2) => {
         return new Intl.NumberFormat('en-US', {
@@ -139,8 +160,8 @@ export const TradeScreen: React.FC<TradeScreenProps> = ({
     };
 
     const formatPrice = (value: number) => {
-        const decimals = symbol?.pipSize ? Math.max(0, Math.ceil(-Math.log10(symbol.pipSize))) : 5;
-        return value.toFixed(decimals);
+        const isJpy = String(selectedSymbolName).toUpperCase().includes('JPY');
+        return value.toFixed(isJpy ? 2 : 4);
     };
 
     return (
@@ -162,7 +183,7 @@ export const TradeScreen: React.FC<TradeScreenProps> = ({
                     {/* Symbol Card */}
                     <GlassCard style={styles.symbolCard}>
                         <View style={styles.symbolRow}>
-                            <Text style={styles.symbolName}>{symbol?.displayName || selectedSymbolName}</Text>
+                            <Text style={styles.symbolName}>{symbol?.name || selectedSymbolName}</Text>
                             {quote && (
                                 <View style={styles.liveIndicator}>
                                     <View style={styles.liveDot} />
@@ -176,8 +197,8 @@ export const TradeScreen: React.FC<TradeScreenProps> = ({
                             </Text>
                             <Text style={styles.priceChange}>
                                 Change:{' '}
-                                <Text style={changePercent >= 0 ? styles.positive : styles.negative}>
-                                    {changePercent >= 0 ? '+' : ''}{changePercent.toFixed(2)}%
+                                <Text style={changePct >= 0 ? styles.positive : styles.negative}>
+                                    {changePct >= 0 ? '+' : ''}{changePct.toFixed(2)}%
                                 </Text>
                             </Text>
                         </View>
@@ -195,14 +216,14 @@ export const TradeScreen: React.FC<TradeScreenProps> = ({
                             <TouchableOpacity
                                 style={[
                                     styles.toggleButton,
-                                    orderType === 'market' && styles.orderTypeActive,
+                                    orderType === 'Market' && styles.orderTypeActive,
                                 ]}
-                                onPress={() => setOrderType('market')}
+                                onPress={() => setOrderType('Market')}
                             >
                                 <Text
                                     style={[
                                         styles.toggleText,
-                                        orderType === 'market' && styles.orderTypeTextActive,
+                                        orderType === 'Market' && styles.orderTypeTextActive,
                                     ]}
                                 >
                                     Market
@@ -211,14 +232,14 @@ export const TradeScreen: React.FC<TradeScreenProps> = ({
                             <TouchableOpacity
                                 style={[
                                     styles.toggleButton,
-                                    orderType === 'limit' && styles.orderTypeActive,
+                                    orderType === 'Limit' && styles.orderTypeActive,
                                 ]}
-                                onPress={() => setOrderType('limit')}
+                                onPress={() => setOrderType('Limit')}
                             >
                                 <Text
                                     style={[
                                         styles.toggleText,
-                                        orderType === 'limit' && styles.orderTypeTextActive,
+                                        orderType === 'Limit' && styles.orderTypeTextActive,
                                     ]}
                                 >
                                     Limit
@@ -233,14 +254,14 @@ export const TradeScreen: React.FC<TradeScreenProps> = ({
                                 <View style={styles.quantityInput}>
                                     <TouchableOpacity
                                         style={styles.quantityButton}
-                                        onPress={() => adjustQuantity(-0.1)}
+                                        onPress={() => adjustLots(-1)}
                                     >
                                         <Icon name="minus" size={16} color={colors.textSecondary} />
                                     </TouchableOpacity>
-                                    <Text style={styles.quantityValue}>{quantity.toFixed(2)}</Text>
+                                    <Text style={styles.quantityValue}>{lots}</Text>
                                     <TouchableOpacity
                                         style={styles.quantityButton}
-                                        onPress={() => adjustQuantity(0.1)}
+                                        onPress={() => adjustLots(1)}
                                     >
                                         <Icon name="plus" size={16} color={colors.textSecondary} />
                                     </TouchableOpacity>
@@ -248,7 +269,7 @@ export const TradeScreen: React.FC<TradeScreenProps> = ({
                             </View>
 
                             {/* Limit Price (only for limit orders) */}
-                            {orderType === 'limit' && (
+                            {orderType === 'Limit' && (
                                 <View style={styles.formField}>
                                     <Text style={styles.fieldLabel}>Limit Price</Text>
                                     <View style={styles.quantityInput}>

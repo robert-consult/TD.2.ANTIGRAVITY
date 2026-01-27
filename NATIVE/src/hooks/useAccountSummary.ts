@@ -12,38 +12,59 @@ import { useAuth } from './useAuth';
 export interface AccountSummary {
     balance: number;
     equity: number;
-    freeMargin: number;
     usedMargin: number;
-    unrealizedPnl: number;
-    realizedPnlToday: number;
-    leverage: number;
-    marginLevel?: number;
+    freeMargin: number;
+    floatingPnl: number;
+    marginLevel: number | null;
     openPositions: number;
-    pendingOrders: number;
+    pricingStale: boolean;
+    staleSymbols: string[];
+    asOf: string | null;
 }
 
 export function useAccountSummary() {
     const queryClient = useQueryClient();
     const { isAuthenticated } = useAuth();
 
-    // Listen for account updates via WebSocket
+    // Subscribe to account updates via WebSocket (requires authenticated WS session)
     useEffect(() => {
         if (!isAuthenticated) return;
+
+        const subscribeNow = () => {
+            wsService.subscribeAccount();
+        };
+
+        const unsubConnect = wsService.onConnect(() => subscribeNow());
+
+        // Subscribe immediately if already connected
+        if (wsService.isConnected()) {
+            subscribeNow();
+        }
 
         const unsubMessage = wsService.onMessage((message) => {
             if (!message || typeof message !== 'object') return;
 
             if (
-                message.type === 'account:updated' ||
-                message.type === 'trades:updated' ||
-                message.type === 'trades:update'
+                message.type === 'account:snapshot' ||
+                message.type === 'account:update' ||
+                message.type === 'account:updated'
             ) {
-                // Invalidate account summary to trigger refetch
+                const summary = (message as any)?.payload?.summary;
+                if (summary && typeof summary === 'object') {
+                    queryClient.setQueryData(['account', 'summary'], summary);
+                } else {
+                    queryClient.invalidateQueries({ queryKey: ['account', 'summary'] });
+                }
+            }
+
+            if (message.type === 'trades:updated' || message.type === 'trades:update') {
                 queryClient.invalidateQueries({ queryKey: ['account', 'summary'] });
             }
         });
 
         return () => {
+            wsService.unsubscribeAccount();
+            unsubConnect();
             unsubMessage();
         };
     }, [isAuthenticated, queryClient]);
@@ -58,21 +79,19 @@ export function useAccountSummary() {
         queryFn: accountApi.getSummary,
         enabled: isAuthenticated,
         staleTime: 2000,
-        refetchInterval: wsService.isConnected() ? false : 5000,
+        refetchInterval: wsService.isConnected() ? false : 7000,
     });
 
     // Computed values
     const portfolioValue = summary?.equity || 0;
     const buyingPower = summary?.freeMargin || 0;
-    const totalPnl = summary?.unrealizedPnl || 0;
-    const todayPnl = summary?.realizedPnlToday || 0;
+    const totalPnl = summary?.floatingPnl || 0;
     const marginUsage = summary?.usedMargin || 0;
 
     // Calculate margin level percentage
-    const marginLevel = summary?.marginLevel ||
-        (summary?.usedMargin && summary?.equity
-            ? (summary.equity / summary.usedMargin) * 100
-            : undefined);
+    const marginLevel = typeof summary?.marginLevel === 'number'
+        ? summary.marginLevel
+        : null;
 
     // Calculate P&L percentage change
     const pnlPercentage = summary?.balance && summary.balance > 0
@@ -89,7 +108,6 @@ export function useAccountSummary() {
         portfolioValue,
         buyingPower,
         totalPnl,
-        todayPnl,
         marginUsage,
         marginLevel,
         pnlPercentage,
@@ -99,9 +117,10 @@ export function useAccountSummary() {
         equity: summary?.equity || 0,
         freeMargin: summary?.freeMargin || 0,
         usedMargin: summary?.usedMargin || 0,
-        leverage: summary?.leverage || 1,
         openPositions: summary?.openPositions || 0,
-        pendingOrders: summary?.pendingOrders || 0,
+        pricingStale: summary?.pricingStale || false,
+        staleSymbols: summary?.staleSymbols || [],
+        asOf: summary?.asOf || null,
     };
 }
 

@@ -12,7 +12,6 @@ import {
     Platform,
     ScrollView,
     TouchableOpacity,
-    Alert,
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -29,7 +28,7 @@ import { useAuth } from '../../hooks/useAuth';
 
 const loginSchema = z.object({
     email: z.string().email('Please enter a valid email'),
-    password: z.string().min(6, 'Password must be at least 6 characters'),
+    password: z.string().min(8, 'Password must be at least 8 characters'),
 });
 
 type LoginFormData = z.infer<typeof loginSchema>;
@@ -146,30 +145,7 @@ export const SignInScreen: React.FC<SignInScreenProps> = ({ navigation }) => {
 
                             {/* Forgot Password & Social Login */}
                             <View style={styles.forgotContainer}>
-                                <TouchableOpacity
-                                    onPress={() => navigation.navigate('ForgotPassword')}
-                                    disabled={isLoading}
-                                >
-                                    <Text style={styles.forgotText}>Forgot Password?</Text>
-                                </TouchableOpacity>
-
-                                {/* Social Login */}
-                                <View style={styles.socialContainer}>
-                                    <TouchableOpacity
-                                        style={styles.socialButton}
-                                        disabled={isLoading}
-                                        onPress={() => Alert.alert('Coming Soon', 'Google login coming soon!')}
-                                    >
-                                        <Icon name="chrome" size={24} color={colors.textSecondary} />
-                                    </TouchableOpacity>
-                                    <TouchableOpacity
-                                        style={styles.socialButton}
-                                        disabled={isLoading}
-                                        onPress={() => Alert.alert('Coming Soon', 'Apple login coming soon!')}
-                                    >
-                                        <Icon name="smartphone" size={24} color={colors.textSecondary} />
-                                    </TouchableOpacity>
-                                </View>
+                                <View />
                             </View>
                         </GlassCard>
 
@@ -184,13 +160,6 @@ export const SignInScreen: React.FC<SignInScreenProps> = ({ navigation }) => {
                             </TouchableOpacity>
                         </View>
 
-                        {/* Demo Mode Note */}
-                        <View style={styles.demoNote}>
-                            <Icon name="info" size={14} color={colors.textMuted} />
-                            <Text style={styles.demoNoteText}>
-                                Demo mode: Use any email/password to test
-                            </Text>
-                        </View>
                     </ScrollView>
                 </KeyboardAvoidingView>
             </SafeAreaView>
@@ -256,24 +225,6 @@ const styles = StyleSheet.create({
         justifyContent: 'space-between',
         marginTop: spacing.lg,
     },
-    forgotText: {
-        ...typography.bodySmall,
-        color: colors.textMuted,
-    },
-    socialContainer: {
-        flexDirection: 'row',
-        gap: spacing.md,
-    },
-    socialButton: {
-        width: 44,
-        height: 44,
-        borderRadius: 22,
-        backgroundColor: colors.glassBg,
-        alignItems: 'center',
-        justifyContent: 'center',
-        borderWidth: 1,
-        borderColor: colors.border,
-    },
     signUpContainer: {
         flexDirection: 'row',
         justifyContent: 'center',
@@ -287,17 +238,6 @@ const styles = StyleSheet.create({
         ...typography.body,
         color: colors.accent,
         fontWeight: '600',
-    },
-    demoNote: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: spacing.xs,
-        marginTop: spacing.lg,
-    },
-    demoNoteText: {
-        ...typography.labelSmall,
-        color: colors.textMuted,
     },
 });
 

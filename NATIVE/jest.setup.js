@@ -1,5 +1,29 @@
 import 'react-native-gesture-handler/jestSetup';
 
+// Reanimated ships ESM builds that Jest can't execute without extra transforms.
+// Use the official mock to keep unit tests lightweight.
+jest.mock('react-native-reanimated', () => require('react-native-reanimated/mock'));
+
+// The chart library depends on Reanimated/SVG internals that aren't relevant to unit tests.
+jest.mock('react-native-wagmi-charts', () => {
+  const React = require('react');
+  const { View, Text } = require('react-native');
+
+  const Null = () => null;
+  const Wrap = ({ children }) => React.createElement(View, null, children);
+
+  const LineChart = ({ children }) => React.createElement(View, null, children);
+  LineChart.Provider = Wrap;
+  LineChart.Path = Null;
+  LineChart.Gradient = Null;
+  LineChart.CursorCrosshair = Wrap;
+  LineChart.Tooltip = Null;
+  LineChart.PriceText = () => React.createElement(Text, null, '');
+  LineChart.DatetimeText = () => React.createElement(Text, null, '');
+
+  return { LineChart };
+});
+
 jest.mock('react-native-safe-area-context', () => {
   const React = require('react');
   return {

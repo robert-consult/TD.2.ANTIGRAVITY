@@ -40,10 +40,14 @@ const TradeCard = ({
     onCancel?: () => void;
     isClosing?: boolean;
     type: 'open' | 'pending' | 'closed';
-}) => {
-    const isBuy = trade.type === 'BUY';
-    const isProfitable = (trade.profit || 0) >= 0;
-    const symbolName = trade.symbol?.displayName || trade.symbol?.name || `Symbol #${trade.symbolId}`;
+	}) => {
+	    const isBuy = trade.type === 'BUY';
+	    const profitValue = typeof trade.profit === 'number'
+	        ? trade.profit
+	        : Number.parseFloat(String(trade.profit ?? 0)) || 0;
+	    const isProfitable = profitValue >= 0;
+	    const lotsValue = Number(trade.lots ?? 0) || 0;
+	    const symbolName = trade.symbol?.name || trade.symbol?.symbol || `Symbol #${trade.symbolId}`;
 
     const formatCurrency = (value: number) => {
         return new Intl.NumberFormat('en-US', {
@@ -53,12 +57,30 @@ const TradeCard = ({
         }).format(value);
     };
 
-    const formatDate = (dateStr: string) => {
-        try {
-            return format(new Date(dateStr), 'MMM dd, yyyy HH:mm');
-        } catch {
-            return dateStr;
+    const formatDate = (value: unknown) => {
+        if (value === null || value === undefined) return '—';
+
+        const coerceNumber = (n: number) => {
+            const ms = n < 1e12 ? n * 1000 : n;
+            const d = new Date(ms);
+            return Number.isNaN(d.getTime()) ? null : d;
+        };
+
+        if (typeof value === 'number' && Number.isFinite(value)) {
+            const d = coerceNumber(value);
+            return d ? format(d, 'MMM dd, yyyy HH:mm') : '—';
         }
+
+        const raw = String(value).trim();
+        if (/^\\d+$/.test(raw)) {
+            const n = Number(raw);
+            const d = Number.isFinite(n) ? coerceNumber(n) : null;
+            if (d) return format(d, 'MMM dd, yyyy HH:mm');
+        }
+
+        const d = new Date(raw);
+        if (Number.isNaN(d.getTime())) return raw || '—';
+        return format(d, 'MMM dd, yyyy HH:mm');
     };
 
     return (
@@ -72,9 +94,9 @@ const TradeCard = ({
                         color={isBuy ? colors.success : colors.error}
                     />
                 </View>
-                <Text style={[styles.actionText, isBuy ? styles.buyText : styles.sellText]}>
-                    {trade.type} {trade.size} Lots
-                </Text>
+	                <Text style={[styles.actionText, isBuy ? styles.buyText : styles.sellText]}>
+	                    {trade.type} {lotsValue} Lots
+	                </Text>
             </View>
 
             <View style={styles.cardDetails}>
@@ -107,7 +129,7 @@ const TradeCard = ({
                         ]}
                     >
                         {isProfitable ? '+' : ''}
-                        {formatCurrency(trade.profit || 0)}
+                        {formatCurrency(profitValue)}
                     </Text>
                 </View>
             </View>
@@ -172,13 +194,13 @@ export const HistoryScreen: React.FC<HistoryScreenProps> = ({ navigation }) => {
         setRefreshing(false);
     }, [refetchTrades, refetchOpenTrades, refetchPending]);
 
-    const handleCloseTrade = useCallback(async (trade: Trade) => {
-        Alert.alert(
-            'Close Position',
-            `Are you sure you want to close your ${trade.type} position on ${trade.symbol?.displayName || trade.symbol?.name}?`,
-            [
-                { text: 'Cancel', style: 'cancel' },
-                {
+	    const handleCloseTrade = useCallback(async (trade: Trade) => {
+	        Alert.alert(
+	            'Close Position',
+	            `Are you sure you want to close your ${trade.type} position on ${trade.symbol?.name || trade.symbol?.symbol || `Symbol #${trade.symbolId}`}?`,
+	            [
+	                { text: 'Cancel', style: 'cancel' },
+	                {
                     text: 'Close',
                     style: 'destructive',
                     onPress: async () => {

@@ -3,9 +3,7 @@
  * Aligned with webapp use-websocket.tsx for live updates
  */
 
-import { MMKV } from 'react-native-mmkv';
-
-const storage = new MMKV();
+import { Platform } from 'react-native';
 
 type MessageHandler = (message: any) => void;
 type ConnectionHandler = () => void;
@@ -35,16 +33,6 @@ class WebSocketService {
     }
 
     /**
-     * Generate WebSocket URL with auth token
-     */
-    private getWsUrl(): string {
-        const token = storage.getString('authToken');
-        const wsProtocol = this.url.startsWith('https') ? 'wss' : 'ws';
-        const baseUrl = this.url.replace(/^https?/, wsProtocol);
-        return token ? `${baseUrl}?token=${token}` : baseUrl;
-    }
-
-    /**
      * Compute reconnect delay with exponential backoff
      */
     private computeReconnectDelay(): number {
@@ -63,8 +51,8 @@ class WebSocketService {
         if (!this.enabled) return;
         this.clearReconnectTimer();
 
-        const wsUrl = this.getWsUrl();
-        console.log('[WS] Connecting to:', wsUrl.replace(/token=[^&]+/, 'token=***'));
+        const wsUrl = this.url;
+        console.log('[WS] Connecting to:', wsUrl);
 
         try {
             this.ws = new WebSocket(wsUrl);
@@ -73,6 +61,8 @@ class WebSocketService {
                 console.log('[WS] Connected');
                 this.reconnectAttempts = 0;
                 this.onConnectHandlers.forEach((handler) => handler());
+                // Optional handshake for scope discovery (safe even when unauthenticated)
+                this.send({ type: 'auth:hello' });
             };
 
             this.ws.onmessage = (event) => {
@@ -214,6 +204,20 @@ class WebSocketService {
     }
 
     /**
+     * Subscribe to account summary updates (requires authenticated WS session)
+     */
+    subscribeAccount(): void {
+        this.send({ type: 'account:subscribe' });
+    }
+
+    /**
+     * Unsubscribe from account updates
+     */
+    unsubscribeAccount(): void {
+        this.send({ type: 'account:unsubscribe' });
+    }
+
+    /**
      * Subscribe to quote updates
      */
     subscribeQuotes(symbols?: string[]): void {
@@ -229,9 +233,13 @@ class WebSocketService {
 }
 
 // Create singleton instance
-const WS_BASE_URL = __DEV__
-    ? 'ws://localhost:5000/ws'
-    : 'wss://your-production-domain.com/ws';
+const DEV_WS_BASE_URL =
+    Platform.OS === 'android'
+        // Android emulator → host machine. For physical devices prefer `adb reverse tcp:5000 tcp:5000` and use localhost.
+        ? 'ws://10.0.2.2:5000/ws'
+        : 'ws://localhost:5000/ws';
+
+const WS_BASE_URL = __DEV__ ? DEV_WS_BASE_URL : 'wss://your-production-domain.com/ws';
 
 export const wsService = new WebSocketService({
     baseUrl: WS_BASE_URL,

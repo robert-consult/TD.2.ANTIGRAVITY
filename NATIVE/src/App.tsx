@@ -19,6 +19,7 @@ import { SignUpScreen } from './screens/auth/SignUpScreen';
 import { EmailVerificationScreen } from './screens/auth/EmailVerificationScreen';
 import { JournalScreen } from './screens/main/JournalScreen';
 import { ProfileSettingsScreen } from './screens/main/ProfileSettingsScreen';
+import { LeaderboardScreen } from './screens/main/LeaderboardScreen';
 import { useAuth } from './hooks/useAuth';
 import { LegalReacceptGate } from './components/LegalReacceptGate';
 import { startGriftPing, stopGriftPing } from './services/griftPing';
@@ -89,6 +90,7 @@ const Navigation = () => {
                             <Stack.Screen name="Main" component={MainTabNavigator} />
                             <Stack.Screen name="Journal" component={JournalScreen} />
                             <Stack.Screen name="ProfileSettings" component={ProfileSettingsScreen} />
+                            <Stack.Screen name="Leaderboard" component={LeaderboardScreen} />
                             <Stack.Screen name="EmailVerification" component={EmailVerificationScreen} />
                         </>
                     ) : (

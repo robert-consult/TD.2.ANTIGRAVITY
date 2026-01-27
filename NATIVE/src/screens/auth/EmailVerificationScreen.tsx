@@ -19,6 +19,7 @@ import { colors, typography, spacing } from '../../theme';
 import { Button } from '../../components/Button';
 import { GlassCard } from '../../components/cards/GlassCard';
 import api from '../../services/api';
+import { useAuth } from '../../hooks/useAuth';
 
 type Status = 'idle' | 'verifying' | 'success' | 'error';
 
@@ -32,6 +33,7 @@ export const EmailVerificationScreen: React.FC = () => {
     const navigation = useNavigation();
     const route = useRoute<RouteProp<RouteParams, 'EmailVerification'>>();
     const token = route.params?.token;
+    const { isAuthenticated, checkAuth } = useAuth();
 
     const [status, setStatus] = useState<Status>('idle');
     const [message, setMessage] = useState('');
@@ -49,6 +51,10 @@ export const EmailVerificationScreen: React.FC = () => {
                 await api.post('/api/verification/email/verify', { token });
                 setStatus('success');
                 setMessage('Your email has been verified successfully.');
+                if (isAuthenticated) {
+                    // Refresh current user so the UI reflects `emailVerified`.
+                    await checkAuth();
+                }
             } catch (error: any) {
                 setStatus('error');
                 setMessage(
@@ -60,17 +66,17 @@ export const EmailVerificationScreen: React.FC = () => {
         };
 
         verifyEmail();
-    }, [token]);
+    }, [checkAuth, isAuthenticated, token]);
 
     const navigateToDashboard = () => {
         navigation.reset({
             index: 0,
-            routes: [{ name: 'Main' as never }],
+            routes: [{ name: (isAuthenticated ? 'Main' : 'SignIn') as never }],
         });
     };
 
     const navigateToProfile = () => {
-        navigation.navigate('Account' as never);
+        navigation.navigate((isAuthenticated ? 'ProfileSettings' : 'SignIn') as never);
     };
 
     return (

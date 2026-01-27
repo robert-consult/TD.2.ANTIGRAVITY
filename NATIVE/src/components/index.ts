@@ -10,6 +10,8 @@ export { SymbolSelect } from './SymbolSelect';
 export { EditTradeModal } from './EditTradeModal';
 export { ActivityTimeline } from './ActivityTimeline';
 export { VerificationCards } from './VerificationCards';
+export { LegalReacceptGate } from './LegalReacceptGate';
 
 // Cards
 export { GlassCard } from './cards/GlassCard';
+

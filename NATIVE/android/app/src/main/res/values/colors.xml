@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- App Colors - TradeQuip Dark Theme -->
+    <color name="colorPrimary">#0C0E12</color>
+    <color name="colorPrimaryDark">#070A0D</color>
+    <color name="colorAccent">#00E5FF</color>
+    
+    <!-- Status Bar -->
+    <color name="status_bar">#0C0E12</color>
+    <color name="navigation_bar">#0C0E12</color>
+    
+    <!-- Notification -->
+    <color name="notification_color">#00E5FF</color>
+    
+    <!-- Trading Colors -->
+    <color name="success">#00E676</color>
+    <color name="error">#FF5252</color>
+    <color name="warning">#FFC107</color>
+    
+    <!-- Text Colors -->
+    <color name="text_primary">#FFFFFF</color>
+    <color name="text_secondary">#B0BEC5</color>
+    <color name="text_muted">#546E7A</color>
+    
+    <!-- Glass Effect -->
+    <color name="glass_bg">#1A1E26</color>
+    <color name="glass_border">#2A303C</color>
+</resources>

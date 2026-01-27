@@ -1,6 +1,6 @@
 /**
- * TradeQuip Android - Main App Entry
- * Handles authentication state and navigation
+ * TradeQuip Native - Main App Entry
+ * Handles authentication state, navigation, legal compliance, and anti-fraud tracking
  */
 
 import React, { useEffect } from 'react';
@@ -20,6 +20,8 @@ import { EmailVerificationScreen } from './screens/auth/EmailVerificationScreen'
 import { JournalScreen } from './screens/main/JournalScreen';
 import { ProfileSettingsScreen } from './screens/main/ProfileSettingsScreen';
 import { useAuth } from './hooks/useAuth';
+import { LegalReacceptGate } from './components/LegalReacceptGate';
+import { startGriftPing, stopGriftPing } from './services/griftPing';
 
 const Stack = createStackNavigator();
 const queryClient = new QueryClient({
@@ -52,37 +54,57 @@ const Navigation = () => {
         checkAuth();
     }, [checkAuth]);
 
+    // Start/stop grift ping based on auth state
+    useEffect(() => {
+        if (isAuthenticated) {
+            // Start grift ping service when authenticated
+            startGriftPing({ intervalMs: 60_000 });
+        } else {
+            // Stop when logged out
+            stopGriftPing();
+        }
+
+        return () => {
+            stopGriftPing();
+        };
+    }, [isAuthenticated]);
+
     if (isLoading) {
         return <LoadingScreen />;
     }
 
     return (
-        <NavigationContainer>
-            <Stack.Navigator
-                screenOptions={{
-                    headerShown: false,
-                    cardStyle: { backgroundColor: colors.bgPrimary },
-                    animationEnabled: true,
-                }}
-            >
-                {isAuthenticated ? (
-                    // Authenticated routes
-                    <>
-                        <Stack.Screen name="Main" component={MainTabNavigator} />
-                        <Stack.Screen name="Journal" component={JournalScreen} />
-                        <Stack.Screen name="ProfileSettings" component={ProfileSettingsScreen} />
-                        <Stack.Screen name="EmailVerification" component={EmailVerificationScreen} />
-                    </>
-                ) : (
-                    // Auth routes
-                    <>
-                        <Stack.Screen name="SignIn" component={SignInScreen} />
-                        <Stack.Screen name="SignUp" component={SignUpScreen} />
-                        <Stack.Screen name="EmailVerification" component={EmailVerificationScreen} />
-                    </>
-                )}
-            </Stack.Navigator>
-        </NavigationContainer>
+        <>
+            <NavigationContainer>
+                <Stack.Navigator
+                    screenOptions={{
+                        headerShown: false,
+                        cardStyle: { backgroundColor: colors.bgPrimary },
+                        animationEnabled: true,
+                    }}
+                >
+                    {isAuthenticated ? (
+                        // Authenticated routes
+                        <>
+                            <Stack.Screen name="Main" component={MainTabNavigator} />
+                            <Stack.Screen name="Journal" component={JournalScreen} />
+                            <Stack.Screen name="ProfileSettings" component={ProfileSettingsScreen} />
+                            <Stack.Screen name="EmailVerification" component={EmailVerificationScreen} />
+                        </>
+                    ) : (
+                        // Auth routes
+                        <>
+                            <Stack.Screen name="SignIn" component={SignInScreen} />
+                            <Stack.Screen name="SignUp" component={SignUpScreen} />
+                            <Stack.Screen name="EmailVerification" component={EmailVerificationScreen} />
+                        </>
+                    )}
+                </Stack.Navigator>
+            </NavigationContainer>
+
+            {/* Legal re-accept gate - shows modal when user needs to accept updated terms */}
+            {isAuthenticated && <LegalReacceptGate />}
+        </>
     );
 };
 
@@ -120,3 +142,4 @@ const styles = StyleSheet.create({
 });
 
 export default App;
+

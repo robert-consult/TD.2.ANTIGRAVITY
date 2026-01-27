@@ -369,4 +369,100 @@ export const leaderboardApi = {
     },
 };
 
+// ============================================
+// LEGAL ENDPOINTS (matching webapp legal gate)
+// ============================================
+export const legalApi = {
+    /**
+     * Get public legal/captcha config
+     * GET /api/legal/public-config
+     */
+    getPublicConfig: async () => {
+        const response = await api.get('/api/legal/public-config');
+        return response.data;
+    },
+
+    /**
+     * Get re-accept status for current user
+     * GET /api/legal/doc1/reaccept
+     */
+    getReacceptStatus: async () => {
+        const response = await api.get('/api/legal/doc1/reaccept');
+        return response.data;
+    },
+
+    /**
+     * Accept terms (for re-acceptance flow)
+     * POST /api/legal/doc1/accept
+     */
+    acceptTerms: async (data: { termsToken: string; combinedSha256: string }) => {
+        const response = await api.post('/api/legal/doc1/accept', data);
+        return response.data;
+    },
+
+    /**
+     * Resolve terms for a country (signup flow)
+     * GET /api/legal/doc1/resolve
+     */
+    resolveTerms: async (country: string) => {
+        const response = await api.get(`/api/legal/doc1/resolve?country=${country}`);
+        return response.data;
+    },
+
+    /**
+     * Check terms availability for a country
+     * GET /api/legal/doc1/availability
+     */
+    checkAvailability: async (country: string) => {
+        const response = await api.get(`/api/legal/doc1/availability?country=${country}`);
+        return response.data;
+    },
+
+    /**
+     * Check if terms exist for country
+     * GET /api/legal/doc1/check
+     */
+    checkTerms: async (countryIso2: string) => {
+        const response = await api.get(`/api/legal/doc1/check?countryIso2=${countryIso2}`);
+        return response.data;
+    },
+};
+
+// ============================================
+// I18N ENDPOINTS (matching webapp i18n system)
+// ============================================
+export const i18nApi = {
+    /**
+     * Get i18n config (supported locales, default locale)
+     * GET /api/i18n/config
+     */
+    getConfig: async () => {
+        const response = await api.get('/api/i18n/config');
+        return response.data;
+    },
+
+    /**
+     * Get translation bundle for a locale
+     * GET /api/i18n/bundle
+     */
+    getBundle: async (locale: string) => {
+        const response = await api.get(`/api/i18n/bundle?locale=${locale}`);
+        return response.data;
+    },
+};
+
+// ============================================
+// GRIFT/ANTI-FRAUD ENDPOINTS
+// ============================================
+export const griftApi = {
+    /**
+     * Send identity ping to server for anti-fraud tracking
+     * POST /api/grift/ping
+     */
+    ping: async () => {
+        const response = await api.post('/api/grift/ping', {});
+        return response.data;
+    },
+};
+
 export default api;

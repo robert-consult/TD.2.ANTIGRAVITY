@@ -1,9 +1,28 @@
 <resources>
 
-    <!-- Base application theme. -->
+    <!-- Base application theme - Dark mode -->
     <style name="AppTheme" parent="Theme.AppCompat.DayNight.NoActionBar">
-        <!-- Customize your theme here. -->
+        <!-- Primary colors -->
+        <item name="colorPrimary">@color/colorPrimary</item>
+        <item name="colorPrimaryDark">@color/colorPrimaryDark</item>
+        <item name="colorAccent">@color/colorAccent</item>
+        
+        <!-- Fix for React Native edit text -->
         <item name="android:editTextBackground">@drawable/rn_edit_text_material</item>
+        
+        <!-- Status bar and navigation styling -->
+        <item name="android:statusBarColor">@color/status_bar</item>
+        <item name="android:navigationBarColor">@color/navigation_bar</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+        
+        <!-- Dark window background -->
+        <item name="android:windowBackground">@color/colorPrimary</item>
+    </style>
+    
+    <!-- Splash screen theme -->
+    <style name="SplashTheme" parent="AppTheme">
+        <item name="android:windowBackground">@drawable/launch_screen</item>
     </style>
 
 </resources>

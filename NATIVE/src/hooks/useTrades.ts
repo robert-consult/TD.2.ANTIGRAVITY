@@ -34,10 +34,11 @@ export interface Trade {
 export function useTrades() {
     const queryClient = useQueryClient();
     const { user, isAuthenticated } = useAuth();
+    const userId = user?.id;
 
     // Subscribe to trade updates via WebSocket
     useEffect(() => {
-        if (!isAuthenticated || !user) return;
+        if (!isAuthenticated || !userId) return;
 
         // Subscribe when connected
         const unsubConnect = wsService.onConnect(() => {
@@ -50,7 +51,7 @@ export function useTrades() {
 
             if (message.type === 'trades:updated' || message.type === 'trades:update') {
                 const messageUserId = message.userId;
-                if (!messageUserId || messageUserId === user?.id) {
+                if (!messageUserId || messageUserId === userId) {
                     // Invalidate trade queries to trigger refetch
                     queryClient.invalidateQueries({ queryKey: ['trades'] });
                     queryClient.invalidateQueries({ queryKey: ['trades', 'open'] });
@@ -69,7 +70,7 @@ export function useTrades() {
             unsubConnect();
             unsubMessage();
         };
-    }, [isAuthenticated, user?.id, queryClient]);
+    }, [isAuthenticated, userId, queryClient]);
 
     // Get all trades (history)
     const {
@@ -143,7 +144,7 @@ export function useTrades() {
 
             return { previousOpenTrades };
         },
-        onSuccess: (closedTrade, _tradeId, context) => {
+        onSuccess: (closedTrade, _tradeId, _context) => {
             // Add closed trade to history
             if (closedTrade?.id) {
                 queryClient.setQueryData(['trades'], (old: Trade[] | undefined) => {

@@ -4,7 +4,7 @@
  */
 
 import { useState, useCallback, useEffect } from 'react';
-import { Platform, Alert } from 'react-native';
+import { Alert } from 'react-native';
 import ReactNativeBiometrics, { BiometryTypes } from 'react-native-biometrics';
 
 interface BiometricState {

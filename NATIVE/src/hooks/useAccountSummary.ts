@@ -24,7 +24,7 @@ export interface AccountSummary {
 
 export function useAccountSummary() {
     const queryClient = useQueryClient();
-    const { isAuthenticated, user } = useAuth();
+    const { isAuthenticated } = useAuth();
 
     // Listen for account updates via WebSocket
     useEffect(() => {

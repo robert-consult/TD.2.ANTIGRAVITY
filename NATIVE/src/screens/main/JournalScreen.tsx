@@ -38,16 +38,6 @@ interface JournalEntry {
     createdAt: number | string | Date;
 }
 
-interface Trade {
-    id: number;
-    symbol: string | { symbol: string };
-    side: string;
-    profit: number;
-    status?: string;
-    closePrice?: number;
-    closedAt?: number;
-}
-
 const MOOD_OPTIONS = [
     { value: 'confident', label: 'Confident', color: '#00E676' },
     { value: 'calm', label: 'Calm', color: '#2979FF' },
@@ -95,7 +85,7 @@ export const JournalScreen: React.FC = () => {
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editEntry, setEditEntry] = useState<JournalEntry | null>(null);
     const [searchQuery, setSearchQuery] = useState('');
-    const [moodFilter, setMoodFilter] = useState<string | null>(null);
+    const [moodFilter, _setMoodFilter] = useState<string | null>(null);
     const [note, setNote] = useState('');
     const [selectedMood, setSelectedMood] = useState<string | null>(null);
     const [selectedTags, setSelectedTags] = useState<string[]>([]);
@@ -105,15 +95,6 @@ export const JournalScreen: React.FC = () => {
         queryKey: ['journal'],
         queryFn: async () => (await api.get('/api/journal')).data,
     });
-
-    const { data: trades = [] } = useQuery<Trade[]>({
-        queryKey: ['trades'],
-        queryFn: async () => (await api.get('/api/trades')).data,
-    });
-
-    const closedTrades = trades.filter(t =>
-        String(t.status ?? '').toUpperCase() === 'CLOSED' || t.closePrice != null
-    );
 
     const createMutation = useMutation({
         mutationFn: (data: any) => api.post('/api/journal', data),
@@ -159,7 +140,6 @@ export const JournalScreen: React.FC = () => {
 
     const getMoodColor = (m: string | null) => MOOD_OPTIONS.find(o => o.value === m)?.color || colors.textMuted;
     const getMoodLabel = (m: string | null) => MOOD_OPTIONS.find(o => o.value === m)?.label || 'No mood';
-    const getSymbol = (t: Trade) => typeof t.symbol === 'object' ? t.symbol.symbol : t.symbol;
 
     const filteredEntries = entries.filter(e => {
         const matchSearch = !searchQuery || e.note.toLowerCase().includes(searchQuery.toLowerCase());

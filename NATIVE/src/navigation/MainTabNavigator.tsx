@@ -16,7 +16,6 @@ import { ChartsScreen } from '../screens/main/ChartsScreen';
 import { TradeScreen } from '../screens/main/TradeScreen';
 import { HistoryScreen } from '../screens/main/HistoryScreen';
 import { AccountScreen } from '../screens/main/AccountScreen';
-import { JournalScreen } from '../screens/main/JournalScreen';
 
 const Tab = createBottomTabNavigator();
 

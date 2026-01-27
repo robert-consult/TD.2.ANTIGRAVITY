@@ -13,7 +13,6 @@ import {
     TouchableOpacity,
     Alert,
     Switch,
-    ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import LinearGradient from 'react-native-linear-gradient';
@@ -23,7 +22,6 @@ import { useNavigation } from '@react-navigation/native';
 
 import { colors, typography, spacing } from '../../theme';
 import { Button } from '../../components/Button';
-import { Input } from '../../components/Input';
 import { GlassCard } from '../../components/cards/GlassCard';
 import api from '../../services/api';
 import { useAuth } from '../../hooks/useAuth';

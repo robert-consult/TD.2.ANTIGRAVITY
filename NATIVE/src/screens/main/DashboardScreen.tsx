@@ -3,7 +3,7 @@
  * Uses real API hooks for live data
  */
 
-import React, { useEffect } from 'react';
+import React from 'react';
 import {
     View,
     Text,
@@ -20,7 +20,6 @@ import Icon from 'react-native-vector-icons/Feather';
 import { colors, typography, spacing } from '../../theme';
 import { GlassCard } from '../../components/cards/GlassCard';
 import { Button } from '../../components/Button';
-import { useAuth } from '../../hooks/useAuth';
 import { useAccountSummary } from '../../hooks/useAccountSummary';
 import { useTrades } from '../../hooks/useTrades';
 
@@ -29,7 +28,6 @@ interface DashboardScreenProps {
 }
 
 export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
-    const { user } = useAuth();
     const {
         portfolioValue,
         equity,

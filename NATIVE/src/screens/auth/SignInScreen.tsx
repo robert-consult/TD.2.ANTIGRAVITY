@@ -3,7 +3,7 @@
  * Uses real API hooks for authentication
  */
 
-import React, { useState } from 'react';
+import React from 'react';
 import {
     View,
     Text,
@@ -13,7 +13,6 @@ import {
     ScrollView,
     TouchableOpacity,
     Alert,
-    ActivityIndicator,
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -59,7 +58,7 @@ export const SignInScreen: React.FC<SignInScreenProps> = ({ navigation }) => {
             clearError();
             await login(data.email, data.password);
             // Navigation handled by App.tsx based on auth state
-        } catch (err: any) {
+        } catch {
             // Error is already set in the auth store
         }
     };

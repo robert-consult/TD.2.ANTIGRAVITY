@@ -3,14 +3,13 @@
  * Native toast notification component with dismiss and auto-hide
  */
 
-import React, { useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useRef } from 'react';
 import {
     View,
     Text,
     StyleSheet,
     Animated,
     TouchableOpacity,
-    Dimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
@@ -34,8 +33,6 @@ const TOAST_CONFIG = {
     info: { icon: 'info', color: colors.accent, bg: 'rgba(0, 229, 255, 0.15)' },
 };
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
-
 export const Toast: React.FC<ToastProps> = ({
     visible,
     title,
@@ -48,6 +45,21 @@ export const Toast: React.FC<ToastProps> = ({
     const translateY = useRef(new Animated.Value(-100)).current;
     const opacity = useRef(new Animated.Value(0)).current;
     const config = TOAST_CONFIG[type];
+
+    const handleDismiss = useCallback(() => {
+        Animated.parallel([
+            Animated.timing(translateY, {
+                toValue: -100,
+                duration: 200,
+                useNativeDriver: true,
+            }),
+            Animated.timing(opacity, {
+                toValue: 0,
+                duration: 200,
+                useNativeDriver: true,
+            }),
+        ]).start(() => onDismiss());
+    }, [onDismiss, opacity, translateY]);
 
     useEffect(() => {
         if (visible) {
@@ -84,22 +96,7 @@ export const Toast: React.FC<ToastProps> = ({
                 }),
             ]).start();
         }
-    }, [visible, duration]);
-
-    const handleDismiss = () => {
-        Animated.parallel([
-            Animated.timing(translateY, {
-                toValue: -100,
-                duration: 200,
-                useNativeDriver: true,
-            }),
-            Animated.timing(opacity, {
-                toValue: 0,
-                duration: 200,
-                useNativeDriver: true,
-            }),
-        ]).start(() => onDismiss());
-    };
+    }, [visible, duration, handleDismiss, opacity, translateY]);
 
     if (!visible) return null;
 

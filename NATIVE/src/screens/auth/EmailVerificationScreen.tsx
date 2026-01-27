@@ -9,7 +9,6 @@ import {
     Text,
     StyleSheet,
     ActivityIndicator,
-    Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import LinearGradient from 'react-native-linear-gradient';
@@ -47,7 +46,7 @@ export const EmailVerificationScreen: React.FC = () => {
 
             setStatus('verifying');
             try {
-                const response = await api.post('/api/verification/email/verify', { token });
+                await api.post('/api/verification/email/verify', { token });
                 setStatus('success');
                 setMessage('Your email has been verified successfully.');
             } catch (error: any) {

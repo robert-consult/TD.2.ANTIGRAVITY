@@ -34,4 +34,32 @@ jest.mock('@react-navigation/bottom-tabs', () => ({
 jest.mock('react-native-linear-gradient', () => 'LinearGradient');
 jest.mock('react-native-vector-icons/Feather', () => 'Icon');
 
-jest.mock('react-native/Libraries/Animated/NativeAnimatedHelper');
+jest.mock('react-native-mmkv', () => {
+  const store = new Map();
+
+  class MMKV {
+    set(key, value) {
+      store.set(key, String(value));
+    }
+
+    getString(key) {
+      const value = store.get(key);
+      return value === undefined ? undefined : value;
+    }
+
+    delete(key) {
+      store.delete(key);
+    }
+  }
+
+  return { MMKV };
+});
+
+jest.mock('react-native-device-info', () => ({
+  getUniqueId: async () => 'jest-unique-id',
+  getDeviceId: () => 'jest-device-id',
+  getSystemVersion: () => '0',
+  getBrand: () => 'jest',
+  getModel: () => 'jest-model',
+  getVersion: () => '0.0.0',
+}));

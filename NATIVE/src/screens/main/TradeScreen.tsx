@@ -11,7 +11,6 @@ import {
     ScrollView,
     TouchableOpacity,
     Alert,
-    ActivityIndicator,
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -20,7 +19,7 @@ import Icon from 'react-native-vector-icons/Feather';
 import { colors, typography, spacing } from '../../theme';
 import { GlassCard } from '../../components/cards/GlassCard';
 import { Button } from '../../components/Button';
-import { useQuotes, Symbol, Quote } from '../../hooks/useQuotes';
+import { useQuotes } from '../../hooks/useQuotes';
 import { useTrades } from '../../hooks/useTrades';
 import { useAccountSummary } from '../../hooks/useAccountSummary';
 
@@ -34,10 +33,9 @@ export const TradeScreen: React.FC<TradeScreenProps> = ({
     route,
 }) => {
     const initialSymbol = route?.params?.symbol || 'BTC/USD';
-    const initialSymbolId = route?.params?.symbolId;
     const initialSide = route?.params?.side || 'BUY';
 
-    const { quotes, symbols, getQuote, getSymbolByName, isLoading: isLoadingQuotes } = useQuotes();
+    const { getQuote, getSymbolByName } = useQuotes();
     const { createTrade, isCreatingTrade, createTradeError } = useTrades();
     const { freeMargin, leverage } = useAccountSummary();
 
@@ -46,6 +44,13 @@ export const TradeScreen: React.FC<TradeScreenProps> = ({
     const [orderType, setOrderType] = useState<'market' | 'limit'>('market');
     const [quantity, setQuantity] = useState(0.1);
     const [limitPrice, setLimitPrice] = useState(0);
+
+    // Sync symbol when navigating in with params
+    React.useEffect(() => {
+        const nextSymbol = route?.params?.symbol;
+        if (!nextSymbol) return;
+        if (nextSymbol !== selectedSymbolName) setSelectedSymbolName(nextSymbol);
+    }, [route?.params?.symbol, selectedSymbolName]);
 
     // Get current symbol and quote
     const symbol = getSymbolByName(selectedSymbolName);
@@ -75,7 +80,6 @@ export const TradeScreen: React.FC<TradeScreenProps> = ({
 
     // Handle quantity changes
     const adjustQuantity = useCallback((delta: number) => {
-        const step = symbol?.lotStep || 0.01;
         const minLot = symbol?.minLotSize || 0.01;
         const maxLot = symbol?.maxLotSize || 100;
         const newQty = Math.max(minLot, Math.min(maxLot, quantity + delta));
@@ -94,6 +98,8 @@ export const TradeScreen: React.FC<TradeScreenProps> = ({
             Alert.alert('Error', 'Please select a valid symbol');
             return;
         }
+
+        setSide(tradeSide);
 
         if (requiredMargin > freeMargin) {
             Alert.alert('Insufficient Margin', 'You do not have enough buying power for this trade.');

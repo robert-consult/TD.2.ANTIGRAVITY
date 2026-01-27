@@ -24,6 +24,10 @@ import { getGriftDb } from "../grift/griftDb";
 import { recalcAccount } from "../recalcAccount";
 import { publishLiveEvent } from "../services/liveBus";
 
+function getParam(value: string | string[]): string {
+  return Array.isArray(value) ? value[0] : value;
+}
+
 function convertQuestionMarks(sql: string): string {
   let out = "";
   let index = 1;
@@ -314,14 +318,14 @@ export function registerAdminRoutes(app: Express) {
     }
   });
   
-  // Update existing trading symbol
-  app.put("/api/admin/symbols/:id", requireAdmin, async (req: Request, res: Response) => {
-    try {
-      const symbolId = parseInt(req.params.id);
-      
-      // Ensure symbol exists
-      const existingSymbol = await storage.getSymbolConfigById(symbolId);
-      if (!existingSymbol) {
+	  // Update existing trading symbol
+	  app.put("/api/admin/symbols/:id", requireAdmin, async (req: Request, res: Response) => {
+	    try {
+	      const symbolId = parseInt(getParam(req.params.id), 10);
+	      
+	      // Ensure symbol exists
+	      const existingSymbol = await storage.getSymbolConfigById(symbolId);
+	      if (!existingSymbol) {
         return res.status(404).json({ message: "Symbol not found" });
       }
       
@@ -345,14 +349,14 @@ export function registerAdminRoutes(app: Express) {
     }
   });
   
-  // Delete trading symbol
-  app.delete("/api/admin/symbols/:id", requireAdmin, async (req: Request, res: Response) => {
-    try {
-      const symbolId = parseInt(req.params.id);
-      
-      // Check if symbol exists
-      const existingSymbol = await storage.getSymbolConfigById(symbolId);
-      if (!existingSymbol) {
+	  // Delete trading symbol
+	  app.delete("/api/admin/symbols/:id", requireAdmin, async (req: Request, res: Response) => {
+	    try {
+	      const symbolId = parseInt(getParam(req.params.id), 10);
+	      
+	      // Check if symbol exists
+	      const existingSymbol = await storage.getSymbolConfigById(symbolId);
+	      if (!existingSymbol) {
         return res.status(404).json({ message: "Symbol not found" });
       }
       
@@ -400,14 +404,14 @@ export function registerAdminRoutes(app: Express) {
     }
   });
   
-  // Update user balance
-  app.post("/api/admin/users/:id/balance", requireAdmin, async (req, res) => {
-    try {
-      const userId = parseInt(req.params.id);
-      const { balance } = req.body;
-      
-      if (!balance || isNaN(parseFloat(balance))) {
-        return res.status(400).json({ message: "Valid balance is required" });
+	  // Update user balance
+	  app.post("/api/admin/users/:id/balance", requireAdmin, async (req, res) => {
+	    try {
+	      const userId = parseInt(getParam(req.params.id), 10);
+	      const { balance } = req.body;
+	      
+	      if (!balance || isNaN(parseFloat(balance))) {
+	        return res.status(400).json({ message: "Valid balance is required" });
       }
       
       await storage.updateUserBalance(userId, balance);
@@ -2040,7 +2044,7 @@ export function registerAdminRoutes(app: Express) {
   // Toggle user enabled/disabled status
   app.post("/api/admin/users/:id/toggle-status", requireAdmin, async (req: Request, res: Response) => {
     try {
-      const userId = parseInt(req.params.id);
+	      const userId = parseInt(getParam(req.params.id), 10);
       const { disabled } = req.body;
       const adminIdRaw = (req as any).user?.id ?? req.session?.userId;
       const adminIdNum = Number(adminIdRaw);
@@ -2075,7 +2079,7 @@ export function registerAdminRoutes(app: Express) {
   // Freeze user account
   app.post("/api/admin/users/:id/freeze", requireAdmin, async (req: Request, res: Response) => {
     try {
-      const userId = parseInt(req.params.id);
+	      const userId = parseInt(getParam(req.params.id), 10);
       const { reasonCode, reasonText } = req.body;
       const adminIdRaw = (req as any).user?.id ?? req.session?.userId;
       const adminIdNum = Number(adminIdRaw);
@@ -2119,7 +2123,7 @@ export function registerAdminRoutes(app: Express) {
   // Unfreeze user account
   app.post("/api/admin/users/:id/unfreeze", requireAdmin, async (req: Request, res: Response) => {
     try {
-      const userId = parseInt(req.params.id);
+	      const userId = parseInt(getParam(req.params.id), 10);
       const reason = typeof (req.body as any)?.reason === "string" ? String((req.body as any).reason) : undefined;
       const adminIdRaw = (req as any).user?.id ?? req.session?.userId;
       const adminIdNum = Number(adminIdRaw);
@@ -2157,7 +2161,7 @@ export function registerAdminRoutes(app: Express) {
   // Get user timeline (activity history)
   app.get("/api/admin/users/:id/timeline", requireAdmin, async (req: Request, res: Response) => {
     try {
-      const userId = parseInt(req.params.id);
+	      const userId = parseInt(getParam(req.params.id), 10);
       const limit = req.query.limit ? parseInt(req.query.limit as string) : 200;
       
       const timeline = await storage.getUserTimeline(userId, limit);
@@ -2171,7 +2175,7 @@ export function registerAdminRoutes(app: Express) {
   // Get user login history
   app.get("/api/admin/users/:id/logins", requireAdmin, async (req: Request, res: Response) => {
     try {
-      const userId = parseInt(req.params.id);
+	      const userId = parseInt(getParam(req.params.id), 10);
       const limit = req.query.limit ? parseInt(req.query.limit as string) : 50;
       
       const logins = await storage.getUserLoginHistory(userId, limit);
@@ -2185,7 +2189,7 @@ export function registerAdminRoutes(app: Express) {
   // Get user notes/flags
   app.get("/api/admin/users/:id/notes", requireAdmin, async (req: Request, res: Response) => {
     try {
-      const userId = parseInt(req.params.id);
+	      const userId = parseInt(getParam(req.params.id), 10);
       const notes = await storage.getUserNotes(userId);
       res.json(notes);
     } catch (error) {
@@ -2197,7 +2201,7 @@ export function registerAdminRoutes(app: Express) {
   // Add note/flag to user
   app.post("/api/admin/users/:id/notes", requireAdmin, async (req: Request, res: Response) => {
     try {
-      const userId = parseInt(req.params.id);
+	      const userId = parseInt(getParam(req.params.id), 10);
       const { type, severity, flagCode, content } = req.body;
       const adminId = (req as any).user?.id || req.session?.userId;
       
@@ -2224,7 +2228,7 @@ export function registerAdminRoutes(app: Express) {
   // Resolve a note/flag
   app.post("/api/admin/notes/:id/resolve", requireAdmin, async (req: Request, res: Response) => {
     try {
-      const noteId = parseInt(req.params.id);
+	      const noteId = parseInt(getParam(req.params.id), 10);
       const adminId = (req as any).user?.id || req.session?.userId;
       
       const note = await storage.resolveUserNote(noteId, adminId);
@@ -2478,7 +2482,7 @@ export function registerAdminRoutes(app: Express) {
   // Export user activity/timeline to CSV (includes login/logout with session tracking)
   app.get("/api/admin/export/users/:id/timeline", requireAdmin, async (req: Request, res: Response) => {
     try {
-      const userId = parseInt(req.params.id);
+	      const userId = parseInt(getParam(req.params.id), 10);
       
       // Get user info for header columns
       const user = await storage.getUserById(userId);
@@ -2539,7 +2543,7 @@ export function registerAdminRoutes(app: Express) {
   // Export user activity/timeline to JSONL format
   app.get("/api/admin/export/users/:id/timeline/jsonl", requireAdmin, async (req: Request, res: Response) => {
     try {
-      const userId = parseInt(req.params.id);
+	      const userId = parseInt(getParam(req.params.id), 10);
       
       const user = await storage.getUserById(userId);
       const timeline = await storage.getUserTimeline(userId, 1000);
@@ -2970,7 +2974,7 @@ export function registerAdminRoutes(app: Express) {
   // KYC Status Update endpoint - updates userKycProfiles table
   app.post("/api/admin/users/:id/kyc-status", requireAdmin, async (req: Request, res: Response) => {
     try {
-      const userId = parseInt(req.params.id);
+	      const userId = parseInt(getParam(req.params.id), 10);
       const adminId = req.session.userId!;
       const { status, notes } = req.body;
       
@@ -3299,7 +3303,7 @@ export function registerAdminRoutes(app: Express) {
   
   app.post("/api/admin/users/:id/tier", requireAdmin, async (req: Request, res: Response) => {
     try {
-      const userId = parseInt(req.params.id);
+	      const userId = parseInt(getParam(req.params.id), 10);
       const adminId = req.session.userId!;
       
       if (!userId || isNaN(userId)) {
@@ -4085,7 +4089,7 @@ export function registerAdminRoutes(app: Express) {
 
   app.get("/api/admin/identity-audit/user/:userId", requireAdmin, async (req: Request, res: Response) => {
     try {
-      const userId = parseInt(req.params.userId, 10);
+	      const userId = parseInt(getParam(req.params.userId), 10);
       if (isNaN(userId) || userId < 1) {
         return res.status(400).json({ message: "Invalid user ID" });
       }
@@ -4323,7 +4327,7 @@ export function registerAdminRoutes(app: Express) {
   // Delete a daily FX close entry
   app.delete("/api/admin/daily-fx-closes/:id", requireAdmin, async (req: Request, res: Response) => {
     try {
-      const id = parseInt(req.params.id, 10);
+	      const id = parseInt(getParam(req.params.id), 10);
       if (isNaN(id) || id < 1) {
         return res.status(400).json({ message: "Invalid ID" });
       }

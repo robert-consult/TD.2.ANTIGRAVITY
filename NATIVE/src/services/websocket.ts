@@ -4,7 +4,6 @@
  */
 
 import { MMKV } from 'react-native-mmkv';
-import DeviceInfo from 'react-native-device-info';
 
 const storage = new MMKV();
 

@@ -5,7 +5,7 @@
 
 import { create } from 'zustand';
 import { MMKV } from 'react-native-mmkv';
-import { authApi, accountApi } from '../services/api';
+import { authApi } from '../services/api';
 import { wsService } from '../services/websocket';
 
 const storage = new MMKV();
@@ -146,7 +146,7 @@ export const useAuth = create<AuthState>((set, get) => ({
                 isLoading: false,
             });
             wsService.enable();
-        } catch (error) {
+        } catch {
             storage.delete('authToken');
             wsService.disable();
             set({

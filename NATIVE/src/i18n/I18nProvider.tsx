@@ -95,6 +95,7 @@ export const I18nProvider: React.FC<{ children: React.ReactNode }> = ({ children
     });
 
     const config = configQuery.data ?? FALLBACK_CONFIG;
+    const { enabled, defaultLocale, supportedLocales } = config;
 
     const [locale, _setLocale] = useState<string>(() => {
         return getI18nState().locale;
@@ -102,25 +103,25 @@ export const I18nProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     // Normalize locale when config changes
     useEffect(() => {
-        const normalized = normalizeLocale(locale, config.supportedLocales, config.defaultLocale);
+        const normalized = normalizeLocale(locale, supportedLocales, defaultLocale);
         if (normalized !== locale) _setLocale(normalized);
-    }, [config.defaultLocale, config.supportedLocales.join(','), locale]);
+    }, [defaultLocale, supportedLocales, locale]);
 
     // Sync locale from user preference
     useEffect(() => {
         const currentUserLang = user?.language;
         if (!currentUserLang) return;
 
-        const normalized = normalizeLocale(currentUserLang, config.supportedLocales, config.defaultLocale);
+        const normalized = normalizeLocale(currentUserLang, supportedLocales, defaultLocale);
         if (normalized !== locale) {
             _setLocale(normalized);
         }
-    }, [user?.language, config.defaultLocale, config.supportedLocales.join(','), locale]);
+    }, [user?.language, defaultLocale, supportedLocales, locale]);
 
     // Update config in store
     useEffect(() => {
-        setI18nConfig(config);
-    }, [config.enabled, config.defaultLocale, config.supportedLocales.join(',')]);
+        setI18nConfig({ enabled, defaultLocale, supportedLocales });
+    }, [enabled, defaultLocale, supportedLocales]);
 
     // Update locale in store
     useEffect(() => {
@@ -140,14 +141,14 @@ export const I18nProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const bundleQuery = useQuery({
         queryKey: ['i18nBundle', locale],
         queryFn: () => fetchBundle(locale),
-        enabled: config.enabled && !!locale,
+        enabled: enabled && !!locale,
         staleTime: 5 * 60_000,
         refetchOnWindowFocus: false,
     });
 
     // Update bundle in store
     useEffect(() => {
-        if (!config.enabled) {
+        if (!enabled) {
             setI18nBundle(null);
             return;
         }
@@ -160,14 +161,14 @@ export const I18nProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (cached) {
             setI18nBundle(cached);
         }
-    }, [bundleQuery.data, config.enabled, locale]);
+    }, [bundleQuery.data, enabled, locale]);
 
     const setLocale = useCallback(
         (next: string) => {
-            const normalized = normalizeLocale(next, config.supportedLocales, config.defaultLocale);
+            const normalized = normalizeLocale(next, supportedLocales, defaultLocale);
             _setLocale(normalized);
         },
-        [config.defaultLocale, config.supportedLocales.join(',')],
+        [defaultLocale, supportedLocales],
     );
 
     const t = useCallback((key: string, fallback?: string): string => {
@@ -182,13 +183,13 @@ export const I18nProvider: React.FC<{ children: React.ReactNode }> = ({ children
         () => ({
             locale,
             setLocale,
-            loaded: !!bundleQuery.data || !config.enabled,
-            enabled: config.enabled,
-            supportedLocales: config.supportedLocales,
-            defaultLocale: config.defaultLocale,
+            loaded: !!bundleQuery.data || !enabled,
+            enabled,
+            supportedLocales,
+            defaultLocale,
             t,
         }),
-        [locale, setLocale, bundleQuery.data, config.enabled, config.defaultLocale, config.supportedLocales.join(','), t],
+        [bundleQuery.data, defaultLocale, enabled, locale, setLocale, supportedLocales, t],
     );
 
     return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>;

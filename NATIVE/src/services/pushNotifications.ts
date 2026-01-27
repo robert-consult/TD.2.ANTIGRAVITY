@@ -3,7 +3,7 @@
  * Handles iOS push notification registration and handling
  */
 
-import { Platform, Alert } from 'react-native';
+import { Platform } from 'react-native';
 import messaging, { FirebaseMessagingTypes } from '@react-native-firebase/messaging';
 import notifee, { AndroidImportance, EventType } from '@notifee/react-native';
 import { MMKV } from 'react-native-mmkv';

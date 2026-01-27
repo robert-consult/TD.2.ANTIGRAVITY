@@ -162,8 +162,6 @@ export const HistoryScreen: React.FC<HistoryScreenProps> = ({ navigation }) => {
         refetchPending,
         closeTrade,
         cancelOrder,
-        isClosingTrade,
-        isCancellingOrder,
     } = useTrades();
 
     const [refreshing, setRefreshing] = useState(false);

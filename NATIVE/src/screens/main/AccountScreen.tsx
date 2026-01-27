@@ -19,9 +19,10 @@ import Icon from 'react-native-vector-icons/Feather';
 import { colors, typography, spacing } from '../../theme';
 
 const settingsItems = [
-    { id: 'personal', icon: 'user', label: 'Personal Info', screen: 'PersonalInfo' },
-    { id: 'security', icon: 'shield', label: 'Security & Password', screen: 'Security' },
-    { id: 'notifications', icon: 'bell', label: 'Notifications', screen: 'Notifications' },
+    { id: 'personal', icon: 'user', label: 'Personal Info', screen: 'ProfileSettings' },
+    { id: 'journal', icon: 'book', label: 'Trading Journal', screen: 'Journal' },
+    { id: 'security', icon: 'shield', label: 'Security & Password', screen: 'ProfileSettings' },
+    { id: 'notifications', icon: 'bell', label: 'Notifications', screen: 'ProfileSettings' },
     { id: 'data', icon: 'database', label: 'Data Usage', screen: 'DataUsage' },
     { id: 'payment', icon: 'credit-card', label: 'Payment Methods', screen: 'PaymentMethods' },
     { id: 'support', icon: 'help-circle', label: 'Support & Feedback', screen: 'Support' },

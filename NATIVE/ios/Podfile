@@ -28,6 +28,12 @@ end
 target 'TradeQuipNative' do
   config = use_native_modules!
 
+  # Firebase dependencies for push notifications
+  pod 'Firebase', :modular_headers => true
+  pod 'FirebaseCore', :modular_headers => true
+  pod 'FirebaseMessaging', :modular_headers => true
+  pod 'GoogleUtilities', :modular_headers => true
+
   use_react_native!(
     :path => config[:reactNativePath],
     # Enables Flipper.
@@ -51,5 +57,13 @@ target 'TradeQuipNative' do
       config[:reactNativePath],
       :mac_catalyst_enabled => false
     )
+
+    # Fix for Xcode 15 and iOS 17
+    installer.pods_project.targets.each do |target|
+      target.build_configurations.each do |config|
+        config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '13.4'
+      end
+    end
   end
 end
+

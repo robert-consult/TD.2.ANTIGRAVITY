@@ -46,6 +46,9 @@
 		81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.storyboard; name = LaunchScreen.storyboard; path = TradeQuipNative/LaunchScreen.storyboard; sourceTree = "<group>"; };
 		89C6BE57DB24E9ADA2F236DE /* Pods-TradeQuipNative-TradeQuipNativeTests.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-TradeQuipNative-TradeQuipNativeTests.release.xcconfig"; path = "Target Support Files/Pods-TradeQuipNative-TradeQuipNativeTests/Pods-TradeQuipNative-TradeQuipNativeTests.release.xcconfig"; sourceTree = "<group>"; };
 		ED297162215061F000B7C4FE /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; };
+		TQ001 /* TradeQuipNative.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; name = TradeQuipNative.entitlements; path = TradeQuipNative/TradeQuipNative.entitlements; sourceTree = "<group>"; };
+		TQ002 /* TradeQuipNativeRelease.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; name = TradeQuipNativeRelease.entitlements; path = TradeQuipNative/TradeQuipNativeRelease.entitlements; sourceTree = "<group>"; };
+		TQ003 /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; name = "GoogleService-Info.plist"; path = "TradeQuipNative/GoogleService-Info.plist"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -94,6 +97,9 @@
 				13B07FB61A68108700A75B9A /* Info.plist */,
 				81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */,
 				13B07FB71A68108700A75B9A /* main.m */,
+				TQ001 /* TradeQuipNative.entitlements */,
+				TQ002 /* TradeQuipNativeRelease.entitlements */,
+				TQ003 /* GoogleService-Info.plist */,
 			);
 			name = TradeQuipNative;
 			sourceTree = "<group>";
@@ -482,11 +488,12 @@
 					"-ObjC",
 					"-lc++",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = "org.reactjs.native.example.$(PRODUCT_NAME:rfc1034identifier)";
+				PRODUCT_BUNDLE_IDENTIFIER = "com.tradequip.native";
 				PRODUCT_NAME = TradeQuipNative;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.0;
 				VERSIONING_SYSTEM = "apple-generic";
+				CODE_SIGN_ENTITLEMENTS = TradeQuipNative/TradeQuipNative.entitlements;
 			};
 			name = Debug;
 		};
@@ -508,10 +515,11 @@
 					"-ObjC",
 					"-lc++",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = "org.reactjs.native.example.$(PRODUCT_NAME:rfc1034identifier)";
+				PRODUCT_BUNDLE_IDENTIFIER = "com.tradequip.native";
 				PRODUCT_NAME = TradeQuipNative;
 				SWIFT_VERSION = 5.0;
 				VERSIONING_SYSTEM = "apple-generic";
+				CODE_SIGN_ENTITLEMENTS = TradeQuipNative/TradeQuipNativeRelease.entitlements;
 			};
 			name = Release;
 		};

@@ -48,6 +48,18 @@ export const typography = StyleSheet.create({
         lineHeight: 20,
         color: 'rgba(176, 190, 197, 0.8)',
     },
+    bodyBold: {
+        fontSize: 16,
+        fontWeight: '600',
+        lineHeight: 24,
+        color: '#FFFFFF',
+    },
+    caption: {
+        fontSize: 12,
+        fontWeight: '400',
+        lineHeight: 16,
+        color: 'rgba(176, 190, 197, 0.8)',
+    },
 
     // Labels
     label: {

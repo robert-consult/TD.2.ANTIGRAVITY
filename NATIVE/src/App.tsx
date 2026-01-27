@@ -16,6 +16,9 @@ import { colors } from './theme';
 import { MainTabNavigator } from './navigation/MainTabNavigator';
 import { SignInScreen } from './screens/auth/SignInScreen';
 import { SignUpScreen } from './screens/auth/SignUpScreen';
+import { EmailVerificationScreen } from './screens/auth/EmailVerificationScreen';
+import { JournalScreen } from './screens/main/JournalScreen';
+import { ProfileSettingsScreen } from './screens/main/ProfileSettingsScreen';
 import { useAuth } from './hooks/useAuth';
 
 const Stack = createStackNavigator();
@@ -64,12 +67,18 @@ const Navigation = () => {
             >
                 {isAuthenticated ? (
                     // Authenticated routes
-                    <Stack.Screen name="Main" component={MainTabNavigator} />
+                    <>
+                        <Stack.Screen name="Main" component={MainTabNavigator} />
+                        <Stack.Screen name="Journal" component={JournalScreen} />
+                        <Stack.Screen name="ProfileSettings" component={ProfileSettingsScreen} />
+                        <Stack.Screen name="EmailVerification" component={EmailVerificationScreen} />
+                    </>
                 ) : (
                     // Auth routes
                     <>
                         <Stack.Screen name="SignIn" component={SignInScreen} />
                         <Stack.Screen name="SignUp" component={SignUpScreen} />
+                        <Stack.Screen name="EmailVerification" component={EmailVerificationScreen} />
                     </>
                 )}
             </Stack.Navigator>

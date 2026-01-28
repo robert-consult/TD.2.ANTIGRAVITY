@@ -4,11 +4,12 @@
  */
 
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, type GestureResponderEvent, type LayoutChangeEvent } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { LineChart, type TLineChartPoint } from 'react-native-wagmi-charts';
 import Icon from 'react-native-vector-icons/Feather';
+import Svg, { Circle, Defs, LinearGradient as SvgLinearGradient, Line, Path, Stop } from 'react-native-svg';
+import { format } from 'date-fns';
 
 import { colors, typography, spacing } from '../../theme';
 import { GlassCard } from '../../components/cards/GlassCard';
@@ -36,6 +37,163 @@ const formatPrice = (symbol: string, value: number) => {
     return value.toFixed(decimals);
 };
 
+type ChartPoint = { timestamp: number; value: number };
+
+const buildLineChartPaths = (data: ChartPoint[], width: number, height: number) => {
+    const safeWidth = Math.max(1, Math.floor(width));
+    const safeHeight = Math.max(1, Math.floor(height));
+    if (data.length < 2) return null;
+
+    let sorted = true;
+    for (let i = 1; i < data.length; i++) {
+        if (data[i].timestamp < data[i - 1].timestamp) {
+            sorted = false;
+            break;
+        }
+    }
+    const ordered = sorted ? data : [...data].sort((a, b) => a.timestamp - b.timestamp);
+    const minX = ordered[0]?.timestamp ?? 0;
+    const maxX = ordered[ordered.length - 1]?.timestamp ?? minX;
+    let minY = ordered[0]?.value ?? 0;
+    let maxY = ordered[0]?.value ?? 0;
+    for (let i = 1; i < ordered.length; i++) {
+        const v = ordered[i].value;
+        if (v < minY) minY = v;
+        if (v > maxY) maxY = v;
+    }
+
+    const xSpan = Math.max(1, maxX - minX);
+    const ySpan = Math.max(1e-9, maxY - minY);
+
+    const points = new Array(ordered.length);
+    const lineParts = new Array(ordered.length);
+    for (let i = 0; i < ordered.length; i++) {
+        const p = ordered[i];
+        const x = ((p.timestamp - minX) / xSpan) * (safeWidth - 1);
+        const y = safeHeight - 1 - ((p.value - minY) / ySpan) * (safeHeight - 1);
+        points[i] = { x, y, timestamp: p.timestamp, value: p.value };
+        lineParts[i] = `${i === 0 ? 'M' : 'L'} ${x.toFixed(2)} ${y.toFixed(2)}`;
+    }
+
+    const lineD = lineParts.join(' ');
+    const first = points[0];
+    const last = points[points.length - 1];
+    const bottom = (safeHeight - 1).toFixed(2);
+    const areaD = `${lineD} L ${last.x.toFixed(2)} ${bottom} L ${first.x.toFixed(2)} ${bottom} Z`;
+
+    return { lineD, areaD, points };
+};
+
+const SimpleLineChart = ({
+    data,
+    height,
+    onCursorPointChange,
+}: {
+    data: ChartPoint[];
+    height: number;
+    onCursorPointChange?: (point: ChartPoint | null) => void;
+}) => {
+    const [width, setWidth] = useState(0);
+    const [cursorIndex, setCursorIndex] = useState<number | null>(null);
+
+    const onLayout = useCallback((e: LayoutChangeEvent) => {
+        const nextWidth = Math.max(0, Math.floor(e.nativeEvent.layout.width));
+        setWidth((prev) => (prev === nextWidth ? prev : nextWidth));
+    }, []);
+
+    const chart = useMemo(() => {
+        if (width <= 0) return null;
+        return buildLineChartPaths(data, width, height);
+    }, [data, height, width]);
+
+    const clearCursor = useCallback(() => {
+        setCursorIndex(null);
+        onCursorPointChange?.(null);
+    }, [onCursorPointChange]);
+
+    const selectClosestPoint = useCallback(
+        (x: number) => {
+            if (!chart?.points?.length || width <= 0) return;
+            const clamped = Math.max(0, Math.min(width - 1, x));
+            const pts = chart.points;
+
+            // Binary search for insertion point by x.
+            let lo = 0;
+            let hi = pts.length - 1;
+            while (lo < hi) {
+                const mid = Math.floor((lo + hi) / 2);
+                if (pts[mid].x < clamped) lo = mid + 1;
+                else hi = mid;
+            }
+
+            const idx = lo;
+            const prev = idx > 0 ? idx - 1 : idx;
+            const best =
+                Math.abs(pts[idx].x - clamped) < Math.abs(pts[prev].x - clamped) ? idx : prev;
+
+            setCursorIndex(best);
+            onCursorPointChange?.({ timestamp: pts[best].timestamp, value: pts[best].value });
+        },
+        [chart, onCursorPointChange, width]
+    );
+
+    const onResponderGrant = useCallback(
+        (e: GestureResponderEvent) => {
+            selectClosestPoint(e.nativeEvent.locationX);
+        },
+        [selectClosestPoint]
+    );
+
+    const onResponderMove = useCallback(
+        (e: GestureResponderEvent) => {
+            selectClosestPoint(e.nativeEvent.locationX);
+        },
+        [selectClosestPoint]
+    );
+
+    const cursor = cursorIndex !== null && chart?.points?.length ? chart.points[cursorIndex] : null;
+
+    return (
+        <View
+            style={{ height }}
+            onLayout={onLayout}
+            onStartShouldSetResponder={() => true}
+            onResponderGrant={onResponderGrant}
+            onResponderMove={onResponderMove}
+            onResponderRelease={clearCursor}
+            onResponderTerminate={clearCursor}
+        >
+            {width > 0 && chart ? (
+                <Svg width={width} height={height}>
+                    <Defs>
+                        <SvgLinearGradient id="chartFill" x1="0" y1="0" x2="0" y2="1">
+                            <Stop offset="0" stopColor={colors.accent} stopOpacity={0.16} />
+                            <Stop offset="1" stopColor={colors.accent} stopOpacity={0} />
+                        </SvgLinearGradient>
+                    </Defs>
+                    <Path d={chart.areaD} fill="url(#chartFill)" />
+                    <Path d={chart.lineD} stroke={colors.accent} strokeWidth={2} fill="none" />
+
+                    {cursor ? (
+                        <>
+                            <Line
+                                x1={cursor.x}
+                                y1={0}
+                                x2={cursor.x}
+                                y2={height}
+                                stroke={colors.accent}
+                                strokeWidth={1}
+                                opacity={0.35}
+                            />
+                            <Circle cx={cursor.x} cy={cursor.y} r={4} fill={colors.accent} />
+                        </>
+                    ) : null}
+                </Svg>
+            ) : null}
+        </View>
+    );
+};
+
 export const ChartsScreen: React.FC<ChartsScreenProps> = ({ navigation, route }) => {
     const { symbols, getQuote, isLive, refetchQuotes } = useQuotes();
 
@@ -44,7 +202,8 @@ export const ChartsScreen: React.FC<ChartsScreenProps> = ({ navigation, route })
         route?.params?.symbol || firstEnabledSymbol || 'USDJPY'
     );
     const [activePeriod, setActivePeriod] = useState<ChartPeriod>('1D');
-    const [series, setSeries] = useState<TLineChartPoint[]>([]);
+    const [series, setSeries] = useState<ChartPoint[]>([]);
+    const [cursorPoint, setCursorPoint] = useState<ChartPoint | null>(null);
 
     // Keep selection in sync when navigating from Quotes/History, etc.
     useEffect(() => {
@@ -67,7 +226,7 @@ export const ChartsScreen: React.FC<ChartsScreenProps> = ({ navigation, route })
     }, [activePeriod]);
 
     const pushPoint = useCallback(
-        (point: TLineChartPoint) => {
+        (point: ChartPoint) => {
             setSeries((prev) => {
                 const now = point.timestamp || Date.now();
                 const cutoff = now - chartWindowMs;
@@ -75,7 +234,7 @@ export const ChartsScreen: React.FC<ChartsScreenProps> = ({ navigation, route })
                 const trimmed = Array.isArray(prev) ? prev.filter((p) => p.timestamp >= cutoff) : [];
                 const last = trimmed[trimmed.length - 1];
 
-                let next: TLineChartPoint[];
+                let next: ChartPoint[];
                 if (last && last.timestamp === point.timestamp) {
                     next = [...trimmed.slice(0, -1), point];
                 } else {
@@ -104,9 +263,11 @@ export const ChartsScreen: React.FC<ChartsScreenProps> = ({ navigation, route })
         const tsSec = typeof quote?.timestamp === 'number' ? quote.timestamp : Math.floor(Date.now() / 1000);
         if (value === null) {
             setSeries([]);
+            setCursorPoint(null);
             return;
         }
         setSeries([{ timestamp: tsSec * 1000, value }]);
+        setCursorPoint(null);
         refetchQuotes().catch(() => undefined);
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [activePeriod, selectedSymbol]);
@@ -125,6 +286,12 @@ export const ChartsScreen: React.FC<ChartsScreenProps> = ({ navigation, route })
     const ask = quote?.ask ?? quote?.price ?? 0;
     const spread = quote?.spread ?? (ask && bid ? Math.abs(ask - bid) : 0);
     const changePct = quote?.changePct ?? 0;
+    const latestPoint = chartData.length ? chartData[chartData.length - 1] : null;
+    const displayPoint = cursorPoint ?? latestPoint;
+    const displayPrice = displayPoint ? displayPoint.value : bid;
+    const displayDate = displayPoint?.timestamp ? new Date(displayPoint.timestamp) : null;
+    const displayDateLabel =
+        displayDate && !Number.isNaN(displayDate.getTime()) ? format(displayDate, 'MMM dd, HH:mm') : '—';
 
     return (
         <LinearGradient colors={[colors.bgPrimary, colors.bgSecondary]} style={styles.gradient}>
@@ -189,34 +356,13 @@ export const ChartsScreen: React.FC<ChartsScreenProps> = ({ navigation, route })
 
                     <View style={styles.chartArea}>
                         {chartData.length ? (
-                            <LineChart.Provider data={chartData}>
+                            <>
                                 <View style={styles.chartLabels}>
-                                    <LineChart.PriceText
-                                        precision={6}
-                                        useOptimizedRendering
-                                        style={styles.chartPrice}
-                                        format={({ value }) => formatPrice(selectedSymbol, Number(value) || 0)}
-                                    />
-                                    <LineChart.DatetimeText
-                                        style={styles.chartDatetime}
-                                        options={{ month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit' }}
-                                    />
+                                    <Text style={styles.chartPrice}>{formatPrice(selectedSymbol, displayPrice)}</Text>
+                                    <Text style={styles.chartDatetime}>{displayDateLabel}</Text>
                                 </View>
-                                <LineChart height={220}>
-                                    <LineChart.Path
-                                        color={colors.accent}
-                                        width={2}
-                                        isTransitionEnabled
-                                    />
-                                    <LineChart.Gradient
-                                        color={colors.accent}
-                                        opacity={0.12}
-                                    />
-                                    <LineChart.CursorCrosshair color={colors.accent}>
-                                        <LineChart.Tooltip />
-                                    </LineChart.CursorCrosshair>
-                                </LineChart>
-                            </LineChart.Provider>
+                                <SimpleLineChart data={chartData} height={220} onCursorPointChange={setCursorPoint} />
+                            </>
                         ) : (
                             <View style={styles.chartEmpty}>
                                 <Icon name="activity" size={28} color={colors.textMuted} />

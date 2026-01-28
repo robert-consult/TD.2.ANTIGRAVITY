@@ -35,6 +35,33 @@ const queryClient = new QueryClient({
     },
 });
 
+const linking = {
+    prefixes: ['tradequip://', 'https://tradequip.app'],
+    config: {
+        screens: {
+            SignIn: 'signin',
+            SignUp: 'signup',
+            EmailVerification: {
+                path: 'verify-email',
+                parse: { token: (token: string) => token },
+            },
+            Main: {
+                screens: {
+                    Dashboard: 'dashboard',
+                    Quotes: 'quotes',
+                    Charts: 'charts',
+                    Trade: 'trade',
+                    History: 'history',
+                    Account: 'account',
+                },
+            },
+            Journal: 'journal',
+            ProfileSettings: 'profile',
+            Leaderboard: 'leaderboard',
+        },
+    },
+};
+
 // Loading screen while checking auth
 const LoadingScreen = () => (
     <LinearGradient
@@ -76,7 +103,7 @@ const Navigation = () => {
 
     return (
         <>
-            <NavigationContainer>
+            <NavigationContainer linking={linking}>
                 <Stack.Navigator
                     screenOptions={{
                         headerShown: false,

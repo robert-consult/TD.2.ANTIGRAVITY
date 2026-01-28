@@ -4,24 +4,24 @@ import 'react-native-gesture-handler/jestSetup';
 // Use the official mock to keep unit tests lightweight.
 jest.mock('react-native-reanimated', () => require('react-native-reanimated/mock'));
 
-// The chart library depends on Reanimated/SVG internals that aren't relevant to unit tests.
-jest.mock('react-native-wagmi-charts', () => {
+// react-native-svg depends on native bindings; mock it for unit tests.
+jest.mock('react-native-svg', () => {
   const React = require('react');
-  const { View, Text } = require('react-native');
+  const { View } = require('react-native');
 
-  const Null = () => null;
-  const Wrap = ({ children }) => React.createElement(View, null, children);
+  const Mock = ({ children, ...props }) => React.createElement(View, props, children);
 
-  const LineChart = ({ children }) => React.createElement(View, null, children);
-  LineChart.Provider = Wrap;
-  LineChart.Path = Null;
-  LineChart.Gradient = Null;
-  LineChart.CursorCrosshair = Wrap;
-  LineChart.Tooltip = Null;
-  LineChart.PriceText = () => React.createElement(Text, null, '');
-  LineChart.DatetimeText = () => React.createElement(Text, null, '');
-
-  return { LineChart };
+  return {
+    __esModule: true,
+    default: Mock,
+    Svg: Mock,
+    Defs: Mock,
+    LinearGradient: Mock,
+    Line: Mock,
+    Path: Mock,
+    Circle: Mock,
+    Stop: Mock,
+  };
 });
 
 jest.mock('react-native-safe-area-context', () => {

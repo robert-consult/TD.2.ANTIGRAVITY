@@ -10,6 +10,7 @@ import Icon from 'react-native-vector-icons/Feather';
 import { colors, typography, spacing } from '../theme';
 
 // Screen imports (will be created)
+import { DashboardScreen } from '../screens/main/DashboardScreen';
 import { QuotesScreen } from '../screens/main/QuotesScreen';
 import { ChartsScreen } from '../screens/main/ChartsScreen';
 import { TradeScreen } from '../screens/main/TradeScreen';
@@ -49,6 +50,8 @@ const CustomTabBar = ({ state, descriptors, navigation, insets }: any) => {
 
                 const getIconName = () => {
                     switch (route.name) {
+                        case 'Dashboard':
+                            return 'home';
                         case 'Quotes':
                             return 'list';
                         case 'Charts':
@@ -106,6 +109,7 @@ export const MainTabNavigator = () => {
                 headerShown: false,
             }}
         >
+            <Tab.Screen name="Dashboard" component={DashboardScreen} />
             <Tab.Screen name="Quotes" component={QuotesScreen} />
             <Tab.Screen name="Charts" component={ChartsScreen} />
             <Tab.Screen name="Trade" component={TradeScreen} />

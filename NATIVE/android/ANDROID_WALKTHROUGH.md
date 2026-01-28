@@ -62,9 +62,9 @@ All services in `NATIVE/src/services/` work on Android identically to iOS.
 ### Build Settings
 | Setting | Value | Status |
 |---------|-------|--------|
-| Package ID | com.tradequip.native | ✅ |
-| Min SDK | 23 (Android 6.0) | ✅ |
-| Target SDK | 34 (Android 14) | ✅ |
+| Package ID | com.tradequipnative | ✅ |
+| Min SDK | 24 (Android 7.0) | ✅ |
+| Target SDK | 36 (Android API 36) | ✅ |
 | Proguard | Enabled for release | ✅ |
 | ABI Splits | armeabi-v7a, arm64-v8a, x86, x86_64 | ✅ |
 

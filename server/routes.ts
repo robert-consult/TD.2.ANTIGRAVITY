@@ -135,9 +135,17 @@ function normalizeLanguagePreference(value: string | undefined): { normalized: s
   return { normalized: defaultLocale, matched: false };
 }
 
+function requireEnv(name: string): string {
+  const value = process.env[name];
+  if (typeof value !== "string" || !value.trim()) {
+    throw new Error(`Missing required environment variable: ${name}`);
+  }
+  return value;
+}
+
 // Create session store with Postgres persistence
 const SESSION_COOKIE_NAME = "connect.sid";
-const SESSION_SECRET = process.env.SESSION_SECRET || "trading-platform-secret";
+const SESSION_SECRET = requireEnv("SESSION_SECRET");
 
 declare module "express-session" {
   interface SessionData {
@@ -185,6 +193,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       name: SESSION_COOKIE_NAME,
       cookie: {
         secure: cookieSecure,
+        httpOnly: true,
         sameSite: (process.env.COOKIE_SAMESITE as "lax" | "strict" | "none") || "lax",
         maxAge: 24 * 60 * 60 * 1000, // 24 hours
       },

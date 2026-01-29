@@ -31,6 +31,25 @@ function validateEnvVars() {
       "legal compliance tokens cannot be signed. Generate with: openssl rand -hex 32"
     );
   }
+
+  // CRITICAL: Session secret (required for cookie signing)
+  const sessionSecret = process.env.SESSION_SECRET;
+  if (!sessionSecret) {
+    criticalErrors.push(
+      "SESSION_SECRET not configured - session cookies cannot be signed safely. " +
+      "Generate with: openssl rand -hex 32"
+    );
+  } else if (sessionSecret.length < 32) {
+    warnings.push("SESSION_SECRET is shorter than 32 chars - rotate to a stronger secret for production.");
+  }
+
+  // Email verification token secret (recommended; required for production hardening)
+  const emailVerifyTokenSecret = process.env.EMAIL_VERIFY_TOKEN_SECRET;
+  if (isProduction && !emailVerifyTokenSecret) {
+    warnings.push("EMAIL_VERIFY_TOKEN_SECRET not configured - email verification token hashing is not keyed.");
+  } else if (emailVerifyTokenSecret && emailVerifyTokenSecret.length < 32) {
+    warnings.push("EMAIL_VERIFY_TOKEN_SECRET is shorter than 32 chars - rotate to a stronger secret for production.");
+  }
   
   // Critical for email verification
   if (!process.env.RESEND_API_KEY) {
@@ -56,6 +75,8 @@ function validateEnvVars() {
   // Log presence status
   console.log("Environment validation complete:");
   console.log("  - LEGAL_TERMS_HMAC_SECRET:", legalSecret && legalSecret.length >= 32 ? "configured" : "MISSING/TOO SHORT");
+  console.log("  - SESSION_SECRET:", sessionSecret ? "configured" : "MISSING");
+  console.log("  - EMAIL_VERIFY_TOKEN_SECRET:", emailVerifyTokenSecret ? "configured" : "MISSING");
   console.log("  - RESEND_API_KEY:", process.env.RESEND_API_KEY ? "configured" : "MISSING");
   console.log("  - TWILIO_ACCOUNT_SID:", process.env.TWILIO_ACCOUNT_SID ? "configured" : "MISSING");
   console.log("  - TWILIO_AUTH_TOKEN:", process.env.TWILIO_AUTH_TOKEN ? "configured" : "MISSING");
@@ -201,9 +222,11 @@ app.use((req, res, next) => {
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
     const message = err.message || "Internal Server Error";
+    const isProd = process.env.NODE_ENV === "production";
+    const safeMessage = status >= 500 && isProd ? "Internal Server Error" : message;
 
     if (!res.headersSent) {
-      res.status(status).json({ message });
+      res.status(status).json({ message: safeMessage });
     }
     console.error("Express error handler:", err);
   });

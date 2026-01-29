@@ -11,7 +11,7 @@ services:
       - pgdata:/var/lib/postgresql/data
 
   pgbouncer:
-    image: edoburu/pgbouncer:latest
+    image: edoburu/pgbouncer:latest@sha256:85d1e38593617af1b5f7f285e97d407e56c29939683cc7cfe4c8f6dc19f1268b
     depends_on:
       - postgres
     ports:
@@ -29,7 +29,7 @@ services:
       SERVER_RESET_QUERY: DISCARD ALL
 
   valkey:
-    image: valkey/valkey:latest
+    image: valkey/valkey:9.0.1@sha256:546304417feac0874c3dd576e0952c6bb8f06bb4093ea0c9ca303c73cf458f63
     ports:
       - "6379:6379"
 

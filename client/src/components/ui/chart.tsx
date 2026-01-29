@@ -6,6 +6,15 @@ import { cn } from "@/lib/utils"
 // Format: { THEME_NAME: CSS_SELECTOR }
 const THEMES = { light: "", dark: ".dark" } as const
 
+function escapeCssString(value: string): string {
+  return String(value).replace(/\\/g, "\\\\").replace(/"/g, '\\"')
+}
+
+function coerceSafeChartId(value: string): string {
+  const safe = String(value).trim().replace(/[^a-zA-Z0-9_-]/g, "")
+  return safe || "chart"
+}
+
 export type ChartConfig = {
   [k in string]: {
     label?: React.ReactNode
@@ -42,7 +51,8 @@ const ChartContainer = React.forwardRef<
   }
 >(({ id, className, children, config, ...props }, ref) => {
   const uniqueId = React.useId()
-  const chartId = `chart-${id || uniqueId.replace(/:/g, "")}`
+  const rawId = id ? String(id) : uniqueId.replace(/:/g, "")
+  const chartId = coerceSafeChartId(`chart-${rawId}`)
 
   return (
     <ChartContext.Provider value={{ config }}>
@@ -74,27 +84,28 @@ const ChartStyle = ({ id, config }: { id: string; config: ChartConfig }) => {
     return null
   }
 
+  const escapedId = escapeCssString(id)
+  const cssVarKeyOk = (key: string) => /^[a-zA-Z0-9_-]+$/.test(key)
+
   return (
-    <style
-      dangerouslySetInnerHTML={{
-        __html: Object.entries(THEMES)
-          .map(
-            ([theme, prefix]) => `
-${prefix} [data-chart=${id}] {
-${colorConfig
-  .map(([key, itemConfig]) => {
-    const color =
-      itemConfig.theme?.[theme as keyof typeof itemConfig.theme] ||
-      itemConfig.color
-    return color ? `  --color-${key}: ${color};` : null
-  })
-  .join("\n")}
-}
-`
-          )
-          .join("\n"),
-      }}
-    />
+    <style>
+      {Object.entries(THEMES)
+        .map(([theme, prefix]) => {
+          const cssLines = colorConfig
+            .map(([key, itemConfig]) => {
+              if (!cssVarKeyOk(key)) return null
+              const color =
+                itemConfig.theme?.[theme as keyof typeof itemConfig.theme] ||
+                itemConfig.color
+              return color ? `  --color-${key}: ${color};` : null
+            })
+            .filter(Boolean)
+            .join("\n")
+
+          return `${prefix} [data-chart="${escapedId}"] {\n${cssLines}\n}\n`
+        })
+        .join("\n")}
+    </style>
   )
 }
 

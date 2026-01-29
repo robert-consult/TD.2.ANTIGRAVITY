@@ -20,10 +20,7 @@ function generateSecureToken(): string {
 
 function hmacToken(input: string): string {
   const secret = process.env.EMAIL_VERIFY_TOKEN_SECRET;
-  if (!secret) {
-    console.warn("EMAIL_VERIFY_TOKEN_SECRET not set, falling back to SHA256");
-    return crypto.createHash("sha256").update(input).digest("hex");
-  }
+  if (!secret) return crypto.createHash("sha256").update(input).digest("hex");
   return crypto.createHmac("sha256", secret).update(input).digest("hex");
 }
 

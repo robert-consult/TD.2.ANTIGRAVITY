@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
@@ -120,6 +120,31 @@ export default function HistoryScreen() {
   const [isDateRangeOpen, setIsDateRangeOpen] = useState(false);
   const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set());
   const isMobile = useMobile();
+
+  // Container width detection for responsive table vs compact view
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [containerWidth, setContainerWidth] = useState(1200);
+
+  // Threshold for switching to compact view (when table would need to scroll)
+  const COMPACT_VIEW_THRESHOLD = 900;
+  const useCompactView = containerWidth < COMPACT_VIEW_THRESHOLD;
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        setContainerWidth(entry.contentRect.width);
+      }
+    });
+
+    observer.observe(container);
+    // Set initial width
+    setContainerWidth(container.clientWidth);
+
+    return () => observer.disconnect();
+  }, []);
 
   const toggleRowExpand = (id: number) => {
     setExpandedRows(prev => {
@@ -258,13 +283,14 @@ export default function HistoryScreen() {
         <h2 className="text-lg font-semibold text-white">Trade History</h2>
       </div>
 
-      {/* Filters */}
-      <div className="px-gutter py-3 border-b border-gray-800 flex flex-wrap items-center gap-3">
-        <div className="relative flex-grow max-w-xs">
-          <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+      {/* Filters - Compact responsive layout */}
+      <div className="px-gutter py-2 border-b border-gray-800">
+        {/* Search - full width on mobile, constrained on desktop */}
+        <div className="relative mb-2 md:mb-0 md:max-w-xs md:inline-block md:mr-3">
+          <div className="absolute inset-y-0 left-0 pl-2 flex items-center pointer-events-none">
             <svg
               xmlns="http://www.w3.org/2000/svg"
-              className="h-4 w-4 text-gray-500"
+              className="h-3.5 w-3.5 text-gray-500"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
@@ -278,80 +304,82 @@ export default function HistoryScreen() {
           </div>
           <Input
             type="text"
-            placeholder="Search trades..."
-            className="block w-full pl-10 pr-3 py-2 border border-gray-700 bg-neutral-850 rounded-md text-white placeholder:text-gray-400 focus-visible:ring-2 focus-visible:ring-primary"
+            placeholder="Search..."
+            className="block w-full pl-7 pr-2 py-1.5 text-sm border border-gray-700 bg-neutral-850 rounded-md text-white placeholder:text-gray-400 focus-visible:ring-1 focus-visible:ring-primary"
             value={search}
             onChange={(e) => {
               setSearch(e.target.value);
-              setCurrentPage(1); // Reset pagination when search changes
+              setCurrentPage(1);
             }}
           />
         </div>
 
-        <Select value={symbolFilter} onValueChange={(val) => {
-          setSymbolFilter(val);
-          setCurrentPage(1); // Reset pagination when filter changes
-        }}>
-          <SelectTrigger className="w-[160px] bg-neutral-850 border-gray-700 text-white">
-            <SelectValue placeholder="All Symbols" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Symbols</SelectItem>
-            {symbols.map((symbol: any) => (
-              <SelectItem key={symbol.id} value={symbol.symbol}>
-                {symbol.symbol}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-
-        <Select
-          value={timeFilter}
-          onValueChange={(val) => {
-            setTimeFilter(val);
-            setCurrentPage(1); // Reset pagination when time filter changes
-            if (val === "custom") {
-              setIsDateRangeOpen(true);
-              return;
-            }
-
-            setIsDateRangeOpen(false);
-            setLastTimeFilter(val);
-            setCustomDateRange(undefined);
-          }}
-        >
-          <SelectTrigger className="w-[160px] bg-neutral-850 border-gray-700 text-white">
-            <SelectValue placeholder="Last 7 days" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="today">Today</SelectItem>
-            <SelectItem value="7days">Last 7 days</SelectItem>
-            <SelectItem value="30days">Last 30 days</SelectItem>
-            <SelectItem value="90days">Last 90 days</SelectItem>
-            <SelectItem value="all">All time</SelectItem>
-            <SelectItem value="custom">Custom range...</SelectItem>
-          </SelectContent>
-        </Select>
-
-        <Select
-          value={closeReasonFilter}
-          onValueChange={(val) => {
-            setCloseReasonFilter(val);
+        {/* Dropdowns - horizontal scroll on mobile */}
+        <div className="flex gap-2 overflow-x-auto pb-1 md:pb-0 md:inline-flex md:gap-3">
+          <Select value={symbolFilter} onValueChange={(val) => {
+            setSymbolFilter(val);
             setCurrentPage(1);
-          }}
-        >
-          <SelectTrigger className="w-[160px] bg-neutral-850 border-gray-700 text-white">
-            <SelectValue placeholder="All Reasons" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Reasons</SelectItem>
-            {traderCloseReasons.map((reason) => (
-              <SelectItem key={reason.code} value={reason.code}>
-                {reason.shortLabel}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+          }}>
+            <SelectTrigger className="min-w-[100px] w-auto h-8 text-xs bg-neutral-850 border-gray-700 text-white">
+              <SelectValue placeholder="Symbol" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Symbols</SelectItem>
+              {symbols.map((symbol: any) => (
+                <SelectItem key={symbol.id} value={symbol.symbol}>
+                  {symbol.symbol}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <Select
+            value={timeFilter}
+            onValueChange={(val) => {
+              setTimeFilter(val);
+              setCurrentPage(1);
+              if (val === "custom") {
+                setIsDateRangeOpen(true);
+                return;
+              }
+              setIsDateRangeOpen(false);
+              setLastTimeFilter(val);
+              setCustomDateRange(undefined);
+            }}
+          >
+            <SelectTrigger className="min-w-[90px] w-auto h-8 text-xs bg-neutral-850 border-gray-700 text-white">
+              <SelectValue placeholder="Time" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="today">Today</SelectItem>
+              <SelectItem value="7days">7 days</SelectItem>
+              <SelectItem value="30days">30 days</SelectItem>
+              <SelectItem value="90days">90 days</SelectItem>
+              <SelectItem value="all">All</SelectItem>
+              <SelectItem value="custom">Custom...</SelectItem>
+            </SelectContent>
+          </Select>
+
+          <Select
+            value={closeReasonFilter}
+            onValueChange={(val) => {
+              setCloseReasonFilter(val);
+              setCurrentPage(1);
+            }}
+          >
+            <SelectTrigger className="min-w-[90px] w-auto h-8 text-xs bg-neutral-850 border-gray-700 text-white">
+              <SelectValue placeholder="Reason" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Reasons</SelectItem>
+              {traderCloseReasons.map((reason) => (
+                <SelectItem key={reason.code} value={reason.code}>
+                  {reason.shortLabel}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
       </div>
 
       {/* Calendar for custom date range */}
@@ -533,9 +561,9 @@ export default function HistoryScreen() {
       )}
 
       {/* Trade history table */}
-      <div className="flex-1 overflow-auto">
-        {isMobile ? (
-          /* Mobile: Compact expandable rows */
+      <div ref={containerRef} className="flex-1 overflow-auto">
+        {useCompactView ? (
+          /* Compact view: Expandable rows (when container too narrow for full table) */
           <div className="divide-y divide-gray-800">
             {isLoading && Array(4).fill(null).map((_, i) => (
               <div key={i} className="px-4 py-3">
@@ -562,31 +590,30 @@ export default function HistoryScreen() {
                 <div key={trade.id}>
                   {/* Compact row header */}
                   <div
-                    className="px-4 py-3 flex items-center justify-between cursor-pointer hover:bg-neutral-850 active:bg-neutral-800"
+                    className="px-4 py-3 flex items-center cursor-pointer hover:bg-neutral-850 active:bg-neutral-800"
                     onClick={() => toggleRowExpand(trade.id)}
                   >
-                    <div className="flex items-center gap-3 flex-1 min-w-0">
-                      {/* Symbol */}
-                      <span className="font-bold text-white text-sm">
-                        {trade.symbol?.symbol}
-                      </span>
-                      {/* Size */}
-                      <span className="text-xs text-gray-400">
-                        {trade.lots || trade.size}
-                      </span>
-                    </div>
+                    {/* Symbol - fixed width */}
+                    <span className="font-bold text-white text-sm w-[72px] shrink-0">
+                      {trade.symbol?.symbol}
+                    </span>
 
-                    {/* Entry → Exit with directional arrow */}
-                    <div className="flex items-center gap-1 font-mono text-xs mx-2">
+                    {/* Size - fixed width */}
+                    <span className="text-xs text-gray-400 w-[28px] shrink-0 text-center">
+                      {trade.lots || trade.size}
+                    </span>
+
+                    {/* Entry → Exit with directional arrow - flex grow */}
+                    <div className="flex items-center gap-1 font-mono text-xs flex-1 justify-center">
                       <span className="text-gray-300">{trade.openPrice?.toFixed(isJpy ? 2 : 4)}</span>
-                      <span className={isProfit ? "text-green-500" : "text-red-500"}>
-                        {isProfit ? "↑" : "↓"}
+                      <span className={`font-bold text-sm ${trade.type === "BUY" ? "text-lime-500" : "text-orange-500"}`}>
+                        {trade.type === "BUY" ? "↗" : "↘"}
                       </span>
                       <span className="text-gray-300">{trade.closePrice?.toFixed(isJpy ? 2 : 4) || "—"}</span>
                     </div>
 
-                    {/* P/L */}
-                    <div className={`font-mono font-semibold text-sm min-w-[60px] text-right ${isProfit ? "text-green-500" : "text-red-500"}`}>
+                    {/* P/L - fixed width */}
+                    <div className={`font-mono font-semibold text-sm w-[80px] shrink-0 text-right ${isProfit ? "text-green-500" : "text-red-500"}`}>
                       {trade.profit ? (
                         <>
                           {isProfit ? "+" : ""}${Math.abs(profitValue).toFixed(2)}
@@ -594,9 +621,9 @@ export default function HistoryScreen() {
                       ) : "—"}
                     </div>
 
-                    {/* Chevron */}
-                    <div className="ml-2 text-gray-400">
-                      {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                    {/* Chevron - fixed width */}
+                    <div className="w-[24px] shrink-0 text-gray-400 text-right">
+                      {isExpanded ? <ChevronUp className="h-4 w-4 inline" /> : <ChevronDown className="h-4 w-4 inline" />}
                     </div>
                   </div>
 
@@ -667,9 +694,9 @@ export default function HistoryScreen() {
             })}
           </div>
         ) : (
-          /* Desktop: Full table with Duration column */
-          <div className="w-full overflow-x-auto">
-            <Table className="min-w-[900px]">
+          /* Full table: Only shown when container is wide enough (≥900px) */
+          <div className="w-full">
+            <Table className="w-full table-fixed">
               <TableHeader className="bg-neutral-850">
                 <TableRow>
                   <TableHead className="text-left text-xs font-medium text-gray-400 uppercase tracking-wider">

@@ -1,0 +1,15 @@
+# Deep Context Code Review Task
+
+## Objective
+Conduct a comprehensive code review of the TD.2.ANTIGRAVITY project and produce a detailed report.
+
+## Tasks
+- [/] Explore codebase structure
+- [ ] Review client-side architecture
+- [ ] Review server-side architecture 
+- [ ] Review database schema and migrations
+- [ ] Review mobile/native implementations
+- [ ] Analyze security implementations
+- [ ] Check code quality patterns
+- [ ] Identify issues and recommendations
+- [ ] Produce comprehensive report

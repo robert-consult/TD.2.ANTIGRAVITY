@@ -220,7 +220,13 @@ export default function AccountScreen() {
                   <div className="flex justify-between items-center py-2 border-b border-gray-700/50">
                     <span className="text-gray-400">Member Since</span>
                     <span className="text-white font-medium">
-                      {user?.createdAt ? new Date(user.createdAt).toLocaleDateString() : "-"}
+                      {user?.createdAt
+                        ? new Date(
+                            typeof user.createdAt === "number" && user.createdAt < 1e12
+                              ? user.createdAt * 1000
+                              : user.createdAt
+                          ).toLocaleDateString()
+                        : "-"}
                     </span>
                   </div>
                   <div className="flex justify-between items-center py-2">

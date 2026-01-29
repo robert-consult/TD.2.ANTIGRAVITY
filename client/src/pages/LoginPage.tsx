@@ -15,7 +15,7 @@ import { SignupAvailabilityGate } from "@/components/SignupAvailabilityGate";
 import { TermsModal } from "@/components/TermsModal";
 import { CaptchaTurnstile } from "@/components/CaptchaTurnstile";
 import { SliderCaptcha } from "@/components/SliderCaptcha";
-import { FileText, Loader2 } from "lucide-react";
+import { FileText, Loader2, Eye, EyeOff } from "lucide-react";
 import { fetchWithIdentity } from "@/lib/fetchWithIdentity";
 import { lazyWithPing } from "@/lib/lazyWithPing";
 
@@ -70,12 +70,17 @@ export default function LoginPage() {
   const { login, register } = useAuth();
   const { toast } = useToast();
 
+  // Password visibility state - separate for each field for better security
+  const [showLoginPassword, setShowLoginPassword] = useState(false);
+  const [showRegisterPassword, setShowRegisterPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+
   const [legal, setLegal] = useState<LegalDocResponse | null>(null);
   const [legalLoading, setLegalLoading] = useState(false);
   const [termsOpen, setTermsOpen] = useState(false);
   const [scrolledToEnd, setScrolledToEnd] = useState(false);
   const [accepted, setAccepted] = useState(false);
-  
+
   const [publicCfg, setPublicCfg] = useState<{
     captcha?: { enforceSignupCaptcha: boolean; provider: string };
     signupPhoneEnforce?: boolean;
@@ -537,7 +542,28 @@ export default function LoginPage() {
                       <FormItem>
                         <FormLabel>Password</FormLabel>
                         <FormControl>
-                          <Input type="password" placeholder="********" {...field} />
+                          <div className="relative">
+                            <Input
+                              type={showLoginPassword ? "text" : "password"}
+                              placeholder="********"
+                              autoComplete="current-password"
+                              {...field}
+                              onBlur={(e) => {
+                                field.onBlur();
+                                // Security: hide password when field loses focus
+                                setShowLoginPassword(false);
+                              }}
+                            />
+                            <button
+                              type="button"
+                              tabIndex={-1}
+                              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors focus:outline-none"
+                              onClick={() => setShowLoginPassword(!showLoginPassword)}
+                              aria-label={showLoginPassword ? "Hide password" : "Show password"}
+                            >
+                              {showLoginPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                            </button>
+                          </div>
                         </FormControl>
                         <FormMessage />
                       </FormItem>
@@ -700,7 +726,7 @@ export default function LoginPage() {
                 </div>
               ) : (
                 <div className="space-y-4">
-                  <SignupAvailabilityGate 
+                  <SignupAvailabilityGate
                     onCountryChange={handleCountryChange}
                     selectedCountry={signupCountry}
                   />
@@ -763,7 +789,28 @@ export default function LoginPage() {
                           <FormItem>
                             <FormLabel>Password</FormLabel>
                             <FormControl>
-                              <Input type="password" placeholder="********" {...field} />
+                              <div className="relative">
+                                <Input
+                                  type={showRegisterPassword ? "text" : "password"}
+                                  placeholder="********"
+                                  autoComplete="new-password"
+                                  {...field}
+                                  onBlur={(e) => {
+                                    field.onBlur();
+                                    // Security: hide password when field loses focus
+                                    setShowRegisterPassword(false);
+                                  }}
+                                />
+                                <button
+                                  type="button"
+                                  tabIndex={-1}
+                                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors focus:outline-none"
+                                  onClick={() => setShowRegisterPassword(!showRegisterPassword)}
+                                  aria-label={showRegisterPassword ? "Hide password" : "Show password"}
+                                >
+                                  {showRegisterPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                                </button>
+                              </div>
                             </FormControl>
                             <FormMessage />
                           </FormItem>
@@ -776,7 +823,28 @@ export default function LoginPage() {
                           <FormItem>
                             <FormLabel>Confirm Password</FormLabel>
                             <FormControl>
-                              <Input type="password" placeholder="********" {...field} />
+                              <div className="relative">
+                                <Input
+                                  type={showConfirmPassword ? "text" : "password"}
+                                  placeholder="********"
+                                  autoComplete="new-password"
+                                  {...field}
+                                  onBlur={(e) => {
+                                    field.onBlur();
+                                    // Security: hide password when field loses focus
+                                    setShowConfirmPassword(false);
+                                  }}
+                                />
+                                <button
+                                  type="button"
+                                  tabIndex={-1}
+                                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors focus:outline-none"
+                                  onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                                  aria-label={showConfirmPassword ? "Hide password" : "Show password"}
+                                >
+                                  {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                                </button>
+                              </div>
                             </FormControl>
                             <FormMessage />
                           </FormItem>

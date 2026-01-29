@@ -141,6 +141,11 @@ export default function AdminLegalAcceptances() {
 
   function fmtTime(v: any) {
     try {
+      if (typeof v === "number" && v > 0) {
+        // Handle Unix seconds vs milliseconds - if v < 1e12, it's seconds
+        const ms = v < 1e12 ? v * 1000 : v;
+        return new Date(ms).toLocaleString();
+      }
       const d = v instanceof Date ? v : new Date(v);
       return d.toLocaleString();
     } catch {
@@ -345,7 +350,7 @@ export default function AdminLegalAcceptances() {
               <Info label="Email" value={detail.emailAtAcceptance} />
               <Info label="Country" value={detail.countryIso2} />
               <Info label="Region Key" value={detail.regionKey ?? "—"} />
-              <Info label="Accepted At" value={new Date(detail.acceptedAt).toLocaleString()} />
+              <Info label="Accepted At" value={fmtTime(detail.acceptedAt)} />
               <Info label="IP" value={detail.ipAddress ?? "—"} />
               <Info label="Ledger Seq" value={detail.ledgerSeq} />
               <Info label="Ledger Hash" value={detail.ledgerHash} mono />

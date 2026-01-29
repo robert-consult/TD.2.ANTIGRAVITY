@@ -12,17 +12,17 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { 
-  AlertTriangle, 
-  Users, 
-  Link2, 
-  Activity, 
+import {
+  AlertTriangle,
+  Users,
+  Link2,
+  Activity,
   Fingerprint,
-  Shield, 
-  Download, 
-  Settings, 
-  FileText, 
-  ChevronDown, 
+  Shield,
+  Download,
+  Settings,
+  FileText,
+  ChevronDown,
   ChevronRight,
   RefreshCw,
   CheckCircle,
@@ -326,7 +326,9 @@ function getStatusColor(status: string) {
 function formatTimestamp(ts: number) {
   if (!ts) return "N/A";
   try {
-    return new Date(ts).toLocaleString();
+    // Handle Unix seconds vs milliseconds - if ts < 1e12, it's seconds
+    const ms = ts < 1e12 ? ts * 1000 : ts;
+    return new Date(ms).toLocaleString();
   } catch {
     return String(ts);
   }
@@ -661,119 +663,119 @@ function SignalsTab() {
                   signals.map((signal) => {
                     const evidence = parseJson(signal.evidence_json);
                     return (
-                    <Collapsible key={signal.id} open={expandedRows.has(signal.id)} asChild>
-                      <>
-                        <TableRow className="border-neutral-700">
-                          <TableCell>
-                            <CollapsibleTrigger asChild>
-                              <Button variant="ghost" size="sm" onClick={() => toggleExpand(signal.id)}>
-                                {expandedRows.has(signal.id) ? (
-                                  <ChevronDown className="h-4 w-4" />
-                                ) : (
-                                  <ChevronRight className="h-4 w-4" />
-                                )}
-                              </Button>
-                            </CollapsibleTrigger>
-                          </TableCell>
-                          <TableCell className="font-mono text-xs">{signal.id}</TableCell>
-                          <TableCell className="font-mono text-xs">{signal.rule_code}</TableCell>
-                          <TableCell>
-                            <span className="text-sm">{signal.username || `#${signal.user_id}`}</span>
-                          </TableCell>
-                          <TableCell>
-                            <Badge className={getSeverityColor(signal.severity)}>{signal.severity}</Badge>
-                          </TableCell>
-                          <TableCell className="font-bold">{signal.points}</TableCell>
-                          <TableCell>
-                            <Badge className={getStatusColor(signal.status)}>{signal.status}</Badge>
-                          </TableCell>
-                          <TableCell className="text-xs text-gray-400">{formatTimestamp(signal.created_at)}</TableCell>
-                          <TableCell>
-                            {signal.status === "OPEN" && (
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => closeSignalMutation.mutate(signal.id)}
-                                disabled={closeSignalMutation.isPending}
-                              >
-                                Close
-                              </Button>
-                            )}
-                          </TableCell>
-                        </TableRow>
-                        <CollapsibleContent asChild>
-                          <TableRow className="border-neutral-700 bg-neutral-900">
-                            <TableCell colSpan={9}>
-                              <div className="p-4">
-                                <h4 className="text-sm font-semibold mb-2">Identifiers</h4>
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
-                                  <div>
-                                    <span className="text-gray-400">Device Install ID: </span>
-                                    <span className="font-mono">{signal.device_install_id || "N/A"}</span>
-                                  </div>
-                                  <div>
-                                    <span className="text-gray-400">Device ID (legacy): </span>
-                                    <span className="font-mono">{signal.device_id || "N/A"}</span>
-                                  </div>
-                                  <div>
-                                    <span className="text-gray-400">Device Fingerprint: </span>
-                                    <span className="font-mono">{signal.device_fp || "N/A"}</span>
-                                  </div>
-                                  <div>
-                                    <span className="text-gray-400">Client TZ: </span>
-                                    <span>{signal.client_tz || "N/A"}</span>
-                                  </div>
-                                  <div>
-                                    <span className="text-gray-400">Client Lang: </span>
-                                    <span>{signal.client_lang || "N/A"}</span>
-                                  </div>
-                                  <div>
-                                    <span className="text-gray-400">IP: </span>
-                                    <span className="font-mono">{signal.ip || "N/A"}</span>
-                                  </div>
-                                  <div>
-                                    <span className="text-gray-400">ASN: </span>
-                                    <span>{signal.asn ?? "N/A"}</span>
-                                  </div>
-                                  <div>
-                                    <span className="text-gray-400">Org: </span>
-                                    <span>{signal.org || "N/A"}</span>
-                                  </div>
-                                  <div>
-                                    <span className="text-gray-400">Geo: </span>
-                                    <span>{signal.geo_country || "N/A"}</span>
-                                    {signal.geo_region ? ` / ${signal.geo_region}` : ""}
-                                    {signal.geo_city ? ` / ${signal.geo_city}` : ""}
-                                  </div>
-                                  <div>
-                                    <span className="text-gray-400">Lat/Lon: </span>
-                                    <span>{signal.latitude ?? "N/A"}</span>
-                                    <span>{signal.longitude != null ? `, ${signal.longitude}` : ""}</span>
-                                  </div>
-                                  <div>
-                                    <span className="text-gray-400">Symbol: </span>
-                                    <span className="font-mono">{signal.symbol || "N/A"}</span>
-                                  </div>
-                                  <div>
-                                    <span className="text-gray-400">Trade ID: </span>
-                                    <span className="font-mono">{signal.trade_id ?? "N/A"}</span>
-                                  </div>
-                                  <div className="md:col-span-2">
-                                    <span className="text-gray-400">User Agent: </span>
-                                    <span className="break-all">{signal.user_agent || "N/A"}</span>
-                                  </div>
-                                </div>
-
-                                <h4 className="text-sm font-semibold mt-4 mb-2">Evidence</h4>
-                                <pre className="text-xs bg-neutral-950 p-3 rounded overflow-auto max-h-40">
-                                  {evidence ? JSON.stringify(evidence, null, 2) : "No evidence data"}
-                                </pre>
-                              </div>
+                      <Collapsible key={signal.id} open={expandedRows.has(signal.id)} asChild>
+                        <>
+                          <TableRow className="border-neutral-700">
+                            <TableCell>
+                              <CollapsibleTrigger asChild>
+                                <Button variant="ghost" size="sm" onClick={() => toggleExpand(signal.id)}>
+                                  {expandedRows.has(signal.id) ? (
+                                    <ChevronDown className="h-4 w-4" />
+                                  ) : (
+                                    <ChevronRight className="h-4 w-4" />
+                                  )}
+                                </Button>
+                              </CollapsibleTrigger>
+                            </TableCell>
+                            <TableCell className="font-mono text-xs">{signal.id}</TableCell>
+                            <TableCell className="font-mono text-xs">{signal.rule_code}</TableCell>
+                            <TableCell>
+                              <span className="text-sm">{signal.username || `#${signal.user_id}`}</span>
+                            </TableCell>
+                            <TableCell>
+                              <Badge className={getSeverityColor(signal.severity)}>{signal.severity}</Badge>
+                            </TableCell>
+                            <TableCell className="font-bold">{signal.points}</TableCell>
+                            <TableCell>
+                              <Badge className={getStatusColor(signal.status)}>{signal.status}</Badge>
+                            </TableCell>
+                            <TableCell className="text-xs text-gray-400">{formatTimestamp(signal.created_at)}</TableCell>
+                            <TableCell>
+                              {signal.status === "OPEN" && (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => closeSignalMutation.mutate(signal.id)}
+                                  disabled={closeSignalMutation.isPending}
+                                >
+                                  Close
+                                </Button>
+                              )}
                             </TableCell>
                           </TableRow>
-                        </CollapsibleContent>
-                      </>
-                    </Collapsible>
+                          <CollapsibleContent asChild>
+                            <TableRow className="border-neutral-700 bg-neutral-900">
+                              <TableCell colSpan={9}>
+                                <div className="p-4">
+                                  <h4 className="text-sm font-semibold mb-2">Identifiers</h4>
+                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
+                                    <div>
+                                      <span className="text-gray-400">Device Install ID: </span>
+                                      <span className="font-mono">{signal.device_install_id || "N/A"}</span>
+                                    </div>
+                                    <div>
+                                      <span className="text-gray-400">Device ID (legacy): </span>
+                                      <span className="font-mono">{signal.device_id || "N/A"}</span>
+                                    </div>
+                                    <div>
+                                      <span className="text-gray-400">Device Fingerprint: </span>
+                                      <span className="font-mono">{signal.device_fp || "N/A"}</span>
+                                    </div>
+                                    <div>
+                                      <span className="text-gray-400">Client TZ: </span>
+                                      <span>{signal.client_tz || "N/A"}</span>
+                                    </div>
+                                    <div>
+                                      <span className="text-gray-400">Client Lang: </span>
+                                      <span>{signal.client_lang || "N/A"}</span>
+                                    </div>
+                                    <div>
+                                      <span className="text-gray-400">IP: </span>
+                                      <span className="font-mono">{signal.ip || "N/A"}</span>
+                                    </div>
+                                    <div>
+                                      <span className="text-gray-400">ASN: </span>
+                                      <span>{signal.asn ?? "N/A"}</span>
+                                    </div>
+                                    <div>
+                                      <span className="text-gray-400">Org: </span>
+                                      <span>{signal.org || "N/A"}</span>
+                                    </div>
+                                    <div>
+                                      <span className="text-gray-400">Geo: </span>
+                                      <span>{signal.geo_country || "N/A"}</span>
+                                      {signal.geo_region ? ` / ${signal.geo_region}` : ""}
+                                      {signal.geo_city ? ` / ${signal.geo_city}` : ""}
+                                    </div>
+                                    <div>
+                                      <span className="text-gray-400">Lat/Lon: </span>
+                                      <span>{signal.latitude ?? "N/A"}</span>
+                                      <span>{signal.longitude != null ? `, ${signal.longitude}` : ""}</span>
+                                    </div>
+                                    <div>
+                                      <span className="text-gray-400">Symbol: </span>
+                                      <span className="font-mono">{signal.symbol || "N/A"}</span>
+                                    </div>
+                                    <div>
+                                      <span className="text-gray-400">Trade ID: </span>
+                                      <span className="font-mono">{signal.trade_id ?? "N/A"}</span>
+                                    </div>
+                                    <div className="md:col-span-2">
+                                      <span className="text-gray-400">User Agent: </span>
+                                      <span className="break-all">{signal.user_agent || "N/A"}</span>
+                                    </div>
+                                  </div>
+
+                                  <h4 className="text-sm font-semibold mt-4 mb-2">Evidence</h4>
+                                  <pre className="text-xs bg-neutral-950 p-3 rounded overflow-auto max-h-40">
+                                    {evidence ? JSON.stringify(evidence, null, 2) : "No evidence data"}
+                                  </pre>
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          </CollapsibleContent>
+                        </>
+                      </Collapsible>
                     );
                   })
                 )}
@@ -863,10 +865,10 @@ export function KycQueueTab() {
   const [statusFilter, setStatusFilter] = useState("all_status");
 
   // Build query URL based on filter - default queryFn uses first queryKey element as URL
-  const kycQueryUrl = statusFilter !== "all_status" 
-    ? `/api/admin/kyc/queue?status=${statusFilter}` 
+  const kycQueryUrl = statusFilter !== "all_status"
+    ? `/api/admin/kyc/queue?status=${statusFilter}`
     : "/api/admin/kyc/queue";
-    
+
   const { data, isLoading, refetch } = useQuery<KycQueueItem[]>({
     queryKey: [kycQueryUrl],
   });
@@ -877,7 +879,7 @@ export function KycQueueTab() {
     },
     onSuccess: (_, variables) => {
       // Invalidate all KYC queue queries regardless of filter
-      queryClient.invalidateQueries({ 
+      queryClient.invalidateQueries({
         predicate: (query) => {
           const key = query.queryKey[0];
           return typeof key === 'string' && key.startsWith('/api/admin/kyc/queue');
@@ -1387,7 +1389,7 @@ function IdentitiesTab() {
                                       <div className="text-xs text-gray-400">
                                         {link.link_type} = <span className="font-mono">{link.link_value}</span>
                                       </div>
-                                  </div>
+                                    </div>
                                     <GriftRefreshButton
                                       onClick={() => {
                                         setSelectedUserId(null);

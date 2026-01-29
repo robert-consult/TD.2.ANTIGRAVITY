@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Calendar } from "@/components/ui/calendar";
 import { format } from "date-fns";
 import { DateRange } from "react-day-picker";
+import { ChevronDown, ChevronUp } from "lucide-react";
 import {
   Sheet,
   SheetContent,
@@ -69,6 +70,20 @@ function toMs(value: unknown): number | null {
   return num < 1e12 ? num * 1000 : num;
 }
 
+function getDuration(openedAt: unknown, closedAt: unknown): string {
+  const openMs = toMs(openedAt);
+  const closeMs = toMs(closedAt);
+  if (!openMs || !closeMs) return "—";
+  const diffMs = closeMs - openMs;
+  if (diffMs < 0) return "—";
+  const mins = Math.floor(diffMs / 60000);
+  const hours = Math.floor(mins / 60);
+  const days = Math.floor(hours / 24);
+  if (days > 0) return `${days}d ${hours % 24}h`;
+  if (hours > 0) return `${hours}h ${mins % 60}m`;
+  return `${mins}m`;
+}
+
 export default function HistoryScreen() {
   const { locale } = useI18n();
   const calendarMonthOptions = [
@@ -103,7 +118,17 @@ export default function HistoryScreen() {
   const [currentPage, setCurrentPage] = useState(1);
   const [customDateRange, setCustomDateRange] = useState<DateRange | undefined>(undefined);
   const [isDateRangeOpen, setIsDateRangeOpen] = useState(false);
+  const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set());
   const isMobile = useMobile();
+
+  const toggleRowExpand = (id: number) => {
+    setExpandedRows(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
   const today = new Date();
   const todayEnd = new Date(today);
   todayEnd.setHours(23, 59, 59, 999);
@@ -124,7 +149,7 @@ export default function HistoryScreen() {
   const calendarFormatters = {
     formatMonthDropdown: (month: Date) => formatCalendarMonth(month),
   };
-  
+
   // Get trader-facing close reasons for filter dropdown
   const traderCloseReasons = listTraderFacingCloseReasons();
 
@@ -148,7 +173,7 @@ export default function HistoryScreen() {
       if (!isClosed) {
         return false;
       }
-      
+
       // Symbol filter
       if (symbolFilter !== "all" && trade.symbol?.symbol !== symbolFilter) {
         return false;
@@ -161,12 +186,12 @@ export default function HistoryScreen() {
         const ticketMatch = String(trade.id).includes(searchLower);
         const closeReasonLabel = closeReasonShortLabel(trade.closeReason, "").toLowerCase();
         const closeReasonMatch = closeReasonLabel.includes(searchLower);
-        
+
         if (!symbolMatch && !ticketMatch && !closeReasonMatch) {
           return false;
         }
       }
-      
+
       // Close reason filter
       if (closeReasonFilter !== "all") {
         const normalizedReason = normalizeCloseReason(trade.closeReason);
@@ -180,7 +205,7 @@ export default function HistoryScreen() {
       if (!tradeDateMs) return false;
       const tradeDate = new Date(tradeDateMs);
       const now = new Date();
-      
+
       if (timeFilter === "today") {
         // Check if the trade date is today
         const today = new Date(now);
@@ -202,10 +227,10 @@ export default function HistoryScreen() {
         // Set start date to beginning of day and end date to end of day
         const startDate = new Date(customDateRange.from);
         startDate.setHours(0, 0, 0, 0);
-        
+
         const endDate = new Date(customDateRange.to);
         endDate.setHours(23, 59, 59, 999);
-        
+
         if (tradeDate < startDate || tradeDate > endDate) return false;
       }
 
@@ -264,9 +289,9 @@ export default function HistoryScreen() {
         </div>
 
         <Select value={symbolFilter} onValueChange={(val) => {
-            setSymbolFilter(val);
-            setCurrentPage(1); // Reset pagination when filter changes
-          }}>
+          setSymbolFilter(val);
+          setCurrentPage(1); // Reset pagination when filter changes
+        }}>
           <SelectTrigger className="w-[160px] bg-neutral-850 border-gray-700 text-white">
             <SelectValue placeholder="All Symbols" />
           </SelectTrigger>
@@ -280,8 +305,8 @@ export default function HistoryScreen() {
           </SelectContent>
         </Select>
 
-        <Select 
-          value={timeFilter} 
+        <Select
+          value={timeFilter}
           onValueChange={(val) => {
             setTimeFilter(val);
             setCurrentPage(1); // Reset pagination when time filter changes
@@ -307,9 +332,9 @@ export default function HistoryScreen() {
             <SelectItem value="custom">Custom range...</SelectItem>
           </SelectContent>
         </Select>
-        
-        <Select 
-          value={closeReasonFilter} 
+
+        <Select
+          value={closeReasonFilter}
           onValueChange={(val) => {
             setCloseReasonFilter(val);
             setCurrentPage(1);
@@ -488,7 +513,7 @@ export default function HistoryScreen() {
           )}
         </>
       )}
-      
+
       {/* Date range display when calendar is collapsed */}
       {timeFilter === "custom" && customDateRange?.from && customDateRange?.to && !isDateRangeOpen && (
         <div id="dateRangeSummary" className="px-gutter py-2 border-b border-gray-800 flex justify-between items-center">
@@ -496,7 +521,7 @@ export default function HistoryScreen() {
             <span className="text-gray-400 mr-2">Custom range:</span>
             {format(customDateRange.from, 'MMM d, yyyy')} - {format(customDateRange.to, 'MMM d, yyyy')}
           </div>
-          <button 
+          <button
             className="text-blue-400 hover:text-blue-300 text-sm"
             onClick={() => {
               setIsDateRangeOpen(true);
@@ -506,170 +531,299 @@ export default function HistoryScreen() {
           </button>
         </div>
       )}
-      
+
       {/* Trade history table */}
       <div className="flex-1 overflow-auto">
-        <div className="w-full overflow-x-auto">
-          <Table className="min-w-[800px]">
-          <TableHeader className="bg-neutral-850">
-            <TableRow>
-              <TableHead className="text-left text-xs font-medium text-gray-400 uppercase tracking-wider">
-                Ticket
-              </TableHead>
-              <TableHead className="text-left text-xs font-medium text-gray-400 uppercase tracking-wider">
-                Symbol
-              </TableHead>
-              <TableHead className="text-left text-xs font-medium text-gray-400 uppercase tracking-wider">
-                Open Time
-              </TableHead>
-              <TableHead className="text-left text-xs font-medium text-gray-400 uppercase tracking-wider">
-                Close Time
-              </TableHead>
-              <TableHead className="text-left text-xs font-medium text-gray-400 uppercase tracking-wider">
-                Type
-              </TableHead>
-              <TableHead className="text-left text-xs font-medium text-gray-400 uppercase tracking-wider">
-                Lots
-              </TableHead>
-              <TableHead className="text-left text-xs font-medium text-gray-400 uppercase tracking-wider">
-                Open Price
-              </TableHead>
-              <TableHead className="text-left text-xs font-medium text-gray-400 uppercase tracking-wider">
-                Close Price
-              </TableHead>
-              <TableHead className="text-left text-xs font-medium text-gray-400 uppercase tracking-wider">
-                Profit/Loss
-              </TableHead>
-              <TableHead className="text-left text-xs font-medium text-gray-400 uppercase tracking-wider">
-                Close Reason
-              </TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody className="bg-neutral-900 divide-y divide-gray-800">
-            {isLoading &&
-              Array(4)
-                .fill(null)
-                .map((_, i) => (
-                  <TableRow key={i}>
-                    <TableCell>
-                      <Skeleton className="h-4 w-16" />
-                    </TableCell>
-                    <TableCell>
-                      <Skeleton className="h-4 w-12" />
-                    </TableCell>
-                    <TableCell>
-                      <Skeleton className="h-4 w-16" />
-                    </TableCell>
-                    <TableCell>
-                      <Skeleton className="h-4 w-16" />
-                    </TableCell>
-                    <TableCell>
-                      <Skeleton className="h-4 w-16" />
-                    </TableCell>
-                    <TableCell>
-                      <Skeleton className="h-4 w-16" />
-                    </TableCell>
-                    <TableCell>
-                      <Skeleton className="h-4 w-24" />
-                    </TableCell>
-                  </TableRow>
-                ))}
+        {isMobile ? (
+          /* Mobile: Compact expandable rows */
+          <div className="divide-y divide-gray-800">
+            {isLoading && Array(4).fill(null).map((_, i) => (
+              <div key={i} className="px-4 py-3">
+                <div className="flex items-center justify-between">
+                  <Skeleton className="h-5 w-20" />
+                  <Skeleton className="h-5 w-16" />
+                </div>
+              </div>
+            ))}
 
             {!isLoading && paginatedTrades.length === 0 && (
-              <TableRow>
-                <TableCell colSpan={10} className="text-center py-8 text-gray-500">
-                  No trades found
-                </TableCell>
-              </TableRow>
+              <div className="text-center py-8 text-gray-500">
+                No trades found
+              </div>
             )}
 
-            {!isLoading &&
-              paginatedTrades.map((trade: any) => (
-                <TableRow key={trade.id} className="hover:bg-neutral-850">
-                  <TableCell>
-                    <div className="font-medium text-white">{trade.id}</div>
-                  </TableCell>
-                  <TableCell>
-                    <div className="font-medium text-white">{trade.symbol?.symbol}</div>
-                  </TableCell>
-                  <TableCell className="text-sm text-gray-400">
-                    {(() => {
-                      const openedAtMs = toMs(trade.openedAt);
-                      return openedAtMs ? new Date(openedAtMs).toLocaleString(locale) : "—";
-                    })()}
-                  </TableCell>
-                  <TableCell className="text-sm text-gray-400">
-                    {(() => {
-                      const closedAtMs = toMs(trade.closedAt);
-                      return closedAtMs ? new Date(closedAtMs).toLocaleString(locale) : "—";
-                    })()}
-                  </TableCell>
-                  <TableCell>
-                    <span
-                      className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                        trade.type === "BUY"
-                          ? "bg-green-900 text-green-300"
-                          : "bg-red-900 text-red-300"
-                      }`}
-                    >
-                      {getSideLabel(trade.type)}
-                    </span>
-                  </TableCell>
-                  <TableCell className="font-mono">
-                    {trade.lots ? trade.lots.toLocaleString() : trade.size.toLocaleString()}
-                  </TableCell>
-                  <TableCell className="font-mono">
-                    {(() => {
-                      const isJpy = trade.symbol?.symbol?.includes("JPY");
-                      return trade.openPrice.toFixed(isJpy ? 2 : 5);
-                    })()}
-                  </TableCell>
-                  <TableCell className="font-mono">
-                    {trade.closePrice
-                      ? (() => {
-                          const isJpy = trade.symbol?.symbol?.includes("JPY");
-                          return trade.closePrice.toFixed(isJpy ? 2 : 5);
-                        })()
-                      : "—"}
-                  </TableCell>
-                  <TableCell>
-                    {trade.profit ? (
-                      <div
-                        className={`font-mono font-medium ${
-                          parseFloat(trade.profit) >= 0
-                            ? "text-green-500"
-                            : "text-red-500"
-                        }`}
-                      >
-                        {parseFloat(trade.profit) >= 0 ? "+" : ""}
-                        {Math.abs(parseFloat(trade.profit)).toFixed(2)}
+            {!isLoading && paginatedTrades.map((trade: any) => {
+              const isExpanded = expandedRows.has(trade.id);
+              const isJpy = trade.symbol?.symbol?.includes("JPY");
+              const profitValue = trade.profit ? parseFloat(trade.profit) : 0;
+              const isProfit = profitValue >= 0;
+
+              return (
+                <div key={trade.id}>
+                  {/* Compact row header */}
+                  <div
+                    className="px-4 py-3 flex items-center justify-between cursor-pointer hover:bg-neutral-850 active:bg-neutral-800"
+                    onClick={() => toggleRowExpand(trade.id)}
+                  >
+                    <div className="flex items-center gap-3 flex-1 min-w-0">
+                      {/* Symbol */}
+                      <span className="font-bold text-white text-sm">
+                        {trade.symbol?.symbol}
+                      </span>
+                      {/* Size */}
+                      <span className="text-xs text-gray-400">
+                        {trade.lots || trade.size}
+                      </span>
+                    </div>
+
+                    {/* Entry → Exit with directional arrow */}
+                    <div className="flex items-center gap-1 font-mono text-xs mx-2">
+                      <span className="text-gray-300">{trade.openPrice?.toFixed(isJpy ? 2 : 4)}</span>
+                      <span className={isProfit ? "text-green-500" : "text-red-500"}>
+                        {isProfit ? "↑" : "↓"}
+                      </span>
+                      <span className="text-gray-300">{trade.closePrice?.toFixed(isJpy ? 2 : 4) || "—"}</span>
+                    </div>
+
+                    {/* P/L */}
+                    <div className={`font-mono font-semibold text-sm min-w-[60px] text-right ${isProfit ? "text-green-500" : "text-red-500"}`}>
+                      {trade.profit ? (
+                        <>
+                          {isProfit ? "+" : ""}${Math.abs(profitValue).toFixed(2)}
+                        </>
+                      ) : "—"}
+                    </div>
+
+                    {/* Chevron */}
+                    <div className="ml-2 text-gray-400">
+                      {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                    </div>
+                  </div>
+
+                  {/* Expanded details */}
+                  {isExpanded && (
+                    <div className="px-4 pb-4 bg-neutral-850 border-t border-gray-700">
+                      <div className="grid grid-cols-2 gap-3 pt-3 text-sm">
+                        <div>
+                          <span className="text-gray-500 text-xs">Ticket</span>
+                          <div className="text-white font-mono">{trade.id}</div>
+                        </div>
+                        <div>
+                          <span className="text-gray-500 text-xs">Type</span>
+                          <div>
+                            <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${trade.type === "BUY" ? "bg-green-900 text-green-300" : "bg-red-900 text-red-300"
+                              }`}>
+                              {getSideLabel(trade.type)}
+                            </span>
+                          </div>
+                        </div>
+                        <div>
+                          <span className="text-gray-500 text-xs">Open Time</span>
+                          <div className="text-gray-300 text-xs">
+                            {(() => {
+                              const ms = toMs(trade.openedAt);
+                              return ms ? new Date(ms).toLocaleString(locale) : "—";
+                            })()}
+                          </div>
+                        </div>
+                        <div>
+                          <span className="text-gray-500 text-xs">Close Time</span>
+                          <div className="text-gray-300 text-xs">
+                            {(() => {
+                              const ms = toMs(trade.closedAt);
+                              return ms ? new Date(ms).toLocaleString(locale) : "—";
+                            })()}
+                          </div>
+                        </div>
+                        <div>
+                          <span className="text-gray-500 text-xs">Open Price</span>
+                          <div className="text-white font-mono">{trade.openPrice?.toFixed(isJpy ? 2 : 5)}</div>
+                        </div>
+                        <div>
+                          <span className="text-gray-500 text-xs">Close Price</span>
+                          <div className="text-white font-mono">{trade.closePrice?.toFixed(isJpy ? 2 : 5) || "—"}</div>
+                        </div>
+                        <div>
+                          <span className="text-gray-500 text-xs">Duration</span>
+                          <div className="text-white">{getDuration(trade.openedAt, trade.closedAt)}</div>
+                        </div>
+                        <div>
+                          <span className="text-gray-500 text-xs">Close Reason</span>
+                          <div>
+                            {(() => {
+                              const label = closeReasonShortLabel(trade.closeReason);
+                              const variant = closeReasonVariant(trade.closeReason);
+                              const badgeClass = getCloseReasonBadgeClass(variant);
+                              if (label === "—") return <span className="text-gray-500">—</span>;
+                              return <span className={`px-2 py-0.5 text-xs rounded border ${badgeClass}`}>{label}</span>;
+                            })()}
+                          </div>
+                        </div>
                       </div>
-                    ) : (
-                      <div className="text-gray-400">—</div>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    {(() => {
-                      const label = closeReasonShortLabel(trade.closeReason);
-                      const variant = closeReasonVariant(trade.closeReason);
-                      const badgeClass = getCloseReasonBadgeClass(variant);
-                      
-                      if (label === "—") {
-                        return <span className="text-gray-500">—</span>;
-                      }
-                      
-                      return (
-                        <span className={`px-2 py-1 text-xs rounded border ${badgeClass}`}>
-                          {label}
-                        </span>
-                      );
-                    })()}
-                  </TableCell>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          /* Desktop: Full table with Duration column */
+          <div className="w-full overflow-x-auto">
+            <Table className="min-w-[900px]">
+              <TableHeader className="bg-neutral-850">
+                <TableRow>
+                  <TableHead className="text-left text-xs font-medium text-gray-400 uppercase tracking-wider">
+                    Ticket
+                  </TableHead>
+                  <TableHead className="text-left text-xs font-medium text-gray-400 uppercase tracking-wider">
+                    Symbol
+                  </TableHead>
+                  <TableHead className="text-left text-xs font-medium text-gray-400 uppercase tracking-wider">
+                    Open Time
+                  </TableHead>
+                  <TableHead className="text-left text-xs font-medium text-gray-400 uppercase tracking-wider">
+                    Close Time
+                  </TableHead>
+                  <TableHead className="text-left text-xs font-medium text-gray-400 uppercase tracking-wider">
+                    Type
+                  </TableHead>
+                  <TableHead className="text-left text-xs font-medium text-gray-400 uppercase tracking-wider">
+                    Lots
+                  </TableHead>
+                  <TableHead className="text-left text-xs font-medium text-gray-400 uppercase tracking-wider">
+                    Open Price
+                  </TableHead>
+                  <TableHead className="text-left text-xs font-medium text-gray-400 uppercase tracking-wider">
+                    Close Price
+                  </TableHead>
+                  <TableHead className="text-left text-xs font-medium text-gray-400 uppercase tracking-wider">
+                    Profit/Loss
+                  </TableHead>
+                  <TableHead className="text-left text-xs font-medium text-gray-400 uppercase tracking-wider">
+                    Duration
+                  </TableHead>
+                  <TableHead className="text-left text-xs font-medium text-gray-400 uppercase tracking-wider">
+                    Close Reason
+                  </TableHead>
                 </TableRow>
-              ))}
-          </TableBody>
-        </Table>
-        </div>
+              </TableHeader>
+              <TableBody className="bg-neutral-900 divide-y divide-gray-800">
+                {isLoading &&
+                  Array(4)
+                    .fill(null)
+                    .map((_, i) => (
+                      <TableRow key={i}>
+                        <TableCell><Skeleton className="h-4 w-16" /></TableCell>
+                        <TableCell><Skeleton className="h-4 w-12" /></TableCell>
+                        <TableCell><Skeleton className="h-4 w-24" /></TableCell>
+                        <TableCell><Skeleton className="h-4 w-24" /></TableCell>
+                        <TableCell><Skeleton className="h-4 w-12" /></TableCell>
+                        <TableCell><Skeleton className="h-4 w-10" /></TableCell>
+                        <TableCell><Skeleton className="h-4 w-16" /></TableCell>
+                        <TableCell><Skeleton className="h-4 w-16" /></TableCell>
+                        <TableCell><Skeleton className="h-4 w-16" /></TableCell>
+                        <TableCell><Skeleton className="h-4 w-14" /></TableCell>
+                        <TableCell><Skeleton className="h-4 w-20" /></TableCell>
+                      </TableRow>
+                    ))}
+
+                {!isLoading && paginatedTrades.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={11} className="text-center py-8 text-gray-500">
+                      No trades found
+                    </TableCell>
+                  </TableRow>
+                )}
+
+                {!isLoading &&
+                  paginatedTrades.map((trade: any) => (
+                    <TableRow key={trade.id} className="hover:bg-neutral-850">
+                      <TableCell>
+                        <div className="font-medium text-white">{trade.id}</div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="font-medium text-white">{trade.symbol?.symbol}</div>
+                      </TableCell>
+                      <TableCell className="text-sm text-gray-400">
+                        {(() => {
+                          const openedAtMs = toMs(trade.openedAt);
+                          return openedAtMs ? new Date(openedAtMs).toLocaleString(locale) : "—";
+                        })()}
+                      </TableCell>
+                      <TableCell className="text-sm text-gray-400">
+                        {(() => {
+                          const closedAtMs = toMs(trade.closedAt);
+                          return closedAtMs ? new Date(closedAtMs).toLocaleString(locale) : "—";
+                        })()}
+                      </TableCell>
+                      <TableCell>
+                        <span
+                          className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${trade.type === "BUY"
+                            ? "bg-green-900 text-green-300"
+                            : "bg-red-900 text-red-300"
+                            }`}
+                        >
+                          {getSideLabel(trade.type)}
+                        </span>
+                      </TableCell>
+                      <TableCell className="font-mono">
+                        {trade.lots ? trade.lots.toLocaleString() : trade.size.toLocaleString()}
+                      </TableCell>
+                      <TableCell className="font-mono">
+                        {(() => {
+                          const isJpy = trade.symbol?.symbol?.includes("JPY");
+                          return trade.openPrice.toFixed(isJpy ? 2 : 5);
+                        })()}
+                      </TableCell>
+                      <TableCell className="font-mono">
+                        {trade.closePrice
+                          ? (() => {
+                            const isJpy = trade.symbol?.symbol?.includes("JPY");
+                            return trade.closePrice.toFixed(isJpy ? 2 : 5);
+                          })()
+                          : "—"}
+                      </TableCell>
+                      <TableCell>
+                        {trade.profit ? (
+                          <div
+                            className={`font-mono font-medium ${parseFloat(trade.profit) >= 0
+                              ? "text-green-500"
+                              : "text-red-500"
+                              }`}
+                          >
+                            {parseFloat(trade.profit) >= 0 ? "+" : ""}
+                            {Math.abs(parseFloat(trade.profit)).toFixed(2)}
+                          </div>
+                        ) : (
+                          <div className="text-gray-400">—</div>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-sm text-gray-300">
+                        {getDuration(trade.openedAt, trade.closedAt)}
+                      </TableCell>
+                      <TableCell>
+                        {(() => {
+                          const label = closeReasonShortLabel(trade.closeReason);
+                          const variant = closeReasonVariant(trade.closeReason);
+                          const badgeClass = getCloseReasonBadgeClass(variant);
+
+                          if (label === "—") {
+                            return <span className="text-gray-500">—</span>;
+                          }
+
+                          return (
+                            <span className={`px-2 py-1 text-xs rounded border ${badgeClass}`}>
+                              {label}
+                            </span>
+                          );
+                        })()}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+              </TableBody>
+            </Table>
+          </div>
+        )}
       </div>
 
       {/* Pagination */}

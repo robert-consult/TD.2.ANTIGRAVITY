@@ -215,7 +215,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     if (!req.session.userId) {
       return res.status(401).json({ message: "Not authenticated" });
     }
-    
+
     // Check if session has been revoked
     const sessionId = req.sessionID;
     if (sessionId) {
@@ -224,16 +224,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         .from(userSessions)
         .where(and(eq(userSessions.sessionId, sessionId), eq(userSessions.userId, req.session.userId)))
         .limit(1);
-      
+
       if (sessionRow?.revokedAt) {
         // Session has been revoked - destroy it and reject
-        req.session.destroy(() => {});
-        return res.status(401).json({ 
+        req.session.destroy(() => { });
+        return res.status(401).json({
           message: "Session has been terminated",
           code: "SESSION_REVOKED"
         });
       }
-      
+
       // Touch session to update lastActiveAt (only for non-revoked sessions)
       try {
         await touchSession(sessionId);
@@ -241,7 +241,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // Ignore touch errors
       }
     }
-    
+
     next();
   };
 
@@ -307,7 +307,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       signupsFrozen: Boolean((row as any)?.signupFreeze ?? false),
       signupFreezeMessage: String(
         (row as any)?.signupFreezeMessage ??
-          "Signups are temporarily paused due to capacity. Existing users can still log in."
+        "Signups are temporarily paused due to capacity. Existing users can still log in."
       ),
       waitlistEnabled: Boolean((row as any)?.signupWaitlistEnabled ?? true),
       waitlistPolicyVersion,
@@ -358,6 +358,64 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // API status endpoint - moved from root to not conflict with frontend
   app.get("/api/status", (req: Request, res: Response) => {
     res.json({ message: "TradeQuip API" });
+  });
+
+  // Public global settings endpoint (returns lot settings for order form)
+  app.get("/api/global-settings", async (_req: Request, res: Response) => {
+    try {
+      const ABSOLUTE_MAX_LOTS = 50;
+
+      const clampInt = (value: unknown, min: number, max: number, fallback: number) => {
+        const n = typeof value === "number" ? value : Number(value);
+        if (!Number.isFinite(n)) return fallback;
+        return Math.min(max, Math.max(min, Math.trunc(n)));
+      };
+
+      const parsePresetCards = (raw: string | null | undefined, max: number): number[] => {
+        try {
+          const parsed = JSON.parse(raw || "[]");
+          if (!Array.isArray(parsed)) return [];
+          const values = parsed
+            .map((v) => (typeof v === "number" ? v : Number(v)))
+            .filter((n) => Number.isFinite(n))
+            .map((n) => Math.trunc(n))
+            .filter((n) => n >= 1 && n <= max);
+          const unique = Array.from(new Set(values));
+          unique.sort((a, b) => a - b);
+          return unique;
+        } catch {
+          return [];
+        }
+      };
+
+      const [settings] = await db.select({
+        lotPresetCards: globalSettings.lotPresetCards,
+        lotDropdownMax: globalSettings.lotDropdownMax,
+        updatedAt: globalSettings.updatedAt,
+      }).from(globalSettings).where(eq(globalSettings.id, 1)).limit(1);
+
+      const lotDropdownMax = clampInt(settings?.lotDropdownMax, 1, ABSOLUTE_MAX_LOTS, ABSOLUTE_MAX_LOTS);
+
+      const presetsParsed = parsePresetCards(settings?.lotPresetCards, lotDropdownMax);
+      const lotPresetCardsArray =
+        presetsParsed.length > 0
+          ? presetsParsed
+          : [1, 5, 10, 25, 50].filter((n) => n <= lotDropdownMax);
+
+      const lotDropdownOptions = Array.from({ length: lotDropdownMax }, (_v, i) => i + 1);
+
+      res.json({
+        lotPresetCards: JSON.stringify(lotPresetCardsArray),
+        lotPresetCardsArray,
+        lotDropdownMax,
+        lotDropdownOptions,
+        absoluteMaxLots: ABSOLUTE_MAX_LOTS,
+        updatedAt: typeof settings?.updatedAt === "number" ? settings.updatedAt : null,
+      });
+    } catch (error: any) {
+      console.error("[GlobalSettings] Failed to fetch:", error);
+      res.status(500).json({ message: "Failed to fetch settings" });
+    }
   });
 
   // Public signup configuration (captcha + phone enforcement)
@@ -563,7 +621,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const forgeKeyPresent = Boolean(process.env.FORGE_KEY);
       const forgeKeyLength = process.env.FORGE_KEY?.length || 0;
-      
+
       // Try to get cache stats from quote feed module
       let cacheStats = { cacheSize: 0, lastSuccessfulApiCall: 0, consecutiveApiFailures: 0, staleCount: 0 };
       try {
@@ -572,10 +630,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } catch (e) {
         console.error('Error getting cache stats:', e);
       }
-      
+
       // Get current quotes from database
       let quotesInfo = { count: 0, latestUpdate: null as number | null, symbols: [] as string[] };
-      
+
       try {
         const quoteRows = await db
           .select({
@@ -593,13 +651,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } catch (e) {
         console.error('Error getting quotes info:', e);
       }
-      
+
       // Calculate time since last API update
       const now = Date.now();
-      const timeSinceLastUpdate = cacheStats.lastSuccessfulApiCall > 0 
-        ? Math.round((now - cacheStats.lastSuccessfulApiCall) / 1000) 
+      const timeSinceLastUpdate = cacheStats.lastSuccessfulApiCall > 0
+        ? Math.round((now - cacheStats.lastSuccessfulApiCall) / 1000)
         : null;
-      
+
       res.json({
         status: forgeKeyPresent ? 'configured' : 'missing_api_key',
         apiKeyPresent: forgeKeyPresent,
@@ -689,7 +747,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           success: false,
           failureReason: "Account frozen",
         });
-        return res.status(403).json({ 
+        return res.status(403).json({
           message: "Account is frozen. Please contact support.",
           reasonCode: (user as any).freezeReasonCode
         });
@@ -828,7 +886,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const verificationLogin = await db.query.userVerification.findFirst({
         where: eq(userVerification.userId, user.id),
       });
-      
+
       const emailVerifiedLogin = !!verificationLogin?.emailVerifiedAt;
       const gracePeriodMsLogin = 14 * 24 * 60 * 60 * 1000;
       const createdAtMsLogin = typeof user.createdAt === 'number'
@@ -854,7 +912,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } catch (e) {
         console.error("[Legal] Failed to compute re-acceptance status on login:", e);
       }
-      
+
       res.json({
         id: user.id,
         email: user.email,
@@ -1091,11 +1149,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // Fail-closed: do not allow an account to exist without an acceptance row.
         try {
           await db.transaction(async (tx) => {
-            try { await tx.delete(signupFingerprints).where(eq(signupFingerprints.userId, user.id)); } catch {}
-            try { await tx.delete(userAccountEvents).where(eq(userAccountEvents.userId, user.id)); } catch {}
-            try { await tx.delete(userVerification).where(eq(userVerification.userId, user.id)); } catch {}
-            try { await tx.delete(emailVerificationTokens).where(eq(emailVerificationTokens.userId, user.id)); } catch {}
-            try { await tx.delete(users).where(eq(users.id, user.id)); } catch {}
+            try { await tx.delete(signupFingerprints).where(eq(signupFingerprints.userId, user.id)); } catch { }
+            try { await tx.delete(userAccountEvents).where(eq(userAccountEvents.userId, user.id)); } catch { }
+            try { await tx.delete(userVerification).where(eq(userVerification.userId, user.id)); } catch { }
+            try { await tx.delete(emailVerificationTokens).where(eq(emailVerificationTokens.userId, user.id)); } catch { }
+            try { await tx.delete(users).where(eq(users.id, user.id)); } catch { }
           });
         } catch (rollbackErr) {
           console.error("[Legal] Signup rollback failed:", rollbackErr);
@@ -1151,13 +1209,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       try {
         const VERIFICATION_TOKEN_EXPIRY_HOURS = 24;
         const token = crypto.randomBytes(32).toString("hex");
-        
+
         // Hash the token (HMAC if secret available, else SHA256)
         const emailSecret = process.env.EMAIL_VERIFY_TOKEN_SECRET;
-        const tokenHash = emailSecret 
+        const tokenHash = emailSecret
           ? crypto.createHmac("sha256", emailSecret).update(token).digest("hex")
           : crypto.createHash("sha256").update(token).digest("hex");
-        
+
         const tokenId = crypto.randomUUID();
         const expiresAt = Math.floor(Date.now() / 1000) + VERIFICATION_TOKEN_EXPIRY_HOURS * 3600;
 
@@ -1173,10 +1231,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // Send verification email via Resend API
         const resendApiKey = process.env.RESEND_API_KEY;
         let emailSent = false;
-        
+
         if (resendApiKey) {
           const verifyUrl = `${process.env.APP_URL || "http://localhost:5000"}/api/verification/email/verify?token=${token}`;
-          
+
           try {
             const emailResponse = await fetch("https://api.resend.com/emails", {
               method: "POST",
@@ -1309,7 +1367,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ? ((user.createdAt as number) < 1e12 ? (user.createdAt as number) * 1000 : user.createdAt)
         : new Date(user.createdAt as any).getTime();
       const gracePeriodEndsAtReg = createdAtMsReg + gracePeriodMsReg;
-      
+
       res.status(201).json({
         id: user.id,
         email: user.email,
@@ -1340,7 +1398,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const sessionId = req.sessionID;
     const ip = getClientIp(req);
     const userAgent = getUserAgent(req);
-    
+
     if (userId) {
       try {
         await endSession({ userId, sessionId, ip, userAgent, geo: buildGeoContext(ip, extractGeoHints(req)) });
@@ -1367,7 +1425,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const user = await storage.getUserById(req.session.userId);
 
       if (!user) {
-        req.session.destroy(() => {});
+        req.session.destroy(() => { });
         return res.status(401).json({ message: "User not found" });
       }
 
@@ -1376,41 +1434,41 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // Import directly here to avoid circular dependencies
         const { recalcAccount } = await import('./recalcAccount');
         await recalcAccount(user.id);
-        
+
         // Fetch the user again to get updated metrics
         const updatedUser = await storage.getUserById(req.session.userId);
-        
+
         if (updatedUser) {
           const verification = await db.query.userVerification.findFirst({
             where: eq(userVerification.userId, updatedUser.id),
           });
-          
+
           const emailVerified = !!verification?.emailVerifiedAt;
           const gracePeriodMs = 14 * 24 * 60 * 60 * 1000;
-          const createdAtMs = typeof updatedUser.createdAt === 'number' 
+          const createdAtMs = typeof updatedUser.createdAt === 'number'
             ? (updatedUser.createdAt < 1e12 ? updatedUser.createdAt * 1000 : updatedUser.createdAt)
             : new Date(updatedUser.createdAt as any).getTime();
-           const gracePeriodEndsAt = createdAtMs + gracePeriodMs;
-           const inGracePeriod = !emailVerified && Date.now() < gracePeriodEndsAt;
+          const gracePeriodEndsAt = createdAtMs + gracePeriodMs;
+          const inGracePeriod = !emailVerified && Date.now() < gracePeriodEndsAt;
 
-           let legalReacceptRequired = false;
-           let legalRequiredCombinedSha256: string | null = null;
-           let legalLastAcceptedCombinedSha256: string | null = null;
-           try {
-             const reqRow = await getDoc1ReacceptRequirement(updatedUser.id);
-             if (reqRow) {
-               legalReacceptRequired = true;
-               legalRequiredCombinedSha256 = reqRow.requiredCombinedSha256;
-               legalLastAcceptedCombinedSha256 = reqRow.lastAcceptedCombinedSha256;
-             }
-           } catch (e) {
-             console.error("[Legal] Failed to load re-accept requirement:", e);
-           }
-           
-           res.json({
-             id: updatedUser.id,
-             email: updatedUser.email,
-             username: updatedUser.username,
+          let legalReacceptRequired = false;
+          let legalRequiredCombinedSha256: string | null = null;
+          let legalLastAcceptedCombinedSha256: string | null = null;
+          try {
+            const reqRow = await getDoc1ReacceptRequirement(updatedUser.id);
+            if (reqRow) {
+              legalReacceptRequired = true;
+              legalRequiredCombinedSha256 = reqRow.requiredCombinedSha256;
+              legalLastAcceptedCombinedSha256 = reqRow.lastAcceptedCombinedSha256;
+            }
+          } catch (e) {
+            console.error("[Legal] Failed to load re-accept requirement:", e);
+          }
+
+          res.json({
+            id: updatedUser.id,
+            email: updatedUser.email,
+            username: updatedUser.username,
             name: updatedUser.name || "",
             phone: updatedUser.phone || "",
             countryIso2: updatedUser.countryIso2 || null,
@@ -1426,20 +1484,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
             userTier: (updatedUser as any).userTier || "CANDIDATE",
             contenderTier: (updatedUser as any).contenderTier || null,
             // Verification status for reminder popup
-             emailVerified,
-             emailVerifiedAt: verification?.emailVerifiedAt || null,
-             inGracePeriod,
-             gracePeriodEndsAt: inGracePeriod ? gracePeriodEndsAt : null,
-             legalReacceptRequired,
-             legalReacceptBlocked: false,
-             legalReacceptBlockedReason: null,
-             legalRequiredCombinedSha256,
-             legalLastAcceptedCombinedSha256,
-             // View As impersonation status
-             isImpersonating: req.session.isImpersonating || false,
-             realAdminId: req.session.realAdminId || null,
-             realAdminEmail: req.session.realAdminEmail || null,
-           });
+            emailVerified,
+            emailVerifiedAt: verification?.emailVerifiedAt || null,
+            inGracePeriod,
+            gracePeriodEndsAt: inGracePeriod ? gracePeriodEndsAt : null,
+            legalReacceptRequired,
+            legalReacceptBlocked: false,
+            legalReacceptBlockedReason: null,
+            legalRequiredCombinedSha256,
+            legalLastAcceptedCombinedSha256,
+            // View As impersonation status
+            isImpersonating: req.session.isImpersonating || false,
+            realAdminId: req.session.realAdminId || null,
+            realAdminEmail: req.session.realAdminEmail || null,
+          });
           return;
         }
       } catch (recalcError) {
@@ -1451,7 +1509,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const verificationFallback = await db.query.userVerification.findFirst({
         where: eq(userVerification.userId, user.id),
       });
-      
+
       const emailVerifiedFb = !!verificationFallback?.emailVerifiedAt;
       const gracePeriodMsFb = 14 * 24 * 60 * 60 * 1000;
       const createdAtMsFb = typeof user.createdAt === 'number'
@@ -1473,7 +1531,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } catch (e) {
         console.error("[Legal] Failed to load re-accept requirement:", e);
       }
-      
+
       res.json({
         id: user.id,
         email: user.email,
@@ -1519,7 +1577,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const userId = req.session.userId!;
       const ip = (req.headers["x-forwarded-for"] as string) ?? req.ip ?? undefined;
       const userAgent = req.headers["user-agent"] ?? undefined;
-      
+
       // Validate with Zod - only allow whitelisted fields
       const profileUpdateSchema = z.object({
         email: z.string().email("Please enter a valid email").optional(),
@@ -1528,7 +1586,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         phone: z.string().max(20).optional(),
         countryIso2: z.string().length(2, "Country code must be 2 letters").optional(),
       });
-      
+
       const validationResult = profileUpdateSchema.safeParse(req.body);
       if (!validationResult.success) {
         return res.status(400).json({
@@ -1538,13 +1596,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const { email, username, name, phone, countryIso2 } = validationResult.data;
       const normalizedCountryIso2 = countryIso2?.toUpperCase();
-      
+
       // Get existing user data to compare
       const existingUser = await storage.getUserById(userId);
       if (!existingUser) {
         return res.status(404).json({ message: "User not found" });
       }
-      
+
       // Check if username is already taken by another user
       if (username) {
         const existingUsername = await storage.getUserByUsername(username);
@@ -1552,7 +1610,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           return res.status(400).json({ message: "Username is already taken" });
         }
       }
-      
+
       // Check if email is already taken by another user
       if (email && email.toLowerCase() !== existingUser.email.toLowerCase()) {
         const existingEmail = await storage.getUserByEmail(email);
@@ -1560,7 +1618,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           return res.status(400).json({ message: "Email is already taken" });
         }
       }
-      
+
       const phoneRequired = (await getSignupPublicConfig()).signupPhoneEnforce;
 
       if (phone === undefined && phoneRequired && !existingUser.phone) {
@@ -1592,7 +1650,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         updateData.countryIso2 = normalizedCountryIso2;
         updateData.country = normalizedCountryIso2;
       }
-      
+
       await storage.updateUser(userId, updateData);
 
       if (normalizedPhone !== null && normalizedPhone !== existingUser.phone) {
@@ -1640,7 +1698,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           userAgent,
         });
       }
-      
+
       // P0: Email change must reset verification state
       if (email && email.toLowerCase() !== existingUser.email.toLowerCase()) {
         // 1. Reset verification state in user_verification table
@@ -1650,20 +1708,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
             emailReverifyDueAt: null,
           })
           .where(eq(userVerification.userId, userId));
-        
+
         // 2. Generate new verification token
         const VERIFICATION_TOKEN_EXPIRY_HOURS = 24;
         const token = crypto.randomBytes(32).toString("hex");
-        
+
         // Hash the token (HMAC if secret available, else SHA256)
         const emailSecret = process.env.EMAIL_VERIFY_TOKEN_SECRET;
-        const tokenHash = emailSecret 
+        const tokenHash = emailSecret
           ? crypto.createHmac("sha256", emailSecret).update(token).digest("hex")
           : crypto.createHash("sha256").update(token).digest("hex");
-        
+
         const tokenId = crypto.randomUUID();
         const expiresAt = Math.floor(Date.now() / 1000) + VERIFICATION_TOKEN_EXPIRY_HOURS * 3600;
-        
+
         // 3. Store token hash in email_verification_tokens table
         await db.insert(emailVerificationTokens).values({
           id: tokenId,
@@ -1672,14 +1730,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
           purpose: "VERIFY",
           expiresAt,
         });
-        
+
         // 4. Send verification email to new address
         const resendApiKey = process.env.RESEND_API_KEY;
         let emailSent = false;
-        
+
         if (resendApiKey) {
           const verifyUrl = `${process.env.APP_URL || "http://localhost:5000"}/api/verification/email/verify?token=${token}`;
-          
+
           try {
             const emailResponse = await fetch("https://api.resend.com/emails", {
               method: "POST",
@@ -1718,7 +1776,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         } else {
           console.warn("RESEND_API_KEY not configured, skipping verification email");
         }
-        
+
         // 5. Emit identity_audit event for EMAIL_CHANGED
         appendIdentityAudit({
           userId: userId,
@@ -1730,7 +1788,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           ip,
           userAgent,
         });
-        
+
         // Also log the verification email send status
         appendIdentityAudit({
           userId: userId,
@@ -1742,11 +1800,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
           ip,
           userAgent,
         });
-        
+
         // Update session email
         req.session.email = email;
       }
-      
+
       res.json({ message: "Profile updated successfully" });
     } catch (error) {
       console.error("Profile update error:", error);
@@ -1761,32 +1819,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
         currentPassword: z.string().min(1, "Current password is required"),
         newPassword: z.string().min(8, "New password must be at least 8 characters").max(25, "New password must be at most 25 characters"),
       });
-      
+
       const validationResult = passwordChangeSchema.safeParse(req.body);
       if (!validationResult.success) {
-        return res.status(400).json({ 
-          message: validationResult.error.errors[0]?.message || "Invalid input" 
+        return res.status(400).json({
+          message: validationResult.error.errors[0]?.message || "Invalid input"
         });
       }
-      
+
       const { currentPassword, newPassword } = validationResult.data;
-      
+
       const user = await storage.getUserById(req.session.userId!);
       if (!user) {
         return res.status(401).json({ message: "User not found" });
       }
-      
+
       // Verify current password using passwordHash field (same as login)
       const bcrypt = await import("bcryptjs");
       const validPassword = await bcrypt.compare(currentPassword, user.passwordHash);
       if (!validPassword) {
         return res.status(400).json({ message: "Current password is incorrect" });
       }
-      
+
       // Hash new password and update using passwordHash field
       const hashedPassword = await bcrypt.hash(newPassword, 10);
       await storage.updateUser(req.session.userId!, { passwordHash: hashedPassword });
-      
+
       res.json({ message: "Password changed successfully" });
     } catch (error) {
       console.error("Change password error:", error);
@@ -1811,7 +1869,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const user = await storage.getUserById(req.session.userId!);
       if (!user) {
-        req.session.destroy(() => {});
+        req.session.destroy(() => { });
         return res.status(401).json({ message: "User not found" });
       }
 
@@ -1907,7 +1965,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const user = await storage.getUserById(req.session.userId!);
       if (!user) {
-        req.session.destroy(() => {});
+        req.session.destroy(() => { });
         return res.status(401).json({ message: "User not found" });
       }
 
@@ -1989,25 +2047,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ message: "Failed to delete account" });
     }
   });
-  
+
   // Consolidated profile endpoint - /api/profile/me
   app.get("/api/profile/me", ensureAuth, async (req: Request, res: Response) => {
     try {
       const userId = req.session.userId!;
       const user = await storage.getUserById(userId);
-      
+
       if (!user) {
         return res.status(401).json({ message: "User not found" });
       }
-      
+
       const verification = await db.query.userVerification.findFirst({
         where: eq(userVerification.userId, userId),
       });
-      
+
       const kyc = await db.query.userKycProfiles.findFirst({
         where: eq(userKycProfiles.userId, userId),
       });
-      
+
       const payout = await db.query.userPayoutProfiles.findFirst({
         where: eq(userPayoutProfiles.userId, userId),
       });
@@ -2029,7 +2087,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         policyConfig,
       });
       const gates = featureGates(decisionCtx, policyConfig);
-      
+
       const consolidatedProfile = {
         id: user.id,
         email: user.email,
@@ -2039,28 +2097,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
         userTier: (user as any).userTier || "CANDIDATE",
         isAdmin: user.isAdmin,
         createdAt: user.createdAt,
-        
-          verification: {
-            emailVerified: !!verification?.emailVerifiedAt,
-            emailVerifiedAt: verification?.emailVerifiedAt,
-            emailReverifyDueAt: verification?.emailReverifyDueAt,
-            gracePeriodEndsAt: verification?.emailInitialDueAt ?? null,
-            phoneVerified: !!verification?.smsVerifiedAt,
-            phoneVerifiedAt: verification?.smsVerifiedAt,
-            contenderTier: verification?.contenderTier || "NONE",
-          },
-        
+
+        verification: {
+          emailVerified: !!verification?.emailVerifiedAt,
+          emailVerifiedAt: verification?.emailVerifiedAt,
+          emailReverifyDueAt: verification?.emailReverifyDueAt,
+          gracePeriodEndsAt: verification?.emailInitialDueAt ?? null,
+          phoneVerified: !!verification?.smsVerifiedAt,
+          phoneVerifiedAt: verification?.smsVerifiedAt,
+          contenderTier: verification?.contenderTier || "NONE",
+        },
+
         kyc: {
           status: kyc?.status || "NOT_STARTED",
           invitedAt: kyc?.invitedAt,
           submittedAt: kyc?.submittedAt,
           reviewedAt: kyc?.reviewedAt,
         },
-        
+
         payout: {
           preferredPaymentCurrency: payout?.preferredPaymentCurrency,
         },
-        
+
         settings: {
           defaultSymbol: settings?.defaultSymbol,
           defaultLotSize: settings?.defaultLotSize,
@@ -2068,7 +2126,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           defaultStopLoss: settings?.defaultStopLoss,
           defaultTakeProfit: settings?.defaultTakeProfit,
         },
-        
+
         featureGates: {
           accountState: gates.accountState,
           contenderEligible: gates.contenderEligible,
@@ -2080,7 +2138,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           canRequestPayout: gates.canRequestPayout,
         },
       };
-      
+
       res.json(consolidatedProfile);
     } catch (error) {
       console.error("Get profile error:", error);
@@ -2194,9 +2252,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const ip = getClientIp(req);
       const userAgent = getUserAgent(req);
       const geoContext = buildGeoContext(ip, extractGeoHints(req));
-      
+
       let sessions = await getActiveSessions({ userId, limit });
-      
+
       const currentExists = sessions.some(s => s.sessionId === currentSessionId);
       if (!currentExists) {
         const user = await storage.getUserById(userId);
@@ -2210,13 +2268,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
         sessions = await getActiveSessions({ userId, limit });
       }
-      
+
       const formattedSessions = sessions.map((s) => ({
         ...s,
         isCurrent: s.sessionId === currentSessionId,
         location: [s.city, s.region, s.countryCode].filter(Boolean).join(", ") || "Unknown",
       }));
-      
+
       res.json(formattedSessions);
     } catch (error) {
       console.error("Get sessions error:", error);
@@ -2228,11 +2286,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.delete("/api/profile/sessions/:sessionId", ensureAuth, async (req: Request, res: Response) => {
     try {
       const { sessionId } = req.params;
-      
+
       if (sessionId === req.sessionID) {
         return res.status(400).json({ message: "Cannot terminate current session. Use logout instead." });
       }
-      
+
       await revokeSession({
         actorUserId: req.session.userId!,
         targetUserId: req.session.userId!,
@@ -2251,7 +2309,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const currentSessionId = req.sessionID;
       const allSessions = await getActiveSessions({ userId: req.session.userId!, limit: 100 });
-      
+
       for (const session of allSessions) {
         if (session.sessionId !== currentSessionId) {
           await revokeSession({
@@ -2278,14 +2336,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         language: z.string().max(10).optional(),
         country: z.string().max(50).optional(),
       });
-      
+
       const validationResult = preferencesSchema.safeParse(req.body);
       if (!validationResult.success) {
-        return res.status(400).json({ 
-          message: validationResult.error.errors[0]?.message || "Invalid input" 
+        return res.status(400).json({
+          message: validationResult.error.errors[0]?.message || "Invalid input"
         });
       }
-      
+
       const { timezone, language, country } = validationResult.data;
 
       const user = await storage.getUserById(req.session.userId!);
@@ -2414,81 +2472,81 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Submit KYC documents for current user
   app.post("/api/profile/kyc/submit", ensureAuth, requirePolicy("KYC_SUBMIT"), async (req: Request, res: Response) => {
-      try {
-        const userId = req.session.userId!;
-        const {
-          documentType,
-          documentNumber,
-          legalFirstName,
-          legalLastName,
-          dob,
-          addressLine1,
-          addressLine2,
-          city,
-          region,
-          postalCode,
-          country,
-          idDocumentRef,
-          documentData,
-        } = req.body ?? {};
-        
-        if (!documentType || typeof documentType !== "string") {
-          return res.status(400).json({ message: "Document type is required" });
-        }
+    try {
+      const userId = req.session.userId!;
+      const {
+        documentType,
+        documentNumber,
+        legalFirstName,
+        legalLastName,
+        dob,
+        addressLine1,
+        addressLine2,
+        city,
+        region,
+        postalCode,
+        country,
+        idDocumentRef,
+        documentData,
+      } = req.body ?? {};
 
-        const missing: string[] = [];
-        if (!legalFirstName) missing.push("legalFirstName");
-        if (!legalLastName) missing.push("legalLastName");
-        if (!dob) missing.push("dob");
-        if (!addressLine1) missing.push("addressLine1");
-        if (!city) missing.push("city");
-        if (!country) missing.push("country");
+      if (!documentType || typeof documentType !== "string") {
+        return res.status(400).json({ message: "Document type is required" });
+      }
 
-        if (missing.length) {
-          return res.status(400).json({ message: `Missing required KYC fields: ${missing.join(", ")}` });
-        }
-        
-        const user = await storage.getUserById(userId);
-        if (!user) {
-          return res.status(404).json({ message: "User not found" });
-        }
-      
+      const missing: string[] = [];
+      if (!legalFirstName) missing.push("legalFirstName");
+      if (!legalLastName) missing.push("legalLastName");
+      if (!dob) missing.push("dob");
+      if (!addressLine1) missing.push("addressLine1");
+      if (!city) missing.push("city");
+      if (!country) missing.push("country");
+
+      if (missing.length) {
+        return res.status(400).json({ message: `Missing required KYC fields: ${missing.join(", ")}` });
+      }
+
+      const user = await storage.getUserById(userId);
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
       const kycProfile = await db.query.userKycProfiles.findFirst({
         where: eq(userKycProfiles.userId, userId),
       });
-      
+
       if (!kycProfile) {
         return res.status(400).json({ message: "You must be invited for KYC verification first" });
       }
-      
+
       if (kycProfile.status !== "INVITED" && kycProfile.status !== "REJECTED") {
-        return res.status(400).json({ 
-          message: `Cannot submit KYC with current status: ${kycProfile.status}` 
+        return res.status(400).json({
+          message: `Cannot submit KYC with current status: ${kycProfile.status}`
         });
       }
-      
+
       const nowSec = Math.floor(Date.now() / 1000);
-      
-        await db.update(userKycProfiles)
-          .set({
-            status: "SUBMITTED",
-            documentType,
-            documentNumber: documentNumber || null,
-            legalFirstName: legalFirstName || null,
-            legalLastName: legalLastName || null,
-            dob: dob || null,
-            addressLine1: addressLine1 || null,
-            addressLine2: addressLine2 || null,
-            city: city || null,
-            region: region || null,
-            postalCode: postalCode || null,
-            country: country || null,
-            idDocumentRef: idDocumentRef || documentData || null,
-            submittedAt: nowSec,
-            updatedAt: nowSec,
-          })
-          .where(eq(userKycProfiles.userId, userId));
-      
+
+      await db.update(userKycProfiles)
+        .set({
+          status: "SUBMITTED",
+          documentType,
+          documentNumber: documentNumber || null,
+          legalFirstName: legalFirstName || null,
+          legalLastName: legalLastName || null,
+          dob: dob || null,
+          addressLine1: addressLine1 || null,
+          addressLine2: addressLine2 || null,
+          city: city || null,
+          region: region || null,
+          postalCode: postalCode || null,
+          country: country || null,
+          idDocumentRef: idDocumentRef || documentData || null,
+          submittedAt: nowSec,
+          updatedAt: nowSec,
+        })
+        .where(eq(userKycProfiles.userId, userId));
+
       appendIdentityAudit({
         userId,
         email: user.email,
@@ -2499,7 +2557,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ip: req.ip || (req.headers["x-forwarded-for"] as string),
         userAgent: req.headers["user-agent"],
       });
-      
+
       res.json({ success: true, message: "KYC documents submitted for review" });
     } catch (error) {
       console.error("KYC submit error:", error);
@@ -2547,12 +2605,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
           errorMap: () => ({ message: "Invalid currency. Must be USD, EUR, GBP, CHF, or JPY" })
         })
       });
-      
+
       const validationResult = payoutCurrencySchema.safeParse(req.body);
       if (!validationResult.success) {
         return res.status(400).json({ message: validationResult.error.errors[0]?.message || "Invalid input" });
       }
-      
+
       const { currency } = validationResult.data;
 
       const existing = await db.query.userPayoutProfiles.findFirst({
@@ -2561,7 +2619,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       if (existing) {
         await db.update(userPayoutProfiles)
-          .set({ 
+          .set({
             preferredPaymentCurrency: currency,
             updatedAt: Math.floor(Date.now() / 1000),
           })
@@ -2584,15 +2642,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/account/summary", ensureAuth, async (req: Request, res: Response) => {
     try {
       const userId = req.session.userId;
-      
+
       // Import and run recalcAccount to get fresh metrics with stale detection
       const { recalcAccount } = await import('./recalcAccount');
       const metrics = await recalcAccount(userId);
-      
+
       if (!metrics) {
         return res.status(404).json({ message: "User not found" });
       }
-      
+
       // Return MT5-style account summary with stale pricing indicators
       res.json({
         balance: metrics.balance,
@@ -2641,624 +2699,624 @@ export async function registerRoutes(app: Express): Promise<Server> {
     },
     riskMiddleware,
     async (req: Request, res: Response) => {
-    const correlationId = generateCorrelationId();
-    const auditCtx = buildAuditContext(req);
-    auditCtx.correlationId = correlationId;
-    const receivedAtMs = Date.now();
+      const correlationId = generateCorrelationId();
+      const auditCtx = buildAuditContext(req);
+      auditCtx.correlationId = correlationId;
+      const receivedAtMs = Date.now();
 
-    try {
-      // Handle either lots or size parameter from the request
-      const { symbol, type, lots, size, orderType, limitPrice, stopPrice } = req.body;
-      const orderSize = size ?? lots;
-      
-      if (typeof orderSize !== "number") {
-        return res.status(400).json({ message: "size (lots) must be numeric" });
-      }
-      
-      // Validate request data
-      const data = insertTradeSchema.parse({
-        ...req.body,
-        userId: req.session.userId,
-        openedAt: Math.floor(Date.now() / 1000),
-        lots: orderSize, // Use the unified size parameter
-      });
-
-      // Get current symbol price from our memory-based quotes
-      // First, get the symbol config to get the symbol string
-      const symbolConfig = await storage.getSymbolConfigById(data.symbolId);
-      if (!symbolConfig) {
-        return res.status(404).json({ message: "Symbol configuration not found" });
-      }
-      
-      const executionQuote = await getExecutionQuote(symbolConfig.symbol, data.type, "OPEN");
-      const quote = {
-        symbol: executionQuote.symbol,
-        bid: executionQuote.bid,
-        ask: executionQuote.ask,
-        mid: executionQuote.mid,
-        price: executionQuote.mid,
-        isStale: executionQuote.isStale,
-        lastApiUpdate: executionQuote.quoteTs.getTime(),
-        source: executionQuote.source,
-      };
-
-      const quoteTs = executionQuote.quoteTs ?? null;
-      const quoteSource = executionQuote.source ?? "quote_service";
-      
-      // AUDIT: Write ORDER_RECEIVED event immediately after we have quote context
       try {
-        await writeOrderIntentAudit({
-          correlationId,
-          eventCode: "ORDER_RECEIVED",
-          ctx: auditCtx,
+        // Handle either lots or size parameter from the request
+        const { symbol, type, lots, size, orderType, limitPrice, stopPrice } = req.body;
+        const orderSize = size ?? lots;
+
+        if (typeof orderSize !== "number") {
+          return res.status(400).json({ message: "size (lots) must be numeric" });
+        }
+
+        // Validate request data
+        const data = insertTradeSchema.parse({
+          ...req.body,
           userId: req.session.userId,
-          symbol: symbolConfig.symbol,
-          side: data.type,
-          orderType: orderType ?? "Market",
-          qtyLots: orderSize,
-          requestedPrice: parseFloat(String(req.body.limitPrice ?? req.body.stopPrice ?? quote.price)),
-          limitPrice: req.body.limitPrice ? parseFloat(String(req.body.limitPrice)) : null,
-          stopPrice: req.body.stopPrice ? parseFloat(String(req.body.stopPrice)) : null,
-          takeProfit: req.body.takeProfit ? parseFloat(String(req.body.takeProfit)) : null,
-          stopLoss: req.body.stopLoss ? parseFloat(String(req.body.stopLoss)) : null,
-          quoteBid: quote.bid ? parseFloat(String(quote.bid)) : null,
-          quoteAsk: quote.ask ? parseFloat(String(quote.ask)) : null,
-          quoteMid: quote.mid ? parseFloat(String(quote.mid)) : quote.price ? parseFloat(String(quote.price)) : null,
-          quoteTs,
-          quoteIsStale: quote.isStale ?? false,
-          payload: { rawBody: req.body, receivedAtMs, quoteSource },
+          openedAt: Math.floor(Date.now() / 1000),
+          lots: orderSize, // Use the unified size parameter
         });
-      } catch (auditErr) {
-        console.error("Error writing ORDER_RECEIVED audit:", auditErr);
-      }
-      
-      // OPTION 1: Block trade open on stale quote
-      if (quote.isStale === true) {
-        // AUDIT: Write DECISION REJECT for stale quote
+
+        // Get current symbol price from our memory-based quotes
+        // First, get the symbol config to get the symbol string
+        const symbolConfig = await storage.getSymbolConfigById(data.symbolId);
+        if (!symbolConfig) {
+          return res.status(404).json({ message: "Symbol configuration not found" });
+        }
+
+        const executionQuote = await getExecutionQuote(symbolConfig.symbol, data.type, "OPEN");
+        const quote = {
+          symbol: executionQuote.symbol,
+          bid: executionQuote.bid,
+          ask: executionQuote.ask,
+          mid: executionQuote.mid,
+          price: executionQuote.mid,
+          isStale: executionQuote.isStale,
+          lastApiUpdate: executionQuote.quoteTs.getTime(),
+          source: executionQuote.source,
+        };
+
+        const quoteTs = executionQuote.quoteTs ?? null;
+        const quoteSource = executionQuote.source ?? "quote_service";
+
+        // AUDIT: Write ORDER_RECEIVED event immediately after we have quote context
         try {
           await writeOrderIntentAudit({
             correlationId,
-            eventCode: "DECISION",
+            eventCode: "ORDER_RECEIVED",
             ctx: auditCtx,
             userId: req.session.userId,
-            decision: "REJECT",
             symbol: symbolConfig.symbol,
             side: data.type,
             orderType: orderType ?? "Market",
             qtyLots: orderSize,
             requestedPrice: parseFloat(String(req.body.limitPrice ?? req.body.stopPrice ?? quote.price)),
+            limitPrice: req.body.limitPrice ? parseFloat(String(req.body.limitPrice)) : null,
+            stopPrice: req.body.stopPrice ? parseFloat(String(req.body.stopPrice)) : null,
+            takeProfit: req.body.takeProfit ? parseFloat(String(req.body.takeProfit)) : null,
+            stopLoss: req.body.stopLoss ? parseFloat(String(req.body.stopLoss)) : null,
             quoteBid: quote.bid ? parseFloat(String(quote.bid)) : null,
             quoteAsk: quote.ask ? parseFloat(String(quote.ask)) : null,
             quoteMid: quote.mid ? parseFloat(String(quote.mid)) : quote.price ? parseFloat(String(quote.price)) : null,
             quoteTs,
-            quoteIsStale: true,
-            riskLimit: {},
-            riskObserved: {},
-            payload: { rejectReason: "STALE_QUOTE", latencyMs: Date.now() - receivedAtMs, quoteSource },
+            quoteIsStale: quote.isStale ?? false,
+            payload: { rawBody: req.body, receivedAtMs, quoteSource },
           });
         } catch (auditErr) {
-          console.error("Error writing DECISION REJECT audit:", auditErr);
+          console.error("Error writing ORDER_RECEIVED audit:", auditErr);
         }
-        return res.status(503).json({ 
-          code: "QUOTE_STALE",
-          message: "Quote is stale. Cannot open trade until fresh quotes are available.",
-          symbol: symbolConfig.symbol,
-          isStale: true
-        });
-      }
 
-      // Use the appropriate price based on trade type
-      // For a realistic trading experience with spreads
-      let entryPrice;
-      
-      if (data.type === 'BUY') {
-        entryPrice = quote.ask !== undefined ? 
-          parseFloat(String(quote.ask)) : 
-          parseFloat(String(quote.price));
-      } else {
-        entryPrice = quote.bid !== undefined ? 
-          parseFloat(String(quote.bid)) : 
-          parseFloat(String(quote.price));
-      }
-
-      // Handle either lots or size parameter, ensuring numeric type
-      let tradeLots = 1; // Default to 1 lot
-      
-      if (data.lots !== undefined) {
-        // Ensure lots is a number (could be a string from the client)
-        tradeLots = typeof data.lots === 'string' ? parseInt(data.lots, 10) : Number(data.lots);
-      } else if (data.size) {
-        // Calculate lots from size
-        tradeLots = Math.floor(Number(data.size) / 100000);
-      }
-      
-      // Validate lots are within acceptable range (1-50)
-      if (isNaN(tradeLots) || tradeLots < 1 || tradeLots > 50) {
-        // AUDIT: Write DECISION REJECT for invalid lots
-        try {
-          await writeOrderIntentAudit({
-            correlationId,
-            eventCode: "DECISION",
-            ctx: auditCtx,
-            userId: req.session.userId,
-            decision: "REJECT",
+        // OPTION 1: Block trade open on stale quote
+        if (quote.isStale === true) {
+          // AUDIT: Write DECISION REJECT for stale quote
+          try {
+            await writeOrderIntentAudit({
+              correlationId,
+              eventCode: "DECISION",
+              ctx: auditCtx,
+              userId: req.session.userId,
+              decision: "REJECT",
+              symbol: symbolConfig.symbol,
+              side: data.type,
+              orderType: orderType ?? "Market",
+              qtyLots: orderSize,
+              requestedPrice: parseFloat(String(req.body.limitPrice ?? req.body.stopPrice ?? quote.price)),
+              quoteBid: quote.bid ? parseFloat(String(quote.bid)) : null,
+              quoteAsk: quote.ask ? parseFloat(String(quote.ask)) : null,
+              quoteMid: quote.mid ? parseFloat(String(quote.mid)) : quote.price ? parseFloat(String(quote.price)) : null,
+              quoteTs,
+              quoteIsStale: true,
+              riskLimit: {},
+              riskObserved: {},
+              payload: { rejectReason: "STALE_QUOTE", latencyMs: Date.now() - receivedAtMs, quoteSource },
+            });
+          } catch (auditErr) {
+            console.error("Error writing DECISION REJECT audit:", auditErr);
+          }
+          return res.status(503).json({
+            code: "QUOTE_STALE",
+            message: "Quote is stale. Cannot open trade until fresh quotes are available.",
             symbol: symbolConfig.symbol,
-            side: data.type,
-            orderType: orderType ?? "Market",
-            qtyLots: tradeLots,
-            riskLimit: { minLots: 1, maxLots: 50 },
-            riskObserved: { requestedLots: tradeLots },
-            payload: { rejectReason: "INVALID_LOTS", latencyMs: Date.now() - receivedAtMs },
+            isStale: true
           });
-        } catch (auditErr) {
-          console.error("Error writing DECISION REJECT audit:", auditErr);
         }
-        return res.status(400).json({ 
-          message: "Invalid input data", 
-          errors: [
-            { code: "custom", message: "Lots must be between 1 and 50", path: ["lots"] },
-            { code: "too_big", maximum: 50, type: "number", inclusive: true, message: "Lots must be less than or equal to 50", path: ["lots"] }
-          ]
-        });
-      }
 
-      // Calculate position size from lots (1 lot = $100,000)
-      const CONTRACT_SIZE = 100000;
-      const positionSize = tradeLots * CONTRACT_SIZE;
-      
-      // Enforce global maxPositionSize limit
-      const globalSettingsForPosition = await db.query.globalSettings.findFirst({
-        where: eq(globalSettings.id, 1),
-      });
-      const maxPositionSize = Number(globalSettingsForPosition?.maxPositionSize ?? 5000000);
-      if (positionSize > maxPositionSize) {
-        // AUDIT: Write DECISION REJECT for position size exceeded
-        try {
-          await writeOrderIntentAudit({
-            correlationId,
-            eventCode: "DECISION",
-            ctx: auditCtx,
-            userId: req.session.userId,
-            decision: "REJECT",
-            symbol: symbolConfig.symbol,
-            side: data.type,
-            orderType: orderType ?? "Market",
-            qtyLots: tradeLots,
-            riskLimit: { maxPositionSize },
-            riskObserved: { positionSize },
-            payload: { rejectReason: "POSITION_SIZE_EXCEEDED", latencyMs: Date.now() - receivedAtMs },
-          });
-        } catch (auditErr) {
-          console.error("Error writing DECISION REJECT audit:", auditErr);
-        }
-        return res.status(400).json({ 
-          code: "MAX_POSITION_SIZE",
-          message: `Position size $${positionSize.toLocaleString()} exceeds maximum allowed ($${maxPositionSize.toLocaleString()}).`,
-          positionSize,
-          maxPositionSize,
-          suggestedMaxLots: Math.floor(maxPositionSize / CONTRACT_SIZE)
-        });
-      }
-      
-      // Ensure the account numbers are fresh
-      await recalcAccount(req.session.userId);
+        // Use the appropriate price based on trade type
+        // For a realistic trading experience with spreads
+        let entryPrice;
 
-      // Pull the updated user
-      const updatedUser = await storage.getUserById(req.session.userId);
-      if (!updatedUser) return res.status(404).json({ message: "User not found" });
-
-      // Determine order type and status (handle both "LIMIT" and "limit" formats)
-      const normalizedOrderType = String(orderType ?? "Market").toUpperCase();
-      const isLimitOrder = normalizedOrderType === "LIMIT" || normalizedOrderType === "BUY_LIMIT" || normalizedOrderType === "SELL_LIMIT";
-      const isStopOrder = (normalizedOrderType === "STOP" || normalizedOrderType === "BUY_STOP" || normalizedOrderType === "SELL_STOP") && normalizedOrderType !== "STOPLOSS";
-      const isPendingOrder = isLimitOrder || isStopOrder;
-
-      const orderId = generateOrderId();
-      const positionId = generatePositionId();
-      const openExecutionId = isPendingOrder ? null : generateExecutionId();
-
-      // Helper for writing DECISION REJECT audit
-      const writeDecisionReject = async (rejectReason: string, riskLimit: any = {}, riskObserved: any = {}) => {
-        try {
-          await writeOrderIntentAudit({
-            correlationId,
-            eventCode: "DECISION",
-            ctx: auditCtx,
-            userId: req.session.userId,
-            decision: "REJECT",
-            symbol: symbolConfig.symbol,
-            side: data.type,
-            orderType: orderType ?? "Market",
-            qtyLots: tradeLots,
-            riskLimit,
-            riskObserved,
-            payload: { rejectReason, latencyMs: Date.now() - receivedAtMs },
-          });
-        } catch (auditErr) {
-          console.error("Error writing DECISION REJECT audit:", auditErr);
-        }
-      };
-      
-      // Validate Limit/Stop orders have required prices
-      if (isLimitOrder && (limitPrice === undefined || limitPrice === null)) {
-        await writeDecisionReject("LIMIT_PRICE_MISSING");
-        return res.status(400).json({ message: "Limit orders require a limitPrice" });
-      }
-      if (isStopOrder && (stopPrice === undefined || stopPrice === null)) {
-        await writeDecisionReject("STOP_PRICE_MISSING");
-        return res.status(400).json({ message: "Stop orders require a stopPrice" });
-      }
-
-      // MT5-style 10-pip placement validation for Limit/Stop orders
-      if (isPendingOrder) {
-        const pip = symbolConfig.symbol.includes("JPY") ? 0.01 : 0.0001;
-        const minDist = 10 * pip;
-        const bid = quote.bid !== undefined ? parseFloat(String(quote.bid)) : entryPrice;
-        const ask = quote.ask !== undefined ? parseFloat(String(quote.ask)) : entryPrice;
-        // Floating point tolerance to allow exactly 10 pips
-        const tolerance = pip * 0.01;
-        
-        if (isLimitOrder) {
-          const reqPrice = parseFloat(String(limitPrice));
-          const maxBuyLimit = ask - minDist;
-          const minSellLimit = bid + minDist;
-          // Use precision-aware comparison for limit orders
-          if (data.type === "BUY" && priceGreaterThan(reqPrice, maxBuyLimit, symbolConfig.symbol)) {
-            await writeDecisionReject("BUY_LIMIT_TOO_CLOSE", { minDistPips: 10, ask }, { requestedPrice: reqPrice });
-            return res.status(400).json({ 
-              message: `BUY LIMIT must be at least 10 pips below current ask (${ask.toFixed(5)}). Maximum: ${maxBuyLimit.toFixed(5)}`
-            });
-          }
-          if (data.type === "SELL" && priceLessThan(reqPrice, minSellLimit, symbolConfig.symbol)) {
-            await writeDecisionReject("SELL_LIMIT_TOO_CLOSE", { minDistPips: 10, bid }, { requestedPrice: reqPrice });
-            return res.status(400).json({ 
-              message: `SELL LIMIT must be at least 10 pips above current bid (${bid.toFixed(5)}). Minimum: ${minSellLimit.toFixed(5)}`
-            });
-          }
-        }
-        
-        if (isStopOrder) {
-          const reqPrice = parseFloat(String(stopPrice));
-          const minBuyStop = ask + minDist;
-          const maxSellStop = bid - minDist;
-          // Use precision-aware comparison for stop orders
-          if (data.type === "BUY" && priceLessThan(reqPrice, minBuyStop, symbolConfig.symbol)) {
-            await writeDecisionReject("BUY_STOP_TOO_CLOSE", { minDistPips: 10, ask }, { requestedPrice: reqPrice });
-            return res.status(400).json({ 
-              message: `BUY STOP must be at least 10 pips above current ask (${ask.toFixed(5)}). Minimum: ${minBuyStop.toFixed(5)}`
-            });
-          }
-          if (data.type === "SELL" && priceGreaterThan(reqPrice, maxSellStop, symbolConfig.symbol)) {
-            await writeDecisionReject("SELL_STOP_TOO_CLOSE", { minDistPips: 10, bid }, { requestedPrice: reqPrice });
-            return res.status(400).json({ 
-              message: `SELL STOP must be at least 10 pips below current bid (${bid.toFixed(5)}). Maximum: ${maxSellStop.toFixed(5)}`
-            });
-          }
-        }
-        
-        // TP/SL validation for pending orders using precision-aware comparison
-        // This handles truncated decimals correctly (e.g., 0.67 = 0.6700 > 0.6698)
-        const intendedEntry = isLimitOrder ? parseFloat(String(limitPrice)) : parseFloat(String(stopPrice));
-        const tp = req.body.takeProfit ? parseFloat(String(req.body.takeProfit)) : null;
-        const sl = req.body.stopLoss ? parseFloat(String(req.body.stopLoss)) : null;
-        const minTpSl = intendedEntry + minDist; // Minimum distance for TP (BUY) or SL (SELL)
-        const maxTpSl = intendedEntry - minDist; // Maximum for SL (BUY) or TP (SELL)
-        
-        if (data.type === "BUY") {
-          // BUY TP must be >= entry + 10 pips (using tick-based comparison)
-          if (tp !== null && priceLessThan(tp, minTpSl, symbolConfig.symbol)) {
-            await writeDecisionReject("BUY_TP_TOO_CLOSE", { minDistPips: 10, intendedEntry }, { tp });
-            return res.status(400).json({ message: `BUY TP must be at least 10 pips above entry. Minimum: ${minTpSl.toFixed(5)}` });
-          }
-          // BUY SL must be <= entry - 10 pips (using tick-based comparison)
-          if (sl !== null && priceGreaterThan(sl, maxTpSl, symbolConfig.symbol)) {
-            await writeDecisionReject("BUY_SL_TOO_CLOSE", { minDistPips: 10, intendedEntry }, { sl });
-            return res.status(400).json({ message: `BUY SL must be at least 10 pips below entry. Maximum: ${maxTpSl.toFixed(5)}` });
-          }
+        if (data.type === 'BUY') {
+          entryPrice = quote.ask !== undefined ?
+            parseFloat(String(quote.ask)) :
+            parseFloat(String(quote.price));
         } else {
-          // SELL TP must be <= entry - 10 pips (using tick-based comparison)
-          if (tp !== null && priceGreaterThan(tp, maxTpSl, symbolConfig.symbol)) {
-            await writeDecisionReject("SELL_TP_TOO_CLOSE", { minDistPips: 10, intendedEntry }, { tp });
-            return res.status(400).json({ message: `SELL TP must be at least 10 pips below entry. Maximum: ${maxTpSl.toFixed(5)}` });
+          entryPrice = quote.bid !== undefined ?
+            parseFloat(String(quote.bid)) :
+            parseFloat(String(quote.price));
+        }
+
+        // Handle either lots or size parameter, ensuring numeric type
+        let tradeLots = 1; // Default to 1 lot
+
+        if (data.lots !== undefined) {
+          // Ensure lots is a number (could be a string from the client)
+          tradeLots = typeof data.lots === 'string' ? parseInt(data.lots, 10) : Number(data.lots);
+        } else if (data.size) {
+          // Calculate lots from size
+          tradeLots = Math.floor(Number(data.size) / 100000);
+        }
+
+        // Validate lots are within acceptable range (1-50)
+        if (isNaN(tradeLots) || tradeLots < 1 || tradeLots > 50) {
+          // AUDIT: Write DECISION REJECT for invalid lots
+          try {
+            await writeOrderIntentAudit({
+              correlationId,
+              eventCode: "DECISION",
+              ctx: auditCtx,
+              userId: req.session.userId,
+              decision: "REJECT",
+              symbol: symbolConfig.symbol,
+              side: data.type,
+              orderType: orderType ?? "Market",
+              qtyLots: tradeLots,
+              riskLimit: { minLots: 1, maxLots: 50 },
+              riskObserved: { requestedLots: tradeLots },
+              payload: { rejectReason: "INVALID_LOTS", latencyMs: Date.now() - receivedAtMs },
+            });
+          } catch (auditErr) {
+            console.error("Error writing DECISION REJECT audit:", auditErr);
           }
-          // SELL SL must be >= entry + 10 pips (using tick-based comparison)
-          if (sl !== null && priceLessThan(sl, minTpSl, symbolConfig.symbol)) {
-            await writeDecisionReject("SELL_SL_TOO_CLOSE", { minDistPips: 10, intendedEntry }, { sl });
-            return res.status(400).json({ message: `SELL SL must be at least 10 pips above entry. Minimum: ${minTpSl.toFixed(5)}` });
-          }
-        }
-      }
-
-      // For pending orders, use the requested price for margin calculation
-      const priceForMargin = isPendingOrder 
-        ? parseFloat(String(limitPrice ?? stopPrice ?? entryPrice))
-        : entryPrice;
-
-      // Get global settings for leverage cascade
-      const gs = await db.query.globalSettings.findFirst({
-        where: eq(globalSettings.id, 1),
-      });
-      const globalDefaultLeverage = Number(gs?.defaultLeverage ?? 50);
-
-      // Effective leverage: user override takes precedence over global
-      const effectiveLeverage = Number(updatedUser.leverage ?? globalDefaultLeverage);
-
-      // How much margin will this order need?
-      const neededMargin = requiredMargin(
-        symbolConfig.symbol,
-        tradeLots,
-        priceForMargin,
-        effectiveLeverage,
-      );
-
-      // Stop the order if free margin isn't enough
-      if (Number(updatedUser.freeMargin) < neededMargin) {
-        // AUDIT: Write DECISION REJECT for margin denial
-        try {
-          await writeOrderIntentAudit({
-            correlationId,
-            eventCode: "DECISION",
-            ctx: auditCtx,
-            userId: req.session.userId,
-            decision: "REJECT",
-            symbol: symbolConfig.symbol,
-            side: data.type,
-            orderType: orderType ?? "Market",
-            qtyLots: tradeLots,
-            riskLimit: { marginRequired: neededMargin },
-            riskObserved: { freeMargin: Number(updatedUser.freeMargin) },
-            payload: { rejectReason: "INSUFFICIENT_MARGIN", latencyMs: Date.now() - receivedAtMs },
+          return res.status(400).json({
+            message: "Invalid input data",
+            errors: [
+              { code: "custom", message: "Lots must be between 1 and 50", path: ["lots"] },
+              { code: "too_big", maximum: 50, type: "number", inclusive: true, message: "Lots must be less than or equal to 50", path: ["lots"] }
+            ]
           });
-        } catch (auditErr) {
-          console.error("Error writing DECISION REJECT audit:", auditErr);
         }
-        return res.status(400).json({ message: "Not enough margin available" });
-      }
 
-      // Check max concurrent lots limit (includes both OPEN and PENDING orders)
-      const userSettingsData = await storage.getUserSettingsById(req.session.userId);
-      const globalMaxConcurrentLots = Number(gs?.maxConcurrentLots ?? 50);
-      // Effective max lots: user override takes precedence over global (can exceed)
-      const effectiveMaxConcurrentLots = Number(userSettingsData?.maxConcurrentLots ?? globalMaxConcurrentLots);
-      
-      // Get current total lots from open AND pending positions
-      const openTrades = await storage.getOpenTradesByUserId(req.session.userId);
-      const pendingTrades = await storage.getPendingTradesByUserId(req.session.userId);
-      const openLots = openTrades.reduce((sum, t) => sum + Number(t.lots || 0), 0);
-      const pendingLots = pendingTrades.reduce((sum, t) => sum + Number(t.lots || 0), 0);
-      const currentTotalLots = openLots + pendingLots;
-      
-      // Check if adding this trade would exceed the limit
-      if (currentTotalLots + tradeLots > effectiveMaxConcurrentLots) {
-        // AUDIT: Write DECISION REJECT for max concurrent lots exceeded
-        try {
-          await writeOrderIntentAudit({
-            correlationId,
-            eventCode: "DECISION",
-            ctx: auditCtx,
-            userId: req.session.userId,
-            decision: "REJECT",
-            symbol: symbolConfig.symbol,
-            side: data.type,
-            orderType: orderType ?? "Market",
-            qtyLots: tradeLots,
-            riskLimit: { maxConcurrentLots: effectiveMaxConcurrentLots },
-            riskObserved: { currentLots: currentTotalLots, requestedLots: tradeLots },
-            payload: { rejectReason: "MAX_CONCURRENT_LOTS_EXCEEDED", openLots, pendingLots, latencyMs: Date.now() - receivedAtMs },
-          });
-        } catch (auditErr) {
-          console.error("Error writing DECISION REJECT audit:", auditErr);
-        }
-        return res.status(409).json({ 
-          code: "MAX_CONCURRENT_LOTS",
-          message: `Maximum concurrent lots exceeded. Open: ${openLots}, Pending: ${pendingLots}, Requested: ${tradeLots}, Limit: ${effectiveMaxConcurrentLots}`,
-          openLots,
-          pendingLots,
-          currentLots: currentTotalLots,
-          requestedLots: tradeLots,
-          maxLots: effectiveMaxConcurrentLots,
-          limit: effectiveMaxConcurrentLots
+        // Calculate position size from lots (1 lot = $100,000)
+        const CONTRACT_SIZE = 100000;
+        const positionSize = tradeLots * CONTRACT_SIZE;
+
+        // Enforce global maxPositionSize limit
+        const globalSettingsForPosition = await db.query.globalSettings.findFirst({
+          where: eq(globalSettings.id, 1),
         });
-      }
-      
-      // Create trade with appropriate price and status based on order type
-      // Market orders: OPEN immediately at current price
-      // Limit/Stop orders: PENDING, waiting for price trigger
-      const trade = await storage.createTrade({
-        ...data,
-        openPrice: isPendingOrder ? priceForMargin : entryPrice, // Pending orders use limit/stop price as intended entry
-        lots: tradeLots,
-        size: positionSize,
-        orderType: orderType ?? "Market",
-        limitPrice: isLimitOrder ? parseFloat(String(limitPrice)) : null,
-        stopPrice: isStopOrder ? parseFloat(String(stopPrice)) : null,
-        status: isPendingOrder ? "PENDING" : "OPEN",
-        correlationId: correlationId,
-        orderId,
-        positionId,
-        lastExecutionId: openExecutionId,
-        lastActorUserId: req.session.userId,
-        lastActorSessionId: auditCtx.sessionId,
-        lastActorIp: auditCtx.ip,
-        lastActorUserAgent: auditCtx.userAgent,
-        lastActorType: auditCtx.actorType,
-      });
+        const maxPositionSize = Number(globalSettingsForPosition?.maxPositionSize ?? 5000000);
+        if (positionSize > maxPositionSize) {
+          // AUDIT: Write DECISION REJECT for position size exceeded
+          try {
+            await writeOrderIntentAudit({
+              correlationId,
+              eventCode: "DECISION",
+              ctx: auditCtx,
+              userId: req.session.userId,
+              decision: "REJECT",
+              symbol: symbolConfig.symbol,
+              side: data.type,
+              orderType: orderType ?? "Market",
+              qtyLots: tradeLots,
+              riskLimit: { maxPositionSize },
+              riskObserved: { positionSize },
+              payload: { rejectReason: "POSITION_SIZE_EXCEEDED", latencyMs: Date.now() - receivedAtMs },
+            });
+          } catch (auditErr) {
+            console.error("Error writing DECISION REJECT audit:", auditErr);
+          }
+          return res.status(400).json({
+            code: "MAX_POSITION_SIZE",
+            message: `Position size $${positionSize.toLocaleString()} exceeds maximum allowed ($${maxPositionSize.toLocaleString()}).`,
+            positionSize,
+            maxPositionSize,
+            suggestedMaxLots: Math.floor(maxPositionSize / CONTRACT_SIZE)
+          });
+        }
 
-      // AUDIT: Write DECISION event (PASS) after successful trade creation
-      const latencyMs = Date.now() - receivedAtMs;
-      try {
-        await writeOrderIntentAudit({
-          correlationId,
-          eventCode: "DECISION",
-          ctx: auditCtx,
-          userId: req.session.userId,
-          decision: "PASS",
-          symbol: symbolConfig.symbol,
-          side: data.type,
+        // Ensure the account numbers are fresh
+        await recalcAccount(req.session.userId);
+
+        // Pull the updated user
+        const updatedUser = await storage.getUserById(req.session.userId);
+        if (!updatedUser) return res.status(404).json({ message: "User not found" });
+
+        // Determine order type and status (handle both "LIMIT" and "limit" formats)
+        const normalizedOrderType = String(orderType ?? "Market").toUpperCase();
+        const isLimitOrder = normalizedOrderType === "LIMIT" || normalizedOrderType === "BUY_LIMIT" || normalizedOrderType === "SELL_LIMIT";
+        const isStopOrder = (normalizedOrderType === "STOP" || normalizedOrderType === "BUY_STOP" || normalizedOrderType === "SELL_STOP") && normalizedOrderType !== "STOPLOSS";
+        const isPendingOrder = isLimitOrder || isStopOrder;
+
+        const orderId = generateOrderId();
+        const positionId = generatePositionId();
+        const openExecutionId = isPendingOrder ? null : generateExecutionId();
+
+        // Helper for writing DECISION REJECT audit
+        const writeDecisionReject = async (rejectReason: string, riskLimit: any = {}, riskObserved: any = {}) => {
+          try {
+            await writeOrderIntentAudit({
+              correlationId,
+              eventCode: "DECISION",
+              ctx: auditCtx,
+              userId: req.session.userId,
+              decision: "REJECT",
+              symbol: symbolConfig.symbol,
+              side: data.type,
+              orderType: orderType ?? "Market",
+              qtyLots: tradeLots,
+              riskLimit,
+              riskObserved,
+              payload: { rejectReason, latencyMs: Date.now() - receivedAtMs },
+            });
+          } catch (auditErr) {
+            console.error("Error writing DECISION REJECT audit:", auditErr);
+          }
+        };
+
+        // Validate Limit/Stop orders have required prices
+        if (isLimitOrder && (limitPrice === undefined || limitPrice === null)) {
+          await writeDecisionReject("LIMIT_PRICE_MISSING");
+          return res.status(400).json({ message: "Limit orders require a limitPrice" });
+        }
+        if (isStopOrder && (stopPrice === undefined || stopPrice === null)) {
+          await writeDecisionReject("STOP_PRICE_MISSING");
+          return res.status(400).json({ message: "Stop orders require a stopPrice" });
+        }
+
+        // MT5-style 10-pip placement validation for Limit/Stop orders
+        if (isPendingOrder) {
+          const pip = symbolConfig.symbol.includes("JPY") ? 0.01 : 0.0001;
+          const minDist = 10 * pip;
+          const bid = quote.bid !== undefined ? parseFloat(String(quote.bid)) : entryPrice;
+          const ask = quote.ask !== undefined ? parseFloat(String(quote.ask)) : entryPrice;
+          // Floating point tolerance to allow exactly 10 pips
+          const tolerance = pip * 0.01;
+
+          if (isLimitOrder) {
+            const reqPrice = parseFloat(String(limitPrice));
+            const maxBuyLimit = ask - minDist;
+            const minSellLimit = bid + minDist;
+            // Use precision-aware comparison for limit orders
+            if (data.type === "BUY" && priceGreaterThan(reqPrice, maxBuyLimit, symbolConfig.symbol)) {
+              await writeDecisionReject("BUY_LIMIT_TOO_CLOSE", { minDistPips: 10, ask }, { requestedPrice: reqPrice });
+              return res.status(400).json({
+                message: `BUY LIMIT must be at least 10 pips below current ask (${ask.toFixed(5)}). Maximum: ${maxBuyLimit.toFixed(5)}`
+              });
+            }
+            if (data.type === "SELL" && priceLessThan(reqPrice, minSellLimit, symbolConfig.symbol)) {
+              await writeDecisionReject("SELL_LIMIT_TOO_CLOSE", { minDistPips: 10, bid }, { requestedPrice: reqPrice });
+              return res.status(400).json({
+                message: `SELL LIMIT must be at least 10 pips above current bid (${bid.toFixed(5)}). Minimum: ${minSellLimit.toFixed(5)}`
+              });
+            }
+          }
+
+          if (isStopOrder) {
+            const reqPrice = parseFloat(String(stopPrice));
+            const minBuyStop = ask + minDist;
+            const maxSellStop = bid - minDist;
+            // Use precision-aware comparison for stop orders
+            if (data.type === "BUY" && priceLessThan(reqPrice, minBuyStop, symbolConfig.symbol)) {
+              await writeDecisionReject("BUY_STOP_TOO_CLOSE", { minDistPips: 10, ask }, { requestedPrice: reqPrice });
+              return res.status(400).json({
+                message: `BUY STOP must be at least 10 pips above current ask (${ask.toFixed(5)}). Minimum: ${minBuyStop.toFixed(5)}`
+              });
+            }
+            if (data.type === "SELL" && priceGreaterThan(reqPrice, maxSellStop, symbolConfig.symbol)) {
+              await writeDecisionReject("SELL_STOP_TOO_CLOSE", { minDistPips: 10, bid }, { requestedPrice: reqPrice });
+              return res.status(400).json({
+                message: `SELL STOP must be at least 10 pips below current bid (${bid.toFixed(5)}). Maximum: ${maxSellStop.toFixed(5)}`
+              });
+            }
+          }
+
+          // TP/SL validation for pending orders using precision-aware comparison
+          // This handles truncated decimals correctly (e.g., 0.67 = 0.6700 > 0.6698)
+          const intendedEntry = isLimitOrder ? parseFloat(String(limitPrice)) : parseFloat(String(stopPrice));
+          const tp = req.body.takeProfit ? parseFloat(String(req.body.takeProfit)) : null;
+          const sl = req.body.stopLoss ? parseFloat(String(req.body.stopLoss)) : null;
+          const minTpSl = intendedEntry + minDist; // Minimum distance for TP (BUY) or SL (SELL)
+          const maxTpSl = intendedEntry - minDist; // Maximum for SL (BUY) or TP (SELL)
+
+          if (data.type === "BUY") {
+            // BUY TP must be >= entry + 10 pips (using tick-based comparison)
+            if (tp !== null && priceLessThan(tp, minTpSl, symbolConfig.symbol)) {
+              await writeDecisionReject("BUY_TP_TOO_CLOSE", { minDistPips: 10, intendedEntry }, { tp });
+              return res.status(400).json({ message: `BUY TP must be at least 10 pips above entry. Minimum: ${minTpSl.toFixed(5)}` });
+            }
+            // BUY SL must be <= entry - 10 pips (using tick-based comparison)
+            if (sl !== null && priceGreaterThan(sl, maxTpSl, symbolConfig.symbol)) {
+              await writeDecisionReject("BUY_SL_TOO_CLOSE", { minDistPips: 10, intendedEntry }, { sl });
+              return res.status(400).json({ message: `BUY SL must be at least 10 pips below entry. Maximum: ${maxTpSl.toFixed(5)}` });
+            }
+          } else {
+            // SELL TP must be <= entry - 10 pips (using tick-based comparison)
+            if (tp !== null && priceGreaterThan(tp, maxTpSl, symbolConfig.symbol)) {
+              await writeDecisionReject("SELL_TP_TOO_CLOSE", { minDistPips: 10, intendedEntry }, { tp });
+              return res.status(400).json({ message: `SELL TP must be at least 10 pips below entry. Maximum: ${maxTpSl.toFixed(5)}` });
+            }
+            // SELL SL must be >= entry + 10 pips (using tick-based comparison)
+            if (sl !== null && priceLessThan(sl, minTpSl, symbolConfig.symbol)) {
+              await writeDecisionReject("SELL_SL_TOO_CLOSE", { minDistPips: 10, intendedEntry }, { sl });
+              return res.status(400).json({ message: `SELL SL must be at least 10 pips above entry. Minimum: ${minTpSl.toFixed(5)}` });
+            }
+          }
+        }
+
+        // For pending orders, use the requested price for margin calculation
+        const priceForMargin = isPendingOrder
+          ? parseFloat(String(limitPrice ?? stopPrice ?? entryPrice))
+          : entryPrice;
+
+        // Get global settings for leverage cascade
+        const gs = await db.query.globalSettings.findFirst({
+          where: eq(globalSettings.id, 1),
+        });
+        const globalDefaultLeverage = Number(gs?.defaultLeverage ?? 50);
+
+        // Effective leverage: user override takes precedence over global
+        const effectiveLeverage = Number(updatedUser.leverage ?? globalDefaultLeverage);
+
+        // How much margin will this order need?
+        const neededMargin = requiredMargin(
+          symbolConfig.symbol,
+          tradeLots,
+          priceForMargin,
+          effectiveLeverage,
+        );
+
+        // Stop the order if free margin isn't enough
+        if (Number(updatedUser.freeMargin) < neededMargin) {
+          // AUDIT: Write DECISION REJECT for margin denial
+          try {
+            await writeOrderIntentAudit({
+              correlationId,
+              eventCode: "DECISION",
+              ctx: auditCtx,
+              userId: req.session.userId,
+              decision: "REJECT",
+              symbol: symbolConfig.symbol,
+              side: data.type,
+              orderType: orderType ?? "Market",
+              qtyLots: tradeLots,
+              riskLimit: { marginRequired: neededMargin },
+              riskObserved: { freeMargin: Number(updatedUser.freeMargin) },
+              payload: { rejectReason: "INSUFFICIENT_MARGIN", latencyMs: Date.now() - receivedAtMs },
+            });
+          } catch (auditErr) {
+            console.error("Error writing DECISION REJECT audit:", auditErr);
+          }
+          return res.status(400).json({ message: "Not enough margin available" });
+        }
+
+        // Check max concurrent lots limit (includes both OPEN and PENDING orders)
+        const userSettingsData = await storage.getUserSettingsById(req.session.userId);
+        const globalMaxConcurrentLots = Number(gs?.maxConcurrentLots ?? 50);
+        // Effective max lots: user override takes precedence over global (can exceed)
+        const effectiveMaxConcurrentLots = Number(userSettingsData?.maxConcurrentLots ?? globalMaxConcurrentLots);
+
+        // Get current total lots from open AND pending positions
+        const openTrades = await storage.getOpenTradesByUserId(req.session.userId);
+        const pendingTrades = await storage.getPendingTradesByUserId(req.session.userId);
+        const openLots = openTrades.reduce((sum, t) => sum + Number(t.lots || 0), 0);
+        const pendingLots = pendingTrades.reduce((sum, t) => sum + Number(t.lots || 0), 0);
+        const currentTotalLots = openLots + pendingLots;
+
+        // Check if adding this trade would exceed the limit
+        if (currentTotalLots + tradeLots > effectiveMaxConcurrentLots) {
+          // AUDIT: Write DECISION REJECT for max concurrent lots exceeded
+          try {
+            await writeOrderIntentAudit({
+              correlationId,
+              eventCode: "DECISION",
+              ctx: auditCtx,
+              userId: req.session.userId,
+              decision: "REJECT",
+              symbol: symbolConfig.symbol,
+              side: data.type,
+              orderType: orderType ?? "Market",
+              qtyLots: tradeLots,
+              riskLimit: { maxConcurrentLots: effectiveMaxConcurrentLots },
+              riskObserved: { currentLots: currentTotalLots, requestedLots: tradeLots },
+              payload: { rejectReason: "MAX_CONCURRENT_LOTS_EXCEEDED", openLots, pendingLots, latencyMs: Date.now() - receivedAtMs },
+            });
+          } catch (auditErr) {
+            console.error("Error writing DECISION REJECT audit:", auditErr);
+          }
+          return res.status(409).json({
+            code: "MAX_CONCURRENT_LOTS",
+            message: `Maximum concurrent lots exceeded. Open: ${openLots}, Pending: ${pendingLots}, Requested: ${tradeLots}, Limit: ${effectiveMaxConcurrentLots}`,
+            openLots,
+            pendingLots,
+            currentLots: currentTotalLots,
+            requestedLots: tradeLots,
+            maxLots: effectiveMaxConcurrentLots,
+            limit: effectiveMaxConcurrentLots
+          });
+        }
+
+        // Create trade with appropriate price and status based on order type
+        // Market orders: OPEN immediately at current price
+        // Limit/Stop orders: PENDING, waiting for price trigger
+        const trade = await storage.createTrade({
+          ...data,
+          openPrice: isPendingOrder ? priceForMargin : entryPrice, // Pending orders use limit/stop price as intended entry
+          lots: tradeLots,
+          size: positionSize,
           orderType: orderType ?? "Market",
-          qtyLots: tradeLots,
-          requestedPrice: isPendingOrder ? priceForMargin : entryPrice,
           limitPrice: isLimitOrder ? parseFloat(String(limitPrice)) : null,
           stopPrice: isStopOrder ? parseFloat(String(stopPrice)) : null,
-          takeProfit: req.body.takeProfit ? parseFloat(String(req.body.takeProfit)) : null,
-          stopLoss: req.body.stopLoss ? parseFloat(String(req.body.stopLoss)) : null,
-          quoteBid: quote.bid ? parseFloat(String(quote.bid)) : null,
-          quoteAsk: quote.ask ? parseFloat(String(quote.ask)) : null,
-          quoteMid: quote.mid ? parseFloat(String(quote.mid)) : quote.price ? parseFloat(String(quote.price)) : null,
-          quoteTs,
-          quoteIsStale: quote.isStale ?? false,
-          riskLimit: { maxConcurrentLots: effectiveMaxConcurrentLots, marginRequired: neededMargin },
-          riskObserved: { currentLots: currentTotalLots, freeMargin: Number(updatedUser.freeMargin) },
-          payload: { tradeId: trade.id, latencyMs, status: trade.status, quoteSource },
-        });
-
-        await writeTradeAudit({
-          tradeId: trade.id,
-          eventType: "ORDER_PLACED",
-          eventCategory: "ORDER",
-          ctx: auditCtx,
+          status: isPendingOrder ? "PENDING" : "OPEN",
+          correlationId: correlationId,
           orderId,
           positionId,
-          symbol: symbolConfig.symbol,
-          side: data.type,
-          orderType: orderType ?? "Market",
-          qtyLots: tradeLots,
-          requestedPrice: isPendingOrder ? priceForMargin : entryPrice,
-          limitPrice: isLimitOrder ? parseFloat(String(limitPrice)) : null,
-          stopPrice: isStopOrder ? parseFloat(String(stopPrice)) : null,
-          quoteBid: quote.bid ? parseFloat(String(quote.bid)) : null,
-          quoteAsk: quote.ask ? parseFloat(String(quote.ask)) : null,
-          quoteMid: quote.mid ? parseFloat(String(quote.mid)) : quote.price ? parseFloat(String(quote.price)) : null,
-          quoteTs,
-          quoteSource,
-          riskResult: "PASS",
-          note: isPendingOrder ? `Pending ${normalizedOrderType}` : "Market order placed",
-          payload: {
-            normalizedOrderType,
+          lastExecutionId: openExecutionId,
+          lastActorUserId: req.session.userId,
+          lastActorSessionId: auditCtx.sessionId,
+          lastActorIp: auditCtx.ip,
+          lastActorUserAgent: auditCtx.userAgent,
+          lastActorType: auditCtx.actorType,
+        });
+
+        // AUDIT: Write DECISION event (PASS) after successful trade creation
+        const latencyMs = Date.now() - receivedAtMs;
+        try {
+          await writeOrderIntentAudit({
+            correlationId,
+            eventCode: "DECISION",
+            ctx: auditCtx,
+            userId: req.session.userId,
+            decision: "PASS",
+            symbol: symbolConfig.symbol,
+            side: data.type,
+            orderType: orderType ?? "Market",
+            qtyLots: tradeLots,
+            requestedPrice: isPendingOrder ? priceForMargin : entryPrice,
             limitPrice: isLimitOrder ? parseFloat(String(limitPrice)) : null,
             stopPrice: isStopOrder ? parseFloat(String(stopPrice)) : null,
             takeProfit: req.body.takeProfit ? parseFloat(String(req.body.takeProfit)) : null,
             stopLoss: req.body.stopLoss ? parseFloat(String(req.body.stopLoss)) : null,
-            status: trade.status,
-          },
-        });
-        
-        // For market orders, also write ORDER_FILLED to trade_audit
-        if (!isPendingOrder) {
-          const spread = quote.ask && quote.bid ? parseFloat(String(quote.ask)) - parseFloat(String(quote.bid)) : 0;
-          const requestedPrice = data.type === "BUY" 
-            ? (quote.ask ? parseFloat(String(quote.ask)) : entryPrice)
-            : (quote.bid ? parseFloat(String(quote.bid)) : entryPrice);
-          const slippagePoints = Math.abs(entryPrice - requestedPrice);
-          
+            quoteBid: quote.bid ? parseFloat(String(quote.bid)) : null,
+            quoteAsk: quote.ask ? parseFloat(String(quote.ask)) : null,
+            quoteMid: quote.mid ? parseFloat(String(quote.mid)) : quote.price ? parseFloat(String(quote.price)) : null,
+            quoteTs,
+            quoteIsStale: quote.isStale ?? false,
+            riskLimit: { maxConcurrentLots: effectiveMaxConcurrentLots, marginRequired: neededMargin },
+            riskObserved: { currentLots: currentTotalLots, freeMargin: Number(updatedUser.freeMargin) },
+            payload: { tradeId: trade.id, latencyMs, status: trade.status, quoteSource },
+          });
+
           await writeTradeAudit({
             tradeId: trade.id,
-            eventType: "ORDER_FILLED",
-            eventCategory: "TRADE",
+            eventType: "ORDER_PLACED",
+            eventCategory: "ORDER",
             ctx: auditCtx,
             orderId,
             positionId,
-            executionId: openExecutionId ?? undefined,
             symbol: symbolConfig.symbol,
             side: data.type,
-            orderType: "Market",
+            orderType: orderType ?? "Market",
             qtyLots: tradeLots,
-            requestedPrice,
-            fillPrice: entryPrice,
-            avgFillPrice: entryPrice,
+            requestedPrice: isPendingOrder ? priceForMargin : entryPrice,
+            limitPrice: isLimitOrder ? parseFloat(String(limitPrice)) : null,
+            stopPrice: isStopOrder ? parseFloat(String(stopPrice)) : null,
             quoteBid: quote.bid ? parseFloat(String(quote.bid)) : null,
             quoteAsk: quote.ask ? parseFloat(String(quote.ask)) : null,
-            quoteMid: quote.mid ? parseFloat(String(quote.mid)) : null,
-            quoteSpread: spread,
-            spreadPips: calculateSpreadPips(symbolConfig.symbol, spread),
+            quoteMid: quote.mid ? parseFloat(String(quote.mid)) : quote.price ? parseFloat(String(quote.price)) : null,
             quoteTs,
             quoteSource,
-            slippage: slippagePoints,
-            slippagePips: calculateSlippagePips(symbolConfig.symbol, slippagePoints),
-            slippageReference: "market",
-            latencyMs,
             riskResult: "PASS",
-            note: `Market order filled at ${entryPrice}`,
+            note: isPendingOrder ? `Pending ${normalizedOrderType}` : "Market order placed",
+            payload: {
+              normalizedOrderType,
+              limitPrice: isLimitOrder ? parseFloat(String(limitPrice)) : null,
+              stopPrice: isStopOrder ? parseFloat(String(stopPrice)) : null,
+              takeProfit: req.body.takeProfit ? parseFloat(String(req.body.takeProfit)) : null,
+              stopLoss: req.body.stopLoss ? parseFloat(String(req.body.stopLoss)) : null,
+              status: trade.status,
+            },
           });
+
+          // For market orders, also write ORDER_FILLED to trade_audit
+          if (!isPendingOrder) {
+            const spread = quote.ask && quote.bid ? parseFloat(String(quote.ask)) - parseFloat(String(quote.bid)) : 0;
+            const requestedPrice = data.type === "BUY"
+              ? (quote.ask ? parseFloat(String(quote.ask)) : entryPrice)
+              : (quote.bid ? parseFloat(String(quote.bid)) : entryPrice);
+            const slippagePoints = Math.abs(entryPrice - requestedPrice);
+
+            await writeTradeAudit({
+              tradeId: trade.id,
+              eventType: "ORDER_FILLED",
+              eventCategory: "TRADE",
+              ctx: auditCtx,
+              orderId,
+              positionId,
+              executionId: openExecutionId ?? undefined,
+              symbol: symbolConfig.symbol,
+              side: data.type,
+              orderType: "Market",
+              qtyLots: tradeLots,
+              requestedPrice,
+              fillPrice: entryPrice,
+              avgFillPrice: entryPrice,
+              quoteBid: quote.bid ? parseFloat(String(quote.bid)) : null,
+              quoteAsk: quote.ask ? parseFloat(String(quote.ask)) : null,
+              quoteMid: quote.mid ? parseFloat(String(quote.mid)) : null,
+              quoteSpread: spread,
+              spreadPips: calculateSpreadPips(symbolConfig.symbol, spread),
+              quoteTs,
+              quoteSource,
+              slippage: slippagePoints,
+              slippagePips: calculateSlippagePips(symbolConfig.symbol, slippagePoints),
+              slippageReference: "market",
+              latencyMs,
+              riskResult: "PASS",
+              note: `Market order filled at ${entryPrice}`,
+            });
+          }
+        } catch (auditErr) {
+          console.error("Error writing DECISION/ORDER_FILLED audit:", auditErr);
         }
-      } catch (auditErr) {
-        console.error("Error writing DECISION/ORDER_FILLED audit:", auditErr);
-      }
 
-      // Recalculate margin metrics after order placement (market orders affect margin immediately)
-      try {
-        await recalcAccount(req.session.userId, {
-          emit: true,
-          reason: isPendingOrder ? "PENDING_ORDER_PLACED" : "MARKET_ORDER_PLACED",
-        });
-      } catch (accountError) {
-        console.error("Failed to update account after trade placement:", accountError);
-      }
-
-      // Notify ALL browser sessions for this user that trades changed (multi-device sync)
-      // Include userId in payload so clients can filter, but also send to unauth'd clients
-      const targetUserId = req.session.userId;
-      broadcast(
-        { type: "trades:updated", userId: targetUserId },
-        (client) => client.userId === targetUserId || client.userId === undefined
-      );
-
-      // Grift detection: Record trade observation and check for coordinated hedging
-      if (isPostgres) {
+        // Recalculate margin metrics after order placement (market orders affect margin immediately)
         try {
-          const griftCtx = extractGriftContext(req);
-          await withGriftClient(async (griftDb) => {
-            const griftAuditCtx: GriftAuditContext = {
-              ts: Date.now(),
-              userId: req.session.userId,
-              sessionId: req.sessionID,
-              deviceId: griftCtx.deviceId ?? undefined,
-              deviceIdLegacy: griftCtx.deviceIdLegacy ?? undefined,
-              deviceFp: griftCtx.deviceFp ?? undefined,
-              deviceInstallId: griftCtx.deviceInstallId ?? undefined,
-              clientTz: griftCtx.clientTz ?? undefined,
-              clientLang: griftCtx.clientLang ?? undefined,
-              eventType: "TRADE_SUBMIT",
-              ip: griftCtx.ip ?? undefined,
-              userAgent: griftCtx.userAgent ?? undefined,
-              geoCountry: griftCtx.geoCountry ?? undefined,
-              geoRegion: griftCtx.geoRegion ?? undefined,
-              geoCity: griftCtx.geoCity ?? undefined,
-              latitude: griftCtx.latitude ?? undefined,
-              longitude: griftCtx.longitude ?? undefined,
-              asn: griftCtx.asn ?? undefined,
-              org: griftCtx.org ?? undefined,
-            };
-
-            await onTradeSubmit(
-              griftDb,
-              trade.id,
-              symbolConfig.symbol,
-              data.type,
-              tradeLots,
-              griftAuditCtx
-            );
-
-            try {
-              await maybeApplyAutoEnforcement(griftDb, griftAuditCtx);
-            } catch (enfErr) {
-              console.error("[Grift] Auto-enforcement failed (trade submit):", enfErr);
-            }
+          await recalcAccount(req.session.userId, {
+            emit: true,
+            reason: isPendingOrder ? "PENDING_ORDER_PLACED" : "MARKET_ORDER_PLACED",
           });
-        } catch (griftErr) {
-          console.error("Error in grift detection onTradeSubmit:", griftErr);
+        } catch (accountError) {
+          console.error("Failed to update account after trade placement:", accountError);
         }
-      }
 
-      res.status(201).json(trade);
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        return res.status(400).json({ message: "Invalid input data", errors: error.errors });
+        // Notify ALL browser sessions for this user that trades changed (multi-device sync)
+        // Include userId in payload so clients can filter, but also send to unauth'd clients
+        const targetUserId = req.session.userId;
+        broadcast(
+          { type: "trades:updated", userId: targetUserId },
+          (client) => client.userId === targetUserId || client.userId === undefined
+        );
+
+        // Grift detection: Record trade observation and check for coordinated hedging
+        if (isPostgres) {
+          try {
+            const griftCtx = extractGriftContext(req);
+            await withGriftClient(async (griftDb) => {
+              const griftAuditCtx: GriftAuditContext = {
+                ts: Date.now(),
+                userId: req.session.userId,
+                sessionId: req.sessionID,
+                deviceId: griftCtx.deviceId ?? undefined,
+                deviceIdLegacy: griftCtx.deviceIdLegacy ?? undefined,
+                deviceFp: griftCtx.deviceFp ?? undefined,
+                deviceInstallId: griftCtx.deviceInstallId ?? undefined,
+                clientTz: griftCtx.clientTz ?? undefined,
+                clientLang: griftCtx.clientLang ?? undefined,
+                eventType: "TRADE_SUBMIT",
+                ip: griftCtx.ip ?? undefined,
+                userAgent: griftCtx.userAgent ?? undefined,
+                geoCountry: griftCtx.geoCountry ?? undefined,
+                geoRegion: griftCtx.geoRegion ?? undefined,
+                geoCity: griftCtx.geoCity ?? undefined,
+                latitude: griftCtx.latitude ?? undefined,
+                longitude: griftCtx.longitude ?? undefined,
+                asn: griftCtx.asn ?? undefined,
+                org: griftCtx.org ?? undefined,
+              };
+
+              await onTradeSubmit(
+                griftDb,
+                trade.id,
+                symbolConfig.symbol,
+                data.type,
+                tradeLots,
+                griftAuditCtx
+              );
+
+              try {
+                await maybeApplyAutoEnforcement(griftDb, griftAuditCtx);
+              } catch (enfErr) {
+                console.error("[Grift] Auto-enforcement failed (trade submit):", enfErr);
+              }
+            });
+          } catch (griftErr) {
+            console.error("Error in grift detection onTradeSubmit:", griftErr);
+          }
+        }
+
+        res.status(201).json(trade);
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return res.status(400).json({ message: "Invalid input data", errors: error.errors });
+        }
+        console.error("Create trade error:", error);
+        res.status(500).json({ message: "Internal server error" });
       }
-      console.error("Create trade error:", error);
-      res.status(500).json({ message: "Internal server error" });
-    }
-  });
+    });
 
   app.get("/api/trades", ensureAuth, async (req: Request, res: Response) => {
 
@@ -3293,243 +3351,243 @@ export async function registerRoutes(app: Express): Promise<Server> {
       next();
     },
     async (req: Request, res: Response) => {
-    const tradeId = parseInt(req.params.id);
-    if (isNaN(tradeId)) {
-      return res.status(400).json({ message: "Invalid trade ID" });
-    }
-
-    try {
-      // Get the trade
-      const trade = await storage.getTradeById(tradeId);
-
-      if (!trade) {
-        return res.status(404).json({ message: "Trade not found" });
+      const tradeId = parseInt(req.params.id);
+      if (isNaN(tradeId)) {
+        return res.status(400).json({ message: "Invalid trade ID" });
       }
 
-      if (trade.userId !== req.session.userId) {
-        return res.status(403).json({ message: "Not authorized to close this trade" });
-      }
+      try {
+        // Get the trade
+        const trade = await storage.getTradeById(tradeId);
 
-      if (trade.status === "CLOSED") {
-        return res.status(400).json({ message: "Trade is already closed" });
-      }
-
-      // Check minimum hold time enforcement
-      const minHoldSec = await getEffectiveMinHoldSec(req.session.userId);
-      if (minHoldSec > 0 && trade.openedAt) {
-        let openedAtMs: number;
-        if (typeof trade.openedAt === 'number') {
-          openedAtMs = trade.openedAt < 1e12 ? trade.openedAt * 1000 : trade.openedAt;
-        } else {
-          // Handle various string formats - add 'Z' if no timezone to ensure UTC parsing
-          const dateStr = String(trade.openedAt);
-          const normalizedStr = dateStr.includes('Z') || dateStr.includes('+') || dateStr.includes('-', 10)
-            ? dateStr 
-            : dateStr.replace(' ', 'T') + 'Z';
-          openedAtMs = new Date(normalizedStr).getTime();
+        if (!trade) {
+          return res.status(404).json({ message: "Trade not found" });
         }
-        
-        // Guard against invalid dates
-        if (!isNaN(openedAtMs)) {
-          const holdDurationSec = (Date.now() - openedAtMs) / 1000;
-          
-          if (holdDurationSec < minHoldSec) {
-            const remainingSec = Math.ceil(minHoldSec - holdDurationSec);
-            return res.status(403).json({ 
-              code: "MIN_HOLD_TIME",
-              message: `Trade must be held for at least ${minHoldSec} seconds. ${remainingSec} seconds remaining.`,
-              minHoldSec,
-              holdDurationSec: Math.floor(holdDurationSec),
-              remainingSec,
-            });
+
+        if (trade.userId !== req.session.userId) {
+          return res.status(403).json({ message: "Not authorized to close this trade" });
+        }
+
+        if (trade.status === "CLOSED") {
+          return res.status(400).json({ message: "Trade is already closed" });
+        }
+
+        // Check minimum hold time enforcement
+        const minHoldSec = await getEffectiveMinHoldSec(req.session.userId);
+        if (minHoldSec > 0 && trade.openedAt) {
+          let openedAtMs: number;
+          if (typeof trade.openedAt === 'number') {
+            openedAtMs = trade.openedAt < 1e12 ? trade.openedAt * 1000 : trade.openedAt;
+          } else {
+            // Handle various string formats - add 'Z' if no timezone to ensure UTC parsing
+            const dateStr = String(trade.openedAt);
+            const normalizedStr = dateStr.includes('Z') || dateStr.includes('+') || dateStr.includes('-', 10)
+              ? dateStr
+              : dateStr.replace(' ', 'T') + 'Z';
+            openedAtMs = new Date(normalizedStr).getTime();
+          }
+
+          // Guard against invalid dates
+          if (!isNaN(openedAtMs)) {
+            const holdDurationSec = (Date.now() - openedAtMs) / 1000;
+
+            if (holdDurationSec < minHoldSec) {
+              const remainingSec = Math.ceil(minHoldSec - holdDurationSec);
+              return res.status(403).json({
+                code: "MIN_HOLD_TIME",
+                message: `Trade must be held for at least ${minHoldSec} seconds. ${remainingSec} seconds remaining.`,
+                minHoldSec,
+                holdDurationSec: Math.floor(holdDurationSec),
+                remainingSec,
+              });
+            }
           }
         }
-      }
 
-      // Get symbol config for the trade
-      const symbolConfig = await storage.getSymbolConfigById(trade.symbolId);
-      if (!symbolConfig) {
-        return res.status(404).json({ message: "Symbol configuration not found" });
-      }
-
-      // Use server-authoritative quote service - NEVER accept client-supplied closePrice
-      let q;
-      try {
-        q = await getExecutionQuote(symbolConfig.symbol, trade.type as "BUY" | "SELL", "CLOSE");
-      } catch (quoteError) {
-        return res.status(503).json({ message: "Live price unavailable. Try again shortly." });
-      }
-
-      // Reject if market is closed
-      if (!q.marketOpen) {
-        return res.status(409).json({ message: "Market is closed. Try again when market re-opens." });
-      }
-
-      // Warn but allow stale quotes for manual closes (user explicitly requested close)
-      // Log stale close for monitoring but don't block the user
-      if (q.isStale) {
-        console.warn(`Manual close with stale quote: trade=${tradeId} symbol=${q.symbol} age=${(Date.now() - q.quoteTs.getTime()) / 60000}min`);
-      }
-
-      const closePrice = q.execPrice;
-      const openPrice = parseFloat(String(trade.openPrice));
-      const lots = typeof trade.lots === "string" ? Number(trade.lots) : Number(trade.lots ?? 1);
-
-      // Use proper P/L calculation that handles JPY and cross pairs correctly
-      const pnlUsd = await realizedPnlUsd({
-        symbol: q.symbol,
-        side: trade.type as "BUY" | "SELL",
-        lots,
-        openPrice,
-        closePrice,
-      });
-
-      const profit = pnlUsd;
-      
-      // Build audit context for this close request
-      const closeAuditCtx = buildAuditContext(req);
-      const correlationId = (trade as any).correlationId || generateCorrelationId();
-      const orderId = (trade as any).orderId || generateOrderId();
-      const positionId = (trade as any).positionId || generatePositionId();
-      const executionId = generateExecutionId();
-
-      await db.update(trades)
-        .set({
-          correlationId,
-          orderId,
-          positionId,
-          lastExecutionId: executionId,
-          lastActorUserId: req.session.userId,
-          lastActorSessionId: closeAuditCtx.sessionId,
-          lastActorIp: closeAuditCtx.ip,
-          lastActorUserAgent: closeAuditCtx.userAgent,
-          lastActorType: closeAuditCtx.actorType,
-        })
-        .where(eq(trades.id, tradeId));
-
-      closeAuditCtx.correlationId = correlationId;
-      
-      // Close the trade with audit trail
-      const closedTrade = await storage.closeTrade(
-        tradeId, 
-        closePrice, 
-        profit.toFixed(2),
-        {
-          closeReason: "MANUAL",
-          closeQuoteTs: q.quoteTs,
-          closeSource: q.source,
-          closeBid: q.bid,
-          closeAsk: q.ask,
-          closeMid: q.mid,
-          closeSpread: q.spread,
+        // Get symbol config for the trade
+        const symbolConfig = await storage.getSymbolConfigById(trade.symbolId);
+        if (!symbolConfig) {
+          return res.status(404).json({ message: "Symbol configuration not found" });
         }
-      );
-      
-      // AUDIT: Write POSITION_CLOSED event with full provenance
-      try {
-        const slippagePoints = 0; // No slippage on manual close
-        await writeTradeAudit({
-          tradeId,
-          eventType: "POSITION_CLOSED",
-          eventCategory: "TRADE",
-          ctx: closeAuditCtx,
-          orderId,
-          positionId,
-          executionId,
-          symbol: q.symbol,
-          side: trade.type as string,
-          qtyLots: lots,
-          requestedPrice: closePrice,
-          fillPrice: closePrice,
-          avgFillPrice: closePrice,
-          quoteBid: q.bid,
-          quoteAsk: q.ask,
-          quoteMid: q.mid,
-          quoteSpread: q.spread,
-          quoteTs: q.quoteTs,
-          quoteSource: q.source,
-          spreadPips: calculateSpreadPips(q.symbol, q.spread),
-          slippage: slippagePoints,
-          slippagePips: 0,
-          slippageReference: "manual_close",
-          riskResult: "PASS",
-          reasonCode: "MANUAL",
-          note: `Manual close at ${closePrice}, P/L: ${profit.toFixed(2)}`,
-          payload: { profit: profit.toFixed(2), openPrice, closeReason: "MANUAL" },
-        });
-      } catch (auditErr) {
-        console.error("Error writing POSITION_CLOSED audit:", auditErr);
-      }
-      
-      // Update account balance with realized P/L and recalculate margin metrics
-      try {
-        const user = await storage.getUserById(trade.userId);
-        if (user) {
-          const previousBalance = parseFloat(user.balance);
-          const realizedPnL = parseFloat(closedTrade.profit ?? "0");
-          const newBalance = (previousBalance + realizedPnL).toFixed(2);
 
-          await storage.updateUserBalance(user.id, newBalance);
-          await recalcAccount(user.id, { emit: true, reason: "TRADE_CLOSED" });
-        }
-      } catch (accountError) {
-        console.error("Failed to update account after closing trade:", accountError);
-      }
-      
-      // Notify ALL browser sessions for this user that trades changed (multi-device sync)
-      // Include userId in payload so clients can filter, but also send to unauth'd clients
-      const targetUserId = req.session.userId;
-      broadcast(
-        { type: "trades:updated", userId: targetUserId },
-        (client) => client.userId === targetUserId || client.userId === undefined
-      );
-
-      // Grift detection: record close activity (supports churn/concurrency + identity linking)
-      if (isPostgres) {
+        // Use server-authoritative quote service - NEVER accept client-supplied closePrice
+        let q;
         try {
-          const griftCtx = extractGriftContext(req);
-          await withGriftClient(async (griftDb) => {
-            const griftAuditCtx: GriftAuditContext = {
-              ts: Date.now(),
-              userId: req.session.userId,
-              sessionId: req.sessionID,
-              deviceId: griftCtx.deviceId ?? undefined,
-              deviceIdLegacy: griftCtx.deviceIdLegacy ?? undefined,
-              deviceFp: griftCtx.deviceFp ?? undefined,
-              deviceInstallId: griftCtx.deviceInstallId ?? undefined,
-              clientTz: griftCtx.clientTz ?? undefined,
-              clientLang: griftCtx.clientLang ?? undefined,
-              eventType: "TRADE_CLOSE",
-              ip: griftCtx.ip ?? undefined,
-              userAgent: griftCtx.userAgent ?? undefined,
-              geoCountry: griftCtx.geoCountry ?? undefined,
-              geoRegion: griftCtx.geoRegion ?? undefined,
-              geoCity: griftCtx.geoCity ?? undefined,
-              latitude: griftCtx.latitude ?? undefined,
-              longitude: griftCtx.longitude ?? undefined,
-              asn: griftCtx.asn ?? undefined,
-              org: griftCtx.org ?? undefined,
-            };
-
-            await onSessionActivity(griftDb, griftAuditCtx);
-
-            try {
-              await maybeApplyAutoEnforcement(griftDb, griftAuditCtx);
-            } catch (enfErr) {
-              console.error("[Grift] Auto-enforcement failed (trade close):", enfErr);
-            }
-          });
-        } catch (griftErr) {
-          console.error("Error in grift detection on trade close:", griftErr);
+          q = await getExecutionQuote(symbolConfig.symbol, trade.type as "BUY" | "SELL", "CLOSE");
+        } catch (quoteError) {
+          return res.status(503).json({ message: "Live price unavailable. Try again shortly." });
         }
+
+        // Reject if market is closed
+        if (!q.marketOpen) {
+          return res.status(409).json({ message: "Market is closed. Try again when market re-opens." });
+        }
+
+        // Warn but allow stale quotes for manual closes (user explicitly requested close)
+        // Log stale close for monitoring but don't block the user
+        if (q.isStale) {
+          console.warn(`Manual close with stale quote: trade=${tradeId} symbol=${q.symbol} age=${(Date.now() - q.quoteTs.getTime()) / 60000}min`);
+        }
+
+        const closePrice = q.execPrice;
+        const openPrice = parseFloat(String(trade.openPrice));
+        const lots = typeof trade.lots === "string" ? Number(trade.lots) : Number(trade.lots ?? 1);
+
+        // Use proper P/L calculation that handles JPY and cross pairs correctly
+        const pnlUsd = await realizedPnlUsd({
+          symbol: q.symbol,
+          side: trade.type as "BUY" | "SELL",
+          lots,
+          openPrice,
+          closePrice,
+        });
+
+        const profit = pnlUsd;
+
+        // Build audit context for this close request
+        const closeAuditCtx = buildAuditContext(req);
+        const correlationId = (trade as any).correlationId || generateCorrelationId();
+        const orderId = (trade as any).orderId || generateOrderId();
+        const positionId = (trade as any).positionId || generatePositionId();
+        const executionId = generateExecutionId();
+
+        await db.update(trades)
+          .set({
+            correlationId,
+            orderId,
+            positionId,
+            lastExecutionId: executionId,
+            lastActorUserId: req.session.userId,
+            lastActorSessionId: closeAuditCtx.sessionId,
+            lastActorIp: closeAuditCtx.ip,
+            lastActorUserAgent: closeAuditCtx.userAgent,
+            lastActorType: closeAuditCtx.actorType,
+          })
+          .where(eq(trades.id, tradeId));
+
+        closeAuditCtx.correlationId = correlationId;
+
+        // Close the trade with audit trail
+        const closedTrade = await storage.closeTrade(
+          tradeId,
+          closePrice,
+          profit.toFixed(2),
+          {
+            closeReason: "MANUAL",
+            closeQuoteTs: q.quoteTs,
+            closeSource: q.source,
+            closeBid: q.bid,
+            closeAsk: q.ask,
+            closeMid: q.mid,
+            closeSpread: q.spread,
+          }
+        );
+
+        // AUDIT: Write POSITION_CLOSED event with full provenance
+        try {
+          const slippagePoints = 0; // No slippage on manual close
+          await writeTradeAudit({
+            tradeId,
+            eventType: "POSITION_CLOSED",
+            eventCategory: "TRADE",
+            ctx: closeAuditCtx,
+            orderId,
+            positionId,
+            executionId,
+            symbol: q.symbol,
+            side: trade.type as string,
+            qtyLots: lots,
+            requestedPrice: closePrice,
+            fillPrice: closePrice,
+            avgFillPrice: closePrice,
+            quoteBid: q.bid,
+            quoteAsk: q.ask,
+            quoteMid: q.mid,
+            quoteSpread: q.spread,
+            quoteTs: q.quoteTs,
+            quoteSource: q.source,
+            spreadPips: calculateSpreadPips(q.symbol, q.spread),
+            slippage: slippagePoints,
+            slippagePips: 0,
+            slippageReference: "manual_close",
+            riskResult: "PASS",
+            reasonCode: "MANUAL",
+            note: `Manual close at ${closePrice}, P/L: ${profit.toFixed(2)}`,
+            payload: { profit: profit.toFixed(2), openPrice, closeReason: "MANUAL" },
+          });
+        } catch (auditErr) {
+          console.error("Error writing POSITION_CLOSED audit:", auditErr);
+        }
+
+        // Update account balance with realized P/L and recalculate margin metrics
+        try {
+          const user = await storage.getUserById(trade.userId);
+          if (user) {
+            const previousBalance = parseFloat(user.balance);
+            const realizedPnL = parseFloat(closedTrade.profit ?? "0");
+            const newBalance = (previousBalance + realizedPnL).toFixed(2);
+
+            await storage.updateUserBalance(user.id, newBalance);
+            await recalcAccount(user.id, { emit: true, reason: "TRADE_CLOSED" });
+          }
+        } catch (accountError) {
+          console.error("Failed to update account after closing trade:", accountError);
+        }
+
+        // Notify ALL browser sessions for this user that trades changed (multi-device sync)
+        // Include userId in payload so clients can filter, but also send to unauth'd clients
+        const targetUserId = req.session.userId;
+        broadcast(
+          { type: "trades:updated", userId: targetUserId },
+          (client) => client.userId === targetUserId || client.userId === undefined
+        );
+
+        // Grift detection: record close activity (supports churn/concurrency + identity linking)
+        if (isPostgres) {
+          try {
+            const griftCtx = extractGriftContext(req);
+            await withGriftClient(async (griftDb) => {
+              const griftAuditCtx: GriftAuditContext = {
+                ts: Date.now(),
+                userId: req.session.userId,
+                sessionId: req.sessionID,
+                deviceId: griftCtx.deviceId ?? undefined,
+                deviceIdLegacy: griftCtx.deviceIdLegacy ?? undefined,
+                deviceFp: griftCtx.deviceFp ?? undefined,
+                deviceInstallId: griftCtx.deviceInstallId ?? undefined,
+                clientTz: griftCtx.clientTz ?? undefined,
+                clientLang: griftCtx.clientLang ?? undefined,
+                eventType: "TRADE_CLOSE",
+                ip: griftCtx.ip ?? undefined,
+                userAgent: griftCtx.userAgent ?? undefined,
+                geoCountry: griftCtx.geoCountry ?? undefined,
+                geoRegion: griftCtx.geoRegion ?? undefined,
+                geoCity: griftCtx.geoCity ?? undefined,
+                latitude: griftCtx.latitude ?? undefined,
+                longitude: griftCtx.longitude ?? undefined,
+                asn: griftCtx.asn ?? undefined,
+                org: griftCtx.org ?? undefined,
+              };
+
+              await onSessionActivity(griftDb, griftAuditCtx);
+
+              try {
+                await maybeApplyAutoEnforcement(griftDb, griftAuditCtx);
+              } catch (enfErr) {
+                console.error("[Grift] Auto-enforcement failed (trade close):", enfErr);
+              }
+            });
+          } catch (griftErr) {
+            console.error("Error in grift detection on trade close:", griftErr);
+          }
+        }
+
+        res.json(closedTrade);
+      } catch (error) {
+        console.error("Close trade error:", error);
+        res.status(500).json({ message: "Failed to close trade" });
       }
-      
-      res.json(closedTrade);
-    } catch (error) {
-      console.error("Close trade error:", error);
-      res.status(500).json({ message: "Failed to close trade" });
-    }
-  });
+    });
 
   // Update take profit and stop loss for an open trade
   app.patch(
@@ -3543,143 +3601,143 @@ export async function registerRoutes(app: Express): Promise<Server> {
       next();
     },
     async (req: Request, res: Response) => {
-    try {
-      const session = req.session as SessionData;
-
-      const tradeId = parseInt(req.params.id);
-      const { takeProfit, stopLoss } = req.body;
-
-      const trade = await storage.getTradeById(tradeId);
-      if (!trade) {
-        return res.status(404).json({ message: "Trade not found" });
-      }
-
-      if (trade.userId !== session.userId) {
-        return res.status(403).json({ message: "Not authorized" });
-      }
-
-      if (trade.status !== "OPEN" && trade.status !== "PENDING") {
-        return res.status(400).json({ message: "Trade is not open or pending" });
-      }
-
-      // Store previous values for audit
-      const prevTp = trade.takeProfit ? parseFloat(String(trade.takeProfit)) : null;
-      const prevSl = trade.stopLoss ? parseFloat(String(trade.stopLoss)) : null;
-      
-      const updatedTrade = await storage.updateTradeTargets(tradeId, takeProfit, stopLoss);
-      
-      // AUDIT: Write TARGETS_UPDATED event
       try {
-        const targetsAuditCtx = buildAuditContext(req);
-        const correlationId = (trade as any).correlationId || generateCorrelationId();
-        const orderId = (trade as any).orderId || generateOrderId();
-        const positionId = (trade as any).positionId || generatePositionId();
+        const session = req.session as SessionData;
 
-        await db.update(trades)
-          .set({
-            correlationId,
+        const tradeId = parseInt(req.params.id);
+        const { takeProfit, stopLoss } = req.body;
+
+        const trade = await storage.getTradeById(tradeId);
+        if (!trade) {
+          return res.status(404).json({ message: "Trade not found" });
+        }
+
+        if (trade.userId !== session.userId) {
+          return res.status(403).json({ message: "Not authorized" });
+        }
+
+        if (trade.status !== "OPEN" && trade.status !== "PENDING") {
+          return res.status(400).json({ message: "Trade is not open or pending" });
+        }
+
+        // Store previous values for audit
+        const prevTp = trade.takeProfit ? parseFloat(String(trade.takeProfit)) : null;
+        const prevSl = trade.stopLoss ? parseFloat(String(trade.stopLoss)) : null;
+
+        const updatedTrade = await storage.updateTradeTargets(tradeId, takeProfit, stopLoss);
+
+        // AUDIT: Write TARGETS_UPDATED event
+        try {
+          const targetsAuditCtx = buildAuditContext(req);
+          const correlationId = (trade as any).correlationId || generateCorrelationId();
+          const orderId = (trade as any).orderId || generateOrderId();
+          const positionId = (trade as any).positionId || generatePositionId();
+
+          await db.update(trades)
+            .set({
+              correlationId,
+              orderId,
+              positionId,
+              lastActorUserId: session.userId,
+              lastActorSessionId: targetsAuditCtx.sessionId,
+              lastActorIp: targetsAuditCtx.ip,
+              lastActorUserAgent: targetsAuditCtx.userAgent,
+              lastActorType: targetsAuditCtx.actorType,
+            })
+            .where(eq(trades.id, tradeId));
+
+          targetsAuditCtx.correlationId = correlationId;
+
+          const symbol = (trade as any).symbol?.symbol ?? null;
+          let q = null;
+          if (symbol) {
+            try {
+              q = await getExecutionQuote(symbol, trade.type as "BUY" | "SELL", "OPEN");
+            } catch { }
+          }
+
+          await writeTradeAudit({
+            tradeId,
+            eventType: "TARGETS_UPDATED",
+            eventCategory: "MODIFICATION",
+            ctx: targetsAuditCtx,
             orderId,
             positionId,
-            lastActorUserId: session.userId,
-            lastActorSessionId: targetsAuditCtx.sessionId,
-            lastActorIp: targetsAuditCtx.ip,
-            lastActorUserAgent: targetsAuditCtx.userAgent,
-            lastActorType: targetsAuditCtx.actorType,
-          })
-          .where(eq(trades.id, tradeId));
-
-        targetsAuditCtx.correlationId = correlationId;
-
-        const symbol = (trade as any).symbol?.symbol ?? null;
-        let q = null;
-        if (symbol) {
-          try {
-            q = await getExecutionQuote(symbol, trade.type as "BUY" | "SELL", "OPEN");
-          } catch {}
-        }
-        
-        await writeTradeAudit({
-          tradeId,
-          eventType: "TARGETS_UPDATED",
-          eventCategory: "MODIFICATION",
-          ctx: targetsAuditCtx,
-          orderId,
-          positionId,
-          symbol,
-          side: trade.type as string,
-          stopPrice: stopLoss ? parseFloat(String(stopLoss)) : null,
-          quoteBid: q?.bid ?? null,
-          quoteAsk: q?.ask ?? null,
-          quoteMid: q?.mid ?? null,
-          quoteSpread: q?.spread ?? null,
-          spreadPips: q ? calculateSpreadPips(symbol || "", q.spread) : null,
-          quoteTs: q?.quoteTs ?? null,
-          quoteSource: q?.source ?? null,
-          note: `TP: ${prevTp ?? 'none'} → ${takeProfit ?? 'none'}, SL: ${prevSl ?? 'none'} → ${stopLoss ?? 'none'}`,
-          payload: { 
-            previousTakeProfit: prevTp,
-            previousStopLoss: prevSl,
-            newTakeProfit: takeProfit ? parseFloat(String(takeProfit)) : null,
-            newStopLoss: stopLoss ? parseFloat(String(stopLoss)) : null,
-          },
-        });
-      } catch (auditErr) {
-        console.error("Error writing TARGETS_UPDATED audit:", auditErr);
-      }
-
-      // Notify ALL browser sessions for this user that trades changed (multi-device sync)
-      const targetUserId = session.userId;
-      broadcast(
-        { type: "trades:updated", userId: targetUserId },
-        (client) => client.userId === targetUserId || client.userId === undefined
-      );
-
-      // Grift detection: record modification activity (supports churn/concurrency + identity linking)
-      if (isPostgres) {
-        try {
-          const griftCtx = extractGriftContext(req);
-          await withGriftClient(async (griftDb) => {
-            const griftAuditCtx: GriftAuditContext = {
-              ts: Date.now(),
-              userId: session.userId,
-              sessionId: req.sessionID,
-              deviceId: griftCtx.deviceId ?? undefined,
-              deviceIdLegacy: griftCtx.deviceIdLegacy ?? undefined,
-              deviceFp: griftCtx.deviceFp ?? undefined,
-              deviceInstallId: griftCtx.deviceInstallId ?? undefined,
-              clientTz: griftCtx.clientTz ?? undefined,
-              clientLang: griftCtx.clientLang ?? undefined,
-              eventType: "TRADE_TARGETS_UPDATE",
-              ip: griftCtx.ip ?? undefined,
-              userAgent: griftCtx.userAgent ?? undefined,
-              geoCountry: griftCtx.geoCountry ?? undefined,
-              geoRegion: griftCtx.geoRegion ?? undefined,
-              geoCity: griftCtx.geoCity ?? undefined,
-              latitude: griftCtx.latitude ?? undefined,
-              longitude: griftCtx.longitude ?? undefined,
-              asn: griftCtx.asn ?? undefined,
-              org: griftCtx.org ?? undefined,
-            };
-
-            await onSessionActivity(griftDb, griftAuditCtx);
-
-            try {
-              await maybeApplyAutoEnforcement(griftDb, griftAuditCtx);
-            } catch (enfErr) {
-              console.error("[Grift] Auto-enforcement failed (trade targets update):", enfErr);
-            }
+            symbol,
+            side: trade.type as string,
+            stopPrice: stopLoss ? parseFloat(String(stopLoss)) : null,
+            quoteBid: q?.bid ?? null,
+            quoteAsk: q?.ask ?? null,
+            quoteMid: q?.mid ?? null,
+            quoteSpread: q?.spread ?? null,
+            spreadPips: q ? calculateSpreadPips(symbol || "", q.spread) : null,
+            quoteTs: q?.quoteTs ?? null,
+            quoteSource: q?.source ?? null,
+            note: `TP: ${prevTp ?? 'none'} → ${takeProfit ?? 'none'}, SL: ${prevSl ?? 'none'} → ${stopLoss ?? 'none'}`,
+            payload: {
+              previousTakeProfit: prevTp,
+              previousStopLoss: prevSl,
+              newTakeProfit: takeProfit ? parseFloat(String(takeProfit)) : null,
+              newStopLoss: stopLoss ? parseFloat(String(stopLoss)) : null,
+            },
           });
-        } catch (griftErr) {
-          console.error("Error in grift detection on trade targets update:", griftErr);
+        } catch (auditErr) {
+          console.error("Error writing TARGETS_UPDATED audit:", auditErr);
         }
+
+        // Notify ALL browser sessions for this user that trades changed (multi-device sync)
+        const targetUserId = session.userId;
+        broadcast(
+          { type: "trades:updated", userId: targetUserId },
+          (client) => client.userId === targetUserId || client.userId === undefined
+        );
+
+        // Grift detection: record modification activity (supports churn/concurrency + identity linking)
+        if (isPostgres) {
+          try {
+            const griftCtx = extractGriftContext(req);
+            await withGriftClient(async (griftDb) => {
+              const griftAuditCtx: GriftAuditContext = {
+                ts: Date.now(),
+                userId: session.userId,
+                sessionId: req.sessionID,
+                deviceId: griftCtx.deviceId ?? undefined,
+                deviceIdLegacy: griftCtx.deviceIdLegacy ?? undefined,
+                deviceFp: griftCtx.deviceFp ?? undefined,
+                deviceInstallId: griftCtx.deviceInstallId ?? undefined,
+                clientTz: griftCtx.clientTz ?? undefined,
+                clientLang: griftCtx.clientLang ?? undefined,
+                eventType: "TRADE_TARGETS_UPDATE",
+                ip: griftCtx.ip ?? undefined,
+                userAgent: griftCtx.userAgent ?? undefined,
+                geoCountry: griftCtx.geoCountry ?? undefined,
+                geoRegion: griftCtx.geoRegion ?? undefined,
+                geoCity: griftCtx.geoCity ?? undefined,
+                latitude: griftCtx.latitude ?? undefined,
+                longitude: griftCtx.longitude ?? undefined,
+                asn: griftCtx.asn ?? undefined,
+                org: griftCtx.org ?? undefined,
+              };
+
+              await onSessionActivity(griftDb, griftAuditCtx);
+
+              try {
+                await maybeApplyAutoEnforcement(griftDb, griftAuditCtx);
+              } catch (enfErr) {
+                console.error("[Grift] Auto-enforcement failed (trade targets update):", enfErr);
+              }
+            });
+          } catch (griftErr) {
+            console.error("Error in grift detection on trade targets update:", griftErr);
+          }
+        }
+
+        res.json(updatedTrade);
+      } catch (error) {
+        console.error("Error updating trade targets:", error);
+        res.status(500).json({ message: "Failed to update trade targets" });
       }
-      
-      res.json(updatedTrade);
-    } catch (error) {
-      console.error("Error updating trade targets:", error);
-      res.status(500).json({ message: "Failed to update trade targets" });
-    }
-  });
+    });
 
   // Cancel a pending trade
   app.patch(
@@ -3693,140 +3751,140 @@ export async function registerRoutes(app: Express): Promise<Server> {
       next();
     },
     async (req: Request, res: Response) => {
-    try {
-      const session = req.session as SessionData;
+      try {
+        const session = req.session as SessionData;
 
-      const tradeId = parseInt(req.params.id);
-      const trade = await storage.getTradeById(tradeId);
-      
-      if (!trade) {
-        return res.status(404).json({ message: "Trade not found" });
-      }
+        const tradeId = parseInt(req.params.id);
+        const trade = await storage.getTradeById(tradeId);
 
-      if (trade.userId !== session.userId) {
-        return res.status(403).json({ message: "Not authorized" });
-      }
+        if (!trade) {
+          return res.status(404).json({ message: "Trade not found" });
+        }
 
-      if (trade.status !== "PENDING") {
-        return res.status(400).json({ message: "Trade is not pending" });
-      }
+        if (trade.userId !== session.userId) {
+          return res.status(403).json({ message: "Not authorized" });
+        }
 
-      // Build audit context
-      const cancelAuditCtx = buildAuditContext(req);
-      const correlationId = (trade as any).correlationId || generateCorrelationId();
-      const orderId = (trade as any).orderId || generateOrderId();
-      const positionId = (trade as any).positionId || generatePositionId();
+        if (trade.status !== "PENDING") {
+          return res.status(400).json({ message: "Trade is not pending" });
+        }
 
-      await db.update(trades)
-        .set({
-          correlationId,
-          orderId,
-          positionId,
-          lastActorUserId: session.userId,
-          lastActorSessionId: cancelAuditCtx.sessionId,
-          lastActorIp: cancelAuditCtx.ip,
-          lastActorUserAgent: cancelAuditCtx.userAgent,
-          lastActorType: cancelAuditCtx.actorType,
-        })
-        .where(eq(trades.id, tradeId));
+        // Build audit context
+        const cancelAuditCtx = buildAuditContext(req);
+        const correlationId = (trade as any).correlationId || generateCorrelationId();
+        const orderId = (trade as any).orderId || generateOrderId();
+        const positionId = (trade as any).positionId || generatePositionId();
 
-      cancelAuditCtx.correlationId = correlationId;
-
-      const symbol = (trade as any).symbol?.symbol ?? null;
-      let q = null;
-      if (symbol) {
-        try {
-          q = await getExecutionQuote(symbol, trade.type as "BUY" | "SELL", "OPEN");
-        } catch {}
-      }
-      
-      const canceledTrade = await storage.cancelTrade(tradeId);
-      
-      // AUDIT: Write ORDER_CANCELED with full provenance
-      if (canceledTrade) {
-        try {
-          await writeTradeAudit({
-            tradeId,
-            eventType: "ORDER_CANCELED",
-            eventCategory: "TRADE",
-            ctx: cancelAuditCtx,
+        await db.update(trades)
+          .set({
+            correlationId,
             orderId,
             positionId,
-            symbol,
-            side: trade.type as string,
-            orderType: trade.orderType as string,
-            qtyLots: typeof trade.lots === "string" ? Number(trade.lots) : Number(trade.lots ?? 1),
-            limitPrice: trade.limitPrice ? parseFloat(String(trade.limitPrice)) : null,
-            stopPrice: trade.stopPrice ? parseFloat(String(trade.stopPrice)) : null,
-            quoteBid: q?.bid ?? null,
-            quoteAsk: q?.ask ?? null,
-            quoteMid: q?.mid ?? null,
-            quoteSpread: q?.spread ?? null,
-            spreadPips: q ? calculateSpreadPips(symbol || "", q.spread) : null,
-            quoteTs: q?.quoteTs ?? null,
-            quoteSource: q?.source ?? null,
-            reasonCode: "CANCELED_BY_USER",
-            note: `User canceled pending ${trade.orderType} order`,
-            payload: { originalOrderType: trade.orderType },
-          });
-        } catch (auditErr) {
-          console.error("Error writing ORDER_CANCELED audit:", auditErr);
+            lastActorUserId: session.userId,
+            lastActorSessionId: cancelAuditCtx.sessionId,
+            lastActorIp: cancelAuditCtx.ip,
+            lastActorUserAgent: cancelAuditCtx.userAgent,
+            lastActorType: cancelAuditCtx.actorType,
+          })
+          .where(eq(trades.id, tradeId));
+
+        cancelAuditCtx.correlationId = correlationId;
+
+        const symbol = (trade as any).symbol?.symbol ?? null;
+        let q = null;
+        if (symbol) {
+          try {
+            q = await getExecutionQuote(symbol, trade.type as "BUY" | "SELL", "OPEN");
+          } catch { }
         }
-      }
 
-      // Notify ALL browser sessions for this user that trades changed (multi-device sync)
-      const targetUserId = session.userId;
-      broadcast(
-        { type: "trades:updated", userId: targetUserId },
-        (client) => client.userId === targetUserId || client.userId === undefined
-      );
+        const canceledTrade = await storage.cancelTrade(tradeId);
 
-      // Grift detection: record cancel activity (supports churn/concurrency + identity linking)
-      if (isPostgres) {
-        try {
-          const griftCtx = extractGriftContext(req);
-          await withGriftClient(async (griftDb) => {
-            const griftAuditCtx: GriftAuditContext = {
-              ts: Date.now(),
-              userId: session.userId,
-              sessionId: req.sessionID,
-              deviceId: griftCtx.deviceId ?? undefined,
-              deviceIdLegacy: griftCtx.deviceIdLegacy ?? undefined,
-              deviceFp: griftCtx.deviceFp ?? undefined,
-              deviceInstallId: griftCtx.deviceInstallId ?? undefined,
-              clientTz: griftCtx.clientTz ?? undefined,
-              clientLang: griftCtx.clientLang ?? undefined,
-              eventType: "TRADE_CANCEL_PENDING",
-              ip: griftCtx.ip ?? undefined,
-              userAgent: griftCtx.userAgent ?? undefined,
-              geoCountry: griftCtx.geoCountry ?? undefined,
-              geoRegion: griftCtx.geoRegion ?? undefined,
-              geoCity: griftCtx.geoCity ?? undefined,
-              latitude: griftCtx.latitude ?? undefined,
-              longitude: griftCtx.longitude ?? undefined,
-              asn: griftCtx.asn ?? undefined,
-              org: griftCtx.org ?? undefined,
-            };
-
-            await onSessionActivity(griftDb, griftAuditCtx);
-
-            try {
-              await maybeApplyAutoEnforcement(griftDb, griftAuditCtx);
-            } catch (enfErr) {
-              console.error("[Grift] Auto-enforcement failed (trade cancel):", enfErr);
-            }
-          });
-        } catch (griftErr) {
-          console.error("Error in grift detection on trade cancel:", griftErr);
+        // AUDIT: Write ORDER_CANCELED with full provenance
+        if (canceledTrade) {
+          try {
+            await writeTradeAudit({
+              tradeId,
+              eventType: "ORDER_CANCELED",
+              eventCategory: "TRADE",
+              ctx: cancelAuditCtx,
+              orderId,
+              positionId,
+              symbol,
+              side: trade.type as string,
+              orderType: trade.orderType as string,
+              qtyLots: typeof trade.lots === "string" ? Number(trade.lots) : Number(trade.lots ?? 1),
+              limitPrice: trade.limitPrice ? parseFloat(String(trade.limitPrice)) : null,
+              stopPrice: trade.stopPrice ? parseFloat(String(trade.stopPrice)) : null,
+              quoteBid: q?.bid ?? null,
+              quoteAsk: q?.ask ?? null,
+              quoteMid: q?.mid ?? null,
+              quoteSpread: q?.spread ?? null,
+              spreadPips: q ? calculateSpreadPips(symbol || "", q.spread) : null,
+              quoteTs: q?.quoteTs ?? null,
+              quoteSource: q?.source ?? null,
+              reasonCode: "CANCELED_BY_USER",
+              note: `User canceled pending ${trade.orderType} order`,
+              payload: { originalOrderType: trade.orderType },
+            });
+          } catch (auditErr) {
+            console.error("Error writing ORDER_CANCELED audit:", auditErr);
+          }
         }
+
+        // Notify ALL browser sessions for this user that trades changed (multi-device sync)
+        const targetUserId = session.userId;
+        broadcast(
+          { type: "trades:updated", userId: targetUserId },
+          (client) => client.userId === targetUserId || client.userId === undefined
+        );
+
+        // Grift detection: record cancel activity (supports churn/concurrency + identity linking)
+        if (isPostgres) {
+          try {
+            const griftCtx = extractGriftContext(req);
+            await withGriftClient(async (griftDb) => {
+              const griftAuditCtx: GriftAuditContext = {
+                ts: Date.now(),
+                userId: session.userId,
+                sessionId: req.sessionID,
+                deviceId: griftCtx.deviceId ?? undefined,
+                deviceIdLegacy: griftCtx.deviceIdLegacy ?? undefined,
+                deviceFp: griftCtx.deviceFp ?? undefined,
+                deviceInstallId: griftCtx.deviceInstallId ?? undefined,
+                clientTz: griftCtx.clientTz ?? undefined,
+                clientLang: griftCtx.clientLang ?? undefined,
+                eventType: "TRADE_CANCEL_PENDING",
+                ip: griftCtx.ip ?? undefined,
+                userAgent: griftCtx.userAgent ?? undefined,
+                geoCountry: griftCtx.geoCountry ?? undefined,
+                geoRegion: griftCtx.geoRegion ?? undefined,
+                geoCity: griftCtx.geoCity ?? undefined,
+                latitude: griftCtx.latitude ?? undefined,
+                longitude: griftCtx.longitude ?? undefined,
+                asn: griftCtx.asn ?? undefined,
+                org: griftCtx.org ?? undefined,
+              };
+
+              await onSessionActivity(griftDb, griftAuditCtx);
+
+              try {
+                await maybeApplyAutoEnforcement(griftDb, griftAuditCtx);
+              } catch (enfErr) {
+                console.error("[Grift] Auto-enforcement failed (trade cancel):", enfErr);
+              }
+            });
+          } catch (griftErr) {
+            console.error("Error in grift detection on trade cancel:", griftErr);
+          }
+        }
+
+        res.json(canceledTrade);
+      } catch (error) {
+        console.error("Error canceling trade:", error);
+        res.status(500).json({ message: "Failed to cancel trade" });
       }
-      
-      res.json(canceledTrade);
-    } catch (error) {
-      console.error("Error canceling trade:", error);
-      res.status(500).json({ message: "Failed to cancel trade" });
-    }
-  });
+    });
 
   // Get pending trades for current user
   app.get("/api/trades/pending", async (req: Request, res: Response) => {
@@ -3874,7 +3932,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/journal", ensureAuth, async (req: Request, res: Response) => {
     try {
       const { tradeId, tradeIds, note, mood, tags, attachmentUrl } = req.body;
-      
+
       // Validate note
       const noteClean = String(note || "").trim();
       if (!noteClean || noteClean.length < 3) {
@@ -3938,7 +3996,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         tags: validatedTags,
         attachmentUrl: attachmentUrl ? String(attachmentUrl).slice(0, 2000) : null,
       });
-      
+
       res.status(201).json(entry);
     } catch (error) {
       console.error("Create journal entry error:", error);
@@ -3958,7 +4016,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const noteClean = note !== undefined ? String(note || "").trim() : undefined;
       const moodClean =
         mood !== undefined ? (mood ? String(mood).trim().toLowerCase() : null) : undefined;
-      
+
       // Validate note if provided
       if (noteClean !== undefined) {
         if (!noteClean || noteClean.length < 3) {
@@ -4063,11 +4121,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         tradeId: validatedTradeId,
         tradeIds: validatedTradeIds,
       });
-      
+
       if (!updated) {
         return res.status(404).json({ message: "Entry not found or access denied" });
       }
-      
+
       res.json(updated);
     } catch (error) {
       const body = req.body ?? {};
@@ -4099,11 +4157,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Storage layer ensures only entries belonging to req.session.userId can be deleted
       const deleted = await storage.deleteJournalEntry(entryId, req.session.userId!);
-      
+
       if (!deleted) {
         return res.status(404).json({ message: "Entry not found or access denied" });
       }
-      
+
       res.json({ success: true });
     } catch (error) {
       console.error("Delete journal entry error:", error);
@@ -4122,7 +4180,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if ((cfg as any)?.staleThresholdMs) staleThresholdMs = Number((cfg as any).staleThresholdMs);
       if ((cfg as any)?.fxRolloverTz) fxRolloverTz = String((cfg as any).fxRolloverTz);
       if ((cfg as any)?.fxRolloverTime) fxRolloverTime = String((cfg as any).fxRolloverTime);
-    } catch {}
+    } catch { }
     return { staleThresholdMs, fxRolloverTz, fxRolloverTime };
   }
 
@@ -4290,9 +4348,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const rawSymbols = String(req.query.symbols ?? "").trim();
       const symbols = rawSymbols
         ? rawSymbols
-            .split(",")
-            .map((s) => s.trim().toUpperCase())
-            .filter(Boolean)
+          .split(",")
+          .map((s) => s.trim().toUpperCase())
+          .filter(Boolean)
         : undefined;
       const snapshot = await buildQuoteSnapshotResponse(symbols);
       return res.json(snapshot.rows);
@@ -4301,11 +4359,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.status(500).json({ message: "Failed to fetch quotes" });
     }
   });
-  
+
   // Get individual quote by symbol
   app.get("/api/quotes/:symbol", async (req: Request, res: Response) => {
     const symbol = req.params.symbol.toUpperCase();
-    
+
     try {
       let quote: any | null = getQuote(symbol);
 
@@ -4319,7 +4377,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           where: eq(quotes.symbol, symbol),
         });
       }
-      
+
       if (quote) {
         // Calculate spread from bid and ask prices
         const bid = typeof quote.bid === "number" ? quote.bid : null;
@@ -4515,7 +4573,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           sessionId: String(client.sessionId),
           reason: String(decision?.reasonCode ?? decision?.code ?? "JURISDICTION_RESTRICTED"),
         });
-      } catch {}
+      } catch { }
 
       await destroyCookieSession(String(client.sessionId));
     }
@@ -4531,7 +4589,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     wsSendJson(socket, { type: "ws:error", code: "WS_UNAUTHORIZED", message: "Unauthorized", reason });
     try {
       socket.close(4401, "UNAUTHORIZED");
-    } catch {}
+    } catch { }
   }
 
   function broadcast(event: any, filter?: (client: LiveClient) => boolean) {

@@ -57,6 +57,13 @@
       "when": 1769128300000,
       "tag": "0007_grift_linked_edges_unique",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1769802540000,
+      "tag": "0008_visual_lot_settings",
+      "breakpoints": true
     }
   ]
 }

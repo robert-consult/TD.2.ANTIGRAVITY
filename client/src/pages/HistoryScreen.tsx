@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Calendar } from "@/components/ui/calendar";
 import { format } from "date-fns";
 import { DateRange } from "react-day-picker";
-import { ChevronDown, ChevronUp } from "lucide-react";
+import { ChevronDown, ChevronUp, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
 import {
   Sheet,
   SheetContent,
@@ -45,6 +45,66 @@ import {
 } from "@/components/ui/pagination";
 import { useI18n } from "@/i18n";
 import { useMobile } from "@/hooks/use-mobile";
+
+// Sortable column types
+type SortColumn =
+  | "ticket"
+  | "symbol"
+  | "openTime"
+  | "closeTime"
+  | "type"
+  | "lots"
+  | "openPrice"
+  | "closePrice"
+  | "profit"
+  | "duration"
+  | "closeReason";
+
+type SortDirection = "asc" | "desc";
+
+interface SortConfig {
+  column: SortColumn | null;
+  direction: SortDirection;
+}
+
+// Sortable header component
+function SortableHeader({
+  column,
+  label,
+  currentSort,
+  onSort,
+  className,
+}: {
+  column: SortColumn;
+  label: string;
+  currentSort: SortConfig;
+  onSort: (column: SortColumn) => void;
+  className?: string;
+}) {
+  const isActive = currentSort.column === column;
+
+  return (
+    <TableHead
+      className={`text-left text-xs font-medium text-gray-400 uppercase tracking-wider cursor-pointer hover:text-white transition-colors select-none ${className || ""}`}
+      onClick={() => onSort(column)}
+    >
+      <div className="flex items-center gap-1">
+        <span>{label}</span>
+        <span className="inline-flex">
+          {isActive ? (
+            currentSort.direction === "asc" ? (
+              <ArrowUp className="h-3 w-3 text-blue-400" />
+            ) : (
+              <ArrowDown className="h-3 w-3 text-blue-400" />
+            )
+          ) : (
+            <ArrowUpDown className="h-3 w-3 opacity-30" />
+          )}
+        </span>
+      </div>
+    </TableHead>
+  );
+}
 
 // Get variant-based badge styles for close reason
 function getCloseReasonBadgeClass(variant: CloseReasonUiVariant): string {
@@ -119,6 +179,7 @@ export default function HistoryScreen() {
   const [customDateRange, setCustomDateRange] = useState<DateRange | undefined>(undefined);
   const [isDateRangeOpen, setIsDateRangeOpen] = useState(false);
   const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set());
+  const [sortConfig, setSortConfig] = useState<SortConfig>({ column: "closeTime", direction: "desc" });
   const isMobile = useMobile();
 
   // Container width detection for responsive table vs compact view
@@ -262,10 +323,94 @@ export default function HistoryScreen() {
       return true;
     });
 
+  // Sorting function
+  const handleSort = (column: SortColumn) => {
+    setSortConfig((prev) => {
+      if (prev.column === column) {
+        // Toggle direction if same column
+        return { column, direction: prev.direction === "asc" ? "desc" : "asc" };
+      }
+      // New column, default to descending (newest/highest first)
+      return { column, direction: "desc" };
+    });
+    setCurrentPage(1); // Reset to first page when sorting
+  };
+
+  // Sort filtered trades
+  const sortedTrades = [...filteredTrades].sort((a: any, b: any) => {
+    if (!sortConfig.column) return 0;
+
+    let aValue: any;
+    let bValue: any;
+
+    switch (sortConfig.column) {
+      case "ticket":
+        aValue = a.id;
+        bValue = b.id;
+        break;
+      case "symbol":
+        aValue = a.symbol?.symbol || "";
+        bValue = b.symbol?.symbol || "";
+        break;
+      case "openTime":
+        aValue = toMs(a.openedAt) || 0;
+        bValue = toMs(b.openedAt) || 0;
+        break;
+      case "closeTime":
+        aValue = toMs(a.closedAt) || 0;
+        bValue = toMs(b.closedAt) || 0;
+        break;
+      case "type":
+        aValue = a.type || "";
+        bValue = b.type || "";
+        break;
+      case "lots":
+        aValue = a.lots || a.size || 0;
+        bValue = b.lots || b.size || 0;
+        break;
+      case "openPrice":
+        aValue = a.openPrice || 0;
+        bValue = b.openPrice || 0;
+        break;
+      case "closePrice":
+        aValue = a.closePrice || 0;
+        bValue = b.closePrice || 0;
+        break;
+      case "profit":
+        aValue = a.profit ? parseFloat(a.profit) : 0;
+        bValue = b.profit ? parseFloat(b.profit) : 0;
+        break;
+      case "duration":
+        const aOpen = toMs(a.openedAt);
+        const aClose = toMs(a.closedAt);
+        const bOpen = toMs(b.openedAt);
+        const bClose = toMs(b.closedAt);
+        aValue = (aOpen && aClose) ? (aClose - aOpen) : 0;
+        bValue = (bOpen && bClose) ? (bClose - bOpen) : 0;
+        break;
+      case "closeReason":
+        aValue = closeReasonShortLabel(a.closeReason, "");
+        bValue = closeReasonShortLabel(b.closeReason, "");
+        break;
+      default:
+        return 0;
+    }
+
+    // Compare values
+    if (typeof aValue === "string" && typeof bValue === "string") {
+      const comparison = aValue.localeCompare(bValue);
+      return sortConfig.direction === "asc" ? comparison : -comparison;
+    }
+
+    if (aValue < bValue) return sortConfig.direction === "asc" ? -1 : 1;
+    if (aValue > bValue) return sortConfig.direction === "asc" ? 1 : -1;
+    return 0;
+  });
+
   // Pagination
   const itemsPerPage = 6;
-  const totalPages = Math.ceil(filteredTrades.length / itemsPerPage);
-  const paginatedTrades = filteredTrades.slice(
+  const totalPages = Math.ceil(sortedTrades.length / itemsPerPage);
+  const paginatedTrades = sortedTrades.slice(
     (currentPage - 1) * itemsPerPage,
     currentPage * itemsPerPage
   );
@@ -696,42 +841,20 @@ export default function HistoryScreen() {
         ) : (
           /* Full table: Only shown when container is wide enough (≥900px) */
           <div className="w-full">
-            <Table className="w-full table-fixed">
+            <Table className="w-full">
               <TableHeader className="bg-neutral-850">
                 <TableRow>
-                  <TableHead className="text-left text-xs font-medium text-gray-400 uppercase tracking-wider">
-                    Ticket
-                  </TableHead>
-                  <TableHead className="text-left text-xs font-medium text-gray-400 uppercase tracking-wider">
-                    Symbol
-                  </TableHead>
-                  <TableHead className="text-left text-xs font-medium text-gray-400 uppercase tracking-wider">
-                    Open Time
-                  </TableHead>
-                  <TableHead className="text-left text-xs font-medium text-gray-400 uppercase tracking-wider">
-                    Close Time
-                  </TableHead>
-                  <TableHead className="text-left text-xs font-medium text-gray-400 uppercase tracking-wider">
-                    Type
-                  </TableHead>
-                  <TableHead className="text-left text-xs font-medium text-gray-400 uppercase tracking-wider">
-                    Lots
-                  </TableHead>
-                  <TableHead className="text-left text-xs font-medium text-gray-400 uppercase tracking-wider">
-                    Open Price
-                  </TableHead>
-                  <TableHead className="text-left text-xs font-medium text-gray-400 uppercase tracking-wider">
-                    Close Price
-                  </TableHead>
-                  <TableHead className="text-left text-xs font-medium text-gray-400 uppercase tracking-wider">
-                    Profit/Loss
-                  </TableHead>
-                  <TableHead className="text-left text-xs font-medium text-gray-400 uppercase tracking-wider">
-                    Duration
-                  </TableHead>
-                  <TableHead className="text-left text-xs font-medium text-gray-400 uppercase tracking-wider">
-                    Close Reason
-                  </TableHead>
+                  <SortableHeader column="ticket" label="Ticket" currentSort={sortConfig} onSort={handleSort} />
+                  <SortableHeader column="symbol" label="Symbol" currentSort={sortConfig} onSort={handleSort} />
+                  <SortableHeader column="openTime" label="Open Time" currentSort={sortConfig} onSort={handleSort} className="min-w-[130px]" />
+                  <SortableHeader column="closeTime" label="Close Time" currentSort={sortConfig} onSort={handleSort} className="min-w-[130px]" />
+                  <SortableHeader column="type" label="Type" currentSort={sortConfig} onSort={handleSort} />
+                  <SortableHeader column="lots" label="Lots" currentSort={sortConfig} onSort={handleSort} />
+                  <SortableHeader column="openPrice" label="Open Price" currentSort={sortConfig} onSort={handleSort} className="min-w-[90px]" />
+                  <SortableHeader column="closePrice" label="Close Price" currentSort={sortConfig} onSort={handleSort} className="min-w-[90px]" />
+                  <SortableHeader column="profit" label="Profit/Loss" currentSort={sortConfig} onSort={handleSort} className="min-w-[90px]" />
+                  <SortableHeader column="duration" label="Duration" currentSort={sortConfig} onSort={handleSort} />
+                  <SortableHeader column="closeReason" label="Close Reason" currentSort={sortConfig} onSort={handleSort} />
                 </TableRow>
               </TableHeader>
               <TableBody className="bg-neutral-900 divide-y divide-gray-800">
@@ -854,7 +977,7 @@ export default function HistoryScreen() {
       </div>
 
       {/* Pagination */}
-      {filteredTrades.length > 0 && (
+      {sortedTrades.length > 0 && (
         <div className="px-gutter py-3 flex items-center justify-between border-t border-gray-800">
           <div className="flex-1 flex justify-between sm:hidden">
             <button
@@ -883,9 +1006,9 @@ export default function HistoryScreen() {
                 </span>{" "}
                 to{" "}
                 <span className="font-medium">
-                  {Math.min(currentPage * itemsPerPage, filteredTrades.length)}
+                  {Math.min(currentPage * itemsPerPage, sortedTrades.length)}
                 </span>{" "}
-                of <span className="font-medium">{filteredTrades.length}</span>{" "}
+                of <span className="font-medium">{sortedTrades.length}</span>{" "}
                 results
               </p>
             </div>

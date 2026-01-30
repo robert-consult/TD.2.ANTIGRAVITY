@@ -3,26 +3,26 @@ import { useState, useEffect, useMemo } from "react";
 
 function parseUserAgent(ua: string | null | undefined): string | null {
   if (!ua) return null;
-  
+
   let deviceType = 'Desktop';
   if (/Mobile|Android|iPhone|iPad|iPod/i.test(ua)) {
     deviceType = /iPad|Tablet/i.test(ua) ? 'Tablet' : 'Mobile';
   }
-  
+
   let browser = 'Unknown';
   if (/Edg\//i.test(ua)) browser = 'Edge';
   else if (/Chrome\//i.test(ua)) browser = 'Chrome';
   else if (/Safari\//i.test(ua) && !/Chrome/i.test(ua)) browser = 'Safari';
   else if (/Firefox\//i.test(ua)) browser = 'Firefox';
   else if (/MSIE|Trident/i.test(ua)) browser = 'IE';
-  
+
   let os = 'Unknown';
   if (/Windows NT/i.test(ua)) os = 'Windows';
   else if (/Mac OS X/i.test(ua)) os = 'macOS';
   else if (/Linux/i.test(ua)) os = 'Linux';
   else if (/Android/i.test(ua)) os = 'Android';
   else if (/iPhone|iPad|iPod/i.test(ua)) os = 'iOS';
-  
+
   return `${deviceType} / ${browser} / ${os}`;
 }
 import axios from "axios";
@@ -43,13 +43,13 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
-import { 
-  Dialog, 
-  DialogContent, 
-  DialogHeader, 
-  DialogTitle, 
-  DialogFooter, 
-  DialogTrigger 
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+  DialogTrigger
 } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
@@ -83,6 +83,9 @@ interface GlobalSettings {
   enableLossLimits: boolean;
   dailyLossLimitPct: number;
   lifetimeLossLimitPct: number;
+  // Visual Lot Settings
+  lotPresetCards: string; // JSON array string
+  lotDropdownMax: number;
   updatedAt: number | null;
 }
 
@@ -302,12 +305,12 @@ interface TimezoneRow {
   rawFormat: string;
 }
 
-function FxRolloverSettings({ 
-  config, 
-  setConfig, 
-  setConfigChanged 
-}: { 
-  config: SystemConfigData; 
+function FxRolloverSettings({
+  config,
+  setConfig,
+  setConfigChanged
+}: {
+  config: SystemConfigData;
   setConfig: (fn: (prev: SystemConfigData | null) => SystemConfigData | null) => void;
   setConfigChanged: (v: boolean) => void;
 }) {
@@ -1421,7 +1424,7 @@ function SystemConfigTab() {
   const [subTab, setSubTab] = useState("trading");
   const [config, setConfig] = useState<SystemConfigData | null>(null);
   const [configChanged, setConfigChanged] = useState(false);
-  const [confirmDialog, setConfirmDialog] = useState<{open: boolean; key: string; value: boolean; label: string}>({
+  const [confirmDialog, setConfirmDialog] = useState<{ open: boolean; key: string; value: boolean; label: string }>({
     open: false,
     key: "",
     value: false,
@@ -1518,7 +1521,7 @@ function SystemConfigTab() {
     <div>
       <h2 className="text-xl font-semibold mb-2">System Configuration</h2>
       <p className="text-gray-400 text-sm mb-4">Manage platform-wide operational controls, API integration, and performance parameters.</p>
-      
+
       <Tabs value={subTab} onValueChange={setSubTab} className="space-y-4">
         <TabsList className="bg-neutral-700 w-full h-auto p-1 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-1">
           <TabsTrigger value="trading" className="data-[state=active]:bg-neutral-600 text-xs sm:text-sm px-2 py-1.5">Trading Controls</TabsTrigger>
@@ -1597,8 +1600,8 @@ function SystemConfigTab() {
               </div>
 
               <div className="flex justify-end pt-4">
-                <Button 
-                  onClick={handleSave} 
+                <Button
+                  onClick={handleSave}
                   disabled={!configChanged || updateMutation.isPending}
                   className="bg-blue-600 hover:bg-blue-700"
                 >
@@ -1663,22 +1666,22 @@ function SystemConfigTab() {
                 </div>
               </div>
 
-              <FxRolloverSettings 
-                config={config} 
-                setConfig={setConfig} 
-                setConfigChanged={setConfigChanged} 
+              <FxRolloverSettings
+                config={config}
+                setConfig={setConfig}
+                setConfigChanged={setConfigChanged}
               />
 
               <div className="bg-green-900/30 border border-green-700/50 p-4 rounded-lg mt-4">
                 <p className="text-sm text-green-300">
-                  <strong>Note:</strong> Changes to feed polling rates and stale thresholds take effect immediately 
+                  <strong>Note:</strong> Changes to feed polling rates and stale thresholds take effect immediately
                   without requiring a server restart.
                 </p>
               </div>
 
               <div className="flex justify-end pt-4">
-                <Button 
-                  onClick={handleSave} 
+                <Button
+                  onClick={handleSave}
                   disabled={!configChanged || updateMutation.isPending}
                   className="bg-blue-600 hover:bg-blue-700"
                 >
@@ -1842,8 +1845,8 @@ function SystemConfigTab() {
           <Card className="bg-neutral-700 border-gray-600">
             <CardHeader className="flex flex-row items-center justify-between">
               <CardTitle className="text-base">System Health Status</CardTitle>
-              <Button 
-                variant="outline" 
+              <Button
+                variant="outline"
                 size="sm"
                 onClick={() => refetchHealth()}
                 className="bg-neutral-600 hover:bg-neutral-500"
@@ -1867,8 +1870,8 @@ function SystemConfigTab() {
                   <div className="bg-neutral-800 p-4 rounded-lg">
                     <div className="font-medium mb-2">Last Successful API Call</div>
                     <p className="text-lg">
-                      {health.lastSuccess 
-                        ? new Date(health.lastSuccess).toLocaleString() 
+                      {health.lastSuccess
+                        ? new Date(health.lastSuccess).toLocaleString()
                         : 'Never'}
                     </p>
                   </div>
@@ -1947,7 +1950,7 @@ export default function AdminDashboard() {
   });
   const [activeTab, setActiveTab] = useState("users");
   const [editDialogOpen, setEditDialogOpen] = useState(false);
-  
+
   // Enhanced user management state
   const [selectedUserIds, setSelectedUserIds] = useState<number[]>([]);
   const [userFilterTab, setUserFilterTab] = useState<"all" | "active" | "disabled" | "frozen" | "online" | "logins" | "audit" | "kyc" | "grift" | "activity">("all");
@@ -1961,10 +1964,10 @@ export default function AdminDashboard() {
   const [notesDialogOpen, setNotesDialogOpen] = useState(false);
   const [notesUser, setNotesUser] = useState<User | null>(null);
   const [newNote, setNewNote] = useState({ type: "NOTE" as "NOTE" | "FLAG", severity: "INFO" as "INFO" | "WARN" | "HIGH" | "CRITICAL", content: "", flagCode: "" });
-  
+
   // Grift drilldown state
   const [griftDrilldownUserId, setGriftDrilldownUserId] = useState<number | null>(null);
-  
+
   // Column visibility state for responsive design
   const [visibleColumns, setVisibleColumns] = useState<Record<UserColumnKey, boolean>>({
     name: false,
@@ -1979,7 +1982,7 @@ export default function AdminDashboard() {
     maxHold: false,
     leaderboard: true,
   });
-  
+
   // Column search filters
   const [columnFilters, setColumnFilters] = useState({
     name: '',
@@ -1987,10 +1990,10 @@ export default function AdminDashboard() {
     username: '',
     email: '',
   });
-  
+
   // Audit trail filter state
   const [auditEventFilter, setAuditEventFilter] = useState<"all" | "signup" | "login_success" | "login_fail" | "admin">("all");
-  
+
   // Symbol management state
   const [editingSymbol, setEditingSymbol] = useState<SymbolConfig | null>(null);
   const [symbolDialogOpen, setSymbolDialogOpen] = useState(false);
@@ -2008,7 +2011,7 @@ export default function AdminDashboard() {
   });
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [symbolToDelete, setSymbolToDelete] = useState<number | null>(null);
-  
+
   // Global settings state (includes all Trade Settings tab values)
   const [riskParams, setRiskParams] = useState<GlobalSettings>({
     id: 1,
@@ -2027,6 +2030,8 @@ export default function AdminDashboard() {
     enableLossLimits: true,
     dailyLossLimitPct: 10,
     lifetimeLossLimitPct: 20,
+    lotPresetCards: "[1,5,10,25,50]",
+    lotDropdownMax: 50,
     updatedAt: null
   });
   const [riskParamsChanged, setRiskParamsChanged] = useState(false);
@@ -2035,18 +2040,18 @@ export default function AdminDashboard() {
     queryKey: ["/api/admin/users"],
     queryFn: () => axios.get("/api/admin/users").then(r => r.data),
   });
-  
+
   const { data: symbols = [], isLoading: isLoadingSymbols } = useQuery<SymbolConfig[]>({
     queryKey: ["/api/admin/symbols"],
     queryFn: () => axios.get("/api/admin/symbols").then(r => r.data),
   });
-  
+
   // Fetch global settings
   const { data: globalSettingsData } = useQuery<GlobalSettings>({
     queryKey: ["/api/admin/global-settings"],
     queryFn: () => axios.get("/api/admin/global-settings").then(r => r.data),
   });
-  
+
   // Sync global settings to local state when data is fetched (only when not editing)
   useEffect(() => {
     if (globalSettingsData && !riskParamsChanged) {
@@ -2096,7 +2101,7 @@ export default function AdminDashboard() {
   };
 
   const handleBalanceUpdate = useMutation({
-    mutationFn: (data: {userId: number, balance: string}) => 
+    mutationFn: (data: { userId: number, balance: string }) =>
       axios.post(`/api/admin/users/${data.userId}/balance`, { balance: data.balance }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/users"] });
@@ -2110,23 +2115,23 @@ export default function AdminDashboard() {
   const updateBalance = (userId: number, newBalance: string) => {
     handleBalanceUpdate.mutate({ userId, balance: newBalance });
   };
-  
+
   // Enhanced user management queries
   const { data: userTimeline = [], refetch: refetchTimeline } = useQuery<TimelineEvent[]>({
     queryKey: ["/api/admin/users", timelineUser?.id, "timeline"],
     queryFn: () => axios.get(`/api/admin/users/${timelineUser?.id}/timeline`).then(r => r.data),
     enabled: !!timelineUser && timelineDialogOpen,
   });
-  
+
   const { data: userNotes = [], refetch: refetchNotes } = useQuery<AdminNote[]>({
     queryKey: ["/api/admin/users", notesUser?.id, "notes"],
     queryFn: () => axios.get(`/api/admin/users/${notesUser?.id}/notes`).then(r => r.data),
     enabled: !!notesUser && notesDialogOpen,
   });
-  
+
   // Enhanced user management mutations
   const toggleUserStatusMutation = useMutation({
-    mutationFn: (data: {userId: number; disabled: boolean}) =>
+    mutationFn: (data: { userId: number; disabled: boolean }) =>
       axios.post(`/api/admin/users/${data.userId}/toggle-status`, { disabled: data.disabled }),
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/users"] });
@@ -2136,9 +2141,9 @@ export default function AdminDashboard() {
       toast({ title: "Error", description: error.response?.data?.message || "Failed to update user status", variant: "destructive" });
     },
   });
-  
+
   const freezeUserMutation = useMutation({
-    mutationFn: (data: {userId: number; reasonCode: string; reasonText?: string}) =>
+    mutationFn: (data: { userId: number; reasonCode: string; reasonText?: string }) =>
       axios.post(`/api/admin/users/${data.userId}/freeze`, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/users"] });
@@ -2151,7 +2156,7 @@ export default function AdminDashboard() {
       toast({ title: "Error", description: error.response?.data?.message || "Failed to freeze account", variant: "destructive" });
     },
   });
-  
+
   const unfreezeUserMutation = useMutation({
     mutationFn: (userId: number) => axios.post(`/api/admin/users/${userId}/unfreeze`, {}),
     onSuccess: () => {
@@ -2173,16 +2178,16 @@ export default function AdminDashboard() {
       toast({ title: "Error", description: error.response?.data?.message || "Failed to start impersonation", variant: "destructive" });
     },
   });
-  
+
   // KYC status update mutation
   const updateKycStatusMutation = useMutation({
-    mutationFn: (data: {userId: number; status: string; notes?: string}) =>
+    mutationFn: (data: { userId: number; status: string; notes?: string }) =>
       axios.post(`/api/admin/users/${data.userId}/kyc-status`, data),
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/kyc-queue"] });
-      toast({ 
-        title: variables.status === 'APPROVED' ? "KYC Approved" : "KYC Rejected", 
-        description: `User KYC status has been updated to ${variables.status}` 
+      toast({
+        title: variables.status === 'APPROVED' ? "KYC Approved" : "KYC Rejected",
+        description: `User KYC status has been updated to ${variables.status}`
       });
     },
     onError: (error: any) => {
@@ -2201,9 +2206,9 @@ export default function AdminDashboard() {
       toast({ title: "Error", description: error.response?.data?.message || "Failed to send KYC invite", variant: "destructive" });
     },
   });
-  
+
   const addNoteMutation = useMutation({
-    mutationFn: (data: {userId: number; type: string; severity: string; content: string; flagCode?: string}) =>
+    mutationFn: (data: { userId: number; type: string; severity: string; content: string; flagCode?: string }) =>
       axios.post(`/api/admin/users/${data.userId}/notes`, data),
     onSuccess: () => {
       refetchNotes();
@@ -2214,7 +2219,7 @@ export default function AdminDashboard() {
       toast({ title: "Error", description: error.response?.data?.message || "Failed to add note", variant: "destructive" });
     },
   });
-  
+
   const resolveNoteMutation = useMutation({
     mutationFn: (noteId: number) => axios.post(`/api/admin/notes/${noteId}/resolve`),
     onSuccess: () => {
@@ -2225,23 +2230,23 @@ export default function AdminDashboard() {
       toast({ title: "Error", description: error.response?.data?.message || "Failed to resolve note", variant: "destructive" });
     },
   });
-  
+
   const bulkToggleStatusMutation = useMutation({
-    mutationFn: (data: {userIds: number[]; disabled: boolean}) =>
+    mutationFn: (data: { userIds: number[]; disabled: boolean }) =>
       axios.post(`/api/admin/users/bulk/toggle-status`, data),
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/users"] });
       setSelectedUserIds([]);
-      toast({ 
-        title: variables.disabled ? "Users disabled" : "Users enabled", 
-        description: `${variables.userIds.length} account(s) updated successfully` 
+      toast({
+        title: variables.disabled ? "Users disabled" : "Users enabled",
+        description: `${variables.userIds.length} account(s) updated successfully`
       });
     },
     onError: (error: any) => {
       toast({ title: "Error", description: error.response?.data?.message || "Failed to update users", variant: "destructive" });
     },
   });
-  
+
   // User management handlers
   const handleSelectUser = (userId: number, selected: boolean) => {
     if (selected) {
@@ -2250,7 +2255,7 @@ export default function AdminDashboard() {
       setSelectedUserIds(prev => prev.filter(id => id !== userId));
     }
   };
-  
+
   const handleSelectAll = (selected: boolean) => {
     if (selected) {
       setSelectedUserIds(filteredUsers.map(u => u.id));
@@ -2258,37 +2263,37 @@ export default function AdminDashboard() {
       setSelectedUserIds([]);
     }
   };
-  
+
   const openTimeline = (user: User) => {
     setTimelineUser(user);
     setTimelineDialogOpen(true);
   };
-  
+
   const openFreeze = (user: User) => {
     setFreezeUser(user);
     setFreezeDialogOpen(true);
   };
-  
+
   const openNotes = (user: User) => {
     setNotesUser(user);
     setNotesDialogOpen(true);
   };
-  
+
   const exportUsers = () => {
     window.open('/api/admin/export/users', '_blank');
   };
-  
+
   const exportUsersJsonl = () => {
     window.open('/api/admin/export/users/jsonl', '_blank');
   };
-  
+
   // Login history query for Login History tab
   const { data: allLoginHistory = [], isLoading: isLoadingLoginHistory } = useQuery<LoginHistoryEntry[]>({
     queryKey: ["/api/admin/login-history"],
     queryFn: () => axios.get("/api/admin/login-history").then(r => r.data),
     enabled: userFilterTab === "logins",
   });
-  
+
   // Audit trail query for combined audit events (signups, logins, admin actions)
   const { data: auditTrailData, isLoading: isLoadingAuditTrail } = useQuery<{
     signups: Array<{ id: number; email: string; username: string; createdAt: number }>;
@@ -2299,7 +2304,7 @@ export default function AdminDashboard() {
     queryFn: () => axios.get("/api/admin/audit-trail").then(r => r.data),
     enabled: userFilterTab === "audit",
   });
-  
+
   // KYC Queue query for contender candidates (policy-backed)
   const { data: kycQueueData, isLoading: isLoadingKycQueue } = useQuery<{ candidates: KycCandidate[] }>({
     queryKey: ["/api/admin/kyc-queue"],
@@ -2469,7 +2474,7 @@ export default function AdminDashboard() {
   });
 
   const signalIgnoreMutation = useMutation({
-    mutationFn: ({ signalId, reason }: { signalId: number; reason?: string }) => 
+    mutationFn: ({ signalId, reason }: { signalId: number; reason?: string }) =>
       axios.post(`/api/admin/grift/signals/${signalId}/ignore`, { reason }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/grift/signals"] });
@@ -2480,7 +2485,7 @@ export default function AdminDashboard() {
   });
 
   const signalCloseMutation = useMutation({
-    mutationFn: ({ signalId, reason }: { signalId: number; reason?: string }) => 
+    mutationFn: ({ signalId, reason }: { signalId: number; reason?: string }) =>
       axios.post(`/api/admin/grift/signals/${signalId}/close`, { reason }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/grift/signals"] });
@@ -2492,7 +2497,7 @@ export default function AdminDashboard() {
 
   // Grift enforcement mutations
   const griftFreezeMutation = useMutation({
-    mutationFn: ({ userId, notes }: { userId: number; notes?: string }) => 
+    mutationFn: ({ userId, notes }: { userId: number; notes?: string }) =>
       axios.post(`/api/admin/users/${userId}/grift/freeze`, { notes }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/users", griftDrilldownUserId, "grift-profile"] });
@@ -2509,7 +2514,7 @@ export default function AdminDashboard() {
   });
 
   const griftDisableMutation = useMutation({
-    mutationFn: ({ userId, notes }: { userId: number; notes?: string }) => 
+    mutationFn: ({ userId, notes }: { userId: number; notes?: string }) =>
       axios.post(`/api/admin/users/${userId}/grift/disable`, { notes }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/users", griftDrilldownUserId, "grift-profile"] });
@@ -2558,7 +2563,7 @@ export default function AdminDashboard() {
     queryFn: () => axios.get("/api/admin/online-users").then(r => r.data),
     refetchInterval: 30000, // Refresh every 30 seconds
   });
-  
+
   // Filter users based on selected tab
   const filteredUsers = users.filter(user => {
     // Status filter - Disabled tab takes priority (disabled users show there even if also frozen)
@@ -2577,16 +2582,16 @@ export default function AdminDashboard() {
         break;
     }
     if (!statusMatch) return false;
-    
+
     // Column search filters
     if (columnFilters.name && !(user.name || '').toLowerCase().includes(columnFilters.name.toLowerCase())) return false;
     if (columnFilters.phone && !(user.phone || '').toLowerCase().includes(columnFilters.phone.toLowerCase())) return false;
     if (columnFilters.username && !user.username.toLowerCase().includes(columnFilters.username.toLowerCase())) return false;
     if (columnFilters.email && !user.email.toLowerCase().includes(columnFilters.email.toLowerCase())) return false;
-    
+
     return true;
   });
-  
+
   // Symbol management mutations
   const symbolUpdateMutation = useMutation({
     mutationFn: (payload: SymbolConfig) =>
@@ -2602,7 +2607,7 @@ export default function AdminDashboard() {
       toast({ title: "Error", description: error.response?.data?.message || "Failed to save symbol", variant: "destructive" });
     },
   });
-  
+
   const newSymbolMutation = useMutation({
     mutationFn: (payload: Partial<SymbolConfig>) =>
       axios.post('/api/admin/symbols', payload),
@@ -2627,7 +2632,7 @@ export default function AdminDashboard() {
       toast({ title: "Error", description: error.response?.data?.message || "Failed to add symbol", variant: "destructive" });
     },
   });
-  
+
   const deleteSymbolMutation = useMutation({
     mutationFn: (symbolId: number) =>
       axios.delete(`/api/admin/symbols/${symbolId}`),
@@ -2642,7 +2647,7 @@ export default function AdminDashboard() {
       toast({ title: "Error", description: error.response?.data?.message || "Failed to delete symbol", variant: "destructive" });
     },
   });
-  
+
   // Global settings mutation
   const globalSettingsMutation = useMutation({
     mutationFn: (payload: Partial<GlobalSettings>) =>
@@ -2656,12 +2661,12 @@ export default function AdminDashboard() {
       toast({ title: "Error", description: error.response?.data?.message || "Failed to save risk settings", variant: "destructive" });
     },
   });
-  
+
   const handleRiskParamChange = (field: keyof GlobalSettings, value: number | string | boolean) => {
     setRiskParams(prev => ({ ...prev, [field]: value }));
     setRiskParamsChanged(true);
   };
-  
+
   const handleSaveRiskParams = () => {
     globalSettingsMutation.mutate({
       defaultLeverage: riskParams.defaultLeverage,
@@ -2679,14 +2684,16 @@ export default function AdminDashboard() {
       enableLossLimits: riskParams.enableLossLimits,
       dailyLossLimitPct: riskParams.dailyLossLimitPct,
       lifetimeLossLimitPct: riskParams.lifetimeLossLimitPct,
+      lotPresetCards: riskParams.lotPresetCards,
+      lotDropdownMax: riskParams.lotDropdownMax,
     });
   };
-  
+
   const handleEditSymbol = (symbol: SymbolConfig) => {
     setEditingSymbol(symbol);
     setSymbolDialogOpen(true);
   };
-  
+
   const handleSymbolSave = () => {
     if (editingSymbol) {
       // Create a clean copy of the symbol data without the createdAt timestamp
@@ -2703,11 +2710,11 @@ export default function AdminDashboard() {
         minLot: editingSymbol.minLot,
         maxLot: editingSymbol.maxLot
       };
-      
+
       symbolUpdateMutation.mutate(symbolData as SymbolConfig);
     }
   };
-  
+
   const handleSymbolChange = (name: string, value: any) => {
     if (editingSymbol) {
       setEditingSymbol(prev => ({
@@ -2716,23 +2723,23 @@ export default function AdminDashboard() {
       }));
     }
   };
-  
+
   const handleNewSymbolChange = (name: string, value: any) => {
     setNewSymbol(prev => ({
       ...prev,
       [name]: value
     }));
   };
-  
+
   const handleNewSymbolSave = () => {
     newSymbolMutation.mutate(newSymbol);
   };
-  
+
   const confirmDeleteSymbol = (symbolId: number) => {
     setSymbolToDelete(symbolId);
     setDeleteConfirmOpen(true);
   };
-  
+
   const handleDeleteSymbol = () => {
     if (symbolToDelete !== null) {
       deleteSymbolMutation.mutate(symbolToDelete);
@@ -2777,7 +2784,7 @@ export default function AdminDashboard() {
                 Legal
               </TabsTrigger>
             </TabsList>
-            
+
             <TabsContent value="users" className="p-2 sm:p-4">
               <div className="flex flex-wrap justify-between items-start gap-2 mb-4">
                 <h2 className="text-lg sm:text-xl font-semibold">User Management</h2>
@@ -2790,7 +2797,7 @@ export default function AdminDashboard() {
                   </Button>
                 </div>
               </div>
-              
+
               {/* Mini-tabs for filtering */}
               <div className="flex flex-wrap gap-1.5 sm:gap-2 mb-4 p-1 bg-neutral-700 rounded">
                 <button
@@ -2858,12 +2865,12 @@ export default function AdminDashboard() {
                   Activity
                 </button>
               </div>
-              
+
               {userFilterTab !== "logins" && userFilterTab !== "online" && userFilterTab !== "audit" && userFilterTab !== "kyc" && userFilterTab !== "grift" && userFilterTab !== "activity" && selectedUserIds.length > 0 && (
                 <div className="bg-neutral-700 p-3 rounded mb-4 flex items-center gap-4 flex-wrap">
                   <span className="text-sm">{selectedUserIds.length} user(s) selected</span>
-                  <Button 
-                    size="sm" 
+                  <Button
+                    size="sm"
                     variant="outline"
                     disabled={bulkToggleStatusMutation.isPending}
                     onClick={() => bulkToggleStatusMutation.mutate({ userIds: selectedUserIds, disabled: true })}
@@ -2871,8 +2878,8 @@ export default function AdminDashboard() {
                   >
                     {bulkToggleStatusMutation.isPending ? 'Processing...' : 'Disable Selected'}
                   </Button>
-                  <Button 
-                    size="sm" 
+                  <Button
+                    size="sm"
                     variant="outline"
                     disabled={bulkToggleStatusMutation.isPending}
                     onClick={() => bulkToggleStatusMutation.mutate({ userIds: selectedUserIds, disabled: false })}
@@ -2885,7 +2892,7 @@ export default function AdminDashboard() {
                   </Button>
                 </div>
               )}
-              
+
               {userFilterTab === "online" ? (
                 /* Online Users View */
                 <div className="overflow-x-auto">
@@ -2931,7 +2938,7 @@ export default function AdminDashboard() {
                                 if (mins > 0) return `${mins}m ${secs}s`;
                                 return `${secs}s`;
                               };
-                              
+
                               return (
                                 <TableRow key={user.id} className="border-b border-gray-700">
                                   <TableCell className="py-3 px-4">
@@ -3089,7 +3096,7 @@ export default function AdminDashboard() {
                           <div className="text-sm text-gray-400">Admin Actions</div>
                         </div>
                       </div>
-                      
+
                       {/* Event Type Filter */}
                       <div className="flex gap-2 flex-wrap">
                         {[
@@ -3102,17 +3109,16 @@ export default function AdminDashboard() {
                           <button
                             key={filter.value}
                             onClick={() => setAuditEventFilter(filter.value as any)}
-                            className={`px-3 py-1.5 rounded text-sm transition ${
-                              auditEventFilter === filter.value 
-                                ? `${filter.color} text-white` 
-                                : "bg-neutral-700 text-gray-300 hover:bg-neutral-600"
-                            }`}
+                            className={`px-3 py-1.5 rounded text-sm transition ${auditEventFilter === filter.value
+                              ? `${filter.color} text-white`
+                              : "bg-neutral-700 text-gray-300 hover:bg-neutral-600"
+                              }`}
                           >
                             {filter.label}
                           </button>
                         ))}
                       </div>
-                      
+
                       <Card className="bg-neutral-700 border-gray-600">
                         <CardHeader>
                           <CardTitle className="text-base">Combined Audit Timeline</CardTitle>
@@ -3179,7 +3185,7 @@ export default function AdminDashboard() {
                                       userAgent: a.userAgent || null,
                                     })) || [])
                                   ];
-                                  
+
                                   // Apply event type filter
                                   if (auditEventFilter !== "all") {
                                     allEvents = allEvents.filter(event => {
@@ -3190,7 +3196,7 @@ export default function AdminDashboard() {
                                       return true;
                                     });
                                   }
-                                  
+
                                   allEvents = allEvents.sort((a, b) => b.time - a.time).slice(0, 100);
 
                                   if (allEvents.length === 0) {
@@ -3211,12 +3217,11 @@ export default function AdminDashboard() {
                                         </span>
                                       </TableCell>
                                       <TableCell className="py-3 px-3">
-                                        <span className={`text-xs px-2 py-0.5 rounded whitespace-nowrap ${
-                                          event.type === 'SIGNUP' ? 'bg-blue-600 text-white' :
+                                        <span className={`text-xs px-2 py-0.5 rounded whitespace-nowrap ${event.type === 'SIGNUP' ? 'bg-blue-600 text-white' :
                                           event.type === 'LOGIN_SUCCESS' ? 'bg-green-600 text-white' :
-                                          event.type === 'LOGIN_FAIL' ? 'bg-red-600 text-white' :
-                                          'bg-orange-600 text-white'
-                                        }`}>
+                                            event.type === 'LOGIN_FAIL' ? 'bg-red-600 text-white' :
+                                              'bg-orange-600 text-white'
+                                          }`}>
                                           {event.type.replace('_', ' ')}
                                         </span>
                                       </TableCell>
@@ -3277,218 +3282,66 @@ export default function AdminDashboard() {
                     </div>
                   ) : (
                     <div className="space-y-4">
-                        <div className="bg-teal-900/20 border border-teal-600/50 rounded-lg p-4">
-                          <h3 className="text-lg font-semibold text-teal-400 mb-2">Contender Pipeline</h3>
-                          <p className="text-sm text-gray-400">
-                            Users who meet performance criteria (P1: {policySummary?.policyContenderPath1MinAgeDays ?? 30}+ days, {Math.round((policySummary?.policyContenderPath1MinBalancePct ?? 1.2) * 100)}%+ balance, {policySummary?.policyContenderPath1MinTradesLifetime ?? 30}+ trades)
-                            or (P2: {policySummary?.policyContenderPath2MinAgeDays ?? 90}+ days, {Math.round((policySummary?.policyContenderPath2MinReturnLast90 ?? 0.1) * 100)}%+ last-{path2WindowDays}d return, {policySummary?.policyContenderPath2MinTradesLast90 ?? 20}+ trades, last trade within {policySummary?.policyContenderPath2MaxDaysSinceLastTrade ?? 14} days)
-                            will appear here for KYC/funding consideration.
-                          </p>
-                        </div>
+                      <div className="bg-teal-900/20 border border-teal-600/50 rounded-lg p-4">
+                        <h3 className="text-lg font-semibold text-teal-400 mb-2">Contender Pipeline</h3>
+                        <p className="text-sm text-gray-400">
+                          Users who meet performance criteria (P1: {policySummary?.policyContenderPath1MinAgeDays ?? 30}+ days, {Math.round((policySummary?.policyContenderPath1MinBalancePct ?? 1.2) * 100)}%+ balance, {policySummary?.policyContenderPath1MinTradesLifetime ?? 30}+ trades)
+                          or (P2: {policySummary?.policyContenderPath2MinAgeDays ?? 90}+ days, {Math.round((policySummary?.policyContenderPath2MinReturnLast90 ?? 0.1) * 100)}%+ last-{path2WindowDays}d return, {policySummary?.policyContenderPath2MinTradesLast90 ?? 20}+ trades, last trade within {policySummary?.policyContenderPath2MaxDaysSinceLastTrade ?? 14} days)
+                          will appear here for KYC/funding consideration.
+                        </p>
+                      </div>
 
-                        <Card className="bg-neutral-700 border-gray-600">
-                          <CardHeader>
-                            <CardTitle className="text-base">Policy Controls</CardTitle>
-                          </CardHeader>
-                          <CardContent>
-                            {isLoadingPolicyConfig || !policyConfig ? (
-                              <div className="text-sm text-gray-400">Loading policy controls...</div>
-                            ) : (
-                              <div className="space-y-4">
-                                <div className="grid gap-4 md:grid-cols-2">
-                                  <div className="rounded-md border border-green-600/50 p-3">
-                                    <div className="text-sm font-medium text-green-500 mb-3">Path 1 Criteria</div>
-                                    <div className="space-y-4">
-                                      <div className="space-y-2">
-                                        <Label className="text-green-500">Min Age (days)</Label>
-                                        <Input
-                                          type="number"
-                                          value={policyConfig.policyContenderPath1MinAgeDays}
-                                          onChange={(e) => {
-                                            setPolicyConfig({
-                                              ...policyConfig,
-                                              policyContenderPath1MinAgeDays: Number(e.target.value),
-                                            });
-                                            setPolicyConfigChanged(true);
-                                          }}
-                                        />
-                                      </div>
-                                      <div className="space-y-2">
-                                        <Label className="text-green-500">Min Trades (lifetime)</Label>
-                                        <Input
-                                          type="number"
-                                          value={policyConfig.policyContenderPath1MinTradesLifetime}
-                                          onChange={(e) => {
-                                            setPolicyConfig({
-                                              ...policyConfig,
-                                              policyContenderPath1MinTradesLifetime: Number(e.target.value),
-                                            });
-                                            setPolicyConfigChanged(true);
-                                          }}
-                                        />
-                                      </div>
-                                      <div className="space-y-2">
-                                        <Label className="text-green-500">Min Balance Multiplier (1.20 = 120%)</Label>
-                                        <Input
-                                          type="number"
-                                          step="0.01"
-                                          value={policyConfig.policyContenderPath1MinBalancePct}
-                                          onChange={(e) => {
-                                            setPolicyConfig({
-                                              ...policyConfig,
-                                              policyContenderPath1MinBalancePct: Number(e.target.value),
-                                            });
-                                            setPolicyConfigChanged(true);
-                                          }}
-                                        />
-                                      </div>
-                                    </div>
-                                  </div>
-                                  <div className="rounded-md border border-teal-600/50 p-3">
-                                    <div className="text-sm font-medium text-teal-400 mb-3">Path 2 Criteria</div>
-                                    <div className="space-y-4">
-                                      <div className="space-y-2">
-                                        <Label className="text-teal-400">Min Age (days)</Label>
-                                        <Input
-                                          type="number"
-                                          value={policyConfig.policyContenderPath2MinAgeDays}
-                                          onChange={(e) => {
-                                            setPolicyConfig({
-                                              ...policyConfig,
-                                              policyContenderPath2MinAgeDays: Number(e.target.value),
-                                            });
-                                            setPolicyConfigChanged(true);
-                                          }}
-                                        />
-                                      </div>
-                                      <div className="space-y-2">
-                                        <Label className="text-teal-400">Min Trades (last {path2WindowDays}d)</Label>
-                                        <Input
-                                          type="number"
-                                          value={policyConfig.policyContenderPath2MinTradesLast90}
-                                          onChange={(e) => {
-                                            setPolicyConfig({
-                                              ...policyConfig,
-                                              policyContenderPath2MinTradesLast90: Number(e.target.value),
-                                            });
-                                            setPolicyConfigChanged(true);
-                                          }}
-                                        />
-                                      </div>
-                                      <div className="space-y-2">
-                                        <Label className="text-teal-400">Min Return (0.10 = 10%)</Label>
-                                        <Input
-                                          type="number"
-                                          step="0.01"
-                                          value={policyConfig.policyContenderPath2MinReturnLast90}
-                                          onChange={(e) => {
-                                            setPolicyConfig({
-                                              ...policyConfig,
-                                              policyContenderPath2MinReturnLast90: Number(e.target.value),
-                                            });
-                                            setPolicyConfigChanged(true);
-                                          }}
-                                        />
-                                      </div>
-                                      <div className="space-y-2">
-                                        <Label className="text-teal-400">Max Days Since Last Trade</Label>
-                                        <Input
-                                          type="number"
-                                          value={policyConfig.policyContenderPath2MaxDaysSinceLastTrade}
-                                          onChange={(e) => {
-                                            setPolicyConfig({
-                                              ...policyConfig,
-                                              policyContenderPath2MaxDaysSinceLastTrade: Number(e.target.value),
-                                            });
-                                            setPolicyConfigChanged(true);
-                                          }}
-                                        />
-                                      </div>
-                                    </div>
-                                  </div>
-                                </div>
-                                <div className="rounded-md border border-gray-600/70 p-3">
-                                  <div className="text-sm font-medium text-gray-200">Messaging and OTP Limits</div>
-                                  <div className="mt-3 grid gap-4 md:grid-cols-2">
+                      <Card className="bg-neutral-700 border-gray-600">
+                        <CardHeader>
+                          <CardTitle className="text-base">Policy Controls</CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                          {isLoadingPolicyConfig || !policyConfig ? (
+                            <div className="text-sm text-gray-400">Loading policy controls...</div>
+                          ) : (
+                            <div className="space-y-4">
+                              <div className="grid gap-4 md:grid-cols-2">
+                                <div className="rounded-md border border-green-600/50 p-3">
+                                  <div className="text-sm font-medium text-green-500 mb-3">Path 1 Criteria</div>
+                                  <div className="space-y-4">
                                     <div className="space-y-2">
-                                      <Label>Email Resend Cooldown (sec)</Label>
+                                      <Label className="text-green-500">Min Age (days)</Label>
                                       <Input
                                         type="number"
-                                        value={policyConfig.policyEmailResendCooldownSec}
+                                        value={policyConfig.policyContenderPath1MinAgeDays}
                                         onChange={(e) => {
                                           setPolicyConfig({
                                             ...policyConfig,
-                                            policyEmailResendCooldownSec: Number(e.target.value),
+                                            policyContenderPath1MinAgeDays: Number(e.target.value),
                                           });
                                           setPolicyConfigChanged(true);
                                         }}
                                       />
                                     </div>
                                     <div className="space-y-2">
-                                      <Label>Email Daily Send Cap</Label>
+                                      <Label className="text-green-500">Min Trades (lifetime)</Label>
                                       <Input
                                         type="number"
-                                        value={policyConfig.policyEmailDailySendCap}
+                                        value={policyConfig.policyContenderPath1MinTradesLifetime}
                                         onChange={(e) => {
                                           setPolicyConfig({
                                             ...policyConfig,
-                                            policyEmailDailySendCap: Number(e.target.value),
+                                            policyContenderPath1MinTradesLifetime: Number(e.target.value),
                                           });
                                           setPolicyConfigChanged(true);
                                         }}
                                       />
                                     </div>
                                     <div className="space-y-2">
-                                      <Label>SMS Resend Cooldown (sec)</Label>
+                                      <Label className="text-green-500">Min Balance Multiplier (1.20 = 120%)</Label>
                                       <Input
                                         type="number"
-                                        value={policyConfig.policySmsResendCooldownSec}
+                                        step="0.01"
+                                        value={policyConfig.policyContenderPath1MinBalancePct}
                                         onChange={(e) => {
                                           setPolicyConfig({
                                             ...policyConfig,
-                                            policySmsResendCooldownSec: Number(e.target.value),
-                                          });
-                                          setPolicyConfigChanged(true);
-                                        }}
-                                      />
-                                    </div>
-                                    <div className="space-y-2">
-                                      <Label>SMS Daily Send Cap</Label>
-                                      <Input
-                                        type="number"
-                                        value={policyConfig.policySmsDailySendCap}
-                                        onChange={(e) => {
-                                          setPolicyConfig({
-                                            ...policyConfig,
-                                            policySmsDailySendCap: Number(e.target.value),
-                                          });
-                                          setPolicyConfigChanged(true);
-                                        }}
-                                      />
-                                    </div>
-                                    <div className="space-y-2">
-                                      <Label>OTP Max Attempts</Label>
-                                      <Input
-                                        type="number"
-                                        value={policyConfig.policyOtpMaxAttempts}
-                                        onChange={(e) => {
-                                          setPolicyConfig({
-                                            ...policyConfig,
-                                            policyOtpMaxAttempts: Number(e.target.value),
-                                          });
-                                          setPolicyConfigChanged(true);
-                                        }}
-                                      />
-                                    </div>
-                                    <div className="space-y-2">
-                                      <Label>OTP Lock Minutes</Label>
-                                      <Input
-                                        type="number"
-                                        value={policyConfig.policyOtpLockMinutes}
-                                        onChange={(e) => {
-                                          setPolicyConfig({
-                                            ...policyConfig,
-                                            policyOtpLockMinutes: Number(e.target.value),
+                                            policyContenderPath1MinBalancePct: Number(e.target.value),
                                           });
                                           setPolicyConfigChanged(true);
                                         }}
@@ -3496,123 +3349,275 @@ export default function AdminDashboard() {
                                     </div>
                                   </div>
                                 </div>
-                                <div className="flex items-center justify-between gap-4">
-                                  <div>
-                                    <div className="text-sm font-medium">Auto-promote Performer</div>
-                                    <div className="text-xs text-gray-400">Automatically label eligible traders as PERFORMER.</div>
+                                <div className="rounded-md border border-teal-600/50 p-3">
+                                  <div className="text-sm font-medium text-teal-400 mb-3">Path 2 Criteria</div>
+                                  <div className="space-y-4">
+                                    <div className="space-y-2">
+                                      <Label className="text-teal-400">Min Age (days)</Label>
+                                      <Input
+                                        type="number"
+                                        value={policyConfig.policyContenderPath2MinAgeDays}
+                                        onChange={(e) => {
+                                          setPolicyConfig({
+                                            ...policyConfig,
+                                            policyContenderPath2MinAgeDays: Number(e.target.value),
+                                          });
+                                          setPolicyConfigChanged(true);
+                                        }}
+                                      />
+                                    </div>
+                                    <div className="space-y-2">
+                                      <Label className="text-teal-400">Min Trades (last {path2WindowDays}d)</Label>
+                                      <Input
+                                        type="number"
+                                        value={policyConfig.policyContenderPath2MinTradesLast90}
+                                        onChange={(e) => {
+                                          setPolicyConfig({
+                                            ...policyConfig,
+                                            policyContenderPath2MinTradesLast90: Number(e.target.value),
+                                          });
+                                          setPolicyConfigChanged(true);
+                                        }}
+                                      />
+                                    </div>
+                                    <div className="space-y-2">
+                                      <Label className="text-teal-400">Min Return (0.10 = 10%)</Label>
+                                      <Input
+                                        type="number"
+                                        step="0.01"
+                                        value={policyConfig.policyContenderPath2MinReturnLast90}
+                                        onChange={(e) => {
+                                          setPolicyConfig({
+                                            ...policyConfig,
+                                            policyContenderPath2MinReturnLast90: Number(e.target.value),
+                                          });
+                                          setPolicyConfigChanged(true);
+                                        }}
+                                      />
+                                    </div>
+                                    <div className="space-y-2">
+                                      <Label className="text-teal-400">Max Days Since Last Trade</Label>
+                                      <Input
+                                        type="number"
+                                        value={policyConfig.policyContenderPath2MaxDaysSinceLastTrade}
+                                        onChange={(e) => {
+                                          setPolicyConfig({
+                                            ...policyConfig,
+                                            policyContenderPath2MaxDaysSinceLastTrade: Number(e.target.value),
+                                          });
+                                          setPolicyConfigChanged(true);
+                                        }}
+                                      />
+                                    </div>
                                   </div>
-                                  <Switch
-                                    checked={Boolean(policyConfig.policyAutoPromotePerformer)}
-                                    onCheckedChange={(checked) => {
-                                      setPolicyConfig({
-                                        ...policyConfig,
-                                        policyAutoPromotePerformer: checked,
-                                      });
-                                      setPolicyConfigChanged(true);
-                                    }}
-                                  />
-                                </div>
-                                <div className="flex justify-end">
-                                  <Button
-                                    disabled={!policyConfigChanged || policyConfigMutation.isPending}
-                                    onClick={() => policyConfig && policyConfigMutation.mutate(policyConfig)}
-                                  >
-                                    {policyConfigMutation.isPending ? "Saving..." : "Save Controls"}
-                                  </Button>
                                 </div>
                               </div>
-                            )}
-                          </CardContent>
-                        </Card>
-                        
-                        <Card className="bg-neutral-700 border-gray-600">
-                          <CardHeader>
-                            <CardTitle className="text-base">KYC Candidates Queue</CardTitle>
-                          </CardHeader>
+                              <div className="rounded-md border border-gray-600/70 p-3">
+                                <div className="text-sm font-medium text-gray-200">Messaging and OTP Limits</div>
+                                <div className="mt-3 grid gap-4 md:grid-cols-2">
+                                  <div className="space-y-2">
+                                    <Label>Email Resend Cooldown (sec)</Label>
+                                    <Input
+                                      type="number"
+                                      value={policyConfig.policyEmailResendCooldownSec}
+                                      onChange={(e) => {
+                                        setPolicyConfig({
+                                          ...policyConfig,
+                                          policyEmailResendCooldownSec: Number(e.target.value),
+                                        });
+                                        setPolicyConfigChanged(true);
+                                      }}
+                                    />
+                                  </div>
+                                  <div className="space-y-2">
+                                    <Label>Email Daily Send Cap</Label>
+                                    <Input
+                                      type="number"
+                                      value={policyConfig.policyEmailDailySendCap}
+                                      onChange={(e) => {
+                                        setPolicyConfig({
+                                          ...policyConfig,
+                                          policyEmailDailySendCap: Number(e.target.value),
+                                        });
+                                        setPolicyConfigChanged(true);
+                                      }}
+                                    />
+                                  </div>
+                                  <div className="space-y-2">
+                                    <Label>SMS Resend Cooldown (sec)</Label>
+                                    <Input
+                                      type="number"
+                                      value={policyConfig.policySmsResendCooldownSec}
+                                      onChange={(e) => {
+                                        setPolicyConfig({
+                                          ...policyConfig,
+                                          policySmsResendCooldownSec: Number(e.target.value),
+                                        });
+                                        setPolicyConfigChanged(true);
+                                      }}
+                                    />
+                                  </div>
+                                  <div className="space-y-2">
+                                    <Label>SMS Daily Send Cap</Label>
+                                    <Input
+                                      type="number"
+                                      value={policyConfig.policySmsDailySendCap}
+                                      onChange={(e) => {
+                                        setPolicyConfig({
+                                          ...policyConfig,
+                                          policySmsDailySendCap: Number(e.target.value),
+                                        });
+                                        setPolicyConfigChanged(true);
+                                      }}
+                                    />
+                                  </div>
+                                  <div className="space-y-2">
+                                    <Label>OTP Max Attempts</Label>
+                                    <Input
+                                      type="number"
+                                      value={policyConfig.policyOtpMaxAttempts}
+                                      onChange={(e) => {
+                                        setPolicyConfig({
+                                          ...policyConfig,
+                                          policyOtpMaxAttempts: Number(e.target.value),
+                                        });
+                                        setPolicyConfigChanged(true);
+                                      }}
+                                    />
+                                  </div>
+                                  <div className="space-y-2">
+                                    <Label>OTP Lock Minutes</Label>
+                                    <Input
+                                      type="number"
+                                      value={policyConfig.policyOtpLockMinutes}
+                                      onChange={(e) => {
+                                        setPolicyConfig({
+                                          ...policyConfig,
+                                          policyOtpLockMinutes: Number(e.target.value),
+                                        });
+                                        setPolicyConfigChanged(true);
+                                      }}
+                                    />
+                                  </div>
+                                </div>
+                              </div>
+                              <div className="flex items-center justify-between gap-4">
+                                <div>
+                                  <div className="text-sm font-medium">Auto-promote Performer</div>
+                                  <div className="text-xs text-gray-400">Automatically label eligible traders as PERFORMER.</div>
+                                </div>
+                                <Switch
+                                  checked={Boolean(policyConfig.policyAutoPromotePerformer)}
+                                  onCheckedChange={(checked) => {
+                                    setPolicyConfig({
+                                      ...policyConfig,
+                                      policyAutoPromotePerformer: checked,
+                                    });
+                                    setPolicyConfigChanged(true);
+                                  }}
+                                />
+                              </div>
+                              <div className="flex justify-end">
+                                <Button
+                                  disabled={!policyConfigChanged || policyConfigMutation.isPending}
+                                  onClick={() => policyConfig && policyConfigMutation.mutate(policyConfig)}
+                                >
+                                  {policyConfigMutation.isPending ? "Saving..." : "Save Controls"}
+                                </Button>
+                              </div>
+                            </div>
+                          )}
+                        </CardContent>
+                      </Card>
+
+                      <Card className="bg-neutral-700 border-gray-600">
+                        <CardHeader>
+                          <CardTitle className="text-base">KYC Candidates Queue</CardTitle>
+                        </CardHeader>
                         <CardContent>
                           <Table className="border-collapse">
                             <TableHeader>
                               <TableRow className="border-b border-gray-700">
                                 <TableHead className="py-3 px-4 text-left text-gray-400">User</TableHead>
                                 <TableHead className="py-3 px-4 text-left text-gray-400">Account Age</TableHead>
-                                  <TableHead className="py-3 px-4 text-left text-gray-400">Trades (L/{path2WindowDays}d)</TableHead>
-                                  <TableHead className="py-3 px-4 text-left text-gray-400">Balance %</TableHead>
-                                  <TableHead className="py-3 px-4 text-left text-gray-400">Return {path2WindowDays}d</TableHead>
-                                  <TableHead className="py-3 px-4 text-left text-gray-400">Path</TableHead>
-                                  <TableHead className="py-3 px-4 text-left text-gray-400">Tier</TableHead>
+                                <TableHead className="py-3 px-4 text-left text-gray-400">Trades (L/{path2WindowDays}d)</TableHead>
+                                <TableHead className="py-3 px-4 text-left text-gray-400">Balance %</TableHead>
+                                <TableHead className="py-3 px-4 text-left text-gray-400">Return {path2WindowDays}d</TableHead>
+                                <TableHead className="py-3 px-4 text-left text-gray-400">Path</TableHead>
+                                <TableHead className="py-3 px-4 text-left text-gray-400">Tier</TableHead>
                                 <TableHead className="py-3 px-4 text-left text-gray-400">Actions</TableHead>
                               </TableRow>
                             </TableHeader>
                             <TableBody>
-                                {(!kycCandidates || kycCandidates.length === 0) ? (
-                                  <TableRow>
-                                    <TableCell colSpan={8} className="text-center py-8 text-gray-400">
-                                      <div className="space-y-2">
-                                        <div className="text-lg">No KYC candidates yet</div>
-                                        <div className="text-sm">Users will appear here when they meet the contender eligibility criteria</div>
+                              {(!kycCandidates || kycCandidates.length === 0) ? (
+                                <TableRow>
+                                  <TableCell colSpan={8} className="text-center py-8 text-gray-400">
+                                    <div className="space-y-2">
+                                      <div className="text-lg">No KYC candidates yet</div>
+                                      <div className="text-sm">Users will appear here when they meet the contender eligibility criteria</div>
+                                    </div>
+                                  </TableCell>
+                                </TableRow>
+                              ) : (
+                                kycCandidates.map((candidate) => (
+                                  <TableRow key={candidate.userId} className="border-b border-gray-700">
+                                    <TableCell className="py-3 px-4">
+                                      <div>
+                                        <div className="font-medium">{candidate.email}</div>
+                                        <div className="text-xs text-gray-400">@{candidate.username}</div>
+                                      </div>
+                                    </TableCell>
+                                    <TableCell className="py-3 px-4">{candidate.accountAgeDays} days</TableCell>
+                                    <TableCell className="py-3 px-4">{candidate.tradesLifetime} / {candidate.tradesLast90d}</TableCell>
+                                    <TableCell className="py-3 px-4">
+                                      <span className={candidate.balancePctOfStart >= 1 ? "text-green-400" : "text-red-400"}>
+                                        {candidate.balancePctOfStart >= 1 ? "+" : ""}
+                                        {((candidate.balancePctOfStart - 1) * 100).toFixed(2)}%
+                                      </span>
+                                    </TableCell>
+                                    <TableCell className="py-3 px-4">
+                                      {(candidate.returnLast90d * 100).toFixed(2)}%
+                                    </TableCell>
+                                    <TableCell className="py-3 px-4">
+                                      <span className="text-xs px-2 py-0.5 rounded bg-blue-700 text-white">
+                                        {candidate.contenderPath1 ? "P1" : candidate.contenderPath2 ? "P2" : "N/A"}
+                                      </span>
+                                    </TableCell>
+                                    <TableCell className="py-3 px-4">
+                                      <span className="text-xs px-2 py-0.5 rounded bg-gray-600 text-white">
+                                        {candidate.userTier} / {candidate.contenderTier}
+                                      </span>
+                                    </TableCell>
+                                    <TableCell className="py-3 px-4">
+                                      <div className="flex gap-2">
+                                        <Button
+                                          size="sm"
+                                          variant="outline"
+                                          className="text-xs bg-green-700 hover:bg-green-600 border-0"
+                                          onClick={() => inviteKycMutation.mutate({ userId: candidate.userId })}
+                                          disabled={inviteKycMutation.isPending}
+                                        >
+                                          Invite KYC
+                                        </Button>
+                                        <Button
+                                          size="sm"
+                                          variant="outline"
+                                          className="text-xs bg-red-700 hover:bg-red-600 border-0"
+                                          onClick={() => updateKycStatusMutation.mutate({ userId: candidate.userId, status: 'REJECTED' })}
+                                          disabled={updateKycStatusMutation.isPending}
+                                        >
+                                          Reject
+                                        </Button>
                                       </div>
                                     </TableCell>
                                   </TableRow>
-                                ) : (
-                                  kycCandidates.map((candidate) => (
-                                    <TableRow key={candidate.userId} className="border-b border-gray-700">
-                                      <TableCell className="py-3 px-4">
-                                        <div>
-                                          <div className="font-medium">{candidate.email}</div>
-                                          <div className="text-xs text-gray-400">@{candidate.username}</div>
-                                        </div>
-                                      </TableCell>
-                                      <TableCell className="py-3 px-4">{candidate.accountAgeDays} days</TableCell>
-                                      <TableCell className="py-3 px-4">{candidate.tradesLifetime} / {candidate.tradesLast90d}</TableCell>
-                                      <TableCell className="py-3 px-4">
-                                        <span className={candidate.balancePctOfStart >= 1 ? "text-green-400" : "text-red-400"}>
-                                          {candidate.balancePctOfStart >= 1 ? "+" : ""}
-                                          {((candidate.balancePctOfStart - 1) * 100).toFixed(2)}%
-                                        </span>
-                                      </TableCell>
-                                      <TableCell className="py-3 px-4">
-                                        {(candidate.returnLast90d * 100).toFixed(2)}%
-                                      </TableCell>
-                                      <TableCell className="py-3 px-4">
-                                        <span className="text-xs px-2 py-0.5 rounded bg-blue-700 text-white">
-                                          {candidate.contenderPath1 ? "P1" : candidate.contenderPath2 ? "P2" : "N/A"}
-                                        </span>
-                                      </TableCell>
-                                      <TableCell className="py-3 px-4">
-                                        <span className="text-xs px-2 py-0.5 rounded bg-gray-600 text-white">
-                                          {candidate.userTier} / {candidate.contenderTier}
-                                        </span>
-                                      </TableCell>
-                                      <TableCell className="py-3 px-4">
-                                        <div className="flex gap-2">
-                                          <Button 
-                                            size="sm" 
-                                            variant="outline" 
-                                            className="text-xs bg-green-700 hover:bg-green-600 border-0"
-                                            onClick={() => inviteKycMutation.mutate({ userId: candidate.userId })}
-                                            disabled={inviteKycMutation.isPending}
-                                          >
-                                            Invite KYC
-                                          </Button>
-                                          <Button 
-                                            size="sm" 
-                                            variant="outline" 
-                                            className="text-xs bg-red-700 hover:bg-red-600 border-0"
-                                            onClick={() => updateKycStatusMutation.mutate({ userId: candidate.userId, status: 'REJECTED' })}
-                                            disabled={updateKycStatusMutation.isPending}
-                                          >
-                                            Reject
-                                          </Button>
-                                        </div>
-                                      </TableCell>
-                                    </TableRow>
-                                  ))
+                                ))
                               )}
                             </TableBody>
                           </Table>
                         </CardContent>
                       </Card>
-                      
+
                       <KycQueueTab />
                     </div>
                   )}
@@ -3639,300 +3644,300 @@ export default function AdminDashboard() {
                 </div>
               ) : (
                 <>
-                {/* Column visibility dropdown */}
-                <div className="flex justify-end mb-2">
-                  <div className="relative group">
-                    <Button variant="outline" size="sm" className="bg-neutral-700 text-xs">
-                      Columns ▾
-                    </Button>
-                    <div className="absolute right-0 mt-1 w-48 bg-neutral-800 border border-gray-600 rounded-md shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 p-2 space-y-1">
-                      {([
-                        { key: 'name', label: 'Names' },
-                        { key: 'phone', label: 'Phone' },
-                        { key: 'username', label: 'Username' },
-                        { key: 'email', label: 'Email' },
-                        { key: 'status', label: 'Status' },
-                        { key: 'balance', label: 'Balance' },
-                        { key: 'leverage', label: 'Leverage' },
-                        { key: 'maxTrades', label: 'Max Trades' },
-                        { key: 'minHold', label: 'Min Hold' },
-                        { key: 'maxHold', label: 'Max Hold' },
-                        { key: 'leaderboard', label: 'Leaderboard' },
-                      ] as { key: UserColumnKey; label: string }[]).map(col => (
-                        <label key={col.key} className="flex items-center gap-2 text-xs cursor-pointer hover:bg-neutral-700 p-1 rounded">
-                          <Checkbox 
-                            checked={visibleColumns[col.key]} 
-                            onCheckedChange={(checked) => setVisibleColumns(prev => ({ ...prev, [col.key]: !!checked }))}
-                          />
-                          {col.label}
-                        </label>
-                      ))}
+                  {/* Column visibility dropdown */}
+                  <div className="flex justify-end mb-2">
+                    <div className="relative group">
+                      <Button variant="outline" size="sm" className="bg-neutral-700 text-xs">
+                        Columns ▾
+                      </Button>
+                      <div className="absolute right-0 mt-1 w-48 bg-neutral-800 border border-gray-600 rounded-md shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 p-2 space-y-1">
+                        {([
+                          { key: 'name', label: 'Names' },
+                          { key: 'phone', label: 'Phone' },
+                          { key: 'username', label: 'Username' },
+                          { key: 'email', label: 'Email' },
+                          { key: 'status', label: 'Status' },
+                          { key: 'balance', label: 'Balance' },
+                          { key: 'leverage', label: 'Leverage' },
+                          { key: 'maxTrades', label: 'Max Trades' },
+                          { key: 'minHold', label: 'Min Hold' },
+                          { key: 'maxHold', label: 'Max Hold' },
+                          { key: 'leaderboard', label: 'Leaderboard' },
+                        ] as { key: UserColumnKey; label: string }[]).map(col => (
+                          <label key={col.key} className="flex items-center gap-2 text-xs cursor-pointer hover:bg-neutral-700 p-1 rounded">
+                            <Checkbox
+                              checked={visibleColumns[col.key]}
+                              onCheckedChange={(checked) => setVisibleColumns(prev => ({ ...prev, [col.key]: !!checked }))}
+                            />
+                            {col.label}
+                          </label>
+                        ))}
+                      </div>
                     </div>
                   </div>
-                </div>
-                
-                <div className="overflow-x-auto">
-                  <Table className="border-collapse">
-                    <TableHeader>
-                      <TableRow className="border-b border-gray-700">
-                        <TableHead className="py-3 px-2 w-10">
-                          <Checkbox 
-                            checked={selectedUserIds.length > 0 && selectedUserIds.length === filteredUsers.length}
-                            onCheckedChange={(checked) => handleSelectAll(!!checked)}
-                          />
-                        </TableHead>
-                        {visibleColumns.name && (
-                          <TableHead className="py-2 px-4 text-left text-gray-400">
-                            <div className="space-y-1">
-                              <span>Names</span>
-                              <Input 
-                                placeholder="Search..." 
-                                value={columnFilters.name}
-                                onChange={(e) => setColumnFilters(prev => ({ ...prev, name: e.target.value }))}
-                                className="h-7 text-xs bg-neutral-700 w-full"
-                              />
-                            </div>
+
+                  <div className="overflow-x-auto">
+                    <Table className="border-collapse">
+                      <TableHeader>
+                        <TableRow className="border-b border-gray-700">
+                          <TableHead className="py-3 px-2 w-10">
+                            <Checkbox
+                              checked={selectedUserIds.length > 0 && selectedUserIds.length === filteredUsers.length}
+                              onCheckedChange={(checked) => handleSelectAll(!!checked)}
+                            />
                           </TableHead>
-                        )}
-                        {visibleColumns.phone && (
-                          <TableHead className="py-2 px-4 text-left text-gray-400">
-                            <div className="space-y-1">
-                              <span>Phone</span>
-                              <Input 
-                                placeholder="Search..." 
-                                value={columnFilters.phone}
-                                onChange={(e) => setColumnFilters(prev => ({ ...prev, phone: e.target.value }))}
-                                className="h-7 text-xs bg-neutral-700 w-full"
-                              />
-                            </div>
-                          </TableHead>
-                        )}
-                        {visibleColumns.username && (
-                          <TableHead className="py-2 px-4 text-left text-gray-400">
-                            <div className="space-y-1">
-                              <span>Username</span>
-                              <Input 
-                                placeholder="Search..." 
-                                value={columnFilters.username}
-                                onChange={(e) => setColumnFilters(prev => ({ ...prev, username: e.target.value }))}
-                                className="h-7 text-xs bg-neutral-700 w-full"
-                              />
-                            </div>
-                          </TableHead>
-                        )}
-                        {visibleColumns.email && (
-                          <TableHead className="py-2 px-4 text-left text-gray-400">
-                            <div className="space-y-1">
-                              <span>Email</span>
-                              <Input 
-                                placeholder="Search..." 
-                                value={columnFilters.email}
-                                onChange={(e) => setColumnFilters(prev => ({ ...prev, email: e.target.value }))}
-                                className="h-7 text-xs bg-neutral-700 w-full"
-                              />
-                            </div>
-                          </TableHead>
-                        )}
-                        {visibleColumns.status && <TableHead className="py-3 px-4 text-left text-gray-400">Status</TableHead>}
-                        {visibleColumns.balance && <TableHead className="py-3 px-4 text-left text-gray-400">Balance</TableHead>}
-                        {visibleColumns.leverage && <TableHead className="py-3 px-4 text-left text-gray-400">Leverage</TableHead>}
-                        {visibleColumns.maxTrades && <TableHead className="py-3 px-4 text-left text-gray-400">Max Trades</TableHead>}
-                        {visibleColumns.minHold && <TableHead className="py-3 px-4 text-left text-gray-400">Min Hold (s)</TableHead>}
-                        {visibleColumns.maxHold && <TableHead className="py-3 px-4 text-left text-gray-400">Max Hold (s)</TableHead>}
-                        {visibleColumns.leaderboard && <TableHead className="py-3 px-4 text-left text-gray-400">Leaderboard</TableHead>}
-                        <TableHead className="py-3 px-4 text-left text-gray-400">Actions</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {filteredUsers.length === 0 ? (
-                        <TableRow>
-                          <TableCell colSpan={10} className="text-center py-4">
-                            No users found
-                          </TableCell>
+                          {visibleColumns.name && (
+                            <TableHead className="py-2 px-4 text-left text-gray-400">
+                              <div className="space-y-1">
+                                <span>Names</span>
+                                <Input
+                                  placeholder="Search..."
+                                  value={columnFilters.name}
+                                  onChange={(e) => setColumnFilters(prev => ({ ...prev, name: e.target.value }))}
+                                  className="h-7 text-xs bg-neutral-700 w-full"
+                                />
+                              </div>
+                            </TableHead>
+                          )}
+                          {visibleColumns.phone && (
+                            <TableHead className="py-2 px-4 text-left text-gray-400">
+                              <div className="space-y-1">
+                                <span>Phone</span>
+                                <Input
+                                  placeholder="Search..."
+                                  value={columnFilters.phone}
+                                  onChange={(e) => setColumnFilters(prev => ({ ...prev, phone: e.target.value }))}
+                                  className="h-7 text-xs bg-neutral-700 w-full"
+                                />
+                              </div>
+                            </TableHead>
+                          )}
+                          {visibleColumns.username && (
+                            <TableHead className="py-2 px-4 text-left text-gray-400">
+                              <div className="space-y-1">
+                                <span>Username</span>
+                                <Input
+                                  placeholder="Search..."
+                                  value={columnFilters.username}
+                                  onChange={(e) => setColumnFilters(prev => ({ ...prev, username: e.target.value }))}
+                                  className="h-7 text-xs bg-neutral-700 w-full"
+                                />
+                              </div>
+                            </TableHead>
+                          )}
+                          {visibleColumns.email && (
+                            <TableHead className="py-2 px-4 text-left text-gray-400">
+                              <div className="space-y-1">
+                                <span>Email</span>
+                                <Input
+                                  placeholder="Search..."
+                                  value={columnFilters.email}
+                                  onChange={(e) => setColumnFilters(prev => ({ ...prev, email: e.target.value }))}
+                                  className="h-7 text-xs bg-neutral-700 w-full"
+                                />
+                              </div>
+                            </TableHead>
+                          )}
+                          {visibleColumns.status && <TableHead className="py-3 px-4 text-left text-gray-400">Status</TableHead>}
+                          {visibleColumns.balance && <TableHead className="py-3 px-4 text-left text-gray-400">Balance</TableHead>}
+                          {visibleColumns.leverage && <TableHead className="py-3 px-4 text-left text-gray-400">Leverage</TableHead>}
+                          {visibleColumns.maxTrades && <TableHead className="py-3 px-4 text-left text-gray-400">Max Trades</TableHead>}
+                          {visibleColumns.minHold && <TableHead className="py-3 px-4 text-left text-gray-400">Min Hold (s)</TableHead>}
+                          {visibleColumns.maxHold && <TableHead className="py-3 px-4 text-left text-gray-400">Max Hold (s)</TableHead>}
+                          {visibleColumns.leaderboard && <TableHead className="py-3 px-4 text-left text-gray-400">Leaderboard</TableHead>}
+                          <TableHead className="py-3 px-4 text-left text-gray-400">Actions</TableHead>
                         </TableRow>
-                      ) : (
-                        filteredUsers.map((user) => (
-                          <TableRow 
-                            key={user.id} 
-                            className={`border-b border-gray-700 ${user.isFrozen ? 'bg-blue-900/20' : user.isDisabled ? 'bg-red-900/20' : ''}`}
-                          >
-                            <TableCell className="py-3 px-2">
-                              <Checkbox 
-                                checked={selectedUserIds.includes(user.id)}
-                                onCheckedChange={(checked) => handleSelectUser(user.id, !!checked)}
-                              />
+                      </TableHeader>
+                      <TableBody>
+                        {filteredUsers.length === 0 ? (
+                          <TableRow>
+                            <TableCell colSpan={10} className="text-center py-4">
+                              No users found
                             </TableCell>
-                            {visibleColumns.name && (
-                              <TableCell className="py-3 px-4">
-                                <span className="text-sm">{user.name || '-'}</span>
+                          </TableRow>
+                        ) : (
+                          filteredUsers.map((user) => (
+                            <TableRow
+                              key={user.id}
+                              className={`border-b border-gray-700 ${user.isFrozen ? 'bg-blue-900/20' : user.isDisabled ? 'bg-red-900/20' : ''}`}
+                            >
+                              <TableCell className="py-3 px-2">
+                                <Checkbox
+                                  checked={selectedUserIds.includes(user.id)}
+                                  onCheckedChange={(checked) => handleSelectUser(user.id, !!checked)}
+                                />
                               </TableCell>
-                            )}
-                            {visibleColumns.phone && (
+                              {visibleColumns.name && (
+                                <TableCell className="py-3 px-4">
+                                  <span className="text-sm">{user.name || '-'}</span>
+                                </TableCell>
+                              )}
+                              {visibleColumns.phone && (
+                                <TableCell className="py-3 px-4">
+                                  <span className="text-sm">{user.phone || '-'}</span>
+                                </TableCell>
+                              )}
+                              {visibleColumns.username && (
+                                <TableCell className="py-3 px-4">
+                                  <span className="text-sm font-medium">{user.username}</span>
+                                </TableCell>
+                              )}
+                              {visibleColumns.email && (
+                                <TableCell className="py-3 px-4">
+                                  <span className="text-sm">{user.email}</span>
+                                </TableCell>
+                              )}
+                              {visibleColumns.status && (
+                                <TableCell className="py-3 px-4">
+                                  <div className="flex flex-col gap-1">
+                                    {user.isAdmin && (
+                                      <span className="text-xs px-2 py-0.5 rounded bg-purple-600 text-white">Admin</span>
+                                    )}
+                                    {user.isFrozen ? (
+                                      <span className="text-xs px-2 py-0.5 rounded bg-blue-600 text-white">Frozen</span>
+                                    ) : user.isDisabled ? (
+                                      <span className="text-xs px-2 py-0.5 rounded bg-red-600 text-white">Disabled</span>
+                                    ) : (
+                                      <span className="text-xs px-2 py-0.5 rounded bg-green-600 text-white">Active</span>
+                                    )}
+                                  </div>
+                                </TableCell>
+                              )}
+                              {visibleColumns.balance && (
+                                <TableCell className="py-3 px-4">
+                                  <Input
+                                    type="text"
+                                    defaultValue={user.balance}
+                                    onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
+                                      if (e.key === 'Enter') {
+                                        updateBalance(user.id, e.currentTarget.value);
+                                      }
+                                    }}
+                                    onBlur={(e) => updateBalance(user.id, e.currentTarget.value)}
+                                    className="w-28 h-8 bg-neutral-700"
+                                  />
+                                </TableCell>
+                              )}
+                              {visibleColumns.leverage && (
+                                <TableCell className="py-3 px-4">{user.leverage || 'Default'}</TableCell>
+                              )}
+                              {visibleColumns.maxTrades && (
+                                <TableCell className="py-3 px-4">{user.maxConcurrent || 'Default'}</TableCell>
+                              )}
+                              {visibleColumns.minHold && (
+                                <TableCell className="py-3 px-4">{user.minHoldSec || 'Default'}</TableCell>
+                              )}
+                              {visibleColumns.maxHold && (
+                                <TableCell className="py-3 px-4">{user.maxHoldSec || 'Default'}</TableCell>
+                              )}
+                              {visibleColumns.leaderboard && (
+                                <TableCell className="py-3 px-4">
+                                  <Switch
+                                    checked={user.showOnLeaderboard !== false}
+                                    onCheckedChange={(checked) => {
+                                      const settings = {
+                                        userId: user.id,
+                                        leverage: user.leverage || 50,
+                                        maxConcurrent: user.maxConcurrent || 5,
+                                        maxConcurrentLots: user.maxConcurrentLots || 50,
+                                        minHoldSec: user.minHoldSec || 60,
+                                        maxHoldSec: user.maxHoldSec || 86400,
+                                        showOnLeaderboard: checked
+                                      };
+                                      mutation.mutate(settings);
+                                    }}
+                                  />
+                                </TableCell>
+                              )}
                               <TableCell className="py-3 px-4">
-                                <span className="text-sm">{user.phone || '-'}</span>
-                              </TableCell>
-                            )}
-                            {visibleColumns.username && (
-                              <TableCell className="py-3 px-4">
-                                <span className="text-sm font-medium">{user.username}</span>
-                              </TableCell>
-                            )}
-                            {visibleColumns.email && (
-                              <TableCell className="py-3 px-4">
-                                <span className="text-sm">{user.email}</span>
-                              </TableCell>
-                            )}
-                            {visibleColumns.status && (
-                              <TableCell className="py-3 px-4">
-                                <div className="flex flex-col gap-1">
-                                  {user.isAdmin && (
-                                    <span className="text-xs px-2 py-0.5 rounded bg-purple-600 text-white">Admin</span>
-                                  )}
-                                  {user.isFrozen ? (
-                                    <span className="text-xs px-2 py-0.5 rounded bg-blue-600 text-white">Frozen</span>
-                                  ) : user.isDisabled ? (
-                                    <span className="text-xs px-2 py-0.5 rounded bg-red-600 text-white">Disabled</span>
+                                <div className="flex flex-wrap gap-1">
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => handleEdit(user)}
+                                    className="bg-neutral-700 hover:bg-neutral-600 h-7 text-xs px-2"
+                                  >
+                                    Edit
+                                  </Button>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => openTimeline(user)}
+                                    className="bg-neutral-700 hover:bg-neutral-600 h-7 text-xs px-2"
+                                  >
+                                    Timeline
+                                  </Button>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => openNotes(user)}
+                                    className="bg-neutral-700 hover:bg-neutral-600 h-7 text-xs px-2"
+                                  >
+                                    Notes
+                                  </Button>
+                                  {user.isDisabled ? (
+                                    /* Disabled users (including frozen+disabled) only get Enable button */
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() => toggleUserStatusMutation.mutate({ userId: user.id, disabled: false })}
+                                      disabled={toggleUserStatusMutation.isPending}
+                                      className="bg-green-600 hover:bg-green-700 border-0 h-7 text-xs px-2"
+                                    >
+                                      {toggleUserStatusMutation.isPending ? '...' : 'Enable'}
+                                    </Button>
+                                  ) : user.isFrozen ? (
+                                    /* Frozen only users get Unfreeze + Disable */
+                                    <>
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => unfreezeUserMutation.mutate(user.id)}
+                                        disabled={unfreezeUserMutation.isPending}
+                                        className="bg-blue-600 hover:bg-blue-700 border-0 h-7 text-xs px-2"
+                                      >
+                                        {unfreezeUserMutation.isPending ? '...' : 'Unfreeze'}
+                                      </Button>
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => toggleUserStatusMutation.mutate({ userId: user.id, disabled: true })}
+                                        disabled={toggleUserStatusMutation.isPending}
+                                        className="bg-red-600 hover:bg-red-700 border-0 h-7 text-xs px-2"
+                                      >
+                                        {toggleUserStatusMutation.isPending ? '...' : 'Disable'}
+                                      </Button>
+                                    </>
                                   ) : (
-                                    <span className="text-xs px-2 py-0.5 rounded bg-green-600 text-white">Active</span>
+                                    /* Active users get Freeze + Disable */
+                                    <>
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => openFreeze(user)}
+                                        className="bg-amber-600 hover:bg-amber-700 border-0 h-7 text-xs px-2"
+                                      >
+                                        Freeze
+                                      </Button>
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => toggleUserStatusMutation.mutate({ userId: user.id, disabled: true })}
+                                        disabled={toggleUserStatusMutation.isPending}
+                                        className="bg-red-600 hover:bg-red-700 border-0 h-7 text-xs px-2"
+                                      >
+                                        {toggleUserStatusMutation.isPending ? '...' : 'Disable'}
+                                      </Button>
+                                    </>
                                   )}
                                 </div>
                               </TableCell>
-                            )}
-                            {visibleColumns.balance && (
-                              <TableCell className="py-3 px-4">
-                                <Input 
-                                  type="text"
-                                  defaultValue={user.balance}
-                                  onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
-                                    if (e.key === 'Enter') {
-                                      updateBalance(user.id, e.currentTarget.value);
-                                    }
-                                  }}
-                                  onBlur={(e) => updateBalance(user.id, e.currentTarget.value)}
-                                  className="w-28 h-8 bg-neutral-700"
-                                />
-                              </TableCell>
-                            )}
-                            {visibleColumns.leverage && (
-                              <TableCell className="py-3 px-4">{user.leverage || 'Default'}</TableCell>
-                            )}
-                            {visibleColumns.maxTrades && (
-                              <TableCell className="py-3 px-4">{user.maxConcurrent || 'Default'}</TableCell>
-                            )}
-                            {visibleColumns.minHold && (
-                              <TableCell className="py-3 px-4">{user.minHoldSec || 'Default'}</TableCell>
-                            )}
-                            {visibleColumns.maxHold && (
-                              <TableCell className="py-3 px-4">{user.maxHoldSec || 'Default'}</TableCell>
-                            )}
-                            {visibleColumns.leaderboard && (
-                              <TableCell className="py-3 px-4">
-                                <Switch 
-                                  checked={user.showOnLeaderboard !== false}
-                                  onCheckedChange={(checked) => {
-                                    const settings = {
-                                      userId: user.id,
-                                      leverage: user.leverage || 50,
-                                      maxConcurrent: user.maxConcurrent || 5,
-                                      maxConcurrentLots: user.maxConcurrentLots || 50,
-                                      minHoldSec: user.minHoldSec || 60,
-                                      maxHoldSec: user.maxHoldSec || 86400,
-                                      showOnLeaderboard: checked
-                                    };
-                                    mutation.mutate(settings);
-                                  }}
-                                />
-                              </TableCell>
-                            )}
-                            <TableCell className="py-3 px-4">
-                              <div className="flex flex-wrap gap-1">
-                                <Button 
-                                  variant="outline" 
-                                  size="sm" 
-                                  onClick={() => handleEdit(user)}
-                                  className="bg-neutral-700 hover:bg-neutral-600 h-7 text-xs px-2"
-                                >
-                                  Edit
-                                </Button>
-                                <Button 
-                                  variant="outline" 
-                                  size="sm" 
-                                  onClick={() => openTimeline(user)}
-                                  className="bg-neutral-700 hover:bg-neutral-600 h-7 text-xs px-2"
-                                >
-                                  Timeline
-                                </Button>
-                                <Button 
-                                  variant="outline" 
-                                  size="sm" 
-                                  onClick={() => openNotes(user)}
-                                  className="bg-neutral-700 hover:bg-neutral-600 h-7 text-xs px-2"
-                                >
-                                  Notes
-                                </Button>
-                                {user.isDisabled ? (
-                                  /* Disabled users (including frozen+disabled) only get Enable button */
-                                  <Button 
-                                    variant="outline" 
-                                    size="sm" 
-                                    onClick={() => toggleUserStatusMutation.mutate({ userId: user.id, disabled: false })}
-                                    disabled={toggleUserStatusMutation.isPending}
-                                    className="bg-green-600 hover:bg-green-700 border-0 h-7 text-xs px-2"
-                                  >
-                                    {toggleUserStatusMutation.isPending ? '...' : 'Enable'}
-                                  </Button>
-                                ) : user.isFrozen ? (
-                                  /* Frozen only users get Unfreeze + Disable */
-                                  <>
-                                    <Button 
-                                      variant="outline" 
-                                      size="sm" 
-                                      onClick={() => unfreezeUserMutation.mutate(user.id)}
-                                      disabled={unfreezeUserMutation.isPending}
-                                      className="bg-blue-600 hover:bg-blue-700 border-0 h-7 text-xs px-2"
-                                    >
-                                      {unfreezeUserMutation.isPending ? '...' : 'Unfreeze'}
-                                    </Button>
-                                    <Button 
-                                      variant="outline" 
-                                      size="sm" 
-                                      onClick={() => toggleUserStatusMutation.mutate({ userId: user.id, disabled: true })}
-                                      disabled={toggleUserStatusMutation.isPending}
-                                      className="bg-red-600 hover:bg-red-700 border-0 h-7 text-xs px-2"
-                                    >
-                                      {toggleUserStatusMutation.isPending ? '...' : 'Disable'}
-                                    </Button>
-                                  </>
-                                ) : (
-                                  /* Active users get Freeze + Disable */
-                                  <>
-                                    <Button 
-                                      variant="outline" 
-                                      size="sm" 
-                                      onClick={() => openFreeze(user)}
-                                      className="bg-amber-600 hover:bg-amber-700 border-0 h-7 text-xs px-2"
-                                    >
-                                      Freeze
-                                    </Button>
-                                    <Button 
-                                      variant="outline" 
-                                      size="sm" 
-                                      onClick={() => toggleUserStatusMutation.mutate({ userId: user.id, disabled: true })}
-                                      disabled={toggleUserStatusMutation.isPending}
-                                      className="bg-red-600 hover:bg-red-700 border-0 h-7 text-xs px-2"
-                                    >
-                                      {toggleUserStatusMutation.isPending ? '...' : 'Disable'}
-                                    </Button>
-                                  </>
-                                )}
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                        ))
-                      )}
-                    </TableBody>
-                  </Table>
-                </div>
+                            </TableRow>
+                          ))
+                        )}
+                      </TableBody>
+                    </Table>
+                  </div>
                 </>
               )}
             </TabsContent>
@@ -3945,7 +3950,7 @@ export default function AdminDashboard() {
                 Select a trader to view the platform from their perspective. This is useful for debugging and support purposes.
                 All impersonation actions are logged for audit compliance.
               </p>
-              
+
               <div className="mb-4">
                 <Input
                   placeholder="Search by name, email, username, or phone..."
@@ -3975,7 +3980,7 @@ export default function AdminDashboard() {
                     ) : (
                       users
                         .filter(user => !user.isAdmin)
-                        .filter(user => !columnFilters.email || 
+                        .filter(user => !columnFilters.email ||
                           user.email.toLowerCase().includes(columnFilters.email.toLowerCase()) ||
                           user.username?.toLowerCase().includes(columnFilters.email.toLowerCase()) ||
                           user.phone?.toLowerCase().includes(columnFilters.email.toLowerCase()) ||
@@ -3999,9 +4004,9 @@ export default function AdminDashboard() {
                               )}
                             </TableCell>
                             <TableCell className="py-3">
-                              <Button 
-                                variant="outline" 
-                                size="sm" 
+                              <Button
+                                variant="outline"
+                                size="sm"
                                 onClick={() => viewAsMutation.mutate(user.id)}
                                 disabled={viewAsMutation.isPending}
                                 className="bg-purple-600 hover:bg-purple-700 border-0"
@@ -4016,11 +4021,11 @@ export default function AdminDashboard() {
                 </Table>
               </div>
             </TabsContent>
-            
+
             <TabsContent value="trades" className="p-4">
               <h2 className="text-xl font-semibold mb-4">Trade Settings</h2>
               <p className="text-gray-400">Configure global trade parameters, risk management, and trading hours.</p>
-              
+
               {/* This would be populated with trade settings controls */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
                 <Card className="bg-neutral-700 border-gray-600">
@@ -4030,8 +4035,8 @@ export default function AdminDashboard() {
                       <p className="text-xs text-gray-400">Configure trading hours in UTC timezone</p>
                     </div>
                     {riskParamsChanged && (
-                      <Button 
-                        size="sm" 
+                      <Button
+                        size="sm"
                         onClick={handleSaveRiskParams}
                         disabled={globalSettingsMutation.isPending}
                         className="shrink-0 w-full sm:w-auto text-xs sm:text-sm"
@@ -4045,26 +4050,26 @@ export default function AdminDashboard() {
                       <div className="grid grid-cols-2 gap-2">
                         <div>
                           <Label>Opening Time (UTC)</Label>
-                          <Input 
-                            type="time" 
-                            value={riskParams.marketOpenTime} 
+                          <Input
+                            type="time"
+                            value={riskParams.marketOpenTime}
                             onChange={(e) => handleRiskParamChange('marketOpenTime', e.target.value)}
-                            className="bg-neutral-600" 
+                            className="bg-neutral-600"
                           />
                         </div>
                         <div>
                           <Label>Closing Time (UTC)</Label>
-                          <Input 
-                            type="time" 
-                            value={riskParams.marketCloseTime} 
+                          <Input
+                            type="time"
+                            value={riskParams.marketCloseTime}
                             onChange={(e) => handleRiskParamChange('marketCloseTime', e.target.value)}
-                            className="bg-neutral-600" 
+                            className="bg-neutral-600"
                           />
                         </div>
                       </div>
                       <div className="flex items-center space-x-2">
-                        <Checkbox 
-                          id="weekend" 
+                        <Checkbox
+                          id="weekend"
                           checked={riskParams.allowWeekendTrading}
                           onCheckedChange={(checked) => handleRiskParamChange('allowWeekendTrading', Boolean(checked))}
                         />
@@ -4073,13 +4078,13 @@ export default function AdminDashboard() {
                     </div>
                   </CardContent>
                 </Card>
-                
+
                 <Card className="bg-neutral-700 border-gray-600">
                   <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                     <CardTitle className="text-sm sm:text-base min-w-0">Default Risk Parameters</CardTitle>
                     {riskParamsChanged && (
-                      <Button 
-                        size="sm" 
+                      <Button
+                        size="sm"
                         onClick={handleSaveRiskParams}
                         disabled={globalSettingsMutation.isPending}
                         className="shrink-0 w-full sm:w-auto text-xs sm:text-sm"
@@ -4092,49 +4097,49 @@ export default function AdminDashboard() {
                     <div className="space-y-4">
                       <div>
                         <Label>Default Leverage</Label>
-                        <Input 
-                          type="number" 
-                          value={riskParams.defaultLeverage} 
+                        <Input
+                          type="number"
+                          value={riskParams.defaultLeverage}
                           onChange={(e) => handleRiskParamChange('defaultLeverage', Number(e.target.value))}
-                          className="bg-neutral-600" 
+                          className="bg-neutral-600"
                         />
                       </div>
                       <div>
                         <Label>Max Position Size</Label>
-                        <Input 
-                          type="number" 
-                          value={riskParams.maxPositionSize} 
+                        <Input
+                          type="number"
+                          value={riskParams.maxPositionSize}
                           onChange={(e) => handleRiskParamChange('maxPositionSize', Number(e.target.value))}
-                          className="bg-neutral-600" 
+                          className="bg-neutral-600"
                         />
                       </div>
                       <div>
                         <Label>Maximum Trades Per User</Label>
-                        <Input 
-                          type="number" 
-                          value={riskParams.maxTradesPerUser} 
+                        <Input
+                          type="number"
+                          value={riskParams.maxTradesPerUser}
                           onChange={(e) => handleRiskParamChange('maxTradesPerUser', Number(e.target.value))}
-                          className="bg-neutral-600" 
+                          className="bg-neutral-600"
                         />
                         <p className="text-xs text-gray-400 mt-1">Maximum number of concurrent trades allowed per user</p>
                       </div>
                       <div>
                         <Label>Maximum Trades Per Instrument</Label>
-                        <Input 
-                          type="number" 
-                          value={riskParams.maxTradesPerInstrument} 
+                        <Input
+                          type="number"
+                          value={riskParams.maxTradesPerInstrument}
                           onChange={(e) => handleRiskParamChange('maxTradesPerInstrument', Number(e.target.value))}
-                          className="bg-neutral-600" 
+                          className="bg-neutral-600"
                         />
                         <p className="text-xs text-gray-400 mt-1">Maximum number of concurrent trades allowed per instrument</p>
                       </div>
                       <div>
                         <Label>Maximum Concurrent Lots Per User</Label>
-                        <Input 
-                          type="number" 
-                          value={riskParams.maxConcurrentLots} 
+                        <Input
+                          type="number"
+                          value={riskParams.maxConcurrentLots}
                           onChange={(e) => handleRiskParamChange('maxConcurrentLots', Number(e.target.value))}
-                          className="bg-neutral-600" 
+                          className="bg-neutral-600"
                         />
                         <p className="text-xs text-gray-400 mt-1">Maximum total lots allowed across all open trades per user</p>
                       </div>
@@ -4149,8 +4154,8 @@ export default function AdminDashboard() {
                   <CardContent className="pt-4">
                     <div className="space-y-4">
                       <div className="flex items-center space-x-2">
-                        <Switch 
-                          id="enableAutoClose" 
+                        <Switch
+                          id="enableAutoClose"
                           checked={riskParams.enableAutoClose}
                           onCheckedChange={(checked) => handleRiskParamChange('enableAutoClose', checked)}
                         />
@@ -4159,31 +4164,31 @@ export default function AdminDashboard() {
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                         <div>
                           <Label>Auto-close after (days)</Label>
-                          <Input 
-                            type="number" 
-                            value={riskParams.autoCloseAfterDays} 
+                          <Input
+                            type="number"
+                            value={riskParams.autoCloseAfterDays}
                             onChange={(e) => handleRiskParamChange('autoCloseAfterDays', Number(e.target.value))}
-                            className="bg-neutral-600" 
+                            className="bg-neutral-600"
                           />
                           <p className="text-xs text-gray-400 mt-1">Trades will auto-close after this many days</p>
                         </div>
                         <div>
                           <Label>Check frequency (minutes)</Label>
-                          <Input 
-                            type="number" 
-                            value={riskParams.autoCloseCheckFrequencyMinutes} 
+                          <Input
+                            type="number"
+                            value={riskParams.autoCloseCheckFrequencyMinutes}
                             onChange={(e) => handleRiskParamChange('autoCloseCheckFrequencyMinutes', Number(e.target.value))}
-                            className="bg-neutral-600" 
+                            className="bg-neutral-600"
                           />
                           <p className="text-xs text-gray-400 mt-1">How often the system checks for trades to close</p>
                         </div>
                         <div>
                           <Label>Minimum Hold Time (seconds)</Label>
-                          <Input 
-                            type="number" 
-                            value={riskParams.minHoldSec} 
+                          <Input
+                            type="number"
+                            value={riskParams.minHoldSec}
                             onChange={(e) => handleRiskParamChange('minHoldSec', Number(e.target.value))}
-                            className="bg-neutral-600" 
+                            className="bg-neutral-600"
                           />
                           <p className="text-xs text-gray-400 mt-1">Global default - users can have overrides</p>
                         </div>
@@ -4199,8 +4204,8 @@ export default function AdminDashboard() {
                   <CardContent className="pt-4">
                     <div className="space-y-4">
                       <div className="flex items-center space-x-2 mb-4">
-                        <Switch 
-                          id="enableLossLimits" 
+                        <Switch
+                          id="enableLossLimits"
                           checked={riskParams.enableLossLimits}
                           onCheckedChange={(checked) => handleRiskParamChange('enableLossLimits', checked)}
                         />
@@ -4209,21 +4214,21 @@ export default function AdminDashboard() {
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div>
                           <Label>Daily Loss Limit (%)</Label>
-                          <Input 
-                            type="number" 
-                            value={riskParams.dailyLossLimitPct} 
+                          <Input
+                            type="number"
+                            value={riskParams.dailyLossLimitPct}
                             onChange={(e) => handleRiskParamChange('dailyLossLimitPct', Number(e.target.value))}
-                            className="bg-neutral-600" 
+                            className="bg-neutral-600"
                           />
                           <p className="text-xs text-gray-400 mt-1">Maximum daily loss as percentage of initial balance</p>
                         </div>
                         <div>
                           <Label>Lifetime Loss Limit (%)</Label>
-                          <Input 
-                            type="number" 
-                            value={riskParams.lifetimeLossLimitPct} 
+                          <Input
+                            type="number"
+                            value={riskParams.lifetimeLossLimitPct}
                             onChange={(e) => handleRiskParamChange('lifetimeLossLimitPct', Number(e.target.value))}
-                            className="bg-neutral-600" 
+                            className="bg-neutral-600"
                           />
                           <p className="text-xs text-gray-400 mt-1">Maximum lifetime loss before account is disabled</p>
                         </div>
@@ -4231,23 +4236,137 @@ export default function AdminDashboard() {
                     </div>
                   </CardContent>
                 </Card>
+
+                <Card className="bg-neutral-700 border-gray-600 col-span-1 md:col-span-2">
+                  <CardHeader className="border-b border-gray-600 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                    <div className="min-w-0">
+                      <CardTitle className="text-sm sm:text-base text-purple-400">Visual Lot Settings</CardTitle>
+                      <p className="text-xs text-gray-400">Configure lot preset quick-select cards and dropdown maximum for the trader order form</p>
+                    </div>
+                    {riskParamsChanged && (
+                      <Button
+                        size="sm"
+                        onClick={handleSaveRiskParams}
+                        disabled={globalSettingsMutation.isPending}
+                        className="shrink-0 w-full sm:w-auto text-xs sm:text-sm"
+                      >
+                        {globalSettingsMutation.isPending ? "Saving..." : "Save"}
+                      </Button>
+                    )}
+                  </CardHeader>
+                  <CardContent className="pt-4">
+                    <div className="space-y-6">
+                      {/* Preset Cards Editor */}
+                      <div>
+                        <Label className="text-sm font-medium">Lot Preset Cards</Label>
+                        <p className="text-xs text-gray-400 mb-3">Quick-select buttons shown to traders on the order form</p>
+                        <div className="flex flex-wrap gap-2 mb-3">
+                          {(() => {
+                            try {
+                              const presets: number[] = JSON.parse(riskParams.lotPresetCards || "[]");
+                              return presets.map((value, index) => (
+                                <div key={index} className="flex items-center gap-1 bg-neutral-600 rounded-md px-2 py-1">
+                                  <Input
+                                    type="number"
+                                    value={value}
+                                    onChange={(e) => {
+                                      const newValue = parseInt(e.target.value) || 1;
+                                      const maxAllowed = Math.min(50, riskParams.lotDropdownMax || 50);
+                                      const updated = [...presets];
+                                      updated[index] = Math.max(1, Math.min(maxAllowed, newValue));
+                                      handleRiskParamChange('lotPresetCards', JSON.stringify(updated));
+                                    }}
+                                    className="w-16 h-7 text-xs bg-neutral-700 border-gray-500 text-center"
+                                    min={1}
+                                    max={Math.min(50, riskParams.lotDropdownMax || 50)}
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const updated = presets.filter((_, i) => i !== index);
+                                      handleRiskParamChange('lotPresetCards', JSON.stringify(updated));
+                                    }}
+                                    className="text-gray-400 hover:text-red-400 px-1"
+                                  >
+                                    ×
+                                  </button>
+                                </div>
+                              ));
+                            } catch {
+                              return <span className="text-red-400 text-xs">Invalid preset data</span>;
+                            }
+                          })()}
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              try {
+                                const presets: number[] = JSON.parse(riskParams.lotPresetCards || "[]");
+                                const maxAllowed = Math.min(50, riskParams.lotDropdownMax || 50);
+                                const newValue = presets.length > 0 ? Math.min((presets[presets.length - 1] || 1) * 2, maxAllowed) : 1;
+                                handleRiskParamChange('lotPresetCards', JSON.stringify([...presets, newValue]));
+                              } catch {
+                                handleRiskParamChange('lotPresetCards', JSON.stringify([1]));
+                              }
+                            }}
+                            className="h-7 text-xs bg-neutral-600 hover:bg-neutral-500"
+                          >
+                            + Add
+                          </Button>
+                        </div>
+                      </div>
+
+                      {/* Dropdown Max */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                          <Label>Dropdown Maximum Lots</Label>
+                          <Input
+                            type="number"
+                            value={riskParams.lotDropdownMax}
+                            onChange={(e) => handleRiskParamChange('lotDropdownMax', Math.max(1, Math.min(50, Number(e.target.value) || 50)))}
+                            className="bg-neutral-600"
+                            min={1}
+                            max={50}
+                          />
+                          <p className="text-xs text-gray-400 mt-1">Maximum lot value shown in the dropdown selector (1-50)</p>
+                        </div>
+                        <div className="flex items-end">
+                          <div className="w-full p-3 bg-neutral-800 rounded-md border border-gray-600">
+                            <p className="text-xs text-gray-400 mb-2">Preview (dropdown options):</p>
+                            <div className="flex flex-wrap gap-1 text-xs">
+                              {(() => {
+                                const max = riskParams.lotDropdownMax || 50;
+                                const options = Array.from({ length: Math.min(max, 50) }, (_v, i) => i + 1);
+                                return options.slice(0, 12).map(n => (
+                                  <span key={n} className="px-1.5 py-0.5 bg-neutral-700 rounded">{n}</span>
+                                ));
+                              })()}
+                              {riskParams.lotDropdownMax > 12 && <span className="text-gray-500">...</span>}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
               </div>
             </TabsContent>
-            
+
             <TabsContent value="instruments" className="p-4">
               <div className="flex justify-between items-center mb-4">
                 <h2 className="text-xl font-semibold">Trading Instruments</h2>
-                <Button 
-                  variant="default" 
+                <Button
+                  variant="default"
                   className="bg-green-600 hover:bg-green-700"
                   onClick={() => setNewSymbolDialogOpen(true)}
                 >
                   Add New Instrument
                 </Button>
               </div>
-              
+
               <p className="text-gray-400 mb-4">Configure the trading instruments available on the platform, including spread settings and lot limits.</p>
-              
+
               {isLoadingSymbols ? (
                 <div className="flex items-center justify-center h-40">
                   <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary"></div>
@@ -4292,17 +4411,17 @@ export default function AdminDashboard() {
                               </TableCell>
                               <TableCell className="py-3 px-4">
                                 <div className="flex space-x-2">
-                                  <Button 
-                                    variant="outline" 
-                                    size="sm" 
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
                                     onClick={() => handleEditSymbol(symbol)}
                                     className="bg-neutral-700 hover:bg-neutral-600"
                                   >
                                     Edit
                                   </Button>
-                                  <Button 
-                                    variant="outline" 
-                                    size="sm" 
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
                                     onClick={() => confirmDeleteSymbol(symbol.id)}
                                     className="bg-red-800 hover:bg-red-700 border-red-700"
                                   >
@@ -4316,7 +4435,7 @@ export default function AdminDashboard() {
                       </TableBody>
                     </Table>
                   </div>
-                  
+
                   {/* Inactive Instruments */}
                   <div>
                     <h3 className="text-lg font-semibold mb-2 text-gray-300">Inactive Instruments</h3>
@@ -4355,17 +4474,17 @@ export default function AdminDashboard() {
                               </TableCell>
                               <TableCell className="py-3 px-4">
                                 <div className="flex space-x-2">
-                                  <Button 
-                                    variant="outline" 
-                                    size="sm" 
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
                                     onClick={() => handleEditSymbol(symbol)}
                                     className="bg-neutral-700 hover:bg-neutral-600"
                                   >
                                     Edit
                                   </Button>
-                                  <Button 
-                                    variant="outline" 
-                                    size="sm" 
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
                                     onClick={() => confirmDeleteSymbol(symbol.id)}
                                     className="bg-red-800 hover:bg-red-700 border-red-700"
                                   >
@@ -4382,7 +4501,7 @@ export default function AdminDashboard() {
                 </div>
               )}
             </TabsContent>
-            
+
             <TabsContent value="data" className="p-0">
               <AdminData />
             </TabsContent>
@@ -4394,7 +4513,7 @@ export default function AdminDashboard() {
             <TabsContent value="system" className="p-4">
               <SystemConfigTab />
             </TabsContent>
-            
+
             <TabsContent value="legal" className="p-4">
               <AdminLegalPanel />
             </TabsContent>
@@ -4409,89 +4528,89 @@ export default function AdminDashboard() {
             <DialogTitle>Edit User Settings: {editingUser?.email}</DialogTitle>
             <p className="text-xs text-blue-400 mt-1">User overrides take precedence and can exceed global limits</p>
           </DialogHeader>
-          
+
           <div className="grid grid-cols-2 gap-6 py-4">
             <div className="space-y-4">
               <div>
                 <Label htmlFor="leverage">Leverage</Label>
-                <Input 
+                <Input
                   id="leverage"
-                  type="number" 
-                  value={editForm.leverage} 
+                  type="number"
+                  value={editForm.leverage}
                   onChange={(e) => handleChange("leverage", Number(e.target.value))}
                   className="bg-neutral-700"
                 />
                 <p className="text-xs text-gray-400 mt-1">Maximum leverage this user can use for trading</p>
               </div>
-              
+
               <div>
                 <Label htmlFor="maxConcurrent">Max Concurrent Trades</Label>
-                <Input 
+                <Input
                   id="maxConcurrent"
-                  type="number" 
-                  value={editForm.maxConcurrent} 
+                  type="number"
+                  value={editForm.maxConcurrent}
                   onChange={(e) => handleChange("maxConcurrent", Number(e.target.value))}
                   className="bg-neutral-700"
                 />
                 <p className="text-xs text-gray-400 mt-1">Maximum number of open positions allowed</p>
               </div>
-              
+
               <div>
                 <Label htmlFor="maxConcurrentPerInstrument">Max Per Instrument (optional)</Label>
-                <Input 
+                <Input
                   id="maxConcurrentPerInstrument"
-                  type="number" 
-                  value={editForm.maxConcurrentPerInstrument ?? ""} 
+                  type="number"
+                  value={editForm.maxConcurrentPerInstrument ?? ""}
                   onChange={(e) => handleChange("maxConcurrentPerInstrument", e.target.value === "" ? null : Number(e.target.value))}
                   className="bg-neutral-700"
                   placeholder="Use global default"
                 />
                 <p className="text-xs text-gray-400 mt-1">Leave blank to use global default</p>
               </div>
-              
+
               <div>
                 <Label htmlFor="maxConcurrentLots">Max Concurrent Lots</Label>
-                <Input 
+                <Input
                   id="maxConcurrentLots"
-                  type="number" 
-                  value={editForm.maxConcurrentLots} 
+                  type="number"
+                  value={editForm.maxConcurrentLots}
                   onChange={(e) => handleChange("maxConcurrentLots", Number(e.target.value))}
                   className="bg-neutral-700"
                 />
                 <p className="text-xs text-gray-400 mt-1">Maximum total lots this user can have open at once</p>
               </div>
             </div>
-            
+
             <div className="space-y-4">
               <div>
                 <Label htmlFor="minHoldSec">Minimum Hold Time (seconds)</Label>
-                <Input 
+                <Input
                   id="minHoldSec"
-                  type="number" 
-                  value={editForm.minHoldSec} 
+                  type="number"
+                  value={editForm.minHoldSec}
                   onChange={(e) => handleChange("minHoldSec", Number(e.target.value))}
                   className="bg-neutral-700"
                 />
                 <p className="text-xs text-gray-400 mt-1">Minimum time a position must be held before closing</p>
               </div>
-              
+
               <div>
                 <Label htmlFor="maxHoldSec">Maximum Hold Time (seconds)</Label>
-                <Input 
+                <Input
                   id="maxHoldSec"
-                  type="number" 
-                  value={editForm.maxHoldSec} 
+                  type="number"
+                  value={editForm.maxHoldSec}
                   onChange={(e) => handleChange("maxHoldSec", Number(e.target.value))}
                   className="bg-neutral-700"
                 />
                 <p className="text-xs text-gray-400 mt-1">Maximum time a position can be held before auto-closing</p>
               </div>
             </div>
-            
+
             <div className="col-span-2">
               <div className="flex items-center space-x-2">
-                <Checkbox 
-                  id="showOnLeaderboard" 
+                <Checkbox
+                  id="showOnLeaderboard"
                   checked={editForm.showOnLeaderboard}
                   onCheckedChange={(checked) => handleChange("showOnLeaderboard", Boolean(checked))}
                 />
@@ -4500,10 +4619,10 @@ export default function AdminDashboard() {
               <p className="text-xs text-gray-400 mt-1">Whether this user's performance should be visible on the leaderboard</p>
             </div>
           </div>
-          
+
           <DialogFooter className="flex justify-between sm:justify-between">
-            <Button 
-              variant="outline" 
+            <Button
+              variant="outline"
               onClick={() => {
                 if (globalSettingsData) {
                   setEditForm(prev => ({
@@ -4532,20 +4651,20 @@ export default function AdminDashboard() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-      
+
       {/* Edit Symbol Dialog */}
       <Dialog open={symbolDialogOpen} onOpenChange={setSymbolDialogOpen}>
         <DialogContent className="bg-neutral-800 text-white border-gray-700 max-w-2xl">
           <DialogHeader>
             <DialogTitle>Edit Trading Instrument: {editingSymbol?.symbol}</DialogTitle>
           </DialogHeader>
-          
+
           <div className="grid grid-cols-2 gap-6 py-4">
             <div className="space-y-4">
               <div>
                 <Label htmlFor="symbol">Symbol</Label>
                 <div className="pt-1">
-                  <SymbolSelect 
+                  <SymbolSelect
                     defaultSymbol={editingSymbol?.symbol || ''}
                     onSelected={(opt) => {
                       // Auto-fill all fields from the selected symbol
@@ -4558,61 +4677,61 @@ export default function AdminDashboard() {
                 </div>
                 <p className="text-xs text-gray-400 mt-1">Type to search (e.g. EURUSD, "gold", etc.)</p>
               </div>
-              
+
               <div>
                 <Label htmlFor="name">Display Name</Label>
-                <Input 
+                <Input
                   id="name"
-                  value={editingSymbol?.name || ''} 
+                  value={editingSymbol?.name || ''}
                   onChange={(e) => handleSymbolChange("name", e.target.value)}
                   className="bg-neutral-700"
                 />
                 <p className="text-xs text-gray-400 mt-1">User-friendly name for the instrument</p>
               </div>
-              
+
               <div>
                 <Label htmlFor="minSpreadPips">Minimum Spread (pips)</Label>
-                <Input 
+                <Input
                   id="minSpreadPips"
-                  type="number" 
+                  type="number"
                   step="0.1"
-                  value={editingSymbol?.minSpreadPips || 2} 
+                  value={editingSymbol?.minSpreadPips || 2}
                   onChange={(e) => handleSymbolChange("minSpreadPips", Number(e.target.value))}
                   className="bg-neutral-700"
                 />
                 <p className="text-xs text-gray-400 mt-1">Minimum spread in pips (2.0 recommended)</p>
               </div>
             </div>
-            
+
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <Label htmlFor="baseCurrency">Base Currency</Label>
-                  <Input 
+                  <Input
                     id="baseCurrency"
-                    value={editingSymbol?.baseCurrency || ''} 
+                    value={editingSymbol?.baseCurrency || ''}
                     onChange={(e) => handleSymbolChange("baseCurrency", e.target.value)}
                     className="bg-neutral-700"
                   />
                 </div>
                 <div>
                   <Label htmlFor="quoteCurrency">Quote Currency</Label>
-                  <Input 
+                  <Input
                     id="quoteCurrency"
-                    value={editingSymbol?.quoteCurrency || ''} 
+                    value={editingSymbol?.quoteCurrency || ''}
                     onChange={(e) => handleSymbolChange("quoteCurrency", e.target.value)}
                     className="bg-neutral-700"
                   />
                 </div>
               </div>
-              
+
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <Label htmlFor="minLot">Min Lot Size</Label>
-                  <Input 
+                  <Input
                     id="minLot"
-                    type="number" 
-                    value={editingSymbol?.minLot || 1} 
+                    type="number"
+                    value={editingSymbol?.minLot || 1}
                     onChange={(e) => handleSymbolChange("minLot", Number(e.target.value))}
                     className="bg-neutral-700"
                   />
@@ -4620,20 +4739,20 @@ export default function AdminDashboard() {
                 </div>
                 <div>
                   <Label htmlFor="maxLot">Max Lot Size</Label>
-                  <Input 
+                  <Input
                     id="maxLot"
-                    type="number" 
-                    value={editingSymbol?.maxLot || 50} 
+                    type="number"
+                    value={editingSymbol?.maxLot || 50}
                     onChange={(e) => handleSymbolChange("maxLot", Number(e.target.value))}
                     className="bg-neutral-700"
                   />
                   <p className="text-xs text-gray-400 mt-1">Maximum lots allowed (1-50)</p>
                 </div>
               </div>
-              
+
               <div className="flex items-center space-x-2 pt-4">
-                <Switch 
-                  id="enabled" 
+                <Switch
+                  id="enabled"
                   checked={editingSymbol?.enabled}
                   onCheckedChange={(checked) => handleSymbolChange("enabled", Boolean(checked))}
                 />
@@ -4641,12 +4760,12 @@ export default function AdminDashboard() {
               </div>
             </div>
           </div>
-          
+
           <DialogFooter>
             <Button variant="outline" onClick={() => setSymbolDialogOpen(false)} className="bg-neutral-700">
               Cancel
             </Button>
-            <Button 
+            <Button
               onClick={handleSymbolSave}
               className="bg-blue-600 hover:bg-blue-700"
               disabled={symbolUpdateMutation.isPending}
@@ -4656,20 +4775,20 @@ export default function AdminDashboard() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-      
+
       {/* New Symbol Dialog */}
       <Dialog open={newSymbolDialogOpen} onOpenChange={setNewSymbolDialogOpen}>
         <DialogContent className="bg-neutral-800 text-white border-gray-700 max-w-2xl">
           <DialogHeader>
             <DialogTitle>Add New Trading Instrument</DialogTitle>
           </DialogHeader>
-          
+
           <div className="grid grid-cols-2 gap-6 py-4">
             <div className="space-y-4">
               <div>
                 <Label htmlFor="new-symbol">Symbol</Label>
                 <div className="pt-1">
-                  <SymbolSelect 
+                  <SymbolSelect
                     defaultSymbol={newSymbol.symbol || ''}
                     onSelected={(opt) => {
                       // Auto-fill all fields from the selected symbol
@@ -4682,61 +4801,61 @@ export default function AdminDashboard() {
                 </div>
                 <p className="text-xs text-gray-400 mt-1">Type to search (e.g. EURUSD, "gold", etc.)</p>
               </div>
-              
+
               <div>
                 <Label htmlFor="new-name">Display Name</Label>
-                <Input 
+                <Input
                   id="new-name"
-                  value={newSymbol.name} 
+                  value={newSymbol.name}
                   onChange={(e) => handleNewSymbolChange("name", e.target.value)}
                   className="bg-neutral-700"
                 />
                 <p className="text-xs text-gray-400 mt-1">User-friendly name for the instrument</p>
               </div>
-              
+
               <div>
                 <Label htmlFor="new-minSpreadPips">Minimum Spread (pips)</Label>
-                <Input 
+                <Input
                   id="new-minSpreadPips"
-                  type="number" 
+                  type="number"
                   step="0.1"
-                  value={newSymbol.minSpreadPips} 
+                  value={newSymbol.minSpreadPips}
                   onChange={(e) => handleNewSymbolChange("minSpreadPips", Number(e.target.value))}
                   className="bg-neutral-700"
                 />
                 <p className="text-xs text-gray-400 mt-1">Minimum spread in pips (2.0 recommended)</p>
               </div>
             </div>
-            
+
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <Label htmlFor="new-baseCurrency">Base Currency</Label>
-                  <Input 
+                  <Input
                     id="new-baseCurrency"
-                    value={newSymbol.baseCurrency} 
+                    value={newSymbol.baseCurrency}
                     onChange={(e) => handleNewSymbolChange("baseCurrency", e.target.value)}
                     className="bg-neutral-700"
                   />
                 </div>
                 <div>
                   <Label htmlFor="new-quoteCurrency">Quote Currency</Label>
-                  <Input 
+                  <Input
                     id="new-quoteCurrency"
-                    value={newSymbol.quoteCurrency} 
+                    value={newSymbol.quoteCurrency}
                     onChange={(e) => handleNewSymbolChange("quoteCurrency", e.target.value)}
                     className="bg-neutral-700"
                   />
                 </div>
               </div>
-              
+
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <Label htmlFor="new-minLot">Min Lot Size</Label>
-                  <Input 
+                  <Input
                     id="new-minLot"
-                    type="number" 
-                    value={newSymbol.minLot} 
+                    type="number"
+                    value={newSymbol.minLot}
                     onChange={(e) => handleNewSymbolChange("minLot", Number(e.target.value))}
                     className="bg-neutral-700"
                   />
@@ -4744,20 +4863,20 @@ export default function AdminDashboard() {
                 </div>
                 <div>
                   <Label htmlFor="new-maxLot">Max Lot Size</Label>
-                  <Input 
+                  <Input
                     id="new-maxLot"
-                    type="number" 
-                    value={newSymbol.maxLot} 
+                    type="number"
+                    value={newSymbol.maxLot}
                     onChange={(e) => handleNewSymbolChange("maxLot", Number(e.target.value))}
                     className="bg-neutral-700"
                   />
                   <p className="text-xs text-gray-400 mt-1">Maximum lots allowed (1-50)</p>
                 </div>
               </div>
-              
+
               <div className="flex items-center space-x-2 pt-4">
-                <Switch 
-                  id="new-enabled" 
+                <Switch
+                  id="new-enabled"
                   checked={newSymbol.enabled}
                   onCheckedChange={(checked) => handleNewSymbolChange("enabled", Boolean(checked))}
                 />
@@ -4765,12 +4884,12 @@ export default function AdminDashboard() {
               </div>
             </div>
           </div>
-          
+
           <DialogFooter>
             <Button variant="outline" onClick={() => setNewSymbolDialogOpen(false)} className="bg-neutral-700">
               Cancel
             </Button>
-            <Button 
+            <Button
               onClick={handleNewSymbolSave}
               className="bg-green-600 hover:bg-green-700"
               disabled={newSymbolMutation.isPending}
@@ -4780,7 +4899,7 @@ export default function AdminDashboard() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-      
+
       {/* Delete Confirmation Dialog */}
       <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
         <AlertDialogContent className="bg-neutral-800 text-white border-gray-700">
@@ -4794,7 +4913,7 @@ export default function AdminDashboard() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel className="bg-neutral-700 text-white">Cancel</AlertDialogCancel>
-            <AlertDialogAction 
+            <AlertDialogAction
               onClick={handleDeleteSymbol}
               className="bg-red-600 text-white hover:bg-red-700"
             >
@@ -4803,7 +4922,7 @@ export default function AdminDashboard() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-      
+
       {/* User Timeline Dialog - Vertical Timeline with Dots */}
       <Dialog open={timelineDialogOpen} onOpenChange={setTimelineDialogOpen}>
         <DialogContent className="bg-neutral-800 text-white border-gray-700 max-w-3xl max-h-[80vh] overflow-hidden">
@@ -4817,17 +4936,17 @@ export default function AdminDashboard() {
               <div className="relative">
                 {/* Vertical timeline line */}
                 <div className="absolute left-2 top-2 bottom-2 w-0.5 bg-gray-600"></div>
-                
+
                 {userTimeline.map((event, index) => {
-                  const dotColor = 
+                  const dotColor =
                     event.type === 'ACCOUNT_CREATED' ? 'bg-emerald-500' :
-                    event.type === 'LOGIN' ? (event.description?.includes('Failed') ? 'bg-red-500' : 'bg-green-500') :
-                    event.type === 'LOGOUT' ? 'bg-yellow-500' :
-                    event.type === 'TRADE' || event.type === 'TRADE_OPENED' || event.type === 'TRADE_CLOSED' ? 'bg-blue-500' :
-                    event.type === 'FREEZE' || event.type === 'UNFREEZE' ? 'bg-amber-500' :
-                    event.type === 'STATUS_CHANGE' ? 'bg-purple-500' :
-                    event.type === 'ADMIN_ACTION' ? 'bg-orange-500' :
-                    'bg-gray-400';
+                      event.type === 'LOGIN' ? (event.description?.includes('Failed') ? 'bg-red-500' : 'bg-green-500') :
+                        event.type === 'LOGOUT' ? 'bg-yellow-500' :
+                          event.type === 'TRADE' || event.type === 'TRADE_OPENED' || event.type === 'TRADE_CLOSED' ? 'bg-blue-500' :
+                            event.type === 'FREEZE' || event.type === 'UNFREEZE' ? 'bg-amber-500' :
+                              event.type === 'STATUS_CHANGE' ? 'bg-purple-500' :
+                                event.type === 'ADMIN_ACTION' ? 'bg-orange-500' :
+                                  'bg-gray-400';
 
                   const formatSessionLength = (seconds: number | undefined) => {
                     if (!seconds) return 'Unknown';
@@ -4838,32 +4957,30 @@ export default function AdminDashboard() {
                     if (mins > 0) return `${mins}m ${secs}s`;
                     return `${secs}s`;
                   };
-                    
+
                   return (
                     <div key={event.id} className="relative pl-8 pb-6 last:pb-0">
                       {/* Timeline dot */}
                       <div className={`absolute left-0 top-1 w-4 h-4 rounded-full ${dotColor} border-2 border-neutral-800 z-10`}></div>
-                      
+
                       {/* Content card */}
-                      <div className={`p-3 rounded-lg ${
-                        event.severity === 'HIGH' || event.severity === 'CRITICAL' ? 'bg-red-900/30 border border-red-600/50' :
+                      <div className={`p-3 rounded-lg ${event.severity === 'HIGH' || event.severity === 'CRITICAL' ? 'bg-red-900/30 border border-red-600/50' :
                         event.severity === 'WARN' ? 'bg-amber-900/30 border border-amber-600/50' :
-                        'bg-neutral-700/50'
-                      }`}>
+                          'bg-neutral-700/50'
+                        }`}>
                         <div className="flex flex-wrap justify-between items-start gap-2 mb-1">
                           <div className="flex items-center gap-2">
-                            <span className={`text-xs px-2 py-0.5 rounded ${
-                              event.type === 'ACCOUNT_CREATED' ? 'bg-emerald-600' :
+                            <span className={`text-xs px-2 py-0.5 rounded ${event.type === 'ACCOUNT_CREATED' ? 'bg-emerald-600' :
                               event.type === 'LOGIN' ? 'bg-green-600' :
-                              event.type === 'LOGOUT' ? 'bg-yellow-600' :
-                              event.type === 'TRADE' || event.type === 'TRADE_OPENED' ? 'bg-blue-600' :
-                              event.type === 'TRADE_CLOSED' ? 'bg-indigo-600' :
-                              event.type === 'FREEZE' ? 'bg-amber-600' :
-                              event.type === 'UNFREEZE' ? 'bg-cyan-600' :
-                              event.type === 'STATUS_CHANGE' ? 'bg-purple-600' :
-                              event.type === 'ADMIN_ACTION' ? 'bg-orange-600' :
-                              'bg-gray-600'
-                            }`}>{event.type === 'ACCOUNT_CREATED' ? 'CREATED' : event.type}</span>
+                                event.type === 'LOGOUT' ? 'bg-yellow-600' :
+                                  event.type === 'TRADE' || event.type === 'TRADE_OPENED' ? 'bg-blue-600' :
+                                    event.type === 'TRADE_CLOSED' ? 'bg-indigo-600' :
+                                      event.type === 'FREEZE' ? 'bg-amber-600' :
+                                        event.type === 'UNFREEZE' ? 'bg-cyan-600' :
+                                          event.type === 'STATUS_CHANGE' ? 'bg-purple-600' :
+                                            event.type === 'ADMIN_ACTION' ? 'bg-orange-600' :
+                                              'bg-gray-600'
+                              }`}>{event.type === 'ACCOUNT_CREATED' ? 'CREATED' : event.type}</span>
                             <span className="font-medium text-sm">{event.title}</span>
                           </div>
                           <span className="text-xs text-gray-400">
@@ -4888,7 +5005,7 @@ export default function AdminDashboard() {
                         {event.reasonCode && (
                           <p className="text-xs text-amber-400 mt-1">Reason: {event.reasonCode}</p>
                         )}
-                        
+
                         {/* Login/Logout specific info */}
                         {event.type === 'LOGIN' && event.loginIp && (
                           <div className="mt-2 text-xs text-gray-500">
@@ -4903,7 +5020,7 @@ export default function AdminDashboard() {
                             {event.loginIp && <div>IP: {event.loginIp}</div>}
                           </div>
                         )}
-                        
+
                         {/* Other metadata */}
                         {event.metadata && event.type !== 'LOGIN' && event.type !== 'LOGOUT' && (
                           <div className="mt-2 text-xs text-gray-500">
@@ -4919,14 +5036,14 @@ export default function AdminDashboard() {
             )}
           </div>
           <DialogFooter>
-            <Button 
-              variant="csv" 
+            <Button
+              variant="csv"
               onClick={() => window.open(`/api/admin/export/users/${timelineUser?.id}/timeline`, '_blank')}
             >
               Export CSV
             </Button>
-            <Button 
-              variant="jsonl" 
+            <Button
+              variant="jsonl"
               onClick={() => window.open(`/api/admin/export/users/${timelineUser?.id}/timeline/jsonl`, '_blank')}
             >
               Export JSONL
@@ -4937,7 +5054,7 @@ export default function AdminDashboard() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-      
+
       {/* Freeze User Dialog */}
       <Dialog open={freezeDialogOpen} onOpenChange={setFreezeDialogOpen}>
         <DialogContent className="bg-neutral-800 text-white border-gray-700">
@@ -4946,7 +5063,7 @@ export default function AdminDashboard() {
           </DialogHeader>
           <div className="space-y-4 py-4">
             <p className="text-gray-400 text-sm">
-              Freezing an account will prevent the user from opening new trades. 
+              Freezing an account will prevent the user from opening new trades.
               They will still be able to close existing positions.
             </p>
             <div>
@@ -4981,7 +5098,7 @@ export default function AdminDashboard() {
             <Button variant="outline" onClick={() => setFreezeDialogOpen(false)} className="bg-neutral-700">
               Cancel
             </Button>
-            <Button 
+            <Button
               onClick={() => {
                 if (freezeUser && freezeReason.code) {
                   freezeUserMutation.mutate({
@@ -4999,7 +5116,7 @@ export default function AdminDashboard() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-      
+
       {/* User Notes Dialog */}
       <Dialog open={notesDialogOpen} onOpenChange={setNotesDialogOpen}>
         <DialogContent className="bg-neutral-800 text-white border-gray-700 max-w-2xl max-h-[80vh] overflow-hidden">
@@ -5061,21 +5178,20 @@ export default function AdminDashboard() {
                 {addNoteMutation.isPending ? 'Adding...' : 'Add Note'}
               </Button>
             </div>
-            
+
             <div className="max-h-[40vh] overflow-y-auto space-y-2">
               {userNotes.length === 0 ? (
                 <p className="text-gray-400 text-center py-4">No notes yet</p>
               ) : (
                 userNotes.map((note) => (
-                  <div 
+                  <div
                     key={note.id}
-                    className={`p-3 rounded border-l-4 ${
-                      note.isResolved ? 'opacity-50 border-gray-500 bg-neutral-700' :
+                    className={`p-3 rounded border-l-4 ${note.isResolved ? 'opacity-50 border-gray-500 bg-neutral-700' :
                       note.severity === 'CRITICAL' ? 'border-red-500 bg-red-900/20' :
-                      note.severity === 'HIGH' ? 'border-orange-500 bg-orange-900/20' :
-                      note.severity === 'WARN' ? 'border-amber-500 bg-amber-900/20' :
-                      'border-blue-500 bg-neutral-700'
-                    }`}
+                        note.severity === 'HIGH' ? 'border-orange-500 bg-orange-900/20' :
+                          note.severity === 'WARN' ? 'border-amber-500 bg-amber-900/20' :
+                            'border-blue-500 bg-neutral-700'
+                      }`}
                   >
                     <div className="flex justify-between items-start">
                       <div className="flex gap-2 items-center">

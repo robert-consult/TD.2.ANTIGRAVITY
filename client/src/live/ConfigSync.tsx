@@ -20,6 +20,12 @@ export function ConfigSync() {
         return;
       }
 
+      if (message.type === "global-settings:updated") {
+        queryClient.invalidateQueries({ queryKey: ["/api/global-settings"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/admin/global-settings"] });
+        return;
+      }
+
       if (message.type === "system-config:updated") {
         queryClient.invalidateQueries({ queryKey: ["/api/admin/system-config"] });
       }
@@ -28,4 +34,3 @@ export function ConfigSync() {
 
   return null;
 }
-

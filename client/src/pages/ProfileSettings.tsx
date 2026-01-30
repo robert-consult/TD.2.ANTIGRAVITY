@@ -777,20 +777,20 @@ export default function ProfileSettings() {
       <Header title="TradeQuip" />
 
       <main className="flex-1 page-pad">
-        <div className="max-w-5xl w-full mx-auto space-y-6">
+        <div className="max-w-5xl w-full mx-auto space-y-6 @container">
           <div className="flex items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3 min-w-0 flex-1">
               <Link href="/">
-                <Button variant="ghost" size="icon" className="h-8 w-8">
+                <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0">
                   <ArrowLeft className="h-5 w-5" />
                 </Button>
               </Link>
-              <div>
-                <h1 className="text-2xl font-bold">Profile Settings</h1>
-                <p className="text-gray-400">Manage your account information and security</p>
+              <div className="min-w-0">
+                <h1 className="text-lg sm:text-xl md:text-2xl font-bold leading-tight">Profile Settings</h1>
+                <p className="text-xs sm:text-sm text-gray-400">Manage your account information and security</p>
               </div>
             </div>
-            <TierBadge tier={((user as any)?.userTier as UserTier) || "CANDIDATE"} size="lg" />
+            <TierBadge tier={((user as any)?.userTier as UserTier) || "CANDIDATE"} size="responsive" />
           </div>
 
           <div className="-mx-2 px-2 overflow-x-auto">
@@ -815,11 +815,11 @@ export default function ProfileSettings() {
           </div>
 
           {activeSection === "profile" && (
-            <Card className="bg-neutral-800 border-gray-700">
+            <Card className="bg-neutral-800 border-gray-700 w-full">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
-                  <User className="h-5 w-5 text-primary" />
-                  Account Information
+                  <User className="h-5 w-5 text-primary shrink-0" />
+                  <span className="text-cq-base sm:text-lg">Account Information</span>
                 </CardTitle>
               </CardHeader>
               <CardContent>
@@ -897,27 +897,27 @@ export default function ProfileSettings() {
 
           {activeSection === "security" && (
             <>
-              <Card className="bg-neutral-800 border-gray-700">
+              <Card className="bg-neutral-800 border-gray-700 w-full">
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
-                    <Shield className="h-5 w-5 text-green-500" />
-                    Account Security
+                    <Shield className="h-5 w-5 text-green-500 shrink-0" />
+                    <span className="text-cq-base sm:text-lg whitespace-nowrap">Account Security</span>
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-3">
-                    <div className="flex justify-between items-center p-3 bg-neutral-700 rounded-lg">
-                      <div>
-                        <div className="font-medium">Account Status</div>
-                        <div className="text-sm text-gray-400">Your account is active and in good standing</div>
+                    <div className="flex justify-between items-center p-3 bg-neutral-700 rounded-lg gap-2 flex-wrap">
+                      <div className="min-w-0 flex-1">
+                        <div className="text-cq-sm font-medium">Account Status</div>
+                        <div className="text-cq-xs text-gray-400">Your account is active and in good standing</div>
                       </div>
-                      <span className="px-2 py-1 bg-green-600 text-white text-xs rounded">Active</span>
+                      <span className="px-2 py-1 bg-green-600 text-white text-cq-xs rounded shrink-0">Active</span>
                     </div>
 
-                    <div className="flex justify-between items-center p-3 bg-neutral-700 rounded-lg">
-                      <div>
-                        <div className="font-medium">Member Since</div>
-                        <div className="text-sm text-gray-400">
+                    <div className="flex justify-between items-center p-3 bg-neutral-700 rounded-lg gap-2 flex-wrap">
+                      <div className="min-w-0 flex-1">
+                        <div className="text-cq-sm font-medium">Member Since</div>
+                        <div className="text-cq-xs text-gray-400">
                           {formatDateTime(
                             user?.createdAt,
                             {
@@ -933,12 +933,12 @@ export default function ProfileSettings() {
                       </div>
                     </div>
 
-                    <div className="flex justify-between items-center p-3 bg-neutral-700 rounded-lg">
-                      <div className="flex items-center gap-2">
-                        <Smartphone className="h-4 w-4 text-gray-400" />
-                        <div>
-                          <div className="font-medium">Two-Factor Authentication</div>
-                          <div className="text-sm text-gray-400">
+                    <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start p-3 bg-neutral-700 rounded-lg gap-3">
+                      <div className="flex items-start gap-2 min-w-0">
+                        <Smartphone className="h-4 w-4 text-gray-400 shrink-0 mt-0.5" />
+                        <div className="min-w-0">
+                          <div className="text-cq-sm font-medium whitespace-nowrap">Two-Factor Authentication</div>
+                          <div className="text-cq-xs text-gray-400">
                             {mfaStatus?.enabled ? (
                               <>
                                 Enabled since{" "}
@@ -950,40 +950,43 @@ export default function ProfileSettings() {
                           </div>
                         </div>
                       </div>
-                      {mfaStatus?.enabled ? (
-                        <div className="flex items-center gap-2">
-                          <span className="px-2 py-1 bg-green-600 text-white text-xs rounded flex items-center gap-1">
-                            <CheckCircle className="h-3 w-3" />
-                            Enabled
-                          </span>
+                      <div className="shrink-0 self-start sm:self-auto">
+                        {mfaStatus?.enabled ? (
+                          <div className="flex items-center gap-2">
+                            <span className="px-2 py-1 bg-green-600 text-white text-cq-xs rounded flex items-center gap-1 whitespace-nowrap">
+                              <CheckCircle className="h-3 w-3" />
+                              Enabled
+                            </span>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setMfaDisableDialog(true)}
+                              className="text-red-400 border-red-600 hover:bg-red-900/30"
+                            >
+                              Disable
+                            </Button>
+                          </div>
+                        ) : (
                           <Button
-                            variant="outline"
+                            onClick={() => mfaSetupMutation.mutate()}
+                            disabled={mfaSetupMutation.isPending}
                             size="sm"
-                            onClick={() => setMfaDisableDialog(true)}
-                            className="text-red-400 border-red-600 hover:bg-red-900/30"
+                            className="whitespace-nowrap w-full sm:w-auto"
                           >
-                            Disable
+                            {mfaSetupMutation.isPending ? "..." : "Enable 2FA"}
                           </Button>
-                        </div>
-                      ) : (
-                        <Button
-                          onClick={() => mfaSetupMutation.mutate()}
-                          disabled={mfaSetupMutation.isPending}
-                          size="sm"
-                        >
-                          {mfaSetupMutation.isPending ? "..." : "Enable 2FA"}
-                        </Button>
-                      )}
+                        )}
+                      </div>
                     </div>
                   </div>
                 </CardContent>
               </Card>
 
-              <Card className="bg-neutral-800 border-gray-700">
+              <Card className="bg-neutral-800 border-gray-700 w-full">
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
-                    <Key className="h-5 w-5 text-yellow-500" />
-                    Change Password
+                    <Key className="h-5 w-5 text-yellow-500 shrink-0" />
+                    <span className="text-cq-base sm:text-lg whitespace-nowrap">Change Password</span>
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
@@ -1058,15 +1061,15 @@ export default function ProfileSettings() {
                 </CardContent>
               </Card>
 
-              <Card className="bg-neutral-800 border-gray-700">
+              <Card className="bg-neutral-800 border-gray-700 w-full">
                 <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <AlertTriangle className="h-5 w-5 text-amber-500" />
-                    Account Deactivation & Deletion
+                  <CardTitle className="flex items-center gap-2 flex-wrap">
+                    <AlertTriangle className="h-5 w-5 text-amber-500 shrink-0" />
+                    <span className="text-cq-base sm:text-lg">Account Deactivation & Deletion</span>
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="space-y-2 text-sm text-gray-400">
+                  <div className="space-y-2 text-cq-sm text-gray-400">
                     <p>Deactivation disables access immediately and hides you from trader-facing views.</p>
                     <p>Deletion is a permanent request that disables access while retaining data for audit.</p>
                   </div>
@@ -1100,11 +1103,11 @@ export default function ProfileSettings() {
 
           {activeSection === "devices" && (
             <>
-              <Card className="bg-neutral-800 border-gray-700">
-                <CardHeader className="flex flex-row items-center justify-between">
+              <Card className="bg-neutral-800 border-gray-700 w-full">
+                <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                   <CardTitle className="flex items-center gap-2">
-                    <LogOut className="h-5 w-5 text-orange-500" />
-                    Active Sessions
+                    <LogOut className="h-5 w-5 text-orange-500 shrink-0" />
+                    <span className="text-cq-base sm:text-lg whitespace-nowrap">Active Sessions</span>
                   </CardTitle>
                   {Array.isArray(activeSessions) && activeSessions.length > 1 && (
                     <Button
@@ -1112,7 +1115,7 @@ export default function ProfileSettings() {
                       size="sm"
                       onClick={() => terminateAllSessionsMutation.mutate()}
                       disabled={terminateAllSessionsMutation.isPending}
-                      className="text-red-400 border-red-600 hover:bg-red-900/30"
+                      className="text-red-400 border-red-600 hover:bg-red-900/30 w-full sm:w-auto"
                     >
                       {terminateAllSessionsMutation.isPending ? "..." : "Terminate All Others"}
                     </Button>
@@ -1122,23 +1125,26 @@ export default function ProfileSettings() {
                   <div className="space-y-2">
                     {Array.isArray(activeSessions) && activeSessions.length > 0 ? (
                       activeSessions.map((session: any) => (
-                        <div key={session.id} className={`flex justify-between items-center p-3 rounded-lg ${session.isCurrent ? 'bg-green-900/30 border border-green-600/50' : 'bg-neutral-700'}`}>
-                          <div className="flex items-center gap-3">
-                            <Monitor className="h-4 w-4 text-gray-400" />
-                            <div>
-                              <div className="text-sm font-medium flex items-center gap-2">
-                                {session.browser || session.deviceType || "Unknown Device"}
+                        <div key={session.id} className={`flex flex-col sm:flex-row sm:justify-between sm:items-center p-3 rounded-lg gap-2 ${session.isCurrent ? 'bg-green-900/30 border border-green-600/50' : 'bg-neutral-700'}`}>
+                          <div className="flex items-center gap-3 min-w-0">
+                            <Monitor className="h-4 w-4 text-gray-400 shrink-0" />
+                            <div className="min-w-0">
+                              <div className="text-cq-sm font-medium flex items-center gap-2 flex-wrap">
+                                <span>{session.browser || session.deviceType || "Unknown Device"}</span>
                                 {session.isCurrent && (
-                                  <span className="text-xs px-2 py-0.5 bg-green-600 text-white rounded">Current</span>
+                                  <span className="text-cq-xs px-2 py-0.5 bg-green-600 text-white rounded shrink-0">Current</span>
                                 )}
                               </div>
-                              <div className="text-xs text-gray-400">
+                              <div className="text-cq-xs text-gray-400">
                                 IP: {session.ip || "Unknown"} • {session.os || "Unknown OS"}
+                              </div>
+                              <div className="text-cq-xs text-gray-500 sm:hidden">
+                                Last active: {safeFmt(session.lastActiveAt)}
                               </div>
                             </div>
                           </div>
-                          <div className="flex items-center gap-2">
-                            <div className="text-xs text-gray-500 text-right">
+                          <div className="flex items-center gap-2 shrink-0 justify-between sm:justify-end">
+                            <div className="text-cq-xs text-gray-500 text-right hidden sm:block">
                               <div>Last active: {safeFmt(session.lastActiveAt)}</div>
                               <div className="text-gray-600">{formatLocation(session)}</div>
                             </div>
@@ -1163,34 +1169,40 @@ export default function ProfileSettings() {
                 </CardContent>
               </Card>
 
-              <Card className="bg-neutral-800 border-gray-700">
+              <Card className="bg-neutral-800 border-gray-700 w-full">
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
-                    <Monitor className="h-5 w-5 text-blue-500" />
-                    Recent Login Activity
+                    <Monitor className="h-5 w-5 text-blue-500 shrink-0" />
+                    <span className="text-cq-base sm:text-lg whitespace-nowrap">Recent Login Activity</span>
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-2">
                     {Array.isArray(loginHistory) && loginHistory.length > 0 ? (
                       loginHistory.slice(0, 5).map((login: any, index: number) => (
-                        <div key={index} className="flex justify-between items-center p-3 bg-neutral-700 rounded-lg">
-                          <div className="flex items-center gap-3">
-                            <Clock className="h-4 w-4 text-gray-400" />
-                            <div>
-                              <div className="text-sm font-medium">
+                        <div key={index} className="flex flex-col sm:flex-row sm:justify-between sm:items-center p-3 bg-neutral-700 rounded-lg gap-2">
+                          <div className="flex items-start gap-3 min-w-0">
+                            <Clock className="h-4 w-4 text-gray-400 shrink-0 mt-0.5" />
+                            <div className="min-w-0">
+                              <div className="text-cq-sm font-medium">
                                 {login.success ? "Successful login" : "Failed login attempt"}
                               </div>
-                              <div className="text-xs text-gray-400">
-                                IP: {login.ip || "Unknown"} • {login.userAgent?.substring(0, 30) || "Unknown device"}...
+                              <div className="text-cq-xs text-gray-400">
+                                IP: {login.ip || "Unknown"} • {login.userAgent?.substring(0, 40) || "Unknown device"}
+                              </div>
+                              <div className="text-cq-xs text-gray-500 sm:hidden">
+                                {(() => {
+                                  const raw = (login as any).eventAt ?? (login as any).createdAt ?? (login as any).at;
+                                  return formatDateTime(raw, undefined, "Unknown");
+                                })()}
                               </div>
                             </div>
                           </div>
-                          <div className="text-right">
-                            <div className={`text-xs px-2 py-0.5 rounded ${login.success ? "bg-green-600/30 text-green-400" : "bg-red-600/30 text-red-400"}`}>
+                          <div className="flex items-center gap-2 justify-between sm:flex-col sm:items-end shrink-0">
+                            <div className={`text-cq-xs px-2 py-0.5 rounded whitespace-nowrap ${login.success ? "bg-green-600/30 text-green-400" : "bg-red-600/30 text-red-400"}`}>
                               {login.success ? "Success" : "Failed"}
                             </div>
-                            <div className="text-xs text-gray-500 mt-1">
+                            <div className="text-cq-xs text-gray-500 hidden sm:block">
                               {(() => {
                                 const raw = (login as any).eventAt ?? (login as any).createdAt ?? (login as any).at;
                                 return formatDateTime(raw, undefined, "Unknown");
@@ -1210,11 +1222,11 @@ export default function ProfileSettings() {
 
           {activeSection === "preferences" && (
             <>
-              <Card className="bg-neutral-800 border-gray-700">
+              <Card className="bg-neutral-800 border-gray-700 w-full">
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
-                    <Globe className="h-5 w-5 text-cyan-500" />
-                    Regional Preferences
+                    <Globe className="h-5 w-5 text-cyan-500 shrink-0" />
+                    <span className="text-cq-base sm:text-lg whitespace-nowrap">Regional Preferences</span>
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
@@ -1318,19 +1330,19 @@ export default function ProfileSettings() {
                 </CardContent>
               </Card>
 
-              <Card className="bg-neutral-800 border-gray-700">
+              <Card className="bg-neutral-800 border-gray-700 w-full">
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
-                    <Bell className="h-5 w-5 text-amber-500" />
-                    Notification Preferences
+                    <Bell className="h-5 w-5 text-amber-500 shrink-0" />
+                    <span className="text-cq-base sm:text-lg whitespace-nowrap">Notification Preferences</span>
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-4">
-                    <div className="flex justify-between items-center">
-                      <div>
-                        <div className="font-medium">Trade Executed</div>
-                        <div className="text-sm text-gray-400">Get notified when a trade opens or closes</div>
+                    <div className="flex justify-between items-center gap-2">
+                      <div className="min-w-0">
+                        <div className="text-cq-sm font-medium">Trade Executed</div>
+                        <div className="text-cq-xs text-gray-400">Get notified when a trade opens or closes</div>
                       </div>
                       <Switch
                         checked={notifications.tradeExecuted}
@@ -1338,10 +1350,10 @@ export default function ProfileSettings() {
                       />
                     </div>
 
-                    <div className="flex justify-between items-center">
-                      <div>
-                        <div className="font-medium">Margin Warning</div>
-                        <div className="text-sm text-gray-400">Alert when margin level is low</div>
+                    <div className="flex justify-between items-center gap-2">
+                      <div className="min-w-0">
+                        <div className="text-cq-sm font-medium">Margin Warning</div>
+                        <div className="text-cq-xs text-gray-400">Alert when margin level is low</div>
                       </div>
                       <Switch
                         checked={notifications.marginWarning}
@@ -1349,10 +1361,10 @@ export default function ProfileSettings() {
                       />
                     </div>
 
-                    <div className="flex justify-between items-center">
-                      <div>
-                        <div className="font-medium">Stop Loss / Take Profit Hit</div>
-                        <div className="text-sm text-gray-400">Get notified when SL/TP is triggered</div>
+                    <div className="flex justify-between items-center gap-2">
+                      <div className="min-w-0">
+                        <div className="text-cq-sm font-medium">Stop Loss / Take Profit Hit</div>
+                        <div className="text-cq-xs text-gray-400">Get notified when SL/TP is triggered</div>
                       </div>
                       <Switch
                         checked={notifications.stopLossHit}
@@ -1360,10 +1372,10 @@ export default function ProfileSettings() {
                       />
                     </div>
 
-                    <div className="flex justify-between items-center">
-                      <div>
-                        <div className="font-medium">Daily Summary</div>
-                        <div className="text-sm text-gray-400">Receive a daily trading summary</div>
+                    <div className="flex justify-between items-center gap-2">
+                      <div className="min-w-0">
+                        <div className="text-cq-sm font-medium">Daily Summary</div>
+                        <div className="text-cq-xs text-gray-400">Receive a daily trading summary</div>
                       </div>
                       <Switch
                         checked={notifications.dailySummary}
@@ -1371,10 +1383,10 @@ export default function ProfileSettings() {
                       />
                     </div>
 
-                    <div className="flex justify-between items-center">
-                      <div>
-                        <div className="font-medium">Promotions & Updates</div>
-                        <div className="text-sm text-gray-400">News about new features and offers</div>
+                    <div className="flex justify-between items-center gap-2">
+                      <div className="min-w-0">
+                        <div className="text-cq-sm font-medium">Promotions & Updates</div>
+                        <div className="text-cq-xs text-gray-400">News about new features and offers</div>
                       </div>
                       <Switch
                         checked={notifications.promotions}
@@ -1382,34 +1394,34 @@ export default function ProfileSettings() {
                       />
                     </div>
 
-                    <p className="text-xs text-gray-500 pt-2">
+                    <p className="text-cq-xs text-gray-500 pt-2">
                       Notification settings are stored locally. Email notifications coming soon.
                     </p>
                   </div>
                 </CardContent>
               </Card>
 
-              <Card className="bg-neutral-800 border-gray-700">
+              <Card className="bg-neutral-800 border-gray-700 w-full">
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
-                    <Settings className="h-5 w-5 text-purple-500" />
-                    Trading Preferences
+                    <Settings className="h-5 w-5 text-purple-500 shrink-0" />
+                    <span className="text-cq-base sm:text-lg whitespace-nowrap">Trading Preferences</span>
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-3 text-gray-400">
-                    <p className="text-sm">
+                    <p className="text-cq-sm">
                       Your trading parameters (leverage, max trades, hold times) are managed by your account administrator.
                       Contact support if you need adjustments.
                     </p>
                     <div className="grid grid-cols-2 gap-3">
                       <div className="p-3 bg-neutral-700 rounded-lg">
-                        <div className="text-xs text-gray-500">Leverage</div>
-                        <div className="font-medium text-white">{(user as any)?.leverage || 50}x</div>
+                        <div className="text-cq-xs text-gray-500">Leverage</div>
+                        <div className="text-cq-sm font-medium text-white">{(user as any)?.leverage || 50}x</div>
                       </div>
                       <div className="p-3 bg-neutral-700 rounded-lg">
-                        <div className="text-xs text-gray-500">Max Trades</div>
-                        <div className="font-medium text-white">{(user as any)?.maxConcurrent || 5}</div>
+                        <div className="text-cq-xs text-gray-500">Max Trades</div>
+                        <div className="text-cq-sm font-medium text-white">{(user as any)?.maxConcurrent || 5}</div>
                       </div>
                     </div>
                   </div>
@@ -1420,10 +1432,11 @@ export default function ProfileSettings() {
 
           <div className="h-16 lg:hidden" />
         </div>
-      </main>
+      </main >
 
       {/* 2FA Setup Dialog */}
-      <Dialog open={mfaSetupDialog} onOpenChange={(open) => !open && closeMfaSetupDialog()}>
+      < Dialog open={mfaSetupDialog} onOpenChange={(open) => !open && closeMfaSetupDialog()
+      }>
         <DialogContent className="bg-neutral-800 border-gray-700 max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -1501,10 +1514,10 @@ export default function ProfileSettings() {
             </div>
           )}
         </DialogContent>
-      </Dialog>
+      </Dialog >
 
       {/* 2FA Disable Dialog */}
-      <Dialog open={mfaDisableDialog} onOpenChange={setMfaDisableDialog}>
+      < Dialog open={mfaDisableDialog} onOpenChange={setMfaDisableDialog} >
         <DialogContent className="bg-neutral-800 border-gray-700 max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-red-400">
@@ -1546,7 +1559,7 @@ export default function ProfileSettings() {
             </DialogFooter>
           </div>
         </DialogContent>
-      </Dialog>
+      </Dialog >
 
       <Dialog
         open={accountAction !== null}
@@ -1650,6 +1663,6 @@ export default function ProfileSettings() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </div >
   );
 }

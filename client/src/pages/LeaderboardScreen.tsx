@@ -31,25 +31,25 @@ export default function LeaderboardScreen() {
 
   return (
     <div className="h-full flex flex-col bg-neutral-900 overflow-auto">
-      <div className="px-gutter py-4 border-b border-gray-800">
-        <h1 className="text-2xl font-bold text-blue-400">Leaderboard</h1>
+      <div className="px-3 sm:px-gutter py-3 sm:py-4 border-b border-gray-800">
+        <h1 className="text-lg sm:text-xl md:text-2xl font-bold text-blue-400">Leaderboard</h1>
       </div>
 
       <div className="flex-1 page-pad">
-        <div className="bg-neutral-800 rounded-lg p-card max-w-4xl w-full mx-auto">
-          <div className="mb-4">
-            <h2 className="text-xl font-bold text-white">Top Traders</h2>
-            <p className="text-sm text-gray-400">Ranking based on overall profit/loss.</p>
+        <div className="bg-neutral-800 rounded-lg p-3 sm:p-card max-w-4xl w-full mx-auto">
+          <div className="mb-3 sm:mb-4">
+            <h2 className="text-base sm:text-lg md:text-xl font-bold text-white">Top Traders</h2>
+            <p className="text-[10px] sm:text-xs md:text-sm text-gray-400">Ranking based on overall profit/loss.</p>
           </div>
 
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
                 <tr className="border-b border-gray-700">
-                  <th className="text-left py-3 px-4 text-sm font-medium text-gray-400">Rank</th>
-                  <th className="text-left py-3 px-4 text-sm font-medium text-gray-400">Trader</th>
-                  <th className="text-left py-3 px-4 text-sm font-medium text-gray-400">Profit/Loss</th>
-                  <th className="text-left py-3 px-4 text-sm font-medium text-gray-400">Win Rate</th>
+                  <th className="text-left py-2 sm:py-3 px-2 sm:px-4 text-[10px] sm:text-xs md:text-sm font-medium text-gray-400">Rank</th>
+                  <th className="text-left py-2 sm:py-3 px-2 sm:px-4 text-[10px] sm:text-xs md:text-sm font-medium text-gray-400">Trader</th>
+                  <th className="text-left py-2 sm:py-3 px-2 sm:px-4 text-[10px] sm:text-xs md:text-sm font-medium text-gray-400"><span className="hidden sm:inline">Profit/</span>P/L</th>
+                  <th className="text-left py-2 sm:py-3 px-2 sm:px-4 text-[10px] sm:text-xs md:text-sm font-medium text-gray-400"><span className="hidden sm:inline">Win </span>Rate</th>
                 </tr>
               </thead>
               <tbody>
@@ -57,16 +57,16 @@ export default function LeaderboardScreen() {
                   <>
                     {[1, 2, 3, 4, 5].map((i) => (
                       <tr key={i} className="border-b border-gray-700/50">
-                        <td className="py-4 px-4">
+                        <td className="py-3 sm:py-4 px-2 sm:px-4">
                           <Skeleton className="h-5 w-8" />
                         </td>
-                        <td className="py-4 px-4">
+                        <td className="py-3 sm:py-4 px-2 sm:px-4">
                           <Skeleton className="h-5 w-32" />
                         </td>
-                        <td className="py-4 px-4">
+                        <td className="py-3 sm:py-4 px-2 sm:px-4">
                           <Skeleton className="h-5 w-24" />
                         </td>
-                        <td className="py-4 px-4">
+                        <td className="py-3 sm:py-4 px-2 sm:px-4">
                           <Skeleton className="h-5 w-16" />
                         </td>
                       </tr>
@@ -77,35 +77,35 @@ export default function LeaderboardScreen() {
                 {!isLoading && leaderboard.map((leader, index) => {
                   const rank = index + 1;
                   const showTrophy = rank <= 3;
-                  
+
                   return (
-                    <tr 
-                      key={leader.userId} 
+                    <tr
+                      key={leader.userId}
                       className="border-b border-gray-700/50 hover:bg-neutral-700/30 transition-colors"
                     >
-                      <td className="py-4 px-4">
-                        <div className="flex items-center gap-2">
+                      <td className="py-3 sm:py-4 px-2 sm:px-4">
+                        <div className="flex items-center gap-1 sm:gap-2">
                           {showTrophy && (
-                            <Trophy className={`h-5 w-5 ${getTrophyColor(rank)}`} />
+                            <Trophy className={`h-4 w-4 sm:h-5 sm:w-5 ${getTrophyColor(rank)}`} />
                           )}
-                          <span className="text-white font-medium">{rank}</span>
+                          <span className="text-white font-medium text-xs sm:text-sm">{rank}</span>
                         </div>
                       </td>
-                      <td className="py-4 px-4">
-                        <span className="text-white">{leader.username}</span>
+                      <td className="py-3 sm:py-4 px-2 sm:px-4">
+                        <span className="text-white text-xs sm:text-sm truncate max-w-[80px] sm:max-w-none block">{leader.username}</span>
                       </td>
-                      <td className="py-4 px-4">
+                      <td className="py-3 sm:py-4 px-2 sm:px-4">
                         <div className="flex items-center gap-1">
-                          <TrendingUp 
-                            className={`h-4 w-4 ${leader.profit >= 0 ? 'text-green-500' : 'text-red-500'}`} 
+                          <TrendingUp
+                            className={`h-3 w-3 sm:h-4 sm:w-4 ${leader.profit >= 0 ? 'text-green-500' : 'text-red-500'}`}
                           />
-                          <span className={`font-medium ${leader.profit >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                            ${Math.abs(leader.profit).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          <span className={`font-medium text-xs sm:text-sm ${leader.profit >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                            ${Math.abs(leader.profit).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
                           </span>
                         </div>
                       </td>
-                      <td className="py-4 px-4">
-                        <span className="text-gray-300">{leader.winRate.toFixed(1)}%</span>
+                      <td className="py-3 sm:py-4 px-2 sm:px-4">
+                        <span className="text-gray-300 text-xs sm:text-sm">{leader.winRate.toFixed(0)}%</span>
                       </td>
                     </tr>
                   );

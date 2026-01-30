@@ -62,7 +62,7 @@ export const users = pgTable("users", {
   kycStatus: text("kyc_status").default("none"), // none, pending, approved, rejected, reverify_required
   kycVerifiedAt: integer("kyc_verified_at"),
   kycExpiresAt: integer("kyc_expires_at"),
-  
+
   // Signup fingerprinting (denormalized for quick access)
   signupIp: text("signup_ip"),
   signupIpHash: text("signup_ip_hash"), // SHA-256 for privacy-safe indexing
@@ -87,17 +87,17 @@ export const signupFingerprints = pgTable("signup_fingerprints", {
   id: serial("id").primaryKey(),
   userId: integer("user_id").notNull().unique(), // One per user, immutable
   requestId: text("request_id").notNull(), // UUID for request correlation
-  
+
   // Network identity
   ip: text("ip").notNull(),
   ipHash: text("ip_hash").notNull(), // SHA-256 for privacy-safe joins
-  
+
   // User agent & device
   userAgent: text("user_agent"),
   deviceType: text("device_type"),
   browser: text("browser"),
   os: text("os"),
-  
+
   // Geo enrichment
   countryCode: text("country_code"),
   region: text("region"),
@@ -105,17 +105,17 @@ export const signupFingerprints = pgTable("signup_fingerprints", {
   latitude: real("latitude"),
   longitude: real("longitude"),
   inferredTz: text("inferred_tz"),
-  
+
   // Client identity headers
   clientTz: text("client_tz"),
   clientLang: text("client_lang"),
   deviceFp: text("device_fp"),
   deviceInstallId: text("device_install_id"),
-  
+
   // Registration context
   countryIso2Selected: text("country_iso2_selected"), // Country user selected at signup
   regionKeySelected: text("region_key_selected"), // Region from terms token
-  
+
   // Timestamps
   createdAt: integer("created_at").notNull().default(nowUnix),
 });
@@ -323,6 +323,9 @@ export const globalSettings = pgTable("global_settings", {
   enableLossLimits: boolean("enable_loss_limits").notNull().default(true),
   dailyLossLimitPct: real("daily_loss_limit_pct").notNull().default(10),
   lifetimeLossLimitPct: real("lifetime_loss_limit_pct").notNull().default(20),
+  // Visual Lot Settings (UI configuration for trader order form)
+  lotPresetCards: text("lot_preset_cards").notNull().default("[1,5,10,25,50]"), // JSON array of lot values for quick-select cards
+  lotDropdownMax: integer("lot_dropdown_max").notNull().default(50), // Maximum lot value shown in dropdown
   // Timestamp
   updatedAt: integer("updated_at").default(nowUnix),
 });
@@ -608,33 +611,33 @@ export const signupWaitlist = pgTable("signup_waitlist", {
 export const tradeAudit = pgTable("trade_audit", {
   id: serial("id").primaryKey(),
   tradeId: integer("trade_id").notNull().references(() => trades.id),
-  
+
   // Event identification
   eventType: text("event_type").notNull(), // ORDER_PLACED, ORDER_FILLED, POSITION_CLOSED, ORDER_CANCELED, ORDER_REJECTED, RISK_CHECK_PASS, RISK_CHECK_FAIL, TARGETS_UPDATED, SL_TRIGGERED, TP_TRIGGERED
   eventCategory: text("event_category").notNull().default("TRADE"), // ORDER, EXECUTION, POSITION, RISK, ADMIN, SYSTEM
   eventAt: integer("event_at").notNull().default(nowUnix),
   eventAtMs: bigint("event_at_ms", { mode: "number" }), // Millisecond precision timestamp
-  
+
   // Correlation & lifecycle IDs
   correlationId: text("correlation_id"), // Links related events across the order lifecycle
   orderId: text("order_id"), // Unique per order intent
   executionId: text("execution_id"), // Unique per fill
   positionId: text("position_id"), // Unique per open position
-  
+
   // Actor/provenance (who/where/how)
   actorType: text("actor_type").notNull().default("SYSTEM"), // USER, ADMIN, SYSTEM
   actorUserId: integer("actor_user_id"),
   sessionId: text("session_id"),
   ip: text("ip"),
   userAgent: text("user_agent"),
-  
+
   // Order economics
   symbol: text("symbol"),
   side: text("side"), // BUY, SELL
   orderType: text("order_type"), // MARKET, LIMIT, STOP, STOP_LIMIT
   timeInForce: text("time_in_force"), // GTC, DAY, IOC, FOK
   qtyLots: real("qty_lots"),
-  
+
   // Pricing
   requestedPrice: real("requested_price"),
   triggerPrice: real("trigger_price"),
@@ -642,7 +645,7 @@ export const tradeAudit = pgTable("trade_audit", {
   stopPrice: real("stop_price"),
   fillPrice: real("fill_price"),
   avgFillPrice: real("avg_fill_price"),
-  
+
   // Market context at event time
   quoteTs: integer("quote_ts"),
   quoteSource: text("quote_source"),
@@ -651,25 +654,25 @@ export const tradeAudit = pgTable("trade_audit", {
   quoteMid: real("quote_mid"),
   quoteSpread: real("quote_spread"),
   spreadPips: real("spread_pips"),
-  
+
   // Slippage analysis (TCA)
   slippage: real("slippage"),
   slippagePips: real("slippage_pips"),
   slippageReference: text("slippage_reference"), // MID, BIDASK, LAST, REQUESTED
   latencyMs: integer("latency_ms"), // Time from order receipt to execution
-  
+
   // Risk control evidence
   riskCheckName: text("risk_check_name"), // e.g., MAX_CONCURRENT_LOTS, MAX_TRADES_PER_SYMBOL
   riskLimitValue: real("risk_limit_value"), // The limit that was enforced
   riskObservedValue: real("risk_observed_value"), // The value at decision time
   riskResult: text("risk_result"), // PASS, FAIL, OVERRIDE
   reasonCode: text("reason_code"), // Standardized rejection code
-  
+
   // Data integrity (tamper-evident hash chain)
   payloadJson: text("payload_json"), // Canonical JSON for forensic replay
   prevHash: text("prev_hash"), // Hash of previous event
   eventHash: text("event_hash"), // SHA-256 hash for tamper-evidence
-  
+
   note: text("note"),
 });
 
@@ -684,24 +687,24 @@ export const tradeAuditRelations = relations(tradeAudit, ({ one }) => ({
 export const orderIntentAudit = pgTable("order_intent_audit", {
   id: serial("id").primaryKey(),
   correlationId: text("correlation_id").notNull(), // Links to trade_audit events
-  
+
   // Timestamps
   eventAt: integer("event_at").notNull().default(nowUnix),
   eventAtMs: bigint("event_at_ms", { mode: "number" }), // Millisecond precision
-  
+
   // Event type
   eventCode: text("event_code").notNull(), // ORDER_RECEIVED, ORDER_VALIDATED, RISK_CHECK, DECISION
   decision: text("decision"), // PASS, REJECT (for DECISION events)
   rejectCheck: text("reject_check"), // Which check failed (e.g., MAX_CONCURRENT_LOTS)
   rejectReason: text("reject_reason"), // Human-readable reason
-  
+
   // Actor/provenance
   actorType: text("actor_type").notNull().default("USER"), // USER, ADMIN, SYSTEM
   userId: integer("user_id").notNull(),
   sessionId: text("session_id"),
   ip: text("ip"),
   userAgent: text("user_agent"),
-  
+
   // Order economics
   symbol: text("symbol"),
   side: text("side"), // BUY, SELL
@@ -713,19 +716,19 @@ export const orderIntentAudit = pgTable("order_intent_audit", {
   stopPrice: real("stop_price"),
   takeProfit: real("take_profit"),
   stopLoss: real("stop_loss"),
-  
+
   // Quote context at receipt
   quoteBid: real("quote_bid"),
   quoteAsk: real("quote_ask"),
   quoteMid: real("quote_mid"),
   quoteTs: integer("quote_ts"),
   quoteIsStale: boolean("quote_is_stale"),
-  
+
   // Risk evidence snapshot
   riskLimitJson: text("risk_limit_json"), // JSON: {maxLots: 50, maxTrades: 5, ...}
   riskObservedJson: text("risk_observed_json"), // JSON: {currentLots: 45, openTrades: 3, ...}
   riskSnapshotJson: text("risk_snapshot_json"), // Full account state at decision time
-  
+
   // Data integrity
   payloadJson: text("payload_json").notNull(),
   prevHash: text("prev_hash").notNull(),
@@ -944,7 +947,7 @@ export const migrationIntegrityChecks = pgTable("migration_integrity_checks", {
 // User verification status and rate limiting
 export const userVerification = pgTable("user_verification", {
   userId: integer("user_id").primaryKey().notNull(),
-  
+
   // Email verification lifecycle
   emailVerifiedAt: integer("email_verified_at"),
   emailInitialDueAt: integer("email_initial_due_at"),
@@ -953,7 +956,7 @@ export const userVerification = pgTable("user_verification", {
   emailResendCountDay: integer("email_resend_count_day").default(0),
   emailLastResendAt: integer("email_last_resend_at"),
   emailResendDayStart: integer("email_resend_day_start"),
-  
+
   // Phone/SMS verification
   phoneE164: text("phone_e164"),
   smsVerifiedAt: integer("sms_verified_at"),
@@ -965,7 +968,7 @@ export const userVerification = pgTable("user_verification", {
   smsVerifyFailCount: integer("sms_verify_fail_count").default(0),
   smsOtpLockedUntil: integer("sms_otp_locked_until"),
   smsEnabled: boolean("sms_enabled").default(false),
-  
+
   // Contender tier (progression tracking)
   contenderTier: text("contender_tier").notNull().default("NONE"), // NONE, CANDIDATE_EMAIL_ONLY, CANDIDATE_SMS_REQUIRED, VERIFIED_SMS, SELECTED_REAL_CAPITAL
   contenderEligibleAt: integer("contender_eligible_at"),
@@ -973,7 +976,7 @@ export const userVerification = pgTable("user_verification", {
   // Lock snapshot (policy reporting only; runtime enforcement derives state)
   lockedAt: integer("locked_at"),
   lockReason: text("lock_reason"),
-  
+
   // Timestamps
   createdAt: integer("created_at").notNull().default(nowUnix),
   updatedAt: integer("updated_at").notNull().default(nowUnix),
@@ -1018,21 +1021,21 @@ export const userEquityDaily = pgTable(
 // MFA (TOTP) configuration
 export const userMfa = pgTable("user_mfa", {
   userId: integer("user_id").primaryKey().notNull(),
-  
+
   // TOTP secrets (encrypted)
   totpSecretEnc: text("totp_secret_enc"), // AES-256-GCM encrypted base32 secret
   totpPendingSecretEnc: text("totp_pending_secret_enc"), // Pending during setup
-  
+
   // Recovery codes (hashed)
   recoveryCodesHashJson: text("recovery_codes_hash_json"), // JSON array of SHA-256 hashes
   recoveryCodesUsedJson: text("recovery_codes_used_json"), // JSON array of used indices
-  
+
   // Status
   enabledAt: integer("enabled_at"),
   disabledAt: integer("disabled_at"),
   lastVerifiedAt: integer("last_verified_at"),
   failedAttempts: integer("failed_attempts").default(0),
-  
+
   // Timestamps
   createdAt: integer("created_at").notNull().default(nowUnix),
   updatedAt: integer("updated_at").notNull().default(nowUnix),
@@ -1041,15 +1044,15 @@ export const userMfa = pgTable("user_mfa", {
 // KYC profiles (invite-based)
 export const userKycProfiles = pgTable("user_kyc_profiles", {
   userId: integer("user_id").primaryKey().notNull(),
-  
+
   // Status: NOT_STARTED | INVITED | SUBMITTED | APPROVED | REJECTED
   status: text("status").notNull().default("NOT_STARTED"),
-  
+
   // Invite tracking
   invitedAt: integer("invited_at"),
   invitedByAdminId: integer("invited_by_admin_id"),
   inviteNote: text("invite_note"),
-  
+
   // Submission tracking
   submittedAt: integer("submitted_at"),
   documentType: text("document_type"), // PASSPORT, DRIVERS_LICENSE, ID_CARD
@@ -1064,13 +1067,13 @@ export const userKycProfiles = pgTable("user_kyc_profiles", {
   postalCode: text("postal_code"),
   country: text("country"),
   idDocumentRef: text("id_document_ref"),
-  
+
   // Review tracking
   reviewedAt: integer("reviewed_at"),
   reviewedByAdminId: integer("reviewed_by_admin_id"),
   reviewerNote: text("reviewer_note"),
   rejectionReason: text("rejection_reason"),
-  
+
   // Timestamps
   createdAt: integer("created_at").notNull().default(nowUnix),
   updatedAt: integer("updated_at").notNull().default(nowUnix),
@@ -1079,18 +1082,18 @@ export const userKycProfiles = pgTable("user_kyc_profiles", {
 // Payout profiles (gated to Selected tier)
 export const userPayoutProfiles = pgTable("user_payout_profiles", {
   userId: integer("user_id").primaryKey().notNull(),
-  
+
   // Payment preferences
   preferredPaymentCurrency: text("preferred_payment_currency").default("USD"),
   payoutMethod: text("payout_method"), // BANK_TRANSFER, WISE, PAYPAL, CRYPTO
-  
+
   // Payout details (encrypted JSON for flexibility)
   payoutDetailsJson: text("payout_details_json"),
-  
+
   // Status
   isVerified: boolean("is_verified").default(false),
   verifiedAt: integer("verified_at"),
-  
+
   // Timestamps
   createdAt: integer("created_at").notNull().default(nowUnix),
   updatedAt: integer("updated_at").notNull().default(nowUnix),
@@ -1099,21 +1102,21 @@ export const userPayoutProfiles = pgTable("user_payout_profiles", {
 // Identity audit trail (hash-chained for tamper evidence)
 export const identityAudit = pgTable("identity_audit", {
   id: serial("id").primaryKey(),
-  
+
   // Event timing
   at: integer("at").notNull().default(nowUnix),
-  
+
   // User context
   userId: integer("user_id"),
   email: text("email"),
   username: text("username"),
-  
+
   // Event classification
   category: text("category").notNull(), // ACCOUNT_EVENT, EMAIL, SMS, MFA, KYC, LOGIN, ADMIN
   type: text("type").notNull(), // e.g., EMAIL_VERIFIED, SMS_OTP_SENT, MFA_ENABLED, KYC_APPROVED
   title: text("title"),
   description: text("description"),
-  
+
   // Actor/provenance
   ip: text("ip"),
   userAgent: text("user_agent"),
@@ -1123,7 +1126,7 @@ export const identityAudit = pgTable("identity_audit", {
   sessionId: text("session_id"),
   correlationId: text("correlation_id"),
   dataJson: text("data_json"),
-  
+
   // Data integrity (hash chain)
   prevHash: text("prev_hash"),
   eventHash: text("event_hash").notNull(),
@@ -1561,36 +1564,36 @@ export const legalDocPointers = pgTable("legal_doc_pointers", {
 export const legalAcceptances = pgTable("legal_acceptances", {
   id: serial("id").primaryKey(),
   userId: integer("user_id").notNull().references(() => users.id),
-  
+
   // User context at time of acceptance
   emailAtAcceptance: text("email_at_acceptance"), // Email address at acceptance time
   countryIso2: text("country_iso2"), // User's country (ISO 3166-1 alpha-2)
   regionKey: text("region_key"), // User's region (e.g., "US-CA", "EU")
-  
+
   // Global Master document reference
   globalDocId: integer("global_doc_id").references(() => legalDocuments.id),
   globalDocVersion: text("global_doc_version"),
   globalDocSha256: text("global_doc_sha256"),
-  
+
   // Addendum document reference (if applicable)
   addendumId: integer("addendum_id").references(() => legalDocuments.id),
   addendumVersion: text("addendum_version"),
   addendumSha256: text("addendum_sha256"),
-  
+
   // Combined document hash (for tamper evidence)
   combinedSha256: text("combined_sha256").notNull(), // SHA-256 of global + addendum combined
   combinedText: text("combined_text"), // Full combined text that was accepted
-  
+
   // Hash-chain for tamper-evident ledger
   ledgerSeq: integer("ledger_seq").notNull(), // Monotonic sequence number
   prevLedgerHash: text("prev_ledger_hash"), // Hash of previous acceptance record (null for first)
   ledgerHash: text("ledger_hash").notNull(), // SHA-256 hash of this record including prevLedgerHash
-  
+
   // Client provenance
   ipAddress: text("ip_address"),
   userAgent: text("user_agent"),
   sessionId: text("session_id"),
-  
+
   // Legacy fields (deprecated but kept for compatibility)
   docId: integer("doc_id").references(() => legalDocuments.id),
   docVersion: text("doc_version"),
@@ -1601,7 +1604,7 @@ export const legalAcceptances = pgTable("legal_acceptances", {
   acceptedUserAgent: text("accepted_user_agent"),
   prevHash: text("prev_hash"),
   recordHash: text("record_hash"),
-  
+
   acceptedAt: integer("accepted_at").notNull().default(nowUnix),
   // Milliseconds precision timestamp for hash computation (not coerced by Drizzle)
   acceptedAtMs: bigint("accepted_at_ms", { mode: "number" }),
@@ -1651,28 +1654,28 @@ export const legalDocChangeAuditLegacy = pgTable("legal_doc_change_audit", {
 // Legal document change audit trail (v2, hash-chained)
 export const legalDocChangeAudit = pgTable("legal_doc_change_audit_chain", {
   id: serial("id").primaryKey(),
-  
+
   // Hash-chain for tamper-evidence
   seq: integer("seq").notNull(), // Monotonic sequence number
   prevHash: text("prev_hash").notNull(), // Hash of previous audit record ("GENESIS" for first)
   eventHash: text("event_hash").notNull(), // SHA-256 hash of this event including prevHash
-  
+
   // Actor
   adminUserId: integer("admin_user_id"),
-  
+
   // Action type
   action: text("action").notNull(), // CREATE_VERSION | SET_ACTIVE | REPLACE_ACTIVE | ROLLBACK
-  
+
   // 4-part key context
   docSet: text("doc_set"),
   docType: text("doc_type"),
   jurisdictionType: text("jurisdiction_type"),
   jurisdictionKey: text("jurisdiction_key"),
-  
+
   // Document references
   oldActiveDocumentId: integer("old_active_document_id").references(() => legalDocuments.id),
   newActiveDocumentId: integer("new_active_document_id").references(() => legalDocuments.id),
-  
+
   // Additional context
   note: text("note"),
 

@@ -47,7 +47,7 @@ export function EditTradeModal({ trade, open, onOpenChange }: EditTradeModalProp
   const queryClient = useQueryClient();
   const { quotes } = useQuotes();
   const { bundle } = useTranslation();
-  const [validationMessages, setValidationMessages] = useState<{tp?: string; sl?: string}>({});
+  const [validationMessages, setValidationMessages] = useState<{ tp?: string; sl?: string }>({});
   const textTemplates = {
     priceLabelOrder: { text: "order price" },
     priceLabelCurrent: { text: "current price" },
@@ -158,9 +158,9 @@ export function EditTradeModal({ trade, open, onOpenChange }: EditTradeModalProp
       return getCurrentPrice();
     }
   };
-  
+
   const referencePrice = getReferencePrice();
-  
+
   // Extract symbol string from various possible structures
   let tradeSymbol = '';
   if (typeof trade.symbol === 'string') {
@@ -170,14 +170,14 @@ export function EditTradeModal({ trade, open, onOpenChange }: EditTradeModalProp
   } else if (trade.symbolName) {
     tradeSymbol = trade.symbolName;
   }
-  
+
   const isJpyPair = tradeSymbol.toUpperCase().includes('JPY');
   const pipSize = isJpyPair ? 0.01 : 0.0001; // JPY pairs: 0.01, others: 0.0001 
   const minDistance = MIN_POINTS * pipSize; // 20 points minimum distance
-  
+
   // Safe formatted reference price (guards against undefined/NaN)
-  const safeRefPrice = (referencePrice && Number.isFinite(referencePrice)) 
-    ? referencePrice.toFixed(isJpyPair ? 2 : 4) 
+  const safeRefPrice = (referencePrice && Number.isFinite(referencePrice))
+    ? referencePrice.toFixed(isJpyPair ? 2 : 4)
     : "—";
   const priceLabelShort = trade?.status === "PENDING"
     ? textTemplates.priceLabelOrderShort.text
@@ -186,7 +186,7 @@ export function EditTradeModal({ trade, open, onOpenChange }: EditTradeModalProp
     label: priceLabelShort,
     price: safeRefPrice,
   });
-  
+
   const form = useForm<FormValues>({
     resolver: zodResolver(schema),
     defaultValues: {
@@ -197,14 +197,14 @@ export function EditTradeModal({ trade, open, onOpenChange }: EditTradeModalProp
 
   // Validation function for TP/SL placement (minimum 20 points)
   const validateTPSL = (takeProfit: number | null, stopLoss: number | null) => {
-    const messages: {tp?: string; sl?: string} = {};
-    
+    const messages: { tp?: string; sl?: string } = {};
+
     // Guard against invalid referencePrice
     if (!referencePrice || referencePrice <= 0) {
       setValidationMessages({});
       return true;
     }
-    
+
     const isPending = trade.status === "PENDING";
     const tpAboveTemplate = isPending ? textTemplates.tpAboveOrder.text : textTemplates.tpAboveCurrent.text;
     const tpBelowTemplate = isPending ? textTemplates.tpBelowOrder.text : textTemplates.tpBelowCurrent.text;
@@ -216,7 +216,7 @@ export function EditTradeModal({ trade, open, onOpenChange }: EditTradeModalProp
 
     const tp = typeof takeProfit === "number" && Number.isFinite(takeProfit) ? takeProfit : null;
     const sl = typeof stopLoss === "number" && Number.isFinite(stopLoss) ? stopLoss : null;
-    
+
     if (trade.type === 'BUY') {
       // BUY: TP >= ref + minDistance ; SL <= ref - minDistance
       if (sl !== null && sl > (referencePrice - minDistance)) {
@@ -250,7 +250,7 @@ export function EditTradeModal({ trade, open, onOpenChange }: EditTradeModalProp
         });
       }
     }
-    
+
     setValidationMessages(messages);
     return Object.keys(messages).length === 0;
   };
@@ -324,14 +324,14 @@ export function EditTradeModal({ trade, open, onOpenChange }: EditTradeModalProp
     if (!open) return;
     if (!presetHydratedRef.current) return;
     if (!referencePrice || referencePrice <= 0) return;
-    
+
     // Only auto-apply once per trade
     if (autoAppliedForTradeRef.current === trade.id) return;
-    
+
     // Check if trade has no TP/SL set
     const hasTP = typeof trade.takeProfit === "number" && Number.isFinite(trade.takeProfit) && trade.takeProfit > 0;
     const hasSL = typeof trade.stopLoss === "number" && Number.isFinite(trade.stopLoss) && trade.stopLoss > 0;
-    
+
     if (!hasTP && !hasSL) {
       // Auto-apply the stored preset
       autoAppliedForTradeRef.current = trade.id;
@@ -355,11 +355,11 @@ export function EditTradeModal({ trade, open, onOpenChange }: EditTradeModalProp
         }),
         credentials: "include",
       });
-      
+
       if (!response.ok) {
         throw new Error(await response.text());
       }
-      
+
       return response.json();
     },
     onSuccess: () => {
@@ -397,7 +397,7 @@ export function EditTradeModal({ trade, open, onOpenChange }: EditTradeModalProp
             {trade.status === 'PENDING' ? 'Order price' : 'Current price'}: {safeRefPrice} | Trade: {getSideLabel(trade.type)} {trade.lots} lots {tradeSymbol}
           </DialogDescription>
         </DialogHeader>
-        
+
         <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
@@ -408,7 +408,7 @@ export function EditTradeModal({ trade, open, onOpenChange }: EditTradeModalProp
                 step="0.00001"
                 placeholder={pricePlaceholder}
                 className="placeholder:text-gray-400 border-2 border-green-500 focus:border-green-400 focus:ring-green-500/20 text-green-400"
-                {...form.register("takeProfit", { 
+                {...form.register("takeProfit", {
                   valueAsNumber: true,
                   onChange: (e) => {
                     const value = parseFloat(e.target.value) || null;
@@ -421,7 +421,7 @@ export function EditTradeModal({ trade, open, onOpenChange }: EditTradeModalProp
                 <p className="text-sm text-red-500 mt-1">{validationMessages.tp}</p>
               )}
             </div>
-            
+
             <div className="space-y-2">
               <Label htmlFor="stopLoss" className="text-red-500">Stop Loss</Label>
               <Input
@@ -430,7 +430,7 @@ export function EditTradeModal({ trade, open, onOpenChange }: EditTradeModalProp
                 step="0.00001"
                 placeholder={pricePlaceholder}
                 className="placeholder:text-gray-400 border-2 border-red-500 focus:border-red-400 focus:ring-red-500/20 text-red-400"
-                {...form.register("stopLoss", { 
+                {...form.register("stopLoss", {
                   valueAsNumber: true,
                   onChange: (e) => {
                     const value = parseFloat(e.target.value) || null;
@@ -447,8 +447,8 @@ export function EditTradeModal({ trade, open, onOpenChange }: EditTradeModalProp
 
           {/* Auto-Fix UI with drop-up preset selector (shows when validation errors exist) */}
           {Object.keys(validationMessages).length > 0 && (
-            <div className="rounded-md border border-amber-500/20 bg-amber-500/5 p-3 flex items-center justify-between gap-3">
-              <div className="text-sm text-amber-200">{invalidTargetsText}</div>
+            <div className="rounded-md border border-amber-500/20 bg-amber-500/5 p-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <div className="text-xs sm:text-sm text-amber-200">{invalidTargetsText}</div>
 
               <div className="flex items-center gap-2">
                 <Button
@@ -503,8 +503,8 @@ export function EditTradeModal({ trade, open, onOpenChange }: EditTradeModalProp
 
           {/* Quick presets when targets are already valid */}
           {Object.keys(validationMessages).length === 0 && (
-            <div className="rounded-md border border-white/10 bg-white/5 p-3 flex items-center justify-between gap-3">
-              <div className="text-sm text-gray-200">{quickPresetsText}</div>
+            <div className="rounded-md border border-white/10 bg-white/5 p-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <div className="text-xs sm:text-sm text-gray-200">{quickPresetsText}</div>
 
               <div className="flex items-center gap-2">
                 <Button
@@ -558,7 +558,7 @@ export function EditTradeModal({ trade, open, onOpenChange }: EditTradeModalProp
           )}
 
           {/* Trading Rules Info */}
-          <div className="bg-gray-50 dark:bg-gray-800 p-3 rounded-md text-sm">
+          <div className="bg-gray-50 dark:bg-gray-800 p-3 rounded-md text-xs sm:text-sm">
             <p className="font-medium mb-1 text-gray-900 dark:text-gray-100">Trading Rules:</p>
             {trade.type === 'BUY' ? (
               <>
@@ -572,18 +572,18 @@ export function EditTradeModal({ trade, open, onOpenChange }: EditTradeModalProp
               </>
             )}
           </div>
-          
+
           <div className="flex gap-2 pt-4">
-            <Button 
-              type="button" 
-              variant="outline" 
+            <Button
+              type="button"
+              variant="outline"
               onClick={() => onOpenChange(false)}
               className="flex-1 border-2 border-gray-400 bg-gray-700 hover:bg-gray-600 text-white font-semibold"
             >
               Cancel
             </Button>
-            <Button 
-              type="submit" 
+            <Button
+              type="submit"
               disabled={updateTargets.isPending || Object.keys(validationMessages).length > 0}
               className="flex-1"
             >

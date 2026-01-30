@@ -6,16 +6,16 @@ import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { queryClient, apiRequest, ApiError } from "@/lib/queryClient";
-import { 
-  Mail, 
-  Phone, 
-  Shield, 
-  Wallet, 
-  CheckCircle, 
-  Clock, 
-  AlertCircle, 
-  Lock, 
-  Send, 
+import {
+  Mail,
+  Phone,
+  Shield,
+  Wallet,
+  CheckCircle,
+  Clock,
+  AlertCircle,
+  Lock,
+  Send,
   RefreshCw,
   BadgeCheck
 } from "lucide-react";
@@ -76,7 +76,7 @@ interface PolicySnapshot {
 export function EmailVerificationCard() {
   const { toast } = useToast();
   const { locale } = useI18n();
-  
+
   const { data: status, refetch } = useQuery<PolicySnapshot>({
     queryKey: ["/api/policy/snapshot"],
     staleTime: 0,
@@ -151,14 +151,14 @@ export function EmailVerificationCard() {
   };
 
   return (
-    <Card className="bg-neutral-800 border-gray-700">
+    <Card className="bg-neutral-800 border-gray-700 w-full">
       <CardHeader className="pb-3">
-        <CardTitle className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Mail className="h-5 w-5 text-blue-500" />
-            Email Verification
+        <CardTitle className="flex items-center justify-between flex-wrap gap-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <Mail className="h-5 w-5 text-blue-500 shrink-0" />
+            <span className="text-cq-base sm:text-lg">Email Verification</span>
           </div>
-          <span className={`text-xs px-2 py-1 rounded ${statusDisplay.badgeClass}`}>
+          <span className={`text-xs px-2 py-1 rounded shrink-0 ${statusDisplay.badgeClass}`}>
             {statusDisplay.badge}
           </span>
         </CardTitle>
@@ -169,7 +169,7 @@ export function EmailVerificationCard() {
       </CardHeader>
       <CardContent>
         {!status?.user?.emailVerifiedAt && (
-          <Button 
+          <Button
             onClick={() => sendEmailMutation.mutate()}
             disabled={sendEmailMutation.isPending || !status?.features?.canSendEmailVerification}
             className="w-full"
@@ -199,7 +199,7 @@ export function SmsVerificationCard() {
   const [phone, setPhone] = useState("");
   const [code, setCode] = useState("");
   const [showCodeInput, setShowCodeInput] = useState(false);
-  
+
   const { data: status, refetch } = useQuery<PolicySnapshot>({
     queryKey: ["/api/policy/snapshot"],
     staleTime: 0,
@@ -252,16 +252,16 @@ export function SmsVerificationCard() {
 
   if (isLocked) {
     return (
-      <Card className="bg-neutral-800 border-gray-700 opacity-60">
+      <Card className="bg-neutral-800 border-gray-700 opacity-60 w-full">
         <CardHeader className="pb-3">
-          <CardTitle className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Phone className="h-5 w-5 text-gray-500" />
-              Phone Verification
+          <CardTitle className="flex items-center justify-between flex-wrap gap-2">
+            <div className="flex items-center gap-2 min-w-0">
+              <Phone className="h-5 w-5 text-gray-500 shrink-0" />
+              <span className="text-cq-base sm:text-lg">Phone Verification</span>
             </div>
-            <Lock className="h-4 w-4 text-gray-500" />
+            <Lock className="h-4 w-4 text-gray-500 shrink-0" />
           </CardTitle>
-          <CardDescription>
+          <CardDescription className="text-cq-xs">
             Unlock by meeting contender requirements
           </CardDescription>
         </CardHeader>
@@ -280,15 +280,15 @@ export function SmsVerificationCard() {
   }
 
   return (
-    <Card className="bg-neutral-800 border-gray-700">
+    <Card className="bg-neutral-800 border-gray-700 w-full">
       <CardHeader className="pb-3">
-        <CardTitle className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Phone className="h-5 w-5 text-purple-500" />
-            Phone Verification
+        <CardTitle className="flex items-center justify-between flex-wrap gap-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <Phone className="h-5 w-5 text-purple-500 shrink-0" />
+            <span className="text-cq-base sm:text-lg">Phone Verification</span>
           </div>
           {isVerified && (
-            <span className="text-xs px-2 py-1 rounded bg-green-600 text-white">
+            <span className="text-xs px-2 py-1 rounded bg-green-600 text-white shrink-0">
               Verified
             </span>
           )}
@@ -317,7 +317,7 @@ export function SmsVerificationCard() {
                 onChange={(e) => setPhone(e.target.value)}
                 className="bg-neutral-700 border-gray-600"
               />
-              <Button 
+              <Button
                 onClick={() => startSmsMutation.mutate(phone)}
                 disabled={startSmsMutation.isPending || !phone}
               >
@@ -339,14 +339,14 @@ export function SmsVerificationCard() {
                 maxLength={6}
                 className="bg-neutral-700 border-gray-600"
               />
-              <Button 
+              <Button
                 onClick={() => confirmSmsMutation.mutate(code)}
                 disabled={confirmSmsMutation.isPending || code.length < 6}
               >
                 {confirmSmsMutation.isPending ? "..." : "Verify"}
               </Button>
             </div>
-            <button 
+            <button
               className="text-sm text-blue-400 hover:underline"
               onClick={() => setShowCodeInput(false)}
             >
@@ -387,16 +387,16 @@ export function KycStatusCard() {
 
   if (isLocked) {
     return (
-      <Card className="bg-neutral-800 border-gray-700 opacity-60">
+      <Card className="bg-neutral-800 border-gray-700 opacity-60 w-full">
         <CardHeader className="pb-3">
-          <CardTitle className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <BadgeCheck className="h-5 w-5 text-gray-500" />
-              KYC Verification
+          <CardTitle className="flex items-center justify-between flex-wrap gap-2">
+            <div className="flex items-center gap-2 min-w-0">
+              <BadgeCheck className="h-5 w-5 text-gray-500 shrink-0" />
+              <span className="text-cq-base sm:text-lg">KYC Verification</span>
             </div>
-            <Lock className="h-4 w-4 text-gray-500" />
+            <Lock className="h-4 w-4 text-gray-500 shrink-0" />
           </CardTitle>
-          <CardDescription>
+          <CardDescription className="text-cq-xs">
             Available for selected traders only
           </CardDescription>
         </CardHeader>
@@ -420,29 +420,29 @@ export function KycStatusCard() {
   };
 
   return (
-    <Card className="bg-neutral-800 border-gray-700">
+    <Card className="bg-neutral-800 border-gray-700 w-full">
       <CardHeader className="pb-3">
-        <CardTitle className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <BadgeCheck className="h-5 w-5 text-emerald-500" />
-            KYC Verification
+        <CardTitle className="flex items-center justify-between flex-wrap gap-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <BadgeCheck className="h-5 w-5 text-emerald-500 shrink-0" />
+            <span className="text-cq-base sm:text-lg">KYC Verification</span>
           </div>
           {kycProfile?.status && (
-            <span className={`text-xs px-2 py-1 rounded text-white ${getStatusColor(kycProfile.status)}`}>
+            <span className={`text-xs px-2 py-1 rounded text-white shrink-0 ${getStatusColor(kycProfile.status)}`}>
               {kycProfile.status}
             </span>
           )}
         </CardTitle>
         <CardDescription>
-          {kycProfile?.status === "APPROVED" 
+          {kycProfile?.status === "APPROVED"
             ? "Identity verified - eligible for payouts"
             : kycProfile?.status === "INVITED"
-            ? "You've been invited to complete KYC"
-            : kycProfile?.status === "SUBMITTED"
-            ? "Under review"
-            : kycProfile?.status === "REJECTED"
-            ? kycProfile.rejectionReason || "Please contact support"
-            : "Not started"
+              ? "You've been invited to complete KYC"
+              : kycProfile?.status === "SUBMITTED"
+                ? "Under review"
+                : kycProfile?.status === "REJECTED"
+                  ? kycProfile.rejectionReason || "Please contact support"
+                  : "Not started"
           }
         </CardDescription>
       </CardHeader>
@@ -467,7 +467,7 @@ export function KycStatusCard() {
 export function PayoutProfileCard() {
   const { toast } = useToast();
   const [currency, setCurrency] = useState("USD");
-  
+
   const { data: status } = useQuery<PolicySnapshot>({
     queryKey: ["/api/policy/snapshot"],
     staleTime: 0,
@@ -507,16 +507,16 @@ export function PayoutProfileCard() {
 
   if (isLocked) {
     return (
-      <Card className="bg-neutral-800 border-gray-700 opacity-60">
+      <Card className="bg-neutral-800 border-gray-700 opacity-60 w-full">
         <CardHeader className="pb-3">
-          <CardTitle className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Wallet className="h-5 w-5 text-gray-500" />
-              Payout Settings
+          <CardTitle className="flex items-center justify-between flex-wrap gap-2">
+            <div className="flex items-center gap-2 min-w-0">
+              <Wallet className="h-5 w-5 text-gray-500 shrink-0" />
+              <span className="text-cq-base sm:text-lg">Payout Settings</span>
             </div>
-            <Lock className="h-4 w-4 text-gray-500" />
+            <Lock className="h-4 w-4 text-gray-500 shrink-0" />
           </CardTitle>
-          <CardDescription>
+          <CardDescription className="text-cq-xs">
             Available after KYC approval
           </CardDescription>
         </CardHeader>
@@ -530,21 +530,21 @@ export function PayoutProfileCard() {
   }
 
   return (
-    <Card className="bg-neutral-800 border-gray-700">
+    <Card className="bg-neutral-800 border-gray-700 w-full">
       <CardHeader className="pb-3">
         <CardTitle className="flex items-center gap-2">
-          <Wallet className="h-5 w-5 text-amber-500" />
-          Payout Settings
+          <Wallet className="h-5 w-5 text-amber-500 shrink-0" />
+          <span className="text-cq-base sm:text-lg">Payout Settings</span>
         </CardTitle>
-        <CardDescription>
+        <CardDescription className="text-cq-xs">
           Manage your payment preferences
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="space-y-2">
           <Label>Preferred Currency</Label>
-          <Select 
-            value={payoutProfile?.preferredPaymentCurrency || currency} 
+          <Select
+            value={payoutProfile?.preferredPaymentCurrency || currency}
             onValueChange={(val) => {
               setCurrency(val);
               updateCurrencyMutation.mutate(val);
@@ -574,12 +574,12 @@ export function PayoutProfileCard() {
 
 export function VerificationSection() {
   return (
-    <div className="space-y-4">
-      <h2 className="text-lg font-semibold flex items-center gap-2">
-        <Shield className="h-5 w-5 text-primary" />
+    <div className="space-y-4 w-full">
+      <h2 className="text-cq-base sm:text-lg font-semibold flex items-center gap-2">
+        <Shield className="h-5 w-5 text-primary shrink-0" />
         Verification & Security
       </h2>
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid gap-4 grid-cols-1 md:grid-cols-2 w-full">
         <EmailVerificationCard />
         <SmsVerificationCard />
         <KycStatusCard />

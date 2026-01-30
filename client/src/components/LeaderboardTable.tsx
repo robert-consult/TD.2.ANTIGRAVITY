@@ -40,12 +40,12 @@ export function LeaderboardTable({ leaderboard }: LeaderboardTableProps) {
       <Table>
         <TableHeader className="bg-slate-50 dark:bg-slate-800/50">
           <TableRow className="hover:bg-slate-50/80 dark:hover:bg-slate-800/60">
-            <TableHead className="w-[90px] font-semibold">Rank</TableHead>
+            <TableHead className="font-semibold">Rank</TableHead>
             <TableHead className="font-semibold">Trader</TableHead>
             <TableHead className="font-semibold">Email</TableHead>
             <TableHead className="text-right font-semibold">Trades</TableHead>
             <TableHead className="text-right font-semibold">Win&nbsp;Rate</TableHead>
-            <TableHead className="text-right font-semibold">Profit/Loss</TableHead>
+            <TableHead className="text-right font-semibold min-w-[100px]">Profit/Loss</TableHead>
             <TableHead className="text-right font-semibold">Profit&nbsp;%</TableHead>
             <TableHead className="text-right font-semibold">Avg&nbsp;Hold</TableHead>
             <TableHead className="text-right font-semibold">Last&nbsp;Trade</TableHead>
@@ -64,8 +64,8 @@ export function LeaderboardTable({ leaderboard }: LeaderboardTableProps) {
                       e.rank === 1
                         ? "text-yellow-500"
                         : e.rank === 2
-                        ? "text-slate-400"
-                        : "text-orange-600"
+                          ? "text-slate-400"
+                          : "text-orange-600"
                     }
                   />
                 )}
@@ -74,10 +74,10 @@ export function LeaderboardTable({ leaderboard }: LeaderboardTableProps) {
 
               {/* ── Trader name ── */}
               <TableCell className="font-medium">{e.traderName}</TableCell>
-              
+
               {/* ── Email ── */}
               <TableCell className="text-slate-600 dark:text-slate-400">{e.email}</TableCell>
-              
+
               {/* ── Trades count ── */}
               <TableCell className="text-right">{e.trades}</TableCell>
 
@@ -88,9 +88,8 @@ export function LeaderboardTable({ leaderboard }: LeaderboardTableProps) {
 
               {/* ── Profit/Loss with green up-wave or red down-wave ── */}
               <TableCell
-                className={`text-right font-medium flex items-center justify-end gap-1 ${
-                  e.profitOrLoss >= 0 ? "text-green-500" : "text-red-500"
-                }`}
+                className={`text-right font-medium flex items-center justify-end gap-1 ${e.profitOrLoss >= 0 ? "text-green-500" : "text-red-500"
+                  }`}
               >
                 {e.profitOrLoss >= 0 ? (
                   <TrendingUp size={16} className="text-green-500" />
@@ -102,9 +101,8 @@ export function LeaderboardTable({ leaderboard }: LeaderboardTableProps) {
 
               {/* ── Profit % ── */}
               <TableCell
-                className={`text-right font-medium ${
-                  e.profitPct >= 0 ? "text-green-500" : "text-red-500"
-                }`}
+                className={`text-right font-medium ${e.profitPct >= 0 ? "text-green-500" : "text-red-500"
+                  }`}
               >
                 {e.profitPct >= 0 ? '+' : ''}{e.profitPct.toFixed(2)}%
               </TableCell>

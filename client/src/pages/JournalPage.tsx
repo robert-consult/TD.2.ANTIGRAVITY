@@ -194,7 +194,7 @@ export default function JournalPage() {
     const hasClosedAt = t.closedAt !== null && t.closedAt !== undefined;
     return status === "CLOSED" || hasClosePrice || hasClosedAt;
   });
-  
+
   // Filter trades based on search and sort by most recent first
   const filteredTrades = closedTrades
     .filter((trade: any) => {
@@ -203,8 +203,8 @@ export default function JournalPage() {
       const side = String(trade.side ?? trade.type ?? "");
       const searchLower = tradeSearchQuery.toLowerCase();
       return symbol.toLowerCase().includes(searchLower) ||
-             side.toLowerCase().includes(searchLower) ||
-             String(trade.profit || "").includes(searchLower);
+        side.toLowerCase().includes(searchLower) ||
+        String(trade.profit || "").includes(searchLower);
     })
     .sort((a: any, b: any) => {
       // Sort by close time, most recent first
@@ -308,7 +308,7 @@ export default function JournalPage() {
       try {
         const ids = JSON.parse(entry.tradeIds);
         if (Array.isArray(ids)) return ids;
-      } catch {}
+      } catch { }
     }
     // Fallback to legacy tradeId
     if (entry.tradeId) return [entry.tradeId];
@@ -336,8 +336,8 @@ export default function JournalPage() {
 
   // Toggle trade selection
   const toggleTradeSelection = (tradeId: number) => {
-    setSelectedTradeIds(prev => 
-      prev.includes(tradeId) 
+    setSelectedTradeIds(prev =>
+      prev.includes(tradeId)
         ? prev.filter(id => id !== tradeId)
         : [...prev, tradeId]
     );
@@ -367,7 +367,7 @@ export default function JournalPage() {
     const tagsText = parseTags(entry.tags).join(" ");
     const matchesSearch = searchQuery
       ? entry.note.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        tagsText.toLowerCase().includes(searchQuery.toLowerCase())
+      tagsText.toLowerCase().includes(searchQuery.toLowerCase())
       : true;
     const matchesMood = moodFilter !== "all_moods" ? entry.mood === moodFilter : true;
     return matchesSearch && matchesMood;
@@ -421,10 +421,10 @@ export default function JournalPage() {
             <Button variant="ghost" size="icon" onClick={() => navigate("/")}>
               <ArrowLeft className="h-5 w-5" />
             </Button>
-            <BookOpen className="h-8 w-8 text-emerald-500" />
+            <BookOpen className="h-6 w-6 sm:h-8 sm:w-8 text-emerald-500" />
             <div>
-              <h1 className="text-2xl font-bold">Trading Journal</h1>
-              <p className="text-muted-foreground text-sm">
+              <h1 className="text-lg sm:text-xl md:text-2xl font-bold">Trading Journal</h1>
+              <p className="text-muted-foreground text-[10px] sm:text-xs md:text-sm">
                 Track your thoughts, emotions, and lessons
               </p>
             </div>
@@ -529,7 +529,7 @@ export default function JournalPage() {
                   </label>
                   <Select value={newMood} onValueChange={setNewMood}>
                     <SelectTrigger>
-                    <SelectValue placeholder="How are you feeling?" />
+                      <SelectValue placeholder="How are you feeling?" />
                     </SelectTrigger>
                     <SelectContent>
                       {moodOptions.map((mood) => (

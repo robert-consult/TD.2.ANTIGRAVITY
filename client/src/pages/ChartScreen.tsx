@@ -8,6 +8,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { getTradeErrorToast } from "@/lib/tradeErrorMessages";
 import { useLiveUpdates } from "@/live/LiveUpdatesProvider";
+import { useLotSettings } from "@/hooks/use-lot-settings";
 
 // Declare TradingView type for TypeScript
 declare global {
@@ -160,10 +161,19 @@ export default function ChartScreen({ selectedSymbol }: ChartScreenProps) {
 
   const queryClient = useQueryClient();
   const { isConnected: isWsConnected } = useLiveUpdates();
+  const { lotDropdownMax, lotDropdownOptions } = useLotSettings();
 
   // Trade controls
   const [lots, setLots] = useState<number>(1);
   const [currentTradeType, setCurrentTradeType] = useState<"BUY" | "SELL">("BUY");
+
+  useEffect(() => {
+    setLots((prev) => {
+      if (!Number.isFinite(prev) || prev < 1) return 1;
+      if (prev > lotDropdownMax) return lotDropdownMax;
+      return prev;
+    });
+  }, [lotDropdownMax]);
 
   // Draggable floater state
   const [floaterPosition, setFloaterPosition] = useState({ x: 16, y: 16 });
@@ -631,12 +641,8 @@ export default function ChartScreen({ selectedSymbol }: ChartScreenProps) {
                 <SelectValue placeholder="1" />
               </SelectTrigger>
               <SelectContent className="max-h-[calc(5*2.25rem)] overflow-y-auto w-14 sm:w-16 bg-neutral-900 border-gray-700">
-                {Array.from({ length: 50 }, (_, i) => i + 1).map((lot) => (
-                  <SelectItem
-                    key={lot}
-                    value={lot.toString()}
-                    className="text-white hover:bg-neutral-800"
-                  >
+                {lotDropdownOptions.map((lot) => (
+                  <SelectItem key={lot} value={lot.toString()} className="text-white hover:bg-neutral-800">
                     {lot}
                   </SelectItem>
                 ))}

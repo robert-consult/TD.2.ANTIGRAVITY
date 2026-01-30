@@ -33,7 +33,7 @@ export default function AccountScreen() {
 
   const { user } = useAuth();
   const [, navigate] = useLocation();
-  
+
   const { summary, isLoading } = useAccountSummary();
 
   const { data: trades = [] } = useQuery<any[]>({
@@ -177,13 +177,13 @@ export default function AccountScreen() {
   };
 
   return (
-    <div className="h-full flex flex-col bg-neutral-900 overflow-auto">
-      <div className="px-6 py-4 border-b border-gray-800">
-        <h1 className="text-2xl font-bold text-blue-400">Account</h1>
+    <div className="h-full flex flex-col bg-neutral-900 overflow-auto" style={{ containerType: 'inline-size', containerName: 'account' }}>
+      <div className="px-gutter py-pad-y border-b border-gray-800">
+        <h1 className="text-cq-xl font-bold text-blue-400">Account</h1>
       </div>
 
-      <div className="flex-1 p-6">
-        <div className="max-w-4xl space-y-6">
+      <div className="flex-1 p-3 sm:p-6">
+        <div className="max-w-4xl space-y-4 sm:space-y-6">
           {/* Stale Pricing Warning Banner */}
           {summary?.pricingStale && (
             <Alert className="bg-yellow-900/30 border-yellow-600">
@@ -198,191 +198,192 @@ export default function AccountScreen() {
           )}
 
           <Card className="bg-neutral-800 border-gray-700">
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-white">
-                <User className="h-5 w-5 text-blue-400" />
-                Account Information
+            <CardHeader className="pb-2 sm:pb-3 px-3 sm:px-6">
+              <CardTitle className="flex items-center gap-2 text-white text-sm sm:text-base">
+                <User className="h-4 w-4 sm:h-5 sm:w-5 text-blue-400" />
+                <span className="hidden sm:inline">Account Information</span>
+                <span className="sm:hidden">Account Info</span>
               </CardTitle>
             </CardHeader>
-            <CardContent>
+            <CardContent className="px-3 sm:px-6">
               {isLoading ? (
                 <Skeleton className="h-6 w-48" />
               ) : (
                 <div className="space-y-2">
-                  <div className="flex justify-between items-center py-2 border-b border-gray-700/50">
-                    <span className="text-gray-400">Username</span>
-                    <span className="text-white font-medium">{user?.username || "-"}</span>
+                  <div className="flex justify-between items-center py-1.5 sm:py-2 border-b border-gray-700/50">
+                    <span className="text-gray-400 text-xs sm:text-sm">Username</span>
+                    <span className="text-white font-medium text-xs sm:text-sm">{user?.username || "-"}</span>
                   </div>
-                  <div className="flex justify-between items-center py-2 border-b border-gray-700/50">
-                    <span className="text-gray-400">Account Type</span>
-                    <span className="text-white font-medium">{user?.isAdmin ? "Admin" : "Trader"}</span>
+                  <div className="flex justify-between items-center py-1.5 sm:py-2 border-b border-gray-700/50">
+                    <span className="text-gray-400 text-xs sm:text-sm">Account Type</span>
+                    <span className="text-white font-medium text-xs sm:text-sm">{user?.isAdmin ? "Admin" : "Trader"}</span>
                   </div>
-                  <div className="flex justify-between items-center py-2 border-b border-gray-700/50">
-                    <span className="text-gray-400">Member Since</span>
-                    <span className="text-white font-medium">
+                  <div className="flex justify-between items-center py-1.5 sm:py-2 border-b border-gray-700/50">
+                    <span className="text-gray-400 text-xs sm:text-sm">Member Since</span>
+                    <span className="text-white font-medium text-xs sm:text-sm">
                       {user?.createdAt
                         ? new Date(
-                            typeof user.createdAt === "number" && user.createdAt < 1e12
-                              ? user.createdAt * 1000
-                              : user.createdAt
-                          ).toLocaleDateString()
+                          typeof user.createdAt === "number" && user.createdAt < 1e12
+                            ? user.createdAt * 1000
+                            : user.createdAt
+                        ).toLocaleDateString()
                         : "-"}
                     </span>
                   </div>
-                  <div className="flex justify-between items-center py-2">
-                    <span className="text-gray-400">Open Positions</span>
-                    <span className="text-white font-medium">{summary?.openPositions ?? 0}</span>
+                  <div className="flex justify-between items-center py-1.5 sm:py-2">
+                    <span className="text-gray-400 text-xs sm:text-sm">Open Positions</span>
+                    <span className="text-white font-medium text-xs sm:text-sm">{summary?.openPositions ?? 0}</span>
                   </div>
                 </div>
               )}
             </CardContent>
           </Card>
 
-          <div className="grid-auto-fit grid-min-18">
+          <div className="grid-auto-fit grid-min-18" style={{ containerType: 'inline-size', containerName: 'panel' }}>
             <Card className="bg-neutral-800 border-gray-700">
-              <CardContent className="pt-6">
+              <CardContent className="pt-4 px-card">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm text-gray-400">Balance</p>
+                    <p className="text-cq-xs text-gray-400">Balance</p>
                     {isLoading ? (
-                      <Skeleton className="h-7 w-24 mt-1" />
+                      <Skeleton className="h-5 w-20 mt-1" />
                     ) : (
-                      <p className="text-xl font-bold text-white">{formatCurrency(summary?.balance)}</p>
+                      <p className="price-display text-white">{formatCurrency(summary?.balance)}</p>
                     )}
                   </div>
-                  <Wallet className="h-8 w-8 text-blue-400" />
+                  <Wallet className="h-6 w-6 text-blue-400" />
                 </div>
               </CardContent>
             </Card>
 
             <Card className="bg-neutral-800 border-gray-700">
-              <CardContent className="pt-6">
+              <CardContent className="pt-4 px-card">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm text-gray-400">Equity</p>
+                    <p className="text-cq-xs text-gray-400">Equity</p>
                     {isLoading ? (
-                      <Skeleton className="h-7 w-24 mt-1" />
+                      <Skeleton className="h-5 w-20 mt-1" />
                     ) : (
-                      <p className={`text-xl font-bold ${summary?.pricingStale ? 'text-yellow-400' : 'text-white'}`}>
+                      <p className={`price-display ${summary?.pricingStale ? 'text-yellow-400' : 'text-white'}`}>
                         {formatCurrency(summary?.equity)}
-                        {summary?.pricingStale && <span className="text-xs ml-1">(stale)</span>}
+                        {summary?.pricingStale && <span className="text-cq-xs ml-1">(stale)</span>}
                       </p>
                     )}
                   </div>
-                  <Activity className="h-8 w-8 text-green-400" />
+                  <Activity className="h-6 w-6 text-green-400" />
                 </div>
               </CardContent>
             </Card>
 
             <Card className="bg-neutral-800 border-gray-700">
-              <CardContent className="pt-6">
+              <CardContent className="pt-4 px-card">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm text-gray-400">Free Margin</p>
+                    <p className="text-cq-xs text-gray-400"><span className="cq-hide-narrow">Free </span>Margin</p>
                     {isLoading ? (
-                      <Skeleton className="h-7 w-24 mt-1" />
+                      <Skeleton className="h-5 w-20 mt-1" />
                     ) : (
-                      <p className={`text-xl font-bold ${summary?.pricingStale ? 'text-yellow-400' : 'text-white'}`}>
+                      <p className={`price-display ${summary?.pricingStale ? 'text-yellow-400' : 'text-white'}`}>
                         {formatCurrency(summary?.freeMargin)}
-                        {summary?.pricingStale && <span className="text-xs ml-1">(stale)</span>}
+                        {summary?.pricingStale && <span className="text-cq-xs ml-1">(stale)</span>}
                       </p>
                     )}
                   </div>
-                  <TrendingUp className="h-8 w-8 text-emerald-400" />
+                  <TrendingUp className="h-6 w-6 text-emerald-400" />
                 </div>
               </CardContent>
             </Card>
 
             <Card className="bg-neutral-800 border-gray-700">
-              <CardContent className="pt-6">
+              <CardContent className="pt-4 px-card">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm text-gray-400">Used Margin</p>
+                    <p className="text-cq-xs text-gray-400"><span className="cq-hide-narrow">Used </span>Margin</p>
                     {isLoading ? (
-                      <Skeleton className="h-7 w-24 mt-1" />
+                      <Skeleton className="h-5 w-20 mt-1" />
                     ) : (
-                      <p className="text-xl font-bold text-white">{formatCurrency(summary?.usedMargin)}</p>
+                      <p className="price-display text-white">{formatCurrency(summary?.usedMargin)}</p>
                     )}
                   </div>
-                  <TrendingDown className="h-8 w-8 text-orange-400" />
+                  <TrendingDown className="h-6 w-6 text-orange-400" />
                 </div>
               </CardContent>
             </Card>
 
             <Card className="bg-neutral-800 border-gray-700">
-              <CardContent className="pt-6">
+              <CardContent className="pt-4 px-card">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm text-gray-400">Floating P/L</p>
+                    <p className="text-cq-xs text-gray-400"><span className="cq-hide-narrow">Floating </span>P/L</p>
                     {isLoading ? (
-                      <Skeleton className="h-7 w-24 mt-1" />
+                      <Skeleton className="h-5 w-20 mt-1" />
                     ) : (
-                      <p className={`text-xl font-bold ${
-                        summary?.pricingStale 
-                          ? 'text-yellow-400' 
-                          : (summary?.floatingPnl || 0) >= 0 ? 'text-green-500' : 'text-red-500'
-                      }`}>
+                      <p className={`price-display ${summary?.pricingStale
+                        ? 'text-yellow-400'
+                        : (summary?.floatingPnl || 0) >= 0 ? 'pnl-positive' : 'pnl-negative'
+                        }`}>
                         {formatCurrency(summary?.floatingPnl)}
-                        {summary?.pricingStale && <span className="text-xs ml-1">(stale)</span>}
+                        {summary?.pricingStale && <span className="text-cq-xs ml-1">(stale)</span>}
                       </p>
                     )}
                   </div>
-                  <PieChart className="h-8 w-8 text-purple-400" />
+                  <PieChart className="h-6 w-6 text-purple-400" />
                 </div>
               </CardContent>
             </Card>
 
             <Card className="bg-neutral-800 border-gray-700">
-              <CardContent className="pt-6">
+              <CardContent className="pt-4 sm:pt-6 px-3 sm:px-6">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm text-gray-400">Margin Level</p>
+                    <p className="text-[10px] sm:text-xs md:text-sm text-gray-400"><span className="hidden sm:inline">Margin </span>Level</p>
                     {isLoading ? (
-                      <Skeleton className="h-7 w-24 mt-1" />
+                      <Skeleton className="h-5 sm:h-7 w-20 sm:w-24 mt-1" />
                     ) : (
-                      <p className="text-xl font-bold text-white">
-                        {summary?.marginLevel !== null && summary?.marginLevel !== undefined 
-                          ? `${summary.marginLevel.toFixed(2)}%` 
+                      <p className="text-base sm:text-lg md:text-xl font-bold text-white">
+                        {summary?.marginLevel !== null && summary?.marginLevel !== undefined
+                          ? `${summary.marginLevel.toFixed(2)}%`
                           : "-"}
                       </p>
                     )}
                   </div>
-                  <Activity className="h-8 w-8 text-cyan-400" />
+                  <Activity className="h-6 w-6 sm:h-8 sm:w-8 text-cyan-400" />
                 </div>
               </CardContent>
             </Card>
           </div>
 
           <Card className="bg-neutral-800 border-gray-700">
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-white">
-                <TrendingUp className="h-5 w-5 text-blue-400" />
-                Trading Statistics
+            <CardHeader className="pb-2 sm:pb-3 px-3 sm:px-6">
+              <CardTitle className="flex items-center gap-2 text-white text-sm sm:text-base">
+                <TrendingUp className="h-4 w-4 sm:h-5 sm:w-5 text-blue-400" />
+                <span className="hidden sm:inline">Trading Statistics</span>
+                <span className="sm:hidden">Stats</span>
               </CardTitle>
             </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <div className="text-center p-card bg-neutral-700/50 rounded-lg">
-                  <p className="text-2xl font-bold text-white">{closedTrades.length}</p>
-                  <p className="text-sm text-gray-400">Total Trades</p>
+            <CardContent className="px-3 sm:px-6">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-4">
+                <div className="text-center p-2 sm:p-card bg-neutral-700/50 rounded-lg">
+                  <p className="text-lg sm:text-xl md:text-2xl font-bold text-white">{closedTrades.length}</p>
+                  <p className="text-[10px] sm:text-xs md:text-sm text-gray-400">Total Trades</p>
                 </div>
-                <div className="text-center p-card bg-neutral-700/50 rounded-lg">
-                  <p className="text-2xl font-bold text-green-500">{winningTrades.length}</p>
-                  <p className="text-sm text-gray-400">Winning Trades</p>
+                <div className="text-center p-2 sm:p-card bg-neutral-700/50 rounded-lg">
+                  <p className="text-lg sm:text-xl md:text-2xl font-bold text-green-500">{winningTrades.length}</p>
+                  <p className="text-[10px] sm:text-xs md:text-sm text-gray-400">Winning</p>
                 </div>
-                <div className="text-center p-card bg-neutral-700/50 rounded-lg">
-                  <p className="text-2xl font-bold text-red-500">{closedTrades.length - winningTrades.length}</p>
-                  <p className="text-sm text-gray-400">Losing Trades</p>
+                <div className="text-center p-2 sm:p-card bg-neutral-700/50 rounded-lg">
+                  <p className="text-lg sm:text-xl md:text-2xl font-bold text-red-500">{closedTrades.length - winningTrades.length}</p>
+                  <p className="text-[10px] sm:text-xs md:text-sm text-gray-400">Losing</p>
                 </div>
-                <div className="text-center p-card bg-neutral-700/50 rounded-lg">
-                  <p className="text-2xl font-bold text-blue-400">{winRate.toFixed(1)}%</p>
-                  <p className="text-sm text-gray-400">Win Rate</p>
+                <div className="text-center p-2 sm:p-card bg-neutral-700/50 rounded-lg">
+                  <p className="text-lg sm:text-xl md:text-2xl font-bold text-blue-400">{winRate.toFixed(1)}%</p>
+                  <p className="text-[10px] sm:text-xs md:text-sm text-gray-400">Win Rate</p>
                 </div>
               </div>
-              <div className="mt-4 p-card bg-neutral-700/50 rounded-lg">
+              <div className="mt-3 sm:mt-4 p-2 sm:p-card bg-neutral-700/50 rounded-lg">
                 <div className="flex justify-between items-center">
-                  <span className="text-gray-400">Total Realized P/L</span>
-                  <span className={`text-xl font-bold ${totalProfit >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                  <span className="text-gray-400 text-xs sm:text-sm"><span className="hidden sm:inline">Total </span>Realized P/L</span>
+                  <span className={`text-base sm:text-lg md:text-xl font-bold ${totalProfit >= 0 ? 'text-green-500' : 'text-red-500'}`}>
                     {formatCurrency(totalProfit)}
                   </span>
                 </div>
@@ -392,19 +393,20 @@ export default function AccountScreen() {
 
           {/* Trader Insights Card */}
           <Card className="bg-neutral-800 border-gray-700">
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-white">
-                <Lightbulb className="h-5 w-5 text-amber-400" />
-                Trader Insights
+            <CardHeader className="pb-2 sm:pb-3 px-3 sm:px-6">
+              <CardTitle className="flex items-center gap-2 text-white text-sm sm:text-base">
+                <Lightbulb className="h-4 w-4 sm:h-5 sm:w-5 text-amber-400" />
+                <span className="hidden sm:inline">Trader Insights</span>
+                <span className="sm:hidden">Insights</span>
               </CardTitle>
             </CardHeader>
-            <CardContent>
+            <CardContent className="px-3 sm:px-6">
               {closedTrades.length === 0 ? (
-                <div className="text-sm text-gray-400 p-card text-center">
+                <div className="text-xs sm:text-sm text-gray-400 p-2 sm:p-card text-center">
                   No closed trades yet. Insights will appear once you have realized P/L history.
                 </div>
               ) : closedTrades.length < 5 ? (
-                <div className="text-sm text-gray-400 p-card text-center">
+                <div className="text-xs sm:text-sm text-gray-400 p-2 sm:p-card text-center">
                   Need at least 5 closed trades for meaningful insights. You have {closedTrades.length} so far.
                 </div>
               ) : (

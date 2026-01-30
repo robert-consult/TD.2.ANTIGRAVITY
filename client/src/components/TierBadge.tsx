@@ -22,7 +22,7 @@ interface PolicySnapshot {
 
 interface TierBadgeProps {
   tier: UserTier;
-  size?: "sm" | "md" | "lg";
+  size?: "sm" | "md" | "lg" | "responsive";
   showLabel?: boolean;
   className?: string;
 }
@@ -31,6 +31,11 @@ const sizeConfig = {
   sm: { iconSize: "h-3 w-3", padding: "px-2 py-0.5", text: "text-xs" },
   md: { iconSize: "h-4 w-4", padding: "px-3 py-1", text: "text-sm" },
   lg: { iconSize: "h-5 w-5", padding: "px-4 py-2", text: "text-base" },
+  responsive: {
+    iconSize: "h-3 w-3 sm:h-4 sm:w-4",
+    padding: "px-1.5 py-0.5 sm:px-2.5 sm:py-1",
+    text: "text-[10px] sm:text-xs leading-none"
+  },
 };
 
 export function TierBadge({ tier, size = "md", showLabel = true, className }: TierBadgeProps) {
@@ -113,7 +118,7 @@ export function TierProgressCard({ tier, className }: { tier: UserTier; classNam
   });
 
   const nextTier = tier === "CANDIDATE" ? "PERFORMER" : tier === "PERFORMER" ? "SELECTED" : null;
-  
+
   const path1 = policySnapshot?.contenderCriteria?.path1;
   const path2 = policySnapshot?.contenderCriteria?.path2;
 
@@ -124,14 +129,14 @@ export function TierProgressCard({ tier, className }: { tier: UserTier; classNam
   const path2MinAgeDays = path2?.minAgeDays ?? 90;
   const path2MinReturnPct = Math.round((path2?.minReturnPct ?? 0.1) * 100);
   const path2MinTrades = path2?.minTradesWindow ?? 20;
-  
+
   return (
     <div className={cn("p-4 rounded-lg border bg-neutral-800 border-gray-700", className)}>
       <div className="flex items-center justify-between mb-3">
         <h3 className="font-medium text-gray-200">Your Trading Tier</h3>
         <TierBadge tier={tier} />
       </div>
-      
+
       {nextTier && (
         <div className="space-y-2">
           <div className="flex items-center justify-between text-sm">
@@ -151,7 +156,7 @@ export function TierProgressCard({ tier, className }: { tier: UserTier; classNam
           </div>
         </div>
       )}
-      
+
       {tier === "SELECTED" && (
         <div className="mt-2 p-2 bg-purple-900/30 border border-purple-600/50 rounded text-sm text-purple-200">
           You've reached the highest tier with access to real capital trading and payouts.

@@ -73,6 +73,13 @@ export async function bootstrapQuoteHub(): Promise<boolean> {
   return true;
 }
 
+export async function bootstrapQuoteHubFromValkeySymbols(symbols: string[]): Promise<boolean> {
+  const rows = await getValkeyQuoteRows(symbols);
+  if (!rows.length) return false;
+  applyQuoteUpdate(rows, { seq: 0, asOf: Date.now() });
+  return true;
+}
+
 export function getQuoteSnapshot(symbols?: string[]): { rows: QuoteCore[]; seq: number; asOf: number } {
   const rows = symbols?.length
     ? symbols

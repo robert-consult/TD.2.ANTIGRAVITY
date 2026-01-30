@@ -9,8 +9,9 @@ import { recalcAccount } from "../recalcAccount";
 import { onQuotesUpdated } from "../engine/orderEngine";
 import { computeSessionDayForQuote, ensureMarketDailyCloseTable } from "../utils/marketDailyClose";
 import { onLiveEvent, publishLiveEvent } from "../services/liveBus";
-import { getValkey, writeToRollingBuffer, cachePrevClose, getCachedPrevClose } from "../services/valkey";
+import { getValkey, valkeyGetJson, writeToRollingBuffer, cachePrevClose, getCachedPrevClose } from "../services/valkey";
 import { isMarketOpenForSymbol } from "../services/marketHours";
+import { extractForgeErrorMessage, formatSymbolsForForgeAPI, normalizeSymbol } from "./forgeUtils";
 
 const API_KEY = process.env.FORGE_KEY;
 
@@ -77,6 +78,152 @@ export function getCacheStats() {
   };
 }
 
+type PersistedValkeyQuoteRow = {
+  symbol: string;
+  bid: number | null;
+  ask: number | null;
+  price: number | null;
+  lastApiUpdate: number;
+  isStale: boolean;
+};
+
+type PersistedValkeyQuoteSnapshot = {
+  seq?: number;
+  asOf?: number;
+  source?: string;
+  rows: PersistedValkeyQuoteRow[];
+};
+
+function normalizeEpochMs(value: unknown, fallbackMs: number): number {
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n)) return fallbackMs;
+  return n < 1e12 ? n * 1000 : n;
+}
+
+async function loadPersistedValkeyQuoteRows(symbols: string[]): Promise<PersistedValkeyQuoteRow[]> {
+  if (!symbols.length) return [];
+  const v = getValkey();
+  if (!v) return [];
+
+  const keys = symbols.map((s) => `q:v1:${normalizeSymbol(s)}`);
+  try {
+    const values = await v.mget(...keys);
+    const rows: PersistedValkeyQuoteRow[] = [];
+    for (const raw of values) {
+      if (!raw) continue;
+      try {
+        const parsed = JSON.parse(raw);
+        if (!parsed?.symbol) continue;
+        rows.push({
+          symbol: normalizeSymbol(parsed.symbol),
+          bid: typeof parsed.bid === "number" ? parsed.bid : parsed.bid == null ? null : Number(parsed.bid),
+          ask: typeof parsed.ask === "number" ? parsed.ask : parsed.ask == null ? null : Number(parsed.ask),
+          price: typeof parsed.price === "number" ? parsed.price : parsed.price == null ? null : Number(parsed.price),
+          lastApiUpdate: normalizeEpochMs(parsed.lastApiUpdate, Date.now()),
+          isStale: Boolean(parsed.isStale),
+        });
+      } catch {
+        // ignore malformed entries
+      }
+    }
+    return rows;
+  } catch {
+    return [];
+  }
+}
+
+async function loadPersistedDbQuoteRows(symbols: string[]) {
+  if (!symbols.length) return [];
+  try {
+    const res = await dbClient.query(
+      `
+      SELECT symbol, price, bid, ask, last_api_update AS "lastApiUpdate", updated_at AS "updatedAt", is_stale AS "isStale"
+      FROM quotes
+      WHERE symbol = ANY($1::text[])
+      `,
+      [symbols.map((s) => normalizeSymbol(s))],
+    );
+    const nowMs = Date.now();
+    return res.rows
+      .map((row: any) => {
+        if (!row?.symbol) return null;
+        const symbol = normalizeSymbol(String(row.symbol));
+        const lastUpdated = normalizeEpochMs(row.lastApiUpdate ?? row.updatedAt, nowMs);
+        return {
+          symbol,
+          price: typeof row.price === "number" ? row.price : row.price == null ? null : Number(row.price),
+          bid: typeof row.bid === "number" ? row.bid : row.bid == null ? null : Number(row.bid),
+          ask: typeof row.ask === "number" ? row.ask : row.ask == null ? null : Number(row.ask),
+          lastUpdated,
+          isStale: Boolean(row.isStale),
+          consecutiveFailures: 0,
+        };
+      })
+      .filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+async function bootstrapQuoteSnapshotCacheFromPersistence(symbols: string[]) {
+  if (!symbols.length) return;
+  const wanted = new Set(symbols.map((s) => normalizeSymbol(s)));
+  const nowMs = Date.now();
+
+  // 1) Fast-path: Valkey snapshot payload
+  const snapshot = await valkeyGetJson<PersistedValkeyQuoteSnapshot>(QUOTE_SNAPSHOT_KEY);
+  if (snapshot?.rows?.length) {
+    const rows = snapshot.rows
+      .map((r) => {
+        if (!r?.symbol) return null;
+        const symbol = normalizeSymbol(String(r.symbol));
+        if (!wanted.has(symbol)) return null;
+        return {
+          symbol,
+          price: r.price,
+          bid: r.bid,
+          ask: r.ask,
+          lastUpdated: normalizeEpochMs(r.lastApiUpdate, nowMs),
+          isStale: Boolean(r.isStale),
+          consecutiveFailures: 0,
+        };
+      })
+      .filter(Boolean);
+
+    if (rows.length) {
+      updateSnapshotCache(rows, { markSuccess: false });
+      console.log(`[Feed] Bootstrapped quoteSnapshotCache from Valkey snapshot (${rows.length} symbols)`);
+      return;
+    }
+  }
+
+  // 2) Fallback: Valkey per-symbol keys
+  const valkeyRows = await loadPersistedValkeyQuoteRows(symbols);
+  if (valkeyRows.length) {
+    updateSnapshotCache(
+      valkeyRows.map((r) => ({
+        symbol: r.symbol,
+        price: r.price,
+        bid: r.bid,
+        ask: r.ask,
+        lastUpdated: normalizeEpochMs(r.lastApiUpdate, nowMs),
+        isStale: Boolean(r.isStale),
+        consecutiveFailures: 0,
+      })),
+      { markSuccess: false },
+    );
+    console.log(`[Feed] Bootstrapped quoteSnapshotCache from Valkey keys (${valkeyRows.length} symbols)`);
+    return;
+  }
+
+  // 3) Last resort: DB quotes table
+  const dbRows = await loadPersistedDbQuoteRows(symbols);
+  if (dbRows.length) {
+    updateSnapshotCache(dbRows, { markSuccess: false });
+    console.log(`[Feed] Bootstrapped quoteSnapshotCache from DB (${dbRows.length} symbols)`);
+  }
+}
+
 async function loadFeedConfig() {
   try {
     const row = await db.query.systemConfig.findFirst({
@@ -112,10 +259,11 @@ function updateSnapshotCache(quotes: any[], options: { markSuccess?: boolean } =
   const now = Date.now();
   for (const quote of quotes) {
     if (!quote?.symbol) continue;
-    const updatedAt = typeof quote.lastUpdated === "number" ? quote.lastUpdated : now;
+    const symbol = normalizeSymbol(String(quote.symbol));
+    const updatedAt = normalizeEpochMs(quote.lastUpdated, now);
     const consecutiveFailures = typeof quote.consecutiveFailures === "number" ? quote.consecutiveFailures : 0;
-    quoteSnapshotCache.set(quote.symbol, {
-      symbol: quote.symbol,
+    quoteSnapshotCache.set(symbol, {
+      symbol,
       price: quote.price,
       bid: quote.bid,
       ask: quote.ask,
@@ -140,31 +288,6 @@ async function getActiveInstruments(): Promise<string[]> {
   }
 }
 
-function formatSymbolsForForgeAPI(symbols: string[]): string {
-  const formattedSymbols = symbols
-    .map((symbol) => {
-      if (symbol.includes("/")) return symbol;
-      if (symbol.length === 6 && !symbol.includes("JPY")) {
-        return `${symbol.substring(0, 3)}/${symbol.substring(3, 6)}`;
-      }
-      if (symbol.includes("JPY")) {
-        if (symbol.startsWith("JPY")) {
-          return `JPY/${symbol.substring(3, 6)}`;
-        }
-        return `${symbol.substring(0, 3)}/JPY`;
-      }
-      if (symbol === "XAUUSD") return "XAU/USD";
-      if (symbol === "XAGUSD") return "XAG/USD";
-      if (symbol === "US30") return "USA30";
-      if (symbol === "NGAS") return "NATGAS";
-      if (symbol === "WTI") return "USOIL";
-      return symbol;
-    })
-    .filter((s) => s.includes("/"));
-
-  return [...new Set(formattedSymbols)].join(",");
-}
-
 let dynamicSet = new Set<string>();
 const throttle = pThrottle({ limit: REST_LIMIT_PER_DAY, interval: 86_400_000 });
 
@@ -182,9 +305,8 @@ async function fetchForgeQuotes(symbols: string[]) {
   );
   let quotesData = response.data;
   if (quotesData && typeof quotesData === "object" && !Array.isArray(quotesData)) {
-    if (quotesData.error || quotesData.message) {
-      throw new Error(quotesData.error || quotesData.message);
-    }
+    const errMsg = extractForgeErrorMessage(quotesData);
+    if (errMsg) throw new Error(errMsg);
     if (quotesData.quotes) quotesData = quotesData.quotes;
   }
 
@@ -248,21 +370,23 @@ function generateSimulatedQuotes(symbols: string[]) {
   });
 }
 
-function buildFallbackQuotes(symbols: string[]) {
+async function buildFallbackQuotes(symbols: string[]) {
   const now = Date.now();
   const cached: any[] = [];
   const missing: string[] = [];
 
   for (const symbol of symbols) {
-    const cachedQuote = quoteSnapshotCache.get(symbol);
+    const sym = normalizeSymbol(symbol);
+    if (!sym) continue;
+    const cachedQuote = quoteSnapshotCache.get(sym);
     if (!cachedQuote) {
-      missing.push(symbol);
+      missing.push(sym);
       continue;
     }
 
     const lastUpdated = typeof cachedQuote.lastUpdated === "number" ? cachedQuote.lastUpdated : now;
     cached.push({
-      symbol,
+      symbol: sym,
       price: cachedQuote.price,
       bid: cachedQuote.bid,
       ask: cachedQuote.ask,
@@ -273,15 +397,71 @@ function buildFallbackQuotes(symbols: string[]) {
     });
   }
 
-  const simulated = missing.length
-    ? generateSimulatedQuotes(missing).map((quote) => ({
-      ...quote,
+  if (!missing.length) return cached;
+
+  const recoveredForCache: any[] = [];
+  const recoveredForPublish: any[] = [];
+
+  // Prefer Valkey's per-symbol keys (fast + survives process restarts).
+  const valkeyRows = await loadPersistedValkeyQuoteRows(missing);
+  const valkeyFound = new Set<string>();
+  for (const row of valkeyRows) {
+    if (!row?.symbol) continue;
+    valkeyFound.add(row.symbol);
+    const lastUpdated = normalizeEpochMs(row.lastApiUpdate, now);
+    recoveredForCache.push({
+      symbol: row.symbol,
+      price: row.price,
+      bid: row.bid,
+      ask: row.ask,
+      lastUpdated,
+      isStale: Boolean(row.isStale),
+      consecutiveFailures: 0,
+    });
+    recoveredForPublish.push({
+      symbol: row.symbol,
+      price: row.price,
+      bid: row.bid,
+      ask: row.ask,
+      timestamp: Math.floor(lastUpdated / 1000),
+      lastUpdated,
       isStale: true,
       consecutiveFailures: consecutiveApiFailures,
-    }))
-    : [];
+    });
+  }
 
-  return [...cached, ...simulated];
+  const stillMissing = missing.filter((sym) => !valkeyFound.has(sym));
+  if (stillMissing.length) {
+    const dbRows = await loadPersistedDbQuoteRows(stillMissing);
+    if (dbRows.length) {
+      recoveredForCache.push(...dbRows);
+      for (const row of dbRows) {
+        const lastUpdated = normalizeEpochMs(row.lastUpdated, now);
+        recoveredForPublish.push({
+          symbol: row.symbol,
+          price: row.price,
+          bid: row.bid,
+          ask: row.ask,
+          timestamp: Math.floor(lastUpdated / 1000),
+          lastUpdated,
+          isStale: true,
+          consecutiveFailures: consecutiveApiFailures,
+        });
+      }
+    }
+  }
+
+  if (recoveredForCache.length) {
+    updateSnapshotCache(recoveredForCache, { markSuccess: false });
+  }
+
+  // Never synthesize random prices on API failures; if we cannot recover anything, skip the batch.
+  const recovered = recoveredForPublish.filter((q) => {
+    if (!q?.symbol) return false;
+    return typeof q.price === "number" || typeof q.bid === "number" || typeof q.ask === "number";
+  });
+
+  return [...cached, ...recovered];
 }
 
 type LiveQuoteRow = {
@@ -297,6 +477,7 @@ function toLiveQuoteRows(rows: any[], asOf: number, isStaleDefault: boolean): Li
   return rows
     .map((q) => {
       if (!q?.symbol) return null;
+      const symbol = normalizeSymbol(String(q.symbol));
       const bid = typeof q.bid === "number" ? q.bid : null;
       const ask = typeof q.ask === "number" ? q.ask : null;
       const price =
@@ -308,7 +489,7 @@ function toLiveQuoteRows(rows: any[], asOf: number, isStaleDefault: boolean): Li
       const lastApiUpdateRaw = typeof q.lastUpdated === "number" ? q.lastUpdated : typeof q.lastApiUpdate === "number" ? q.lastApiUpdate : asOf;
       const lastApiUpdate = lastApiUpdateRaw < 1e12 ? lastApiUpdateRaw * 1000 : lastApiUpdateRaw;
       return {
-        symbol: String(q.symbol),
+        symbol,
         bid,
         ask,
         price,
@@ -613,7 +794,7 @@ async function pullBatch() {
     } catch (e: any) {
       consecutiveApiFailures++;
       console.error("[1Forge] API failure:", e?.message || e);
-      const fallbackQuotes = buildFallbackQuotes(slice);
+      const fallbackQuotes = await buildFallbackQuotes(slice);
       if (!fallbackQuotes.length) {
         console.warn("[1Forge] No fallback cache available; skipping quote persistence.");
         continue;
@@ -642,6 +823,7 @@ export async function startQuoteFeed(): Promise<void> {
 
     await ensureMarketDailyCloseTable();
     await refreshDynamicSet(true);
+    await bootstrapQuoteSnapshotCacheFromPersistence([...dynamicSet]);
 
     if (!unsubscribeLiveBus) {
       unsubscribeLiveBus = onLiveEvent((event) => {

@@ -4235,7 +4235,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
 
     const change = Number.isFinite(midPrice) && prevClose != null ? midPrice - prevClose : 0;
-    const rawLastUpdate = Number(quote.lastApiUpdate ?? quote.last_api_update ?? nowMs);
+    const rawLastUpdate = Number(
+      quote.lastApiUpdate ??
+      quote.last_api_update ??
+      quote.lastUpdated ??
+      quote.updatedAt ??
+      quote.updated_at ??
+      nowMs,
+    );
     const lastUpdate = rawLastUpdate < 1e12 ? rawLastUpdate * 1000 : rawLastUpdate;
     const ageMs = nowMs - lastUpdate;
     const dbIsStale = quote.isStale === 1 || quote.isStale === true;
@@ -4291,6 +4298,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return { rows: enhancedQuotes, seq: valkeySnapshot.seq ?? 0, asOf: valkeySnapshot.asOf ?? nowMs };
     }
 
+    // If the snapshot key expired, fall back to per-symbol Valkey keys (q:v1:*) before hitting Postgres.
+    if (symbols?.length) {
+      const valkeyRows = await getValkeyQuoteRows(symbols);
+      if (valkeyRows.length) {
+        const symbolList = valkeyRows.map((row) => String(row.symbol));
+        const prevCloseMap = await loadPrevCloseMap(symbolList, currentSessionDay);
+        const enhancedQuotes = valkeyRows.map((quote) => ({
+          ...buildQuoteView(quote, prevCloseMap, nowMs, staleThresholdMs),
+          timestamp: nowSec,
+        }));
+        return { rows: enhancedQuotes, seq: 0, asOf: nowMs };
+      }
+    }
+
     const quotesTable = await dbClient.query("SELECT to_regclass('public.quotes') as table_name");
     if (!quotesTable.rows?.[0]?.table_name) {
       return { rows: [], seq: 0, asOf: nowMs };
@@ -4308,7 +4329,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         q.ask,
         q.price AS "lastPrice",
         COALESCE(q.is_stale, false) AS "isStale",
-        COALESCE(q.last_api_update, $1) AS "lastApiUpdate",
+        COALESCE(q.last_api_update, q.updated_at, $1) AS "lastApiUpdate",
         COALESCE(
           (
             SELECT dc.close

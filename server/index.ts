@@ -256,9 +256,22 @@ app.use((req, res, next) => {
     setImmediate(async () => {
       if (roles.has("api") || roles.has("ws")) {
         try {
-          const { bootstrapQuoteHub } = await import("./services/quoteHub");
+          const { bootstrapQuoteHub, bootstrapQuoteHubFromValkeySymbols } = await import("./services/quoteHub");
           const loaded = await bootstrapQuoteHub();
           log(`[QuoteHub] Bootstrap ${loaded ? "loaded" : "skipped"} from Valkey snapshot`);
+
+          if (!loaded) {
+            try {
+              const symbolsRes = await dbClient.query("SELECT symbol FROM symbol_configs WHERE enabled = true");
+              const symbols = symbolsRes.rows.map((r: any) => String(r.symbol)).filter(Boolean);
+              if (symbols.length) {
+                const loadedKeys = await bootstrapQuoteHubFromValkeySymbols(symbols);
+                log(`[QuoteHub] Bootstrap ${loadedKeys ? "loaded" : "skipped"} from Valkey per-symbol keys`);
+              }
+            } catch (e) {
+              console.warn("[QuoteHub] Per-symbol bootstrap failed:", e);
+            }
+          }
         } catch (e) {
           console.warn("[QuoteHub] Bootstrap failed:", e);
         }

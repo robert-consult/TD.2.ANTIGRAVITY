@@ -8,6 +8,7 @@ import { quotes } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import { isMarketOpenForSymbol } from "./marketHours";
 import { getQuote, getValkeyQuoteRows } from "./quoteHub";
+import { getFromRollingBuffer, getCachedPrevClose } from "./valkey";
 
 // Quote freshness: 5 minutes default to accommodate 1Forge refresh intervals
 const STALE_AFTER_MS = Number(process.env.QUOTE_STALE_AFTER_MS ?? 300_000);
@@ -36,8 +37,11 @@ export type ExecutionQuote = {
 };
 
 // Get a fresh database connection for each query to avoid locking issues
+// Fallback chain: Hub → Valkey Snapshot → Rolling Buffer → DB → prevClose
 export async function getLatestQuoteRow(symbol: string): Promise<any | null> {
   const sym = normalizeSymbol(symbol);
+
+  // 1. Try in-memory hub (fastest)
   const hubQuote = getQuote(sym);
   if (hubQuote) {
     return {
@@ -47,8 +51,11 @@ export async function getLatestQuoteRow(symbol: string): Promise<any | null> {
       price: hubQuote.price,
       lastApiUpdate: hubQuote.lastApiUpdate,
       isStale: hubQuote.isStale,
+      prevClose: hubQuote.prevClose,
     };
   }
+
+  // 2. Try Valkey snapshot
   const valkeyRows = await getValkeyQuoteRows([sym]);
   if (valkeyRows.length) {
     const cached = valkeyRows[0];
@@ -61,10 +68,41 @@ export async function getLatestQuoteRow(symbol: string): Promise<any | null> {
       isStale: cached.isStale,
     };
   }
+
+  // 3. Try rolling buffer (30-second history)
+  const rollingQuote = await getFromRollingBuffer(sym);
+  if (rollingQuote && rollingQuote.price != null) {
+    return {
+      symbol: sym,
+      bid: rollingQuote.bid,
+      ask: rollingQuote.ask,
+      price: rollingQuote.price,
+      lastApiUpdate: rollingQuote.lastApiUpdate,
+      isStale: true, // Mark as stale since we're falling back
+    };
+  }
+
+  // 4. Try database
   const row = await db.query.quotes.findFirst({
     where: eq(quotes.symbol, sym),
   });
-  return row || null;
+  if (row) return row;
+
+  // 5. Last resort: use prevClose as price (better than nothing)
+  const prevClose = await getCachedPrevClose(sym);
+  if (prevClose != null) {
+    return {
+      symbol: sym,
+      bid: prevClose,
+      ask: prevClose,
+      price: prevClose,
+      lastApiUpdate: Date.now(),
+      isStale: true,
+      isPrevCloseFallback: true,
+    };
+  }
+
+  return null;
 }
 
 export async function getExecutionQuote(symbol: string, side: "BUY" | "SELL", action: "OPEN" | "CLOSE"): Promise<ExecutionQuote> {

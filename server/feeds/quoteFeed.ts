@@ -9,7 +9,7 @@ import { recalcAccount } from "../recalcAccount";
 import { onQuotesUpdated } from "../engine/orderEngine";
 import { computeSessionDayForQuote, ensureMarketDailyCloseTable } from "../utils/marketDailyClose";
 import { onLiveEvent, publishLiveEvent } from "../services/liveBus";
-import { getValkey } from "../services/valkey";
+import { getValkey, writeToRollingBuffer, cachePrevClose, getCachedPrevClose } from "../services/valkey";
 import { isMarketOpenForSymbol } from "../services/marketHours";
 
 const API_KEY = process.env.FORGE_KEY;
@@ -275,10 +275,10 @@ function buildFallbackQuotes(symbols: string[]) {
 
   const simulated = missing.length
     ? generateSimulatedQuotes(missing).map((quote) => ({
-        ...quote,
-        isStale: true,
-        consecutiveFailures: consecutiveApiFailures,
-      }))
+      ...quote,
+      isStale: true,
+      consecutiveFailures: consecutiveApiFailures,
+    }))
     : [];
 
   return [...cached, ...simulated];
@@ -303,8 +303,8 @@ function toLiveQuoteRows(rows: any[], asOf: number, isStaleDefault: boolean): Li
         typeof q.price === "number"
           ? q.price
           : bid != null && ask != null
-          ? (bid + ask) / 2
-          : null;
+            ? (bid + ask) / 2
+            : null;
       const lastApiUpdateRaw = typeof q.lastUpdated === "number" ? q.lastUpdated : typeof q.lastApiUpdate === "number" ? q.lastApiUpdate : asOf;
       const lastApiUpdate = lastApiUpdateRaw < 1e12 ? lastApiUpdateRaw * 1000 : lastApiUpdateRaw;
       return {
@@ -362,6 +362,10 @@ async function handleQuoteBatch(
 ) {
   if (!rows.length) return;
   updateSnapshotCache(rows, { markSuccess: options.markSuccess });
+
+  // Write to rolling buffer for recovery
+  await writeToRollingBufferBatch(rows);
+
   await maybePersistDailyClose(rows);
   await maybePersistQuotes(rows, isStaleDefault);
   await publishQuoteUpdate(rows, source, isStaleDefault);
@@ -376,6 +380,22 @@ async function handleQuoteBatch(
       lastUpdated: q.lastUpdated,
     })),
   );
+}
+
+/**
+ * Write a batch of quotes to rolling buffers.
+ */
+async function writeToRollingBufferBatch(rows: any[]) {
+  const promises = rows.map((q) => {
+    if (!q?.symbol) return Promise.resolve(false);
+    return writeToRollingBuffer(q.symbol, {
+      bid: typeof q.bid === "number" ? q.bid : null,
+      ask: typeof q.ask === "number" ? q.ask : null,
+      price: typeof q.price === "number" ? q.price : null,
+      lastApiUpdate: typeof q.lastUpdated === "number" ? q.lastUpdated : Date.now(),
+    });
+  });
+  await Promise.all(promises);
 }
 
 async function refreshDynamicSet(force = false) {
@@ -477,14 +497,19 @@ async function persistDailyClose(rows: any[]) {
         rolloverTz: dynamicConfig.rolloverTz,
         rolloverTime: dynamicConfig.rolloverTime,
       });
-      await client.query(
+      const result = await client.query(
         `
         INSERT INTO market_daily_close (symbol, session_day, close, close_ts_ms, updated_at)
         VALUES ($1, $2, $3, $4, $5)
         ON CONFLICT (symbol, session_day) DO NOTHING
+        RETURNING symbol
         `,
         [q.symbol, sessionDay, mid, lastUpdatedMs, nowSec],
       );
+      // If a new session close was inserted, cache it as prevClose for next session
+      if (result.rowCount && result.rowCount > 0) {
+        await cachePrevClose(q.symbol, mid as number);
+      }
     }
     await client.query("COMMIT");
   } catch (error) {

@@ -1,7 +1,7 @@
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import parseDate from "../utils/parseDate";
 import { apiRequest } from "@/lib/queryClient";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -16,17 +16,17 @@ import { Form, FormControl, FormField, FormItem, FormLabel } from "@/components/
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { 
-  Table, 
-  TableHeader, 
-  TableRow, 
-  TableHead, 
-  TableBody, 
-  TableCell 
+import {
+  Table,
+  TableHeader,
+  TableRow,
+  TableHead,
+  TableBody,
+  TableCell
 } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
 import { EditTradeModal } from "@/components/EditTradeModal";
-import { Pencil, X, Zap, Layers, AlertTriangle } from "lucide-react";
+import { Pencil, X, Zap, Layers, AlertTriangle, ChevronDown, ChevronUp } from "lucide-react";
 import { useTranslation } from "@/i18n";
 import { getTradeErrorToast } from "@/lib/tradeErrorMessages";
 import { useLiveUpdates } from "@/live/LiveUpdatesProvider";
@@ -68,6 +68,71 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
   const { openTrades = [], isLoadingOpenTrades, closeTrade } = useTrades();
   const { summary: accountSummary, isLoading: isLoadingAccountSummary } = useAccountSummary();
   const { pendingOrders = [], isLoading: isLoadingPending, cancelOrder } = usePendingOrders();
+
+  // Container width detection for responsive table (ResizeObserver-based, not pixel breakpoints)
+  const positionsContainerRef = useRef<HTMLDivElement>(null);
+  const ordersContainerRef = useRef<HTMLDivElement>(null);
+  const [positionsContainerWidth, setPositionsContainerWidth] = useState(1200);
+  const [ordersContainerWidth, setOrdersContainerWidth] = useState(1200);
+
+  // Threshold for switching to compact view (based on minimum column widths)
+  const COMPACT_VIEW_THRESHOLD = 700;
+  const useCompactPositions = positionsContainerWidth < COMPACT_VIEW_THRESHOLD;
+  const useCompactOrders = ordersContainerWidth < COMPACT_VIEW_THRESHOLD;
+
+  // Expandable row state
+  const [expandedPositionRows, setExpandedPositionRows] = useState<Set<number>>(new Set());
+  const [expandedOrderRows, setExpandedOrderRows] = useState<Set<number>>(new Set());
+
+  const togglePositionExpand = (id: number) => {
+    setExpandedPositionRows(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  const toggleOrderExpand = (id: number) => {
+    setExpandedOrderRows(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  // ResizeObserver for positions container
+  useEffect(() => {
+    const container = positionsContainerRef.current;
+    if (!container) return;
+
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        setPositionsContainerWidth(entry.contentRect.width);
+      }
+    });
+
+    observer.observe(container);
+    setPositionsContainerWidth(container.clientWidth);
+
+    return () => observer.disconnect();
+  }, []);
+
+  // ResizeObserver for orders container
+  useEffect(() => {
+    const container = ordersContainerRef.current;
+    if (!container) return;
+
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        setOrdersContainerWidth(entry.contentRect.width);
+      }
+    });
+
+    observer.observe(container);
+    setOrdersContainerWidth(container.clientWidth);
+
+    return () => observer.disconnect();
+  }, []);
 
   const formatTemplate = (template: string, vars: Record<string, string | number | boolean | null | undefined>) =>
     template.replace(/\{([a-zA-Z0-9_]+)\}/g, (_m, key: string) => {
@@ -144,7 +209,7 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
     minLot: number;
     maxLot: number;
   }
-  
+
   // Define trade type
   interface Trade {
     id: number;
@@ -168,7 +233,7 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
     openedAt?: Date | string | number | null;
     executedAt?: Date | string | number | null;
   }
-  
+
   // Get selected symbol data
   const { data: symbols = [] } = useQuery<SymbolConfig[]>({
     queryKey: ["/api/config/symbols"],
@@ -180,17 +245,17 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
   );
 
   const currentQuote = quotes?.find(q => q.symbol === selectedSymbol);
-  
+
   // Calculate bid/ask prices with minimum 2 pip spread (moved early for useEffect dependencies)
   const minSpreadPips = selectedSymbolConfig?.minSpreadPips || 2.0;
   const pipFactor = selectedSymbol?.includes("JPY") ? 0.01 : 0.0001;
-  const minSpread = minSpreadPips * pipFactor; 
-  
-  const realSpread = currentQuote?.bid && currentQuote?.ask ? 
+  const minSpread = minSpreadPips * pipFactor;
+
+  const realSpread = currentQuote?.bid && currentQuote?.ask ?
     Math.abs(currentQuote.ask - currentQuote.bid) : 0;
-  
+
   let bidPrice: number | undefined, askPrice: number | undefined, spread: number;
-  
+
   if (currentQuote?.bid && currentQuote?.ask && realSpread >= minSpread) {
     bidPrice = currentQuote.bid;
     askPrice = currentQuote.ask;
@@ -339,7 +404,7 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
     if (orderType === "Market" || !askPrice || !bidPrice) return;
     const pip = selectedSymbol.includes("JPY") ? 0.01 : 0.0001;
     const decimals = selectedSymbol.includes("JPY") ? 3 : 5;
-    
+
     if (orderType === "Limit" && autoEntry) {
       const price = pendingSide === "BUY" ? (askPrice - 10 * pip) : (bidPrice + 10 * pip);
       form.setValue("limitPrice", price.toFixed(decimals));
@@ -385,7 +450,7 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
         queryClient.invalidateQueries({ queryKey: ["/api/trades/pending"] });
         queryClient.invalidateQueries({ queryKey: ["/api/account/summary"] });
       }
-      
+
       toast({
         title: toastTemplates.tradeExecutedTitle.text,
         description: formatTemplate(toastTemplates.orderPlaced.text, {
@@ -393,7 +458,7 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
           symbol: selectedSymbol,
         }),
       });
-      
+
       // Reset form and direction
       form.reset({
         lots: "1", // Default to 1 lot
@@ -403,7 +468,7 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
         stopPrice: "",
       });
       setTradeDirection(null);
-      
+
       // Show the active positions tab to see the new trade
       setActiveTab("active-positions");
     },
@@ -431,10 +496,10 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
     const lots = Number(values.lots);
     const takeProfit = values.takeProfit ? Number(values.takeProfit) : undefined;
     const stopLoss = values.stopLoss ? Number(values.stopLoss) : undefined;
-    
+
     // Handle different order types
     let openPrice: number;
-    
+
     switch (orderType) {
       case "Market":
         if (!currentPrice) {
@@ -447,7 +512,7 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
         }
         openPrice = currentPrice;
         break;
-        
+
       case "Limit":
         if (!values.limitPrice || isNaN(Number(values.limitPrice))) {
           toast({
@@ -459,7 +524,7 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
         }
         openPrice = Number(values.limitPrice);
         break;
-        
+
       case "Stop":
         if (!values.stopPrice || isNaN(Number(values.stopPrice))) {
           toast({
@@ -471,7 +536,7 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
         }
         openPrice = Number(values.stopPrice);
         break;
-        
+
       default:
         toast({
           title: toastTemplates.tradeErrorTitle.text,
@@ -493,16 +558,16 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
       // Only include openPrice for Market orders (pending orders don't have it yet)
       ...(orderType === "Market" && { openPrice: openPrice }),
     };
-    
+
     // Add order-specific fields
     if (orderType === "Limit" && values.limitPrice) {
       tradeRequest.limitPrice = Number(values.limitPrice);
     }
-    
+
     if (orderType === "Stop" && values.stopPrice) {
       tradeRequest.stopPrice = Number(values.stopPrice);
     }
-    
+
     // Add TP/SL if provided
     if (values.takeProfit) {
       tradeRequest.takeProfit = Number(values.takeProfit);
@@ -510,7 +575,7 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
     if (values.stopLoss) {
       tradeRequest.stopLoss = Number(values.stopLoss);
     }
-    
+
     executeTrade.mutate(tradeRequest);
   };
 
@@ -557,8 +622,8 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
                       selectedSymbol.includes("JPY") ? 2 : 4
                     )}
                   </div>
-                  <div className={`text-sm ${currentQuote?.changePct && currentQuote.changePct >= 0 
-                    ? "text-success-500" 
+                  <div className={`text-sm ${currentQuote?.changePct && currentQuote.changePct >= 0
+                    ? "text-success-500"
                     : "text-danger-500"}`}>
                     {currentQuote?.changePct && currentQuote.changePct >= 0 ? "+" : ""}
                     {currentQuote?.changePct !== undefined ? currentQuote.changePct.toFixed(2) : "0.00"}% today
@@ -572,7 +637,7 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
               )}
             </div>
           </div>
-          
+
           {/* Market information - responsive layout */}
           <div className="flex flex-col gap-3 mt-4">
             {/* Bid/Ask/Spread row */}
@@ -608,7 +673,7 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
                 )}
               </div>
             </div>
-            
+
             {/* Account metrics - responsive grid with real-time data */}
             <div className="w-full">
               <span className="text-xs text-gray-400 mb-1 block">Account</span>
@@ -617,40 +682,40 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
                   <span className="text-[10px] text-gray-500">Balance</span>
                   {accountSummary ? (
                     <span className="font-mono text-white text-xs truncate">
-                      ${accountSummary.balance.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+                      ${accountSummary.balance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </span>
                   ) : (
                     <Skeleton className="h-4 w-16" />
                   )}
                 </div>
-                
+
                 <div className="flex flex-col">
                   <span className="text-[10px] text-gray-500">Equity</span>
                   {accountSummary ? (
                     <span className={`font-mono text-xs truncate ${accountSummary.floatingPnl >= 0 ? 'text-success-500' : 'text-danger-500'}`}>
-                      ${accountSummary.equity.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+                      ${accountSummary.equity.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </span>
                   ) : (
                     <Skeleton className="h-4 w-16" />
                   )}
                 </div>
-                
+
                 <div className="flex flex-col">
                   <span className="text-[10px] text-gray-500">Free Margin</span>
                   {accountSummary ? (
                     <span className="font-mono text-white text-xs truncate">
-                      ${accountSummary.freeMargin.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+                      ${accountSummary.freeMargin.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </span>
                   ) : (
                     <Skeleton className="h-4 w-16" />
                   )}
                 </div>
-                
+
                 <div className="flex flex-col">
                   <span className="text-[10px] text-gray-500">Used Margin</span>
                   {accountSummary ? (
                     <span className="font-mono text-yellow-400 text-xs truncate">
-                      ${accountSummary.usedMargin.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+                      ${accountSummary.usedMargin.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </span>
                   ) : (
                     <Skeleton className="h-4 w-16" />
@@ -670,26 +735,26 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
           className="w-full"
         >
           <TabsList className="w-full grid grid-cols-3 rounded-none bg-neutral-800">
-            <TabsTrigger 
+            <TabsTrigger
               value="place-order"
               className="data-[state=active]:bg-neutral-700 rounded-none"
             >
               Place Order
             </TabsTrigger>
-            <TabsTrigger 
+            <TabsTrigger
               value="active-positions"
               className="data-[state=active]:bg-neutral-700 rounded-none"
             >
               Active Positions
             </TabsTrigger>
-            <TabsTrigger 
+            <TabsTrigger
               value="pending-orders"
               className="data-[state=active]:bg-neutral-700 rounded-none"
             >
               Pending Orders
             </TabsTrigger>
           </TabsList>
-          
+
           {/* Place Order Tab */}
           <TabsContent value="place-order" className="p-0 m-0">
             <div className="flex flex-col lg:flex-row">
@@ -708,11 +773,10 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
                           <Button
                             type="button"
                             variant={orderType === "Market" ? "default" : "outline"}
-                            className={`flex-1 py-2 px-4 ${
-                              orderType === "Market"
-                                ? "bg-sky-600 hover:bg-sky-700 border border-sky-500 text-white font-medium"
-                                : "bg-neutral-900 border border-gray-800 text-gray-400 hover:bg-neutral-800"
-                            }`}
+                            className={`flex-1 py-2 px-4 ${orderType === "Market"
+                              ? "bg-sky-600 hover:bg-sky-700 border border-sky-500 text-white font-medium"
+                              : "bg-neutral-900 border border-gray-800 text-gray-400 hover:bg-neutral-800"
+                              }`}
                             onClick={() => setOrderType("Market")}
                           >
                             {getOrderTypeLabel("Market")}
@@ -720,11 +784,10 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
                           <Button
                             type="button"
                             variant={orderType === "Limit" ? "default" : "outline"}
-                            className={`flex-1 py-2 px-4 ${
-                              orderType === "Limit"
-                                ? "bg-sky-600 hover:bg-sky-700 border border-sky-500 text-white font-medium"
-                                : "bg-neutral-900 border border-gray-800 text-gray-400 hover:bg-neutral-800"
-                            }`}
+                            className={`flex-1 py-2 px-4 ${orderType === "Limit"
+                              ? "bg-sky-600 hover:bg-sky-700 border border-sky-500 text-white font-medium"
+                              : "bg-neutral-900 border border-gray-800 text-gray-400 hover:bg-neutral-800"
+                              }`}
                             onClick={() => setOrderType("Limit")}
                           >
                             {getOrderTypeLabel("Limit")}
@@ -732,11 +795,10 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
                           <Button
                             type="button"
                             variant={orderType === "Stop" ? "default" : "outline"}
-                            className={`flex-1 py-2 px-4 ${
-                              orderType === "Stop"
-                                ? "bg-sky-600 hover:bg-sky-700 border border-sky-500 text-white font-medium"
-                                : "bg-neutral-900 border border-gray-800 text-gray-400 hover:bg-neutral-800"
-                            }`}
+                            className={`flex-1 py-2 px-4 ${orderType === "Stop"
+                              ? "bg-sky-600 hover:bg-sky-700 border border-sky-500 text-white font-medium"
+                              : "bg-neutral-900 border border-gray-800 text-gray-400 hover:bg-neutral-800"
+                              }`}
                             onClick={() => setOrderType("Stop")}
                           >
                             {getOrderTypeLabel("Stop")}
@@ -750,11 +812,10 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
                           <Button
                             type="button"
                             variant={pendingSide === "BUY" ? "default" : "outline"}
-                            className={`flex-1 py-2 ${
-                              pendingSide === "BUY"
-                                ? "bg-lime-600 hover:bg-lime-700 text-black font-bold"
-                                : "bg-neutral-900 border border-gray-700 text-gray-400"
-                            }`}
+                            className={`flex-1 py-2 ${pendingSide === "BUY"
+                              ? "bg-lime-600 hover:bg-lime-700 text-black font-bold"
+                              : "bg-neutral-900 border border-gray-700 text-gray-400"
+                              }`}
                             onClick={() => setPendingSide("BUY")}
                           >
                             {getPendingOrderLabel("BUY", orderType)}
@@ -762,11 +823,10 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
                           <Button
                             type="button"
                             variant={pendingSide === "SELL" ? "default" : "outline"}
-                            className={`flex-1 py-2 ${
-                              pendingSide === "SELL"
-                                ? "bg-orange-600 hover:bg-orange-700 text-white font-bold"
-                                : "bg-neutral-900 border border-gray-700 text-gray-400"
-                            }`}
+                            className={`flex-1 py-2 ${pendingSide === "SELL"
+                              ? "bg-orange-600 hover:bg-orange-700 text-white font-bold"
+                              : "bg-neutral-900 border border-gray-700 text-gray-400"
+                              }`}
                             onClick={() => setPendingSide("SELL")}
                           >
                             {getPendingOrderLabel("SELL", orderType)}
@@ -790,7 +850,7 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
                                     <SelectValue placeholder="1" />
                                   </SelectTrigger>
                                 </FormControl>
-                                <SelectContent 
+                                <SelectContent
                                   className="max-h-[calc(8*2.25rem)] overflow-y-auto w-24 bg-neutral-900 border-gray-700"
                                 >
                                   {/* Common lot sizes */}
@@ -818,11 +878,10 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
                               <Button
                                 type="button"
                                 variant="outline"
-                                className={`py-1 px-2 text-xs ${
-                                  field.value === "1"
-                                    ? "bg-primary-800 text-white font-medium"
-                                    : "bg-neutral-800 text-gray-300"
-                                }`}
+                                className={`py-1 px-2 text-xs ${field.value === "1"
+                                  ? "bg-primary-800 text-white font-medium"
+                                  : "bg-neutral-800 text-gray-300"
+                                  }`}
                                 onClick={() => handleLotsPreset("1")}
                               >
                                 1
@@ -830,11 +889,10 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
                               <Button
                                 type="button"
                                 variant="outline"
-                                className={`py-1 px-2 text-xs ${
-                                  field.value === "5"
-                                    ? "bg-primary-800 text-white font-medium"
-                                    : "bg-neutral-800 text-gray-300"
-                                }`}
+                                className={`py-1 px-2 text-xs ${field.value === "5"
+                                  ? "bg-primary-800 text-white font-medium"
+                                  : "bg-neutral-800 text-gray-300"
+                                  }`}
                                 onClick={() => handleLotsPreset("5")}
                               >
                                 5
@@ -842,11 +900,10 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
                               <Button
                                 type="button"
                                 variant="outline"
-                                className={`py-1 px-2 text-xs ${
-                                  field.value === "10"
-                                    ? "bg-primary-800 text-white font-medium"
-                                    : "bg-neutral-800 text-gray-300"
-                                }`}
+                                className={`py-1 px-2 text-xs ${field.value === "10"
+                                  ? "bg-primary-800 text-white font-medium"
+                                  : "bg-neutral-800 text-gray-300"
+                                  }`}
                                 onClick={() => handleLotsPreset("10")}
                               >
                                 10
@@ -854,11 +911,10 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
                               <Button
                                 type="button"
                                 variant="outline"
-                                className={`py-1 px-2 text-xs ${
-                                  field.value === "25"
-                                    ? "bg-primary-800 text-white font-medium"
-                                    : "bg-neutral-800 text-gray-300"
-                                }`}
+                                className={`py-1 px-2 text-xs ${field.value === "25"
+                                  ? "bg-primary-800 text-white font-medium"
+                                  : "bg-neutral-800 text-gray-300"
+                                  }`}
                                 onClick={() => handleLotsPreset("25")}
                               >
                                 25
@@ -866,11 +922,10 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
                               <Button
                                 type="button"
                                 variant="outline"
-                                className={`py-1 px-2 text-xs ${
-                                  field.value === "50"
-                                    ? "bg-primary-800 text-white font-medium"
-                                    : "bg-neutral-800 text-gray-300"
-                                }`}
+                                className={`py-1 px-2 text-xs ${field.value === "50"
+                                  ? "bg-primary-800 text-white font-medium"
+                                  : "bg-neutral-800 text-gray-300"
+                                  }`}
                                 onClick={() => handleLotsPreset("50")}
                               >
                                 50
@@ -898,8 +953,8 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
                                     placeholder={
                                       currentPrice
                                         ? currentPrice.toFixed(
-                                            selectedSymbol.includes("JPY") ? 2 : 4
-                                          )
+                                          selectedSymbol.includes("JPY") ? 2 : 4
+                                        )
                                         : "0.0000"
                                     }
                                   />
@@ -928,8 +983,8 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
                                     placeholder={
                                       currentPrice
                                         ? currentPrice.toFixed(
-                                            selectedSymbol.includes("JPY") ? 2 : 4
-                                          )
+                                          selectedSymbol.includes("JPY") ? 2 : 4
+                                        )
                                         : "0.0000"
                                     }
                                   />
@@ -961,11 +1016,11 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
                                       placeholder={
                                         currentPrice
                                           ? (
-                                              currentPrice +
-                                              (currentPrice * 0.01)
-                                            ).toFixed(
-                                              selectedSymbol.includes("JPY") ? 2 : 4
-                                            )
+                                            currentPrice +
+                                            (currentPrice * 0.01)
+                                          ).toFixed(
+                                            selectedSymbol.includes("JPY") ? 2 : 4
+                                          )
                                           : "0.00"
                                       }
                                     />
@@ -992,11 +1047,11 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
                                       placeholder={
                                         currentPrice
                                           ? (
-                                              currentPrice -
-                                              (currentPrice * 0.01)
-                                            ).toFixed(
-                                              selectedSymbol.includes("JPY") ? 2 : 4
-                                            )
+                                            currentPrice -
+                                            (currentPrice * 0.01)
+                                          ).toFixed(
+                                            selectedSymbol.includes("JPY") ? 2 : 4
+                                          )
                                           : "0.00"
                                       }
                                     />
@@ -1013,11 +1068,10 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
                         {orderType !== "Market" ? (
                           <Button
                             type="submit"
-                            className={`w-full py-3 px-4 font-bold shadow-md transition-all ${
-                              pendingSide === "BUY"
-                                ? "bg-lime-500 hover:bg-lime-600 text-black"
-                                : "bg-orange-500 hover:bg-orange-600 text-white"
-                            }`}
+                            className={`w-full py-3 px-4 font-bold shadow-md transition-all ${pendingSide === "BUY"
+                              ? "bg-lime-500 hover:bg-lime-600 text-black"
+                              : "bg-orange-500 hover:bg-orange-600 text-white"
+                              }`}
                             disabled={executeTrade.isPending || !currentPrice}
                             onClick={() => setTradeDirection(pendingSide)}
                           >
@@ -1026,8 +1080,8 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
                             ) : null}
                             Place {getPendingOrderLabel(pendingSide, orderType)}
                             {(() => {
-                              const entryPrice = orderType === "Limit" 
-                                ? form.getValues("limitPrice") 
+                              const entryPrice = orderType === "Limit"
+                                ? form.getValues("limitPrice")
                                 : form.getValues("stopPrice");
                               return entryPrice ? (
                                 <span className="text-xs block">@ {entryPrice}</span>
@@ -1037,34 +1091,34 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
                         ) : (
                           /* Market orders: dual BUY/SELL buttons */
                           <div className="flex space-x-3">
-                          <Button
-                            type="submit"
-                            className="btn-sell flex-1 py-3 px-4 text-white font-bold bg-orange-500 hover:bg-orange-600 shadow-md transition-all uppercase"
-                            disabled={executeTrade.isPending || !currentPrice}
-                            onClick={() => setTradeDirection("SELL")}
-                          >
-                            {executeTrade.isPending && tradeDirection === "SELL" ? (
-                              <div className="animate-spin mr-2 h-4 w-4 border-t-2 border-white rounded-full"></div>
-                            ) : null}
-                            {getSideLabel("SELL")}
-                            {bidPrice && (
-                              <span className="text-xs block">@ {bidPrice.toFixed(selectedSymbol.includes("JPY") ? 2 : 4)}</span>
-                            )}
-                          </Button>
-                          <Button
-                            type="submit"
-                            className="btn-buy flex-1 py-3 px-4 text-black font-bold bg-lime-500 hover:bg-lime-600 shadow-md transition-all uppercase"
-                            disabled={executeTrade.isPending || !currentPrice}
-                            onClick={() => setTradeDirection("BUY")}
-                          >
-                            {executeTrade.isPending && tradeDirection === "BUY" ? (
-                              <div className="animate-spin mr-2 h-4 w-4 border-t-2 border-black rounded-full"></div>
-                            ) : null}
-                            {getSideLabel("BUY")}
-                            {askPrice && (
-                              <span className="text-xs block">@ {askPrice.toFixed(selectedSymbol.includes("JPY") ? 2 : 4)}</span>
-                            )}
-                          </Button>
+                            <Button
+                              type="submit"
+                              className="btn-sell flex-1 py-3 px-4 text-white font-bold bg-orange-500 hover:bg-orange-600 shadow-md transition-all uppercase"
+                              disabled={executeTrade.isPending || !currentPrice}
+                              onClick={() => setTradeDirection("SELL")}
+                            >
+                              {executeTrade.isPending && tradeDirection === "SELL" ? (
+                                <div className="animate-spin mr-2 h-4 w-4 border-t-2 border-white rounded-full"></div>
+                              ) : null}
+                              {getSideLabel("SELL")}
+                              {bidPrice && (
+                                <span className="text-xs block">@ {bidPrice.toFixed(selectedSymbol.includes("JPY") ? 2 : 4)}</span>
+                              )}
+                            </Button>
+                            <Button
+                              type="submit"
+                              className="btn-buy flex-1 py-3 px-4 text-black font-bold bg-lime-500 hover:bg-lime-600 shadow-md transition-all uppercase"
+                              disabled={executeTrade.isPending || !currentPrice}
+                              onClick={() => setTradeDirection("BUY")}
+                            >
+                              {executeTrade.isPending && tradeDirection === "BUY" ? (
+                                <div className="animate-spin mr-2 h-4 w-4 border-t-2 border-black rounded-full"></div>
+                              ) : null}
+                              {getSideLabel("BUY")}
+                              {askPrice && (
+                                <span className="text-xs block">@ {askPrice.toFixed(selectedSymbol.includes("JPY") ? 2 : 4)}</span>
+                              )}
+                            </Button>
                           </div>
                         )}
                       </div>
@@ -1074,12 +1128,12 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
               </div>
             </div>
           </TabsContent>
-          
+
           {/* Active Positions Tab */}
           <TabsContent value="active-positions" className="p-0 m-0">
             <div className="p-4">
               <h2 className="text-lg font-semibold text-white mb-4">Active Positions</h2>
-              
+
               {isLoadingOpenTrades ? (
                 <div className="flex justify-center py-8">
                   <div className="animate-spin h-6 w-6 border-2 border-primary rounded-full border-t-transparent"></div>
@@ -1089,161 +1143,258 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
                   No active positions. Place an order to open a position.
                 </div>
               ) : (
-                <div className="overflow-x-auto">
-                  <Table className="min-w-[800px]">
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Symbol</TableHead>
-                        <TableHead>Type</TableHead>
-                        <TableHead>Size</TableHead>
-                        <TableHead>Open Time</TableHead>
-                        <TableHead>Open Price</TableHead>
-                        <TableHead>Current Price</TableHead>
-                        <TableHead>TP</TableHead>
-                        <TableHead>SL</TableHead>
-                        <TableHead>P/L</TableHead>
-                        <TableHead className="text-right">Action</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
+                <div ref={positionsContainerRef} className="flex-1">
+                  {useCompactPositions ? (
+                    /* Compact view: Expandable rows (when container too narrow for full table) */
+                    <div className="divide-y divide-gray-800">
                       {Array.isArray(openTrades) && openTrades.map((trade: Trade) => {
                         const tradeSymbol = symbols.find(s => s.id === trade.symbolId)?.symbol || '';
                         const tradeQuote = quotes.find(q => q.symbol === tradeSymbol);
                         const currentTradePrice = tradeQuote?.price || currentPrice;
-                        
-                        // Calculate profit/loss using MT4/5-style calculations
+                        const isJpy = tradeSymbol.includes('JPY');
+                        const isExpanded = expandedPositionRows.has(trade.id);
+
+                        // Calculate profit/loss
                         let pl = 0;
                         if (currentTradePrice) {
-                          const isJpyPair = tradeSymbol.includes('JPY');
-                          const pipSize = isJpyPair ? 0.01 : 0.0001;
-                          const contractSize = 100000; // Standard lot size
-                          
-                          // Calculate price difference in pips
-                          const priceDiff = trade.type === 'BUY' 
-                            ? currentTradePrice - trade.openPrice 
+                          const pipSize = isJpy ? 0.01 : 0.0001;
+                          const contractSize = 100000;
+                          const priceDiff = trade.type === 'BUY'
+                            ? currentTradePrice - trade.openPrice
                             : trade.openPrice - currentTradePrice;
-                          
                           const pips = priceDiff / pipSize;
-                          
-                          if (isJpyPair) {
-                            // For JPY pairs: pipValue = (contractSize * pipSize) / currentPrice
+                          if (isJpy) {
                             const pipValueInUsd = (contractSize * pipSize) / currentTradePrice;
                             pl = pips * pipValueInUsd * trade.lots;
-                          } else if (tradeSymbol.startsWith('USD')) {
-                            // For USD base pairs (USDJPY, USDCAD, etc.)
-                            // Each pip is worth (contractSize * pipSize)
-                            pl = pips * (contractSize * pipSize) * trade.lots;
                           } else {
-                            // For other pairs (EURUSD, GBPUSD, etc.)
-                            // Each pip is worth (contractSize * pipSize)
                             pl = pips * (contractSize * pipSize) * trade.lots;
                           }
                         }
-                        
+
+                        const isProfit = pl >= 0;
+
                         return (
-                          <TableRow 
-                            key={trade.id} 
-                            className={trade.type === 'BUY' ? 'bg-success-50/5' : 'bg-danger-50/5'}
-                          >
-                            <TableCell>{tradeSymbol}</TableCell>
-                            <TableCell className={`uppercase font-semibold ${trade.type === 'BUY' ? 'text-lime-500 font-medium' : 'text-orange-500 font-medium'}`}>
-                              {getSideLabel(trade.type)}
-                            </TableCell>
-                            <TableCell>{trade.lots} Lot{trade.lots > 1 ? 's' : ''}</TableCell>
-                            <TableCell>
-                              {(() => {
-                                try {
-                                  // Try to use openedAt first (which is when the trade was executed)
-                                  const timestamp = trade.openedAt || trade.createdAt || trade.executedAt;
-                                  
-                                  if (!timestamp) {
-                                    return new Date().toLocaleString(); // Use current time as fallback
-                                  }
-                                  
-                                  // For Date objects
-                                  if (timestamp instanceof Date) {
-                                    return timestamp.toLocaleString();
-                                  }
-                                  
-                                  // For Unix timestamps in seconds
-                                  if (typeof timestamp === 'number' && timestamp < 10000000000) {
-                                    return new Date(timestamp * 1000).toLocaleString();
-                                  }
-                                  
-                                  // For millisecond timestamps (standard in JS)
-                                  if (typeof timestamp === 'number') {
-                                    return new Date(timestamp).toLocaleString();
-                                  }
-                                  
-                                  // For string timestamps that might be Unix timestamps
-                                  if (typeof timestamp === 'string' && /^\d+$/.test(timestamp)) {
-                                    const numTimestamp = parseInt(timestamp);
-                                    // Convert seconds to milliseconds if needed
-                                    const dateTimestamp = numTimestamp < 10000000000 
-                                      ? numTimestamp * 1000 
-                                      : numTimestamp;
-                                    return new Date(dateTimestamp).toLocaleString();
-                                  }
-                                  
-                                  // For ISO strings or other date formats
-                                  const date = new Date(timestamp);
-                                  if (!isNaN(date.getTime())) {
-                                    return date.toLocaleString();
-                                  }
-                                } catch (e) {
-                                  console.error("Error formatting date:", e);
-                                }
-                                
-                                // If all else fails, use the current time instead of "Recent"
-                                return new Date().toLocaleString();
-                              })()}
-                            </TableCell>
-                            <TableCell>
-                              {trade.openPrice.toFixed(tradeSymbol.includes('JPY') ? 2 : 4)}
-                            </TableCell>
-                            <TableCell>
-                              {currentTradePrice 
-                                ? currentTradePrice.toFixed(tradeSymbol.includes('JPY') ? 2 : 4)
-                                : '-'
-                              }
-                            </TableCell>
-                            <TableCell>
-                              {renderTargetPill("TP", trade.takeProfit, tradeSymbol, trade.type, trade.openPrice)}
-                            </TableCell>
-                            <TableCell>
-                              {renderTargetPill("SL", trade.stopLoss, tradeSymbol, trade.type, trade.openPrice)}
-                            </TableCell>
-                            <TableCell className={`font-medium ${pl > 0 ? 'text-green-400' : pl < 0 ? 'text-red-400' : 'text-white'}`}>
-                              ${pl.toFixed(2)}
-                              <div className="text-xs text-gray-400">
-                                {tradeQuote && ((Math.abs(pl) / (trade.lots * 100000)) * 100).toFixed(4)}%
+                          <div key={trade.id}>
+                            {/* Compact row header */}
+                            <div
+                              className={`px-4 py-3 flex items-center cursor-pointer hover:bg-neutral-850 active:bg-neutral-800 ${trade.type === 'BUY' ? 'bg-success-50/5' : 'bg-danger-50/5'}`}
+                              onClick={() => togglePositionExpand(trade.id)}
+                            >
+                              {/* Symbol - fixed width */}
+                              <span className="font-bold text-white text-sm w-[72px] shrink-0">
+                                {tradeSymbol}
+                              </span>
+
+                              {/* Type badge */}
+                              <span className={`text-xs font-semibold w-[40px] shrink-0 ${trade.type === 'BUY' ? 'text-lime-500' : 'text-orange-500'}`}>
+                                {getSideLabel(trade.type)}
+                              </span>
+
+                              {/* Entry → Current with directional arrow - flex grow */}
+                              <div className="flex items-center gap-1 font-mono text-xs flex-1 justify-center">
+                                <span className="text-gray-300">{trade.openPrice?.toFixed(isJpy ? 2 : 4)}</span>
+                                <span className={`font-bold text-sm ${trade.type === 'BUY' ? 'text-lime-500' : 'text-orange-500'}`}>
+                                  {trade.type === 'BUY' ? '↗' : '↘'}
+                                </span>
+                                <span className="text-gray-300">{currentTradePrice?.toFixed(isJpy ? 2 : 4) || '—'}</span>
                               </div>
-                            </TableCell>
-                            <TableCell className="text-right">
-                              <div className="flex gap-1">
-                                <Button 
-                                  variant="outline" 
-                                  size="sm"
-                                  className={editIconButtonClass}
-                                  onClick={() => setEditingTrade(trade)}
-                                >
-                                  <Pencil className="h-3 w-3" />
-                                </Button>
-                                <Button 
-                                  variant="destructive" 
-                                  size="sm"
-                                  onClick={() => handleCloseTrade(trade.id)}
-                                  disabled={closingTradeId === trade.id && closeTrade.isPending}
-                                >
-                                  {closingTradeId === trade.id && closeTrade.isPending ? 'Closing...' : 'Close'}
-                                </Button>
+
+                              {/* P/L - fixed width */}
+                              <div className={`font-mono font-semibold text-sm w-[80px] shrink-0 text-right ${isProfit ? 'text-green-400' : 'text-red-400'}`}>
+                                {isProfit ? '+' : ''}${pl.toFixed(2)}
                               </div>
-                            </TableCell>
-                          </TableRow>
+
+                              {/* Chevron - fixed width */}
+                              <div className="w-[24px] shrink-0 text-gray-400 text-right">
+                                {isExpanded ? <ChevronUp className="h-4 w-4 inline" /> : <ChevronDown className="h-4 w-4 inline" />}
+                              </div>
+                            </div>
+
+                            {/* Expanded details */}
+                            {isExpanded && (
+                              <div className="px-4 pb-4 bg-neutral-850 border-t border-gray-700">
+                                <div className="grid grid-cols-2 gap-3 pt-3 text-sm">
+                                  <div>
+                                    <span className="text-gray-500 text-xs">Size</span>
+                                    <div className="text-white">{trade.lots} Lot{trade.lots > 1 ? 's' : ''}</div>
+                                  </div>
+                                  <div>
+                                    <span className="text-gray-500 text-xs">Open Time</span>
+                                    <div className="text-gray-300 text-xs">
+                                      {(() => {
+                                        const timestamp = trade.openedAt || trade.createdAt || trade.executedAt;
+                                        if (!timestamp) return new Date().toLocaleString();
+                                        if (timestamp instanceof Date) return timestamp.toLocaleString();
+                                        if (typeof timestamp === 'number') {
+                                          return new Date(timestamp < 10000000000 ? timestamp * 1000 : timestamp).toLocaleString();
+                                        }
+                                        const date = new Date(timestamp);
+                                        return !isNaN(date.getTime()) ? date.toLocaleString() : new Date().toLocaleString();
+                                      })()}
+                                    </div>
+                                  </div>
+                                  <div>
+                                    <span className="text-gray-500 text-xs">Take Profit</span>
+                                    <div>{renderTargetPill("TP", trade.takeProfit, tradeSymbol, trade.type, trade.openPrice)}</div>
+                                  </div>
+                                  <div>
+                                    <span className="text-gray-500 text-xs">Stop Loss</span>
+                                    <div>{renderTargetPill("SL", trade.stopLoss, tradeSymbol, trade.type, trade.openPrice)}</div>
+                                  </div>
+                                </div>
+                                <div className="flex gap-2 mt-3 pt-3 border-t border-gray-700">
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className={`flex-1 ${editIconButtonClass}`}
+                                    onClick={(e) => { e.stopPropagation(); setEditingTrade(trade); }}
+                                  >
+                                    <Pencil className="h-3 w-3 mr-1" /> Edit
+                                  </Button>
+                                  <Button
+                                    variant="destructive"
+                                    size="sm"
+                                    className="flex-1"
+                                    onClick={(e) => { e.stopPropagation(); handleCloseTrade(trade.id); }}
+                                    disabled={closingTradeId === trade.id && closeTrade.isPending}
+                                  >
+                                    {closingTradeId === trade.id && closeTrade.isPending ? 'Closing...' : 'Close'}
+                                  </Button>
+                                </div>
+                              </div>
+                            )}
+                          </div>
                         );
                       })}
-                    </TableBody>
-                  </Table>
+                    </div>
+                  ) : (
+                    /* Full table: Only shown when container is wide enough */
+                    <div className="overflow-x-auto">
+                      <Table className="min-w-[800px]">
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Symbol</TableHead>
+                            <TableHead>Type</TableHead>
+                            <TableHead>Size</TableHead>
+                            <TableHead>Open Time</TableHead>
+                            <TableHead>Open Price</TableHead>
+                            <TableHead>Current Price</TableHead>
+                            <TableHead>TP</TableHead>
+                            <TableHead>SL</TableHead>
+                            <TableHead>P/L</TableHead>
+                            <TableHead className="text-right">Action</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {Array.isArray(openTrades) && openTrades.map((trade: Trade) => {
+                            const tradeSymbol = symbols.find(s => s.id === trade.symbolId)?.symbol || '';
+                            const tradeQuote = quotes.find(q => q.symbol === tradeSymbol);
+                            const currentTradePrice = tradeQuote?.price || currentPrice;
+
+                            // Calculate profit/loss using MT4/5-style calculations
+                            let pl = 0;
+                            if (currentTradePrice) {
+                              const isJpyPair = tradeSymbol.includes('JPY');
+                              const pipSize = isJpyPair ? 0.01 : 0.0001;
+                              const contractSize = 100000;
+
+                              const priceDiff = trade.type === 'BUY'
+                                ? currentTradePrice - trade.openPrice
+                                : trade.openPrice - currentTradePrice;
+
+                              const pips = priceDiff / pipSize;
+
+                              if (isJpyPair) {
+                                const pipValueInUsd = (contractSize * pipSize) / currentTradePrice;
+                                pl = pips * pipValueInUsd * trade.lots;
+                              } else if (tradeSymbol.startsWith('USD')) {
+                                pl = pips * (contractSize * pipSize) * trade.lots;
+                              } else {
+                                pl = pips * (contractSize * pipSize) * trade.lots;
+                              }
+                            }
+
+                            return (
+                              <TableRow
+                                key={trade.id}
+                                className={trade.type === 'BUY' ? 'bg-success-50/5' : 'bg-danger-50/5'}
+                              >
+                                <TableCell>{tradeSymbol}</TableCell>
+                                <TableCell className={`uppercase font-semibold ${trade.type === 'BUY' ? 'text-lime-500 font-medium' : 'text-orange-500 font-medium'}`}>
+                                  {getSideLabel(trade.type)}
+                                </TableCell>
+                                <TableCell>{trade.lots} Lot{trade.lots > 1 ? 's' : ''}</TableCell>
+                                <TableCell>
+                                  {(() => {
+                                    try {
+                                      const timestamp = trade.openedAt || trade.createdAt || trade.executedAt;
+                                      if (!timestamp) return new Date().toLocaleString();
+                                      if (timestamp instanceof Date) return timestamp.toLocaleString();
+                                      if (typeof timestamp === 'number' && timestamp < 10000000000) {
+                                        return new Date(timestamp * 1000).toLocaleString();
+                                      }
+                                      if (typeof timestamp === 'number') return new Date(timestamp).toLocaleString();
+                                      if (typeof timestamp === 'string' && /^\d+$/.test(timestamp)) {
+                                        const numTimestamp = parseInt(timestamp);
+                                        const dateTimestamp = numTimestamp < 10000000000 ? numTimestamp * 1000 : numTimestamp;
+                                        return new Date(dateTimestamp).toLocaleString();
+                                      }
+                                      const date = new Date(timestamp);
+                                      if (!isNaN(date.getTime())) return date.toLocaleString();
+                                    } catch (e) {
+                                      console.error("Error formatting date:", e);
+                                    }
+                                    return new Date().toLocaleString();
+                                  })()}
+                                </TableCell>
+                                <TableCell>
+                                  {trade.openPrice.toFixed(tradeSymbol.includes('JPY') ? 2 : 4)}
+                                </TableCell>
+                                <TableCell>
+                                  {currentTradePrice
+                                    ? currentTradePrice.toFixed(tradeSymbol.includes('JPY') ? 2 : 4)
+                                    : '-'
+                                  }
+                                </TableCell>
+                                <TableCell>
+                                  {renderTargetPill("TP", trade.takeProfit, tradeSymbol, trade.type, trade.openPrice)}
+                                </TableCell>
+                                <TableCell>
+                                  {renderTargetPill("SL", trade.stopLoss, tradeSymbol, trade.type, trade.openPrice)}
+                                </TableCell>
+                                <TableCell className={`font-medium ${pl > 0 ? 'text-green-400' : pl < 0 ? 'text-red-400' : 'text-white'}`}>
+                                  ${pl.toFixed(2)}
+                                  <div className="text-xs text-gray-400">
+                                    {tradeQuote && ((Math.abs(pl) / (trade.lots * 100000)) * 100).toFixed(4)}%
+                                  </div>
+                                </TableCell>
+                                <TableCell className="text-right">
+                                  <div className="flex gap-1">
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className={editIconButtonClass}
+                                      onClick={() => setEditingTrade(trade)}
+                                    >
+                                      <Pencil className="h-3 w-3" />
+                                    </Button>
+                                    <Button
+                                      variant="destructive"
+                                      size="sm"
+                                      onClick={() => handleCloseTrade(trade.id)}
+                                      disabled={closingTradeId === trade.id && closeTrade.isPending}
+                                    >
+                                      {closingTradeId === trade.id && closeTrade.isPending ? 'Closing...' : 'Close'}
+                                    </Button>
+                                  </div>
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -1253,7 +1404,7 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
           <TabsContent value="pending-orders" className="p-0 m-0">
             <div className="p-4">
               <h2 className="text-lg font-semibold text-white mb-4">Pending Orders</h2>
-              
+
               {isLoadingPending ? (
                 <div className="flex justify-center py-8">
                   <div className="animate-spin h-6 w-6 border-2 border-primary rounded-full border-t-transparent"></div>
@@ -1263,26 +1414,15 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
                   No pending orders. Place a limit or stop order to see it here.
                 </div>
               ) : (
-                <div className="overflow-x-auto">
-                  <Table className="min-w-[800px]">
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Symbol</TableHead>
-                        <TableHead>Type</TableHead>
-                        <TableHead>Order Type</TableHead>
-                        <TableHead>Size</TableHead>
-                        <TableHead>Order Price</TableHead>
-                        <TableHead>TP</TableHead>
-                        <TableHead>SL</TableHead>
-                        <TableHead className="text-right">Action</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
+                <div ref={ordersContainerRef} className="flex-1">
+                  {useCompactOrders ? (
+                    /* Compact view: Expandable rows (when container too narrow for full table) */
+                    <div className="divide-y divide-gray-800">
                       {Array.isArray(pendingOrders) && pendingOrders.map((order: any) => {
                         const orderSymbol = symbols.find(s => s.id === order.symbolId)?.symbol || "";
-
                         const orderTypeLabel = String(order.orderType ?? "").trim() || "Unknown";
                         const orderTypeKey = orderTypeLabel.toLowerCase();
+                        const isExpanded = expandedOrderRows.has(order.id);
 
                         const orderPrice =
                           orderTypeKey === "limit"
@@ -1292,86 +1432,210 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
                               : (order.limitPrice ?? order.stopPrice);
 
                         const entry = toFiniteNumber(orderPrice);
-                        const OrderTypeIcon =
-                          orderTypeKey === "stop" ? Zap :
-                          orderTypeKey === "limit" ? Layers :
-                          null;
-                        const helpText = getOrderTypeHelp(orderTypeKey);
                         const orderTypeDisplay = getOrderTypeLabel(orderTypeLabel);
+                        const OrderTypeIcon = orderTypeKey === "stop" ? Zap : orderTypeKey === "limit" ? Layers : null;
 
                         return (
-                          <TableRow
-                            key={order.id}
-                            className={order.type === "BUY" ? "bg-success-50/5" : "bg-danger-50/5"}
-                          >
-                            <TableCell>{orderSymbol}</TableCell>
+                          <div key={order.id}>
+                            {/* Compact row header */}
+                            <div
+                              className={`px-4 py-3 flex items-center cursor-pointer hover:bg-neutral-850 active:bg-neutral-800 ${order.type === 'BUY' ? 'bg-success-50/5' : 'bg-danger-50/5'}`}
+                              onClick={() => toggleOrderExpand(order.id)}
+                            >
+                              {/* Symbol - fixed width */}
+                              <span className="font-bold text-white text-sm w-[72px] shrink-0">
+                                {orderSymbol}
+                              </span>
 
-                            <TableCell>
-                              <span
-                                className={`uppercase font-semibold ${order.type === "BUY" ? "text-lime-500" : "text-orange-500"}`}
-                              >
+                              {/* Type badge */}
+                              <span className={`text-xs font-semibold w-[40px] shrink-0 ${order.type === 'BUY' ? 'text-lime-500' : 'text-orange-500'}`}>
                                 {getSideLabel(order.type)}
                               </span>
-                            </TableCell>
 
-                            <TableCell>
-                              <span
-                                title={helpText}
-                                className={`inline-flex items-center rounded-md border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${orderTypePillClass(orderTypeLabel)}`}
-                              >
-                                {OrderTypeIcon ? <OrderTypeIcon className="h-3 w-3 mr-1" /> : null}
-                                {orderTypeDisplay}
-                              </span>
-                            </TableCell>
-
-                            <TableCell>{order.lots} lots</TableCell>
-
-                            <TableCell className="font-mono tabular-nums">
-                              {formatPx(orderPrice, orderSymbol)}
-                            </TableCell>
-
-                            <TableCell>
-                              {renderTargetPill("TP", order.takeProfit, orderSymbol, order.type, entry)}
-                            </TableCell>
-
-                            <TableCell>
-                              {renderTargetPill("SL", order.stopLoss, orderSymbol, order.type, entry)}
-                            </TableCell>
-
-                            <TableCell className="text-right">
-                              <div className="flex gap-2 justify-end">
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  className={`w-10 px-0 ${editIconButtonClass}`}
-                                  onClick={() => setEditingTrade(order)}
+                              {/* Merged Order Type + Price - flex grow */}
+                              <div className="flex items-center gap-1 flex-1 justify-center">
+                                <span
+                                  className={`inline-flex items-center rounded-md border px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${orderTypePillClass(orderTypeLabel)}`}
                                 >
-                                  <Pencil className="h-4 w-4" />
-                                </Button>
-
-                                <Button
-                                  variant="destructive"
-                                  size="sm"
-                                  className="w-10 px-0"
-                                  onClick={() => cancelOrder.mutate(order.id)}
-                                  disabled={cancelOrder.isPending}
-                                >
-                                  <X className="h-4 w-4" />
-                                </Button>
+                                  {OrderTypeIcon ? <OrderTypeIcon className="h-3 w-3 mr-0.5" /> : null}
+                                  {orderTypeDisplay}
+                                </span>
+                                <span className="text-gray-400 text-xs">@</span>
+                                <span className="font-mono text-white text-xs">{formatPx(orderPrice, orderSymbol)}</span>
                               </div>
-                            </TableCell>
-                          </TableRow>
+
+                              {/* Chevron - fixed width */}
+                              <div className="w-[24px] shrink-0 text-gray-400 text-right">
+                                {isExpanded ? <ChevronUp className="h-4 w-4 inline" /> : <ChevronDown className="h-4 w-4 inline" />}
+                              </div>
+                            </div>
+
+                            {/* Expanded details */}
+                            {isExpanded && (
+                              <div className="px-4 pb-4 bg-neutral-850 border-t border-gray-700">
+                                <div className="grid grid-cols-2 gap-3 pt-3 text-sm">
+                                  <div>
+                                    <span className="text-gray-500 text-xs">Size</span>
+                                    <div className="text-white">{order.lots} lots</div>
+                                  </div>
+                                  <div>
+                                    <span className="text-gray-500 text-xs">Order Type</span>
+                                    <div>
+                                      <span
+                                        className={`inline-flex items-center rounded-md border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${orderTypePillClass(orderTypeLabel)}`}
+                                      >
+                                        {OrderTypeIcon ? <OrderTypeIcon className="h-3 w-3 mr-1" /> : null}
+                                        {orderTypeDisplay}
+                                      </span>
+                                    </div>
+                                  </div>
+                                  <div>
+                                    <span className="text-gray-500 text-xs">Take Profit</span>
+                                    <div>{renderTargetPill("TP", order.takeProfit, orderSymbol, order.type, entry)}</div>
+                                  </div>
+                                  <div>
+                                    <span className="text-gray-500 text-xs">Stop Loss</span>
+                                    <div>{renderTargetPill("SL", order.stopLoss, orderSymbol, order.type, entry)}</div>
+                                  </div>
+                                </div>
+                                <div className="flex gap-2 mt-3 pt-3 border-t border-gray-700">
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className={`flex-1 ${editIconButtonClass}`}
+                                    onClick={(e) => { e.stopPropagation(); setEditingTrade(order); }}
+                                  >
+                                    <Pencil className="h-3 w-3 mr-1" /> Edit
+                                  </Button>
+                                  <Button
+                                    variant="destructive"
+                                    size="sm"
+                                    className="flex-1"
+                                    onClick={(e) => { e.stopPropagation(); cancelOrder.mutate(order.id); }}
+                                    disabled={cancelOrder.isPending}
+                                  >
+                                    Cancel
+                                  </Button>
+                                </div>
+                              </div>
+                            )}
+                          </div>
                         );
                       })}
-                    </TableBody>
-                  </Table>
+                    </div>
+                  ) : (
+                    /* Full table: Only shown when container is wide enough */
+                    <div className="overflow-x-auto">
+                      <Table className="min-w-[800px]">
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Symbol</TableHead>
+                            <TableHead>Type</TableHead>
+                            <TableHead>Order Type</TableHead>
+                            <TableHead>Size</TableHead>
+                            <TableHead>Order Price</TableHead>
+                            <TableHead>TP</TableHead>
+                            <TableHead>SL</TableHead>
+                            <TableHead className="text-right">Action</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {Array.isArray(pendingOrders) && pendingOrders.map((order: any) => {
+                            const orderSymbol = symbols.find(s => s.id === order.symbolId)?.symbol || "";
+
+                            const orderTypeLabel = String(order.orderType ?? "").trim() || "Unknown";
+                            const orderTypeKey = orderTypeLabel.toLowerCase();
+
+                            const orderPrice =
+                              orderTypeKey === "limit"
+                                ? order.limitPrice
+                                : orderTypeKey === "stop"
+                                  ? order.stopPrice
+                                  : (order.limitPrice ?? order.stopPrice);
+
+                            const entry = toFiniteNumber(orderPrice);
+                            const OrderTypeIcon =
+                              orderTypeKey === "stop" ? Zap :
+                                orderTypeKey === "limit" ? Layers :
+                                  null;
+                            const helpText = getOrderTypeHelp(orderTypeKey);
+                            const orderTypeDisplay = getOrderTypeLabel(orderTypeLabel);
+
+                            return (
+                              <TableRow
+                                key={order.id}
+                                className={order.type === "BUY" ? "bg-success-50/5" : "bg-danger-50/5"}
+                              >
+                                <TableCell>{orderSymbol}</TableCell>
+
+                                <TableCell>
+                                  <span
+                                    className={`uppercase font-semibold ${order.type === "BUY" ? "text-lime-500" : "text-orange-500"}`}
+                                  >
+                                    {getSideLabel(order.type)}
+                                  </span>
+                                </TableCell>
+
+                                <TableCell>
+                                  <span
+                                    title={helpText}
+                                    className={`inline-flex items-center rounded-md border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${orderTypePillClass(orderTypeLabel)}`}
+                                  >
+                                    {OrderTypeIcon ? <OrderTypeIcon className="h-3 w-3 mr-1" /> : null}
+                                    {orderTypeDisplay}
+                                  </span>
+                                </TableCell>
+
+                                <TableCell>{order.lots} lots</TableCell>
+
+                                <TableCell className="font-mono tabular-nums">
+                                  {formatPx(orderPrice, orderSymbol)}
+                                </TableCell>
+
+                                <TableCell>
+                                  {renderTargetPill("TP", order.takeProfit, orderSymbol, order.type, entry)}
+                                </TableCell>
+
+                                <TableCell>
+                                  {renderTargetPill("SL", order.stopLoss, orderSymbol, order.type, entry)}
+                                </TableCell>
+
+                                <TableCell className="text-right">
+                                  <div className="flex gap-2 justify-end">
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className={`w-10 px-0 ${editIconButtonClass}`}
+                                      onClick={() => setEditingTrade(order)}
+                                    >
+                                      <Pencil className="h-4 w-4" />
+                                    </Button>
+
+                                    <Button
+                                      variant="destructive"
+                                      size="sm"
+                                      className="w-10 px-0"
+                                      onClick={() => cancelOrder.mutate(order.id)}
+                                      disabled={cancelOrder.isPending}
+                                    >
+                                      <X className="h-4 w-4" />
+                                    </Button>
+                                  </div>
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
           </TabsContent>
         </Tabs>
       </div>
-      
+
       {/* Edit Trade Modal */}
       {editingTrade && (
         <EditTradeModal

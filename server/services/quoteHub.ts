@@ -1,4 +1,4 @@
-import { getValkey, valkeyGetJson } from "./valkey";
+import { getValkey, valkeyGetJson, getCachedPrevClose, getFromRollingBuffer } from "./valkey";
 
 export type QuoteCore = {
   symbol: string;
@@ -8,6 +8,7 @@ export type QuoteCore = {
   lastUpdated: number;
   lastApiUpdate: number;
   isStale: boolean;
+  prevClose?: number | null;
 };
 
 export type QuoteSnapshot = {
@@ -35,10 +36,10 @@ function toQuoteCore(row: any, asOf: number): QuoteCore | null {
     typeof row.price === "number"
       ? row.price
       : bid != null && ask != null
-      ? (bid + ask) / 2
-      : row.price == null
-      ? null
-      : Number(row.price);
+        ? (bid + ask) / 2
+        : row.price == null
+          ? null
+          : Number(row.price);
   const lastUpdatedRaw = row.lastUpdated ?? row.lastApiUpdate ?? row.updatedAt ?? asOf;
   const lastApiRaw = row.lastApiUpdate ?? row.lastUpdated ?? row.updatedAt ?? asOf;
   const lastUpdated = Number.isFinite(Number(lastUpdatedRaw)) ? Number(lastUpdatedRaw) : asOf;
@@ -75,8 +76,8 @@ export async function bootstrapQuoteHub(): Promise<boolean> {
 export function getQuoteSnapshot(symbols?: string[]): { rows: QuoteCore[]; seq: number; asOf: number } {
   const rows = symbols?.length
     ? symbols
-        .map((symbol) => quoteMap.get(normalizeSymbol(symbol)))
-        .filter((row): row is QuoteCore => Boolean(row))
+      .map((symbol) => quoteMap.get(normalizeSymbol(symbol)))
+      .filter((row): row is QuoteCore => Boolean(row))
     : [...quoteMap.values()];
   return { rows, seq: lastSeq, asOf: lastAsOf || Date.now() };
 }

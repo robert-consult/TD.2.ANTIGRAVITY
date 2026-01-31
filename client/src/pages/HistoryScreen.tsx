@@ -93,9 +93,9 @@ function SortableHeader({
         <span className="inline-flex">
           {isActive ? (
             currentSort.direction === "asc" ? (
-              <ArrowUp className="h-3 w-3 text-blue-400" />
+              <ArrowUp className="h-3 w-3 text-primary" />
             ) : (
-              <ArrowDown className="h-3 w-3 text-blue-400" />
+              <ArrowDown className="h-3 w-3 text-primary" />
             )
           ) : (
             <ArrowUpDown className="h-3 w-3 opacity-30" />
@@ -116,7 +116,7 @@ function getCloseReasonBadgeClass(variant: CloseReasonUiVariant): string {
     case "warning":
       return "bg-yellow-900/50 text-yellow-300 border-yellow-700/50";
     case "info":
-      return "bg-blue-900/50 text-blue-300 border-blue-700/50";
+      return "bg-primary/10 text-primary border-primary/30";
     case "neutral":
     default:
       return "bg-gray-800/50 text-gray-300 border-gray-700/50";
@@ -424,8 +424,8 @@ export default function HistoryScreen() {
 
   return (
     <div className="h-full flex flex-col bg-neutral-900">
-      <div className="px-gutter py-3 border-b border-gray-800">
-        <h2 className="text-lg font-semibold text-white">Trade History</h2>
+      <div className="tq-page-header">
+        <h2 className="tq-page-title">Trade History</h2>
       </div>
 
       {/* Filters - Compact responsive layout */}
@@ -575,7 +575,7 @@ export default function HistoryScreen() {
                       Cancel
                     </button>
                     <button
-                      className="px-3 py-1 bg-blue-600 hover:bg-blue-500 rounded text-white text-sm"
+                      className="px-3 py-1 bg-primary hover:bg-primary/90 rounded text-black text-sm font-semibold"
                       onClick={() => {
                         if (customDateRange?.from && customDateRange?.to) {
                           setIsDateRangeOpen(false);
@@ -662,7 +662,7 @@ export default function HistoryScreen() {
                     Cancel
                   </button>
                   <button
-                    className="px-3 py-1 bg-blue-600 hover:bg-blue-500 rounded text-white text-sm"
+                    className="px-3 py-1 bg-primary hover:bg-primary/90 rounded text-black text-sm font-semibold"
                     onClick={() => {
                       if (customDateRange?.from && customDateRange?.to) {
                         setIsDateRangeOpen(false);
@@ -695,7 +695,7 @@ export default function HistoryScreen() {
             {format(customDateRange.from, 'MMM d, yyyy')} - {format(customDateRange.to, 'MMM d, yyyy')}
           </div>
           <button
-            className="text-blue-400 hover:text-blue-300 text-sm"
+            className="text-primary hover:text-primary/80 text-sm font-semibold"
             onClick={() => {
               setIsDateRangeOpen(true);
             }}

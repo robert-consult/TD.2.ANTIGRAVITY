@@ -18,6 +18,20 @@ export function Header({ title = "TradeQuip", showBalance = false }: HeaderProps
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [isPromotingAdmin, setIsPromotingAdmin] = useState(false);
 
+  const shortTitle = (() => {
+    const trimmed = title.trim();
+    if (!trimmed) return "TQ";
+
+    const parts = trimmed.split(/[\s_-]+/).filter(Boolean);
+    if (parts.length >= 2) {
+      return `${parts[0][0] ?? ""}${parts[1][0] ?? ""}`.toUpperCase();
+    }
+
+    const camel = trimmed.slice(1).match(/[A-Z]/)?.[0];
+    const second = camel ?? trimmed[1] ?? "";
+    return `${trimmed[0] ?? ""}${second}`.toUpperCase();
+  })();
+
   const handleLogout = async () => {
     await logout();
   };
@@ -59,7 +73,7 @@ export function Header({ title = "TradeQuip", showBalance = false }: HeaderProps
     <header className="bg-[#0F0F0F] border-b border-white/5 py-2 md:py-3 px-gutter shrink-0">
       <div className="flex justify-between items-center">
         <div className="flex items-center">
-          <h1 className="text-lg md:text-xl font-bold text-white">
+          <h1 className="font-bold text-white leading-none text-[clamp(1rem,0.9rem+0.8vw,1.25rem)]">
             <svg
               xmlns="http://www.w3.org/2000/svg"
               className="inline-block mr-2 h-4 w-4 md:h-5 md:w-5 text-primary"
@@ -74,16 +88,22 @@ export function Header({ title = "TradeQuip", showBalance = false }: HeaderProps
               <path d="m19 9-5-5-4 4-4 4" />
               <path d="m14 4 5 5" />
             </svg>
-            {title}
+            <span className="hidden sm:inline">{title}</span>
+            <span className="sm:hidden">{shortTitle}</span>
           </h1>
         </div>
 
         {user && (
           <div className="flex items-center relative gap-2">
             {showBalance ? (
-              <div className="hidden min-[360px]:flex items-center gap-1 rounded-full bg-white/[0.03] border border-white/10 px-2 py-1">
-                <span className="text-[10px] font-semibold tracking-wide text-gray-500">BAL</span>
-                <span className="text-xs font-mono text-white/90">{formattedBalance}</span>
+              <div className="flex items-center gap-[clamp(0.2rem,0.8vw,0.35rem)] rounded-full bg-white/[0.03] border border-white/10 px-[clamp(0.4rem,1.4vw,0.65rem)] py-[clamp(0.2rem,0.8vw,0.35rem)] min-w-0">
+                <span className="text-[clamp(0.5rem,0.46rem+0.25vw,0.65rem)] font-semibold tracking-wide text-gray-500 whitespace-nowrap leading-none">
+                  <span className="hidden min-[420px]:inline">BAL:</span>
+                  <span className="min-[420px]:hidden">BL:</span>
+                </span>
+                <span className="min-w-0 text-[clamp(0.62rem,0.58rem+0.3vw,0.78rem)] font-mono text-white/90 whitespace-nowrap truncate leading-none">
+                  {formattedBalance}
+                </span>
               </div>
             ) : null}
             <button

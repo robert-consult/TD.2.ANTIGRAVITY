@@ -86,6 +86,8 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
   const headerHeightsRef = useRef({ expanded: 0, compact: 0, distance: 120 });
   const headerAppliedRef = useRef({ progress: -1, height: -1 });
   const headerMeasureRafRef = useRef<number | null>(null);
+  const headerLastScrollTopRef = useRef(0);
+  const headerForceExpandRef = useRef(false);
 
   // Container width detection for responsive table (ResizeObserver-based, not pixel breakpoints)
   const positionsContainerRef = useRef<HTMLDivElement>(null);
@@ -310,6 +312,27 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
     const raw = scrollTop / Math.max(1, distance);
     let progress = Math.max(0, Math.min(1, raw));
 
+    const prevScrollTop = headerLastScrollTopRef.current;
+    headerLastScrollTopRef.current = scrollTop;
+
+    const prevAppliedRaw = headerAppliedRef.current.progress;
+    const prevApplied = prevAppliedRaw >= 0 ? prevAppliedRaw : 0;
+
+    if (headerForceExpandRef.current) {
+      headerForceExpandRef.current = false;
+      progress = 0;
+    } else {
+      // If collapsing the header makes the container non-scrollable, browsers can clamp `scrollTop`
+      // back to 0. Don't interpret that as "user scrolled to top" or we can get an oscillation.
+      const scrollEl = tabScrollRef.current;
+      if (scrollEl) {
+        const overflowNow = scrollEl.scrollHeight - scrollEl.clientHeight;
+        if (scrollTop === 0 && prevScrollTop > 0 && overflowNow <= 0 && prevApplied > 0) {
+          progress = prevApplied;
+        }
+      }
+    }
+
     // Snap with hysteresis at extremes to avoid boundary flicker.
     const prevProgress = headerAppliedRef.current.progress;
     const snapTopIn = 0.02;
@@ -326,9 +349,19 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
       if (progress > snapBottomIn) progress = 1;
     }
 
+    // Avoid "scrollTop clamped to 0" when collapsing would make the container non-scrollable.
+    // Cap collapse so the container retains at least a 1px overflow (prevents scroll position reset).
+    const scrollEl = tabScrollRef.current;
+    const collapseRange = expanded - compact;
+    if (scrollEl && collapseRange > 0 && progress > prevApplied) {
+      const overflowNow = scrollEl.scrollHeight - scrollEl.clientHeight;
+      const maxProgress = Math.min(1, Math.max(0, prevApplied + (overflowNow - 1) / collapseRange));
+      if (progress > maxProgress) progress = maxProgress;
+    }
+
     const height = Math.round(expanded - progress * (expanded - compact));
     const prev = headerAppliedRef.current;
-    if (prev.height === height && Math.abs(prev.progress - progress) < 0.002) return;
+    if (Math.abs(prev.height - height) <= 1 && Math.abs(prev.progress - progress) < 0.005) return;
     headerAppliedRef.current = { progress, height };
 
     shell.style.height = `${height}px`;
@@ -353,10 +386,15 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
 
     const distance = Math.max(96, expanded - compact);
     const prev = headerHeightsRef.current;
-    if (prev.expanded === expanded && prev.compact === compact && prev.distance === distance) return;
-
-    headerHeightsRef.current = { expanded, compact, distance };
-    headerAppliedRef.current = { progress: -1, height: -1 };
+    const heightsChanged = prev.expanded !== expanded || prev.compact !== compact || prev.distance !== distance;
+    if (heightsChanged) {
+      // Only invalidate applied state if heights changed meaningfully (prevents flicker from minor variations)
+      const needsReset = Math.abs(prev.expanded - expanded) > 2 || Math.abs(prev.compact - compact) > 2;
+      headerHeightsRef.current = { expanded, compact, distance };
+      if (needsReset) {
+        headerAppliedRef.current = { progress: -1, height: -1 };
+      }
+    }
     applyTradeHeaderCollapse(tabScrollRef.current?.scrollTop ?? 0);
   };
 
@@ -904,33 +942,98 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
     setAutoSl(true);
   }, [orderType, pendingSide]);
 
-  // Auto-suggest entry/TP/SL prices for pending orders (10 pips from market)
+  // Auto-suggest entry/TP/SL prices for pending orders.
   useEffect(() => {
     if (orderType === "Market" || !askPrice || !bidPrice) return;
     const pip = selectedSymbol.includes("JPY") ? 0.01 : 0.0001;
     const decimals = selectedSymbol.includes("JPY") ? 3 : 5;
+    const minDist = 10 * pip;
+    // Guard against client/server quote skew (e.g., mid vs bid/ask, jittery feeds).
+    // This keeps the autosuggested entry safely beyond the 10-pip server minimum.
+    const entryGuard = Math.max(0, spread || 0);
+
+    const factor = Math.pow(10, decimals);
+    const roundUp = (v: number) => Math.ceil(v * factor) / factor;
+    const roundDown = (v: number) => Math.floor(v * factor) / factor;
+
+    const setFieldIfChanged = (name: keyof TradeFormValues, value: number) => {
+      const next = value.toFixed(decimals);
+      const prev = String(form.getValues(name) ?? "");
+      if (prev === next) return;
+      form.setValue(name, next);
+    };
 
     if (orderType === "Limit" && autoEntry) {
-      const price = pendingSide === "BUY" ? (askPrice - 10 * pip) : (bidPrice + 10 * pip);
-      form.setValue("limitPrice", price.toFixed(decimals));
+      const raw = pendingSide === "BUY"
+        ? (askPrice - (minDist + entryGuard))
+        : (bidPrice + (minDist + entryGuard));
+      const price = pendingSide === "BUY" ? roundDown(raw) : roundUp(raw);
+      setFieldIfChanged("limitPrice", price);
     }
     if (orderType === "Stop" && autoEntry) {
-      const price = pendingSide === "BUY" ? (askPrice + 10 * pip) : (bidPrice - 10 * pip);
-      form.setValue("stopPrice", price.toFixed(decimals));
+      const raw = pendingSide === "BUY"
+        ? (askPrice + (minDist + entryGuard))
+        : (bidPrice - (minDist + entryGuard));
+      const price = pendingSide === "BUY" ? roundUp(raw) : roundDown(raw);
+      setFieldIfChanged("stopPrice", price);
     }
+
     const entryStr = orderType === "Limit" ? form.getValues("limitPrice") : form.getValues("stopPrice");
     const entry = parseFloat(entryStr || "0");
     if (entry > 0) {
       if (autoTp) {
-        const tp = pendingSide === "BUY" ? entry + 10 * pip : entry - 10 * pip;
-        form.setValue("takeProfit", tp.toFixed(decimals));
+        const rawTp = pendingSide === "BUY" ? entry + minDist : entry - minDist;
+        const tp = pendingSide === "BUY" ? roundUp(rawTp) : roundDown(rawTp);
+        setFieldIfChanged("takeProfit", tp);
       }
       if (autoSl) {
-        const sl = pendingSide === "BUY" ? entry - 10 * pip : entry + 10 * pip;
-        form.setValue("stopLoss", sl.toFixed(decimals));
+        const rawSl = pendingSide === "BUY" ? entry - minDist : entry + minDist;
+        const sl = pendingSide === "BUY" ? roundDown(rawSl) : roundUp(rawSl);
+        setFieldIfChanged("stopLoss", sl);
       }
     }
-  }, [askPrice, bidPrice, orderType, pendingSide, autoEntry, autoTp, autoSl, selectedSymbol, form]);
+  }, [askPrice, bidPrice, orderType, pendingSide, autoEntry, autoTp, autoSl, selectedSymbol, spread, form]);
+
+  // If the user edits a pending entry price, keep TP/SL aligned (prevents "submit before next tick" rejections).
+  useLayoutEffect(() => {
+    if (orderType === "Market") return;
+    if (!autoTp && !autoSl) return;
+
+    const pip = selectedSymbol.includes("JPY") ? 0.01 : 0.0001;
+    const decimals = selectedSymbol.includes("JPY") ? 3 : 5;
+    const minDist = 10 * pip;
+    const factor = Math.pow(10, decimals);
+    const roundUp = (v: number) => Math.ceil(v * factor) / factor;
+    const roundDown = (v: number) => Math.floor(v * factor) / factor;
+
+    const entryField = orderType === "Limit" ? "limitPrice" : "stopPrice";
+    const subscription = form.watch((values, meta) => {
+      if (meta.name !== entryField) return;
+      const rawEntry = values?.[entryField];
+      const entry = typeof rawEntry === "string" ? Number(rawEntry) : Number.NaN;
+      if (!Number.isFinite(entry) || entry <= 0) return;
+
+      const setFieldIfChanged = (name: keyof TradeFormValues, value: number) => {
+        const next = value.toFixed(decimals);
+        const prev = String(form.getValues(name) ?? "");
+        if (prev === next) return;
+        form.setValue(name, next);
+      };
+
+      if (autoTp) {
+        const rawTp = pendingSide === "BUY" ? entry + minDist : entry - minDist;
+        const tp = pendingSide === "BUY" ? roundUp(rawTp) : roundDown(rawTp);
+        setFieldIfChanged("takeProfit", tp);
+      }
+      if (autoSl) {
+        const rawSl = pendingSide === "BUY" ? entry - minDist : entry + minDist;
+        const sl = pendingSide === "BUY" ? roundDown(rawSl) : roundUp(rawSl);
+        setFieldIfChanged("stopLoss", sl);
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, [autoSl, autoTp, form, orderType, pendingSide, selectedSymbol]);
 
   // Execute trade mutation
   const executeTrade = useMutation({
@@ -989,7 +1092,10 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
   });
 
   const onSubmit = (values: TradeFormValues) => {
-    if (!tradeDirection || !selectedSymbolConfig) {
+    // For pending orders, use pendingSide; for market orders, use tradeDirection
+    const effectiveDirection = orderType === "Market" ? tradeDirection : pendingSide;
+
+    if (!effectiveDirection || !selectedSymbolConfig) {
       toast({
         title: toastTemplates.tradeErrorTitle.text,
         description: toastTemplates.missingTradeInfo.text,
@@ -1051,9 +1157,6 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
         return;
     }
 
-    // For pending orders, use pendingSide; for market orders, use tradeDirection
-    const effectiveDirection = orderType === "Market" ? tradeDirection : pendingSide;
-
     // Create trade request with order-specific fields and proper types
     const tradeRequest: any = {
       symbolId: selectedSymbolConfig.id,
@@ -1105,22 +1208,27 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
       {/* Symbol info header */}
       <div
         ref={headerShellRef}
+        data-testid="trade-header-shell"
         className="border-b border-gray-800 shrink-0 relative overflow-hidden"
         style={{ willChange: collapseHeaderOnMobile ? "height" : undefined }}
       >
         {/* Compact overlay (fades/slides in progressively as the tab content scrolls) */}
-        <button
-          ref={headerCompactRef}
-          type="button"
-          onClick={() => tabScrollRef.current?.scrollTo({ top: 0, behavior: "smooth" })}
-          className="absolute inset-x-0 top-0 z-10 w-full px-3 sm:px-gutter py-2 text-left hover:bg-white/[0.02] transition-colors opacity-0 pointer-events-none"
-          aria-label="Scroll to top to expand market and account details"
-          style={{ willChange: "opacity, transform", backfaceVisibility: "hidden" }}
-        >
+	          <button
+	            ref={headerCompactRef}
+	            type="button"
+	          onClick={() => {
+	            headerForceExpandRef.current = true;
+	            tabScrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+	            applyTradeHeaderCollapse(0);
+	          }}
+	            className="absolute inset-x-0 top-0 z-10 w-full px-3 sm:px-gutter py-2 text-left hover:bg-white/[0.02] transition-colors opacity-0 pointer-events-none"
+	            aria-label="Scroll to top to expand market and account details"
+	            style={{ willChange: "opacity, transform", backfaceVisibility: "hidden" }}
+	          >
           <div className="flex items-center justify-between gap-3">
             <div className="min-w-0">
               <div className="flex items-center gap-2 min-w-0">
-                <span className="text-sm font-semibold text-white">{selectedSymbol}</span>
+                <span className="text-sm font-semibold text-primary">{selectedSymbol}</span>
                 {currentPrice ? (
                   <span className="text-sm font-mono text-white/90">
                     {currentPrice.toFixed(selectedSymbol.includes("JPY") ? 2 : 4)}
@@ -1169,7 +1277,7 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
                 <div className="min-w-0">
                   {currentQuote ? (
                     <>
-                      <h3 className="text-cq-lg font-medium text-white">{selectedSymbol}</h3>
+                      <h3 className="font-semibold text-primary text-[clamp(0.875rem,0.8rem+0.35cqi,1rem)]">{selectedSymbol}</h3>
                       <p className="text-cq-xs text-gray-400 truncate max-w-[120px] @[400px]/trade:max-w-[150px] @[600px]/trade:max-w-none">{currentQuote.name}</p>
                     </>
                   ) : (
@@ -1217,13 +1325,13 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
             </div>
 
             <div className="text-right shrink-0">
-              {currentPrice ? (
-                <>
-                  <div className="price-display text-white">
-                    {currentPrice.toFixed(
-                      selectedSymbol.includes("JPY") ? 2 : 4
-                    )}
-                  </div>
+	              {currentPrice ? (
+	                <>
+	                  <div className="font-mono font-semibold tabular-nums text-white whitespace-nowrap leading-none text-[clamp(0.9rem,0.85rem+0.6cqi,1.25rem)]">
+	                    {currentPrice.toFixed(
+	                      selectedSymbol.includes("JPY") ? 2 : 4
+	                    )}
+	                  </div>
                   <div className={`text-cq-sm ${currentQuote?.changePct && currentQuote.changePct >= 0
                     ? "text-success-500"
                     : "text-danger-500"}`}>
@@ -1245,7 +1353,7 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
             <span className="text-xs text-gray-400 mb-1 block">Account</span>
             <div
               className="grid gap-2 bg-neutral-800 p-2 rounded-md"
-              style={{ gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))" }}
+              style={{ gridTemplateColumns: "repeat(auto-fit, minmax(min(8rem, 100%), 1fr))" }}
             >
               <div className="flex flex-col min-w-0">
                 <span className="text-[10px] text-gray-500">Balance</span>
@@ -1296,15 +1404,21 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
       </div>
 
       {/* Main tabbed content area */}
-      <div ref={tabScrollRef} className="flex-1 min-h-0 overflow-auto overscroll-contain">
-        <Tabs
-          value={activeTab}
-          onValueChange={setActiveTab}
-          className="w-full"
-        >
-          <TabsList className="w-full grid grid-cols-3 rounded-none bg-neutral-800">
+      <div
+        ref={tabScrollRef}
+        data-testid="trade-tab-scroll"
+        className="flex-1 min-h-0 overflow-auto overscroll-contain"
+        style={{ scrollbarGutter: "stable", overflowAnchor: "none" }}
+      >
+	        <Tabs
+	          value={activeTab}
+	          onValueChange={setActiveTab}
+	          className="w-full min-h-full flex flex-col"
+	        >
+	          <TabsList className="w-full grid grid-cols-3 rounded-none bg-neutral-800 shrink-0">
             <TabsTrigger
               value="place-order"
+              aria-label="Place Order"
               className="data-[state=active]:bg-neutral-700 rounded-none text-cq-sm px-1"
             >
               <span className="cq-hide-narrow">Place Order</span>
@@ -1312,6 +1426,7 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
             </TabsTrigger>
             <TabsTrigger
               value="active-positions"
+              aria-label="Active Positions"
               className="data-[state=active]:bg-neutral-700 rounded-none text-cq-sm px-1"
             >
               <span className="cq-hide-narrow">Active Positions</span>
@@ -1319,6 +1434,7 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
             </TabsTrigger>
             <TabsTrigger
               value="pending-orders"
+              aria-label="Pending Orders"
               className="data-[state=active]:bg-neutral-700 rounded-none text-cq-sm px-1"
             >
               <span className="cq-hide-narrow">Pending Orders</span>
@@ -1327,18 +1443,19 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
           </TabsList>
 
           {/* Place Order Tab */}
-          <TabsContent value="place-order" className="p-0 m-0">
-            <div className="flex flex-col lg:flex-row">
-              {/* Order form */}
-              <div className="w-full flex flex-col">
-                <div className="px-4 py-3 border-b border-gray-800">
-                  <h2 className="text-lg font-semibold text-white">Order Details</h2>
-                </div>
-
-                <div className="p-4 flex-grow">
-                  <Form {...form}>
-                    <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-5">
-                      <div className="space-y-2">
+		          <TabsContent value="place-order" className="p-0 m-0 flex-1 min-h-0">
+		            <div className="flex flex-col lg:flex-row h-full min-h-0">
+		              {/* Order form */}
+		              <div className="w-full flex flex-col h-full min-h-0">
+		                <div className="p-4 flex-1 flex flex-col min-h-0">
+		                  <Form {...form}>
+		                    <form
+                          id="trade-order-form"
+                          onSubmit={form.handleSubmit(onSubmit)}
+                          className="flex flex-col flex-1"
+                        >
+		                      <div className="space-y-5">
+		                      <div className="space-y-2">
                         <FormLabel>Order Type</FormLabel>
                         <div className="flex space-x-2">
                           <Button
@@ -1442,7 +1559,10 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
                             <div className="text-xs text-gray-400 mt-1">
                               1 lot = $100,000 (${Number(field.value || 1) * 100000} total)
                             </div>
-                            <div className="mt-2 grid grid-cols-3 sm:grid-cols-5 gap-2">
+                            <div
+                              className="mt-2 grid gap-2"
+                              style={{ gridTemplateColumns: "repeat(auto-fit, minmax(min(6rem, 100%), 1fr))" }}
+                            >
                               {lotPresetCards.map((preset) => {
                                 const value = preset.toString();
                                 return (
@@ -1527,7 +1647,10 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
 
                       <div className="space-y-2">
                         <FormLabel>Take Profit / Stop Loss</FormLabel>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div
+                          className="grid gap-3"
+                          style={{ gridTemplateColumns: "repeat(auto-fit, minmax(min(16rem, 100%), 1fr))" }}
+                        >
                           <FormField
                             control={form.control}
                             name="takeProfit"
@@ -1593,81 +1716,22 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
                         </div>
                       </div>
 
-                      <div className="pt-3">
-                        {/* For pending orders: single button with price label */}
-                        {orderType !== "Market" ? (
-                          <Button
-                            type="submit"
-                            className={`w-full py-3 px-4 font-bold shadow-md transition-all ${pendingSide === "BUY"
-                              ? "bg-lime-500 hover:bg-lime-600 text-black"
-                              : "bg-orange-500 hover:bg-orange-600 text-white"
-                              }`}
-                            disabled={executeTrade.isPending || !currentPrice}
-                            onClick={() => setTradeDirection(pendingSide)}
-                          >
-                            {executeTrade.isPending ? (
-                              <div className="animate-spin mr-2 h-4 w-4 border-t-2 rounded-full inline-block"></div>
-                            ) : null}
-                            Place {getPendingOrderLabel(pendingSide, orderType)}
-                            {(() => {
-                              const entryPrice = orderType === "Limit"
-                                ? form.getValues("limitPrice")
-                                : form.getValues("stopPrice");
-                              return entryPrice ? (
-                                <span className="text-xs block">@ {entryPrice}</span>
-                              ) : null;
-                            })()}
-                          </Button>
-                        ) : (
-                          /* Market orders: dual BUY/SELL buttons */
-                          <div className="flex space-x-3">
-                            <Button
-                              type="submit"
-                              className="btn-sell flex-1 py-3 px-4 text-white font-bold bg-orange-500 hover:bg-orange-600 shadow-md transition-all uppercase"
-                              disabled={executeTrade.isPending || !currentPrice}
-                              onClick={() => setTradeDirection("SELL")}
-                            >
-                              {executeTrade.isPending && tradeDirection === "SELL" ? (
-                                <div className="animate-spin mr-2 h-4 w-4 border-t-2 border-white rounded-full"></div>
-                              ) : null}
-                              {getSideLabel("SELL")}
-                              {bidPrice && (
-                                <span className="text-xs block">@ {bidPrice.toFixed(selectedSymbol.includes("JPY") ? 2 : 4)}</span>
-                              )}
-                            </Button>
-                            <Button
-                              type="submit"
-                              className="btn-buy flex-1 py-3 px-4 text-black font-bold bg-lime-500 hover:bg-lime-600 shadow-md transition-all uppercase"
-                              disabled={executeTrade.isPending || !currentPrice}
-                              onClick={() => setTradeDirection("BUY")}
-                            >
-                              {executeTrade.isPending && tradeDirection === "BUY" ? (
-                                <div className="animate-spin mr-2 h-4 w-4 border-t-2 border-black rounded-full"></div>
-                              ) : null}
-                              {getSideLabel("BUY")}
-                              {askPrice && (
-                                <span className="text-xs block">@ {askPrice.toFixed(selectedSymbol.includes("JPY") ? 2 : 4)}</span>
-                              )}
-                            </Button>
-                          </div>
-                        )}
                       </div>
-                    </form>
-                  </Form>
-                </div>
+
+	                    </form>
+	                  </Form>
+	                </div>
               </div>
             </div>
           </TabsContent>
 
           {/* Active Positions Tab */}
-          <TabsContent value="active-positions" className="p-0 m-0">
-            <div ref={positionsContainerRef} className="p-4">
-              <h2 className="text-lg font-semibold text-white mb-4">Active Positions</h2>
-
-              {isLoadingOpenTrades ? (
-                <div className="flex justify-center py-8">
-                  <div className="animate-spin h-6 w-6 border-2 border-primary rounded-full border-t-transparent"></div>
-                </div>
+		          <TabsContent value="active-positions" className="p-0 m-0 flex-1 min-h-0">
+	            <div ref={positionsContainerRef} data-testid="trade-active-positions" className="p-4">
+	              {isLoadingOpenTrades ? (
+	                <div className="flex justify-center py-8">
+	                  <div className="animate-spin h-6 w-6 border-2 border-primary rounded-full border-t-transparent"></div>
+	                </div>
               ) : Array.isArray(openTrades) && openTrades.length === 0 ? (
                 <div className="text-center py-8 text-gray-400">
                   No active positions. Place an order to open a position.
@@ -1813,7 +1877,10 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
                               {isExpanded && hasHiddenPositionColumns && (
                                 <TableRow key={`${trade.id}-expanded`} className="bg-neutral-850">
                                   <TableCell colSpan={100} className="py-3">
-                                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
+                                    <div
+                                      className="grid gap-3 text-sm"
+                                      style={{ gridTemplateColumns: "repeat(auto-fit, minmax(min(12rem, 100%), 1fr))" }}
+                                    >
                                       {!positionColumns.size && (
                                         <div>
                                           <span className="text-gray-500 text-xs">Size</span>
@@ -1899,14 +1966,12 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
           </TabsContent>
 
           {/* Pending Orders Tab */}
-          <TabsContent value="pending-orders" className="p-0 m-0">
-            <div ref={ordersContainerRef} className="p-4">
-              <h2 className="text-lg font-semibold text-white mb-4">Pending Orders</h2>
-
-              {isLoadingPending ? (
-                <div className="flex justify-center py-8">
-                  <div className="animate-spin h-6 w-6 border-2 border-primary rounded-full border-t-transparent"></div>
-                </div>
+		          <TabsContent value="pending-orders" className="p-0 m-0 flex-1 min-h-0">
+	            <div ref={ordersContainerRef} data-testid="trade-pending-orders" className="p-4">
+	              {isLoadingPending ? (
+	                <div className="flex justify-center py-8">
+	                  <div className="animate-spin h-6 w-6 border-2 border-primary rounded-full border-t-transparent"></div>
+	                </div>
               ) : Array.isArray(pendingOrders) && pendingOrders.length === 0 ? (
                 <div className="text-center py-8 text-gray-400">
                   No pending orders. Place a limit or stop order to see it here.
@@ -2025,7 +2090,10 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
                               {isExpanded && hasHiddenOrderColumns && (
                                 <TableRow key={`${order.id}-expanded`} className="bg-neutral-850">
                                   <TableCell colSpan={100} className="py-3">
-                                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
+                                    <div
+                                      className="grid gap-3 text-sm"
+                                      style={{ gridTemplateColumns: "repeat(auto-fit, minmax(min(12rem, 100%), 1fr))" }}
+                                    >
                                       {!orderColumns.size && (
                                         <div>
                                           <span className="text-gray-500 text-xs">Size</span>
@@ -2086,12 +2154,81 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
               )}
             </div>
           </TabsContent>
-        </Tabs>
-      </div>
+	        </Tabs>
+	      </div>
 
-      {/* Edit Trade Modal */}
-      {editingTrade && (
-        <EditTradeModal
+        {activeTab === "place-order" && (
+          <div
+            className="shrink-0 border-t border-gray-800 bg-neutral-900 px-3 sm:px-gutter"
+            style={{
+              paddingTop: "clamp(0.5rem, 1cqi, 0.75rem)",
+              paddingBottom: "calc(env(safe-area-inset-bottom) + clamp(0.5rem, 1cqi, 0.75rem))",
+            }}
+          >
+            {orderType !== "Market" ? (
+              <Button
+                type="submit"
+                form="trade-order-form"
+                className={`w-full py-3 px-4 font-bold shadow-md transition-all ${pendingSide === "BUY"
+                  ? "bg-lime-500 hover:bg-lime-600 text-black"
+                  : "bg-orange-500 hover:bg-orange-600 text-white"
+                  }`}
+                disabled={executeTrade.isPending || !currentPrice}
+                onClick={() => setTradeDirection(pendingSide)}
+              >
+                {executeTrade.isPending ? (
+                  <div className="animate-spin mr-2 h-4 w-4 border-t-2 rounded-full inline-block"></div>
+                ) : null}
+                Place {getPendingOrderLabel(pendingSide, orderType)}
+                {(() => {
+                  const entryPrice = orderType === "Limit"
+                    ? form.getValues("limitPrice")
+                    : form.getValues("stopPrice");
+                  return entryPrice ? (
+                    <span className="text-xs block">@ {entryPrice}</span>
+                  ) : null;
+                })()}
+              </Button>
+            ) : (
+              <div className="flex gap-3">
+                <Button
+                  type="submit"
+                  form="trade-order-form"
+                  className="btn-sell flex-1 min-w-0 py-3 px-4 text-white font-bold bg-orange-500 hover:bg-orange-600 shadow-md transition-all uppercase"
+                  disabled={executeTrade.isPending || !currentPrice}
+                  onClick={() => setTradeDirection("SELL")}
+                >
+                  {executeTrade.isPending && tradeDirection === "SELL" ? (
+                    <div className="animate-spin mr-2 h-4 w-4 border-t-2 border-white rounded-full"></div>
+                  ) : null}
+                  {getSideLabel("SELL")}
+                  {bidPrice && (
+                    <span className="text-xs block">@ {bidPrice.toFixed(selectedSymbol.includes("JPY") ? 2 : 4)}</span>
+                  )}
+                </Button>
+                <Button
+                  type="submit"
+                  form="trade-order-form"
+                  className="btn-buy flex-1 min-w-0 py-3 px-4 text-black font-bold bg-lime-500 hover:bg-lime-600 shadow-md transition-all uppercase"
+                  disabled={executeTrade.isPending || !currentPrice}
+                  onClick={() => setTradeDirection("BUY")}
+                >
+                  {executeTrade.isPending && tradeDirection === "BUY" ? (
+                    <div className="animate-spin mr-2 h-4 w-4 border-t-2 border-black rounded-full"></div>
+                  ) : null}
+                  {getSideLabel("BUY")}
+                  {askPrice && (
+                    <span className="text-xs block">@ {askPrice.toFixed(selectedSymbol.includes("JPY") ? 2 : 4)}</span>
+                  )}
+                </Button>
+              </div>
+            )}
+          </div>
+        )}
+	
+	      {/* Edit Trade Modal */}
+	      {editingTrade && (
+	        <EditTradeModal
           trade={editingTrade}
           open={!!editingTrade}
           onOpenChange={(open) => !open && setEditingTrade(null)}

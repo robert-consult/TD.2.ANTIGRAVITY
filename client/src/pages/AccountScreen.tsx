@@ -178,8 +178,8 @@ export default function AccountScreen() {
 
   return (
     <div className="h-full flex flex-col bg-neutral-900 overflow-auto" style={{ containerType: 'inline-size', containerName: 'account' }}>
-      <div className="px-gutter py-pad-y border-b border-gray-800">
-        <h1 className="text-cq-xl font-bold text-blue-400">Account</h1>
+      <div className="tq-page-header">
+        <h1 className="tq-page-title">Account</h1>
       </div>
 
       <div className="flex-1 p-3 sm:p-6">
@@ -198,13 +198,13 @@ export default function AccountScreen() {
           )}
 
           <Card className="bg-neutral-800 border-gray-700">
-            <CardHeader className="pb-2 sm:pb-3 px-3 sm:px-6">
-              <CardTitle className="flex items-center gap-2 text-white text-sm sm:text-base">
-                <User className="h-4 w-4 sm:h-5 sm:w-5 text-blue-400" />
-                <span className="hidden sm:inline">Account Information</span>
-                <span className="sm:hidden">Account Info</span>
-              </CardTitle>
-            </CardHeader>
+	            <CardHeader className="pb-2 sm:pb-3 px-3 sm:px-6">
+	              <CardTitle className="flex items-center gap-2 text-white text-sm sm:text-base">
+	                <User className="h-4 w-4 sm:h-5 sm:w-5 text-primary" />
+	                <span className="hidden sm:inline">Account Information</span>
+	                <span className="sm:hidden">Account Info</span>
+	              </CardTitle>
+	            </CardHeader>
             <CardContent className="px-3 sm:px-6">
               {isLoading ? (
                 <Skeleton className="h-6 w-48" />
@@ -250,11 +250,11 @@ export default function AccountScreen() {
                     ) : (
                       <p className="price-display text-white">{formatCurrency(summary?.balance)}</p>
                     )}
-                  </div>
-                  <Wallet className="h-6 w-6 text-blue-400" />
-                </div>
-              </CardContent>
-            </Card>
+	                  </div>
+	                  <Wallet className="h-6 w-6 text-primary" />
+	                </div>
+	              </CardContent>
+	            </Card>
 
             <Card className="bg-neutral-800 border-gray-700">
               <CardContent className="pt-4 px-card">
@@ -353,14 +353,14 @@ export default function AccountScreen() {
             </Card>
           </div>
 
-          <Card className="bg-neutral-800 border-gray-700">
-            <CardHeader className="pb-2 sm:pb-3 px-3 sm:px-6">
-              <CardTitle className="flex items-center gap-2 text-white text-sm sm:text-base">
-                <TrendingUp className="h-4 w-4 sm:h-5 sm:w-5 text-blue-400" />
-                <span className="hidden sm:inline">Trading Statistics</span>
-                <span className="sm:hidden">Stats</span>
-              </CardTitle>
-            </CardHeader>
+	          <Card className="bg-neutral-800 border-gray-700">
+	            <CardHeader className="pb-2 sm:pb-3 px-3 sm:px-6">
+	              <CardTitle className="flex items-center gap-2 text-white text-sm sm:text-base">
+	                <TrendingUp className="h-4 w-4 sm:h-5 sm:w-5 text-primary" />
+	                <span className="hidden sm:inline">Trading Statistics</span>
+	                <span className="sm:hidden">Stats</span>
+	              </CardTitle>
+	            </CardHeader>
             <CardContent className="px-3 sm:px-6">
               <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-4">
                 <div className="text-center p-2 sm:p-card bg-neutral-700/50 rounded-lg">
@@ -375,10 +375,10 @@ export default function AccountScreen() {
                   <p className="text-lg sm:text-xl md:text-2xl font-bold text-red-500">{closedTrades.length - winningTrades.length}</p>
                   <p className="text-[10px] sm:text-xs md:text-sm text-gray-400">Losing</p>
                 </div>
-                <div className="text-center p-2 sm:p-card bg-neutral-700/50 rounded-lg">
-                  <p className="text-lg sm:text-xl md:text-2xl font-bold text-blue-400">{winRate.toFixed(1)}%</p>
-                  <p className="text-[10px] sm:text-xs md:text-sm text-gray-400">Win Rate</p>
-                </div>
+	                <div className="text-center p-2 sm:p-card bg-neutral-700/50 rounded-lg">
+	                  <p className="text-lg sm:text-xl md:text-2xl font-bold text-primary">{winRate.toFixed(1)}%</p>
+	                  <p className="text-[10px] sm:text-xs md:text-sm text-gray-400">Win Rate</p>
+	                </div>
               </div>
               <div className="mt-3 sm:mt-4 p-2 sm:p-card bg-neutral-700/50 rounded-lg">
                 <div className="flex justify-between items-center">
@@ -456,12 +456,12 @@ export default function AccountScreen() {
                     </div>
 
                     {/* Best Direction */}
-                    <div className="bg-neutral-700/50 rounded-lg p-card">
-                      <div className="flex items-center gap-2 mb-2">
-                        <BarChart3 className="h-4 w-4 text-blue-400" />
-                        <span className="text-sm text-gray-400">Best Direction</span>
-                      </div>
-                      {insights.bestSide ? (
+	                    <div className="bg-neutral-700/50 rounded-lg p-card">
+	                      <div className="flex items-center gap-2 mb-2">
+	                        <BarChart3 className="h-4 w-4 text-primary" />
+	                        <span className="text-sm text-gray-400">Best Direction</span>
+	                      </div>
+	                      {insights.bestSide ? (
                         <div>
                           <div className="text-lg font-bold text-white">
                             {getBestSideLabel(insights.bestSide.side)}

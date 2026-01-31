@@ -1,6 +1,7 @@
 import { storage } from "../server/storage";
 import { db } from "@db";
-import { globalSettings, systemConfig, userVerification } from "@shared/schema";
+import { globalSettings, systemConfig, tradeAudit, trades, userVerification } from "@shared/schema";
+import { eq } from "drizzle-orm";
 
 async function seed() {
   console.log("Seeding database...");
@@ -10,6 +11,14 @@ async function seed() {
     // Ensure singleton config rows exist (id=1) with defaults
     await db.insert(systemConfig).values({ id: 1 }).onConflictDoNothing();
     await db.insert(globalSettings).values({ id: 1 }).onConflictDoNothing();
+    if (process.env.SEED_RELAX_MARKET_HOURS === "1") {
+      // E2E/CI must be deterministic regardless of the real-world day/time.
+      // (CI can run on weekends; market windows should not hard-block the test suite.)
+      await db
+        .update(globalSettings)
+        .set({ allowWeekendTrading: true, marketOpenTime: "00:00", marketCloseTime: "23:59" })
+        .where(eq(globalSettings.id, 1));
+    }
 
     // Create admin user if it doesn't exist
     const adminEmail = "admin@local.test";
@@ -103,6 +112,12 @@ async function seed() {
           console.log(`Updated min spread for ${symbolData.symbol} to 2 pips`);
         }
       }
+    }
+
+    if (process.env.SEED_RESET_TRADES === "1") {
+      console.log("Resetting trades for deterministic E2E...");
+      await db.delete(tradeAudit);
+      await db.delete(trades);
     }
     
     console.log("Seeding completed successfully");

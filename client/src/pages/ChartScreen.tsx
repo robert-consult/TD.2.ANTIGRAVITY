@@ -484,18 +484,16 @@ export default function ChartScreen({ selectedSymbol }: ChartScreenProps) {
   return (
     <div className="h-full flex flex-col bg-[#0F0F0F] overflow-hidden">
       {/* Top bar with title and quote information */}
-      <div className="shrink-0 border-b border-neutral-800 px-gutter py-2 flex items-center justify-between">
-        <div>
-          <h1 className="text-sm font-semibold text-white md:text-base">
-            Chart: {selectedSymbol}
-          </h1>
-          <p className="text-xs text-gray-400">
-            Interactive TradingView chart with advanced tools
+      <div className="shrink-0 tq-page-header flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <h1 className="tq-page-title truncate">{selectedSymbol}</h1>
+          <p className="text-[clamp(0.7rem,0.65rem+0.3vw,0.8rem)] text-gray-400">
+            Symbol chart
           </p>
         </div>
 
         {/* Current Quote Summary */}
-        <div className="text-xs md:text-sm text-right text-gray-300">
+        <div className="text-right text-gray-300 text-[clamp(0.75rem,0.7rem+0.5vw,0.875rem)]">
           {isLoading ? (
             <div className="flex items-center gap-2">
               <Skeleton className="h-4 w-24 bg-neutral-700" />
@@ -563,7 +561,7 @@ export default function ChartScreen({ selectedSymbol }: ChartScreenProps) {
             ref={floaterRef}
             onMouseDown={handleFloaterMouseDown}
             onTouchStart={handleFloaterTouchStart}
-            className={`absolute bg-black bg-opacity-75 rounded p-2 border border-gray-800 z-10 select-none touch-none ${
+            className={`absolute z-10 select-none touch-none border border-gray-800 bg-black/75 max-w-[min(18rem,calc(100%-0.75rem))] p-[clamp(0.375rem,1vw,0.5rem)] rounded-[clamp(0.375rem,1vw,0.5rem)] text-[clamp(0.75rem,1.1vw,0.875rem)] leading-[1.25] ${
               isDragging ? "cursor-grabbing" : "cursor-grab"
             }`}
             style={{
@@ -571,7 +569,7 @@ export default function ChartScreen({ selectedSymbol }: ChartScreenProps) {
               top: floaterPosition.y,
             }}
           >
-            <div className="grid grid-cols-2 gap-2 text-sm">
+            <div className="grid grid-cols-[auto_minmax(0,1fr)] gap-[clamp(0.25rem,0.8vw,0.5rem)]">
               <span className="text-gray-400">Bid:</span>
               <span className="font-mono text-danger-500 font-medium text-right">
                 {bid?.toFixed(pricePrecision) ?? "-"}

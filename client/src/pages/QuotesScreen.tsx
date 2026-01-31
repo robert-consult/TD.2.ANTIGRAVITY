@@ -76,9 +76,9 @@ export default function QuotesScreen({ onSelectSymbol }: QuotesScreenProps) {
 
   return (
     <div className="h-full flex flex-col bg-neutral-900">
-      <div className="px-gutter py-3 border-b border-gray-800 flex flex-col gap-2 sticky top-0 bg-neutral-900 z-10">
+      <div className="tq-page-header flex flex-col sticky top-0 z-10 gap-[clamp(0.35rem,1.2vw,0.5rem)]">
         <div className="flex justify-between items-center">
-          <h2 className="text-lg font-semibold text-white">Live Quotes</h2>
+          <h2 className="tq-page-title">Live Quotes</h2>
           <div className="flex items-center">
             {connectionStatus === "stale" ? (
               <AlertTriangle className="w-3 h-3 mr-1.5 text-orange-400" />

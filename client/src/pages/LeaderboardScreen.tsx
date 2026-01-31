@@ -31,8 +31,8 @@ export default function LeaderboardScreen() {
 
   return (
     <div className="h-full flex flex-col bg-neutral-900 overflow-auto">
-      <div className="px-3 sm:px-gutter py-3 sm:py-4 border-b border-gray-800">
-        <h1 className="text-lg sm:text-xl md:text-2xl font-bold text-blue-400">Leaderboard</h1>
+      <div className="tq-page-header">
+        <h1 className="tq-page-title">Leaderboard</h1>
       </div>
 
       <div className="flex-1 page-pad">

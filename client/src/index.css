@@ -253,6 +253,20 @@
     font-size: var(--text-xl);
   }
 
+  /* Shared page header/title (mobile-first, consistent across tabs) */
+  .tq-page-header {
+    @apply border-b border-gray-800 bg-neutral-900;
+    padding-left: clamp(0.75rem, 2vw, 1rem);
+    padding-right: clamp(0.75rem, 2vw, 1rem);
+    padding-top: clamp(0.5rem, 1.6vw, 0.75rem);
+    padding-bottom: clamp(0.5rem, 1.6vw, 0.75rem);
+  }
+
+  .tq-page-title {
+    @apply font-semibold leading-none text-primary;
+    font-size: clamp(0.95rem, 0.85rem + 0.6vw, 1.125rem);
+  }
+
   /* Auto-fit grid (no breakpoint hard-coding) */
   .grid-auto-fit {
     display: grid;

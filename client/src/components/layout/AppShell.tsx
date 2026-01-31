@@ -28,12 +28,8 @@ export function AppShell({
     >
       {header ? <div className="shrink-0">{header}</div> : null}
 
-      <div className="@container/app flex-1 min-h-0 overflow-hidden">
-        <div className="flex h-full flex-col @3xl/app:flex-row overflow-hidden">
-          {mobileNav ? (
-            <div className="shrink-0 @3xl/app:hidden">{mobileNav}</div>
-          ) : null}
-
+      <div className="@container/app flex-1 min-h-0 overflow-hidden flex flex-col">
+        <div className="flex-1 min-h-0 overflow-hidden flex">
           {sidebar ? (
             <aside className="hidden @3xl/app:block w-sidebar shrink-0">
               {sidebar}
@@ -46,6 +42,10 @@ export function AppShell({
             {children}
           </main>
         </div>
+
+        {mobileNav ? (
+          <div className="shrink-0 @3xl/app:hidden">{mobileNav}</div>
+        ) : null}
       </div>
     </div>
   );

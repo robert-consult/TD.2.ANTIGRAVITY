@@ -1,7 +1,7 @@
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { useState, useEffect, useRef } from "react";
+import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 import parseDate from "../utils/parseDate";
 import { apiRequest } from "@/lib/queryClient";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -67,58 +67,111 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
   const { lotDropdownMax, lotDropdownOptions, lotPresetCards } = useLotSettings();
   const { bundle } = useTranslation();
   const { quotes } = useQuotes();
+  const currentQuote = quotes?.find(q => q.symbol === selectedSymbol);
   const { openTrades = [], isLoadingOpenTrades, closeTrade } = useTrades();
   const { summary: accountSummary, isLoading: isLoadingAccountSummary } = useAccountSummary();
   const { pendingOrders = [], isLoading: isLoadingPending, cancelOrder } = usePendingOrders();
+  const openTradesCount = Array.isArray(openTrades) ? openTrades.length : 0;
+  const pendingOrdersCount = Array.isArray(pendingOrders) ? pendingOrders.length : 0;
+
+  // Collapse the fixed header on mobile when the main tab content scrolls.
+  const tabScrollRef = useRef<HTMLDivElement>(null);
+  const [collapseHeaderOnMobile, setCollapseHeaderOnMobile] = useState(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return true;
+    return window.matchMedia("(max-width: 767px)").matches;
+  });
+  const headerShellRef = useRef<HTMLDivElement>(null);
+  const headerExpandedRef = useRef<HTMLDivElement>(null);
+  const headerCompactRef = useRef<HTMLButtonElement>(null);
+  const headerHeightsRef = useRef({ expanded: 0, compact: 0, distance: 120 });
+  const headerAppliedRef = useRef({ progress: -1, height: -1 });
+  const headerMeasureRafRef = useRef<number | null>(null);
 
   // Container width detection for responsive table (ResizeObserver-based, not pixel breakpoints)
   const positionsContainerRef = useRef<HTMLDivElement>(null);
   const ordersContainerRef = useRef<HTMLDivElement>(null);
+  const positionsTableRef = useRef<HTMLTableElement>(null);
+  const ordersTableRef = useRef<HTMLTableElement>(null);
+  const positionsColumnTuneTimeoutRef = useRef<number | null>(null);
+  const ordersColumnTuneTimeoutRef = useRef<number | null>(null);
   // Use window.innerWidth as initial estimate (will be refined by ResizeObserver)
   const [positionsContainerWidth, setPositionsContainerWidth] = useState(() =>
-    typeof window !== 'undefined' ? window.innerWidth : 1200
+    typeof window !== 'undefined' ? Math.round(window.innerWidth) : 1200
   );
   const [ordersContainerWidth, setOrdersContainerWidth] = useState(() =>
-    typeof window !== 'undefined' ? window.innerWidth : 1200
+    typeof window !== 'undefined' ? Math.round(window.innerWidth) : 1200
   );
 
-  // Threshold for switching to compact view (based on minimum column widths)
-  // Progressive column visibility breakpoints (in pixels)
-  // Columns appear progressively as container widens:
-  // - Always visible: Symbol, Type, P/L
-  // - 350px+: Edit/Close Actions
-  // - 450px+: Size/Lots  
-  // - 550px+: TP/SL
-  // - 700px+: Entry/Open Price, Current Price (positions) or Order Price (pending)
-  // - 900px+: Open Time (positions)
-  const COLUMN_BREAKPOINTS = {
-    ACTIONS: 350,
-    SIZE: 450,
-    TP_SL: 550,
-    PRICES: 700,
-    TIME: 900,
+  type PositionColumnState = {
+    actions: boolean;
+    size: boolean;
+    tpSl: boolean;
+    prices: boolean;
+    time: boolean;
+  };
+  type OrderColumnState = {
+    actions: boolean;
+    size: boolean;
+    tpSl: boolean;
+    prices: boolean;
   };
 
-  // Determine which columns are visible based on container width
-  const getVisibleColumns = (width: number) => ({
-    actions: width >= COLUMN_BREAKPOINTS.ACTIONS,
-    size: width >= COLUMN_BREAKPOINTS.SIZE,
-    tpSl: width >= COLUMN_BREAKPOINTS.TP_SL,
-    prices: width >= COLUMN_BREAKPOINTS.PRICES,
-    time: width >= COLUMN_BREAKPOINTS.TIME,
-  });
+  const [positionColumns, setPositionColumns] = useState<PositionColumnState>(() => ({
+    actions: true,
+    size: true,
+    tpSl: true,
+    prices: true,
+    time: true,
+  }));
+  const [orderColumns, setOrderColumns] = useState<OrderColumnState>(() => ({
+    actions: true,
+    size: true,
+    tpSl: true,
+    prices: true,
+  }));
 
-  const positionColumns = getVisibleColumns(positionsContainerWidth);
-  const orderColumns = getVisibleColumns(ordersContainerWidth);
+  const positionColumnsRef = useRef(positionColumns);
+  const orderColumnsRef = useRef(orderColumns);
+  const positionsWidthRef = useRef(positionsContainerWidth);
+  const ordersWidthRef = useRef(ordersContainerWidth);
 
   // Check if there are any hidden columns (for showing expand chevron)
   // Show chevron when any column (including actions) is hidden
-  const hasHiddenPositionColumns = !positionColumns.time || !positionColumns.actions;
-  const hasHiddenOrderColumns = !orderColumns.tpSl || !orderColumns.actions;
+  const hasHiddenPositionColumns =
+    !positionColumns.actions
+    || !positionColumns.size
+    || !positionColumns.tpSl
+    || !positionColumns.prices
+    || !positionColumns.time;
+  const hasHiddenOrderColumns =
+    !orderColumns.actions
+    || !orderColumns.size
+    || !orderColumns.tpSl
+    || !orderColumns.prices;
 
   // Expandable row state
   const [expandedPositionRows, setExpandedPositionRows] = useState<Set<number>>(new Set());
   const [expandedOrderRows, setExpandedOrderRows] = useState<Set<number>>(new Set());
+
+  useEffect(() => {
+    if (!hasHiddenPositionColumns) {
+      setExpandedPositionRows((prev) => (prev.size ? new Set() : prev));
+    }
+  }, [hasHiddenPositionColumns]);
+
+  useEffect(() => {
+    if (!hasHiddenOrderColumns) {
+      setExpandedOrderRows((prev) => (prev.size ? new Set() : prev));
+    }
+  }, [hasHiddenOrderColumns]);
+
+  useEffect(() => {
+    positionColumnsRef.current = positionColumns;
+  }, [positionColumns]);
+
+  useEffect(() => {
+    orderColumnsRef.current = orderColumns;
+  }, [orderColumns]);
 
   const togglePositionExpand = (id: number) => {
     setExpandedPositionRows(prev => {
@@ -143,12 +196,17 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
 
     const observer = new ResizeObserver((entries) => {
       for (const entry of entries) {
-        setPositionsContainerWidth(entry.contentRect.width);
+        const width = Math.max(0, Math.round(entry.contentRect.width));
+        if (width === positionsWidthRef.current) continue;
+        positionsWidthRef.current = width;
+        setPositionsContainerWidth(width);
       }
     });
 
     observer.observe(container);
-    setPositionsContainerWidth(container.clientWidth);
+    const width = Math.max(0, Math.round(container.clientWidth));
+    positionsWidthRef.current = width;
+    setPositionsContainerWidth(width);
 
     return () => observer.disconnect();
   }, [activeTab]);
@@ -160,12 +218,17 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
 
     const observer = new ResizeObserver((entries) => {
       for (const entry of entries) {
-        setOrdersContainerWidth(entry.contentRect.width);
+        const width = Math.max(0, Math.round(entry.contentRect.width));
+        if (width === ordersWidthRef.current) continue;
+        ordersWidthRef.current = width;
+        setOrdersContainerWidth(width);
       }
     });
 
     observer.observe(container);
-    setOrdersContainerWidth(container.clientWidth);
+    const width = Math.max(0, Math.round(container.clientWidth));
+    ordersWidthRef.current = width;
+    setOrdersContainerWidth(width);
 
     return () => observer.disconnect();
   }, [activeTab]);
@@ -175,20 +238,396 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
     const handleResize = () => {
       // Use container width if available, otherwise use window width
       if (positionsContainerRef.current) {
-        setPositionsContainerWidth(positionsContainerRef.current.clientWidth);
+        const width = Math.max(0, Math.round(positionsContainerRef.current.clientWidth));
+        if (width !== positionsWidthRef.current) {
+          positionsWidthRef.current = width;
+          setPositionsContainerWidth(width);
+        }
       } else {
-        setPositionsContainerWidth(window.innerWidth);
+        const width = Math.max(0, Math.round(window.innerWidth));
+        if (width !== positionsWidthRef.current) {
+          positionsWidthRef.current = width;
+          setPositionsContainerWidth(width);
+        }
       }
       if (ordersContainerRef.current) {
-        setOrdersContainerWidth(ordersContainerRef.current.clientWidth);
+        const width = Math.max(0, Math.round(ordersContainerRef.current.clientWidth));
+        if (width !== ordersWidthRef.current) {
+          ordersWidthRef.current = width;
+          setOrdersContainerWidth(width);
+        }
       } else {
-        setOrdersContainerWidth(window.innerWidth);
+        const width = Math.max(0, Math.round(window.innerWidth));
+        if (width !== ordersWidthRef.current) {
+          ordersWidthRef.current = width;
+          setOrdersContainerWidth(width);
+        }
       }
     };
 
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
+
+  // Mobile breakpoint detection (keeps the header dense on desktop).
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
+    const mql = window.matchMedia("(max-width: 767px)");
+    const update = () => setCollapseHeaderOnMobile(mql.matches);
+    update();
+
+    if (typeof mql.addEventListener === "function") {
+      mql.addEventListener("change", update);
+      return () => mql.removeEventListener("change", update);
+    }
+
+    // Safari legacy API
+    mql.addListener(update);
+    return () => mql.removeListener(update);
+  }, []);
+
+  const applyTradeHeaderCollapse = (scrollTop: number) => {
+    const shell = headerShellRef.current;
+    const expandedEl = headerExpandedRef.current;
+    const compactEl = headerCompactRef.current;
+    if (!shell || !expandedEl || !compactEl) return;
+
+    if (!collapseHeaderOnMobile) {
+      shell.style.height = "";
+      expandedEl.style.opacity = "";
+      expandedEl.style.transform = "";
+      expandedEl.style.pointerEvents = "";
+
+      compactEl.style.opacity = "0";
+      compactEl.style.transform = "";
+      compactEl.style.pointerEvents = "none";
+      return;
+    }
+
+    const { expanded, compact, distance } = headerHeightsRef.current;
+    if (!expanded || !compact) return;
+
+    const raw = scrollTop / Math.max(1, distance);
+    let progress = Math.max(0, Math.min(1, raw));
+
+    // Snap with hysteresis at extremes to avoid boundary flicker.
+    const prevProgress = headerAppliedRef.current.progress;
+    const snapTopIn = 0.02;
+    const snapTopOut = 0.08;
+    const snapBottomIn = 0.98;
+    const snapBottomOut = 0.92;
+
+    if (prevProgress === 0 && progress < snapTopOut) {
+      progress = 0;
+    } else if (prevProgress === 1 && progress > snapBottomOut) {
+      progress = 1;
+    } else {
+      if (progress < snapTopIn) progress = 0;
+      if (progress > snapBottomIn) progress = 1;
+    }
+
+    const height = Math.round(expanded - progress * (expanded - compact));
+    const prev = headerAppliedRef.current;
+    if (prev.height === height && Math.abs(prev.progress - progress) < 0.002) return;
+    headerAppliedRef.current = { progress, height };
+
+    shell.style.height = `${height}px`;
+    expandedEl.style.opacity = `${1 - progress}`;
+    expandedEl.style.transform = `translateY(${Math.round(-progress * 8)}px) translateZ(0)`;
+    expandedEl.style.pointerEvents = progress > 0.85 ? "none" : "auto";
+
+    compactEl.style.opacity = `${progress}`;
+    compactEl.style.transform = `translateY(${Math.round((1 - progress) * 8)}px) translateZ(0)`;
+    compactEl.style.pointerEvents = progress < 0.15 ? "none" : "auto";
+  };
+
+  const measureTradeHeaderHeights = () => {
+    const expandedEl = headerExpandedRef.current;
+    const compactEl = headerCompactRef.current;
+    if (!expandedEl || !compactEl) return;
+
+    // Round to avoid subpixel jitter across resize/layout changes.
+    const expanded = Math.max(0, Math.round(expandedEl.scrollHeight));
+    const compact = Math.max(0, Math.round(compactEl.scrollHeight));
+    if (!expanded || !compact) return;
+
+    const distance = Math.max(96, expanded - compact);
+    const prev = headerHeightsRef.current;
+    if (prev.expanded === expanded && prev.compact === compact && prev.distance === distance) return;
+
+    headerHeightsRef.current = { expanded, compact, distance };
+    headerAppliedRef.current = { progress: -1, height: -1 };
+    applyTradeHeaderCollapse(tabScrollRef.current?.scrollTop ?? 0);
+  };
+
+  const scheduleMeasureTradeHeaderHeights = () => {
+    if (headerMeasureRafRef.current !== null) return;
+    headerMeasureRafRef.current = window.requestAnimationFrame(() => {
+      headerMeasureRafRef.current = null;
+      measureTradeHeaderHeights();
+    });
+  };
+
+  useLayoutEffect(() => {
+    const shell = headerShellRef.current;
+    const expandedEl = headerExpandedRef.current;
+    const compactEl = headerCompactRef.current;
+    if (!shell || !expandedEl || !compactEl) return;
+
+    scheduleMeasureTradeHeaderHeights();
+  }, [
+    collapseHeaderOnMobile,
+    selectedSymbol,
+    currentQuote?.name,
+    Boolean(accountSummary),
+    isLoadingAccountSummary,
+  ]);
+
+  // Keep header heights in sync across responsive wraps (prevents "no man's land" clipping on resize).
+  useLayoutEffect(() => {
+    if (!collapseHeaderOnMobile) return;
+
+    const expandedEl = headerExpandedRef.current;
+    const compactEl = headerCompactRef.current;
+    if (!expandedEl || !compactEl) return;
+
+    const observer = new ResizeObserver(() => scheduleMeasureTradeHeaderHeights());
+    observer.observe(expandedEl);
+    observer.observe(compactEl);
+    scheduleMeasureTradeHeaderHeights();
+
+    return () => {
+      observer.disconnect();
+      if (headerMeasureRafRef.current !== null) {
+        window.cancelAnimationFrame(headerMeasureRafRef.current);
+        headerMeasureRafRef.current = null;
+      }
+    };
+  }, [collapseHeaderOnMobile]);
+
+  useEffect(() => {
+    const el = tabScrollRef.current;
+    if (!el) return;
+
+    let rafId: number | null = null;
+
+    const onScroll = () => {
+      if (rafId !== null) return;
+      rafId = window.requestAnimationFrame(() => {
+        rafId = null;
+        applyTradeHeaderCollapse(el.scrollTop);
+      });
+    };
+
+    el.addEventListener("scroll", onScroll, { passive: true });
+    applyTradeHeaderCollapse(el.scrollTop);
+
+    return () => {
+      el.removeEventListener("scroll", onScroll);
+      if (rafId !== null) window.cancelAnimationFrame(rafId);
+    };
+  }, [activeTab, collapseHeaderOnMobile]);
+
+  // Fit table columns to available width (fluid, content-aware).
+  useEffect(() => {
+    if (activeTab !== "active-positions") return;
+    if (isLoadingOpenTrades) return;
+    if (!Array.isArray(openTrades) || openTrades.length === 0) return;
+
+    let cancelled = false;
+    const nextPaint = () => new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+
+    const run = async () => {
+      const table = positionsTableRef.current;
+      const container = positionsContainerRef.current;
+      if (!table || !container) return;
+
+      const getAvailableWidth = () => table.parentElement?.clientWidth ?? container.clientWidth;
+      const all: PositionColumnState = { actions: true, size: true, tpSl: true, prices: true, time: true };
+      const showOrder: Array<keyof PositionColumnState> = ["actions", "size", "tpSl", "prices", "time"];
+      const hideOrder: Array<keyof PositionColumnState> = [...showOrder].reverse();
+
+      let next = positionColumnsRef.current ?? all;
+      await nextPaint();
+      if (cancelled) return;
+
+      const fits = () => {
+        const available = getAvailableWidth();
+        return table.scrollWidth <= available + 1;
+      };
+
+      // 1) If overflowing, hide least-important columns until it fits.
+      if (!fits()) {
+        for (const key of hideOrder) {
+          if (next[key] === false) continue;
+          next = { ...next, [key]: false };
+          setPositionColumns((prevState) => {
+            if (
+              prevState.actions === next.actions
+              && prevState.size === next.size
+              && prevState.tpSl === next.tpSl
+              && prevState.prices === next.prices
+              && prevState.time === next.time
+            ) return prevState;
+            return next;
+          });
+          await nextPaint();
+          if (cancelled) return;
+          if (fits()) break;
+        }
+      }
+
+      // 2) If it fits, try adding columns back (most-important first) until it overflows.
+      if (fits()) {
+        for (const key of showOrder) {
+          if (next[key] === true) continue;
+          const candidate = { ...next, [key]: true };
+          setPositionColumns((prevState) => {
+            if (
+              prevState.actions === candidate.actions
+              && prevState.size === candidate.size
+              && prevState.tpSl === candidate.tpSl
+              && prevState.prices === candidate.prices
+              && prevState.time === candidate.time
+            ) return prevState;
+            return candidate;
+          });
+          await nextPaint();
+          if (cancelled) return;
+          if (!fits()) {
+            // Revert last change if it caused overflow.
+            next = { ...next, [key]: false };
+            setPositionColumns((prevState) => {
+              if (
+                prevState.actions === next.actions
+                && prevState.size === next.size
+                && prevState.tpSl === next.tpSl
+                && prevState.prices === next.prices
+                && prevState.time === next.time
+              ) return prevState;
+              return next;
+            });
+            await nextPaint();
+            break;
+          }
+          next = candidate;
+        }
+      }
+    };
+
+    if (positionsColumnTuneTimeoutRef.current !== null) {
+      window.clearTimeout(positionsColumnTuneTimeoutRef.current);
+    }
+    positionsColumnTuneTimeoutRef.current = window.setTimeout(() => {
+      positionsColumnTuneTimeoutRef.current = null;
+      void run();
+    }, 140);
+
+    return () => {
+      cancelled = true;
+      if (positionsColumnTuneTimeoutRef.current !== null) {
+        window.clearTimeout(positionsColumnTuneTimeoutRef.current);
+        positionsColumnTuneTimeoutRef.current = null;
+      }
+    };
+  }, [activeTab, positionsContainerWidth, isLoadingOpenTrades, openTradesCount]);
+
+  useEffect(() => {
+    if (activeTab !== "pending-orders") return;
+    if (isLoadingPending) return;
+    if (!Array.isArray(pendingOrders) || pendingOrders.length === 0) return;
+
+    let cancelled = false;
+    const nextPaint = () => new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+
+    const run = async () => {
+      const table = ordersTableRef.current;
+      const container = ordersContainerRef.current;
+      if (!table || !container) return;
+
+      const getAvailableWidth = () => table.parentElement?.clientWidth ?? container.clientWidth;
+      const all: OrderColumnState = { actions: true, size: true, tpSl: true, prices: true };
+      const showOrder: Array<keyof OrderColumnState> = ["actions", "size", "prices", "tpSl"];
+      const hideOrder: Array<keyof OrderColumnState> = [...showOrder].reverse();
+
+      let next = orderColumnsRef.current ?? all;
+      await nextPaint();
+      if (cancelled) return;
+
+      const fits = () => {
+        const available = getAvailableWidth();
+        return table.scrollWidth <= available + 1;
+      };
+
+      if (!fits()) {
+        for (const key of hideOrder) {
+          if (next[key] === false) continue;
+          next = { ...next, [key]: false };
+          setOrderColumns((prevState) => {
+            if (
+              prevState.actions === next.actions
+              && prevState.size === next.size
+              && prevState.tpSl === next.tpSl
+              && prevState.prices === next.prices
+            ) return prevState;
+            return next;
+          });
+          await nextPaint();
+          if (cancelled) return;
+          if (fits()) break;
+        }
+      }
+
+      if (fits()) {
+        for (const key of showOrder) {
+          if (next[key] === true) continue;
+          const candidate = { ...next, [key]: true };
+          setOrderColumns((prevState) => {
+            if (
+              prevState.actions === candidate.actions
+              && prevState.size === candidate.size
+              && prevState.tpSl === candidate.tpSl
+              && prevState.prices === candidate.prices
+            ) return prevState;
+            return candidate;
+          });
+          await nextPaint();
+          if (cancelled) return;
+          if (!fits()) {
+            next = { ...next, [key]: false };
+            setOrderColumns((prevState) => {
+              if (
+                prevState.actions === next.actions
+                && prevState.size === next.size
+                && prevState.tpSl === next.tpSl
+                && prevState.prices === next.prices
+              ) return prevState;
+              return next;
+            });
+            await nextPaint();
+            break;
+          }
+          next = candidate;
+        }
+      }
+    };
+
+    if (ordersColumnTuneTimeoutRef.current !== null) {
+      window.clearTimeout(ordersColumnTuneTimeoutRef.current);
+    }
+    ordersColumnTuneTimeoutRef.current = window.setTimeout(() => {
+      ordersColumnTuneTimeoutRef.current = null;
+      void run();
+    }, 140);
+
+    return () => {
+      cancelled = true;
+      if (ordersColumnTuneTimeoutRef.current !== null) {
+        window.clearTimeout(ordersColumnTuneTimeoutRef.current);
+        ordersColumnTuneTimeoutRef.current = null;
+      }
+    };
+  }, [activeTab, ordersContainerWidth, isLoadingPending, pendingOrdersCount]);
 
   const formatTemplate = (template: string, vars: Record<string, string | number | boolean | null | undefined>) =>
     template.replace(/\{([a-zA-Z0-9_]+)\}/g, (_m, key: string) => {
@@ -299,8 +738,6 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
   const selectedSymbolConfig = symbols.find(
     (s) => s.symbol === selectedSymbol
   );
-
-  const currentQuote = quotes?.find(q => q.symbol === selectedSymbol);
 
   // Calculate bid/ask prices with minimum 2 pip spread (moved early for useEffect dependencies)
   const minSpreadPips = selectedSymbolConfig?.minSpreadPips || 2.0;
@@ -666,23 +1103,120 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
   return (
     <div className="h-full flex flex-col bg-neutral-900 overflow-hidden @container/trade" style={{ containerType: 'inline-size', containerName: 'trade' }}>
       {/* Symbol info header */}
-      <div className="border-b border-gray-800 shrink-0">
-        <div className="px-3 sm:px-gutter py-3 sm:py-4">
-          <div className="flex justify-between items-center">
-            <div>
-              {currentQuote ? (
-                <>
-                  <h3 className="text-cq-lg font-medium text-white">{selectedSymbol}</h3>
-                  <p className="text-cq-xs text-gray-400 truncate max-w-[120px] @[400px]/trade:max-w-[150px] @[600px]/trade:max-w-none">{currentQuote.name}</p>
-                </>
-              ) : (
-                <>
-                  <Skeleton className="h-6 w-24 mb-1" />
-                  <Skeleton className="h-4 w-40" />
-                </>
-              )}
+      <div
+        ref={headerShellRef}
+        className="border-b border-gray-800 shrink-0 relative overflow-hidden"
+        style={{ willChange: collapseHeaderOnMobile ? "height" : undefined }}
+      >
+        {/* Compact overlay (fades/slides in progressively as the tab content scrolls) */}
+        <button
+          ref={headerCompactRef}
+          type="button"
+          onClick={() => tabScrollRef.current?.scrollTo({ top: 0, behavior: "smooth" })}
+          className="absolute inset-x-0 top-0 z-10 w-full px-3 sm:px-gutter py-2 text-left hover:bg-white/[0.02] transition-colors opacity-0 pointer-events-none"
+          aria-label="Scroll to top to expand market and account details"
+          style={{ willChange: "opacity, transform", backfaceVisibility: "hidden" }}
+        >
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="text-sm font-semibold text-white">{selectedSymbol}</span>
+                {currentPrice ? (
+                  <span className="text-sm font-mono text-white/90">
+                    {currentPrice.toFixed(selectedSymbol.includes("JPY") ? 2 : 4)}
+                  </span>
+                ) : (
+                  <span className="text-sm text-gray-500">—</span>
+                )}
+                {currentQuote?.changePct !== undefined ? (
+                  <span
+                    className={`text-xs font-mono ${currentQuote.changePct >= 0 ? "text-success-500" : "text-danger-500"}`}
+                  >
+                    {currentQuote.changePct >= 0 ? "+" : ""}
+                    {currentQuote.changePct.toFixed(2)}%
+                  </span>
+                ) : null}
+              </div>
+              <div className="mt-0.5 text-[11px] text-gray-400 font-mono overflow-x-auto whitespace-nowrap" style={{ scrollbarWidth: "none" }}>
+                {accountSummary ? (
+                  <>
+                    Bal: ${accountSummary.balance.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}{" "}
+                    | Eq: ${accountSummary.equity.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}{" "}
+                    | FM: ${accountSummary.freeMargin.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}{" "}
+                    | UM: ${accountSummary.usedMargin.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </>
+                ) : (
+                  <>
+                    Account:{" "}
+                    {isLoadingAccountSummary ? "Loading…" : "—"}
+                  </>
+                )}
+              </div>
             </div>
-            <div className="text-right">
+            <ChevronDown className="h-4 w-4 text-gray-500 shrink-0" />
+          </div>
+        </button>
+
+        {/* Full header (shrinks progressively; clipped by the shell height) */}
+        <div
+          ref={headerExpandedRef}
+          className="px-3 sm:px-gutter py-3 sm:py-4"
+          style={{ willChange: "opacity, transform", backfaceVisibility: "hidden" }}
+        >
+          <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-8 gap-y-2 items-start">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-end gap-x-8 gap-y-3">
+                <div className="min-w-0">
+                  {currentQuote ? (
+                    <>
+                      <h3 className="text-cq-lg font-medium text-white">{selectedSymbol}</h3>
+                      <p className="text-cq-xs text-gray-400 truncate max-w-[120px] @[400px]/trade:max-w-[150px] @[600px]/trade:max-w-none">{currentQuote.name}</p>
+                    </>
+                  ) : (
+                    <>
+                      <Skeleton className="h-6 w-24 mb-1" />
+                      <Skeleton className="h-4 w-40" />
+                    </>
+                  )}
+                </div>
+
+                {/* Bid/Ask/Spread row (wraps below symbol when space is tight; moves inline when space allows) */}
+                <div className="flex flex-wrap gap-x-6 gap-y-2">
+                  <div className="flex flex-col min-w-[60px]">
+                    <span className="text-cq-xs text-gray-400">Bid</span>
+                    {bidPrice ? (
+                      <span className="data-cell text-danger-500">
+                        {bidPrice.toFixed(selectedSymbol.includes("JPY") ? 2 : 4)}
+                      </span>
+                    ) : (
+                      <Skeleton className="h-4 w-16" />
+                    )}
+                  </div>
+                  <div className="flex flex-col min-w-[60px]">
+                    <span className="text-cq-xs text-gray-400">Ask</span>
+                    {askPrice ? (
+                      <span className="data-cell text-success-500">
+                        {askPrice.toFixed(selectedSymbol.includes("JPY") ? 2 : 4)}
+                      </span>
+                    ) : (
+                      <Skeleton className="h-4 w-16" />
+                    )}
+                  </div>
+                  <div className="flex flex-col min-w-[60px]">
+                    <span className="text-cq-xs text-gray-400">Spread</span>
+                    {spread ? (
+                      <span className="data-cell">
+                        {spread.toFixed(selectedSymbol.includes("JPY") ? 2 : 4)}
+                      </span>
+                    ) : (
+                      <Skeleton className="h-4 w-16" />
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="text-right shrink-0">
               {currentPrice ? (
                 <>
                   <div className="price-display text-white">
@@ -706,89 +1240,55 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
             </div>
           </div>
 
-          {/* Market information - responsive layout */}
-          <div className="flex flex-col gap-3 mt-4">
-            {/* Bid/Ask/Spread row */}
-            <div className="flex flex-wrap gap-4">
-              <div className="flex flex-col min-w-[50px]">
-                <span className="text-cq-xs text-gray-400">Bid</span>
-                {bidPrice ? (
-                  <span className="data-cell text-danger-500">
-                    {bidPrice.toFixed(selectedSymbol.includes("JPY") ? 2 : 4)}
+          {/* Account metrics - responsive grid with real-time data */}
+          <div className="w-full mt-4">
+            <span className="text-xs text-gray-400 mb-1 block">Account</span>
+            <div
+              className="grid gap-2 bg-neutral-800 p-2 rounded-md"
+              style={{ gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))" }}
+            >
+              <div className="flex flex-col min-w-0">
+                <span className="text-[10px] text-gray-500">Balance</span>
+                {accountSummary ? (
+                  <span className="font-mono text-white text-xs truncate">
+                    ${accountSummary.balance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </span>
                 ) : (
                   <Skeleton className="h-4 w-16" />
                 )}
               </div>
-              <div className="flex flex-col min-w-[50px]">
-                <span className="text-cq-xs text-gray-400">Ask</span>
-                {askPrice ? (
-                  <span className="data-cell text-success-500">
-                    {askPrice.toFixed(selectedSymbol.includes("JPY") ? 2 : 4)}
+
+              <div className="flex flex-col min-w-0">
+                <span className="text-[10px] text-gray-500">Equity</span>
+                {accountSummary ? (
+                  <span className={`font-mono text-xs truncate ${accountSummary.floatingPnl >= 0 ? 'text-success-500' : 'text-danger-500'}`}>
+                    ${accountSummary.equity.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </span>
                 ) : (
                   <Skeleton className="h-4 w-16" />
                 )}
               </div>
-              <div className="flex flex-col min-w-[50px]">
-                <span className="text-cq-xs text-gray-400">Spread</span>
-                {spread ? (
-                  <span className="data-cell">
-                    {spread.toFixed(selectedSymbol.includes("JPY") ? 2 : 4)}
+
+              <div className="flex flex-col min-w-0">
+                <span className="text-[10px] text-gray-500">Free Margin</span>
+                {accountSummary ? (
+                  <span className="font-mono text-white text-xs truncate">
+                    ${accountSummary.freeMargin.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </span>
                 ) : (
                   <Skeleton className="h-4 w-16" />
                 )}
               </div>
-            </div>
 
-            {/* Account metrics - responsive grid with real-time data */}
-            <div className="w-full">
-              <span className="text-xs text-gray-400 mb-1 block">Account</span>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-neutral-800 p-2 rounded-md">
-                <div className="flex flex-col">
-                  <span className="text-[10px] text-gray-500">Balance</span>
-                  {accountSummary ? (
-                    <span className="font-mono text-white text-xs truncate">
-                      ${accountSummary.balance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </span>
-                  ) : (
-                    <Skeleton className="h-4 w-16" />
-                  )}
-                </div>
-
-                <div className="flex flex-col">
-                  <span className="text-[10px] text-gray-500">Equity</span>
-                  {accountSummary ? (
-                    <span className={`font-mono text-xs truncate ${accountSummary.floatingPnl >= 0 ? 'text-success-500' : 'text-danger-500'}`}>
-                      ${accountSummary.equity.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </span>
-                  ) : (
-                    <Skeleton className="h-4 w-16" />
-                  )}
-                </div>
-
-                <div className="flex flex-col">
-                  <span className="text-[10px] text-gray-500">Free Margin</span>
-                  {accountSummary ? (
-                    <span className="font-mono text-white text-xs truncate">
-                      ${accountSummary.freeMargin.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </span>
-                  ) : (
-                    <Skeleton className="h-4 w-16" />
-                  )}
-                </div>
-
-                <div className="flex flex-col">
-                  <span className="text-[10px] text-gray-500">Used Margin</span>
-                  {accountSummary ? (
-                    <span className="font-mono text-yellow-400 text-xs truncate">
-                      ${accountSummary.usedMargin.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </span>
-                  ) : (
-                    <Skeleton className="h-4 w-16" />
-                  )}
-                </div>
+              <div className="flex flex-col min-w-0">
+                <span className="text-[10px] text-gray-500">Used Margin</span>
+                {accountSummary ? (
+                  <span className="font-mono text-yellow-400 text-xs truncate">
+                    ${accountSummary.usedMargin.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
+                ) : (
+                  <Skeleton className="h-4 w-16" />
+                )}
               </div>
             </div>
           </div>
@@ -796,7 +1296,7 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
       </div>
 
       {/* Main tabbed content area */}
-      <div className="flex-1 min-h-0 overflow-auto">
+      <div ref={tabScrollRef} className="flex-1 min-h-0 overflow-auto overscroll-contain">
         <Tabs
           value={activeTab}
           onValueChange={setActiveTab}
@@ -1176,17 +1676,17 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
                 <div>
                   {/* Progressive table view - always table, columns appear as space allows */}
                   <div className="overflow-x-auto">
-                    <Table className="w-full">
+                    <Table ref={positionsTableRef} className="w-full [&_th]:!p-2 [&_td]:!p-2">
                       <TableHeader>
                         <TableRow>
                           <TableHead className="whitespace-nowrap">Symbol</TableHead>
                           <TableHead className="whitespace-nowrap">Type</TableHead>
                           {positionColumns.size && <TableHead className="whitespace-nowrap">Size</TableHead>}
-                          {positionColumns.time && <TableHead className="whitespace-nowrap min-w-[120px]">Open Time</TableHead>}
+                          {positionColumns.time && <TableHead className="whitespace-nowrap">Open Time</TableHead>}
                           {positionColumns.prices && (
                             <>
-                              <TableHead className="whitespace-nowrap min-w-[80px]">Open Price</TableHead>
-                              <TableHead className="whitespace-nowrap min-w-[70px]">Current</TableHead>
+                              <TableHead className="whitespace-nowrap">Open Price</TableHead>
+                              <TableHead className="whitespace-nowrap">Current</TableHead>
                             </>
                           )}
                           {positionColumns.tpSl && (
@@ -1195,7 +1695,7 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
                               <TableHead className="whitespace-nowrap">SL</TableHead>
                             </>
                           )}
-                          <TableHead className="whitespace-nowrap min-w-[90px]">P/L</TableHead>
+                          <TableHead className="whitespace-nowrap">P/L</TableHead>
                           {positionColumns.actions && <TableHead className="text-right whitespace-nowrap">Action</TableHead>}
                           {hasHiddenPositionColumns && <TableHead className="w-8"></TableHead>}
                         </TableRow>
@@ -1227,7 +1727,7 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
                           }
 
                           return (
-                            <>
+                            <Fragment key={trade.id}>
                               <TableRow
                                 key={trade.id}
                                 className={`${trade.type === 'BUY' ? 'bg-success-50/5' : 'bg-danger-50/5'} ${hasHiddenPositionColumns ? 'cursor-pointer hover:bg-neutral-850' : ''}`}
@@ -1241,7 +1741,7 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
                                   <TableCell className="whitespace-nowrap">{trade.lots} Lot{trade.lots > 1 ? 's' : ''}</TableCell>
                                 )}
                                 {positionColumns.time && (
-                                  <TableCell className="whitespace-nowrap text-sm text-gray-400">
+                                  <TableCell className="text-sm text-gray-400">
                                     {(() => {
                                       try {
                                         const timestamp = trade.openedAt || trade.createdAt || trade.executedAt;
@@ -1387,7 +1887,7 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
                                   </TableCell>
                                 </TableRow>
                               )}
-                            </>
+                            </Fragment>
                           );
                         })}
                       </TableBody>
@@ -1415,14 +1915,14 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
                 <div>
                   {/* Progressive table view - always table, columns appear as space allows */}
                   <div className="overflow-x-auto">
-                    <Table className="w-full">
+                    <Table ref={ordersTableRef} className="w-full [&_th]:!p-2 [&_td]:!p-2">
                       <TableHeader>
                         <TableRow>
                           <TableHead className="whitespace-nowrap">Symbol</TableHead>
                           <TableHead className="whitespace-nowrap">Type</TableHead>
                           <TableHead className="whitespace-nowrap">Order</TableHead>
                           {orderColumns.size && <TableHead className="whitespace-nowrap">Size</TableHead>}
-                          {orderColumns.prices && <TableHead className="whitespace-nowrap min-w-[80px]">Price</TableHead>}
+                          {orderColumns.prices && <TableHead className="whitespace-nowrap">Price</TableHead>}
                           {orderColumns.tpSl && (
                             <>
                               <TableHead className="whitespace-nowrap">TP</TableHead>
@@ -1456,7 +1956,7 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
                           const orderTypeDisplay = getOrderTypeLabel(orderTypeLabel);
 
                           return (
-                            <>
+                            <Fragment key={order.id}>
                               <TableRow
                                 key={order.id}
                                 className={`${order.type === "BUY" ? "bg-success-50/5" : "bg-danger-50/5"} ${hasHiddenOrderColumns ? 'cursor-pointer hover:bg-neutral-850' : ''}`}
@@ -1576,7 +2076,7 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
                                   </TableCell>
                                 </TableRow>
                               )}
-                            </>
+                            </Fragment>
                           );
                         })}
                       </TableBody>

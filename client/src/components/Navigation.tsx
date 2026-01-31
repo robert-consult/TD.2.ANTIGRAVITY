@@ -8,19 +8,19 @@ interface NavigationProps {
 
 export function MobileNavigation({ activeTab, setActiveTab }: NavigationProps) {
   return (
-    <div className="bg-neutral-850 border-b border-gray-800 shrink-0">
-      <div className="flex overflow-x-auto">
+    <div className="bg-neutral-850 border-t border-gray-800 shrink-0 pb-[env(safe-area-inset-bottom)]">
+      <div className="grid grid-cols-6">
         <button
-          className={`flex-1 min-w-[60px] py-3 text-center text-xs font-medium text-gray-400 border-b-2 ${
+          className={`flex flex-col items-center justify-center gap-1 py-2 text-[11px] font-medium text-gray-400 border-t-2 ${
             activeTab === "quotes"
-              ? "border-primary-500 text-primary-500"
+              ? "border-primary text-primary"
               : "border-transparent"
           }`}
           onClick={() => setActiveTab("quotes")}
         >
           <svg
             xmlns="http://www.w3.org/2000/svg"
-            className="mb-1 block mx-auto h-4 w-4"
+            className="h-4 w-4"
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
@@ -38,16 +38,16 @@ export function MobileNavigation({ activeTab, setActiveTab }: NavigationProps) {
           Quotes
         </button>
         <button
-          className={`flex-1 min-w-[60px] py-3 text-center text-xs font-medium text-gray-400 border-b-2 ${
+          className={`flex flex-col items-center justify-center gap-1 py-2 text-[11px] font-medium text-gray-400 border-t-2 ${
             activeTab === "chart"
-              ? "border-primary-500 text-primary-500"
+              ? "border-primary text-primary"
               : "border-transparent"
           }`}
           onClick={() => setActiveTab("chart")}
         >
           <svg
             xmlns="http://www.w3.org/2000/svg"
-            className="mb-1 block mx-auto h-4 w-4"
+            className="h-4 w-4"
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
@@ -63,16 +63,16 @@ export function MobileNavigation({ activeTab, setActiveTab }: NavigationProps) {
           Chart
         </button>
         <button
-          className={`flex-1 min-w-[60px] py-3 text-center text-xs font-medium text-gray-400 border-b-2 ${
+          className={`flex flex-col items-center justify-center gap-1 py-2 text-[11px] font-medium text-gray-400 border-t-2 ${
             activeTab === "trade"
-              ? "border-primary-500 text-primary-500"
+              ? "border-primary text-primary"
               : "border-transparent"
           }`}
           onClick={() => setActiveTab("trade")}
         >
           <svg
             xmlns="http://www.w3.org/2000/svg"
-            className="mb-1 block mx-auto h-4 w-4"
+            className="h-4 w-4"
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
@@ -88,16 +88,16 @@ export function MobileNavigation({ activeTab, setActiveTab }: NavigationProps) {
           Trade
         </button>
         <button
-          className={`flex-1 min-w-[60px] py-3 text-center text-xs font-medium text-gray-400 border-b-2 ${
+          className={`flex flex-col items-center justify-center gap-1 py-2 text-[11px] font-medium text-gray-400 border-t-2 ${
             activeTab === "history"
-              ? "border-primary-500 text-primary-500"
+              ? "border-primary text-primary"
               : "border-transparent"
           }`}
           onClick={() => setActiveTab("history")}
         >
           <svg
             xmlns="http://www.w3.org/2000/svg"
-            className="mb-1 block mx-auto h-4 w-4"
+            className="h-4 w-4"
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
@@ -111,25 +111,25 @@ export function MobileNavigation({ activeTab, setActiveTab }: NavigationProps) {
           History
         </button>
         <button
-          className={`flex-1 min-w-[60px] py-3 text-center text-xs font-medium text-gray-400 border-b-2 ${
+          className={`flex flex-col items-center justify-center gap-1 py-2 text-[11px] font-medium text-gray-400 border-t-2 ${
             activeTab === "leaderboard"
-              ? "border-primary-500 text-primary-500"
+              ? "border-primary text-primary"
               : "border-transparent"
           }`}
           onClick={() => setActiveTab("leaderboard")}
         >
-          <Trophy className="mb-1 block mx-auto h-4 w-4" />
+          <Trophy className="h-4 w-4" />
           Leaders
         </button>
         <button
-          className={`flex-1 min-w-[60px] py-3 text-center text-xs font-medium text-gray-400 border-b-2 ${
+          className={`flex flex-col items-center justify-center gap-1 py-2 text-[11px] font-medium text-gray-400 border-t-2 ${
             activeTab === "account"
-              ? "border-primary-500 text-primary-500"
+              ? "border-primary text-primary"
               : "border-transparent"
           }`}
           onClick={() => setActiveTab("account")}
         >
-          <User className="mb-1 block mx-auto h-4 w-4" />
+          <User className="h-4 w-4" />
           Account
         </button>
       </div>
@@ -153,7 +153,7 @@ export function SideNavigation({ activeTab, setActiveTab }: NavigationProps) {
             <svg
               xmlns="http://www.w3.org/2000/svg"
               className={`mr-3 h-5 w-5 ${
-                activeTab === "quotes" ? "text-primary-400" : "text-gray-400"
+                activeTab === "quotes" ? "text-primary" : "text-gray-400"
               }`}
               viewBox="0 0 24 24"
               fill="none"
@@ -180,7 +180,7 @@ export function SideNavigation({ activeTab, setActiveTab }: NavigationProps) {
             <svg
               xmlns="http://www.w3.org/2000/svg"
               className={`mr-3 h-5 w-5 ${
-                activeTab === "chart" ? "text-primary-400" : "text-gray-400"
+                activeTab === "chart" ? "text-primary" : "text-gray-400"
               }`}
               viewBox="0 0 24 24"
               fill="none"
@@ -206,7 +206,7 @@ export function SideNavigation({ activeTab, setActiveTab }: NavigationProps) {
             <svg
               xmlns="http://www.w3.org/2000/svg"
               className={`mr-3 h-5 w-5 ${
-                activeTab === "trade" ? "text-primary-400" : "text-gray-400"
+                activeTab === "trade" ? "text-primary" : "text-gray-400"
               }`}
               viewBox="0 0 24 24"
               fill="none"
@@ -231,7 +231,7 @@ export function SideNavigation({ activeTab, setActiveTab }: NavigationProps) {
             <svg
               xmlns="http://www.w3.org/2000/svg"
               className={`mr-3 h-5 w-5 ${
-                activeTab === "history" ? "text-primary-400" : "text-gray-400"
+                activeTab === "history" ? "text-primary" : "text-gray-400"
               }`}
               viewBox="0 0 24 24"
               fill="none"
@@ -256,7 +256,7 @@ export function SideNavigation({ activeTab, setActiveTab }: NavigationProps) {
           >
             <Trophy
               className={`mr-3 h-5 w-5 ${
-                activeTab === "leaderboard" ? "text-primary-400" : "text-gray-400"
+                activeTab === "leaderboard" ? "text-primary" : "text-gray-400"
               }`}
             />
             Leaderboard
@@ -269,7 +269,7 @@ export function SideNavigation({ activeTab, setActiveTab }: NavigationProps) {
           >
             <User
               className={`mr-3 h-5 w-5 ${
-                activeTab === "account" ? "text-primary-400" : "text-gray-400"
+                activeTab === "account" ? "text-primary" : "text-gray-400"
               }`}
             />
             Account

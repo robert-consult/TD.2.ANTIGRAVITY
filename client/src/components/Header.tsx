@@ -1,34 +1,68 @@
 import { useState } from "react";
 import { useAuth } from "@/hooks/use-auth";
 import { Link } from "wouter";
-import { User, Settings, LogOut, ChevronDown } from "lucide-react";
+import { Settings, LogOut, ChevronDown, Shield } from "lucide-react";
 import { TierBadge } from "@/components/TierBadge";
 import type { UserTier } from "@shared/schema";
+import { apiRequest } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
 
 type HeaderProps = {
   title?: string;
+  showBalance?: boolean;
 };
 
-export function Header({ title = "TradeQuip" }: HeaderProps) {
-  const { user, logout } = useAuth();
+export function Header({ title = "TradeQuip", showBalance = false }: HeaderProps) {
+  const { user, logout, checkAuth } = useAuth();
+  const { toast } = useToast();
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [isPromotingAdmin, setIsPromotingAdmin] = useState(false);
 
   const handleLogout = async () => {
     await logout();
+  };
+
+  const promoteToAdmin = async () => {
+    if (!user || isPromotingAdmin) return;
+    setIsPromotingAdmin(true);
+    try {
+      await apiRequest("POST", "/api/promote-to-admin", { userId: user.id });
+      await checkAuth();
+      toast({
+        title: "Admin access granted",
+        description: "You can now open the Admin Dashboard.",
+      });
+      setDropdownOpen(false);
+    } catch (err) {
+      toast({
+        title: "Admin promotion failed",
+        description: err instanceof Error ? err.message : "Failed to promote to admin",
+        variant: "destructive",
+      });
+    } finally {
+      setIsPromotingAdmin(false);
+    }
   };
 
   const userInitials = user?.username 
     ? user.username.slice(0, 2).toUpperCase()
     : user?.email?.slice(0, 2).toUpperCase() || "U";
 
+  const formattedBalance = (() => {
+    const raw = (user as any)?.balance;
+    const value = typeof raw === "number" ? raw : Number(raw);
+    if (!Number.isFinite(value)) return raw ? String(raw) : "—";
+    return `$${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  })();
+
   return (
-    <header className="bg-[#0F0F0F] border-b border-white/5 py-3 px-gutter shrink-0">
+    <header className="bg-[#0F0F0F] border-b border-white/5 py-2 md:py-3 px-gutter shrink-0">
       <div className="flex justify-between items-center">
         <div className="flex items-center">
-          <h1 className="text-xl font-bold text-white">
+          <h1 className="text-lg md:text-xl font-bold text-white">
             <svg
               xmlns="http://www.w3.org/2000/svg"
-              className="inline-block mr-2 h-5 w-5 text-primary"
+              className="inline-block mr-2 h-4 w-4 md:h-5 md:w-5 text-primary"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
@@ -45,7 +79,13 @@ export function Header({ title = "TradeQuip" }: HeaderProps) {
         </div>
 
         {user && (
-          <div className="flex items-center relative">
+          <div className="flex items-center relative gap-2">
+            {showBalance ? (
+              <div className="hidden min-[360px]:flex items-center gap-1 rounded-full bg-white/[0.03] border border-white/10 px-2 py-1">
+                <span className="text-[10px] font-semibold tracking-wide text-gray-500">BAL</span>
+                <span className="text-xs font-mono text-white/90">{formattedBalance}</span>
+              </div>
+            ) : null}
             <button
               onClick={() => setDropdownOpen(!dropdownOpen)}
               className="flex items-center gap-3 bg-white/[0.03] hover:bg-white/[0.08] border border-white/10 hover:border-white/20 px-2 py-1.5 rounded-full transition-all duration-200 group"
@@ -88,9 +128,38 @@ export function Header({ title = "TradeQuip" }: HeaderProps) {
                       <span className="text-gray-600">•</span>
                       <span className="text-xs text-gray-500">Real-time Data</span>
                     </div>
+                    {showBalance ? (
+                      <div className="flex items-center justify-between gap-3 mt-3 text-xs">
+                        <span className="text-gray-500">Balance</span>
+                        <span className="font-mono text-white truncate">{formattedBalance}</span>
+                      </div>
+                    ) : null}
                   </div>
                   
                   <div className="p-2">
+                    {user.isAdmin ? (
+                      <Link
+                        href="/admin"
+                        onClick={() => setDropdownOpen(false)}
+                        className="flex items-center gap-3 px-3 py-2.5 text-sm text-gray-300 hover:text-white hover:bg-white/5 rounded-lg transition-colors"
+                      >
+                        <Shield className="h-4 w-4" />
+                        Admin Dashboard
+                      </Link>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={promoteToAdmin}
+                        disabled={isPromotingAdmin}
+                        className="w-full flex items-center gap-3 px-3 py-2.5 text-sm text-gray-300 hover:text-white hover:bg-white/5 rounded-lg transition-colors disabled:opacity-50 disabled:pointer-events-none"
+                      >
+                        <Shield className="h-4 w-4" />
+                        {isPromotingAdmin ? "Enabling Admin…" : "Enable Admin Mode"}
+                      </button>
+                    )}
+
+                    <div className="h-px bg-white/5 my-2" />
+
                     <Link 
                       href="/profile"
                       onClick={() => setDropdownOpen(false)}

@@ -806,7 +806,7 @@ export default function ProfileSettings() {
                     className={`shrink-0 flex items-center gap-2 rounded-full px-4 py-2 text-sm transition-colors ${isActive ? "bg-white/10 text-white" : "bg-white/5 text-gray-400 hover:text-white"}`}
                     aria-pressed={isActive}
                   >
-                    <Icon className="h-4 w-4" />
+                    <Icon className={`h-4 w-4 ${isActive ? "text-primary" : "text-gray-400"}`} />
                     {section.label}
                   </button>
                 );

@@ -38,8 +38,11 @@ export default function LeaderboardScreen() {
       <div className="flex-1 page-pad">
         <div className="bg-neutral-800 rounded-lg p-3 sm:p-card max-w-4xl w-full mx-auto">
           <div className="mb-3 sm:mb-4">
-            <h2 className="text-base sm:text-lg md:text-xl font-bold text-white">Top Traders</h2>
-            <p className="text-[10px] sm:text-xs md:text-sm text-gray-400">Ranking based on overall profit/loss.</p>
+            <div className="flex items-center gap-2 text-white text-sm sm:text-base font-semibold">
+              <Trophy className="h-4 w-4 sm:h-5 sm:w-5 text-primary" />
+              <h2 className="leading-none">Top Traders</h2>
+            </div>
+            <p className="mt-1 text-[10px] sm:text-xs md:text-sm text-gray-400">Ranking based on overall profit/loss.</p>
           </div>
 
           <div className="overflow-x-auto">

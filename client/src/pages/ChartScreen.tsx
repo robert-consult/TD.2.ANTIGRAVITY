@@ -9,6 +9,7 @@ import { apiRequest } from "@/lib/queryClient";
 import { getTradeErrorToast } from "@/lib/tradeErrorMessages";
 import { useLiveUpdates } from "@/live/LiveUpdatesProvider";
 import { useLotSettings } from "@/hooks/use-lot-settings";
+import { X } from "lucide-react";
 
 // Declare TradingView type for TypeScript
 declare global {
@@ -176,6 +177,7 @@ export default function ChartScreen({ selectedSymbol }: ChartScreenProps) {
   }, [lotDropdownMax]);
 
   // Draggable floater state
+  const [showQuoteFloater, setShowQuoteFloater] = useState(true);
   const [floaterPosition, setFloaterPosition] = useState({ x: 16, y: 16 });
   const [isDragging, setIsDragging] = useState(false);
   const dragOffset = useRef({ x: 0, y: 0 });
@@ -556,7 +558,7 @@ export default function ChartScreen({ selectedSymbol }: ChartScreenProps) {
         ) : null}
 
         {/* Chart overlays - Draggable bid/ask/spread floater */}
-        {hasQuote && currentQuote && (
+        {showQuoteFloater && hasQuote && currentQuote && (
           <div
             ref={floaterRef}
             onMouseDown={handleFloaterMouseDown}
@@ -569,6 +571,19 @@ export default function ChartScreen({ selectedSymbol }: ChartScreenProps) {
               top: floaterPosition.y,
             }}
           >
+            <button
+              type="button"
+              aria-label="Hide quote floater"
+              className="absolute right-1.5 top-1.5 inline-flex h-6 w-6 items-center justify-center rounded-md text-gray-300 transition-colors hover:bg-white/10 hover:text-white focus:outline-none focus:ring-2 focus:ring-cyan-400/60"
+              onClick={() => {
+                setShowQuoteFloater(false);
+                setIsDragging(false);
+              }}
+              onMouseDown={(e) => e.stopPropagation()}
+              onTouchStart={(e) => e.stopPropagation()}
+            >
+              <X className="h-4 w-4" />
+            </button>
             <div className="grid grid-cols-[auto_minmax(0,1fr)] gap-[clamp(0.25rem,0.8vw,0.5rem)]">
               <span className="text-gray-400">Bid:</span>
               <span className="font-mono text-danger-500 font-medium text-right">

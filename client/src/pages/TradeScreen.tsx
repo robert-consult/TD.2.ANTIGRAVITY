@@ -88,6 +88,7 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
   const headerMeasureRafRef = useRef<number | null>(null);
   const headerLastScrollTopRef = useRef(0);
   const headerForceExpandRef = useRef(false);
+  const headerLockedCollapsedRef = useRef(false);
 
   // Container width detection for responsive table (ResizeObserver-based, not pixel breakpoints)
   const positionsContainerRef = useRef<HTMLDivElement>(null);
@@ -288,6 +289,13 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
     return () => mql.removeListener(update);
   }, []);
 
+  const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
+  const smoothstep = (edge0: number, edge1: number, x: number) => {
+    const denom = Math.max(1e-6, edge1 - edge0);
+    const t = clamp01((x - edge0) / denom);
+    return t * t * (3 - 2 * t);
+  };
+
   const applyTradeHeaderCollapse = (scrollTop: number) => {
     const shell = headerShellRef.current;
     const expandedEl = headerExpandedRef.current;
@@ -295,6 +303,7 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
     if (!shell || !expandedEl || !compactEl) return;
 
     if (!collapseHeaderOnMobile) {
+      headerLockedCollapsedRef.current = false;
       shell.style.height = "";
       expandedEl.style.opacity = "";
       expandedEl.style.transform = "";
@@ -309,54 +318,57 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
     const { expanded, compact, distance } = headerHeightsRef.current;
     if (!expanded || !compact) return;
 
-    const raw = scrollTop / Math.max(1, distance);
-    let progress = Math.max(0, Math.min(1, raw));
-
     const prevScrollTop = headerLastScrollTopRef.current;
     headerLastScrollTopRef.current = scrollTop;
 
     const prevAppliedRaw = headerAppliedRef.current.progress;
     const prevApplied = prevAppliedRaw >= 0 ? prevAppliedRaw : 0;
 
+    let progress = 0;
+
     if (headerForceExpandRef.current) {
       headerForceExpandRef.current = false;
+      headerLockedCollapsedRef.current = false;
       progress = 0;
+    } else if (headerLockedCollapsedRef.current) {
+      progress = 1;
     } else {
+      const raw = scrollTop / Math.max(1, distance);
+      progress = clamp01(raw);
+
       // If collapsing the header makes the container non-scrollable, browsers can clamp `scrollTop`
       // back to 0. Don't interpret that as "user scrolled to top" or we can get an oscillation.
       const scrollEl = tabScrollRef.current;
       if (scrollEl) {
         const overflowNow = scrollEl.scrollHeight - scrollEl.clientHeight;
         if (scrollTop === 0 && prevScrollTop > 0 && overflowNow <= 0 && prevApplied > 0) {
-          progress = prevApplied;
+          // If collapsing makes the tab body fully fit, browsers can clamp `scrollTop` back to 0.
+          // Treat this as "fully collapsed" so tall screens don't need multiple scroll gestures.
+          progress = 1;
         }
       }
     }
 
-    // Snap with hysteresis at extremes to avoid boundary flicker.
-    const prevProgress = headerAppliedRef.current.progress;
-    const snapTopIn = 0.02;
-    const snapTopOut = 0.08;
-    const snapBottomIn = 0.98;
-    const snapBottomOut = 0.92;
+    if (!headerLockedCollapsedRef.current) {
+      // Snap with hysteresis at extremes to avoid boundary flicker.
+      const prevProgress = headerAppliedRef.current.progress;
+      const snapTopIn = 0.02;
+      const snapTopOut = 0.08;
+      const snapBottomIn = 0.94;
+      const snapBottomOut = 0.86;
 
-    if (prevProgress === 0 && progress < snapTopOut) {
-      progress = 0;
-    } else if (prevProgress === 1 && progress > snapBottomOut) {
-      progress = 1;
-    } else {
-      if (progress < snapTopIn) progress = 0;
-      if (progress > snapBottomIn) progress = 1;
-    }
+      if (prevProgress === 0 && progress < snapTopOut) {
+        progress = 0;
+      } else if (prevProgress === 1 && progress > snapBottomOut) {
+        progress = 1;
+      } else {
+        if (progress < snapTopIn) progress = 0;
+        if (progress > snapBottomIn) progress = 1;
+      }
 
-    // Avoid "scrollTop clamped to 0" when collapsing would make the container non-scrollable.
-    // Cap collapse so the container retains at least a 1px overflow (prevents scroll position reset).
-    const scrollEl = tabScrollRef.current;
-    const collapseRange = expanded - compact;
-    if (scrollEl && collapseRange > 0 && progress > prevApplied) {
-      const overflowNow = scrollEl.scrollHeight - scrollEl.clientHeight;
-      const maxProgress = Math.min(1, Math.max(0, prevApplied + (overflowNow - 1) / collapseRange));
-      if (progress > maxProgress) progress = maxProgress;
+      if (progress >= 1) {
+        headerLockedCollapsedRef.current = true;
+      }
     }
 
     const height = Math.round(expanded - progress * (expanded - compact));
@@ -365,13 +377,16 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
     headerAppliedRef.current = { progress, height };
 
     shell.style.height = `${height}px`;
-    expandedEl.style.opacity = `${1 - progress}`;
-    expandedEl.style.transform = `translateY(${Math.round(-progress * 8)}px) translateZ(0)`;
-    expandedEl.style.pointerEvents = progress > 0.85 ? "none" : "auto";
+    const expandedOpacity = 1 - smoothstep(0.25, 0.7, progress);
+    const compactOpacity = smoothstep(0.55, 0.9, progress);
 
-    compactEl.style.opacity = `${progress}`;
-    compactEl.style.transform = `translateY(${Math.round((1 - progress) * 8)}px) translateZ(0)`;
-    compactEl.style.pointerEvents = progress < 0.15 ? "none" : "auto";
+    expandedEl.style.opacity = `${expandedOpacity}`;
+    expandedEl.style.transform = `translateY(${Math.round(-progress * 8)}px) translateZ(0)`;
+    expandedEl.style.pointerEvents = expandedOpacity < 0.05 ? "none" : "auto";
+
+    compactEl.style.opacity = `${compactOpacity}`;
+    compactEl.style.transform = `translateY(${Math.round((1 - compactOpacity) * 8)}px) translateZ(0)`;
+    compactEl.style.pointerEvents = compactOpacity < 0.35 ? "none" : "auto";
   };
 
   const measureTradeHeaderHeights = () => {
@@ -384,7 +399,8 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
     const compact = Math.max(0, Math.round(compactEl.scrollHeight));
     if (!expanded || !compact) return;
 
-    const distance = Math.max(96, expanded - compact);
+    const collapseRange = Math.max(0, expanded - compact);
+    const distance = Math.max(72, Math.round(collapseRange * 0.5));
     const prev = headerHeightsRef.current;
     const heightsChanged = prev.expanded !== expanded || prev.compact !== compact || prev.distance !== distance;
     if (heightsChanged) {
@@ -412,6 +428,8 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
     const compactEl = headerCompactRef.current;
     if (!shell || !expandedEl || !compactEl) return;
 
+    // Measure synchronously so the first user scroll doesn't "fight" an unmeasured header.
+    measureTradeHeaderHeights();
     scheduleMeasureTradeHeaderHeights();
   }, [
     collapseHeaderOnMobile,
@@ -1245,17 +1263,17 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
                   </span>
                 ) : null}
               </div>
-              <div className="mt-0.5 text-[11px] text-gray-400 font-mono overflow-x-auto whitespace-nowrap" style={{ scrollbarWidth: "none" }}>
-                {accountSummary ? (
-                  <>
-                    Bal: ${accountSummary.balance.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}{" "}
-                    | Eq: ${accountSummary.equity.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}{" "}
-                    | FM: ${accountSummary.freeMargin.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}{" "}
-                    | UM: ${accountSummary.usedMargin.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                  </>
-                ) : (
-                  <>
-                    Account:{" "}
+	              <div className="mt-0.5 text-[11px] text-gray-400 font-mono overflow-x-auto whitespace-nowrap" style={{ scrollbarWidth: "none" }}>
+	                {accountSummary ? (
+	                  <>
+	                    Eq: ${accountSummary.equity.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}{" "}
+	                    | FM: ${accountSummary.freeMargin.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}{" "}
+	                    | UM: ${accountSummary.usedMargin.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}{" "}
+	                    | Bal: ${accountSummary.balance.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+	                  </>
+	                ) : (
+	                  <>
+	                    Account:{" "}
                     {isLoadingAccountSummary ? "Loading…" : "—"}
                   </>
                 )}
@@ -1415,12 +1433,12 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
 	          onValueChange={setActiveTab}
 	          className="w-full min-h-full flex flex-col"
 	        >
-	          <TabsList className="w-full grid grid-cols-3 rounded-none bg-neutral-800 shrink-0">
-            <TabsTrigger
-              value="place-order"
-              aria-label="Place Order"
-              className="data-[state=active]:bg-neutral-700 rounded-none text-cq-sm px-1"
-            >
+		          <TabsList className="w-full grid grid-cols-3 rounded-none bg-neutral-800 shrink-0 sticky top-0 z-20 border-b border-gray-800">
+	            <TabsTrigger
+	              value="place-order"
+	              aria-label="Place Order"
+	              className="data-[state=active]:bg-neutral-700 rounded-none text-cq-sm px-1"
+	            >
               <span className="cq-hide-narrow">Place Order</span>
               <span className="cq-show-narrow-only">Order</span>
             </TabsTrigger>

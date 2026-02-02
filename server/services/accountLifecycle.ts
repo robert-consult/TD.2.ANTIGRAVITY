@@ -643,7 +643,7 @@ export async function runInactivitySweep(args: {
     `
       WITH
       sess AS (SELECT user_id, MAX(last_active_at) AS last_seen_at FROM user_sessions GROUP BY user_id),
-      logins AS (SELECT user_id, MAX(created_at) AS last_login_at FROM user_login_history WHERE success=1 GROUP BY user_id),
+      logins AS (SELECT user_id, MAX(created_at) AS last_login_at FROM user_login_history WHERE success IS TRUE GROUP BY user_id),
       trades_last AS (SELECT user_id, MAX(COALESCE(closed_at, opened_at)) AS last_trade_at FROM trades GROUP BY user_id)
       SELECT
         u.id AS "userId",
@@ -658,7 +658,7 @@ export async function runInactivitySweep(args: {
       LEFT JOIN sess ON sess.user_id=u.id
       LEFT JOIN logins ON logins.user_id=u.id
       LEFT JOIN trades_last ON trades_last.user_id=u.id
-      WHERE u.is_admin=0 AND u.is_deleted=0
+      WHERE u.is_admin IS FALSE AND u.is_deleted IS FALSE
     `
   );
 

@@ -1,7 +1,7 @@
 import { storage } from "../server/storage";
 import { db } from "@db";
 import { globalSettings, systemConfig, tradeAudit, trades, userVerification } from "@shared/schema";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 
 async function seed() {
   console.log("Seeding database...");
@@ -16,7 +16,7 @@ async function seed() {
       // (CI can run on weekends; market windows should not hard-block the test suite.)
       await db
         .update(globalSettings)
-        .set({ allowWeekendTrading: true, marketOpenTime: "00:00", marketCloseTime: "23:59" })
+        .set({ allowWeekendTrading: true, marketOpenTime: "00:00", marketCloseTime: "23:59", minHoldSec: 0 })
         .where(eq(globalSettings.id, 1));
     }
 
@@ -115,9 +115,35 @@ async function seed() {
     }
 
     if (process.env.SEED_RESET_TRADES === "1") {
+      if (process.env.NODE_ENV === "production") {
+        throw new Error("Refusing to reset trades in production (SEED_RESET_TRADES=1).");
+      }
+      if (process.env.SEED_DESTRUCTIVE_OK !== "1") {
+        throw new Error(
+          "Refusing destructive seed without SEED_DESTRUCTIVE_OK=1 (SEED_RESET_TRADES=1). " +
+            "This guard prevents accidental data loss on shared databases.",
+        );
+      }
+      const databaseUrl = process.env.DATABASE_URL ?? "";
+      let host: string | null = null;
+      try {
+        host = new URL(databaseUrl).hostname || null;
+      } catch {
+        host = null;
+      }
+      const isLocalHost = host === "localhost" || host === "127.0.0.1" || host === "::1";
+      if (!isLocalHost && process.env.SEED_DESTRUCTIVE_NONLOCAL_OK !== "1") {
+        throw new Error(
+          `Refusing destructive seed on non-local DATABASE_URL host (${host ?? "unparseable"}). ` +
+            "Set SEED_DESTRUCTIVE_NONLOCAL_OK=1 to override.",
+        );
+      }
       console.log("Resetting trades for deterministic E2E...");
-      await db.delete(tradeAudit);
-      await db.delete(trades);
+      await db.transaction(async (tx) => {
+        await tx.execute(sql`select set_config('tradequip.allow_destructive', '1', true)`);
+        await tx.delete(tradeAudit);
+        await tx.delete(trades);
+      });
     }
     
     console.log("Seeding completed successfully");

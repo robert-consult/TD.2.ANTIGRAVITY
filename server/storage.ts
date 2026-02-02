@@ -356,6 +356,19 @@ export const storage = {
     });
   },
 
+  async getTradeHistoryByUserId(userId: number): Promise<Trade[]> {
+    return await db.query.trades.findMany({
+      where: and(
+        eq(trades.userId, userId),
+        or(eq(trades.status, "CLOSED"), eq(trades.status, "CANCELED"))
+      ),
+      orderBy: [desc(trades.closedAt), desc(trades.openedAt)],
+      with: {
+        symbol: true,
+      },
+    });
+  },
+
   async getOpenTradesByUserId(userId: number): Promise<Trade[]> {
     return await db.query.trades.findMany({
       where: and(eq(trades.userId, userId), eq(trades.status, "OPEN")),

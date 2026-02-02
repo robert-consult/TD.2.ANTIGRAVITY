@@ -2,6 +2,23 @@ import path from "node:path";
 
 type TableColumns = Map<string, Set<string>>;
 
+const REQUIRED_TRADE_GUARD_TRIGGERS = [
+  "tradequip_no_delete_trades",
+  "tradequip_no_truncate_trades",
+  "tradequip_no_delete_trade_audit",
+  "tradequip_no_truncate_trade_audit",
+  "tradequip_no_delete_order_intent_audit",
+  "tradequip_no_truncate_order_intent_audit",
+] as const;
+
+const REQUIRED_TRADE_INDEXES = [
+  "trades_user_opened_at_idx",
+  "trades_user_status_opened_at_idx",
+  "trades_symbol_status_opened_at_idx",
+  "trades_user_closed_at_history_idx",
+  "trades_open_opened_at_idx",
+] as const;
+
 function diff(expected: Set<string>, actual: Set<string>): { missing: string[]; extra: string[] } {
   const missing: string[] = [];
   const extra: string[] = [];
@@ -105,23 +122,85 @@ async function collectDbColumnsPg(): Promise<TableColumns> {
     out.get(t)!.add(c);
   }
 
-  await dbClient.end();
   return out;
 }
 
+async function verifyTradeGuardrailsPg(): Promise<number> {
+  const { dbClient } = await import("../db");
+  let issues = 0;
+
+  try {
+    const trigRes = await dbClient.query(
+      `
+      SELECT tgname, tgenabled
+      FROM pg_trigger
+      WHERE NOT tgisinternal AND tgname = ANY($1::text[])
+      `,
+      [REQUIRED_TRADE_GUARD_TRIGGERS],
+    );
+    const enabledByName = new Map<string, string>();
+    for (const row of trigRes.rows) {
+      enabledByName.set(String(row.tgname), String(row.tgenabled));
+    }
+
+    for (const name of REQUIRED_TRADE_GUARD_TRIGGERS) {
+      const state = enabledByName.get(name);
+      if (!state) {
+        issues += 1;
+        console.error(`[audit] Missing required trade guard trigger: ${name}`);
+        continue;
+      }
+      if (state === "D") {
+        issues += 1;
+        console.error(`[audit] Trade guard trigger is disabled: ${name}`);
+      }
+    }
+
+    const idxRes = await dbClient.query(
+      `
+      SELECT indexname
+      FROM pg_indexes
+      WHERE schemaname='public' AND tablename='trades' AND indexname = ANY($1::text[])
+      `,
+      [REQUIRED_TRADE_INDEXES],
+    );
+    const foundIndexes = new Set(idxRes.rows.map((r: any) => String(r.indexname)));
+    for (const name of REQUIRED_TRADE_INDEXES) {
+      if (foundIndexes.has(name)) continue;
+      issues += 1;
+      console.error(`[audit] Missing required trades index: ${name}`);
+    }
+  } catch (err) {
+    issues += 1;
+    console.error(
+      `[audit] Failed to verify trade guardrails/indexes: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+
+  return issues;
+}
+
 async function main() {
-  const codeColumns = await collectCodeColumnsPg();
-  const dbColumns = await collectDbColumnsPg();
+  const { dbClient } = await import("../db");
 
-  console.log(`[audit] Tables in code schema: ${codeColumns.size}`);
-  console.log(`[audit] Tables in Postgres (public): ${dbColumns.size}`);
-  const issues = audit(codeColumns, dbColumns, "postgres");
+  try {
+    const codeColumns = await collectCodeColumnsPg();
+    const dbColumns = await collectDbColumnsPg();
 
-  if (issues === 0) {
-    console.log("[audit] OK");
-  } else {
-    console.error(`[audit] Found ${issues} issue(s)`);
-    process.exitCode = 1;
+    console.log(`[audit] Tables in code schema: ${codeColumns.size}`);
+    console.log(`[audit] Tables in Postgres (public): ${dbColumns.size}`);
+    const schemaIssues = audit(codeColumns, dbColumns, "postgres");
+    const hardeningIssues = await verifyTradeGuardrailsPg();
+    const issues = schemaIssues + hardeningIssues;
+
+    if (issues === 0) {
+      console.log("[audit] OK");
+    } else {
+      console.error(`[audit] Found ${issues} issue(s)`);
+      process.exitCode = 1;
+    }
+  } finally {
+    await dbClient.end();
   }
 }
 

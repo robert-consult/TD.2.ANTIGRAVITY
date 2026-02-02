@@ -3329,6 +3329,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.get("/api/trades/history", ensureAuth, async (req: Request, res: Response) => {
+
+    try {
+      const trades = await storage.getTradeHistoryByUserId(req.session.userId);
+      res.json(trades);
+    } catch (error) {
+      console.error("Get trade history error:", error);
+      res.status(500).json({ message: "Failed to fetch trade history" });
+    }
+  });
+
   app.get("/api/trades/open", ensureAuth, async (req: Request, res: Response) => {
 
     try {

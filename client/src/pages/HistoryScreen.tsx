@@ -240,7 +240,7 @@ export default function HistoryScreen() {
   const traderCloseReasons = listTraderFacingCloseReasons();
 
   const { data: trades = [], isLoading } = useQuery<any[]>({
-    queryKey: ["/api/trades"],
+    queryKey: ["/api/trades/history"],
   });
 
   const { data: symbols = [] } = useQuery<any[]>({

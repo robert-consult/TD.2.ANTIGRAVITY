@@ -64,6 +64,20 @@
       "when": 1769802540000,
       "tag": "0008_visual_lot_settings",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1769942010518,
+      "tag": "0009_trades_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1769986227414,
+      "tag": "0010_trade_delete_guards",
+      "breakpoints": true
     }
   ]
 }

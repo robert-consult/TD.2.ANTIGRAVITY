@@ -4,7 +4,7 @@
  */
 
 import { db } from "@db";
-import { quotes } from "@shared/schema";
+import { globalSettings, quotes } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import { isMarketOpenForSymbol } from "./marketHours";
 import { getQuote, getValkeyQuoteRows } from "./quoteHub";
@@ -12,6 +12,16 @@ import { getFromRollingBuffer, getCachedPrevClose } from "./valkey";
 
 // Quote freshness: 5 minutes default to accommodate 1Forge refresh intervals
 const STALE_AFTER_MS = Number(process.env.QUOTE_STALE_AFTER_MS ?? 300_000);
+const MARKET_HOURS_CACHE_TTL_MS = Number(process.env.MARKET_HOURS_CACHE_TTL_MS ?? 15_000);
+
+type MarketHoursConfig = {
+  allowWeekendTrading: boolean;
+  openMins: number | null;
+  closeMins: number | null;
+};
+
+let cachedMarketHours: { fetchedAtMs: number; value: MarketHoursConfig } | null = null;
+let marketHoursInflight: Promise<MarketHoursConfig | null> | null = null;
 
 function normalizeSymbol(s: string): string {
   return s.replace("/", "").trim().toUpperCase();
@@ -21,6 +31,73 @@ function toNum(v: any): number | null {
   if (v === null || v === undefined) return null;
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
+}
+
+function parseTimeToMinutes(raw: string): number | null {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(String(raw ?? "").trim());
+  if (!m) return null;
+  const hh = Number(m[1]);
+  const mm = Number(m[2]);
+  if (!Number.isFinite(hh) || !Number.isFinite(mm)) return null;
+  if (hh < 0 || hh > 23) return null;
+  if (mm < 0 || mm > 59) return null;
+  return hh * 60 + mm;
+}
+
+function isMarketOpenByConfig(cfg: MarketHoursConfig, at: Date): boolean {
+  const dayOfWeek = at.getUTCDay(); // 0=Sun ... 6=Sat
+  if (!cfg.allowWeekendTrading && (dayOfWeek === 0 || dayOfWeek === 6)) return false;
+
+  const openMins = cfg.openMins;
+  const closeMins = cfg.closeMins;
+  if (openMins === null || closeMins === null) return false;
+
+  const currentMins = at.getUTCHours() * 60 + at.getUTCMinutes();
+
+  // Overnight market: close < open means next day
+  if (closeMins < openMins) {
+    return currentMins >= openMins || currentMins < closeMins;
+  }
+
+  return currentMins >= openMins && currentMins < closeMins;
+}
+
+async function getMarketHoursConfig(): Promise<MarketHoursConfig | null> {
+  const now = Date.now();
+  if (cachedMarketHours && now - cachedMarketHours.fetchedAtMs < MARKET_HOURS_CACHE_TTL_MS) {
+    return cachedMarketHours.value;
+  }
+
+  if (marketHoursInflight) return marketHoursInflight;
+
+  marketHoursInflight = (async () => {
+    try {
+      const row = await db.query.globalSettings.findFirst({ where: eq(globalSettings.id, 1) });
+      if (!row) return cachedMarketHours?.value ?? null;
+
+      const marketOpenTime = String(row.marketOpenTime ?? "00:00");
+      const marketCloseTime = String(row.marketCloseTime ?? "23:59");
+      const value: MarketHoursConfig = {
+        allowWeekendTrading: Boolean(row.allowWeekendTrading),
+        openMins: parseTimeToMinutes(marketOpenTime),
+        closeMins: parseTimeToMinutes(marketCloseTime),
+      };
+      cachedMarketHours = { fetchedAtMs: Date.now(), value };
+      return value;
+    } catch {
+      return cachedMarketHours?.value ?? null;
+    } finally {
+      marketHoursInflight = null;
+    }
+  })();
+
+  return marketHoursInflight;
+}
+
+async function isMarketOpenForExecution(symbol: string, at: Date): Promise<boolean> {
+  const cfg = await getMarketHoursConfig();
+  if (cfg) return isMarketOpenByConfig(cfg, at);
+  return isMarketOpenForSymbol(symbol, at);
 }
 
 export type ExecutionQuote = {
@@ -132,7 +209,7 @@ export async function getExecutionQuote(symbol: string, side: "BUY" | "SELL", ac
     lastApiMs === null ||
     (now - lastApiMs) > STALE_AFTER_MS;
 
-  const marketOpen = isMarketOpenForSymbol(sym, new Date());
+  const marketOpen = await isMarketOpenForExecution(sym, new Date());
 
   // Institutional: BUY opens at ask, closes at bid. SELL opens at bid, closes at ask.
   const execPrice =

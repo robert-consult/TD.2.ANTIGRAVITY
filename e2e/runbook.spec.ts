@@ -195,7 +195,7 @@ test("RUNBOOK: chart provider not fetched until Chart tab is opened", async ({ p
   expect(tvScriptRequests()).toBe(0);
 
   await page.getByRole("button", { name: "Chart" }).first().click();
-  await expect(page.getByText(/Chart:/)).toBeVisible();
+  await expect(page.getByText("Symbol chart")).toBeVisible();
 
   await expect
     .poll(() => tvScriptRequests(), { timeout: 30_000 })
@@ -212,7 +212,7 @@ test("RUNBOOK: no fast polling + trade flow works under Slow 4G", async ({ page 
   audit.reset();
 
   await page.getByRole("button", { name: "Trade" }).first().click();
-  await expect(page.getByText("Order Details")).toBeVisible();
+  await expect(page.locator('[data-testid="trade-tab-scroll"]')).toBeVisible();
 
   const buyButton = page.locator("button.btn-buy");
   await expect(buyButton).toBeEnabled({ timeout: 60_000 });

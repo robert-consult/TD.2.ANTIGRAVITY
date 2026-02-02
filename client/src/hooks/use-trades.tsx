@@ -31,6 +31,7 @@ export function useTrades() {
       const currentUserId = user?.id;
       if (!messageUserId || !currentUserId || messageUserId === currentUserId) {
         queryClient.invalidateQueries({ queryKey: ["/api/trades"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/trades/history"] });
         queryClient.invalidateQueries({ queryKey: ["/api/trades/open"] });
         queryClient.invalidateQueries({ queryKey: ["/api/trades/pending"] });
       }
@@ -145,10 +146,25 @@ export function useTrades() {
           }
           return next;
         });
+
+        queryClient.setQueryData(["/api/trades/history"], (old: any[] | undefined) => {
+          if (!Array.isArray(old)) return [{ ...mergedTrade }];
+          let found = false;
+          const next = old.map((trade) => {
+            if (trade?.id !== closedTrade.id) return trade;
+            found = true;
+            return { ...trade, ...mergedTrade, symbol: trade.symbol ?? mergedTrade.symbol };
+          });
+          if (!found) {
+            return [{ ...mergedTrade }, ...next];
+          }
+          return next;
+        });
       }
 
       // Mark queries stale so active views refetch and background tabs stay ready.
       queryClient.invalidateQueries({ queryKey: ["/api/trades"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/trades/history"] });
       queryClient.invalidateQueries({ queryKey: ["/api/trades/open"] });
       queryClient.invalidateQueries({ queryKey: ["/api/trades/pending"] });
       if (!isTradeWsConnected) {

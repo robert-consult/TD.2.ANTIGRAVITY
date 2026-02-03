@@ -73,6 +73,7 @@ interface GlobalSettings {
   maxTradesPerUser: number;
   maxTradesPerInstrument: number;
   maxConcurrentLots: number;
+  minPriceDistancePips: number;
   marketOpenTime: string;
   marketCloseTime: string;
   allowWeekendTrading: boolean;
@@ -2020,6 +2021,7 @@ export default function AdminDashboard() {
     maxTradesPerUser: 10,
     maxTradesPerInstrument: 3,
     maxConcurrentLots: 50,
+    minPriceDistancePips: 20,
     marketOpenTime: "09:00",
     marketCloseTime: "17:00",
     allowWeekendTrading: false,
@@ -2055,9 +2057,13 @@ export default function AdminDashboard() {
   // Sync global settings to local state when data is fetched (only when not editing)
   useEffect(() => {
     if (globalSettingsData && !riskParamsChanged) {
-      setRiskParams(globalSettingsData);
+      setRiskParams((prev) => {
+        const raw = Number((globalSettingsData as any)?.minPriceDistancePips);
+        const minPriceDistancePips = Number.isFinite(raw) ? Math.trunc(raw) : (prev.minPriceDistancePips ?? 20);
+        return { ...prev, ...globalSettingsData, minPriceDistancePips };
+      });
     }
-  }, [globalSettingsData]);
+  }, [globalSettingsData, riskParamsChanged]);
 
   const mutation = useMutation({
     mutationFn: (payload: UserSettings) =>
@@ -2674,6 +2680,7 @@ export default function AdminDashboard() {
       maxTradesPerUser: riskParams.maxTradesPerUser,
       maxTradesPerInstrument: riskParams.maxTradesPerInstrument,
       maxConcurrentLots: riskParams.maxConcurrentLots,
+      minPriceDistancePips: riskParams.minPriceDistancePips,
       marketOpenTime: riskParams.marketOpenTime,
       marketCloseTime: riskParams.marketCloseTime,
       allowWeekendTrading: riskParams.allowWeekendTrading,
@@ -4142,6 +4149,18 @@ export default function AdminDashboard() {
                           className="bg-neutral-600"
                         />
                         <p className="text-xs text-gray-400 mt-1">Maximum total lots allowed across all open trades per user</p>
+                      </div>
+                      <div>
+                        <Label>Minimum Price Distance (pips)</Label>
+                        <Input
+                          type="number"
+                          min={1}
+                          step={1}
+                          value={riskParams.minPriceDistancePips}
+                          onChange={(e) => handleRiskParamChange('minPriceDistancePips', Number(e.target.value))}
+                          className="bg-neutral-600"
+                        />
+                        <p className="text-xs text-gray-400 mt-1">Minimum distance enforced for pending orders and TP/SL (open + edits)</p>
                       </div>
                     </div>
                   </CardContent>

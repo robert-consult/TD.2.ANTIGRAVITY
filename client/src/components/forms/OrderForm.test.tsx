@@ -2,6 +2,14 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { OrderForm } from './OrderForm';
 import { describe, it, expect, vi } from 'vitest';
 
+vi.mock('@/hooks/use-lot-settings', () => ({
+    useLotSettings: () => ({
+        lotDropdownOptions: [1, 2, 3, 4, 5, 10, 25, 50],
+        lotPresetCards: [1, 5, 10, 25, 50],
+        minPriceDistancePips: 20,
+    }),
+}));
+
 describe('OrderForm', () => {
     const defaultProps = {
         selectedSymbol: 'EURUSD',
@@ -17,11 +25,8 @@ describe('OrderForm', () => {
 
     it('validates lots input', async () => {
         render(<OrderForm {...defaultProps} />);
-        const lotsInput = screen.getByText('1'); // Select trigger shows default value
-        // Note: Testing Select component interaction might require user-event or specific selectors
-        // tailored to the component library implementation.
-        // For simplicity, we check if the default value is present.
-        expect(lotsInput).toBeInTheDocument();
+        const lotsSelect = screen.getByRole('combobox'); // Select trigger shows default value
+        expect(lotsSelect).toHaveTextContent('1');
     });
 
     it('calculates auto-stop/limit prices', async () => {
@@ -32,9 +37,9 @@ describe('OrderForm', () => {
         fireEvent.click(limitBtn);
 
         // Check if limit price input is populated
-        // Logic: Buy Limit = Price - 10 pips (1.1000 - 0.0010 = 1.0990)
+        // Logic: Buy Limit = Price - 20 pips (1.1000 - 0.0020 = 1.0980)
         const limitInput = screen.getByLabelText('Limit Price') as HTMLInputElement;
-        expect(limitInput.value).toBe('1.09900');
+        expect(limitInput.value).toBe('1.09800');
     });
 
     it('submits market order correctly', async () => {

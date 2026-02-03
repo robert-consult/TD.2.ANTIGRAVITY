@@ -1,11 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
-import { apiRequest } from "@/lib/queryClient";
+import { ApiError, apiRequest } from "@/lib/queryClient";
 import { getTradeErrorToast } from "@/lib/tradeErrorMessages";
 import { useAuth } from "./use-auth";
 import { useToast } from "./use-toast";
 import { useLiveUpdates } from "@/live/LiveUpdatesProvider";
 import { recommendedPollIntervalMs } from "@/lib/perfHints";
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export function useTrades() {
   const queryClient = useQueryClient();
@@ -100,35 +102,35 @@ export function useTrades() {
   // Close a trade (server determines close price from authoritative quotes)
   const closeTrade = useMutation({
     mutationFn: async ({ id }: { id: number }) => {
-      const res = await apiRequest("POST", `/api/trades/${id}/close`, {});
-      return res.json();
+      const startedAt = Date.now();
+      let backoffMs = 1000;
+      const maxWaitMs = 15_000;
+
+      while (true) {
+        try {
+          const res = await apiRequest("POST", `/api/trades/${id}/close`, {});
+          return res.json();
+        } catch (err) {
+          if (err instanceof ApiError && err.code === "QUOTE_STALE_CLOSE") {
+            if (Date.now() - startedAt >= maxWaitMs) throw err;
+            await sleep(backoffMs);
+            backoffMs = Math.min(2000, Math.round(backoffMs * 1.5));
+            continue;
+          }
+          throw err;
+        }
+      }
     },
-    onMutate: async ({ id }) => {
-      // Cancel any outgoing refetches so they don't overwrite our optimistic update
-      await queryClient.cancelQueries({ queryKey: ["/api/trades/open"] });
-      
-      // Snapshot the previous value
-      const previousOpenTrades = queryClient.getQueryData(["/api/trades/open"]);
-      
-      // Optimistically remove the trade from open trades immediately
-      queryClient.setQueryData(["/api/trades/open"], (old: any[] | undefined) => {
-        if (!old) return old;
-        return old.filter((trade: any) => trade.id !== id);
-      });
-      
-      return { previousOpenTrades };
-    },
-    onSuccess: (closedTrade: any, _vars, context) => {
+    onSuccess: (closedTrade: any) => {
       toast({
         title: "Trade Closed",
         description: "Your trade was successfully closed",
       });
       // Update cached trade history immediately so History tab reflects the close instantly.
       if (closedTrade?.id) {
-        const previousOpenTrades = Array.isArray(context?.previousOpenTrades)
-          ? context?.previousOpenTrades
-          : [];
-        const previousTrade = previousOpenTrades.find((trade: any) => trade?.id === closedTrade.id);
+        const previousOpenTrades = queryClient.getQueryData(["/api/trades/open"]);
+        const openTradesArr = Array.isArray(previousOpenTrades) ? previousOpenTrades : [];
+        const previousTrade = openTradesArr.find((trade: any) => trade?.id === closedTrade.id);
         const mergedTrade = previousTrade
           ? { ...previousTrade, ...closedTrade, symbol: previousTrade.symbol ?? closedTrade.symbol }
           : closedTrade;
@@ -171,11 +173,7 @@ export function useTrades() {
         queryClient.invalidateQueries({ queryKey: ["/api/account/summary"] });
       }
     },
-    onError: (error: Error, _variables, context) => {
-      // Rollback to the previous value on error
-      if (context?.previousOpenTrades) {
-        queryClient.setQueryData(["/api/trades/open"], context.previousOpenTrades);
-      }
+    onError: (error: Error) => {
       const { title, description } = getTradeErrorToast(error);
       toast({
         title,

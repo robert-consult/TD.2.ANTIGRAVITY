@@ -310,6 +310,7 @@ export const globalSettings = pgTable("global_settings", {
   maxTradesPerUser: integer("max_trades_per_user").notNull().default(10),
   maxTradesPerInstrument: integer("max_trades_per_instrument").notNull().default(3),
   maxConcurrentLots: integer("max_concurrent_lots").notNull().default(50),
+  minPriceDistancePips: integer("min_price_distance_pips").notNull().default(20),
   // Market Hours
   marketOpenTime: text("market_open_time").notNull().default("09:00"),
   marketCloseTime: text("market_close_time").notNull().default("17:00"),

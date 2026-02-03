@@ -14,6 +14,7 @@ import { appendIdentityAudit } from "../services/identityAudit";
 import { buildDecisionContext } from "../policy/buildDecisionContext";
 import { decidePolicy } from "@shared/policyDecision";
 import { loadPolicyConfig } from "../policy/getPolicyConfig";
+import { applyUserBalanceDelta, releaseUserMargin, reserveUserMargin } from "../services/tradeAtomic";
 import { 
   writeTradeAudit, 
   generateCorrelationId, 
@@ -109,7 +110,7 @@ async function auditRejection(params: {
   riskObservedValue: number;
   reasonCode: string;
   note: string;
-}) {
+}, opts?: { db?: any }) {
   try {
     const ctx = getSystemAuditContext(params.correlationId, {
       sessionId: params.sessionId,
@@ -140,7 +141,7 @@ async function auditRejection(params: {
       riskResult: "FAIL",
       reasonCode: params.reasonCode,
       note: params.note,
-    });
+    }, opts);
   } catch (e) {
     console.error("Error writing rejection audit:", e);
   }
@@ -171,7 +172,7 @@ async function auditFill(params: {
   userAgent?: string | null;
   latencyMs?: number;
   note?: string;
-}) {
+}, opts?: { db?: any }) {
   try {
     const ctx = getSystemAuditContext(params.correlationId, {
       sessionId: params.sessionId,
@@ -212,7 +213,7 @@ async function auditFill(params: {
       quoteSource: params.quoteSource ?? DEFAULT_QUOTE_SOURCE,
       riskResult: "PASS",
       note: params.note,
-    });
+    }, opts);
   } catch (e) {
     console.error("Error writing fill audit:", e);
   }
@@ -244,7 +245,7 @@ async function auditClose(params: {
   ip?: string | null;
   userAgent?: string | null;
   profit: number;
-}) {
+}, opts?: { db?: any }) {
   try {
     const ctx = getSystemAuditContext(params.correlationId, {
       sessionId: params.sessionId,
@@ -278,7 +279,7 @@ async function auditClose(params: {
       quoteSource: params.quoteSource ?? DEFAULT_QUOTE_SOURCE,
       reasonCode: params.closeReason,
       note: `closeReason=${params.closeReason}, profit=${params.profit.toFixed(2)}`,
-    });
+    }, opts);
   } catch (e) {
     console.error("Error writing close audit:", e);
   }
@@ -605,21 +606,99 @@ async function processPendingForSymbol(symbol: string, q: Quote) {
       continue;
     }
 
-    // Margin check
-    const freeMargin = Number(u.freeMargin ?? 0);
-    if (freeMargin < neededMargin) {
-      await db.update(trades)
-        .set({ status: "CANCELED", closeReason: "ORDER_REJECTED", closedAt: nowSec })
-        .where(and(eq(trades.id, t.id), eq(trades.status, "PENDING")));
-      await auditRejection({
+    const executionId = generateExecutionId();
+    const positionId = (t as any).positionId || generatePositionId();
+
+    const fillResult = await db.transaction(async (tx) => {
+      const tradeLock = await tx.execute(sql`
+        select id
+        from trades
+        where id = ${t.id} and status = 'PENDING'
+        for update
+      `);
+      if (!tradeLock.rows.length) return { action: "SKIP" as const };
+
+      const userRowRes = await tx.execute(sql`
+        select id, free_margin, leverage
+        from users
+        where id = ${u.id}
+        for update
+      `);
+      const userRow = userRowRes.rows[0] as any;
+      const freeMargin = Number(userRow?.free_margin ?? 0);
+      const leverageNow = Number(userRow?.leverage ?? effectiveLeverage);
+      const neededMarginNow = requiredMargin(symbol, lots, fillPrice, leverageNow);
+
+      const reserve = await reserveUserMargin(tx, { userId: u.id, marginUsd: neededMarginNow });
+      if (!reserve.reserved) {
+        const canceled = await tx.update(trades)
+          .set({ status: "CANCELED", closeReason: "ORDER_REJECTED", closedAt: nowSec, correlationId, orderId })
+          .where(and(eq(trades.id, t.id), eq(trades.status, "PENDING")))
+          .returning({ id: trades.id });
+        if (!canceled.length) return { action: "SKIP" as const };
+
+        await auditRejection({
+          tradeId: t.id,
+          correlationId,
+          orderId,
+          symbol,
+          side,
+          orderType,
+          qtyLots: lots,
+          requestedPrice: requested,
+          quoteBid: ba.bid,
+          quoteAsk: ba.ask,
+          quoteMid: ba.mid,
+          quoteSpread: ba.spread,
+          quoteTs,
+          quoteSource,
+          ...tradeProvenance,
+          riskCheckName: "MARGIN_CHECK",
+          riskLimitValue: neededMarginNow,
+          riskObservedValue: freeMargin,
+          reasonCode: "INSUFFICIENT_MARGIN",
+          note: "Insufficient free margin at execution",
+        }, { db: tx });
+
+        return { action: "CANCELED" as const };
+      }
+
+      const updated = await tx.update(trades)
+        .set({
+          status: "OPEN",
+          executedAt: nowSec,
+          openPrice: fillPrice,
+          correlationId,
+          orderId,
+          positionId,
+          lastExecutionId: executionId,
+          lastActorType: "SYSTEM",
+          lastActorUserId: null,
+          lastActorSessionId: null,
+          lastActorIp: null,
+          lastActorUserAgent: null,
+        })
+        .where(and(eq(trades.id, t.id), eq(trades.status, "PENDING")))
+        .returning({ id: trades.id });
+
+      if (updated.length === 0) {
+        await releaseUserMargin(tx, { userId: u.id, marginUsd: neededMarginNow });
+        return { action: "SKIP" as const };
+      }
+
+      await auditFill({
         tradeId: t.id,
         correlationId,
         orderId,
+        executionId,
+        positionId,
         symbol,
         side,
         orderType,
         qtyLots: lots,
         requestedPrice: requested,
+        triggerPrice,
+        fillPrice,
         quoteBid: ba.bid,
         quoteAsk: ba.ask,
         quoteMid: ba.mid,
@@ -627,61 +706,13 @@ async function processPendingForSymbol(symbol: string, q: Quote) {
         quoteTs,
         quoteSource,
         ...tradeProvenance,
-        riskCheckName: "MARGIN_CHECK",
-        riskLimitValue: neededMargin,
-        riskObservedValue: freeMargin,
-        reasonCode: "INSUFFICIENT_MARGIN",
-        note: "Insufficient free margin at execution",
-      });
-      continue;
-    }
+        note: `orderType=${t.orderType}`,
+      }, { db: tx });
 
-    const executionId = generateExecutionId();
-    const positionId = (t as any).positionId || generatePositionId();
-
-    // Fill the order
-    const updated = await db.update(trades)
-      .set({
-        status: "OPEN",
-        executedAt: nowSec,
-        openPrice: fillPrice,
-        correlationId,
-        orderId,
-        positionId,
-        lastExecutionId: executionId,
-        lastActorType: "SYSTEM",
-        lastActorUserId: null,
-        lastActorSessionId: null,
-        lastActorIp: null,
-        lastActorUserAgent: null,
-      })
-      .where(and(eq(trades.id, t.id), eq(trades.status, "PENDING")))
-      .returning();
-
-    if (updated.length === 0) continue;
-
-    await auditFill({
-      tradeId: t.id,
-      correlationId,
-      orderId,
-      executionId,
-      positionId,
-      symbol,
-      side,
-      orderType,
-      qtyLots: lots,
-      requestedPrice: requested,
-      triggerPrice,
-      fillPrice,
-      quoteBid: ba.bid,
-      quoteAsk: ba.ask,
-      quoteMid: ba.mid,
-      quoteSpread: ba.spread,
-      quoteTs,
-      quoteSource,
-      ...tradeProvenance,
-      note: `orderType=${t.orderType}`,
+      return { action: "FILLED" as const };
     });
+
+    if (fillResult.action !== "FILLED") continue;
 
     await recalcAccount(u.id, { emit: true, reason: "PENDING_ORDER_FILLED" });
     publishLiveEvent({
@@ -755,53 +786,81 @@ async function processStopsForOpenTrades(symbol: string, q: Quote) {
     const executionId = generateExecutionId();
     const closedAt = Math.floor(Date.now() / 1000);
 
-    const closed = await db.update(trades)
-      .set({
-        status: "CLOSED",
-        closePrice: closePx,
-        profit,
-        closeReason: reason,
-        closedAt,
+    const closeResult = await db.transaction(async (tx) => {
+      const tradeLock = await tx.execute(sql`
+        select id
+        from trades
+        where id = ${t.id} and status = 'OPEN'
+        for update
+      `);
+      if (!tradeLock.rows.length) return { action: "SKIP" as const };
+
+      const userRowRes = await tx.execute(sql`
+        select id, leverage
+        from users
+        where id = ${u.id}
+        for update
+      `);
+      const leverageNow = Number((userRowRes.rows[0] as any)?.leverage ?? 5);
+      const marginToRelease = requiredMargin(symbol, lots, closePx, leverageNow);
+
+      const closed = await tx.update(trades)
+        .set({
+          status: "CLOSED",
+          closePrice: closePx,
+          profit,
+          closeReason: reason,
+          closedAt,
+          closeQuoteTs: Math.floor(quoteTs.getTime() / 1000),
+          closeSource: quoteSource,
+          closeBid: ba.bid,
+          closeAsk: ba.ask,
+          closeMid: ba.mid,
+          closeSpread: ba.spread,
+          correlationId,
+          orderId,
+          positionId,
+          lastExecutionId: executionId,
+          lastActorType: "SYSTEM",
+          lastActorUserId: null,
+          lastActorSessionId: null,
+          lastActorIp: null,
+          lastActorUserAgent: null,
+        })
+        .where(and(eq(trades.id, t.id), eq(trades.status, "OPEN")))
+        .returning({ id: trades.id });
+
+      if (closed.length === 0) return { action: "SKIP" as const };
+
+      await applyUserBalanceDelta(tx, { userId: u.id, deltaUsd: profitNum });
+      await releaseUserMargin(tx, { userId: u.id, marginUsd: marginToRelease });
+
+      await auditClose({
+        tradeId: t.id,
         correlationId,
         orderId,
         positionId,
-        lastExecutionId: executionId,
-        lastActorType: "SYSTEM",
-        lastActorUserId: null,
-        lastActorSessionId: null,
-        lastActorIp: null,
-        lastActorUserAgent: null,
-      })
-      .where(and(eq(trades.id, t.id), eq(trades.status, "OPEN")))
-      .returning();
+        executionId,
+        symbol,
+        side,
+        qtyLots: lots,
+        openPrice: openPx,
+        closePrice: closePx,
+        closeReason: reason,
+        quoteBid: ba.bid,
+        quoteAsk: ba.ask,
+        quoteMid: ba.mid,
+        quoteSpread: ba.spread,
+        quoteTs,
+        quoteSource,
+        ...tradeProvenance,
+        profit: profitNum,
+      }, { db: tx });
 
-    if (closed.length === 0) continue;
-
-    // Update balance
-    const newBalance = (Number(u.balance) + Number(profit)).toFixed(2);
-    await db.update(users).set({ balance: newBalance }).where(eq(users.id, u.id));
-
-    await auditClose({
-      tradeId: t.id,
-      correlationId,
-      orderId,
-      positionId,
-      executionId,
-      symbol,
-      side,
-      qtyLots: lots,
-      openPrice: openPx,
-      closePrice: closePx,
-      closeReason: reason,
-      quoteBid: ba.bid,
-      quoteAsk: ba.ask,
-      quoteMid: ba.mid,
-      quoteSpread: ba.spread,
-      quoteTs,
-      quoteSource,
-      ...tradeProvenance,
-      profit: profitNum,
+      return { action: "CLOSED" as const };
     });
+
+    if (closeResult.action !== "CLOSED") continue;
 
     await recalcAccount(u.id, { emit: true, reason: reason ?? "STOP_TAKE_PROFIT" });
     publishLiveEvent({

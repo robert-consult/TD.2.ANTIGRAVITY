@@ -16,12 +16,9 @@ import { useToast } from "@/hooks/use-toast";
 import { useQuotes } from "@/hooks/use-quotes";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronUp, Check } from "lucide-react";
-import { fetchWithIdentity } from "@/lib/fetchWithIdentity";
 import { useTranslation } from "@/i18n";
-
-// Platform rule: minimum TP/SL distance = 20 points
-const MIN_POINTS = 20;
-const AUTO_FIX_PRESETS = [20, 50, 100, 150, 200] as const;
+import { ApiError, apiRequest } from "@/lib/queryClient";
+import { useLotSettings } from "@/hooks/use-lot-settings";
 
 const formatTemplate = (template: string, vars: Record<string, string | number | boolean | null | undefined>) =>
   template.replace(/\{([a-zA-Z0-9_]+)\}/g, (_m, key: string) => {
@@ -47,6 +44,20 @@ export function EditTradeModal({ trade, open, onOpenChange }: EditTradeModalProp
   const queryClient = useQueryClient();
   const { quotes } = useQuotes();
   const { bundle } = useTranslation();
+  const { minPriceDistancePips } = useLotSettings();
+  const minPips = minPriceDistancePips;
+  const autoFixPresets = useMemo(() => {
+    const presets = [minPips, 50, 100, 150, 200];
+    const seen = new Set<number>();
+    const out: number[] = [];
+    for (const p of presets) {
+      if (!Number.isFinite(p) || p <= 0) continue;
+      if (seen.has(p)) continue;
+      seen.add(p);
+      out.push(p);
+    }
+    return out;
+  }, [minPips]);
   const [validationMessages, setValidationMessages] = useState<{ tp?: string; sl?: string }>({});
   const textTemplates = {
     priceLabelOrder: { text: "order price" },
@@ -54,22 +65,22 @@ export function EditTradeModal({ trade, open, onOpenChange }: EditTradeModalProp
     priceLabelOrderShort: { text: "Order" },
     priceLabelCurrentShort: { text: "Current" },
     pricePlaceholder: { text: "{label}: {price}" },
-    tpAboveOrder: { text: "Take Profit must be at least {delta} ({points}) above order price of {price}" },
-    tpAboveCurrent: { text: "Take Profit must be at least {delta} ({points}) above current price of {price}" },
-    tpBelowOrder: { text: "Take Profit must be at least {delta} ({points}) below order price of {price}" },
-    tpBelowCurrent: { text: "Take Profit must be at least {delta} ({points}) below current price of {price}" },
-    slAboveOrder: { text: "Stop Loss must be at least {delta} ({points}) above order price of {price}" },
-    slAboveCurrent: { text: "Stop Loss must be at least {delta} ({points}) above current price of {price}" },
-    slBelowOrder: { text: "Stop Loss must be at least {delta} ({points}) below order price of {price}" },
-    slBelowCurrent: { text: "Stop Loss must be at least {delta} ({points}) below current price of {price}" },
+    tpAboveOrder: { text: "Take Profit must be at least {delta} ({pips} pips) above order price of {price}" },
+    tpAboveCurrent: { text: "Take Profit must be at least {delta} ({pips} pips) above current price of {price}" },
+    tpBelowOrder: { text: "Take Profit must be at least {delta} ({pips} pips) below order price of {price}" },
+    tpBelowCurrent: { text: "Take Profit must be at least {delta} ({pips} pips) below current price of {price}" },
+    slAboveOrder: { text: "Stop Loss must be at least {delta} ({pips} pips) above order price of {price}" },
+    slAboveCurrent: { text: "Stop Loss must be at least {delta} ({pips} pips) above current price of {price}" },
+    slBelowOrder: { text: "Stop Loss must be at least {delta} ({pips} pips) below order price of {price}" },
+    slBelowCurrent: { text: "Stop Loss must be at least {delta} ({pips} pips) below current price of {price}" },
     targetsInvalidOrder: { text: "One or more targets are invalid relative to the order price." },
     targetsInvalidCurrent: { text: "One or more targets are invalid relative to the current price." },
     quickPresetsOrder: { text: "Quick presets: set TP/SL relative to the order price." },
     quickPresetsCurrent: { text: "Quick presets: set TP/SL relative to the current price." },
     presetAppliedTitle: { text: "TP/SL preset applied" },
-    presetAppliedDescOrder: { text: "Set targets to ±{points} points from the order price." },
-    presetAppliedDescCurrent: { text: "Set targets to ±{points} points from the current price." },
-    applyPresetTitle: { text: "Apply TP/SL using the current preset (±{points} points)" },
+    presetAppliedDescOrder: { text: "Set targets to ±{pips} pips from the order price." },
+    presetAppliedDescCurrent: { text: "Set targets to ±{pips} pips from the current price." },
+    applyPresetTitle: { text: "Apply TP/SL using the current preset (±{pips} pips)" },
     invalidTargetsError: { text: "Please correct the Take Profit and Stop Loss values according to the validation messages." },
     targetsUpdated: { text: "Trade targets updated successfully" },
     modalTitle: { text: "Edit Take Profit & Stop Loss" },
@@ -103,7 +114,7 @@ export function EditTradeModal({ trade, open, onOpenChange }: EditTradeModalProp
   const skipNextSaveRef = useRef(false);
   const presetHydratedRef = useRef(false);
   const autoAppliedForTradeRef = useRef<number | null>(null);
-  const [lastPresetPoints, setLastPresetPoints] = useState<number>(MIN_POINTS);
+  const [lastPresetPoints, setLastPresetPoints] = useState<number>(() => minPips);
 
   // Load preset whenever the symbol changes (hydrate from localStorage)
   useEffect(() => {
@@ -111,18 +122,17 @@ export function EditTradeModal({ trade, open, onOpenChange }: EditTradeModalProp
     presetHydratedRef.current = false;
     try {
       const raw = window.localStorage.getItem(presetStorageKey);
-      const n = raw ? Number(raw) : MIN_POINTS;
-      const allowed = [...AUTO_FIX_PRESETS] as unknown as number[];
-      const value = allowed.includes(n) ? n : MIN_POINTS;
+      const n = raw ? Number(raw) : minPips;
+      const value = autoFixPresets.includes(n) ? n : minPips;
       skipNextSaveRef.current = true;
       setLastPresetPoints(value);
       presetHydratedRef.current = true;
     } catch {
       skipNextSaveRef.current = true;
-      setLastPresetPoints(MIN_POINTS);
+      setLastPresetPoints(minPips);
       presetHydratedRef.current = true;
     }
-  }, [presetStorageKey]);
+  }, [autoFixPresets, minPips, presetStorageKey]);
 
   // Save preset whenever it changes (per-symbol)
   useEffect(() => {
@@ -140,9 +150,19 @@ export function EditTradeModal({ trade, open, onOpenChange }: EditTradeModalProp
 
   // Get current market price for this trade's symbol
   const getCurrentPrice = () => {
-    const tradeSymbol = trade.symbol || trade.symbolName || '';
-    const quote = quotes.find(q => q.symbol === tradeSymbol);
-    return quote?.price || trade.openPrice || 0;
+    const tradeSymbol =
+      typeof trade.symbol === "string"
+        ? trade.symbol
+        : typeof trade.symbol === "object" && trade.symbol?.symbol
+          ? trade.symbol.symbol
+          : trade.symbolName || "";
+    const quote = quotes.find((q) => q.symbol === tradeSymbol);
+
+    // Server executions and triggers use BUY=bid and SELL=ask. Match that for validation UX.
+    const side = String(trade.type ?? "").trim().toUpperCase();
+    if (side === "BUY") return quote?.bid ?? quote?.price ?? trade.openPrice ?? 0;
+    if (side === "SELL") return quote?.ask ?? quote?.price ?? trade.openPrice ?? 0;
+    return quote?.price ?? trade.openPrice ?? 0;
   };
 
   // For pending orders, use the correct execution price based on order type
@@ -173,7 +193,7 @@ export function EditTradeModal({ trade, open, onOpenChange }: EditTradeModalProp
 
   const isJpyPair = tradeSymbol.toUpperCase().includes('JPY');
   const pipSize = isJpyPair ? 0.01 : 0.0001; // JPY pairs: 0.01, others: 0.0001 
-  const minDistance = MIN_POINTS * pipSize; // 20 points minimum distance
+  const minDistance = minPips * pipSize; // Minimum distance (pips)
 
   // Safe formatted reference price (guards against undefined/NaN)
   const safeRefPrice = (referencePrice && Number.isFinite(referencePrice))
@@ -195,7 +215,7 @@ export function EditTradeModal({ trade, open, onOpenChange }: EditTradeModalProp
     },
   });
 
-  // Validation function for TP/SL placement (minimum 20 points)
+  // Validation function for TP/SL placement (minimum minPips pips)
   const validateTPSL = (takeProfit: number | null, stopLoss: number | null) => {
     const messages: { tp?: string; sl?: string } = {};
 
@@ -211,8 +231,8 @@ export function EditTradeModal({ trade, open, onOpenChange }: EditTradeModalProp
     const slAboveTemplate = isPending ? textTemplates.slAboveOrder.text : textTemplates.slAboveCurrent.text;
     const slBelowTemplate = isPending ? textTemplates.slBelowOrder.text : textTemplates.slBelowCurrent.text;
     const refPriceStr = referencePrice.toFixed(isJpyPair ? 2 : 4);
-    const deltaText = isJpyPair ? '0.20' : '0.0020';
-    const ptsText = `${MIN_POINTS} points`;
+    const deltaText = minDistance.toFixed(isJpyPair ? 2 : 4);
+    const pips = minPips;
 
     const tp = typeof takeProfit === "number" && Number.isFinite(takeProfit) ? takeProfit : null;
     const sl = typeof stopLoss === "number" && Number.isFinite(stopLoss) ? stopLoss : null;
@@ -222,14 +242,14 @@ export function EditTradeModal({ trade, open, onOpenChange }: EditTradeModalProp
       if (sl !== null && sl > (referencePrice - minDistance)) {
         messages.sl = formatTemplate(slBelowTemplate, {
           delta: deltaText,
-          points: ptsText,
+          pips,
           price: refPriceStr,
         });
       }
       if (tp !== null && tp < (referencePrice + minDistance)) {
         messages.tp = formatTemplate(tpAboveTemplate, {
           delta: deltaText,
-          points: ptsText,
+          pips,
           price: refPriceStr,
         });
       }
@@ -238,14 +258,14 @@ export function EditTradeModal({ trade, open, onOpenChange }: EditTradeModalProp
       if (sl !== null && sl < (referencePrice + minDistance)) {
         messages.sl = formatTemplate(slAboveTemplate, {
           delta: deltaText,
-          points: ptsText,
+          pips,
           price: refPriceStr,
         });
       }
       if (tp !== null && tp > (referencePrice - minDistance)) {
         messages.tp = formatTemplate(tpBelowTemplate, {
           delta: deltaText,
-          points: ptsText,
+          pips,
           price: refPriceStr,
         });
       }
@@ -274,14 +294,14 @@ export function EditTradeModal({ trade, open, onOpenChange }: EditTradeModalProp
     validateTPSL(tp, sl);
   }, [trade?.id, referencePrice, trade?.type]);
 
-  // Auto-fix function to set TP/SL at ±N points from reference price
+  // Auto-fix function to set TP/SL at ±N pips from reference price
   // Always applies the selected preset values (unconditionally overwrites current values)
-  const autoFixTargets = (points: number = MIN_POINTS) => {
+  const autoFixTargets = (points: number = minPips) => {
     if (!referencePrice || referencePrice <= 0) return;
 
     const decimals = isJpyPair ? 2 : 4;
 
-    // Convert "points" → price distance; enforce minimum 20 points
+    // Convert "pips" → price distance; enforce minimum minPips
     const requestedDistance = points * pipSize;
     const distance = Math.max(minDistance, requestedDistance);
 
@@ -312,10 +332,10 @@ export function EditTradeModal({ trade, open, onOpenChange }: EditTradeModalProp
   const quickPresetsText = trade?.status === "PENDING"
     ? textTemplates.quickPresetsOrder.text
     : textTemplates.quickPresetsCurrent.text;
-  const toastPresetApplied = (points: number) => {
+  const toastPresetApplied = (pips: number) => {
     toast({
       title: textTemplates.presetAppliedTitle.text,
-      description: formatTemplate(presetDescTemplate, { points }),
+      description: formatTemplate(presetDescTemplate, { pips }),
     });
   };
 
@@ -346,21 +366,27 @@ export function EditTradeModal({ trade, open, onOpenChange }: EditTradeModalProp
         throw new Error(textTemplates.invalidTargetsError.text);
       }
 
-      const response = await fetchWithIdentity(`/api/trades/${trade.id}/targets`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          takeProfit: data.takeProfit || null,
-          stopLoss: data.stopLoss || null,
-        }),
-        credentials: "include",
-      });
+      const startedAt = Date.now();
+      let backoffMs = 1000;
+      const maxWaitMs = 15_000;
 
-      if (!response.ok) {
-        throw new Error(await response.text());
+      while (true) {
+        try {
+          const response = await apiRequest("PATCH", `/api/trades/${trade.id}/targets`, {
+            takeProfit: data.takeProfit || null,
+            stopLoss: data.stopLoss || null,
+          });
+          return response.json();
+        } catch (err) {
+          if (err instanceof ApiError && err.code === "QUOTE_STALE_MODIFY") {
+            if (Date.now() - startedAt >= maxWaitMs) throw err;
+            await new Promise((resolve) => setTimeout(resolve, backoffMs));
+            backoffMs = Math.min(2000, Math.round(backoffMs * 1.5));
+            continue;
+          }
+          throw err;
+        }
       }
-
-      return response.json();
     },
     onSuccess: () => {
       toast({
@@ -461,7 +487,7 @@ export function EditTradeModal({ trade, open, onOpenChange }: EditTradeModalProp
                     toastPresetApplied(lastPresetPoints);
                   }}
                   title={formatTemplate(textTemplates.applyPresetTitle.text, {
-                    points: lastPresetPoints,
+                    pips: lastPresetPoints,
                   })}
                 >
                   Auto-Fix (±{lastPresetPoints})
@@ -481,7 +507,7 @@ export function EditTradeModal({ trade, open, onOpenChange }: EditTradeModalProp
                   </DropdownMenuTrigger>
 
                   <DropdownMenuContent side="top" align="end" className="w-44">
-                    {AUTO_FIX_PRESETS.map((p) => (
+                    {autoFixPresets.map((p) => (
                       <DropdownMenuItem
                         key={p}
                         onSelect={() => {
@@ -517,7 +543,7 @@ export function EditTradeModal({ trade, open, onOpenChange }: EditTradeModalProp
                     toastPresetApplied(lastPresetPoints);
                   }}
                   title={formatTemplate(textTemplates.applyPresetTitle.text, {
-                    points: lastPresetPoints,
+                    pips: lastPresetPoints,
                   })}
                 >
                   Auto-Fix (±{lastPresetPoints})
@@ -537,7 +563,7 @@ export function EditTradeModal({ trade, open, onOpenChange }: EditTradeModalProp
                   </DropdownMenuTrigger>
 
                   <DropdownMenuContent side="top" align="end" className="w-44">
-                    {AUTO_FIX_PRESETS.map((p) => (
+                    {autoFixPresets.map((p) => (
                       <DropdownMenuItem
                         key={p}
                         onSelect={() => {
@@ -562,13 +588,13 @@ export function EditTradeModal({ trade, open, onOpenChange }: EditTradeModalProp
             <p className="font-medium mb-1 text-gray-900 dark:text-gray-100">Trading Rules:</p>
             {trade.type === 'BUY' ? (
               <>
-                <p className="text-green-600 dark:text-green-400">• Take Profit must be above current price by 20+ points</p>
-                <p className="text-red-600 dark:text-red-400">• Stop Loss must be below current price by 20+ points</p>
+                <p className="text-green-600 dark:text-green-400">• Take Profit must be above current price by {minPips}+ pips</p>
+                <p className="text-red-600 dark:text-red-400">• Stop Loss must be below current price by {minPips}+ pips</p>
               </>
             ) : (
               <>
-                <p className="text-green-600 dark:text-green-400">• Take Profit must be below current price by 20+ points</p>
-                <p className="text-red-600 dark:text-red-400">• Stop Loss must be above current price by 20+ points</p>
+                <p className="text-green-600 dark:text-green-400">• Take Profit must be below current price by {minPips}+ pips</p>
+                <p className="text-red-600 dark:text-red-400">• Stop Loss must be above current price by {minPips}+ pips</p>
               </>
             )}
           </div>

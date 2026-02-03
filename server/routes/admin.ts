@@ -1241,6 +1241,7 @@ export function registerAdminRoutes(app: Express) {
         maxTradesPerUser: parseNum(body.maxTradesPerUser),
         maxTradesPerInstrument: parseNum(body.maxTradesPerInstrument),
         maxConcurrentLots: parseNum(body.maxConcurrentLots),
+        minPriceDistancePips: parseNum(body.minPriceDistancePips),
         marketOpenTime: parseTime(body.marketOpenTime),
         marketCloseTime: parseTime(body.marketCloseTime),
         allowWeekendTrading: parseBool(body.allowWeekendTrading),
@@ -1270,6 +1271,12 @@ export function registerAdminRoutes(app: Express) {
           ABSOLUTE_MAX_LOTS,
           ABSOLUTE_MAX_LOTS
         );
+        const effectiveMinPriceDistancePips = clampInt(
+          next.minPriceDistancePips ?? existing.minPriceDistancePips ?? 20,
+          1,
+          10_000,
+          20
+        );
 
         let presetValues: number[] = [];
         const rawPresets = next.lotPresetCards ?? existing.lotPresetCards;
@@ -1294,6 +1301,7 @@ export function registerAdminRoutes(app: Express) {
             maxTradesPerUser: next.maxTradesPerUser ?? existing.maxTradesPerUser,
             maxTradesPerInstrument: next.maxTradesPerInstrument ?? existing.maxTradesPerInstrument,
             maxConcurrentLots: next.maxConcurrentLots ?? existing.maxConcurrentLots,
+            minPriceDistancePips: effectiveMinPriceDistancePips,
             marketOpenTime: next.marketOpenTime ?? existing.marketOpenTime,
             marketCloseTime: next.marketCloseTime ?? existing.marketCloseTime,
             allowWeekendTrading: next.allowWeekendTrading ?? existing.allowWeekendTrading,
@@ -1311,6 +1319,7 @@ export function registerAdminRoutes(app: Express) {
           .where(eq(globalSettings.id, 1));
       } else {
         const effectiveLotDropdownMax = clampInt(next.lotDropdownMax ?? ABSOLUTE_MAX_LOTS, 1, ABSOLUTE_MAX_LOTS, ABSOLUTE_MAX_LOTS);
+        const effectiveMinPriceDistancePips = clampInt(next.minPriceDistancePips ?? 20, 1, 10_000, 20);
 
         let presetValues: number[] = [];
         if (typeof next.lotPresetCards === "string") {
@@ -1332,6 +1341,7 @@ export function registerAdminRoutes(app: Express) {
           maxTradesPerUser: next.maxTradesPerUser ?? 10,
           maxTradesPerInstrument: next.maxTradesPerInstrument ?? 3,
           maxConcurrentLots: next.maxConcurrentLots ?? 50,
+          minPriceDistancePips: effectiveMinPriceDistancePips,
           marketOpenTime: next.marketOpenTime ?? "09:00",
           marketCloseTime: next.marketCloseTime ?? "17:00",
           allowWeekendTrading: next.allowWeekendTrading ?? false,

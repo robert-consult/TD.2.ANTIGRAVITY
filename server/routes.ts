@@ -10,7 +10,7 @@ import { loginSchema, insertTradeSchema, tradeAudit, trades, globalSettings, use
 import crypto from "crypto";
 import bcrypt from "bcryptjs";
 import { appendIdentityAudit } from "./services/identityAudit";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { db, dbClient } from "@db";
 import { isPostgres } from "@db/config";
 import session from "express-session";
@@ -45,6 +45,7 @@ import { requirePolicy } from "./middleware/requirePolicy";
 import { recalcAccount } from "./recalcAccount";
 import { requiredMargin } from "./lib/margin";
 import { getExecutionQuote } from "./services/quoteService";
+import { applyUserBalanceDelta, releaseUserMargin, reserveUserMargin } from "./services/tradeAtomic";
 import { realizedPnlUsd } from "./lib/realizedPnl";
 import { buildAuditContext, type AuditContext } from "./lib/auditContext";
 import { writeOrderIntentAudit, writeTradeAudit, generateCorrelationId, generateOrderId, generateExecutionId, generatePositionId, calculateSpreadPips, calculateSlippagePips } from "./lib/auditWriter";
@@ -67,6 +68,7 @@ import { ensureMarketDailyCloseTable } from "./utils/marketDailyClose";
 import { getI18nConfig } from "./i18n/config";
 import { i18nRouter } from "./routes/i18n";
 import { adminI18nRouter } from "./routes/adminI18n";
+import { getGlobalSettingsCached, getMinPriceDistancePips, sanitizeMinPriceDistancePips } from "./services/globalSettings";
 import { botGuard, persistBotAssessmentForUser } from "./security/botGuard";
 import { jurisdictionSessionGuard } from "./middleware/jurisdictionSessionGuard";
 import { withGriftClient } from "./grift/griftDb";
@@ -146,6 +148,10 @@ function requireEnv(name: string): string {
 // Create session store with Postgres persistence
 const SESSION_COOKIE_NAME = "connect.sid";
 const SESSION_SECRET = requireEnv("SESSION_SECRET");
+
+// Prometheus counters (process-local; scraped via /metrics).
+let metricTradeCloseRejectedQuoteStaleTotal = 0;
+let metricTradeTargetsRejectedQuoteStaleTotal = 0;
 
 declare module "express-session" {
   interface SessionData {
@@ -391,10 +397,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const [settings] = await db.select({
         lotPresetCards: globalSettings.lotPresetCards,
         lotDropdownMax: globalSettings.lotDropdownMax,
+        minPriceDistancePips: globalSettings.minPriceDistancePips,
         updatedAt: globalSettings.updatedAt,
       }).from(globalSettings).where(eq(globalSettings.id, 1)).limit(1);
 
       const lotDropdownMax = clampInt(settings?.lotDropdownMax, 1, ABSOLUTE_MAX_LOTS, ABSOLUTE_MAX_LOTS);
+      const minPriceDistancePips = sanitizeMinPriceDistancePips(settings?.minPriceDistancePips);
 
       const presetsParsed = parsePresetCards(settings?.lotPresetCards, lotDropdownMax);
       const lotPresetCardsArray =
@@ -409,6 +417,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         lotPresetCardsArray,
         lotDropdownMax,
         lotDropdownOptions,
+        minPriceDistancePips,
         absoluteMaxLots: ABSOLUTE_MAX_LOTS,
         updatedAt: typeof settings?.updatedAt === "number" ? settings.updatedAt : null,
       });
@@ -2865,10 +2874,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const positionSize = tradeLots * CONTRACT_SIZE;
 
         // Enforce global maxPositionSize limit
-        const globalSettingsForPosition = await db.query.globalSettings.findFirst({
-          where: eq(globalSettings.id, 1),
-        });
-        const maxPositionSize = Number(globalSettingsForPosition?.maxPositionSize ?? 5000000);
+        const gs = await getGlobalSettingsCached();
+        const maxPositionSize = Number(gs?.maxPositionSize ?? 5000000);
+        const minPriceDistancePips = sanitizeMinPriceDistancePips(gs?.minPriceDistancePips);
         if (positionSize > maxPositionSize) {
           // AUDIT: Write DECISION REJECT for position size exceeded
           try {
@@ -2947,14 +2955,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
           return res.status(400).json({ message: "Stop orders require a stopPrice" });
         }
 
-        // MT5-style 10-pip placement validation for Limit/Stop orders
+        // MT5-style placement validation for Limit/Stop orders
         if (isPendingOrder) {
           const pip = symbolConfig.symbol.includes("JPY") ? 0.01 : 0.0001;
-          const minDist = 10 * pip;
+          const minDist = minPriceDistancePips * pip;
           const bid = quote.bid !== undefined ? parseFloat(String(quote.bid)) : entryPrice;
           const ask = quote.ask !== undefined ? parseFloat(String(quote.ask)) : entryPrice;
-          // Floating point tolerance to allow exactly 10 pips
-          const tolerance = pip * 0.01;
 
           if (isLimitOrder) {
             const reqPrice = parseFloat(String(limitPrice));
@@ -2962,15 +2968,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
             const minSellLimit = bid + minDist;
             // Use precision-aware comparison for limit orders
             if (data.type === "BUY" && priceGreaterThan(reqPrice, maxBuyLimit, symbolConfig.symbol)) {
-              await writeDecisionReject("BUY_LIMIT_TOO_CLOSE", { minDistPips: 10, ask }, { requestedPrice: reqPrice });
+              await writeDecisionReject("BUY_LIMIT_TOO_CLOSE", { minDistPips: minPriceDistancePips, ask }, { requestedPrice: reqPrice });
               return res.status(400).json({
-                message: `BUY LIMIT must be at least 10 pips below current ask (${ask.toFixed(5)}). Maximum: ${maxBuyLimit.toFixed(5)}`
+                message: `BUY LIMIT must be at least ${minPriceDistancePips} pips below current ask (${ask.toFixed(5)}). Maximum: ${maxBuyLimit.toFixed(5)}`
               });
             }
             if (data.type === "SELL" && priceLessThan(reqPrice, minSellLimit, symbolConfig.symbol)) {
-              await writeDecisionReject("SELL_LIMIT_TOO_CLOSE", { minDistPips: 10, bid }, { requestedPrice: reqPrice });
+              await writeDecisionReject("SELL_LIMIT_TOO_CLOSE", { minDistPips: minPriceDistancePips, bid }, { requestedPrice: reqPrice });
               return res.status(400).json({
-                message: `SELL LIMIT must be at least 10 pips above current bid (${bid.toFixed(5)}). Minimum: ${minSellLimit.toFixed(5)}`
+                message: `SELL LIMIT must be at least ${minPriceDistancePips} pips above current bid (${bid.toFixed(5)}). Minimum: ${minSellLimit.toFixed(5)}`
               });
             }
           }
@@ -2981,15 +2987,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
             const maxSellStop = bid - minDist;
             // Use precision-aware comparison for stop orders
             if (data.type === "BUY" && priceLessThan(reqPrice, minBuyStop, symbolConfig.symbol)) {
-              await writeDecisionReject("BUY_STOP_TOO_CLOSE", { minDistPips: 10, ask }, { requestedPrice: reqPrice });
+              await writeDecisionReject("BUY_STOP_TOO_CLOSE", { minDistPips: minPriceDistancePips, ask }, { requestedPrice: reqPrice });
               return res.status(400).json({
-                message: `BUY STOP must be at least 10 pips above current ask (${ask.toFixed(5)}). Minimum: ${minBuyStop.toFixed(5)}`
+                message: `BUY STOP must be at least ${minPriceDistancePips} pips above current ask (${ask.toFixed(5)}). Minimum: ${minBuyStop.toFixed(5)}`
               });
             }
             if (data.type === "SELL" && priceGreaterThan(reqPrice, maxSellStop, symbolConfig.symbol)) {
-              await writeDecisionReject("SELL_STOP_TOO_CLOSE", { minDistPips: 10, bid }, { requestedPrice: reqPrice });
+              await writeDecisionReject("SELL_STOP_TOO_CLOSE", { minDistPips: minPriceDistancePips, bid }, { requestedPrice: reqPrice });
               return res.status(400).json({
-                message: `SELL STOP must be at least 10 pips below current bid (${bid.toFixed(5)}). Maximum: ${maxSellStop.toFixed(5)}`
+                message: `SELL STOP must be at least ${minPriceDistancePips} pips below current bid (${bid.toFixed(5)}). Maximum: ${maxSellStop.toFixed(5)}`
               });
             }
           }
@@ -3003,26 +3009,56 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const maxTpSl = intendedEntry - minDist; // Maximum for SL (BUY) or TP (SELL)
 
           if (data.type === "BUY") {
-            // BUY TP must be >= entry + 10 pips (using tick-based comparison)
+            // BUY TP must be >= entry + minPriceDistancePips
             if (tp !== null && priceLessThan(tp, minTpSl, symbolConfig.symbol)) {
-              await writeDecisionReject("BUY_TP_TOO_CLOSE", { minDistPips: 10, intendedEntry }, { tp });
-              return res.status(400).json({ message: `BUY TP must be at least 10 pips above entry. Minimum: ${minTpSl.toFixed(5)}` });
+              await writeDecisionReject("BUY_TP_TOO_CLOSE", { minDistPips: minPriceDistancePips, intendedEntry }, { tp });
+              return res.status(400).json({ message: `BUY TP must be at least ${minPriceDistancePips} pips above entry. Minimum: ${minTpSl.toFixed(5)}` });
             }
-            // BUY SL must be <= entry - 10 pips (using tick-based comparison)
+            // BUY SL must be <= entry - minPriceDistancePips
             if (sl !== null && priceGreaterThan(sl, maxTpSl, symbolConfig.symbol)) {
-              await writeDecisionReject("BUY_SL_TOO_CLOSE", { minDistPips: 10, intendedEntry }, { sl });
-              return res.status(400).json({ message: `BUY SL must be at least 10 pips below entry. Maximum: ${maxTpSl.toFixed(5)}` });
+              await writeDecisionReject("BUY_SL_TOO_CLOSE", { minDistPips: minPriceDistancePips, intendedEntry }, { sl });
+              return res.status(400).json({ message: `BUY SL must be at least ${minPriceDistancePips} pips below entry. Maximum: ${maxTpSl.toFixed(5)}` });
             }
           } else {
-            // SELL TP must be <= entry - 10 pips (using tick-based comparison)
+            // SELL TP must be <= entry - minPriceDistancePips
             if (tp !== null && priceGreaterThan(tp, maxTpSl, symbolConfig.symbol)) {
-              await writeDecisionReject("SELL_TP_TOO_CLOSE", { minDistPips: 10, intendedEntry }, { tp });
-              return res.status(400).json({ message: `SELL TP must be at least 10 pips below entry. Maximum: ${maxTpSl.toFixed(5)}` });
+              await writeDecisionReject("SELL_TP_TOO_CLOSE", { minDistPips: minPriceDistancePips, intendedEntry }, { tp });
+              return res.status(400).json({ message: `SELL TP must be at least ${minPriceDistancePips} pips below entry. Maximum: ${maxTpSl.toFixed(5)}` });
             }
-            // SELL SL must be >= entry + 10 pips (using tick-based comparison)
+            // SELL SL must be >= entry + minPriceDistancePips
             if (sl !== null && priceLessThan(sl, minTpSl, symbolConfig.symbol)) {
-              await writeDecisionReject("SELL_SL_TOO_CLOSE", { minDistPips: 10, intendedEntry }, { sl });
-              return res.status(400).json({ message: `SELL SL must be at least 10 pips above entry. Minimum: ${minTpSl.toFixed(5)}` });
+              await writeDecisionReject("SELL_SL_TOO_CLOSE", { minDistPips: minPriceDistancePips, intendedEntry }, { sl });
+              return res.status(400).json({ message: `SELL SL must be at least ${minPriceDistancePips} pips above entry. Minimum: ${minTpSl.toFixed(5)}` });
+            }
+          }
+        }
+        // TP/SL validation for market orders using the same minimum distance rule.
+        // This prevents "instant-hit" targets and keeps behavior consistent with pending orders and edits.
+        if (!isPendingOrder) {
+          const pip = symbolConfig.symbol.includes("JPY") ? 0.01 : 0.0001;
+          const minDist = minPriceDistancePips * pip;
+          const tp = req.body.takeProfit ? parseFloat(String(req.body.takeProfit)) : null;
+          const sl = req.body.stopLoss ? parseFloat(String(req.body.stopLoss)) : null;
+          const minTpSl = entryPrice + minDist;
+          const maxTpSl = entryPrice - minDist;
+
+          if (data.type === "BUY") {
+            if (tp !== null && priceLessThan(tp, minTpSl, symbolConfig.symbol)) {
+              await writeDecisionReject("BUY_TP_TOO_CLOSE", { minDistPips: minPriceDistancePips, entryPrice }, { tp });
+              return res.status(400).json({ message: `BUY TP must be at least ${minPriceDistancePips} pips above entry. Minimum: ${minTpSl.toFixed(5)}` });
+            }
+            if (sl !== null && priceGreaterThan(sl, maxTpSl, symbolConfig.symbol)) {
+              await writeDecisionReject("BUY_SL_TOO_CLOSE", { minDistPips: minPriceDistancePips, entryPrice }, { sl });
+              return res.status(400).json({ message: `BUY SL must be at least ${minPriceDistancePips} pips below entry. Maximum: ${maxTpSl.toFixed(5)}` });
+            }
+          } else {
+            if (tp !== null && priceGreaterThan(tp, maxTpSl, symbolConfig.symbol)) {
+              await writeDecisionReject("SELL_TP_TOO_CLOSE", { minDistPips: minPriceDistancePips, entryPrice }, { tp });
+              return res.status(400).json({ message: `SELL TP must be at least ${minPriceDistancePips} pips below entry. Maximum: ${maxTpSl.toFixed(5)}` });
+            }
+            if (sl !== null && priceLessThan(sl, minTpSl, symbolConfig.symbol)) {
+              await writeDecisionReject("SELL_SL_TOO_CLOSE", { minDistPips: minPriceDistancePips, entryPrice }, { sl });
+              return res.status(400).json({ message: `SELL SL must be at least ${minPriceDistancePips} pips above entry. Minimum: ${minTpSl.toFixed(5)}` });
             }
           }
         }
@@ -3033,9 +3069,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
           : entryPrice;
 
         // Get global settings for leverage cascade
-        const gs = await db.query.globalSettings.findFirst({
-          where: eq(globalSettings.id, 1),
-        });
         const globalDefaultLeverage = Number(gs?.defaultLeverage ?? 50);
 
         // Effective leverage: user override takes precedence over global
@@ -3122,25 +3155,45 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // Create trade with appropriate price and status based on order type
         // Market orders: OPEN immediately at current price
         // Limit/Stop orders: PENDING, waiting for price trigger
-        const trade = await storage.createTrade({
-          ...data,
-          openPrice: isPendingOrder ? priceForMargin : entryPrice, // Pending orders use limit/stop price as intended entry
-          lots: tradeLots,
-          size: positionSize,
-          orderType: orderType ?? "Market",
-          limitPrice: isLimitOrder ? parseFloat(String(limitPrice)) : null,
-          stopPrice: isStopOrder ? parseFloat(String(stopPrice)) : null,
-          status: isPendingOrder ? "PENDING" : "OPEN",
-          correlationId: correlationId,
-          orderId,
-          positionId,
-          lastExecutionId: openExecutionId,
-          lastActorUserId: req.session.userId,
-          lastActorSessionId: auditCtx.sessionId,
-          lastActorIp: auditCtx.ip,
-          lastActorUserAgent: auditCtx.userAgent,
-          lastActorType: auditCtx.actorType,
+        const nowSec = Math.floor(Date.now() / 1000);
+        const trade = await db.transaction(async (tx) => {
+          if (!isPendingOrder) {
+            const reserve = await reserveUserMargin(tx, { userId: req.session.userId, marginUsd: neededMargin });
+            if (!reserve.reserved) return null;
+          }
+
+          const [createdTrade] = await tx
+            .insert(trades)
+            .values({
+              ...data,
+              openPrice: isPendingOrder ? priceForMargin : entryPrice, // Pending orders use limit/stop price as intended entry
+              lots: tradeLots,
+              size: positionSize,
+              orderType: orderType ?? "Market",
+              limitPrice: isLimitOrder ? parseFloat(String(limitPrice)) : null,
+              stopPrice: isStopOrder ? parseFloat(String(stopPrice)) : null,
+              status: isPendingOrder ? "PENDING" : "OPEN",
+              executedAt: isPendingOrder ? undefined : nowSec,
+              correlationId: correlationId,
+              orderId,
+              positionId,
+              lastExecutionId: openExecutionId,
+              lastActorUserId: req.session.userId,
+              lastActorSessionId: auditCtx.sessionId,
+              lastActorIp: auditCtx.ip,
+              lastActorUserAgent: auditCtx.userAgent,
+              lastActorType: auditCtx.actorType,
+            })
+            .returning();
+
+          if (!createdTrade) throw new Error("Failed to create trade");
+          return createdTrade;
         });
+
+        if (!trade) {
+          await writeDecisionReject("INSUFFICIENT_MARGIN_AT_COMMIT", { marginRequired: neededMargin }, {});
+          return res.status(400).json({ message: "Not enough margin available" });
+        }
 
         // AUDIT: Write DECISION event (PASS) after successful trade creation
         const latencyMs = Date.now() - receivedAtMs;
@@ -3434,10 +3487,65 @@ export async function registerRoutes(app: Express): Promise<Server> {
           return res.status(409).json({ message: "Market is closed. Try again when market re-opens." });
         }
 
-        // Warn but allow stale quotes for manual closes (user explicitly requested close)
-        // Log stale close for monitoring but don't block the user
+        // Institutional: Never execute manual closes on stale quotes. Require a fresh server-authoritative quote.
         if (q.isStale) {
-          console.warn(`Manual close with stale quote: trade=${tradeId} symbol=${q.symbol} age=${(Date.now() - q.quoteTs.getTime()) / 60000}min`);
+          const quoteAgeMs = Math.max(0, Date.now() - q.quoteTs.getTime());
+          const closeAuditCtx = buildAuditContext(req);
+          const correlationId = (trade as any).correlationId || generateCorrelationId();
+          const orderId = (trade as any).orderId || generateOrderId();
+          const positionId = (trade as any).positionId || generatePositionId();
+
+          closeAuditCtx.correlationId = correlationId;
+
+          metricTradeCloseRejectedQuoteStaleTotal += 1;
+
+          try {
+            await db.update(trades)
+              .set({
+                correlationId,
+                orderId,
+                positionId,
+                lastActorUserId: req.session.userId,
+                lastActorSessionId: closeAuditCtx.sessionId,
+                lastActorIp: closeAuditCtx.ip,
+                lastActorUserAgent: closeAuditCtx.userAgent,
+                lastActorType: closeAuditCtx.actorType,
+              })
+              .where(eq(trades.id, tradeId));
+
+            await writeTradeAudit({
+              tradeId,
+              eventType: "POSITION_CLOSE_REJECTED",
+              eventCategory: "TRADE",
+              ctx: closeAuditCtx,
+              orderId,
+              positionId,
+              symbol: q.symbol,
+              side: trade.type as string,
+              requestedPrice: q.execPrice,
+              quoteBid: q.bid,
+              quoteAsk: q.ask,
+              quoteMid: q.mid,
+              quoteSpread: q.spread,
+              quoteTs: q.quoteTs,
+              quoteSource: `stale:${q.source}`,
+              riskResult: "REJECT",
+              reasonCode: "QUOTE_STALE",
+              note: `Rejected manual close due to stale quote (ageMs=${quoteAgeMs})`,
+              payload: { quoteAgeMs },
+            });
+          } catch (auditErr) {
+            console.error("Error writing POSITION_CLOSE_REJECTED audit:", auditErr);
+          }
+
+          res.setHeader("Retry-After", "1");
+          return res.status(409).json({
+            code: "QUOTE_STALE_CLOSE",
+            message: `Cannot close trade: quote data for ${q.symbol} is stale. Please wait for fresh market data.`,
+            symbol: q.symbol,
+            quoteTs: Math.floor(q.quoteTs.getTime() / 1000),
+            quoteAgeMs,
+          });
         }
 
         const closePrice = q.execPrice;
@@ -3462,40 +3570,59 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const positionId = (trade as any).positionId || generatePositionId();
         const executionId = generateExecutionId();
 
-        await db.update(trades)
-          .set({
-            correlationId,
-            orderId,
-            positionId,
-            lastExecutionId: executionId,
-            lastActorUserId: req.session.userId,
-            lastActorSessionId: closeAuditCtx.sessionId,
-            lastActorIp: closeAuditCtx.ip,
-            lastActorUserAgent: closeAuditCtx.userAgent,
-            lastActorType: closeAuditCtx.actorType,
-          })
-          .where(eq(trades.id, tradeId));
-
         closeAuditCtx.correlationId = correlationId;
 
-        // Close the trade with audit trail
-        const closedTrade = await storage.closeTrade(
-          tradeId,
-          closePrice,
-          profit.toFixed(2),
-          {
-            closeReason: "MANUAL",
-            closeQuoteTs: q.quoteTs,
-            closeSource: q.source,
-            closeBid: q.bid,
-            closeAsk: q.ask,
-            closeMid: q.mid,
-            closeSpread: q.spread,
-          }
-        );
+        const closeSource = q.isStale ? `stale:${q.source}` : q.source;
+        const closeResult = await db.transaction(async (tx) => {
+          const tradeLock = await tx.execute(sql`
+            select id
+            from trades
+            where id = ${tradeId} and user_id = ${req.session.userId} and status = 'OPEN'
+            for update
+          `);
+          if (!tradeLock.rows.length) return null;
 
-        // AUDIT: Write POSITION_CLOSED event with full provenance
-        try {
+          const userRowRes = await tx.execute(sql`
+            select id, leverage
+            from users
+            where id = ${req.session.userId}
+            for update
+          `);
+          const leverageNow = Number((userRowRes.rows[0] as any)?.leverage ?? 5);
+          const marginToRelease = requiredMargin(q.symbol, lots, closePrice, leverageNow);
+
+          const closedRows = await tx.update(trades)
+            .set({
+              status: "CLOSED",
+              closePrice,
+              profit: profit.toFixed(2),
+              closeReason: "MANUAL",
+              closedAt: Math.floor(Date.now() / 1000),
+              closeQuoteTs: Math.floor(q.quoteTs.getTime() / 1000),
+              closeSource,
+              closeBid: q.bid,
+              closeAsk: q.ask,
+              closeMid: q.mid,
+              closeSpread: q.spread,
+              correlationId,
+              orderId,
+              positionId,
+              lastExecutionId: executionId,
+              lastActorUserId: req.session.userId,
+              lastActorSessionId: closeAuditCtx.sessionId,
+              lastActorIp: closeAuditCtx.ip,
+              lastActorUserAgent: closeAuditCtx.userAgent,
+              lastActorType: closeAuditCtx.actorType,
+            })
+            .where(and(eq(trades.id, tradeId), eq(trades.userId, req.session.userId), eq(trades.status, "OPEN")))
+            .returning();
+
+          const closedTrade = closedRows[0];
+          if (!closedTrade) return null;
+
+          await applyUserBalanceDelta(tx, { userId: req.session.userId, deltaUsd: profit });
+          await releaseUserMargin(tx, { userId: req.session.userId, marginUsd: marginToRelease });
+
           const slippagePoints = 0; // No slippage on manual close
           await writeTradeAudit({
             tradeId,
@@ -3516,7 +3643,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             quoteMid: q.mid,
             quoteSpread: q.spread,
             quoteTs: q.quoteTs,
-            quoteSource: q.source,
+            quoteSource: closeSource,
             spreadPips: calculateSpreadPips(q.symbol, q.spread),
             slippage: slippagePoints,
             slippagePips: 0,
@@ -3525,22 +3652,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
             reasonCode: "MANUAL",
             note: `Manual close at ${closePrice}, P/L: ${profit.toFixed(2)}`,
             payload: { profit: profit.toFixed(2), openPrice, closeReason: "MANUAL" },
-          });
-        } catch (auditErr) {
-          console.error("Error writing POSITION_CLOSED audit:", auditErr);
+          }, { db: tx });
+
+          return closedTrade;
+        });
+
+        if (!closeResult) {
+          return res.status(409).json({ message: "Trade is already closed" });
         }
 
-        // Update account balance with realized P/L and recalculate margin metrics
         try {
-          const user = await storage.getUserById(trade.userId);
-          if (user) {
-            const previousBalance = parseFloat(user.balance);
-            const realizedPnL = parseFloat(closedTrade.profit ?? "0");
-            const newBalance = (previousBalance + realizedPnL).toFixed(2);
-
-            await storage.updateUserBalance(user.id, newBalance);
-            await recalcAccount(user.id, { emit: true, reason: "TRADE_CLOSED" });
-          }
+          await recalcAccount(req.session.userId, { emit: true, reason: "TRADE_CLOSED" });
         } catch (accountError) {
           console.error("Failed to update account after closing trade:", accountError);
         }
@@ -3593,7 +3715,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
         }
 
-        res.json(closedTrade);
+        res.json(closeResult);
       } catch (error) {
         console.error("Close trade error:", error);
         res.status(500).json({ message: "Failed to close trade" });
@@ -3617,6 +3739,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         const tradeId = parseInt(req.params.id);
         const { takeProfit, stopLoss } = req.body;
+        const tpNext =
+          takeProfit === null || takeProfit === undefined || takeProfit === ""
+            ? null
+            : Number(takeProfit);
+        const slNext =
+          stopLoss === null || stopLoss === undefined || stopLoss === ""
+            ? null
+            : Number(stopLoss);
+
+        if (tpNext !== null && !Number.isFinite(tpNext)) {
+          return res.status(400).json({ code: "TAKE_PROFIT_INVALID", message: "Invalid takeProfit value" });
+        }
+        if (slNext !== null && !Number.isFinite(slNext)) {
+          return res.status(400).json({ code: "STOP_LOSS_INVALID", message: "Invalid stopLoss value" });
+        }
 
         const trade = await storage.getTradeById(tradeId);
         if (!trade) {
@@ -3635,7 +3772,168 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const prevTp = trade.takeProfit ? parseFloat(String(trade.takeProfit)) : null;
         const prevSl = trade.stopLoss ? parseFloat(String(trade.stopLoss)) : null;
 
-        const updatedTrade = await storage.updateTradeTargets(tradeId, takeProfit, stopLoss);
+        // Server-side TP/SL validation using authoritative prices.
+        // For PENDING orders, validate relative to intended entry; for OPEN positions, validate relative to the current close-side price (BUY=bid, SELL=ask).
+        let symbol = (trade as any).symbol?.symbol ? String((trade as any).symbol.symbol) : null;
+        if (!symbol) {
+          const symbolConfig = await storage.getSymbolConfigById(trade.symbolId);
+          symbol = symbolConfig?.symbol ? String(symbolConfig.symbol) : null;
+        }
+
+        if (!symbol) {
+          return res.status(404).json({ message: "Symbol configuration not found" });
+        }
+
+        const side = String(trade.type ?? "").toUpperCase() as "BUY" | "SELL";
+        const pip = symbol.includes("JPY") ? 0.01 : 0.0001;
+        const minPips = await getMinPriceDistancePips();
+        const minDist = minPips * pip;
+
+        let refPrice: number | null = null;
+        let q: any | null = null;
+
+        if (trade.status === "PENDING") {
+          const ot = String((trade as any).orderType ?? "").trim().toUpperCase();
+          const intendedEntryRaw =
+            ot === "LIMIT"
+              ? (trade as any).limitPrice
+              : ot === "STOP"
+                ? (trade as any).stopPrice
+                : (trade as any).limitPrice ?? (trade as any).stopPrice ?? (trade as any).openPrice;
+          const intendedEntry = intendedEntryRaw == null ? null : Number(intendedEntryRaw);
+          if (intendedEntry !== null && Number.isFinite(intendedEntry)) {
+            refPrice = intendedEntry;
+          }
+          if (refPrice === null) {
+            return res.status(400).json({
+              code: "ORDER_PRICE_MISSING",
+              message: "Cannot update targets: pending order has no valid reference price.",
+              symbol,
+            });
+          }
+        } else if (trade.status === "OPEN") {
+          try {
+            q = await getExecutionQuote(symbol, side, "CLOSE");
+          } catch {
+            return res.status(503).json({
+              code: "QUOTE_UNAVAILABLE",
+              message: "Live price unavailable. Try again shortly.",
+              symbol,
+            });
+          }
+
+          // Only enforce stale-quote blocking while the market is open.
+          if (q.marketOpen && q.isStale) {
+            const quoteAgeMs = Math.max(0, Date.now() - q.quoteTs.getTime());
+            const targetsAuditCtx = buildAuditContext(req);
+            const correlationId = (trade as any).correlationId || generateCorrelationId();
+            const orderId = (trade as any).orderId || generateOrderId();
+            const positionId = (trade as any).positionId || generatePositionId();
+
+            targetsAuditCtx.correlationId = correlationId;
+
+            metricTradeTargetsRejectedQuoteStaleTotal += 1;
+
+            try {
+              await db.update(trades)
+                .set({
+                  correlationId,
+                  orderId,
+                  positionId,
+                  lastActorUserId: session.userId,
+                  lastActorSessionId: targetsAuditCtx.sessionId,
+                  lastActorIp: targetsAuditCtx.ip,
+                  lastActorUserAgent: targetsAuditCtx.userAgent,
+                  lastActorType: targetsAuditCtx.actorType,
+                })
+                .where(eq(trades.id, tradeId));
+
+              await writeTradeAudit({
+                tradeId,
+                eventType: "TARGETS_UPDATE_REJECTED",
+                eventCategory: "MODIFICATION",
+                ctx: targetsAuditCtx,
+                orderId,
+                positionId,
+                symbol,
+                side: trade.type as string,
+                stopPrice: slNext,
+                limitPrice: tpNext,
+                quoteBid: q.bid,
+                quoteAsk: q.ask,
+                quoteMid: q.mid,
+                quoteSpread: q.spread,
+                spreadPips: calculateSpreadPips(symbol, q.spread),
+                quoteTs: q.quoteTs,
+                quoteSource: `stale:${q.source}`,
+                riskResult: "REJECT",
+                reasonCode: "QUOTE_STALE",
+                note: `Rejected targets update due to stale quote (ageMs=${quoteAgeMs})`,
+                payload: { quoteAgeMs, previousTakeProfit: prevTp, previousStopLoss: prevSl, newTakeProfit: tpNext, newStopLoss: slNext },
+              });
+            } catch (auditErr) {
+              console.error("Error writing TARGETS_UPDATE_REJECTED audit:", auditErr);
+            }
+
+            res.setHeader("Retry-After", "1");
+            return res.status(409).json({
+              code: "QUOTE_STALE_MODIFY",
+              message: `Cannot update targets: quote data for ${symbol} is stale. Please wait for fresh market data.`,
+              symbol,
+              quoteTs: Math.floor(q.quoteTs.getTime() / 1000),
+              quoteAgeMs,
+            });
+          }
+
+          refPrice = q.execPrice;
+        }
+
+          if (refPrice !== null && Number.isFinite(refPrice)) {
+            if (side === "BUY") {
+              if (slNext !== null && priceGreaterThan(slNext, refPrice - minDist, symbol)) {
+                return res.status(400).json({
+                  code: "STOP_LOSS_TOO_CLOSE",
+                  message: `BUY SL must be at least ${minPips} pips below reference price. Maximum: ${(refPrice - minDist).toFixed(symbol.includes("JPY") ? 2 : 4)}`,
+                  symbol,
+                  minPips,
+                  minPoints: minPips,
+                });
+              }
+              if (tpNext !== null && priceLessThan(tpNext, refPrice + minDist, symbol)) {
+                return res.status(400).json({
+                  code: "TAKE_PROFIT_TOO_CLOSE",
+                  message: `BUY TP must be at least ${minPips} pips above reference price. Minimum: ${(refPrice + minDist).toFixed(symbol.includes("JPY") ? 2 : 4)}`,
+                  symbol,
+                  minPips,
+                  minPoints: minPips,
+                });
+              }
+            } else if (side === "SELL") {
+              if (slNext !== null && priceLessThan(slNext, refPrice + minDist, symbol)) {
+                return res.status(400).json({
+                  code: "STOP_LOSS_TOO_CLOSE",
+                  message: `SELL SL must be at least ${minPips} pips above reference price. Minimum: ${(refPrice + minDist).toFixed(symbol.includes("JPY") ? 2 : 4)}`,
+                  symbol,
+                  minPips,
+                  minPoints: minPips,
+                });
+              }
+              if (tpNext !== null && priceGreaterThan(tpNext, refPrice - minDist, symbol)) {
+                return res.status(400).json({
+                  code: "TAKE_PROFIT_TOO_CLOSE",
+                  message: `SELL TP must be at least ${minPips} pips below reference price. Maximum: ${(refPrice - minDist).toFixed(symbol.includes("JPY") ? 2 : 4)}`,
+                  symbol,
+                  minPips,
+                  minPoints: minPips,
+                });
+              }
+            }
+          }
+
+        const updatedTrade = await storage.updateTradeTargets(tradeId, tpNext, slNext);
+        if (!updatedTrade) {
+          return res.status(409).json({ message: "Trade is no longer open or pending" });
+        }
 
         // AUDIT: Write TARGETS_UPDATED event
         try {
@@ -3663,7 +3961,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           let q = null;
           if (symbol) {
             try {
-              q = await getExecutionQuote(symbol, trade.type as "BUY" | "SELL", "OPEN");
+              q = await getExecutionQuote(symbol, trade.type as "BUY" | "SELL", "CLOSE");
             } catch { }
           }
 
@@ -3676,7 +3974,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             positionId,
             symbol,
             side: trade.type as string,
-            stopPrice: stopLoss ? parseFloat(String(stopLoss)) : null,
+            stopPrice: slNext,
             quoteBid: q?.bid ?? null,
             quoteAsk: q?.ask ?? null,
             quoteMid: q?.mid ?? null,
@@ -3684,12 +3982,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
             spreadPips: q ? calculateSpreadPips(symbol || "", q.spread) : null,
             quoteTs: q?.quoteTs ?? null,
             quoteSource: q?.source ?? null,
-            note: `TP: ${prevTp ?? 'none'} → ${takeProfit ?? 'none'}, SL: ${prevSl ?? 'none'} → ${stopLoss ?? 'none'}`,
+            note: `TP: ${prevTp ?? 'none'} → ${tpNext ?? 'none'}, SL: ${prevSl ?? 'none'} → ${slNext ?? 'none'}`,
             payload: {
               previousTakeProfit: prevTp,
               previousStopLoss: prevSl,
-              newTakeProfit: takeProfit ? parseFloat(String(takeProfit)) : null,
-              newStopLoss: stopLoss ? parseFloat(String(stopLoss)) : null,
+              newTakeProfit: tpNext,
+              newStopLoss: slNext,
             },
           });
         } catch (auditErr) {
@@ -4475,6 +4773,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         "# HELP quotehub_asof Latest quote snapshot timestamp (ms)",
         "# TYPE quotehub_asof gauge",
         `quotehub_asof ${quoteMeta.asOf}`,
+        "# HELP trade_close_rejected_quote_stale_total Manual close requests rejected due to stale quotes",
+        "# TYPE trade_close_rejected_quote_stale_total counter",
+        `trade_close_rejected_quote_stale_total ${metricTradeCloseRejectedQuoteStaleTotal}`,
+        "# HELP trade_targets_rejected_quote_stale_total Target update requests rejected due to stale quotes (market open)",
+        "# TYPE trade_targets_rejected_quote_stale_total counter",
+        `trade_targets_rejected_quote_stale_total ${metricTradeTargetsRejectedQuoteStaleTotal}`,
         "",
       ].join("\n"),
     );

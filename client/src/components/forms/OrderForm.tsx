@@ -51,7 +51,7 @@ export function OrderForm({
     const [autoTp, setAutoTp] = useState(true);
     const [autoSl, setAutoSl] = useState(true);
 
-    const { lotDropdownOptions, lotPresetCards } = useLotSettings();
+    const { lotDropdownOptions, lotPresetCards, minPriceDistancePips } = useLotSettings();
     const lotPresets = useMemo(() => lotPresetCards.map(String), [lotPresetCards]);
 
     const form = useForm<TradeFormValues>({
@@ -95,12 +95,12 @@ export function OrderForm({
 
         if (orderType === "Limit" && autoEntry) {
             // Buy Limit is placed BELOW price, Sell Limit ABOVE
-            const price = pendingSide === "BUY" ? (baseAsk - 10 * pip) : (baseBid + 10 * pip);
+            const price = pendingSide === "BUY" ? (baseAsk - minPriceDistancePips * pip) : (baseBid + minPriceDistancePips * pip);
             form.setValue("limitPrice", price.toFixed(decimals));
         }
         if (orderType === "Stop" && autoEntry) {
             // Buy Stop is placed ABOVE price, Sell Stop BELOW
-            const price = pendingSide === "BUY" ? (baseAsk + 10 * pip) : (baseBid - 10 * pip);
+            const price = pendingSide === "BUY" ? (baseAsk + minPriceDistancePips * pip) : (baseBid - minPriceDistancePips * pip);
             form.setValue("stopPrice", price.toFixed(decimals));
         }
 
@@ -115,16 +115,16 @@ export function OrderForm({
         if (entryForCalc && entryForCalc > 0) {
             if (autoTp) {
                 // TP is always beneficial direction
-                const tp = pendingSide === "BUY" ? entryForCalc + 10 * pip : entryForCalc - 10 * pip;
+                const tp = pendingSide === "BUY" ? entryForCalc + minPriceDistancePips * pip : entryForCalc - minPriceDistancePips * pip;
                 form.setValue("takeProfit", tp.toFixed(decimals));
             }
             if (autoSl) {
                 // SL is always detrimental direction
-                const sl = pendingSide === "BUY" ? entryForCalc - 10 * pip : entryForCalc + 10 * pip;
+                const sl = pendingSide === "BUY" ? entryForCalc - minPriceDistancePips * pip : entryForCalc + minPriceDistancePips * pip;
                 form.setValue("stopLoss", sl.toFixed(decimals));
             }
         }
-    }, [askPrice, bidPrice, currentPrice, orderType, pendingSide, autoEntry, autoTp, autoSl, selectedSymbol, form]);
+    }, [askPrice, bidPrice, currentPrice, orderType, pendingSide, autoEntry, autoTp, autoSl, selectedSymbol, minPriceDistancePips, form]);
 
     // Helper Labels
     const sideLabels: Record<string, { label: string }> = {

@@ -64,7 +64,7 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const { isConnected: isWsConnected } = useLiveUpdates();
-  const { lotDropdownMax, lotDropdownOptions, lotPresetCards } = useLotSettings();
+  const { lotDropdownMax, lotDropdownOptions, lotPresetCards, minPriceDistancePips } = useLotSettings();
   const { bundle } = useTranslation();
   const { quotes } = useQuotes();
   const currentQuote = quotes?.find(q => q.symbol === selectedSymbol);
@@ -965,9 +965,9 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
     if (orderType === "Market" || !askPrice || !bidPrice) return;
     const pip = selectedSymbol.includes("JPY") ? 0.01 : 0.0001;
     const decimals = selectedSymbol.includes("JPY") ? 3 : 5;
-    const minDist = 10 * pip;
+    const minDist = minPriceDistancePips * pip;
     // Guard against client/server quote skew (e.g., mid vs bid/ask, jittery feeds).
-    // This keeps the autosuggested entry safely beyond the 10-pip server minimum.
+    // This keeps the autosuggested entry safely beyond the server minimum.
     const entryGuard = Math.max(0, spread || 0);
 
     const factor = Math.pow(10, decimals);
@@ -1010,7 +1010,7 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
         setFieldIfChanged("stopLoss", sl);
       }
     }
-  }, [askPrice, bidPrice, orderType, pendingSide, autoEntry, autoTp, autoSl, selectedSymbol, spread, form]);
+  }, [askPrice, bidPrice, orderType, pendingSide, autoEntry, autoTp, autoSl, selectedSymbol, spread, minPriceDistancePips, form]);
 
   // If the user edits a pending entry price, keep TP/SL aligned (prevents "submit before next tick" rejections).
   useLayoutEffect(() => {
@@ -1019,7 +1019,7 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
 
     const pip = selectedSymbol.includes("JPY") ? 0.01 : 0.0001;
     const decimals = selectedSymbol.includes("JPY") ? 3 : 5;
-    const minDist = 10 * pip;
+    const minDist = minPriceDistancePips * pip;
     const factor = Math.pow(10, decimals);
     const roundUp = (v: number) => Math.ceil(v * factor) / factor;
     const roundDown = (v: number) => Math.floor(v * factor) / factor;
@@ -1051,7 +1051,7 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
     });
 
     return () => subscription.unsubscribe();
-  }, [autoSl, autoTp, form, orderType, pendingSide, selectedSymbol]);
+  }, [autoSl, autoTp, form, orderType, pendingSide, selectedSymbol, minPriceDistancePips]);
 
   // Execute trade mutation
   const executeTrade = useMutation({

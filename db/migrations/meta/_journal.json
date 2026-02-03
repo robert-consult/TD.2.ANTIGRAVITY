@@ -78,6 +78,13 @@
       "when": 1769986227414,
       "tag": "0010_trade_delete_guards",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1770070232995,
+      "tag": "0011_min_price_distance_pips",
+      "breakpoints": true
     }
   ]
 }

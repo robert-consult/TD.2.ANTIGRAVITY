@@ -12,12 +12,14 @@ import { log } from "../vite";
 import { recalcAccount } from "../recalcAccount";
 import { getExecutionQuote } from "../services/quoteService";
 import { realizedPnlUsd } from "../lib/realizedPnl";
+import { requiredMargin } from "../lib/margin";
 import { db } from "@db";
-import { eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { globalSettings, trades } from "@shared/schema";
 import { writeTradeAudit, generateCorrelationId, generateOrderId, generateExecutionId, generatePositionId, calculateSpreadPips } from "../lib/auditWriter";
 import type { CloseReasonCode } from "@shared/closeReasons";
 import { onLiveEvent, publishLiveEvent } from "../services/liveBus";
+import { applyUserBalanceDelta, releaseUserMargin } from "../services/tradeAtomic";
 
 const STALE_DEFER_MAX_MIN = Number(process.env.AUTOCLOSE_STALE_DEFER_MAX_MIN ?? 60);
 const ALLOW_STALE_CLOSE = String(process.env.AUTOCLOSE_ALLOW_STALE_CLOSE ?? "true") === "true";
@@ -104,25 +106,44 @@ async function runAutoCloseJob() {
 
         const closeReasonCode: CloseReasonCode = "MAX_HOLD_TIME";
         
-        const closedTrade = await storage.closeTrade(trade.id, closePrice, profit, {
-          closeReason: closeReasonCode,
-          closeQuoteTs: q.quoteTs,
-          closeSource: q.isStale ? `stale:${q.source}` : q.source,
-          closeBid: q.bid,
-          closeAsk: q.ask,
-          closeMid: q.mid,
-          closeSpread: q.spread,
-        });
+        const closeSource = q.isStale ? `stale:${q.source}` : q.source;
+        const closeResult = await db.transaction(async (tx) => {
+          const tradeLock = await tx.execute(sql`
+            select id
+            from trades
+            where id = ${trade.id} and status = 'OPEN'
+            for update
+          `);
+          if (!tradeLock.rows.length) return null;
 
-        // Write hedge-fund grade trade audit for auto-close
-        try {
+          const userRowRes = await tx.execute(sql`
+            select id, leverage
+            from users
+            where id = ${trade.userId}
+            for update
+          `);
+          const leverageNow = Number((userRowRes.rows[0] as any)?.leverage ?? 5);
+          const marginToRelease = requiredMargin(q.symbol, lots, closePrice, leverageNow);
+
           const correlationId = (trade as any).correlationId || generateCorrelationId();
           const orderId = (trade as any).orderId || generateOrderId();
           const positionId = (trade as any).positionId || generatePositionId();
           const executionId = generateExecutionId();
+          const closedAt = Math.floor(Date.now() / 1000);
 
-          await db.update(trades)
+          const closedRows = await tx.update(trades)
             .set({
+              status: "CLOSED",
+              closePrice,
+              profit,
+              closeReason: closeReasonCode,
+              closedAt,
+              closeQuoteTs: Math.floor(q.quoteTs.getTime() / 1000),
+              closeSource,
+              closeBid: q.bid,
+              closeAsk: q.ask,
+              closeMid: q.mid,
+              closeSpread: q.spread,
               correlationId,
               orderId,
               positionId,
@@ -133,8 +154,15 @@ async function runAutoCloseJob() {
               lastActorIp: null,
               lastActorUserAgent: null,
             })
-            .where(eq(trades.id, trade.id));
-          
+            .where(and(eq(trades.id, trade.id), eq(trades.status, "OPEN")))
+            .returning();
+
+          const closedTrade = closedRows[0];
+          if (!closedTrade) return null;
+
+          await applyUserBalanceDelta(tx, { userId: trade.userId, deltaUsd: pnlUsd });
+          await releaseUserMargin(tx, { userId: trade.userId, marginUsd: marginToRelease });
+
           await writeTradeAudit({
             tradeId: trade.id,
             eventType: "POSITION_CLOSED",
@@ -162,7 +190,7 @@ async function runAutoCloseJob() {
             quoteSpread: q.spread,
             spreadPips: calculateSpreadPips(symbolConfig.symbol, q.spread),
             quoteTs: q.quoteTs,
-            quoteSource: q.isStale ? `stale:${q.source}` : q.source,
+            quoteSource: closeSource,
             riskResult: "PASS",
             reasonCode: closeReasonCode,
             note: `Auto-closed: max hold time exceeded (${settings.autoCloseAfterDays} days). P/L: ${profit}`,
@@ -174,17 +202,14 @@ async function runAutoCloseJob() {
               autoCloseAfterDays: settings.autoCloseAfterDays,
               isStaleQuote: q.isStale,
             },
-          });
-        } catch (auditErr) {
-          log(`Error writing auto-close audit for trade=${trade.id}: ${auditErr}`);
-        }
+          }, { db: tx });
 
-        const user = await storage.getUserById(trade.userId);
-        if (user) {
-          const newBalance = (Number(user.balance) + Number(closedTrade.profit ?? profit)).toFixed(2);
-          await storage.updateUserBalance(trade.userId, newBalance);
-          await recalcAccount(trade.userId, { emit: true, reason: "AUTO_CLOSE" });
-        }
+          return { closedTrade, closeReasonCode };
+        });
+
+        if (!closeResult) continue;
+
+        await recalcAccount(trade.userId, { emit: true, reason: "AUTO_CLOSE" });
 
         log(`Auto-closed trade=${trade.id} reason=${closeReasonCode} profit=${profit} symbol=${q.symbol} stale=${q.isStale}`);
         publishLiveEvent({

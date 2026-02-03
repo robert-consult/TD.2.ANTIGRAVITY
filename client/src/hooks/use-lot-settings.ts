@@ -1,13 +1,16 @@
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { MIN_PRICE_DISTANCE_PIPS } from "@shared/tradingRules";
 
 const ABSOLUTE_MAX_LOTS = 50;
+const DEFAULT_MIN_PRICE_DISTANCE_PIPS = MIN_PRICE_DISTANCE_PIPS;
 
 type GlobalLotSettingsResponse = {
   lotPresetCards?: string | null;
   lotPresetCardsArray?: number[] | null;
   lotDropdownMax?: number | null;
   lotDropdownOptions?: number[] | null;
+  minPriceDistancePips?: number | null;
   absoluteMaxLots?: number | null;
 };
 
@@ -67,6 +70,10 @@ export function useLotSettings() {
     return [1, 5, 10, 25, 50].filter((n) => n <= lotDropdownMax);
   }, [lotDropdownMax, query.data?.lotPresetCards, query.data?.lotPresetCardsArray]);
 
+  const minPriceDistancePips = useMemo(() => {
+    return clampInt(query.data?.minPriceDistancePips, 1, 10_000, DEFAULT_MIN_PRICE_DISTANCE_PIPS);
+  }, [query.data?.minPriceDistancePips]);
+
   const lotDropdownOptions = useMemo(() => {
     const fromServer = Array.isArray(query.data?.lotDropdownOptions)
       ? query.data?.lotDropdownOptions
@@ -88,5 +95,6 @@ export function useLotSettings() {
     lotDropdownMax,
     lotDropdownOptions,
     lotPresetCards,
+    minPriceDistancePips,
   };
 }

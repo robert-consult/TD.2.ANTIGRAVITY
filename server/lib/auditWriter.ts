@@ -9,6 +9,8 @@ import { db } from "@db";
 import { tradeAudit, orderIntentAudit } from "@shared/schema";
 import { eq, desc } from "drizzle-orm";
 
+type AuditDb = Pick<typeof db, "query" | "insert">;
+
 // Canonical JSON serialization for consistent hashing
 function canonicalJson(value: any): string {
   if (value === null || value === undefined) return "null";
@@ -111,7 +113,10 @@ export interface TradeAuditParams {
 }
 
 // Write a trade audit event with hash chaining
-export async function writeTradeAudit(params: TradeAuditParams): Promise<{ eventHash: string; prevHash: string }> {
+export async function writeTradeAudit(
+  params: TradeAuditParams,
+  opts?: { db?: AuditDb },
+): Promise<{ eventHash: string; prevHash: string }> {
   const eventAtMs = Date.now();
   const eventAt = Math.floor(eventAtMs / 1000);
   const quoteTs = params.quoteTs == null
@@ -120,10 +125,11 @@ export async function writeTradeAudit(params: TradeAuditParams): Promise<{ event
       ? Math.floor(params.quoteTs)
       : Math.floor(params.quoteTs.getTime() / 1000);
   const correlationId = params.ctx.correlationId || generateCorrelationId();
+  const dbLike = opts?.db ?? db;
   
   try {
     // Get previous hash for this trade's chain
-    const lastEvent = await db.query.tradeAudit.findFirst({
+    const lastEvent = await dbLike.query.tradeAudit.findFirst({
       where: eq(tradeAudit.tradeId, params.tradeId),
       orderBy: desc(tradeAudit.id),
     });
@@ -177,7 +183,7 @@ export async function writeTradeAudit(params: TradeAuditParams): Promise<{ event
     const payloadJson = canonicalJson(envelope);
     const eventHash = sha256Hex(prevHash + "\n" + payloadJson);
     
-    await db.insert(tradeAudit).values({
+    await dbLike.insert(tradeAudit).values({
       tradeId: params.tradeId,
       eventType: params.eventType,
       eventCategory: params.eventCategory ?? "TRADE",
@@ -271,7 +277,10 @@ export interface OrderIntentParams {
 }
 
 // Write an order intent audit event
-export async function writeOrderIntentAudit(params: OrderIntentParams): Promise<{ eventHash: string; prevHash: string }> {
+export async function writeOrderIntentAudit(
+  params: OrderIntentParams,
+  opts?: { db?: AuditDb },
+): Promise<{ eventHash: string; prevHash: string }> {
   const eventAtMs = Date.now();
   const eventAt = Math.floor(eventAtMs / 1000);
   const quoteTs = params.quoteTs == null
@@ -279,10 +288,11 @@ export async function writeOrderIntentAudit(params: OrderIntentParams): Promise<
     : typeof params.quoteTs === "number"
       ? Math.floor(params.quoteTs)
       : Math.floor(params.quoteTs.getTime() / 1000);
+  const dbLike = opts?.db ?? db;
   
   try {
     // Get previous hash for this correlation chain
-    const lastEvent = await db.query.orderIntentAudit.findFirst({
+    const lastEvent = await dbLike.query.orderIntentAudit.findFirst({
       where: eq(orderIntentAudit.correlationId, params.correlationId),
       orderBy: desc(orderIntentAudit.id),
     });
@@ -325,7 +335,7 @@ export async function writeOrderIntentAudit(params: OrderIntentParams): Promise<
     const payloadJson = canonicalJson(envelope);
     const eventHash = sha256Hex(prevHash + "\n" + payloadJson);
     
-    await db.insert(orderIntentAudit).values({
+    await dbLike.insert(orderIntentAudit).values({
       correlationId: params.correlationId,
       eventAt,
       eventAtMs,

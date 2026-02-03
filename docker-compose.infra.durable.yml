@@ -1,0 +1,37 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: tradehub
+      POSTGRES_PASSWORD: tradehub_pw
+      POSTGRES_DB: tradehub
+    ports:
+      # 5432 is often taken by host/system Postgres (e.g. Replit module). Use 5433 for durability compose.
+      - "5433:5432"
+    volumes:
+      # Bind-mount into the repo so DB state survives host restarts where /var/lib can be ephemeral.
+      - ./.tmp/pgdata:/var/lib/postgresql/data
+
+  pgbouncer:
+    image: edoburu/pgbouncer:latest@sha256:85d1e38593617af1b5f7f285e97d407e56c29939683cc7cfe4c8f6dc19f1268b
+    depends_on:
+      - postgres
+    ports:
+      - "6433:5432"
+    environment:
+      DB_USER: tradehub
+      DB_PASSWORD: tradehub_pw
+      DB_HOST: postgres
+      DB_NAME: tradehub
+      AUTH_TYPE: scram-sha-256
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: 2000
+      DEFAULT_POOL_SIZE: 50
+      RESERVE_POOL_SIZE: 20
+      SERVER_RESET_QUERY: DISCARD ALL
+
+  valkey:
+    image: valkey/valkey:9.0.1@sha256:546304417feac0874c3dd576e0952c6bb8f06bb4093ea0c9ca303c73cf458f63
+    ports:
+      # Avoid conflicting with any host Redis/Valkey already bound to 6379.
+      - "6380:6379"

@@ -1,24 +1,23 @@
 import { storage } from "../server/storage";
 import { db } from "@db";
-import { globalSettings, systemConfig, tradeAudit, trades, userVerification } from "@shared/schema";
+import { adminActions, globalSettings, orderIntentAudit, systemConfig, tradeAudit, trades, userVerification } from "@shared/schema";
 import { eq, sql } from "drizzle-orm";
 
 async function seed() {
   console.log("Seeding database...");
   const nowSec = Math.floor(Date.now() / 1000);
   
-  try {
-    // Ensure singleton config rows exist (id=1) with defaults
-    await db.insert(systemConfig).values({ id: 1 }).onConflictDoNothing();
-    await db.insert(globalSettings).values({ id: 1 }).onConflictDoNothing();
-    if (process.env.SEED_RELAX_MARKET_HOURS === "1") {
-      // E2E/CI must be deterministic regardless of the real-world day/time.
-      // (CI can run on weekends; market windows should not hard-block the test suite.)
-      await db
-        .update(globalSettings)
-        .set({ allowWeekendTrading: true, marketOpenTime: "00:00", marketCloseTime: "23:59", minHoldSec: 0 })
-        .where(eq(globalSettings.id, 1));
-    }
+  // Ensure singleton config rows exist (id=1) with defaults
+  await db.insert(systemConfig).values({ id: 1 }).onConflictDoNothing();
+  await db.insert(globalSettings).values({ id: 1 }).onConflictDoNothing();
+  if (process.env.SEED_RELAX_MARKET_HOURS === "1") {
+    // E2E/CI must be deterministic regardless of the real-world day/time.
+    // (CI can run on weekends; market windows should not hard-block the test suite.)
+    await db
+      .update(globalSettings)
+      .set({ allowWeekendTrading: true, marketOpenTime: "00:00", marketCloseTime: "23:59", minHoldSec: 0 })
+      .where(eq(globalSettings.id, 1));
+  }
 
     // Create admin user if it doesn't exist
     const adminEmail = "admin@local.test";
@@ -124,6 +123,12 @@ async function seed() {
             "This guard prevents accidental data loss on shared databases.",
         );
       }
+      if (process.env.SEED_RESET_TRADES_CONFIRM !== "DELETE_TRADES") {
+        throw new Error(
+          "Refusing destructive seed without SEED_RESET_TRADES_CONFIRM=DELETE_TRADES (SEED_RESET_TRADES=1). " +
+            "This guard prevents accidental trade-history wipes.",
+        );
+      }
       const databaseUrl = process.env.DATABASE_URL ?? "";
       let host: string | null = null;
       try {
@@ -141,23 +146,49 @@ async function seed() {
       console.log("Resetting trades for deterministic E2E...");
       await db.transaction(async (tx) => {
         await tx.execute(sql`select set_config('tradequip.allow_destructive', '1', true)`);
+
+        // Record an immutable system audit entry before wiping.
+        try {
+          const countsRes = await tx.execute(sql`
+            select
+              (select count(*)::int from trades) as trades_count,
+              (select count(*)::int from trade_audit) as trade_audit_count,
+              (select count(*)::int from order_intent_audit) as order_intent_audit_count
+          `);
+          const counts = (countsRes.rows?.[0] ?? {}) as any;
+          await tx.insert(adminActions).values({
+            adminId: 0,
+            userId: 0,
+            actionType: "SEED_RESET_TRADES",
+            metadata: JSON.stringify({
+              reason: "SEED_RESET_TRADES=1",
+              trades: Number(counts.trades_count ?? 0),
+              tradeAudit: Number(counts.trade_audit_count ?? 0),
+              orderIntentAudit: Number(counts.order_intent_audit_count ?? 0),
+              at: new Date().toISOString(),
+            }),
+            ip: null,
+            userAgent: "db/seed.ts",
+            createdAt: nowSec,
+          });
+        } catch (auditErr) {
+          console.warn("[Seed] Failed to write admin_actions audit entry for destructive reset:", auditErr);
+        }
+
         await tx.delete(tradeAudit);
+        await tx.delete(orderIntentAudit);
         await tx.delete(trades);
       });
     }
     
-    console.log("Seeding completed successfully");
-  } catch (error) {
-    console.error("Error seeding database:", error);
-  }
+  console.log("Seeding completed successfully");
 }
 
-// Run seed function
-seed()
-  .catch(error => {
+void seed()
+  .then(() => {
+    process.exit(0);
+  })
+  .catch((error) => {
     console.error("Seed error:", error);
     process.exit(1);
-  })
-  .finally(() => {
-    process.exit(0);
   });

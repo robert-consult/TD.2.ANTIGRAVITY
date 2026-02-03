@@ -17,6 +17,53 @@ import { dbClient } from "@db";
 import { getValkey } from "./services/valkey";
 import { withGriftClient } from "./grift/griftDb";
 
+const REQUIRED_TRADE_GUARD_TRIGGERS = [
+  "tradequip_no_delete_trades",
+  "tradequip_no_truncate_trades",
+  "tradequip_no_delete_trade_audit",
+  "tradequip_no_truncate_trade_audit",
+  "tradequip_no_delete_order_intent_audit",
+  "tradequip_no_truncate_order_intent_audit",
+] as const;
+
+async function assertTradeLedgerGuardrails() {
+  try {
+    const res = await dbClient.query(
+      `
+        SELECT tgname, tgenabled
+        FROM pg_trigger
+        WHERE NOT tgisinternal AND tgname = ANY($1::text[])
+      `,
+      [REQUIRED_TRADE_GUARD_TRIGGERS],
+    );
+
+    const enabledByName = new Map<string, string>();
+    for (const row of res.rows ?? []) {
+      enabledByName.set(String((row as any).tgname), String((row as any).tgenabled));
+    }
+
+    const missing: string[] = [];
+    const disabled: string[] = [];
+    for (const name of REQUIRED_TRADE_GUARD_TRIGGERS) {
+      const state = enabledByName.get(name);
+      if (!state) missing.push(name);
+      else if (state === "D") disabled.push(name);
+    }
+
+    if (missing.length || disabled.length) {
+      console.error("[FATAL] Trade ledger guardrails are missing/disabled.");
+      if (missing.length) console.error("  - Missing triggers:", missing.join(", "));
+      if (disabled.length) console.error("  - Disabled triggers:", disabled.join(", "));
+      console.error("Fix: run `npm run db:migrate:drizzle` and `npm run db:audit` before starting the server.");
+      process.exit(1);
+    }
+  } catch (e) {
+    console.error("[FATAL] Failed to verify trade ledger guardrails:", e);
+    console.error("Refusing to start without confirming trade-history anti-wipe triggers.");
+    process.exit(1);
+  }
+}
+
 // Validate required environment variables at startup
 function validateEnvVars() {
   const warnings: string[] = [];
@@ -217,6 +264,7 @@ app.use((req, res, next) => {
 });
 
 (async () => {
+  await assertTradeLedgerGuardrails();
   const server = await registerRoutes(app);
 
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {

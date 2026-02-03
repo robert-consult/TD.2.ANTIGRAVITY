@@ -574,7 +574,7 @@ export default function ChartScreen({ selectedSymbol }: ChartScreenProps) {
             <button
               type="button"
               aria-label="Hide quote floater"
-              className="absolute right-1.5 top-1.5 inline-flex h-6 w-6 items-center justify-center rounded-md text-gray-300 transition-colors hover:bg-white/10 hover:text-white focus:outline-none focus:ring-2 focus:ring-cyan-400/60"
+              className="absolute left-1/2 top-0 -translate-x-1/2 inline-flex h-6 w-6 items-center justify-center rounded-md text-gray-300 transition-colors hover:bg-white/10 hover:text-white focus:outline-none focus:ring-2 focus:ring-cyan-400/60"
               onClick={() => {
                 setShowQuoteFloater(false);
                 setIsDragging(false);

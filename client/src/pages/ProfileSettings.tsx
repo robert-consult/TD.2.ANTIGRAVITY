@@ -1070,8 +1070,8 @@ export default function ProfileSettings() {
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-2 text-cq-sm text-gray-400">
-                    <p>Deactivation disables access immediately and hides you from trader-facing views.</p>
-                    <p>Deletion is a permanent request that disables access while retaining data for audit.</p>
+                    <p>Deactivation instantly pauses your account and hides your public profile.</p>
+                    <p>Deletion is permanent. Your account will be closed, and identifying data hidden, retaining only what is required for regulatory compliance.</p>
                   </div>
                   <div className="flex flex-col sm:flex-row gap-2 mt-4">
                     <Button
@@ -1579,8 +1579,8 @@ export default function ProfileSettings() {
             </DialogTitle>
             <DialogDescription>
               {accountAction === "delete"
-                ? "This request disables access and marks the account as deleted. Data is retained for audit."
-                : "This disables access immediately and logs you out on all devices."}
+                ? "This request permanently closes your account. Records are securely retained for compliance, but your public profile is removed."
+                : "This pauses your account immediately and logs you out on all devices."}
             </DialogDescription>
           </DialogHeader>
 

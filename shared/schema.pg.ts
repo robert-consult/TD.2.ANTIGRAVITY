@@ -157,10 +157,14 @@ export const symbolConfigs = pgTable("symbol_configs", {
   id: serial("id").primaryKey(),
   symbol: text("symbol").notNull().unique(),
   name: text("name").notNull(),
+  category: text("category"), // e.g. forex|stocks|crypto|commodities|bonds|etf|funds|mutual_funds|indices
   baseCurrency: text("base_currency"),
   quoteCurrency: text("quote_currency"),
   spread: real("spread"),
   minSpreadPips: real("min_spread_pips").default(2.0), // Minimum spread in pips (2 pips default)
+  pipDecimals: integer("pip_decimals"), // pip = 10^-pipDecimals (e.g. 4 => 0.0001)
+  quoteDecimals: integer("quote_decimals"), // formatting/rounding hint (e.g. 5 for non-JPY FX)
+  providerSymbolMapJson: text("provider_symbol_map_json").notNull().default("{}"), // JSON: { "twelvedata":"EUR/USD", "1forge":"EUR/USD" }
   enabled: boolean("enabled").notNull().default(true),
   minLot: integer("min_lot").notNull().default(100000), // 1 standard lot = $100,000
   maxLot: integer("max_lot").notNull().default(5000000), // 50 standard lots
@@ -346,6 +350,8 @@ export const systemConfig = pgTable("system_config", {
   quoteRefreshMs: integer("quote_refresh_ms").notNull().default(870),
   feedPollMs: integer("feed_poll_ms").notNull().default(870),
   staleThresholdMs: integer("stale_threshold_ms").notNull().default(30000),
+  marketDataActiveProviderKey: text("market_data_active_provider_key"),
+  marketDataFallbackProviderKeysCsv: text("market_data_fallback_provider_keys_csv").notNull().default(""),
   fxRolloverTz: text("fx_rollover_tz").notNull().default("America/New_York"),
   fxRolloverTime: text("fx_rollover_time").notNull().default("17:00"),
   // Legal Coverage Enforcement
@@ -447,6 +453,54 @@ export const systemConfig = pgTable("system_config", {
 });
 
 export const insertSystemConfigSchema = createInsertSchema(systemConfig);
+
+export const marketDataProviders = pgTable(
+  "market_data_providers",
+  {
+    id: serial("id").primaryKey(),
+    providerKey: text("provider_key").notNull().unique(),
+    displayName: text("display_name").notNull(),
+    driver: text("driver").notNull(), // twelvedata|oneforge|generic_rest_v1
+    configJson: text("config_json").notNull().default("{}"),
+    isEnabled: boolean("is_enabled").notNull().default(true),
+    createdAt: integer("created_at").notNull().default(nowUnix),
+    updatedAt: integer("updated_at").notNull().default(nowUnix),
+    deletedAt: integer("deleted_at"),
+  },
+);
+
+export const instrumentReference = pgTable(
+  "instrument_reference",
+  {
+    id: serial("id").primaryKey(),
+    providerKey: text("provider_key").notNull(),
+    category: text("category").notNull(),
+    canonicalSymbol: text("canonical_symbol").notNull(),
+    providerSymbol: text("provider_symbol").notNull(),
+    name: text("name"),
+    currency: text("currency"),
+    exchange: text("exchange"),
+    country: text("country"),
+    type: text("type"),
+    currencyBase: text("currency_base"),
+    currencyQuote: text("currency_quote"),
+    region: text("region"),
+    metaJson: text("meta_json").notNull().default("{}"),
+    lastRefreshedAt: integer("last_refreshed_at").notNull().default(nowUnix),
+  },
+  (table) => ({
+    uniq: uniqueIndex("instrument_reference_unique").on(table.providerKey, table.canonicalSymbol, table.providerSymbol),
+    providerCategoryIdx: index("instrument_reference_provider_category_idx").on(table.providerKey, table.category, table.lastRefreshedAt),
+  }),
+);
+
+export const pipCategoryDefaults = pgTable("pip_category_defaults", {
+  category: text("category").primaryKey(),
+  pipDecimals: integer("pip_decimals").notNull(),
+  quoteDecimals: integer("quote_decimals"),
+  updatedAt: integer("updated_at").notNull().default(nowUnix),
+  updatedByAdminId: integer("updated_by_admin_id"),
+});
 
 // i18n (dynamic UI translations) tables
 export const i18nManifestVersions = pgTable("i18n_manifest_versions", {

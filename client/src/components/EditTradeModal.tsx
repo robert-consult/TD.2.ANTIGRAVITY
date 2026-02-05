@@ -19,6 +19,7 @@ import { ChevronUp, Check } from "lucide-react";
 import { useTranslation } from "@/i18n";
 import { ApiError, apiRequest } from "@/lib/queryClient";
 import { useLotSettings } from "@/hooks/use-lot-settings";
+import { getPipSize, getQuoteDecimals } from "@shared/pips";
 
 const formatTemplate = (template: string, vars: Record<string, string | number | boolean | null | undefined>) =>
   template.replace(/\{([a-zA-Z0-9_]+)\}/g, (_m, key: string) => {
@@ -191,13 +192,31 @@ export function EditTradeModal({ trade, open, onOpenChange }: EditTradeModalProp
     tradeSymbol = trade.symbolName;
   }
 
-  const isJpyPair = tradeSymbol.toUpperCase().includes('JPY');
-  const pipSize = isJpyPair ? 0.01 : 0.0001; // JPY pairs: 0.01, others: 0.0001 
+  const tradeSymbolConfig =
+    trade?.symbol && typeof trade.symbol === "object" ? trade.symbol : null;
+  const pipCfg = useMemo(
+    () => ({
+      symbol: tradeSymbol,
+      category: tradeSymbolConfig?.category,
+      quoteCurrency: tradeSymbolConfig?.quoteCurrency,
+      pipDecimals: tradeSymbolConfig?.pipDecimals,
+      quoteDecimals: tradeSymbolConfig?.quoteDecimals,
+    }),
+    [
+      tradeSymbol,
+      tradeSymbolConfig?.category,
+      tradeSymbolConfig?.quoteCurrency,
+      tradeSymbolConfig?.pipDecimals,
+      tradeSymbolConfig?.quoteDecimals,
+    ],
+  );
+  const pipSize = getPipSize(pipCfg);
+  const priceDecimals = getQuoteDecimals(pipCfg);
   const minDistance = minPips * pipSize; // Minimum distance (pips)
 
   // Safe formatted reference price (guards against undefined/NaN)
   const safeRefPrice = (referencePrice && Number.isFinite(referencePrice))
-    ? referencePrice.toFixed(isJpyPair ? 2 : 4)
+    ? referencePrice.toFixed(priceDecimals)
     : "—";
   const priceLabelShort = trade?.status === "PENDING"
     ? textTemplates.priceLabelOrderShort.text
@@ -230,8 +249,8 @@ export function EditTradeModal({ trade, open, onOpenChange }: EditTradeModalProp
     const tpBelowTemplate = isPending ? textTemplates.tpBelowOrder.text : textTemplates.tpBelowCurrent.text;
     const slAboveTemplate = isPending ? textTemplates.slAboveOrder.text : textTemplates.slAboveCurrent.text;
     const slBelowTemplate = isPending ? textTemplates.slBelowOrder.text : textTemplates.slBelowCurrent.text;
-    const refPriceStr = referencePrice.toFixed(isJpyPair ? 2 : 4);
-    const deltaText = minDistance.toFixed(isJpyPair ? 2 : 4);
+    const refPriceStr = referencePrice.toFixed(priceDecimals);
+    const deltaText = minDistance.toFixed(priceDecimals);
     const pips = minPips;
 
     const tp = typeof takeProfit === "number" && Number.isFinite(takeProfit) ? takeProfit : null;
@@ -299,7 +318,7 @@ export function EditTradeModal({ trade, open, onOpenChange }: EditTradeModalProp
   const autoFixTargets = (points: number = minPips) => {
     if (!referencePrice || referencePrice <= 0) return;
 
-    const decimals = isJpyPair ? 2 : 4;
+    const decimals = priceDecimals;
 
     // Convert "pips" → price distance; enforce minimum minPips
     const requestedDistance = points * pipSize;

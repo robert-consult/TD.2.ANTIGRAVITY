@@ -1,0 +1,13 @@
+{
+  "providerKey": "twelvedata",
+  "displayName": "Twelve Data",
+  "driver": "twelvedata",
+  "config": {
+    "driver": "twelvedata",
+    "apiKey": "env:TWELVE_DATA_API_KEY",
+    "restBaseUrl": "https://api.twelvedata.com",
+    "quoteEndpoint": "/quote",
+    "timeoutMs": 8000,
+    "maxBatchSymbols": 8
+  }
+}

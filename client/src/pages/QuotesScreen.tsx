@@ -1,11 +1,13 @@
 import { useQuotes } from "@/hooks/use-quotes";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import SpreadBadge from "@/components/SpreadBadge";
 import { useAuth } from "@/hooks/use-auth";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Search, ArrowUpDown, AlertTriangle, Clock } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { getQuoteDecimals, pointsToPips } from "@shared/pips";
 
 interface QuotesScreenProps {
   onSelectSymbol: (symbol: string) => void;
@@ -19,6 +21,13 @@ export default function QuotesScreen({ onSelectSymbol }: QuotesScreenProps) {
   const [sortField, setSortField] = useState<string>("symbol");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
   const DEFAULT_BALANCE = 1000000; // $1,000,000 as shown in reference image
+
+  const { data: symbolConfigs = [] } = useQuery<any[]>({
+    queryKey: ["/api/config/symbols"],
+    initialData: [],
+  });
+
+  const symbolCfgBySymbol = useMemo(() => new Map(symbolConfigs.map((s) => [s.symbol, s])), [symbolConfigs]);
 
   // Update connection status for UI display (including stale data warning)
   useEffect(() => {
@@ -185,79 +194,98 @@ export default function QuotesScreen({ onSelectSymbol }: QuotesScreenProps) {
               ))}
 
           {!isLoading && filteredAndSortedQuotes.length > 0 &&
-            filteredAndSortedQuotes.map((quote) => (
-              <div
-                key={quote.symbol}
-                className="flex items-center justify-between gap-3 px-gutter py-3 hover:bg-neutral-850 transition-colors cursor-pointer"
-                onClick={() => onSelectSymbol(quote.symbol)}
-              >
-                <div className="min-w-0">
-                  <div className="flex items-start gap-2">
-                    <div className="w-20 shrink-0 font-medium text-base">{quote.symbol}</div>
-                    <div className="text-sm text-gray-400 mt-0.5 truncate">
-                      {quote.name}
+            filteredAndSortedQuotes.map((quote) => {
+              const cfg = symbolCfgBySymbol.get(quote.symbol);
+              const decimals = getQuoteDecimals({
+                symbol: quote.symbol,
+                category: cfg?.category,
+                quoteCurrency: cfg?.quoteCurrency,
+                pipDecimals: cfg?.pipDecimals,
+                quoteDecimals: cfg?.quoteDecimals,
+              });
+
+              const spreadPips = quote.spread != null
+                ? pointsToPips(quote.spread, {
+                    symbol: quote.symbol,
+                    category: cfg?.category,
+                    quoteCurrency: cfg?.quoteCurrency,
+                    pipDecimals: cfg?.pipDecimals,
+                    quoteDecimals: cfg?.quoteDecimals,
+                  })
+                : null;
+
+              return (
+                <div
+                  key={quote.symbol}
+                  className="flex items-center justify-between gap-3 px-gutter py-3 hover:bg-neutral-850 transition-colors cursor-pointer"
+                  onClick={() => onSelectSymbol(quote.symbol)}
+                >
+                  <div className="min-w-0">
+                    <div className="flex items-start gap-2">
+                      <div className="w-20 shrink-0 font-medium text-base">{quote.symbol}</div>
+                      <div className="text-sm text-gray-400 mt-0.5 truncate">
+                        {quote.name}
+                      </div>
                     </div>
                   </div>
-                </div>
 
-                <div className="flex items-center gap-4 md:gap-6">
-                  {/* Price and change display */}
-                  <div className="flex flex-col items-end">
-                    <div className="font-mono font-medium text-base text-white">
-                      {quote.price?.toFixed(
-                        quote.symbol.includes("JPY") ? 2 : 4
+                  <div className="flex items-center gap-4 md:gap-6">
+                    {/* Price and change display */}
+                    <div className="flex flex-col items-end">
+                      <div className="font-mono font-medium text-base text-white">
+                        {quote.price?.toFixed(decimals)}
+                      </div>
+                      <div
+                        className={`text-sm ${
+                          (quote.percent_change ?? 0) > 0
+                            ? "text-lime-400" // Bright green for increases
+                            : (quote.percent_change ?? 0) < 0
+                              ? "text-red-500" // Red for decreases
+                              : "text-yellow-500" // Yellow for unchanged
+                        }`}
+                      >
+                        {(quote.percent_change ?? 0) > 0 ? "+" : ""}
+                        {(quote.percent_change ?? 0).toFixed(2)}%
+                      </div>
+                    </div>
+                    
+                    {/* Bid/Ask/Spread display - Enhanced for Phase-2 */}
+                    <div className="hidden md:flex flex-col items-end text-sm gap-1">
+                      <div className="flex justify-between gap-3">
+                        <span className="text-gray-400 mr-1 font-medium">Bid:</span>
+                        <span className="font-mono text-danger-500 font-medium">
+                          {quote.bid?.toFixed(decimals)}
+                        </span>
+                      </div>
+                      <div className="flex justify-between gap-3">
+                        <span className="text-gray-400 mr-1 font-medium">Ask:</span>
+                        <span className="font-mono text-success-500 font-medium">
+                          {quote.ask?.toFixed(decimals)}
+                        </span>
+                      </div>
+                      {spreadPips !== null && (
+                        <div className="flex justify-end mt-1">
+                          <SpreadBadge spread={`${spreadPips.toFixed(1)} pips`} />
+                        </div>
                       )}
                     </div>
-                    <div
-                      className={`text-sm ${
-                        (quote.percent_change ?? 0) > 0
-                          ? "text-lime-400" // Bright green for increases
-                          : (quote.percent_change ?? 0) < 0
-                            ? "text-red-500" // Red for decreases
-                            : "text-yellow-500" // Yellow for unchanged
-                      }`}
+                    
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      className="h-5 w-5 text-gray-600"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
                     >
-                      {(quote.percent_change ?? 0) > 0 ? "+" : ""}
-                      {(quote.percent_change ?? 0).toFixed(2)}%
-                    </div>
+                      <polyline points="9 18 15 12 9 6" />
+                    </svg>
                   </div>
-                  
-                  {/* Bid/Ask/Spread display - Enhanced for Phase-2 */}
-                  <div className="hidden md:flex flex-col items-end text-sm gap-1">
-                    <div className="flex justify-between gap-3">
-                      <span className="text-gray-400 mr-1 font-medium">Bid:</span>
-                      <span className="font-mono text-danger-500 font-medium">
-                        {quote.bid?.toFixed(quote.symbol.includes("JPY") ? 2 : 4)}
-                      </span>
-                    </div>
-                    <div className="flex justify-between gap-3">
-                      <span className="text-gray-400 mr-1 font-medium">Ask:</span>
-                      <span className="font-mono text-success-500 font-medium">
-                        {quote.ask?.toFixed(quote.symbol.includes("JPY") ? 2 : 4)}
-                      </span>
-                    </div>
-                    {quote.spread !== undefined && (
-                      <div className="flex justify-end mt-1">
-                        <SpreadBadge spread={(quote.spread * (quote.symbol.includes("JPY") ? 100 : 10000)).toFixed(1) + " pips"} />
-                      </div>
-                    )}
-                  </div>
-                  
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    className="h-5 w-5 text-gray-600"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <polyline points="9 18 15 12 9 6" />
-                  </svg>
                 </div>
-              </div>
-            ))}
+              );
+            })}
 
           {(!filteredAndSortedQuotes || filteredAndSortedQuotes.length === 0) && !isLoading && (
             <div className="px-gutter py-8 text-center text-gray-500">

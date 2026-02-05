@@ -188,7 +188,7 @@ async function runAutoCloseJob() {
             quoteAsk: q.ask,
             quoteMid: q.mid,
             quoteSpread: q.spread,
-            spreadPips: calculateSpreadPips(symbolConfig.symbol, q.spread),
+            spreadPips: calculateSpreadPips(symbolConfig.symbol, q.spread, symbolConfig.pipDecimals),
             quoteTs: q.quoteTs,
             quoteSource: closeSource,
             riskResult: "PASS",

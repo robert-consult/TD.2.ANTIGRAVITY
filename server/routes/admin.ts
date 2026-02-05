@@ -1,13 +1,16 @@
 import { Express, Request, Response } from "express";
 import { storage } from "../storage";
 import { requireAdmin } from "../middleware/auth";
-import { insertUserSettingsSchema, insertSymbolConfigSchema, tradeAudit, orderIntentAudit, globalSettings, systemConfig, userAdminNotes, userKycProfiles, userVerification, userPayoutProfiles, signupWaitlist } from "@shared/schema";
+import { insertUserSettingsSchema, insertSymbolConfigSchema, tradeAudit, orderIntentAudit, globalSettings, systemConfig, marketDataProviders, userAdminNotes, userKycProfiles, userVerification, userPayoutProfiles, signupWaitlist } from "@shared/schema";
 import { db, dbClient } from "../../db";
-import { eq, sql, desc, and, gte, inArray, like, or } from "drizzle-orm";
+import { eq, sql, desc, and, gte, inArray, like, or, isNull } from "drizzle-orm";
 import { trades, users, symbolConfigs, userSettings } from "@shared/schema";
 import { appendIdentityAudit, getRecentIdentityAudit } from "../services/identityAudit";
 import { scheduleAutoClose } from "../cron/autoClose";
 import { getCacheStats, reloadFeedConfig } from "../feeds/quoteFeed";
+import { MarketDataProviderConfigSchema } from "@shared/marketDataProviders";
+import { resolveSecretRef } from "../marketdata/secret";
+import { getActiveProviderSelection } from "../marketdata/providerManager";
 import { stringify } from "csv-stringify/sync";
 import { z } from "zod";
 import { sha256, stableStringify } from "../legal/cryptoUtils";
@@ -23,9 +26,17 @@ import { appendAuditEntry } from "../grift/griftAdminAudit";
 import { getGriftDb } from "../grift/griftDb";
 import { recalcAccount } from "../recalcAccount";
 import { publishLiveEvent } from "../services/liveBus";
+import { TRADER_SEARCH_CATEGORIES } from "@shared/admin/traderSearch";
 
 function getParam(value: string | string[]): string {
   return Array.isArray(value) ? value[0] : value;
+}
+
+function normalizeProviderKey(raw: unknown): string | null {
+  const v = String(raw ?? "").trim();
+  if (!v) return null;
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/.test(v)) return null;
+  return v;
 }
 
 function convertQuestionMarks(sql: string): string {
@@ -599,8 +610,814 @@ export function registerAdminRoutes(app: Express) {
   const parseDaysParam = (value: unknown, fallback: number) => {
     const parsed = Number(value);
     if (!Number.isFinite(parsed)) return fallback;
-    return Math.max(0, Math.trunc(parsed));
+    return Math.max(0, Math.min(365, Math.trunc(parsed)));
   };
+
+  const TRADER_SCOUT_CATEGORY_CACHE_TTL_MS = 60_000;
+  let traderScoutCategoriesCache: { loadedAtMs: number; categories: string[]; set: Set<string> } | null = null;
+
+  const loadTraderScoutAllowedCategories = async () => {
+    const now = Date.now();
+    if (traderScoutCategoriesCache && now - traderScoutCategoriesCache.loadedAtMs < TRADER_SCOUT_CATEGORY_CACHE_TTL_MS) {
+      return traderScoutCategoriesCache;
+    }
+
+    const set = new Set<string>();
+    for (const c of TRADER_SEARCH_CATEGORIES as unknown as string[]) set.add(String(c));
+
+    try {
+      const res = await dbClient.query(`
+        SELECT DISTINCT LOWER(COALESCE(NULLIF(category, ''), 'unknown')) AS category
+        FROM symbol_configs
+      `);
+      for (const row of res.rows ?? []) {
+        const v = String((row as any)?.category ?? "").trim();
+        if (v) set.add(v);
+      }
+    } catch {
+      // ignore: fall back to static list
+    }
+
+    const categories = Array.from(set.values()).sort();
+    traderScoutCategoriesCache = { loadedAtMs: now, categories, set };
+    return traderScoutCategoriesCache;
+  };
+
+  const readQuery = (value: unknown): string | undefined => {
+    if (typeof value === "string") return value;
+    if (Array.isArray(value)) return typeof value[0] === "string" ? value[0] : undefined;
+    return undefined;
+  };
+
+  const clampInt = (raw: unknown, fallback: number, min: number, max: number): number => {
+    const parsed = Number(readQuery(raw));
+    if (!Number.isFinite(parsed)) return fallback;
+    return Math.max(min, Math.min(max, Math.trunc(parsed)));
+  };
+
+  const clampFloat = (raw: unknown): number | null => {
+    const parsed = Number(readQuery(raw));
+    if (!Number.isFinite(parsed)) return null;
+    return parsed;
+  };
+
+  const normalizePct01 = (raw: unknown): number | null => {
+    const parsed = clampFloat(raw);
+    if (parsed === null) return null;
+    const value = parsed > 1 ? parsed / 100 : parsed;
+    if (!Number.isFinite(value)) return null;
+    return Math.max(0, Math.min(1, value));
+  };
+
+  const TRADER_SCOUT_SEARCH_SQL = `
+WITH ft AS (
+  SELECT
+    t.user_id,
+    t.opened_at,
+    t.closed_at,
+    COALESCE(NULLIF(t.profit, '')::numeric, 0) AS profit,
+    t.stop_loss,
+    t.take_profit,
+    LOWER(COALESCE(NULLIF(sc.category, ''), 'unknown')) AS category
+  FROM trades t
+  JOIN users u ON u.id = t.user_id
+  LEFT JOIN symbol_configs sc ON sc.id = t.symbol_id
+  WHERE t.status = 'CLOSED'
+    AND t.closed_at IS NOT NULL
+    AND t.closed_at >= $1::int
+    AND u.is_admin = FALSE
+    AND ($2::text[] IS NULL OR LOWER(COALESCE(NULLIF(sc.category, ''), 'unknown')) = ANY($2::text[]))
+    AND ($3::text IS NULL OR u.username ILIKE $3::text OR u.email ILIKE $3::text)
+),
+agg AS (
+  SELECT
+    user_id,
+    COUNT(*)::int AS trades,
+    SUM(profit) AS net_profit,
+    SUM(CASE WHEN profit > 0 THEN profit ELSE 0 END) AS gross_profit,
+    SUM(CASE WHEN profit < 0 THEN profit ELSE 0 END) AS gross_loss,
+    (SUM(CASE WHEN profit > 0 THEN 1 ELSE 0 END)::float / NULLIF(COUNT(*), 0)) AS win_rate,
+    AVG((closed_at - opened_at)::float) AS avg_hold_sec,
+    MAX((closed_at - opened_at)::float) AS max_hold_sec,
+    MIN((closed_at - opened_at)::float) AS min_hold_sec,
+    (SUM(CASE WHEN stop_loss IS NOT NULL THEN 1 ELSE 0 END)::float / NULLIF(COUNT(*), 0)) AS sl_usage,
+    (SUM(CASE WHEN take_profit IS NOT NULL THEN 1 ELSE 0 END)::float / NULLIF(COUNT(*), 0)) AS tp_usage
+  FROM ft
+  GROUP BY user_id
+  HAVING COUNT(*) >= $6::int
+),
+candidates AS (
+  SELECT
+    a.*,
+    CASE
+      WHEN ABS(a.gross_loss) < 0.0001 THEN CASE WHEN a.gross_profit > 0 THEN 999.0 ELSE NULL END
+      ELSE (a.gross_profit / ABS(a.gross_loss))
+    END AS profit_factor
+  FROM agg a
+  WHERE ($7::float IS NULL OR a.win_rate >= $7::float)
+    AND ($8::numeric IS NULL OR a.net_profit >= $8::numeric)
+    AND ($4::int IS NULL OR a.avg_hold_sec >= $4::int)
+    AND ($5::int IS NULL OR a.avg_hold_sec <= $5::int)
+    AND ($12::float IS NULL OR a.sl_usage >= $12::float)
+    AND ($13::float IS NULL OR a.tp_usage >= $13::float)
+),
+candidates2 AS (
+  SELECT *
+  FROM candidates c
+  WHERE ($11::float IS NULL OR (c.profit_factor IS NOT NULL AND c.profit_factor >= $11::float))
+),
+day_pnl AS (
+  SELECT
+    ft.user_id,
+    date_trunc('day', to_timestamp(ft.closed_at)) AS day,
+    SUM(ft.profit) AS pnl
+  FROM ft
+  JOIN candidates2 c ON c.user_id = ft.user_id
+  GROUP BY ft.user_id, day
+),
+day_equity AS (
+  SELECT
+    dp.user_id,
+    dp.day,
+    SUM(dp.pnl) OVER (PARTITION BY dp.user_id ORDER BY dp.day) AS cum_pnl
+  FROM day_pnl dp
+),
+day_equity2 AS (
+  SELECT
+    de.user_id,
+    de.day,
+    de.cum_pnl,
+    MAX(de.cum_pnl) OVER (
+      PARTITION BY de.user_id
+      ORDER BY de.day
+      ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+    ) AS peak_cum_pnl
+  FROM day_equity de
+),
+dd AS (
+  SELECT
+    de.user_id,
+    MAX(
+      CASE
+        WHEN (u.starting_equity::numeric + de.peak_cum_pnl) <= 0 THEN NULL
+        ELSE (de.peak_cum_pnl - de.cum_pnl) / NULLIF((u.starting_equity::numeric + de.peak_cum_pnl), 0)
+      END
+    ) AS max_drawdown
+  FROM day_equity2 de
+  JOIN users u ON u.id = de.user_id
+  GROUP BY de.user_id
+),
+best_day AS (
+  SELECT
+    user_id,
+    MAX(pnl) AS best_day_pnl,
+    SUM(pnl) AS total_pnl
+  FROM day_pnl
+  GROUP BY user_id
+),
+best_day_pct AS (
+  SELECT
+    user_id,
+    CASE WHEN total_pnl > 0 THEN (best_day_pnl / total_pnl) ELSE NULL END AS best_day_pct
+  FROM best_day
+),
+mix AS (
+  SELECT
+    ft.user_id,
+    ft.category,
+    COUNT(*)::int AS trades
+  FROM ft
+  JOIN candidates2 c ON c.user_id = ft.user_id
+  GROUP BY ft.user_id, ft.category
+),
+mix_totals AS (
+  SELECT user_id, SUM(trades)::int AS total_trades
+  FROM mix
+  GROUP BY user_id
+),
+mix_json AS (
+  SELECT
+    m.user_id,
+    jsonb_object_agg(m.category, (m.trades::float / NULLIF(mt.total_trades, 0))) AS asset_mix
+  FROM mix m
+  JOIN mix_totals mt ON mt.user_id = m.user_id
+  GROUP BY m.user_id
+)
+SELECT
+  u.id AS user_id,
+  u.username,
+  u.email,
+  c.trades,
+  c.win_rate,
+  c.net_profit,
+  c.gross_profit,
+  c.gross_loss,
+  c.profit_factor,
+  c.avg_hold_sec,
+  c.max_hold_sec,
+  c.min_hold_sec,
+  d.max_drawdown,
+  b.best_day_pct,
+  c.sl_usage,
+  c.tp_usage,
+  mj.asset_mix
+FROM candidates2 c
+JOIN users u ON u.id = c.user_id
+LEFT JOIN dd d ON d.user_id = c.user_id
+LEFT JOIN best_day_pct b ON b.user_id = c.user_id
+LEFT JOIN mix_json mj ON mj.user_id = c.user_id
+WHERE ($9::float IS NULL OR (d.max_drawdown IS NOT NULL AND d.max_drawdown <= $9::float))
+  AND ($10::float IS NULL OR (b.best_day_pct IS NOT NULL AND b.best_day_pct <= $10::float))
+ORDER BY c.net_profit DESC, c.trades DESC, u.id ASC
+LIMIT $14::int OFFSET $15::int;
+  `;
+
+  const runTraderScoutSearch = async (args: {
+    cutoffSec: number;
+    categories: string[];
+    q: string | null;
+    minHoldSec: number | null;
+    maxHoldSec: number | null;
+    minTrades: number;
+    minWinRate: number | null;
+    minNetProfit: number | null;
+    maxDrawdown: number | null;
+    maxBestDayPct: number | null;
+    minProfitFactor: number | null;
+    minSlUsage: number | null;
+    minTpUsage: number | null;
+    limit: number;
+    offset: number;
+  }): Promise<{
+    hasMore: boolean;
+    results: Array<{
+      userId: number;
+      username: string | null;
+      email: string | null;
+      trades: number;
+      winRate: number;
+      netProfit: number;
+      grossProfit: number;
+      grossLoss: number;
+      profitFactor: number | null;
+      avgHoldSec: number | null;
+      maxHoldSec: number | null;
+      minHoldSec: number | null;
+      maxDrawdown: number | null;
+      bestDayPct: number | null;
+      slUsage: number | null;
+      tpUsage: number | null;
+      assetMix: any;
+    }>;
+  }> => {
+    const limit = Math.max(1, Math.min(200_000, Math.trunc(args.limit || 25)));
+    const offset = Math.max(0, Math.min(200_000, Math.trunc(args.offset || 0)));
+
+    const params = [
+      args.cutoffSec,
+      args.categories.length ? args.categories : null,
+      args.q,
+      args.minHoldSec === null ? null : Math.max(0, Math.trunc(args.minHoldSec)),
+      args.maxHoldSec === null ? null : Math.max(0, Math.trunc(args.maxHoldSec)),
+      Math.max(0, Math.trunc(args.minTrades)),
+      args.minWinRate,
+      args.minNetProfit,
+      args.maxDrawdown,
+      args.maxBestDayPct,
+      args.minProfitFactor,
+      args.minSlUsage,
+      args.minTpUsage,
+      limit + 1,
+      offset,
+    ];
+
+    const rows = (await dbClient.query(TRADER_SCOUT_SEARCH_SQL, params)).rows as any[];
+    const hasMore = rows.length > limit;
+    const sliced = hasMore ? rows.slice(0, limit) : rows;
+
+    const results = sliced.map((r) => ({
+      userId: Number(r.user_id),
+      username: r.username ?? null,
+      email: r.email ?? null,
+      trades: Number(r.trades ?? 0),
+      winRate: Number(r.win_rate ?? 0),
+      netProfit: Number(r.net_profit ?? 0),
+      grossProfit: Number(r.gross_profit ?? 0),
+      grossLoss: Number(r.gross_loss ?? 0),
+      profitFactor: r.profit_factor == null ? null : Number(r.profit_factor),
+      avgHoldSec: r.avg_hold_sec == null ? null : Number(r.avg_hold_sec),
+      maxHoldSec: r.max_hold_sec == null ? null : Number(r.max_hold_sec),
+      minHoldSec: r.min_hold_sec == null ? null : Number(r.min_hold_sec),
+      maxDrawdown: r.max_drawdown == null ? null : Number(r.max_drawdown),
+      bestDayPct: r.best_day_pct == null ? null : Number(r.best_day_pct),
+      slUsage: r.sl_usage == null ? null : Number(r.sl_usage),
+      tpUsage: r.tp_usage == null ? null : Number(r.tp_usage),
+      assetMix: r.asset_mix ?? null,
+    }));
+
+    return { hasMore, results };
+  };
+
+  const normalizeTraderScoutCategory = (raw: string): string => {
+    const v = raw.trim().toLowerCase();
+    if (v === "fx") return "forex";
+    if (v === "etfs") return "etf";
+    if (v === "index") return "indices";
+    if (v === "commodity") return "commodities";
+    if (v === "bond") return "bonds";
+    return v;
+  };
+
+  // Trader Search / Scouting (Admin > Data mini-tab)
+  app.get("/api/admin/trader-scouting/categories", requireAdmin, async (_req: Request, res: Response) => {
+    try {
+      const allowed = await loadTraderScoutAllowedCategories();
+      res.json({ ok: true, categories: allowed.categories });
+    } catch (error) {
+      console.error("Trader scouting categories list error:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.get("/api/admin/trader-scouting/search", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const days = parseDaysParam(readQuery(req.query.days), 30);
+      const nowSec = Math.floor(Date.now() / 1000);
+      const cutoffSec = days > 0 ? nowSec - days * 86400 : 0;
+
+      const qRaw = (readQuery(req.query.q) || "").trim();
+      const q = qRaw.length ? `%${qRaw.slice(0, 200)}%` : null;
+
+      const categoriesRaw =
+        (readQuery(req.query.categories) || readQuery(req.query.assetClasses) || "").trim();
+      const categoriesList = categoriesRaw
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+
+      const allowed = await loadTraderScoutAllowedCategories();
+      const allowedCategories = allowed.set;
+      const categories = categoriesList.map(normalizeTraderScoutCategory);
+      for (const c of categories) {
+        if (!allowedCategories.has(c)) {
+          return res.status(400).json({
+            message: `Invalid category: ${c}`,
+            allowed: allowed.categories,
+          });
+        }
+      }
+
+      const minTrades = clampInt(req.query.minTrades, 0, 0, 200_000);
+      const minWinRate = normalizePct01(readQuery(req.query.minWinRate) ?? readQuery(req.query.minWinRatePct));
+      const maxDrawdown = normalizePct01(readQuery(req.query.maxDrawdown) ?? readQuery(req.query.maxDrawdownPct));
+      const maxBestDayPct = normalizePct01(readQuery(req.query.maxBestDayPct));
+
+      const minNetProfitRaw = clampFloat(readQuery(req.query.minNetProfit) ?? readQuery(req.query.minProfit));
+      const minNetProfit = minNetProfitRaw === null ? null : minNetProfitRaw;
+
+      const minHoldSec = clampFloat(readQuery(req.query.minHoldSec));
+      const maxHoldSec = clampFloat(readQuery(req.query.maxHoldSec));
+
+      const minProfitFactorRaw = clampFloat(readQuery(req.query.minProfitFactor));
+      const minProfitFactor = minProfitFactorRaw === null ? null : Math.max(0, minProfitFactorRaw);
+      const minSlUsage = normalizePct01(readQuery(req.query.minSlUsage) ?? readQuery(req.query.minSlUsagePct));
+      const minTpUsage = normalizePct01(readQuery(req.query.minTpUsage) ?? readQuery(req.query.minTpUsagePct));
+
+      const limit = clampInt(req.query.limit, 25, 1, 200);
+      const offset = clampInt(req.query.offset, 0, 0, 200_000);
+
+      const { results, hasMore } = await runTraderScoutSearch({
+        cutoffSec,
+        categories,
+        q,
+        minHoldSec,
+        maxHoldSec,
+        minTrades,
+        minWinRate,
+        minNetProfit,
+        maxDrawdown,
+        maxBestDayPct,
+        minProfitFactor,
+        minSlUsage,
+        minTpUsage,
+        limit,
+        offset,
+      });
+
+      // Audit: only record materially-filtered searches (avoid noisy keystroke churn)
+      const shouldAuditSearch =
+        (qRaw.length >= 3 ||
+          categories.length > 0 ||
+          minWinRate !== null ||
+          maxDrawdown !== null ||
+          maxBestDayPct !== null ||
+          minProfitFactor !== null ||
+          minSlUsage !== null ||
+          minTpUsage !== null) &&
+        offset === 0;
+
+      if (shouldAuditSearch && req.session?.userId) {
+        try {
+          const auditCtx = buildAuditContext(req);
+          const griftDb = getGriftDb();
+          await appendAuditEntry(griftDb, Number(req.session.userId), "TRADER_SCOUT_SEARCH", "analytics", 1, {
+            correlationId: auditCtx.correlationId,
+            days,
+            cutoffSec,
+            qHash: qRaw ? sha256(qRaw) : null,
+            qLen: qRaw.length || 0,
+            categories,
+            minTrades,
+            minWinRate,
+            maxDrawdown,
+            minNetProfit,
+            maxBestDayPct,
+            minHoldSec: minHoldSec === null ? null : Math.max(0, Math.trunc(minHoldSec)),
+            maxHoldSec: maxHoldSec === null ? null : Math.max(0, Math.trunc(maxHoldSec)),
+            minProfitFactor,
+            minSlUsage,
+            minTpUsage,
+          });
+        } catch (auditErr) {
+          console.error("Trader scouting audit write failed:", auditErr);
+        }
+      }
+
+      res.json({
+        ok: true,
+        days,
+        cutoffSec,
+        limit,
+        offset,
+        hasMore,
+        results,
+      });
+    } catch (error) {
+      console.error("Trader scouting search error:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.get("/api/admin/trader-scouting/export", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const days = parseDaysParam(readQuery(req.query.days), 30);
+      const nowSec = Math.floor(Date.now() / 1000);
+      const cutoffSec = days > 0 ? nowSec - days * 86400 : 0;
+
+      const formatRaw = String(readQuery(req.query.format) ?? "csv").trim().toLowerCase();
+      const format = formatRaw === "excel" ? "csv" : formatRaw === "ndjson" ? "jsonl" : formatRaw;
+      if (format !== "csv" && format !== "jsonl") {
+        return res.status(400).json({ message: "Invalid format (expected csv or jsonl)" });
+      }
+
+      const exportLimit = clampInt(req.query.exportLimit, 5000, 1, 50_000);
+
+      const qRaw = (readQuery(req.query.q) || "").trim();
+      const q = qRaw.length ? `%${qRaw.slice(0, 200)}%` : null;
+
+      const categoriesRaw = (readQuery(req.query.categories) || readQuery(req.query.assetClasses) || "").trim();
+      const categoriesList = categoriesRaw
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+
+      const allowed = await loadTraderScoutAllowedCategories();
+      const allowedCategories = allowed.set;
+      const categories = categoriesList.map(normalizeTraderScoutCategory);
+      for (const c of categories) {
+        if (!allowedCategories.has(c)) {
+          return res.status(400).json({
+            message: `Invalid category: ${c}`,
+            allowed: allowed.categories,
+          });
+        }
+      }
+
+      const minTrades = clampInt(req.query.minTrades, 0, 0, 200_000);
+      const minWinRate = normalizePct01(readQuery(req.query.minWinRate) ?? readQuery(req.query.minWinRatePct));
+      const maxDrawdown = normalizePct01(readQuery(req.query.maxDrawdown) ?? readQuery(req.query.maxDrawdownPct));
+      const maxBestDayPct = normalizePct01(readQuery(req.query.maxBestDayPct));
+
+      const minNetProfitRaw = clampFloat(readQuery(req.query.minNetProfit) ?? readQuery(req.query.minProfit));
+      const minNetProfit = minNetProfitRaw === null ? null : minNetProfitRaw;
+
+      const minHoldSec = clampFloat(readQuery(req.query.minHoldSec));
+      const maxHoldSec = clampFloat(readQuery(req.query.maxHoldSec));
+
+      const minProfitFactorRaw = clampFloat(readQuery(req.query.minProfitFactor));
+      const minProfitFactor = minProfitFactorRaw === null ? null : Math.max(0, minProfitFactorRaw);
+      const minSlUsage = normalizePct01(readQuery(req.query.minSlUsage) ?? readQuery(req.query.minSlUsagePct));
+      const minTpUsage = normalizePct01(readQuery(req.query.minTpUsage) ?? readQuery(req.query.minTpUsagePct));
+
+      const { results, hasMore } = await runTraderScoutSearch({
+        cutoffSec,
+        categories,
+        q,
+        minHoldSec,
+        maxHoldSec,
+        minTrades,
+        minWinRate,
+        minNetProfit,
+        maxDrawdown,
+        maxBestDayPct,
+        minProfitFactor,
+        minSlUsage,
+        minTpUsage,
+        limit: exportLimit,
+        offset: 0,
+      });
+
+      res.setHeader("Cache-Control", "no-store");
+      res.setHeader("X-Export-Limit", String(exportLimit));
+      if (hasMore) res.setHeader("X-Export-Truncated", "1");
+
+      const dateTag = new Date().toISOString().slice(0, 10);
+      const baseName = `trader-scout-${days}d-${dateTag}`;
+
+      if (req.session?.userId) {
+        try {
+          const auditCtx = buildAuditContext(req);
+          const griftDb = getGriftDb();
+          await appendAuditEntry(griftDb, Number(req.session.userId), "TRADER_SCOUT_EXPORT", "analytics", 1, {
+            correlationId: auditCtx.correlationId,
+            days,
+            cutoffSec,
+            format,
+            exportLimit,
+            truncated: hasMore,
+            qHash: qRaw ? sha256(qRaw) : null,
+            qLen: qRaw.length || 0,
+            categories,
+            minTrades,
+            minWinRate,
+            maxDrawdown,
+            minNetProfit,
+            maxBestDayPct,
+            minHoldSec: minHoldSec === null ? null : Math.max(0, Math.trunc(minHoldSec)),
+            maxHoldSec: maxHoldSec === null ? null : Math.max(0, Math.trunc(maxHoldSec)),
+            minProfitFactor,
+            minSlUsage,
+            minTpUsage,
+          });
+        } catch (auditErr) {
+          console.error("Trader scouting export audit write failed:", auditErr);
+        }
+      }
+
+      if (format === "jsonl") {
+        res.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
+        res.setHeader("Content-Disposition", `attachment; filename="${baseName}.jsonl"`);
+        for (const row of results) {
+          res.write(JSON.stringify(row));
+          res.write("\n");
+        }
+        res.end();
+        return;
+      }
+
+      const csvEscape = (value: unknown): string => {
+        if (value === null || value === undefined) return "";
+        const s = typeof value === "string" ? value : typeof value === "number" ? String(value) : JSON.stringify(value);
+        if (/[",\n\r]/.test(s)) return `"${s.replaceAll("\"", "\"\"")}"`;
+        return s;
+      };
+
+      res.setHeader("Content-Type", "text/csv; charset=utf-8");
+      res.setHeader("Content-Disposition", `attachment; filename="${baseName}.csv"`);
+
+      const header = [
+        "userId",
+        "username",
+        "email",
+        "trades",
+        "winRate",
+        "netProfit",
+        "grossProfit",
+        "grossLoss",
+        "profitFactor",
+        "avgHoldSec",
+        "maxHoldSec",
+        "minHoldSec",
+        "maxDrawdown",
+        "bestDayPct",
+        "slUsage",
+        "tpUsage",
+        "assetMix",
+      ].join(",");
+
+      // UTF-8 BOM helps Excel detect encoding correctly.
+      res.write("\uFEFF");
+      res.write(header);
+      res.write("\n");
+
+      for (const row of results) {
+        const line = [
+          csvEscape(row.userId),
+          csvEscape(row.username),
+          csvEscape(row.email),
+          csvEscape(row.trades),
+          csvEscape(row.winRate),
+          csvEscape(row.netProfit),
+          csvEscape(row.grossProfit),
+          csvEscape(row.grossLoss),
+          csvEscape(row.profitFactor),
+          csvEscape(row.avgHoldSec),
+          csvEscape(row.maxHoldSec),
+          csvEscape(row.minHoldSec),
+          csvEscape(row.maxDrawdown),
+          csvEscape(row.bestDayPct),
+          csvEscape(row.slUsage),
+          csvEscape(row.tpUsage),
+          csvEscape(row.assetMix),
+        ].join(",");
+        res.write(line);
+        res.write("\n");
+      }
+
+      res.end();
+    } catch (error) {
+      console.error("Trader scouting export error:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.get("/api/admin/trader-scouting/:userId/asset-classes", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const readQuery = (value: unknown): string | undefined => {
+        if (typeof value === "string") return value;
+        if (Array.isArray(value)) return typeof value[0] === "string" ? value[0] : undefined;
+        return undefined;
+      };
+
+      const userId = Number(getParam(req.params.userId));
+      if (!Number.isFinite(userId) || userId <= 0) return res.status(400).json({ message: "Invalid userId" });
+
+      const days = parseDaysParam(readQuery(req.query.days), 30);
+      const nowSec = Math.floor(Date.now() / 1000);
+      const cutoffSec = days > 0 ? nowSec - days * 86400 : 0;
+
+      const sqlText = `
+WITH ft AS (
+  SELECT
+    t.user_id,
+    t.opened_at,
+    t.closed_at,
+    COALESCE(NULLIF(t.profit, '')::numeric, 0) AS profit,
+    LOWER(COALESCE(NULLIF(sc.category, ''), 'unknown')) AS category
+  FROM trades t
+  LEFT JOIN symbol_configs sc ON sc.id = t.symbol_id
+  WHERE t.user_id = $1::int
+    AND t.status = 'CLOSED'
+    AND t.closed_at IS NOT NULL
+    AND t.closed_at >= $2::int
+)
+SELECT
+  category,
+  COUNT(*)::int AS trades,
+  SUM(profit) AS net_profit,
+  (SUM(CASE WHEN profit > 0 THEN 1 ELSE 0 END)::float / NULLIF(COUNT(*), 0)) AS win_rate,
+  AVG((closed_at - opened_at)::float) AS avg_hold_sec,
+  MAX((closed_at - opened_at)::float) AS max_hold_sec,
+  MIN((closed_at - opened_at)::float) AS min_hold_sec
+FROM ft
+GROUP BY category
+ORDER BY net_profit DESC;
+      `;
+
+      const rows = (await dbClient.query(sqlText, [userId, cutoffSec])).rows as any[];
+      const out = rows.map((r) => ({
+        category: r.category,
+        trades: Number(r.trades ?? 0),
+        netProfit: Number(r.net_profit ?? 0),
+        winRate: Number(r.win_rate ?? 0),
+        avgHoldSec: r.avg_hold_sec == null ? null : Number(r.avg_hold_sec),
+        maxHoldSec: r.max_hold_sec == null ? null : Number(r.max_hold_sec),
+        minHoldSec: r.min_hold_sec == null ? null : Number(r.min_hold_sec),
+      }));
+
+      if (req.session?.userId) {
+        try {
+          const auditCtx = buildAuditContext(req);
+          const griftDb = getGriftDb();
+          await appendAuditEntry(griftDb, Number(req.session.userId), "TRADER_SCOUT_DRILLDOWN", "user", userId, {
+            correlationId: auditCtx.correlationId,
+            endpoint: "asset-classes",
+            days,
+            cutoffSec,
+          });
+        } catch (auditErr) {
+          console.error("Trader scouting drilldown audit write failed:", auditErr);
+        }
+      }
+
+      res.json({ ok: true, userId, days, cutoffSec, rows: out });
+    } catch (error) {
+      console.error("Trader scouting categories drilldown error:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.get("/api/admin/trader-scouting/:userId/trade-extremes", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const readQuery = (value: unknown): string | undefined => {
+        if (typeof value === "string") return value;
+        if (Array.isArray(value)) return typeof value[0] === "string" ? value[0] : undefined;
+        return undefined;
+      };
+
+      const userId = Number(getParam(req.params.userId));
+      if (!Number.isFinite(userId) || userId <= 0) return res.status(400).json({ message: "Invalid userId" });
+
+      const days = parseDaysParam(readQuery(req.query.days), 30);
+      const nowSec = Math.floor(Date.now() / 1000);
+      const cutoffSec = days > 0 ? nowSec - days * 86400 : 0;
+
+      const limit = Math.max(1, Math.min(100, Math.trunc(Number(readQuery(req.query.limit)) || 10)));
+
+      const sqlText = `
+WITH ft AS (
+  SELECT
+    t.id,
+    sc.symbol,
+    t.type,
+    t.open_price,
+    t.close_price,
+    t.opened_at,
+    t.closed_at,
+    COALESCE(NULLIF(t.profit, '')::numeric, 0) AS profit,
+    CASE
+      WHEN t.open_price IS NULL OR t.open_price = 0 OR t.close_price IS NULL THEN NULL
+      WHEN t.type = 'BUY' THEN (t.close_price - t.open_price) / t.open_price
+      WHEN t.type = 'SELL' THEN (t.open_price - t.close_price) / t.open_price
+      ELSE NULL
+    END AS price_return_pct
+  FROM trades t
+  LEFT JOIN symbol_configs sc ON sc.id = t.symbol_id
+  WHERE t.user_id = $1::int
+    AND t.status = 'CLOSED'
+    AND t.closed_at IS NOT NULL
+    AND t.closed_at >= $2::int
+)
+SELECT 'top' AS bucket, *
+FROM (
+  SELECT * FROM ft ORDER BY profit DESC, closed_at DESC LIMIT $3::int
+) a
+UNION ALL
+SELECT 'bottom' AS bucket, *
+FROM (
+  SELECT * FROM ft ORDER BY profit ASC, closed_at DESC LIMIT $3::int
+) b;
+      `;
+
+      const rows = (await dbClient.query(sqlText, [userId, cutoffSec, limit])).rows as any[];
+      const top: any[] = [];
+      const bottom: any[] = [];
+
+      const toSide = (value: any): "buy" | "sell" | null => {
+        const v = String(value || "").toUpperCase();
+        if (v === "BUY") return "buy";
+        if (v === "SELL") return "sell";
+        return null;
+      };
+
+      for (const r of rows) {
+        const item = {
+          id: Number(r.id),
+          symbol: r.symbol ?? null,
+          side: toSide(r.type),
+          openedAt: r.opened_at == null ? null : Number(r.opened_at),
+          closedAt: r.closed_at == null ? null : Number(r.closed_at),
+          holdSec:
+            r.closed_at != null && r.opened_at != null ? Number(r.closed_at) - Number(r.opened_at) : null,
+          profit: Number(r.profit ?? 0),
+          priceReturnPct: r.price_return_pct == null ? null : Number(r.price_return_pct),
+        };
+        if (r.bucket === "top") top.push(item);
+        else bottom.push(item);
+      }
+
+      if (req.session?.userId) {
+        try {
+          const auditCtx = buildAuditContext(req);
+          const griftDb = getGriftDb();
+          await appendAuditEntry(griftDb, Number(req.session.userId), "TRADER_SCOUT_DRILLDOWN", "user", userId, {
+            correlationId: auditCtx.correlationId,
+            endpoint: "trade-extremes",
+            days,
+            cutoffSec,
+            limit,
+          });
+        } catch (auditErr) {
+          console.error("Trader scouting drilldown audit write failed:", auditErr);
+        }
+      }
+
+      res.json({ ok: true, userId, days, cutoffSec, limit, top, bottom });
+    } catch (error) {
+      console.error("Trader scouting trade extremes error:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
 
   const buildDeactivatedAccountsCte = (cutoff: number | null, params: any[]) => {
     let cutoffClause = "";
@@ -2091,16 +2908,105 @@ export function registerAdminRoutes(app: Express) {
   app.get("/api/admin/system-health", requireAdmin, async (req: Request, res: Response) => {
     try {
       const cacheStats = getCacheStats();
+      const cfg = await db.query.systemConfig.findFirst({ where: eq(systemConfig.id, 1) });
+      const activeProviderKey = cfg?.marketDataActiveProviderKey ? String(cfg.marketDataActiveProviderKey) : null;
+      const requestedProviderKey = normalizeProviderKey(req.query.providerKey) ?? activeProviderKey;
+
+      const selection = await getActiveProviderSelection();
+      const feedProviderKey = selection?.providerKey ?? null;
+      const feedProviderDriver = selection?.provider?.driver ?? null;
+      const feedProviderDisplayName = selection?.provider?.displayName ?? null;
+
+      let requestedProvider: any = null;
+      if (requestedProviderKey) {
+        const row = await db.query.marketDataProviders.findFirst({
+          where: and(eq(marketDataProviders.providerKey, requestedProviderKey), isNull(marketDataProviders.deletedAt)),
+        });
+
+        if (row && row.isEnabled) {
+          const rawCfg = (() => {
+            try {
+              return JSON.parse(String((row as any).configJson ?? "{}"));
+            } catch {
+              return {};
+            }
+          })();
+          const parsed = MarketDataProviderConfigSchema.parse({ ...(rawCfg || {}), driver: rawCfg?.driver ?? row.driver });
+
+          const missingSecrets: string[] = [];
+          let configUsable = true;
+
+          const noteMissing = (ref: string | undefined | null) => {
+            const raw = String(ref ?? "").trim();
+            if (!raw.toLowerCase().startsWith("env:")) return;
+            const key = raw.slice(4).trim();
+            if (!key) return;
+            if (!process.env[key]) missingSecrets.push(key);
+          };
+
+          if (parsed.driver === "twelvedata") {
+            configUsable = Boolean(resolveSecretRef(parsed.apiKey));
+            if (!configUsable) noteMissing(parsed.apiKey);
+          } else if (parsed.driver === "oneforge") {
+            configUsable = Boolean(resolveSecretRef(parsed.apiKey));
+            if (!configUsable) noteMissing(parsed.apiKey);
+          } else if (parsed.driver === "generic_rest_v1") {
+            if (parsed.apiKey) {
+              configUsable = Boolean(resolveSecretRef(parsed.apiKey));
+              if (!configUsable) noteMissing(parsed.apiKey);
+            }
+          }
+
+          requestedProvider = {
+            providerKey: row.providerKey,
+            displayName: row.displayName,
+            driver: row.driver,
+            configUsable,
+            missingSecrets,
+            isActiveConfigured: Boolean(activeProviderKey && row.providerKey === activeProviderKey),
+          };
+        } else {
+          requestedProvider = {
+            providerKey: requestedProviderKey,
+            displayName: row?.displayName ?? null,
+            driver: row?.driver ?? null,
+            configUsable: false,
+            missingSecrets: [],
+            isActiveConfigured: Boolean(activeProviderKey && requestedProviderKey === activeProviderKey),
+            error: row ? "PROVIDER_DISABLED" : "PROVIDER_NOT_FOUND",
+          };
+        }
+      }
+
+      const feedProviderConnected = Boolean(
+        feedProviderKey &&
+          cacheStats.lastProviderSuccessKey === feedProviderKey &&
+          cacheStats.consecutiveApiFailures === 0 &&
+          cacheStats.lastProviderSuccessAtMs > 0,
+      );
 
       res.json({
-        apiConnected: cacheStats.consecutiveApiFailures === 0,
+        apiConnected: feedProviderConnected,
         lastSuccess: cacheStats.lastSuccessfulApiCall
           ? new Date(cacheStats.lastSuccessfulApiCall).toISOString()
           : null,
         failures: cacheStats.consecutiveApiFailures,
         staleCount: cacheStats.staleCount,
         cacheSize: cacheStats.cacheSize,
-        serverTime: new Date().toISOString()
+        serverTime: new Date().toISOString(),
+
+        feedSource: cacheStats.lastPublishedSource,
+        feedSourceAt: cacheStats.lastPublishedAtMs ? new Date(cacheStats.lastPublishedAtMs).toISOString() : null,
+        feedProviderKey,
+        feedProviderDriver,
+        feedProviderDisplayName,
+        feedProviderConnected,
+        lastProviderSuccessAt: cacheStats.lastProviderSuccessAtMs ? new Date(cacheStats.lastProviderSuccessAtMs).toISOString() : null,
+        lastProviderSuccessKey: cacheStats.lastProviderSuccessKey ?? null,
+
+        activeProviderKey,
+        requestedProviderKey,
+        requestedProvider,
       });
     } catch (error) {
       console.error("Error fetching system health:", error);

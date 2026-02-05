@@ -236,20 +236,27 @@ app.use(express.urlencoded({ extended: false }));
 app.use((req, res, next) => {
   const start = Date.now();
   const path = req.path;
-  let capturedJsonResponse: Record<string, any> | undefined = undefined;
+  const captureBodies = app.get("env") === "development" && process.env.LOG_API_BODIES === "1";
+  let capturedJsonResponse: unknown = undefined;
 
-  const originalResJson = res.json;
-  res.json = function (bodyJson, ...args) {
-    capturedJsonResponse = bodyJson;
-    return originalResJson.apply(res, [bodyJson, ...args]);
-  };
+  if (captureBodies) {
+    const originalResJson = res.json;
+    res.json = function (bodyJson, ...args) {
+      capturedJsonResponse = bodyJson;
+      return originalResJson.apply(res, [bodyJson, ...args]);
+    };
+  }
 
   res.on("finish", () => {
     const duration = Date.now() - start;
     if (path.startsWith("/api")) {
       let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
-      if (capturedJsonResponse) {
-        logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
+      if (captureBodies && capturedJsonResponse !== undefined) {
+        try {
+          logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
+        } catch {
+          // ignore stringify issues
+        }
       }
 
       if (logLine.length > 80) {
@@ -277,6 +284,11 @@ app.use((req, res, next) => {
       res.status(status).json({ message: safeMessage });
     }
     console.error("Express error handler:", err);
+  });
+
+  // Prevent SPA fallthrough from masking missing API routes.
+  app.use("/api", (_req, res) => {
+    res.status(404).json({ message: "Not found" });
   });
 
   // importantly only setup vite in development and after
@@ -323,6 +335,45 @@ app.use((req, res, next) => {
         } catch (e) {
           console.warn("[QuoteHub] Bootstrap failed:", e);
         }
+      }
+
+      // Market data provider configs: optionally sync provider definitions from filesystem JSON.
+      // This is safe-by-default (create_missing) unless overridden via env.
+      try {
+        const enabled = String(process.env.MARKET_DATA_PROVIDER_FILE_SYNC ?? "").trim() === "1";
+        if (enabled && (roles.has("api") || roles.has("ingestor"))) {
+          const { syncProviderConfigsFromDirToDb } = await import("./marketdata/providerConfigFiles");
+          const synced = await syncProviderConfigsFromDirToDb();
+          const changed = (synced.createdKeys?.length ?? 0) + (synced.updatedKeys?.length ?? 0);
+          if (synced.errors?.length) {
+            console.warn(`[MarketData] Provider file sync completed with ${synced.errors.length} error(s).`);
+          } else {
+            console.log("[MarketData] Provider file sync OK.");
+          }
+          if (changed > 0) {
+            console.log(
+              `[MarketData] Provider file sync applied (created=${synced.createdKeys.length}, updated=${synced.updatedKeys.length}, skipped=${synced.skippedKeys.length})`,
+            );
+          }
+        }
+      } catch (e) {
+        console.warn("[MarketData] Provider file sync failed:", e);
+      }
+
+      // Market data provider health: warn early if configured providers reference missing env secrets.
+      try {
+        const { checkConfiguredProviderSecrets } = await import("./marketdata/providerManager");
+        const status = await checkConfiguredProviderSecrets();
+        const missing = status.missingEnvByProviderKey ?? {};
+        const missingKeys = Object.keys(missing);
+        if (missingKeys.length) {
+          console.warn("[MarketData] Configured provider secrets missing from process.env:");
+          for (const providerKey of missingKeys) {
+            console.warn(`  - ${providerKey}: ${(missing as any)[providerKey].join(", ")}`);
+          }
+        }
+      } catch (e) {
+        console.warn("[MarketData] Provider secret preflight failed:", e);
       }
 
       // Seed baseline legal terms + kick off ip2asn import (worker only)

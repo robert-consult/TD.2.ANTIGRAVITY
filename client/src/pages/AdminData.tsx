@@ -10,6 +10,7 @@ import { LeaderboardTable, LeaderboardEntry, formatCurrency } from "@/components
 import { useQuery } from "@tanstack/react-query";
 import axios from "axios";
 import { fetchWithIdentity } from "@/lib/fetchWithIdentity";
+import TraderSearchTab from "@/components/admin/TraderSearchTab";
 
 interface KPIData {
   totalUsers: number;
@@ -71,7 +72,7 @@ function formatSignedCurrency(value: number): string {
 
 export default function AdminData() {
   const [dateRange, setDateRange] = useState("30"); // days
-  const [dataTab, setDataTab] = useState<"stats" | "funnel" | "analytics" | "compliance" | "deactivated">("stats");
+  const [dataTab, setDataTab] = useState<"stats" | "funnel" | "analytics" | "compliance" | "traderSearch" | "deactivated">("stats");
   const [traderStats, setTraderStats] = useState<any[]>([]);
   const [filteredStats, setFilteredStats] = useState<any[]>([]);
   const [filterValue, setFilterValue] = useState("");
@@ -446,6 +447,12 @@ export default function AdminData() {
           className={`px-3 py-1.5 rounded text-sm transition ${dataTab === "compliance" ? "bg-rose-600 text-white" : "text-gray-300 hover:bg-neutral-600"}`}
         >
           Verification Compliance
+        </button>
+        <button
+          onClick={() => setDataTab("traderSearch")}
+          className={`px-3 py-1.5 rounded text-sm transition ${dataTab === "traderSearch" ? "bg-orange-600 text-white" : "text-gray-300 hover:bg-neutral-600"}`}
+        >
+          Trader Search
         </button>
         <button
           onClick={() => setDataTab("deactivated")}
@@ -894,6 +901,8 @@ export default function AdminData() {
             </CardContent>
           </Card>
         </div>
+      ) : dataTab === "traderSearch" ? (
+        <TraderSearchTab days={dateRange} />
       ) : dataTab === "deactivated" ? (
         <div className="space-y-6">
           {deactivatedLoading ? (

@@ -1,7 +1,7 @@
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import parseDate from "../utils/parseDate";
 import { apiRequest } from "@/lib/queryClient";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -31,6 +31,7 @@ import { useTranslation } from "@/i18n";
 import { getTradeErrorToast } from "@/lib/tradeErrorMessages";
 import { useLiveUpdates } from "@/live/LiveUpdatesProvider";
 import { useLotSettings } from "@/hooks/use-lot-settings";
+import { getPipSize, getQuoteDecimals } from "@shared/pips";
 
 interface TradeScreenProps {
   selectedSymbol: string;
@@ -752,10 +753,13 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
     id: number;
     symbol: string;
     name: string;
+    category?: string | null;
     baseCurrency?: string;
     quoteCurrency?: string;
     spread?: number;
     minSpreadPips: number;
+    pipDecimals?: number | null;
+    quoteDecimals?: number | null;
     enabled: boolean;
     minLot: number;
     maxLot: number;
@@ -791,14 +795,33 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
     initialData: [],
   });
 
-  const selectedSymbolConfig = symbols.find(
-    (s) => s.symbol === selectedSymbol
+  const symbolCfgBySymbol = useMemo(() => new Map(symbols.map((s) => [s.symbol, s])), [symbols]);
+
+  const selectedSymbolConfig = symbolCfgBySymbol.get(selectedSymbol);
+
+  const selectedPipCfg = useMemo(
+    () => ({
+      symbol: selectedSymbol,
+      category: selectedSymbolConfig?.category,
+      quoteCurrency: selectedSymbolConfig?.quoteCurrency,
+      pipDecimals: selectedSymbolConfig?.pipDecimals,
+      quoteDecimals: selectedSymbolConfig?.quoteDecimals,
+    }),
+    [
+      selectedSymbol,
+      selectedSymbolConfig?.category,
+      selectedSymbolConfig?.quoteCurrency,
+      selectedSymbolConfig?.pipDecimals,
+      selectedSymbolConfig?.quoteDecimals,
+    ],
   );
+
+  const pipSize = getPipSize(selectedPipCfg);
+  const priceDecimals = getQuoteDecimals(selectedPipCfg);
 
   // Calculate bid/ask prices with minimum 2 pip spread (moved early for useEffect dependencies)
   const minSpreadPips = selectedSymbolConfig?.minSpreadPips || 2.0;
-  const pipFactor = selectedSymbol?.includes("JPY") ? 0.01 : 0.0001;
-  const minSpread = minSpreadPips * pipFactor;
+  const minSpread = minSpreadPips * pipSize;
 
   const realSpread = currentQuote?.bid && currentQuote?.ask ?
     Math.abs(currentQuote.ask - currentQuote.bid) : 0;
@@ -831,7 +854,15 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
   const formatPx = (value: unknown, symbol: string): string => {
     const n = toFiniteNumber(value);
     if (n === null) return "-";
-    return n.toFixed(symbol.includes("JPY") ? 2 : 4);
+    const cfg = symbolCfgBySymbol.get(symbol);
+    const decimals = getQuoteDecimals({
+      symbol,
+      category: cfg?.category,
+      quoteCurrency: cfg?.quoteCurrency,
+      pipDecimals: cfg?.pipDecimals,
+      quoteDecimals: cfg?.quoteDecimals,
+    });
+    return n.toFixed(decimals);
   };
 
   const orderTypePillClass = (orderType: unknown): string => {
@@ -963,9 +994,8 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
   // Auto-suggest entry/TP/SL prices for pending orders.
   useEffect(() => {
     if (orderType === "Market" || !askPrice || !bidPrice) return;
-    const pip = selectedSymbol.includes("JPY") ? 0.01 : 0.0001;
-    const decimals = selectedSymbol.includes("JPY") ? 3 : 5;
-    const minDist = minPriceDistancePips * pip;
+    const decimals = priceDecimals;
+    const minDist = minPriceDistancePips * pipSize;
     // Guard against client/server quote skew (e.g., mid vs bid/ask, jittery feeds).
     // This keeps the autosuggested entry safely beyond the server minimum.
     const entryGuard = Math.max(0, spread || 0);
@@ -1010,16 +1040,15 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
         setFieldIfChanged("stopLoss", sl);
       }
     }
-  }, [askPrice, bidPrice, orderType, pendingSide, autoEntry, autoTp, autoSl, selectedSymbol, spread, minPriceDistancePips, form]);
+  }, [askPrice, bidPrice, orderType, pendingSide, autoEntry, autoTp, autoSl, priceDecimals, pipSize, selectedSymbol, spread, minPriceDistancePips, form]);
 
   // If the user edits a pending entry price, keep TP/SL aligned (prevents "submit before next tick" rejections).
   useLayoutEffect(() => {
     if (orderType === "Market") return;
     if (!autoTp && !autoSl) return;
 
-    const pip = selectedSymbol.includes("JPY") ? 0.01 : 0.0001;
-    const decimals = selectedSymbol.includes("JPY") ? 3 : 5;
-    const minDist = minPriceDistancePips * pip;
+    const decimals = priceDecimals;
+    const minDist = minPriceDistancePips * pipSize;
     const factor = Math.pow(10, decimals);
     const roundUp = (v: number) => Math.ceil(v * factor) / factor;
     const roundDown = (v: number) => Math.floor(v * factor) / factor;
@@ -1051,7 +1080,7 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
     });
 
     return () => subscription.unsubscribe();
-  }, [autoSl, autoTp, form, orderType, pendingSide, selectedSymbol, minPriceDistancePips]);
+  }, [autoSl, autoTp, form, orderType, pendingSide, priceDecimals, pipSize, selectedSymbol, minPriceDistancePips]);
 
   // Execute trade mutation
   const executeTrade = useMutation({
@@ -1249,7 +1278,7 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
                 <span className="text-sm font-semibold text-primary">{selectedSymbol}</span>
                 {currentPrice ? (
                   <span className="text-sm font-mono text-white/90">
-                    {currentPrice.toFixed(selectedSymbol.includes("JPY") ? 2 : 4)}
+                    {currentPrice.toFixed(priceDecimals)}
                   </span>
                 ) : (
                   <span className="text-sm text-gray-500">—</span>
@@ -1312,7 +1341,7 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
                     <span className="text-cq-xs text-gray-400">Bid</span>
                     {bidPrice ? (
                       <span className="data-cell text-danger-500">
-                        {bidPrice.toFixed(selectedSymbol.includes("JPY") ? 2 : 4)}
+                        {bidPrice.toFixed(priceDecimals)}
                       </span>
                     ) : (
                       <Skeleton className="h-4 w-16" />
@@ -1322,7 +1351,7 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
                     <span className="text-cq-xs text-gray-400">Ask</span>
                     {askPrice ? (
                       <span className="data-cell text-success-500">
-                        {askPrice.toFixed(selectedSymbol.includes("JPY") ? 2 : 4)}
+                        {askPrice.toFixed(priceDecimals)}
                       </span>
                     ) : (
                       <Skeleton className="h-4 w-16" />
@@ -1332,7 +1361,7 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
                     <span className="text-cq-xs text-gray-400">Spread</span>
                     {spread ? (
                       <span className="data-cell">
-                        {spread.toFixed(selectedSymbol.includes("JPY") ? 2 : 4)}
+                        {spread.toFixed(priceDecimals)}
                       </span>
                     ) : (
                       <Skeleton className="h-4 w-16" />
@@ -1346,9 +1375,7 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
 	              {currentPrice ? (
 	                <>
 	                  <div className="font-mono font-semibold tabular-nums text-white whitespace-nowrap leading-none text-[clamp(0.9rem,0.85rem+0.6cqi,1.25rem)]">
-	                    {currentPrice.toFixed(
-	                      selectedSymbol.includes("JPY") ? 2 : 4
-	                    )}
+	                    {currentPrice.toFixed(priceDecimals)}
 	                  </div>
                   <div className={`text-cq-sm ${currentQuote?.changePct && currentQuote.changePct >= 0
                     ? "text-success-500"
@@ -1620,9 +1647,7 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
                                     className="w-full py-2 pl-3 bg-neutral-800 border border-gray-700 rounded-md text-white placeholder:text-slate-400"
                                     placeholder={
                                       currentPrice
-                                        ? currentPrice.toFixed(
-                                          selectedSymbol.includes("JPY") ? 2 : 4
-                                        )
+                                        ? currentPrice.toFixed(priceDecimals)
                                         : "0.0000"
                                     }
                                   />
@@ -1650,9 +1675,7 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
                                     className="w-full py-2 pl-3 bg-neutral-800 border border-gray-700 rounded-md text-white placeholder:text-slate-400"
                                     placeholder={
                                       currentPrice
-                                        ? currentPrice.toFixed(
-                                          selectedSymbol.includes("JPY") ? 2 : 4
-                                        )
+                                        ? currentPrice.toFixed(priceDecimals)
                                         : "0.0000"
                                     }
                                   />
@@ -1689,9 +1712,7 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
                                           ? (
                                             currentPrice +
                                             (currentPrice * 0.01)
-                                          ).toFixed(
-                                            selectedSymbol.includes("JPY") ? 2 : 4
-                                          )
+                                          ).toFixed(priceDecimals)
                                           : "0.00"
                                       }
                                     />
@@ -1720,9 +1741,7 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
                                           ? (
                                             currentPrice -
                                             (currentPrice * 0.01)
-                                          ).toFixed(
-                                            selectedSymbol.includes("JPY") ? 2 : 4
-                                          )
+                                          ).toFixed(priceDecimals)
                                           : "0.00"
                                       }
                                     />
@@ -1784,27 +1803,34 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
                       </TableHeader>
                       <TableBody>
                         {Array.isArray(openTrades) && openTrades.map((trade: Trade) => {
-                          const tradeSymbol = symbols.find(s => s.id === trade.symbolId)?.symbol || '';
+                          const tradeSymbolConfig = symbols.find(s => s.id === trade.symbolId);
+                          const tradeSymbol = tradeSymbolConfig?.symbol || '';
                           const tradeQuote = quotes.find(q => q.symbol === tradeSymbol);
                           const currentTradePrice = tradeQuote?.price || currentPrice;
-                          const isJpy = tradeSymbol.includes('JPY');
+                          const isJpy = String(tradeSymbolConfig?.quoteCurrency || '').toUpperCase() === 'JPY' || tradeSymbol.includes('JPY');
+                          const tradePipSize = getPipSize({
+                            symbol: tradeSymbol,
+                            category: tradeSymbolConfig?.category,
+                            quoteCurrency: tradeSymbolConfig?.quoteCurrency,
+                            pipDecimals: tradeSymbolConfig?.pipDecimals,
+                            quoteDecimals: tradeSymbolConfig?.quoteDecimals,
+                          });
                           const isExpanded = expandedPositionRows.has(trade.id);
 
                           // Calculate profit/loss using MT4/5-style calculations
                           let pl = 0;
                           if (currentTradePrice) {
-                            const pipSize = isJpy ? 0.01 : 0.0001;
                             const contractSize = 100000;
                             const priceDiff = trade.type === 'BUY'
                               ? currentTradePrice - trade.openPrice
                               : trade.openPrice - currentTradePrice;
-                            const pips = priceDiff / pipSize;
+                            const pips = priceDiff / tradePipSize;
 
                             if (isJpy) {
-                              const pipValueInUsd = (contractSize * pipSize) / currentTradePrice;
+                              const pipValueInUsd = (contractSize * tradePipSize) / currentTradePrice;
                               pl = pips * pipValueInUsd * trade.lots;
                             } else {
-                              pl = pips * (contractSize * pipSize) * trade.lots;
+                              pl = pips * (contractSize * tradePipSize) * trade.lots;
                             }
                           }
 
@@ -2221,7 +2247,7 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
                   ) : null}
                   {getSideLabel("SELL")}
                   {bidPrice && (
-                    <span className="text-xs block">@ {bidPrice.toFixed(selectedSymbol.includes("JPY") ? 2 : 4)}</span>
+                    <span className="text-xs block">@ {bidPrice.toFixed(priceDecimals)}</span>
                   )}
                 </Button>
                 <Button
@@ -2236,7 +2262,7 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
                   ) : null}
                   {getSideLabel("BUY")}
                   {askPrice && (
-                    <span className="text-xs block">@ {askPrice.toFixed(selectedSymbol.includes("JPY") ? 2 : 4)}</span>
+                    <span className="text-xs block">@ {askPrice.toFixed(priceDecimals)}</span>
                   )}
                 </Button>
               </div>

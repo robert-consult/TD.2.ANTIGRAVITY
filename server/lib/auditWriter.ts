@@ -402,16 +402,13 @@ export async function verifyTradeAuditChain(tradeId: number): Promise<{ valid: b
 }
 
 // Calculate slippage in pips
-export function calculateSlippagePips(symbol: string, slippagePoints: number): number {
-  // For JPY pairs, 1 pip = 0.01; for others, 1 pip = 0.0001
-  const isJpy = symbol.toUpperCase().includes("JPY");
-  const pipValue = isJpy ? 0.01 : 0.0001;
-  return slippagePoints / pipValue;
+export function calculateSlippagePips(symbol: string, slippagePoints: number, pipDecimals?: number | null): number {
+  const pip = Number.isFinite(Number(pipDecimals)) ? Math.pow(10, -Math.trunc(Number(pipDecimals))) : (symbol.toUpperCase().includes("JPY") ? 0.01 : 0.0001);
+  return slippagePoints / pip;
 }
 
 // Calculate spread in pips
-export function calculateSpreadPips(symbol: string, spreadPoints: number): number {
-  const isJpy = symbol.toUpperCase().includes("JPY");
-  const pipValue = isJpy ? 0.01 : 0.0001;
-  return spreadPoints / pipValue;
+export function calculateSpreadPips(symbol: string, spreadPoints: number, pipDecimals?: number | null): number {
+  const pip = Number.isFinite(Number(pipDecimals)) ? Math.pow(10, -Math.trunc(Number(pipDecimals))) : (symbol.toUpperCase().includes("JPY") ? 0.01 : 0.0001);
+  return spreadPoints / pip;
 }

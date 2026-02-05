@@ -85,6 +85,27 @@
       "when": 1770070232995,
       "tag": "0011_min_price_distance_pips",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1770157932572,
+      "tag": "0012_market_data_providers",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1770157932573,
+      "tag": "0013_instrument_reference_and_pips",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1770169747856,
+      "tag": "0014_trader_scouting_indexes",
+      "breakpoints": true
     }
   ]
 }

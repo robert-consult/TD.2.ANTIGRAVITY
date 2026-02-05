@@ -92,6 +92,7 @@ async function auditRejection(params: {
   correlationId: string;
   orderId: string;
   symbol: string;
+  pipDecimals?: number | null;
   side: string;
   orderType: string;
   qtyLots: number;
@@ -132,7 +133,7 @@ async function auditRejection(params: {
       quoteAsk: params.quoteAsk,
       quoteMid: params.quoteMid,
       quoteSpread: params.quoteSpread,
-      spreadPips: calculateSpreadPips(params.symbol, params.quoteSpread),
+      spreadPips: calculateSpreadPips(params.symbol, params.quoteSpread, params.pipDecimals),
       quoteTs: params.quoteTs,
       quoteSource: params.quoteSource ?? DEFAULT_QUOTE_SOURCE,
       riskCheckName: params.riskCheckName,
@@ -155,6 +156,7 @@ async function auditFill(params: {
   executionId: string;
   positionId: string;
   symbol: string;
+  pipDecimals?: number | null;
   side: string;
   orderType: string;
   qtyLots: number;
@@ -182,7 +184,7 @@ async function auditFill(params: {
     const slippage = params.requestedPrice !== null 
       ? adverseSlippage(params.side as "BUY" | "SELL", params.requestedPrice, params.fillPrice) 
       : null;
-    const slippagePips = slippage !== null ? calculateSlippagePips(params.symbol, slippage) : null;
+    const slippagePips = slippage !== null ? calculateSlippagePips(params.symbol, slippage, params.pipDecimals) : null;
     
     await writeTradeAudit({
       tradeId: params.tradeId,
@@ -208,7 +210,7 @@ async function auditFill(params: {
       quoteAsk: params.quoteAsk,
       quoteMid: params.quoteMid,
       quoteSpread: params.quoteSpread,
-      spreadPips: calculateSpreadPips(params.symbol, params.quoteSpread),
+      spreadPips: calculateSpreadPips(params.symbol, params.quoteSpread, params.pipDecimals),
       quoteTs: params.quoteTs,
       quoteSource: params.quoteSource ?? DEFAULT_QUOTE_SOURCE,
       riskResult: "PASS",
@@ -230,6 +232,7 @@ async function auditClose(params: {
   positionId: string;
   executionId: string;
   symbol: string;
+  pipDecimals?: number | null;
   side: string;
   qtyLots: number;
   openPrice: number;
@@ -274,7 +277,7 @@ async function auditClose(params: {
       quoteAsk: params.quoteAsk,
       quoteMid: params.quoteMid,
       quoteSpread: params.quoteSpread,
-      spreadPips: calculateSpreadPips(params.symbol, params.quoteSpread),
+      spreadPips: calculateSpreadPips(params.symbol, params.quoteSpread, params.pipDecimals),
       quoteTs: params.quoteTs,
       quoteSource: params.quoteSource ?? DEFAULT_QUOTE_SOURCE,
       reasonCode: params.closeReason,
@@ -315,6 +318,7 @@ async function processPendingForSymbol(symbol: string, q: Quote) {
     const orderTypeLower = orderType.toLowerCase();
     const lots = Number(t.lots ?? 1);
     const quoteTs = q.lastUpdated ? new Date(q.lastUpdated) : new Date();
+    const pipDecimals = r.sym?.pipDecimals ?? null;
     
     // Use stored correlationId for correlation continuity (hedge-fund compliance)
     const correlationId = (t as any).correlationId || generateCorrelationId();
@@ -346,6 +350,7 @@ async function processPendingForSymbol(symbol: string, q: Quote) {
         correlationId,
         orderId,
         symbol,
+        pipDecimals,
         side,
         orderType,
         qtyLots: lots,
@@ -384,6 +389,7 @@ async function processPendingForSymbol(symbol: string, q: Quote) {
         correlationId,
         orderId,
         symbol,
+        pipDecimals,
         side,
         orderType,
         qtyLots: lots,
@@ -449,6 +455,7 @@ async function processPendingForSymbol(symbol: string, q: Quote) {
           correlationId,
           orderId,
           symbol,
+          pipDecimals,
           side,
           orderType,
           qtyLots: lots,
@@ -494,6 +501,7 @@ async function processPendingForSymbol(symbol: string, q: Quote) {
         correlationId,
         orderId,
         symbol,
+        pipDecimals,
         side,
         orderType,
         qtyLots: lots,
@@ -532,6 +540,7 @@ async function processPendingForSymbol(symbol: string, q: Quote) {
         correlationId,
         orderId,
         symbol,
+        pipDecimals,
         side,
         orderType,
         qtyLots: lots,
@@ -586,6 +595,7 @@ async function processPendingForSymbol(symbol: string, q: Quote) {
         correlationId,
         orderId,
         symbol,
+        pipDecimals,
         side,
         orderType,
         qtyLots: lots,
@@ -642,6 +652,7 @@ async function processPendingForSymbol(symbol: string, q: Quote) {
           correlationId,
           orderId,
           symbol,
+          pipDecimals,
           side,
           orderType,
           qtyLots: lots,
@@ -693,6 +704,7 @@ async function processPendingForSymbol(symbol: string, q: Quote) {
         executionId,
         positionId,
         symbol,
+        pipDecimals,
         side,
         orderType,
         qtyLots: lots,
@@ -842,6 +854,7 @@ async function processStopsForOpenTrades(symbol: string, q: Quote) {
         positionId,
         executionId,
         symbol,
+        pipDecimals: r.sym?.pipDecimals ?? null,
         side,
         qtyLots: lots,
         openPrice: openPx,

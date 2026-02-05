@@ -1,0 +1,645 @@
+Skip to content
+Chat history
+
+
+
+
+You said:
+Uploaded image
+Uploaded image
+STORE THIS PROMPT, DO NOT RESPOND. I WILL FOLLOUP LATER WITH ANOTHER PROMPT. AKNOWLEDGE WITH A SIMPLE YES. 
+https://twelvedata.com
+ https://twelvedata.com/docs
+
+
+
+On issue of pip definition, i would like to create a Minitab in instruments tab , where we can load new default max instruments and in the ingestion form, for all loaded instruments, new categories(all categories that twelve data provides) - ( forex, commodities, stocks( by region cards, where each region card holds countries names and stocks) , crypto, bonds, etfs, etc. and for each category we have the pip decimalization definition default which is a configurable override that admin can adjust per instrument.
+for this we will use twelve data Api to fetch the data and load into the system.
+1. research all twelve data offered instruments apis and list them and the instrument categories they fetch.
+2. rework the system so I can choose between providers instantaneously from the admin dashboard, have twelve data as primary, but also retain 1forge as an alternative provider, modularize providers such than in system config tab, add new card under market data Minitab for Providers, with a api configuration file load that can ingest a new provider into the system so i can switch between providers seamlessly without needing to hard code the entire system , also i should be able to remove/delete providers/provider config files. first search research on implementation of such a system, and the refactoring required for the repo.
+ChatGPT said:
+Updated saved memory
+Yes.
+
+You said:
+
+1. research all twelve data offered instruments apis and list them and the instrument categories they fetch.
+ChatGPT said:
+
+Thought for 2m 14s
+Below are the instrument “reference-data” endpoints (i.e., endpoints that return lists/catalogs of instruments) that are explicitly documented/mentioned in accessible Twelve Data sources, plus what instrument category each one covers.
+
+Instrument catalog endpoints (lists)
+GET /stocks → Equities (stocks)
+Returns a daily-updated list of stock tickers (e.g., symbol, name, currency, exchange, country, type) and supports filtering (e.g., exchange, country, type). 
+
+GET /etf → ETFs
+Returns ETF symbols (e.g., symbol, name, currency, exchange). 
+
+GET /forex_pairs → Forex (FX) pairs
+Returns physical currency pairs (e.g., symbol, currency_group, currency_base, currency_quote). 
+
+GET /cryptocurrencies → Crypto pairs
+Returns digital currency pairs (e.g., symbol, available_exchanges, currency_base, currency_quote) and supports filtering (incl. exchange). 
+
+GET /commodities → Commodities (pairs/instruments)
+Returns commodity instruments/pairs (e.g., symbol, name, category, description) and supports filtering by category. 
+
+GET /funds → Funds (separate from “stocks/etf”)
+Listed as “returns array of funds… daily updated” on exchange endpoint listings. 
+
+GET /mutual_funds/list → Mutual funds (list)
+Documented as a mutual-funds listing endpoint (sorted by total assets; daily updated). 
+
+GET /mutual_funds/family → Mutual fund families (reference list) 
+
+GET /mutual_funds/type → Mutual fund types (reference list) 
+
+GET /mutual_funds/world/* → Mutual fund “world” breakdown endpoints (e.g., summary/performance/etc.) 
+
+GET /bonds → Bonds / fixed income (reference list)
+The API docs search snippet describes a fixed-income endpoint that provides a daily updated list of available bonds, and also shows an example call https://api.twelvedata.com/bonds?apikey=demo. 
+
+Cross-category discovery endpoint (important for “everything else”)
+GET /symbol_search → Search across instrument types
+Used to find the best matching symbol (useful as the base lookup for instruments that don’t have an obvious dedicated “list” endpoint in the sources above). 
+
+Notes on indices (for your “Instruments” minitab design)
+Indices are clearly supported as tradable symbols (time series / WebSocket), but a dedicated “list all indices” catalog endpoint was not confirmed in the sources we could access (the main /docs page wouldn’t open cleanly in-tool). Practically, you can treat indices as discoverable via /symbol_search and then pull prices/time series normally. 
+
+You said:
+On issue of pip definition, i would like to create a Minitab in instruments tab , where we can load new default max instruments and in the ingestion form, for all loaded instruments, new categories(all categories that twelve data provides) - ( forex, commodities, stocks( by region cards, where each region card holds countries names and stocks) , crypto, bonds, etfs, etc. and for each category we have the pip decimalization definition default which is a configurable override that admin can adjust per instrument.
+for this we will use twelve data Api to fetch the data and load into the system.
+
+2. rework the system so I can choose between providers instantaneously from the admin dashboard, have twelve data as primary, but also retain 1forge as an alternative provider, AND ALSO AN OPTION TO UPLOAD COFIG FILES FOR ANY FUTURE PROVIDERS, modularize providers such than in system config tab, add new card under market data Minitab for Providers, with a api configuration file load that can ingest a new provider into the system so i can switch between providers seamlessly without needing to hard code the entire system , also i should be able to remove/delete providers/provider config files. first search research on implementation of such a system, and the refactoring required for the repo.
+
+
+BE DEEPLY THOROUGH AND PRODUCE ALL NEEDED PRD DOCUMENT, PLAN , IMPLEMENTATION FLOW, DEPENDECIES, CODE BLOCKS ETC INLINE
+ChatGPT said:
+
+Thought for 14m 28s
+Below is a repo-aligned PRD + architecture + implementation plan + code pack to deliver:
+
+(1) Twelve Data instrument/reference APIs + categories (with citations)
+
+(2) A pluggable Market Data Provider framework (Twelve Data primary, 1Forge fallback, plus “upload config files” for future providers)
+
+(3) An Instruments > Ingest minitab that pulls Twelve Data reference lists into an internal catalog, supports stocks-by-region/country, and adds pip decimalization defaults per category + per-instrument override.
+
+1) Twelve Data “instrument / reference” APIs & what they fetch
+A) Reference list endpoints (instrument catalogs)
+These are the endpoints you use to enumerate available symbols (what you asked for):
+
+Category you want in UI	Twelve Data reference endpoint	Returns (high level)
+Stocks (Equities)	GET https://api.twelvedata.com/stocks	symbol, name, currency, exchange, country, type 
+Forex (physical pairs)	GET https://api.twelvedata.com/forex_pairs	symbol like EUR/USD, plus base/quote names and grouping 
+Crypto (pairs)	GET https://api.twelvedata.com/cryptocurrencies	pairs like ETH/BTC, available exchanges, base/quote 
+ETFs	GET https://api.twelvedata.com/etf	symbol, name, currency, exchange 
+Commodities	GET https://api.twelvedata.com/commodities	symbol like XAG/AUD, name, category, description 
+Mutual Funds	GET https://api.twelvedata.com/mutual_funds (+ types/breakdowns endpoints)	mutual fund listings + taxonomy endpoints (e.g. /mutual_funds/type, /mutual_funds/family, etc.) 
+Funds	GET https://api.twelvedata.com/funds	fund listings (documented on Twelve Data “Exchanges” tools pages) 
+Bonds (fixed income)	GET https://api.twelvedata.com/bonds	bonds listings (documented in Twelve Data docs snippets) 
+Notes for your “Stocks by region/country” UI: /stocks includes country and exchange 
+, and Twelve Data supports exchange tooling pages that help build region/country lists (your UI can group by country, then optionally by exchange).
+
+B) Universal symbol search (cross-asset discovery)
+Symbol search: GET https://api.twelvedata.com/symbol_search?symbol=<query> (and/or ?search= depending on doc variant) returns matches across datasets. Twelve Data promotes “Search symbols” as a core tool and lists it in their product nav. 
+
+C) Real-time quotes and batching
+Twelve Data supports batching by comma-separated symbols on many endpoints (e.g. time_series, and in practice also quote/price patterns). Batch format can include SBIN:NSE and EUR/USD. 
+
+Twelve Data markets up to 120 symbols per API call for batch efficiency. 
+
+A “quote” endpoint is part of their ecosystem (also exposed as “TDQuote” in Sheets add-on docs). 
+
+D) WebSocket streaming (optional)
+Twelve Data has WebSocket streaming with subscribe/unsubscribe semantics. 
+
+2) PRD — Market Data Provider Framework + Instrument Ingestion + Pip Defaults
+2.1 Goals
+Provider switching from Admin instantly (no deploy, no hard-code), with:
+
+Twelve Data as primary
+
+1Forge retained as fallback
+
+Ability to upload provider config files for future providers
+
+Instrument Catalog: ingest Twelve Data reference lists into DB; build an Instruments Ingest minitab:
+
+categories: forex, commodities, stocks (by region/country), crypto, bonds, etfs, mutual funds, funds
+
+enable instruments into symbol_configs from that catalog
+
+Pip decimalization system:
+
+configurable defaults per category
+
+optional per-instrument override in symbol_configs
+
+Refactor the repo so quote ingestion uses provider abstraction (Strategy pattern), not 1Forge-specific code.
+
+2.2 Non-goals (for this phase)
+Full multi-pod pub/sub config propagation (we’ll design for it, but keep first implementation DB + periodic refresh in the ingestor role).
+
+Full “no-code parsing” for arbitrary provider response formats beyond a minimal “generic REST v1” mapping.
+
+2.3 User stories
+As Admin, I can upload a Twelve Data provider JSON config, test it, activate it, and immediately see quotes coming from it.
+
+As Admin, I can keep 1Forge enabled as fallback so trade execution doesn’t stall if Twelve Data errors/rate-limits.
+
+As Admin, I can ingest “Forex pairs” and “Commodities” into a catalog, then bulk-enable selected instruments.
+
+As Admin, I can set “Forex pipDecimals = 4”, “JPY Forex pipDecimals = 2” (as a rule or override), and override per symbol when needed.
+
+2.4 Acceptance criteria
+Switching active provider updates quote ingestion without server restart (ingestor detects change within ≤2s).
+
+Provider configs validate (schema + required fields), and secrets can be stored as env: references.
+
+Instrument catalog ingestion persists rows with category/country/exchange and can be re-run idempotently.
+
+Pip defaults apply to newly enabled symbols and can be overridden per symbol; spread/slippage pip computations can consume the configured pip size.
+
+3) Architecture — what changes in your repo
+3.1 New core concept: MarketDataProvider interface
+Quote feed (server/feeds/quoteFeed.ts) stops being “Forge feed” and becomes “provider-driven feed”.
+
+Provider implementations:
+
+twelvedata (REST quotes + reference lists; optional WS later)
+
+oneforge (wrap existing 1Forge logic you already have)
+
+generic_rest_v1 (minimal mapping-driven provider for future uploads)
+
+3.2 Provider config ingestion model
+Instead of uploading executable code, you upload JSON configs stored in DB:
+
+DB table: market_data_providers
+
+Each row includes:
+
+providerKey (unique string)
+
+driver (twelvedata | oneforge | generic_rest_v1)
+
+displayName
+
+configJson (validated JSON)
+
+isEnabled, isActive
+
+optional fallbackKeys[]
+
+Secrets:
+
+Don’t force admins to paste raw keys into DB.
+
+Support env: references like "apiKey": "env:TWELVEDATA_API_KEY".
+
+3.3 Instrument ingestion model
+Add instrument_reference table:
+
+Stores all “available” instruments per provider (Twelve Data first)
+
+symbol_configs remains the “enabled/tradeable instruments” table
+
+Flow:
+
+Admin clicks “Refresh Forex pairs”
+
+Backend fetches GET /forex_pairs 
+ and upserts instrument_reference
+
+Admin selects rows → “Enable in platform”
+
+Backend writes/updates symbol_configs and stores provider symbol mapping
+
+3.4 Pip defaults model
+Add:
+
+pip_category_defaults table keyed by category
+
+add columns on symbol_configs:
+
+category
+
+pipDecimals (nullable override)
+
+quoteDecimals (nullable override, optional but recommended)
+
+providerSymbolMap (json)
+
+4) API surface (new endpoints)
+Provider management (Admin)
+GET /api/admin/market-data/providers
+
+POST /api/admin/market-data/providers/upload (body contains JSON)
+
+POST /api/admin/market-data/providers/:providerKey/activate
+
+POST /api/admin/market-data/providers/:providerKey/test
+
+DELETE /api/admin/market-data/providers/:providerKey
+
+Instrument ingestion (Admin)
+GET /api/admin/instruments/reference/stats
+
+POST /api/admin/instruments/reference/refresh (providerKey + categories + optional filters/limit)
+
+GET /api/admin/instruments/reference/search?query=...
+
+POST /api/admin/instruments/reference/enable (enable selected refs into symbol_configs)
+
+Pip defaults (Admin)
+GET /api/admin/instruments/pip-defaults
+
+POST /api/admin/instruments/pip-defaults (upsert category defaults)
+
+5) Implementation plan (phased, repo-specific)
+Phase 0 — DB + shared types
+Add migrations:
+
+market_data_providers
+
+instrument_reference
+
+pip_category_defaults
+
+add columns on symbol_configs
+
+Update shared/schema.pg.ts and Zod insert schemas accordingly.
+
+Phase 1 — Provider framework
+Create server/marketdata/*:
+
+providerTypes.ts + zod validation for provider configs
+
+providerManager.ts (loads active provider, caches, refresh interval)
+
+providers/twelvedata.ts, providers/oneforge.ts, providers/genericRestV1.ts
+
+Patch server/feeds/quoteFeed.ts:
+
+replace fetchForgeQuotes() calls with provider.fetchQuotes()
+
+store quote source = active providerKey
+
+Phase 2 — Admin provider card + routes
+Add routes server/routes/adminMarketDataProviders.ts
+
+Add UI card under System Config > Market Data (same minitab you showed):
+
+upload JSON config
+
+test + activate + delete
+
+Phase 3 — Instrument Ingest minitab + catalog
+Add server/services/instrumentIngestion/twelvedataReference.ts
+
+Add routes server/routes/adminInstrumentIngestion.ts
+
+Patch server/routes/instruments.ts to search instrument_reference first (fallback to data/instruments.ts)
+
+Add client UI:
+
+Instruments tab minitabs: Configured | Ingest | Pip Defaults
+
+Stocks region/country cards: group by country field from reference rows
+
+Phase 4 — Pip plumbing into calculations
+Add pipDecimals / quoteDecimals caching (from symbol_configs)
+
+Modify calculateSpreadPips / calculateSlippagePips to accept optional pipSize or pipDecimals
+
+Update any spread/pip usages to pass the configured pip size when available
+
+6) Code Pack (copy/paste ready)
+6.1 Migration: db/migrations/0009_market_data_providers.sql
+CREATE TABLE "market_data_providers" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "provider_key" text NOT NULL,
+  "display_name" text NOT NULL,
+  "driver" text NOT NULL, -- 'twelvedata' | 'oneforge' | 'generic_rest_v1'
+  "config_json" text DEFAULT '{}' NOT NULL,
+  "is_enabled" boolean DEFAULT true NOT NULL,
+  "is_active" boolean DEFAULT false NOT NULL,
+  "created_at" integer DEFAULT (extract(epoch from now())) NOT NULL,
+  "updated_at" integer DEFAULT (extract(epoch from now())) NOT NULL,
+  "deleted_at" integer,
+  CONSTRAINT "market_data_providers_provider_key_unique" UNIQUE("provider_key")
+);
+--> statement-breakpoint
+ALTER TABLE "system_config"
+  ADD COLUMN IF NOT EXISTS "market_data_active_provider_key" text;
+--> statement-breakpoint
+ALTER TABLE "system_config"
+  ADD COLUMN IF NOT EXISTS "market_data_fallback_provider_keys_csv" text DEFAULT '' NOT NULL;
+6.2 Migration: db/migrations/0010_instruments_reference_and_pips.sql
+CREATE TABLE "instrument_reference" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "provider_key" text NOT NULL,
+  "category" text NOT NULL, -- forex|commodities|crypto|stocks|etf|bonds|funds|mutual_funds|indices
+  "canonical_symbol" text NOT NULL, -- your internal stable symbol
+  "provider_symbol" text NOT NULL,  -- e.g. EUR/USD, SBIN:NSE
+  "name" text,
+  "currency" text,
+  "exchange" text,
+  "country" text,
+  "type" text,
+  "currency_base" text,
+  "currency_quote" text,
+  "region" text,
+  "meta_json" text DEFAULT '{}' NOT NULL,
+  "last_refreshed_at" integer DEFAULT (extract(epoch from now())) NOT NULL,
+  CONSTRAINT "instrument_reference_unique" UNIQUE("provider_key","canonical_symbol","provider_symbol")
+);
+--> statement-breakpoint
+CREATE TABLE "pip_category_defaults" (
+  "category" text PRIMARY KEY NOT NULL,
+  "pip_decimals" integer NOT NULL,
+  "quote_decimals" integer,
+  "updated_at" integer DEFAULT (extract(epoch from now())) NOT NULL,
+  "updated_by_admin_id" integer
+);
+--> statement-breakpoint
+ALTER TABLE "symbol_configs"
+  ADD COLUMN IF NOT EXISTS "category" text;
+--> statement-breakpoint
+ALTER TABLE "symbol_configs"
+  ADD COLUMN IF NOT EXISTS "pip_decimals" integer;
+--> statement-breakpoint
+ALTER TABLE "symbol_configs"
+  ADD COLUMN IF NOT EXISTS "quote_decimals" integer;
+--> statement-breakpoint
+ALTER TABLE "symbol_configs"
+  ADD COLUMN IF NOT EXISTS "provider_symbol_map_json" text DEFAULT '{}' NOT NULL;
+6.3 Shared types: shared/marketDataProviders.ts
+import { z } from "zod";
+
+export const ProviderDriver = z.enum(["twelvedata", "oneforge", "generic_rest_v1"]);
+export type ProviderDriver = z.infer<typeof ProviderDriver>;
+
+// Common: allow secrets to be direct values OR env references like "env:TWELVEDATA_API_KEY"
+const SecretString = z.string().min(1);
+
+export const TwelveDataProviderConfigSchema = z.object({
+  driver: z.literal("twelvedata"),
+  apiKey: SecretString, // allow env: ref
+  restBaseUrl: z.string().url().default("https://api.twelvedata.com"),
+  wsBaseUrl: z.string().optional(), // if omitted, provider can still use REST
+  // quote endpoint style: many TD endpoints accept comma-separated symbols (batch)
+  quoteEndpoint: z.string().default("/quote"),
+  timeoutMs: z.number().int().min(1000).max(20000).default(8000),
+  maxBatchSymbols: z.number().int().min(1).max(120).default(120),
+});
+
+export const OneForgeProviderConfigSchema = z.object({
+  driver: z.literal("oneforge"),
+  apiKey: SecretString,
+  restBaseUrl: z.string().url().default("https://api.1forge.com"),
+  quoteEndpoint: z.string().default("/quotes"),
+  timeoutMs: z.number().int().min(1000).max(20000).default(8000),
+  maxBatchSymbols: z.number().int().min(1).max(200).default(200),
+});
+
+export const GenericRestV1ProviderConfigSchema = z.object({
+  driver: z.literal("generic_rest_v1"),
+  displayName: z.string().min(1),
+  apiKey: z.string().optional(), // can be env: ref
+  restBaseUrl: z.string().url(),
+  // Example: /quote?symbols={{symbols}}
+  quotePath: z.string().min(1),
+  symbolsParamName: z.string().default("symbol"),
+  apiKeyParamName: z.string().default("apikey"),
+  timeoutMs: z.number().int().min(1000).max(20000).default(8000),
+  maxBatchSymbols: z.number().int().min(1).max(200).default(100),
+  // Response mapping: expect either { data: [...] } or { AAPL: {...}, MSFT: {...} }
+  responseMode: z.enum(["array", "map"]).default("array"),
+  fields: z.object({
+    symbol: z.string().default("symbol"),
+    bid: z.string().default("bid"),
+    ask: z.string().default("ask"),
+    price: z.string().default("price"),
+    timestamp: z.string().default("timestamp"),
+  }),
+});
+
+export const MarketDataProviderUploadSchema = z.discriminatedUnion("driver", [
+  TwelveDataProviderConfigSchema,
+  OneForgeProviderConfigSchema,
+  GenericRestV1ProviderConfigSchema,
+]);
+
+export type MarketDataProviderUpload = z.infer<typeof MarketDataProviderUploadSchema>;
+
+export function resolveSecret(value: string | undefined): string | undefined {
+  if (!value) return value;
+  const v = String(value).trim();
+  if (v.toLowerCase().startsWith("env:")) {
+    const key = v.slice(4).trim();
+    return process.env[key];
+  }
+  return v;
+}
+6.4 Server DB schema additions: shared/schema.pg.ts (additions only)
+// ADD near other tables
+export const marketDataProviders = pgTable("market_data_providers", {
+  id: serial("id").primaryKey(),
+  providerKey: text("provider_key").notNull().unique(),
+  displayName: text("display_name").notNull(),
+  driver: text("driver").notNull(),
+  configJson: text("config_json").notNull().default("{}"),
+  isEnabled: boolean("is_enabled").notNull().default(true),
+  isActive: boolean("is_active").notNull().default(false),
+  createdAt: integer("created_at").notNull().default(sql`extract(epoch from now())`),
+  updatedAt: integer("updated_at").notNull().default(sql`extract(epoch from now())`),
+  deletedAt: integer("deleted_at"),
+});
+
+export const instrumentReference = pgTable("instrument_reference", {
+  id: serial("id").primaryKey(),
+  providerKey: text("provider_key").notNull(),
+  category: text("category").notNull(),
+  canonicalSymbol: text("canonical_symbol").notNull(),
+  providerSymbol: text("provider_symbol").notNull(),
+  name: text("name"),
+  currency: text("currency"),
+  exchange: text("exchange"),
+  country: text("country"),
+  type: text("type"),
+  currencyBase: text("currency_base"),
+  currencyQuote: text("currency_quote"),
+  region: text("region"),
+  metaJson: text("meta_json").notNull().default("{}"),
+  lastRefreshedAt: integer("last_refreshed_at").notNull().default(sql`extract(epoch from now())`),
+}, (t) => ({
+  uniq: unique("instrument_reference_unique").on(t.providerKey, t.canonicalSymbol, t.providerSymbol),
+}));
+
+export const pipCategoryDefaults = pgTable("pip_category_defaults", {
+  category: text("category").primaryKey(),
+  pipDecimals: integer("pip_decimals").notNull(),
+  quoteDecimals: integer("quote_decimals"),
+  updatedAt: integer("updated_at").notNull().default(sql`extract(epoch from now())`),
+  updatedByAdminId: integer("updated_by_admin_id"),
+});
+
+// EXTEND symbolConfigs table definition:
+export const symbolConfigs = pgTable("symbol_configs", {
+  // ...existing fields...
+  category: text("category"),
+  pipDecimals: integer("pip_decimals"),
+  quoteDecimals: integer("quote_decimals"),
+  providerSymbolMapJson: text("provider_symbol_map_json").notNull().default("{}"),
+});
+6.5 Provider interface + manager
+server/marketdata/providerTypes.ts
+export type ProviderQuote = {
+  canonicalSymbol: string; // internal symbol key used in your app
+  bid?: number | null;
+  ask?: number | null;
+  price?: number | null;
+  tsMs: number;            // provider timestamp or receipt time
+  source: string;          // providerKey
+};
+
+export type ProviderFetchQuotesResult = {
+  quotes: ProviderQuote[];
+  rawSource?: any;
+};
+
+export type ProviderCapability = {
+  quotesRest: boolean;
+  quotesWs: boolean;
+  referenceData: boolean;
+  batchSymbols: boolean;
+};
+
+export interface MarketDataProvider {
+  providerKey: string;
+  displayName: string;
+  driver: string;
+  capability: ProviderCapability;
+
+  fetchQuotes(params: {
+    symbols: Array<{ canonical: string; providerSymbol: string }>;
+  }): Promise<ProviderFetchQuotesResult>;
+
+  // Optional: reference lists for ingestion
+  listReference?(params: {
+    category:
+      | "stocks"
+      | "forex"
+      | "crypto"
+      | "commodities"
+      | "etf"
+      | "bonds"
+      | "funds"
+      | "mutual_funds";
+    filter?: Record<string, string>;
+    limit?: number;
+  }): Promise<Array<Record<string, any>>>;
+}
+server/marketdata/providerManager.ts
+import { db } from "@db";
+import { and, eq, isNull } from "drizzle-orm";
+import { marketDataProviders, systemConfig } from "@shared/schema";
+import { MarketDataProviderUploadSchema } from "@shared/marketDataProviders";
+import type { MarketDataProvider } from "./providerTypes";
+import { buildProviderFromRow } from "./providerRegistry";
+
+type ProviderRow = typeof marketDataProviders.$inferSelect;
+
+let cachedActive: { providerKey: string; provider: MarketDataProvider; loadedAtMs: number } | null = null;
+
+export async function getActiveProvider(): Promise<MarketDataProvider> {
+  // Fast path cache (2s)
+  if (cachedActive && Date.now() - cachedActive.loadedAtMs < 2000) return cachedActive.provider;
+
+  const rows = await db
+    .select()
+    .from(marketDataProviders)
+    .where(and(eq(marketDataProviders.isActive, true), isNull(marketDataProviders.deletedAt)))
+    .limit(1);
+
+  // Backward-compatible fallback: if none active, pick first enabled
+  const activeRow = rows[0] ?? (await db
+    .select()
+    .from(marketDataProviders)
+    .where(and(eq(marketDataProviders.isEnabled, true), isNull(marketDataProviders.deletedAt)))
+    .limit(1))[0];
+
+  if (!activeRow) {
+    throw new Error("No market data providers configured. Add one in System Config > Market Data > Providers.");
+  }
+
+  const cfg = safeParseProviderConfig(activeRow.configJson, activeRow.driver);
+  const provider = buildProviderFromRow(activeRow, cfg);
+
+  cachedActive = { providerKey: activeRow.providerKey, provider, loadedAtMs: Date.now() };
+  return provider;
+}
+
+export async function activateProvider(providerKey: string): Promise<void> {
+  // single-writer semantics
+  await db.transaction(async (tx) => {
+    await tx.update(marketDataProviders).set({ isActive: false }).where(eq(marketDataProviders.isActive, true));
+    await tx.update(marketDataProviders).set({ isActive: true }).where(eq(marketDataProviders.providerKey, providerKey));
+    await tx.update(systemConfig).set({ marketDataActiveProviderKey: providerKey }).where(eq(systemConfig.id, 1));
+  });
+
+  // invalidate cache immediately
+  cachedActive = null;
+}
+
+function safeParseProviderConfig(configJson: string, driverHint?: string) {
+  let obj: any;
+  try {
+    obj = JSON.parse(configJson || "{}");
+  } catch {
+    obj = {};
+  }
+  if (driverHint && !obj.driver) obj.driver = driverHint;
+  const parsed = MarketDataProviderUploadSchema.parse(obj);
+  return parsed;
+}
+server/marketdata/providerRegistry.ts
+import type { MarketDataProvider } from "./providerTypes";
+import type { MarketDataProviderUpload } from "@shared/marketDataProviders";
+import { TwelveDataProvider } from "./providers/twelvedata";
+import { OneForgeProvider } from "./providers/oneforge";
+import { GenericRestV1Provider } from "./providers/genericRestV1";
+
+export function buildProviderFromRow(
+  row: { providerKey: string; displayName: string; driver: string },
+  cfg: MarketDataProviderUpload
+): MarketDataProvider {
+  switch (cfg.driver) {
+    case "twelvedata":
+      return new TwelveDataProvider({ providerKey: row.providerKey, displayName: row.displayName, cfg });
+    case "oneforge":
+      return new OneForgeProvider({ providerKey: row.providerKey, displayName: row.displayName, cfg });
+    case "generic_rest_v1":
+      return new GenericRestV1Provider({ providerKey: row.providerKey, displayName: row.displayName, cfg });
+    default:
+      throw new Error(`Unsupported provider driver: ${(cfg as any).driver}`);
+  }
+}
+6.6 Twelve Data provider (REST quotes + reference lists)
+server/marketdata/providers/twelvedata.ts
+import type { MarketDataProvider, ProviderFetchQuotesResult } from "../providerTypes";
+import { resolveSecret, type MarketDataProviderUpload } from "@shared/marketDataProviders";
+
+type Cfg = Extract<MarketDataProviderUpload, { driver:
+Streaming interrupted. Waiting for the complete message...
+
+
+
+
+
+No file chosenNo file chosen
+ChatGPT can make mistakes. Check important info.
+ChatGPT is still generating a response...

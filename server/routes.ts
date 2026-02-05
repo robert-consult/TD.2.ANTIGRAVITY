@@ -26,6 +26,7 @@ import legalRouter from "./routes/legal";
 import adminLegalRouter from './routes/adminLegal';
 import { adminLegalDocsRouter } from './routes/adminLegalDocs';
 import { adminLegalAcceptancesRouter } from './routes/adminLegalAcceptances';
+import { adminMarketDataRouter } from "./routes/adminMarketData";
 import { adminSystemConfigRouter } from './routes/adminSystemConfig';
 import { adminMigrationRouter } from './routes/adminMigration';
 import { adminActivityRouter } from "./routes/adminActivity";
@@ -73,6 +74,8 @@ import { botGuard, persistBotAssessmentForUser } from "./security/botGuard";
 import { jurisdictionSessionGuard } from "./middleware/jurisdictionSessionGuard";
 import { withGriftClient } from "./grift/griftDb";
 import { isMarketOpenForSymbol } from "./services/marketHours";
+import { getPipSize, getQuoteDecimals } from "@shared/pips";
+import { getProviderRateLimitStats } from "./marketdata/rateLimit";
 
 /**
  * Precision-aware price comparison utilities for forex trading.
@@ -80,7 +83,7 @@ import { isMarketOpenForSymbol } from "./services/marketHours";
  * Handles truncated decimals (e.g., 0.67 = 0.6700) correctly.
  */
 function getPrecision(symbol: string): number {
-  // JPY pairs have 2 decimal precision (pip = 0.01), others have 4 (pip = 0.0001)
+  // Deprecated: prefer passing a precision derived from symbol_config.quoteDecimals.
   return symbol.includes("JPY") ? 2 : 4;
 }
 
@@ -96,26 +99,22 @@ function ticksToPrice(ticks: number, precision: number): number {
 }
 
 // Precision-aware comparison: returns true if priceA < priceB
-function priceLessThan(priceA: number, priceB: number, symbol: string): boolean {
-  const precision = getPrecision(symbol);
+function priceLessThan(priceA: number, priceB: number, precision: number): boolean {
   return toTicks(priceA, precision) < toTicks(priceB, precision);
 }
 
 // Precision-aware comparison: returns true if priceA > priceB
-function priceGreaterThan(priceA: number, priceB: number, symbol: string): boolean {
-  const precision = getPrecision(symbol);
+function priceGreaterThan(priceA: number, priceB: number, precision: number): boolean {
   return toTicks(priceA, precision) > toTicks(priceB, precision);
 }
 
 // Precision-aware comparison: returns true if priceA <= priceB
-function priceLessThanOrEqual(priceA: number, priceB: number, symbol: string): boolean {
-  const precision = getPrecision(symbol);
+function priceLessThanOrEqual(priceA: number, priceB: number, precision: number): boolean {
   return toTicks(priceA, precision) <= toTicks(priceB, precision);
 }
 
 // Precision-aware comparison: returns true if priceA >= priceB
-function priceGreaterThanOrEqual(priceA: number, priceB: number, symbol: string): boolean {
-  const precision = getPrecision(symbol);
+function priceGreaterThanOrEqual(priceA: number, priceB: number, precision: number): boolean {
   return toTicks(priceA, precision) >= toTicks(priceB, precision);
 }
 
@@ -2957,8 +2956,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         // MT5-style placement validation for Limit/Stop orders
         if (isPendingOrder) {
-          const pip = symbolConfig.symbol.includes("JPY") ? 0.01 : 0.0001;
-          const minDist = minPriceDistancePips * pip;
+          const pipSize = getPipSize({
+            symbol: symbolConfig.symbol,
+            category: (symbolConfig as any).category,
+            quoteCurrency: (symbolConfig as any).quoteCurrency,
+            pipDecimals: (symbolConfig as any).pipDecimals,
+            quoteDecimals: (symbolConfig as any).quoteDecimals,
+          });
+          const priceDecimals = getQuoteDecimals({
+            symbol: symbolConfig.symbol,
+            category: (symbolConfig as any).category,
+            quoteCurrency: (symbolConfig as any).quoteCurrency,
+            pipDecimals: (symbolConfig as any).pipDecimals,
+            quoteDecimals: (symbolConfig as any).quoteDecimals,
+          });
+          const minDist = minPriceDistancePips * pipSize;
           const bid = quote.bid !== undefined ? parseFloat(String(quote.bid)) : entryPrice;
           const ask = quote.ask !== undefined ? parseFloat(String(quote.ask)) : entryPrice;
 
@@ -2967,16 +2979,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
             const maxBuyLimit = ask - minDist;
             const minSellLimit = bid + minDist;
             // Use precision-aware comparison for limit orders
-            if (data.type === "BUY" && priceGreaterThan(reqPrice, maxBuyLimit, symbolConfig.symbol)) {
+            if (data.type === "BUY" && priceGreaterThan(reqPrice, maxBuyLimit, priceDecimals)) {
               await writeDecisionReject("BUY_LIMIT_TOO_CLOSE", { minDistPips: minPriceDistancePips, ask }, { requestedPrice: reqPrice });
               return res.status(400).json({
-                message: `BUY LIMIT must be at least ${minPriceDistancePips} pips below current ask (${ask.toFixed(5)}). Maximum: ${maxBuyLimit.toFixed(5)}`
+                message: `BUY LIMIT must be at least ${minPriceDistancePips} pips below current ask (${ask.toFixed(priceDecimals)}). Maximum: ${maxBuyLimit.toFixed(priceDecimals)}`
               });
             }
-            if (data.type === "SELL" && priceLessThan(reqPrice, minSellLimit, symbolConfig.symbol)) {
+            if (data.type === "SELL" && priceLessThan(reqPrice, minSellLimit, priceDecimals)) {
               await writeDecisionReject("SELL_LIMIT_TOO_CLOSE", { minDistPips: minPriceDistancePips, bid }, { requestedPrice: reqPrice });
               return res.status(400).json({
-                message: `SELL LIMIT must be at least ${minPriceDistancePips} pips above current bid (${bid.toFixed(5)}). Minimum: ${minSellLimit.toFixed(5)}`
+                message: `SELL LIMIT must be at least ${minPriceDistancePips} pips above current bid (${bid.toFixed(priceDecimals)}). Minimum: ${minSellLimit.toFixed(priceDecimals)}`
               });
             }
           }
@@ -2986,16 +2998,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
             const minBuyStop = ask + minDist;
             const maxSellStop = bid - minDist;
             // Use precision-aware comparison for stop orders
-            if (data.type === "BUY" && priceLessThan(reqPrice, minBuyStop, symbolConfig.symbol)) {
+            if (data.type === "BUY" && priceLessThan(reqPrice, minBuyStop, priceDecimals)) {
               await writeDecisionReject("BUY_STOP_TOO_CLOSE", { minDistPips: minPriceDistancePips, ask }, { requestedPrice: reqPrice });
               return res.status(400).json({
-                message: `BUY STOP must be at least ${minPriceDistancePips} pips above current ask (${ask.toFixed(5)}). Minimum: ${minBuyStop.toFixed(5)}`
+                message: `BUY STOP must be at least ${minPriceDistancePips} pips above current ask (${ask.toFixed(priceDecimals)}). Minimum: ${minBuyStop.toFixed(priceDecimals)}`
               });
             }
-            if (data.type === "SELL" && priceGreaterThan(reqPrice, maxSellStop, symbolConfig.symbol)) {
+            if (data.type === "SELL" && priceGreaterThan(reqPrice, maxSellStop, priceDecimals)) {
               await writeDecisionReject("SELL_STOP_TOO_CLOSE", { minDistPips: minPriceDistancePips, bid }, { requestedPrice: reqPrice });
               return res.status(400).json({
-                message: `SELL STOP must be at least ${minPriceDistancePips} pips below current bid (${bid.toFixed(5)}). Maximum: ${maxSellStop.toFixed(5)}`
+                message: `SELL STOP must be at least ${minPriceDistancePips} pips below current bid (${bid.toFixed(priceDecimals)}). Maximum: ${maxSellStop.toFixed(priceDecimals)}`
               });
             }
           }
@@ -3010,55 +3022,68 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
           if (data.type === "BUY") {
             // BUY TP must be >= entry + minPriceDistancePips
-            if (tp !== null && priceLessThan(tp, minTpSl, symbolConfig.symbol)) {
+            if (tp !== null && priceLessThan(tp, minTpSl, priceDecimals)) {
               await writeDecisionReject("BUY_TP_TOO_CLOSE", { minDistPips: minPriceDistancePips, intendedEntry }, { tp });
-              return res.status(400).json({ message: `BUY TP must be at least ${minPriceDistancePips} pips above entry. Minimum: ${minTpSl.toFixed(5)}` });
+              return res.status(400).json({ message: `BUY TP must be at least ${minPriceDistancePips} pips above entry. Minimum: ${minTpSl.toFixed(priceDecimals)}` });
             }
             // BUY SL must be <= entry - minPriceDistancePips
-            if (sl !== null && priceGreaterThan(sl, maxTpSl, symbolConfig.symbol)) {
+            if (sl !== null && priceGreaterThan(sl, maxTpSl, priceDecimals)) {
               await writeDecisionReject("BUY_SL_TOO_CLOSE", { minDistPips: minPriceDistancePips, intendedEntry }, { sl });
-              return res.status(400).json({ message: `BUY SL must be at least ${minPriceDistancePips} pips below entry. Maximum: ${maxTpSl.toFixed(5)}` });
+              return res.status(400).json({ message: `BUY SL must be at least ${minPriceDistancePips} pips below entry. Maximum: ${maxTpSl.toFixed(priceDecimals)}` });
             }
           } else {
             // SELL TP must be <= entry - minPriceDistancePips
-            if (tp !== null && priceGreaterThan(tp, maxTpSl, symbolConfig.symbol)) {
+            if (tp !== null && priceGreaterThan(tp, maxTpSl, priceDecimals)) {
               await writeDecisionReject("SELL_TP_TOO_CLOSE", { minDistPips: minPriceDistancePips, intendedEntry }, { tp });
-              return res.status(400).json({ message: `SELL TP must be at least ${minPriceDistancePips} pips below entry. Maximum: ${maxTpSl.toFixed(5)}` });
+              return res.status(400).json({ message: `SELL TP must be at least ${minPriceDistancePips} pips below entry. Maximum: ${maxTpSl.toFixed(priceDecimals)}` });
             }
             // SELL SL must be >= entry + minPriceDistancePips
-            if (sl !== null && priceLessThan(sl, minTpSl, symbolConfig.symbol)) {
+            if (sl !== null && priceLessThan(sl, minTpSl, priceDecimals)) {
               await writeDecisionReject("SELL_SL_TOO_CLOSE", { minDistPips: minPriceDistancePips, intendedEntry }, { sl });
-              return res.status(400).json({ message: `SELL SL must be at least ${minPriceDistancePips} pips above entry. Minimum: ${minTpSl.toFixed(5)}` });
+              return res.status(400).json({ message: `SELL SL must be at least ${minPriceDistancePips} pips above entry. Minimum: ${minTpSl.toFixed(priceDecimals)}` });
             }
           }
         }
         // TP/SL validation for market orders using the same minimum distance rule.
         // This prevents "instant-hit" targets and keeps behavior consistent with pending orders and edits.
         if (!isPendingOrder) {
-          const pip = symbolConfig.symbol.includes("JPY") ? 0.01 : 0.0001;
-          const minDist = minPriceDistancePips * pip;
+          const pipSize = getPipSize({
+            symbol: symbolConfig.symbol,
+            category: (symbolConfig as any).category,
+            quoteCurrency: (symbolConfig as any).quoteCurrency,
+            pipDecimals: (symbolConfig as any).pipDecimals,
+            quoteDecimals: (symbolConfig as any).quoteDecimals,
+          });
+          const priceDecimals = getQuoteDecimals({
+            symbol: symbolConfig.symbol,
+            category: (symbolConfig as any).category,
+            quoteCurrency: (symbolConfig as any).quoteCurrency,
+            pipDecimals: (symbolConfig as any).pipDecimals,
+            quoteDecimals: (symbolConfig as any).quoteDecimals,
+          });
+          const minDist = minPriceDistancePips * pipSize;
           const tp = req.body.takeProfit ? parseFloat(String(req.body.takeProfit)) : null;
           const sl = req.body.stopLoss ? parseFloat(String(req.body.stopLoss)) : null;
           const minTpSl = entryPrice + minDist;
           const maxTpSl = entryPrice - minDist;
 
           if (data.type === "BUY") {
-            if (tp !== null && priceLessThan(tp, minTpSl, symbolConfig.symbol)) {
+            if (tp !== null && priceLessThan(tp, minTpSl, priceDecimals)) {
               await writeDecisionReject("BUY_TP_TOO_CLOSE", { minDistPips: minPriceDistancePips, entryPrice }, { tp });
-              return res.status(400).json({ message: `BUY TP must be at least ${minPriceDistancePips} pips above entry. Minimum: ${minTpSl.toFixed(5)}` });
+              return res.status(400).json({ message: `BUY TP must be at least ${minPriceDistancePips} pips above entry. Minimum: ${minTpSl.toFixed(priceDecimals)}` });
             }
-            if (sl !== null && priceGreaterThan(sl, maxTpSl, symbolConfig.symbol)) {
+            if (sl !== null && priceGreaterThan(sl, maxTpSl, priceDecimals)) {
               await writeDecisionReject("BUY_SL_TOO_CLOSE", { minDistPips: minPriceDistancePips, entryPrice }, { sl });
-              return res.status(400).json({ message: `BUY SL must be at least ${minPriceDistancePips} pips below entry. Maximum: ${maxTpSl.toFixed(5)}` });
+              return res.status(400).json({ message: `BUY SL must be at least ${minPriceDistancePips} pips below entry. Maximum: ${maxTpSl.toFixed(priceDecimals)}` });
             }
           } else {
-            if (tp !== null && priceGreaterThan(tp, maxTpSl, symbolConfig.symbol)) {
+            if (tp !== null && priceGreaterThan(tp, maxTpSl, priceDecimals)) {
               await writeDecisionReject("SELL_TP_TOO_CLOSE", { minDistPips: minPriceDistancePips, entryPrice }, { tp });
-              return res.status(400).json({ message: `SELL TP must be at least ${minPriceDistancePips} pips below entry. Maximum: ${maxTpSl.toFixed(5)}` });
+              return res.status(400).json({ message: `SELL TP must be at least ${minPriceDistancePips} pips below entry. Maximum: ${maxTpSl.toFixed(priceDecimals)}` });
             }
-            if (sl !== null && priceLessThan(sl, minTpSl, symbolConfig.symbol)) {
+            if (sl !== null && priceLessThan(sl, minTpSl, priceDecimals)) {
               await writeDecisionReject("SELL_SL_TOO_CLOSE", { minDistPips: minPriceDistancePips, entryPrice }, { sl });
-              return res.status(400).json({ message: `SELL SL must be at least ${minPriceDistancePips} pips above entry. Minimum: ${minTpSl.toFixed(5)}` });
+              return res.status(400).json({ message: `SELL SL must be at least ${minPriceDistancePips} pips above entry. Minimum: ${minTpSl.toFixed(priceDecimals)}` });
             }
           }
         }
@@ -3281,11 +3306,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
               quoteAsk: quote.ask ? parseFloat(String(quote.ask)) : null,
               quoteMid: quote.mid ? parseFloat(String(quote.mid)) : null,
               quoteSpread: spread,
-              spreadPips: calculateSpreadPips(symbolConfig.symbol, spread),
+              spreadPips: calculateSpreadPips(symbolConfig.symbol, spread, symbolConfig.pipDecimals),
               quoteTs,
               quoteSource,
               slippage: slippagePoints,
-              slippagePips: calculateSlippagePips(symbolConfig.symbol, slippagePoints),
+              slippagePips: calculateSlippagePips(symbolConfig.symbol, slippagePoints, symbolConfig.pipDecimals),
               slippageReference: "market",
               latencyMs,
               riskResult: "PASS",
@@ -3644,7 +3669,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             quoteSpread: q.spread,
             quoteTs: q.quoteTs,
             quoteSource: closeSource,
-            spreadPips: calculateSpreadPips(q.symbol, q.spread),
+            spreadPips: calculateSpreadPips(q.symbol, q.spread, (trade as any).symbol?.pipDecimals),
             slippage: slippagePoints,
             slippagePips: 0,
             slippageReference: "manual_close",
@@ -3774,20 +3799,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         // Server-side TP/SL validation using authoritative prices.
         // For PENDING orders, validate relative to intended entry; for OPEN positions, validate relative to the current close-side price (BUY=bid, SELL=ask).
-        let symbol = (trade as any).symbol?.symbol ? String((trade as any).symbol.symbol) : null;
-        if (!symbol) {
-          const symbolConfig = await storage.getSymbolConfigById(trade.symbolId);
-          symbol = symbolConfig?.symbol ? String(symbolConfig.symbol) : null;
-        }
+        let symbolConfig = (trade as any).symbol ? (trade as any).symbol : null;
+        if (!symbolConfig) symbolConfig = await storage.getSymbolConfigById(trade.symbolId);
+        const symbol = symbolConfig?.symbol ? String(symbolConfig.symbol) : null;
 
         if (!symbol) {
           return res.status(404).json({ message: "Symbol configuration not found" });
         }
 
         const side = String(trade.type ?? "").toUpperCase() as "BUY" | "SELL";
-        const pip = symbol.includes("JPY") ? 0.01 : 0.0001;
+        const pipSize = getPipSize({
+          symbol,
+          category: symbolConfig?.category,
+          quoteCurrency: symbolConfig?.quoteCurrency,
+          pipDecimals: symbolConfig?.pipDecimals,
+          quoteDecimals: symbolConfig?.quoteDecimals,
+        });
+        const priceDecimals = getQuoteDecimals({
+          symbol,
+          category: symbolConfig?.category,
+          quoteCurrency: symbolConfig?.quoteCurrency,
+          pipDecimals: symbolConfig?.pipDecimals,
+          quoteDecimals: symbolConfig?.quoteDecimals,
+        });
         const minPips = await getMinPriceDistancePips();
-        const minDist = minPips * pip;
+        const minDist = minPips * pipSize;
 
         let refPrice: number | null = null;
         let q: any | null = null;
@@ -3863,7 +3899,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 quoteAsk: q.ask,
                 quoteMid: q.mid,
                 quoteSpread: q.spread,
-                spreadPips: calculateSpreadPips(symbol, q.spread),
+                spreadPips: calculateSpreadPips(symbol, q.spread, symbolConfig?.pipDecimals),
                 quoteTs: q.quoteTs,
                 quoteSource: `stale:${q.source}`,
                 riskResult: "REJECT",
@@ -3888,47 +3924,47 @@ export async function registerRoutes(app: Express): Promise<Server> {
           refPrice = q.execPrice;
         }
 
-          if (refPrice !== null && Number.isFinite(refPrice)) {
-            if (side === "BUY") {
-              if (slNext !== null && priceGreaterThan(slNext, refPrice - minDist, symbol)) {
-                return res.status(400).json({
-                  code: "STOP_LOSS_TOO_CLOSE",
-                  message: `BUY SL must be at least ${minPips} pips below reference price. Maximum: ${(refPrice - minDist).toFixed(symbol.includes("JPY") ? 2 : 4)}`,
-                  symbol,
-                  minPips,
-                  minPoints: minPips,
-                });
-              }
-              if (tpNext !== null && priceLessThan(tpNext, refPrice + minDist, symbol)) {
-                return res.status(400).json({
-                  code: "TAKE_PROFIT_TOO_CLOSE",
-                  message: `BUY TP must be at least ${minPips} pips above reference price. Minimum: ${(refPrice + minDist).toFixed(symbol.includes("JPY") ? 2 : 4)}`,
-                  symbol,
-                  minPips,
-                  minPoints: minPips,
-                });
-              }
-            } else if (side === "SELL") {
-              if (slNext !== null && priceLessThan(slNext, refPrice + minDist, symbol)) {
-                return res.status(400).json({
-                  code: "STOP_LOSS_TOO_CLOSE",
-                  message: `SELL SL must be at least ${minPips} pips above reference price. Minimum: ${(refPrice + minDist).toFixed(symbol.includes("JPY") ? 2 : 4)}`,
-                  symbol,
-                  minPips,
-                  minPoints: minPips,
-                });
-              }
-              if (tpNext !== null && priceGreaterThan(tpNext, refPrice - minDist, symbol)) {
-                return res.status(400).json({
-                  code: "TAKE_PROFIT_TOO_CLOSE",
-                  message: `SELL TP must be at least ${minPips} pips below reference price. Maximum: ${(refPrice - minDist).toFixed(symbol.includes("JPY") ? 2 : 4)}`,
-                  symbol,
-                  minPips,
-                  minPoints: minPips,
-                });
-              }
+        if (refPrice !== null && Number.isFinite(refPrice)) {
+          if (side === "BUY") {
+            if (slNext !== null && priceGreaterThan(slNext, refPrice - minDist, priceDecimals)) {
+              return res.status(400).json({
+                code: "STOP_LOSS_TOO_CLOSE",
+                message: `BUY SL must be at least ${minPips} pips below reference price. Maximum: ${(refPrice - minDist).toFixed(priceDecimals)}`,
+                symbol,
+                minPips,
+                minPoints: minPips,
+              });
+            }
+            if (tpNext !== null && priceLessThan(tpNext, refPrice + minDist, priceDecimals)) {
+              return res.status(400).json({
+                code: "TAKE_PROFIT_TOO_CLOSE",
+                message: `BUY TP must be at least ${minPips} pips above reference price. Minimum: ${(refPrice + minDist).toFixed(priceDecimals)}`,
+                symbol,
+                minPips,
+                minPoints: minPips,
+              });
+            }
+          } else if (side === "SELL") {
+            if (slNext !== null && priceLessThan(slNext, refPrice + minDist, priceDecimals)) {
+              return res.status(400).json({
+                code: "STOP_LOSS_TOO_CLOSE",
+                message: `SELL SL must be at least ${minPips} pips above reference price. Minimum: ${(refPrice + minDist).toFixed(priceDecimals)}`,
+                symbol,
+                minPips,
+                minPoints: minPips,
+              });
+            }
+            if (tpNext !== null && priceGreaterThan(tpNext, refPrice - minDist, priceDecimals)) {
+              return res.status(400).json({
+                code: "TAKE_PROFIT_TOO_CLOSE",
+                message: `SELL TP must be at least ${minPips} pips below reference price. Maximum: ${(refPrice - minDist).toFixed(priceDecimals)}`,
+                symbol,
+                minPips,
+                minPoints: minPips,
+              });
             }
           }
+        }
 
         const updatedTrade = await storage.updateTradeTargets(tradeId, tpNext, slNext);
         if (!updatedTrade) {
@@ -3957,11 +3993,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
           targetsAuditCtx.correlationId = correlationId;
 
-          const symbol = (trade as any).symbol?.symbol ?? null;
+          const symbolForAudit = symbol;
           let q = null;
-          if (symbol) {
+          if (symbolForAudit) {
             try {
-              q = await getExecutionQuote(symbol, trade.type as "BUY" | "SELL", "CLOSE");
+              q = await getExecutionQuote(symbolForAudit, trade.type as "BUY" | "SELL", "CLOSE");
             } catch { }
           }
 
@@ -3972,14 +4008,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
             ctx: targetsAuditCtx,
             orderId,
             positionId,
-            symbol,
+            symbol: symbolForAudit,
             side: trade.type as string,
             stopPrice: slNext,
             quoteBid: q?.bid ?? null,
             quoteAsk: q?.ask ?? null,
             quoteMid: q?.mid ?? null,
             quoteSpread: q?.spread ?? null,
-            spreadPips: q ? calculateSpreadPips(symbol || "", q.spread) : null,
+            spreadPips: q ? calculateSpreadPips(symbolForAudit || "", q.spread, symbolConfig?.pipDecimals) : null,
             quoteTs: q?.quoteTs ?? null,
             quoteSource: q?.source ?? null,
             note: `TP: ${prevTp ?? 'none'} → ${tpNext ?? 'none'}, SL: ${prevSl ?? 'none'} → ${slNext ?? 'none'}`,
@@ -4129,7 +4165,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               quoteAsk: q?.ask ?? null,
               quoteMid: q?.mid ?? null,
               quoteSpread: q?.spread ?? null,
-              spreadPips: q ? calculateSpreadPips(symbol || "", q.spread) : null,
+              spreadPips: q ? calculateSpreadPips(symbol || "", q.spread, (trade as any).symbol?.pipDecimals) : null,
               quoteTs: q?.quoteTs ?? null,
               quoteSource: q?.source ?? null,
               reasonCode: "CANCELED_BY_USER",
@@ -4737,6 +4773,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use("/api/legal", legalRouter); // Legal terms resolution routes
   app.use('/api/admin/legal-docs-v2', adminLegalDocsRouter); // DB-first admin legal docs (new)
   app.use('/api/admin/legal-acceptances', adminLegalAcceptancesRouter); // Legal acceptances management
+  app.use("/api/admin/market-data", adminMarketDataRouter); // Market data providers + instrument ingestion
   app.use('/api/admin/system-config', adminSystemConfigRouter); // System config (coverage gate toggle)
   app.use("/api/admin/activity", adminActivityRouter); // Inactive users + bot management
 
@@ -4758,6 +4795,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/metrics", (_req, res) => {
     const quoteMeta = getQuoteMeta();
     const wsCount = wss.clients ? wss.clients.size : 0;
+    const providerRateStats = getProviderRateLimitStats();
     res.setHeader("Content-Type", "text/plain; version=0.0.4");
     res.send(
       [
@@ -4773,6 +4811,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
         "# HELP quotehub_asof Latest quote snapshot timestamp (ms)",
         "# TYPE quotehub_asof gauge",
         `quotehub_asof ${quoteMeta.asOf}`,
+        "# HELP marketdata_provider_ratelimit_queue_length Queued provider HTTP requests (rate limiter)",
+        "# TYPE marketdata_provider_ratelimit_queue_length gauge",
+        ...providerRateStats.map(
+          (s) => `marketdata_provider_ratelimit_queue_length{provider_key="${s.providerKey}"} ${s.queueLength}`,
+        ),
+        "# HELP marketdata_provider_ratelimit_active In-flight provider HTTP requests (rate limiter)",
+        "# TYPE marketdata_provider_ratelimit_active gauge",
+        ...providerRateStats.map(
+          (s) => `marketdata_provider_ratelimit_active{provider_key="${s.providerKey}"} ${s.active}`,
+        ),
+        "# HELP marketdata_provider_ratelimit_rejected_total Provider requests rejected due to full queue",
+        "# TYPE marketdata_provider_ratelimit_rejected_total counter",
+        ...providerRateStats.map(
+          (s) => `marketdata_provider_ratelimit_rejected_total{provider_key="${s.providerKey}"} ${s.rejectedQueueFullTotal}`,
+        ),
+        "# HELP marketdata_provider_ratelimit_started_total Provider requests started (rate limiter)",
+        "# TYPE marketdata_provider_ratelimit_started_total counter",
+        ...providerRateStats.map(
+          (s) => `marketdata_provider_ratelimit_started_total{provider_key="${s.providerKey}"} ${s.startedTotal}`,
+        ),
         "# HELP trade_close_rejected_quote_stale_total Manual close requests rejected due to stale quotes",
         "# TYPE trade_close_rejected_quote_stale_total counter",
         `trade_close_rejected_quote_stale_total ${metricTradeCloseRejectedQuoteStaleTotal}`,

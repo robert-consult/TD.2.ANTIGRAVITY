@@ -1,6 +1,5 @@
 // @ts-nocheck
 import "dotenv/config";
-import axios from "axios";
 import pThrottle from "p-throttle";
 import { db, dbClient } from "@db";
 import { eq } from "drizzle-orm";
@@ -11,12 +10,11 @@ import { computeSessionDayForQuote, ensureMarketDailyCloseTable } from "../utils
 import { onLiveEvent, publishLiveEvent } from "../services/liveBus";
 import { getValkey, valkeyGetJson, writeToRollingBuffer, cachePrevClose, getCachedPrevClose } from "../services/valkey";
 import { isMarketOpenForSymbol } from "../services/marketHours";
-import { extractForgeErrorMessage, formatSymbolsForForgeAPI, normalizeSymbol } from "./forgeUtils";
-
-const API_KEY = process.env.FORGE_KEY;
+import { normalizeSymbol } from "./forgeUtils";
+import { getActiveProviderSelection, invalidateActiveProviderCache } from "../marketdata/providerManager";
+import type { ProviderSymbolInput } from "../marketdata/providerTypes";
 
 const REST_LIMIT_PER_DAY = 100000;
-const MAX_PER_REQ = 100;
 const DEFAULT_POLL_MS = 870;
 const DEFAULT_STALE_MS = 30000;
 const QUOTE_SNAPSHOT_KEY = process.env.QUOTE_SNAPSHOT_KEY ?? "quotes:latest:v1";
@@ -64,6 +62,10 @@ interface QuoteSnapshot {
 const quoteSnapshotCache = new Map<string, QuoteSnapshot>();
 let lastSuccessfulApiCall = 0;
 let consecutiveApiFailures = 0;
+let lastPublishedSource: string | null = null;
+let lastPublishedAtMs = 0;
+let lastProviderSuccessAtMs = 0;
+let lastProviderSuccessKey: string | null = null;
 
 export function getQuoteSnapshotCache(): Map<string, QuoteSnapshot> {
   return quoteSnapshotCache;
@@ -75,6 +77,10 @@ export function getCacheStats() {
     lastSuccessfulApiCall,
     consecutiveApiFailures,
     staleCount: [...quoteSnapshotCache.values()].filter((q) => q.isStale).length,
+    lastPublishedSource,
+    lastPublishedAtMs,
+    lastProviderSuccessAtMs,
+    lastProviderSuccessKey,
   };
 }
 
@@ -253,6 +259,12 @@ export async function reloadFeedConfig() {
   if (oldPoll !== dynamicConfig.pollIntervalMs) {
     console.log(`[FeedConfig] Poll interval changed from ${oldPoll}ms to ${dynamicConfig.pollIntervalMs}ms`);
   }
+  try {
+    invalidateActiveProviderCache();
+    void refreshDynamicSet(true);
+  } catch {
+    // ignore provider cache invalidation failures
+  }
 }
 
 function updateSnapshotCache(quotes: any[], options: { markSuccess?: boolean } = {}) {
@@ -278,10 +290,15 @@ function updateSnapshotCache(quotes: any[], options: { markSuccess?: boolean } =
   }
 }
 
-async function getActiveInstruments(): Promise<string[]> {
+type ActiveInstrumentRow = { symbol: string; providerSymbolMapJson: string | null };
+
+async function getActiveInstruments(): Promise<ActiveInstrumentRow[]> {
   try {
-    const rows = await dbClient.query("SELECT symbol FROM symbol_configs WHERE enabled = true");
-    return rows.rows.map((r: any) => String(r.symbol));
+    const rows = await dbClient.query("SELECT symbol, provider_symbol_map_json FROM symbol_configs WHERE enabled = true");
+    return rows.rows.map((r: any) => ({
+      symbol: String(r.symbol),
+      providerSymbolMapJson: r.provider_symbol_map_json != null ? String(r.provider_symbol_map_json) : null,
+    }));
   } catch (error) {
     console.error("[Feed] Error getting active instruments:", error);
     return [];
@@ -289,52 +306,20 @@ async function getActiveInstruments(): Promise<string[]> {
 }
 
 let dynamicSet = new Set<string>();
+let dynamicProviderKey: string | null = null;
+let dynamicProviderSymbols: ProviderSymbolInput[] = [];
 const throttle = pThrottle({ limit: REST_LIMIT_PER_DAY, interval: 86_400_000 });
 
-async function fetchForgeQuotes(symbols: string[]) {
-  const nowMs = Date.now();
-  const staleThresholdMs =
-    Number.isFinite(dynamicConfig.staleThresholdMs) && dynamicConfig.staleThresholdMs > 0
-      ? dynamicConfig.staleThresholdMs
-      : DEFAULT_STALE_MS;
-
-  const formattedSymbols = formatSymbolsForForgeAPI(symbols);
-  if (!formattedSymbols) return [];
-  const response = await axios.get(
-    `https://api.1forge.com/quotes?pairs=${formattedSymbols}&api_key=${API_KEY}`,
-  );
-  let quotesData = response.data;
-  if (quotesData && typeof quotesData === "object" && !Array.isArray(quotesData)) {
-    const errMsg = extractForgeErrorMessage(quotesData);
-    if (errMsg) throw new Error(errMsg);
-    if (quotesData.quotes) quotesData = quotesData.quotes;
+function safeJsonParseObject(raw: unknown): Record<string, any> {
+  if (!raw) return {};
+  if (typeof raw === "object") return raw as any;
+  if (typeof raw !== "string") return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
   }
-
-  if (!Array.isArray(quotesData) || quotesData.length === 0) {
-    throw new Error("Empty 1Forge response");
-  }
-
-  return quotesData
-    .map((quote: any) => {
-      const formattedSymbol = quote.s ? quote.s.replace("/", "") : quote.symbol ? quote.symbol.replace("/", "") : null;
-      const price = quote.p ?? quote.price ?? quote.mid ?? 0;
-      const bid = quote.b ?? quote.bid ?? price * 0.9999;
-      const ask = quote.a ?? quote.ask ?? price * 1.0001;
-      const apiTimestamp = typeof quote.t === "number" ? quote.t : typeof quote.timestamp === "number" ? quote.timestamp : null;
-      const lastUpdated = apiTimestamp != null ? (apiTimestamp > 1e12 ? apiTimestamp : apiTimestamp * 1000) : Date.now();
-      const ageMs = nowMs - lastUpdated;
-      const marketOpen = isMarketOpenForSymbol(formattedSymbol, new Date(nowMs));
-      return {
-        symbol: formattedSymbol,
-        price,
-        bid,
-        ask,
-        timestamp: Math.floor(lastUpdated / 1000),
-        lastUpdated,
-        isStale: marketOpen && ageMs > staleThresholdMs,
-      };
-    })
-    .filter((q: any) => q.symbol && q.price);
 }
 
 function generateSimulatedQuotes(symbols: string[]) {
@@ -528,6 +513,8 @@ async function publishQuoteUpdate(rows: any[], source: string, isStaleDefault: b
   const seq = ++quotesSeq;
   const liveRows = toLiveQuoteRows(rows, asOf, isStaleDefault);
   if (!liveRows.length) return;
+  lastPublishedSource = source;
+  lastPublishedAtMs = asOf;
   publishLiveEvent({
     type: "quotes:update",
     payload: { seq, asOf, source, rows: liveRows },
@@ -582,13 +569,41 @@ async function writeToRollingBufferBatch(rows: any[]) {
 async function refreshDynamicSet(force = false) {
   const now = Date.now();
   if (!force && now - lastDynamicSetRefresh < SYMBOL_REFRESH_INTERVAL_MS) return;
-  const symbols = await getActiveInstruments();
-  if (symbols.length) {
-    dynamicSet = new Set(symbols);
-  } else {
+  const selection = await getActiveProviderSelection();
+  const providerKey = selection?.providerKey ?? null;
+  const provider = selection?.provider ?? null;
+
+  const rows = await getActiveInstruments();
+  if (!rows.length) {
     dynamicSet = new Set();
+    dynamicProviderKey = providerKey;
+    dynamicProviderSymbols = [];
     console.warn("[Feed] No enabled symbols found in symbol_configs; quote fetch paused.");
+    lastDynamicSetRefresh = now;
+    return;
   }
+
+  const nextSet = new Set<string>();
+  const nextMapped: ProviderSymbolInput[] = [];
+
+  for (const r of rows) {
+    const canonical = normalizeSymbol(r.symbol);
+    if (!canonical) continue;
+    nextSet.add(canonical);
+
+    if (!providerKey || !provider) continue;
+    const map = safeJsonParseObject(r.providerSymbolMapJson);
+    const override = map && typeof map[providerKey] === "string" ? String(map[providerKey]).trim() : "";
+    const providerSymbol =
+      override ||
+      (typeof (provider as any).mapSymbol === "function" ? (provider as any).mapSymbol(canonical) : canonical);
+    if (!providerSymbol) continue;
+    nextMapped.push({ canonicalSymbol: canonical, providerSymbol: String(providerSymbol) });
+  }
+
+  dynamicSet = nextSet;
+  dynamicProviderKey = providerKey;
+  dynamicProviderSymbols = nextMapped;
   lastDynamicSetRefresh = now;
 }
 
@@ -765,41 +780,103 @@ async function pullBatch() {
   const wanted = [...new Set([...dynamicSet])];
   if (wanted.length === 0) return;
 
-  if (!API_KEY) {
+  const selection = await getActiveProviderSelection();
+  if (!selection) {
     const simulated = generateSimulatedQuotes(wanted);
     await handleQuoteBatch(simulated, "simulated", false);
     return;
   }
 
-  // Prefer a single batched request for all enabled symbols.
-  try {
-    const batchQuotes = await fetchForgeQuotes(wanted);
-    await handleQuoteBatch(batchQuotes, "1forge", false);
+  if (dynamicProviderKey !== selection.providerKey) {
+    await refreshDynamicSet(true);
+  }
+
+  const providerKey = selection.providerKey;
+  const provider = selection.provider;
+
+  function toFeedRows(providerQuotes: any[]) {
+    const nowMs = Date.now();
+    const staleThresholdMs =
+      Number.isFinite(dynamicConfig.staleThresholdMs) && dynamicConfig.staleThresholdMs > 0
+        ? dynamicConfig.staleThresholdMs
+        : DEFAULT_STALE_MS;
+
+    return (providerQuotes || [])
+      .map((q: any) => {
+        const symbol = normalizeSymbol(q?.canonicalSymbol ?? q?.symbol);
+        if (!symbol) return null;
+        const bid = typeof q?.bid === "number" ? q.bid : q?.bid == null ? null : Number(q.bid);
+        const ask = typeof q?.ask === "number" ? q.ask : q?.ask == null ? null : Number(q.ask);
+        const price =
+          typeof q?.price === "number"
+            ? q.price
+            : q?.price == null
+              ? bid != null && ask != null
+                ? (bid + ask) / 2
+                : null
+              : Number(q.price);
+
+        if (price == null || !Number.isFinite(price)) return null;
+        const lastUpdated = typeof q?.tsMs === "number" ? q.tsMs : typeof q?.lastUpdated === "number" ? q.lastUpdated : nowMs;
+        const ageMs = nowMs - lastUpdated;
+        const marketOpen = isMarketOpenForSymbol(symbol, new Date(nowMs));
+        return {
+          symbol,
+          price,
+          bid: bid != null && Number.isFinite(bid) ? bid : null,
+          ask: ask != null && Number.isFinite(ask) ? ask : null,
+          timestamp: Math.floor(lastUpdated / 1000),
+          lastUpdated,
+          isStale: marketOpen && ageMs > staleThresholdMs,
+        };
+      })
+      .filter(Boolean);
+  }
+
+  const mapped = dynamicProviderKey === providerKey ? dynamicProviderSymbols : [];
+  if (!mapped.length) {
+    const fallbackQuotes = await buildFallbackQuotes(wanted);
+    if (!fallbackQuotes.length) {
+      console.warn(`[Feed] Active provider ${providerKey} has no supported symbols and no fallback cache available.`);
+      return;
+    }
+    await handleQuoteBatch(fallbackQuotes, "fallback_cache", true, { markSuccess: false, reason: "QUOTE_UNSUPPORTED" });
     return;
-  } catch (e: any) {
-    consecutiveApiFailures++;
-    console.error("[1Forge] API failure (batched):", e?.message || e);
   }
 
-  // Fallback: chunk requests if the batch is rejected (URL length / API limits).
-  const chunks: string[][] = [];
-  for (let i = 0; i < wanted.length; i += MAX_PER_REQ) {
-    chunks.push(wanted.slice(i, i + MAX_PER_REQ));
+  const mappedCanonical = new Set(mapped.map((m) => m.canonicalSymbol));
+  const missingForProvider = wanted.filter((sym) => !mappedCanonical.has(sym));
+
+  const maxPerReq = Math.max(1, Number((provider as any).maxBatchSymbols ?? 50) || 50);
+  const chunks: ProviderSymbolInput[][] = [];
+  for (let i = 0; i < mapped.length; i += maxPerReq) {
+    chunks.push(mapped.slice(i, i + maxPerReq));
   }
 
-  for (const slice of chunks) {
+  for (const chunk of chunks) {
     try {
-      const sliceQuotes = await fetchForgeQuotes(slice);
-      await handleQuoteBatch(sliceQuotes, "1forge", false);
+      const result = await provider.fetchQuotes({ symbols: chunk });
+      const rows = toFeedRows(result?.quotes ?? []);
+      if (!rows.length) throw new Error("EMPTY_PROVIDER_RESPONSE");
+      await handleQuoteBatch(rows, providerKey, false);
+      lastProviderSuccessAtMs = Date.now();
+      lastProviderSuccessKey = providerKey;
     } catch (e: any) {
       consecutiveApiFailures++;
-      console.error("[1Forge] API failure:", e?.message || e);
-      const fallbackQuotes = await buildFallbackQuotes(slice);
+      console.error(`[Feed] Provider ${providerKey} failure:`, e?.message || e);
+      const fallbackQuotes = await buildFallbackQuotes(chunk.map((s) => s.canonicalSymbol));
       if (!fallbackQuotes.length) {
-        console.warn("[1Forge] No fallback cache available; skipping quote persistence.");
+        console.warn(`[Feed] No fallback cache available for provider ${providerKey} failure.`);
         continue;
       }
       await handleQuoteBatch(fallbackQuotes, "fallback_cache", true, { markSuccess: false, reason: "QUOTE_STALE" });
+    }
+  }
+
+  if (missingForProvider.length) {
+    const fallbackQuotes = await buildFallbackQuotes(missingForProvider);
+    if (fallbackQuotes.length) {
+      await handleQuoteBatch(fallbackQuotes, "fallback_cache", true, { markSuccess: false, reason: "QUOTE_UNSUPPORTED" });
     }
   }
 }
@@ -833,7 +910,14 @@ export async function startQuoteFeed(): Promise<void> {
           return;
         }
         if (event.type === "feed:config-updated") {
-          void reloadFeedConfig();
+          void (async () => {
+            await reloadFeedConfig();
+            await refreshSymbolsAndPull("feed:config-updated");
+          })();
+          return;
+        }
+        if (event.type === "market-data:providers-updated") {
+          void refreshSymbolsAndPull("market-data:providers-updated");
           return;
         }
       });

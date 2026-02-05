@@ -1,5 +1,5 @@
 import { useQuotes } from "@/hooks/use-quotes";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -10,6 +10,7 @@ import { getTradeErrorToast } from "@/lib/tradeErrorMessages";
 import { useLiveUpdates } from "@/live/LiveUpdatesProvider";
 import { useLotSettings } from "@/hooks/use-lot-settings";
 import { X } from "lucide-react";
+import { getQuoteDecimals, pointsToPips } from "@shared/pips";
 
 // Declare TradingView type for TypeScript
 declare global {
@@ -479,9 +480,29 @@ export default function ChartScreen({ selectedSymbol }: ChartScreenProps) {
     }
   };
 
-  const isJpyPair = selectedSymbol.includes("JPY");
-  const pricePrecision = isJpyPair ? 2 : 4;
-  const pipMultiplier = isJpyPair ? 100 : 10000;
+  const selectedSymbolConfig = useMemo(
+    () => symbolList.find((s) => s.symbol === selectedSymbol) ?? null,
+    [symbolList, selectedSymbol],
+  );
+
+  const pipCfg = useMemo(
+    () => ({
+      symbol: selectedSymbol,
+      category: selectedSymbolConfig?.category,
+      quoteCurrency: selectedSymbolConfig?.quoteCurrency,
+      pipDecimals: selectedSymbolConfig?.pipDecimals,
+      quoteDecimals: selectedSymbolConfig?.quoteDecimals,
+    }),
+    [
+      selectedSymbol,
+      selectedSymbolConfig?.category,
+      selectedSymbolConfig?.quoteCurrency,
+      selectedSymbolConfig?.pipDecimals,
+      selectedSymbolConfig?.quoteDecimals,
+    ],
+  );
+
+  const pricePrecision = getQuoteDecimals(pipCfg);
 
   return (
     <div className="h-full flex flex-col bg-[#0F0F0F] overflow-hidden">
@@ -516,7 +537,7 @@ export default function ChartScreen({ selectedSymbol }: ChartScreenProps) {
               <div className="flex gap-4 items-center justify-end">
                 <span className="text-gray-400">Spread:</span>
                 <span className="font-mono text-white">
-                  {hasQuote ? ((ask! - bid!) * pipMultiplier).toFixed(1) : "0.0"} pips
+                  {hasQuote ? pointsToPips(ask! - bid!, pipCfg).toFixed(1) : "0.0"} pips
                 </span>
               </div>
             </div>
@@ -595,7 +616,7 @@ export default function ChartScreen({ selectedSymbol }: ChartScreenProps) {
               </span>
               <span className="text-gray-400">Spread:</span>
               <span className="font-mono text-white text-right">
-                {hasQuote ? ((ask! - bid!) * pipMultiplier).toFixed(1) : "0.0"} pips
+                {hasQuote ? pointsToPips(ask! - bid!, pipCfg).toFixed(1) : "0.0"} pips
               </span>
             </div>
           </div>
@@ -635,8 +656,8 @@ export default function ChartScreen({ selectedSymbol }: ChartScreenProps) {
               <span className="animate-pulse text-xs">...</span>
             ) : bid !== undefined ? (
               <span className="truncate">
-                <span className="sm:hidden">Sell {bid.toFixed(selectedSymbol.includes("JPY") ? 2 : 4)}</span>
-                <span className="hidden sm:inline">SELL @ {bid.toFixed(selectedSymbol.includes("JPY") ? 2 : 5)}</span>
+                <span className="sm:hidden">Sell {bid.toFixed(pricePrecision)}</span>
+                <span className="hidden sm:inline">SELL @ {bid.toFixed(pricePrecision)}</span>
               </span>
             ) : (
               "Sell"
@@ -676,8 +697,8 @@ export default function ChartScreen({ selectedSymbol }: ChartScreenProps) {
               <span className="animate-pulse text-xs">...</span>
             ) : currentQuote && currentQuote.ask ? (
               <span className="truncate">
-                <span className="sm:hidden">Buy {currentQuote.ask.toFixed(selectedSymbol.includes("JPY") ? 2 : 4)}</span>
-                <span className="hidden sm:inline">BUY @ {currentQuote.ask.toFixed(selectedSymbol.includes("JPY") ? 2 : 5)}</span>
+                <span className="sm:hidden">Buy {currentQuote.ask.toFixed(pricePrecision)}</span>
+                <span className="hidden sm:inline">BUY @ {currentQuote.ask.toFixed(pricePrecision)}</span>
               </span>
             ) : (
               "Buy"

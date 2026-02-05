@@ -6,6 +6,7 @@ import { Calendar } from "@/components/ui/calendar";
 import { format } from "date-fns";
 import { DateRange } from "react-day-picker";
 import { ChevronDown, ChevronUp, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
+import { getQuoteDecimals } from "@shared/pips";
 import {
   Sheet,
   SheetContent,
@@ -727,7 +728,13 @@ export default function HistoryScreen() {
 
             {!isLoading && paginatedTrades.map((trade: any) => {
               const isExpanded = expandedRows.has(trade.id);
-              const isJpy = trade.symbol?.symbol?.includes("JPY");
+              const decimals = getQuoteDecimals({
+                symbol: trade.symbol?.symbol,
+                category: trade.symbol?.category,
+                quoteCurrency: trade.symbol?.quoteCurrency,
+                pipDecimals: trade.symbol?.pipDecimals,
+                quoteDecimals: trade.symbol?.quoteDecimals,
+              });
               const profitValue = trade.profit ? parseFloat(trade.profit) : 0;
               const isProfit = profitValue >= 0;
 
@@ -750,11 +757,11 @@ export default function HistoryScreen() {
 
                     {/* Entry → Exit with directional arrow - flex grow */}
                     <div className="flex items-center gap-1 font-mono text-xs flex-1 justify-center">
-                      <span className="text-gray-300">{trade.openPrice?.toFixed(isJpy ? 2 : 4)}</span>
+                      <span className="text-gray-300">{trade.openPrice?.toFixed(decimals)}</span>
                       <span className={`font-bold text-sm ${trade.type === "BUY" ? "text-lime-500" : "text-orange-500"}`}>
                         {trade.type === "BUY" ? "↗" : "↘"}
                       </span>
-                      <span className="text-gray-300">{trade.closePrice?.toFixed(isJpy ? 2 : 4) || "—"}</span>
+                      <span className="text-gray-300">{trade.closePrice?.toFixed(decimals) || "—"}</span>
                     </div>
 
                     {/* P/L - fixed width */}
@@ -809,11 +816,11 @@ export default function HistoryScreen() {
                         </div>
                         <div>
                           <span className="text-gray-500 text-xs">Open Price</span>
-                          <div className="text-white font-mono">{trade.openPrice?.toFixed(isJpy ? 2 : 5)}</div>
+                          <div className="text-white font-mono">{trade.openPrice?.toFixed(decimals)}</div>
                         </div>
                         <div>
                           <span className="text-gray-500 text-xs">Close Price</span>
-                          <div className="text-white font-mono">{trade.closePrice?.toFixed(isJpy ? 2 : 5) || "—"}</div>
+                          <div className="text-white font-mono">{trade.closePrice?.toFixed(decimals) || "—"}</div>
                         </div>
                         <div>
                           <span className="text-gray-500 text-xs">Duration</span>
@@ -921,15 +928,27 @@ export default function HistoryScreen() {
                       </TableCell>
                       <TableCell className="font-mono">
                         {(() => {
-                          const isJpy = trade.symbol?.symbol?.includes("JPY");
-                          return trade.openPrice.toFixed(isJpy ? 2 : 5);
+                          const decimals = getQuoteDecimals({
+                            symbol: trade.symbol?.symbol,
+                            category: trade.symbol?.category,
+                            quoteCurrency: trade.symbol?.quoteCurrency,
+                            pipDecimals: trade.symbol?.pipDecimals,
+                            quoteDecimals: trade.symbol?.quoteDecimals,
+                          });
+                          return trade.openPrice.toFixed(decimals);
                         })()}
                       </TableCell>
                       <TableCell className="font-mono">
                         {trade.closePrice
                           ? (() => {
-                            const isJpy = trade.symbol?.symbol?.includes("JPY");
-                            return trade.closePrice.toFixed(isJpy ? 2 : 5);
+                            const decimals = getQuoteDecimals({
+                              symbol: trade.symbol?.symbol,
+                              category: trade.symbol?.category,
+                              quoteCurrency: trade.symbol?.quoteCurrency,
+                              pipDecimals: trade.symbol?.pipDecimals,
+                              quoteDecimals: trade.symbol?.quoteDecimals,
+                            });
+                            return trade.closePrice.toFixed(decimals);
                           })()
                           : "—"}
                       </TableCell>

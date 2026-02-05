@@ -8,6 +8,7 @@ import { Form, FormControl, FormField, FormItem, FormLabel } from "@/components/
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Zap, Layers, AlertTriangle } from "lucide-react";
 import { useLotSettings } from "@/hooks/use-lot-settings";
+import { getPipSize, getQuoteDecimals } from "@shared/pips";
 
 // --- Schema Definitions ---
 export const tradeFormSchema = z.object({
@@ -54,6 +55,9 @@ export function OrderForm({
     const { lotDropdownOptions, lotPresetCards, minPriceDistancePips } = useLotSettings();
     const lotPresets = useMemo(() => lotPresetCards.map(String), [lotPresetCards]);
 
+    const pipSize = useMemo(() => getPipSize({ symbol: selectedSymbol, category: "forex" }), [selectedSymbol]);
+    const priceDecimals = useMemo(() => getQuoteDecimals({ symbol: selectedSymbol, category: "forex" }), [selectedSymbol]);
+
     const form = useForm<TradeFormValues>({
         resolver: zodResolver(tradeFormSchema),
         defaultValues: {
@@ -90,8 +94,8 @@ export function OrderForm({
         const baseAsk = askPrice ?? currentPrice;
         const baseBid = bidPrice ?? currentPrice;
 
-        const pip = selectedSymbol.includes("JPY") ? 0.01 : 0.0001;
-        const decimals = selectedSymbol.includes("JPY") ? 3 : 5;
+        const pip = pipSize;
+        const decimals = priceDecimals;
 
         if (orderType === "Limit" && autoEntry) {
             // Buy Limit is placed BELOW price, Sell Limit ABOVE
@@ -124,7 +128,7 @@ export function OrderForm({
                 form.setValue("stopLoss", sl.toFixed(decimals));
             }
         }
-    }, [askPrice, bidPrice, currentPrice, orderType, pendingSide, autoEntry, autoTp, autoSl, selectedSymbol, minPriceDistancePips, form]);
+    }, [askPrice, bidPrice, currentPrice, orderType, pendingSide, autoEntry, autoTp, autoSl, pipSize, priceDecimals, selectedSymbol, minPriceDistancePips, form]);
 
     // Helper Labels
     const sideLabels: Record<string, { label: string }> = {
@@ -277,7 +281,7 @@ export function OrderForm({
                                         onFocus={() => setAutoEntry(false)}
                                         onBlur={() => setAutoEntry(false)}
                                         className="w-full py-2 pl-3 bg-neutral-800 border border-gray-700 rounded-md text-white placeholder:text-slate-400"
-                                        placeholder={currentPrice ? currentPrice.toFixed(selectedSymbol.includes("JPY") ? 2 : 4) : "0.0000"}
+                                        placeholder={currentPrice ? currentPrice.toFixed(priceDecimals) : "0.0000"}
                                     />
                                 </FormControl>
                             </FormItem>
@@ -299,7 +303,7 @@ export function OrderForm({
                                         onFocus={() => setAutoEntry(false)}
                                         onBlur={() => setAutoEntry(false)}
                                         className="w-full py-2 pl-3 bg-neutral-800 border border-gray-700 rounded-md text-white placeholder:text-slate-400"
-                                        placeholder={currentPrice ? currentPrice.toFixed(selectedSymbol.includes("JPY") ? 2 : 4) : "0.0000"}
+                                        placeholder={currentPrice ? currentPrice.toFixed(priceDecimals) : "0.0000"}
                                     />
                                 </FormControl>
                             </FormItem>
@@ -392,7 +396,7 @@ export function OrderForm({
                                 ) : null}
                                 {getSideLabel("SELL")}
                                 {bidPrice && (
-                                    <span className="text-xs block">@ {bidPrice.toFixed(selectedSymbol.includes("JPY") ? 2 : 4)}</span>
+                                    <span className="text-xs block">@ {bidPrice.toFixed(priceDecimals)}</span>
                                 )}
                             </Button>
                             <Button
@@ -406,7 +410,7 @@ export function OrderForm({
                                 ) : null}
                                 {getSideLabel("BUY")}
                                 {askPrice && (
-                                    <span className="text-xs block">@ {askPrice.toFixed(selectedSymbol.includes("JPY") ? 2 : 4)}</span>
+                                    <span className="text-xs block">@ {askPrice.toFixed(priceDecimals)}</span>
                                 )}
                             </Button>
                         </div>

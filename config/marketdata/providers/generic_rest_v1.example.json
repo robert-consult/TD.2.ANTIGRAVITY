@@ -1,0 +1,28 @@
+{
+  "providerKey": "example_rest",
+  "displayName": "Example REST Provider",
+  "driver": "generic_rest_v1",
+  "config": {
+    "driver": "generic_rest_v1",
+    "restBaseUrl": "https://example.com",
+    "quotePath": "/quotes?symbols={{symbols}}&apikey={{apikey}}",
+    "apiKey": "env:EXAMPLE_PROVIDER_API_KEY",
+    "symbolsParamName": "symbols",
+    "symbolsJoinChar": ",",
+    "timeoutMs": 8000,
+    "maxBatchSymbols": 50,
+    "responseMode": "array",
+    "fields": {
+      "symbol": "symbol",
+      "bid": "bid",
+      "ask": "ask",
+      "price": "price",
+      "timestamp": "timestamp"
+    },
+    "rateLimit": {
+      "minTimeMs": 100,
+      "maxConcurrent": 2,
+      "maxQueueSize": 250
+    }
+  }
+}

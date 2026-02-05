@@ -192,8 +192,20 @@ export function verifyDoc1TermsToken(
   }
 
   if (opts?.maxAgeMs) {
-    const age = Date.now() - payload.ts;
-    if (age < 0 || age > opts.maxAgeMs) return { ok: false, error: "TOKEN_EXPIRED" };
+    const now = Date.now();
+    // Backward-compat + robustness:
+    // - tolerate small clock skew (NTP adjustments can move time slightly backwards)
+    // - accept legacy seconds-based timestamps by normalizing to ms when the value is too small
+    const ts = typeof payload.ts === "number" ? payload.ts : Number(payload.ts);
+    if (!Number.isFinite(ts) || ts <= 0) return { ok: false, error: "TOKEN_TS_INVALID" };
+
+    // Heuristic: anything < 10^11 is very likely epoch seconds (or an invalid ms timestamp).
+    const normalizedTs = ts < 100_000_000_000 ? ts * 1000 : ts;
+
+    const age = now - normalizedTs;
+    const CLOCK_SKEW_MS = 5 * 60 * 1000;
+
+    if (age < -CLOCK_SKEW_MS || age > opts.maxAgeMs + CLOCK_SKEW_MS) return { ok: false, error: "TOKEN_EXPIRED" };
   }
 
   return { ok: true, payload: payload as Doc1TermsTokenPayload };

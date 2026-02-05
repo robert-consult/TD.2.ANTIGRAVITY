@@ -28,6 +28,12 @@ export function ConfigSync() {
 
       if (message.type === "system-config:updated") {
         queryClient.invalidateQueries({ queryKey: ["/api/admin/system-config"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/admin/market-data/providers"] });
+      }
+
+      if (message.type === "market-data:providers-updated") {
+        queryClient.invalidateQueries({ queryKey: ["/api/admin/market-data/providers"] });
+        return;
       }
     });
   }, [isAuthenticated, queryClient, subscribe]);

@@ -93,22 +93,35 @@ async function seed() {
     
     for (const symbolData of symbols) {
       const existingSymbol = await storage.getSymbolConfigBySymbol(symbolData.symbol);
+      const baseCurrency =
+        symbolData.symbol.length === 6 ? symbolData.symbol.slice(0, 3).toUpperCase() : undefined;
+      const quoteCurrency =
+        symbolData.symbol.length === 6 ? symbolData.symbol.slice(3).toUpperCase() : undefined;
       
       if (!existingSymbol) {
         await storage.createSymbolConfig({
           symbol: symbolData.symbol,
           name: symbolData.name,
+          category: "forex",
+          baseCurrency,
+          quoteCurrency,
           minSpreadPips: 2.0 // Minimum spread of 2 pips
         });
         console.log(`Created symbol config for ${symbolData.symbol}`);
       } else {
-        // Update spread if needed
-        if (!existingSymbol.minSpreadPips || existingSymbol.minSpreadPips < 2.0) {
+        const needsSpread = !existingSymbol.minSpreadPips || existingSymbol.minSpreadPips < 2.0;
+        const needsCategory = !existingSymbol.category || String(existingSymbol.category).toLowerCase() !== "forex";
+        const needsBase = !existingSymbol.baseCurrency && baseCurrency;
+        const needsQuote = !existingSymbol.quoteCurrency && quoteCurrency;
+
+        if (needsSpread || needsCategory || needsBase || needsQuote) {
           await storage.updateSymbolConfig(existingSymbol.id, {
-            ...existingSymbol,
-            minSpreadPips: 2.0
+            minSpreadPips: 2.0,
+            ...(needsCategory ? { category: "forex" } : {}),
+            ...(needsBase ? { baseCurrency } : {}),
+            ...(needsQuote ? { quoteCurrency } : {}),
           });
-          console.log(`Updated min spread for ${symbolData.symbol} to 2 pips`);
+          console.log(`Updated symbol config for ${symbolData.symbol}`);
         }
       }
     }

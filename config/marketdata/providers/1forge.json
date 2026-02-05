@@ -1,0 +1,18 @@
+{
+  "providerKey": "1forge",
+  "displayName": "1Forge",
+  "driver": "oneforge",
+  "config": {
+    "driver": "oneforge",
+    "apiKey": "env:FORGE_KEY",
+    "restBaseUrl": "https://api.1forge.com",
+    "quoteEndpoint": "/quotes",
+    "timeoutMs": 8000,
+    "maxBatchSymbols": 100,
+    "rateLimit": {
+      "minTimeMs": 100,
+      "maxConcurrent": 2,
+      "maxQueueSize": 250
+    }
+  }
+}

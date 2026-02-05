@@ -27,13 +27,16 @@ export type AuditAction =
   | "ENFORCEMENT_FREEZE"
   | "ENFORCEMENT_UNFREEZE"
   | "ENFORCEMENT_DISABLE"
-  | "ENFORCEMENT_ENABLE";
+  | "ENFORCEMENT_ENABLE"
+  | "TRADER_SCOUT_SEARCH"
+  | "TRADER_SCOUT_DRILLDOWN"
+  | "TRADER_SCOUT_EXPORT";
 
 export type AuditEntry = {
   id?: number;
   adminId: number;
   action: AuditAction;
-  targetType?: "signal" | "case" | "user" | "config" | "ip2asn" | "maintenance";
+  targetType?: "signal" | "case" | "user" | "config" | "ip2asn" | "maintenance" | "analytics";
   targetId?: number;
   payload?: Record<string, any>;
   createdAt: number;
@@ -58,7 +61,7 @@ export async function appendAuditEntry(
   db: GriftDb,
   adminId: number,
   action: AuditAction,
-  targetType?: "signal" | "case" | "user" | "config" | "ip2asn" | "maintenance",
+  targetType?: "signal" | "case" | "user" | "config" | "ip2asn" | "maintenance" | "analytics",
   targetId?: number,
   payload?: Record<string, any>
 ): Promise<AuditEntry> {

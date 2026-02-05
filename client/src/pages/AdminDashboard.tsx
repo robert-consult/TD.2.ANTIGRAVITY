@@ -34,6 +34,10 @@ import UserActivityAdmin from "@/components/admin/UserActivityAdmin";
 import { AdminLegalPanel } from "@/components/admin/AdminLegalTabs";
 import SignupFreezeWaitlistCard from "@/components/admin/SignupFreezeWaitlistCard";
 import { JurisdictionControlsCard } from "@/components/admin/JurisdictionControlsCard";
+import { MarketDataProvidersCard } from "@/components/admin/MarketDataProvidersCard";
+import { InstrumentIngestionPanel } from "@/components/admin/InstrumentIngestionPanel";
+import { InstrumentCatalogEnableDialog } from "@/components/admin/InstrumentCatalogEnableDialog";
+import { PipDefaultsPanel } from "@/components/admin/PipDefaultsPanel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -148,10 +152,13 @@ interface SymbolConfig {
   id: number;
   symbol: string;
   name: string;
+  category?: string | null;
   baseCurrency?: string;
   quoteCurrency?: string;
   spread?: number;
   minSpreadPips: number;
+  pipDecimals?: number | null;
+  quoteDecimals?: number | null;
   enabled: boolean;
   minLot: number;
   maxLot: number;
@@ -278,6 +285,31 @@ interface SystemHealthData {
   staleCount: number;
   cacheSize: number;
   serverTime: string;
+  feedSource?: string | null;
+  feedSourceAt?: string | null;
+  feedProviderKey?: string | null;
+  feedProviderDriver?: string | null;
+  feedProviderDisplayName?: string | null;
+  feedProviderConnected?: boolean;
+  lastProviderSuccessAt?: string | null;
+  lastProviderSuccessKey?: string | null;
+  activeProviderKey?: string | null;
+  requestedProviderKey?: string | null;
+  requestedProvider?: {
+    providerKey: string;
+    displayName: string | null;
+    driver: string | null;
+    configUsable: boolean;
+    missingSecrets: string[];
+    isActiveConfigured: boolean;
+    error?: string;
+  } | null;
+}
+
+interface MarketDataProvidersResp {
+  ok: boolean;
+  activeKey: string | null;
+  rows: Array<{ providerKey: string; displayName: string; driver: string; isEnabled: boolean; deletedAt: number | null }>;
 }
 
 interface LoginHistoryEntry {
@@ -1425,6 +1457,7 @@ function SystemConfigTab() {
   const [subTab, setSubTab] = useState("trading");
   const [config, setConfig] = useState<SystemConfigData | null>(null);
   const [configChanged, setConfigChanged] = useState(false);
+  const [healthProviderKey, setHealthProviderKey] = useState<string>("");
   const [confirmDialog, setConfirmDialog] = useState<{ open: boolean; key: string; value: boolean; label: string }>({
     open: false,
     key: "",
@@ -1437,10 +1470,51 @@ function SystemConfigTab() {
     queryFn: () => axios.get("/api/admin/system-config").then(r => r.data),
   });
 
+  const { data: providersData } = useQuery<MarketDataProvidersResp>({
+    queryKey: ["/api/admin/market-data/providers"],
+    queryFn: () => axios.get("/api/admin/market-data/providers").then((r) => r.data),
+  });
+
+  const providers = useMemo(
+    () => (providersData?.rows || []).filter((p) => !p.deletedAt && p.isEnabled),
+    [providersData?.rows],
+  );
+
   const { data: health, refetch: refetchHealth } = useQuery<SystemHealthData>({
-    queryKey: ["/api/admin/system-health"],
-    queryFn: () => axios.get("/api/admin/system-health").then(r => r.data),
+    queryKey: ["/api/admin/system-health", healthProviderKey],
+    queryFn: () =>
+      axios
+        .get("/api/admin/system-health", { params: healthProviderKey ? { providerKey: healthProviderKey } : undefined })
+        .then((r) => r.data),
     refetchInterval: 5000,
+  });
+
+  useEffect(() => {
+    if (healthProviderKey) return;
+    const active = providersData?.activeKey ?? health?.activeProviderKey ?? null;
+    if (active) setHealthProviderKey(active);
+    else if (providers.length) setHealthProviderKey(providers[0].providerKey);
+  }, [healthProviderKey, health?.activeProviderKey, providers, providersData?.activeKey]);
+
+  const probeProviderMutation = useMutation({
+    mutationFn: async () => {
+      if (!healthProviderKey) throw new Error("Select a provider first");
+      const res = await axios.post(
+        `/api/admin/market-data/providers/${encodeURIComponent(healthProviderKey)}/test`,
+        { symbols: ["EURUSD"] },
+      );
+      return res.data;
+    },
+    onSuccess: (data: any) => {
+      toast({
+        title: data?.ok ? "Provider probe OK" : "Provider probe failed",
+        description: data?.ok ? `Quotes: ${data?.quoteCount ?? 0}` : String(data?.error ?? "Unknown error"),
+        variant: data?.ok ? undefined : "destructive",
+      });
+    },
+    onError: (e: any) => {
+      toast({ title: "Provider probe failed", description: String(e?.message || e), variant: "destructive" });
+    },
   });
 
   useEffect(() => {
@@ -1615,82 +1689,86 @@ function SystemConfigTab() {
 
         {/* MARKET DATA & REFRESH */}
         <TabsContent value="market">
-          <Card className="bg-neutral-700 border-gray-600">
-            <CardHeader>
-              <CardTitle className="text-base">Market Data & Quote Settings</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <div>
-                  <Label className="text-base font-medium">Client Quote Refresh (ms)</Label>
-                  <p className="text-xs text-gray-400 mt-1">How often client polls for quote updates</p>
-                  <Input
-                    type="number"
-                    value={config.quoteRefreshMs}
-                    onChange={(e) => {
-                      setConfig(prev => prev ? { ...prev, quoteRefreshMs: Number(e.target.value) } : prev);
-                      setConfigChanged(true);
-                    }}
-                    className="bg-neutral-600 mt-2"
-                    min={100}
-                  />
+          <div className="space-y-4">
+            <Card className="bg-neutral-700 border-gray-600">
+              <CardHeader>
+                <CardTitle className="text-base">Market Data & Quote Settings</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  <div>
+                    <Label className="text-base font-medium">Client Quote Refresh (ms)</Label>
+                    <p className="text-xs text-gray-400 mt-1">How often client polls for quote updates</p>
+                    <Input
+                      type="number"
+                      value={config.quoteRefreshMs}
+                      onChange={(e) => {
+                        setConfig(prev => prev ? { ...prev, quoteRefreshMs: Number(e.target.value) } : prev);
+                        setConfigChanged(true);
+                      }}
+                      className="bg-neutral-600 mt-2"
+                      min={100}
+                    />
+                  </div>
+
+                  <div>
+                    <Label className="text-base font-medium">Server Feed Poll (ms)</Label>
+                    <p className="text-xs text-gray-400 mt-1">How often server fetches market data (ingestor role)</p>
+                    <Input
+                      type="number"
+                      value={config.feedPollMs}
+                      onChange={(e) => {
+                        setConfig(prev => prev ? { ...prev, feedPollMs: Number(e.target.value) } : prev);
+                        setConfigChanged(true);
+                      }}
+                      className="bg-neutral-600 mt-2"
+                      min={100}
+                    />
+                  </div>
+
+                  <div>
+                    <Label className="text-base font-medium">Stale Threshold (ms)</Label>
+                    <p className="text-xs text-gray-400 mt-1">Quotes older than this are marked stale</p>
+                    <Input
+                      type="number"
+                      value={config.staleThresholdMs}
+                      onChange={(e) => {
+                        setConfig(prev => prev ? { ...prev, staleThresholdMs: Number(e.target.value) } : prev);
+                        setConfigChanged(true);
+                      }}
+                      className="bg-neutral-600 mt-2"
+                      min={1000}
+                    />
+                  </div>
                 </div>
 
-                <div>
-                  <Label className="text-base font-medium">Server Feed Poll (ms)</Label>
-                  <p className="text-xs text-gray-400 mt-1">How often server fetches from 1Forge API</p>
-                  <Input
-                    type="number"
-                    value={config.feedPollMs}
-                    onChange={(e) => {
-                      setConfig(prev => prev ? { ...prev, feedPollMs: Number(e.target.value) } : prev);
-                      setConfigChanged(true);
-                    }}
-                    className="bg-neutral-600 mt-2"
-                    min={100}
-                  />
+                <FxRolloverSettings
+                  config={config}
+                  setConfig={setConfig}
+                  setConfigChanged={setConfigChanged}
+                />
+
+                <div className="bg-green-900/30 border border-green-700/50 p-4 rounded-lg mt-4">
+                  <p className="text-sm text-green-300">
+                    <strong>Note:</strong> Changes to feed polling rates and stale thresholds take effect immediately
+                    without requiring a server restart.
+                  </p>
                 </div>
 
-                <div>
-                  <Label className="text-base font-medium">Stale Threshold (ms)</Label>
-                  <p className="text-xs text-gray-400 mt-1">Quotes older than this are marked stale</p>
-                  <Input
-                    type="number"
-                    value={config.staleThresholdMs}
-                    onChange={(e) => {
-                      setConfig(prev => prev ? { ...prev, staleThresholdMs: Number(e.target.value) } : prev);
-                      setConfigChanged(true);
-                    }}
-                    className="bg-neutral-600 mt-2"
-                    min={1000}
-                  />
+                <div className="flex justify-end pt-4">
+                  <Button
+                    onClick={handleSave}
+                    disabled={!configChanged || updateMutation.isPending}
+                    className="bg-blue-600 hover:bg-blue-700"
+                  >
+                    {updateMutation.isPending ? "Saving..." : "Save Changes"}
+                  </Button>
                 </div>
-              </div>
+              </CardContent>
+            </Card>
 
-              <FxRolloverSettings
-                config={config}
-                setConfig={setConfig}
-                setConfigChanged={setConfigChanged}
-              />
-
-              <div className="bg-green-900/30 border border-green-700/50 p-4 rounded-lg mt-4">
-                <p className="text-sm text-green-300">
-                  <strong>Note:</strong> Changes to feed polling rates and stale thresholds take effect immediately
-                  without requiring a server restart.
-                </p>
-              </div>
-
-              <div className="flex justify-end pt-4">
-                <Button
-                  onClick={handleSave}
-                  disabled={!configChanged || updateMutation.isPending}
-                  className="bg-blue-600 hover:bg-blue-700"
-                >
-                  {updateMutation.isPending ? "Saving..." : "Save Changes"}
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
+            <MarketDataProvidersCard />
+          </div>
         </TabsContent>
 
         {/* SIGNUP COMPLIANCE */}
@@ -1856,24 +1934,96 @@ function SystemConfigTab() {
               </Button>
             </CardHeader>
             <CardContent className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                <div className="md:col-span-3">
+                  <Label>Provider</Label>
+                  <Select value={healthProviderKey} onValueChange={setHealthProviderKey}>
+                    <SelectTrigger className="bg-neutral-600 mt-1">
+                      <SelectValue placeholder="Select provider" />
+                    </SelectTrigger>
+                    <SelectContent className="bg-neutral-700">
+                      {providers.map((p) => (
+                        <SelectItem key={p.providerKey} value={p.providerKey}>
+                          {p.displayName} ({p.providerKey})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-gray-400 mt-1">
+                    Active configured: <span className="font-mono">{health?.activeProviderKey ?? providersData?.activeKey ?? "—"}</span>{" "}
+                    · Feed using: <span className="font-mono">{health?.feedProviderKey ?? health?.feedSource ?? "simulated"}</span>
+                  </p>
+                  {health?.requestedProvider?.missingSecrets?.length ? (
+                    <p className="text-xs text-amber-300 mt-1">
+                      Missing env secrets: <span className="font-mono">{health.requestedProvider.missingSecrets.join(", ")}</span>
+                    </p>
+                  ) : null}
+                </div>
+                <div className="flex items-end justify-end">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => probeProviderMutation.mutate()}
+                    disabled={probeProviderMutation.isPending || !healthProviderKey}
+                    className="bg-neutral-600 hover:bg-neutral-500"
+                  >
+                    {probeProviderMutation.isPending ? "Fetching…" : "Fetch Status"}
+                  </Button>
+                </div>
+              </div>
+
               {health ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div className="bg-neutral-800 p-4 rounded-lg">
                     <div className="flex items-center mb-2">
-                      <div className={`w-3 h-3 rounded-full mr-2 ${health.apiConnected ? 'bg-green-500' : 'bg-red-500'}`}></div>
-                      <span className="font-medium">1Forge API Status</span>
+                      <div
+                        className={`w-3 h-3 rounded-full mr-2 ${
+                          healthProviderKey && health.feedProviderKey && healthProviderKey === health.feedProviderKey
+                            ? (health.feedProviderConnected ? "bg-green-500" : "bg-red-500")
+                            : healthProviderKey
+                              ? (health.requestedProvider?.configUsable ? "bg-amber-500" : "bg-red-500")
+                              : "bg-gray-500"
+                        }`}
+                      ></div>
+                      <span className="font-medium">Provider Status</span>
                     </div>
-                    <p className={`text-lg ${health.apiConnected ? 'text-green-400' : 'text-red-400'}`}>
-                      {health.apiConnected ? 'Connected' : 'Disconnected'}
+                    <p
+                      className={`text-lg ${
+                        healthProviderKey && health.feedProviderKey && healthProviderKey === health.feedProviderKey
+                          ? (health.feedProviderConnected ? "text-green-400" : "text-red-400")
+                          : healthProviderKey
+                            ? (health.requestedProvider?.configUsable ? "text-amber-300" : "text-red-400")
+                            : "text-gray-400"
+                      }`}
+                    >
+                      {(() => {
+                        if (!healthProviderKey) return "Select a provider";
+                        const selectedIsFeed = Boolean(health.feedProviderKey && healthProviderKey === health.feedProviderKey);
+                        if (selectedIsFeed) return health.feedProviderConnected ? "Connected" : "Disconnected";
+                        if (health.requestedProvider?.error) return String(health.requestedProvider.error);
+                        if (health.requestedProvider?.configUsable) return "Configured (not active)";
+                        if (health.requestedProvider?.missingSecrets?.length) return "Missing API key";
+                        return "Unknown";
+                      })()}
+                    </p>
+                    <p className="text-xs text-gray-400 mt-1">
+                      Selected: <span className="font-mono">{healthProviderKey || "—"}</span>
+                      {health.requestedProvider?.displayName ? (
+                        <>
+                          {" "}
+                          · <span className="truncate">{health.requestedProvider.displayName}</span>
+                        </>
+                      ) : null}
                     </p>
                   </div>
 
                   <div className="bg-neutral-800 p-4 rounded-lg">
-                    <div className="font-medium mb-2">Last Successful API Call</div>
+                    <div className="font-medium mb-2">Last Provider Success</div>
                     <p className="text-lg">
-                      {health.lastSuccess
-                        ? new Date(health.lastSuccess).toLocaleString()
-                        : 'Never'}
+                      {health.lastProviderSuccessAt ? new Date(health.lastProviderSuccessAt).toLocaleString() : 'Never'}
+                    </p>
+                    <p className="text-xs text-gray-400 mt-1">
+                      Provider: <span className="font-mono">{health.lastProviderSuccessKey ?? "—"}</span>
                     </p>
                   </div>
 
@@ -1881,6 +2031,14 @@ function SystemConfigTab() {
                     <div className="font-medium mb-2">Consecutive Failures</div>
                     <p className={`text-lg ${health.failures > 0 ? 'text-amber-400' : 'text-green-400'}`}>
                       {health.failures}
+                    </p>
+                  </div>
+
+                  <div className="bg-neutral-800 p-4 rounded-lg">
+                    <div className="font-medium mb-2">Feed Source</div>
+                    <p className="text-lg font-mono">{health.feedSource ?? "—"}</p>
+                    <p className="text-xs text-gray-400 mt-1">
+                      {health.feedSourceAt ? new Date(health.feedSourceAt).toLocaleString() : "—"}
                     </p>
                   </div>
 
@@ -1900,6 +2058,13 @@ function SystemConfigTab() {
                     <div className="font-medium mb-2">Server Time</div>
                     <p className="text-lg">
                       {new Date(health.serverTime).toLocaleString()}
+                    </p>
+                  </div>
+
+                  <div className="bg-neutral-800 p-4 rounded-lg">
+                    <div className="font-medium mb-2">Last Feed Update</div>
+                    <p className="text-lg">
+                      {health.lastSuccess ? new Date(health.lastSuccess).toLocaleString() : "Never"}
                     </p>
                   </div>
                 </div>
@@ -1999,19 +2164,24 @@ export default function AdminDashboard() {
   const [editingSymbol, setEditingSymbol] = useState<SymbolConfig | null>(null);
   const [symbolDialogOpen, setSymbolDialogOpen] = useState(false);
   const [newSymbolDialogOpen, setNewSymbolDialogOpen] = useState(false);
+  const [catalogEnableDialogOpen, setCatalogEnableDialogOpen] = useState(false);
   const [newSymbol, setNewSymbol] = useState<Partial<SymbolConfig>>({
     symbol: '',
     name: '',
+    category: 'forex',
     baseCurrency: '',
     quoteCurrency: '',
     spread: 0,
     minSpreadPips: 2,
+    pipDecimals: null,
+    quoteDecimals: null,
     enabled: true,
     minLot: 1,
     maxLot: 50
   });
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [symbolToDelete, setSymbolToDelete] = useState<number | null>(null);
+  const [instrumentsSubTab, setInstrumentsSubTab] = useState<"configured" | "minitab">("configured");
 
   // Global settings state (includes all Trade Settings tab values)
   const [riskParams, setRiskParams] = useState<GlobalSettings>({
@@ -2709,10 +2879,13 @@ export default function AdminDashboard() {
         id: editingSymbol.id,
         symbol: editingSymbol.symbol,
         name: editingSymbol.name,
+        category: editingSymbol.category ?? null,
         baseCurrency: editingSymbol.baseCurrency,
         quoteCurrency: editingSymbol.quoteCurrency,
         spread: editingSymbol.spread,
         minSpreadPips: editingSymbol.minSpreadPips,
+        pipDecimals: editingSymbol.pipDecimals ?? null,
+        quoteDecimals: editingSymbol.quoteDecimals ?? null,
         enabled: editingSymbol.enabled,
         minLot: editingSymbol.minLot,
         maxLot: editingSymbol.maxLot
@@ -4373,152 +4546,177 @@ export default function AdminDashboard() {
             </TabsContent>
 
             <TabsContent value="instruments" className="p-4">
-              <div className="flex justify-between items-center mb-4">
-                <h2 className="text-xl font-semibold">Trading Instruments</h2>
-                <Button
-                  variant="default"
-                  className="bg-green-600 hover:bg-green-700"
-                  onClick={() => setNewSymbolDialogOpen(true)}
-                >
-                  Add New Instrument
-                </Button>
-              </div>
+              <Tabs value={instrumentsSubTab} onValueChange={(v) => setInstrumentsSubTab(v as any)} className="space-y-4">
+                <TabsList className="bg-neutral-700 w-full h-auto p-1 grid grid-cols-2 gap-1">
+                  <TabsTrigger value="configured" className="data-[state=active]:bg-neutral-600 text-xs sm:text-sm px-2 py-1.5">Configured</TabsTrigger>
+                  <TabsTrigger value="minitab" className="data-[state=active]:bg-neutral-600 text-xs sm:text-sm px-2 py-1.5">Minitab</TabsTrigger>
+                </TabsList>
 
-              <p className="text-gray-400 mb-4">Configure the trading instruments available on the platform, including spread settings and lot limits.</p>
-
-              {isLoadingSymbols ? (
-                <div className="flex items-center justify-center h-40">
-                  <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary"></div>
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  {/* Active Instruments */}
-                  <div className="mb-6">
-                    <h3 className="text-lg font-semibold mb-2">Active Instruments</h3>
-                    <Table className="border-collapse">
-                      <TableHeader>
-                        <TableRow className="border-b border-gray-700">
-                          <TableHead className="py-3 px-4 text-left text-gray-400">Symbol</TableHead>
-                          <TableHead className="py-3 px-4 text-left text-gray-400">Name</TableHead>
-                          <TableHead className="py-3 px-4 text-left text-gray-400">Base/Quote</TableHead>
-                          <TableHead className="py-3 px-4 text-left text-gray-400">Min Spread (pips)</TableHead>
-                          <TableHead className="py-3 px-4 text-left text-gray-400">Min/Max Lot</TableHead>
-                          <TableHead className="py-3 px-4 text-left text-gray-400">Status</TableHead>
-                          <TableHead className="py-3 px-4 text-left text-gray-400">Actions</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {symbols.filter(symbol => symbol.enabled).length === 0 ? (
-                          <TableRow>
-                            <TableCell colSpan={7} className="text-center py-4">
-                              No active instruments configured
-                            </TableCell>
-                          </TableRow>
-                        ) : (
-                          symbols.filter(symbol => symbol.enabled).map((symbol) => (
-                            <TableRow key={symbol.id} className="border-b border-gray-700">
-                              <TableCell className="py-3 px-4 font-semibold">{symbol.symbol}</TableCell>
-                              <TableCell className="py-3 px-4">{symbol.name}</TableCell>
-                              <TableCell className="py-3 px-4">{symbol.baseCurrency || '-'}/{symbol.quoteCurrency || '-'}</TableCell>
-                              <TableCell className="py-3 px-4">{symbol.minSpreadPips}</TableCell>
-                              <TableCell className="py-3 px-4">{symbol.minLot} / {symbol.maxLot} lots</TableCell>
-                              <TableCell className="py-3 px-4">
-                                <div className="flex items-center">
-                                  <div className="w-3 h-3 rounded-full mr-2 bg-green-500"></div>
-                                  <span>Active</span>
-                                </div>
-                              </TableCell>
-                              <TableCell className="py-3 px-4">
-                                <div className="flex space-x-2">
-                                  <Button
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={() => handleEditSymbol(symbol)}
-                                    className="bg-neutral-700 hover:bg-neutral-600"
-                                  >
-                                    Edit
-                                  </Button>
-                                  <Button
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={() => confirmDeleteSymbol(symbol.id)}
-                                    className="bg-red-800 hover:bg-red-700 border-red-700"
-                                  >
-                                    Remove
-                                  </Button>
-                                </div>
-                              </TableCell>
-                            </TableRow>
-                          ))
-                        )}
-                      </TableBody>
-                    </Table>
+                <TabsContent value="configured">
+                  <div className="flex justify-between items-center mb-4">
+                    <h2 className="text-xl font-semibold">Trading Instruments</h2>
+                    <div className="flex gap-2">
+                      <Button
+                        variant="outline"
+                        className="bg-neutral-700 hover:bg-neutral-600"
+                        onClick={() => setCatalogEnableDialogOpen(true)}
+                      >
+                        Add From Catalog
+                      </Button>
+                      <Button
+                        variant="default"
+                        className="bg-green-600 hover:bg-green-700"
+                        onClick={() => setNewSymbolDialogOpen(true)}
+                      >
+                        Add New Instrument
+                      </Button>
+                    </div>
                   </div>
 
-                  {/* Inactive Instruments */}
-                  <div>
-                    <h3 className="text-lg font-semibold mb-2 text-gray-300">Inactive Instruments</h3>
-                    <Table className="border-collapse">
-                      <TableHeader>
-                        <TableRow className="border-b border-gray-700">
-                          <TableHead className="py-3 px-4 text-left text-gray-400">Symbol</TableHead>
-                          <TableHead className="py-3 px-4 text-left text-gray-400">Name</TableHead>
-                          <TableHead className="py-3 px-4 text-left text-gray-400">Base/Quote</TableHead>
-                          <TableHead className="py-3 px-4 text-left text-gray-400">Min Spread (pips)</TableHead>
-                          <TableHead className="py-3 px-4 text-left text-gray-400">Min/Max Lot</TableHead>
-                          <TableHead className="py-3 px-4 text-left text-gray-400">Status</TableHead>
-                          <TableHead className="py-3 px-4 text-left text-gray-400">Actions</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {symbols.filter(symbol => !symbol.enabled).length === 0 ? (
-                          <TableRow>
-                            <TableCell colSpan={7} className="text-center py-4 text-gray-400">
-                              No inactive instruments
-                            </TableCell>
-                          </TableRow>
-                        ) : (
-                          symbols.filter(symbol => !symbol.enabled).map((symbol) => (
-                            <TableRow key={symbol.id} className="border-b border-gray-700 opacity-75">
-                              <TableCell className="py-3 px-4 font-semibold">{symbol.symbol}</TableCell>
-                              <TableCell className="py-3 px-4">{symbol.name}</TableCell>
-                              <TableCell className="py-3 px-4">{symbol.baseCurrency || '-'}/{symbol.quoteCurrency || '-'}</TableCell>
-                              <TableCell className="py-3 px-4">{symbol.minSpreadPips}</TableCell>
-                              <TableCell className="py-3 px-4">{symbol.minLot} / {symbol.maxLot} lots</TableCell>
-                              <TableCell className="py-3 px-4">
-                                <div className="flex items-center">
-                                  <div className="w-3 h-3 rounded-full mr-2 bg-red-500"></div>
-                                  <span>Inactive</span>
-                                </div>
-                              </TableCell>
-                              <TableCell className="py-3 px-4">
-                                <div className="flex space-x-2">
-                                  <Button
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={() => handleEditSymbol(symbol)}
-                                    className="bg-neutral-700 hover:bg-neutral-600"
-                                  >
-                                    Edit
-                                  </Button>
-                                  <Button
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={() => confirmDeleteSymbol(symbol.id)}
-                                    className="bg-red-800 hover:bg-red-700 border-red-700"
-                                  >
-                                    Remove
-                                  </Button>
-                                </div>
-                              </TableCell>
+                  <p className="text-gray-400 mb-4">Configure the trading instruments available on the platform, including spread settings and lot limits.</p>
+
+                  {isLoadingSymbols ? (
+                    <div className="flex items-center justify-center h-40">
+                      <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary"></div>
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      {/* Active Instruments */}
+                      <div className="mb-6">
+                        <h3 className="text-lg font-semibold mb-2">Active Instruments</h3>
+                        <Table className="border-collapse">
+                          <TableHeader>
+                            <TableRow className="border-b border-gray-700">
+                              <TableHead className="py-3 px-4 text-left text-gray-400">Symbol</TableHead>
+                              <TableHead className="py-3 px-4 text-left text-gray-400">Name</TableHead>
+                              <TableHead className="py-3 px-4 text-left text-gray-400">Base/Quote</TableHead>
+                              <TableHead className="py-3 px-4 text-left text-gray-400">Min Spread (pips)</TableHead>
+                              <TableHead className="py-3 px-4 text-left text-gray-400">Min/Max Lot</TableHead>
+                              <TableHead className="py-3 px-4 text-left text-gray-400">Status</TableHead>
+                              <TableHead className="py-3 px-4 text-left text-gray-400">Actions</TableHead>
                             </TableRow>
-                          ))
-                        )}
-                      </TableBody>
-                    </Table>
+                          </TableHeader>
+                          <TableBody>
+                            {symbols.filter(symbol => symbol.enabled).length === 0 ? (
+                              <TableRow>
+                                <TableCell colSpan={7} className="text-center py-4">
+                                  No active instruments configured
+                                </TableCell>
+                              </TableRow>
+                            ) : (
+                              symbols.filter(symbol => symbol.enabled).map((symbol) => (
+                                <TableRow key={symbol.id} className="border-b border-gray-700">
+                                  <TableCell className="py-3 px-4 font-semibold">{symbol.symbol}</TableCell>
+                                  <TableCell className="py-3 px-4">{symbol.name}</TableCell>
+                                  <TableCell className="py-3 px-4">{symbol.baseCurrency || '-'}/{symbol.quoteCurrency || '-'}</TableCell>
+                                  <TableCell className="py-3 px-4">{symbol.minSpreadPips}</TableCell>
+                                  <TableCell className="py-3 px-4">{symbol.minLot} / {symbol.maxLot} lots</TableCell>
+                                  <TableCell className="py-3 px-4">
+                                    <div className="flex items-center">
+                                      <div className="w-3 h-3 rounded-full mr-2 bg-green-500"></div>
+                                      <span>Active</span>
+                                    </div>
+                                  </TableCell>
+                                  <TableCell className="py-3 px-4">
+                                    <div className="flex space-x-2">
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => handleEditSymbol(symbol)}
+                                        className="bg-neutral-700 hover:bg-neutral-600"
+                                      >
+                                        Edit
+                                      </Button>
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => confirmDeleteSymbol(symbol.id)}
+                                        className="bg-red-800 hover:bg-red-700 border-red-700"
+                                      >
+                                        Remove
+                                      </Button>
+                                    </div>
+                                  </TableCell>
+                                </TableRow>
+                              ))
+                            )}
+                          </TableBody>
+                        </Table>
+                      </div>
+
+                      {/* Inactive Instruments */}
+                      <div>
+                        <h3 className="text-lg font-semibold mb-2 text-gray-300">Inactive Instruments</h3>
+                        <Table className="border-collapse">
+                          <TableHeader>
+                            <TableRow className="border-b border-gray-700">
+                              <TableHead className="py-3 px-4 text-left text-gray-400">Symbol</TableHead>
+                              <TableHead className="py-3 px-4 text-left text-gray-400">Name</TableHead>
+                              <TableHead className="py-3 px-4 text-left text-gray-400">Base/Quote</TableHead>
+                              <TableHead className="py-3 px-4 text-left text-gray-400">Min Spread (pips)</TableHead>
+                              <TableHead className="py-3 px-4 text-left text-gray-400">Min/Max Lot</TableHead>
+                              <TableHead className="py-3 px-4 text-left text-gray-400">Status</TableHead>
+                              <TableHead className="py-3 px-4 text-left text-gray-400">Actions</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {symbols.filter(symbol => !symbol.enabled).length === 0 ? (
+                              <TableRow>
+                                <TableCell colSpan={7} className="text-center py-4 text-gray-400">
+                                  No inactive instruments
+                                </TableCell>
+                              </TableRow>
+                            ) : (
+                              symbols.filter(symbol => !symbol.enabled).map((symbol) => (
+                                <TableRow key={symbol.id} className="border-b border-gray-700 opacity-75">
+                                  <TableCell className="py-3 px-4 font-semibold">{symbol.symbol}</TableCell>
+                                  <TableCell className="py-3 px-4">{symbol.name}</TableCell>
+                                  <TableCell className="py-3 px-4">{symbol.baseCurrency || '-'}/{symbol.quoteCurrency || '-'}</TableCell>
+                                  <TableCell className="py-3 px-4">{symbol.minSpreadPips}</TableCell>
+                                  <TableCell className="py-3 px-4">{symbol.minLot} / {symbol.maxLot} lots</TableCell>
+                                  <TableCell className="py-3 px-4">
+                                    <div className="flex items-center">
+                                      <div className="w-3 h-3 rounded-full mr-2 bg-red-500"></div>
+                                      <span>Inactive</span>
+                                    </div>
+                                  </TableCell>
+                                  <TableCell className="py-3 px-4">
+                                    <div className="flex space-x-2">
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => handleEditSymbol(symbol)}
+                                        className="bg-neutral-700 hover:bg-neutral-600"
+                                      >
+                                        Edit
+                                      </Button>
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => confirmDeleteSymbol(symbol.id)}
+                                        className="bg-red-800 hover:bg-red-700 border-red-700"
+                                      >
+                                        Remove
+                                      </Button>
+                                    </div>
+                                  </TableCell>
+                                </TableRow>
+                              ))
+                            )}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    </div>
+                  )}
+                </TabsContent>
+
+                <TabsContent value="minitab">
+                  <div className="space-y-4">
+                    <InstrumentIngestionPanel />
+                    <PipDefaultsPanel />
                   </div>
-                </div>
-              )}
+                </TabsContent>
+              </Tabs>
             </TabsContent>
 
             <TabsContent value="data" className="p-0">
@@ -4709,6 +4907,30 @@ export default function AdminDashboard() {
               </div>
 
               <div>
+                <Label>Category</Label>
+                <Select
+                  value={editingSymbol?.category || ''}
+                  onValueChange={(val) => handleSymbolChange("category", val)}
+                >
+                  <SelectTrigger className="bg-neutral-700 mt-1">
+                    <SelectValue placeholder="Select category" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-neutral-800 border-gray-700">
+                    <SelectItem value="forex">Forex</SelectItem>
+                    <SelectItem value="stocks">Stocks</SelectItem>
+                    <SelectItem value="etf">ETFs</SelectItem>
+                    <SelectItem value="crypto">Crypto</SelectItem>
+                    <SelectItem value="commodities">Commodities</SelectItem>
+                    <SelectItem value="bonds">Bonds</SelectItem>
+                    <SelectItem value="funds">Funds</SelectItem>
+                    <SelectItem value="mutual_funds">Mutual Funds</SelectItem>
+                    <SelectItem value="indices">Indices</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-gray-400 mt-1">Used to apply pip defaults during ingestion and for UI formatting.</p>
+              </div>
+
+              <div>
                 <Label htmlFor="minSpreadPips">Minimum Spread (pips)</Label>
                 <Input
                   id="minSpreadPips"
@@ -4741,6 +4963,39 @@ export default function AdminDashboard() {
                     onChange={(e) => handleSymbolChange("quoteCurrency", e.target.value)}
                     className="bg-neutral-700"
                   />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label htmlFor="pipDecimals">Pip Decimals</Label>
+                  <Input
+                    id="pipDecimals"
+                    type="number"
+                    min={0}
+                    max={12}
+                    value={editingSymbol?.pipDecimals ?? ""}
+                    onChange={(e) =>
+                      handleSymbolChange("pipDecimals", e.target.value === "" ? null : Number(e.target.value))
+                    }
+                    className="bg-neutral-700"
+                  />
+                  <p className="text-xs text-gray-400 mt-1">pip size = 10^-pipDecimals (e.g. 4 → 0.0001)</p>
+                </div>
+                <div>
+                  <Label htmlFor="quoteDecimals">Quote Decimals</Label>
+                  <Input
+                    id="quoteDecimals"
+                    type="number"
+                    min={0}
+                    max={12}
+                    value={editingSymbol?.quoteDecimals ?? ""}
+                    onChange={(e) =>
+                      handleSymbolChange("quoteDecimals", e.target.value === "" ? null : Number(e.target.value))
+                    }
+                    className="bg-neutral-700"
+                  />
+                  <p className="text-xs text-gray-400 mt-1">Formatting/rounding hint (e.g. 5 for FX, 3 for JPY FX)</p>
                 </div>
               </div>
 
@@ -4795,6 +5050,8 @@ export default function AdminDashboard() {
         </DialogContent>
       </Dialog>
 
+      <InstrumentCatalogEnableDialog open={catalogEnableDialogOpen} onOpenChange={setCatalogEnableDialogOpen} />
+
       {/* New Symbol Dialog */}
       <Dialog open={newSymbolDialogOpen} onOpenChange={setNewSymbolDialogOpen}>
         <DialogContent className="bg-neutral-800 text-white border-gray-700 max-w-2xl">
@@ -4833,6 +5090,30 @@ export default function AdminDashboard() {
               </div>
 
               <div>
+                <Label>Category</Label>
+                <Select
+                  value={(newSymbol.category as string) || ''}
+                  onValueChange={(val) => handleNewSymbolChange("category", val)}
+                >
+                  <SelectTrigger className="bg-neutral-700 mt-1">
+                    <SelectValue placeholder="Select category" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-neutral-800 border-gray-700">
+                    <SelectItem value="forex">Forex</SelectItem>
+                    <SelectItem value="stocks">Stocks</SelectItem>
+                    <SelectItem value="etf">ETFs</SelectItem>
+                    <SelectItem value="crypto">Crypto</SelectItem>
+                    <SelectItem value="commodities">Commodities</SelectItem>
+                    <SelectItem value="bonds">Bonds</SelectItem>
+                    <SelectItem value="funds">Funds</SelectItem>
+                    <SelectItem value="mutual_funds">Mutual Funds</SelectItem>
+                    <SelectItem value="indices">Indices</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-gray-400 mt-1">Used to apply pip defaults during ingestion and for UI formatting.</p>
+              </div>
+
+              <div>
                 <Label htmlFor="new-minSpreadPips">Minimum Spread (pips)</Label>
                 <Input
                   id="new-minSpreadPips"
@@ -4865,6 +5146,39 @@ export default function AdminDashboard() {
                     onChange={(e) => handleNewSymbolChange("quoteCurrency", e.target.value)}
                     className="bg-neutral-700"
                   />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label htmlFor="new-pipDecimals">Pip Decimals</Label>
+                  <Input
+                    id="new-pipDecimals"
+                    type="number"
+                    min={0}
+                    max={12}
+                    value={newSymbol.pipDecimals ?? ""}
+                    onChange={(e) =>
+                      handleNewSymbolChange("pipDecimals", e.target.value === "" ? null : Number(e.target.value))
+                    }
+                    className="bg-neutral-700"
+                  />
+                  <p className="text-xs text-gray-400 mt-1">pip size = 10^-pipDecimals (e.g. 4 → 0.0001)</p>
+                </div>
+                <div>
+                  <Label htmlFor="new-quoteDecimals">Quote Decimals</Label>
+                  <Input
+                    id="new-quoteDecimals"
+                    type="number"
+                    min={0}
+                    max={12}
+                    value={newSymbol.quoteDecimals ?? ""}
+                    onChange={(e) =>
+                      handleNewSymbolChange("quoteDecimals", e.target.value === "" ? null : Number(e.target.value))
+                    }
+                    className="bg-neutral-700"
+                  />
+                  <p className="text-xs text-gray-400 mt-1">Formatting/rounding hint (e.g. 5 for FX, 3 for JPY FX)</p>
                 </div>
               </div>
 

@@ -1,0 +1,320 @@
+import React, { useEffect, useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { apiRequest } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+
+type ProvidersResp = {
+  ok: boolean;
+  activeKey: string | null;
+  rows: Array<{ providerKey: string; displayName: string; driver: string; isEnabled: boolean; deletedAt: number | null }>;
+};
+
+type ReferenceRow = {
+  id: number;
+  providerKey: string;
+  category: string;
+  canonicalSymbol: string;
+  providerSymbol: string;
+  name: string | null;
+  exchange: string | null;
+  country: string | null;
+  lastRefreshedAt: number;
+};
+
+type SearchResp = { ok: boolean; providerKey: string; rows: ReferenceRow[] };
+
+const CATEGORIES: Array<{ key: string; label: string }> = [
+  { key: "forex", label: "Forex" },
+  { key: "stocks", label: "Stocks" },
+  { key: "etf", label: "ETFs" },
+  { key: "crypto", label: "Crypto" },
+  { key: "commodities", label: "Commodities" },
+  { key: "bonds", label: "Bonds" },
+  { key: "funds", label: "Funds" },
+  { key: "mutual_funds", label: "Mutual Funds" },
+];
+
+export function InstrumentCatalogEnableDialog(props: { open: boolean; onOpenChange: (open: boolean) => void }) {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+
+  const { data: providersData } = useQuery<ProvidersResp>({
+    queryKey: ["/api/admin/market-data/providers"],
+    enabled: props.open,
+  });
+
+  const providers = useMemo(
+    () => (providersData?.rows || []).filter((p) => !p.deletedAt && p.isEnabled),
+    [providersData?.rows],
+  );
+
+  const [providerKey, setProviderKey] = useState<string>("");
+  const [category, setCategory] = useState<string>("");
+  const [searchQ, setSearchQ] = useState<string>("");
+  const [searchLimit, setSearchLimit] = useState<number>(50);
+  const [searchOffset, setSearchOffset] = useState<number>(0);
+  const [searchNonce, setSearchNonce] = useState<number>(0);
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+
+  useEffect(() => {
+    if (!props.open) return;
+    if (providerKey) return;
+    const active = providersData?.activeKey;
+    if (active) setProviderKey(active);
+    else if (providers.length) setProviderKey(providers[0].providerKey);
+  }, [props.open, providerKey, providers, providersData?.activeKey]);
+
+  useEffect(() => {
+    if (!props.open) return;
+    if (!providerKey) return;
+    if (searchNonce === 0) setSearchNonce(1);
+  }, [props.open, providerKey, searchNonce]);
+
+  const searchUrl = useMemo(() => {
+    if (!providerKey) return null;
+    const qp = new URLSearchParams();
+    qp.set("providerKey", providerKey);
+    if (category) qp.set("category", category);
+    if (searchQ) qp.set("q", searchQ);
+    qp.set("limit", String(searchLimit));
+    qp.set("offset", String(searchOffset));
+    return `/api/admin/market-data/instruments/reference/search?${qp.toString()}`;
+  }, [providerKey, category, searchQ, searchLimit, searchOffset]);
+
+  const { data: searchData, isFetching: isSearching } = useQuery<SearchResp>({
+    queryKey: searchUrl ? [searchUrl, searchNonce] : ["_noop_ref_search_dialog"],
+    enabled: Boolean(props.open && searchUrl && searchNonce > 0),
+  });
+
+  const enableMutation = useMutation({
+    mutationFn: async () => {
+      const ids = Array.from(selectedIds.values());
+      const res = await apiRequest("POST", "/api/admin/market-data/instruments/reference/enable", {
+        providerKey,
+        ids,
+      });
+      return await res.json();
+    },
+    onSuccess: (data: any) => {
+      toast({ title: "Enabled instruments", description: `Enabled: ${data?.enabled?.length ?? 0}` });
+      setSelectedIds(new Set());
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/symbols"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/config/symbols"] });
+      props.onOpenChange(false);
+    },
+    onError: (e: any) => {
+      toast({ title: "Enable failed", description: String(e?.message || e), variant: "destructive" });
+    },
+  });
+
+  const rows = searchData?.rows || [];
+
+  return (
+    <Dialog open={props.open} onOpenChange={props.onOpenChange}>
+      <DialogContent className="bg-neutral-800 text-white border-gray-700 max-w-3xl">
+        <DialogHeader>
+          <DialogTitle>Add Instruments From Catalog</DialogTitle>
+          <p className="text-xs text-gray-400">
+            Searches `instrument_reference` and enables selected rows into `symbol_configs` (active immediately).
+          </p>
+        </DialogHeader>
+
+        <div className="space-y-3 py-2">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+            <div className="md:col-span-2">
+              <Label>Provider</Label>
+              <Select
+                value={providerKey}
+                onValueChange={(v) => {
+                  setProviderKey(v);
+                  setSearchOffset(0);
+                  setSelectedIds(new Set());
+                  setSearchNonce((n) => n + 1);
+                }}
+              >
+                <SelectTrigger className="bg-neutral-700 mt-1">
+                  <SelectValue placeholder="Select provider" />
+                </SelectTrigger>
+                <SelectContent className="bg-neutral-800 border-gray-700">
+                  {providers.map((p) => (
+                    <SelectItem key={p.providerKey} value={p.providerKey}>
+                      {p.displayName} ({p.providerKey})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>Category</Label>
+              <Select
+                value={category}
+                onValueChange={(v) => {
+                  setCategory(v === "_all" ? "" : v);
+                  setSearchOffset(0);
+                  setSelectedIds(new Set());
+                  setSearchNonce((n) => n + 1);
+                }}
+              >
+                <SelectTrigger className="bg-neutral-700 mt-1">
+                  <SelectValue placeholder="All categories" />
+                </SelectTrigger>
+                <SelectContent className="bg-neutral-800 border-gray-700">
+                  <SelectItem value="_all">All</SelectItem>
+                  {CATEGORIES.map((c) => (
+                    <SelectItem key={c.key} value={c.key}>
+                      {c.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>Page Size</Label>
+              <Input
+                type="number"
+                value={searchLimit}
+                onChange={(e) => setSearchLimit(Math.max(1, Math.min(200, Number(e.target.value) || 50)))}
+                className="bg-neutral-700 mt-1"
+                min={1}
+                max={200}
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+            <div className="md:col-span-3">
+              <Label htmlFor="catalog-search">Search</Label>
+              <Input
+                id="catalog-search"
+                value={searchQ}
+                onChange={(e) => setSearchQ(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    setSearchOffset(0);
+                    setSelectedIds(new Set());
+                    setSearchNonce((n) => n + 1);
+                  }
+                }}
+                className="bg-neutral-700 mt-1"
+                placeholder="EURUSD, AAPL, Gold…"
+              />
+            </div>
+            <div className="flex items-end justify-end gap-2">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setSearchOffset(0);
+                  setSelectedIds(new Set());
+                  setSearchNonce((n) => n + 1);
+                }}
+                disabled={!providerKey || isSearching}
+                className="bg-neutral-700 hover:bg-neutral-600"
+              >
+                {isSearching ? "Searching…" : "Search"}
+              </Button>
+              <Button
+                onClick={() => enableMutation.mutate()}
+                disabled={enableMutation.isPending || selectedIds.size === 0 || !providerKey}
+                className="bg-emerald-600 hover:bg-emerald-700"
+              >
+                {enableMutation.isPending ? "Enabling…" : `Enable (${selectedIds.size})`}
+              </Button>
+            </div>
+          </div>
+
+          <div className="border border-gray-700 rounded bg-neutral-900 overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="text-xs text-gray-300 border-b border-gray-800">
+                <tr>
+                  <th className="p-2 text-left">Select</th>
+                  <th className="p-2 text-left">Symbol</th>
+                  <th className="p-2 text-left">Name</th>
+                  <th className="p-2 text-left">Country</th>
+                  <th className="p-2 text-left">Exchange</th>
+                  <th className="p-2 text-left">Provider Symbol</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.length === 0 ? (
+                  <tr>
+                    <td className="p-3 text-gray-400" colSpan={6}>
+                      {searchNonce === 0 ? "Loading…" : "No results."}
+                    </td>
+                  </tr>
+                ) : (
+                  rows.map((r) => {
+                    const checked = selectedIds.has(r.id);
+                    return (
+                      <tr key={r.id} className="border-b border-gray-800 hover:bg-neutral-800/60">
+                        <td className="p-2">
+                          <Checkbox
+                            checked={checked}
+                            onCheckedChange={(v) => {
+                              setSelectedIds((prev) => {
+                                const next = new Set(prev);
+                                if (v) next.add(r.id);
+                                else next.delete(r.id);
+                                return next;
+                              });
+                            }}
+                          />
+                        </td>
+                        <td className="p-2 font-mono text-xs">{r.canonicalSymbol}</td>
+                        <td className="p-2">{r.name || "—"}</td>
+                        <td className="p-2">{r.country || "—"}</td>
+                        <td className="p-2">{r.exchange || "—"}</td>
+                        <td className="p-2 font-mono text-xs">{r.providerSymbol}</td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="flex items-center justify-between">
+            <div className="text-xs text-gray-400">Offset: {searchOffset}</div>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                className="bg-neutral-700 hover:bg-neutral-600"
+                disabled={searchOffset === 0 || isSearching || searchNonce === 0}
+                onClick={() => {
+                  setSearchOffset((o) => Math.max(0, o - searchLimit));
+                  setSelectedIds(new Set());
+                  setSearchNonce((n) => n + 1);
+                }}
+              >
+                Prev
+              </Button>
+              <Button
+                variant="outline"
+                className="bg-neutral-700 hover:bg-neutral-600"
+                disabled={rows.length < searchLimit || isSearching || searchNonce === 0}
+                onClick={() => {
+                  setSearchOffset((o) => o + searchLimit);
+                  setSelectedIds(new Set());
+                  setSearchNonce((n) => n + 1);
+                }}
+              >
+                Next
+              </Button>
+            </div>
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={() => props.onOpenChange(false)} className="bg-neutral-700">
+            Close
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}

@@ -22,7 +22,7 @@ test("RUNBOOK: import catalog → enable → trader sees symbol", async ({ brows
     await expect(adminPage.getByText("Admin Dashboard")).toBeVisible();
 
     await adminPage.getByRole("tab", { name: /^Instr/i }).click();
-    await adminPage.getByRole("tab", { name: "Minitab" }).click();
+    await adminPage.getByRole("tab", { name: "Ingestor" }).click();
 
     const catalog = [
       {

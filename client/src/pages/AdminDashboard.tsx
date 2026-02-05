@@ -2181,7 +2181,7 @@ export default function AdminDashboard() {
   });
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [symbolToDelete, setSymbolToDelete] = useState<number | null>(null);
-  const [instrumentsSubTab, setInstrumentsSubTab] = useState<"configured" | "minitab">("configured");
+  const [instrumentsSubTab, setInstrumentsSubTab] = useState<"configured" | "ingestor">("configured");
 
   // Global settings state (includes all Trade Settings tab values)
   const [riskParams, setRiskParams] = useState<GlobalSettings>({
@@ -4549,7 +4549,7 @@ export default function AdminDashboard() {
               <Tabs value={instrumentsSubTab} onValueChange={(v) => setInstrumentsSubTab(v as any)} className="space-y-4">
                 <TabsList className="bg-neutral-700 w-full h-auto p-1 grid grid-cols-2 gap-1">
                   <TabsTrigger value="configured" className="data-[state=active]:bg-neutral-600 text-xs sm:text-sm px-2 py-1.5">Configured</TabsTrigger>
-                  <TabsTrigger value="minitab" className="data-[state=active]:bg-neutral-600 text-xs sm:text-sm px-2 py-1.5">Minitab</TabsTrigger>
+                  <TabsTrigger value="ingestor" className="data-[state=active]:bg-neutral-600 text-xs sm:text-sm px-2 py-1.5">Ingestor</TabsTrigger>
                 </TabsList>
 
                 <TabsContent value="configured">
@@ -4710,7 +4710,7 @@ export default function AdminDashboard() {
                   )}
                 </TabsContent>
 
-                <TabsContent value="minitab">
+                <TabsContent value="ingestor">
                   <div className="space-y-4">
                     <InstrumentIngestionPanel />
                     <PipDefaultsPanel />

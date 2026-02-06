@@ -66,6 +66,9 @@ let lastPublishedSource: string | null = null;
 let lastPublishedAtMs = 0;
 let lastProviderSuccessAtMs = 0;
 let lastProviderSuccessKey: string | null = null;
+let lastNoProviderLogAtMs = 0;
+let lastNoProviderFallbackPublishAtMs = 0;
+const NO_PROVIDER_THROTTLE_MS = 30_000;
 
 export function getQuoteSnapshotCache(): Map<string, QuoteSnapshot> {
   return quoteSnapshotCache;
@@ -782,6 +785,29 @@ async function pullBatch() {
 
   const selection = await getActiveProviderSelection();
   if (!selection) {
+    const quoteSource = String(process.env.QUOTE_SOURCE ?? "").toLowerCase();
+    const allowSimulated =
+      process.env.NODE_ENV !== "production" ||
+      process.env.ALLOW_SIMULATED_QUOTES === "true" ||
+      quoteSource === "simulated";
+    if (!allowSimulated) {
+      const now = Date.now();
+      if (now - lastNoProviderFallbackPublishAtMs < NO_PROVIDER_THROTTLE_MS) return;
+      lastNoProviderFallbackPublishAtMs = now;
+      const fallbackQuotes = await buildFallbackQuotes(wanted);
+      if (!fallbackQuotes.length) {
+        if (now - lastNoProviderLogAtMs >= NO_PROVIDER_THROTTLE_MS) {
+          lastNoProviderLogAtMs = now;
+          console.error(
+            "[Feed] No active quote provider configured; simulated quotes disabled in production and no fallback cache is available.",
+          );
+        }
+        return;
+      }
+      await handleQuoteBatch(fallbackQuotes, "fallback_cache", true, { markSuccess: false, reason: "NO_PROVIDER" });
+      return;
+    }
+
     const simulated = generateSimulatedQuotes(wanted);
     await handleQuoteBatch(simulated, "simulated", false);
     return;

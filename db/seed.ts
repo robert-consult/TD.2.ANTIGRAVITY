@@ -1,11 +1,19 @@
 import { storage } from "../server/storage";
 import { db } from "@db";
-import { adminActions, globalSettings, orderIntentAudit, systemConfig, tradeAudit, trades, userVerification } from "@shared/schema";
-import { eq, sql } from "drizzle-orm";
+import { adminActions, globalSettings, legalAcceptances, orderIntentAudit, systemConfig, tradeAudit, trades, userVerification } from "@shared/schema";
+import { desc, eq, sql } from "drizzle-orm";
+import { bootstrapDoc1Seed } from "../server/legal/bootstrapDoc1Seed";
+import { recordDoc1Acceptance } from "../server/legal/legalAcceptanceService";
+import { clearDoc1ReacceptRequirement } from "../server/legal/legalReacceptanceService";
+import { assembleDoc1Terms } from "../server/legal/termsEngineDb";
 
 async function seed() {
   console.log("Seeding database...");
   const nowSec = Math.floor(Date.now() / 1000);
+  const defaultCountryIso2 = (() => {
+    const v = String(process.env.SEED_DEFAULT_COUNTRY_ISO2 ?? "US").trim().toUpperCase();
+    return /^[A-Z]{2}$/.test(v) ? v : "US";
+  })();
   
   // Ensure singleton config rows exist (id=1) with defaults
   await db.insert(systemConfig).values({ id: 1 }).onConflictDoNothing();
@@ -19,6 +27,46 @@ async function seed() {
       .where(eq(globalSettings.id, 1));
   }
 
+  // Ensure baseline legal terms exist so seeded demo/admin users can pass DOC1 gates.
+  await bootstrapDoc1Seed();
+
+  async function ensureUserHasDoc1Acceptance(params: { userId: number; email: string }) {
+    await storage.updateUser(params.userId, { countryIso2: defaultCountryIso2, country: defaultCountryIso2 });
+
+    const assembled = await assembleDoc1Terms(defaultCountryIso2, { purpose: "LOGIN" });
+    if (assembled.blocked) {
+      console.warn(
+        `[Seed] DOC1 terms blocked for ${params.email} (${defaultCountryIso2}): ${assembled.blockedReason ?? "UNKNOWN"}`,
+      );
+      return;
+    }
+
+    const [last] = await db
+      .select({ combinedSha256: legalAcceptances.combinedSha256 })
+      .from(legalAcceptances)
+      .where(eq(legalAcceptances.userId, params.userId))
+      .orderBy(desc(legalAcceptances.ledgerSeq))
+      .limit(1);
+
+    if (String(last?.combinedSha256 ?? "") === String(assembled.combined.sha256 ?? "")) {
+      await clearDoc1ReacceptRequirement(params.userId);
+      return;
+    }
+
+    await recordDoc1Acceptance({
+      userId: params.userId,
+      emailAtAcceptance: params.email,
+      countryIso2: defaultCountryIso2,
+      ipAddress: null,
+      userAgent: "db/seed.ts",
+      sessionId: null,
+      termsToken: assembled.token,
+      combinedSha256: assembled.combined.sha256,
+    });
+    await clearDoc1ReacceptRequirement(params.userId);
+    console.log(`[Seed] Recorded DOC1 acceptance for ${params.email} (${defaultCountryIso2})`);
+  }
+
     // Create admin user if it doesn't exist
     const adminEmail = "admin@local.test";
     const existingAdmin = await storage.getUserByEmail(adminEmail);
@@ -29,12 +77,14 @@ async function seed() {
         username: "admin",
         password: "changeme",
         isAdmin: true,
-        balance: "1000000.00" // Set starting capital to $1,000,000
+        balance: "1000000.00", // Set starting capital to $1,000,000
+        countryIso2: defaultCountryIso2,
       });
       await db.insert(userVerification).values({ userId: admin.id, emailVerifiedAt: nowSec, updatedAt: nowSec }).onConflictDoUpdate({
         target: userVerification.userId,
         set: { emailVerifiedAt: nowSec, updatedAt: nowSec },
       });
+      await ensureUserHasDoc1Acceptance({ userId: admin.id, email: adminEmail });
       console.log("Admin user created successfully");
     } else {
       // Update existing admin's balance to $1,000,000 if needed
@@ -47,6 +97,7 @@ async function seed() {
         target: userVerification.userId,
         set: { emailVerifiedAt: nowSec, updatedAt: nowSec },
       });
+      await ensureUserHasDoc1Acceptance({ userId: existingAdmin.id, email: adminEmail });
     }
     
     // Create demo user if it doesn't exist
@@ -60,12 +111,14 @@ async function seed() {
         username: "demo",
         password: demoPassword,
         isAdmin: false,
-        balance: "1000000.00" // Set starting capital to $1,000,000
+        balance: "1000000.00", // Set starting capital to $1,000,000
+        countryIso2: defaultCountryIso2,
       });
       await db.insert(userVerification).values({ userId: demo.id, emailVerifiedAt: nowSec, updatedAt: nowSec }).onConflictDoUpdate({
         target: userVerification.userId,
         set: { emailVerifiedAt: nowSec, updatedAt: nowSec },
       });
+      await ensureUserHasDoc1Acceptance({ userId: demo.id, email: demoEmail });
       console.log("Demo user created successfully");
     } else {
       // Update existing demo user's balance to $1,000,000 if needed
@@ -81,6 +134,7 @@ async function seed() {
         target: userVerification.userId,
         set: { emailVerifiedAt: nowSec, updatedAt: nowSec },
       });
+      await ensureUserHasDoc1Acceptance({ userId: existingDemo.id, email: demoEmail });
     }
     
     // Ensure we have all required symbol configurations with proper spreads

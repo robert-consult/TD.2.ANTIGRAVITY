@@ -8,6 +8,15 @@ import { normalizeIpKey, resolveAsnOrg } from "./griftIpAsn";
 let configCache: { cfg: GriftConfig; fetchedAt: number } | null = null;
 const CONFIG_TTL_MS = 60_000;
 
+function parsePositiveInt(raw: unknown, fallback: number): number {
+  const n = typeof raw === "number" ? raw : Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return fallback;
+  return Math.floor(n);
+}
+
+const MAX_LINKED_EDGE_WRITES_PER_TRIGGER = parsePositiveInt(process.env.GRIFT_MAX_LINKED_EDGE_WRITES_PER_TRIGGER, 50);
+const MAX_EVIDENCE_LINKED_USERS = parsePositiveInt(process.env.GRIFT_MAX_EVIDENCE_LINKED_USERS, 50);
+
 // Map snake_case DB row to camelCase GriftConfig with default fallbacks for NULL values
 function mapConfigRow(row: any): GriftConfig {
   const d = DEFAULT_GRIFT_CONFIG;
@@ -433,19 +442,31 @@ export async function checkMultiAccountDevice(db: GriftDb, ctx: AuditContext): P
   const otherUsers = users.filter((u) => u.user_id !== ctx.userId);
   if (otherUsers.length === 0) return null;
 
-  for (const other of otherUsers) {
-    await recordLinkedEdge(db, ctx.userId, other.user_id, "device", ctx.deviceId);
+  const points = cfg.scoreMultiAccountDevice;
+  const linkedUserIdsAll = otherUsers
+    .map((u) => u.user_id)
+    .filter((n) => Number.isFinite(n))
+    .sort((a, b) => a - b);
+
+  const edgeTargets = linkedUserIdsAll.slice(0, MAX_LINKED_EDGE_WRITES_PER_TRIGGER);
+  for (const otherUserId of edgeTargets) {
+    await recordLinkedEdge(db, ctx.userId, otherUserId, "device", ctx.deviceId);
   }
 
-  const points = cfg.scoreMultiAccountDevice;
-  const linkedUserIds = otherUsers.map((u) => u.user_id).sort((a, b) => a - b);
+  const linkedUserIds = linkedUserIdsAll.slice(0, MAX_EVIDENCE_LINKED_USERS);
   return {
     ruleCode: "MULTI_ACCOUNT_DEVICE",
     severity: severity(points, cfg),
     primaryUserId: ctx.userId,
-    secondaryUserId: linkedUserIds[0],
+    secondaryUserId: linkedUserIdsAll[0] ?? otherUsers[0]!.user_id,
     points,
-    evidence: { deviceId: ctx.deviceId, linkedUsers: linkedUserIds },
+    evidence: {
+      deviceId: ctx.deviceId,
+      linkedUsers: linkedUserIds,
+      linkedUsersTotal: linkedUserIdsAll.length,
+      edgesRecorded: edgeTargets.length,
+      truncated: linkedUserIdsAll.length > linkedUserIds.length,
+    },
   };
 }
 
@@ -471,21 +492,30 @@ export async function checkMultiAccountFingerprint(db: GriftDb, ctx: AuditContex
   const otherUsers = users.filter((u) => u.user_id !== ctx.userId);
   if (otherUsers.length === 0) return null;
 
-  for (const other of otherUsers) {
-    await recordLinkedEdge(db, ctx.userId, other.user_id, "device_fp", ctx.deviceFp);
+  const points = cfg.scoreMultiAccountFingerprint;
+  const linkedUserIdsAll = otherUsers
+    .map((u) => u.user_id)
+    .filter((n) => Number.isFinite(n))
+    .sort((a, b) => a - b);
+
+  const edgeTargets = linkedUserIdsAll.slice(0, MAX_LINKED_EDGE_WRITES_PER_TRIGGER);
+  for (const otherUserId of edgeTargets) {
+    await recordLinkedEdge(db, ctx.userId, otherUserId, "device_fp", ctx.deviceFp);
   }
 
-  const points = cfg.scoreMultiAccountFingerprint;
-  const linkedUserIds = otherUsers.map((u) => u.user_id).sort((a, b) => a - b);
+  const linkedUserIds = linkedUserIdsAll.slice(0, MAX_EVIDENCE_LINKED_USERS);
   return {
     ruleCode: "MULTI_ACCOUNT_FINGERPRINT",
     severity: severity(points, cfg),
     primaryUserId: ctx.userId,
-    secondaryUserId: linkedUserIds[0],
+    secondaryUserId: linkedUserIdsAll[0] ?? otherUsers[0]!.user_id,
     points,
     evidence: {
       deviceFp: ctx.deviceFp,
       linkedUsers: linkedUserIds,
+      linkedUsersTotal: linkedUserIdsAll.length,
+      edgesRecorded: edgeTargets.length,
+      truncated: linkedUserIdsAll.length > linkedUserIds.length,
       windowDays: cfg.multiAccountWindowDays,
     },
   };
@@ -758,14 +788,21 @@ export async function checkSharedIpAsnCluster(db: GriftDb, ctx: AuditContext): P
 
   if (cluster.length < cfg.clusterMinUsersForIpAsn - 1) return null;
 
-  for (const member of cluster) {
-    await recordLinkedEdge(db, ctx.userId, member.user_id, "ip", ctx.ip);
+  const points = cfg.scoreSharedIpAsnCluster;
+  const clusterUserIdsAll = cluster
+    .map((m) => m.user_id)
+    .filter((n) => Number.isFinite(n))
+    .sort((a, b) => a - b);
+
+  const edgeTargets = clusterUserIdsAll.slice(0, MAX_LINKED_EDGE_WRITES_PER_TRIGGER);
+  for (const memberUserId of edgeTargets) {
+    await recordLinkedEdge(db, ctx.userId, memberUserId, "ip", ctx.ip);
     if (ctx.asn) {
-      await recordLinkedEdge(db, ctx.userId, member.user_id, "asn", String(ctx.asn));
+      await recordLinkedEdge(db, ctx.userId, memberUserId, "asn", String(ctx.asn));
     }
   }
 
-  const points = cfg.scoreSharedIpAsnCluster;
+  const clusterMembers = clusterUserIdsAll.slice(0, MAX_EVIDENCE_LINKED_USERS);
   return {
     ruleCode: "SHARED_IPASN_CLUSTER",
     severity: severity(points, cfg),
@@ -775,7 +812,10 @@ export async function checkSharedIpAsnCluster(db: GriftDb, ctx: AuditContext): P
       ip: ctx.ip,
       asn: ctx.asn,
       clusterSize: cluster.length + 1,
-      clusterMembers: cluster.map((m) => m.user_id),
+      clusterMembers,
+      clusterMembersTotal: clusterUserIdsAll.length,
+      edgesRecorded: edgeTargets.length,
+      truncated: clusterUserIdsAll.length > clusterMembers.length,
       threshold: cfg.clusterMinUsersForIpAsn,
     },
   };

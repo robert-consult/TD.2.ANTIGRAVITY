@@ -3137,15 +3137,76 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // Effective max lots: user override takes precedence over global (can exceed)
         const effectiveMaxConcurrentLots = Number(userSettingsData?.maxConcurrentLots ?? globalMaxConcurrentLots);
 
-        // Get current total lots from open AND pending positions
-        const openTrades = await storage.getOpenTradesByUserId(req.session.userId);
-        const pendingTrades = await storage.getPendingTradesByUserId(req.session.userId);
-        const openLots = openTrades.reduce((sum, t) => sum + Number(t.lots || 0), 0);
-        const pendingLots = pendingTrades.reduce((sum, t) => sum + Number(t.lots || 0), 0);
-        const currentTotalLots = openLots + pendingLots;
+        // Create trade with appropriate price and status based on order type
+        // Market orders: OPEN immediately at current price
+        // Limit/Stop orders: PENDING, waiting for price trigger
+        const nowSec = Math.floor(Date.now() / 1000);
+        const tradeResult = await db.transaction(async (tx) => {
+          // Serialize trade placement per user to avoid TOC/TOU races on maxConcurrentLots.
+          // (Only supported on Postgres; other dialects rely on their transaction semantics.)
+          if (isPostgres) {
+            await tx.execute(sql`SELECT ${users.id} FROM ${users} WHERE ${users.id} = ${req.session.userId} FOR UPDATE`);
+          }
 
-        // Check if adding this trade would exceed the limit
-        if (currentTotalLots + tradeLots > effectiveMaxConcurrentLots) {
+          const [openRow] = await tx
+            .select({ lots: sql`COALESCE(SUM(${trades.lots}), 0)` })
+            .from(trades)
+            .where(and(eq(trades.userId, req.session.userId), eq(trades.status, "OPEN")))
+            .limit(1);
+          const [pendingRow] = await tx
+            .select({ lots: sql`COALESCE(SUM(${trades.lots}), 0)` })
+            .from(trades)
+            .where(and(eq(trades.userId, req.session.userId), eq(trades.status, "PENDING")))
+            .limit(1);
+
+          const openLots = Number((openRow as any)?.lots ?? 0);
+          const pendingLots = Number((pendingRow as any)?.lots ?? 0);
+          const currentTotalLots = openLots + pendingLots;
+
+          if (currentTotalLots + tradeLots > effectiveMaxConcurrentLots) {
+            return { trade: null, rejectReason: "MAX_CONCURRENT_LOTS" as const, openLots, pendingLots, currentTotalLots };
+          }
+
+          if (!isPendingOrder) {
+            const reserve = await reserveUserMargin(tx, { userId: req.session.userId, marginUsd: neededMargin });
+            if (!reserve.reserved) {
+              return { trade: null, rejectReason: "INSUFFICIENT_MARGIN_AT_COMMIT" as const, openLots, pendingLots, currentTotalLots };
+            }
+          }
+
+          const [createdTrade] = await tx
+            .insert(trades)
+            .values({
+              ...data,
+              openPrice: isPendingOrder ? priceForMargin : entryPrice, // Pending orders use limit/stop price as intended entry
+              lots: tradeLots,
+              size: positionSize,
+              orderType: orderType ?? "Market",
+              limitPrice: isLimitOrder ? parseFloat(String(limitPrice)) : null,
+              stopPrice: isStopOrder ? parseFloat(String(stopPrice)) : null,
+              status: isPendingOrder ? "PENDING" : "OPEN",
+              executedAt: isPendingOrder ? undefined : nowSec,
+              correlationId: correlationId,
+              orderId,
+              positionId,
+              lastExecutionId: openExecutionId,
+              lastActorUserId: req.session.userId,
+              lastActorSessionId: auditCtx.sessionId,
+              lastActorIp: auditCtx.ip,
+              lastActorUserAgent: auditCtx.userAgent,
+              lastActorType: auditCtx.actorType,
+            })
+            .returning();
+
+          if (!createdTrade) throw new Error("Failed to create trade");
+          return { trade: createdTrade, rejectReason: null as const, openLots, pendingLots, currentTotalLots };
+        });
+
+        const openLots = tradeResult.openLots;
+        const pendingLots = tradeResult.pendingLots;
+        const currentTotalLots = tradeResult.currentTotalLots;
+
+        if (tradeResult.rejectReason === "MAX_CONCURRENT_LOTS") {
           // AUDIT: Write DECISION REJECT for max concurrent lots exceeded
           try {
             await writeOrderIntentAudit({
@@ -3177,44 +3238,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           });
         }
 
-        // Create trade with appropriate price and status based on order type
-        // Market orders: OPEN immediately at current price
-        // Limit/Stop orders: PENDING, waiting for price trigger
-        const nowSec = Math.floor(Date.now() / 1000);
-        const trade = await db.transaction(async (tx) => {
-          if (!isPendingOrder) {
-            const reserve = await reserveUserMargin(tx, { userId: req.session.userId, marginUsd: neededMargin });
-            if (!reserve.reserved) return null;
-          }
-
-          const [createdTrade] = await tx
-            .insert(trades)
-            .values({
-              ...data,
-              openPrice: isPendingOrder ? priceForMargin : entryPrice, // Pending orders use limit/stop price as intended entry
-              lots: tradeLots,
-              size: positionSize,
-              orderType: orderType ?? "Market",
-              limitPrice: isLimitOrder ? parseFloat(String(limitPrice)) : null,
-              stopPrice: isStopOrder ? parseFloat(String(stopPrice)) : null,
-              status: isPendingOrder ? "PENDING" : "OPEN",
-              executedAt: isPendingOrder ? undefined : nowSec,
-              correlationId: correlationId,
-              orderId,
-              positionId,
-              lastExecutionId: openExecutionId,
-              lastActorUserId: req.session.userId,
-              lastActorSessionId: auditCtx.sessionId,
-              lastActorIp: auditCtx.ip,
-              lastActorUserAgent: auditCtx.userAgent,
-              lastActorType: auditCtx.actorType,
-            })
-            .returning();
-
-          if (!createdTrade) throw new Error("Failed to create trade");
-          return createdTrade;
-        });
-
+        const trade = tradeResult.trade;
         if (!trade) {
           await writeDecisionReject("INSUFFICIENT_MARGIN_AT_COMMIT", { marginRequired: neededMargin }, {});
           return res.status(400).json({ message: "Not enough margin available" });

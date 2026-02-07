@@ -8,6 +8,7 @@ import { main as setupAdminViews } from "../db/create_admin_views";
 import { bootstrapDoc1Seed } from "./legal/bootstrapDoc1Seed";
 import { startGriftEvaluationScheduler } from "./grift/griftScheduler";
 import { startVerificationReminderCron } from "./cron/verificationReminders";
+import { startTradeAuditVerificationCron } from "./cron/tradeAuditVerification";
 import { startAccountLifecycleSweepScheduler } from "./services/accountLifecycleSweepScheduler";
 import { getIp2AsnDatasetPath, maybeImportIp2AsnDataset } from "./grift/griftIp2AsnDataset";
 import { startI18nWorker } from "./i18n/worker";
@@ -472,6 +473,18 @@ app.use((req, res, next) => {
         }
       } else {
         log("[Role] Skipping verification reminder cron (worker only).");
+      }
+
+      // Start trade audit-chain verification cron
+      if (RUN_WORKER_TASKS) {
+        try {
+          startTradeAuditVerificationCron();
+          log("Trade audit verification cron initialized");
+        } catch (error) {
+          console.error("Error starting trade audit verification cron:", error);
+        }
+      } else {
+        log("[Role] Skipping trade audit verification cron (worker only).");
       }
 
       // Start account lifecycle sweep scheduler (inactive users + deletion grace)

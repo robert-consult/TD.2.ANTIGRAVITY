@@ -7,7 +7,7 @@
 import crypto from "crypto";
 import { db } from "@db";
 import { tradeAudit, orderIntentAudit } from "@shared/schema";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, inArray, asc } from "drizzle-orm";
 
 type AuditDb = Pick<typeof db, "query" | "insert">;
 
@@ -378,26 +378,69 @@ export async function writeOrderIntentAudit(
   }
 }
 
-// Verify hash chain integrity for a trade
-export async function verifyTradeAuditChain(tradeId: number): Promise<{ valid: boolean; errors: string[] }> {
-  const events = await db.query.tradeAudit.findMany({
-    where: eq(tradeAudit.tradeId, tradeId),
-    orderBy: tradeAudit.id,
-  });
-  
-  const errors: string[] = [];
-  let expectedPrevHash = "GENESIS";
-  
-  for (const event of events) {
-    const e = event as any;
-    if (e.prevHash !== expectedPrevHash) {
-      errors.push(`Event ${e.id}: prevHash mismatch (expected ${expectedPrevHash}, got ${e.prevHash})`);
-    }
-    
-    // Verify event hash (would need to reconstruct payload)
-    expectedPrevHash = e.eventHash || "GENESIS";
+// Verify trade audit hash-chain integrity for one or more trades
+export async function verifyTradeAuditChain(tradeIdOrIds: number | number[]): Promise<{ valid: boolean; errors: string[] }> {
+  const tradeIds = Array.isArray(tradeIdOrIds)
+    ? Array.from(new Set(tradeIdOrIds.map((id) => Math.trunc(Number(id))).filter((id) => Number.isInteger(id) && id > 0)))
+    : [Math.trunc(Number(tradeIdOrIds))].filter((id) => Number.isInteger(id) && id > 0);
+
+  if (tradeIds.length === 0) {
+    return {
+      valid: false,
+      errors: ["No valid trade IDs provided for audit-chain verification"],
+    };
   }
-  
+
+  const events = tradeIds.length === 1
+    ? await db.select({
+      id: tradeAudit.id,
+      tradeId: tradeAudit.tradeId,
+      prevHash: tradeAudit.prevHash,
+      eventHash: tradeAudit.eventHash,
+      payloadJson: tradeAudit.payloadJson,
+    }).from(tradeAudit)
+      .where(eq(tradeAudit.tradeId, tradeIds[0]!))
+      .orderBy(asc(tradeAudit.id))
+    : await db.select({
+      id: tradeAudit.id,
+      tradeId: tradeAudit.tradeId,
+      prevHash: tradeAudit.prevHash,
+      eventHash: tradeAudit.eventHash,
+      payloadJson: tradeAudit.payloadJson,
+    }).from(tradeAudit)
+      .where(inArray(tradeAudit.tradeId, tradeIds))
+      .orderBy(asc(tradeAudit.tradeId), asc(tradeAudit.id));
+
+  const errors: string[] = [];
+  let currentTradeId: number | null = null;
+  let expectedPrevHash = "GENESIS";
+
+  for (const event of events) {
+    if (currentTradeId !== event.tradeId) {
+      currentTradeId = event.tradeId;
+      expectedPrevHash = "GENESIS";
+    }
+
+    const actualPrevHash = event.prevHash ?? "GENESIS";
+    const actualEventHash = event.eventHash ?? "";
+    const payloadJson = event.payloadJson ?? "";
+
+    if (actualPrevHash !== expectedPrevHash) {
+      errors.push(
+        `Trade ${event.tradeId} event ${event.id}: prevHash mismatch (expected ${expectedPrevHash}, got ${actualPrevHash})`,
+      );
+    }
+
+    const recomputedHash = sha256Hex(`${actualPrevHash}\n${payloadJson}`);
+    if (actualEventHash !== recomputedHash) {
+      errors.push(
+        `Trade ${event.tradeId} event ${event.id}: eventHash mismatch (expected ${recomputedHash}, got ${actualEventHash || "EMPTY"})`,
+      );
+    }
+
+    expectedPrevHash = actualEventHash || "GENESIS";
+  }
+
   return { valid: errors.length === 0, errors };
 }
 

@@ -117,17 +117,18 @@ export function InstrumentCatalogEnableDialog(props: { open: boolean; onOpenChan
 
   return (
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
-      <DialogContent className="bg-neutral-800 text-white border-gray-700 max-w-3xl">
+      <DialogContent className="bg-neutral-800 text-white border-gray-700 w-[calc(100%-2rem)] max-w-3xl">
         <DialogHeader>
-          <DialogTitle>Add Instruments From Catalog</DialogTitle>
+          <DialogTitle className="text-base sm:text-lg">Add Instruments From Catalog</DialogTitle>
           <p className="text-xs text-gray-400">
             Searches `instrument_reference` and enables selected rows into `symbol_configs` (active immediately).
           </p>
         </DialogHeader>
 
         <div className="space-y-3 py-2">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-            <div className="md:col-span-2">
+          {/* Row 1: Provider, Category, Page Size */}
+          <div className="flex flex-wrap gap-3">
+            <div className="flex-1 min-w-[140px]">
               <Label>Provider</Label>
               <Select
                 value={providerKey}
@@ -150,7 +151,7 @@ export function InstrumentCatalogEnableDialog(props: { open: boolean; onOpenChan
                 </SelectContent>
               </Select>
             </div>
-            <div>
+            <div className="flex-1 min-w-[120px]">
               <Label>Category</Label>
               <Select
                 value={category}
@@ -174,7 +175,7 @@ export function InstrumentCatalogEnableDialog(props: { open: boolean; onOpenChan
                 </SelectContent>
               </Select>
             </div>
-            <div>
+            <div className="w-[80px] shrink-0">
               <Label>Page Size</Label>
               <Input
                 type="number"
@@ -187,8 +188,9 @@ export function InstrumentCatalogEnableDialog(props: { open: boolean; onOpenChan
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-            <div className="md:col-span-3">
+          {/* Row 2: Search input + buttons - fully responsive */}
+          <div className="flex flex-col sm:flex-row gap-3">
+            <div className="flex-1 min-w-0">
               <Label htmlFor="catalog-search">Search</Label>
               <Input
                 id="catalog-search"
@@ -205,7 +207,7 @@ export function InstrumentCatalogEnableDialog(props: { open: boolean; onOpenChan
                 placeholder="EURUSD, AAPL, Gold…"
               />
             </div>
-            <div className="flex items-end justify-end gap-2">
+            <div className="flex items-end justify-end gap-2 shrink-0 flex-wrap">
               <Button
                 variant="outline"
                 onClick={() => {
@@ -221,7 +223,7 @@ export function InstrumentCatalogEnableDialog(props: { open: boolean; onOpenChan
               <Button
                 onClick={() => enableMutation.mutate()}
                 disabled={enableMutation.isPending || selectedIds.size === 0 || !providerKey}
-                className="bg-emerald-600 hover:bg-emerald-700"
+                className="bg-emerald-600 hover:bg-emerald-700 whitespace-nowrap"
               >
                 {enableMutation.isPending ? "Enabling…" : `Enable (${selectedIds.size})`}
               </Button>

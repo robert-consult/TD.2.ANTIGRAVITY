@@ -86,92 +86,94 @@ export const storage = {
     const langRaw = String(fp?.identity?.clientLang ?? "").trim();
     const language = langRaw || "en";
     
-    const [user] = await db
-      .insert(users)
-      .values({
-        email: userData.email,
-        username: userData.username,
-        passwordHash,
-        isAdmin: userData.isAdmin || false,
-        balance: userData.balance || "1000000.00",
-        timezone,
-        language,
-        countryIso2: userData.countryIso2 ?? null,
-        regionKey: userData.regionKey ?? null,
-        country: userData.countryIso2 ?? userData.country ?? null,
-        phone: userData.phone ?? null,
-        // Signup fingerprinting columns
-        signupIp: fp?.ip ?? null,
-        signupIpHash: ipHash,
-        signupUserAgent: fp?.userAgent ?? null,
-        signupCountryCode: fp?.geo?.countryCode ?? null,
-        signupRegion: fp?.geo?.region ?? null,
-        signupCity: fp?.geo?.city ?? null,
-        signupLatitude: fp?.geo?.latitude ?? null,
-        signupLongitude: fp?.geo?.longitude ?? null,
-        signupDeviceType: fp?.device?.deviceType ?? null,
-        signupBrowser: fp?.device?.browser ?? null,
-        signupOs: fp?.device?.os ?? null,
-        signupClientTz: fp?.identity?.clientTz ?? null,
-        signupInferredTz: fp?.geo?.inferredTz ?? null,
-        signupDeviceFp: fp?.identity?.deviceFp ?? null,
-        signupDeviceInstallId: fp?.identity?.deviceInstallId ?? null,
-        signupClientLang: fp?.identity?.clientLang ?? null,
-      })
-      .returning();
-    
-    // Insert immutable signup fingerprint record (only if we have IP - required field)
-    if (fp && fp.ip && ipHash) {
-      try {
-        await db.insert(signupFingerprints).values({
-          userId: user.id,
-          requestId: fp.requestId,
-          ip: fp.ip,
-          ipHash: ipHash,
-          userAgent: fp.userAgent ?? null,
-          deviceType: fp.device?.deviceType ?? null,
-          browser: fp.device?.browser ?? null,
-          os: fp.device?.os ?? null,
-          countryCode: fp.geo?.countryCode ?? null,
-          region: fp.geo?.region ?? null,
-          city: fp.geo?.city ?? null,
-          latitude: fp.geo?.latitude ?? null,
-          longitude: fp.geo?.longitude ?? null,
-          inferredTz: fp.geo?.inferredTz ?? null,
-          clientTz: fp.identity?.clientTz ?? null,
-          clientLang: fp.identity?.clientLang ?? null,
-          deviceFp: fp.identity?.deviceFp ?? null,
-          deviceInstallId: fp.identity?.deviceInstallId ?? null,
-          countryIso2Selected: fp.countryIso2Selected ?? null,
-          regionKeySelected: fp.regionKeySelected ?? null,
-        });
-      } catch (fpErr) {
-        console.error("[Signup] Failed to insert fingerprint record:", fpErr);
-        // Don't fail user creation, just log the error
+    return await db.transaction(async (tx) => {
+      const [user] = await tx
+        .insert(users)
+        .values({
+          email: userData.email,
+          username: userData.username,
+          passwordHash,
+          isAdmin: userData.isAdmin || false,
+          balance: userData.balance || "1000000.00",
+          timezone,
+          language,
+          countryIso2: userData.countryIso2 ?? null,
+          regionKey: userData.regionKey ?? null,
+          country: userData.countryIso2 ?? userData.country ?? null,
+          phone: userData.phone ?? null,
+          // Signup fingerprinting columns
+          signupIp: fp?.ip ?? null,
+          signupIpHash: ipHash,
+          signupUserAgent: fp?.userAgent ?? null,
+          signupCountryCode: fp?.geo?.countryCode ?? null,
+          signupRegion: fp?.geo?.region ?? null,
+          signupCity: fp?.geo?.city ?? null,
+          signupLatitude: fp?.geo?.latitude ?? null,
+          signupLongitude: fp?.geo?.longitude ?? null,
+          signupDeviceType: fp?.device?.deviceType ?? null,
+          signupBrowser: fp?.device?.browser ?? null,
+          signupOs: fp?.device?.os ?? null,
+          signupClientTz: fp?.identity?.clientTz ?? null,
+          signupInferredTz: fp?.geo?.inferredTz ?? null,
+          signupDeviceFp: fp?.identity?.deviceFp ?? null,
+          signupDeviceInstallId: fp?.identity?.deviceInstallId ?? null,
+          signupClientLang: fp?.identity?.clientLang ?? null,
+        })
+        .returning();
+
+      // Insert immutable signup fingerprint record (only if we have IP - required field)
+      if (fp && fp.ip && ipHash) {
+        try {
+          await tx.insert(signupFingerprints).values({
+            userId: user.id,
+            requestId: fp.requestId,
+            ip: fp.ip,
+            ipHash: ipHash,
+            userAgent: fp.userAgent ?? null,
+            deviceType: fp.device?.deviceType ?? null,
+            browser: fp.device?.browser ?? null,
+            os: fp.device?.os ?? null,
+            countryCode: fp.geo?.countryCode ?? null,
+            region: fp.geo?.region ?? null,
+            city: fp.geo?.city ?? null,
+            latitude: fp.geo?.latitude ?? null,
+            longitude: fp.geo?.longitude ?? null,
+            inferredTz: fp.geo?.inferredTz ?? null,
+            clientTz: fp.identity?.clientTz ?? null,
+            clientLang: fp.identity?.clientLang ?? null,
+            deviceFp: fp.identity?.deviceFp ?? null,
+            deviceInstallId: fp.identity?.deviceInstallId ?? null,
+            countryIso2Selected: fp.countryIso2Selected ?? null,
+            regionKeySelected: fp.regionKeySelected ?? null,
+          });
+        } catch (fpErr) {
+          console.error("[Signup] Failed to insert fingerprint record; rolling back user creation:", fpErr);
+          throw fpErr;
+        }
+      } else if (fp && !fp.ip) {
+        console.warn("[Signup] Missing IP address - signup fingerprint record not created for user", user.id);
       }
-    } else if (fp && !fp.ip) {
-      console.warn("[Signup] Missing IP address - signup fingerprint record not created for user", user.id);
-    }
-    
-    // Record account creation event in timeline
-    await db.insert(userAccountEvents).values({
-      userId: user.id,
-      adminId: null,
-      eventType: 'ACCOUNT_CREATED',
-      title: 'Account created',
-      description: `Account registered with email ${user.email}`,
-      reasonCode: null,
-      reasonText: null,
-      metadata: JSON.stringify({ 
-        email: user.email, 
-        username: user.username,
-        initialBalance: userData.balance || "1000000.00",
-        signupCountry: fp?.geo?.countryCode ?? null,
-        signupCity: fp?.geo?.city ?? null,
-      }),
+
+      // Record account creation event in timeline
+      await tx.insert(userAccountEvents).values({
+        userId: user.id,
+        adminId: null,
+        eventType: 'ACCOUNT_CREATED',
+        title: 'Account created',
+        description: `Account registered with email ${user.email}`,
+        reasonCode: null,
+        reasonText: null,
+        metadata: JSON.stringify({ 
+          email: user.email, 
+          username: user.username,
+          initialBalance: userData.balance || "1000000.00",
+          signupCountry: fp?.geo?.countryCode ?? null,
+          signupCity: fp?.geo?.city ?? null,
+        }),
+      });
+
+      return user;
     });
-    
-    return user;
   },
 
   async getUserByEmail(email: string): Promise<User | undefined> {

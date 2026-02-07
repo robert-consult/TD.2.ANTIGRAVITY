@@ -374,6 +374,7 @@
     .cq-stack-narrow {
       flex-direction: column !important;
     }
+
     .cq-full-narrow {
       width: 100% !important;
       flex: none !important;
@@ -404,14 +405,17 @@
     .cq-table-to-cards {
       display: block !important;
     }
+
     .cq-table-to-cards thead {
       display: none !important;
     }
+
     .cq-table-to-cards tbody {
       display: flex;
       flex-direction: column;
       gap: 0.5rem;
     }
+
     .cq-table-to-cards tr {
       display: grid;
       grid-template-columns: repeat(2, 1fr);
@@ -421,11 +425,13 @@
       border-radius: var(--radius);
       border: 1px solid hsl(var(--border));
     }
+
     .cq-table-to-cards td {
       display: flex;
       flex-direction: column;
       padding: 0 !important;
     }
+
     .cq-table-to-cards td::before {
       content: attr(data-label);
       font-size: 0.625rem;
@@ -475,7 +481,7 @@
     gap: clamp(0.5rem, 2cqi, 1rem);
   }
 
-  .trade-btn-pair > button {
+  .trade-btn-pair>button {
     flex: 1;
     padding: clamp(0.5rem, 2cqi, 1rem) clamp(1rem, 4cqi, 2rem);
     font-size: clamp(0.75rem, 2cqi + 0.5rem, 1rem);
@@ -598,6 +604,73 @@
 
     100% {
       transform: translateX(100%);
+    }
+  }
+
+  /* ═══════════════════════════════════════════════════════════════════════════
+   * GLOBAL RESPONSIVE MODAL UTILITIES
+   * Ensures modals and dialogs are responsive across all screen sizes
+   * ═══════════════════════════════════════════════════════════════════════════ */
+
+  /* Modal content wrapper - ensures proper sizing and scrolling */
+  .modal-responsive {
+    width: calc(100% - 2rem);
+    max-width: var(--modal-max-w, 42rem);
+    max-height: 90vh;
+    overflow-y: auto;
+  }
+
+  /* Responsive form rows in modals - stacks on mobile */
+  .modal-form-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+  }
+
+  .modal-form-row>* {
+    flex: 1 1 auto;
+    min-width: 120px;
+  }
+
+  /* Table in modal - horizontal scroll with proper containment */
+  .modal-table-wrap {
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    border: 1px solid hsl(var(--border));
+    border-radius: var(--radius);
+  }
+
+  .modal-table-wrap table {
+    width: 100%;
+    min-width: 400px;
+    /* Ensures table doesn't collapse too small */
+  }
+
+  /* Action buttons row - wraps on narrow screens */
+  .modal-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: center;
+    justify-content: flex-end;
+  }
+
+  .modal-actions>button {
+    white-space: nowrap;
+  }
+
+  /* Responsive text truncation for table cells */
+  .text-truncate-cell {
+    max-width: 150px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  @media (max-width: 640px) {
+    .text-truncate-cell {
+      max-width: 100px;
     }
   }
 

@@ -2,6 +2,7 @@
 import type { Request } from "express";
 import geoip from "geoip-lite";
 import { normalizeIpKey } from "./griftIpAsn";
+import { getTrustedProxyCountryIso2, getTrustedProxyHeaderValue } from "../security/proxyHeaders";
 
 function headerString(req: Request, key: string): string | null {
   const value = req.headers[key];
@@ -91,8 +92,7 @@ export function extractLegacyDeviceId(req: Request): string | null {
 
 // Extract ASN from headers (Cloudflare, Vercel, etc.)
 export function extractAsn(req: Request): number | null {
-  const asnHeader =
-    headerString(req, "cf-asn") ?? headerString(req, "x-vercel-ip-asn") ?? headerString(req, "x-asn");
+  const asnHeader = getTrustedProxyHeaderValue(req, ["cf-asn", "x-vercel-ip-asn"]);
   if (asnHeader) {
     const asn = parseInt(asnHeader.trim(), 10);
     return isNaN(asn) ? null : asn;
@@ -102,54 +102,36 @@ export function extractAsn(req: Request): number | null {
 
 // Extract org name from headers
 export function extractOrg(req: Request): string | null {
-  const org =
-    headerString(req, "cf-org") ??
-    headerString(req, "cf-organization") ??
-    headerString(req, "cf-isp") ??
-    headerString(req, "x-vercel-ip-org") ??
-    headerString(req, "x-vercel-ip-as-org") ??
-    headerString(req, "x-as-org") ??
-    headerString(req, "x-org");
+  const org = getTrustedProxyHeaderValue(req, [
+    "cf-org",
+    "cf-organization",
+    "cf-isp",
+    "x-vercel-ip-org",
+    "x-vercel-ip-as-org",
+  ]);
   return cleanString(org ?? null, 256);
 }
 
 // Extract country from headers
 export function extractCountry(req: Request): string | null {
-  const country =
-    headerString(req, "cf-ipcountry") ??
-    headerString(req, "x-vercel-ip-country") ??
-    headerString(req, "x-appengine-country") ??
-    headerString(req, "x-country");
-  return cleanString(country ?? null, 32);
+  return getTrustedProxyCountryIso2(req) ?? null;
 }
 
 // Extract city from headers
 export function extractCity(req: Request): string | null {
-  const city =
-    headerString(req, "cf-ipcity") ??
-    headerString(req, "x-vercel-ip-city") ??
-    headerString(req, "x-appengine-city") ??
-    headerString(req, "x-city");
+  const city = getTrustedProxyHeaderValue(req, ["cf-ipcity", "x-vercel-ip-city", "x-appengine-city"]);
   return cleanString(city ?? null, 128);
 }
 
 // Extract region from headers
 export function extractRegion(req: Request): string | null {
-  const region =
-    headerString(req, "cf-region") ??
-    headerString(req, "x-vercel-ip-country-region") ??
-    headerString(req, "x-appengine-region") ??
-    headerString(req, "x-region");
+  const region = getTrustedProxyHeaderValue(req, ["cf-region", "x-vercel-ip-country-region", "x-appengine-region"]);
   return cleanString(region ?? null, 128);
 }
 
 // Extract latitude from headers or body
 export function extractLatitude(req: Request): number | null {
-  const lat =
-    headerString(req, "cf-iplat") ??
-    headerString(req, "x-vercel-ip-latitude") ??
-    (req.body as any)?.latitude ??
-    (req.body as any)?.lat;
+  const lat = getTrustedProxyHeaderValue(req, ["cf-iplat", "x-vercel-ip-latitude"]) ?? (req.body as any)?.latitude ?? (req.body as any)?.lat;
   if (lat != null) {
     const parsed = typeof lat === "number" ? lat : parseFloat(lat as string);
     return isNaN(parsed) ? null : parsed;
@@ -160,8 +142,7 @@ export function extractLatitude(req: Request): number | null {
 // Extract longitude from headers or body
 export function extractLongitude(req: Request): number | null {
   const lon =
-    headerString(req, "cf-iplon") ??
-    headerString(req, "x-vercel-ip-longitude") ??
+    getTrustedProxyHeaderValue(req, ["cf-iplon", "x-vercel-ip-longitude"]) ??
     (req.body as any)?.longitude ??
     (req.body as any)?.lon ??
     (req.body as any)?.lng;

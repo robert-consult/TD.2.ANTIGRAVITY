@@ -5,17 +5,7 @@ import { eq } from "drizzle-orm";
 import { buildGeoContext, extractGeoHints, getClientIp, revokeSession } from "../security/sessionTrail";
 import { evaluateLoginJurisdiction } from "../policy/jurisdictionControl";
 import { getJurisdictionRestrictionPolicy } from "../legal/regionRules";
-
-function readHeaderIso2(req: Request): string | undefined {
-  const raw =
-    req.get("cf-ipcountry") ||
-    req.get("x-vercel-ip-country") ||
-    req.get("x-appengine-country") ||
-    "";
-
-  const v = String(raw).trim().toUpperCase();
-  return /^[A-Z]{2}$/.test(v) ? v : undefined;
-}
+import { getTrustedProxyCountryIso2 } from "../security/proxyHeaders";
 
 /**
  * Applies jurisdiction login restrictions to already-authenticated sessions.
@@ -63,7 +53,7 @@ export async function jurisdictionSessionGuard(req: Request, res: Response, next
 
     if (policy.jurisdictionEnforceByIpGeo) {
       ipCountryIso2 =
-        readHeaderIso2(req) ??
+        getTrustedProxyCountryIso2(req) ??
         (() => {
           const ip = getClientIp(req);
           const geo = buildGeoContext(ip, extractGeoHints(req));

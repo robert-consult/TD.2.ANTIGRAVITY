@@ -13,6 +13,7 @@ import { isMarketOpenForSymbol } from "../services/marketHours";
 import { normalizeSymbol } from "./forgeUtils";
 import { getActiveProviderSelection, invalidateActiveProviderCache } from "../marketdata/providerManager";
 import type { ProviderSymbolInput } from "../marketdata/providerTypes";
+import { isSimulatedQuotesAllowed } from "./simulationPolicy";
 
 const REST_LIMIT_PER_DAY = 100000;
 const DEFAULT_POLL_MS = 870;
@@ -326,6 +327,8 @@ function safeJsonParseObject(raw: unknown): Record<string, any> {
 }
 
 function generateSimulatedQuotes(symbols: string[]) {
+  if (!isSimulatedQuotesAllowed()) return [];
+
   const basePrices: Record<string, number> = {
     EURUSD: 1.09421,
     USDJPY: 144.87,
@@ -785,11 +788,7 @@ async function pullBatch() {
 
   const selection = await getActiveProviderSelection();
   if (!selection) {
-    const quoteSource = String(process.env.QUOTE_SOURCE ?? "").toLowerCase();
-    const allowSimulated =
-      process.env.NODE_ENV !== "production" ||
-      process.env.ALLOW_SIMULATED_QUOTES === "true" ||
-      quoteSource === "simulated";
+    const allowSimulated = isSimulatedQuotesAllowed();
     if (!allowSimulated) {
       const now = Date.now();
       if (now - lastNoProviderFallbackPublishAtMs < NO_PROVIDER_THROTTLE_MS) return;

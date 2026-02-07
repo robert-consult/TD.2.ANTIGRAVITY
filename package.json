@@ -193,7 +193,8 @@
     "vite": "^7.3.1"
   },
   "overrides": {
-    "esbuild": "0.27.2"
+    "esbuild": "0.27.2",
+    "@isaacs/brace-expansion": "5.0.1"
   },
   "optionalDependencies": {
     "bufferutil": "^4.1.0"

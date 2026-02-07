@@ -477,144 +477,15 @@ async function processPendingForSymbol(symbol: string, q: Quote) {
       }
 
       const fillPrice = side === "BUY" ? ba.ask : ba.bid;
-    
+
     // Get global limits dynamically
     const globalLimits = await getGlobalLimits();
-    
-    // Leverage: user override takes precedence over global (can exceed)
-    const effectiveLeverage = Number(u.leverage ?? globalLimits.defaultLeverage);
-    const neededMargin = requiredMargin(symbol, lots, fillPrice, effectiveLeverage);
-
-    // Check max concurrent trades using global limits (user can be stricter)
-    const openCount = await db.select({ c: trades.id })
-      .from(trades)
-      .where(and(eq(trades.userId, u.id), eq(trades.status, "OPEN")));
-
     // User override takes precedence over global (can exceed)
     const effectiveMaxConcurrent = Number(r.s?.maxConcurrent ?? globalLimits.maxTradesPerUser);
-    if (openCount.length >= effectiveMaxConcurrent) {
-      await db.update(trades)
-        .set({ status: "CANCELED", closeReason: "ORDER_REJECTED", closedAt: nowSec })
-        .where(and(eq(trades.id, t.id), eq(trades.status, "PENDING")));
-      await auditRejection({
-        tradeId: t.id,
-        correlationId,
-        orderId,
-        symbol,
-        pipDecimals,
-        side,
-        orderType,
-        qtyLots: lots,
-        requestedPrice: requested,
-        quoteBid: ba.bid,
-        quoteAsk: ba.ask,
-        quoteMid: ba.mid,
-        quoteSpread: ba.spread,
-        quoteTs,
-        quoteSource,
-        ...tradeProvenance,
-        riskCheckName: "MAX_CONCURRENT_TRADES",
-        riskLimitValue: effectiveMaxConcurrent,
-        riskObservedValue: openCount.length,
-        reasonCode: "MAX_TRADES_EXCEEDED",
-        note: `Max concurrent open trades exceeded (limit=${effectiveMaxConcurrent})`,
-      });
-      continue;
-    }
-
-    // Check max concurrent lots using global limits (user can be stricter)
-    const openTrades = await db.select({ lots: trades.lots })
-      .from(trades)
-      .where(and(eq(trades.userId, u.id), eq(trades.status, "OPEN")));
-    
-    const currentOpenLots = openTrades.reduce((sum, ot) => sum + Number(ot.lots || 0), 0);
-    // User override takes precedence over global (can exceed)
     const effectiveMaxConcurrentLots = Number(r.s?.maxConcurrentLots ?? globalLimits.maxConcurrentLots);
-    
-    if (currentOpenLots + lots > effectiveMaxConcurrentLots) {
-      await db.update(trades)
-        .set({ status: "CANCELED", closeReason: "ORDER_REJECTED", closedAt: nowSec })
-        .where(and(eq(trades.id, t.id), eq(trades.status, "PENDING")));
-      await auditRejection({
-        tradeId: t.id,
-        correlationId,
-        orderId,
-        symbol,
-        pipDecimals,
-        side,
-        orderType,
-        qtyLots: lots,
-        requestedPrice: requested,
-        quoteBid: ba.bid,
-        quoteAsk: ba.ask,
-        quoteMid: ba.mid,
-        quoteSpread: ba.spread,
-        quoteTs,
-        quoteSource,
-        ...tradeProvenance,
-        riskCheckName: "MAX_CONCURRENT_LOTS",
-        riskLimitValue: effectiveMaxConcurrentLots,
-        riskObservedValue: currentOpenLots + lots,
-        reasonCode: "MAX_LOTS_EXCEEDED",
-        note: `Max concurrent lots exceeded. Open: ${currentOpenLots}, Requested: ${lots}, Limit: ${effectiveMaxConcurrentLots}`,
-      });
-      console.log(`[OrderEngine] Canceled pending order ${t.id}: would exceed max concurrent lots (${currentOpenLots} + ${lots} > ${effectiveMaxConcurrentLots})`);
-      continue;
-    }
-
-    // Check per-instrument cap (count OPEN + other PENDING trades for this symbol)
-    const openPerSymbol = await db.select({ c: trades.id })
-      .from(trades)
-      .leftJoin(symbolConfigs, eq(trades.symbolId, symbolConfigs.id))
-      .where(and(eq(trades.userId, u.id), eq(trades.status, "OPEN"), eq(symbolConfigs.symbol, symbol)));
-    
-    // Also count other pending orders for this symbol (excluding the current one being processed)
-    const pendingPerSymbol = await db.select({ c: trades.id })
-      .from(trades)
-      .leftJoin(symbolConfigs, eq(trades.symbolId, symbolConfigs.id))
-      .where(and(
-        eq(trades.userId, u.id), 
-        eq(trades.status, "PENDING"), 
-        eq(symbolConfigs.symbol, symbol),
-        sql`${trades.id} != ${t.id}` // Exclude current pending order
-      ));
-
-    // Total active per symbol = OPEN + other PENDING (current order will become OPEN if filled)
-    const activePerSymbol = openPerSymbol.length + pendingPerSymbol.length;
-
-    // User override takes precedence over global (can exceed)
     const effectiveMaxTradesPerInstrument = Number(r.s?.maxConcurrentPerInstrument ?? globalLimits.maxTradesPerInstrument);
-
-    // If filling this order would exceed the limit, reject it
-    if (activePerSymbol >= effectiveMaxTradesPerInstrument) {
-      await db.update(trades)
-        .set({ status: "CANCELED", closeReason: "ORDER_REJECTED", closedAt: nowSec })
-        .where(and(eq(trades.id, t.id), eq(trades.status, "PENDING")));
-      await auditRejection({
-        tradeId: t.id,
-        correlationId,
-        orderId,
-        symbol,
-        pipDecimals,
-        side,
-        orderType,
-        qtyLots: lots,
-        requestedPrice: requested,
-        quoteBid: ba.bid,
-        quoteAsk: ba.ask,
-        quoteMid: ba.mid,
-        quoteSpread: ba.spread,
-        quoteTs,
-        quoteSource,
-        ...tradeProvenance,
-        riskCheckName: "MAX_TRADES_PER_INSTRUMENT",
-        riskLimitValue: effectiveMaxTradesPerInstrument,
-        riskObservedValue: activePerSymbol,
-        reasonCode: "MAX_PER_INSTRUMENT_EXCEEDED",
-        note: `Max trades per instrument exceeded (OPEN=${openPerSymbol.length}, PENDING=${pendingPerSymbol.length}, limit=${effectiveMaxTradesPerInstrument})`,
-      });
-      continue;
-    }
+    // Leverage: user override takes precedence over global (can exceed)
+    const effectiveLeverage = Number(u.leverage ?? globalLimits.defaultLeverage);
 
     const executionId = generateExecutionId();
     const positionId = (t as any).positionId || generatePositionId();
@@ -639,13 +510,18 @@ async function processPendingForSymbol(symbol: string, q: Quote) {
       const leverageNow = Number(userRow?.leverage ?? effectiveLeverage);
       const neededMarginNow = requiredMargin(symbol, lots, fillPrice, leverageNow);
 
-      const reserve = await reserveUserMargin(tx, { userId: u.id, marginUsd: neededMarginNow });
-      if (!reserve.reserved) {
+      const cancelPendingWithAudit = async (params: {
+        riskCheckName: string;
+        riskLimitValue: number;
+        riskObservedValue: number;
+        reasonCode: string;
+        note: string;
+      }) => {
         const canceled = await tx.update(trades)
           .set({ status: "CANCELED", closeReason: "ORDER_REJECTED", closedAt: nowSec, correlationId, orderId })
           .where(and(eq(trades.id, t.id), eq(trades.status, "PENDING")))
           .returning({ id: trades.id });
-        if (!canceled.length) return { action: "SKIP" as const };
+        if (!canceled.length) return false;
 
         await auditRejection({
           tradeId: t.id,
@@ -664,14 +540,86 @@ async function processPendingForSymbol(symbol: string, q: Quote) {
           quoteTs,
           quoteSource,
           ...tradeProvenance,
+          riskCheckName: params.riskCheckName,
+          riskLimitValue: params.riskLimitValue,
+          riskObservedValue: params.riskObservedValue,
+          reasonCode: params.reasonCode,
+          note: params.note,
+        }, { db: tx });
+        return true;
+      };
+
+      // Under user lock, recompute limits to avoid TOC/TOU races with market-order placement.
+      const openCountRows = await tx
+        .select({ c: trades.id })
+        .from(trades)
+        .where(and(eq(trades.userId, u.id), eq(trades.status, "OPEN")));
+      const openCount = openCountRows.length;
+      if (openCount >= effectiveMaxConcurrent) {
+        const canceled = await cancelPendingWithAudit({
+          riskCheckName: "MAX_CONCURRENT_TRADES",
+          riskLimitValue: effectiveMaxConcurrent,
+          riskObservedValue: openCount,
+          reasonCode: "MAX_TRADES_EXCEEDED",
+          note: `Max concurrent open trades exceeded (limit=${effectiveMaxConcurrent})`,
+        });
+        return canceled ? { action: "CANCELED" as const } : { action: "SKIP" as const };
+      }
+
+      const [openLotsRow] = await tx
+        .select({ lots: sql`COALESCE(SUM(${trades.lots}), 0)` })
+        .from(trades)
+        .where(and(eq(trades.userId, u.id), eq(trades.status, "OPEN")))
+        .limit(1);
+      const currentOpenLots = Number((openLotsRow as any)?.lots ?? 0);
+      if (currentOpenLots + lots > effectiveMaxConcurrentLots) {
+        const canceled = await cancelPendingWithAudit({
+          riskCheckName: "MAX_CONCURRENT_LOTS",
+          riskLimitValue: effectiveMaxConcurrentLots,
+          riskObservedValue: currentOpenLots + lots,
+          reasonCode: "MAX_LOTS_EXCEEDED",
+          note: `Max concurrent lots exceeded. Open: ${currentOpenLots}, Requested: ${lots}, Limit: ${effectiveMaxConcurrentLots}`,
+        });
+        return canceled ? { action: "CANCELED" as const } : { action: "SKIP" as const };
+      }
+
+      const openPerSymbolRows = await tx.select({ c: trades.id })
+        .from(trades)
+        .leftJoin(symbolConfigs, eq(trades.symbolId, symbolConfigs.id))
+        .where(and(eq(trades.userId, u.id), eq(trades.status, "OPEN"), eq(symbolConfigs.symbol, symbol)));
+
+      const pendingPerSymbolRows = await tx.select({ c: trades.id })
+        .from(trades)
+        .leftJoin(symbolConfigs, eq(trades.symbolId, symbolConfigs.id))
+        .where(and(
+          eq(trades.userId, u.id),
+          eq(trades.status, "PENDING"),
+          eq(symbolConfigs.symbol, symbol),
+          sql`${trades.id} != ${t.id}`
+        ));
+
+      const activePerSymbol = openPerSymbolRows.length + pendingPerSymbolRows.length;
+      if (activePerSymbol >= effectiveMaxTradesPerInstrument) {
+        const canceled = await cancelPendingWithAudit({
+          riskCheckName: "MAX_TRADES_PER_INSTRUMENT",
+          riskLimitValue: effectiveMaxTradesPerInstrument,
+          riskObservedValue: activePerSymbol,
+          reasonCode: "MAX_PER_INSTRUMENT_EXCEEDED",
+          note: `Max trades per instrument exceeded (OPEN=${openPerSymbolRows.length}, PENDING=${pendingPerSymbolRows.length}, limit=${effectiveMaxTradesPerInstrument})`,
+        });
+        return canceled ? { action: "CANCELED" as const } : { action: "SKIP" as const };
+      }
+
+      const reserve = await reserveUserMargin(tx, { userId: u.id, marginUsd: neededMarginNow });
+      if (!reserve.reserved) {
+        const canceled = await cancelPendingWithAudit({
           riskCheckName: "MARGIN_CHECK",
           riskLimitValue: neededMarginNow,
           riskObservedValue: freeMargin,
           reasonCode: "INSUFFICIENT_MARGIN",
           note: "Insufficient free margin at execution",
-        }, { db: tx });
-
-        return { action: "CANCELED" as const };
+        });
+        return canceled ? { action: "CANCELED" as const } : { action: "SKIP" as const };
       }
 
       const updated = await tx.update(trades)

@@ -1,0 +1,766 @@
+EXTRACT WHAT WAS SUPPOSED TO BE OUTPUT FROM THE COMBINED CHAINS OF THOUGHTS  THINKING. MERGE BEST PRACTICE AND PRODUCE THE DOCUMENTS FINAL AND CODEBLOCKS IN FULL
+
+Here is the consolidated implementation plan, design document, and code patch based on the merged chains of thought. This solution introduces a "Dynamic Quote Feed" system that allows for a global baseline feed while supporting user-specific custom subscriptions.
+
+1. Product Requirements Document (PRD)
+Feature: Dynamic Quote Feed & Subscription Management Goal: Transition from a static, global quote feed to a dynamic model where traders receive a union of a "Baseline" feed and their own "Custom" subscriptions.
+
+Core Requirements
+Quote Modes (Per User):
+
+Basic: User receives only the system-defined "Baseline" feed.
+
+Custom: User receives only their specifically subscribed symbols.
+
+Both (Hybrid): User receives the Baseline feed + their Custom subscriptions.
+
+Data Distribution:
+
+Upstream (Fetch): The system must subscribe to the union of the Baseline list and ALL active custom subscriptions to ensure data availability.
+
+Downstream (Client): Each connected client receives only the data permitted by their Quote Mode and Subscription list.
+
+Admin Interface:
+
+New "Quote Subscriptions" mini-tab under the Instruments page.
+
+Capabilities: Manage the Baseline symbol list, view/edit user Quote Modes, and manage User Subscription lists.
+
+2. Algorithm & Architecture
+Database Schema Changes
+users table: Add quote_mode column (basic | custom | both, default: basic).
+
+quote_baseline table: Stores the global list of symbols (replacing static config).
+
+user_subscriptions table: Stores user_id <-> symbol relationships.
+
+Backend Logic (The "Union" Strategy)
+Ingestion Layer:
+
+Periodically (or on change) calculate Set(Baseline) U Set(All_User_Subs).
+
+Ensure the market data provider (WebSocket/REST) is watching this superset.
+
+Distribution Layer (WebSocket):
+
+On client connect, load user's quote_mode and subscriptions.
+
+Construct the user's AllowedSet.
+
+When a quote arrives for Symbol X:
+
+If X is in Baseline, broadcast to all Basic and Both users.
+
+If X is in a user's Custom list, send to that specific connection.
+
+Optimization: For the MVP, we can filter at the socket level: if (userAllowed(socket, symbol)) send(socket, data).
+
+3. Implementation Code
+A. Database Schema (Drizzle ORM)
+server/db/schema.ts
+
+TypeScript
+import { pgTable, serial, text, integer, timestamp, boolean, pgEnum, primaryKey } from "drizzle-orm/pg-core";
+import { relations } from "drizzle-orm";
+
+// 1. Define the Quote Mode Enum
+export const quoteModeEnum = pgEnum("quote_mode", ["basic", "custom", "both"]);
+
+// 2. Update Users Table (Assumption: extending existing definition)
+export const users = pgTable("users", {
+  id: serial("id").primaryKey(),
+  // ... existing fields ...
+  quoteMode: quoteModeEnum("quote_mode").default("basic").notNull(),
+});
+
+// 3. Baseline Feed Table (Global)
+export const quoteBaseline = pgTable("quote_baseline", {
+  symbol: text("symbol").primaryKey(), // e.g., "BTC-USD"
+  isActive: boolean("is_active").default(true),
+  addedAt: timestamp("added_at").defaultNow(),
+});
+
+// 4. User Custom Subscriptions
+export const userSubscriptions = pgTable("user_subscriptions", {
+  userId: integer("user_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
+  symbol: text("symbol").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (t) => ({
+  pk: primaryKey(t.userId, t.symbol),
+}));
+
+// Relations
+export const userSubscriptionsRelations = relations(userSubscriptions, ({ one }) => ({
+  user: one(users, {
+    fields: [userSubscriptions.userId],
+    references: [users.id],
+  }),
+}));
+B. Backend Services & Routes
+server/routes/adminQuotes.ts Handles the new Admin Tab logic.
+
+TypeScript
+import { Router } from "express";
+import { db } from "@db";
+import { users, quoteBaseline, userSubscriptions } from "@db/schema";
+import { eq, inArray } from "drizzle-orm";
+import { requireAdmin } from "../middleware/auth"; // Assumed middleware
+
+const router = Router();
+
+// --- Baseline Management ---
+
+// Get all baseline symbols
+router.get("/baseline", requireAdmin, async (req, res) => {
+  try {
+    const baseline = await db.select().from(quoteBaseline);
+    res.json(baseline);
+  } catch (error) {
+    res.status(500).json({ message: "Error fetching baseline" });
+  }
+});
+
+// Update baseline (Add/Remove)
+router.post("/baseline", requireAdmin, async (req, res) => {
+  const { symbol, action } = req.body; // action: 'add' | 'remove'
+  
+  try {
+    if (action === "add") {
+      await db.insert(quoteBaseline).values({ symbol }).onConflictDoNothing();
+    } else {
+      await db.delete(quoteBaseline).where(eq(quoteBaseline.symbol, symbol));
+    }
+    // TODO: Trigger Feed Manager to re-calculate global subscription union
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ message: "Error updating baseline" });
+  }
+});
+
+// --- User Quote Management ---
+
+// Update User Quote Mode
+router.patch("/user/:userId/mode", requireAdmin, async (req, res) => {
+  const { mode } = req.body; // 'basic', 'custom', 'both'
+  const userId = parseInt(req.params.userId);
+
+  try {
+    await db.update(users)
+      .set({ quoteMode: mode })
+      .where(eq(users.id, userId));
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ message: "Error updating user mode" });
+  }
+});
+
+// Manage User Subscriptions (Admin Override)
+router.post("/user/:userId/subscription", requireAdmin, async (req, res) => {
+  const { symbol, action } = req.body;
+  const userId = parseInt(req.params.userId);
+
+  try {
+    if (action === "add") {
+      await db.insert(userSubscriptions).values({ userId, symbol }).onConflictDoNothing();
+    } else {
+      await db.delete(userSubscriptions)
+        .where(eq(userSubscriptions.userId, userId) && eq(userSubscriptions.symbol, symbol));
+    }
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ message: "Error modifying subscription" });
+  }
+});
+
+export default router;
+server/services/FeedManager.ts Logic to determine what the user sees.
+
+TypeScript
+import { db } from "@db";
+import { quoteBaseline, userSubscriptions, users } from "@db/schema";
+import { eq } from "drizzle-orm";
+
+export class FeedManager {
+  // Get the effective list of symbols a user should receive
+  static async getUserAllowedSymbols(userId: number): Promise<Set<string>> {
+    const user = await db.query.users.findFirst({
+      where: eq(users.id, userId),
+      columns: { quoteMode: true },
+    });
+
+    if (!user) return new Set();
+
+    const allowed = new Set<string>();
+
+    // 1. Load Baseline if applicable
+    if (user.quoteMode === "basic" || user.quoteMode === "both") {
+      const baseline = await db.select({ symbol: quoteBaseline.symbol }).from(quoteBaseline);
+      baseline.forEach((b) => allowed.add(b.symbol));
+    }
+
+    // 2. Load Custom Subs if applicable
+    if (user.quoteMode === "custom" || user.quoteMode === "both") {
+      const subs = await db.select({ symbol: userSubscriptions.symbol })
+        .from(userSubscriptions)
+        .where(eq(userSubscriptions.userId, userId));
+      subs.forEach((s) => allowed.add(s.symbol));
+    }
+
+    return allowed;
+  }
+
+  // Get the UNION of all needed symbols (for the upstream fetcher)
+  static async getGlobalFetchList(): Promise<string[]> {
+    const baseline = await db.select({ symbol: quoteBaseline.symbol }).from(quoteBaseline);
+    const custom = await db.select({ symbol: userSubscriptions.symbol }).from(userSubscriptions);
+    
+    const union = new Set([
+        ...baseline.map(b => b.symbol),
+        ...custom.map(c => c.symbol)
+    ]);
+    
+    return Array.from(union);
+  }
+}
+C. Frontend: Admin Instruments Tab
+client/src/pages/admin/Instruments.tsx (Partial Update)
+
+TypeScript
+import React, { useState, useEffect } from "react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
+import { useToast } from "@/hooks/use-toast";
+import api from "@/lib/api"; // Assumed API wrapper
+
+// ... existing imports ...
+
+export default function AdminInstruments() {
+  const [activeTab, setActiveTab] = useState("list");
+
+  return (
+    <div className="p-6 space-y-6">
+      <h1 className="text-2xl font-bold">Instruments Management</h1>
+      
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <TabsList>
+          <TabsTrigger value="list">All Instruments</TabsTrigger>
+          <TabsTrigger value="subscriptions">Quote Subscriptions</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="list">
+          {/* ... Existing Instruments Table ... */}
+          <div className="p-4 border rounded">Existing Instrument Management Area</div>
+        </TabsContent>
+
+        <TabsContent value="subscriptions">
+          <QuoteSubscriptionManager />
+        </TabsContent>
+      </Tabs>
+    </div>
+  );
+}
+
+// --- New Component: Quote Subscription Manager ---
+
+function QuoteSubscriptionManager() {
+  const { toast } = useToast();
+  const [baseline, setBaseline] = useState<string[]>([]);
+  const [newSymbol, setNewSymbol] = useState("");
+
+  useEffect(() => {
+    fetchBaseline();
+  }, []);
+
+  const fetchBaseline = async () => {
+    try {
+      const res = await api.get("/admin/quotes/baseline");
+      setBaseline(res.data.map((b: any) => b.symbol));
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const updateBaseline = async (symbol: string, action: "add" | "remove") => {
+    try {
+      await api.post("/admin/quotes/baseline", { symbol, action });
+      fetchBaseline();
+      if (action === "add") setNewSymbol("");
+      toast({ title: "Success", description: `Baseline updated.` });
+    } catch (e) {
+      toast({ title: "Error", description: "Failed to update baseline.", variant: "destructive" });
+    }
+  };
+
+  return (
+    <div className="grid gap-6 md:grid-cols-2">
+      {/* Left: Baseline Feed Management */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Global Baseline Feed</CardTitle>
+          <p className="text-sm text-muted-foreground">
+            These symbols are streamed to all users with "Basic" or "Both" mode.
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex gap-2">
+            <Input 
+              placeholder="Add Symbol (e.g. BTC-USD)" 
+              value={newSymbol}
+              onChange={(e) => setNewSymbol(e.target.value.toUpperCase())}
+            />
+            <Button onClick={() => updateBaseline(newSymbol, "add")}>Add</Button>
+          </div>
+          
+          <div className="flex flex-wrap gap-2 mt-4">
+            {baseline.map((sym) => (
+              <Badge key={sym} variant="secondary" className="px-3 py-1 text-sm flex gap-2 items-center">
+                {sym}
+                <span 
+                  className="cursor-pointer font-bold hover:text-red-500"
+                  onClick={() => updateBaseline(sym, "remove")}
+                >
+                  ×
+                </span>
+              </Badge>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Right: User Mode Preview (Placeholder for future complexity) */}
+      <Card>
+        <CardHeader>
+          <CardTitle>User Configuration</CardTitle>
+          <p className="text-sm text-muted-foreground">
+            Select a user to modify their Quote Mode or specific subscriptions.
+          </p>
+        </CardHeader>
+        <CardContent>
+          <div className="flex items-center justify-center h-40 border-2 border-dashed rounded-lg bg-muted/50">
+            <span className="text-muted-foreground">User Selector & Mode Toggle (Coming Soon)</span>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+DO THE SAME FOR THESE TWO EXTRACT AND MERGE BEST PRACTICE OUTPUT
+
+Here is the consolidated Final Implementation Plan and Code Implementation derived from the merged chains of thought. This solution finalizes the "Dynamic Quote Feed" system, ensuring traders receive the correct data intersection based on their assigned mode.
+
+1. Final Product Requirements Document (PRD)
+Feature: Dynamic Multi-Mode Quote Feed Objective: Allow the trading platform to switch between a global "Baseline" feed and user-specific "Custom" feeds, or a hybrid of both.
+
+User Stories
+The Admin needs a "Quote Subscriptions" tab to manage the global "Baseline" list of symbols (e.g., BTC, ETH, SPY) that all basic users see.
+
+The Admin needs to set a user's Quote Mode:
+
+Basic: User sees only the Baseline feed.
+
+Custom: User sees only symbols they have specifically subscribed to.
+
+Both: User sees the Baseline feed plus their custom subscriptions.
+
+The System must fetch data for the union of all active requirements (Baseline + All Custom Subs) from the upstream provider.
+
+The WebSocket Server must filter outgoing messages so clients only receive quotes permitted by their mode.
+
+2. Database Schema Implementation
+File: server/db/schema.ts Adds support for the new modes and subscription tables.
+
+TypeScript
+import { pgTable, serial, text, integer, boolean, timestamp, pgEnum, primaryKey } from "drizzle-orm/pg-core";
+import { relations } from "drizzle-orm";
+
+// 1. Quote Mode Enum
+export const quoteModeEnum = pgEnum("quote_mode", ["basic", "custom", "both"]);
+
+// 2. Extend Users Table
+export const users = pgTable("users", {
+  id: serial("id").primaryKey(),
+  username: text("username").notNull().unique(),
+  // ... other existing fields ...
+  quoteMode: quoteModeEnum("quote_mode").default("basic").notNull(),
+});
+
+// 3. Baseline Feed (Global)
+export const quoteBaseline = pgTable("quote_baseline", {
+  symbol: text("symbol").primaryKey(), // e.g., "BTC-USD"
+  isActive: boolean("is_active").default(true).notNull(),
+  addedAt: timestamp("added_at").defaultNow(),
+});
+
+// 4. User Custom Subscriptions
+export const userSubscriptions = pgTable("user_subscriptions", {
+  userId: integer("user_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
+  symbol: text("symbol").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (t) => ({
+  pk: primaryKey({ columns: [t.userId, t.symbol] }),
+}));
+
+// 5. Relations
+export const userSubscriptionsRelations = relations(userSubscriptions, ({ one }) => ({
+  user: one(users, {
+    fields: [userSubscriptions.userId],
+    references: [users.id],
+  }),
+}));
+3. Server-Side Logic & API
+A. Feed Manager (The Logic Core)
+File: server/services/FeedManager.ts Handles the calculation of what to fetch and who sees what. Includes caching to prevent DB thrashing on every tick.
+
+TypeScript
+import { db } from "@db";
+import { quoteBaseline, userSubscriptions, users } from "@db/schema";
+import { eq } from "drizzle-orm";
+
+export class FeedManager {
+  // Cache for the global fetch list to avoid heavy DB queries on every tick
+  private static globalFetchListCache: Set<string> | null = null;
+
+  /**
+   * Returns the set of symbols a specific user is allowed to see.
+   */
+  static async getUserAllowedSymbols(userId: number): Promise<Set<string>> {
+    const user = await db.query.users.findFirst({
+      where: eq(users.id, userId),
+      columns: { quoteMode: true },
+    });
+
+    if (!user) return new Set();
+
+    const allowed = new Set<string>();
+
+    // 1. Add Baseline (if mode is Basic or Both)
+    if (user.quoteMode === "basic" || user.quoteMode === "both") {
+      const baseline = await db.select({ symbol: quoteBaseline.symbol })
+        .from(quoteBaseline)
+        .where(eq(quoteBaseline.isActive, true));
+      baseline.forEach((b) => allowed.add(b.symbol));
+    }
+
+    // 2. Add Custom Subs (if mode is Custom or Both)
+    if (user.quoteMode === "custom" || user.quoteMode === "both") {
+      const subs = await db.select({ symbol: userSubscriptions.symbol })
+        .from(userSubscriptions)
+        .where(eq(userSubscriptions.userId, userId));
+      subs.forEach((s) => allowed.add(s.symbol));
+    }
+
+    return allowed;
+  }
+
+  /**
+   * Returns the UNION of all symbols the system needs to fetch from upstream.
+   * (Baseline U All_User_Custom_Subs)
+   */
+  static async getGlobalFetchList(forceRefresh = false): Promise<string[]> {
+    if (!forceRefresh && this.globalFetchListCache) {
+      return Array.from(this.globalFetchListCache);
+    }
+
+    const baseline = await db.select({ symbol: quoteBaseline.symbol })
+      .from(quoteBaseline)
+      .where(eq(quoteBaseline.isActive, true));
+
+    const custom = await db.select({ symbol: userSubscriptions.symbol })
+      .from(userSubscriptions);
+
+    const union = new Set([
+      ...baseline.map(b => b.symbol),
+      ...custom.map(c => c.symbol)
+    ]);
+
+    this.globalFetchListCache = union;
+    return Array.from(union);
+  }
+
+  /**
+   * Call this whenever subscriptions change to invalidate cache.
+   */
+  static invalidateCache() {
+    this.globalFetchListCache = null;
+    // Optional: Trigger upstream re-subscription logic here
+  }
+}
+B. Admin Routes
+File: server/routes/adminQuotes.ts Endpoints for the UI to manage these settings.
+
+TypeScript
+import { Router } from "express";
+import { db } from "@db";
+import { users, quoteBaseline, userSubscriptions } from "@db/schema";
+import { eq, and } from "drizzle-orm";
+import { FeedManager } from "../services/FeedManager";
+
+// Middleware check (pseudo-code)
+const requireAdmin = (req, res, next) => { /* ... auth check ... */ next(); };
+
+const router = Router();
+
+// --- Baseline Management ---
+
+router.get("/baseline", requireAdmin, async (req, res) => {
+  const list = await db.select().from(quoteBaseline);
+  res.json(list);
+});
+
+router.post("/baseline", requireAdmin, async (req, res) => {
+  const { symbol, action } = req.body;
+  
+  if (action === "add") {
+    await db.insert(quoteBaseline).values({ symbol, isActive: true }).onConflictDoNothing();
+  } else if (action === "remove") {
+    await db.delete(quoteBaseline).where(eq(quoteBaseline.symbol, symbol));
+  }
+  
+  FeedManager.invalidateCache();
+  res.json({ success: true });
+});
+
+// --- User Management ---
+
+router.get("/user/:userId", requireAdmin, async (req, res) => {
+  const userId = parseInt(req.params.userId);
+  const user = await db.query.users.findFirst({
+    where: eq(users.id, userId),
+    with: { subscriptions: true }
+  });
+  if (!user) return res.status(404).send("User not found");
+  res.json(user);
+});
+
+router.patch("/user/:userId/mode", requireAdmin, async (req, res) => {
+  const { mode } = req.body; // 'basic', 'custom', 'both'
+  await db.update(users).set({ quoteMode: mode }).where(eq(users.id, parseInt(req.params.userId)));
+  FeedManager.invalidateCache(); // Mode change might affect active listener count (opt)
+  res.json({ success: true });
+});
+
+router.post("/user/:userId/subscription", requireAdmin, async (req, res) => {
+  const { symbol, action } = req.body;
+  const userId = parseInt(req.params.userId);
+
+  if (action === "add") {
+    await db.insert(userSubscriptions).values({ userId, symbol }).onConflictDoNothing();
+  } else {
+    await db.delete(userSubscriptions)
+      .where(and(eq(userSubscriptions.userId, userId), eq(userSubscriptions.symbol, symbol)));
+  }
+
+  FeedManager.invalidateCache();
+  res.json({ success: true });
+});
+
+export default router;
+4. Frontend Implementation
+File: client/src/components/admin/QuoteSubscriptionsPanel.tsx The new Admin UI component.
+
+TypeScript
+import React, { useState, useEffect } from "react";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Loader2, Plus, X, Search } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
+
+// Types
+type BaselineSymbol = { symbol: string; isActive: boolean };
+type UserConfig = { id: number; username: string; quoteMode: "basic" | "custom" | "both"; subscriptions: { symbol: string }[] };
+
+export function QuoteSubscriptionsPanel() {
+  const { toast } = useToast();
+  
+  // State: Baseline
+  const [baseline, setBaseline] = useState<BaselineSymbol[]>([]);
+  const [newBaseSymbol, setNewBaseSymbol] = useState("");
+  const [loadingBase, setLoadingBase] = useState(false);
+
+  // State: User Config
+  const [targetUserId, setTargetUserId] = useState("");
+  const [activeUser, setActiveUser] = useState<UserConfig | null>(null);
+  const [newUserSymbol, setNewUserSymbol] = useState("");
+
+  useEffect(() => {
+    fetchBaseline();
+  }, []);
+
+  // --- Baseline Handlers ---
+
+  const fetchBaseline = async () => {
+    try {
+      const res = await fetch("/api/admin/quotes/baseline");
+      const data = await res.json();
+      setBaseline(data);
+    } catch (e) {
+      console.error("Failed to fetch baseline");
+    }
+  };
+
+  const updateBaseline = async (symbol: string, action: "add" | "remove") => {
+    setLoadingBase(true);
+    try {
+      await fetch("/api/admin/quotes/baseline", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ symbol, action }),
+      });
+      await fetchBaseline();
+      if (action === "add") setNewBaseSymbol("");
+      toast({ title: "Baseline Updated", description: `${symbol} ${action}ed.` });
+    } catch (e) {
+      toast({ title: "Error", variant: "destructive" });
+    } finally {
+      setLoadingBase(false);
+    }
+  };
+
+  // --- User Handlers ---
+
+  const fetchUser = async () => {
+    if (!targetUserId) return;
+    try {
+      const res = await fetch(`/api/admin/quotes/user/${targetUserId}`);
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+      setActiveUser(data);
+    } catch (e) {
+      toast({ title: "User Not Found", variant: "destructive" });
+      setActiveUser(null);
+    }
+  };
+
+  const updateUserMode = async (mode: string) => {
+    if (!activeUser) return;
+    await fetch(`/api/admin/quotes/user/${activeUser.id}/mode`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode }),
+    });
+    fetchUser();
+    toast({ title: "Mode Updated" });
+  };
+
+  const updateUserSub = async (symbol: string, action: "add" | "remove") => {
+    if (!activeUser) return;
+    await fetch(`/api/admin/quotes/user/${activeUser.id}/subscription`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ symbol, action }),
+    });
+    fetchUser();
+    if (action === "add") setNewUserSymbol("");
+  };
+
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      
+      {/* 1. Global Baseline Config */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Global Baseline Feed</CardTitle>
+          <CardDescription>Symbols streamed to all "Basic" and "Both" users.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex gap-2">
+            <Input 
+              placeholder="BTC-USD" 
+              value={newBaseSymbol} 
+              onChange={e => setNewBaseSymbol(e.target.value.toUpperCase())}
+            />
+            <Button disabled={loadingBase} onClick={() => updateBaseline(newBaseSymbol, "add")}>
+              {loadingBase ? <Loader2 className="animate-spin" /> : <Plus className="w-4 h-4" />}
+            </Button>
+          </div>
+          <div className="flex flex-wrap gap-2 mt-4 max-h-[300px] overflow-y-auto">
+            {baseline.map(b => (
+              <Badge key={b.symbol} variant="secondary" className="px-3 py-1 flex items-center gap-2">
+                {b.symbol}
+                <X 
+                  className="w-3 h-3 cursor-pointer hover:text-red-500" 
+                  onClick={() => updateBaseline(b.symbol, "remove")} 
+                />
+              </Badge>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* 2. User Specific Config */}
+      <Card>
+        <CardHeader>
+          <CardTitle>User Configuration</CardTitle>
+          <CardDescription>Manage individual permissions and custom feeds.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {/* User Search */}
+          <div className="flex gap-2">
+            <Input 
+              placeholder="User ID..." 
+              value={targetUserId} 
+              onChange={e => setTargetUserId(e.target.value)}
+            />
+            <Button onClick={fetchUser} variant="outline"><Search className="w-4 h-4" /></Button>
+          </div>
+
+          {activeUser && (
+            <div className="space-y-4 border-t pt-4">
+              <div className="flex justify-between items-center">
+                <span className="font-semibold">{activeUser.username}</span>
+                <Select value={activeUser.quoteMode} onValueChange={updateUserMode}>
+                  <SelectTrigger className="w-[140px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="basic">Basic (Global)</SelectItem>
+                    <SelectItem value="custom">Custom Only</SelectItem>
+                    <SelectItem value="both">Hybrid (Both)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {(activeUser.quoteMode !== 'basic') && (
+                <div className="space-y-2">
+                  <p className="text-sm font-medium">Custom Subscriptions</p>
+                  <div className="flex gap-2">
+                    <Input 
+                      placeholder="Symbol..." 
+                      value={newUserSymbol} 
+                      onChange={e => setNewUserSymbol(e.target.value.toUpperCase())} 
+                    />
+                    <Button size="sm" onClick={() => updateUserSub(newUserSymbol, "add")}>Add</Button>
+                  </div>
+                  <div className="flex flex-wrap gap-1 mt-2">
+                    {activeUser.subscriptions.length === 0 && <span className="text-xs text-muted-foreground">No custom symbols</span>}
+                    {activeUser.subscriptions.map(sub => (
+                      <Badge key={sub.symbol} variant="outline" className="gap-1">
+                        {sub.symbol}
+                        <X 
+                          className="w-3 h-3 cursor-pointer hover:text-red-500" 
+                          onClick={() => updateUserSub(sub.symbol, "remove")}
+                        />
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+
+
+
+
+GEMINI EXTRACTION

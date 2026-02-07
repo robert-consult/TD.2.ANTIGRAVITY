@@ -7,6 +7,7 @@ import geoip from "geoip-lite";
 import tzlookup from "@photostructure/tz-lookup";
 import { UAParser } from "ua-parser-js";
 import { normalizeIpKey } from "../grift/griftIpAsn";
+import { getTrustedProxyCountryIso2, getTrustedProxyHeaderValue } from "./proxyHeaders";
 
 export type GeoContext = {
   countryCode?: string;
@@ -81,37 +82,20 @@ function parseForwardedFor(value: string | undefined): string[] {
 }
 
 export function extractGeoHints(req: any): Partial<GeoContext> {
-  const countryCode = normalizeCountryCode(
-    readHeader(req, "cf-ipcountry") ??
-      readHeader(req, "x-vercel-ip-country") ??
-      readHeader(req, "x-appengine-country") ??
-      readHeader(req, "x-country")
-  );
+  const countryCode = normalizeCountryCode(getTrustedProxyCountryIso2(req));
   const region = cleanString(
-    readHeader(req, "cf-region") ??
-      readHeader(req, "x-vercel-ip-country-region") ??
-      readHeader(req, "x-appengine-region") ??
-      readHeader(req, "x-region"),
+    getTrustedProxyHeaderValue(req, ["cf-region", "x-vercel-ip-country-region", "x-appengine-region"]),
     128
   );
   const city = cleanString(
-    readHeader(req, "cf-ipcity") ??
-      readHeader(req, "x-vercel-ip-city") ??
-      readHeader(req, "x-appengine-city") ??
-      readHeader(req, "x-city"),
+    getTrustedProxyHeaderValue(req, ["cf-ipcity", "x-vercel-ip-city", "x-appengine-city"]),
     128
   );
   const latitude = parseHeaderNumber(
-    readHeader(req, "cf-iplat") ??
-      readHeader(req, "x-vercel-ip-latitude") ??
-      readHeader(req, "x-lat") ??
-      readHeader(req, "x-geo-lat")
+    getTrustedProxyHeaderValue(req, ["cf-iplat", "x-vercel-ip-latitude"])
   );
   const longitude = parseHeaderNumber(
-    readHeader(req, "cf-iplon") ??
-      readHeader(req, "x-vercel-ip-longitude") ??
-      readHeader(req, "x-lon") ??
-      readHeader(req, "x-geo-lon")
+    getTrustedProxyHeaderValue(req, ["cf-iplon", "x-vercel-ip-longitude"])
   );
 
   return {

@@ -71,6 +71,7 @@ import { i18nRouter } from "./routes/i18n";
 import { adminI18nRouter } from "./routes/adminI18n";
 import { getGlobalSettingsCached, getMinPriceDistancePips, sanitizeMinPriceDistancePips } from "./services/globalSettings";
 import { botGuard, persistBotAssessmentForUser } from "./security/botGuard";
+import { getTrustedProxyCountryIso2 } from "./security/proxyHeaders";
 import { jurisdictionSessionGuard } from "./middleware/jurisdictionSessionGuard";
 import { withGriftClient } from "./grift/griftDb";
 import { isMarketOpenForSymbol } from "./services/marketHours";
@@ -485,18 +486,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
     const geo = buildGeoContext(ip, extractGeoHints(req));
 
-    // Prefer CDN header if present (useful in production behind Cloudflare/Vercel)
-    const headerCountry =
-      (req.get("cf-ipcountry") ||
-        req.get("x-vercel-ip-country") ||
-        req.get("x-appengine-country")) ?? "";
-
-    const ipCountryIso2 =
-      headerCountry && /^[A-Za-z]{2}$/.test(headerCountry.trim())
-        ? headerCountry.trim().toUpperCase()
-        : geo.countryCode
-          ? geo.countryCode.toUpperCase()
-          : undefined;
+    const ipCountryIso2 = getTrustedProxyCountryIso2(req) ?? (geo.countryCode ? geo.countryCode.toUpperCase() : undefined);
 
     const waitlistJ = evaluateSignupJurisdiction({
       ipCountryIso2,
@@ -762,18 +752,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Jurisdiction control (sanctions / restricted countries)
-      // Prefer CDN header if present (useful in production behind Cloudflare/Vercel)
-      const headerCountry =
-        (req.get("cf-ipcountry") ||
-          req.get("x-vercel-ip-country") ||
-          req.get("x-appengine-country")) ?? "";
-
       const ipCountryIso2 =
-        headerCountry && /^[A-Za-z]{2}$/.test(headerCountry.trim())
-          ? headerCountry.trim().toUpperCase()
-          : geoContext.countryCode
-            ? geoContext.countryCode.toUpperCase()
-            : undefined;
+        getTrustedProxyCountryIso2(req) ??
+        (geoContext.countryCode ? geoContext.countryCode.toUpperCase() : undefined);
 
       const userCountryIso2 =
         (user as any).countryIso2 && /^[A-Za-z]{2}$/.test(String((user as any).countryIso2).trim())
@@ -1004,18 +985,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const geoHints = extractGeoHints(req);
       const geoContext = buildGeoContext(ip, geoHints);
 
-      // Prefer CDN header if present
-      const headerCountry =
-        (req.get("cf-ipcountry") ||
-          req.get("x-vercel-ip-country") ||
-          req.get("x-appengine-country")) ?? "";
-
       const ipCountryIso2 =
-        headerCountry && /^[A-Za-z]{2}$/.test(headerCountry.trim())
-          ? headerCountry.trim().toUpperCase()
-          : geoContext.countryCode
-            ? geoContext.countryCode.toUpperCase()
-            : undefined;
+        getTrustedProxyCountryIso2(req) ??
+        (geoContext.countryCode ? geoContext.countryCode.toUpperCase() : undefined);
 
       const signupJ = evaluateSignupJurisdiction({
         ipCountryIso2,
@@ -4903,14 +4875,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   }
 
   function readWsHeaderIso2(req: any): string | undefined {
-    const raw =
-      req?.headers?.["cf-ipcountry"] ||
-      req?.headers?.["x-vercel-ip-country"] ||
-      req?.headers?.["x-appengine-country"] ||
-      "";
-
-    if (Array.isArray(raw)) return normIso2(raw[0]);
-    return normIso2(raw);
+    return getTrustedProxyCountryIso2(req as Request);
   }
 
   function getWsSessionIdFromCookies(req: any): string | undefined {

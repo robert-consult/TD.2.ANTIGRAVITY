@@ -38,6 +38,7 @@ import { MarketDataProvidersCard } from "@/components/admin/MarketDataProvidersC
 import { InstrumentIngestionPanel } from "@/components/admin/InstrumentIngestionPanel";
 import { InstrumentCatalogEnableDialog } from "@/components/admin/InstrumentCatalogEnableDialog";
 import { PipDefaultsPanel } from "@/components/admin/PipDefaultsPanel";
+import { QuoteSubscriptionsPanel } from "@/components/admin/QuoteSubscriptionsPanel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -2181,7 +2182,7 @@ export default function AdminDashboard() {
   });
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [symbolToDelete, setSymbolToDelete] = useState<number | null>(null);
-  const [instrumentsSubTab, setInstrumentsSubTab] = useState<"configured" | "ingestor">("configured");
+  const [instrumentsSubTab, setInstrumentsSubTab] = useState<"configured" | "ingestor" | "quoteSubscriptions">("configured");
 
   // Global settings state (includes all Trade Settings tab values)
   const [riskParams, setRiskParams] = useState<GlobalSettings>({
@@ -4547,9 +4548,10 @@ export default function AdminDashboard() {
 
             <TabsContent value="instruments" className="p-4">
               <Tabs value={instrumentsSubTab} onValueChange={(v) => setInstrumentsSubTab(v as any)} className="space-y-4">
-                <TabsList className="bg-neutral-700 w-full h-auto p-1 grid grid-cols-2 gap-1">
+                <TabsList className="bg-neutral-700 w-full h-auto p-1 grid grid-cols-3 gap-1">
                   <TabsTrigger value="configured" className="data-[state=active]:bg-neutral-600 text-xs sm:text-sm px-2 py-1.5">Configured</TabsTrigger>
                   <TabsTrigger value="ingestor" className="data-[state=active]:bg-neutral-600 text-xs sm:text-sm px-2 py-1.5">Ingestor</TabsTrigger>
+                  <TabsTrigger value="quoteSubscriptions" className="data-[state=active]:bg-neutral-600 text-xs sm:text-sm px-2 py-1.5">Quote Subscriptions</TabsTrigger>
                 </TabsList>
 
                 <TabsContent value="configured">
@@ -4715,6 +4717,10 @@ export default function AdminDashboard() {
                     <InstrumentIngestionPanel />
                     <PipDefaultsPanel />
                   </div>
+                </TabsContent>
+
+                <TabsContent value="quoteSubscriptions">
+                  <QuoteSubscriptionsPanel />
                 </TabsContent>
               </Tabs>
             </TabsContent>

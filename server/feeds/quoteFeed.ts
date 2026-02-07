@@ -12,8 +12,13 @@ import { getValkey, valkeyGetJson, writeToRollingBuffer, cachePrevClose, getCach
 import { isMarketOpenForSymbol } from "../services/marketHours";
 import { normalizeSymbol } from "./forgeUtils";
 import { getActiveProviderSelection, invalidateActiveProviderCache } from "../marketdata/providerManager";
-import type { ProviderSymbolInput } from "../marketdata/providerTypes";
+import type {
+  ProviderQuote,
+  ProviderQuoteStreamSession,
+  ProviderSymbolInput,
+} from "../marketdata/providerTypes";
 import { isSimulatedQuotesAllowed } from "./simulationPolicy";
+import { getCustomUniverseInstruments } from "../services/quoteSubscriptions";
 
 const REST_LIMIT_PER_DAY = 100000;
 const DEFAULT_POLL_MS = 870;
@@ -25,6 +30,7 @@ const DEFAULT_SYMBOL_REFRESH_MS = 30000;
 const SYMBOL_REFRESH_MS = Number(process.env.QUOTE_SYMBOL_REFRESH_MS ?? DEFAULT_SYMBOL_REFRESH_MS);
 const SYMBOL_REFRESH_INTERVAL_MS =
   Number.isFinite(SYMBOL_REFRESH_MS) && SYMBOL_REFRESH_MS > 0 ? SYMBOL_REFRESH_MS : DEFAULT_SYMBOL_REFRESH_MS;
+const UPSTREAM_WS_FLUSH_MS = Math.max(20, Number(process.env.UPSTREAM_WS_FLUSH_MS ?? 120) || 120);
 const QUOTE_DB_WRITE_MODE = String(process.env.QUOTE_DB_WRITE_MODE ?? "off").toLowerCase();
 const QUOTE_DB_WRITE_INTERVAL_MS = Number(process.env.QUOTE_DB_WRITE_INTERVAL_MS ?? 60_000);
 const DAILY_CLOSE_WRITE_INTERVAL_MS = Number(process.env.DAILY_CLOSE_WRITE_INTERVAL_MS ?? 60_000);
@@ -71,6 +77,19 @@ let lastNoProviderLogAtMs = 0;
 let lastNoProviderFallbackPublishAtMs = 0;
 const NO_PROVIDER_THROTTLE_MS = 30_000;
 
+let upstreamMode: "rest" | "ws" | "none" = "none";
+let upstreamWsProviderKey: string | null = null;
+let upstreamWsSymbolsKey = "";
+let upstreamWsConnected = false;
+let upstreamWsLastMessageAtMs = 0;
+let upstreamWsFailures = 0;
+let upstreamWsLastError: string | null = null;
+let upstreamWsSession: ProviderQuoteStreamSession | null = null;
+let upstreamWsPendingBySymbol = new Map<string, ProviderQuote>();
+let upstreamWsFlushTimer: ReturnType<typeof setTimeout> | null = null;
+let upstreamWsFlushInFlight = false;
+let upstreamStreamSyncInFlight: Promise<void> | null = null;
+
 export function getQuoteSnapshotCache(): Map<string, QuoteSnapshot> {
   return quoteSnapshotCache;
 }
@@ -85,6 +104,15 @@ export function getCacheStats() {
     lastPublishedAtMs,
     lastProviderSuccessAtMs,
     lastProviderSuccessKey,
+    upstreamMode,
+    upstreamWsProviderKey,
+    upstreamWsConnected,
+    upstreamWsLastMessageAtMs,
+    upstreamWsFailures,
+    upstreamWsLastError,
+    upstreamWsSymbolCount: upstreamWsSymbolsKey ? upstreamWsSymbolsKey.split(",").filter(Boolean).length : 0,
+    feedPollMs: dynamicConfig.pollIntervalMs,
+    staleThresholdMs: dynamicConfig.staleThresholdMs,
   };
 }
 
@@ -296,9 +324,28 @@ function updateSnapshotCache(quotes: any[], options: { markSuccess?: boolean } =
 
 type ActiveInstrumentRow = { symbol: string; providerSymbolMapJson: string | null };
 
-async function getActiveInstruments(): Promise<ActiveInstrumentRow[]> {
+async function getActiveInstruments(customSymbols: string[] = []): Promise<ActiveInstrumentRow[]> {
   try {
-    const rows = await dbClient.query("SELECT symbol, provider_symbol_map_json FROM symbol_configs WHERE enabled = true");
+    const normalizedCustom = Array.from(
+      new Set(
+        customSymbols
+          .map((symbol) => normalizeSymbol(symbol))
+          .filter(Boolean),
+      ),
+    );
+
+    const rows =
+      normalizedCustom.length > 0
+        ? await dbClient.query(
+          `
+          SELECT DISTINCT symbol, provider_symbol_map_json
+          FROM symbol_configs
+          WHERE enabled = true OR symbol = ANY($1::text[])
+          `,
+          [normalizedCustom],
+        )
+        : await dbClient.query("SELECT symbol, provider_symbol_map_json FROM symbol_configs WHERE enabled = true");
+
     return rows.rows.map((r: any) => ({
       symbol: String(r.symbol),
       providerSymbolMapJson: r.provider_symbol_map_json != null ? String(r.provider_symbol_map_json) : null,
@@ -324,6 +371,265 @@ function safeJsonParseObject(raw: unknown): Record<string, any> {
   } catch {
     return {};
   }
+}
+
+function toFeedRowsFromProviderQuotes(providerQuotes: ProviderQuote[]) {
+  const nowMs = Date.now();
+  const staleThresholdMs =
+    Number.isFinite(dynamicConfig.staleThresholdMs) && dynamicConfig.staleThresholdMs > 0
+      ? dynamicConfig.staleThresholdMs
+      : DEFAULT_STALE_MS;
+
+  return (providerQuotes || [])
+    .map((q: any) => {
+      const symbol = normalizeSymbol(q?.canonicalSymbol ?? q?.symbol);
+      if (!symbol) return null;
+      const bid = typeof q?.bid === "number" ? q.bid : q?.bid == null ? null : Number(q.bid);
+      const ask = typeof q?.ask === "number" ? q.ask : q?.ask == null ? null : Number(q.ask);
+      const price =
+        typeof q?.price === "number"
+          ? q.price
+          : q?.price == null
+            ? bid != null && ask != null
+              ? (bid + ask) / 2
+              : null
+            : Number(q.price);
+
+      if (price == null || !Number.isFinite(price)) return null;
+      const lastUpdated = typeof q?.tsMs === "number" ? q.tsMs : typeof q?.lastUpdated === "number" ? q.lastUpdated : nowMs;
+      const ageMs = nowMs - lastUpdated;
+      const marketOpen = isMarketOpenForSymbol(symbol, new Date(nowMs));
+      return {
+        symbol,
+        price,
+        bid: bid != null && Number.isFinite(bid) ? bid : null,
+        ask: ask != null && Number.isFinite(ask) ? ask : null,
+        timestamp: Math.floor(lastUpdated / 1000),
+        lastUpdated,
+        isStale: marketOpen && ageMs > staleThresholdMs,
+      };
+    })
+    .filter(Boolean);
+}
+
+function mappedSymbolsKey(mapped: ProviderSymbolInput[]): string {
+  return (mapped || [])
+    .map((s) => `${String(s.canonicalSymbol || "").toUpperCase()}=>${String(s.providerSymbol || "").toUpperCase()}`)
+    .filter(Boolean)
+    .sort()
+    .join(",");
+}
+
+function providerSupportsUpstreamWs(provider: any): boolean {
+  return Boolean(
+    provider &&
+      provider.capability &&
+      provider.capability.quotesWs &&
+      typeof provider.openQuoteStream === "function",
+  );
+}
+
+function clearUpstreamWsFlushTimer() {
+  if (!upstreamWsFlushTimer) return;
+  clearTimeout(upstreamWsFlushTimer);
+  upstreamWsFlushTimer = null;
+}
+
+function scheduleUpstreamWsFlush() {
+  if (upstreamWsFlushTimer) return;
+  upstreamWsFlushTimer = setTimeout(() => {
+    upstreamWsFlushTimer = null;
+    void flushUpstreamWsQuotes();
+  }, UPSTREAM_WS_FLUSH_MS);
+}
+
+async function flushUpstreamWsQuotes() {
+  if (upstreamWsFlushInFlight) return;
+  const providerKey = upstreamWsProviderKey;
+  if (!providerKey) {
+    upstreamWsPendingBySymbol.clear();
+    clearUpstreamWsFlushTimer();
+    return;
+  }
+  if (!upstreamWsPendingBySymbol.size) return;
+
+  upstreamWsFlushInFlight = true;
+  const pending = Array.from(upstreamWsPendingBySymbol.values());
+  upstreamWsPendingBySymbol.clear();
+  try {
+    const rows = toFeedRowsFromProviderQuotes(pending);
+    if (rows.length) {
+      await handleQuoteBatch(rows, providerKey, false, { reason: "QUOTE_STREAM" });
+      lastProviderSuccessAtMs = Date.now();
+      lastProviderSuccessKey = providerKey;
+    }
+  } catch (error) {
+    upstreamWsFailures++;
+    upstreamWsLastError = `WS_FLUSH_FAILED:${String((error as any)?.message ?? error)}`;
+    console.error("[Feed] Upstream WS flush failed:", error);
+  } finally {
+    upstreamWsFlushInFlight = false;
+    if (upstreamWsPendingBySymbol.size) scheduleUpstreamWsFlush();
+  }
+}
+
+function queueUpstreamWsQuotes(quotes: ProviderQuote[]) {
+  if (!Array.isArray(quotes) || !quotes.length) return;
+  const nowMs = Date.now();
+  upstreamWsLastMessageAtMs = nowMs;
+  upstreamWsConnected = true;
+
+  for (const q of quotes) {
+    const symbol = normalizeSymbol((q as any)?.canonicalSymbol ?? (q as any)?.symbol);
+    if (!symbol) continue;
+    upstreamWsPendingBySymbol.set(symbol, {
+      ...q,
+      canonicalSymbol: symbol,
+      tsMs: typeof (q as any)?.tsMs === "number" ? (q as any).tsMs : nowMs,
+    });
+  }
+  scheduleUpstreamWsFlush();
+}
+
+async function stopUpstreamQuoteStream(reason: string) {
+  clearUpstreamWsFlushTimer();
+  upstreamWsPendingBySymbol.clear();
+  if (!upstreamWsSession) {
+    upstreamWsConnected = false;
+    upstreamWsLastMessageAtMs = 0;
+    upstreamWsLastError = reason ? `WS_STOPPED:${reason}` : null;
+    upstreamWsProviderKey = null;
+    upstreamWsSymbolsKey = "";
+    return;
+  }
+
+  const existing = upstreamWsSession;
+  upstreamWsSession = null;
+  try {
+    await existing.close(reason);
+  } catch {
+    // ignore close errors
+  }
+  upstreamWsConnected = false;
+  upstreamWsLastMessageAtMs = 0;
+  upstreamWsLastError = reason ? `WS_STOPPED:${reason}` : null;
+  upstreamWsProviderKey = null;
+  upstreamWsSymbolsKey = "";
+}
+
+async function syncUpstreamQuoteStream(params: {
+  providerKey: string | null;
+  provider: any | null;
+  mapped: ProviderSymbolInput[];
+  reason: string;
+}) {
+  const providerKey = params.providerKey ?? null;
+  const provider = params.provider ?? null;
+  const mapped = params.mapped ?? [];
+
+  if (!providerKey || !provider || !mapped.length) {
+    await stopUpstreamQuoteStream(`disabled:${params.reason}`);
+    upstreamMode = providerKey && provider ? "rest" : "none";
+    return;
+  }
+
+  if (!providerSupportsUpstreamWs(provider)) {
+    await stopUpstreamQuoteStream(`rest-only:${params.reason}`);
+    upstreamMode = "rest";
+    return;
+  }
+
+  const symbolsKey = mappedSymbolsKey(mapped);
+  if (upstreamWsSession && upstreamWsProviderKey === providerKey) {
+    upstreamMode = "ws";
+    if (upstreamWsSymbolsKey === symbolsKey) return;
+    try {
+      await upstreamWsSession.updateSymbols(mapped);
+      upstreamWsSymbolsKey = symbolsKey;
+      upstreamWsLastError = null;
+      return;
+    } catch (error) {
+      upstreamWsFailures++;
+      upstreamWsLastError = `WS_UPDATE_SYMBOLS_FAILED:${String((error as any)?.message ?? error)}`;
+      console.error("[Feed] Upstream WS updateSymbols failed; recreating stream:", error);
+      await stopUpstreamQuoteStream("update-failed");
+    }
+  }
+
+  await stopUpstreamQuoteStream(`restart:${params.reason}`);
+  upstreamMode = "ws";
+  upstreamWsProviderKey = providerKey;
+  upstreamWsSymbolsKey = symbolsKey;
+  upstreamWsConnected = false;
+
+  try {
+    const session = await provider.openQuoteStream({
+      symbols: mapped,
+      handlers: {
+        onQuotes: (quotes: ProviderQuote[]) => {
+          queueUpstreamWsQuotes(quotes);
+        },
+        onError: (error: unknown) => {
+          upstreamWsFailures++;
+          upstreamWsConnected = false;
+          upstreamWsLastError = `WS_STREAM_ERROR:${String((error as any)?.message ?? error)}`;
+          console.warn(`[Feed] Upstream WS error (${providerKey}):`, error);
+        },
+        onStateChange: (state: string, meta?: Record<string, any>) => {
+          if (state === "connected") {
+            upstreamWsConnected = true;
+            upstreamWsLastError = null;
+            if (meta?.symbolCount != null) {
+              // keep symbol key stable from mapped key; no-op.
+            }
+            return;
+          }
+          if (state === "connecting" || state === "reconnecting") {
+            upstreamWsConnected = false;
+            return;
+          }
+          if (state === "disconnected") {
+            upstreamWsConnected = false;
+          }
+        },
+      },
+    });
+    upstreamWsSession = session;
+  } catch (error) {
+    upstreamWsFailures++;
+    upstreamWsConnected = false;
+    upstreamWsLastError = `WS_START_FAILED:${String((error as any)?.message ?? error)}`;
+    console.error(`[Feed] Failed to start upstream WS for provider ${providerKey}:`, error);
+    upstreamMode = "rest";
+    upstreamWsSession = null;
+    upstreamWsProviderKey = null;
+    upstreamWsSymbolsKey = "";
+  }
+}
+
+async function ensureUpstreamQuoteStream(params: {
+  providerKey: string | null;
+  provider: any | null;
+  mapped: ProviderSymbolInput[];
+  reason: string;
+}) {
+  if (upstreamStreamSyncInFlight) return upstreamStreamSyncInFlight;
+  upstreamStreamSyncInFlight = (async () => {
+    await syncUpstreamQuoteStream(params);
+  })().finally(() => {
+    upstreamStreamSyncInFlight = null;
+  });
+  return upstreamStreamSyncInFlight;
+}
+
+function isUpstreamWsHealthy(providerKey: string | null): boolean {
+  if (!providerKey) return false;
+  if (upstreamMode !== "ws") return false;
+  if (!upstreamWsConnected) return false;
+  if (upstreamWsProviderKey !== providerKey) return false;
+  if (upstreamWsLastMessageAtMs <= 0) return false;
+  const freshnessMs = Math.max(3_000, Number(dynamicConfig.staleThresholdMs ?? DEFAULT_STALE_MS) * 2);
+  return Date.now() - upstreamWsLastMessageAtMs <= freshnessMs;
 }
 
 function generateSimulatedQuotes(symbols: string[]) {
@@ -578,8 +884,8 @@ async function refreshDynamicSet(force = false) {
   const selection = await getActiveProviderSelection();
   const providerKey = selection?.providerKey ?? null;
   const provider = selection?.provider ?? null;
-
-  const rows = await getActiveInstruments();
+  const customUniverse = await getCustomUniverseInstruments();
+  const rows = await getActiveInstruments(customUniverse.map((row) => row.symbol));
   if (!rows.length) {
     dynamicSet = new Set();
     dynamicProviderKey = providerKey;
@@ -590,7 +896,7 @@ async function refreshDynamicSet(force = false) {
   }
 
   const nextSet = new Set<string>();
-  const nextMapped: ProviderSymbolInput[] = [];
+  const nextMappedByCanonical = new Map<string, ProviderSymbolInput>();
 
   for (const r of rows) {
     const canonical = normalizeSymbol(r.symbol);
@@ -604,12 +910,12 @@ async function refreshDynamicSet(force = false) {
       override ||
       (typeof (provider as any).mapSymbol === "function" ? (provider as any).mapSymbol(canonical) : canonical);
     if (!providerSymbol) continue;
-    nextMapped.push({ canonicalSymbol: canonical, providerSymbol: String(providerSymbol) });
+    nextMappedByCanonical.set(canonical, { canonicalSymbol: canonical, providerSymbol: String(providerSymbol) });
   }
 
   dynamicSet = nextSet;
   dynamicProviderKey = providerKey;
-  dynamicProviderSymbols = nextMapped;
+  dynamicProviderSymbols = Array.from(nextMappedByCanonical.values());
   lastDynamicSetRefresh = now;
 }
 
@@ -619,8 +925,9 @@ async function refreshSymbolsAndPull(reason: string) {
   if (symbolsRefreshInFlight) return symbolsRefreshInFlight;
   symbolsRefreshInFlight = (async () => {
     await refreshDynamicSet(true);
-    if (dynamicSet.size === 0) return;
     console.log(`[Feed] symbols:updated (${reason}) -> refreshed ${dynamicSet.size} symbols`);
+    // Always run pullBatch so upstream WS/REST sessions are torn down immediately
+    // when the active symbol universe is emptied by admin/subscription changes.
     await throttle(pullBatch)();
   })().finally(() => {
     symbolsRefreshInFlight = null;
@@ -784,10 +1091,26 @@ async function notifyAccountsForSymbols(rows: any[], reason: string) {
 async function pullBatch() {
   await refreshDynamicSet();
   const wanted = [...new Set([...dynamicSet])];
-  if (wanted.length === 0) return;
+  if (wanted.length === 0) {
+    await ensureUpstreamQuoteStream({
+      providerKey: null,
+      provider: null,
+      mapped: [],
+      reason: "no-symbols",
+    });
+    upstreamMode = "none";
+    return;
+  }
 
   const selection = await getActiveProviderSelection();
   if (!selection) {
+    await ensureUpstreamQuoteStream({
+      providerKey: null,
+      provider: null,
+      mapped: [],
+      reason: "no-provider",
+    });
+    upstreamMode = "none";
     const allowSimulated = isSimulatedQuotesAllowed();
     if (!allowSimulated) {
       const now = Date.now();
@@ -819,46 +1142,31 @@ async function pullBatch() {
   const providerKey = selection.providerKey;
   const provider = selection.provider;
 
-  function toFeedRows(providerQuotes: any[]) {
-    const nowMs = Date.now();
-    const staleThresholdMs =
-      Number.isFinite(dynamicConfig.staleThresholdMs) && dynamicConfig.staleThresholdMs > 0
-        ? dynamicConfig.staleThresholdMs
-        : DEFAULT_STALE_MS;
+  const mapped = dynamicProviderKey === providerKey ? dynamicProviderSymbols : [];
+  await ensureUpstreamQuoteStream({
+    providerKey,
+    provider,
+    mapped,
+    reason: "pull",
+  });
 
-    return (providerQuotes || [])
-      .map((q: any) => {
-        const symbol = normalizeSymbol(q?.canonicalSymbol ?? q?.symbol);
-        if (!symbol) return null;
-        const bid = typeof q?.bid === "number" ? q.bid : q?.bid == null ? null : Number(q.bid);
-        const ask = typeof q?.ask === "number" ? q.ask : q?.ask == null ? null : Number(q.ask);
-        const price =
-          typeof q?.price === "number"
-            ? q.price
-            : q?.price == null
-              ? bid != null && ask != null
-                ? (bid + ask) / 2
-                : null
-              : Number(q.price);
-
-        if (price == null || !Number.isFinite(price)) return null;
-        const lastUpdated = typeof q?.tsMs === "number" ? q.tsMs : typeof q?.lastUpdated === "number" ? q.lastUpdated : nowMs;
-        const ageMs = nowMs - lastUpdated;
-        const marketOpen = isMarketOpenForSymbol(symbol, new Date(nowMs));
-        return {
-          symbol,
-          price,
-          bid: bid != null && Number.isFinite(bid) ? bid : null,
-          ask: ask != null && Number.isFinite(ask) ? ask : null,
-          timestamp: Math.floor(lastUpdated / 1000),
-          lastUpdated,
-          isStale: marketOpen && ageMs > staleThresholdMs,
-        };
-      })
-      .filter(Boolean);
+  if (isUpstreamWsHealthy(providerKey)) {
+    if (mapped.length) {
+      const mappedCanonical = new Set(mapped.map((m) => m.canonicalSymbol));
+      const missingForProvider = wanted.filter((sym) => !mappedCanonical.has(sym));
+      if (missingForProvider.length) {
+        const fallbackQuotes = await buildFallbackQuotes(missingForProvider);
+        if (fallbackQuotes.length) {
+          await handleQuoteBatch(fallbackQuotes, "fallback_cache", true, {
+            markSuccess: false,
+            reason: "QUOTE_UNSUPPORTED",
+          });
+        }
+      }
+    }
+    return;
   }
 
-  const mapped = dynamicProviderKey === providerKey ? dynamicProviderSymbols : [];
   if (!mapped.length) {
     const fallbackQuotes = await buildFallbackQuotes(wanted);
     if (!fallbackQuotes.length) {
@@ -881,9 +1189,9 @@ async function pullBatch() {
   for (const chunk of chunks) {
     try {
       const result = await provider.fetchQuotes({ symbols: chunk });
-      const rows = toFeedRows(result?.quotes ?? []);
+      const rows = toFeedRowsFromProviderQuotes(result?.quotes ?? []);
       if (!rows.length) throw new Error("EMPTY_PROVIDER_RESPONSE");
-      await handleQuoteBatch(rows, providerKey, false);
+      await handleQuoteBatch(rows, providerKey, false, { reason: "QUOTE_POLL" });
       lastProviderSuccessAtMs = Date.now();
       lastProviderSuccessKey = providerKey;
     } catch (e: any) {
@@ -943,6 +1251,10 @@ export async function startQuoteFeed(): Promise<void> {
         }
         if (event.type === "market-data:providers-updated") {
           void refreshSymbolsAndPull("market-data:providers-updated");
+          return;
+        }
+        if (event.type === "quote-subscriptions:updated") {
+          void refreshSymbolsAndPull("quote-subscriptions:updated");
           return;
         }
       });

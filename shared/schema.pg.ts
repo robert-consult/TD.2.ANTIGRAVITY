@@ -171,6 +171,42 @@ export const symbolConfigs = pgTable("symbol_configs", {
   createdAt: integer("created_at").notNull().default(nowUnix),
 });
 
+// Per-trader quote subscription preferences.
+export const traderQuotePrefs = pgTable("trader_quote_prefs", {
+  userId: integer("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  quoteMode: text("quote_mode").notNull().default("BASIC_ONLY"), // BASIC_ONLY | BASIC_PLUS_CUSTOM | CUSTOM_ONLY
+  updatedAt: integer("updated_at").notNull().default(nowUnix),
+});
+
+// Per-trader custom quote subscriptions (symbols loaded in symbol_configs).
+export const traderQuoteSubscriptions = pgTable(
+  "trader_quote_subscriptions",
+  {
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    symbolId: integer("symbol_id")
+      .notNull()
+      .references(() => symbolConfigs.id, { onDelete: "cascade" }),
+    createdAt: integer("created_at").notNull().default(nowUnix),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.userId, table.symbolId] }),
+    symbolIdIdx: index("trader_quote_subscriptions_symbol_id_idx").on(table.symbolId),
+  }),
+);
+
+// Global quote-subscription behavior (system-wide enable + default mode).
+export const quoteSubscriptionConfig = pgTable("quote_subscription_config", {
+  id: integer("id").primaryKey().default(1),
+  globalEnabled: boolean("global_enabled").notNull().default(false),
+  defaultMode: text("default_mode").notNull().default("BASIC_PLUS_CUSTOM"),
+  updatedAt: integer("updated_at").notNull().default(nowUnix),
+  updatedBy: text("updated_by"),
+});
+
 // Trade history
 export const trades = pgTable("trades", {
   id: serial("id").primaryKey(),
@@ -216,10 +252,31 @@ export const trades = pgTable("trades", {
 // Define relations
 export const usersRelations = relations(users, ({ many }) => ({
   trades: many(trades),
+  quotePrefs: many(traderQuotePrefs),
+  quoteSubscriptions: many(traderQuoteSubscriptions),
 }));
 
 export const symbolConfigsRelations = relations(symbolConfigs, ({ many }) => ({
   trades: many(trades),
+  traderQuoteSubscriptions: many(traderQuoteSubscriptions),
+}));
+
+export const traderQuotePrefsRelations = relations(traderQuotePrefs, ({ one }) => ({
+  user: one(users, {
+    fields: [traderQuotePrefs.userId],
+    references: [users.id],
+  }),
+}));
+
+export const traderQuoteSubscriptionsRelations = relations(traderQuoteSubscriptions, ({ one }) => ({
+  user: one(users, {
+    fields: [traderQuoteSubscriptions.userId],
+    references: [users.id],
+  }),
+  symbol: one(symbolConfigs, {
+    fields: [traderQuoteSubscriptions.symbolId],
+    references: [symbolConfigs.id],
+  }),
 }));
 
 export const tradesRelations = relations(trades, ({ one }) => ({
@@ -250,6 +307,9 @@ export const loginSchema = z.object({
 });
 
 export const insertSymbolConfigSchema = createInsertSchema(symbolConfigs);
+export const insertTraderQuotePrefSchema = createInsertSchema(traderQuotePrefs);
+export const insertTraderQuoteSubscriptionSchema = createInsertSchema(traderQuoteSubscriptions);
+export const insertQuoteSubscriptionConfigSchema = createInsertSchema(quoteSubscriptionConfig);
 // Create a custom lots validator that handles string values
 const lotsValidator = z.preprocess(
   (val) => {
@@ -1842,6 +1902,12 @@ export type User = typeof users.$inferSelect;
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type SymbolConfig = typeof symbolConfigs.$inferSelect;
 export type InsertSymbolConfig = z.infer<typeof insertSymbolConfigSchema>;
+export type TraderQuotePref = typeof traderQuotePrefs.$inferSelect;
+export type InsertTraderQuotePref = z.infer<typeof insertTraderQuotePrefSchema>;
+export type TraderQuoteSubscription = typeof traderQuoteSubscriptions.$inferSelect;
+export type InsertTraderQuoteSubscription = z.infer<typeof insertTraderQuoteSubscriptionSchema>;
+export type QuoteSubscriptionConfig = typeof quoteSubscriptionConfig.$inferSelect;
+export type InsertQuoteSubscriptionConfig = z.infer<typeof insertQuoteSubscriptionConfigSchema>;
 export type Trade = typeof trades.$inferSelect;
 export type InsertTrade = z.infer<typeof insertTradeSchema>;
 export type UserSettings = typeof userSettings.$inferSelect;

@@ -2,12 +2,13 @@ import { useQuotes } from "@/hooks/use-quotes";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useEffect, useMemo, useState } from "react";
 import SpreadBadge from "@/components/SpreadBadge";
-import { useAuth } from "@/hooks/use-auth";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Search, ArrowUpDown, AlertTriangle, Clock } from "lucide-react";
+import { Search, AlertTriangle, Clock, PencilLine, Plus } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { getQuoteDecimals, pointsToPips } from "@shared/pips";
+import { SymbolSubscriptionDialog } from "@/components/SymbolSubscriptionDialog";
+import { useAuth } from "@/hooks/use-auth";
 
 interface QuotesScreenProps {
   onSelectSymbol: (symbol: string) => void;
@@ -15,17 +16,31 @@ interface QuotesScreenProps {
 
 export default function QuotesScreen({ onSelectSymbol }: QuotesScreenProps) {
   const { quotes, isLoading, isConnected, hasStaleData } = useQuotes();
-  const { user } = useAuth();
+  const { isAuthenticated } = useAuth();
   const [connectionStatus, setConnectionStatus] = useState<string>("connecting");
   const [searchTerm, setSearchTerm] = useState<string>("");
   const [sortField, setSortField] = useState<string>("symbol");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
-  const DEFAULT_BALANCE = 1000000; // $1,000,000 as shown in reference image
+  const [addDialogOpen, setAddDialogOpen] = useState(false);
+  const [manageDialogOpen, setManageDialogOpen] = useState(false);
 
-  const { data: symbolConfigs = [] } = useQuery<any[]>({
-    queryKey: ["/api/config/symbols"],
-    initialData: [],
+  const { data: allowedSymbolsData = { symbols: [] } } = useQuery<{ symbols: any[] }>({
+    queryKey: ["/api/quote-subscriptions/allowed-symbols"],
+    initialData: { symbols: [] },
   });
+  const { data: quoteModeData } = useQuery<{
+    supportsCustom?: boolean;
+    effectiveMode?: "BASIC_ONLY" | "BASIC_PLUS_CUSTOM" | "CUSTOM_ONLY";
+  }>({
+    queryKey: ["/api/quote-subscriptions/me"],
+    enabled: isAuthenticated,
+    refetchInterval: 5000,
+    refetchOnWindowFocus: true,
+    staleTime: 0,
+  });
+  const symbolConfigs = allowedSymbolsData.symbols ?? [];
+  const supportsCustomUi = Boolean(quoteModeData?.supportsCustom);
+  const effectiveModeUi = quoteModeData?.effectiveMode ?? "BASIC_ONLY";
 
   const symbolCfgBySymbol = useMemo(() => new Map(symbolConfigs.map((s) => [s.symbol, s])), [symbolConfigs]);
 
@@ -43,6 +58,12 @@ export default function QuotesScreen({ onSelectSymbol }: QuotesScreenProps) {
       setConnectionStatus("disconnected");
     }
   }, [hasStaleData, isConnected, isLoading, quotes]);
+
+  useEffect(() => {
+    if (supportsCustomUi) return;
+    setAddDialogOpen(false);
+    setManageDialogOpen(false);
+  }, [supportsCustomUi]);
   
   // Filter and sort quotes
   const filteredAndSortedQuotes = quotes
@@ -88,7 +109,31 @@ export default function QuotesScreen({ onSelectSymbol }: QuotesScreenProps) {
       <div className="tq-page-header flex flex-col sticky top-0 z-10 gap-[clamp(0.35rem,1.2vw,0.5rem)]">
         <div className="flex justify-between items-center">
           <h2 className="tq-page-title">Live Quotes</h2>
-          <div className="flex items-center">
+          <div className="flex items-center gap-2">
+            {supportsCustomUi ? (
+              <div className="flex items-center gap-1">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 text-cyan-300 hover:text-cyan-200 hover:bg-neutral-800"
+                  onClick={() => setAddDialogOpen(true)}
+                  aria-label="Add quote symbol"
+                  title="Add symbols"
+                >
+                  <Plus className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 text-cyan-300 hover:text-cyan-200 hover:bg-neutral-800"
+                  onClick={() => setManageDialogOpen(true)}
+                  aria-label="Manage quote symbols"
+                  title="Manage symbols"
+                >
+                  <PencilLine className="h-4 w-4" />
+                </Button>
+              </div>
+            ) : null}
             {connectionStatus === "stale" ? (
               <AlertTriangle className="w-3 h-3 mr-1.5 text-orange-400" />
             ) : connectionStatus === "market_closed" ? (
@@ -296,6 +341,19 @@ export default function QuotesScreen({ onSelectSymbol }: QuotesScreenProps) {
           )}
         </div>
       </div>
+
+      <SymbolSubscriptionDialog
+        open={addDialogOpen}
+        onOpenChange={setAddDialogOpen}
+        mode="add"
+        effectiveMode={effectiveModeUi}
+      />
+      <SymbolSubscriptionDialog
+        open={manageDialogOpen}
+        onOpenChange={setManageDialogOpen}
+        mode="manage"
+        effectiveMode={effectiveModeUi}
+      />
     </div>
   );
 }

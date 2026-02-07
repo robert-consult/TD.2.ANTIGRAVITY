@@ -48,6 +48,30 @@ const GenericRestV1FieldsSchema = z.object({
   timestamp: z.string().min(1).optional().default("timestamp"),
 });
 
+const GenericRestV1WsConfigSchema = z.object({
+  enabled: z.boolean().optional().default(true),
+  url: z.string().url(),
+  protocols: z.array(z.string().min(1)).max(5).optional().default([]),
+  connectTimeoutMs: z.number().int().min(500).max(120_000).optional().default(10_000),
+  reconnectBaseMs: z.number().int().min(250).max(60_000).optional().default(1_000),
+  reconnectMaxMs: z.number().int().min(1_000).max(300_000).optional().default(20_000),
+  subscribeMessage: z.string().min(1).optional().default('{"type":"subscribe","symbols":"{{symbols}}"}'),
+  unsubscribeMessage: z.string().min(1).optional(),
+  authMessage: z.string().min(1).optional(),
+  pingMessage: z.string().min(1).optional(),
+  pingIntervalMs: z.number().int().min(1_000).max(120_000).optional().default(20_000),
+  symbolsJoinChar: z.string().min(1).optional().default(","),
+  responseMode: z.enum(["array", "map", "wrapper_array"]).optional().default("array"),
+  wrapperKey: z.string().min(1).optional(),
+  fields: GenericRestV1FieldsSchema.optional().default({
+    symbol: "symbol",
+    bid: "bid",
+    ask: "ask",
+    price: "price",
+    timestamp: "timestamp",
+  }),
+});
+
 export const GenericRestV1ProviderConfigSchema = z.object({
   driver: z.literal("generic_rest_v1"),
 
@@ -73,6 +97,8 @@ export const GenericRestV1ProviderConfigSchema = z.object({
     price: "price",
     timestamp: "timestamp",
   }),
+  // Optional upstream websocket config for quote streaming.
+  ws: GenericRestV1WsConfigSchema.optional(),
   rateLimit: ProviderRateLimitSchema,
 }).superRefine((cfg, ctx) => {
   if (cfg.responseMode === "wrapper_array" && !cfg.wrapperKey) {
@@ -88,6 +114,14 @@ export const GenericRestV1ProviderConfigSchema = z.object({
       code: "custom",
       message: "apiKey is required when quotePath includes {{apikey}}",
       path: ["apiKey"],
+    });
+  }
+
+  if (cfg.ws?.responseMode === "wrapper_array" && !cfg.ws?.wrapperKey) {
+    ctx.addIssue({
+      code: "custom",
+      message: "ws.wrapperKey is required when ws.responseMode is wrapper_array",
+      path: ["ws", "wrapperKey"],
     });
   }
 });

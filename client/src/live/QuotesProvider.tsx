@@ -27,7 +27,19 @@ interface SymbolConfig {
   id: number;
   symbol: string;
   name: string;
+  category?: string | null;
+  baseCurrency?: string | null;
+  quoteCurrency?: string | null;
+  pipDecimals?: number | null;
+  quoteDecimals?: number | null;
   enabled?: boolean;
+}
+
+interface AllowedSymbolsResponse {
+  symbols: SymbolConfig[];
+  effectiveMode: "BASIC_ONLY" | "BASIC_PLUS_CUSTOM" | "CUSTOM_ONLY";
+  supportsCustom: boolean;
+  includesBaseline: boolean;
 }
 
 type QuotesState = {
@@ -35,6 +47,8 @@ type QuotesState = {
   isConnected: boolean;
   isLoading: boolean;
   hasStaleData: boolean;
+  supportsCustom: boolean;
+  effectiveMode: AllowedSymbolsResponse["effectiveMode"];
 };
 
 const QuotesContext = createContext<QuotesState | null>(null);
@@ -90,26 +104,31 @@ export function QuotesProvider({ children }: { children: ReactNode }) {
     flushTimerRef.current = window.setTimeout(flushNow, intervalMs);
   }, [flushNow]);
 
-  const { data: symbolsData, isLoading: isSymbolsLoading } = useQuery<SymbolConfig[]>({
-    queryKey: ["/api/config/symbols"],
+  const { data: symbolsData, isLoading: isSymbolsLoading } = useQuery<AllowedSymbolsResponse>({
+    queryKey: ["/api/quote-subscriptions/allowed-symbols"],
     enabled: isAuthenticated,
     refetchOnWindowFocus: false,
     staleTime: Infinity,
-    refetchInterval: isWsConnected ? false : recommendedPollIntervalMs(30_000),
-    placeholderData: EMPTY_SYMBOLS,
+    // Keep permissions fresh even if an upstream WS event is missed.
+    refetchInterval: isWsConnected ? 10_000 : 20_000,
+    placeholderData: {
+      symbols: EMPTY_SYMBOLS,
+      effectiveMode: "BASIC_ONLY",
+      supportsCustom: false,
+      includesBaseline: true,
+    },
   });
 
-  const symbols = symbolsData ?? EMPTY_SYMBOLS;
+  const symbols = symbolsData?.symbols ?? EMPTY_SYMBOLS;
 
   useEffect(() => {
     const map = new Map<string, string>();
     const allowed = new Set<string>();
     (symbols || []).forEach((s) => {
-      if (s.enabled !== false) {
-        const sym = String(s.symbol).toUpperCase();
-        allowed.add(sym);
-        map.set(sym, s.name);
-      }
+      const sym = String(s.symbol).toUpperCase();
+      if (!sym) return;
+      allowed.add(sym);
+      map.set(sym, s.name);
     });
     symbolNameMapRef.current = map;
     allowedSymbolsRef.current = allowed;
@@ -142,7 +161,6 @@ export function QuotesProvider({ children }: { children: ReactNode }) {
 
   const requestedSymbols = useMemo(() => {
     return (symbols || [])
-      .filter((s) => s.enabled !== false)
       .map((s) => String(s.symbol).toUpperCase());
   }, [symbols]);
 
@@ -244,13 +262,8 @@ export function QuotesProvider({ children }: { children: ReactNode }) {
     });
   }, [applyQuoteRows, isAuthenticated, subscribe]);
 
-  const symbolsQuery = requestedSymbols.join(",");
-  const quotesUrl = symbolsQuery
-    ? `/api/quotes/latest?symbols=${encodeURIComponent(symbolsQuery)}`
-    : "/api/quotes/latest";
-
   const { data: latestQuotesData, isLoading, isError } = useQuery({
-    queryKey: [quotesUrl],
+    queryKey: ["/api/quotes/latest", requestedSymbols.join("|")],
     enabled: isAuthenticated && requestedSymbols.length > 0,
     refetchInterval: isWsConnected ? false : recommendedPollIntervalMs(5000),
     refetchOnWindowFocus: false,
@@ -281,8 +294,10 @@ export function QuotesProvider({ children }: { children: ReactNode }) {
       isConnected,
       isLoading: isSymbolsLoading || (isLoading && quotes.length === 0),
       hasStaleData,
+      supportsCustom: Boolean(symbolsData?.supportsCustom),
+      effectiveMode: symbolsData?.effectiveMode ?? "BASIC_ONLY",
     };
-  }, [hasStaleData, isConnected, isLoading, isSymbolsLoading, quotes]);
+  }, [hasStaleData, isConnected, isLoading, isSymbolsLoading, quotes, symbolsData?.effectiveMode, symbolsData?.supportsCustom]);
 
   return <QuotesContext.Provider value={value}>{children}</QuotesContext.Provider>;
 }

@@ -16,6 +16,19 @@ export type ProviderFetchQuotesResult = {
   raw?: unknown;
 };
 
+export type ProviderQuoteStreamState = "connecting" | "connected" | "reconnecting" | "disconnected";
+
+export type ProviderQuoteStreamHandlers = {
+  onQuotes: (quotes: ProviderQuote[]) => void | Promise<void>;
+  onError: (error: unknown) => void;
+  onStateChange?: (state: ProviderQuoteStreamState, meta?: Record<string, any>) => void;
+};
+
+export type ProviderQuoteStreamSession = {
+  updateSymbols: (symbols: ProviderSymbolInput[]) => void | Promise<void>;
+  close: (reason?: string) => void | Promise<void>;
+};
+
 export type ProviderCapability = {
   quotesRest: boolean;
   quotesWs: boolean;
@@ -37,6 +50,15 @@ export interface MarketDataProvider {
   fetchQuotes(params: { symbols: ProviderSymbolInput[] }): Promise<ProviderFetchQuotesResult>;
 
   /**
+   * Optional streaming quote source.
+   * If provided and capability.quotesWs is true, quoteFeed can switch upstream ingestion to provider WS.
+   */
+  openQuoteStream?(params: {
+    symbols: ProviderSymbolInput[];
+    handlers: ProviderQuoteStreamHandlers;
+  }): Promise<ProviderQuoteStreamSession>;
+
+  /**
    * Optional: list reference instruments for ingestion.
    * Must return an array of provider-native records (raw) that the ingestor can normalize.
    */
@@ -52,4 +74,3 @@ export interface MarketDataProvider {
    */
   mapSymbol?(canonicalSymbol: string): string | null;
 }
-

@@ -167,10 +167,25 @@ adminMarketDataRouter.get("/providers", async (_req, res) => {
       .where(and(isNull(marketDataProviders.deletedAt)))
       .orderBy(asc(marketDataProviders.providerKey));
 
-    const computeSecretStatus = (row: any): { configUsable: boolean; missingSecrets: string[] } => {
+    const computeProviderMeta = (row: any): {
+      configUsable: boolean;
+      missingSecrets: string[];
+      capability: {
+        quotesRest: boolean;
+        quotesWs: boolean;
+        referenceData: boolean;
+        batchSymbols: boolean;
+      } | null;
+      streamSupported: boolean;
+    } => {
       try {
         const cfgRaw = safeJsonParseObject(row.configJson);
         const parsed = MarketDataProviderConfigSchema.parse({ ...(cfgRaw || {}), driver: cfgRaw?.driver ?? row.driver });
+        const provider = buildProviderFromConfig({
+          providerKey: String(row.providerKey),
+          displayName: String(row.displayName),
+          cfg: parsed,
+        });
 
         const missingSecrets: string[] = [];
         const noteMissing = (ref: string | undefined | null) => {
@@ -196,9 +211,21 @@ adminMarketDataRouter.get("/providers", async (_req, res) => {
           }
         }
 
-        return { configUsable, missingSecrets: [...new Set(missingSecrets)].sort() };
+        return {
+          configUsable,
+          missingSecrets: [...new Set(missingSecrets)].sort(),
+          capability: provider?.capability
+            ? {
+                quotesRest: Boolean(provider.capability.quotesRest),
+                quotesWs: Boolean(provider.capability.quotesWs),
+                referenceData: Boolean(provider.capability.referenceData),
+                batchSymbols: Boolean(provider.capability.batchSymbols),
+              }
+            : null,
+          streamSupported: Boolean(provider?.capability?.quotesWs && typeof (provider as any)?.openQuoteStream === "function"),
+        };
       } catch {
-        return { configUsable: false, missingSecrets: [] };
+        return { configUsable: false, missingSecrets: [], capability: null, streamSupported: false };
       }
     };
 
@@ -207,8 +234,8 @@ adminMarketDataRouter.get("/providers", async (_req, res) => {
       activeKey,
       fallbackKeys,
       rows: rows.map((r: any) => {
-        const secretStatus = computeSecretStatus(r);
-        return { ...r, isActive: activeKey ? r.providerKey === activeKey : false, ...secretStatus };
+        const meta = computeProviderMeta(r);
+        return { ...r, isActive: activeKey ? r.providerKey === activeKey : false, ...meta };
       }),
     });
   } catch (e: any) {
@@ -558,6 +585,8 @@ adminMarketDataRouter.post("/providers/:providerKey/test", async (req, res) => {
       ok: true,
       providerKey: inst.providerKey,
       driver: inst.provider.driver,
+      capability: inst.provider.capability ?? null,
+      streamSupported: Boolean(inst.provider.capability?.quotesWs && typeof (inst.provider as any).openQuoteStream === "function"),
       quoteCount,
       sample: result.quotes.slice(0, 5),
       mappedSymbols: mapped.slice(0, 10),

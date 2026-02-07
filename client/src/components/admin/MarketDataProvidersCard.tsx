@@ -19,6 +19,13 @@ type ProviderRow = {
   isEnabled: boolean;
   configUsable?: boolean;
   missingSecrets?: string[];
+  capability?: {
+    quotesRest: boolean;
+    quotesWs: boolean;
+    referenceData: boolean;
+    batchSymbols: boolean;
+  } | null;
+  streamSupported?: boolean;
   createdAt: number;
   updatedAt: number;
   deletedAt: number | null;
@@ -285,6 +292,22 @@ export function MarketDataProvidersCard() {
                     </div>
                     <div className="text-xs text-gray-400 mt-1">
                       Driver: <span className="font-mono">{p.driver}</span>
+                      {p.capability ? (
+                        <>
+                          {" "}·{" "}
+                          {p.capability.quotesRest ? "REST" : "No REST"}
+                          {" / "}
+                          {p.capability.quotesWs ? "WS" : "No WS"}
+                          {" / "}
+                          {p.capability.referenceData ? "Reference data" : "No reference data"}
+                          {p.capability.quotesWs ? (
+                            <>
+                              {" / "}
+                              {p.streamSupported ? "WS stream adapter ready" : "WS stream adapter missing"}
+                            </>
+                          ) : null}
+                        </>
+                      ) : null}
                     </div>
                   </div>
 

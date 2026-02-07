@@ -12,7 +12,19 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 type ProvidersResp = {
   ok: boolean;
   activeKey: string | null;
-  rows: Array<{ providerKey: string; displayName: string; driver: string; isEnabled: boolean; deletedAt: number | null }>;
+  rows: Array<{
+    providerKey: string;
+    displayName: string;
+    driver: string;
+    isEnabled: boolean;
+    deletedAt: number | null;
+    capability?: {
+      quotesRest: boolean;
+      quotesWs: boolean;
+      referenceData: boolean;
+      batchSymbols: boolean;
+    } | null;
+  }>;
 };
 
 type ReferenceRow = {
@@ -66,9 +78,14 @@ export function InstrumentIngestionPanel() {
     () => (providersData?.rows || []).filter((p) => !p.deletedAt && p.isEnabled),
     [providersData?.rows],
   );
+  const [providerKey, setProviderKey] = useState<string>("");
+  const selectedProvider = useMemo(
+    () => providers.find((p) => p.providerKey === providerKey) ?? null,
+    [providerKey, providers],
+  );
+  const supportsReference = Boolean(selectedProvider?.capability?.referenceData ?? true);
 
   const [category, setCategory] = useState<string>("forex");
-  const [providerKey, setProviderKey] = useState<string>("");
   const [refreshLimit, setRefreshLimit] = useState<number>(500);
   const [filterJson, setFilterJson] = useState<string>("{}");
 
@@ -266,12 +283,17 @@ export function InstrumentIngestionPanel() {
           <div className="flex justify-end">
             <Button
               onClick={() => refreshMutation.mutate()}
-              disabled={refreshMutation.isPending || !providerKey}
+              disabled={refreshMutation.isPending || !providerKey || !supportsReference}
               className="bg-blue-600 hover:bg-blue-700"
             >
               {refreshMutation.isPending ? "Refreshing…" : "Refresh Reference List"}
             </Button>
           </div>
+          {!supportsReference ? (
+            <p className="text-xs text-amber-300">
+              Selected provider does not advertise reference-data ingestion support.
+            </p>
+          ) : null}
         </CardContent>
       </Card>
 

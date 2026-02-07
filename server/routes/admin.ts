@@ -25,8 +25,10 @@ import type { AccountActionProvenance } from "../lib/accountEventMirror";
 import { appendAuditEntry } from "../grift/griftAdminAudit";
 import { getGriftDb } from "../grift/griftDb";
 import { recalcAccount } from "../recalcAccount";
-import { publishLiveEvent } from "../services/liveBus";
+import { onLiveEvent, publishLiveEvent } from "../services/liveBus";
 import { TRADER_SEARCH_CATEGORIES } from "@shared/admin/traderSearch";
+
+let traderScoutCategoryLiveBusSubscribed = false;
 
 function getParam(value: string | string[]): string {
   return Array.isArray(value) ? value[0] : value;
@@ -615,6 +617,20 @@ export function registerAdminRoutes(app: Express) {
 
   const TRADER_SCOUT_CATEGORY_CACHE_TTL_MS = 60_000;
   let traderScoutCategoriesCache: { loadedAtMs: number; categories: string[]; set: Set<string> } | null = null;
+
+  if (!traderScoutCategoryLiveBusSubscribed) {
+    traderScoutCategoryLiveBusSubscribed = true;
+    onLiveEvent((event) => {
+      if (!event || typeof event !== "object") return;
+      if (
+        event.type === "symbols:updated" ||
+        event.type === "market-data:providers-updated" ||
+        event.type === "quote-subscriptions:updated"
+      ) {
+        traderScoutCategoriesCache = null;
+      }
+    });
+  }
 
   const loadTraderScoutAllowedCategories = async () => {
     const now = Date.now();

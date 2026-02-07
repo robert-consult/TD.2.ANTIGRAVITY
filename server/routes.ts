@@ -30,6 +30,7 @@ import { adminMarketDataRouter } from "./routes/adminMarketData";
 import { adminSystemConfigRouter } from './routes/adminSystemConfig';
 import { adminMigrationRouter } from './routes/adminMigration';
 import { adminActivityRouter } from "./routes/adminActivity";
+import { adminQuoteSubscriptionsRouter } from "./routes/adminQuoteSubscriptions";
 import { registerMetaRoutes } from "./routes/meta";
 import { registerMeSessionsRoutes } from "./routes/meSessions";
 import { registerAdminSecurityRoutes } from "./routes/adminSecurity";
@@ -69,6 +70,7 @@ import { ensureMarketDailyCloseTable } from "./utils/marketDailyClose";
 import { getI18nConfig } from "./i18n/config";
 import { i18nRouter } from "./routes/i18n";
 import { adminI18nRouter } from "./routes/adminI18n";
+import { quoteSubscriptionsRouter } from "./routes/quoteSubscriptions";
 import { getGlobalSettingsCached, getMinPriceDistancePips, sanitizeMinPriceDistancePips } from "./services/globalSettings";
 import { botGuard, persistBotAssessmentForUser } from "./security/botGuard";
 import { getTrustedProxyCountryIso2 } from "./security/proxyHeaders";
@@ -77,6 +79,7 @@ import { withGriftClient } from "./grift/griftDb";
 import { isMarketOpenForSymbol } from "./services/marketHours";
 import { getPipSize, getQuoteDecimals } from "@shared/pips";
 import { getProviderRateLimitStats } from "./marketdata/rateLimit";
+import { getAllowedSymbolsForUser } from "./services/quoteSubscriptions";
 
 /**
  * Precision-aware price comparison utilities for forex trading.
@@ -152,6 +155,8 @@ const SESSION_SECRET = requireEnv("SESSION_SECRET");
 // Prometheus counters (process-local; scraped via /metrics).
 let metricTradeCloseRejectedQuoteStaleTotal = 0;
 let metricTradeTargetsRejectedQuoteStaleTotal = 0;
+let metricWsQuotePermissionRefreshTotal = 0;
+let metricWsQuotePermissionRefreshErrorsTotal = 0;
 
 declare module "express-session" {
   interface SessionData {
@@ -4705,17 +4710,43 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Quotes endpoint for getting real-time price data
   // Add endpoint for getting all latest quotes (for REST polling)
+  function normalizeSymbolsInputRaw(raw: string | undefined): string[] {
+    if (!raw) return [];
+    return raw
+      .split(",")
+      .map((s) => s.trim().toUpperCase())
+      .filter(Boolean);
+  }
+
+  async function getAllowedQuoteSymbolsForRequest(req: Request): Promise<Set<string>> {
+    const sessionUserId = Number(req.session?.userId ?? 0);
+    const userId = Number.isInteger(sessionUserId) && sessionUserId > 0 ? sessionUserId : null;
+    return getAllowedSymbolsForUser(userId);
+  }
+
   app.get("/api/quotes/latest", async (req: Request, res: Response) => {
     try {
       const rawSymbols = String(req.query.symbols ?? "").trim();
-      const symbols = rawSymbols
-        ? rawSymbols
-          .split(",")
-          .map((s) => s.trim().toUpperCase())
-          .filter(Boolean)
-        : undefined;
-      const snapshot = await buildQuoteSnapshotResponse(symbols);
-      return res.json(snapshot.rows);
+      const requestedSymbols = rawSymbols ? normalizeSymbolsInputRaw(rawSymbols) : null;
+      const allowedSymbols = await getAllowedQuoteSymbolsForRequest(req);
+
+      const snapshotSymbols = requestedSymbols
+        ? requestedSymbols.filter((symbol) => allowedSymbols.has(symbol))
+        : Array.from(allowedSymbols.values());
+
+      if (!snapshotSymbols.length) {
+        return res.json([]);
+      }
+
+      const snapshot = await buildQuoteSnapshotResponse(snapshotSymbols);
+      const requestedSet = new Set(snapshotSymbols);
+      const rows = snapshot.rows.filter((row: any) => {
+        const symbol = String(row?.symbol ?? "").toUpperCase();
+        if (!symbol) return false;
+        return allowedSymbols.has(symbol) && requestedSet.has(symbol);
+      });
+
+      return res.json(rows);
     } catch (error) {
       console.error("Error fetching latest quotes:", error);
       return res.status(500).json({ message: "Failed to fetch quotes" });
@@ -4727,6 +4758,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const symbol = req.params.symbol.toUpperCase();
 
     try {
+      const allowedSymbols = await getAllowedQuoteSymbolsForRequest(req);
+      if (!allowedSymbols.has(symbol)) {
+        return res.status(403).json({ message: `Quote access denied for ${symbol}` });
+      }
+
       let quote: any | null = getQuote(symbol);
 
       if (!quote) {
@@ -4770,10 +4806,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use('/api/admin/legal-docs-v2', adminLegalDocsRouter); // DB-first admin legal docs (new)
   app.use('/api/admin/legal-acceptances', adminLegalAcceptancesRouter); // Legal acceptances management
   app.use("/api/admin/market-data", adminMarketDataRouter); // Market data providers + instrument ingestion
+  app.use("/api/admin/quote-subscriptions", adminQuoteSubscriptionsRouter); // Admin quote subscription controls
   app.use('/api/admin/system-config', adminSystemConfigRouter); // System config (coverage gate toggle)
   app.use("/api/admin/activity", adminActivityRouter); // Inactive users + bot management
 
   app.use("/api/admin/i18n", adminI18nRouter); // Admin controls for i18n
+  app.use("/api/quote-subscriptions", quoteSubscriptionsRouter); // Trader quote subscription controls
   registerGriftRoutes(app);
   app.use("/api/grift", griftPublicRouter);
   app.use('/api/admin/migration', adminMigrationRouter); // Migration export/import (backup)
@@ -4833,6 +4871,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         "# HELP trade_targets_rejected_quote_stale_total Target update requests rejected due to stale quotes (market open)",
         "# TYPE trade_targets_rejected_quote_stale_total counter",
         `trade_targets_rejected_quote_stale_total ${metricTradeTargetsRejectedQuoteStaleTotal}`,
+        "# HELP ws_quote_permission_refresh_total WebSocket clients whose quote permissions were recalculated",
+        "# TYPE ws_quote_permission_refresh_total counter",
+        `ws_quote_permission_refresh_total ${metricWsQuotePermissionRefreshTotal}`,
+        "# HELP ws_quote_permission_refresh_errors_total WebSocket quote-permission refresh failures",
+        "# TYPE ws_quote_permission_refresh_errors_total counter",
+        `ws_quote_permission_refresh_errors_total ${metricWsQuotePermissionRefreshErrorsTotal}`,
         "",
       ].join("\n"),
     );
@@ -4848,6 +4892,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     isImpersonating?: boolean;
     ipCountryIso2?: string;
     userCountryIso2?: string;
+    allowedQuoteSymbols?: Set<string>;
     quoteSymbols?: Set<string>;
     wantsQuotesAll?: boolean;
     quoteKey?: string;
@@ -4855,8 +4900,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     wantsAccount?: boolean;
   };
 
-  function computeQuoteKey(symbols: Set<string> | undefined, wantsAll: boolean | undefined): string {
-    if (wantsAll) return "*";
+  function computeQuoteKey(symbols: Set<string> | undefined): string {
     if (!symbols || symbols.size === 0) return "";
     return Array.from(symbols)
       .map((s) => String(s).toUpperCase())
@@ -4866,7 +4910,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   }
 
   function syncClientQuoteKey(client: LiveClient) {
-    client.quoteKey = computeQuoteKey(client.quoteSymbols, client.wantsQuotesAll);
+    client.quoteKey = computeQuoteKey(client.quoteSymbols);
   }
 
   function normIso2(v: any): string | undefined {
@@ -5000,6 +5044,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
   }
 
   async function sendQuoteSnapshot(socket: WebSocket, symbols?: string[]) {
+    if (Array.isArray(symbols) && symbols.length === 0) {
+      wsSendJson(socket, {
+        type: "quotes:snapshot",
+        protocolVersion: WS_PROTOCOL_VERSION,
+        seq: 0,
+        asOf: Date.now(),
+        rows: [],
+      });
+      return;
+    }
+
     const snapshot = await buildQuoteSnapshotResponse(symbols);
     wsSendJson(socket, {
       type: "quotes:snapshot",
@@ -5011,10 +5066,57 @@ export async function registerRoutes(app: Express): Promise<Server> {
   }
 
   function filterQuoteRowsForClient(rows: any[], client: LiveClient) {
-    if (client.wantsQuotesAll) return rows;
     const symbols = client.quoteSymbols;
     if (!symbols || symbols.size === 0) return [];
     return rows.filter((row) => row?.symbol && symbols.has(String(row.symbol).toUpperCase()));
+  }
+
+  async function refreshClientAllowedQuoteSymbols(client: LiveClient) {
+    const userId = typeof client.userId === "number" && Number.isFinite(client.userId) ? client.userId : null;
+    const allowedSymbols = await getAllowedSymbolsForUser(userId);
+    client.allowedQuoteSymbols = allowedSymbols;
+
+    if (client.wantsQuotesAll) {
+      client.quoteSymbols = new Set(allowedSymbols);
+      syncClientQuoteKey(client);
+      return;
+    }
+
+    const current = client.quoteSymbols ?? new Set<string>();
+    const filtered = new Set<string>();
+    for (const symbol of current) {
+      if (allowedSymbols.has(symbol)) filtered.add(symbol);
+    }
+    client.quoteSymbols = filtered;
+    syncClientQuoteKey(client);
+  }
+
+  async function refreshWsQuotePermissions(targetUserIds?: Set<number>) {
+    const tasks: Array<Promise<void>> = [];
+
+    for (const ws of wss.clients as Set<LiveClient>) {
+      const client = ws as LiveClient;
+      if (client.readyState !== WebSocket.OPEN) continue;
+
+      const userId = typeof client.userId === "number" ? client.userId : null;
+      if (targetUserIds) {
+        if (!userId || !targetUserIds.has(userId)) continue;
+      }
+
+      tasks.push(
+        (async () => {
+          await refreshClientAllowedQuoteSymbols(client);
+          const snapshotSymbols = Array.from(client.quoteSymbols ?? []);
+          await sendQuoteSnapshot(client, snapshotSymbols);
+        })(),
+      );
+    }
+
+    if (tasks.length) {
+      const settled = await Promise.allSettled(tasks);
+      metricWsQuotePermissionRefreshTotal += tasks.length;
+      metricWsQuotePermissionRefreshErrorsTotal += settled.filter((entry) => entry.status === "rejected").length;
+    }
   }
 
   wss.on("connection", async (socket, req) => {
@@ -5058,16 +5160,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         if (type === "quotes:subscribe") {
           const symbols = normalizeSymbolsInput((msg as any).symbols);
+          const allowedSymbols = client.allowedQuoteSymbols ?? new Set<string>();
           if (!symbols.length) {
             client.wantsQuotesAll = true;
+            client.quoteSymbols = new Set(allowedSymbols);
           } else {
             client.wantsQuotesAll = false;
             for (const symbol of symbols) {
-              client.quoteSymbols?.add(symbol);
+              if (allowedSymbols.has(symbol)) {
+                client.quoteSymbols?.add(symbol);
+              }
             }
           }
           syncClientQuoteKey(client);
-          const snapshotSymbols = client.wantsQuotesAll ? undefined : Array.from(client.quoteSymbols ?? []);
+          const snapshotSymbols = Array.from(client.quoteSymbols ?? []);
           await sendQuoteSnapshot(socket, snapshotSymbols);
           return;
         }
@@ -5162,6 +5268,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     client.isImpersonating = false;
     client.ipCountryIso2 = undefined;
     client.userCountryIso2 = undefined;
+    client.allowedQuoteSymbols = new Set();
     client.quoteSymbols = new Set();
     client.wantsQuotesAll = false;
     client.quoteKey = "";
@@ -5228,6 +5335,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.warn("[WS] Failed to bind session to websocket:", e);
     }
 
+    try {
+      await refreshClientAllowedQuoteSymbols(client);
+    } catch (e) {
+      console.warn("[WS] Failed to resolve allowed quote symbols:", e);
+      client.allowedQuoteSymbols = new Set();
+      client.quoteSymbols = new Set();
+      client.wantsQuotesAll = false;
+      syncClientQuoteKey(client);
+    }
+
     wsReady = true;
     if (pendingMessages.length) {
       const queued = pendingMessages.splice(0);
@@ -5262,6 +5379,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Bridge internal live events to WebSocket clients (user-scoped when userId is present)
   onLiveEvent((event) => {
     const ev = event as any;
+    if (ev?.type === "quote-subscriptions:updated") {
+      const userIds = Array.isArray(ev?.payload?.userIds)
+        ? new Set(
+          (ev.payload.userIds as any[])
+            .map((id) => Number(id))
+            .filter((id) => Number.isInteger(id) && id > 0),
+        )
+        : undefined;
+
+      const targetUserIds = userIds && userIds.size > 0 ? userIds : undefined;
+      const eventPayload = {
+        type: "quote-subscriptions:updated",
+        payload: ev?.payload ?? null,
+      };
+
+      void (async () => {
+        await refreshWsQuotePermissions(targetUserIds);
+        // Broadcast config-change signal to all connected clients so query caches
+        // refresh even for sockets that have not yet bound a userId.
+        broadcast(eventPayload);
+      })();
+      return;
+    }
+
     if (ev?.type === "quotes:update" && Array.isArray(ev?.payload?.rows)) {
       const seq = Number(ev.payload?.seq ?? 0);
       const asOf = Number(ev.payload?.asOf ?? Date.now());
@@ -5272,7 +5413,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       for (const ws of wss.clients as Set<LiveClient>) {
         if (ws.readyState !== WebSocket.OPEN) continue;
         const client = ws as LiveClient;
-        const key = client.quoteKey ?? computeQuoteKey(client.quoteSymbols, client.wantsQuotesAll);
+        const key = client.quoteKey ?? computeQuoteKey(client.quoteSymbols);
         if (!key) continue;
         const list = groups.get(key);
         if (list) list.push(client);

@@ -6,6 +6,8 @@ import { TierBadge } from "@/components/TierBadge";
 import type { UserTier } from "@shared/schema";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { NotificationBell } from "@/components/NotificationBell";
+import { useMailboxE2eeBootstrap } from "@/hooks/use-mailbox";
 
 type HeaderProps = {
   title?: string;
@@ -14,6 +16,7 @@ type HeaderProps = {
 
 export function Header({ title = "TradeQuip", showBalance = false }: HeaderProps) {
   const { user, logout, checkAuth } = useAuth();
+  useMailboxE2eeBootstrap();
   const { toast } = useToast();
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [isPromotingAdmin, setIsPromotingAdmin] = useState(false);
@@ -95,6 +98,7 @@ export function Header({ title = "TradeQuip", showBalance = false }: HeaderProps
 
         {user && (
           <div className="flex items-center relative gap-2">
+            <NotificationBell />
             {showBalance ? (
               <div className="flex items-center gap-[clamp(0.2rem,0.8vw,0.35rem)] rounded-full bg-white/[0.03] border border-white/10 px-[clamp(0.4rem,1.4vw,0.65rem)] py-[clamp(0.2rem,0.8vw,0.35rem)] min-w-0">
                 <span className="text-[clamp(0.5rem,0.46rem+0.25vw,0.65rem)] font-semibold tracking-wide text-gray-500 whitespace-nowrap leading-none">

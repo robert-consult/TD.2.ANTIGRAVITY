@@ -32,6 +32,7 @@ import {
 import crypto from "crypto";
 import { mirrorAccountEventToTradeAudit, type AccountActionProvenance } from "./lib/accountEventMirror";
 import { revokeAllSessionsForUser } from "./security/sessionTrail";
+import { createNotification, sendFreezeMailboxMessage, sendUnfreezeMailboxMessage } from "./services/messaging";
 
 // Type for signup fingerprint data
 export type SignupFingerprintData = {
@@ -1187,6 +1188,29 @@ export const storage = {
     } catch (e) {
       console.error("Failed to revoke sessions after freeze:", e);
     }
+
+    void createNotification({
+      userId: params.userId,
+      type: "ACCOUNT",
+      severity: "CRITICAL",
+      title: "Account frozen",
+      message: params.reasonText
+        ? `Your account has been frozen. Reason: ${params.reasonCode}: ${params.reasonText}.`
+        : `Your account has been frozen. Reason: ${params.reasonCode}.`,
+      sourceEvent: `ACCOUNT_FREEZE:${params.userId}:${nowSec}`,
+      link: "/profile",
+      playSound: true,
+    }).catch((err) => {
+      console.error("[notifications] failed to create freeze notification:", err);
+    });
+
+    void sendFreezeMailboxMessage({
+      userId: params.userId,
+      reasonCode: params.reasonCode,
+      reasonText: params.reasonText,
+    }).catch((err) => {
+      console.error("[mailbox] failed to create freeze mailbox message:", err);
+    });
      
     return updated;
   },
@@ -1197,6 +1221,7 @@ export const storage = {
     reason?: string;
     provenance?: AccountActionProvenance;
   }): Promise<User> {
+    const timestamp = Math.floor(Date.now() / 1000);
     const [updated] = await db.update(users)
       .set({
         isFrozen: false,
@@ -1236,6 +1261,28 @@ export const storage = {
     } catch (e) {
       console.warn("[audit] logAdminAction failed (unfreezeUserAccount):", e);
     }
+
+    void createNotification({
+      userId: params.userId,
+      type: "ACCOUNT",
+      severity: "SUCCESS",
+      title: "Account unfrozen",
+      message: params.reason
+        ? `Your account access has been restored. Note: ${params.reason}.`
+        : "Your account access has been restored.",
+      sourceEvent: `ACCOUNT_UNFREEZE:${params.userId}:${timestamp}`,
+      link: "/profile",
+      playSound: true,
+    }).catch((err) => {
+      console.error("[notifications] failed to create unfreeze notification:", err);
+    });
+
+    void sendUnfreezeMailboxMessage({
+      userId: params.userId,
+      reason: params.reason,
+    }).catch((err) => {
+      console.error("[mailbox] failed to create unfreeze mailbox message:", err);
+    });
      
     return updated;
   },

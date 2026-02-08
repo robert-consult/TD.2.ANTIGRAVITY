@@ -20,6 +20,7 @@ import { writeTradeAudit, generateCorrelationId, generateOrderId, generateExecut
 import type { CloseReasonCode } from "@shared/closeReasons";
 import { onLiveEvent, publishLiveEvent } from "../services/liveBus";
 import { applyUserBalanceDelta, releaseUserMargin } from "../services/tradeAtomic";
+import { createNotification } from "../services/messaging";
 
 const STALE_DEFER_MAX_MIN = Number(process.env.AUTOCLOSE_STALE_DEFER_MAX_MIN ?? 60);
 const ALLOW_STALE_CLOSE = String(process.env.AUTOCLOSE_ALLOW_STALE_CLOSE ?? "true") === "true";
@@ -216,6 +217,18 @@ async function runAutoCloseJob() {
           type: "trades:updated",
           userId: trade.userId,
           payload: { reason: closeReasonCode, tradeId: trade.id },
+        });
+        void createNotification({
+          userId: trade.userId,
+          type: "TRADE",
+          severity: "WARNING",
+          title: "Trade closed by max hold time",
+          message: `${q.symbol} position was auto-closed after exceeding the maximum hold duration.`,
+          sourceEvent: `${closeReasonCode}:${trade.id}:${Math.floor(Date.now() / 1000)}`,
+          link: "/",
+          playSound: true,
+        }).catch((err) => {
+          log(`[notifications] failed to create max-hold notification trade=${trade.id}: ${String(err)}`);
         });
       } catch (e) {
         log(`Error auto-closing trade=${trade.id}: ${e}`);

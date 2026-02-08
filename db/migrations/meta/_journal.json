@@ -113,6 +113,34 @@
       "when": 1775439600000,
       "tag": "0015_quote_subscriptions",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1775862000000,
+      "tag": "0016_messaging_notifications",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1775865600000,
+      "tag": "0017_communication_settings",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1775908800000,
+      "tag": "0018_messaging_security_hardening",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1775925600000,
+      "tag": "0019_messaging_e2ee_audit",
+      "breakpoints": true
     }
   ]
 }

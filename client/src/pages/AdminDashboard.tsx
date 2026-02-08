@@ -29,6 +29,7 @@ import axios from "axios";
 import SymbolSelect from "../components/SymbolSelect";
 import AdminData from "@/pages/AdminData";
 import AdminTradeAudit from "@/pages/AdminTradeAudit";
+import AdminCommunications from "@/pages/AdminCommunications";
 import GriftAdmin, { KycQueueTab } from "@/components/admin/GriftAdmin";
 import UserActivityAdmin from "@/components/admin/UserActivityAdmin";
 import { AdminLegalPanel } from "@/components/admin/AdminLegalTabs";
@@ -2957,6 +2958,10 @@ export default function AdminDashboard() {
                 <span className="hidden md:inline">Trade Audit</span>
                 <span className="md:hidden">Audit</span>
               </TabsTrigger>
+              <TabsTrigger value="communications" className="shrink-0 text-[10px] sm:text-xs md:text-sm data-[state=active]:bg-cyan-600/60 data-[state=active]:text-white px-1.5 sm:px-2 py-1.5">
+                <span className="hidden md:inline">Communications</span>
+                <span className="md:hidden">Comms</span>
+              </TabsTrigger>
               <TabsTrigger value="system" className="shrink-0 text-[10px] sm:text-xs md:text-sm data-[state=active]:bg-slate-600/60 data-[state=active]:text-white px-1.5 sm:px-2 py-1.5">
                 <span className="hidden md:inline">System Config</span>
                 <span className="md:hidden">Config</span>
@@ -4731,6 +4736,10 @@ export default function AdminDashboard() {
 
             <TabsContent value="audit" className="p-4">
               <AdminTradeAudit />
+            </TabsContent>
+
+            <TabsContent value="communications" className="p-4">
+              <AdminCommunications />
             </TabsContent>
 
             <TabsContent value="system" className="p-4">

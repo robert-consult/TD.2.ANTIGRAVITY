@@ -15,6 +15,7 @@ import { buildDecisionContext } from "../policy/buildDecisionContext";
 import { decidePolicy } from "@shared/policyDecision";
 import { loadPolicyConfig } from "../policy/getPolicyConfig";
 import { applyUserBalanceDelta, releaseUserMargin, reserveUserMargin } from "../services/tradeAtomic";
+import { createNotification } from "../services/messaging";
 import { 
   writeTradeAudit, 
   generateCorrelationId, 
@@ -680,6 +681,18 @@ async function processPendingForSymbol(symbol: string, q: Quote) {
       userId: u.id,
       payload: { reason: "PENDING_ORDER_FILLED", tradeId: t.id },
     });
+    void createNotification({
+      userId: u.id,
+      type: "TRADE",
+      severity: "INFO",
+      title: "Pending order filled",
+      message: `Pending ${String(t.orderType || "order")} for ${symbol} filled at ${fillPrice.toFixed(5)}.`,
+      sourceEvent: `PENDING_ORDER_FILLED:${t.id}:${Math.floor(Date.now() / 1000)}`,
+      link: "/",
+      playSound: true,
+    }).catch((err) => {
+      console.error("[notifications] failed to create pending-fill notification:", err);
+    });
     console.log(`[OrderEngine] Filled pending order: trade=${t.id} type=${t.orderType} fillPrice=${fillPrice}`);
   }
 }
@@ -829,6 +842,22 @@ async function processStopsForOpenTrades(symbol: string, q: Quote) {
       userId: u.id,
       payload: { reason: reason ?? "STOP_TAKE_PROFIT", tradeId: t.id },
     });
+    if (reason === "STOP_LOSS_HIT" || reason === "TAKE_PROFIT_HIT") {
+      const title = reason === "TAKE_PROFIT_HIT" ? "Take Profit hit" : "Stop Loss hit";
+      const severity = reason === "TAKE_PROFIT_HIT" ? "SUCCESS" : "WARNING";
+      void createNotification({
+        userId: u.id,
+        type: "TRADE",
+        severity,
+        title,
+        message: `${title} for ${symbol} at ${closePx.toFixed(5)}. P/L ${profit}.`,
+        sourceEvent: `${reason}:${t.id}:${closedAt}`,
+        link: "/",
+        playSound: true,
+      }).catch((err) => {
+        console.error("[notifications] failed to create SL/TP notification:", err);
+      });
+    }
     console.log(`[OrderEngine] Closed position via ${reason}: trade=${t.id} profit=${profit}`);
   }
 }

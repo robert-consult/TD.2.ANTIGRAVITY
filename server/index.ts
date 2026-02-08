@@ -184,6 +184,67 @@ if (app.get("env") !== "development") {
   app.use(compression());
 }
 
+function envFlagEnabled(value: string | undefined, fallback: boolean): boolean {
+  if (value === undefined) return fallback;
+  const normalized = String(value).trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
+  return fallback;
+}
+
+function isRequestTransportSecure(req: Request): boolean {
+  if (Boolean(req.secure)) return true;
+  const xfProtoRaw = req.headers["x-forwarded-proto"];
+  const xfProto = Array.isArray(xfProtoRaw) ? xfProtoRaw[0] : String(xfProtoRaw ?? "");
+  const firstProto = xfProto.split(",")[0]?.trim().toLowerCase();
+  return firstProto === "https" || firstProto === "wss";
+}
+
+const isProdRuntime = process.env.NODE_ENV === "production";
+const transportHeadersEnabled = envFlagEnabled(process.env.TRANSPORT_HEADERS_ENABLED, true);
+const transportTlsRequired = envFlagEnabled(
+  process.env.TRANSPORT_REQUIRE_TLS,
+  isProdRuntime && process.env.COOKIE_SECURE !== "false",
+);
+const transportHstsEnabled = envFlagEnabled(process.env.TRANSPORT_HSTS_ENABLED, isProdRuntime);
+const transportHstsIncludeSubdomains = envFlagEnabled(process.env.TRANSPORT_HSTS_INCLUDE_SUBDOMAINS, true);
+const transportHstsPreload = envFlagEnabled(process.env.TRANSPORT_HSTS_PRELOAD, true);
+const transportHstsMaxAgeSec = (() => {
+  const parsed = Number(process.env.TRANSPORT_HSTS_MAX_AGE_SEC ?? 31536000);
+  if (!Number.isFinite(parsed)) return 31536000;
+  return Math.max(300, Math.min(63072000, Math.trunc(parsed)));
+})();
+
+app.use((req, res, next) => {
+  if (transportHeadersEnabled) {
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("X-Frame-Options", "DENY");
+    res.setHeader("Referrer-Policy", "same-origin");
+    res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+
+    if (transportHstsEnabled && isRequestTransportSecure(req)) {
+      const directives = [`max-age=${transportHstsMaxAgeSec}`];
+      if (transportHstsIncludeSubdomains) directives.push("includeSubDomains");
+      if (transportHstsPreload) directives.push("preload");
+      res.setHeader("Strict-Transport-Security", directives.join("; "));
+    }
+  }
+  next();
+});
+
+app.use("/api", (req, res, next) => {
+  if (!transportTlsRequired) return next();
+  if (isRequestTransportSecure(req)) return next();
+
+  // Keep health probes available if deployment intentionally performs plain HTTP checks internally.
+  if (req.path === "/status" || req.path === "/health") return next();
+
+  return res.status(426).json({
+    message: "TLS_REQUIRED",
+    code: "TRANSPORT_TLS_REQUIRED",
+  });
+});
+
 // Lightweight health check - responds immediately before any middleware
 // This ensures deployment health checks pass quickly
 app.get("/", (req, res, next) => {

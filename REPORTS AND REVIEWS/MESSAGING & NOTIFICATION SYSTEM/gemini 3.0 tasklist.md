@@ -1,0 +1,42 @@
+# Task: Design Internal Mailbox/Messaging System
+
+- [x] Explore Codebase for Context <!-- id: 0 -->
+    - [x] Analyze Database Schema <!-- id: 1 -->
+    - [x] Analyze Admin Dashboard Components <!-- id: 2 -->
+    - [x] Analyze Client Account Components <!-- id: 3 -->
+    - [x] Identify Notification/Messaging Infrastructure <!-- id: 4 -->
+- [x] Create Product Requirements Document (PRD) <!-- id: 5 -->
+    - [x] Define Functional Requirements <!-- id: 6 -->
+    - [x] Define Non-Functional Requirements <!-- id: 7 -->
+    - [x] Define UI/UX Requirements <!-- id: 8 -->
+    - [x] Incorporate User Feedback (Targeting, Sounds, Triggers) <!-- id: 18 -->
+- [x] Develop Algorithm Design <!-- id: 9 -->
+    - [x] Message Routing & Delivery Logic <!-- id: 10 -->
+    - [x] Notification Trigger Logic <!-- id: 11 -->
+    - [x] Filtering & Targeting Logic <!-- id: 12 -->
+    - [x] Incorporate User Feedback (Sound Logic, Manual Exclusions) <!-- id: 19 -->
+- [ ] Create Implementation Plan <!-- id: 13 -->
+    - [x] Database Schema Changes <!-- id: 14 -->
+    - [x] Backend API Endpoints <!-- id: 15 -->
+    - [x] Frontend Components (Admin & Client) <!-- id: 16 -->
+    - [x] Integration Steps <!-- id: 17 -->
+    - [x] Incorporate User Feedback (Sound Assets, Signup Hooks) <!-- id: 20 -->
+
+# Implementation Phase
+- [/] **Database Schema Implementation** <!-- id: 21 -->
+    - [ ] Create `mailbox_threads` table <!-- id: 22 -->
+    - [ ] Create `mailbox_messages` table <!-- id: 23 -->
+    - [ ] Create `mailbox_participants` table <!-- id: 24 -->
+    - [ ] Create `notifications` table <!-- id: 25 -->
+- [ ] **Backend Implementation** <!-- id: 26 -->
+    - [ ] Create `server/routes/mailbox.ts` <!-- id: 27 -->
+    - [ ] Create `server/routes/notifications.ts` <!-- id: 28 -->
+    - [ ] Register routes in `server/routes.ts` <!-- id: 29 -->
+    - [ ] Update `server/services/tradeService.ts` with hooks <!-- id: 30 -->
+    - [ ] Update `server/routes/auth.ts` for welcome message <!-- id: 31 -->
+- [ ] **Frontend Implementation** <!-- id: 32 -->
+    - [ ] Add sound asset <!-- id: 33 -->
+    - [ ] Create `MailboxMinitab.tsx` <!-- id: 34 -->
+    - [ ] Create `AdminCommunications.tsx` <!-- id: 35 -->
+    - [ ] Update `Header.tsx` (Bell icon & Sound) <!-- id: 36 -->
+    - [ ] Update `AdminDashboard.tsx` <!-- id: 37 -->

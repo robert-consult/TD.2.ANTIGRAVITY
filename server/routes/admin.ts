@@ -27,6 +27,7 @@ import { getGriftDb } from "../grift/griftDb";
 import { recalcAccount } from "../recalcAccount";
 import { onLiveEvent, publishLiveEvent } from "../services/liveBus";
 import { TRADER_SEARCH_CATEGORIES } from "@shared/admin/traderSearch";
+import { createNotification, sendKycMailboxMessage } from "../services/messaging";
 
 let traderScoutCategoryLiveBusSubscribed = false;
 
@@ -153,6 +154,48 @@ async function ensureDefaultPayoutCurrency(user: any, userId: number, nowSec: nu
     updatedAt: nowSec,
   });
   return preferred;
+}
+
+async function notifyKycStatusChange(params: {
+  userId: number;
+  status: string;
+  note?: string | null;
+  actorAdminId: number;
+}) {
+  const status = String(params.status || "").toUpperCase();
+  const title =
+    status === "APPROVED"
+      ? "KYC approved"
+      : status === "REJECTED"
+        ? "KYC rejected"
+        : status === "INVITED"
+          ? "KYC invited"
+          : `KYC status: ${status}`;
+  const message = params.note
+    ? `${title}. ${params.note}`
+    : `${title}. Check your account for next steps.`;
+
+  void createNotification({
+    userId: params.userId,
+    type: "KYC",
+    severity: status === "REJECTED" ? "WARNING" : status === "APPROVED" ? "SUCCESS" : "INFO",
+    title,
+    message,
+    sourceEvent: `KYC_${status}:${params.userId}:${params.actorAdminId}:${Math.floor(Date.now() / 1000)}`,
+    link: "/account",
+    playSound: true,
+  }).catch((err) => {
+    console.error("[notifications] failed to create KYC notification:", err);
+  });
+
+  void sendKycMailboxMessage({
+    userId: params.userId,
+    actorAdminId: params.actorAdminId,
+    subject: `KYC Update: ${status}`,
+    body: message,
+  }).catch((err) => {
+    console.error("[mailbox] failed to create KYC mailbox update:", err);
+  });
 }
 
 export function registerAdminRoutes(app: Express) {
@@ -4103,6 +4146,13 @@ FROM (
         userAgent: req.headers["user-agent"],
       });
 
+      await notifyKycStatusChange({
+        userId,
+        status,
+        note: typeof notes === "string" ? notes : null,
+        actorAdminId: adminId,
+      });
+
       res.json({ success: true, message: `KYC status updated to ${status}` });
     } catch (error) {
       console.error("Update KYC status error:", error);
@@ -4195,6 +4245,13 @@ FROM (
         userAgent: req.headers["user-agent"],
       });
 
+      await notifyKycStatusChange({
+        userId,
+        status: "INVITED",
+        note: typeof note === "string" ? note : null,
+        actorAdminId: adminId,
+      });
+
       res.json({ success: true, message: "KYC invitation sent" });
     } catch (error) {
       console.error("KYC invite error:", error);
@@ -4284,6 +4341,17 @@ FROM (
         actorAdminId: adminId,
         ip: req.ip || (req.headers["x-forwarded-for"] as string),
         userAgent: req.headers["user-agent"],
+      });
+
+      await notifyKycStatusChange({
+        userId,
+        status: decision,
+        note: typeof rejectionReason === "string" && rejectionReason
+          ? rejectionReason
+          : typeof note === "string"
+            ? note
+            : null,
+        actorAdminId: adminId,
       });
 
       res.json({

@@ -80,6 +80,9 @@ import { isMarketOpenForSymbol } from "./services/marketHours";
 import { getPipSize, getQuoteDecimals } from "@shared/pips";
 import { getProviderRateLimitStats } from "./marketdata/rateLimit";
 import { getAllowedSymbolsForUser } from "./services/quoteSubscriptions";
+import { mailboxRouter } from "./routes/mailbox";
+import { notificationsRouter } from "./routes/notifications";
+import { getMessagingMetrics, sendWelcomeMailboxMessage } from "./services/messaging";
 
 /**
  * Precision-aware price comparison utilities for forex trading.
@@ -1346,6 +1349,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           })
         );
       }
+
+      void sendWelcomeMailboxMessage(user.id).catch((mailErr) => {
+        console.error("[mailbox] failed to send signup welcome message:", mailErr);
+      });
 
       const gracePeriodMsReg = 14 * 24 * 60 * 60 * 1000;
       const createdAtMsReg = typeof user.createdAt === 'number'
@@ -4812,6 +4819,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.use("/api/admin/i18n", adminI18nRouter); // Admin controls for i18n
   app.use("/api/quote-subscriptions", quoteSubscriptionsRouter); // Trader quote subscription controls
+  app.use("/api/mailbox", mailboxRouter); // Internal mailbox + admin communications
+  app.use("/api/notifications", notificationsRouter); // User notifications center
   registerGriftRoutes(app);
   app.use("/api/grift", griftPublicRouter);
   app.use('/api/admin/migration', adminMigrationRouter); // Migration export/import (backup)
@@ -4830,6 +4839,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const quoteMeta = getQuoteMeta();
     const wsCount = wss.clients ? wss.clients.size : 0;
     const providerRateStats = getProviderRateLimitStats();
+    const messagingMetrics = getMessagingMetrics();
     res.setHeader("Content-Type", "text/plain; version=0.0.4");
     res.send(
       [
@@ -4877,12 +4887,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
         "# HELP ws_quote_permission_refresh_errors_total WebSocket quote-permission refresh failures",
         "# TYPE ws_quote_permission_refresh_errors_total counter",
         `ws_quote_permission_refresh_errors_total ${metricWsQuotePermissionRefreshErrorsTotal}`,
+        "# HELP mailbox_fanout_queue_depth Pending mailbox fanout jobs",
+        "# TYPE mailbox_fanout_queue_depth gauge",
+        `mailbox_fanout_queue_depth ${messagingMetrics.mailboxFanoutQueueDepth}`,
+        "# HELP mailbox_fanout_running Whether mailbox fanout worker is currently running",
+        "# TYPE mailbox_fanout_running gauge",
+        `mailbox_fanout_running ${messagingMetrics.mailboxFanoutRunning}`,
+        "# HELP mailbox_fanout_enqueued_total Total mailbox recipients enqueued for async fanout",
+        "# TYPE mailbox_fanout_enqueued_total counter",
+        `mailbox_fanout_enqueued_total ${messagingMetrics.mailboxFanoutEnqueuedTotal}`,
+        "# HELP mailbox_fanout_processed_total Total mailbox recipients processed by async fanout",
+        "# TYPE mailbox_fanout_processed_total counter",
+        `mailbox_fanout_processed_total ${messagingMetrics.mailboxFanoutProcessedTotal}`,
+        "# HELP mailbox_fanout_failed_total Total mailbox recipients that failed async fanout processing",
+        "# TYPE mailbox_fanout_failed_total counter",
+        `mailbox_fanout_failed_total ${messagingMetrics.mailboxFanoutFailedTotal}`,
         "",
       ].join("\n"),
     );
   });
 
   const WS_PROTOCOL_VERSION = 1;
+  const wsTransportTlsRequired =
+    process.env.NODE_ENV === "production" &&
+    process.env.COOKIE_SECURE !== "false" &&
+    !["0", "false", "off", "no"].includes(
+      String(process.env.WS_TRANSPORT_REQUIRE_TLS ?? "1").trim().toLowerCase(),
+    );
 
   // Helper type for WebSocket clients
   type LiveClient = WebSocket & {
@@ -4920,6 +4951,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   function readWsHeaderIso2(req: any): string | undefined {
     return getTrustedProxyCountryIso2(req as Request);
+  }
+
+  function isWsRequestTransportSecure(req: any): boolean {
+    if (Boolean(req?.socket?.encrypted)) return true;
+    const protoHeaderRaw = req?.headers?.["x-forwarded-proto"];
+    const protoHeader = Array.isArray(protoHeaderRaw) ? protoHeaderRaw[0] : String(protoHeaderRaw ?? "");
+    const proto = protoHeader.split(",")[0]?.trim().toLowerCase();
+    return proto === "https" || proto === "wss";
   }
 
   function getWsSessionIdFromCookies(req: any): string | undefined {
@@ -5123,6 +5162,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const client = socket as LiveClient;
     const pendingMessages: any[] = [];
     let wsReady = false;
+
+    if (wsTransportTlsRequired && !isWsRequestTransportSecure(req)) {
+      wsSendJson(socket, {
+        type: "ws:error",
+        code: "TRANSPORT_TLS_REQUIRED",
+        message: "Secure transport required",
+      });
+      try {
+        socket.close(4401, "TLS_REQUIRED");
+      } catch {
+        // ignore close race
+      }
+      return;
+    }
 
     const handleMessage = async (raw: any) => {
       try {

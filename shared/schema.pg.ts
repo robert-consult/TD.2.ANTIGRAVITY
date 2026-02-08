@@ -80,6 +80,10 @@ export const users = pgTable("users", {
   signupDeviceFp: text("signup_device_fp"),
   signupDeviceInstallId: text("signup_device_install_id"),
   signupClientLang: text("signup_client_lang"),
+  mailboxPublicKey: text("mailbox_public_key"),
+  mailboxPublicKeyAlgo: text("mailbox_public_key_algo"),
+  mailboxPublicKeyFingerprint: text("mailbox_public_key_fingerprint"),
+  mailboxPublicKeyUpdatedAt: integer("mailbox_public_key_updated_at"),
 });
 
 // Signup fingerprints - immutable audit record (write-once per signup)
@@ -352,7 +356,228 @@ export const userSettings = pgTable("user_settings", {
     .default(true),
 });
 
+// Internal mailbox threads (formal admin↔trader communications)
+export const mailboxThreads = pgTable(
+  "mailbox_threads",
+  {
+    id: serial("id").primaryKey(),
+    subject: text("subject"),
+    createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: integer("created_at").notNull().default(nowUnix),
+    updatedAt: integer("updated_at").notNull().default(nowUnix),
+    isBroadcast: boolean("is_broadcast").notNull().default(false),
+    category: text("category").notNull().default("SUPPORT"), // SYSTEM | SUPPORT | ANNOUNCEMENT
+  },
+  (table) => ({
+    updatedAtIdx: index("mailbox_threads_updated_at_idx").on(table.updatedAt),
+    createdByIdx: index("mailbox_threads_created_by_idx").on(table.createdBy),
+  }),
+);
+
+// Individual mailbox messages inside a thread
+export const mailboxMessages = pgTable(
+  "mailbox_messages",
+  {
+    id: serial("id").primaryKey(),
+    threadId: integer("thread_id")
+      .notNull()
+      .references(() => mailboxThreads.id, { onDelete: "cascade" }),
+    senderId: integer("sender_id").references(() => users.id, { onDelete: "set null" }),
+    body: text("body").notNull().default(""),
+    bodyEncrypted: text("body_encrypted"),
+    bodyEncoding: text("body_encoding").notNull().default("PLAINTEXT_V0"),
+    encryptionVersion: integer("encryption_version").notNull().default(0),
+    bodyDigestSha256: text("body_digest_sha256"),
+    e2eeEnvelope: text("e2ee_envelope"),
+    e2eeSenderKeyFingerprint: text("e2ee_sender_key_fingerprint"),
+    contentFormat: text("content_format").notNull().default("PLAINTEXT"), // PLAINTEXT | MARKDOWN
+    createdAt: integer("created_at").notNull().default(nowUnix),
+    allowReply: boolean("allow_reply").notNull().default(false),
+    messageType: text("message_type").notNull().default("DIRECT"),
+    metadata: text("metadata").notNull().default("{}"),
+  },
+  (table) => ({
+    threadCreatedIdx: index("mailbox_messages_thread_created_idx").on(table.threadId, table.createdAt),
+    senderIdx: index("mailbox_messages_sender_idx").on(table.senderId),
+  }),
+);
+
+// Per-user mailbox thread membership and read markers
+export const mailboxParticipants = pgTable(
+  "mailbox_participants",
+  {
+    threadId: integer("thread_id")
+      .notNull()
+      .references(() => mailboxThreads.id, { onDelete: "cascade" }),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    lastReadMessageId: integer("last_read_message_id").references(() => mailboxMessages.id, { onDelete: "set null" }),
+    isArchived: boolean("is_archived").notNull().default(false),
+    isPinned: boolean("is_pinned").notNull().default(false),
+    createdAt: integer("created_at").notNull().default(nowUnix),
+    updatedAt: integer("updated_at").notNull().default(nowUnix),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.threadId, table.userId] }),
+    userUpdatedIdx: index("mailbox_participants_user_updated_idx").on(table.userId, table.updatedAt),
+    userArchivedIdx: index("mailbox_participants_user_archived_idx").on(table.userId, table.isArchived),
+  }),
+);
+
+// Short-form actionable alerts (distinct from mailbox)
+export const notifications = pgTable(
+  "notifications",
+  {
+    id: serial("id").primaryKey(),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    type: text("type").notNull().default("SYSTEM"), // TRADE | SYSTEM | ACCOUNT | SECURITY
+    severity: text("severity").notNull().default("INFO"), // INFO | SUCCESS | WARNING | CRITICAL
+    title: text("title").notNull(),
+    titleEncrypted: text("title_encrypted"),
+    message: text("message").notNull(),
+    messageEncrypted: text("message_encrypted"),
+    contentEncoding: text("content_encoding").notNull().default("PLAINTEXT_V0"),
+    encryptionVersion: integer("encryption_version").notNull().default(0),
+    contentDigestSha256: text("content_digest_sha256"),
+    e2eeEnvelope: text("e2ee_envelope"),
+    isRead: boolean("is_read").notNull().default(false),
+    createdAt: integer("created_at").notNull().default(nowUnix),
+    readAt: integer("read_at"),
+    link: text("link"),
+    sourceEvent: text("source_event"),
+  },
+  (table) => ({
+    userCreatedIdx: index("notifications_user_created_idx").on(table.userId, table.createdAt),
+    userReadIdx: index("notifications_user_read_idx").on(table.userId, table.isRead),
+  }),
+);
+
+// Immutable mailbox audit trail (append-only hash-chain)
+export const mailboxMessageAudit = pgTable(
+  "mailbox_message_audit",
+  {
+    id: serial("id").primaryKey(),
+    messageId: integer("message_id").references(() => mailboxMessages.id, { onDelete: "cascade" }),
+    threadId: integer("thread_id")
+      .notNull()
+      .references(() => mailboxThreads.id, { onDelete: "cascade" }),
+    actorUserId: integer("actor_user_id").references(() => users.id, { onDelete: "set null" }),
+    actorRole: text("actor_role").notNull().default("SYSTEM"), // USER | ADMIN | SYSTEM
+    action: text("action").notNull(), // MESSAGE_CREATED | MESSAGE_REPLIED | THREAD_READ
+    ip: text("ip"),
+    userAgent: text("user_agent"),
+    metadata: text("metadata").notNull().default("{}"),
+    createdAt: integer("created_at").notNull().default(nowUnix),
+    prevHash: text("prev_hash"),
+    eventHash: text("event_hash").notNull(),
+  },
+  (table) => ({
+    threadCreatedIdx: index("mailbox_message_audit_thread_created_idx").on(table.threadId, table.createdAt),
+    messageIdx: index("mailbox_message_audit_message_idx").on(table.messageId),
+  }),
+);
+
+// Global communications configuration (admin-controlled, instantly propagated)
+export const communicationSettings = pgTable("communication_settings", {
+  id: integer("id").primaryKey().default(1),
+  // Messaging controls
+  messagingEnabled: boolean("messaging_enabled").notNull().default(true),
+  messagingAllowReplyByDefault: boolean("messaging_allow_reply_by_default").notNull().default(false),
+  messagingAllowBroadcastReplies: boolean("messaging_allow_broadcast_replies").notNull().default(false),
+  messagingLargeTargetThreshold: integer("messaging_large_target_threshold").notNull().default(100),
+  messagingMaxRecipientsPerSend: integer("messaging_max_recipients_per_send").notNull().default(10000),
+  messagingAsyncFanoutThreshold: integer("messaging_async_fanout_threshold").notNull().default(200),
+  messagingFanoutBatchSize: integer("messaging_fanout_batch_size").notNull().default(500),
+  messagingAutoWelcomeEnabled: boolean("messaging_auto_welcome_enabled").notNull().default(true),
+  messagingAccountStatusMailboxEnabled: boolean("messaging_account_status_mailbox_enabled").notNull().default(true),
+  messagingKycMailboxEnabled: boolean("messaging_kyc_mailbox_enabled").notNull().default(true),
+  messagingE2eeEnabled: boolean("messaging_e2ee_enabled").notNull().default(false),
+  messagingE2eeRequired: boolean("messaging_e2ee_required").notNull().default(false),
+  // Notification controls
+  notificationsEnabled: boolean("notifications_enabled").notNull().default(true),
+  notificationRealtimeEnabled: boolean("notification_realtime_enabled").notNull().default(true),
+  notificationSoundDefaultEnabled: boolean("notification_sound_default_enabled").notNull().default(true),
+  notificationE2eeEnabled: boolean("notification_e2ee_enabled").notNull().default(false),
+  notificationE2eeRequired: boolean("notification_e2ee_required").notNull().default(false),
+  notificationTradePendingFillEnabled: boolean("notification_trade_pending_fill_enabled").notNull().default(true),
+  notificationTradeTakeProfitEnabled: boolean("notification_trade_take_profit_enabled").notNull().default(true),
+  notificationTradeStopLossEnabled: boolean("notification_trade_stop_loss_enabled").notNull().default(true),
+  notificationTradeMaxHoldEnabled: boolean("notification_trade_max_hold_enabled").notNull().default(true),
+  notificationAccountFreezeEnabled: boolean("notification_account_freeze_enabled").notNull().default(true),
+  notificationAccountUnfreezeEnabled: boolean("notification_account_unfreeze_enabled").notNull().default(true),
+  notificationKycUpdatesEnabled: boolean("notification_kyc_updates_enabled").notNull().default(true),
+  // Audit
+  updatedAt: integer("updated_at").notNull().default(nowUnix),
+  updatedBy: text("updated_by"),
+});
+
+export const mailboxThreadsRelations = relations(mailboxThreads, ({ one, many }) => ({
+  createdByUser: one(users, {
+    fields: [mailboxThreads.createdBy],
+    references: [users.id],
+  }),
+  messages: many(mailboxMessages),
+  participants: many(mailboxParticipants),
+}));
+
+export const mailboxMessagesRelations = relations(mailboxMessages, ({ one }) => ({
+  thread: one(mailboxThreads, {
+    fields: [mailboxMessages.threadId],
+    references: [mailboxThreads.id],
+  }),
+  sender: one(users, {
+    fields: [mailboxMessages.senderId],
+    references: [users.id],
+  }),
+}));
+
+export const mailboxParticipantsRelations = relations(mailboxParticipants, ({ one }) => ({
+  thread: one(mailboxThreads, {
+    fields: [mailboxParticipants.threadId],
+    references: [mailboxThreads.id],
+  }),
+  user: one(users, {
+    fields: [mailboxParticipants.userId],
+    references: [users.id],
+  }),
+  lastReadMessage: one(mailboxMessages, {
+    fields: [mailboxParticipants.lastReadMessageId],
+    references: [mailboxMessages.id],
+  }),
+}));
+
+export const notificationsRelations = relations(notifications, ({ one }) => ({
+  user: one(users, {
+    fields: [notifications.userId],
+    references: [users.id],
+  }),
+}));
+
+export const mailboxMessageAuditRelations = relations(mailboxMessageAudit, ({ one }) => ({
+  thread: one(mailboxThreads, {
+    fields: [mailboxMessageAudit.threadId],
+    references: [mailboxThreads.id],
+  }),
+  message: one(mailboxMessages, {
+    fields: [mailboxMessageAudit.messageId],
+    references: [mailboxMessages.id],
+  }),
+  actor: one(users, {
+    fields: [mailboxMessageAudit.actorUserId],
+    references: [users.id],
+  }),
+}));
+
 export const insertUserSettingsSchema = createInsertSchema(userSettings);
+export const insertMailboxThreadSchema = createInsertSchema(mailboxThreads);
+export const insertMailboxMessageSchema = createInsertSchema(mailboxMessages);
+export const insertMailboxParticipantSchema = createInsertSchema(mailboxParticipants);
+export const insertNotificationSchema = createInsertSchema(notifications);
+export const insertMailboxMessageAuditSchema = createInsertSchema(mailboxMessageAudit);
+export const insertCommunicationSettingsSchema = createInsertSchema(communicationSettings);
 
 // Quotes cache (market data)
 export const quotes = pgTable("quotes", {
@@ -1912,6 +2137,18 @@ export type Trade = typeof trades.$inferSelect;
 export type InsertTrade = z.infer<typeof insertTradeSchema>;
 export type UserSettings = typeof userSettings.$inferSelect;
 export type InsertUserSettings = z.infer<typeof insertUserSettingsSchema>;
+export type MailboxThread = typeof mailboxThreads.$inferSelect;
+export type InsertMailboxThread = z.infer<typeof insertMailboxThreadSchema>;
+export type MailboxMessage = typeof mailboxMessages.$inferSelect;
+export type InsertMailboxMessage = z.infer<typeof insertMailboxMessageSchema>;
+export type MailboxParticipant = typeof mailboxParticipants.$inferSelect;
+export type InsertMailboxParticipant = z.infer<typeof insertMailboxParticipantSchema>;
+export type Notification = typeof notifications.$inferSelect;
+export type InsertNotification = z.infer<typeof insertNotificationSchema>;
+export type MailboxMessageAudit = typeof mailboxMessageAudit.$inferSelect;
+export type InsertMailboxMessageAudit = z.infer<typeof insertMailboxMessageAuditSchema>;
+export type CommunicationSettings = typeof communicationSettings.$inferSelect;
+export type InsertCommunicationSettings = z.infer<typeof insertCommunicationSettingsSchema>;
 export type GlobalSettings = typeof globalSettings.$inferSelect;
 export type InsertGlobalSettings = z.infer<typeof insertGlobalSettingsSchema>;
 export type SystemConfig = typeof systemConfig.$inferSelect;

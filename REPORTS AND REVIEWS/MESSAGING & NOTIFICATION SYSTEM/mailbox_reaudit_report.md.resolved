@@ -1,0 +1,63 @@
+# Internal Mailbox System - Re-Audit Resolution Report
+
+Date: 2026-02-08
+Based on:
+- `REPORTS AND REVIEWS/MESSAGING & NOTIFICATION SYSTEM/mailbox_reaudit_report.md`
+
+## Resolution Summary
+All items listed in "Remaining Minor Gaps" are resolved, and additional security hardening has been implemented.
+
+## Re-Audit Gaps - Final Status
+
+| Item from Re-Audit | Previous Status | Final Status | Evidence |
+|---|---|---|---|
+| E2EE client-side implementation | Backend-only | Resolved | `client/src/lib/e2ee.ts`, `client/src/hooks/use-mailbox.tsx`, `client/src/hooks/use-notifications.tsx`, `client/src/pages/AdminCommunications.tsx`, `client/src/components/Mailbox/MailboxMinitab.tsx` |
+| Rich Text/Markdown rendering | Not done | Resolved | `client/src/components/Mailbox/MessageBody.tsx` |
+| Category-based filtering UI | Not done | Resolved | `client/src/components/Mailbox/MailboxMinitab.tsx`, `client/src/pages/AdminCommunications.tsx` |
+
+## Additional Hardening Applied During Re-Audit Resolution
+
+### 1) Envelope + key validation hardening
+- Strict envelope recipient-set validation (rejects extra/non-numeric recipients).
+- Strict base64 and algorithm checks for E2EE envelope fields.
+- Public key normalization enforces RSA SPKI key type and modulus bounds.
+- Fingerprints normalized to strict SHA-256 hex.
+
+Files:
+- `server/services/messaging.ts`
+
+### 2) Abuse controls + security auditability hardening
+- Added per-user key-update rate limiting with `Retry-After`.
+- Added per-user mailbox reply rate limiting with `Retry-After`.
+- Added identity audit events for key/reply deny + success paths.
+- Added sender key-fingerprint binding checks for E2EE compose/reply.
+
+Files:
+- `server/routes/mailbox.ts`
+
+### 3) Config propagation + admin configurability
+- Communications settings remain admin-configurable for both messaging and notifications.
+- Live propagation is wired through `communications:config-updated` invalidation paths.
+
+Files:
+- `client/src/pages/AdminCommunications.tsx`
+- `client/src/hooks/use-mailbox.tsx`
+- `client/src/hooks/use-notifications.tsx`
+- `server/services/messaging.ts`
+
+## Validation Results
+
+- `npm run check` -> PASS
+- `npm run build` -> PASS
+- `npm run db:audit` -> PASS
+- `npm run audit:activity` -> PASS
+- `SMOKE_BASE_URL=http://localhost:5000 ADMIN_EMAIL=allinfini.ai@gmail.com ADMIN_PASSWORD=allinfini2026 npm run smoke:admin` -> PASS
+- `npm run e2e` -> PASS (12/12)
+
+Targeted runtime hardening checks -> PASS:
+- malformed envelope rejection,
+- key-update flood throttling (`429`),
+- reply flood throttling (`429`).
+
+## Conclusion
+The re-audit gaps are closed and the subsystem is materially hardened against common abuse paths (payload tampering, spam/flood, and fingerprint spoofing), with stronger deny/success audit traceability.

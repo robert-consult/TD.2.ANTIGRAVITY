@@ -4,9 +4,12 @@ import { useAccountSummary } from "@/hooks/use-account-summary";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { User, Wallet, TrendingUp, TrendingDown, PieChart, Activity, AlertTriangle, Lightbulb, Clock, Target, BarChart3, BookOpen, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useLocation } from "wouter";
+import { MailboxMinitab } from "@/components/Mailbox/MailboxMinitab";
+import { useMailboxThreads } from "@/hooks/use-mailbox";
 
 export default function AccountScreen() {
   const sideLabels: Record<string, { label: string }> = {
@@ -35,6 +38,8 @@ export default function AccountScreen() {
   const [, navigate] = useLocation();
 
   const { summary, isLoading } = useAccountSummary();
+  const { data: mailboxSummary } = useMailboxThreads(1, 0);
+  const mailboxUnreadCount = Number(mailboxSummary?.unreadCount ?? 0);
 
   const { data: trades = [] } = useQuery<any[]>({
     queryKey: ["/api/trades"],
@@ -179,11 +184,32 @@ export default function AccountScreen() {
   return (
     <div className="h-full flex flex-col bg-neutral-900 overflow-auto" style={{ containerType: 'inline-size', containerName: 'account' }}>
       <div className="tq-page-header">
-        <h1 className="tq-page-title">Account</h1>
+        <h1 className="tq-page-title inline-flex items-center gap-2">
+          Account
+          {mailboxUnreadCount > 0 ? <span className="h-2.5 w-2.5 rounded-full bg-sky-400" title="Unread mailbox messages" /> : null}
+        </h1>
       </div>
 
       <div className="flex-1 p-3 sm:p-6">
-        <div className="max-w-4xl space-y-4 sm:space-y-6">
+        <div className="max-w-4xl">
+          <Tabs defaultValue="account" className="space-y-4 sm:space-y-6">
+            <TabsList className="bg-neutral-800 border border-gray-700 h-auto p-1 w-full max-w-sm grid grid-cols-2 gap-1">
+              <TabsTrigger value="account" className="text-xs sm:text-sm data-[state=active]:bg-neutral-700">
+                Account
+              </TabsTrigger>
+              <TabsTrigger value="mailbox" className="text-xs sm:text-sm data-[state=active]:bg-neutral-700">
+                <span className="inline-flex items-center gap-1.5">
+                  Mailbox
+                  {mailboxUnreadCount > 0 ? <span className="h-2 w-2 rounded-full bg-sky-400" title="Unread mailbox messages" /> : null}
+                </span>
+              </TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="mailbox" className="mt-0">
+              <MailboxMinitab />
+            </TabsContent>
+
+            <TabsContent value="account" className="space-y-4 sm:space-y-6 mt-0">
           {/* Stale Pricing Warning Banner */}
           {summary?.pricingStale && (
             <Alert className="bg-yellow-900/30 border-yellow-600">
@@ -579,6 +605,8 @@ export default function AccountScreen() {
               </div>
             </CardContent>
           </Card>
+            </TabsContent>
+          </Tabs>
         </div>
       </div>
     </div>

@@ -351,6 +351,7 @@ export default function AdminCommunications() {
         threadId,
         body: text.trim(),
         contentFormat: "PLAINTEXT",
+        optimisticBody: text.trim(),
       };
 
       if (settings?.messagingE2eeEnabled) {

@@ -41,6 +41,11 @@ export type NotificationClientConfig = {
   updatedAt: number;
 };
 
+function isNotificationsPayload(value: unknown): value is NotificationsPayload {
+  if (!value || typeof value !== "object") return false;
+  return Array.isArray((value as any).rows);
+}
+
 function isMessageForUser(message: any, userId: number | undefined): boolean {
   if (!userId) return false;
   const eventUserId = Number(message?.userId ?? 0);
@@ -134,7 +139,57 @@ export function useNotifications(limit = 30) {
       const res = await apiRequest("POST", "/api/notifications/mark-read", payload);
       return res.json();
     },
-    onSuccess: () => {
+    onMutate: async (payload: { ids?: number[]; all?: boolean }) => {
+      await queryClient.cancelQueries({ queryKey: ["notifications"] });
+      const previousEntries = queryClient.getQueriesData<NotificationsPayload>({
+        queryKey: ["notifications"],
+      });
+
+      const markAll = Boolean(payload?.all);
+      const idsSet = new Set<number>(
+        Array.isArray(payload?.ids)
+          ? payload.ids
+              .map((raw) => Number(raw))
+              .filter((n) => Number.isInteger(n) && n > 0)
+          : [],
+      );
+      const nowSec = Math.floor(Date.now() / 1000);
+
+      for (const [key] of previousEntries) {
+        queryClient.setQueryData<NotificationsPayload | NotificationClientConfig | undefined>(key, (old) => {
+          if (!isNotificationsPayload(old)) return old;
+          const nextRows = old.rows.map((row) => {
+            const shouldMark = markAll || idsSet.has(Number(row.id));
+            if (!shouldMark || row.isRead) return row;
+            return {
+              ...row,
+              isRead: true,
+              readAt: row.readAt ?? nowSec,
+            };
+          });
+
+          let nextUnread = 0;
+          for (const row of nextRows) {
+            if (!row.isRead) nextUnread += 1;
+          }
+
+          return {
+            ...old,
+            rows: nextRows,
+            unreadCount: nextUnread,
+          };
+        });
+      }
+
+      return { previousEntries };
+    },
+    onError: (_error, _payload, context) => {
+      if (!context) return;
+      for (const [key, value] of context.previousEntries || []) {
+        queryClient.setQueryData(key, value);
+      }
+    },
+    onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ["notifications"] });
     },
   });

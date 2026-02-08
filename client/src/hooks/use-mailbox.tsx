@@ -310,6 +310,7 @@ export function useMailboxE2eeKey() {
 
 export function useMailboxReply() {
   const queryClient = useQueryClient();
+  const { user } = useAuth();
   return useMutation({
     mutationFn: async (payload: {
       threadId: number;
@@ -318,6 +319,7 @@ export function useMailboxReply() {
       e2eeEnvelope?: string;
       e2eeSenderKeyFingerprint?: string;
       bodyDigestSha256?: string;
+      optimisticBody?: string;
     }) => {
       const res = await apiRequest("POST", `/api/mailbox/${payload.threadId}/reply`, {
         body: payload.body,
@@ -328,7 +330,147 @@ export function useMailboxReply() {
       });
       return res.json();
     },
-    onSuccess: (_data, variables) => {
+    onMutate: async (variables) => {
+      const threadId = Number(variables.threadId);
+      if (!Number.isInteger(threadId) || threadId <= 0) {
+        return null;
+      }
+
+      const nowSec = Math.floor(Date.now() / 1000);
+      const optimisticMessageId = -Math.max(1, Date.now());
+      const optimisticBodyRaw = String(variables.optimisticBody ?? variables.body ?? "");
+      const optimisticBody = optimisticBodyRaw.trim() ? optimisticBodyRaw.trim() : optimisticBodyRaw;
+      const senderId = Number(user?.id ?? 0);
+      const senderUserId = Number.isInteger(senderId) && senderId > 0 ? senderId : null;
+      const senderUsername =
+        typeof (user as any)?.username === "string" && (user as any).username.trim().length > 0
+          ? String((user as any).username).trim()
+          : null;
+      const senderEmail =
+        typeof (user as any)?.email === "string" && (user as any).email.trim().length > 0
+          ? String((user as any).email).trim()
+          : null;
+
+      await queryClient.cancelQueries({ queryKey: ["mailbox", "thread", threadId] });
+      await queryClient.cancelQueries({ queryKey: ["mailbox", "threads"] });
+
+      const previousThreadEntries = queryClient.getQueriesData<MailboxThreadDetail>({
+        queryKey: ["mailbox", "thread", threadId],
+      });
+      const previousThreadListEntries = queryClient.getQueriesData<MailboxThreadsPayload>({
+        queryKey: ["mailbox", "threads"],
+      });
+
+      for (const [key] of previousThreadEntries) {
+        queryClient.setQueryData<MailboxThreadDetail | undefined>(key, (old) => {
+          if (!old) return old;
+          const prevMessages = Array.isArray(old.messages) ? old.messages : [];
+          if (prevMessages.some((row) => Number(row.id) === optimisticMessageId)) return old;
+          return {
+            ...old,
+            messages: [
+              ...prevMessages,
+              {
+                id: optimisticMessageId,
+                threadId,
+                senderId: senderUserId,
+                body: optimisticBody,
+                bodyEncoding: variables.e2eeEnvelope ? "E2EE_ENVELOPE_V1" : "PLAINTEXT_V0",
+                contentFormat: variables.contentFormat ?? "PLAINTEXT",
+                e2eeEnvelope: variables.e2eeEnvelope ?? null,
+                e2eeSenderKeyFingerprint: variables.e2eeSenderKeyFingerprint ?? null,
+                createdAt: nowSec,
+                allowReply: Boolean(user?.isAdmin),
+                messageType: "REPLY",
+                metadata: null,
+                senderUsername,
+                senderEmail,
+                senderIsAdmin: Boolean(user?.isAdmin),
+              },
+            ],
+          };
+        });
+      }
+
+      for (const [key] of previousThreadListEntries) {
+        queryClient.setQueryData<MailboxThreadsPayload | undefined>(key, (old) => {
+          if (!old || !Array.isArray(old.rows)) return old;
+          const idx = old.rows.findIndex((row) => Number(row.threadId) === threadId);
+          if (idx < 0) return old;
+
+          const row = old.rows[idx];
+          const nextRow: MailboxThreadRow = {
+            ...row,
+            updatedAt: nowSec,
+            latestMessageId: optimisticMessageId,
+            latestBody: optimisticBody,
+            latestContentFormat: variables.contentFormat ?? row.latestContentFormat ?? "PLAINTEXT",
+            latestCreatedAt: nowSec,
+            latestSenderId: senderUserId,
+            latestAllowReply: Boolean(user?.isAdmin) ? true : row.latestAllowReply,
+            latestSenderEmail: senderEmail ?? row.latestSenderEmail ?? null,
+            latestSenderUsername: senderUsername ?? row.latestSenderUsername ?? null,
+            hasUnread: false,
+          };
+
+          const rows = [...old.rows];
+          rows.splice(idx, 1);
+          rows.unshift(nextRow);
+          return { ...old, rows };
+        });
+      }
+
+      return {
+        threadId,
+        optimisticMessageId,
+        previousThreadEntries,
+        previousThreadListEntries,
+      };
+    },
+    onError: (_error, _variables, context) => {
+      if (!context) return;
+      for (const [key, value] of context.previousThreadEntries || []) {
+        queryClient.setQueryData(key, value);
+      }
+      for (const [key, value] of context.previousThreadListEntries || []) {
+        queryClient.setQueryData(key, value);
+      }
+    },
+    onSuccess: (data, variables, context) => {
+      const resolvedMessageId = Number((data as any)?.messageId ?? 0);
+      if (context && Number.isInteger(resolvedMessageId) && resolvedMessageId > 0) {
+        for (const [key] of context.previousThreadEntries || []) {
+          queryClient.setQueryData<MailboxThreadDetail | undefined>(key, (old) => {
+            if (!old || !Array.isArray(old.messages)) return old;
+            return {
+              ...old,
+              messages: old.messages.map((message) =>
+                Number(message.id) === Number(context.optimisticMessageId)
+                  ? {
+                      ...message,
+                      id: resolvedMessageId,
+                    }
+                  : message,
+              ),
+            };
+          });
+        }
+
+        for (const [key] of context.previousThreadListEntries || []) {
+          queryClient.setQueryData<MailboxThreadsPayload | undefined>(key, (old) => {
+            if (!old || !Array.isArray(old.rows)) return old;
+            return {
+              ...old,
+              rows: old.rows.map((row) =>
+                Number(row.threadId) === Number(context.threadId)
+                  ? { ...row, latestMessageId: resolvedMessageId }
+                  : row,
+              ),
+            };
+          });
+        }
+      }
+
       queryClient.invalidateQueries({ queryKey: ["mailbox"] });
       queryClient.invalidateQueries({ queryKey: ["mailbox", "thread", variables.threadId] });
     },

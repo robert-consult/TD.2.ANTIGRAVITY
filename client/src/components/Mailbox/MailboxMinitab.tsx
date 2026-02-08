@@ -79,6 +79,7 @@ export function MailboxMinitab() {
         threadId: selectedThreadId,
         body,
         contentFormat: replyFormat,
+        optimisticBody: body,
       };
 
       if (messagingE2eeEnabled) {

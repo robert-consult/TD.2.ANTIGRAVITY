@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { INSTRUMENT_CATALOG_CATEGORY_TAGS, INSTRUMENT_CATEGORY_LABELS } from "@shared/instruments/categories";
 
 type ProvidersResp = {
   ok: boolean;
@@ -29,16 +30,10 @@ type ReferenceRow = {
 
 type SearchResp = { ok: boolean; providerKey: string; rows: ReferenceRow[] };
 
-const CATEGORIES: Array<{ key: string; label: string }> = [
-  { key: "forex", label: "Forex" },
-  { key: "stocks", label: "Stocks" },
-  { key: "etf", label: "ETFs" },
-  { key: "crypto", label: "Crypto" },
-  { key: "commodities", label: "Commodities" },
-  { key: "bonds", label: "Bonds" },
-  { key: "funds", label: "Funds" },
-  { key: "mutual_funds", label: "Mutual Funds" },
-];
+const CATEGORIES = INSTRUMENT_CATALOG_CATEGORY_TAGS.map((key) => ({
+  key,
+  label: INSTRUMENT_CATEGORY_LABELS[key],
+}));
 
 export function InstrumentCatalogEnableDialog(props: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const { toast } = useToast();

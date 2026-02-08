@@ -15,19 +15,10 @@ import {
   traderSearchTradeExtremesResponseSchema,
   type TraderSearchRow,
 } from "@shared/admin/traderSearch";
-
-const CATEGORY_LABELS: Record<string, string> = {
-  forex: "FX",
-  stocks: "Stocks",
-  etf: "ETFs",
-  bonds: "Bonds",
-  crypto: "Crypto",
-  commodities: "Commodities",
-  funds: "Funds",
-  mutual_funds: "Mutual Funds",
-  indices: "Indices",
-  unknown: "Unknown",
-};
+import {
+  INSTRUMENT_CATEGORY_LABELS,
+  normalizeInstrumentCategory,
+} from "@shared/instruments/categories";
 
 function clampNumber(raw: string, fallback: number): number {
   const parsed = Number(raw);
@@ -105,7 +96,9 @@ export default function TraderSearchTab({ days }: { days: string }) {
 
   const categoryChoices = useMemo(() => {
     const fromApi = categoriesData?.categories?.filter(Boolean) ?? [];
-    if (fromApi.length) return fromApi;
+    if (fromApi.length) {
+      return Array.from(new Set(fromApi.map((raw) => normalizeInstrumentCategory(raw, "unknown"))));
+    }
     return [...TRADER_SEARCH_CATEGORIES];
   }, [categoriesData?.categories]);
 
@@ -503,18 +496,19 @@ export default function TraderSearchTab({ days }: { days: string }) {
           <div className="flex flex-wrap gap-2 items-center">
             <div className="text-xs text-gray-400 mr-1">Categories:</div>
             {categoryChoices.map((key) => {
-              const label = CATEGORY_LABELS[key] ?? key;
-              const active = categories.includes(key);
+              const canonicalKey = normalizeInstrumentCategory(key, "unknown");
+              const label = INSTRUMENT_CATEGORY_LABELS[canonicalKey];
+              const active = categories.includes(canonicalKey);
               return (
                 <Button
-                  key={key}
+                  key={canonicalKey}
                   type="button"
                   variant={active ? "default" : "outline"}
                   size="sm"
                   className={
                     active ? "bg-orange-600 hover:bg-orange-500" : "border-neutral-600 text-gray-200 hover:bg-neutral-700"
                   }
-                  onClick={() => toggleCategory(key)}
+                  onClick={() => toggleCategory(canonicalKey)}
                 >
                   {label}
                 </Button>
@@ -556,7 +550,7 @@ export default function TraderSearchTab({ days }: { days: string }) {
                   })
                 }
                 disabled={exportMutation.isPending}
-                className="bg-orange-600 hover:bg-orange-500"
+                variant="csv"
                 data-testid="trader-search-export-csv"
               >
                 Export CSV (Excel)
@@ -571,8 +565,7 @@ export default function TraderSearchTab({ days }: { days: string }) {
                   })
                 }
                 disabled={exportMutation.isPending}
-                variant="outline"
-                className="border-neutral-600 text-gray-200 hover:bg-neutral-700"
+                variant="jsonl"
                 data-testid="trader-search-export-jsonl"
               >
                 Export JSONL

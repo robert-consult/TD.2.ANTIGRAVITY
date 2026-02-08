@@ -1,17 +1,7 @@
 import { z } from "zod";
+import { INSTRUMENT_CATEGORY_TAGS } from "../instruments/categories";
 
-export const TRADER_SEARCH_CATEGORIES = [
-  "forex",
-  "stocks",
-  "etf",
-  "crypto",
-  "commodities",
-  "bonds",
-  "funds",
-  "mutual_funds",
-  "indices",
-  "unknown",
-] as const;
+export const TRADER_SEARCH_CATEGORIES = INSTRUMENT_CATEGORY_TAGS;
 
 export const traderSearchCategorySchema = z.enum(TRADER_SEARCH_CATEGORIES);
 export type TraderSearchCategory = z.infer<typeof traderSearchCategorySchema>;

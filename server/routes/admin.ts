@@ -27,6 +27,7 @@ import { getGriftDb } from "../grift/griftDb";
 import { recalcAccount } from "../recalcAccount";
 import { onLiveEvent, publishLiveEvent } from "../services/liveBus";
 import { TRADER_SEARCH_CATEGORIES } from "@shared/admin/traderSearch";
+import { canonicalizeInstrumentCategory, normalizeInstrumentCategory } from "@shared/instruments/categories";
 import { createNotification, sendKycMailboxMessage } from "../services/messaging";
 
 let traderScoutCategoryLiveBusSubscribed = false;
@@ -691,7 +692,8 @@ export function registerAdminRoutes(app: Express) {
       `);
       for (const row of res.rows ?? []) {
         const v = String((row as any)?.category ?? "").trim();
-        if (v) set.add(v);
+        if (!v) continue;
+        set.add(normalizeInstrumentCategory(v, "unknown"));
       }
     } catch {
       // ignore: fall back to static list
@@ -728,6 +730,22 @@ export function registerAdminRoutes(app: Express) {
     return Math.max(0, Math.min(1, value));
   };
 
+  const TRADER_SCOUT_CATEGORY_SQL = `
+    CASE
+      WHEN LOWER(COALESCE(NULLIF(sc.category, ''), 'unknown')) IN ('fx', 'forex', 'forex_pair', 'forex_pairs') THEN 'forex'
+      WHEN LOWER(COALESCE(NULLIF(sc.category, ''), 'unknown')) IN ('stock', 'stocks') THEN 'stocks'
+      WHEN LOWER(COALESCE(NULLIF(sc.category, ''), 'unknown')) IN ('etf', 'etfs') THEN 'etf'
+      WHEN LOWER(COALESCE(NULLIF(sc.category, ''), 'unknown')) IN ('crypto', 'cryptocurrency', 'cryptocurrencies') THEN 'crypto'
+      WHEN LOWER(COALESCE(NULLIF(sc.category, ''), 'unknown')) IN ('commodity', 'commodities') THEN 'commodities'
+      WHEN LOWER(COALESCE(NULLIF(sc.category, ''), 'unknown')) IN ('bond', 'bonds') THEN 'bonds'
+      WHEN LOWER(COALESCE(NULLIF(sc.category, ''), 'unknown')) IN ('fund', 'funds') THEN 'funds'
+      WHEN LOWER(COALESCE(NULLIF(sc.category, ''), 'unknown')) IN ('mutual_fund', 'mutual_funds') THEN 'mutual_funds'
+      WHEN LOWER(COALESCE(NULLIF(sc.category, ''), 'unknown')) IN ('index', 'indices') THEN 'indices'
+      WHEN LOWER(COALESCE(NULLIF(sc.category, ''), 'unknown')) = 'unknown' THEN 'unknown'
+      ELSE LOWER(COALESCE(NULLIF(sc.category, ''), 'unknown'))
+    END
+  `;
+
   const TRADER_SCOUT_SEARCH_SQL = `
 WITH ft AS (
   SELECT
@@ -737,7 +755,7 @@ WITH ft AS (
     COALESCE(NULLIF(t.profit, '')::numeric, 0) AS profit,
     t.stop_loss,
     t.take_profit,
-    LOWER(COALESCE(NULLIF(sc.category, ''), 'unknown')) AS category
+    ${TRADER_SCOUT_CATEGORY_SQL} AS category
   FROM trades t
   JOIN users u ON u.id = t.user_id
   LEFT JOIN symbol_configs sc ON sc.id = t.symbol_id
@@ -745,7 +763,7 @@ WITH ft AS (
     AND t.closed_at IS NOT NULL
     AND t.closed_at >= $1::int
     AND u.is_admin = FALSE
-    AND ($2::text[] IS NULL OR LOWER(COALESCE(NULLIF(sc.category, ''), 'unknown')) = ANY($2::text[]))
+    AND ($2::text[] IS NULL OR ${TRADER_SCOUT_CATEGORY_SQL} = ANY($2::text[]))
     AND ($3::text IS NULL OR u.username ILIKE $3::text OR u.email ILIKE $3::text)
 ),
 agg AS (
@@ -977,14 +995,8 @@ LIMIT $14::int OFFSET $15::int;
     return { hasMore, results };
   };
 
-  const normalizeTraderScoutCategory = (raw: string): string => {
-    const v = raw.trim().toLowerCase();
-    if (v === "fx") return "forex";
-    if (v === "etfs") return "etf";
-    if (v === "index") return "indices";
-    if (v === "commodity") return "commodities";
-    if (v === "bond") return "bonds";
-    return v;
+  const normalizeTraderScoutCategory = (raw: string): string | null => {
+    return canonicalizeInstrumentCategory(raw);
   };
 
   // Trader Search / Scouting (Admin > Data mini-tab)
@@ -1016,8 +1028,19 @@ LIMIT $14::int OFFSET $15::int;
 
       const allowed = await loadTraderScoutAllowedCategories();
       const allowedCategories = allowed.set;
-      const categories = categoriesList.map(normalizeTraderScoutCategory);
-      for (const c of categories) {
+      const categories: string[] = [];
+      for (const rawCategory of categoriesList) {
+        const normalizedCategory = normalizeTraderScoutCategory(rawCategory);
+        if (!normalizedCategory) {
+          return res.status(400).json({
+            message: `Invalid category: ${rawCategory}`,
+            allowed: allowed.categories,
+          });
+        }
+        categories.push(normalizedCategory);
+      }
+      const normalizedCategories = Array.from(new Set(categories));
+      for (const c of normalizedCategories) {
         if (!allowedCategories.has(c)) {
           return res.status(400).json({
             message: `Invalid category: ${c}`,
@@ -1047,7 +1070,7 @@ LIMIT $14::int OFFSET $15::int;
 
       const { results, hasMore } = await runTraderScoutSearch({
         cutoffSec,
-        categories,
+        categories: normalizedCategories,
         q,
         minHoldSec,
         maxHoldSec,
@@ -1066,7 +1089,7 @@ LIMIT $14::int OFFSET $15::int;
       // Audit: only record materially-filtered searches (avoid noisy keystroke churn)
       const shouldAuditSearch =
         (qRaw.length >= 3 ||
-          categories.length > 0 ||
+          normalizedCategories.length > 0 ||
           minWinRate !== null ||
           maxDrawdown !== null ||
           maxBestDayPct !== null ||
@@ -1085,7 +1108,7 @@ LIMIT $14::int OFFSET $15::int;
             cutoffSec,
             qHash: qRaw ? sha256(qRaw) : null,
             qLen: qRaw.length || 0,
-            categories,
+            categories: normalizedCategories,
             minTrades,
             minWinRate,
             maxDrawdown,
@@ -1142,8 +1165,19 @@ LIMIT $14::int OFFSET $15::int;
 
       const allowed = await loadTraderScoutAllowedCategories();
       const allowedCategories = allowed.set;
-      const categories = categoriesList.map(normalizeTraderScoutCategory);
-      for (const c of categories) {
+      const categories: string[] = [];
+      for (const rawCategory of categoriesList) {
+        const normalizedCategory = normalizeTraderScoutCategory(rawCategory);
+        if (!normalizedCategory) {
+          return res.status(400).json({
+            message: `Invalid category: ${rawCategory}`,
+            allowed: allowed.categories,
+          });
+        }
+        categories.push(normalizedCategory);
+      }
+      const normalizedCategories = Array.from(new Set(categories));
+      for (const c of normalizedCategories) {
         if (!allowedCategories.has(c)) {
           return res.status(400).json({
             message: `Invalid category: ${c}`,
@@ -1170,7 +1204,7 @@ LIMIT $14::int OFFSET $15::int;
 
       const { results, hasMore } = await runTraderScoutSearch({
         cutoffSec,
-        categories,
+        categories: normalizedCategories,
         q,
         minHoldSec,
         maxHoldSec,
@@ -1206,7 +1240,7 @@ LIMIT $14::int OFFSET $15::int;
             truncated: hasMore,
             qHash: qRaw ? sha256(qRaw) : null,
             qLen: qRaw.length || 0,
-            categories,
+            categories: normalizedCategories,
             minTrades,
             minWinRate,
             maxDrawdown,
@@ -1322,7 +1356,7 @@ WITH ft AS (
     t.opened_at,
     t.closed_at,
     COALESCE(NULLIF(t.profit, '')::numeric, 0) AS profit,
-    LOWER(COALESCE(NULLIF(sc.category, ''), 'unknown')) AS category
+    ${TRADER_SCOUT_CATEGORY_SQL} AS category
   FROM trades t
   LEFT JOIN symbol_configs sc ON sc.id = t.symbol_id
   WHERE t.user_id = $1::int

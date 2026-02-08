@@ -729,14 +729,33 @@ export default function AdminCommunications() {
                         <div className="text-sm text-gray-400">Loading thread…</div>
                       ) : (
                         (inboxThreadQuery.data?.messages || []).map((message) => (
-                          <div key={message.id} className="rounded-md border border-white/10 bg-white/[0.03] p-2">
-                            <div className="text-xs text-gray-400">{message.senderUsername || message.senderEmail || "System"}</div>
-                            <MessageBody
-                              body={message.body}
-                              contentFormat={message.contentFormat}
-                              className="text-sm text-white whitespace-pre-wrap mt-1 break-words"
-                            />
-                            <div className="text-[11px] text-gray-500 mt-1">{formatWhen(message.createdAt)}</div>
+                          <div key={message.id} className={`flex ${message.senderIsAdmin ? "justify-end" : "justify-start"}`}>
+                            <div
+                              className={`w-full max-w-[92%] rounded-md border p-2 ${
+                                message.senderIsAdmin
+                                  ? "border-cyan-400/35 bg-cyan-500/10 text-cyan-50"
+                                  : "border-emerald-400/35 bg-emerald-500/10 text-emerald-50"
+                              }`}
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <span
+                                  className={`text-[11px] font-medium ${
+                                    message.senderIsAdmin ? "text-cyan-200" : "text-emerald-200"
+                                  }`}
+                                >
+                                  {message.senderIsAdmin ? "Sent" : "Reply"}
+                                </span>
+                                <span className="text-[11px] text-gray-400">{formatWhen(message.createdAt)}</span>
+                              </div>
+                              <div className="text-xs text-gray-300 mt-0.5">
+                                {message.senderUsername || message.senderEmail || "System"}
+                              </div>
+                              <MessageBody
+                                body={message.body}
+                                contentFormat={message.contentFormat}
+                                className="text-sm whitespace-pre-wrap mt-1 break-words"
+                              />
+                            </div>
                           </div>
                         ))
                       )}
@@ -814,14 +833,33 @@ export default function AdminCommunications() {
                         <div className="text-sm text-gray-400">Loading thread…</div>
                       ) : (
                         (sentThreadQuery.data?.messages || []).map((message) => (
-                          <div key={message.id} className="rounded-md border border-white/10 bg-white/[0.03] p-2">
-                            <div className="text-xs text-gray-400">{message.senderUsername || message.senderEmail || "System"}</div>
-                            <MessageBody
-                              body={message.body}
-                              contentFormat={message.contentFormat}
-                              className="text-sm text-white whitespace-pre-wrap mt-1 break-words"
-                            />
-                            <div className="text-[11px] text-gray-500 mt-1">{formatWhen(message.createdAt)}</div>
+                          <div key={message.id} className={`flex ${message.senderIsAdmin ? "justify-end" : "justify-start"}`}>
+                            <div
+                              className={`w-full max-w-[92%] rounded-md border p-2 ${
+                                message.senderIsAdmin
+                                  ? "border-cyan-400/35 bg-cyan-500/10 text-cyan-50"
+                                  : "border-emerald-400/35 bg-emerald-500/10 text-emerald-50"
+                              }`}
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <span
+                                  className={`text-[11px] font-medium ${
+                                    message.senderIsAdmin ? "text-cyan-200" : "text-emerald-200"
+                                  }`}
+                                >
+                                  {message.senderIsAdmin ? "Sent" : "Reply"}
+                                </span>
+                                <span className="text-[11px] text-gray-400">{formatWhen(message.createdAt)}</span>
+                              </div>
+                              <div className="text-xs text-gray-300 mt-0.5">
+                                {message.senderUsername || message.senderEmail || "System"}
+                              </div>
+                              <MessageBody
+                                body={message.body}
+                                contentFormat={message.contentFormat}
+                                className="text-sm whitespace-pre-wrap mt-1 break-words"
+                              />
+                            </div>
                           </div>
                         ))
                       )}

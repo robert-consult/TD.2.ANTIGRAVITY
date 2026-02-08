@@ -1,0 +1,250 @@
+# Add/Edit Button Logic Audit & Fix Plan
+
+> **Date**: 2026-02-07 17:37  
+> **Scope**: [SymbolSubscriptionDialog](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/components/SymbolSubscriptionDialog.tsx#49-331) add/manage mode logic  
+> **Type**: Gap Analysis with Fix Plan
+
+---
+
+## Executive Summary
+
+**Critical Gap Identified**: The "Add Symbols" dialog shows ALL symbols from the database, including baseline symbols that are **already displayed on the QuotesScreen**. This is confusing UX - users expect to add symbols they don't already have.
+
+| Issue | Severity | Impact |
+|-------|----------|--------|
+| Add mode shows already-visible baseline symbols | 🔴 HIGH | User confusion |
+| No visual distinction between modes | 🟡 MEDIUM | Unclear purpose |
+| `isSubscribed` flag ignored in client filtering | 🟡 MEDIUM | Incorrect counts |
+
+---
+
+## 1. Current Data Flow
+
+```mermaid
+flowchart TD
+    A[QuotesScreen] -->|uses| B[useQuotes hook]
+    B -->|fetches| C[/api/quote-subscriptions/allowed-symbols]
+    C -->|returns| D["baseline (enabled=true) + custom subscriptions"]
+    
+    E[SymbolSubscriptionDialog] -->|Add mode| F[/api/quote-subscriptions/available-symbols]
+    F -->|returns| G["ALL symbolConfigs rows<br/>(enabled AND disabled)"]
+    
+    E -->|Manage mode| H[/api/quote-subscriptions/me/subscriptions]
+    H -->|returns| I["user's custom subscriptions only"]
+    
+    style G fill:#f88
+```
+
+---
+
+## 2. Gap Analysis
+
+### 2.1 Core Problem: Add Mode Filtering
+
+**Location**: [SymbolSubscriptionDialog.tsx lines 154-158](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\client\src\components\SymbolSubscriptionDialog.tsx#L154-L158)
+
+```tsx
+// CURRENT: Only filters by draftSymbolIds
+const availableRows = useMemo(() => {
+  return (availableQuery.data?.rows ?? [])
+    .filter((row) => !draftSymbolIds.has(row.id))  // ← Only excludes draft
+    .sort((a, b) => String(a.symbol).localeCompare(String(b.symbol)));
+}, [availableQuery.data?.rows, draftSymbolIds]);
+```
+
+**What's Missing**:
+- Does NOT filter out baseline symbols (`enabled=true`) that are already on quotes screen
+- Does NOT use the `isSubscribed` flag from backend response
+
+### 2.2 Backend Response Has Data, Client Ignores It
+
+**Backend** ([quoteSubscriptions.ts lines 125-134](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\server\routes\quoteSubscriptions.ts#L125-L134)):
+
+```ts
+const subscribedIds = new Set(subscriptions.map((s) => s.id));
+return res.json({
+  rows: rows.map((row) => ({
+    ...row,
+    isSubscribed: subscribedIds.has(row.id),  // ← Flag exists!
+  })),
+});
+```
+
+**Client** ignores `isSubscribed` - it could be used to hide already-subscribed symbols.
+
+### 2.3 Baseline Symbols Not Considered
+
+**What user expects in "Add" mode**:
+- Show symbols NOT already on their quotes screen
+- Quotes screen = baseline symbols (if mode includes baseline) + custom subscriptions
+
+**What user sees**:
+- ALL symbols from DB, including enabled baseline symbols already visible
+
+**Example Scenario**:
+1. User has mode `BASIC_PLUS_CUSTOM`
+2. Baseline includes EURUSD, GBPUSD, USDJPY (enabled=true)
+3. User opens "Add Symbols" dialog
+4. Dialog shows EURUSD, GBPUSD, USDJPY in "Available" list
+5. User clicks "Add" on EURUSD → **Confusing**: it's already on screen!
+
+### 2.4 "Manage" Mode Also Shows Both Panels
+
+**Current**: Manage mode shows identical layout to Add mode (two panels)
+
+**Expected**: Manage mode should focus on removal only - just show currently subscribed symbols
+
+---
+
+## 3. UX Best Practice Comparison
+
+| Aspect | Current | Best Practice (MetaTrader 5 style) |
+|--------|---------|-----------------------------------|
+| Add mode content | All DB symbols | Only symbols NOT on quotes screen |
+| Manage mode layout | Two panels (add + remove) | Single panel (removal focus) |
+| Already-subscribed indicator | `isSubscribed` flag unused | Badge or grayed out |
+| Baseline vs Custom distinction | None | Clear visual separation |
+
+---
+
+## 4. Data Source Analysis
+
+### What Goes on QuotesScreen (`/allowed-symbols`)
+
+```ts
+// getAllowedSymbolConfigsForUser combines:
+if (quoteModeIncludesBaseline(mode)) {
+  tasks.push(getBaselineSymbolConfigs());  // enabled=true symbols
+}
+if (quoteModeSupportsCustom(mode)) {
+  tasks.push(getCustomSymbolConfigsForUser(userId));  // user subscriptions
+}
+```
+
+### What's Shown in "Available" (`/available-symbols`)
+
+```ts
+// Returns ALL symbolConfigs - no mode filtering
+db.select(...).from(symbolConfigs).where(searchFilter).limit(180)
+```
+
+---
+
+## 5. Fix Plan
+
+### Option A: Client-Side Filtering (Recommended - Quick Fix)
+
+**Location**: [SymbolSubscriptionDialog.tsx](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/components/SymbolSubscriptionDialog.tsx)
+
+**Changes**:
+
+1. **Add query for allowed-symbols** (what's on QuotesScreen):
+```tsx
+const allowedQuery = useQuery<{ symbols: { id: number }[] }>({
+  queryKey: ["/api/quote-subscriptions/allowed-symbols"],
+  enabled: open && mode === "add",
+});
+```
+
+2. **Filter availableRows to exclude allowed symbols**:
+```tsx
+const allowedSymbolIds = useMemo(() => {
+  return new Set((allowedQuery.data?.symbols ?? []).map(s => s.id));
+}, [allowedQuery.data?.symbols]);
+
+const availableRows = useMemo(() => {
+  return (availableQuery.data?.rows ?? [])
+    .filter((row) => !draftSymbolIds.has(row.id))
+    .filter((row) => !allowedSymbolIds.has(row.id))  // ← NEW: exclude already-displayed
+    .sort((a, b) => String(a.symbol).localeCompare(String(b.symbol)));
+}, [availableQuery.data?.rows, draftSymbolIds, allowedSymbolIds]);
+```
+
+3. **Differentiate mode layouts**:
+```tsx
+// In render:
+{mode === "add" ? (
+  <TwoColumnLayout />  // Search + Add
+) : (
+  <SingleColumnLayout />  // Remove only
+)}
+```
+
+**Effort**: ~2 hours
+
+---
+
+### Option B: Backend Filtering (More Robust)
+
+**Location**: [server/routes/quoteSubscriptions.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/quoteSubscriptions.ts)
+
+**Changes**:
+
+1. **Add parameter to `/available-symbols`**:
+```ts
+const excludeAllowed = req.query.excludeAllowed === "true";
+
+if (excludeAllowed) {
+  const allowed = await getAllowedSymbolConfigsForUser(userId);
+  const allowedIds = new Set(allowed.map(s => s.id));
+  rows = rows.filter(row => !allowedIds.has(row.id));
+}
+```
+
+2. **Client passes parameter**:
+```tsx
+const availableQueryPath = useMemo(() => {
+  const qp = new URLSearchParams();
+  if (debouncedSearch.trim()) qp.set("q", debouncedSearch.trim());
+  qp.set("limit", "180");
+  if (mode === "add") qp.set("excludeAllowed", "true");  // ← NEW
+  return `/api/quote-subscriptions/available-symbols?${qp.toString()}`;
+}, [debouncedSearch, mode]);
+```
+
+**Effort**: ~3 hours
+
+---
+
+### Option C: Unified "Manage" Mode (Best UX)
+
+Per industry best practices, consolidate into a single manage mode:
+
+1. **Single dialog** with tabs or sections
+2. **"Your Symbols"**: Shows all symbols on quotes screen (baseline + custom)
+3. **"Add More"**: Search bar for symbols NOT on quotes screen
+4. **Inline actions**: Remove button only on custom symbols (not baseline)
+
+**Effort**: ~6 hours
+
+---
+
+## 6. Recommended Approach
+
+| Phase | Action | Priority |
+|-------|--------|----------|
+| **Phase 1** | Implement Option A (client-side filtering) | 🔴 IMMEDIATE |
+| **Phase 2** | Differentiate Add/Manage layouts | 🟡 SOON |
+| **Phase 3** | Consider Option C for future iteration | 🟢 LATER |
+
+---
+
+## 7. Test Scenarios After Fix
+
+| Scenario | Expected Result |
+|----------|-----------------|
+| User with BASIC_PLUS_CUSTOM opens Add dialog | Baseline symbols NOT in available list |
+| User with CUSTOM_ONLY opens Add dialog | All DB symbols shown (no baseline) |
+| User adds symbol via dialog | Symbol appears on QuotesScreen immediately |
+| User opens Manage dialog | Only custom subscriptions shown |
+| Admin removes custom permission | Icons disappear, dialogs close |
+
+---
+
+## 8. Files to Modify
+
+| File | Change |
+|------|--------|
+| [SymbolSubscriptionDialog.tsx](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\client\src\components\SymbolSubscriptionDialog.tsx) | Add allowedQuery, filter logic, mode layouts |
+| [SymbolSubscriptionDialog.test.tsx](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\client\src\components\SymbolSubscriptionDialog.test.tsx) | Add tests for filtering baseline symbols |
+| [quote-customization.spec.ts](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\e2e\quote-customization.spec.ts) | Add e2e test for add filtering |

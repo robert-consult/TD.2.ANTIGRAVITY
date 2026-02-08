@@ -70,8 +70,22 @@ test("Quote customization: icon visibility + add/remove flow + admin withdrawal"
     await expect(traderPage.getByRole("heading", { name: "Manage Symbols" })).toBeVisible();
     await traderPage.getByRole("button", { name: "Cancel" }).click();
 
+    const overlapCount = await traderPage.evaluate(async () => {
+      const [allowedRes, availableRes] = await Promise.all([
+        fetch("/api/quote-subscriptions/allowed-symbols", { credentials: "include" }),
+        fetch("/api/quote-subscriptions/available-symbols?limit=180&excludeAllowed=true", { credentials: "include" }),
+      ]);
+      const allowed = await allowedRes.json();
+      const available = await availableRes.json();
+      const allowedIds = new Set((allowed?.symbols ?? []).map((row: any) => Number(row.id)));
+      return (available?.rows ?? []).filter((row: any) => allowedIds.has(Number(row.id))).length;
+    });
+    expect(overlapCount).toBe(0);
+
     const candidate = await traderPage.evaluate(async () => {
-      const availableRes = await fetch("/api/quote-subscriptions/available-symbols?limit=180", { credentials: "include" });
+      const availableRes = await fetch("/api/quote-subscriptions/available-symbols?limit=180&excludeAllowed=true", {
+        credentials: "include",
+      });
       const available = await availableRes.json();
       const pick = (available?.rows ?? []).find((row: any) => Number(row.id) > 0);
       if (!pick) return null;

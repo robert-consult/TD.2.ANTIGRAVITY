@@ -73,6 +73,7 @@ export function SymbolSubscriptionDialog(props: {
     const qp = new URLSearchParams();
     if (debouncedSearch.trim()) qp.set("q", debouncedSearch.trim());
     qp.set("limit", "180");
+    qp.set("excludeAllowed", "true");
     return `/api/quote-subscriptions/available-symbols?${qp.toString()}`;
   }, [debouncedSearch]);
 

@@ -2,7 +2,7 @@ import { Router } from "express";
 import { db } from "@db";
 import { symbolConfigs } from "@shared/schema";
 import { quoteSubscriptionsSetSymbolsSchema } from "@shared/quoteSubscriptions";
-import { asc, desc, ilike, or } from "drizzle-orm";
+import { and, asc, desc, ilike, notInArray, or } from "drizzle-orm";
 import { requireAuth } from "../middleware/auth";
 import {
   canUserManageQuoteSubscriptions,
@@ -12,6 +12,7 @@ import {
   getUserQuoteSubscriptions,
   setUserQuoteSubscriptionsBySymbolIds,
 } from "../services/quoteSubscriptions";
+import { filterAvailableRowsByAllowedIds, parseBooleanQueryParam } from "./quoteSubscriptions.utils";
 
 export const quoteSubscriptionsRouter = Router();
 quoteSubscriptionsRouter.use(requireAuth);
@@ -98,7 +99,9 @@ quoteSubscriptionsRouter.get("/available-symbols", async (req, res) => {
 
     const q = String(req.query.q ?? "").trim();
     const limit = parsePositiveInt(req.query.limit, 100, 200);
-    const where = q
+    const excludeAllowed = parseBooleanQueryParam(req.query.excludeAllowed, false);
+
+    const searchWhere = q
       ? or(
           ilike(symbolConfigs.symbol, `%${q}%`),
           ilike(symbolConfigs.name, `%${q}%`),
@@ -106,28 +109,37 @@ quoteSubscriptionsRouter.get("/available-symbols", async (req, res) => {
         )
       : undefined;
 
-    const [rows, subscriptions] = await Promise.all([
-      db
-        .select({
-          id: symbolConfigs.id,
-          symbol: symbolConfigs.symbol,
-          name: symbolConfigs.name,
-          category: symbolConfigs.category,
-          enabled: symbolConfigs.enabled,
-        })
-        .from(symbolConfigs)
-        .where(where)
-        .orderBy(desc(symbolConfigs.enabled), asc(symbolConfigs.symbol))
-        .limit(limit),
+    const [subscriptions, allowedRows] = await Promise.all([
       getUserQuoteSubscriptions(userId),
+      excludeAllowed ? getAllowedSymbolConfigsForUser(userId) : Promise.resolve([]),
     ]);
 
+    const allowedIds = new Set<number>(allowedRows.map((row) => row.id));
+    const exclusionWhere =
+      excludeAllowed && allowedIds.size > 0 ? notInArray(symbolConfigs.id, Array.from(allowedIds.values())) : undefined;
+    const where = searchWhere && exclusionWhere ? and(searchWhere, exclusionWhere) : searchWhere ?? exclusionWhere;
+
+    const rows = await db
+      .select({
+        id: symbolConfigs.id,
+        symbol: symbolConfigs.symbol,
+        name: symbolConfigs.name,
+        category: symbolConfigs.category,
+        enabled: symbolConfigs.enabled,
+      })
+      .from(symbolConfigs)
+      .where(where)
+      .orderBy(desc(symbolConfigs.enabled), asc(symbolConfigs.symbol))
+      .limit(limit);
+
+    const filteredRows = filterAvailableRowsByAllowedIds(rows, allowedIds, excludeAllowed);
     const subscribedIds = new Set(subscriptions.map((s) => s.id));
 
     return res.json({
       q,
       limit,
-      rows: rows.map((row) => ({
+      excludeAllowed,
+      rows: filteredRows.map((row) => ({
         ...row,
         symbol: String(row.symbol).toUpperCase(),
         isSubscribed: subscribedIds.has(row.id),

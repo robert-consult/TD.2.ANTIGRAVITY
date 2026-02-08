@@ -126,7 +126,7 @@ describe("SymbolSubscriptionDialog", () => {
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
-        expect.stringContaining("/api/quote-subscriptions/available-symbols?limit=180"),
+        expect.stringContaining("/api/quote-subscriptions/available-symbols?limit=180&excludeAllowed=true"),
       ),
     );
 
@@ -141,7 +141,7 @@ describe("SymbolSubscriptionDialog", () => {
     });
 
     const beforeDebounce = fetchMock.mock.calls.filter(([arg]) =>
-      String(arg).includes("/api/quote-subscriptions/available-symbols?q=AAPL"),
+      String(arg).includes("/api/quote-subscriptions/available-symbols?q=AAPL&limit=180&excludeAllowed=true"),
     );
     expect(beforeDebounce.length).toBe(0);
 
@@ -151,7 +151,7 @@ describe("SymbolSubscriptionDialog", () => {
     });
 
     const calls = fetchMock.mock.calls.filter(([arg]) =>
-      String(arg).includes("/api/quote-subscriptions/available-symbols?q=AAPL"),
+      String(arg).includes("/api/quote-subscriptions/available-symbols?q=AAPL&limit=180&excludeAllowed=true"),
     );
     expect(calls.length).toBeGreaterThan(0);
   });

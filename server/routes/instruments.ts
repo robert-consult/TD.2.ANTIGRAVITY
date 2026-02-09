@@ -2,6 +2,10 @@
 import { Router } from "express";
 import { dbClient } from "@db";
 import { instruments, Instrument } from "../../data/instruments";
+import {
+  categoryToLegacyAssetClass,
+  normalizeInstrumentCategory,
+} from "@shared/instruments/categories";
 
 const router = Router();
 
@@ -32,18 +36,12 @@ router.get("/", async (req, res) => {
     );
 
     const dbResults: Instrument[] = (rows.rows as any[]).map((r) => ({
+      category: normalizeInstrumentCategory(r.category, "unknown"),
       symbol: String(r.symbol),
       displayName: String(r.name ?? r.symbol),
       base: String(r.baseCurrency ?? ""),
       quote: String(r.quoteCurrency ?? ""),
-      assetClass:
-        String(r.category ?? "").toLowerCase() === "crypto"
-          ? "CRYPTO"
-          : String(r.category ?? "").toLowerCase() === "indices"
-            ? "INDEX"
-            : String(r.category ?? "").toLowerCase() === "commodities"
-              ? "METAL"
-              : "FOREX",
+      assetClass: categoryToLegacyAssetClass(r.category, { symbol: r.symbol }),
     }));
 
     const seen = new Set(dbResults.map((r) => r.symbol.toUpperCase()));

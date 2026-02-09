@@ -198,9 +198,10 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
                             </View>
                         ) : (
                             openTrades.slice(0, 5).map((trade, index) => {
-                                const profitValue = typeof trade.profit === 'number'
-                                    ? trade.profit
-                                    : Number.parseFloat(String(trade.profit ?? 0)) || 0;
+                                const rawProfit = trade.netProfitUsd ?? trade.profit;
+                                const profitValue = typeof rawProfit === 'number'
+                                    ? rawProfit
+                                    : Number.parseFloat(String(rawProfit ?? 0)) || 0;
                                 const lotsValue = Number(trade.lots ?? 0) || 0;
                                 const symbolCode = trade.symbol?.symbol || trade.symbol?.name || `Symbol #${trade.symbolId}`;
                                 const symbolLabel = trade.symbol?.name || symbolCode;

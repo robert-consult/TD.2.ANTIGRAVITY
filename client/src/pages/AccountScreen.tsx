@@ -47,8 +47,13 @@ export default function AccountScreen() {
   });
 
   const closedTrades = trades.filter((t: any) => t.closePrice);
-  const totalProfit = closedTrades.reduce((sum: number, t: any) => sum + (parseFloat(t.profit) || 0), 0);
-  const winningTrades = closedTrades.filter((t: any) => parseFloat(t.profit) > 0);
+  const getProfit = (t: any) => {
+    const v = t?.netProfitUsd ?? t?.profit ?? t?.pnl ?? t?.realizedPnl ?? 0;
+    const n = typeof v === "number" ? v : parseFloat(v);
+    return Number.isFinite(n) ? n : 0;
+  };
+  const totalProfit = closedTrades.reduce((sum: number, t: any) => sum + getProfit(t), 0);
+  const winningTrades = closedTrades.filter((t: any) => getProfit(t) > 0);
   const winRate = closedTrades.length > 0 ? (winningTrades.length / closedTrades.length) * 100 : 0;
 
   // Trader Insights computation
@@ -80,12 +85,6 @@ export default function AccountScreen() {
     const v = t?.closeTime ?? t?.exitTime ?? t?.updatedAt ?? t?.closedAt ?? null;
     const d = v ? new Date(typeof v === 'number' && v < 10000000000 ? v * 1000 : v) : null;
     return d && !isNaN(d.getTime()) ? d.getTime() : null;
-  };
-
-  const getProfit = (t: any) => {
-    const v = t?.profit ?? t?.pnl ?? t?.realizedPnl ?? 0;
-    const n = typeof v === "number" ? v : parseFloat(v);
-    return Number.isFinite(n) ? n : 0;
   };
 
   const holdingBucket = (sec: number) => {

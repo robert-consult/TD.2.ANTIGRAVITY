@@ -21,6 +21,7 @@ import type { CloseReasonCode } from "@shared/closeReasons";
 import { onLiveEvent, publishLiveEvent } from "../services/liveBus";
 import { applyUserBalanceDelta, releaseUserMargin } from "../services/tradeAtomic";
 import { createNotification } from "../services/messaging";
+import { computeCloseSettlementCosts } from "../services/tradeCosts";
 
 const STALE_DEFER_MAX_MIN = Number(process.env.AUTOCLOSE_STALE_DEFER_MAX_MIN ?? 60);
 const ALLOW_STALE_CLOSE = String(process.env.AUTOCLOSE_ALLOW_STALE_CLOSE ?? "true") === "true";
@@ -102,8 +103,22 @@ async function runAutoCloseJob() {
           openPrice,
           closePrice,
         });
-
-        const profit = pnlUsd.toFixed(2);
+        const closeCostSummary = await computeCloseSettlementCosts({
+          category: (trade as any).categorySnapshot ?? (symbolConfig as any).category,
+          positionSide: trade.type as "BUY" | "SELL",
+          notionalUsd: (trade as any).notionalUsd,
+          size: Number((trade as any).size ?? lots * 100000),
+          lots,
+          openedAt: (trade as any).openedAt,
+          executedAt: (trade as any).executedAt,
+          closedAtMs: q.quoteTs.getTime(),
+          openCommissionUsd: (trade as any).openCommissionUsd,
+          openOtherFeesUsd: (trade as any).openOtherFeesUsd,
+        });
+        const grossProfitUsd = pnlUsd;
+        const netProfitUsd = grossProfitUsd - closeCostSummary.totalCostsUsd;
+        const closeSettlementUsd = grossProfitUsd - closeCostSummary.closingChargesUsd;
+        const profit = netProfitUsd.toFixed(2);
 
         const closeReasonCode: CloseReasonCode = "MAX_HOLD_TIME";
         
@@ -137,6 +152,17 @@ async function runAutoCloseJob() {
               status: "CLOSED",
               closePrice,
               profit,
+              grossProfitUsd,
+              netProfitUsd,
+              notionalUsd: closeCostSummary.notionalUsd,
+              totalCostsUsd: closeCostSummary.totalCostsUsd,
+              closeCommissionUsd: closeCostSummary.closeCommissionUsd,
+              closeOtherFeesUsd: closeCostSummary.closeOtherFeesUsd,
+              financingAccruedUsd: closeCostSummary.financingAccruedUsd,
+              swapAccruedUsd: closeCostSummary.swapAccruedUsd,
+              overnightDays: closeCostSummary.overnightDays,
+              categorySnapshot: closeCostSummary.categorySnapshot,
+              costModelVersion: closeCostSummary.costModelVersion,
               closeReason: closeReasonCode,
               closedAt,
               closeQuoteTs: Math.floor(q.quoteTs.getTime() / 1000),
@@ -161,7 +187,7 @@ async function runAutoCloseJob() {
           const closedTrade = closedRows[0];
           if (!closedTrade) return null;
 
-          await applyUserBalanceDelta(tx, { userId: trade.userId, deltaUsd: pnlUsd });
+          await applyUserBalanceDelta(tx, { userId: trade.userId, deltaUsd: closeSettlementUsd });
           await releaseUserMargin(tx, { userId: trade.userId, marginUsd: marginToRelease });
 
           await writeTradeAudit({
@@ -194,10 +220,24 @@ async function runAutoCloseJob() {
             quoteSource: closeSource,
             riskResult: "PASS",
             reasonCode: closeReasonCode,
-            note: `Auto-closed: max hold time exceeded (${settings.autoCloseAfterDays} days). P/L: ${profit}`,
+            note: `Auto-closed: max hold time exceeded (${settings.autoCloseAfterDays} days). gross=${grossProfitUsd.toFixed(2)} net=${profit}`,
             payload: {
               closeReason: closeReasonCode,
-              profit,
+              grossProfitUsd,
+              netProfitUsd,
+              balanceDeltaUsd: closeSettlementUsd,
+              costModelVersion: closeCostSummary.costModelVersion,
+              categorySnapshot: closeCostSummary.categorySnapshot,
+              notionalUsd: closeCostSummary.notionalUsd,
+              openCommissionUsd: closeCostSummary.openCommissionUsd,
+              openOtherFeesUsd: closeCostSummary.openOtherFeesUsd,
+              closeCommissionUsd: closeCostSummary.closeCommissionUsd,
+              closeOtherFeesUsd: closeCostSummary.closeOtherFeesUsd,
+              financingAccruedUsd: closeCostSummary.financingAccruedUsd,
+              swapAccruedUsd: closeCostSummary.swapAccruedUsd,
+              overnightDays: closeCostSummary.overnightDays,
+              holdDays: closeCostSummary.holdDays,
+              totalCostsUsd: closeCostSummary.totalCostsUsd,
               openPrice,
               closePrice,
               autoCloseAfterDays: settings.autoCloseAfterDays,

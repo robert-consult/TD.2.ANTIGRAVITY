@@ -30,6 +30,19 @@ interface AuditRecord {
   orderType: string | null;
   timeInForce: string | null;
   qtyLots: number | null;
+  notionalUsd: number | null;
+  grossProfitUsd: number | null;
+  netProfitUsd: number | null;
+  totalCostsUsd: number | null;
+  openCommissionUsd: number | null;
+  closeCommissionUsd: number | null;
+  openOtherFeesUsd: number | null;
+  closeOtherFeesUsd: number | null;
+  financingAccruedUsd: number | null;
+  swapAccruedUsd: number | null;
+  overnightDays: number | null;
+  categorySnapshot: string | null;
+  costModelVersion: string | null;
   requestedPrice: number | null;
   triggerPrice: number | null;
   limitPrice: number | null;
@@ -213,6 +226,18 @@ export default function AdminTradeAudit() {
     return Number(price).toFixed(5);
   };
 
+  const formatUsd = (amount: number | null | undefined) => {
+    if (amount === null || amount === undefined || !Number.isFinite(Number(amount))) return "-";
+    return Number(amount).toFixed(2);
+  };
+
+  const formatSignedUsd = (amount: number | null | undefined) => {
+    if (amount === null || amount === undefined || !Number.isFinite(Number(amount))) return "-";
+    const n = Number(amount);
+    const sign = n > 0 ? "+" : "";
+    return `${sign}${n.toFixed(2)}`;
+  };
+
   const formatDate = (dateStr: string | null, ms?: number | null) => {
     if (!dateStr) return "-";
     const date = new Date(dateStr);
@@ -239,6 +264,9 @@ export default function AdminTradeAudit() {
       "Correlation ID", "Order ID", "Execution ID", "Position ID",
       "Actor Type", "Actor User ID", "Session ID", "IP", "User Agent",
       "Symbol", "Side", "Order Type", "Time In Force", "Qty (Lots)",
+      "Notional USD", "Gross P/L USD", "Net P/L USD", "Total Costs USD",
+      "Open Comm USD", "Close Comm USD", "Open Fees USD", "Close Fees USD",
+      "Financing USD", "Swap USD", "Overnight Days", "Category Snapshot", "Cost Model Version",
       "Requested Price", "Trigger Price", "Limit Price", "Stop Price", "Fill Price", "Avg Fill Price",
       "Slippage", "Slippage (Pips)", "Slippage Reference", "Latency (ms)",
       "Quote Bid", "Quote Ask", "Quote Mid", "Quote Spread", "Spread (Pips)",
@@ -251,6 +279,9 @@ export default function AdminTradeAudit() {
       r.correlationId ?? "", r.orderId ?? "", r.executionId ?? "", r.positionId ?? "",
       r.actorType ?? "", r.actorUserId ?? "", r.sessionId ?? "", r.ip ?? "", r.userAgent ?? "",
       r.symbol ?? "", r.side ?? "", r.orderType ?? "", r.timeInForce ?? "", r.qtyLots ?? "",
+      r.notionalUsd ?? "", r.grossProfitUsd ?? "", r.netProfitUsd ?? "", r.totalCostsUsd ?? "",
+      r.openCommissionUsd ?? "", r.closeCommissionUsd ?? "", r.openOtherFeesUsd ?? "", r.closeOtherFeesUsd ?? "",
+      r.financingAccruedUsd ?? "", r.swapAccruedUsd ?? "", r.overnightDays ?? "", r.categorySnapshot ?? "", r.costModelVersion ?? "",
       r.requestedPrice ?? "", r.triggerPrice ?? "", r.limitPrice ?? "", r.stopPrice ?? "", r.fillPrice ?? "", r.avgFillPrice ?? "",
       r.slippage ?? "", r.slippagePips ?? "", r.slippageReference ?? "", r.latencyMs ?? "",
       r.quoteBid ?? "", r.quoteAsk ?? "", r.quoteMid ?? "", r.quoteSpread ?? "", r.spreadPips ?? "",
@@ -454,6 +485,8 @@ export default function AdminTradeAudit() {
                 <TableHead className="text-gray-400">Fill Price</TableHead>
                 <TableHead className="text-gray-400">Slip (Pips)</TableHead>
                 <TableHead className="text-gray-400">Latency</TableHead>
+                <TableHead className="text-gray-400">Net P/L</TableHead>
+                <TableHead className="text-gray-400">Costs</TableHead>
                 <TableHead className="text-gray-400">Result</TableHead>
                 <TableHead className="text-gray-400">User</TableHead>
               </TableRow>
@@ -502,13 +535,25 @@ export default function AdminTradeAudit() {
                     <TableCell className="font-mono text-sm">
                       {record.latencyMs !== null ? `${record.latencyMs}ms` : "-"}
                     </TableCell>
+                    <TableCell className="font-mono text-sm">
+                      {record.netProfitUsd !== null && record.netProfitUsd !== undefined ? (
+                        <span className={Number(record.netProfitUsd) >= 0 ? "text-green-300" : "text-red-300"}>
+                          {formatSignedUsd(record.netProfitUsd)}
+                        </span>
+                      ) : "-"}
+                    </TableCell>
+                    <TableCell className="font-mono text-sm">
+                      {record.totalCostsUsd !== null && record.totalCostsUsd !== undefined ? (
+                        <span className="text-amber-300">{formatUsd(record.totalCostsUsd)}</span>
+                      ) : "-"}
+                    </TableCell>
                     <TableCell>{getResultBadge(record)}</TableCell>
                     <TableCell className="text-sm">{record.username || "-"}</TableCell>
                   </TableRow>
                   
                   {expandedRows.has(record.id) && (
                     <TableRow className="bg-neutral-900 border-b border-gray-700">
-                      <TableCell colSpan={14} className="p-4">
+                      <TableCell colSpan={16} className="p-4">
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
                           <div className="space-y-2">
                             <h4 className="font-semibold text-blue-400 flex items-center gap-1">
@@ -564,6 +609,22 @@ export default function AdminTradeAudit() {
                               <p><span className="text-gray-500">Trigger Price:</span> {formatPrice(record.triggerPrice)}</p>
                               <p><span className="text-gray-500">Avg Fill:</span> {formatPrice(record.avgFillPrice)}</p>
                               <p><span className="text-gray-500">Time In Force:</span> {record.timeInForce || "GTC"}</p>
+                            </div>
+                          </div>
+
+                          <div className="space-y-2">
+                            <h4 className="font-semibold text-amber-400">Cost Breakdown</h4>
+                            <div className="space-y-1 text-gray-300">
+                              <p><span className="text-gray-500">Category Snapshot:</span> {record.categorySnapshot || "N/A"}</p>
+                              <p><span className="text-gray-500">Cost Model:</span> {record.costModelVersion || "N/A"}</p>
+                              <p><span className="text-gray-500">Notional USD:</span> {formatUsd(record.notionalUsd)}</p>
+                              <p><span className="text-gray-500">Gross P/L USD:</span> {formatSignedUsd(record.grossProfitUsd)}</p>
+                              <p><span className="text-gray-500">Net P/L USD:</span> {formatSignedUsd(record.netProfitUsd)}</p>
+                              <p><span className="text-gray-500">Total Costs USD:</span> {formatUsd(record.totalCostsUsd)}</p>
+                              <p><span className="text-gray-500">Open + Close Commission:</span> {formatUsd((record.openCommissionUsd ?? 0) + (record.closeCommissionUsd ?? 0))}</p>
+                              <p><span className="text-gray-500">Open + Close Other Fees:</span> {formatUsd((record.openOtherFeesUsd ?? 0) + (record.closeOtherFeesUsd ?? 0))}</p>
+                              <p><span className="text-gray-500">Financing / Swap:</span> {formatUsd(record.financingAccruedUsd)} / {formatUsd(record.swapAccruedUsd)}</p>
+                              <p><span className="text-gray-500">Overnight Days:</span> {record.overnightDays ?? "0"}</p>
                             </div>
                           </div>
                           

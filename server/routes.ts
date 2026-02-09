@@ -49,6 +49,7 @@ import { requiredMargin } from "./lib/margin";
 import { getExecutionQuote } from "./services/quoteService";
 import { applyUserBalanceDelta, releaseUserMargin, reserveUserMargin } from "./services/tradeAtomic";
 import { realizedPnlUsd } from "./lib/realizedPnl";
+import { computeCloseSettlementCosts, computeOpenSideCosts } from "./services/tradeCosts";
 import { buildAuditContext, type AuditContext } from "./lib/auditContext";
 import { writeOrderIntentAudit, writeTradeAudit, generateCorrelationId, generateOrderId, generateExecutionId, generatePositionId, calculateSpreadPips, calculateSlippagePips } from "./lib/auditWriter";
 import { decidePolicy, featureGates } from "@shared/policyDecision";
@@ -2855,6 +2856,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // Calculate position size from lots (1 lot = $100,000)
         const CONTRACT_SIZE = 100000;
         const positionSize = tradeLots * CONTRACT_SIZE;
+        const openCostSummary = computeOpenSideCosts({
+          category: (symbolConfig as any).category,
+          notionalUsd: positionSize,
+          lots: tradeLots,
+          size: positionSize,
+          positionSide: data.type,
+        });
 
         // Enforce global maxPositionSize limit
         const gs = await getGlobalSettingsCached();
@@ -3156,6 +3164,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
             if (!reserve.reserved) {
               return { trade: null, rejectReason: "INSUFFICIENT_MARGIN_AT_COMMIT" as const, openLots, pendingLots, currentTotalLots };
             }
+            await applyUserBalanceDelta(tx, {
+              userId: req.session.userId,
+              deltaUsd: -openCostSummary.totalUsd,
+            });
           }
 
           const [createdTrade] = await tx
@@ -3173,6 +3185,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
               correlationId: correlationId,
               orderId,
               positionId,
+              notionalUsd: openCostSummary.notionalUsd,
+              categorySnapshot: openCostSummary.categorySnapshot,
+              costModelVersion: openCostSummary.costModelVersion,
+              openCommissionUsd: isPendingOrder ? 0 : openCostSummary.commissionUsd,
+              openOtherFeesUsd: isPendingOrder ? 0 : openCostSummary.otherFeesUsd,
+              totalCostsUsd: isPendingOrder ? 0 : openCostSummary.totalUsd,
               lastExecutionId: openExecutionId,
               lastActorUserId: req.session.userId,
               lastActorSessionId: auditCtx.sessionId,
@@ -3253,7 +3271,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
             quoteIsStale: quote.isStale ?? false,
             riskLimit: { maxConcurrentLots: effectiveMaxConcurrentLots, marginRequired: neededMargin },
             riskObserved: { currentLots: currentTotalLots, freeMargin: Number(updatedUser.freeMargin) },
-            payload: { tradeId: trade.id, latencyMs, status: trade.status, quoteSource },
+            payload: {
+              tradeId: trade.id,
+              latencyMs,
+              status: trade.status,
+              quoteSource,
+              costModelVersion: openCostSummary.costModelVersion,
+              categorySnapshot: openCostSummary.categorySnapshot,
+              notionalUsd: openCostSummary.notionalUsd,
+              openCostEstimatedUsd: openCostSummary.totalUsd,
+              openCommissionEstimatedUsd: openCostSummary.commissionUsd,
+              openOtherFeesEstimatedUsd: openCostSummary.otherFeesUsd,
+              openCostChargedNowUsd: isPendingOrder ? 0 : openCostSummary.totalUsd,
+            },
           });
 
           await writeTradeAudit({
@@ -3284,6 +3314,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
               takeProfit: req.body.takeProfit ? parseFloat(String(req.body.takeProfit)) : null,
               stopLoss: req.body.stopLoss ? parseFloat(String(req.body.stopLoss)) : null,
               status: trade.status,
+              costModelVersion: openCostSummary.costModelVersion,
+              categorySnapshot: openCostSummary.categorySnapshot,
+              notionalUsd: openCostSummary.notionalUsd,
+              openCostEstimatedUsd: openCostSummary.totalUsd,
+              openCommissionEstimatedUsd: openCostSummary.commissionUsd,
+              openOtherFeesEstimatedUsd: openCostSummary.otherFeesUsd,
+              openCostChargedNowUsd: isPendingOrder ? 0 : openCostSummary.totalUsd,
             },
           });
 
@@ -3322,7 +3359,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
               slippageReference: "market",
               latencyMs,
               riskResult: "PASS",
-              note: `Market order filled at ${entryPrice}`,
+              note: `Market order filled at ${entryPrice}, openCost=${openCostSummary.totalUsd.toFixed(2)}`,
+              payload: {
+                costModelVersion: openCostSummary.costModelVersion,
+                categorySnapshot: openCostSummary.categorySnapshot,
+                notionalUsd: openCostSummary.notionalUsd,
+                openCommissionUsd: openCostSummary.commissionUsd,
+                openOtherFeesUsd: openCostSummary.otherFeesUsd,
+                openCostChargedUsd: openCostSummary.totalUsd,
+              },
             });
           }
         } catch (auditErr) {
@@ -3593,8 +3638,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
           openPrice,
           closePrice,
         });
-
-        const profit = pnlUsd;
+        const closeCostSummary = await computeCloseSettlementCosts({
+          category: (trade as any).categorySnapshot ?? (trade as any).symbol?.category ?? (symbolConfig as any).category,
+          positionSide: trade.type as "BUY" | "SELL",
+          notionalUsd: (trade as any).notionalUsd,
+          size: Number((trade as any).size ?? lots * 100000),
+          lots,
+          openedAt: trade.openedAt,
+          executedAt: (trade as any).executedAt,
+          closedAtMs: q.quoteTs.getTime(),
+          openCommissionUsd: (trade as any).openCommissionUsd,
+          openOtherFeesUsd: (trade as any).openOtherFeesUsd,
+        });
+        const grossProfitUsd = pnlUsd;
+        const netProfitUsd = grossProfitUsd - closeCostSummary.totalCostsUsd;
+        const closeSettlementUsd = grossProfitUsd - closeCostSummary.closingChargesUsd;
 
         // Build audit context for this close request
         const closeAuditCtx = buildAuditContext(req);
@@ -3628,7 +3686,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
             .set({
               status: "CLOSED",
               closePrice,
-              profit: profit.toFixed(2),
+              profit: netProfitUsd.toFixed(2),
+              grossProfitUsd,
+              netProfitUsd,
+              notionalUsd: closeCostSummary.notionalUsd,
+              totalCostsUsd: closeCostSummary.totalCostsUsd,
+              closeCommissionUsd: closeCostSummary.closeCommissionUsd,
+              closeOtherFeesUsd: closeCostSummary.closeOtherFeesUsd,
+              financingAccruedUsd: closeCostSummary.financingAccruedUsd,
+              swapAccruedUsd: closeCostSummary.swapAccruedUsd,
+              overnightDays: closeCostSummary.overnightDays,
+              categorySnapshot: closeCostSummary.categorySnapshot,
+              costModelVersion: closeCostSummary.costModelVersion,
               closeReason: "MANUAL",
               closedAt: Math.floor(Date.now() / 1000),
               closeQuoteTs: Math.floor(q.quoteTs.getTime() / 1000),
@@ -3653,7 +3722,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const closedTrade = closedRows[0];
           if (!closedTrade) return null;
 
-          await applyUserBalanceDelta(tx, { userId: req.session.userId, deltaUsd: profit });
+          await applyUserBalanceDelta(tx, { userId: req.session.userId, deltaUsd: closeSettlementUsd });
           await releaseUserMargin(tx, { userId: req.session.userId, marginUsd: marginToRelease });
 
           const slippagePoints = 0; // No slippage on manual close
@@ -3683,8 +3752,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
             slippageReference: "manual_close",
             riskResult: "PASS",
             reasonCode: "MANUAL",
-            note: `Manual close at ${closePrice}, P/L: ${profit.toFixed(2)}`,
-            payload: { profit: profit.toFixed(2), openPrice, closeReason: "MANUAL" },
+            note: `Manual close at ${closePrice}, gross=${grossProfitUsd.toFixed(2)}, net=${netProfitUsd.toFixed(2)}`,
+            payload: {
+              closeReason: "MANUAL",
+              openPrice,
+              grossProfitUsd: grossProfitUsd.toFixed(2),
+              netProfitUsd: netProfitUsd.toFixed(2),
+              balanceDeltaUsd: closeSettlementUsd.toFixed(2),
+              costModelVersion: closeCostSummary.costModelVersion,
+              categorySnapshot: closeCostSummary.categorySnapshot,
+              notionalUsd: closeCostSummary.notionalUsd,
+              openCommissionUsd: closeCostSummary.openCommissionUsd,
+              openOtherFeesUsd: closeCostSummary.openOtherFeesUsd,
+              closeCommissionUsd: closeCostSummary.closeCommissionUsd,
+              closeOtherFeesUsd: closeCostSummary.closeOtherFeesUsd,
+              financingAccruedUsd: closeCostSummary.financingAccruedUsd,
+              swapAccruedUsd: closeCostSummary.swapAccruedUsd,
+              overnightDays: closeCostSummary.overnightDays,
+              holdDays: closeCostSummary.holdDays,
+              totalCostsUsd: closeCostSummary.totalCostsUsd,
+            },
           }, { db: tx });
 
           return closedTrade;

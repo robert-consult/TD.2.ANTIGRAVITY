@@ -42,14 +42,15 @@ const TradeCard = ({
     onCancel?: () => void;
     isClosing?: boolean;
     type: 'open' | 'pending' | 'closed';
-	}) => {
-	    const isBuy = trade.type === 'BUY';
-	    const profitValue = typeof trade.profit === 'number'
-	        ? trade.profit
-	        : Number.parseFloat(String(trade.profit ?? 0)) || 0;
-	    const isProfitable = profitValue >= 0;
-	    const lotsValue = Number(trade.lots ?? 0) || 0;
-	    const symbolName = trade.symbol?.name || trade.symbol?.symbol || `Symbol #${trade.symbolId}`;
+    }) => {
+    const isBuy = trade.type === 'BUY';
+    const rawProfit = trade.netProfitUsd ?? trade.profit;
+    const profitValue = typeof rawProfit === 'number'
+        ? rawProfit
+        : Number.parseFloat(String(rawProfit ?? 0)) || 0;
+    const isProfitable = profitValue >= 0;
+    const lotsValue = Number(trade.lots ?? 0) || 0;
+    const symbolName = trade.symbol?.name || trade.symbol?.symbol || `Symbol #${trade.symbolId}`;
 
     const formatCurrency = (value: number) => {
         return new Intl.NumberFormat('en-US', {

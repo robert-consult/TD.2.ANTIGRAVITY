@@ -529,6 +529,12 @@ export function registerAdminRoutes(app: Express) {
         : allTrades.filter((t: any) => (t.openedAt || 0) >= cutoff);
 
       const closedTrades = periodTrades.filter((t: any) => t.status === 'CLOSED');
+      const tradeNetProfit = (trade: any): number => {
+        const net = Number(trade?.netProfitUsd);
+        if (Number.isFinite(net)) return net;
+        const legacy = Number.parseFloat(String(trade?.profit ?? "0"));
+        return Number.isFinite(legacy) ? legacy : 0;
+      };
 
       // Calculate metrics
       const activeTraders = new Set(periodTrades.map((t: any) => t.userId)).size;
@@ -541,11 +547,11 @@ export function registerAdminRoutes(app: Express) {
 
       // Total P/L
       const totalPnL = closedTrades.reduce((sum: number, t: any) => {
-        return sum + parseFloat(t.profit || '0');
+        return sum + tradeNetProfit(t);
       }, 0);
 
       // Average win rate
-      const winningTrades = closedTrades.filter((t: any) => parseFloat(t.profit || '0') > 0).length;
+      const winningTrades = closedTrades.filter((t: any) => tradeNetProfit(t) > 0).length;
       const avgWinRate = totalTradesCount > 0 ? (winningTrades / totalTradesCount) * 100 : 0;
 
       res.json({
@@ -568,19 +574,71 @@ export function registerAdminRoutes(app: Express) {
       const days = req.query.days ? parseInt(req.query.days as string) : 30;
 
       const params: any[] = [];
-      let query = "SELECT * FROM vw_trader_stats";
-
-      // If days parameter is provided and not 0 (all time), filter by date
+      let havingClause = "";
       if (days > 0) {
         const cutoffDate = new Date();
         cutoffDate.setDate(cutoffDate.getDate() - days);
         const cutoffTimestamp = Math.floor(cutoffDate.getTime() / 1000);
         params.push(cutoffTimestamp);
-        query += ` WHERE last_trade_date > $${params.length}`;
+        havingClause = `HAVING MAX(t.closed_at) > $${params.length}`;
       }
 
-      // Order by profit descending
-      query += " ORDER BY profit DESC";
+      const query = `
+        SELECT
+          u.id AS user_id,
+          u.username,
+          u.email,
+          COUNT(t.id) AS total_trades,
+          ROUND(
+            SUM(
+              CASE
+                WHEN COALESCE(
+                  t.net_profit_usd::numeric,
+                  CASE
+                    WHEN t.profit IS NULL OR btrim(t.profit) = '' THEN 0::numeric
+                    WHEN t.profit ~ '^-?\\d+(\\.\\d+)?$' THEN t.profit::numeric
+                    ELSE 0::numeric
+                  END
+                ) > 0 THEN 1
+                ELSE 0
+              END
+            ) * 100.0 / NULLIF(COUNT(t.id), 0),
+            2
+          ) AS win_rate,
+          ROUND(
+            SUM(
+              COALESCE(
+                t.net_profit_usd::numeric,
+                CASE
+                  WHEN t.profit IS NULL OR btrim(t.profit) = '' THEN 0::numeric
+                  WHEN t.profit ~ '^-?\\d+(\\.\\d+)?$' THEN t.profit::numeric
+                  ELSE 0::numeric
+                END
+              )
+            ),
+            2
+          ) AS profit,
+          ROUND(
+            SUM(
+              COALESCE(
+                t.net_profit_usd::numeric,
+                CASE
+                  WHEN t.profit IS NULL OR btrim(t.profit) = '' THEN 0::numeric
+                  WHEN t.profit ~ '^-?\\d+(\\.\\d+)?$' THEN t.profit::numeric
+                  ELSE 0::numeric
+                END
+              )
+            ) * 100.0 / NULLIF(COALESCE(u.starting_equity, 1000000)::numeric, 0),
+            2
+          ) AS profit_percent,
+          ROUND(AVG((t.closed_at - t.opened_at) / 3600.0)::numeric, 2) AS avg_hold_time,
+          MAX(t.closed_at) AS last_trade_date
+        FROM users u
+        LEFT JOIN trades t ON u.id = t.user_id AND t.status = 'CLOSED'
+        GROUP BY u.id, u.username, u.email, u.starting_equity
+        ${havingClause}
+        ORDER BY profit DESC
+      `;
 
       const stats = (await dbClient.query(query, params)).rows;
       res.json(stats);
@@ -604,6 +662,19 @@ export function registerAdminRoutes(app: Express) {
         openPrice: trades.openPrice,
         closePrice: trades.closePrice,
         profit: trades.profit,
+        grossProfitUsd: trades.grossProfitUsd,
+        netProfitUsd: trades.netProfitUsd,
+        notionalUsd: trades.notionalUsd,
+        totalCostsUsd: trades.totalCostsUsd,
+        openCommissionUsd: trades.openCommissionUsd,
+        closeCommissionUsd: trades.closeCommissionUsd,
+        openOtherFeesUsd: trades.openOtherFeesUsd,
+        closeOtherFeesUsd: trades.closeOtherFeesUsd,
+        financingAccruedUsd: trades.financingAccruedUsd,
+        swapAccruedUsd: trades.swapAccruedUsd,
+        overnightDays: trades.overnightDays,
+        categorySnapshot: trades.categorySnapshot,
+        costModelVersion: trades.costModelVersion,
         status: trades.status,
         openedAt: trades.openedAt,
         closedAt: trades.closedAt,
@@ -730,15 +801,30 @@ export function registerAdminRoutes(app: Express) {
     return Math.max(0, Math.min(1, value));
   };
 
+  const LEGACY_TRADE_PROFIT_NUMERIC_SQL = `
+    CASE
+      WHEN t.profit IS NULL OR btrim(t.profit) = '' THEN 0::numeric
+      WHEN t.profit ~ '^-?\\d+(\\.\\d+)?$' THEN t.profit::numeric
+      ELSE 0::numeric
+    END
+  `;
+
+  const TRADE_NET_PROFIT_SQL = `
+    COALESCE(
+      t.net_profit_usd::numeric,
+      ${LEGACY_TRADE_PROFIT_NUMERIC_SQL}
+    )
+  `;
+
   const TRADER_SCOUT_CATEGORY_SQL = `
     CASE
-      WHEN LOWER(COALESCE(NULLIF(sc.category, ''), 'unknown')) IN ('fx', 'forex', 'forex_pair', 'forex_pairs') THEN 'forex'
-      WHEN LOWER(COALESCE(NULLIF(sc.category, ''), 'unknown')) IN ('stock', 'stocks') THEN 'stocks'
-      WHEN LOWER(COALESCE(NULLIF(sc.category, ''), 'unknown')) IN ('etf', 'etfs') THEN 'etf'
-      WHEN LOWER(COALESCE(NULLIF(sc.category, ''), 'unknown')) IN ('crypto', 'cryptocurrency', 'cryptocurrencies') THEN 'crypto'
-      WHEN LOWER(COALESCE(NULLIF(sc.category, ''), 'unknown')) IN ('commodity', 'commodities') THEN 'commodities'
+      WHEN LOWER(COALESCE(NULLIF(sc.category, ''), 'unknown')) IN ('fx', 'forex', 'forex_pair', 'forex_pairs', 'physical_currency') THEN 'forex'
+      WHEN LOWER(COALESCE(NULLIF(sc.category, ''), 'unknown')) IN ('stock', 'stocks', 'common_stock', 'preferred_stock', 'american_depositary_receipt', 'depositary_receipt', 'global_depositary_receipt', 'reit', 'right', 'warrant', 'limited_partnership', 'structured_product') THEN 'stocks'
+      WHEN LOWER(COALESCE(NULLIF(sc.category, ''), 'unknown')) IN ('etf', 'etfs', 'exchange_traded_note', 'exchange_traded_fund') THEN 'etf'
+      WHEN LOWER(COALESCE(NULLIF(sc.category, ''), 'unknown')) IN ('crypto', 'cryptocurrency', 'cryptocurrencies', 'digital_currency', 'crypto_pair', 'crypto_pairs') THEN 'crypto'
+      WHEN LOWER(COALESCE(NULLIF(sc.category, ''), 'unknown')) IN ('commodity', 'commodities', 'agricultural_product', 'energy', 'energies', 'energy_resource', 'livestock', 'metal', 'metals', 'precious_metal', 'precious_metals', 'industrial_metal', 'industrial_metals', 'gold', 'silver', 'platinum', 'palladium', 'oil', 'gas', 'natural_gas', 'crude_oil') THEN 'commodities'
       WHEN LOWER(COALESCE(NULLIF(sc.category, ''), 'unknown')) IN ('bond', 'bonds') THEN 'bonds'
-      WHEN LOWER(COALESCE(NULLIF(sc.category, ''), 'unknown')) IN ('fund', 'funds') THEN 'funds'
+      WHEN LOWER(COALESCE(NULLIF(sc.category, ''), 'unknown')) IN ('fund', 'funds', 'bond_fund', 'closed_end_fund', 'trust', 'unit') THEN 'funds'
       WHEN LOWER(COALESCE(NULLIF(sc.category, ''), 'unknown')) IN ('mutual_fund', 'mutual_funds') THEN 'mutual_funds'
       WHEN LOWER(COALESCE(NULLIF(sc.category, ''), 'unknown')) IN ('index', 'indices') THEN 'indices'
       WHEN LOWER(COALESCE(NULLIF(sc.category, ''), 'unknown')) = 'unknown' THEN 'unknown'
@@ -752,7 +838,7 @@ WITH ft AS (
     t.user_id,
     t.opened_at,
     t.closed_at,
-    COALESCE(NULLIF(t.profit, '')::numeric, 0) AS profit,
+    ${TRADE_NET_PROFIT_SQL} AS profit,
     t.stop_loss,
     t.take_profit,
     ${TRADER_SCOUT_CATEGORY_SQL} AS category
@@ -1355,7 +1441,7 @@ WITH ft AS (
     t.user_id,
     t.opened_at,
     t.closed_at,
-    COALESCE(NULLIF(t.profit, '')::numeric, 0) AS profit,
+    ${TRADE_NET_PROFIT_SQL} AS profit,
     ${TRADER_SCOUT_CATEGORY_SQL} AS category
   FROM trades t
   LEFT JOIN symbol_configs sc ON sc.id = t.symbol_id
@@ -1437,7 +1523,7 @@ WITH ft AS (
     t.close_price,
     t.opened_at,
     t.closed_at,
-    COALESCE(NULLIF(t.profit, '')::numeric, 0) AS profit,
+    ${TRADE_NET_PROFIT_SQL} AS profit,
     CASE
       WHEN t.open_price IS NULL OR t.open_price = 0 OR t.close_price IS NULL THEN NULL
       WHEN t.type = 'BUY' THEN (t.close_price - t.open_price) / t.open_price
@@ -1541,13 +1627,13 @@ FROM (
           COUNT(*) FILTER (WHERE t.status = 'CLOSED') AS "closedTrades",
           SUM(
             CASE
-              WHEN t.status = 'CLOSED' THEN COALESCE(NULLIF(t.profit, '')::numeric, 0)
+              WHEN t.status = 'CLOSED' THEN ${TRADE_NET_PROFIT_SQL}
               ELSE 0
             END
           ) AS "profit",
           SUM(
             CASE
-              WHEN t.status = 'CLOSED' AND COALESCE(NULLIF(t.profit, '')::numeric, 0) > 0 THEN 1
+              WHEN t.status = 'CLOSED' AND ${TRADE_NET_PROFIT_SQL} > 0 THEN 1
               ELSE 0
             END
           ) AS "winningTrades"
@@ -1727,7 +1813,26 @@ FROM (
             t.lots AS lots,
             t.open_price AS "openPrice",
             t.close_price AS "closePrice",
-            t.profit AS profit,
+            COALESCE(
+              t.net_profit_usd,
+              CASE
+                WHEN t.profit IS NULL OR btrim(t.profit) = '' THEN NULL
+                WHEN t.profit ~ '^-?\\d+(\\.\\d+)?$' THEN t.profit::real
+                ELSE NULL
+              END
+            ) AS profit,
+            t.gross_profit_usd AS "grossProfitUsd",
+            t.net_profit_usd AS "netProfitUsd",
+            t.total_costs_usd AS "totalCostsUsd",
+            t.open_commission_usd AS "openCommissionUsd",
+            t.close_commission_usd AS "closeCommissionUsd",
+            t.open_other_fees_usd AS "openOtherFeesUsd",
+            t.close_other_fees_usd AS "closeOtherFeesUsd",
+            t.financing_accrued_usd AS "financingAccruedUsd",
+            t.swap_accrued_usd AS "swapAccruedUsd",
+            t.overnight_days AS "overnightDays",
+            t.category_snapshot AS "categorySnapshot",
+            t.cost_model_version AS "costModelVersion",
             t.opened_at AS "openedAt",
             t.closed_at AS "closedAt"
           FROM trades t
@@ -1792,6 +1897,18 @@ FROM (
                 openPrice: trade.openPrice != null ? Number(trade.openPrice) : null,
                 closePrice: trade.closePrice != null ? Number(trade.closePrice) : null,
                 profit: trade.profit != null ? Number(trade.profit) : null,
+                grossProfitUsd: trade.grossProfitUsd != null ? Number(trade.grossProfitUsd) : null,
+                netProfitUsd: trade.netProfitUsd != null ? Number(trade.netProfitUsd) : null,
+                totalCostsUsd: trade.totalCostsUsd != null ? Number(trade.totalCostsUsd) : null,
+                openCommissionUsd: trade.openCommissionUsd != null ? Number(trade.openCommissionUsd) : null,
+                closeCommissionUsd: trade.closeCommissionUsd != null ? Number(trade.closeCommissionUsd) : null,
+                openOtherFeesUsd: trade.openOtherFeesUsd != null ? Number(trade.openOtherFeesUsd) : null,
+                closeOtherFeesUsd: trade.closeOtherFeesUsd != null ? Number(trade.closeOtherFeesUsd) : null,
+                financingAccruedUsd: trade.financingAccruedUsd != null ? Number(trade.financingAccruedUsd) : null,
+                swapAccruedUsd: trade.swapAccruedUsd != null ? Number(trade.swapAccruedUsd) : null,
+                overnightDays: trade.overnightDays != null ? Number(trade.overnightDays) : null,
+                categorySnapshot: trade.categorySnapshot ? String(trade.categorySnapshot) : null,
+                costModelVersion: trade.costModelVersion ? String(trade.costModelVersion) : null,
                 openedAt: trade.openedAt != null ? Number(trade.openedAt) : null,
                 closedAt: trade.closedAt != null ? Number(trade.closedAt) : null,
                 exportedAt,
@@ -1830,7 +1947,13 @@ FROM (
         "lots",
         "open_price",
         "close_price",
-        "profit",
+        "net_profit_usd",
+        "total_costs_usd",
+        "open_commission_usd",
+        "close_commission_usd",
+        "financing_accrued_usd",
+        "swap_accrued_usd",
+        "overnight_days",
         "opened_at",
         "closed_at",
       ];
@@ -1853,6 +1976,13 @@ FROM (
             user.profitUsd,
             user.trades,
             user.winRatePct,
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
             "",
             "",
             "",
@@ -1887,7 +2017,13 @@ FROM (
             trade.lots ?? "",
             trade.openPrice ?? "",
             trade.closePrice ?? "",
-            trade.profit ?? "",
+            trade.netProfitUsd ?? trade.profit ?? "",
+            trade.totalCostsUsd ?? "",
+            trade.openCommissionUsd ?? "",
+            trade.closeCommissionUsd ?? "",
+            trade.financingAccruedUsd ?? "",
+            trade.swapAccruedUsd ?? "",
+            trade.overnightDays ?? "",
             trade.openedAt ?? "",
             trade.closedAt ?? "",
           ];
@@ -1930,6 +2066,19 @@ FROM (
           orderType: tradeAudit.orderType,
           timeInForce: tradeAudit.timeInForce,
           qtyLots: tradeAudit.qtyLots,
+          notionalUsd: tradeAudit.notionalUsd,
+          grossProfitUsd: tradeAudit.grossProfitUsd,
+          netProfitUsd: tradeAudit.netProfitUsd,
+          totalCostsUsd: tradeAudit.totalCostsUsd,
+          openCommissionUsd: tradeAudit.openCommissionUsd,
+          closeCommissionUsd: tradeAudit.closeCommissionUsd,
+          openOtherFeesUsd: tradeAudit.openOtherFeesUsd,
+          closeOtherFeesUsd: tradeAudit.closeOtherFeesUsd,
+          financingAccruedUsd: tradeAudit.financingAccruedUsd,
+          swapAccruedUsd: tradeAudit.swapAccruedUsd,
+          overnightDays: tradeAudit.overnightDays,
+          categorySnapshot: tradeAudit.categorySnapshot,
+          costModelVersion: tradeAudit.costModelVersion,
           requestedPrice: tradeAudit.requestedPrice,
           triggerPrice: tradeAudit.triggerPrice,
           limitPrice: tradeAudit.limitPrice,
@@ -1963,6 +2112,19 @@ FROM (
           tradeSide: trades.type,
           tradeLots: trades.lots,
           tradeOrderType: trades.orderType,
+          tradeNotionalUsd: trades.notionalUsd,
+          tradeGrossProfitUsd: trades.grossProfitUsd,
+          tradeNetProfitUsd: trades.netProfitUsd,
+          tradeTotalCostsUsd: trades.totalCostsUsd,
+          tradeOpenCommissionUsd: trades.openCommissionUsd,
+          tradeCloseCommissionUsd: trades.closeCommissionUsd,
+          tradeOpenOtherFeesUsd: trades.openOtherFeesUsd,
+          tradeCloseOtherFeesUsd: trades.closeOtherFeesUsd,
+          tradeFinancingAccruedUsd: trades.financingAccruedUsd,
+          tradeSwapAccruedUsd: trades.swapAccruedUsd,
+          tradeOvernightDays: trades.overnightDays,
+          tradeCategorySnapshot: trades.categorySnapshot,
+          tradeCostModelVersion: trades.costModelVersion,
         })
         .from(tradeAudit)
         .leftJoin(trades, eq(tradeAudit.tradeId, trades.id))
@@ -1996,6 +2158,19 @@ FROM (
         side: r.side || r.tradeSide,
         qtyLots: r.qtyLots ?? r.tradeLots,
         orderType: r.orderType || r.tradeOrderType,
+        notionalUsd: r.notionalUsd ?? r.tradeNotionalUsd,
+        grossProfitUsd: r.grossProfitUsd ?? r.tradeGrossProfitUsd,
+        netProfitUsd: r.netProfitUsd ?? r.tradeNetProfitUsd,
+        totalCostsUsd: r.totalCostsUsd ?? r.tradeTotalCostsUsd,
+        openCommissionUsd: r.openCommissionUsd ?? r.tradeOpenCommissionUsd,
+        closeCommissionUsd: r.closeCommissionUsd ?? r.tradeCloseCommissionUsd,
+        openOtherFeesUsd: r.openOtherFeesUsd ?? r.tradeOpenOtherFeesUsd,
+        closeOtherFeesUsd: r.closeOtherFeesUsd ?? r.tradeCloseOtherFeesUsd,
+        financingAccruedUsd: r.financingAccruedUsd ?? r.tradeFinancingAccruedUsd,
+        swapAccruedUsd: r.swapAccruedUsd ?? r.tradeSwapAccruedUsd,
+        overnightDays: r.overnightDays ?? r.tradeOvernightDays,
+        categorySnapshot: r.categorySnapshot ?? r.tradeCategorySnapshot,
+        costModelVersion: r.costModelVersion ?? r.tradeCostModelVersion,
       }));
 
       const enrichedFixed = enriched.map(r => ({
@@ -4697,7 +4872,11 @@ FROM (
             tenTrades++;
 
             const totalProfit = closedTrades.reduce((sum: number, t: any) =>
-              sum + parseFloat(t.profit || '0'), 0);
+              sum +
+              (Number.isFinite(Number(t?.netProfitUsd))
+                ? Number(t.netProfitUsd)
+                : Number.parseFloat(String(t?.profit ?? "0")) || 0),
+            0);
             if (totalProfit > 0) {
               profitable++;
             }
@@ -4891,6 +5070,19 @@ FROM (
           orderType: tradeAudit.orderType,
           timeInForce: tradeAudit.timeInForce,
           qtyLots: tradeAudit.qtyLots,
+          notionalUsd: tradeAudit.notionalUsd,
+          grossProfitUsd: tradeAudit.grossProfitUsd,
+          netProfitUsd: tradeAudit.netProfitUsd,
+          totalCostsUsd: tradeAudit.totalCostsUsd,
+          openCommissionUsd: tradeAudit.openCommissionUsd,
+          closeCommissionUsd: tradeAudit.closeCommissionUsd,
+          openOtherFeesUsd: tradeAudit.openOtherFeesUsd,
+          closeOtherFeesUsd: tradeAudit.closeOtherFeesUsd,
+          financingAccruedUsd: tradeAudit.financingAccruedUsd,
+          swapAccruedUsd: tradeAudit.swapAccruedUsd,
+          overnightDays: tradeAudit.overnightDays,
+          categorySnapshot: tradeAudit.categorySnapshot,
+          costModelVersion: tradeAudit.costModelVersion,
           requestedPrice: tradeAudit.requestedPrice,
           triggerPrice: tradeAudit.triggerPrice,
           limitPrice: tradeAudit.limitPrice,
@@ -4919,6 +5111,19 @@ FROM (
           symbolFromTrade: symbolConfigs.symbol,
           userId: trades.userId,
           username: users.username,
+          tradeNotionalUsd: trades.notionalUsd,
+          tradeGrossProfitUsd: trades.grossProfitUsd,
+          tradeNetProfitUsd: trades.netProfitUsd,
+          tradeTotalCostsUsd: trades.totalCostsUsd,
+          tradeOpenCommissionUsd: trades.openCommissionUsd,
+          tradeCloseCommissionUsd: trades.closeCommissionUsd,
+          tradeOpenOtherFeesUsd: trades.openOtherFeesUsd,
+          tradeCloseOtherFeesUsd: trades.closeOtherFeesUsd,
+          tradeFinancingAccruedUsd: trades.financingAccruedUsd,
+          tradeSwapAccruedUsd: trades.swapAccruedUsd,
+          tradeOvernightDays: trades.overnightDays,
+          tradeCategorySnapshot: trades.categorySnapshot,
+          tradeCostModelVersion: trades.costModelVersion,
         })
         .from(tradeAudit)
         .leftJoin(trades, eq(tradeAudit.tradeId, trades.id))
@@ -4938,6 +5143,19 @@ FROM (
       const normalized = records.map(r => ({
         ...r,
         symbol: r.symbol || r.symbolFromTrade,
+        notionalUsd: r.notionalUsd ?? r.tradeNotionalUsd,
+        grossProfitUsd: r.grossProfitUsd ?? r.tradeGrossProfitUsd,
+        netProfitUsd: r.netProfitUsd ?? r.tradeNetProfitUsd,
+        totalCostsUsd: r.totalCostsUsd ?? r.tradeTotalCostsUsd,
+        openCommissionUsd: r.openCommissionUsd ?? r.tradeOpenCommissionUsd,
+        closeCommissionUsd: r.closeCommissionUsd ?? r.tradeCloseCommissionUsd,
+        openOtherFeesUsd: r.openOtherFeesUsd ?? r.tradeOpenOtherFeesUsd,
+        closeOtherFeesUsd: r.closeOtherFeesUsd ?? r.tradeCloseOtherFeesUsd,
+        financingAccruedUsd: r.financingAccruedUsd ?? r.tradeFinancingAccruedUsd,
+        swapAccruedUsd: r.swapAccruedUsd ?? r.tradeSwapAccruedUsd,
+        overnightDays: r.overnightDays ?? r.tradeOvernightDays,
+        categorySnapshot: r.categorySnapshot ?? r.tradeCategorySnapshot,
+        costModelVersion: r.costModelVersion ?? r.tradeCostModelVersion,
         eventAt: toIso(r.eventAt),
         quoteTs: toIso(r.quoteTs),
       }));

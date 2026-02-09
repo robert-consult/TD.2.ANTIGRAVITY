@@ -2,6 +2,7 @@ import axios from "axios";
 import type { MarketDataProvider, ProviderCapability, ProviderFetchQuotesResult, ProviderQuote, ProviderSymbolInput } from "../providerTypes";
 import type { TwelveDataProviderConfig } from "@shared/marketDataProviders";
 import { resolveSecretRef } from "../secret";
+import { normalizeInstrumentCategory } from "@shared/instruments/categories";
 
 function normalizeCanonicalSymbol(symbol: string): string {
   return String(symbol ?? "").replace("/", "").trim().toUpperCase();
@@ -121,7 +122,7 @@ export class TwelveDataProvider implements MarketDataProvider {
       throw err;
     }
 
-    const cat = String(params.category || "").trim().toLowerCase();
+    const cat = normalizeInstrumentCategory(params.category, "unknown");
     const endpoint =
       cat === "stocks"
         ? "/stocks"
@@ -155,4 +156,3 @@ export class TwelveDataProvider implements MarketDataProvider {
     return rows as Array<Record<string, any>>;
   }
 }
-

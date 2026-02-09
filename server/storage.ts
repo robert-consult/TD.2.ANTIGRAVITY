@@ -405,7 +405,7 @@ export const storage = {
     id: number,
     closePrice: number,
     profit: string,
-    audit?: {
+    auditOrCosts?: {
       closeReason: string;
       closeQuoteTs: number | Date;
       closeSource: string;
@@ -413,8 +413,54 @@ export const storage = {
       closeAsk: number;
       closeMid: number;
       closeSpread: number;
-    }
+    } | {
+      grossProfitUsd?: number;
+      netProfitUsd?: number;
+      notionalUsd?: number;
+      totalCostsUsd?: number;
+      openCommissionUsd?: number;
+      closeCommissionUsd?: number;
+      openOtherFeesUsd?: number;
+      closeOtherFeesUsd?: number;
+      financingAccruedUsd?: number;
+      swapAccruedUsd?: number;
+      overnightDays?: number;
+      categorySnapshot?: string;
+      costModelVersion?: string;
+    },
+    maybeCosts?: {
+      grossProfitUsd?: number;
+      netProfitUsd?: number;
+      notionalUsd?: number;
+      totalCostsUsd?: number;
+      openCommissionUsd?: number;
+      closeCommissionUsd?: number;
+      openOtherFeesUsd?: number;
+      closeOtherFeesUsd?: number;
+      financingAccruedUsd?: number;
+      swapAccruedUsd?: number;
+      overnightDays?: number;
+      categorySnapshot?: string;
+      costModelVersion?: string;
+    },
   ): Promise<Trade> {
+    const hasAuditFields = (value: any) =>
+      value &&
+      (value.closeReason !== undefined ||
+        value.closeQuoteTs !== undefined ||
+        value.closeSource !== undefined);
+    const audit = hasAuditFields(auditOrCosts)
+      ? (auditOrCosts as any)
+      : (hasAuditFields(maybeCosts) ? (maybeCosts as any) : undefined);
+    const costs = hasAuditFields(auditOrCosts)
+      ? (maybeCosts as any)
+      : (auditOrCosts as any);
+
+    const normalizeCostNumber = (value: unknown): number | undefined => {
+      const n = Number(value);
+      return Number.isFinite(n) ? n : undefined;
+    };
+
     const nowSec = Math.floor(Date.now() / 1000);
     const closeQuoteTs = audit?.closeQuoteTs == null
       ? undefined
@@ -429,6 +475,29 @@ export const storage = {
         profit,
         status: "CLOSED",
         closedAt: nowSec,
+        ...(costs ? {
+          grossProfitUsd: normalizeCostNumber(costs.grossProfitUsd),
+          netProfitUsd: normalizeCostNumber(costs.netProfitUsd),
+          notionalUsd: normalizeCostNumber(costs.notionalUsd),
+          totalCostsUsd: normalizeCostNumber(costs.totalCostsUsd),
+          openCommissionUsd: normalizeCostNumber(costs.openCommissionUsd),
+          closeCommissionUsd: normalizeCostNumber(costs.closeCommissionUsd),
+          openOtherFeesUsd: normalizeCostNumber(costs.openOtherFeesUsd),
+          closeOtherFeesUsd: normalizeCostNumber(costs.closeOtherFeesUsd),
+          financingAccruedUsd: normalizeCostNumber(costs.financingAccruedUsd),
+          swapAccruedUsd: normalizeCostNumber(costs.swapAccruedUsd),
+          overnightDays: Number.isFinite(Number(costs.overnightDays))
+            ? Math.max(0, Math.trunc(Number(costs.overnightDays)))
+            : undefined,
+          categorySnapshot:
+            typeof costs.categorySnapshot === "string" && costs.categorySnapshot.trim()
+              ? costs.categorySnapshot
+              : undefined,
+          costModelVersion:
+            typeof costs.costModelVersion === "string" && costs.costModelVersion.trim()
+              ? costs.costModelVersion
+              : undefined,
+        } : {}),
         ...(audit ? {
           closeReason: audit.closeReason,
           closeQuoteTs,
@@ -531,11 +600,14 @@ export const storage = {
       WITH closed AS (
         SELECT
           t.user_id,
-          CASE
-            WHEN t.profit IS NULL OR btrim(t.profit) = '' THEN 0::numeric
-            WHEN t.profit ~ '^-?\\d+(\\.\\d+)?$' THEN t.profit::numeric
-            ELSE 0::numeric
-          END AS profit_num
+          COALESCE(
+            t.net_profit_usd::numeric,
+            CASE
+              WHEN t.profit IS NULL OR btrim(t.profit) = '' THEN 0::numeric
+              WHEN t.profit ~ '^-?\\d+(\\.\\d+)?$' THEN t.profit::numeric
+              ELSE 0::numeric
+            END
+          ) AS profit_num
         FROM trades t
         WHERE t.status = 'CLOSED'
       )
@@ -1050,14 +1122,24 @@ export const storage = {
         });
       }
       if (trade.status === 'CLOSED' && trade.closedAt) {
+        const netProfit = Number((trade as any).netProfitUsd);
+        const legacyProfit = Number.parseFloat(String(trade.profit || "0"));
+        const timelineProfit = Number.isFinite(netProfit)
+          ? netProfit
+          : (Number.isFinite(legacyProfit) ? legacyProfit : 0);
         timeline.push({
           id: `trade-close-${trade.id}`,
           type: 'TRADE_CLOSED',
           title: `Closed ${(trade as any).symbol?.symbol || 'Unknown'}`,
-          description: `P/L: $${trade.profit || '0'}`,
+          description: `P/L: $${timelineProfit.toFixed(2)}`,
           timestamp: trade.closedAt,
-          severity: parseFloat(trade.profit || '0') >= 0 ? 'INFO' : 'WARN',
-          metadata: { tradeId: trade.id, profit: trade.profit },
+          severity: timelineProfit >= 0 ? 'INFO' : 'WARN',
+          metadata: {
+            tradeId: trade.id,
+            profit: trade.profit,
+            netProfitUsd: Number.isFinite(netProfit) ? netProfit : null,
+            totalCostsUsd: Number((trade as any).totalCostsUsd ?? 0),
+          },
         });
       }
     }

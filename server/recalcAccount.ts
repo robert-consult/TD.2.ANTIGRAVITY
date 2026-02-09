@@ -4,6 +4,7 @@ import { users, trades, quotes } from '../shared/schema';
 import { requiredMargin, unrealizedPnl, updateFxRates } from './lib/margin';
 import { publishLiveEvent } from './services/liveBus';
 import { getQuoteSnapshot, getValkeyQuoteRows } from './services/quoteHub';
+import { computeOpenTradeAccrualCosts } from './services/tradeCosts';
 
 // Staleness threshold in milliseconds (5 minutes)
 const STALE_THRESHOLD_MS = 5 * 60 * 1000;
@@ -346,10 +347,27 @@ export async function recalcAccount(
         mtmPrice,
         tradeSize
       );
+
+      // Include carry and overnight swap accrual for open positions in floating P/L.
+      // Open-side execution costs are already realized at open and reflected in balance.
+      const holdingCosts = await computeOpenTradeAccrualCosts({
+        category: (trade as any).categorySnapshot ?? (trade as any).symbol?.category,
+        positionSide: trade.type as 'BUY' | 'SELL',
+        notionalUsd: (trade as any).notionalUsd,
+        size: Number((trade as any).size ?? tradeSize * 100000),
+        lots: tradeSize,
+        openedAt: trade.openedAt,
+        executedAt: (trade as any).executedAt,
+        asOfMs: Date.now(),
+      });
+      const netFloating = pnl - holdingCosts.accruedHoldingCostsUsd;
+
+      floatingProfit += netFloating;
       
-      floatingProfit += pnl;
-      
-      console.log(`Trade ${trade.id} ${trade.type} ${symbol}: openPrice=${trade.openPrice} mtmPrice=${mtmPrice} pnl=${pnl.toFixed(2)}`);
+      console.log(
+        `Trade ${trade.id} ${trade.type} ${symbol}: openPrice=${trade.openPrice} mtmPrice=${mtmPrice} ` +
+        `grossPnl=${pnl.toFixed(2)} accrual=${holdingCosts.accruedHoldingCostsUsd.toFixed(2)} netPnl=${netFloating.toFixed(2)}`
+      );
     }
     
     // Calculate equity and free margin

@@ -227,6 +227,20 @@ export const trades = pgTable("trades", {
   limitPrice: real("limit_price"),
   stopPrice: real("stop_price"),
   profit: text("profit"),
+  // Gross/net/cost breakdown (institutional-grade TCA)
+  grossProfitUsd: real("gross_profit_usd"),
+  netProfitUsd: real("net_profit_usd"),
+  notionalUsd: real("notional_usd"),
+  totalCostsUsd: real("total_costs_usd").notNull().default(0),
+  openCommissionUsd: real("open_commission_usd").notNull().default(0),
+  closeCommissionUsd: real("close_commission_usd").notNull().default(0),
+  openOtherFeesUsd: real("open_other_fees_usd").notNull().default(0),
+  closeOtherFeesUsd: real("close_other_fees_usd").notNull().default(0),
+  financingAccruedUsd: real("financing_accrued_usd").notNull().default(0),
+  swapAccruedUsd: real("swap_accrued_usd").notNull().default(0),
+  overnightDays: integer("overnight_days").notNull().default(0),
+  categorySnapshot: text("category_snapshot"),
+  costModelVersion: text("cost_model_version"),
   status: text("status").notNull().default("PENDING"), // PENDING, OPEN, CLOSED, CANCELED
   openedAt: integer("opened_at").notNull().default(nowUnix),
   executedAt: integer("executed_at"),
@@ -977,6 +991,21 @@ export const tradeAudit = pgTable("trade_audit", {
   orderType: text("order_type"), // MARKET, LIMIT, STOP, STOP_LIMIT
   timeInForce: text("time_in_force"), // GTC, DAY, IOC, FOK
   qtyLots: real("qty_lots"),
+  notionalUsd: real("notional_usd"),
+
+  // Cost & P/L breakdown (snapshot at event time)
+  grossProfitUsd: real("gross_profit_usd"),
+  netProfitUsd: real("net_profit_usd"),
+  totalCostsUsd: real("total_costs_usd"),
+  openCommissionUsd: real("open_commission_usd"),
+  closeCommissionUsd: real("close_commission_usd"),
+  openOtherFeesUsd: real("open_other_fees_usd"),
+  closeOtherFeesUsd: real("close_other_fees_usd"),
+  financingAccruedUsd: real("financing_accrued_usd"),
+  swapAccruedUsd: real("swap_accrued_usd"),
+  overnightDays: integer("overnight_days"),
+  categorySnapshot: text("category_snapshot"),
+  costModelVersion: text("cost_model_version"),
 
   // Pricing
   requestedPrice: real("requested_price"),

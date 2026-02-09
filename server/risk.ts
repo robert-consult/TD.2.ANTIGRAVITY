@@ -305,8 +305,14 @@ export async function riskMiddleware(req: Request, res: Response, next: NextFunc
 
     let dailyPnL = 0;
     dailyTrades.forEach((trade: Trade) => {
+      const netProfit = Number((trade as any).netProfitUsd);
+      if (Number.isFinite(netProfit)) {
+        dailyPnL += netProfit;
+        return;
+      }
       if (trade.profit) {
-        dailyPnL += parseFloat(trade.profit);
+        const legacyProfit = Number.parseFloat(trade.profit);
+        if (Number.isFinite(legacyProfit)) dailyPnL += legacyProfit;
       }
     });
 

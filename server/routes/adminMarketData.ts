@@ -9,6 +9,7 @@ import { buildProviderFromConfig } from "../marketdata/providerRegistry";
 import { publishLiveEvent } from "../services/liveBus";
 import { resolveSecretRef } from "../marketdata/secret";
 import { loadProviderConfigsFromDir, syncProviderConfigsFromDirToDb, type ProviderConfigFilesSyncMode } from "../marketdata/providerConfigFiles";
+import { canonicalizeInstrumentCategory, normalizeInstrumentCategory } from "@shared/instruments/categories";
 
 export const adminMarketDataRouter = Router();
 adminMarketDataRouter.use(requireAdmin);
@@ -103,6 +104,14 @@ function normalizeCanonicalSymbol(raw: unknown): string | null {
   return s.replace("/", "").trim().toUpperCase();
 }
 
+function normalizeIngestCategory(raw: unknown): string {
+  return normalizeInstrumentCategory(raw, "unknown");
+}
+
+function canonicalizeIngestCategory(raw: unknown): string | null {
+  return canonicalizeInstrumentCategory(raw);
+}
+
 function canonicalizeReferenceSymbol(category: string, item: any): { canonical: string; providerSymbol: string } | null {
   const providerSymbolRaw = String(item?.symbol ?? item?.provider_symbol ?? "").trim();
   if (!providerSymbolRaw) return null;
@@ -110,7 +119,7 @@ function canonicalizeReferenceSymbol(category: string, item: any): { canonical: 
   const symbolRaw = String(item?.symbol ?? "").trim();
   const exchangeRaw = String(item?.exchange ?? item?.mic_code ?? "").trim();
 
-  const cat = String(category || "").toLowerCase();
+  const cat = normalizeIngestCategory(category);
 
   // Stocks/ETFs/funds may collide globally; include exchange when available.
   if (cat === "stocks" || cat === "etf" || cat === "funds" || cat === "mutual_funds" || cat === "bonds") {
@@ -603,7 +612,7 @@ adminMarketDataRouter.post("/providers/:providerKey/test", async (req, res) => {
 adminMarketDataRouter.post("/instruments/reference/import", async (req, res) => {
   try {
     const providerKey = normalizeProviderKey(req.body?.providerKey);
-    const categoryDefault = String(req.body?.category ?? "").trim().toLowerCase();
+    const categoryDefault = canonicalizeIngestCategory(req.body?.category);
     const rowsRaw = Array.isArray(req.body?.rows) ? req.body.rows : [];
 
     let keyToUse = providerKey;
@@ -628,7 +637,7 @@ adminMarketDataRouter.post("/instruments/reference/import", async (req, res) => 
 
     const normalized = rowsRaw
       .map((item: any) => {
-        const category = String(item?.category ?? categoryDefault ?? "").trim().toLowerCase();
+        const category = canonicalizeIngestCategory(item?.category ?? categoryDefault);
         if (!category) return null;
 
         const symbolRaw = String(item?.canonicalSymbol ?? item?.canonical_symbol ?? item?.symbol ?? item?.ticker ?? item?.pair ?? "").trim();
@@ -708,11 +717,13 @@ adminMarketDataRouter.post("/instruments/reference/import", async (req, res) => 
 adminMarketDataRouter.post("/instruments/reference/refresh", async (req, res) => {
   try {
     const providerKey = normalizeProviderKey(req.body?.providerKey);
-    const category = String(req.body?.category ?? "").trim().toLowerCase();
+    const categoryRaw = String(req.body?.category ?? "").trim().toLowerCase();
+    const category = canonicalizeIngestCategory(categoryRaw);
     const filter = req.body?.filter && typeof req.body.filter === "object" ? req.body.filter : undefined;
     const limit = req.body?.limit != null ? Number(req.body.limit) : undefined;
 
-    if (!category) return res.status(400).json({ ok: false, error: "category required" });
+    if (!categoryRaw) return res.status(400).json({ ok: false, error: "category required" });
+    if (!category) return res.status(400).json({ ok: false, error: `Invalid category: ${categoryRaw}` });
 
     let keyToUse = providerKey;
     if (!keyToUse) {
@@ -785,10 +796,12 @@ adminMarketDataRouter.post("/instruments/reference/refresh", async (req, res) =>
 adminMarketDataRouter.get("/instruments/reference/search", async (req, res) => {
   try {
     const providerKey = normalizeProviderKey(req.query.providerKey);
-    const category = String(req.query.category ?? "").trim().toLowerCase();
+    const categoryRaw = String(req.query.category ?? "").trim().toLowerCase();
+    const category = categoryRaw ? canonicalizeIngestCategory(categoryRaw) : null;
     const q = String(req.query.q ?? "").trim();
     const limit = Math.min(200, Math.max(1, Number(req.query.limit ?? 50) || 50));
     const offset = Math.max(0, Number(req.query.offset ?? 0) || 0);
+    if (categoryRaw && !category) return res.status(400).json({ ok: false, error: `Invalid category: ${categoryRaw}` });
 
     let keyToUse = providerKey;
     if (!keyToUse) {
@@ -870,7 +883,7 @@ adminMarketDataRouter.post("/instruments/reference/enable", async (req, res) => 
 
     const defaults = await db.select().from(pipCategoryDefaults);
     const defaultsByCategory = new Map<string, any>();
-    for (const d of defaults as any[]) defaultsByCategory.set(String(d.category), d);
+    for (const d of defaults as any[]) defaultsByCategory.set(normalizeIngestCategory(d.category), d);
 
     const providerMappers = await loadDefaultProviderSymbolMappers();
 
@@ -879,7 +892,7 @@ adminMarketDataRouter.post("/instruments/reference/enable", async (req, res) => 
       const symbol = String(r.canonicalSymbol);
       const existing = await db.query.symbolConfigs.findFirst({ where: eq(symbolConfigs.symbol, symbol) });
 
-      const cat = String(r.category || "").toLowerCase();
+      const cat = normalizeIngestCategory(r.category);
       const pipDefault = defaultsByCategory.get(cat);
       const isJpyForex = cat === "forex" && String(r.currencyQuote || "").toUpperCase() === "JPY";
       const pipDecimals = isJpyForex ? 2 : pipDefault?.pipDecimals ?? null;
@@ -947,8 +960,10 @@ adminMarketDataRouter.get("/pip-defaults", async (_req, res) => {
 
 adminMarketDataRouter.put("/pip-defaults/:category", async (req, res) => {
   try {
-    const category = String(req.params.category ?? "").trim().toLowerCase();
-    if (!category) return res.status(400).json({ ok: false, error: "category required" });
+    const categoryRaw = String(req.params.category ?? "").trim().toLowerCase();
+    if (!categoryRaw) return res.status(400).json({ ok: false, error: "category required" });
+    const category = canonicalizeIngestCategory(categoryRaw);
+    if (!category) return res.status(400).json({ ok: false, error: `Invalid category: ${categoryRaw}` });
 
     const pipDecimals = Number(req.body?.pipDecimals);
     const quoteDecimals = req.body?.quoteDecimals == null ? null : Number(req.body.quoteDecimals);

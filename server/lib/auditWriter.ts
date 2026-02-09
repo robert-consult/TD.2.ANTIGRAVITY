@@ -77,6 +77,21 @@ export interface TradeAuditParams {
   orderType?: string | null;
   timeInForce?: string | null;
   qtyLots?: number | null;
+  notionalUsd?: number | null;
+  
+  // Cost & P/L snapshot
+  grossProfitUsd?: number | null;
+  netProfitUsd?: number | null;
+  totalCostsUsd?: number | null;
+  openCommissionUsd?: number | null;
+  closeCommissionUsd?: number | null;
+  openOtherFeesUsd?: number | null;
+  closeOtherFeesUsd?: number | null;
+  financingAccruedUsd?: number | null;
+  swapAccruedUsd?: number | null;
+  overnightDays?: number | null;
+  categorySnapshot?: string | null;
+  costModelVersion?: string | null;
   
   // Pricing
   requestedPrice?: number | null;
@@ -126,6 +141,46 @@ export async function writeTradeAudit(
       : Math.floor(params.quoteTs.getTime() / 1000);
   const correlationId = params.ctx.correlationId || generateCorrelationId();
   const dbLike = opts?.db ?? db;
+
+  const payloadObj =
+    params.payload && typeof params.payload === "object" && !Array.isArray(params.payload)
+      ? (params.payload as Record<string, any>)
+      : {};
+  const toFinite = (value: unknown): number | null => {
+    if (value == null) return null;
+    const n = Number(value);
+    return Number.isFinite(n) ? n : null;
+  };
+  const readFinite = (...values: unknown[]): number | null => {
+    for (const value of values) {
+      const n = toFinite(value);
+      if (n !== null) return n;
+    }
+    return null;
+  };
+  const readText = (...values: unknown[]): string | null => {
+    for (const value of values) {
+      if (typeof value === "string" && value.trim()) return value;
+    }
+    return null;
+  };
+
+  const overnightDaysRaw = readFinite(params.overnightDays, payloadObj.overnightDays);
+  const normalizedCostSnapshot = {
+    notionalUsd: readFinite(params.notionalUsd, payloadObj.notionalUsd),
+    grossProfitUsd: readFinite(params.grossProfitUsd, payloadObj.grossProfitUsd),
+    netProfitUsd: readFinite(params.netProfitUsd, payloadObj.netProfitUsd),
+    totalCostsUsd: readFinite(params.totalCostsUsd, payloadObj.totalCostsUsd),
+    openCommissionUsd: readFinite(params.openCommissionUsd, payloadObj.openCommissionUsd),
+    closeCommissionUsd: readFinite(params.closeCommissionUsd, payloadObj.closeCommissionUsd),
+    openOtherFeesUsd: readFinite(params.openOtherFeesUsd, payloadObj.openOtherFeesUsd),
+    closeOtherFeesUsd: readFinite(params.closeOtherFeesUsd, payloadObj.closeOtherFeesUsd),
+    financingAccruedUsd: readFinite(params.financingAccruedUsd, payloadObj.financingAccruedUsd),
+    swapAccruedUsd: readFinite(params.swapAccruedUsd, payloadObj.swapAccruedUsd),
+    overnightDays: overnightDaysRaw === null ? null : Math.max(0, Math.trunc(overnightDaysRaw)),
+    categorySnapshot: readText(params.categorySnapshot, payloadObj.categorySnapshot),
+    costModelVersion: readText(params.costModelVersion, payloadObj.costModelVersion),
+  };
   
   try {
     // Get previous hash for this trade's chain
@@ -156,6 +211,19 @@ export async function writeTradeAudit(
       orderType: params.orderType ?? null,
       timeInForce: params.timeInForce ?? null,
       qtyLots: params.qtyLots ?? null,
+      notionalUsd: normalizedCostSnapshot.notionalUsd,
+      grossProfitUsd: normalizedCostSnapshot.grossProfitUsd,
+      netProfitUsd: normalizedCostSnapshot.netProfitUsd,
+      totalCostsUsd: normalizedCostSnapshot.totalCostsUsd,
+      openCommissionUsd: normalizedCostSnapshot.openCommissionUsd,
+      closeCommissionUsd: normalizedCostSnapshot.closeCommissionUsd,
+      openOtherFeesUsd: normalizedCostSnapshot.openOtherFeesUsd,
+      closeOtherFeesUsd: normalizedCostSnapshot.closeOtherFeesUsd,
+      financingAccruedUsd: normalizedCostSnapshot.financingAccruedUsd,
+      swapAccruedUsd: normalizedCostSnapshot.swapAccruedUsd,
+      overnightDays: normalizedCostSnapshot.overnightDays,
+      categorySnapshot: normalizedCostSnapshot.categorySnapshot,
+      costModelVersion: normalizedCostSnapshot.costModelVersion,
       requestedPrice: params.requestedPrice ?? null,
       triggerPrice: params.triggerPrice ?? null,
       limitPrice: params.limitPrice ?? null,
@@ -203,6 +271,19 @@ export async function writeTradeAudit(
       orderType: params.orderType ?? null,
       timeInForce: params.timeInForce ?? null,
       qtyLots: params.qtyLots ?? null,
+      notionalUsd: normalizedCostSnapshot.notionalUsd,
+      grossProfitUsd: normalizedCostSnapshot.grossProfitUsd,
+      netProfitUsd: normalizedCostSnapshot.netProfitUsd,
+      totalCostsUsd: normalizedCostSnapshot.totalCostsUsd,
+      openCommissionUsd: normalizedCostSnapshot.openCommissionUsd,
+      closeCommissionUsd: normalizedCostSnapshot.closeCommissionUsd,
+      openOtherFeesUsd: normalizedCostSnapshot.openOtherFeesUsd,
+      closeOtherFeesUsd: normalizedCostSnapshot.closeOtherFeesUsd,
+      financingAccruedUsd: normalizedCostSnapshot.financingAccruedUsd,
+      swapAccruedUsd: normalizedCostSnapshot.swapAccruedUsd,
+      overnightDays: normalizedCostSnapshot.overnightDays,
+      categorySnapshot: normalizedCostSnapshot.categorySnapshot,
+      costModelVersion: normalizedCostSnapshot.costModelVersion,
       requestedPrice: params.requestedPrice ?? null,
       triggerPrice: params.triggerPrice ?? null,
       limitPrice: params.limitPrice ?? null,

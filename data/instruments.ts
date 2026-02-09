@@ -1,13 +1,20 @@
 // data/instruments.ts
+import {
+  legacyAssetClassToCategory,
+  type InstrumentCategoryTag,
+  type LegacyInstrumentAssetClass,
+} from "@shared/instruments/categories";
+
 export interface Instrument {
   symbol: string;
   displayName: string;
   base: string;
   quote: string;
-  assetClass: "FOREX" | "METAL" | "INDEX" | "ENERGY" | "CRYPTO";
+  assetClass: LegacyInstrumentAssetClass;
+  category: InstrumentCategoryTag;
 }
 
-export const instruments: Instrument[] = [
+const legacyInstruments: Array<Omit<Instrument, "category">> = [
   /* ────────────── FX – 7 majors ────────────── */
   { symbol: "EURUSD", displayName: "Euro / US Dollar",            base: "EUR", quote: "USD", assetClass: "FOREX" },
   { symbol: "USDJPY", displayName: "US Dollar / Japanese Yen",    base: "USD", quote: "JPY", assetClass: "FOREX" },
@@ -79,3 +86,8 @@ export const instruments: Instrument[] = [
   { symbol: "BTCUSD", displayName: "Bitcoin / US Dollar",         base: "BTC", quote: "USD", assetClass: "CRYPTO" },
   { symbol: "ETHUSD", displayName: "Ethereum / US Dollar",        base: "ETH", quote: "USD", assetClass: "CRYPTO" },
 ];
+
+export const instruments: Instrument[] = legacyInstruments.map((row) => ({
+  ...row,
+  category: legacyAssetClassToCategory(row.assetClass, "unknown"),
+}));

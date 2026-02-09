@@ -101,8 +101,8 @@ test("Admin: Trader Search supports optional criteria + drilldown", async ({ bro
     await adminPage.getByTestId("trader-search-q").fill("");
     await adminPage.getByTestId("trader-search-min-trades").fill("1");
 
-    // Categories are optional; "FX" filter must work without requiring other fields.
-    await adminPage.getByRole("button", { name: "FX" }).click();
+    // Categories are optional; forex filter must work without requiring other fields.
+    await adminPage.getByRole("button", { name: "Forex" }).click();
 
     const demoRow = adminPage.locator('table[data-testid="trader-search-results"] tbody tr').filter({
       hasText: DEMO.email,

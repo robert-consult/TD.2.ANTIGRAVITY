@@ -31,6 +31,19 @@ export interface Trade {
     limitPrice?: number | null;
     stopPrice?: number | null;
     profit?: string | number | null;
+    grossProfitUsd?: number | null;
+    netProfitUsd?: number | null;
+    notionalUsd?: number | null;
+    totalCostsUsd?: number | null;
+    openCommissionUsd?: number | null;
+    closeCommissionUsd?: number | null;
+    openOtherFeesUsd?: number | null;
+    closeOtherFeesUsd?: number | null;
+    financingAccruedUsd?: number | null;
+    swapAccruedUsd?: number | null;
+    overnightDays?: number | null;
+    categorySnapshot?: string | null;
+    costModelVersion?: string | null;
     openedAt: number | string;
     closedAt?: number | string | null;
 }

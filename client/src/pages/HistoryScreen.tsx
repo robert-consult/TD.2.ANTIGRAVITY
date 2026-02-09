@@ -131,6 +131,22 @@ function toMs(value: unknown): number | null {
   return num < 1e12 ? num * 1000 : num;
 }
 
+function toFiniteNumber(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+  const num = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(num)) return null;
+  return num;
+}
+
+function getTradeNetProfitUsd(trade: any): number | null {
+  return (
+    toFiniteNumber(trade?.netProfitUsd) ??
+    toFiniteNumber(trade?.profit) ??
+    toFiniteNumber(trade?.pnl) ??
+    toFiniteNumber(trade?.realizedPnl)
+  );
+}
+
 function getDuration(openedAt: unknown, closedAt: unknown): string {
   const openMs = toMs(openedAt);
   const closeMs = toMs(closedAt);
@@ -378,8 +394,8 @@ export default function HistoryScreen() {
         bValue = b.closePrice || 0;
         break;
       case "profit":
-        aValue = a.profit ? parseFloat(a.profit) : 0;
-        bValue = b.profit ? parseFloat(b.profit) : 0;
+        aValue = getTradeNetProfitUsd(a) ?? 0;
+        bValue = getTradeNetProfitUsd(b) ?? 0;
         break;
       case "duration":
         const aOpen = toMs(a.openedAt);
@@ -735,7 +751,9 @@ export default function HistoryScreen() {
                 pipDecimals: trade.symbol?.pipDecimals,
                 quoteDecimals: trade.symbol?.quoteDecimals,
               });
-              const profitValue = trade.profit ? parseFloat(trade.profit) : 0;
+              const rawProfitValue = getTradeNetProfitUsd(trade);
+              const profitValue = rawProfitValue ?? 0;
+              const hasProfitValue = rawProfitValue !== null;
               const isProfit = profitValue >= 0;
 
               return (
@@ -766,7 +784,7 @@ export default function HistoryScreen() {
 
                     {/* P/L - fixed width */}
                     <div className={`font-mono font-semibold text-sm w-[80px] shrink-0 text-right ${isProfit ? "text-green-500" : "text-red-500"}`}>
-                      {trade.profit ? (
+                      {hasProfitValue ? (
                         <>
                           {isProfit ? "+" : ""}${Math.abs(profitValue).toFixed(2)}
                         </>
@@ -953,19 +971,21 @@ export default function HistoryScreen() {
                           : "—"}
                       </TableCell>
                       <TableCell>
-                        {trade.profit ? (
-                          <div
-                            className={`font-mono font-medium ${parseFloat(trade.profit) >= 0
-                              ? "text-green-500"
-                              : "text-red-500"
-                              }`}
-                          >
-                            {parseFloat(trade.profit) >= 0 ? "+" : ""}
-                            {Math.abs(parseFloat(trade.profit)).toFixed(2)}
-                          </div>
-                        ) : (
-                          <div className="text-gray-400">—</div>
-                        )}
+                        {(() => {
+                          const rawProfit = getTradeNetProfitUsd(trade);
+                          if (rawProfit === null) return <div className="text-gray-400">—</div>;
+                          return (
+                            <div
+                              className={`font-mono font-medium ${rawProfit >= 0
+                                ? "text-green-500"
+                                : "text-red-500"
+                                }`}
+                            >
+                              {rawProfit >= 0 ? "+" : ""}
+                              {Math.abs(rawProfit).toFixed(2)}
+                            </div>
+                          );
+                        })()}
                       </TableCell>
                       <TableCell className="text-sm text-gray-300">
                         {getDuration(trade.openedAt, trade.closedAt)}

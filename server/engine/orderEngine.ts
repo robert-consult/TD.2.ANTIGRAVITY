@@ -15,6 +15,7 @@ import { buildDecisionContext } from "../policy/buildDecisionContext";
 import { decidePolicy } from "@shared/policyDecision";
 import { loadPolicyConfig } from "../policy/getPolicyConfig";
 import { applyUserBalanceDelta, releaseUserMargin, reserveUserMargin } from "../services/tradeAtomic";
+import { computeCloseSettlementCosts, computeOpenSideCosts } from "../services/tradeCosts";
 import { createNotification } from "../services/messaging";
 import { 
   writeTradeAudit, 
@@ -175,6 +176,7 @@ async function auditFill(params: {
   userAgent?: string | null;
   latencyMs?: number;
   note?: string;
+  payload?: any;
 }, opts?: { db?: any }) {
   try {
     const ctx = getSystemAuditContext(params.correlationId, {
@@ -216,6 +218,7 @@ async function auditFill(params: {
       quoteSource: params.quoteSource ?? DEFAULT_QUOTE_SOURCE,
       riskResult: "PASS",
       note: params.note,
+      payload: params.payload ?? null,
     }, opts);
   } catch (e) {
     console.error("Error writing fill audit:", e);
@@ -249,6 +252,7 @@ async function auditClose(params: {
   ip?: string | null;
   userAgent?: string | null;
   profit: number;
+  payload?: any;
 }, opts?: { db?: any }) {
   try {
     const ctx = getSystemAuditContext(params.correlationId, {
@@ -283,6 +287,7 @@ async function auditClose(params: {
       quoteSource: params.quoteSource ?? DEFAULT_QUOTE_SOURCE,
       reasonCode: params.closeReason,
       note: `closeReason=${params.closeReason}, profit=${params.profit.toFixed(2)}`,
+      payload: params.payload ?? null,
     }, opts);
   } catch (e) {
     console.error("Error writing close audit:", e);
@@ -478,6 +483,13 @@ async function processPendingForSymbol(symbol: string, q: Quote) {
       }
 
       const fillPrice = side === "BUY" ? ba.ask : ba.bid;
+      const openCostSummary = computeOpenSideCosts({
+        category: (t as any).categorySnapshot ?? r.sym?.category,
+        notionalUsd: (t as any).notionalUsd,
+        size: Number((t as any).size ?? lots * 100000),
+        lots,
+        positionSide: side,
+      });
 
     // Get global limits dynamically
     const globalLimits = await getGlobalLimits();
@@ -628,6 +640,12 @@ async function processPendingForSymbol(symbol: string, q: Quote) {
           status: "OPEN",
           executedAt: nowSec,
           openPrice: fillPrice,
+          notionalUsd: openCostSummary.notionalUsd,
+          categorySnapshot: openCostSummary.categorySnapshot,
+          costModelVersion: openCostSummary.costModelVersion,
+          openCommissionUsd: openCostSummary.commissionUsd,
+          openOtherFeesUsd: openCostSummary.otherFeesUsd,
+          totalCostsUsd: openCostSummary.totalUsd,
           correlationId,
           orderId,
           positionId,
@@ -645,6 +663,7 @@ async function processPendingForSymbol(symbol: string, q: Quote) {
         await releaseUserMargin(tx, { userId: u.id, marginUsd: neededMarginNow });
         return { action: "SKIP" as const };
       }
+      await applyUserBalanceDelta(tx, { userId: u.id, deltaUsd: -openCostSummary.totalUsd });
 
       await auditFill({
         tradeId: t.id,
@@ -667,7 +686,15 @@ async function processPendingForSymbol(symbol: string, q: Quote) {
         quoteTs,
         quoteSource,
         ...tradeProvenance,
-        note: `orderType=${t.orderType}`,
+        note: `orderType=${t.orderType}, openCost=${openCostSummary.totalUsd.toFixed(2)}`,
+        payload: {
+          costModelVersion: openCostSummary.costModelVersion,
+          categorySnapshot: openCostSummary.categorySnapshot,
+          notionalUsd: openCostSummary.notionalUsd,
+          openCommissionUsd: openCostSummary.commissionUsd,
+          openOtherFeesUsd: openCostSummary.otherFeesUsd,
+          openCostChargedUsd: openCostSummary.totalUsd,
+        },
       }, { db: tx });
 
       return { action: "FILLED" as const };
@@ -750,8 +777,22 @@ async function processStopsForOpenTrades(symbol: string, q: Quote) {
       openPrice: openPx,
       closePrice: closePx,
     });
-    const profitNum = pnlUsd;
-    const profit = profitNum.toFixed(2);
+    const closeCostSummary = await computeCloseSettlementCosts({
+      category: (t as any).categorySnapshot ?? r.sym?.category,
+      positionSide: side,
+      notionalUsd: (t as any).notionalUsd,
+      size: Number((t as any).size ?? lots * 100000),
+      lots,
+      openedAt: t.openedAt,
+      executedAt: (t as any).executedAt,
+      closedAtMs: quoteTs.getTime(),
+      openCommissionUsd: (t as any).openCommissionUsd,
+      openOtherFeesUsd: (t as any).openOtherFeesUsd,
+    });
+    const grossProfitUsd = pnlUsd;
+    const netProfitUsd = grossProfitUsd - closeCostSummary.totalCostsUsd;
+    const closeSettlementUsd = grossProfitUsd - closeCostSummary.closingChargesUsd;
+    const profit = netProfitUsd.toFixed(2);
 
     const correlationId = (t as any).correlationId || generateCorrelationId();
     const orderId = (t as any).orderId || generateOrderId();
@@ -782,6 +823,17 @@ async function processStopsForOpenTrades(symbol: string, q: Quote) {
           status: "CLOSED",
           closePrice: closePx,
           profit,
+          grossProfitUsd,
+          netProfitUsd,
+          notionalUsd: closeCostSummary.notionalUsd,
+          totalCostsUsd: closeCostSummary.totalCostsUsd,
+          closeCommissionUsd: closeCostSummary.closeCommissionUsd,
+          closeOtherFeesUsd: closeCostSummary.closeOtherFeesUsd,
+          financingAccruedUsd: closeCostSummary.financingAccruedUsd,
+          swapAccruedUsd: closeCostSummary.swapAccruedUsd,
+          overnightDays: closeCostSummary.overnightDays,
+          categorySnapshot: closeCostSummary.categorySnapshot,
+          costModelVersion: closeCostSummary.costModelVersion,
           closeReason: reason,
           closedAt,
           closeQuoteTs: Math.floor(quoteTs.getTime() / 1000),
@@ -805,7 +857,7 @@ async function processStopsForOpenTrades(symbol: string, q: Quote) {
 
       if (closed.length === 0) return { action: "SKIP" as const };
 
-      await applyUserBalanceDelta(tx, { userId: u.id, deltaUsd: profitNum });
+      await applyUserBalanceDelta(tx, { userId: u.id, deltaUsd: closeSettlementUsd });
       await releaseUserMargin(tx, { userId: u.id, marginUsd: marginToRelease });
 
       await auditClose({
@@ -828,7 +880,24 @@ async function processStopsForOpenTrades(symbol: string, q: Quote) {
         quoteTs,
         quoteSource,
         ...tradeProvenance,
-        profit: profitNum,
+        profit: netProfitUsd,
+        payload: {
+          grossProfitUsd,
+          netProfitUsd,
+          balanceDeltaUsd: closeSettlementUsd,
+          costModelVersion: closeCostSummary.costModelVersion,
+          categorySnapshot: closeCostSummary.categorySnapshot,
+          notionalUsd: closeCostSummary.notionalUsd,
+          openCommissionUsd: closeCostSummary.openCommissionUsd,
+          openOtherFeesUsd: closeCostSummary.openOtherFeesUsd,
+          closeCommissionUsd: closeCostSummary.closeCommissionUsd,
+          closeOtherFeesUsd: closeCostSummary.closeOtherFeesUsd,
+          financingAccruedUsd: closeCostSummary.financingAccruedUsd,
+          swapAccruedUsd: closeCostSummary.swapAccruedUsd,
+          overnightDays: closeCostSummary.overnightDays,
+          holdDays: closeCostSummary.holdDays,
+          totalCostsUsd: closeCostSummary.totalCostsUsd,
+        },
       }, { db: tx });
 
       return { action: "CLOSED" as const };

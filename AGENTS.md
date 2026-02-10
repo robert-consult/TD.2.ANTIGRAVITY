@@ -11,6 +11,14 @@ TradeQuip (a.k.a. “tradehub”) is a self-hosted trading platform (web + mobil
 2) If you work inside a subproject directory, also read the nearest `AGENTS.md` in that tree (nearest wins).
 3) If `AGENTS.local.md` exists, read it but **do not commit it**.
 4) Before finalizing any change, complete the required checklists referenced below.
+5) If you discover any new production/runtime/deployment requirement, update `.agents/PRODUCTION_REQUIREMENTS.md` in the same change.
+
+## Production Requirements Ledger (mandatory)
+- Canonical file: `.agents/PRODUCTION_REQUIREMENTS.md`
+- This file is a living ledger of production-critical requirements.
+- Any agent that uncovers a new requirement must append a dated, testable entry before finalizing.
+- Required entry content: scope, exact requirement, enforcement location, validation steps, and failure mode.
+- If no new production requirements were introduced in a task, explicitly state that in the final summary.
 
 ## Golden commands (must be correct)
 ### Root (web + api)
@@ -78,4 +86,3 @@ See `@/.agents/deep-context.md` for “where to look” by domain (auth, trading
 - Never relax startup secret validation or compliance gates “temporarily”.
 - Never ship changes that increase hot-path complexity or WS payload size without a mitigation plan.
 - No drive-by refactors: only change what the task requires plus directly related hardening.
-

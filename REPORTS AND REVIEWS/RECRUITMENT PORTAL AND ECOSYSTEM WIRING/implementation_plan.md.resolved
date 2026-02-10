@@ -1,0 +1,638 @@
+# Implementation Plan: Partner Onboarding & Gating
+**Date**: 2026-02-09  
+**Version**: 2.0 (Comprehensive)
+
+---
+
+## Goal
+Implement the **"Invite-First" Partner Onboarding** workflow, **integrated into the existing Scout > Partners mini-tab**.
+
+**Core Principles**:
+1.  **Invite**: Admin invites partner via email (API key + credentials generated) with **configurable expiry**.
+2.  **Onboard**: Partner logs in (Read-Only) → Completes Profile → Signs Docs.
+3.  **Gate**: Admin approves "Contact Access" manually.
+4.  **Config**: Global and Per-Partner overrides for all gates.
+
+---
+
+## Phase 1: Database Schema Updates
+
+### 1.1 `partners` Table Updates ([shared/schema.pg.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/shared/schema.pg.ts))
+
+**New Columns**:
+```typescript
+// Invite & Authentication
+contactEmail: text("contact_email"),
+tempPasswordHash: text("temp_password_hash"),
+inviteExpiresAt: integer("invite_expires_at"),
+passwordRotatedAt: integer("password_rotated_at"),
+loginCount: integer("login_count").notNull().default(0),
+
+// Onboarding State
+inviteStatus: text("invite_status").notNull().default("INVITED"), // INVITED | ACTIVE | REVOKED
+onboardingStep: text("onboarding_step").notNull().default("PROFILE"), // PROFILE | IDENTITY | LEGAL | WAITING_APPROVAL | COMPLETED
+
+// Profile Data (JSON)
+profileData: text("profile_data").notNull().default("{}"), // { fundName, aumRange, hqLocation, strategyTags[] }
+fundLogoUrl: text("fund_logo_url"),
+
+// Compliance & Legal (JSON)
+kybDocUrl: text("kyb_doc_url"),
+agreementsSignedAt: integer("agreements_signed_at"),
+
+// Gating Overrides (JSON)
+gatingOverrides: text("gating_overrides").notNull().default("{}"), // { viewDataRoom: "INVITED", simulation: "IDENTITY", etc. }
+
+// Admin Notes (for Review Modal)
+adminNotes: text("admin_notes"),
+```
+
+**Key Points**:
+*   `profileData` JSON structure: `{ fundName, aumRange, hqLocation, strategyTags: ['L/S Equity', 'Crypto'] }`
+*   `gatingOverrides` allows per-partner exceptions to global gating config
+
+
+### 1.2 `system_config` Table Updates
+
+**New Columns**:
+```typescript
+// Partner Gating Configuration
+partnerGatingConfig: text("partner_gating_config").notNull().default(JSON.stringify({
+  viewDataRoom: "INVITED",      // INVITED | IDENTITY | COMPLIANT | ADMIN_APPROVED
+  runSimulations: "IDENTITY",   // Default: Identity step required
+  requestAllocation: "COMPLIANT", // Default: Legal step required
+  directContact: "ADMIN_APPROVED" // Hard requirement
+})),
+
+// Password Policy
+partnerPasswordRotationDays: integer("partner_password_rotation_days").notNull().default(90),
+partnerPasswordReminderLogins: integer("partner_password_reminder_logins").notNull().default(3),
+
+// Invite Defaults
+partnerInviteDefaultExpiryDays: integer("partner_invite_default_expiry_days").notNull().default(7),
+```
+
+### 1.3 New Table: `partner_invites` (Audit Log)
+
+```typescript
+export const partnerInvites = pgTable("partner_invites", {
+  id: serial("id").primaryKey(),
+  adminId: integer("admin_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "set null" }),
+  partnerId: integer("partner_id")
+    .notNull()
+    .references(() => partners.id, { onDelete: "cascade" }),
+  partnerEmail: text("partner_email").notNull(),
+  fundName: text("fund_name"),
+  adminNotes: text("admin_notes"),
+  expiresInDays: integer("expires_in_days").notNull().default(7),
+  invitedAt: integer("invited_at").notNull().default(nowUnix),
+  emailStatus: text("email_status").notNull().default("QUEUED"), // QUEUED | SENT | DELIVERED | OPENED | FAILED
+  inviteToken: text("invite_token"), // Deep link token (optional)
+});
+```
+
+---
+
+## Phase 2: Backend API Implementation
+
+### 2.1 Admin Invite Endpoint
+
+**Route**: `POST /api/admin/partners/invite`
+
+**Request Body**:
+```typescript
+{
+  email: string;           // Required
+  fundName?: string;       // Optional pre-fill
+  adminNotes?: string;     // Internal notes
+  expiresInDays?: number;  // Default from systemConfig
+}
+```
+
+**Implementation Steps**:
+1.  **Validation**: Check email uniqueness, admin permissions.
+2.  **Generate Credentials**:
+    *   [username](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/shared/schema.pg.ts#318-319): `partner_{randomSlug}` (e.g., `partner_bw_7x9b2`)
+    *   `api_key`: `pk_live_{randomBytes(16)}`
+    *   `temp_password`: Secure random string (16 chars)
+3.  **Create Partner Record**:
+    *   Hash `temp_password` => `tempPasswordHash`
+    *   Set `inviteExpiresAt` = now + `expiresInDays` * 86400
+    *   Set `onboardingStep` = `'PROFILE'`
+    *   Set `inviteStatus` = `'INVITED'`
+4.  **Log Invite**: Insert into `partner_invites` table.
+5.  **Send Email**: Call email service (mock for now).
+6.  **Response**: Return `{ success: true, partnerId, username }`.
+
+### 2.2 Email Template: "Golden Ticket"
+
+**Subject**: `Access Granted: TradeQuip Institutional Portal`
+
+**Body** (HTML + Plain Text):
+```
+Hello,
+
+You have been invited to view our curated pool of top-performing traders.
+
+YOUR CREDENTIALS:
+  Username:  {username}
+  Password:  {tempPassword}
+  API Key:   {apiKey}
+
+[🔐 ACCESS PORTAL NOW] → {deepLink}
+
+This link expires in {expiresInDays} days.
+
+Best regards,
+The TradeQuip Team
+```
+
+**Deep Link**: `https://app.tradequip.com/partner/login?u={username}&t={inviteToken}`
+
+### 2.3 Partner Onboarding APIs
+
+#### **A. Profile Update**
+**Route**: `POST /api/partner/onboarding/profile`
+
+**Request Body**:
+```typescript
+{
+  fundName: string;
+  fundLogoUrl?: string;  // File upload handled separately
+  aumRange: string;      // "<$10M" | "$10M-$50M" | "$50M+"
+  hqLocation?: string;
+  strategyTags: string[]; // ["L/S Equity", "Quant", "Crypto"]
+}
+```
+
+**Logic**:
+1.  Validate partner is in `PROFILE` or `IDENTITY` step.
+2.  Update `profileData` JSON field.
+3.  Advance `onboardingStep` to `'IDENTITY'` (unlocks Simulation Engine).
+4.  Return updated partner state.
+
+#### **B. Legal Submission**
+**Route**: `POST /api/partner/onboarding/legal`
+
+**Request Body**:
+```typescript
+{
+  kybDocUrl: string;        // Uploaded Certificate of Incorporation
+  agreedToAllocation: boolean;
+  agreedToNda: boolean;
+}
+```
+
+**Logic**:
+1.  Validate partner is in `IDENTITY` or `LEGAL` step.
+2.  Ensure both agreements are `true`.
+3.  Update `kybDocUrl`, set `agreementsSignedAt` = now.
+4.  Advance `onboardingStep` to `'WAITING_APPROVAL'`.
+5.  Trigger notification to admin (via Mailbox or Email).
+
+#### **C. Admin Approval**
+**Route**: `POST /api/admin/partners/{partnerId}/approve`
+
+**Request Body**:
+```typescript
+{
+  action: "APPROVE" | "HOLD" | "REVOKE";
+  adminNotes?: string;
+}
+```
+
+**Logic**:
+*   **APPROVE**: Set `onboardingStep` = `'COMPLETED'`, send email to partner.
+*   **HOLD**: Add note, keep in `WAITING_APPROVAL`.
+*   **REVOKE**: Set `inviteStatus` = `'REVOKED'`, disable access.
+
+### 2.4 Gating Middleware
+
+**Function**: `requirePartnerGate(gateName: string)`
+
+**Usage**:
+```typescript
+router.post('/api/partner/allocations', requirePartnerGate('requestAllocation'), allocateHandler);
+router.post('/api/partner/contact-trader', requirePartnerGate('directContact'), contactHandler);
+```
+
+**Logic**:
+1.  Fetch `globalGatingConfig` from `system_config`.
+2.  Fetch `partner.gatingOverrides` (if exists).
+3.  Merge configs (partner override takes precedence).
+4.  Check if partner's `onboardingStep` meets the gate requirement.
+5.  Return `403` if gate not met, else `next()`.
+
+**Gate Requirements Mapping**:
+```typescript
+const gateStepMap = {
+  "INVITED": ["PROFILE", "IDENTITY", "LEGAL", "WAITING_APPROVAL", "COMPLETED"],
+  "IDENTITY": ["IDENTITY", "LEGAL", "WAITING_APPROVAL", "COMPLETED"],
+  "COMPLIANT": ["LEGAL", "WAITING_APPROVAL", "COMPLETED"],
+  "ADMIN_APPROVED": ["COMPLETED"]
+};
+```
+
+---
+
+## Phase 3: Frontend Implementation
+
+### 3.1 Admin: Invite Partner Modal
+
+**Location**: `client/src/components/admin/scout/InvitePartnerModal.tsx`
+
+**Form Fields**:
+1.  Partner Email * (text input with validation)
+2.  Fund Name (optional text input)
+3.  Internal Notes (textarea)
+4.  Link Expiry (dropdown: 1, 3, 7, 30 days)
+
+**Actions**:
+*   **Cancel**: Close modal
+*   **✉️ Send Invite**: POST to `/api/admin/partners/invite`
+
+**Success State**: Show toast, refresh Partners table, close modal.
+
+### 3.2 Admin: Partner Management Table
+
+**Location**: `client/src/components/admin/scout/PartnersTable.tsx`
+
+**Tabs**:
+*   All (12) | Pending (3) | Active (8) | Revoked (1)
+
+**Columns**:
+*   Partner Name
+*   Status Badge (🟡 PENDING | 🟢 APPROVED | 🔴 REVOKED)
+*   Onboarding Step (PROFILE | IDENTITY | LEGAL | WAITING_APPROVAL | COMPLETED)
+*   Action Button (Review | Manage | View)
+
+**Action**: Clicking "Review" opens `PartnerReviewModal`.
+
+### 3.3 Admin: Partner Review Modal
+
+**Location**: `client/src/components/admin/scout/PartnerReviewModal.tsx`
+
+**Sections**:
+1.  **Profile Summary**: Display `profileData` (Name, AUM, Mandate, HQ)
+2.  **Submitted Documents**:
+    *   📄 Certificate of Incorporation [Download]
+    *   ☑️ Allocation Agreement (Signed YYYY-MM-DD)
+    *   ☑️ NDA (Signed YYYY-MM-DD)
+3.  **Admin Notes**: Textarea (editable)
+
+**Actions**:
+*   ❌ Revoke | ⏸️ Hold | ✅ Approve
+
+**Behavior**:
+*   **Approve**: POST to `/api/admin/partners/{id}/approve` with `action: "APPROVE"`
+*   Show confirmation dialog before Revoke.
+
+### 3.4 Partner: Dashboard with Banner
+
+**Location**: `client/src/components/partner/PartnerDashboard.tsx`
+
+**Banner Component** (conditional):
+```tsx
+{partner.onboardingStep !== 'COMPLETED' && (
+  <Alert variant="info" className="bg-emerald-50 border-emerald-500">
+    <Info className="h-4 w-4" />
+    <AlertTitle>⚠️ VIEW-ONLY MODE</AlertTitle>
+    <AlertDescription>
+      Complete your Fund Profile to unlock allocations.
+      <Button variant="link" onClick={openWizard}>Complete Profile →</Button>
+    </AlertDescription>
+  </Alert>
+)}
+```
+
+**Feature Cards** (Always Visible):
+```tsx
+<div className="grid grid-cols-4 gap-4">
+  <FeatureCard 
+    title="Data Room" 
+    icon={Database} 
+    unlocked={checkGate('viewDataRoom')} 
+  />
+  <FeatureCard 
+    title="Simulation" 
+    icon={BarChart} 
+    unlocked={checkGate('runSimulations')}
+    tooltip="Complete Identity to unlock"
+  />
+  <FeatureCard 
+    title="Allocate" 
+    icon={DollarSign} 
+    unlocked={checkGate('requestAllocation')}
+    tooltip="Complete Legal to unlock"
+  />
+  <FeatureCard 
+    title="Contact" 
+    icon={MessageCircle} 
+    unlocked={checkGate('directContact')}
+    tooltip="Admin approval required"
+    fallback={<Button variant="outline">Inquire with Admin</Button>}
+  />
+</div>
+```
+
+### 3.5 Partner: Profile Wizard Component
+
+**Location**: `client/src/components/partner/onboarding/PartnerProfileWizard.tsx`
+
+**Steps**:
+1.  **Identity** (Form)
+2.  **Legal** (Doc Upload + Agreements)
+3.  **Pending Approval** (Status Page)
+
+**Step 1 Fields**:
+*   Fund Logo (file upload, circular crop)
+*   Fund Name * (text)
+*   AUM Range * (dropdown)
+*   HQ Location (text)
+*   Investment Mandate (multi-select checkboxes)
+
+**Actions**: Skip for Now | Save & Continue →
+
+**Step 2 Fields**:
+*   Certificate of Incorporation (file upload)
+*   [ ] I agree to Master Allocation Agreement [View PDF]
+*   [ ] I agree to NDA [View PDF]
+
+**Actions**: ← Back | Submit for Approval →
+
+**Step 3 (Read-Only)**:
+```tsx
+<Card className="border-amber-500 bg-amber-50">
+  <CardHeader>
+    <CardTitle className="flex items-center gap-2">
+      <Clock className="h-5 w-5" />
+      ⏳ PENDING ADMIN APPROVAL
+    </CardTitle>
+  </CardHeader>
+  <CardContent>
+    Your documents are under review. You will be notified via email once approved.
+    
+    **Current Access**: Data Room ✅ | Simulations ✅
+    **Awaiting**: Allocations 🔒 | Direct Contact 🔒
+  </CardContent>
+</Card>
+```
+
+### 3.6 Partner: Password Reminder Popup
+
+**Trigger**: On login, check if `loginCount >= partnerPasswordReminderLogins` AND `passwordRotatedAt` is old.
+
+**UI** (Modal):
+```tsx
+<Dialog open={showPasswordReminder}>
+  <DialogContent>
+    <DialogHeader>
+      <DialogTitle>🔒 Secure Your Account</DialogTitle>
+    </DialogHeader>
+    <DialogDescription>
+      You're using a temporary password. We recommend changing it for security.
+    </DialogDescription>
+    <DialogFooter>
+      <Button variant="outline" onClick={dismissReminder}>Remind Me Later</Button>
+      <Button onClick={openPasswordChange}>Change Password Now</Button>
+    </DialogFooter>
+  </DialogContent>
+</Dialog>
+```
+
+**Behavior**:
+*   Increment `loginCount` on each login.
+*   Show reminder if `loginCount >= 3` and password unchanged.
+
+---
+
+## Phase 4: Security & Rate Limiting
+
+### 4.1 Invite Endpoint Rate Limiting
+*   **Admin Limit**: 5 invites per hour per admin.
+*   **IP Limit**: 20 invites per hour per IP.
+*   **Implementation**: Use `express-rate-limit` middleware.
+
+### 4.2 Link Expiry Validation
+*   On partner login, check `inviteExpiresAt > now`.
+*   If expired, show error: "Invite link expired. Contact admin."
+
+### 4.3 Password Rotation Enforcement
+*   Check `passwordRotatedAt` on login.
+*   If `now - passwordRotatedAt > partnerPasswordRotationDays * 86400`:
+    *   **Soft**: Show reminder popup.
+    *   **Hard** (optional config): Force password change.
+
+---
+
+## Phase 5: Configuration UI (Admin)
+
+### 5.1 System Config: Partner Gating Panel
+
+**Location**: `Admin > Settings > Partner Portal`
+
+**Fields**:
+*   **View Data Room Gate**: Dropdown (INVITED | IDENTITY | COMPLIANT | ADMIN_APPROVED)
+*   **Run Simulations Gate**: Dropdown (...)
+*   **Request Allocation Gate**: Dropdown (...)
+*   **Direct Contact Gate**: Dropdown (ADMIN_APPROVED, read-only)
+*   **Password Rotation Days**: Number input (default 90)
+*   **Password Reminder Logins**: Number input (default 3)
+*   **Default Invite Expiry**: Number input (default 7 days)
+
+**Actions**: Save Configuration → Updates `system_config` table.
+
+### 5.2 Per-Partner Gating Overrides
+
+**Location**: `PartnerReviewModal` → "Advanced" tab
+
+**UI**: Same fields as global, but pre-filled with current `gatingOverrides` JSON.
+
+**Use Case**:
+*   "Goldman Sachs" → Auto-approve, skip all gates.
+*   "AnonCapital" → Lock to Read-Only even after docs.
+
+---
+
+## Phase 6: Verification & Testing
+
+### 6.1 Unit Tests
+
+**Backend**:
+*   `requirePartnerGate()` with various config permutations.
+*   Invite token generation and validation.
+*   Password expiry calculation.
+
+**Frontend**:
+*   `FeatureCard` lock/unlock logic.
+*   Wizard step validation.
+
+### 6.2 End-to-End Test Flow
+
+1.  **Admin Invite**:
+    *   Admin invites `test@bluewatercapital.com` with 7-day expiry.
+    *   Verify email sent (mocked).
+    *   Verify `partner_invites` audit log entry.
+
+2.  **Partner Login (Read-Only)**:
+    *   Login with generated credentials.
+    *   Verify landing on Dashboard with "View-Only" banner.
+    *   Verify Data Room unlocked, Simulation/Allocate/Contact locked.
+
+3.  **Profile Completion**:
+    *   Complete Identity step.
+    *   Verify `onboardingStep` = `'IDENTITY'`.
+    *   Verify Simulation Engine unlocked.
+
+4.  **Legal Submission**:
+    *   Upload KYB doc, sign agreements.
+    *   Verify `onboardingStep` = `'WAITING_APPROVAL'`.
+    *   Verify admin notification sent.
+
+5.  **Admin Approval**:
+    *   Admin opens Review Modal.
+    *   Clicks "Approve".
+    *   Verify `onboardingStep` = `'COMPLETED'`.
+    *   Verify partner email notification sent.
+
+6.  **Full Access**:
+    *   Partner refreshes portal.
+    *   Verify all features unlocked (Data Room, Simulation, Allocate, Contact).
+
+### 6.3 Manual Testing Checklist
+
+- [ ] Invite link expiry works (test with 1-minute expiry)
+- [ ] Password reminder popup appears after 3rd login
+- [ ] Per-partner gate overrides work (Goldman skips to Approved)
+- [ ] "Inquire with Admin" fallback link works
+- [ ] Admin can Revoke partner mid-onboarding
+- [ ] Rate limiting blocks excessive invite requests
+
+---
+
+## Phase 7: Migration & Deployment
+
+### 7.1 Database Migration Script
+
+**File**: `db/migrations/XXXX_partner_onboarding.ts`
+
+**Steps**:
+1.  Add new columns to `partners` table (with defaults).
+2.  Create `partner_invites` table.
+3.  Update `system_config` with new JSON fields.
+4.  Backfill existing partners: Set `onboardingStep = 'COMPLETED'`, `inviteStatus = 'ACTIVE'`.
+
+### 7.2 Rollout Plan
+
+1.  **Phase 1**: Deploy schema updates (read-only mode).
+2.  **Phase 2**: Deploy backend APIs (invite disabled).
+3.  **Phase 3**: Deploy frontend UI (hidden behind feature flag).
+4.  **Phase 4**: Enable feature flag for admins only (beta test).
+5.  **Phase 5**: Full rollout to production.
+
+---
+
+## Summary Checklist
+
+### Database
+- [ ] `partners` table updated (11 new columns)
+- [ ] `system_config` table updated (5 new columns)
+- [ ] `partner_invites` table created
+- [ ] Migration script tested
+
+### Backend
+- [ ] Invite API implemented
+- [ ] Profile/Legal APIs implemented
+- [ ] Approval API implemented
+- [ ] Gating middleware implemented
+- [ ] Email templates created
+- [ ] Rate limiting configured
+
+### Frontend
+- [ ] Admin Invite Modal
+- [ ] Admin Partner Table (tabs + filters)
+- [ ] Admin Review Modal
+- [ ] Partner Dashboard (banner + feature cards)
+- [ ] Partner Profile Wizard (3 steps)
+- [ ] Password Reminder Popup
+- [ ] "Inquire with Admin" fallback
+
+### Configuration
+- [ ] Global gating config UI
+- [ ] Per-partner override UI
+- [ ] Password policy settings
+
+### Security
+- [ ] Link expiry validation
+- [ ] Password rotation enforcement
+- [ ] Rate limiting on invite endpoint
+- [ ] Audit logging for all actions
+
+### Testing
+- [ ] Unit tests written
+- [ ] E2E test flow validated
+- [ ] Manual testing checklist completed
+
+---
+
+**NEXT STEPS**: Proceed to Phase 1 (Database Schema Updates).
+
+---
+
+## Execution Status (Implemented in Repo)
+Date: 2026-02-09
+
+Implemented with direct repo mappings:
+
+- Schema + migration:
+  - `shared/schema.pg.ts`
+  - `db/migrations/0024_partner_onboarding_invite_first.sql`
+  - `db/migrations/meta/_journal.json`
+- Partner onboarding + gate evaluation:
+  - `server/partner/onboarding.ts`
+  - `server/middleware/requirePartnerGate.ts`
+  - `server/middleware/requirePartner.ts`
+  - `server/routes/partnerPortal.ts`
+- Admin invite/approval/routing extensions:
+  - `server/routes/adminScout.ts`
+- UI enhancements:
+  - `client/src/pages/PartnerPortal.tsx`
+  - `client/src/components/admin/ScoutWorkbench.tsx`
+- End-to-end coverage:
+  - `e2e/partner-onboarding.spec.ts`
+  - `e2e/scout-ecosystem.spec.ts` (still passing after changes)
+
+Validation run completed:
+
+- Typecheck: `./node_modules/.bin/tsc --noEmit` (pass)
+- Build: `./node_modules/.bin/vite build` + server bundle/precompress (pass)
+- DB migrate + audit: `scripts/drizzleMigrate.ts`, `scripts/dbAudit.ts` (pass)
+- E2E:
+  - `partner-onboarding.spec.ts` (pass)
+  - `scout-ecosystem.spec.ts` (pass)
+
+### Security, Transport, and E2EE Enforcement (Verified)
+- Partner transport hardening:
+  - `server/middleware/requirePartner.ts` enforces HTTPS in production for `/api/partner/*` (`426 PARTNER_HTTPS_REQUIRED`, loopback exception only).
+- Partner inquiry confidentiality:
+  - `server/routes/partnerPortal.ts` requires `e2eeEnvelope` on inquiry create (`INQUIRY_E2EE_REQUIRED` when missing).
+  - Inquiry routing refuses delivery when recipient admin mailbox keys are missing (`INQUIRY_RECIPIENT_KEYS_MISSING`).
+- Admin inquiry routing controls:
+  - `server/routes/adminScout.ts` supports `inboxAlias` (`inquiries@`) plus `routeAdminEmails` and `viewerAdminEmails`.
+  - `client/src/components/admin/ScoutWorkbench.tsx` exposes these controls in Scout Comms.
+
+### Five-Cycle Execution Trace (Completed)
+1. Cycle 1: Schema, migration, backfill, DB verification.
+2. Cycle 2: Partner auth + gate middleware + onboarding domain engine.
+3. Cycle 3: Admin invite/approval APIs + partner onboarding APIs.
+4. Cycle 4: Scout and Partner portal UI integration + inquiry sender detail capture.
+5. Cycle 5: E2E verification, defect fixes, hardening, and retest.
+
+### Remaining Gaps
+- None identified in this implementation scope after 7-cycle audit/fix/retest loop.
+- Previously tracked partial items are now implemented:
+  - Partner password reminder UX (`client/src/pages/PartnerPortal.tsx`)
+  - Scout per-partner gating override editor (`client/src/components/admin/ScoutWorkbench.tsx`)
+  - Simulation gate execution path (`server/routes/partnerPortal.ts` + partner `Simulations` tab)

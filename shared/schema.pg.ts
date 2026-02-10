@@ -222,6 +222,10 @@ export const trades = pgTable("trades", {
   lots: integer("lots"), // Number of lots (1 lot = $100,000)
   openPrice: real("open_price").notNull(),
   closePrice: real("close_price"),
+  intradayHigh: real("intraday_high"),
+  intradayLow: real("intraday_low"),
+  mae: real("mae"), // Max Adverse Excursion (fractional return)
+  mfe: real("mfe"), // Max Favorable Excursion (fractional return)
   takeProfit: real("take_profit"),
   stopLoss: real("stop_loss"),
   limitPrice: real("limit_price"),
@@ -725,6 +729,31 @@ export const systemConfig = pgTable("system_config", {
   policyContenderPath2MinReturnLast90: real("policy_contender_path2_min_return_last90").notNull().default(0.1),
   policyContenderPath2MaxDaysSinceLastTrade: integer("policy_contender_path2_max_days_since_last_trade").notNull().default(14),
   policyAutoPromotePerformer: boolean("policy_auto_promote_performer").notNull().default(true),
+  // Scout + recruitment ecosystem toggles
+  scoutTabEnabled: boolean("scout_tab_enabled").notNull().default(true),
+  partnerPortalEnabled: boolean("partner_portal_enabled").notNull().default(false),
+  traderProProfilesEnabled: boolean("trader_pro_profiles_enabled").notNull().default(false),
+  traderCompeteEnabled: boolean("trader_compete_enabled").notNull().default(false),
+  traderCommunityEnabled: boolean("trader_community_enabled").notNull().default(false),
+  partnerAllocationsEnabled: boolean("partner_allocations_enabled").notNull().default(false),
+  partnerGatingConfig: text("partner_gating_config")
+    .notNull()
+    .default(
+      JSON.stringify({
+        viewDataRoom: "INVITED",
+        runSimulations: "IDENTITY",
+        requestAllocation: "COMPLIANT",
+        directContact: "ADMIN_APPROVED",
+      }),
+    ),
+  partnerPasswordRotationDays: integer("partner_password_rotation_days").notNull().default(90),
+  partnerPasswordReminderLogins: integer("partner_password_reminder_logins").notNull().default(3),
+  partnerInviteDefaultExpiryDays: integer("partner_invite_default_expiry_days").notNull().default(7),
+  partnerInquiryInboxAlias: text("partner_inquiry_inbox_alias").notNull().default("inquiries@"),
+  partnerInquiryRouteAdminEmailsCsv: text("partner_inquiry_route_admin_emails_csv").notNull().default(""),
+  partnerInquiryViewerAdminEmailsCsv: text("partner_inquiry_viewer_admin_emails_csv").notNull().default(""),
+  leaderboardMode: text("leaderboard_mode").notNull().default("PUBLIC"), // PUBLIC | TOP_10 | DISABLED
+  scoutMinSharpeAlert: real("scout_min_sharpe_alert").notNull().default(2.0),
   policyEmailResendCooldownSec: integer("policy_email_resend_cooldown_sec").notNull().default(60),
   policyEmailDailySendCap: integer("policy_email_daily_send_cap").notNull().default(5),
   policySmsDailySendCap: integer("policy_sms_daily_send_cap").notNull().default(5),
@@ -752,6 +781,225 @@ export const systemConfig = pgTable("system_config", {
 });
 
 export const insertSystemConfigSchema = createInsertSchema(systemConfig);
+
+// Nightly scout metrics (risk-adjusted and behavior features)
+export const scoutMetricsSnapshot = pgTable("scout_metrics_snapshot", {
+  userId: integer("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  sharpeRatio: real("sharpe_ratio"),
+  sortinoRatio: real("sortino_ratio"),
+  calmarRatio: real("calmar_ratio"),
+  equityCurveR2: real("equity_curve_r2"),
+  avgMae: real("avg_mae"),
+  avgMfe: real("avg_mfe"),
+  styleCluster: text("style_cluster"), // SNIPER | SCALPER | SWING | NEWS
+  compositeScore: real("composite_score"),
+  calculatedAt: integer("calculated_at").notNull().default(nowUnix),
+});
+
+// Admin-owned watchlists for promising traders
+export const scoutWatchlists = pgTable(
+  "scout_watchlists",
+  {
+    id: serial("id").primaryKey(),
+    adminId: integer("admin_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    tier: text("tier").notNull().default("B_LIST"), // A_LIST | B_LIST | INCUBATOR
+    notes: text("notes"),
+    createdAt: integer("created_at").notNull().default(nowUnix),
+    updatedAt: integer("updated_at").notNull().default(nowUnix),
+  },
+  (table) => ({
+    adminUserUniqueIdx: uniqueIndex("scout_watchlists_admin_user_uidx").on(table.adminId, table.userId),
+    userTierIdx: index("scout_watchlists_user_tier_idx").on(table.userId, table.tier),
+  }),
+);
+
+// Recruitment pipeline state for each trader
+export const recruitingPipeline = pgTable("recruiting_pipeline", {
+  userId: integer("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  stage: text("stage").notNull().default("DETECTED"),
+  assignedAdminId: integer("assigned_admin_id").references(() => users.id, { onDelete: "set null" }),
+  lastContactedAt: integer("last_contacted_at"),
+  notes: text("notes"),
+  isPartnerVisible: boolean("is_partner_visible").notNull().default(false),
+  updatedAt: integer("updated_at").notNull().default(nowUnix),
+});
+
+// External partner organizations (API key hash only)
+export const partners = pgTable(
+  "partners",
+  {
+    id: serial("id").primaryKey(),
+    name: text("name").notNull(),
+    apiKeyHash: text("api_key_hash").notNull(),
+    apiKeyPrefix: text("api_key_prefix"),
+    ipWhitelist: text("ip_whitelist").notNull().default(""),
+    isActive: boolean("is_active").notNull().default(true),
+    contactEmail: text("contact_email"),
+    contactUsername: text("contact_username"),
+    tempPasswordHash: text("temp_password_hash"),
+    inviteTokenHash: text("invite_token_hash"),
+    inviteExpiresAt: integer("invite_expires_at"),
+    passwordRotatedAt: integer("password_rotated_at"),
+    loginCount: integer("login_count").notNull().default(0),
+    inviteStatus: text("invite_status").notNull().default("ACTIVE"), // INVITED | ACTIVE | REVOKED
+    onboardingStep: text("onboarding_step").notNull().default("PROFILE"), // PROFILE | IDENTITY | LEGAL | WAITING_APPROVAL | COMPLETED
+    profileData: text("profile_data").notNull().default("{}"), // JSON: { fundName, aumRange, hqLocation, strategyTags[] }
+    fundLogoUrl: text("fund_logo_url"),
+    aumRange: text("aum_range"),
+    hqLocation: text("hq_location"),
+    strategyTags: text("strategy_tags").notNull().default("[]"), // JSON array mirror for fast read
+    kybDocUrl: text("kyb_doc_url"),
+    agreementsSignedAt: integer("agreements_signed_at"),
+    contactAccessRequestedAt: integer("contact_access_requested_at"),
+    approvedAt: integer("approved_at"),
+    gatingOverrides: text("gating_overrides").notNull().default("{}"), // JSON per-partner gate overrides
+    adminNotes: text("admin_notes"),
+    createdAt: integer("created_at").notNull().default(nowUnix),
+    updatedAt: integer("updated_at").notNull().default(nowUnix),
+    lastKeyRotatedAt: integer("last_key_rotated_at"),
+  },
+  (table) => ({
+    apiKeyHashUniqueIdx: uniqueIndex("partners_api_key_hash_uidx").on(table.apiKeyHash),
+    activeIdx: index("partners_active_idx").on(table.isActive, table.updatedAt),
+  }),
+);
+
+export const partnerInvites = pgTable(
+  "partner_invites",
+  {
+    id: serial("id").primaryKey(),
+    adminId: integer("admin_id").references(() => users.id, { onDelete: "set null" }),
+    partnerId: integer("partner_id")
+      .notNull()
+      .references(() => partners.id, { onDelete: "cascade" }),
+    partnerEmail: text("partner_email").notNull(),
+    fundName: text("fund_name"),
+    adminNotes: text("admin_notes"),
+    expiresInDays: integer("expires_in_days").notNull().default(7),
+    invitedAt: integer("invited_at").notNull().default(nowUnix),
+    emailStatus: text("email_status").notNull().default("QUEUED"), // QUEUED | SENT | DELIVERED | OPENED | FAILED | SKIPPED
+    inviteTokenHash: text("invite_token_hash"),
+    emailProviderMessageId: text("email_provider_message_id"),
+    emailStatusDetail: text("email_status_detail"),
+  },
+  (table) => ({
+    partnerInvitedIdx: index("partner_invites_partner_invited_idx").on(table.partnerId, table.invitedAt),
+    adminInvitedIdx: index("partner_invites_admin_invited_idx").on(table.adminId, table.invitedAt),
+    emailIdx: index("partner_invites_email_idx").on(table.partnerEmail),
+  }),
+);
+
+// Partner virtual allocations (vSMA)
+export const partnerAllocations = pgTable(
+  "partner_allocations",
+  {
+    id: serial("id").primaryKey(),
+    partnerId: integer("partner_id")
+      .notNull()
+      .references(() => partners.id, { onDelete: "cascade" }),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    userHashId: text("user_hash_id").notNull(),
+    capitalUsd: real("capital_usd").notNull(),
+    shadowStopPct: real("shadow_stop_pct"), // 0.03 => 3%
+    status: text("status").notNull().default("ACTIVE"), // ACTIVE | STOPPED | CLOSED
+    currentPnlUsd: real("current_pnl_usd").notNull().default(0),
+    createdAt: integer("created_at").notNull().default(nowUnix),
+    updatedAt: integer("updated_at").notNull().default(nowUnix),
+  },
+  (table) => ({
+    partnerStatusIdx: index("partner_allocations_partner_status_idx").on(table.partnerId, table.status),
+    userStatusIdx: index("partner_allocations_user_status_idx").on(table.userId, table.status),
+  }),
+);
+
+// Partner requests for information, bridged via admin mailbox
+export const partnerInquiries = pgTable(
+  "partner_inquiries",
+  {
+    id: serial("id").primaryKey(),
+    partnerId: integer("partner_id")
+      .notNull()
+      .references(() => partners.id, { onDelete: "cascade" }),
+    userHashId: text("user_hash_id"),
+    senderName: text("sender_name"),
+    senderEmail: text("sender_email"),
+    subject: text("subject").notNull(),
+    body: text("body").notNull(),
+    status: text("status").notNull().default("OPEN"), // OPEN | FORWARDED | ANSWERED | CLOSED
+    mailboxThreadId: integer("mailbox_thread_id").references(() => mailboxThreads.id, { onDelete: "set null" }),
+    createdAt: integer("created_at").notNull().default(nowUnix),
+    updatedAt: integer("updated_at").notNull().default(nowUnix),
+  },
+  (table) => ({
+    partnerStatusIdx: index("partner_inquiries_partner_status_idx").on(table.partnerId, table.status),
+    mailboxThreadIdx: index("partner_inquiries_mailbox_thread_idx").on(table.mailboxThreadId),
+  }),
+);
+
+// Trader self-managed talent profile
+export const traderProfiles = pgTable("trader_profiles", {
+  userId: integer("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  bio: text("bio"),
+  strategy: text("strategy"),
+  pinnedTradeIds: text("pinned_trade_ids").notNull().default("[]"), // JSON array of trade IDs
+  updatedAt: integer("updated_at").notNull().default(nowUnix),
+});
+
+// Admin-defined challenge templates
+export const challenges = pgTable("challenges", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  description: text("description"),
+  profitTargetPct: real("profit_target_pct").notNull(),
+  maxDailyLossPct: real("max_daily_loss_pct").notNull(),
+  maxTotalLossPct: real("max_total_loss_pct"),
+  minTradingDays: integer("min_trading_days"),
+  durationDays: integer("duration_days").notNull(),
+  startAt: integer("start_at"),
+  endAt: integer("end_at"),
+  isActive: boolean("is_active").notNull().default(false),
+  createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: integer("created_at").notNull().default(nowUnix),
+  updatedAt: integer("updated_at").notNull().default(nowUnix),
+});
+
+// Per-user challenge enrollments and running status
+export const challengeEnrollments = pgTable(
+  "challenge_enrollments",
+  {
+    id: serial("id").primaryKey(),
+    challengeId: integer("challenge_id")
+      .notNull()
+      .references(() => challenges.id, { onDelete: "cascade" }),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    status: text("status").notNull().default("ACTIVE"), // ACTIVE | PASSED | FAILED | WITHDRAWN
+    enrolledAt: integer("enrolled_at").notNull().default(nowUnix),
+    completedAt: integer("completed_at"),
+    currentPnlPct: real("current_pnl_pct").notNull().default(0),
+    maxDailyLossHit: real("max_daily_loss_hit"),
+    tradingDays: integer("trading_days").notNull().default(0),
+    updatedAt: integer("updated_at").notNull().default(nowUnix),
+  },
+  (table) => ({
+    challengeUserUniqueIdx: uniqueIndex("challenge_enrollments_challenge_user_uidx").on(table.challengeId, table.userId),
+    userStatusIdx: index("challenge_enrollments_user_status_idx").on(table.userId, table.status),
+  }),
+);
 
 export const marketDataProviders = pgTable(
   "market_data_providers",

@@ -9,6 +9,9 @@ import { bootstrapDoc1Seed } from "./legal/bootstrapDoc1Seed";
 import { startGriftEvaluationScheduler } from "./grift/griftScheduler";
 import { startVerificationReminderCron } from "./cron/verificationReminders";
 import { startTradeAuditVerificationCron } from "./cron/tradeAuditVerification";
+import { startScoutMetricsCron } from "./cron/scoutMetrics";
+import { startChallengeEvaluationCron } from "./cron/evaluateChallenges";
+import { startPartnerAllocationSyncCron } from "./cron/syncPartnerAllocations";
 import { startAccountLifecycleSweepScheduler } from "./services/accountLifecycleSweepScheduler";
 import { getIp2AsnDatasetPath, maybeImportIp2AsnDataset } from "./grift/griftIp2AsnDataset";
 import { startI18nWorker } from "./i18n/worker";
@@ -70,6 +73,8 @@ function validateEnvVars() {
   const warnings: string[] = [];
   const criticalErrors: string[] = [];
   const isProduction = process.env.NODE_ENV === "production";
+  const encryptionKeyRaw = String(process.env.ENCRYPTION_KEY ?? "").trim();
+  const encryptionKeyValid = /^[a-fA-F0-9]{64}$/.test(encryptionKeyRaw);
   
   // CRITICAL: Legal terms HMAC secret (required for tamper-evident token signing)
   const legalSecret = process.env.LEGAL_TERMS_HMAC_SECRET;
@@ -98,6 +103,15 @@ function validateEnvVars() {
   } else if (emailVerifyTokenSecret && emailVerifyTokenSecret.length < 32) {
     warnings.push("EMAIL_VERIFY_TOKEN_SECRET is shorter than 32 chars - rotate to a stronger secret for production.");
   }
+
+  // CRITICAL: At-rest encryption key for mailbox/notification and security secrets.
+  if (!encryptionKeyValid) {
+    const message =
+      "ENCRYPTION_KEY not configured as 64 hex chars (32-byte key). " +
+      "Generate with: openssl rand -hex 32";
+    if (isProduction) criticalErrors.push(message);
+    else warnings.push(message);
+  }
   
   // Critical for email verification
   if (!process.env.RESEND_API_KEY) {
@@ -125,6 +139,7 @@ function validateEnvVars() {
   console.log("  - LEGAL_TERMS_HMAC_SECRET:", legalSecret && legalSecret.length >= 32 ? "configured" : "MISSING/TOO SHORT");
   console.log("  - SESSION_SECRET:", sessionSecret ? "configured" : "MISSING");
   console.log("  - EMAIL_VERIFY_TOKEN_SECRET:", emailVerifyTokenSecret ? "configured" : "MISSING");
+  console.log("  - ENCRYPTION_KEY:", encryptionKeyValid ? "configured" : "MISSING/INVALID");
   console.log("  - RESEND_API_KEY:", process.env.RESEND_API_KEY ? "configured" : "MISSING");
   console.log("  - TWILIO_ACCOUNT_SID:", process.env.TWILIO_ACCOUNT_SID ? "configured" : "MISSING");
   console.log("  - TWILIO_AUTH_TOKEN:", process.env.TWILIO_AUTH_TOKEN ? "configured" : "MISSING");
@@ -558,6 +573,42 @@ app.use((req, res, next) => {
         }
       } else {
         log("[Role] Skipping account lifecycle sweep (worker only).");
+      }
+
+      // Start nightly scout metrics calculation scheduler
+      if (RUN_WORKER_TASKS) {
+        try {
+          startScoutMetricsCron();
+          log("Scout metrics cron initialized");
+        } catch (error) {
+          console.error("Error starting scout metrics cron:", error);
+        }
+      } else {
+        log("[Role] Skipping scout metrics cron (worker only).");
+      }
+
+      // Start challenge evaluation scheduler
+      if (RUN_WORKER_TASKS) {
+        try {
+          startChallengeEvaluationCron();
+          log("Challenge evaluation cron initialized");
+        } catch (error) {
+          console.error("Error starting challenge evaluation cron:", error);
+        }
+      } else {
+        log("[Role] Skipping challenge evaluation cron (worker only).");
+      }
+
+      // Start partner allocation sync scheduler
+      if (RUN_WORKER_TASKS) {
+        try {
+          startPartnerAllocationSyncCron();
+          log("Partner allocation sync cron initialized");
+        } catch (error) {
+          console.error("Error starting partner allocation sync cron:", error);
+        }
+      } else {
+        log("[Role] Skipping partner allocation sync cron (worker only).");
       }
       
       log("Deferred initialization complete");

@@ -17,6 +17,7 @@ import { loadPolicyConfig } from "../policy/getPolicyConfig";
 import { applyUserBalanceDelta, releaseUserMargin, reserveUserMargin } from "../services/tradeAtomic";
 import { computeCloseSettlementCosts, computeOpenSideCosts } from "../services/tradeCosts";
 import { createNotification } from "../services/messaging";
+import { clearTradeExcursion, initTradeExcursion, resolveTradeExcursionForClose, trackTradeExcursion } from "../trades/excursionTracking";
 import { 
   writeTradeAudit, 
   generateCorrelationId, 
@@ -640,6 +641,10 @@ async function processPendingForSymbol(symbol: string, q: Quote) {
           status: "OPEN",
           executedAt: nowSec,
           openPrice: fillPrice,
+          intradayHigh: fillPrice,
+          intradayLow: fillPrice,
+          mae: null,
+          mfe: null,
           notionalUsd: openCostSummary.notionalUsd,
           categorySnapshot: openCostSummary.categorySnapshot,
           costModelVersion: openCostSummary.costModelVersion,
@@ -702,6 +707,8 @@ async function processPendingForSymbol(symbol: string, q: Quote) {
 
     if (fillResult.action !== "FILLED") continue;
 
+    initTradeExcursion(t.id, fillPrice);
+
     await recalcAccount(u.id, { emit: true, reason: "PENDING_ORDER_FILLED" });
     publishLiveEvent({
       type: "trades:updated",
@@ -746,6 +753,13 @@ async function processStopsForOpenTrades(symbol: string, q: Quote) {
 
     // Close price: BUY closes at bid, SELL closes at ask
     const closePx = side === "BUY" ? ba.bid : ba.ask;
+    trackTradeExcursion({
+      tradeId: t.id,
+      openPrice: t.openPrice,
+      markPrice: closePx,
+      intradayHigh: (t as any).intradayHigh,
+      intradayLow: (t as any).intradayLow,
+    });
 
     let reason: CloseReasonCode | null = null;
 
@@ -793,6 +807,14 @@ async function processStopsForOpenTrades(symbol: string, q: Quote) {
     const netProfitUsd = grossProfitUsd - closeCostSummary.totalCostsUsd;
     const closeSettlementUsd = grossProfitUsd - closeCostSummary.closingChargesUsd;
     const profit = netProfitUsd.toFixed(2);
+    const excursion = resolveTradeExcursionForClose({
+      tradeId: t.id,
+      side,
+      openPrice: openPx,
+      closePrice: closePx,
+      intradayHigh: (t as any).intradayHigh,
+      intradayLow: (t as any).intradayLow,
+    });
 
     const correlationId = (t as any).correlationId || generateCorrelationId();
     const orderId = (t as any).orderId || generateOrderId();
@@ -825,6 +847,10 @@ async function processStopsForOpenTrades(symbol: string, q: Quote) {
           profit,
           grossProfitUsd,
           netProfitUsd,
+          intradayHigh: excursion.intradayHigh,
+          intradayLow: excursion.intradayLow,
+          mae: excursion.mae,
+          mfe: excursion.mfe,
           notionalUsd: closeCostSummary.notionalUsd,
           totalCostsUsd: closeCostSummary.totalCostsUsd,
           closeCommissionUsd: closeCostSummary.closeCommissionUsd,
@@ -904,6 +930,8 @@ async function processStopsForOpenTrades(symbol: string, q: Quote) {
     });
 
     if (closeResult.action !== "CLOSED") continue;
+
+    clearTradeExcursion(t.id);
 
     await recalcAccount(u.id, { emit: true, reason: reason ?? "STOP_TAKE_PROFIT" });
     publishLiveEvent({

@@ -40,6 +40,7 @@ import { InstrumentIngestionPanel } from "@/components/admin/InstrumentIngestion
 import { InstrumentCatalogEnableDialog } from "@/components/admin/InstrumentCatalogEnableDialog";
 import { PipDefaultsPanel } from "@/components/admin/PipDefaultsPanel";
 import { QuoteSubscriptionsPanel } from "@/components/admin/QuoteSubscriptionsPanel";
+import ScoutWorkbench from "@/components/admin/ScoutWorkbench";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -190,6 +191,7 @@ interface SystemConfigData {
   jurisdictionBlockSignup: boolean;
   jurisdictionBlockLogin: boolean;
   allowUserTimezoneEdit: boolean;
+  scoutTabEnabled: boolean;
   // Signup freeze + invite waitlist
   signupFreeze: boolean;
   signupFreezeMessage: string;
@@ -1530,6 +1532,7 @@ function SystemConfigTab() {
       axios.put("/api/admin/system-config", payload).then(r => r.data),
     onSuccess: (data: any) => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/system-config"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/scout/config"] });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/signup-waitlist"] });
       setConfigChanged(false);
       toast({ title: "Settings saved", description: "System configuration updated successfully" });
@@ -1904,6 +1907,30 @@ function SystemConfigTab() {
               </CardContent>
             </Card>
 
+            <Card className="bg-neutral-700 border-gray-600">
+              <CardHeader>
+                <CardTitle className="text-base">Scout Access Control</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex items-center justify-between py-3 border-b border-gray-600">
+                  <div>
+                    <Label className="text-base font-medium">Enable Scout tab</Label>
+                    <p className="text-xs text-gray-400 mt-1">
+                      Controls visibility of the admin Scout workspace navigation. Keep enabled unless Scout should be
+                      intentionally hidden.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={Boolean(config.scoutTabEnabled)}
+                    onCheckedChange={(checked) => {
+                      setConfig(prev => prev ? { ...prev, scoutTabEnabled: checked } : prev);
+                      setConfigChanged(true);
+                    }}
+                  />
+                </div>
+              </CardContent>
+            </Card>
+
             <div className="flex justify-end pt-2">
               <Button
                 onClick={handleSave}
@@ -2225,6 +2252,21 @@ export default function AdminDashboard() {
     queryKey: ["/api/admin/global-settings"],
     queryFn: () => axios.get("/api/admin/global-settings").then(r => r.data),
   });
+
+  const { data: scoutTabConfig } = useQuery<Pick<SystemConfigData, "scoutTabEnabled">>({
+    queryKey: ["/api/admin/system-config", "tab-visibility"],
+    queryFn: () => axios.get("/api/admin/system-config").then((r) => r.data),
+    refetchInterval: 30000,
+    refetchOnWindowFocus: false,
+    retry: false,
+  });
+  const scoutTabVisible = Boolean(scoutTabConfig?.scoutTabEnabled ?? true);
+
+  useEffect(() => {
+    if (!scoutTabVisible && activeTab === "scout") {
+      setActiveTab("users");
+    }
+  }, [activeTab, scoutTabVisible]);
 
   // Sync global settings to local state when data is fetched (only when not editing)
   useEffect(() => {
@@ -2932,7 +2974,19 @@ export default function AdminDashboard() {
     <div className="page-pad bg-neutral-900 text-white min-h-screen min-h-dvh">
       <Card className="border-gray-800 bg-neutral-800 text-white">
         <CardHeader className="border-b border-gray-700">
-          <CardTitle>Admin Dashboard</CardTitle>
+          <div className="flex items-center justify-between gap-2">
+            <CardTitle>Admin Dashboard</CardTitle>
+            <Button
+              size="sm"
+              variant="outline"
+              className="border-neutral-600"
+              onClick={() => {
+                window.location.href = "/partner";
+              }}
+            >
+              Partner Portal
+            </Button>
+          </div>
         </CardHeader>
         <CardContent className="p-0">
           <Tabs defaultValue="users" value={activeTab} onValueChange={setActiveTab} className="w-full">
@@ -2962,6 +3016,11 @@ export default function AdminDashboard() {
                 <span className="hidden md:inline">Communications</span>
                 <span className="md:hidden">Comms</span>
               </TabsTrigger>
+              {scoutTabVisible && (
+                <TabsTrigger value="scout" className="shrink-0 text-[10px] sm:text-xs md:text-sm data-[state=active]:bg-orange-600/60 data-[state=active]:text-white px-1.5 sm:px-2 py-1.5">
+                  Scout
+                </TabsTrigger>
+              )}
               <TabsTrigger value="system" className="shrink-0 text-[10px] sm:text-xs md:text-sm data-[state=active]:bg-slate-600/60 data-[state=active]:text-white px-1.5 sm:px-2 py-1.5">
                 <span className="hidden md:inline">System Config</span>
                 <span className="md:hidden">Config</span>
@@ -4741,6 +4800,12 @@ export default function AdminDashboard() {
             <TabsContent value="communications" className="p-4">
               <AdminCommunications />
             </TabsContent>
+
+            {scoutTabVisible && (
+              <TabsContent value="scout" className="p-4">
+                <ScoutWorkbench />
+              </TabsContent>
+            )}
 
             <TabsContent value="system" className="p-4">
               <SystemConfigTab />

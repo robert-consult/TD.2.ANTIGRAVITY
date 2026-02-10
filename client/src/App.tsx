@@ -24,6 +24,7 @@ const LoginPage = lazyWithPing(() => import("@/pages/LoginPage"));
 const AdminDashboard = lazyWithPing(() => import("@/pages/AdminDashboard"));
 const JournalPage = lazyWithPing(() => import("@/pages/JournalPage"));
 const ProfileSettings = lazyWithPing(() => import("@/pages/ProfileSettings"));
+const PartnerPortal = lazyWithPing(() => import("@/pages/PartnerPortal"));
 const VerifyEmail = lazyWithPing(() => import("@/pages/VerifyEmail"));
 
 function ImpersonationBanner() {
@@ -136,6 +137,7 @@ function AppRoutes() {
             <Route path="/admin" component={AdminRoute} />
             <Route path="/journal" component={JournalPage} />
             <Route path="/profile" component={ProfileSettings} />
+            <Route path="/partner" component={PartnerPortal} />
             <Route path="/" component={Dashboard} />
             <Route component={NotFound} />
           </Switch>

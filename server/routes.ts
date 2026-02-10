@@ -50,6 +50,7 @@ import { getExecutionQuote } from "./services/quoteService";
 import { applyUserBalanceDelta, releaseUserMargin, reserveUserMargin } from "./services/tradeAtomic";
 import { realizedPnlUsd } from "./lib/realizedPnl";
 import { computeCloseSettlementCosts, computeOpenSideCosts } from "./services/tradeCosts";
+import { clearTradeExcursion, initTradeExcursion, resolveTradeExcursionForClose } from "./trades/excursionTracking";
 import { buildAuditContext, type AuditContext } from "./lib/auditContext";
 import { writeOrderIntentAudit, writeTradeAudit, generateCorrelationId, generateOrderId, generateExecutionId, generatePositionId, calculateSpreadPips, calculateSlippagePips } from "./lib/auditWriter";
 import { decidePolicy, featureGates } from "@shared/policyDecision";
@@ -84,6 +85,9 @@ import { getAllowedSymbolsForUser } from "./services/quoteSubscriptions";
 import { mailboxRouter } from "./routes/mailbox";
 import { notificationsRouter } from "./routes/notifications";
 import { getMessagingMetrics, sendWelcomeMailboxMessage } from "./services/messaging";
+import { adminChallengesRouter, adminPartnersRouter, adminScoutRouter } from "./routes/adminScout";
+import { partnerAuthRouter, partnerPortalRouter } from "./routes/partnerPortal";
+import { traderTalentRouter } from "./routes/traderTalent";
 
 /**
  * Precision-aware price comparison utilities for forex trading.
@@ -3182,6 +3186,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
               stopPrice: isStopOrder ? parseFloat(String(stopPrice)) : null,
               status: isPendingOrder ? "PENDING" : "OPEN",
               executedAt: isPendingOrder ? undefined : nowSec,
+              intradayHigh: isPendingOrder ? null : entryPrice,
+              intradayLow: isPendingOrder ? null : entryPrice,
+              mae: null,
+              mfe: null,
               correlationId: correlationId,
               orderId,
               positionId,
@@ -3244,6 +3252,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (!trade) {
           await writeDecisionReject("INSUFFICIENT_MARGIN_AT_COMMIT", { marginRequired: neededMargin }, {});
           return res.status(400).json({ message: "Not enough margin available" });
+        }
+
+        if (!isPendingOrder) {
+          initTradeExcursion(Number(trade.id), entryPrice);
         }
 
         // AUDIT: Write DECISION event (PASS) after successful trade creation
@@ -3629,6 +3641,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const closePrice = q.execPrice;
         const openPrice = parseFloat(String(trade.openPrice));
         const lots = typeof trade.lots === "string" ? Number(trade.lots) : Number(trade.lots ?? 1);
+        const excursion = resolveTradeExcursionForClose({
+          tradeId,
+          side: trade.type as "BUY" | "SELL",
+          openPrice,
+          closePrice,
+          intradayHigh: (trade as any).intradayHigh,
+          intradayLow: (trade as any).intradayLow,
+        });
 
         // Use proper P/L calculation that handles JPY and cross pairs correctly
         const pnlUsd = await realizedPnlUsd({
@@ -3689,6 +3709,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
               profit: netProfitUsd.toFixed(2),
               grossProfitUsd,
               netProfitUsd,
+              intradayHigh: excursion.intradayHigh,
+              intradayLow: excursion.intradayLow,
+              mae: excursion.mae,
+              mfe: excursion.mfe,
               notionalUsd: closeCostSummary.notionalUsd,
               totalCostsUsd: closeCostSummary.totalCostsUsd,
               closeCommissionUsd: closeCostSummary.closeCommissionUsd,
@@ -3780,6 +3804,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (!closeResult) {
           return res.status(409).json({ message: "Trade is already closed" });
         }
+
+        clearTradeExcursion(tradeId);
 
         try {
           await recalcAccount(req.session.userId, { emit: true, reason: "TRADE_CLOSED" });
@@ -4344,7 +4370,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/leaderboard", async (req: Request, res: Response) => {
     try {
-      const leaderboard = await storage.getLeaderboard();
+      const [cfg] = await db
+        .select({ leaderboardMode: systemConfig.leaderboardMode })
+        .from(systemConfig)
+        .where(eq(systemConfig.id, 1))
+        .limit(1);
+
+      const modeRaw = String(cfg?.leaderboardMode || "PUBLIC").toUpperCase();
+      const mode = modeRaw === "TOP_10" || modeRaw === "DISABLED" ? modeRaw : "PUBLIC";
+
+      if (mode === "DISABLED") {
+        return res.json([]);
+      }
+
+      const limit = mode === "TOP_10" ? 10 : 100;
+      const leaderboard = await storage.getLeaderboard(limit);
       res.json(leaderboard);
     } catch (error) {
       console.error("Get leaderboard error:", error);
@@ -4908,6 +4948,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use("/api/quote-subscriptions", quoteSubscriptionsRouter); // Trader quote subscription controls
   app.use("/api/mailbox", mailboxRouter); // Internal mailbox + admin communications
   app.use("/api/notifications", notificationsRouter); // User notifications center
+  app.use("/api/admin/scout", adminScoutRouter); // Recruitment scout endpoints
+  app.use("/api/admin/challenges", adminChallengesRouter); // Challenge admin endpoints
+  app.use("/api/admin/partners", adminPartnersRouter); // Partner admin management
+  app.use("/api/partner", partnerAuthRouter); // Public partner auth (invite redemption)
+  app.use("/api/partner", partnerPortalRouter); // Partner portal data room + allocations + inquiries
+  app.use("/api/trader", traderTalentRouter); // Trader talent profile + challenges
   registerGriftRoutes(app);
   app.use("/api/grift", griftPublicRouter);
   app.use('/api/admin/migration', adminMigrationRouter); // Migration export/import (backup)

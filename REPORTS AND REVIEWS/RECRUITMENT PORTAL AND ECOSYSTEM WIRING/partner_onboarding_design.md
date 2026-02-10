@@ -1,0 +1,446 @@
+# Partner Onboarding & Gating: Design Specification
+**Version**: 1.0  
+**Date**: 2026-02-09  
+**Status**: APPROVED
+
+---
+
+## 1. Executive Summary
+This document specifies the **"Invite-First"** onboarding workflow for institutional partners (Hedge Funds, Prop Firms). The goal is **zero-friction entry** (immediate value) followed by **incremental commitment** (gated features).
+
+**Key Principle**: Partners can *see* the talent immediately (Read-Only), but must *identify* themselves to touch the talent (Allocations/Contact).
+
+*> Note: This is an **ENHANCEMENT** of the existing `Scout > Partners` mini-tab and `Mailbox` system. It merges new capabilities into the current "Create Partner" workflow, adding the email trigger and invite logic without removing existing manual controls.*
+
+---
+
+## 2. The "Invite-First" Workflow (Step-by-Step)
+
+### Step 1: Admin Invitation (The Trigger)
+*   **Actor**: Admin
+*   **Action**: Enters Partner Email into `Scout > Partners > Invite`.
+*   **System**: 
+    *   Generates `API_KEY` (e.g., `pk_live_...`).
+    *   Generates `Investor_ID` (Username).
+    *   Generates `Temporary_Password`.
+    *   Sends automated email.
+
+### Step 2: The "Golden Ticket" Email
+*   **Subject**: "Access Granted: TradeQuip Institutional Portal"
+*   **Body**: 
+    *   "You have been invited to view our top-performing traders."
+    *   "Your credentials are listed below."
+    *   **Call to Action**: [Access Portal Now] (Deep link with pre-filled login).
+
+### Step 3: Immediate Gratification (Read-Only)
+*   **State**: `Profile_Status = INCOMPLETE`
+*   **Experience**:
+    *   Partner logs in -> Lands on **Dashboard**.
+    *   Can navigate **Data Room** (Sharpe ratios, returns, styles).
+    *   Can view **Tear Sheets** (Anonymized).
+    *   **GATED ACTIONS**:
+        *   "Allocate Capital" button -> 🔒 **LOCKED**.
+        *   "Contact Trader" button -> 🔒 **LOCKED**.
+        *   "Simulation Engine" -> 🔒 **LOCKED**.
+
+---
+
+## 3. Incremental Profiling (The "Unlock")
+
+*> Prompt: "Unlock Capital Allocation capabilities by completing your Fund Profile."*
+
+### Phase A: Fund Identity (Required for Allocations)
+*   **Logo**: Upload circular fund logo.
+*   **Entity Name**: "BlueWater Capital LLC".
+*   **AUM Range**: "<$10M", "$10M-$50M", "$50M+".
+*   **Strategy Tags**: "L/S Equity", "Macro", "Quant", "Crypto".
+*   **Unlock**: Enables **Simulation Engine** (Draft Portfolios).
+
+### Phase B: Compliance & Legal (Required for Live Allocations)
+*   **KYB (Know Your Business)**: Upload Certificate of Incorporation.
+*   **Agreements**: E-Sign "Master Allocation Agreement" & "NDA".
+*   **Unlock**: Enables **Live Allocations** & **Trader Contact Request**.
+
+### Phase C: Admin Gate (The "Handshake")
+*> "We must sign contracts lest they steal traders."*
+*   **Action**: Partner requests "Contact Access".
+*   **System**: Sets `status = PENDING_APPROVAL`.
+*   **Admin**: Reviews contracts off-platform -> Clicks "Approve Partner".
+*   **Unlock**: Fully enables Direct Contact / Messaging features.
+
+---
+
+## 4. Gating Logic & State Machine (Configurable)
+
+*> All gates are soft-configurable by Admin (Global Defaults + Per-Partner Overrides).*
+
+| Feature | Invited (Read-Only) | Identity Verified | Fully Compliant | Admin Approved |
+|:---|:---:|:---:|:---:|:---:|
+| **View Data Room** | ✅ | ✅ | ✅ | ✅ |
+| **Run Simulations** | 🔒 | ✅ | ✅ | ✅ |
+| **Request Allocation** | 🔒 | 🔒 | ✅ | ✅ |
+| **Direct Contact** | 🔒 | 🔒 | 🔒 | ✅ |
+
+### 4.1 Configuration Toggles
+**Global Defaults** (in `SystemConfig`):
+*   `partner_view_data_room_gate`: "INVITED" (Default) vs "IDENTITY".
+*   `partner_simulation_gate`: "IDENTITY" (Default) vs "COMPLIANT".
+*   `partner_contact_trader_gate`: "ADMIN_APPROVED" (Hard Default).
+
+**Per-Partner Overrides**:
+*   *Scenario*: Trusted partner "Goldman" skips straight to "Approve".
+*   *Scenario*: Suspicious partner "AnonCapital" locked to Read-Only even after docs.
+
+---
+
+## 5. Data Model Updates for Onboarding
+
+### 5.1 `partners` Table Updates
+```sql
+ALTER TABLE partners 
+ADD COLUMN contact_email TEXT,
+ADD COLUMN temp_password_hash TEXT,
+ADD COLUMN profile_step TEXT DEFAULT 'INVITED', -- 'INVITED', 'IDENTITY', 'COMPLIANT'
+ADD COLUMN fund_logo_url TEXT,
+ADD COLUMN aum_range TEXT,
+ADD COLUMN strategy_tags TEXT, -- JSON array
+ADD COLUMN kyb_doc_url TEXT,
+ADD COLUMN agreements_signed_at INTEGER;
+```
+
+### 5.2 `invite_audit_log`
+Track who invited whom and when.
+*   `admin_id`
+*   `partner_email`
+*   `invited_at`
+*   `email_status` (Sent/Delivered/Opened)
+
+---
+
+## 6. UI/UX "Nudges"
+
+1.  **Dashboard Banner**: 
+    *   *Text*: "You are in View-Only mode. Complete your profile to unlock allocations."
+    *   *Color*: Emerald Green (Positive reinforcement).
+
+2.  **Lock Tooltips & Fallbacks**:
+    *   **Primary**: Hovering over "Contact Trader": *"Verifiable identity required to contact traders. [Complete Profile]"* 
+    *   **Secondary (Fallback)**: "Start Inquiry with Admin" link (mailto:inquiries@...) available even if profile is incomplete.
+
+3.  **Progress Bar**:
+    *   "Fund Profile: 33% Complete" (Visible in sidebar).
+
+---
+
+## 7. Security Hardening
+*   **Password Policy**:
+    *   **Initial Login**: Reminder popup to change password (configurable after X logins).
+    *   **Rotation**: Admin-configurable expiry (e.g., Force rotation every 30/60/90 days).
+*   **Link Expiry**: Default 7 days, but **Admin-Configurable** at invite time (1, 3, 7, 30 days).
+*   **Rate Limiting**: "Invite" endpoint strictly rate-limited for Admins to prevent spam.
+
+---
+
+## 8. Detailed UI Mockups
+
+### 8.1 Admin: Invite Partner Modal
+```
+┌─────────────────────────────────────────────────────────────┐
+│  INVITE NEW PARTNER                                    [X]  │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  Partner Email *                                            │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │ analyst@bluewatercapital.com                        │   │
+│  └─────────────────────────────────────────────────────┘   │
+│                                                             │
+│  Fund Name (Optional)                                       │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │ BlueWater Capital LLC                               │   │
+│  └─────────────────────────────────────────────────────┘   │
+│                                                             │
+│  Internal Notes (Admin-Only)                                │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │ Referral from John. AUM ~$50M. Crypto focus.        │   │
+│  └─────────────────────────────────────────────────────┘   │
+│                                                             │
+│  Link Expiry: [ 7 Days ▼ ]                                  │
+│                                                             │
+│  ┌───────────────────────┐  ┌───────────────────────┐      │
+│  │     Cancel            │  │  ✉️ Send Invite        │      │
+│  └───────────────────────┘  └───────────────────────┘      │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 8.2 Partner: "Golden Ticket" Email
+```
+┌─────────────────────────────────────────────────────────────┐
+│                                                             │
+│  📧 Access Granted: TradeQuip Institutional Portal          │
+│                                                             │
+│  ─────────────────────────────────────────────────────────  │
+│                                                             │
+│  Hello,                                                     │
+│                                                             │
+│  You have been invited to view our curated pool of          │
+│  top-performing traders.                                    │
+│                                                             │
+│  YOUR CREDENTIALS:                                          │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │  Username:  partner_bw_7x9b2                        │   │
+│  │  Password:  Tr@d3Qu!p_2026                          │   │
+│  │  API Key:   pk_live_7x9b2...                        │   │
+│  └─────────────────────────────────────────────────────┘   │
+│                                                             │
+│         ┌─────────────────────────────────┐                │
+│         │   🔐 ACCESS PORTAL NOW          │                │
+│         └─────────────────────────────────┘                │
+│                                                             │
+│  This link expires in 7 days.                               │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 8.3 Partner: Read-Only Dashboard (Post-Login)
+```
+┌─────────────────────────────────────────────────────────────┐
+│  TradeQuip Partner Portal              [partner_bw_7x9b2 ▼] │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │  ⚠️ VIEW-ONLY MODE                                   │   │
+│  │  Complete your Fund Profile to unlock allocations.   │   │
+│  │                          [Complete Profile →]        │   │
+│  └─────────────────────────────────────────────────────┘   │
+│                                                             │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐   │
+│  │Data Room │  │Simulation│  │Allocate  │  │ Contact  │   │
+│  │   ✅     │  │   🔒     │  │   🔒     │  │   🔒     │   │
+│  └──────────┘  └──────────┘  └──────────┘  └──────────┘   │
+│                                                             │
+│  ═══════════════════════════════════════════════════════   │
+│  TOP PERFORMERS                                             │
+│  ┌────────────────────────────────────────────────────┐    │
+│  │ User-7X9B2 │ Sharpe: 2.4 │ +18.2% (30d) │ [View]   │    │
+│  │ User-3K8M1 │ Sharpe: 1.9 │ +12.1% (30d) │ [View]   │    │
+│  │ User-9P2L5 │ Sharpe: 1.7 │ +9.8% (30d)  │ [View]   │    │
+│  └────────────────────────────────────────────────────┘    │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 8.4 Partner: Profile Wizard – Step 1 (Identity)
+```
+┌─────────────────────────────────────────────────────────────┐
+│  COMPLETE YOUR FUND PROFILE                            [X]  │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  ○───────●───────○───────○                                  │
+│  Step 1     Step 2     Step 3     Done                      │
+│  Identity   Legal      Approval                             │
+│                                                             │
+│  ═══════════════════════════════════════════════════════   │
+│                                                             │
+│     ┌──────────┐                                            │
+│     │  LOGO    │  Fund Name *                               │
+│     │  Upload  │  ┌─────────────────────────────────┐      │
+│     └──────────┘  │ BlueWater Capital LLC           │      │
+│                   └─────────────────────────────────┘      │
+│                                                             │
+│  AUM Range *                   HQ Location                  │
+│  ┌───────────────────┐        ┌─────────────────────┐      │
+│  │ $10M - $50M     ▼ │        │ New York, USA       │      │
+│  └───────────────────┘        └─────────────────────┘      │
+│                                                             │
+│  Investment Mandate (Select all that apply)                 │
+│  ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐   │
+│  │L/S Eq. │ │ Macro  │ │ Quant  │ │ Crypto │ │ Arb    │   │
+│  │   ✓    │ │        │ │   ✓    │ │   ✓    │ │        │   │
+│  └────────┘ └────────┘ └────────┘ └────────┘ └────────┘   │
+│                                                             │
+│  ┌───────────────────┐  ┌───────────────────────────┐      │
+│  │     Skip for Now  │  │   Save & Continue →       │      │
+│  └───────────────────┘  └───────────────────────────┘      │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 8.5 Partner: Profile Wizard – Step 2 (Legal)
+```
+┌─────────────────────────────────────────────────────────────┐
+│  COMPLETE YOUR FUND PROFILE                            [X]  │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  ●───────●───────○───────○                                  │
+│  Step 1     Step 2     Step 3     Done                      │
+│  Identity   Legal      Approval                             │
+│  ✓ Done                                                     │
+│                                                             │
+│  ═══════════════════════════════════════════════════════   │
+│                                                             │
+│  REQUIRED DOCUMENTS                                         │
+│                                                             │
+│  1. Certificate of Incorporation                            │
+│     ┌─────────────────────────────────────────────────┐    │
+│     │  📄 BlueWater_COI.pdf                   [Remove]│    │
+│     └─────────────────────────────────────────────────┘    │
+│                                                             │
+│  2. Master Allocation Agreement                             │
+│     ┌─────────────────────────────────────────────────┐    │
+│     │  ☐ I have read and agree to the terms.          │    │
+│     │                         [View Agreement PDF]    │    │
+│     └─────────────────────────────────────────────────┘    │
+│                                                             │
+│  3. Non-Disclosure Agreement (NDA)                          │
+│     ┌─────────────────────────────────────────────────┐    │
+│     │  ☐ I have read and agree to the NDA terms.      │    │
+│     │                         [View NDA PDF]          │    │
+│     └─────────────────────────────────────────────────┘    │
+│                                                             │
+│  ┌───────────────────┐  ┌───────────────────────────┐      │
+│  │     ← Back        │  │   Submit for Approval →   │      │
+│  └───────────────────┘  └───────────────────────────┘      │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 8.6 Partner: Pending Approval State
+```
+┌─────────────────────────────────────────────────────────────┐
+│  TradeQuip Partner Portal              [partner_bw_7x9b2 ▼] │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │  ⏳ PENDING ADMIN APPROVAL                           │   │
+│  │  Your documents are under review. You will be       │   │
+│  │  notified via email once approved.                   │   │
+│  │                                                      │   │
+│  │  Current Access: Data Room ✅ | Simulations ✅       │   │
+│  │  Awaiting: Allocations 🔒 | Direct Contact 🔒        │   │
+│  └─────────────────────────────────────────────────────┘   │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 8.7 Admin: Partner Management (Scout Tab)
+```
+┌─────────────────────────────────────────────────────────────┐
+│  ADMIN > SCOUT > PARTNERS                                   │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐       │
+│  │ All (12) │ │Pending(3)│ │Active (8)│ │Revoked(1)│       │
+│  └──────────┘ └──────────┘ └──────────┘ └──────────┘       │
+│                                          [+ Invite Partner] │
+│                                                             │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │ Partner          │ Status       │ Step    │ Action  │   │
+│  ├───────────────────────────────────────────────────────  │
+│  │ BlueWater Cap.   │ 🟡 PENDING   │ LEGAL   │ [Review]│   │
+│  │ RedRock Fund     │ 🟢 APPROVED  │ DONE    │ [Manage]│   │
+│  │ AnonCapital      │ 🔴 REVOKED   │ -       │ [View]  │   │
+│  └─────────────────────────────────────────────────────┘   │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 8.8 Admin: Partner Review & Approval Modal
+```
+┌─────────────────────────────────────────────────────────────┐
+│  REVIEW PARTNER: BlueWater Capital LLC                 [X]  │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  PROFILE SUMMARY                                            │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │  Email:    analyst@bluewatercapital.com             │   │
+│  │  AUM:      $10M - $50M                              │   │
+│  │  Mandate:  L/S Equity, Quant, Crypto                │   │
+│  │  HQ:       New York, USA                            │   │
+│  └─────────────────────────────────────────────────────┘   │
+│                                                             │
+│  SUBMITTED DOCUMENTS                                        │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │  📄 Certificate of Inc.    [Download]               │   │
+│  │  ☑️ Allocation Agreement    Signed 2026-02-09       │   │
+│  │  ☑️ NDA                     Signed 2026-02-09       │   │
+│  └─────────────────────────────────────────────────────┘   │
+│                                                             │
+│  ADMIN NOTES                                                │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │ Verified via LinkedIn. Spoke with John (CEO).       │   │
+│  └─────────────────────────────────────────────────────┘   │
+│                                                             │
+│  ┌────────────────┐  ┌────────────────┐  ┌────────────┐   │
+│  │  ❌ Revoke     │  │  ⏸️ Hold       │  │ ✅ Approve │   │
+│  └────────────────┘  └────────────────┘  └────────────┘   │
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 9. Implemented Architecture Mapping (Real Repo)
+**Date (UTC)**: 2026-02-09
+
+### 9.1 Backend Integration Points
+- Partner auth + transport + invite validity:
+  - `server/middleware/requirePartner.ts`
+- Gate enforcement middleware:
+  - `server/middleware/requirePartnerGate.ts`
+- Gate/state evaluation engine:
+  - `server/partner/onboarding.ts`
+- Partner onboarding APIs + gated partner portal APIs:
+  - `server/routes/partnerPortal.ts`
+- Admin invitation, approval, onboarding config, and inquiry routing:
+  - `server/routes/adminScout.ts`
+
+### 9.2 Frontend Integration Points
+- Partner portal onboarding UX and gated tabs:
+  - `client/src/pages/PartnerPortal.tsx`
+- Admin Scout mini-tab enhancements (Partners + Comms routing controls):
+  - `client/src/components/admin/ScoutWorkbench.tsx`
+
+### 9.3 Schema and Migration Integration Points
+- Contract changes:
+  - `shared/schema.pg.ts`
+- Migration:
+  - `db/migrations/0024_partner_onboarding_invite_first.sql`
+- Migration journal:
+  - `db/migrations/meta/_journal.json`
+
+## 10. Security Contract (Transport + E2EE)
+
+### 10.1 Transport Security
+- Production `/api/partner/*` calls require HTTPS (`PARTNER_HTTPS_REQUIRED`) in `server/middleware/requirePartner.ts`.
+- Partner inquiry create also validates secure transport in `server/routes/partnerPortal.ts`.
+
+### 10.2 End-to-End Encryption
+- Partner inquiry submissions require a non-empty `e2eeEnvelope`.
+- Admin recipients must have mailbox public keys before inquiry forwarding.
+- Enforcement path:
+  - `server/routes/partnerPortal.ts`
+  - `server/partner/inquiryRouting.ts`
+  - `server/services/messaging.ts`
+
+### 10.3 Admin Inquiry Mailbox Routing
+- Configurable alias (`inquiries@`), route-admin recipients, and viewer-admin recipients.
+- Routing APIs:
+  - `GET/PUT /api/admin/scout/inquiry-routing`
+- UI wiring:
+  - `client/src/components/admin/ScoutWorkbench.tsx` (Comms panel)
+
+## 11. Verification Status
+- Typecheck/build/db/e2e validation completed successfully against this implementation.
+- E2E coverage includes invite-first onboarding flow and partner inquiry E2EE routing:
+  - `e2e/partner-onboarding.spec.ts`
+  - `e2e/scout-ecosystem.spec.ts`
+
+## 12. Implemented vs Pending (Gap Transparency)
+- Implemented:
+  - Invite-first onboarding backend + partner portal onboarding UI.
+  - Admin approval actions (approve/hold/revoke).
+  - Secure transport checks and E2EE inquiry requirements.
+  - Admin routing control for inquiry recipients and inbox alias.
+- Implemented in final hardening cycle:
+  - Policy-driven password reminder modal in partner portal.
+  - Per-partner gating override editor in Scout > Partners.
+  - `Simulations` tab plus `POST /api/partner/simulations/preview` gate-enforced flow.
+- Pending/partial:
+  - None within this design scope.

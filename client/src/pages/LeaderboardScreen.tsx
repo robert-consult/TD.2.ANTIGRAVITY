@@ -1,6 +1,15 @@
-import { useQuery } from "@tanstack/react-query";
+import { useEffect, useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import axios from "axios";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Trophy, TrendingUp } from "lucide-react";
+import { useAuth } from "@/hooks/use-auth";
+
+const LEADERBOARD_MODES = ["PUBLIC", "TOP_10", "DISABLED"] as const;
 
 type LeaderboardItem = {
   userId: number;
@@ -10,11 +19,133 @@ type LeaderboardItem = {
   totalTrades: number;
 };
 
+type LeaderboardModeResp = {
+  ok: boolean;
+  leaderboardMode: (typeof LEADERBOARD_MODES)[number];
+  traderProProfilesEnabled: boolean;
+  traderCompeteEnabled: boolean;
+  traderCommunityEnabled: boolean;
+};
+
+type TraderProfileRow = {
+  userId: number;
+  bio: string | null;
+  strategy: string | null;
+  pinnedTradeIds: number[];
+  updatedAt: number | null;
+};
+
+type TraderChallengeRow = {
+  id: number;
+  name: string;
+  description: string | null;
+  profit_target_pct: number;
+  max_daily_loss_pct: number;
+  max_total_loss_pct: number | null;
+  min_trading_days: number | null;
+  duration_days: number;
+  enrollment_id: number | null;
+  enrollment_status: string | null;
+  enrolled_at: number | null;
+  completed_at: number | null;
+  current_pnl_pct: number | null;
+  max_daily_loss_hit: number | null;
+  trading_days: number | null;
+};
+
+function formatPct(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(value)) return "-";
+  return `${(value * 100).toFixed(1)}%`;
+}
+
+function formatWhen(utcSec: number | null | undefined): string {
+  if (!utcSec || !Number.isFinite(utcSec)) return "-";
+  return new Date(utcSec * 1000).toLocaleString();
+}
+
 export default function LeaderboardScreen() {
-  const { data: leaderboard = [], isLoading } = useQuery<LeaderboardItem[]>({
-    queryKey: ["/api/leaderboard"],
-    refetchInterval: 30000, // Refresh every 30 seconds
+  const queryClient = useQueryClient();
+  const [subTab, setSubTab] = useState("leaderboard");
+  const { user } = useAuth();
+
+  const { data: config } = useQuery<LeaderboardModeResp>({
+    queryKey: ["/api/trader/leaderboard-mode"],
+    refetchInterval: 30000,
   });
+
+  const leaderboardMode = config?.leaderboardMode ?? "PUBLIC";
+  const proProfilesEnabled = Boolean(config?.traderProProfilesEnabled);
+  const competeEnabled = Boolean(config?.traderCompeteEnabled);
+  const communityEnabled = Boolean(config?.traderCommunityEnabled);
+
+  const { data: leaderboard = [], isLoading: leaderboardLoading } = useQuery<LeaderboardItem[]>({
+    queryKey: ["/api/leaderboard"],
+    refetchInterval: 30000,
+  });
+
+  const profileQuery = useQuery<{ row: TraderProfileRow }>({
+    queryKey: ["/api/trader/profile"],
+    queryFn: () => axios.get("/api/trader/profile").then((r) => r.data),
+    enabled: proProfilesEnabled,
+    refetchOnWindowFocus: false,
+  });
+
+  const challengesQuery = useQuery<{ rows: TraderChallengeRow[] }>({
+    queryKey: ["/api/trader/challenges"],
+    queryFn: () => axios.get("/api/trader/challenges").then((r) => r.data),
+    enabled: competeEnabled,
+    refetchOnWindowFocus: false,
+  });
+
+  const [profileDraft, setProfileDraft] = useState({ bio: "", strategy: "", pinnedTradeIds: "" });
+
+  useEffect(() => {
+    const row = profileQuery.data?.row;
+    if (!row) return;
+    setProfileDraft({
+      bio: row.bio ?? "",
+      strategy: row.strategy ?? "",
+      pinnedTradeIds: (row.pinnedTradeIds ?? []).join(","),
+    });
+  }, [profileQuery.data?.row]);
+
+  const saveProfileMutation = useMutation({
+    mutationFn: () => {
+      const pinnedTradeIds = profileDraft.pinnedTradeIds
+        .split(",")
+        .map((v) => Number(String(v).trim()))
+        .filter((n) => Number.isInteger(n) && n > 0)
+        .slice(0, 50);
+
+      return axios
+        .put("/api/trader/profile", {
+          bio: profileDraft.bio,
+          strategy: profileDraft.strategy,
+          pinnedTradeIds,
+        })
+        .then((r) => r.data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/trader/profile"] });
+    },
+  });
+
+  const enrollMutation = useMutation({
+    mutationFn: (challengeId: number) => axios.post(`/api/trader/challenges/${challengeId}/enroll`).then((r) => r.data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/trader/challenges"] });
+    },
+  });
+
+  const withdrawMutation = useMutation({
+    mutationFn: (challengeId: number) =>
+      axios.post(`/api/trader/challenges/${challengeId}/withdraw`).then((r) => r.data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/trader/challenges"] });
+    },
+  });
+
+  const challengeRows = challengesQuery.data?.rows ?? [];
 
   const getTrophyColor = (rank: number) => {
     switch (rank) {
@@ -29,101 +160,310 @@ export default function LeaderboardScreen() {
     }
   };
 
+  const leaderboardSubtitle = useMemo(() => {
+    if (leaderboardMode === "TOP_10") return "Ranking based on overall profit/loss. Showing top 10 only.";
+    if (leaderboardMode === "DISABLED") return "Leaderboard is currently disabled by admin.";
+    return "Ranking based on overall profit/loss.";
+  }, [leaderboardMode]);
+
+  const myRank = useMemo(() => {
+    if (!user?.id || leaderboardMode === "DISABLED") return null;
+    const index = leaderboard.findIndex((item) => Number(item.userId) === Number(user.id));
+    return index >= 0 ? index + 1 : null;
+  }, [leaderboard, leaderboardMode, user?.id]);
+
   return (
     <div className="h-full flex flex-col bg-neutral-900 overflow-auto">
       <div className="tq-page-header">
-        <h1 className="tq-page-title">Leaderboard</h1>
+        <h1 className="tq-page-title">Talent</h1>
       </div>
 
       <div className="flex-1 page-pad">
-        <div className="bg-neutral-800 rounded-lg p-3 sm:p-card max-w-4xl w-full mx-auto">
-          <div className="mb-3 sm:mb-4">
-            <div className="flex items-center gap-2 text-white text-sm sm:text-base font-semibold">
-              <Trophy className="h-4 w-4 sm:h-5 sm:w-5 text-primary" />
-              <h2 className="leading-none">Top Traders</h2>
-            </div>
-            <p className="mt-1 text-[10px] sm:text-xs md:text-sm text-gray-400">Ranking based on overall profit/loss.</p>
-          </div>
+        <div className="bg-neutral-800 rounded-lg p-3 sm:p-card max-w-5xl w-full mx-auto space-y-3">
+          <Tabs value={subTab} onValueChange={setSubTab} className="space-y-3">
+            <TabsList className="bg-neutral-700 w-full h-auto p-1 grid grid-cols-1 sm:grid-cols-4 gap-1">
+              <TabsTrigger value="leaderboard" className="data-[state=active]:bg-neutral-600 text-xs sm:text-sm px-2 py-1.5">
+                Leaderboard
+              </TabsTrigger>
+              <TabsTrigger
+                value="resume"
+                className="data-[state=active]:bg-neutral-600 text-xs sm:text-sm px-2 py-1.5"
+                disabled={!proProfilesEnabled}
+              >
+                My Resume
+              </TabsTrigger>
+              <TabsTrigger
+                value="compete"
+                className="data-[state=active]:bg-neutral-600 text-xs sm:text-sm px-2 py-1.5"
+                disabled={!competeEnabled}
+              >
+                Compete
+              </TabsTrigger>
+              <TabsTrigger
+                value="community"
+                className="data-[state=active]:bg-neutral-600 text-xs sm:text-sm px-2 py-1.5"
+                disabled={!communityEnabled}
+              >
+                Community
+              </TabsTrigger>
+            </TabsList>
 
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-gray-700">
-                  <th className="text-left py-2 sm:py-3 px-2 sm:px-4 text-[10px] sm:text-xs md:text-sm font-medium text-gray-400">Rank</th>
-                  <th className="text-left py-2 sm:py-3 px-2 sm:px-4 text-[10px] sm:text-xs md:text-sm font-medium text-gray-400">Trader</th>
-                  <th className="text-left py-2 sm:py-3 px-2 sm:px-4 text-[10px] sm:text-xs md:text-sm font-medium text-gray-400"><span className="hidden sm:inline">Profit/</span>P/L</th>
-                  <th className="text-left py-2 sm:py-3 px-2 sm:px-4 text-[10px] sm:text-xs md:text-sm font-medium text-gray-400"><span className="hidden sm:inline">Win </span>Rate</th>
-                </tr>
-              </thead>
-              <tbody>
-                {isLoading && (
-                  <>
-                    {[1, 2, 3, 4, 5].map((i) => (
-                      <tr key={i} className="border-b border-gray-700/50">
-                        <td className="py-3 sm:py-4 px-2 sm:px-4">
-                          <Skeleton className="h-5 w-8" />
-                        </td>
-                        <td className="py-3 sm:py-4 px-2 sm:px-4">
-                          <Skeleton className="h-5 w-32" />
-                        </td>
-                        <td className="py-3 sm:py-4 px-2 sm:px-4">
-                          <Skeleton className="h-5 w-24" />
-                        </td>
-                        <td className="py-3 sm:py-4 px-2 sm:px-4">
-                          <Skeleton className="h-5 w-16" />
+            <TabsContent value="leaderboard" className="space-y-3">
+              <div className="mb-3 sm:mb-4">
+                <div className="flex items-center gap-2 text-white text-sm sm:text-base font-semibold">
+                  <Trophy className="h-4 w-4 sm:h-5 sm:w-5 text-primary" />
+                  <h2 className="leading-none">Top Traders</h2>
+                </div>
+                <p className="mt-1 text-[10px] sm:text-xs md:text-sm text-gray-400">{leaderboardSubtitle}</p>
+                <p className="mt-1 text-[10px] sm:text-xs text-amber-300">
+                  {leaderboardMode === "DISABLED"
+                    ? "My Rank: unavailable while leaderboard is disabled."
+                    : myRank
+                      ? `My Rank: #${myRank}`
+                      : leaderboardMode === "TOP_10"
+                        ? "My Rank: not currently in Top 10."
+                        : "My Rank: not currently ranked."}
+                </p>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b border-gray-700">
+                      <th className="text-left py-2 sm:py-3 px-2 sm:px-4 text-[10px] sm:text-xs md:text-sm font-medium text-gray-400">Rank</th>
+                      <th className="text-left py-2 sm:py-3 px-2 sm:px-4 text-[10px] sm:text-xs md:text-sm font-medium text-gray-400">Trader</th>
+                      <th className="text-left py-2 sm:py-3 px-2 sm:px-4 text-[10px] sm:text-xs md:text-sm font-medium text-gray-400"><span className="hidden sm:inline">Profit/</span>P/L</th>
+                      <th className="text-left py-2 sm:py-3 px-2 sm:px-4 text-[10px] sm:text-xs md:text-sm font-medium text-gray-400"><span className="hidden sm:inline">Win </span>Rate</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {leaderboardLoading && (
+                      <>
+                        {[1, 2, 3, 4, 5].map((i) => (
+                          <tr key={i} className="border-b border-gray-700/50">
+                            <td className="py-3 sm:py-4 px-2 sm:px-4">
+                              <Skeleton className="h-5 w-8" />
+                            </td>
+                            <td className="py-3 sm:py-4 px-2 sm:px-4">
+                              <Skeleton className="h-5 w-32" />
+                            </td>
+                            <td className="py-3 sm:py-4 px-2 sm:px-4">
+                              <Skeleton className="h-5 w-24" />
+                            </td>
+                            <td className="py-3 sm:py-4 px-2 sm:px-4">
+                              <Skeleton className="h-5 w-16" />
+                            </td>
+                          </tr>
+                        ))}
+                      </>
+                    )}
+
+                    {!leaderboardLoading && leaderboardMode !== "DISABLED" && leaderboard.map((leader, index) => {
+                      const rank = index + 1;
+                      const showTrophy = rank <= 3;
+
+                      return (
+                        <tr
+                          key={leader.userId}
+                          className="border-b border-gray-700/50 hover:bg-neutral-700/30 transition-colors"
+                        >
+                          <td className="py-3 sm:py-4 px-2 sm:px-4">
+                            <div className="flex items-center gap-1 sm:gap-2">
+                              {showTrophy && (
+                                <Trophy className={`h-4 w-4 sm:h-5 sm:w-5 ${getTrophyColor(rank)}`} />
+                              )}
+                              <span className="text-white font-medium text-xs sm:text-sm">{rank}</span>
+                            </div>
+                          </td>
+                          <td className="py-3 sm:py-4 px-2 sm:px-4">
+                            <span className="text-white text-xs sm:text-sm truncate max-w-[80px] sm:max-w-none block">{leader.username}</span>
+                          </td>
+                          <td className="py-3 sm:py-4 px-2 sm:px-4">
+                            <div className="flex items-center gap-1">
+                              <TrendingUp
+                                className={`h-3 w-3 sm:h-4 sm:w-4 ${leader.profit >= 0 ? "text-green-500" : "text-red-500"}`}
+                              />
+                              <span className={`font-medium text-xs sm:text-sm ${leader.profit >= 0 ? "text-green-500" : "text-red-500"}`}>
+                                ${Math.abs(leader.profit).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                              </span>
+                            </div>
+                          </td>
+                          <td className="py-3 sm:py-4 px-2 sm:px-4">
+                            <span className="text-gray-300 text-xs sm:text-sm">{leader.winRate.toFixed(0)}%</span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+
+                    {!leaderboardLoading && leaderboardMode !== "DISABLED" && leaderboard.length === 0 && (
+                      <tr>
+                        <td colSpan={4} className="py-8 text-center text-gray-400">
+                          No traders on the leaderboard yet
                         </td>
                       </tr>
-                    ))}
-                  </>
-                )}
+                    )}
 
-                {!isLoading && leaderboard.map((leader, index) => {
-                  const rank = index + 1;
-                  const showTrophy = rank <= 3;
+                    {!leaderboardLoading && leaderboardMode === "DISABLED" && (
+                      <tr>
+                        <td colSpan={4} className="py-8 text-center text-gray-400">
+                          Leaderboard is disabled
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </TabsContent>
 
-                  return (
-                    <tr
-                      key={leader.userId}
-                      className="border-b border-gray-700/50 hover:bg-neutral-700/30 transition-colors"
-                    >
-                      <td className="py-3 sm:py-4 px-2 sm:px-4">
-                        <div className="flex items-center gap-1 sm:gap-2">
-                          {showTrophy && (
-                            <Trophy className={`h-4 w-4 sm:h-5 sm:w-5 ${getTrophyColor(rank)}`} />
-                          )}
-                          <span className="text-white font-medium text-xs sm:text-sm">{rank}</span>
-                        </div>
-                      </td>
-                      <td className="py-3 sm:py-4 px-2 sm:px-4">
-                        <span className="text-white text-xs sm:text-sm truncate max-w-[80px] sm:max-w-none block">{leader.username}</span>
-                      </td>
-                      <td className="py-3 sm:py-4 px-2 sm:px-4">
-                        <div className="flex items-center gap-1">
-                          <TrendingUp
-                            className={`h-3 w-3 sm:h-4 sm:w-4 ${leader.profit >= 0 ? 'text-green-500' : 'text-red-500'}`}
-                          />
-                          <span className={`font-medium text-xs sm:text-sm ${leader.profit >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                            ${Math.abs(leader.profit).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+            <TabsContent value="resume" className="space-y-3">
+              {!proProfilesEnabled ? (
+                <div className="text-sm text-gray-400">Pro profile is disabled by admin.</div>
+              ) : (
+                <div className="space-y-3">
+                  <div>
+                    <div className="text-xs text-gray-400 mb-1">Bio</div>
+                    <Textarea
+                      value={profileDraft.bio}
+                      onChange={(e) => setProfileDraft((prev) => ({ ...prev, bio: e.target.value }))}
+                      className="bg-neutral-700 border-neutral-600 min-h-[110px]"
+                      placeholder="Summary of your trading background"
+                    />
+                  </div>
+                  <div>
+                    <div className="text-xs text-gray-400 mb-1">Strategy</div>
+                    <Textarea
+                      value={profileDraft.strategy}
+                      onChange={(e) => setProfileDraft((prev) => ({ ...prev, strategy: e.target.value }))}
+                      className="bg-neutral-700 border-neutral-600 min-h-[110px]"
+                      placeholder="Core strategy, risk approach, and market focus"
+                    />
+                  </div>
+                  <div>
+                    <div className="text-xs text-gray-400 mb-1">Pinned Trade IDs (comma-separated)</div>
+                    <Input
+                      value={profileDraft.pinnedTradeIds}
+                      onChange={(e) => setProfileDraft((prev) => ({ ...prev, pinnedTradeIds: e.target.value }))}
+                      className="bg-neutral-700 border-neutral-600"
+                      placeholder="123,456,789"
+                    />
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <div className="text-xs text-gray-500">
+                      Last updated: {formatWhen(profileQuery.data?.row?.updatedAt ?? null)}
+                    </div>
+                    <Button onClick={() => saveProfileMutation.mutate()} disabled={saveProfileMutation.isPending}>
+                      {saveProfileMutation.isPending ? "Saving..." : "Save Resume"}
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </TabsContent>
+
+            <TabsContent value="compete" className="space-y-3">
+              {!competeEnabled ? (
+                <div className="text-sm text-gray-400">Challenges are disabled by admin.</div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-neutral-700 text-gray-300">
+                        <th className="py-2 text-left">Challenge</th>
+                        <th className="py-2 text-right">Target</th>
+                        <th className="py-2 text-right">Max Daily Loss</th>
+                        <th className="py-2 text-right">Duration</th>
+                        <th className="py-2 text-right">Status</th>
+                        <th className="py-2 text-right">Progress</th>
+                        <th className="py-2 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {challengeRows.map((row) => {
+                        const isActive = String(row.enrollment_status || "") === "ACTIVE";
+                        return (
+                          <tr key={row.id} className="border-b border-neutral-800/80">
+                            <td className="py-2">
+                              <div className="text-white font-medium">{row.name}</div>
+                              <div className="text-xs text-gray-400">{row.description || "-"}</div>
+                            </td>
+                            <td className="py-2 text-right">{formatPct(row.profit_target_pct)}</td>
+                            <td className="py-2 text-right">{formatPct(row.max_daily_loss_pct)}</td>
+                            <td className="py-2 text-right">{row.duration_days}d</td>
+                            <td className="py-2 text-right">{row.enrollment_status || "NOT_ENROLLED"}</td>
+                            <td className="py-2 text-right">
+                              <div className="text-xs">PnL: {formatPct(row.current_pnl_pct)}</div>
+                              <div className="text-xs text-gray-400">Days: {row.trading_days ?? 0}</div>
+                            </td>
+                            <td className="py-2 text-right whitespace-nowrap">
+                              {isActive ? (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="border-neutral-600"
+                                  disabled={withdrawMutation.isPending}
+                                  onClick={() => withdrawMutation.mutate(row.id)}
+                                >
+                                  Withdraw
+                                </Button>
+                              ) : (
+                                <Button
+                                  size="sm"
+                                  disabled={enrollMutation.isPending}
+                                  onClick={() => enrollMutation.mutate(row.id)}
+                                >
+                                  Enroll
+                                </Button>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                      {!challengesQuery.isLoading && challengeRows.length === 0 && (
+                        <tr>
+                          <td colSpan={7} className="py-8 text-center text-gray-400">
+                            No active challenges
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </TabsContent>
+
+            <TabsContent value="community" className="space-y-3">
+              {!communityEnabled ? (
+                <div className="text-sm text-gray-400">Community mode is disabled by admin.</div>
+              ) : (
+                <div className="space-y-3">
+                  <div className="rounded border border-neutral-700 p-3">
+                    <div className="text-xs text-gray-400 mb-1">Daily Briefing</div>
+                    <div className="text-sm text-gray-200">
+                      Top momentum is concentrated in current leaderboard leaders. Review your risk plan before
+                      replicating high-volatility sessions.
+                    </div>
+                  </div>
+                  <div className="rounded border border-neutral-700 p-3">
+                    <div className="text-xs text-gray-400 mb-2">Spectator Board (Top 5)</div>
+                    <div className="space-y-1 text-sm">
+                      {(leaderboard || []).slice(0, 5).map((row, idx) => (
+                        <div key={row.userId} className="flex items-center justify-between">
+                          <span>
+                            #{idx + 1} {row.username}
+                          </span>
+                          <span className={row.profit >= 0 ? "text-emerald-400" : "text-red-400"}>
+                            {row.profit >= 0 ? "+" : "-"}${Math.abs(row.profit).toLocaleString("en-US")}
                           </span>
                         </div>
-                      </td>
-                      <td className="py-3 sm:py-4 px-2 sm:px-4">
-                        <span className="text-gray-300 text-xs sm:text-sm">{leader.winRate.toFixed(0)}%</span>
-                      </td>
-                    </tr>
-                  );
-                })}
-
-                {!isLoading && leaderboard.length === 0 && (
-                  <tr>
-                    <td colSpan={4} className="py-8 text-center text-gray-400">
-                      No traders on the leaderboard yet
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+                      ))}
+                      {!leaderboardLoading && leaderboard.length === 0 && (
+                        <div className="text-gray-400">No active spectator streams right now.</div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </TabsContent>
+          </Tabs>
         </div>
       </div>
     </div>

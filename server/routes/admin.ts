@@ -2678,6 +2678,7 @@ FROM (
           signupWaitlistPolicyContent:
             "WAITLIST COMMUNICATIONS & PRIVACY NOTICE\n\nBy requesting an invite, you consent to receive an email when signup slots reopen.\n\nWhat we collect:\n- Your name and email address\n- Basic client metadata (IP address and user agent)\n\nHow we use it:\n- To notify you when signup slots open\n- We do not sell your data\n\nRetention:\n- We retain waitlist records until you are invited or you opt out\n\nOpt-out:\n- You can opt out by replying to an invite email or contacting support.",
           allowUserTimezoneEdit: true,
+          scoutTabEnabled: true,
           migrationChunkingEnabled: false,
           migrationChunkSizeMb: 51200,
           updatedAt: null,
@@ -2710,6 +2711,7 @@ FROM (
         signupWaitlistPolicyVersion: String((config as any).signupWaitlistPolicyVersion ?? "1"),
         signupWaitlistPolicyContent: String((config as any).signupWaitlistPolicyContent ?? ""),
         allowUserTimezoneEdit: Boolean((config as any).allowUserTimezoneEdit ?? true),
+        scoutTabEnabled: Boolean((config as any).scoutTabEnabled ?? true),
         fxRolloverTz: (config as any).fxRolloverTz || "America/New_York",
         fxRolloverTime: (config as any).fxRolloverTime || "17:00",
         migrationChunkingEnabled: Boolean((config as any).migrationChunkingEnabled ?? false),
@@ -2780,6 +2782,7 @@ FROM (
         jurisdictionBlockLogin:
           body.jurisdictionBlockLogin !== undefined ? Boolean(body.jurisdictionBlockLogin) : undefined,
         allowUserTimezoneEdit: body.allowUserTimezoneEdit,
+        scoutTabEnabled: body.scoutTabEnabled !== undefined ? Boolean(body.scoutTabEnabled) : undefined,
         // Signup freeze + waitlist
         signupFreeze: body.signupFreeze !== undefined ? Boolean(body.signupFreeze) : undefined,
         signupFreezeMessage: typeof body.signupFreezeMessage === "string" ? body.signupFreezeMessage : undefined,
@@ -2855,6 +2858,7 @@ FROM (
             jurisdictionBlockLogin:
               (next as any).jurisdictionBlockLogin ?? (existing as any).jurisdictionBlockLogin ?? true,
             allowUserTimezoneEdit: next.allowUserTimezoneEdit ?? (existing as any).allowUserTimezoneEdit ?? true,
+            scoutTabEnabled: (next as any).scoutTabEnabled ?? (existing as any).scoutTabEnabled ?? true,
             signupFreeze: (next as any).signupFreeze ?? (existing as any).signupFreeze ?? false,
             signupFreezeMessage: (next as any).signupFreezeMessage ?? (existing as any).signupFreezeMessage ?? "",
             signupWaitlistEnabled: (next as any).signupWaitlistEnabled ?? (existing as any).signupWaitlistEnabled ?? true,
@@ -2904,6 +2908,7 @@ FROM (
           jurisdictionBlockSignup: (next as any).jurisdictionBlockSignup ?? true,
           jurisdictionBlockLogin: (next as any).jurisdictionBlockLogin ?? true,
           allowUserTimezoneEdit: next.allowUserTimezoneEdit ?? true,
+          scoutTabEnabled: (next as any).scoutTabEnabled ?? true,
           signupFreeze: (next as any).signupFreeze ?? false,
           signupFreezeMessage: (next as any).signupFreezeMessage ?? "Signups are temporarily paused due to capacity. Existing users can still log in.",
           signupWaitlistEnabled: (next as any).signupWaitlistEnabled ?? true,

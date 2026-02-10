@@ -4,16 +4,28 @@ const ALGORITHM = "aes-256-gcm";
 const IV_LENGTH = 16;
 const TAG_LENGTH = 16;
 
+function parseEncryptionKeyHex(value: unknown): Buffer | null {
+  const raw = String(value ?? "").trim();
+  if (!raw) return null;
+  if (!/^[a-fA-F0-9]{64}$/.test(raw)) return null;
+  const buf = Buffer.from(raw, "hex");
+  if (buf.length !== 32) return null;
+  return buf;
+}
+
 function getEncryptionKey(): Buffer {
-  const keyEnv = process.env.ENCRYPTION_KEY;
-  if (keyEnv) {
-    const buf = Buffer.from(keyEnv, "hex");
-    if (buf.length === 32) return buf;
-  }
+  const parsed = parseEncryptionKeyHex(process.env.ENCRYPTION_KEY);
+  if (parsed) return parsed;
+
   if (process.env.NODE_ENV === "production") {
-    throw new Error("ENCRYPTION_KEY environment variable is required in production");
+    throw new Error("ENCRYPTION_KEY must be configured as exactly 64 hex characters in production");
   }
-  console.warn("[CRYPTO] Using development encryption key - NOT for production!");
+
+  if (process.env.ENCRYPTION_KEY) {
+    console.warn("[CRYPTO] ENCRYPTION_KEY is invalid. Falling back to development key.");
+  } else {
+    console.warn("[CRYPTO] Using development encryption key - NOT for production!");
+  }
   return crypto.scryptSync("dev-only-key-tradequip-" + (process.env.REPL_SLUG || "local"), "salt-dev", 32);
 }
 

@@ -22,6 +22,7 @@ import { onLiveEvent, publishLiveEvent } from "../services/liveBus";
 import { applyUserBalanceDelta, releaseUserMargin } from "../services/tradeAtomic";
 import { createNotification } from "../services/messaging";
 import { computeCloseSettlementCosts } from "../services/tradeCosts";
+import { clearTradeExcursion, resolveTradeExcursionForClose } from "../trades/excursionTracking";
 
 const STALE_DEFER_MAX_MIN = Number(process.env.AUTOCLOSE_STALE_DEFER_MAX_MIN ?? 60);
 const ALLOW_STALE_CLOSE = String(process.env.AUTOCLOSE_ALLOW_STALE_CLOSE ?? "true") === "true";
@@ -119,6 +120,14 @@ async function runAutoCloseJob() {
         const netProfitUsd = grossProfitUsd - closeCostSummary.totalCostsUsd;
         const closeSettlementUsd = grossProfitUsd - closeCostSummary.closingChargesUsd;
         const profit = netProfitUsd.toFixed(2);
+        const excursion = resolveTradeExcursionForClose({
+          tradeId: trade.id,
+          side: trade.type as "BUY" | "SELL",
+          openPrice,
+          closePrice,
+          intradayHigh: (trade as any).intradayHigh,
+          intradayLow: (trade as any).intradayLow,
+        });
 
         const closeReasonCode: CloseReasonCode = "MAX_HOLD_TIME";
         
@@ -154,6 +163,10 @@ async function runAutoCloseJob() {
               profit,
               grossProfitUsd,
               netProfitUsd,
+              intradayHigh: excursion.intradayHigh,
+              intradayLow: excursion.intradayLow,
+              mae: excursion.mae,
+              mfe: excursion.mfe,
               notionalUsd: closeCostSummary.notionalUsd,
               totalCostsUsd: closeCostSummary.totalCostsUsd,
               closeCommissionUsd: closeCostSummary.closeCommissionUsd,
@@ -249,6 +262,8 @@ async function runAutoCloseJob() {
         });
 
         if (!closeResult) continue;
+
+        clearTradeExcursion(trade.id);
 
         await recalcAccount(trade.userId, { emit: true, reason: "AUTO_CLOSE" });
 

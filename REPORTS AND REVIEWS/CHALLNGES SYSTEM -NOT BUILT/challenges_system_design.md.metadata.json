@@ -1,0 +1,5 @@
+{
+  "artifactType": "ARTIFACT_TYPE_OTHER",
+  "summary": "Comprehensive design and functionality specification for enhancing the TradeQuip Challenges system. Covers the current system gap analysis, multi-phase challenge architecture (Phase 1 Evaluation, Phase 2 Verification, Funded status), admin dashboard redesign with sub-tabs and cards, full schema proposals, API designs, trader-side engagement features, capital base isolation, scaling plans, challenge leaderboards, analytics dashboards, notification systems, and all integration points. Inspired by industry leaders like FTMO, City Traders Imperium, and others.",
+  "updatedAt": "2026-02-09T23:17:35.730363Z"
+}

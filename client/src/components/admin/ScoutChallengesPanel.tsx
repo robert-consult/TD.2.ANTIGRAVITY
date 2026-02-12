@@ -1,6 +1,16 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import axios from "axios";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -12,6 +22,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 
 type AnyRow = Record<string, any>;
+type InlineTemplateDraft = { profitTargetPct: string; maxDailyLossPct: string; durationDays: string };
 
 const EMPTY_DRAFT = {
   name: "",
@@ -176,6 +187,7 @@ const NOTIFY_TOGGLES = [
   "challengeNotifyViaMailbox",
 ];
 const ELIGIBILITY_GATE_MODES = new Set(["NONE", "EMAIL_VERIFIED", "CONTENDER", "ADMIN_APPROVED"]);
+const HOVER_HINT_SELECTOR = "input,select,textarea,button,[role='switch']";
 
 function toNum(value: unknown, fallback = 0): number {
   const n = Number(value);
@@ -217,6 +229,107 @@ function formatPct(value: unknown): string {
   const n = Number(value);
   if (!Number.isFinite(n)) return "-";
   return `${(n * 100).toFixed(1)}%`;
+}
+
+function normalizeHintText(value: unknown): string {
+  return String(value ?? "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isArchivedTemplateRow(row: AnyRow): boolean {
+  const isActive = Boolean(row.isActive ?? row.is_active);
+  const visibleToTraders = Boolean(row.visibleToTraders ?? row.visible_to_traders);
+  return !isActive && !visibleToTraders;
+}
+
+function buildInlineTemplateDraft(row: AnyRow): InlineTemplateDraft {
+  return {
+    profitTargetPct: String(toNum(row.profit_target_pct ?? row.profitTargetPct, 0.1)),
+    maxDailyLossPct: String(toNum(row.max_daily_loss_pct ?? row.maxDailyLossPct, 0.03)),
+    durationDays: String(Math.max(1, toInt(row.duration_days ?? row.durationDays, 30))),
+  };
+}
+
+function isInlineTemplateDraftEqual(left: InlineTemplateDraft, right: InlineTemplateDraft): boolean {
+  return (
+    left.profitTargetPct === right.profitTargetPct &&
+    left.maxDailyLossPct === right.maxDailyLossPct &&
+    left.durationDays === right.durationDays
+  );
+}
+
+function toChallengeListRowPatch(row: AnyRow): AnyRow {
+  const profitTargetPct = row.profitTargetPct ?? row.profit_target_pct;
+  const maxDailyLossPct = row.maxDailyLossPct ?? row.max_daily_loss_pct;
+  const durationDays = row.durationDays ?? row.duration_days;
+  const isActive = Boolean(row.isActive ?? row.is_active);
+  const visibleToTraders = Boolean(row.visibleToTraders ?? row.visible_to_traders);
+  return {
+    ...row,
+    profitTargetPct,
+    profit_target_pct: profitTargetPct,
+    maxDailyLossPct,
+    max_daily_loss_pct: maxDailyLossPct,
+    durationDays,
+    duration_days: durationDays,
+    isActive,
+    is_active: isActive,
+    visibleToTraders,
+    visible_to_traders: visibleToTraders,
+    updatedAt: row.updatedAt ?? row.updated_at,
+    updated_at: row.updatedAt ?? row.updated_at,
+  };
+}
+
+function inferHoverHint(control: HTMLElement): string {
+  const explicit = normalizeHintText(control.getAttribute("data-hint"));
+  if (explicit) return explicit;
+
+  const ariaLabel = normalizeHintText(control.getAttribute("aria-label"));
+  if (ariaLabel) return ariaLabel;
+
+  if (control instanceof HTMLInputElement || control instanceof HTMLTextAreaElement) {
+    const placeholder = normalizeHintText(control.getAttribute("placeholder"));
+    if (placeholder) return placeholder;
+  }
+
+  const parentLabel = control.closest("label");
+  if (parentLabel) {
+    const labelText = normalizeHintText(parentLabel.textContent);
+    if (labelText) return labelText;
+  }
+
+  if (control instanceof HTMLSelectElement) {
+    const currentOption = normalizeHintText(control.selectedOptions?.[0]?.textContent);
+    if (currentOption) return `Select value (${currentOption})`;
+    return "Select value";
+  }
+
+  if (control instanceof HTMLButtonElement) {
+    const buttonText = normalizeHintText(control.textContent);
+    if (buttonText) return buttonText;
+  }
+
+  const groupedLabel = control.parentElement?.querySelector<HTMLElement>(":scope > .text-xs, :scope > .text-sm, :scope > span");
+  const groupedLabelText = normalizeHintText(groupedLabel?.textContent);
+  if (groupedLabelText) return groupedLabelText;
+
+  return "";
+}
+
+function applyHoverHints(root: HTMLElement): void {
+  const controls = root.querySelectorAll<HTMLElement>(HOVER_HINT_SELECTOR);
+  controls.forEach((control) => {
+    if (control.getAttribute("data-skip-auto-hint") === "true") return;
+    if (normalizeHintText(control.getAttribute("title"))) return;
+    const hint = inferHoverHint(control);
+    if (!hint) return;
+    control.setAttribute("title", hint);
+    if (!control.getAttribute("aria-label")) {
+      control.setAttribute("aria-label", hint);
+    }
+  });
 }
 
 function formatUsd(value: unknown): string {
@@ -326,6 +439,10 @@ export default function ScoutChallengesPanel() {
   const [draft, setDraft] = useState({ ...EMPTY_DRAFT });
   const [editingId, setEditingId] = useState<number | null>(null);
   const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<AnyRow | null>(null);
+  const [inlineDraftById, setInlineDraftById] = useState<Record<number, InlineTemplateDraft>>({});
+  const [lastArchivedId, setLastArchivedId] = useState<number | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
 
   const [enrollFilters, setEnrollFilters] = useState({ challengeId: "", status: "", phase: "", userId: "", fromDate: "" });
   const [selectedEnrollmentId, setSelectedEnrollmentId] = useState<number | null>(null);
@@ -483,6 +600,16 @@ export default function ScoutChallengesPanel() {
     if (Number(first) > 0) setSelectedEnrollmentId(Number(first));
   }, [selectedEnrollmentId, enrollmentsQuery.data?.rows]);
 
+  useEffect(() => {
+    const root = panelRef.current;
+    if (!root) return;
+    const syncHints = () => applyHoverHints(root);
+    syncHints();
+    const observer = new MutationObserver(() => syncHints());
+    observer.observe(root, { childList: true, subtree: true });
+    return () => observer.disconnect();
+  }, []);
+
   const createTemplateMutation = useMutation({
     mutationFn: (payload: AnyRow) => axios.post("/api/admin/challenges", payload).then((r) => r.data),
     onSuccess: () => {
@@ -496,7 +623,23 @@ export default function ScoutChallengesPanel() {
 
   const updateTemplateMutation = useMutation({
     mutationFn: (payload: { id: number; patch: AnyRow }) => axios.put(`/api/admin/challenges/${payload.id}`, payload.patch).then((r) => r.data),
-    onSuccess: (_data, vars) => {
+    onSuccess: (data, vars) => {
+      const updatedRow = data?.row ? toChallengeListRowPatch(data.row) : null;
+      if (updatedRow) {
+        queryClient.setQueryData(["/api/admin/challenges"], (prev: any) => {
+          if (!prev || !Array.isArray(prev.rows)) return prev;
+          return {
+            ...prev,
+            rows: prev.rows.map((row: AnyRow) =>
+              Number(row.id) === Number(vars.id) ? { ...row, ...updatedRow } : row,
+            ),
+          };
+        });
+        queryClient.setQueryData(["/api/admin/challenges/detail", vars.id], (prev: any) => {
+          if (!prev || typeof prev !== "object") return prev;
+          return { ...prev, row: { ...(prev.row ?? {}), ...updatedRow, ...data.row } };
+        });
+      }
       queryClient.invalidateQueries({ queryKey: ["/api/admin/challenges"] });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/challenges/detail", vars.id] });
       toast({ title: "Challenge template updated" });
@@ -513,15 +656,32 @@ export default function ScoutChallengesPanel() {
 
   const archiveTemplateMutation = useMutation({
     mutationFn: (id: number) => axios.put(`/api/admin/challenges/${id}/archive`).then((r) => r.data),
-    onSuccess: () => {
+    onSuccess: (_data, id) => {
+      setLastArchivedId(id);
+      setSubTab("archive");
+      setExpandedId((prev) => (prev === id ? null : prev));
+      setEditingId((prev) => (prev === id ? null : prev));
+      setInlineDraftById((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/challenges"] });
-      toast({ title: "Challenge archived" });
+      toast({ title: "Challenge archived and moved to Archive tab" });
     },
   });
 
   const deleteTemplateMutation = useMutation({
     mutationFn: (id: number) => axios.delete(`/api/admin/challenges/${id}`).then((r) => r.data),
-    onSuccess: () => {
+    onSuccess: (_data, id) => {
+      setDeleteTarget(null);
+      setExpandedId((prev) => (prev === id ? null : prev));
+      setEditingId((prev) => (prev === id ? null : prev));
+      setInlineDraftById((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/challenges"] });
       toast({ title: "Challenge deleted" });
     },
@@ -646,8 +806,28 @@ export default function ScoutChallengesPanel() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["/api/admin/challenges/progression-tiers"] }),
   });
 
-  const templates = templatesQuery.data?.rows ?? [];
-  const challengeMap = useMemo(() => new Map(templates.map((row) => [Number(row.id), row])), [templates]);
+  const challengeRows = useMemo(() => (templatesQuery.data?.rows ?? []) as AnyRow[], [templatesQuery.data?.rows]);
+  const templates = useMemo(() => challengeRows.filter((row) => !isArchivedTemplateRow(row)), [challengeRows]);
+  const archivedTemplates = useMemo(() => challengeRows.filter((row) => isArchivedTemplateRow(row)), [challengeRows]);
+  const challengeMap = useMemo(() => new Map(challengeRows.map((row) => [Number(row.id), row])), [challengeRows]);
+
+  useEffect(() => {
+    const validIds = new Set(challengeRows.map((row) => Number(row.id)));
+    setInlineDraftById((prev) => {
+      let changed = false;
+      const next: Record<number, InlineTemplateDraft> = {};
+      for (const [rawId, draftRow] of Object.entries(prev)) {
+        const id = Number(rawId);
+        if (validIds.has(id)) {
+          next[id] = draftRow;
+        } else {
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [challengeRows]);
+
   const rows = (enrollmentsQuery.data?.rows ?? []) as AnyRow[];
   const fromUtc = enrollFilters.fromDate ? Math.floor(Date.parse(`${enrollFilters.fromDate}T00:00:00Z`) / 1000) : 0;
   const enrollmentRows = fromUtc > 0 ? rows.filter((row) => toInt(row.enrolled_at, 0) >= fromUtc) : rows;
@@ -722,6 +902,54 @@ export default function ScoutChallengesPanel() {
     }
   };
 
+  const setInlineField = (row: AnyRow, field: keyof InlineTemplateDraft, value: string) => {
+    const id = Number(row.id);
+    if (!Number.isInteger(id) || id <= 0) return;
+    const baseline = buildInlineTemplateDraft(row);
+    setInlineDraftById((prev) => {
+      const nextDraft = { ...(prev[id] ?? baseline), [field]: value };
+      if (isInlineTemplateDraftEqual(nextDraft, baseline)) {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      }
+      return { ...prev, [id]: nextDraft };
+    });
+  };
+
+  const resetInlineDraft = (id: number) => {
+    setInlineDraftById((prev) => {
+      if (!prev[id]) return prev;
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+  };
+
+  const saveInlineDraft = async (row: AnyRow) => {
+    const id = Number(row.id);
+    if (!Number.isInteger(id) || id <= 0) return;
+    const baseline = buildInlineTemplateDraft(row);
+    const input = inlineDraftById[id] ?? baseline;
+    const patch = {
+      profitTargetPct: Math.max(0, Math.min(10, toNum(input.profitTargetPct, toNum(baseline.profitTargetPct, 0.1)))),
+      maxDailyLossPct: Math.max(0, Math.min(10, toNum(input.maxDailyLossPct, toNum(baseline.maxDailyLossPct, 0.03)))),
+      durationDays: Math.max(1, Math.min(365, toInt(input.durationDays, toInt(baseline.durationDays, 30)))),
+    };
+
+    await updateTemplateMutation.mutateAsync({ id, patch });
+    resetInlineDraft(id);
+
+    if (editingId === id) {
+      setDraft((prev) => ({
+        ...prev,
+        profitTargetPct: patch.profitTargetPct,
+        maxDailyLossPct: patch.maxDailyLossPct,
+        durationDays: patch.durationDays,
+      }));
+    }
+  };
+
   const currentPhase = toInt(selectedEnrollment?.currentPhase ?? selectedEnrollment?.current_phase, 1);
   const phase = selectedPhases.find((item) => toInt(item.phaseNumber, 0) === currentPhase);
   const pnlTarget = toNum(phase?.profitTargetPct ?? selectedChallenge?.profitTargetPct, 0.1);
@@ -733,12 +961,13 @@ export default function ScoutChallengesPanel() {
       <CardHeader>
         <CardTitle className="text-base">Challenges System</CardTitle>
       </CardHeader>
-      <CardContent className="space-y-3">
+      <CardContent className="space-y-3" ref={panelRef}>
         <Tabs value={subTab} onValueChange={setSubTab} className="space-y-3">
-          <TabsList className="bg-neutral-700 w-full h-auto p-1 grid grid-cols-2 md:grid-cols-4 gap-1">
+          <TabsList className="bg-neutral-700 w-full h-auto p-1 grid grid-cols-2 md:grid-cols-5 gap-1">
             <TabsTrigger value="templates" className="data-[state=active]:bg-neutral-600 text-xs">Templates</TabsTrigger>
             <TabsTrigger value="enrollments" className="data-[state=active]:bg-neutral-600 text-xs">Enrollments</TabsTrigger>
             <TabsTrigger value="analytics" className="data-[state=active]:bg-neutral-600 text-xs">Analytics</TabsTrigger>
+            <TabsTrigger value="archive" className="data-[state=active]:bg-neutral-600 text-xs">Archive</TabsTrigger>
             <TabsTrigger value="settings" className="data-[state=active]:bg-neutral-600 text-xs">Settings</TabsTrigger>
           </TabsList>
 
@@ -792,6 +1021,7 @@ export default function ScoutChallengesPanel() {
                     onChange={(e) =>
                       setDraft((p) => ({ ...p, capitalMode: e.target.value === "SNAPSHOT_EQUITY" ? "SNAPSHOT_EQUITY" : "VIRTUAL" }))
                     }
+                    data-hint="Capital mode"
                     className="h-10 rounded-md border border-neutral-600 bg-neutral-700 px-3 text-sm"
                   >
                     <option value="VIRTUAL">VIRTUAL</option>
@@ -803,6 +1033,7 @@ export default function ScoutChallengesPanel() {
                     value={draft.leverageMultiplier}
                     onChange={(e) => setDraft((p) => ({ ...p, leverageMultiplier: Math.max(0.1, toNum(e.target.value, p.leverageMultiplier)) }))}
                     className="bg-neutral-700 border-neutral-600"
+                    placeholder="Leverage multiplier"
                   />
                 </div>
                 <Textarea
@@ -812,12 +1043,12 @@ export default function ScoutChallengesPanel() {
                   className="bg-neutral-700 border-neutral-600 min-h-[70px]"
                 />
                 <div className="grid grid-cols-1 md:grid-cols-6 gap-2">
-                  <Input type="number" step="0.01" value={draft.profitTargetPct} onChange={(e) => setDraft((p) => ({ ...p, profitTargetPct: toNum(e.target.value, p.profitTargetPct) }))} className="bg-neutral-700 border-neutral-600" />
-                  <Input type="number" step="0.01" value={draft.maxDailyLossPct} onChange={(e) => setDraft((p) => ({ ...p, maxDailyLossPct: toNum(e.target.value, p.maxDailyLossPct) }))} className="bg-neutral-700 border-neutral-600" />
-                  <Input type="number" step="0.01" value={draft.maxTotalLossPct ?? ""} onChange={(e) => setDraft((p) => ({ ...p, maxTotalLossPct: toOptNum(e.target.value) }))} className="bg-neutral-700 border-neutral-600" />
-                  <Input type="number" value={draft.durationDays} onChange={(e) => setDraft((p) => ({ ...p, durationDays: Math.max(1, toInt(e.target.value, p.durationDays)) }))} className="bg-neutral-700 border-neutral-600" />
-                  <Input type="number" value={draft.virtualCapitalUsd} onChange={(e) => setDraft((p) => ({ ...p, virtualCapitalUsd: Math.max(1, toNum(e.target.value, p.virtualCapitalUsd)) }))} className="bg-neutral-700 border-neutral-600" />
-                  <Input type="number" value={draft.featuredOrder} onChange={(e) => setDraft((p) => ({ ...p, featuredOrder: Math.max(0, toInt(e.target.value, p.featuredOrder)) }))} className="bg-neutral-700 border-neutral-600" />
+                  <Input type="number" step="0.01" value={draft.profitTargetPct} onChange={(e) => setDraft((p) => ({ ...p, profitTargetPct: toNum(e.target.value, p.profitTargetPct) }))} className="bg-neutral-700 border-neutral-600" placeholder="Profit target %" />
+                  <Input type="number" step="0.01" value={draft.maxDailyLossPct} onChange={(e) => setDraft((p) => ({ ...p, maxDailyLossPct: toNum(e.target.value, p.maxDailyLossPct) }))} className="bg-neutral-700 border-neutral-600" placeholder="Max daily loss %" />
+                  <Input type="number" step="0.01" value={draft.maxTotalLossPct ?? ""} onChange={(e) => setDraft((p) => ({ ...p, maxTotalLossPct: toOptNum(e.target.value) }))} className="bg-neutral-700 border-neutral-600" placeholder="Max total loss %" />
+                  <Input type="number" value={draft.durationDays} onChange={(e) => setDraft((p) => ({ ...p, durationDays: Math.max(1, toInt(e.target.value, p.durationDays)) }))} className="bg-neutral-700 border-neutral-600" placeholder="Duration (days)" />
+                  <Input type="number" value={draft.virtualCapitalUsd} onChange={(e) => setDraft((p) => ({ ...p, virtualCapitalUsd: Math.max(1, toNum(e.target.value, p.virtualCapitalUsd)) }))} className="bg-neutral-700 border-neutral-600" placeholder="Virtual capital USD" />
+                  <Input type="number" value={draft.featuredOrder} onChange={(e) => setDraft((p) => ({ ...p, featuredOrder: Math.max(0, toInt(e.target.value, p.featuredOrder)) }))} className="bg-neutral-700 border-neutral-600" placeholder="Featured order" />
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
                   <Input type="number" value={draft.maxEnrollments ?? ""} onChange={(e) => setDraft((p) => ({ ...p, maxEnrollments: toOptInt(e.target.value) }))} className="bg-neutral-700 border-neutral-600" placeholder="Max enrollments" />
@@ -835,7 +1066,7 @@ export default function ScoutChallengesPanel() {
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
                   <Input type="number" value={draft.prizePoolUsd} onChange={(e) => setDraft((p) => ({ ...p, prizePoolUsd: Math.max(0, toNum(e.target.value, p.prizePoolUsd)) }))} className="bg-neutral-700 border-neutral-600" placeholder="Prize pool USD" />
                   <Input type="number" value={draft.prizeMinCompletions} onChange={(e) => setDraft((p) => ({ ...p, prizeMinCompletions: Math.max(0, toInt(e.target.value, p.prizeMinCompletions)) }))} className="bg-neutral-700 border-neutral-600" placeholder="Prize min completions" />
-                  <select value={draft.prizeAwardTiming} onChange={(e) => setDraft((p) => ({ ...p, prizeAwardTiming: e.target.value }))} className="h-10 rounded-md border border-neutral-600 bg-neutral-700 px-3 text-sm">
+                  <select value={draft.prizeAwardTiming} onChange={(e) => setDraft((p) => ({ ...p, prizeAwardTiming: e.target.value }))} data-hint="Prize award timing" className="h-10 rounded-md border border-neutral-600 bg-neutral-700 px-3 text-sm">
                     <option value="ON_COMPLETE">ON_COMPLETE</option>
                     <option value="ON_CHALLENGE_END">ON_CHALLENGE_END</option>
                     <option value="MANUAL">MANUAL</option>
@@ -874,11 +1105,11 @@ export default function ScoutChallengesPanel() {
                   <div className="flex items-center justify-between text-xs"><span>Phase Configuration</span><Button size="sm" variant="outline" className="border-neutral-600" disabled={draft.phases.length >= 3} onClick={() => setDraft((p) => ({ ...p, phases: [...p.phases, { ...p.phases[p.phases.length - 1], phaseName: `Phase ${p.phases.length + 1}` }] }))}>Add Phase</Button></div>
                   {draft.phases.map((item, idx) => (
                     <div key={idx} className="rounded border border-neutral-700 p-2 grid grid-cols-1 md:grid-cols-7 gap-2">
-                      <Input value={item.phaseName} onChange={(e) => setDraft((p) => ({ ...p, phases: p.phases.map((x, i) => (i === idx ? { ...x, phaseName: e.target.value } : x)) }))} className="bg-neutral-700 border-neutral-600 md:col-span-2" />
-                      <Input type="number" step="0.01" value={item.profitTargetPct} onChange={(e) => setDraft((p) => ({ ...p, phases: p.phases.map((x, i) => (i === idx ? { ...x, profitTargetPct: toNum(e.target.value, x.profitTargetPct) } : x)) }))} className="bg-neutral-700 border-neutral-600" />
-                      <Input type="number" step="0.01" value={item.maxDailyLossPct} onChange={(e) => setDraft((p) => ({ ...p, phases: p.phases.map((x, i) => (i === idx ? { ...x, maxDailyLossPct: toNum(e.target.value, x.maxDailyLossPct) } : x)) }))} className="bg-neutral-700 border-neutral-600" />
-                      <Input type="number" value={item.durationDays} onChange={(e) => setDraft((p) => ({ ...p, phases: p.phases.map((x, i) => (i === idx ? { ...x, durationDays: Math.max(1, toInt(e.target.value, x.durationDays)) } : x)) }))} className="bg-neutral-700 border-neutral-600" />
-                      <select value={item.drawdownType} onChange={(e) => setDraft((p) => ({ ...p, phases: p.phases.map((x, i) => (i === idx ? { ...x, drawdownType: e.target.value === "TRAILING" ? "TRAILING" : "STATIC" } : x)) }))} className="h-10 rounded-md border border-neutral-600 bg-neutral-700 px-3 text-sm"><option value="STATIC">STATIC</option><option value="TRAILING">TRAILING</option></select>
+                      <Input value={item.phaseName} onChange={(e) => setDraft((p) => ({ ...p, phases: p.phases.map((x, i) => (i === idx ? { ...x, phaseName: e.target.value } : x)) }))} className="bg-neutral-700 border-neutral-600 md:col-span-2" placeholder={`Phase ${idx + 1} name`} />
+                      <Input type="number" step="0.01" value={item.profitTargetPct} onChange={(e) => setDraft((p) => ({ ...p, phases: p.phases.map((x, i) => (i === idx ? { ...x, profitTargetPct: toNum(e.target.value, x.profitTargetPct) } : x)) }))} className="bg-neutral-700 border-neutral-600" placeholder="Phase target %" />
+                      <Input type="number" step="0.01" value={item.maxDailyLossPct} onChange={(e) => setDraft((p) => ({ ...p, phases: p.phases.map((x, i) => (i === idx ? { ...x, maxDailyLossPct: toNum(e.target.value, x.maxDailyLossPct) } : x)) }))} className="bg-neutral-700 border-neutral-600" placeholder="Phase max daily %" />
+                      <Input type="number" value={item.durationDays} onChange={(e) => setDraft((p) => ({ ...p, phases: p.phases.map((x, i) => (i === idx ? { ...x, durationDays: Math.max(1, toInt(e.target.value, x.durationDays)) } : x)) }))} className="bg-neutral-700 border-neutral-600" placeholder="Phase duration days" />
+                      <select value={item.drawdownType} onChange={(e) => setDraft((p) => ({ ...p, phases: p.phases.map((x, i) => (i === idx ? { ...x, drawdownType: e.target.value === "TRAILING" ? "TRAILING" : "STATIC" } : x)) }))} data-hint={`Phase ${idx + 1} drawdown type`} className="h-10 rounded-md border border-neutral-600 bg-neutral-700 px-3 text-sm"><option value="STATIC">STATIC</option><option value="TRAILING">TRAILING</option></select>
                       <Button size="sm" variant="destructive" disabled={draft.phases.length <= 1} onClick={() => setDraft((p) => ({ ...p, phases: p.phases.filter((_, i) => i !== idx) }))}>Remove</Button>
                     </div>
                   ))}
@@ -895,28 +1126,144 @@ export default function ScoutChallengesPanel() {
                 <thead><tr className="border-b border-neutral-700 text-gray-300"><th className="py-2 px-2 text-left">Name</th><th className="py-2 px-2 text-right">Target</th><th className="py-2 px-2 text-right">Max DD</th><th className="py-2 px-2 text-right">Duration</th><th className="py-2 px-2 text-right">Enrollments</th><th className="py-2 px-2 text-right">Pass Rate</th><th className="py-2 px-2 text-right">Actions</th></tr></thead>
                 <tbody>
                   {templates.map((row) => {
-                    const open = Number(expandedId) === Number(row.id);
+                    const rowId = Number(row.id);
+                    const open = Number(expandedId) === rowId;
                     const detail = open ? templateDetailQuery.data : null;
-                    return (
-                      <>
-                        <tr key={row.id} className="border-b border-neutral-800/90">
-                          <td className="py-2 px-2"><div className="font-medium text-white">{row.name}</div><div className="flex gap-1 mt-1"><Badge variant={row.is_active ? "default" : "outline"}>{row.is_active ? "ACTIVE" : "INACTIVE"}</Badge><Badge variant={row.visible_to_traders ? "secondary" : "outline"}>{row.visible_to_traders ? "VISIBLE" : "HIDDEN"}</Badge></div></td>
-                          <td className="py-2 px-2 text-right">{formatPct(row.profit_target_pct)}</td>
-                          <td className="py-2 px-2 text-right">{formatPct(row.max_daily_loss_pct)}</td>
-                          <td className="py-2 px-2 text-right">{toInt(row.duration_days, 0)}d</td>
-                          <td className="py-2 px-2 text-right">{toInt(row.active_enrollment_count, 0)}/{toInt(row.enrollment_count, 0)}</td>
-                          <td className="py-2 px-2 text-right">{formatPct(row.pass_rate)}</td>
-                          <td className="py-2 px-2 text-right whitespace-nowrap">
-                            <Button size="sm" variant="ghost" onClick={() => setExpandedId(open ? null : Number(row.id))}>{open ? "Collapse" : "Expand"}</Button>
-                            <Button size="sm" variant="outline" className="border-neutral-600 ml-1" onClick={() => { setExpandedId(Number(row.id)); setEditingId(Number(row.id)); }}>Edit</Button>
-                            <Button size="sm" variant="outline" className="border-neutral-600 ml-1" onClick={() => duplicateTemplateMutation.mutate(Number(row.id))}>Duplicate</Button>
-                            <Button size="sm" variant="outline" className="border-neutral-600 ml-1" onClick={() => archiveTemplateMutation.mutate(Number(row.id))}>Archive</Button>
-                            <Button size="sm" variant="destructive" className="ml-1" onClick={() => { if (window.confirm(`Delete ${row.name}?`)) deleteTemplateMutation.mutate(Number(row.id)); }}>Delete</Button>
+                    const inlineBase = buildInlineTemplateDraft(row);
+                    const inlineDraft = inlineDraftById[rowId] ?? inlineBase;
+                    const inlineDirty = !isInlineTemplateDraftEqual(inlineDraft, inlineBase);
+                    const rowIsActive = Boolean(row.is_active ?? row.isActive);
+                    const rowIsVisible = Boolean(row.visible_to_traders ?? row.visibleToTraders);
+
+                    return [
+                      <tr key={`template-row-${rowId}`} className="border-b border-neutral-800/90">
+                        <td className="py-2 px-2">
+                          <div className="font-medium text-white">{row.name}</div>
+                          <div className="flex gap-1 mt-1">
+                            <Badge variant={rowIsActive ? "default" : "outline"}>{rowIsActive ? "ACTIVE" : "INACTIVE"}</Badge>
+                            <Badge variant={rowIsVisible ? "secondary" : "outline"}>{rowIsVisible ? "VISIBLE" : "HIDDEN"}</Badge>
+                          </div>
+                        </td>
+                        <td className="py-2 px-2 text-right">
+                          <Input
+                            type="number"
+                            step="0.01"
+                            value={inlineDraft.profitTargetPct}
+                            onChange={(e) => setInlineField(row, "profitTargetPct", e.target.value)}
+                            className="h-8 w-24 ml-auto text-right bg-neutral-900 border-neutral-700"
+                            data-hint="Inline edit: challenge target percentage"
+                          />
+                        </td>
+                        <td className="py-2 px-2 text-right">
+                          <Input
+                            type="number"
+                            step="0.01"
+                            value={inlineDraft.maxDailyLossPct}
+                            onChange={(e) => setInlineField(row, "maxDailyLossPct", e.target.value)}
+                            className="h-8 w-24 ml-auto text-right bg-neutral-900 border-neutral-700"
+                            data-hint="Inline edit: max daily drawdown percentage"
+                          />
+                        </td>
+                        <td className="py-2 px-2 text-right">
+                          <Input
+                            type="number"
+                            value={inlineDraft.durationDays}
+                            onChange={(e) => setInlineField(row, "durationDays", e.target.value)}
+                            className="h-8 w-24 ml-auto text-right bg-neutral-900 border-neutral-700"
+                            data-hint="Inline edit: challenge duration in days"
+                          />
+                        </td>
+                        <td className="py-2 px-2 text-right">
+                          {toInt(row.active_enrollment_count ?? row.activeEnrollmentCount, 0)}/{toInt(row.enrollment_count ?? row.enrollmentCount, 0)}
+                        </td>
+                        <td className="py-2 px-2 text-right">{formatPct(row.pass_rate ?? row.passRate)}</td>
+                        <td className="py-2 px-2 text-right whitespace-nowrap">
+                          {inlineDirty ? (
+                            <>
+                              <Button
+                                size="sm"
+                                className="ml-1"
+                                disabled={updateTemplateMutation.isPending}
+                                onClick={() => void saveInlineDraft(row)}
+                              >
+                                Save
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="border-neutral-600 ml-1"
+                                disabled={updateTemplateMutation.isPending}
+                                onClick={() => resetInlineDraft(rowId)}
+                              >
+                                Reset
+                              </Button>
+                            </>
+                          ) : null}
+                          <Button size="sm" variant="ghost" onClick={() => setExpandedId(open ? null : rowId)}>
+                            {open ? "Collapse" : "Expand"}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="border-neutral-600 ml-1"
+                            onClick={() => {
+                              setExpandedId(rowId);
+                              setEditingId(rowId);
+                            }}
+                          >
+                            Edit
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="border-neutral-600 ml-1"
+                            onClick={() => duplicateTemplateMutation.mutate(rowId)}
+                          >
+                            Duplicate
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="border-neutral-600 ml-1"
+                            onClick={() => archiveTemplateMutation.mutate(rowId)}
+                          >
+                            Archive
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            className="ml-1"
+                            onClick={() => setDeleteTarget(row)}
+                          >
+                            Delete
+                          </Button>
+                        </td>
+                      </tr>,
+                      open ? (
+                        <tr key={`template-row-detail-${rowId}`} className="border-b border-neutral-800/90">
+                          <td colSpan={7} className="p-3">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                              <div className="rounded border border-neutral-700 p-2 text-xs space-y-1">
+                                <div className="text-gray-400">Phase Breakdown</div>
+                                {(detail?.phases ?? []).map((p: AnyRow) => (
+                                  <div key={p.id} className="rounded border border-neutral-700 p-2">
+                                    {p.phaseName || `Phase ${p.phaseNumber}`}: {formatPct(p.profitTargetPct)} target | {formatPct(p.maxDailyLossPct)} daily | {toInt(p.durationDays, 0)}d
+                                  </div>
+                                ))}
+                                {!(detail?.phases ?? []).length ? <div className="text-gray-500">No phases loaded.</div> : null}
+                              </div>
+                              <div className="rounded border border-neutral-700 p-2 text-xs space-y-1">
+                                <div>Prize Pool: {detail?.row?.prizePoolEnabled ? formatUsd(detail?.row?.prizePoolUsd) : "Disabled"}</div>
+                                <div>Badges: {detail?.row?.badgesEnabled ? "Enabled" : "Disabled"}</div>
+                                <div>Certificates: {detail?.row?.certificateEnabled ? "Enabled" : "Disabled"}</div>
+                                <div>Selection Boost: {detail?.row?.selectionBoostEnabled ? `${toNum(detail?.row?.selectionBoostPoints, 0)} pts` : "Disabled"}</div>
+                                <div>Leaderboard: {detail?.row?.leaderboardEnabled ? "Enabled" : "Disabled"}</div>
+                              </div>
+                            </div>
                           </td>
                         </tr>
-                        {open ? <tr className="border-b border-neutral-800/90"><td colSpan={7} className="p-3"><div className="grid grid-cols-1 md:grid-cols-2 gap-3"><div className="rounded border border-neutral-700 p-2 text-xs space-y-1"><div className="text-gray-400">Phase Breakdown</div>{(detail?.phases ?? []).map((p: AnyRow) => <div key={p.id} className="rounded border border-neutral-700 p-2">{p.phaseName || `Phase ${p.phaseNumber}`}: {formatPct(p.profitTargetPct)} target | {formatPct(p.maxDailyLossPct)} daily | {toInt(p.durationDays, 0)}d</div>)}{!(detail?.phases ?? []).length ? <div className="text-gray-500">No phases loaded.</div> : null}</div><div className="rounded border border-neutral-700 p-2 text-xs space-y-1"><div>Prize Pool: {detail?.row?.prizePoolEnabled ? formatUsd(detail?.row?.prizePoolUsd) : "Disabled"}</div><div>Badges: {detail?.row?.badgesEnabled ? "Enabled" : "Disabled"}</div><div>Certificates: {detail?.row?.certificateEnabled ? "Enabled" : "Disabled"}</div><div>Selection Boost: {detail?.row?.selectionBoostEnabled ? `${toNum(detail?.row?.selectionBoostPoints, 0)} pts` : "Disabled"}</div><div>Leaderboard: {detail?.row?.leaderboardEnabled ? "Enabled" : "Disabled"}</div></div></div></td></tr> : null}
-                      </>
-                    );
+                      ) : null,
+                    ];
                   })}
                   {!templatesQuery.isLoading && templates.length === 0 ? <tr><td colSpan={7} className="py-8 text-center text-gray-400">No challenge templates found.</td></tr> : null}
                 </tbody>
@@ -929,10 +1276,11 @@ export default function ScoutChallengesPanel() {
               <select
                 value={enrollFilters.challengeId}
                 onChange={(e) => setEnrollFilters((p) => ({ ...p, challengeId: e.target.value }))}
+                data-hint="Enrollment challenge filter"
                 className="h-10 rounded-md border border-neutral-600 bg-neutral-700 px-3 text-sm"
               >
                 <option value="">All challenges</option>
-                {templates.map((row) => (
+                {challengeRows.map((row) => (
                   <option key={row.id} value={row.id}>
                     #{row.id} {row.name}
                   </option>
@@ -941,6 +1289,7 @@ export default function ScoutChallengesPanel() {
               <select
                 value={enrollFilters.status}
                 onChange={(e) => setEnrollFilters((p) => ({ ...p, status: e.target.value }))}
+                data-hint="Enrollment status filter"
                 className="h-10 rounded-md border border-neutral-600 bg-neutral-700 px-3 text-sm"
               >
                 <option value="">All statuses</option>
@@ -967,6 +1316,7 @@ export default function ScoutChallengesPanel() {
                 value={enrollFilters.fromDate}
                 onChange={(e) => setEnrollFilters((p) => ({ ...p, fromDate: e.target.value }))}
                 className="bg-neutral-700 border-neutral-600"
+                data-hint="Enrollment date filter (from day)"
               />
             </div>
 
@@ -1173,6 +1523,7 @@ export default function ScoutChallengesPanel() {
                         <select
                           value={overrideStatus}
                           onChange={(e) => setOverrideStatus(e.target.value)}
+                          data-hint="Override enrollment status"
                           className="h-9 rounded-md border border-neutral-600 bg-neutral-700 px-2 text-xs"
                         >
                           <option value="ACTIVE">ACTIVE</option>
@@ -1283,6 +1634,7 @@ export default function ScoutChallengesPanel() {
                           <select
                             value={notifyDraft.severity}
                             onChange={(e) => setNotifyDraft((p) => ({ ...p, severity: e.target.value }))}
+                            data-hint="Notification severity"
                             className="h-9 rounded-md border border-neutral-600 bg-neutral-700 px-2 text-xs"
                           >
                             <option value="INFO">INFO</option>
@@ -1450,10 +1802,11 @@ export default function ScoutChallengesPanel() {
                     <select
                       value={prizeChallengeFilter}
                       onChange={(e) => setPrizeChallengeFilter(e.target.value)}
+                      data-hint="Prize queue challenge filter"
                       className="h-9 rounded-md border border-neutral-600 bg-neutral-700 px-2 text-xs"
                     >
                       <option value="">All challenges</option>
-                      {templates.map((row) => (
+                      {challengeRows.map((row) => (
                         <option key={row.id} value={row.id}>
                           #{row.id} {row.name}
                         </option>
@@ -1595,6 +1948,77 @@ export default function ScoutChallengesPanel() {
             </div>
           </TabsContent>
 
+          <TabsContent value="archive" className="space-y-3">
+            <Card className="bg-neutral-900/50 border-neutral-700">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm">Archived Challenges</CardTitle>
+              </CardHeader>
+              <CardContent className="text-xs text-gray-300">
+                Archived challenges are hidden from traders and kept here for audit/history. Open any item in the editor if you need to re-activate it later.
+              </CardContent>
+            </Card>
+
+            <div className="overflow-x-auto rounded border border-neutral-700">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-neutral-700 text-gray-300">
+                    <th className="py-2 px-2 text-left">Name</th>
+                    <th className="py-2 px-2 text-right">Enrollments</th>
+                    <th className="py-2 px-2 text-right">Pass Rate</th>
+                    <th className="py-2 px-2 text-right">Updated</th>
+                    <th className="py-2 px-2 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {archivedTemplates.map((row) => {
+                    const id = Number(row.id);
+                    const isRecentlyArchived = lastArchivedId === id;
+                    return (
+                      <tr
+                        key={id}
+                        className={`border-b border-neutral-800/90 ${isRecentlyArchived ? "bg-cyan-500/10" : ""}`}
+                      >
+                        <td className="py-2 px-2">
+                          <div className="font-medium text-white">{row.name}</div>
+                          <div className="flex gap-1 mt-1">
+                            <Badge variant="outline">ARCHIVED</Badge>
+                            <Badge variant="outline">HIDDEN</Badge>
+                          </div>
+                        </td>
+                        <td className="py-2 px-2 text-right">
+                          {toInt(row.active_enrollment_count, 0)}/{toInt(row.enrollment_count, 0)}
+                        </td>
+                        <td className="py-2 px-2 text-right">{formatPct(row.pass_rate)}</td>
+                        <td className="py-2 px-2 text-right">{formatWhen(row.updated_at ?? row.updatedAt)}</td>
+                        <td className="py-2 px-2 text-right whitespace-nowrap">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="border-neutral-600"
+                            onClick={() => {
+                              setSubTab("templates");
+                              setEditingId(id);
+                              setExpandedId(id);
+                            }}
+                          >
+                            Open In Editor
+                          </Button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {!templatesQuery.isLoading && archivedTemplates.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="py-8 text-center text-gray-400">
+                        No archived challenges found.
+                      </td>
+                    </tr>
+                  ) : null}
+                </tbody>
+              </table>
+            </div>
+          </TabsContent>
+
           <TabsContent value="settings" className="space-y-3">
             <Card className="bg-neutral-900/50 border-neutral-700">
               <CardHeader className="pb-2">
@@ -1631,12 +2055,14 @@ export default function ScoutChallengesPanel() {
                     value={settingsDraft.challengeEvalIntervalMin}
                     onChange={(e) => setSettingsDraft((p) => ({ ...p, challengeEvalIntervalMin: Math.max(1, toInt(e.target.value, p.challengeEvalIntervalMin)) }))}
                     className="bg-neutral-700 border-neutral-600"
+                    placeholder="Eval interval (minutes)"
                   />
                   <Input
                     type="number"
                     value={settingsDraft.challengeEvalMaxRows}
                     onChange={(e) => setSettingsDraft((p) => ({ ...p, challengeEvalMaxRows: Math.max(1, toInt(e.target.value, p.challengeEvalMaxRows)) }))}
                     className="bg-neutral-700 border-neutral-600"
+                    placeholder="Eval max rows per run"
                   />
                   <Input
                     type="number"
@@ -1644,18 +2070,21 @@ export default function ScoutChallengesPanel() {
                     value={settingsDraft.challengeWarningThresholdPct}
                     onChange={(e) => setSettingsDraft((p) => ({ ...p, challengeWarningThresholdPct: toNum(e.target.value, p.challengeWarningThresholdPct) }))}
                     className="bg-neutral-700 border-neutral-600"
+                    placeholder="Warning threshold %"
                   />
                   <Input
                     type="number"
                     value={settingsDraft.challengeLeaderboardRefreshSec}
                     onChange={(e) => setSettingsDraft((p) => ({ ...p, challengeLeaderboardRefreshSec: Math.max(10, toInt(e.target.value, p.challengeLeaderboardRefreshSec)) }))}
                     className="bg-neutral-700 border-neutral-600"
+                    placeholder="Leaderboard refresh (sec)"
                   />
                   <Input
                     type="number"
                     value={settingsDraft.challengeDefaultSelectionBoost}
                     onChange={(e) => setSettingsDraft((p) => ({ ...p, challengeDefaultSelectionBoost: Math.max(0, toNum(e.target.value, p.challengeDefaultSelectionBoost)) }))}
                     className="bg-neutral-700 border-neutral-600"
+                    placeholder="Default selection boost"
                   />
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-5 gap-2">
@@ -1664,33 +2093,39 @@ export default function ScoutChallengesPanel() {
                     value={settingsDraft.challengeDefaultMaxRetries}
                     onChange={(e) => setSettingsDraft((p) => ({ ...p, challengeDefaultMaxRetries: Math.max(0, toInt(e.target.value, p.challengeDefaultMaxRetries)) }))}
                     className="bg-neutral-700 border-neutral-600"
+                    placeholder="Default max retries"
                   />
                   <Input
                     type="number"
                     value={settingsDraft.challengeDefaultRetryCooldownHours}
                     onChange={(e) => setSettingsDraft((p) => ({ ...p, challengeDefaultRetryCooldownHours: Math.max(0, toInt(e.target.value, p.challengeDefaultRetryCooldownHours)) }))}
                     className="bg-neutral-700 border-neutral-600"
+                    placeholder="Retry cooldown (hours)"
                   />
                   <Input
                     value={settingsDraft.challengeDefaultEligibility ?? "EMAIL_VERIFIED"}
                     onChange={(e) => setSettingsDraft((p) => ({ ...p, challengeDefaultEligibility: e.target.value }))}
                     className="bg-neutral-700 border-neutral-600"
+                    placeholder="Default eligibility gate"
                   />
                   <Input
                     value={settingsDraft.challengeDefaultCategory ?? "STANDARD"}
                     onChange={(e) => setSettingsDraft((p) => ({ ...p, challengeDefaultCategory: e.target.value }))}
                     className="bg-neutral-700 border-neutral-600"
+                    placeholder="Default challenge category"
                   />
                   <Input
                     value={settingsDraft.challengeDefaultTier ?? "STARTER"}
                     onChange={(e) => setSettingsDraft((p) => ({ ...p, challengeDefaultTier: e.target.value }))}
                     className="bg-neutral-700 border-neutral-600"
+                    placeholder="Default challenge tier"
                   />
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
                   <select
                     value={String(settingsDraft.challengeMailboxCategory || "SYSTEM")}
                     onChange={(e) => setSettingsDraft((p) => ({ ...p, challengeMailboxCategory: e.target.value }))}
+                    data-hint="Mailbox category for challenge notifications"
                     className="h-10 rounded-md border border-neutral-600 bg-neutral-700 px-3 text-sm"
                   >
                     <option value="SYSTEM">SYSTEM</option>
@@ -1701,6 +2136,7 @@ export default function ScoutChallengesPanel() {
                   <select
                     value={String(settingsDraft.challengeDefaultDrawdownType || "STATIC")}
                     onChange={(e) => setSettingsDraft((p) => ({ ...p, challengeDefaultDrawdownType: e.target.value }))}
+                    data-hint="Default drawdown type"
                     className="h-10 rounded-md border border-neutral-600 bg-neutral-700 px-3 text-sm"
                   >
                     <option value="STATIC">STATIC</option>
@@ -1709,6 +2145,7 @@ export default function ScoutChallengesPanel() {
                   <select
                     value={String(settingsDraft.challengeDefaultCapitalMode || "VIRTUAL")}
                     onChange={(e) => setSettingsDraft((p) => ({ ...p, challengeDefaultCapitalMode: e.target.value }))}
+                    data-hint="Default capital mode"
                     className="h-10 rounded-md border border-neutral-600 bg-neutral-700 px-3 text-sm"
                   >
                     <option value="VIRTUAL">VIRTUAL</option>
@@ -1917,6 +2354,42 @@ export default function ScoutChallengesPanel() {
             </div>
           </TabsContent>
         </Tabs>
+        <AlertDialog
+          open={deleteTarget != null}
+          onOpenChange={(open) => {
+            if (!open && !deleteTemplateMutation.isPending) setDeleteTarget(null);
+          }}
+        >
+          <AlertDialogContent className="bg-neutral-900 border-neutral-700 text-gray-100">
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete Challenge Template?</AlertDialogTitle>
+              <AlertDialogDescription className="text-gray-300">
+                This action permanently removes <span className="font-semibold text-white">{deleteTarget?.name || "this challenge"}</span> and cannot be undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel
+                className="border-neutral-600 bg-transparent text-gray-200 hover:bg-neutral-800"
+                disabled={deleteTemplateMutation.isPending}
+              >
+                Cancel
+              </AlertDialogCancel>
+              <AlertDialogAction
+                className="bg-red-600 hover:bg-red-500 text-white"
+                disabled={deleteTemplateMutation.isPending || !deleteTarget}
+                onClick={(event) => {
+                  if (!deleteTarget) {
+                    event.preventDefault();
+                    return;
+                  }
+                  deleteTemplateMutation.mutate(Number(deleteTarget.id));
+                }}
+              >
+                {deleteTemplateMutation.isPending ? "Deleting..." : "Delete"}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </CardContent>
     </Card>
   );

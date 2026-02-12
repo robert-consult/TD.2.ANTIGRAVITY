@@ -55,6 +55,16 @@ export function ConfigSync() {
         queryClient.invalidateQueries({ queryKey: ["/api/admin/quote-subscriptions/config"] });
         return;
       }
+
+      if (message.type === "challenges:updated") {
+        invalidateByPrefix("/api/admin/challenges");
+        invalidateByPrefix("/api/trader/challenges");
+        queryClient.invalidateQueries({ queryKey: ["/api/trades"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/trades/open"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/trades/history"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/trades/pending"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/account/summary"] });
+      }
     });
   }, [invalidateByPrefix, isAuthenticated, queryClient, subscribe]);
 

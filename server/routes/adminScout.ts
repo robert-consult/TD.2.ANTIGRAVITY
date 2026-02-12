@@ -48,6 +48,7 @@ import {
   upsertPartnerInquiryRoutingConfig,
 } from "../partner/inquiryRouting";
 import { createMailboxThreadWithMessage, createNotification, getCommunicationSettings } from "../services/messaging";
+import { publishLiveEvent } from "../services/liveBus";
 import {
   DEFAULT_PARTNER_GATING_CONFIG,
   normalizePartnerGatingConfig,
@@ -677,6 +678,16 @@ async function appendRecruitmentAudit(req: any, type: string, data: Record<strin
   } catch (error) {
     console.error("[admin-scout] audit append failed:", error);
   }
+}
+
+function publishChallengesUpdated(payload: Record<string, unknown>) {
+  publishLiveEvent({
+    type: "challenges:updated",
+    payload: {
+      ...payload,
+      at: Date.now(),
+    },
+  });
 }
 
 function computeMaxDrawdownFromEquitySeries(equitySeries: number[]): number {
@@ -2081,6 +2092,7 @@ adminChallengesRouter.post("/", async (req, res) => {
     );
 
     await appendRecruitmentAudit(req, "CHALLENGE_CREATE", { challengeId: created.id });
+    publishChallengesUpdated({ action: "created", challengeId: created.id });
     return res.status(201).json({ ok: true, row: created });
   } catch (error) {
     console.error("[admin-scout] challenge create error:", error);
@@ -2206,6 +2218,7 @@ adminChallengesRouter.put("/settings", async (req, res) => {
       .where(eq(systemConfig.id, 1));
 
     await appendRecruitmentAudit(req, "CHALLENGE_SETTINGS_UPDATE", { patchKeys: Object.keys(payload) });
+    publishChallengesUpdated({ action: "settings-updated", patchKeys: Object.keys(payload) });
     const [updated] = await db.select().from(systemConfig).where(eq(systemConfig.id, 1)).limit(1);
     return res.json({ ok: true, settings: updated });
   } catch (error) {
@@ -2258,6 +2271,7 @@ adminChallengesRouter.post("/:id/duplicate", async (req, res) => {
     }
 
     await appendRecruitmentAudit(req, "CHALLENGE_DUPLICATE", { sourceChallengeId: id, challengeId: copy.id });
+    publishChallengesUpdated({ action: "duplicated", challengeId: copy.id, sourceChallengeId: id });
     return res.status(201).json({ ok: true, row: copy });
   } catch (error) {
     console.error("[admin-scout] challenge duplicate error:", error);
@@ -2283,6 +2297,7 @@ adminChallengesRouter.put("/:id/archive", async (req, res) => {
 
     if (!updated) return res.status(404).json({ message: "CHALLENGE_NOT_FOUND" });
     await appendRecruitmentAudit(req, "CHALLENGE_ARCHIVE", { challengeId: id });
+    publishChallengesUpdated({ action: "archived", challengeId: id });
     return res.json({ ok: true, row: updated });
   } catch (error) {
     console.error("[admin-scout] challenge archive error:", error);
@@ -2344,10 +2359,11 @@ adminChallengesRouter.post("/:id/phases", async (req, res) => {
           maxConcurrentPositions: data.maxConcurrentPositions ?? null,
           maxLotSize: data.maxLotSize ?? null,
           updatedAt: ts,
-        })
-        .where(eq(challengePhases.id, existing[0].id))
-        .returning();
+      })
+      .where(eq(challengePhases.id, existing[0].id))
+      .returning();
       await appendRecruitmentAudit(req, "CHALLENGE_PHASE_UPSERT", { challengeId, phaseNumber: data.phaseNumber, mode: "update" });
+      publishChallengesUpdated({ action: "phase-updated", challengeId, phaseNumber: data.phaseNumber });
       return res.json({ ok: true, row });
     }
 
@@ -2375,6 +2391,7 @@ adminChallengesRouter.post("/:id/phases", async (req, res) => {
       .returning();
 
     await appendRecruitmentAudit(req, "CHALLENGE_PHASE_UPSERT", { challengeId, phaseNumber: data.phaseNumber, mode: "insert" });
+    publishChallengesUpdated({ action: "phase-created", challengeId, phaseNumber: data.phaseNumber });
     return res.status(201).json({ ok: true, row });
   } catch (error) {
     console.error("[admin-scout] challenge phase upsert error:", error);
@@ -2395,6 +2412,7 @@ adminChallengesRouter.delete("/:id/phases", async (req, res) => {
     const deleted = await db.delete(challengePhases).where(eq(challengePhases.challengeId, challengeId)).returning({ id: challengePhases.id });
 
     await appendRecruitmentAudit(req, "CHALLENGE_PHASES_DELETE_ALL", { challengeId, deleted: deleted.length });
+    publishChallengesUpdated({ action: "phases-cleared", challengeId, deleted: deleted.length });
     return res.json({ ok: true, deleted: deleted.length });
   } catch (error) {
     console.error("[admin-scout] challenge phases delete-all error:", error);
@@ -2415,6 +2433,7 @@ adminChallengesRouter.delete("/:id/phases/:phaseNumber", async (req, res) => {
       .returning({ id: challengePhases.id });
     if (!deleted) return res.status(404).json({ message: "PHASE_NOT_FOUND" });
     await appendRecruitmentAudit(req, "CHALLENGE_PHASE_DELETE", { challengeId, phaseNumber });
+    publishChallengesUpdated({ action: "phase-deleted", challengeId, phaseNumber });
     return res.json({ ok: true });
   } catch (error) {
     console.error("[admin-scout] challenge phase delete error:", error);
@@ -3619,6 +3638,7 @@ adminChallengesRouter.put("/:id", async (req, res) => {
     }
 
     await appendRecruitmentAudit(req, "CHALLENGE_UPDATE", { challengeId: id, patchKeys: Object.keys(parsed.data) });
+    publishChallengesUpdated({ action: "updated", challengeId: id, patchKeys: Object.keys(parsed.data) });
     return res.json({ ok: true, row: updated });
   } catch (error) {
     console.error("[admin-scout] challenge update error:", error);
@@ -3695,6 +3715,7 @@ adminChallengesRouter.put("/:id/phases", async (req, res) => {
     });
 
     await appendRecruitmentAudit(req, "CHALLENGE_PHASES_REPLACE", { challengeId: id, count: parsed.data.phases.length });
+    publishChallengesUpdated({ action: "phases-replaced", challengeId: id, count: parsed.data.phases.length });
     return res.json({ ok: true });
   } catch (error) {
     console.error("[admin-scout] challenge phases update error:", error);
@@ -3777,6 +3798,7 @@ adminChallengesRouter.delete("/:id", async (req, res) => {
     }
 
     await appendRecruitmentAudit(req, "CHALLENGE_DELETE", { challengeId: id });
+    publishChallengesUpdated({ action: "deleted", challengeId: id });
     return res.json({ ok: true, id });
   } catch (error) {
     console.error("[admin-scout] challenge delete error:", error);

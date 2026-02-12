@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import ChallengesCompetePanel from "@/components/trader/ChallengesCompetePanel";
 import { Trophy, TrendingUp } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 
@@ -34,29 +35,6 @@ type TraderProfileRow = {
   pinnedTradeIds: number[];
   updatedAt: number | null;
 };
-
-type TraderChallengeRow = {
-  id: number;
-  name: string;
-  description: string | null;
-  profit_target_pct: number;
-  max_daily_loss_pct: number;
-  max_total_loss_pct: number | null;
-  min_trading_days: number | null;
-  duration_days: number;
-  enrollment_id: number | null;
-  enrollment_status: string | null;
-  enrolled_at: number | null;
-  completed_at: number | null;
-  current_pnl_pct: number | null;
-  max_daily_loss_hit: number | null;
-  trading_days: number | null;
-};
-
-function formatPct(value: number | null | undefined): string {
-  if (value == null || !Number.isFinite(value)) return "-";
-  return `${(value * 100).toFixed(1)}%`;
-}
 
 function formatWhen(utcSec: number | null | undefined): string {
   if (!utcSec || !Number.isFinite(utcSec)) return "-";
@@ -87,13 +65,6 @@ export default function LeaderboardScreen() {
     queryKey: ["/api/trader/profile"],
     queryFn: () => axios.get("/api/trader/profile").then((r) => r.data),
     enabled: proProfilesEnabled,
-    refetchOnWindowFocus: false,
-  });
-
-  const challengesQuery = useQuery<{ rows: TraderChallengeRow[] }>({
-    queryKey: ["/api/trader/challenges"],
-    queryFn: () => axios.get("/api/trader/challenges").then((r) => r.data),
-    enabled: competeEnabled,
     refetchOnWindowFocus: false,
   });
 
@@ -129,23 +100,6 @@ export default function LeaderboardScreen() {
       queryClient.invalidateQueries({ queryKey: ["/api/trader/profile"] });
     },
   });
-
-  const enrollMutation = useMutation({
-    mutationFn: (challengeId: number) => axios.post(`/api/trader/challenges/${challengeId}/enroll`).then((r) => r.data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/trader/challenges"] });
-    },
-  });
-
-  const withdrawMutation = useMutation({
-    mutationFn: (challengeId: number) =>
-      axios.post(`/api/trader/challenges/${challengeId}/withdraw`).then((r) => r.data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/trader/challenges"] });
-    },
-  });
-
-  const challengeRows = challengesQuery.data?.rows ?? [];
 
   const getTrophyColor = (rank: number) => {
     switch (rank) {
@@ -360,74 +314,7 @@ export default function LeaderboardScreen() {
             </TabsContent>
 
             <TabsContent value="compete" className="space-y-3">
-              {!competeEnabled ? (
-                <div className="text-sm text-gray-400">Challenges are disabled by admin.</div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-neutral-700 text-gray-300">
-                        <th className="py-2 text-left">Challenge</th>
-                        <th className="py-2 text-right">Target</th>
-                        <th className="py-2 text-right">Max Daily Loss</th>
-                        <th className="py-2 text-right">Duration</th>
-                        <th className="py-2 text-right">Status</th>
-                        <th className="py-2 text-right">Progress</th>
-                        <th className="py-2 text-right">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {challengeRows.map((row) => {
-                        const isActive = String(row.enrollment_status || "") === "ACTIVE";
-                        return (
-                          <tr key={row.id} className="border-b border-neutral-800/80">
-                            <td className="py-2">
-                              <div className="text-white font-medium">{row.name}</div>
-                              <div className="text-xs text-gray-400">{row.description || "-"}</div>
-                            </td>
-                            <td className="py-2 text-right">{formatPct(row.profit_target_pct)}</td>
-                            <td className="py-2 text-right">{formatPct(row.max_daily_loss_pct)}</td>
-                            <td className="py-2 text-right">{row.duration_days}d</td>
-                            <td className="py-2 text-right">{row.enrollment_status || "NOT_ENROLLED"}</td>
-                            <td className="py-2 text-right">
-                              <div className="text-xs">PnL: {formatPct(row.current_pnl_pct)}</div>
-                              <div className="text-xs text-gray-400">Days: {row.trading_days ?? 0}</div>
-                            </td>
-                            <td className="py-2 text-right whitespace-nowrap">
-                              {isActive ? (
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  className="border-neutral-600"
-                                  disabled={withdrawMutation.isPending}
-                                  onClick={() => withdrawMutation.mutate(row.id)}
-                                >
-                                  Withdraw
-                                </Button>
-                              ) : (
-                                <Button
-                                  size="sm"
-                                  disabled={enrollMutation.isPending}
-                                  onClick={() => enrollMutation.mutate(row.id)}
-                                >
-                                  Enroll
-                                </Button>
-                              )}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                      {!challengesQuery.isLoading && challengeRows.length === 0 && (
-                        <tr>
-                          <td colSpan={7} className="py-8 text-center text-gray-400">
-                            No active challenges
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              )}
+              <ChallengesCompetePanel competeEnabled={competeEnabled} />
             </TabsContent>
 
             <TabsContent value="community" className="space-y-3">

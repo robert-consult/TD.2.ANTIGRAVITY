@@ -176,6 +176,27 @@
       "when": 1776201600000,
       "tag": "0024_partner_onboarding_invite_first",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1776201601000,
+      "tag": "0025_challenges_v4_multiphase_rewards",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1776201602000,
+      "tag": "0026_challenges_eval_config",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1776201603000,
+      "tag": "0027_challenge_default_category_tier",
+      "breakpoints": true
     }
   ]
 }

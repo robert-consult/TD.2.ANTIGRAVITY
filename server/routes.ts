@@ -87,7 +87,8 @@ import { notificationsRouter } from "./routes/notifications";
 import { getMessagingMetrics, sendWelcomeMailboxMessage } from "./services/messaging";
 import { adminChallengesRouter, adminPartnersRouter, adminScoutRouter } from "./routes/adminScout";
 import { partnerAuthRouter, partnerPortalRouter } from "./routes/partnerPortal";
-import { traderTalentRouter } from "./routes/traderTalent";
+import { traderTalentPublicRouter, traderTalentRouter } from "./routes/traderTalent";
+import { createCsrfProtection } from "./security/csrf";
 
 /**
  * Precision-aware price comparison utilities for forex trading.
@@ -165,12 +166,16 @@ let metricTradeCloseRejectedQuoteStaleTotal = 0;
 let metricTradeTargetsRejectedQuoteStaleTotal = 0;
 let metricWsQuotePermissionRefreshTotal = 0;
 let metricWsQuotePermissionRefreshErrorsTotal = 0;
+let metricWsOriginRejectedTotal = 0;
+let metricWsUserConnectionLimitRejectedTotal = 0;
+let metricWsMessageRateLimitedTotal = 0;
 
 declare module "express-session" {
   interface SessionData {
     userId: number;
     email: string;
     isAdmin: boolean;
+    csrfToken?: string;
     userCountryIso2?: string;
     ipCountryIso2?: string;
     // View As impersonation fields
@@ -219,12 +224,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
     })
   );
 
+  const csrfProtection = createCsrfProtection({
+    sessionCookieName: SESSION_COOKIE_NAME,
+  });
+
   // Apply impersonation guard globally immediately after session middleware
   // This ensures write operations are blocked during View As mode for ALL routes
   app.use("/api", impersonationGuard);
 
   // Apply jurisdiction guard globally so blocked jurisdictions lose access immediately
   app.use("/api", jurisdictionSessionGuard);
+
+  // Session-bound CSRF protection for all API mutation requests.
+  app.get("/api/csrf", csrfProtection.csrfTokenHandler);
+  app.use("/api", csrfProtection.issueCsrfToken, csrfProtection.enforceCsrf);
 
   // Slider CAPTCHA endpoints (server-bound session state)
   app.use("/api/captcha", captchaSliderRouter);
@@ -4953,6 +4966,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use("/api/admin/partners", adminPartnersRouter); // Partner admin management
   app.use("/api/partner", partnerAuthRouter); // Public partner auth (invite redemption)
   app.use("/api/partner", partnerPortalRouter); // Partner portal data room + allocations + inquiries
+  app.use("/api/trader", traderTalentPublicRouter); // Public challenge certificate verification endpoints
   app.use("/api/trader", traderTalentRouter); // Trader talent profile + challenges
   registerGriftRoutes(app);
   app.use("/api/grift", griftPublicRouter);
@@ -5020,6 +5034,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         "# HELP ws_quote_permission_refresh_errors_total WebSocket quote-permission refresh failures",
         "# TYPE ws_quote_permission_refresh_errors_total counter",
         `ws_quote_permission_refresh_errors_total ${metricWsQuotePermissionRefreshErrorsTotal}`,
+        "# HELP ws_origin_rejected_total WebSocket connection attempts rejected by origin validation",
+        "# TYPE ws_origin_rejected_total counter",
+        `ws_origin_rejected_total ${metricWsOriginRejectedTotal}`,
+        "# HELP ws_user_connection_limit_rejected_total WebSocket connections rejected due to per-user connection cap",
+        "# TYPE ws_user_connection_limit_rejected_total counter",
+        `ws_user_connection_limit_rejected_total ${metricWsUserConnectionLimitRejectedTotal}`,
+        "# HELP ws_message_rate_limited_total WebSocket connections closed for message-rate abuse",
+        "# TYPE ws_message_rate_limited_total counter",
+        `ws_message_rate_limited_total ${metricWsMessageRateLimitedTotal}`,
         "# HELP mailbox_fanout_queue_depth Pending mailbox fanout jobs",
         "# TYPE mailbox_fanout_queue_depth gauge",
         `mailbox_fanout_queue_depth ${messagingMetrics.mailboxFanoutQueueDepth}`,
@@ -5047,6 +5070,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
     !["0", "false", "off", "no"].includes(
       String(process.env.WS_TRANSPORT_REQUIRE_TLS ?? "1").trim().toLowerCase(),
     );
+  const wsOriginValidationEnabled = !["0", "false", "off", "no"].includes(
+    String(process.env.WS_ORIGIN_VALIDATION_ENABLED ?? "1").trim().toLowerCase(),
+  );
+  const wsAllowMissingOrigin = ["1", "true", "on", "yes"].includes(
+    String(process.env.WS_ORIGIN_ALLOW_MISSING ?? (process.env.NODE_ENV === "production" ? "0" : "1"))
+      .trim()
+      .toLowerCase(),
+  );
+  const wsUserConnectionLimit = Math.max(
+    1,
+    Math.min(100, Math.trunc(Number(process.env.WS_MAX_CONNECTIONS_PER_USER ?? 5) || 5)),
+  );
+  const wsMessageRateLimitPerWindow = Math.max(
+    1,
+    Math.min(5000, Math.trunc(Number(process.env.WS_MESSAGE_RATE_LIMIT ?? 120) || 120)),
+  );
+  const wsMessageRateWindowMs = Math.max(
+    1000,
+    Math.min(600_000, Math.trunc(Number(process.env.WS_MESSAGE_RATE_WINDOW_MS ?? 10_000) || 10_000)),
+  );
+  const wsAllowedOrigins = new Set<string>();
+  const wsAllowedOriginsRaw = String(process.env.WS_ALLOWED_ORIGINS ?? "").trim();
+  if (wsAllowedOriginsRaw) {
+    for (const candidate of wsAllowedOriginsRaw.split(",")) {
+      const normalized = normalizeWsOrigin(candidate);
+      if (normalized) wsAllowedOrigins.add(normalized);
+    }
+  }
+  {
+    const appOrigin = normalizeWsOrigin(process.env.APP_URL);
+    if (appOrigin) wsAllowedOrigins.add(appOrigin);
+  }
 
   // Helper type for WebSocket clients
   type LiveClient = WebSocket & {
@@ -5062,7 +5117,70 @@ export async function registerRoutes(app: Express): Promise<Server> {
     quoteKey?: string;
     wantsTrades?: boolean;
     wantsAccount?: boolean;
+    wsMsgWindowStartMs?: number;
+    wsMsgCount?: number;
   };
+
+  function normalizeWsOrigin(raw: unknown): string | null {
+    const source = String(raw ?? "").trim();
+    if (!source) return null;
+    try {
+      const parsed = new URL(source);
+      const proto = parsed.protocol.toLowerCase();
+      if (proto !== "http:" && proto !== "https:") return null;
+      return `${proto}//${parsed.host.toLowerCase()}`;
+    } catch {
+      return null;
+    }
+  }
+
+  function getWsRequestPrimaryHeader(req: any, headerName: string): string {
+    const rawValue = req?.headers?.[headerName];
+    const first = Array.isArray(rawValue) ? rawValue[0] : String(rawValue ?? "");
+    return first.split(",")[0]?.trim() || "";
+  }
+
+  function expectedWsOriginFromRequest(req: any): string | null {
+    const hostRaw = getWsRequestPrimaryHeader(req, "x-forwarded-host") || getWsRequestPrimaryHeader(req, "host");
+    if (!hostRaw) return null;
+
+    const secure = isWsRequestTransportSecure(req);
+    const proto = secure ? "https" : "http";
+    return normalizeWsOrigin(`${proto}://${hostRaw}`);
+  }
+
+  function isWsOriginAllowed(req: any): boolean {
+    if (!wsOriginValidationEnabled) return true;
+    const origin = normalizeWsOrigin(req?.headers?.origin);
+    if (!origin) return wsAllowMissingOrigin;
+    if (wsAllowedOrigins.has(origin)) return true;
+    const expected = expectedWsOriginFromRequest(req);
+    if (expected && origin === expected) return true;
+    return false;
+  }
+
+  function countWsConnectionsForUser(userId: number, exclude?: LiveClient): number {
+    let count = 0;
+    for (const ws of wss.clients as Set<LiveClient>) {
+      if (ws === exclude) continue;
+      if (ws.readyState !== WebSocket.OPEN) continue;
+      if (Number(ws.userId) === userId) count += 1;
+    }
+    return count;
+  }
+
+  function consumeWsMessageRate(client: LiveClient): boolean {
+    const nowMs = Date.now();
+    const windowStartMs = Number(client.wsMsgWindowStartMs ?? 0);
+    if (!windowStartMs || nowMs - windowStartMs >= wsMessageRateWindowMs) {
+      client.wsMsgWindowStartMs = nowMs;
+      client.wsMsgCount = 1;
+      return true;
+    }
+    const nextCount = Number(client.wsMsgCount ?? 0) + 1;
+    client.wsMsgCount = nextCount;
+    return nextCount <= wsMessageRateLimitPerWindow;
+  }
 
   function computeQuoteKey(symbols: Set<string> | undefined): string {
     if (!symbols || symbols.size === 0) return "";
@@ -5310,6 +5428,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return;
     }
 
+    if (!isWsOriginAllowed(req)) {
+      metricWsOriginRejectedTotal += 1;
+      wsSendJson(socket, {
+        type: "ws:error",
+        code: "WS_ORIGIN_FORBIDDEN",
+        message: "WebSocket origin not allowed",
+      });
+      try {
+        socket.close(4403, "ORIGIN_FORBIDDEN");
+      } catch {
+        // ignore close race
+      }
+      return;
+    }
+
     const handleMessage = async (raw: any) => {
       try {
         const msg = JSON.parse(raw.toString());
@@ -5441,6 +5574,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
     // Attach immediately so we don't drop messages sent right after the handshake.
     socket.on("message", (raw) => {
+      if (!consumeWsMessageRate(client)) {
+        metricWsMessageRateLimitedTotal += 1;
+        wsSendJson(socket, {
+          type: "ws:error",
+          code: "WS_MESSAGE_RATE_LIMITED",
+          message: "Message rate limit exceeded",
+          retryAfterMs: wsMessageRateWindowMs,
+        });
+        try {
+          socket.close(4408, "RATE_LIMITED");
+        } catch {
+          // ignore close race
+        }
+        return;
+      }
+
       if (!wsReady) {
         if (pendingMessages.length < 50) pendingMessages.push(raw);
         else wsCloseUnauthorized(socket, "WS_BACKPRESSURE");
@@ -5460,6 +5609,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     client.quoteKey = "";
     client.wantsTrades = false;
     client.wantsAccount = false;
+    client.wsMsgWindowStartMs = Date.now();
+    client.wsMsgCount = 0;
 
     // Resolve IP country once at connect time (proxy headers preferred).
     try {
@@ -5515,6 +5666,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
 
           client.userId = sessionUserId;
+
+          const concurrentConnections = countWsConnectionsForUser(sessionUserId, client);
+          if (concurrentConnections >= wsUserConnectionLimit) {
+            metricWsUserConnectionLimitRejectedTotal += 1;
+            wsSendJson(socket, {
+              type: "ws:error",
+              code: "WS_CONNECTION_LIMIT_REACHED",
+              message: "Too many active websocket connections for this user",
+              limit: wsUserConnectionLimit,
+            });
+            try {
+              socket.close(4409, "CONNECTION_LIMIT");
+            } catch {
+              // ignore close race
+            }
+            return;
+          }
         }
       }
     } catch (e) {

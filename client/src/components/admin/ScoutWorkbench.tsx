@@ -8,6 +8,7 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { useMailboxE2eeBootstrap } from "@/hooks/use-mailbox";
+import ScoutChallengesPanel from "@/components/admin/ScoutChallengesPanel";
 
 const PIPELINE_STAGES = [
   "DETECTED",
@@ -160,18 +161,6 @@ type WatchlistRow = {
     compositeScore: number | null;
     styleCluster: string | null;
   };
-};
-
-type ChallengeRow = {
-  id: number;
-  name: string;
-  description: string | null;
-  profit_target_pct: number;
-  max_daily_loss_pct: number;
-  duration_days: number;
-  is_active: boolean;
-  enrollment_count: number;
-  active_enrollment_count: number;
 };
 
 type PartnerRow = {
@@ -354,14 +343,6 @@ export default function ScoutWorkbench() {
   const [inquiryRoutingDraft, setInquiryRoutingDraft] = useState<InquiryRoutingDraft | null>(null);
   const [crmDrafts, setCrmDrafts] = useState<Record<number, CrmDraft>>({});
 
-  const [newChallenge, setNewChallenge] = useState({
-    name: "",
-    description: "",
-    profitTargetPct: 0.1,
-    maxDailyLossPct: 0.03,
-    durationDays: 30,
-  });
-
   const [newPartner, setNewPartner] = useState({ name: "", ipWhitelist: "" });
   const [lastIssuedKey, setLastIssuedKey] = useState<string | null>(null);
   const [inviteDraft, setInviteDraft] = useState({
@@ -415,12 +396,6 @@ export default function ScoutWorkbench() {
     () => clampInviteExpiryDays(configQuery.data?.config?.partnerInviteDefaultExpiryDays, 7),
     [configQuery.data?.config?.partnerInviteDefaultExpiryDays],
   );
-
-  const challengesQuery = useQuery<{ rows: ChallengeRow[] }>({
-    queryKey: ["/api/admin/challenges"],
-    queryFn: () => axios.get("/api/admin/challenges").then((r) => r.data),
-    refetchOnWindowFocus: false,
-  });
 
   const partnersQuery = useQuery<{ rows: PartnerRow[] }>({
     queryKey: ["/api/admin/partners"],
@@ -621,43 +596,6 @@ export default function ScoutWorkbench() {
     },
   });
 
-  const createChallengeMutation = useMutation({
-    mutationFn: (payload: typeof newChallenge) => axios.post("/api/admin/challenges", payload).then((r) => r.data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/challenges"] });
-      setNewChallenge({
-        name: "",
-        description: "",
-        profitTargetPct: 0.1,
-        maxDailyLossPct: 0.03,
-        durationDays: 30,
-      });
-      toast({ title: "Challenge created" });
-    },
-    onError: (error: any) => {
-      toast({
-        title: "Failed to create challenge",
-        description: error?.response?.data?.message || "Unknown error",
-        variant: "destructive",
-      });
-    },
-  });
-
-  const patchChallengeMutation = useMutation({
-    mutationFn: (payload: { id: number; patch: Record<string, unknown> }) =>
-      axios.put(`/api/admin/challenges/${payload.id}`, payload.patch).then((r) => r.data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/challenges"] });
-    },
-  });
-
-  const deleteChallengeMutation = useMutation({
-    mutationFn: (id: number) => axios.delete(`/api/admin/challenges/${id}`).then((r) => r.data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/challenges"] });
-    },
-  });
-
   const createPartnerMutation = useMutation({
     mutationFn: (payload: typeof newPartner) => axios.post("/api/admin/partners", payload).then((r) => r.data),
     onSuccess: (data) => {
@@ -789,7 +727,6 @@ export default function ScoutWorkbench() {
 
   const candidates = candidatesQuery.data?.results ?? [];
   const watchlistRows = watchlistQuery.data?.rows ?? [];
-  const challengeRows = challengesQuery.data?.rows ?? [];
   const partnerRows = partnersQuery.data?.rows ?? [];
   const defaultPartnerGateDraft: PartnerGateDraft = configDraft?.partnerGatingConfig
     ? {
@@ -1546,117 +1483,7 @@ export default function ScoutWorkbench() {
         </TabsContent>
 
         <TabsContent value="challenges" className="space-y-3">
-          <Card className="bg-neutral-800 border-gray-700">
-            <CardHeader>
-              <CardTitle className="text-base">Challenge Management</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
-                <Input
-                  placeholder="Challenge name"
-                  value={newChallenge.name}
-                  onChange={(e) => setNewChallenge((prev) => ({ ...prev, name: e.target.value }))}
-                  className="md:col-span-2 bg-neutral-700 border-neutral-600"
-                />
-                <Input
-                  placeholder="Profit target (e.g. 0.1)"
-                  value={String(newChallenge.profitTargetPct)}
-                  onChange={(e) =>
-                    setNewChallenge((prev) => ({ ...prev, profitTargetPct: Number(e.target.value) || 0 }))
-                  }
-                  inputMode="decimal"
-                  className="bg-neutral-700 border-neutral-600"
-                />
-                <Input
-                  placeholder="Max daily loss (e.g. 0.03)"
-                  value={String(newChallenge.maxDailyLossPct)}
-                  onChange={(e) =>
-                    setNewChallenge((prev) => ({ ...prev, maxDailyLossPct: Number(e.target.value) || 0 }))
-                  }
-                  inputMode="decimal"
-                  className="bg-neutral-700 border-neutral-600"
-                />
-                <Input
-                  placeholder="Duration days"
-                  value={String(newChallenge.durationDays)}
-                  onChange={(e) => setNewChallenge((prev) => ({ ...prev, durationDays: Number(e.target.value) || 1 }))}
-                  inputMode="numeric"
-                  className="bg-neutral-700 border-neutral-600"
-                />
-              </div>
-              <Input
-                placeholder="Description"
-                value={newChallenge.description}
-                onChange={(e) => setNewChallenge((prev) => ({ ...prev, description: e.target.value }))}
-                className="bg-neutral-700 border-neutral-600"
-              />
-              <div className="flex justify-end">
-                <Button
-                  onClick={() => createChallengeMutation.mutate(newChallenge)}
-                  disabled={createChallengeMutation.isPending || !newChallenge.name.trim()}
-                >
-                  {createChallengeMutation.isPending ? "Creating..." : "Create Challenge"}
-                </Button>
-              </div>
-
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-neutral-700 text-gray-300">
-                      <th className="py-2 text-left">Name</th>
-                      <th className="py-2 text-right">Target</th>
-                      <th className="py-2 text-right">Daily Loss</th>
-                      <th className="py-2 text-right">Duration</th>
-                      <th className="py-2 text-right">Enrollments</th>
-                      <th className="py-2 text-right">Active</th>
-                      <th className="py-2 text-right">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {challengeRows.map((row) => (
-                      <tr key={row.id} className="border-b border-neutral-800/80">
-                        <td className="py-2 text-white">{row.name}</td>
-                        <td className="py-2 text-right">{formatPct(row.profit_target_pct)}</td>
-                        <td className="py-2 text-right">{formatPct(row.max_daily_loss_pct)}</td>
-                        <td className="py-2 text-right">{row.duration_days}d</td>
-                        <td className="py-2 text-right">{row.enrollment_count}</td>
-                        <td className="py-2 text-right">{row.is_active ? "Yes" : "No"}</td>
-                        <td className="py-2 text-right whitespace-nowrap">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="border-neutral-600 mr-2"
-                            onClick={() =>
-                              patchChallengeMutation.mutate({
-                                id: row.id,
-                                patch: { isActive: !row.is_active },
-                              })
-                            }
-                          >
-                            {row.is_active ? "Deactivate" : "Activate"}
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="destructive"
-                            onClick={() => deleteChallengeMutation.mutate(row.id)}
-                          >
-                            Delete
-                          </Button>
-                        </td>
-                      </tr>
-                    ))}
-                    {!challengesQuery.isLoading && challengeRows.length === 0 && (
-                      <tr>
-                        <td colSpan={7} className="py-6 text-center text-gray-400">
-                          No challenges found.
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </CardContent>
-          </Card>
+          <ScoutChallengesPanel />
         </TabsContent>
 
         <TabsContent value="partners" className="space-y-3">

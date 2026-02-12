@@ -1,5 +1,5 @@
-import { getIdentityHeaders } from "./identity";
 import { resolveApiUrl } from "./appUrl";
+import { fetchWithIdentity } from "./fetchWithIdentity";
 
 type GriftPingOptions = {
   intervalMs?: number;
@@ -12,13 +12,11 @@ export function startGriftPing(options?: GriftPingOptions) {
 
   const send = async () => {
     try {
-      const headers = await getIdentityHeaders();
-      await fetch(resolveApiUrl("/api/grift/ping"), {
+      await fetchWithIdentity(resolveApiUrl("/api/grift/ping"), {
         method: "POST",
         credentials: "include",
         headers: {
           "Content-Type": "application/json",
-          ...headers,
         },
         body: JSON.stringify({}),
       });

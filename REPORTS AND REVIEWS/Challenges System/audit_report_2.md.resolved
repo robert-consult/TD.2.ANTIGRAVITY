@@ -1,0 +1,53 @@
+# Challenges System Audit Report 2 (Resolved Re-Audit)
+
+**Date:** 2026-02-11  
+**Objective:** Cycle through `audit_report_2.md` and verify each claimed gap against current implementation.
+
+## Executive Result
+
+**Status:** 🟢 **RESOLVED**
+
+All Audit 2 claims are now closed in the current repository state.
+
+## Item-by-Item Closure
+
+1. **Schema missing 7+ tables**  
+   **Result:** Closed. V4 schema tables exist in `shared/schema.pg.ts`, including:
+   - `challenge_phases` (`shared/schema.pg.ts:1122`)
+   - `challenge_enrollment_events` (`shared/schema.pg.ts:1153`)
+   - `challenge_badges` (`shared/schema.pg.ts:1180`)
+   - `challenge_certificates` (`shared/schema.pg.ts:1331`)
+   - `challenge_leaderboard_snapshot` (`shared/schema.pg.ts:1362`)
+
+2. **Admin API broken imports / mismatched V4 schema**  
+   **Result:** Closed. Admin challenge V4 endpoints are implemented and wired, including analytics and reward/admin surfaces in:
+   - `server/routes/adminScout.ts:2871`
+   - `server/routes/adminScout.ts:2946`
+   - `server/routes/adminScout.ts:3037`
+
+3. **Trader API broken imports / mismatched V4 schema**  
+   **Result:** Closed. Trader V4 challenge surfaces are implemented, including enrollments, leaderboard, and rewards:
+   - `server/routes/traderTalent.ts:434`
+   - `server/routes/traderTalent.ts:995`
+   - `server/routes/traderTalent.ts:1215`
+
+4. **Evaluation engine still legacy**  
+   **Result:** Closed. `evaluateChallengeEnrollmentsPassLegacy` is no longer used/present; evaluation runs through V4 tick:
+   - `server/recruitment/engines.ts:11`
+   - `server/recruitment/engines.ts:15`
+
+5. **Frontend still legacy single-table challenges UI**  
+   **Result:** Closed. Admin challenges UI uses a 4-tab minitab and is mounted in Scout Workbench:
+   - `client/src/components/admin/ScoutChallengesPanel.tsx:739`
+   - `client/src/components/admin/ScoutChallengesPanel.tsx:740`
+   - `client/src/components/admin/ScoutChallengesPanel.tsx:741`
+   - `client/src/components/admin/ScoutChallengesPanel.tsx:742`
+   - `client/src/components/admin/ScoutWorkbench.tsx:1486`
+
+## Validation Run (This Cycle)
+
+- `npm run check` ✅ passed
+
+## Conclusion
+
+Audit 2 is no longer accurate for the current codebase. Its reported gaps have been implemented and validated.

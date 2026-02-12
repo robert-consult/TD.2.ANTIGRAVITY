@@ -16,7 +16,7 @@ import { useToast } from "@/hooks/use-toast";
 import { ensureMailboxE2eeKey, encryptTextForMailboxRecipients } from "@/lib/e2ee";
 import { MessageBody } from "@/components/Mailbox/MessageBody";
 
-type ThreadCategoryFilter = "ALL" | "SYSTEM" | "SUPPORT" | "ANNOUNCEMENT";
+type ThreadCategoryFilter = "ALL" | "SYSTEM" | "SUPPORT" | "ANNOUNCEMENT" | "CHALLENGES";
 type ReplyFormat = "PLAINTEXT" | "MARKDOWN";
 
 function formatWhen(value: number | null | undefined): string {
@@ -157,6 +157,7 @@ export function MailboxMinitab() {
                 <option value="SYSTEM">System</option>
                 <option value="SUPPORT">Support</option>
                 <option value="ANNOUNCEMENT">Announcement</option>
+                <option value="CHALLENGES">Challenges</option>
               </select>
             </div>
             <div className="max-h-[420px] overflow-y-auto">

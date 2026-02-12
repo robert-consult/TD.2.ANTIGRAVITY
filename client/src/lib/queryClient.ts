@@ -2,6 +2,7 @@ import { QueryClient, QueryFunction } from "@tanstack/react-query";
 import { getIdentityHeaders } from "./identity";
 import { solveBotChallenge } from "./botProof";
 import { resolveApiUrl } from "./appUrl";
+import { attachCsrfHeader, isCsrfFailureResponse, refreshCsrfToken } from "./csrf";
 
 export class ApiError extends Error {
   status: number;
@@ -51,16 +52,28 @@ export async function apiRequest(
     ...(data ? { "Content-Type": "application/json" } : {}),
     ...identityHeaders,
   };
+  const resolvedUrl = resolveApiUrl(url);
 
-  const doFetch = (extra?: Record<string, string>) =>
-    fetch(resolveApiUrl(url), {
-      method,
-      headers: { ...baseHeaders, ...(extra ?? {}) },
-      body: data ? JSON.stringify(data) : undefined,
-      credentials: "include",
-    });
+  const doFetch = async (extra?: Record<string, string>, options?: { forceCsrfRefresh?: boolean }) => {
+    const requestInit = await attachCsrfHeader(
+      resolvedUrl,
+      {
+        method,
+        headers: { ...baseHeaders, ...(extra ?? {}) },
+        body: data ? JSON.stringify(data) : undefined,
+        credentials: "include",
+      },
+      { forceRefresh: Boolean(options?.forceCsrfRefresh) },
+    );
+
+    return fetch(resolvedUrl, requestInit);
+  };
 
   let res = await doFetch();
+  if (await isCsrfFailureResponse(res)) {
+    await refreshCsrfToken();
+    res = await doFetch(undefined, { forceCsrfRefresh: true });
+  }
 
   // Bot challenge loop (428 Precondition Required)
   if (res.status === 428) {
@@ -75,6 +88,10 @@ export async function apiRequest(
     if (payload?.code === "BOT_CHALLENGE_REQUIRED" && payload?.challenge) {
       const proof = await solveBotChallenge(payload.challenge, baseHeaders);
       res = await doFetch({ "x-bot-proof": proof });
+      if (await isCsrfFailureResponse(res)) {
+        await refreshCsrfToken();
+        res = await doFetch({ "x-bot-proof": proof }, { forceCsrfRefresh: true });
+      }
     }
   }
 

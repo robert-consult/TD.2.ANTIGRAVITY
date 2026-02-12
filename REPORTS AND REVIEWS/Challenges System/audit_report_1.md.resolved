@@ -1,0 +1,106 @@
+# Challenges System Audit Report 1 (Resolved Re-Audit)
+
+**Date:** 2026-02-11  
+**Objective:** Re-run Audit 1 checks against current implementation and verify alignment.
+
+## Executive Result
+
+**Status:** 🟢 **RESOLVED**
+
+The critical failures described in `audit_report_1.md` are no longer present in the current repository state.
+
+## Item-by-Item Alignment
+
+### 1) Database Schema Gaps (Audit 1 Section 2.1)
+
+All listed V4 schema entities are implemented in `shared/schema.pg.ts`:
+
+- `challenge_phases` (`shared/schema.pg.ts:1122`)
+- `challenge_enrollment_events` (`shared/schema.pg.ts:1153`)
+- `challenge_badges` (`shared/schema.pg.ts:1180`)
+- `challenge_badge_awards` (`shared/schema.pg.ts:1200`)
+- `challenge_prize_awards` (`shared/schema.pg.ts:1221`)
+- `challenge_certificate_templates` (`shared/schema.pg.ts:1252`)
+- `challenge_progression_tiers` (`shared/schema.pg.ts:1275`)
+- `challenge_user_progression` (`shared/schema.pg.ts:1291`)
+- `challenge_certificates` (`shared/schema.pg.ts:1331`)
+- `challenge_leaderboard_snapshot` (`shared/schema.pg.ts:1362`)
+
+Audit 1 claim "missing 7+ tables" is closed.
+
+### 2) Enhanced Challenges Table (Audit 1 Section 2.1)
+
+The `challenges` table contains the expanded V4 fields (identity, enrollment controls, schedule, rewards, leaderboard controls), including:
+
+- `category`, `tier`, `slug`, `tags`, `iconColor`
+- `virtualCapitalUsd`, `capitalMode`, `leverageMultiplier`
+- `maxEnrollments`, `maxActiveEnrollments`, `maxRetriesPerTrader`, `retryCooldownHours`, `eligibilityGate`
+- `startAt`, `endAt`, `enrollmentStartAt`, `enrollmentEndAt`, `visibleToTraders`, `featuredOrder`
+- rewards and leaderboard columns (`shared/schema.pg.ts:1001`)
+
+Audit 1 claim "legacy version only" is closed.
+
+### 3) Admin/Trader API Broken Imports (Audit 1 Section 2.2)
+
+Imports and usage now align with existing schema objects and compile:
+
+- Admin route imports/uses V4 tables in `server/routes/adminScout.ts:8`
+- Trader route imports/uses V4 tables in `server/routes/traderTalent.ts:7`
+
+Audit 1 claim "broken imports" is closed.
+
+### 4) Evaluation Engine Legacy (Audit 1 Section 2.2)
+
+`evaluateChallengeEnrollmentsPass` runs V4 evaluation tick and no longer uses the removed legacy path:
+
+- `server/recruitment/engines.ts:11`
+- `server/recruitment/engines.ts:15`
+- V4 evaluator entrypoint: `server/recruitment/challengesV4/challengeEvaluation.ts:1122`
+
+Audit 1 claim "legacy-only evaluation engine" is closed.
+
+### 5) Cron Job Stub / Legacy Invocation (Audit 1 Section 2.2)
+
+Cron executes `evaluateChallengeEnrollmentsPass` and schedules recurring runs:
+
+- `server/cron/evaluateChallenges.ts:1`
+- `server/cron/evaluateChallenges.ts:24`
+
+Audit 1 claim "stub calls legacy engine" is closed.
+
+### 6) Frontend Admin UI Legacy (Audit 1 Section 2.3)
+
+Admin challenges UI is a tabbed minitab with required sections:
+
+- Templates/Enrollments/Analytics/Settings tabs in `client/src/components/admin/ScoutChallengesPanel.tsx:739`
+- Mounted in Scout Workbench at `client/src/components/admin/ScoutWorkbench.tsx:1486`
+
+Audit 1 claim "single flat table only" is closed.
+
+### 7) Frontend Trader Challenges UI Legacy (Audit 1 Section 2.3)
+
+Trader challenge UX now includes multi-tab challenges flow with progress and detail panels:
+
+- Browse/My Challenges/Leaderboard/Rewards tabs in `client/src/components/trader/ChallengesCompetePanel.tsx:188`
+- PnL and daily-loss gauges (`client/src/components/trader/ChallengesCompetePanel.tsx:279`)
+- Event timeline and trade log (`client/src/components/trader/ChallengesCompetePanel.tsx:324`)
+
+Audit 1 claim "legacy simple list/basic table only" is closed.
+
+### 8) Notifications Partial State (Audit 1 Section 2.2)
+
+Challenge notification type and toggle gating are implemented:
+
+- `NotificationType` includes `CHALLENGE` (`server/services/messaging.ts:18`)
+- settings include `notificationChallengeEnabled` (`shared/schema.pg.ts:530`)
+- gating logic handles challenge notifications (`server/services/messaging.ts:1177`)
+
+Audit 1 "partial" observation is no longer a blocker for alignment.
+
+## Validation in This Audit Cycle
+
+- `npm run check` ✅ passed
+
+## Conclusion
+
+Audit 1 does not reflect current implementation state. Its critical/blocked findings are resolved and aligned with the implemented Challenges V4 architecture.

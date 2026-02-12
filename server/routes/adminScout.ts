@@ -1,11 +1,22 @@
 // @ts-nocheck
 import { Router } from "express";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, inArray, lte, sql } from "drizzle-orm";
 import { z } from "zod";
 import bcrypt from "bcryptjs";
 import { db, dbClient } from "@db";
 import {
+  challengeBadges,
+  challengeBadgeAwards,
   challengeEnrollments,
+  challengeEnrollmentEvents,
+  challengeCertificateTemplates,
+  challengeCertificates,
+  challengeLeaderboardSnapshot,
+  challengePhases,
+  challengePrizeAwards,
+  challengeProgressionTiers,
+  challengeSelectionBoosts,
+  challengeUserProgression,
   challenges,
   partnerAllocations,
   partnerInvites,
@@ -15,25 +26,28 @@ import {
   scoutMetricsSnapshot,
   scoutWatchlists,
   systemConfig,
+  trades,
   users,
 } from "@shared/schema";
 import { requireAdmin } from "../middleware/requireAdmin";
 import { appendIdentityAudit } from "../services/identityAudit";
 import { buildAuditContext } from "../lib/auditContext";
-import { randomToken, sha256Hex } from "../services/crypto";
+import { decryptString, encryptString, randomToken, sha256Hex } from "../services/crypto";
 import {
   PIPELINE_STAGES,
   ensurePipelineRowForUser,
   parseOptionalPipelineStage,
   updateRecruitingPipelineForUser,
 } from "../recruitment/pipelineService";
+import { appendChallengeEvent } from "../recruitment/challengesV4/challengeEvents";
+import { getSystemChallengeConfig } from "../recruitment/challengesV4/challengeConfig";
 import { listAdminScoutCandidates } from "../scout/scoutService";
 import {
   getPartnerInquiryRoutingConfig,
   resolvePartnerInquiryRouting,
   upsertPartnerInquiryRoutingConfig,
 } from "../partner/inquiryRouting";
-import { getCommunicationSettings } from "../services/messaging";
+import { createMailboxThreadWithMessage, createNotification, getCommunicationSettings } from "../services/messaging";
 import {
   DEFAULT_PARTNER_GATING_CONFIG,
   normalizePartnerGatingConfig,
@@ -54,6 +68,54 @@ const PARTNER_INVITE_EMAIL_STATUSES = [
 const pipelineStageSchema = z.enum(PIPELINE_STAGES);
 const leaderboardModeSchema = z.enum(LEADERBOARD_MODES);
 const partnerGateLevelSchema = z.enum(PARTNER_GATE_LEVELS);
+const ELIGIBILITY_GATES = new Set(["NONE", "EMAIL_VERIFIED", "CONTENDER", "ADMIN_APPROVED"]);
+
+function isJsonStringValid(value: unknown, mode: "ANY" | "OBJECT_OR_ARRAY" | "OBJECT_ONLY" = "ANY"): boolean {
+  if (typeof value !== "string") return false;
+  const text = value.trim();
+  if (!text) return false;
+  try {
+    const parsed = JSON.parse(text);
+    if (mode === "ANY") return true;
+    if (mode === "OBJECT_OR_ARRAY") return parsed != null && typeof parsed === "object";
+    return parsed != null && typeof parsed === "object" && !Array.isArray(parsed);
+  } catch {
+    return false;
+  }
+}
+
+function isEligibilityGateInputValid(value: unknown): boolean {
+  if (value == null) return true;
+  if (typeof value !== "string") return false;
+  const text = value.trim();
+  if (!text) return true;
+  if (ELIGIBILITY_GATES.has(text.toUpperCase())) return true;
+  return isJsonStringValid(text, "OBJECT_ONLY");
+}
+
+function encryptChallengeAdminNote(value: string | null | undefined): string | null {
+  if (value == null) return null;
+  const text = String(value).trim();
+  if (!text) return null;
+  try {
+    return encryptString(text);
+  } catch (error) {
+    console.error("[admin-scout] failed to encrypt challenge admin note:", error);
+    return text;
+  }
+}
+
+function decryptChallengeAdminNote(value: unknown): string | null {
+  if (value == null) return null;
+  const text = String(value);
+  if (!text) return null;
+  try {
+    return decryptString(text);
+  } catch {
+    // Backward compatibility for legacy plaintext notes.
+    return text;
+  }
+}
 
 const watchlistInputSchema = z.object({
   userId: z.number().int().positive(),
@@ -101,7 +163,224 @@ const challengeUpsertSchema = z.object({
   durationDays: z.number().int().min(1).max(365),
   startAt: z.number().int().nonnegative().optional().nullable(),
   endAt: z.number().int().nonnegative().optional().nullable(),
+  enrollmentStartAt: z.number().int().nonnegative().optional().nullable(),
+  enrollmentEndAt: z.number().int().nonnegative().optional().nullable(),
+  visibleToTraders: z.boolean().optional(),
+  featuredOrder: z.number().int().min(0).max(100000).optional(),
+  category: z.string().trim().max(80).optional(),
+  tier: z.string().trim().max(80).optional(),
+  slug: z.string().trim().min(3).max(120).regex(/^[a-z0-9-]+$/).optional().nullable(),
+  tags: z.string().trim().max(500).optional(),
+  iconColor: z.string().trim().max(32).optional().nullable(),
+  virtualCapitalUsd: z.number().positive().max(100_000_000).optional(),
+  capitalMode: z.enum(["VIRTUAL", "SNAPSHOT_EQUITY"]).optional(),
+  leverageMultiplier: z.number().positive().max(500).optional(),
+  maxEnrollments: z.number().int().min(1).max(1_000_000).optional().nullable(),
+  maxActiveEnrollments: z.number().int().min(1).max(1_000_000).optional().nullable(),
+  maxRetriesPerTrader: z.number().int().min(0).max(100).optional(),
+  retryCooldownHours: z.number().int().min(0).max(24 * 365).optional(),
+  eligibilityGate: z
+    .string()
+    .trim()
+    .max(2000)
+    .optional()
+    .refine((value) => isEligibilityGateInputValid(value), { message: "INVALID_ELIGIBILITY_GATE" }),
+  prizePoolEnabled: z.boolean().optional(),
+  prizePoolUsd: z.number().min(0).max(100_000_000).optional(),
+  prizeDistributionJson: z
+    .string()
+    .trim()
+    .max(4000)
+    .optional()
+    .refine((value) => value == null || value.trim() === "" || isJsonStringValid(value, "OBJECT_OR_ARRAY"), {
+      message: "INVALID_PRIZE_DISTRIBUTION_JSON",
+    }),
+  prizeMinCompletions: z.number().int().min(0).max(1_000_000).optional(),
+  prizeAwardTiming: z.enum(["ON_COMPLETE", "ON_CHALLENGE_END", "MANUAL"]).optional(),
+  badgesEnabled: z.boolean().optional(),
+  badgeOnPass: z.string().trim().max(120).optional().nullable(),
+  badgeOnTop3: z.string().trim().max(120).optional().nullable(),
+  certificateEnabled: z.boolean().optional(),
+  certificateDownloadable: z.boolean().optional(),
+  certificateShareable: z.boolean().optional(),
+  certificateTemplateId: z.number().int().positive().optional().nullable(),
+  certificateIncludeMetrics: z.boolean().optional(),
+  selectionBoostEnabled: z.boolean().optional(),
+  selectionBoostPoints: z.number().min(0).max(100000).optional(),
+  partnerVisibilityOnPass: z.boolean().optional(),
+  autoWatchlistTier: z.enum(["A_LIST", "B_LIST", "INCUBATOR"]).optional().nullable(),
+  progressionTierId: z.number().int().positive().optional().nullable(),
+  customRewardJson: z
+    .string()
+    .trim()
+    .max(8000)
+    .optional()
+    .refine((value) => value == null || value.trim() === "" || isJsonStringValid(value, "OBJECT_OR_ARRAY"), {
+      message: "INVALID_CUSTOM_REWARD_JSON",
+    }),
+  leaderboardEnabled: z.boolean().optional(),
+  leaderboardAnonymize: z.boolean().optional(),
+  leaderboardMaxVisible: z.number().int().min(1).max(500).optional(),
   isActive: z.boolean().optional(),
+  phases: z
+    .array(
+      z.object({
+        phaseNumber: z.number().int().min(1).max(10),
+        phaseName: z.string().trim().max(120).optional().nullable(),
+        profitTargetPct: z.number().min(0).max(10),
+        maxDailyLossPct: z.number().min(0).max(10),
+        maxTotalLossPct: z.number().min(0).max(10).optional().nullable(),
+        drawdownType: z.enum(["STATIC", "TRAILING"]).optional(),
+        durationDays: z.number().int().min(1).max(365),
+        minTradingDays: z.number().int().min(0).max(365).optional().nullable(),
+        maxSingleDayProfitPct: z.number().min(0).max(10).optional().nullable(),
+        allowWeekendHolding: z.boolean().optional(),
+        allowNewsTrading: z.boolean().optional(),
+        restrictedSymbolsCsv: z.string().trim().max(4000).optional().nullable(),
+        maxConcurrentPositions: z.number().int().min(1).max(2000).optional().nullable(),
+        maxLotSize: z.number().positive().max(10000).optional().nullable(),
+      }),
+    )
+    .min(1)
+    .max(3)
+    .optional(),
+});
+
+const challengeEnrollmentActionSchema = z.object({
+  action: z.enum(["ADVANCE_PHASE", "RESET_PHASE", "DISQUALIFY", "WITHDRAW", "ADD_NOTE"]),
+  note: z.string().trim().max(4000).optional().nullable(),
+});
+
+const challengeSettingsPatchSchema = z.object({
+  traderCompeteEnabled: z.boolean().optional(),
+  challengeAutoAdvancePhase: z.boolean().optional(),
+  challengeEvalIntervalMin: z.coerce.number().int().min(1).max(24 * 60).optional(),
+  challengeEvalMaxRows: z.coerce.number().int().min(1).max(5000).optional(),
+  challengeWarningThresholdPct: z.coerce.number().min(0.01).max(0.99).optional(),
+  challengeDefaultDrawdownType: z.enum(["STATIC", "TRAILING"]).optional(),
+  challengeDefaultCapitalMode: z.enum(["VIRTUAL", "SNAPSHOT_EQUITY"]).optional(),
+  challengeDefaultMaxRetries: z.coerce.number().int().min(0).max(100).optional(),
+  challengeDefaultRetryCooldownHours: z.coerce.number().int().min(0).max(24 * 365).optional(),
+  challengeDefaultEligibility: z
+    .string()
+    .trim()
+    .max(2000)
+    .optional()
+    .refine((value) => isEligibilityGateInputValid(value), { message: "INVALID_DEFAULT_ELIGIBILITY" }),
+  challengeDefaultCategory: z.string().trim().max(80).optional(),
+  challengeDefaultTier: z.string().trim().max(80).optional(),
+  challengeRewardsEnabled: z.boolean().optional(),
+  challengePrizePoolsEnabled: z.boolean().optional(),
+  challengeBadgesEnabled: z.boolean().optional(),
+  challengeCertificatesEnabled: z.boolean().optional(),
+  challengeCertificatesDownloadable: z.boolean().optional(),
+  challengeCertificatesShareable: z.boolean().optional(),
+  challengeSelectionBoostEnabled: z.boolean().optional(),
+  challengeDefaultSelectionBoost: z.coerce.number().min(0).max(100000).optional(),
+  challengeProgressionEnabled: z.boolean().optional(),
+  challengeCustomRewardsEnabled: z.boolean().optional(),
+  challengeNotifyOnEnroll: z.boolean().optional(),
+  challengeNotifyOnPhaseWarning: z.boolean().optional(),
+  challengeNotifyOnBreach: z.boolean().optional(),
+  challengeNotifyOnPhasePass: z.boolean().optional(),
+  challengeNotifyOnFail: z.boolean().optional(),
+  challengeNotifyOnComplete: z.boolean().optional(),
+  challengeNotifyOnBadgeAward: z.boolean().optional(),
+  challengeNotifyOnPrizeAward: z.boolean().optional(),
+  challengeNotifyOnCertIssue: z.boolean().optional(),
+  challengeNotifyOnTierUp: z.boolean().optional(),
+  challengeNotifyOnAdminAction: z.boolean().optional(),
+  challengeNotifyViaMailbox: z.boolean().optional(),
+  challengeMailboxCategory: z.enum(["SYSTEM", "SUPPORT", "ANNOUNCEMENT", "CHALLENGES"]).optional(),
+  challengeLeaderboardEnabled: z.boolean().optional(),
+  challengeLeaderboardRefreshSec: z.coerce.number().int().min(10).max(24 * 3600).optional(),
+});
+
+const challengeBadgeUpsertSchema = z.object({
+  key: z.string().trim().min(2).max(120).regex(/^[a-z0-9-_]+$/i),
+  name: z.string().trim().min(2).max(200),
+  description: z.string().trim().max(1000).optional().nullable(),
+  iconUrl: z.string().trim().url().max(2000).optional().nullable(),
+  iconEmoji: z.string().trim().max(64).optional().nullable(),
+  category: z.string().trim().max(80).optional(),
+  criteriaJson: z
+    .string()
+    .trim()
+    .max(8000)
+    .optional()
+    .refine((value) => value == null || value.trim() === "" || isJsonStringValid(value, "OBJECT_OR_ARRAY"), {
+      message: "INVALID_BADGE_CRITERIA_JSON",
+    }),
+  isActive: z.boolean().optional(),
+});
+
+const challengeCertificateTemplateUpsertSchema = z.object({
+  name: z.string().trim().min(2).max(200),
+  headerText: z.string().trim().max(1000).optional(),
+  bodyText: z.string().trim().max(10000).optional(),
+  includeMetrics: z.boolean().optional(),
+  includeVerificationCode: z.boolean().optional(),
+  brandColor: z.string().trim().max(64).optional().nullable(),
+  logoUrl: z.string().trim().url().max(2000).optional().nullable(),
+  isDownloadable: z.boolean().optional(),
+  isShareable: z.boolean().optional(),
+  isActive: z.boolean().optional(),
+});
+
+const challengeProgressionTierUpsertSchema = z.object({
+  name: z.string().trim().min(2).max(200),
+  description: z.string().trim().max(2000).optional().nullable(),
+  tiersJson: z
+    .string()
+    .trim()
+    .min(2)
+    .max(16000)
+    .optional()
+    .refine((value) => value == null || value.trim() === "" || isJsonStringValid(value, "OBJECT_OR_ARRAY"), {
+      message: "INVALID_TIERS_JSON",
+    }),
+  isActive: z.boolean().optional(),
+});
+
+const challengePrizeApproveSchema = z.object({
+  action: z.enum(["APPROVE", "PAID", "CANCEL"]),
+  note: z.string().trim().max(4000).optional().nullable(),
+});
+
+const challengeEnrollmentOverrideSchema = z.object({
+  status: z.enum(["ACTIVE", "PASSED", "FAILED", "WITHDRAWN"]),
+  reason: z.string().trim().min(3).max(4000),
+  currentPhase: z.number().int().min(1).max(10).optional(),
+  completedAt: z.number().int().nonnegative().optional().nullable(),
+});
+
+const challengeEnrollmentExtendSchema = z.object({
+  extendDays: z.coerce.number().int().min(1).max(365),
+  reason: z.string().trim().min(3).max(4000),
+});
+
+const challengeEnrollmentNotifySchema = z.object({
+  title: z.string().trim().min(3).max(180),
+  message: z.string().trim().min(3).max(4000),
+  severity: z.enum(["INFO", "SUCCESS", "WARNING", "CRITICAL"]).optional(),
+  sendMailbox: z.boolean().optional(),
+});
+
+const challengePhaseUpsertSchema = z.object({
+  phaseNumber: z.number().int().min(1).max(10),
+  phaseName: z.string().trim().max(120).optional().nullable(),
+  profitTargetPct: z.number().min(0).max(10),
+  maxDailyLossPct: z.number().min(0).max(10),
+  maxTotalLossPct: z.number().min(0).max(10).optional().nullable(),
+  drawdownType: z.enum(["STATIC", "TRAILING"]).optional(),
+  durationDays: z.number().int().min(1).max(365),
+  minTradingDays: z.number().int().min(0).max(365).optional().nullable(),
+  maxSingleDayProfitPct: z.number().min(0).max(10).optional().nullable(),
+  allowWeekendHolding: z.boolean().optional(),
+  allowNewsTrading: z.boolean().optional(),
+  restrictedSymbolsCsv: z.string().trim().max(4000).optional().nullable(),
+  maxConcurrentPositions: z.number().int().min(1).max(2000).optional().nullable(),
+  maxLotSize: z.number().positive().max(10000).optional().nullable(),
 });
 
 const partnerCreateSchema = z.object({
@@ -182,6 +461,191 @@ function parseOptionalFloat(raw: unknown): number | null {
 
 function parseOptionalStage(raw: unknown): (typeof PIPELINE_STAGES)[number] | null {
   return parseOptionalPipelineStage(raw);
+}
+
+function parseJsonObjectSafe(raw: unknown, fallback: Record<string, unknown> = {}): Record<string, unknown> {
+  if (typeof raw === "string") {
+    const trimmed = raw.trim();
+    if (!trimmed) return fallback;
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        return parsed as Record<string, unknown>;
+      }
+      return fallback;
+    } catch {
+      return fallback;
+    }
+  }
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+    return raw as Record<string, unknown>;
+  }
+  return fallback;
+}
+
+function clampInt(value: unknown, fallback: number, min: number, max: number): number {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(min, Math.min(max, Math.trunc(n)));
+}
+
+function normalizeChallengeMailboxCategory(raw: unknown): "SYSTEM" | "SUPPORT" | "ANNOUNCEMENT" | "CHALLENGES" {
+  const value = String(raw ?? "").trim().toUpperCase();
+  if (value === "SYSTEM" || value === "SUPPORT" || value === "ANNOUNCEMENT" || value === "CHALLENGES") {
+    return value;
+  }
+  return "SYSTEM";
+}
+
+async function notifyChallengeTrader(input: {
+  userId: number;
+  challengeId: number;
+  enrollmentId: number;
+  title: string;
+  message: string;
+  sourceEvent: string;
+  severity?: "INFO" | "SUCCESS" | "WARNING" | "CRITICAL";
+  mailboxRecommended?: boolean;
+}) {
+  try {
+    const cfg = await getSystemChallengeConfig();
+    if (!cfg.challengeNotifyOnAdminAction) return;
+
+    await createNotification({
+      userId: input.userId,
+      type: "CHALLENGE",
+      severity: input.severity ?? "INFO",
+      title: input.title,
+      message: input.message,
+      sourceEvent: input.sourceEvent,
+      link: `/compete/enrollment/${input.enrollmentId}`,
+    });
+
+    if (cfg.challengeNotifyViaMailbox && input.mailboxRecommended) {
+      const category = normalizeChallengeMailboxCategory(cfg.challengeMailboxCategory);
+      await createMailboxThreadWithMessage({
+        createdByUserId: null,
+        senderUserId: null,
+        recipientUserIds: [input.userId],
+        subject: input.title,
+        body: input.message,
+        category,
+        allowReply: false,
+        messageType: "CHALLENGE_ADMIN_ACTION",
+        metadata: {
+          sourceEvent: input.sourceEvent,
+          challengeId: input.challengeId,
+          enrollmentId: input.enrollmentId,
+        },
+      });
+    }
+  } catch (error) {
+    console.error("[admin-scout] challenge trader notification failed:", error);
+  }
+}
+
+async function getEnrollmentById(enrollmentId: number) {
+  const [enrollment] = await db
+    .select()
+    .from(challengeEnrollments)
+    .where(eq(challengeEnrollments.id, enrollmentId))
+    .limit(1);
+  return enrollment ?? null;
+}
+
+async function applyChallengeEnrollmentAdminAction(input: {
+  enrollmentId: number;
+  action: "ADVANCE_PHASE" | "RESET_PHASE" | "DISQUALIFY" | "WITHDRAW" | "ADD_NOTE" | "OVERRIDE" | "EXTEND_PHASE";
+  note?: string | null;
+  actorUserId: number | null;
+  overrideStatus?: "ACTIVE" | "PASSED" | "FAILED" | "WITHDRAWN";
+  overrideCompletedAt?: number | null;
+  overrideCurrentPhase?: number;
+  extendDays?: number;
+}) {
+  const enrollment = await getEnrollmentById(input.enrollmentId);
+  if (!enrollment) throw new Error("ENROLLMENT_NOT_FOUND");
+
+  const ts = nowSec();
+  const next: Record<string, unknown> = {
+    updatedAt: ts,
+  };
+
+  if (input.action === "WITHDRAW") {
+    next.status = "WITHDRAWN";
+    next.completedAt = ts;
+  } else if (input.action === "DISQUALIFY") {
+    next.status = "FAILED";
+    next.completedAt = ts;
+  } else if (input.action === "ADVANCE_PHASE") {
+    next.currentPhase = Math.max(1, Number(enrollment.currentPhase ?? 1) + 1);
+    next.phaseStartedAt = ts;
+    next.status = "ACTIVE";
+    next.completedAt = null;
+    next.lastWarningEvent = null;
+    next.lastWarningAt = null;
+  } else if (input.action === "RESET_PHASE") {
+    next.status = "ACTIVE";
+    next.completedAt = null;
+    next.currentPhase = 1;
+    next.phaseStartedAt = ts;
+    next.currentPnlPct = 0;
+    next.maxDailyLossHit = null;
+    next.maxTotalLossHit = null;
+    next.tradingDays = 0;
+    next.lastWarningEvent = null;
+    next.lastWarningAt = null;
+  } else if (input.action === "OVERRIDE") {
+    next.status = input.overrideStatus;
+    next.completedAt =
+      input.overrideCompletedAt === undefined
+        ? input.overrideStatus === "ACTIVE"
+          ? null
+          : ts
+        : input.overrideCompletedAt;
+    if (input.overrideCurrentPhase != null) {
+      next.currentPhase = Math.max(1, Math.trunc(input.overrideCurrentPhase));
+    }
+  } else if (input.action === "EXTEND_PHASE") {
+    const extendDays = Math.max(1, Math.trunc(Number(input.extendDays ?? 0)));
+    const phaseStartedAt = Number(enrollment.phaseStartedAt ?? enrollment.enrolledAt ?? ts);
+    next.phaseStartedAt = Math.max(0, phaseStartedAt - extendDays * 86400);
+  }
+
+  if (input.note !== undefined) {
+    next.adminNotes = encryptChallengeAdminNote(input.note ?? null);
+  }
+
+  const [updated] = await db
+    .update(challengeEnrollments)
+    .set(next as any)
+    .where(eq(challengeEnrollments.id, input.enrollmentId))
+    .returning();
+
+  const details: Record<string, unknown> = {
+    note: input.note ?? null,
+  };
+  if (input.action === "OVERRIDE") {
+    details.overrideStatus = input.overrideStatus ?? null;
+    details.overrideCurrentPhase = input.overrideCurrentPhase ?? null;
+    details.overrideCompletedAt = input.overrideCompletedAt ?? null;
+  }
+  if (input.action === "EXTEND_PHASE") {
+    details.extendDays = input.extendDays ?? null;
+  }
+
+  await appendChallengeEvent({
+    enrollmentId: input.enrollmentId,
+    eventType: `ADMIN_${input.action}`,
+    eventAt: ts,
+    actorType: "ADMIN",
+    actorUserId: input.actorUserId,
+    phaseNumber: Number((updated as any)?.currentPhase ?? enrollment.currentPhase ?? 1),
+    details,
+    note: input.note ?? null,
+  });
+
+  return { enrollment, updated };
 }
 
 function netProfitSqlAlias(alias: string): string {
@@ -394,6 +858,9 @@ const partnerInviteRateByIp = new Map<string, RateLimitEntry>();
 const PARTNER_INVITE_ADMIN_LIMIT = 5;
 const PARTNER_INVITE_IP_LIMIT = 20;
 const PARTNER_INVITE_WINDOW_MS = 60 * 60 * 1000;
+const challengeActionRateByAdmin = new Map<string, RateLimitEntry>();
+const CHALLENGE_ACTION_WINDOW_MS = 60 * 1000;
+const CHALLENGE_ACTION_LIMIT = 60;
 
 function cleanupRateLimitMap<K>(store: Map<K, RateLimitEntry>) {
   const now = Date.now();
@@ -406,11 +873,12 @@ function consumeRateLimit<K>(
   store: Map<K, RateLimitEntry>,
   key: K,
   limit: number,
+  windowMs = PARTNER_INVITE_WINDOW_MS,
 ): { allowed: boolean; retryAfterSec: number } {
   const now = Date.now();
   const current = store.get(key);
   if (!current || current.resetAtMs <= now) {
-    store.set(key, { count: 1, resetAtMs: now + PARTNER_INVITE_WINDOW_MS });
+    store.set(key, { count: 1, resetAtMs: now + windowMs });
     return { allowed: true, retryAfterSec: 0 };
   }
   if (current.count >= limit) {
@@ -423,9 +891,33 @@ function consumeRateLimit<K>(
   return { allowed: true, retryAfterSec: 0 };
 }
 
+function enforceChallengeAdminActionRateLimit(
+  req: any,
+  res: any,
+  actionKey: string,
+  limit = CHALLENGE_ACTION_LIMIT,
+): boolean {
+  const adminId = Number(req.session?.userId || 0);
+  const rate = consumeRateLimit(
+    challengeActionRateByAdmin,
+    `challenge-action:${adminId}:${actionKey}`,
+    limit,
+    CHALLENGE_ACTION_WINDOW_MS,
+  );
+  if (rate.allowed) return true;
+  res.setHeader("Retry-After", String(rate.retryAfterSec));
+  res.status(429).json({
+    message: "RATE_LIMITED",
+    code: "CHALLENGE_ADMIN_ACTION_RATE_LIMIT",
+    retryAfterSec: rate.retryAfterSec,
+  });
+  return false;
+}
+
 const partnerInviteLimiterCleanupHandle = setInterval(() => {
   cleanupRateLimitMap(partnerInviteRateByAdmin);
   cleanupRateLimitMap(partnerInviteRateByIp);
+  cleanupRateLimitMap(challengeActionRateByAdmin);
 }, 5 * 60 * 1000);
 (partnerInviteLimiterCleanupHandle as any)?.unref?.();
 
@@ -1439,24 +1931,15 @@ adminChallengesRouter.get("/", async (_req, res) => {
   try {
     const rows = await db.execute(sql`
       SELECT
-        c.id,
-        c.name,
-        c.description,
-        c.profit_target_pct,
-        c.max_daily_loss_pct,
-        c.max_total_loss_pct,
-        c.min_trading_days,
-        c.duration_days,
-        c.start_at,
-        c.end_at,
-        c.is_active,
-        c.created_by,
-        c.created_at,
-        c.updated_at,
+        c.*,
         COUNT(e.id)::int AS enrollment_count,
         SUM(CASE WHEN e.status = 'ACTIVE' THEN 1 ELSE 0 END)::int AS active_enrollment_count,
         SUM(CASE WHEN e.status = 'PASSED' THEN 1 ELSE 0 END)::int AS passed_count,
-        SUM(CASE WHEN e.status = 'FAILED' THEN 1 ELSE 0 END)::int AS failed_count
+        SUM(CASE WHEN e.status = 'FAILED' THEN 1 ELSE 0 END)::int AS failed_count,
+        CASE
+          WHEN COUNT(e.id) = 0 THEN 0::float8
+          ELSE SUM(CASE WHEN e.status = 'PASSED' THEN 1 ELSE 0 END)::float8 / COUNT(e.id)::float8
+        END AS pass_rate
       FROM challenges c
       LEFT JOIN challenge_enrollments e ON e.challenge_id = c.id
       GROUP BY c.id
@@ -1478,8 +1961,20 @@ adminChallengesRouter.post("/", async (req, res) => {
     }
 
     const data = parsed.data;
+    const cfg = await getSystemChallengeConfig();
+    const defaultEligibilityGate =
+      typeof cfg.challengeDefaultEligibility === "string"
+        ? cfg.challengeDefaultEligibility
+        : JSON.stringify(cfg.challengeDefaultEligibility ?? "EMAIL_VERIFIED");
     if (data.startAt != null && data.endAt != null && data.endAt < data.startAt) {
       return res.status(400).json({ message: "INVALID_TIME_WINDOW" });
+    }
+    if (data.enrollmentStartAt != null && data.enrollmentEndAt != null && data.enrollmentEndAt < data.enrollmentStartAt) {
+      return res.status(400).json({ message: "INVALID_ENROLLMENT_WINDOW" });
+    }
+    if (data.slug) {
+      const [slugRow] = await db.select({ id: challenges.id }).from(challenges).where(eq(challenges.slug, data.slug)).limit(1);
+      if (slugRow) return res.status(409).json({ message: "CHALLENGE_SLUG_EXISTS" });
     }
 
     const ts = nowSec();
@@ -1495,18 +1990,1429 @@ adminChallengesRouter.post("/", async (req, res) => {
         durationDays: data.durationDays,
         startAt: data.startAt ?? null,
         endAt: data.endAt ?? null,
+        enrollmentStartAt: data.enrollmentStartAt ?? null,
+        enrollmentEndAt: data.enrollmentEndAt ?? null,
+        visibleToTraders: data.visibleToTraders ?? true,
+        featuredOrder: data.featuredOrder ?? 0,
+        category: data.category ?? cfg.challengeDefaultCategory ?? "STANDARD",
+        tier: data.tier ?? cfg.challengeDefaultTier ?? "STARTER",
+        slug: data.slug ?? null,
+        tags: data.tags ?? "",
+        iconColor: data.iconColor ?? null,
+        virtualCapitalUsd: data.virtualCapitalUsd ?? 100000,
+        capitalMode: data.capitalMode ?? "VIRTUAL",
+        leverageMultiplier: data.leverageMultiplier ?? 1,
+        maxEnrollments: data.maxEnrollments ?? null,
+        maxActiveEnrollments: data.maxActiveEnrollments ?? null,
+        maxRetriesPerTrader: data.maxRetriesPerTrader ?? cfg.challengeDefaultMaxRetries ?? 3,
+        retryCooldownHours: data.retryCooldownHours ?? cfg.challengeDefaultRetryCooldownHours ?? 24,
+        eligibilityGate: data.eligibilityGate ?? defaultEligibilityGate,
+        prizePoolEnabled: data.prizePoolEnabled ?? false,
+        prizePoolUsd: data.prizePoolUsd ?? 0,
+        prizeDistributionJson: data.prizeDistributionJson ?? "{}",
+        prizeMinCompletions: data.prizeMinCompletions ?? 0,
+        prizeAwardTiming: data.prizeAwardTiming ?? "ON_COMPLETE",
+        badgesEnabled: data.badgesEnabled ?? false,
+        badgeOnPass: data.badgeOnPass ?? null,
+        badgeOnTop3: data.badgeOnTop3 ?? null,
+        certificateEnabled: data.certificateEnabled ?? false,
+        certificateDownloadable: data.certificateDownloadable ?? true,
+        certificateShareable: data.certificateShareable ?? true,
+        certificateTemplateId: data.certificateTemplateId ?? null,
+        certificateIncludeMetrics: data.certificateIncludeMetrics ?? true,
+        selectionBoostEnabled: data.selectionBoostEnabled ?? false,
+        selectionBoostPoints: data.selectionBoostPoints ?? 0,
+        partnerVisibilityOnPass: data.partnerVisibilityOnPass ?? true,
+        autoWatchlistTier: data.autoWatchlistTier ?? null,
+        progressionTierId: data.progressionTierId ?? null,
+        customRewardJson: data.customRewardJson ?? "{}",
+        leaderboardEnabled: data.leaderboardEnabled ?? true,
+        leaderboardAnonymize: data.leaderboardAnonymize ?? false,
+        leaderboardMaxVisible: data.leaderboardMaxVisible ?? 100,
         isActive: Boolean(data.isActive ?? false),
         createdBy: Number(req.session?.userId || 0) || null,
         createdAt: ts,
         updatedAt: ts,
+        updatedBy: String(req.session?.email || "admin"),
       })
       .returning();
+
+    const phases = data.phases && data.phases.length > 0
+      ? [...data.phases].sort((a, b) => a.phaseNumber - b.phaseNumber)
+      : [
+          {
+            phaseNumber: 1,
+            phaseName: "Phase 1",
+            profitTargetPct: data.profitTargetPct,
+            maxDailyLossPct: data.maxDailyLossPct,
+            maxTotalLossPct: data.maxTotalLossPct ?? null,
+            drawdownType: "STATIC",
+            durationDays: data.durationDays,
+            minTradingDays: data.minTradingDays ?? 0,
+            maxSingleDayProfitPct: null,
+            allowWeekendHolding: true,
+            allowNewsTrading: true,
+            restrictedSymbolsCsv: "",
+            maxConcurrentPositions: null,
+            maxLotSize: null,
+          },
+        ];
+
+    await db.insert(challengePhases).values(
+      phases.map((p) => ({
+        challengeId: created.id,
+        phaseNumber: p.phaseNumber,
+        phaseName: p.phaseName ?? `Phase ${p.phaseNumber}`,
+        profitTargetPct: p.profitTargetPct,
+        maxDailyLossPct: p.maxDailyLossPct,
+        maxTotalLossPct: p.maxTotalLossPct ?? null,
+        drawdownType: p.drawdownType ?? "STATIC",
+        durationDays: p.durationDays,
+        minTradingDays: p.minTradingDays ?? null,
+        maxSingleDayProfitPct: p.maxSingleDayProfitPct ?? null,
+        allowWeekendHolding: p.allowWeekendHolding ?? true,
+        allowNewsTrading: p.allowNewsTrading ?? true,
+        restrictedSymbolsCsv: p.restrictedSymbolsCsv ?? "",
+        maxConcurrentPositions: p.maxConcurrentPositions ?? null,
+        maxLotSize: p.maxLotSize ?? null,
+        createdAt: ts,
+        updatedAt: ts,
+      })),
+    );
 
     await appendRecruitmentAudit(req, "CHALLENGE_CREATE", { challengeId: created.id });
     return res.status(201).json({ ok: true, row: created });
   } catch (error) {
     console.error("[admin-scout] challenge create error:", error);
     return res.status(500).json({ message: "FAILED_TO_CREATE_CHALLENGE" });
+  }
+});
+
+adminChallengesRouter.get("/settings", async (_req, res) => {
+  try {
+    const [row] = await db.select().from(systemConfig).where(eq(systemConfig.id, 1)).limit(1);
+    return res.json({
+      ok: true,
+      settings: {
+        traderCompeteEnabled: Boolean((row as any)?.traderCompeteEnabled ?? false),
+        challengeAutoAdvancePhase: Boolean((row as any)?.challengeAutoAdvancePhase ?? true),
+        challengeEvalIntervalMin: clampInt((row as any)?.challengeEvalIntervalMin, 60, 1, 24 * 60),
+        challengeEvalMaxRows: clampInt((row as any)?.challengeEvalMaxRows, 500, 1, 5000),
+        challengeWarningThresholdPct: Number((row as any)?.challengeWarningThresholdPct ?? 0.8),
+        challengeDefaultDrawdownType: String((row as any)?.challengeDefaultDrawdownType ?? "STATIC"),
+        challengeDefaultCapitalMode: String((row as any)?.challengeDefaultCapitalMode ?? "VIRTUAL"),
+        challengeDefaultMaxRetries: clampInt((row as any)?.challengeDefaultMaxRetries, 3, 0, 100),
+        challengeDefaultRetryCooldownHours: clampInt(
+          (row as any)?.challengeDefaultRetryCooldownHours,
+          24,
+          0,
+          24 * 365,
+        ),
+        challengeDefaultEligibility: String((row as any)?.challengeDefaultEligibility ?? "EMAIL_VERIFIED"),
+        challengeDefaultCategory: String((row as any)?.challengeDefaultCategory ?? "STANDARD"),
+        challengeDefaultTier: String((row as any)?.challengeDefaultTier ?? "STARTER"),
+        challengeRewardsEnabled: Boolean((row as any)?.challengeRewardsEnabled ?? true),
+        challengePrizePoolsEnabled: Boolean((row as any)?.challengePrizePoolsEnabled ?? true),
+        challengeBadgesEnabled: Boolean((row as any)?.challengeBadgesEnabled ?? true),
+        challengeCertificatesEnabled: Boolean((row as any)?.challengeCertificatesEnabled ?? true),
+        challengeCertificatesDownloadable: Boolean((row as any)?.challengeCertificatesDownloadable ?? true),
+        challengeCertificatesShareable: Boolean((row as any)?.challengeCertificatesShareable ?? true),
+        challengeSelectionBoostEnabled: Boolean((row as any)?.challengeSelectionBoostEnabled ?? true),
+        challengeDefaultSelectionBoost: Number((row as any)?.challengeDefaultSelectionBoost ?? 0),
+        challengeProgressionEnabled: Boolean((row as any)?.challengeProgressionEnabled ?? true),
+        challengeCustomRewardsEnabled: Boolean((row as any)?.challengeCustomRewardsEnabled ?? false),
+        challengeNotifyOnEnroll: Boolean((row as any)?.challengeNotifyOnEnroll ?? true),
+        challengeNotifyOnPhaseWarning: Boolean((row as any)?.challengeNotifyOnPhaseWarning ?? true),
+        challengeNotifyOnBreach: Boolean((row as any)?.challengeNotifyOnBreach ?? true),
+        challengeNotifyOnPhasePass: Boolean((row as any)?.challengeNotifyOnPhasePass ?? true),
+        challengeNotifyOnFail: Boolean((row as any)?.challengeNotifyOnFail ?? true),
+        challengeNotifyOnComplete: Boolean((row as any)?.challengeNotifyOnComplete ?? true),
+        challengeNotifyOnBadgeAward: Boolean((row as any)?.challengeNotifyOnBadgeAward ?? true),
+        challengeNotifyOnPrizeAward: Boolean((row as any)?.challengeNotifyOnPrizeAward ?? true),
+        challengeNotifyOnCertIssue: Boolean((row as any)?.challengeNotifyOnCertIssue ?? true),
+        challengeNotifyOnTierUp: Boolean((row as any)?.challengeNotifyOnTierUp ?? true),
+        challengeNotifyOnAdminAction: Boolean((row as any)?.challengeNotifyOnAdminAction ?? true),
+        challengeNotifyViaMailbox: Boolean((row as any)?.challengeNotifyViaMailbox ?? false),
+        challengeMailboxCategory: String((row as any)?.challengeMailboxCategory ?? "SYSTEM"),
+        challengeLeaderboardEnabled: Boolean((row as any)?.challengeLeaderboardEnabled ?? true),
+        challengeLeaderboardRefreshSec: clampInt((row as any)?.challengeLeaderboardRefreshSec, 60, 10, 24 * 3600),
+      },
+    });
+  } catch (error) {
+    console.error("[admin-scout] challenge settings get error:", error);
+    return res.status(500).json({ message: "FAILED_TO_FETCH_CHALLENGE_SETTINGS" });
+  }
+});
+
+adminChallengesRouter.put("/settings", async (req, res) => {
+  try {
+    const parsed = challengeSettingsPatchSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({ message: "INVALID_PAYLOAD", errors: parsed.error.flatten() });
+    }
+    if (Object.keys(parsed.data).length === 0) {
+      return res.status(400).json({ message: "EMPTY_UPDATE" });
+    }
+
+    await db
+      .insert(systemConfig)
+      .values({ id: 1, updatedAt: nowSec(), updatedBy: String(req.session?.email || "admin") } as any)
+      .onConflictDoNothing();
+
+    const payload = parsed.data;
+    await db
+      .update(systemConfig)
+      .set({
+        traderCompeteEnabled: payload.traderCompeteEnabled,
+        challengeAutoAdvancePhase: payload.challengeAutoAdvancePhase,
+        challengeEvalIntervalMin: payload.challengeEvalIntervalMin,
+        challengeEvalMaxRows: payload.challengeEvalMaxRows,
+        challengeWarningThresholdPct: payload.challengeWarningThresholdPct,
+        challengeDefaultDrawdownType: payload.challengeDefaultDrawdownType,
+        challengeDefaultCapitalMode: payload.challengeDefaultCapitalMode,
+        challengeDefaultMaxRetries: payload.challengeDefaultMaxRetries,
+        challengeDefaultRetryCooldownHours: payload.challengeDefaultRetryCooldownHours,
+        challengeDefaultEligibility: payload.challengeDefaultEligibility,
+        challengeDefaultCategory: payload.challengeDefaultCategory,
+        challengeDefaultTier: payload.challengeDefaultTier,
+        challengeRewardsEnabled: payload.challengeRewardsEnabled,
+        challengePrizePoolsEnabled: payload.challengePrizePoolsEnabled,
+        challengeBadgesEnabled: payload.challengeBadgesEnabled,
+        challengeCertificatesEnabled: payload.challengeCertificatesEnabled,
+        challengeCertificatesDownloadable: payload.challengeCertificatesDownloadable,
+        challengeCertificatesShareable: payload.challengeCertificatesShareable,
+        challengeSelectionBoostEnabled: payload.challengeSelectionBoostEnabled,
+        challengeDefaultSelectionBoost: payload.challengeDefaultSelectionBoost,
+        challengeProgressionEnabled: payload.challengeProgressionEnabled,
+        challengeCustomRewardsEnabled: payload.challengeCustomRewardsEnabled,
+        challengeNotifyOnEnroll: payload.challengeNotifyOnEnroll,
+        challengeNotifyOnPhaseWarning: payload.challengeNotifyOnPhaseWarning,
+        challengeNotifyOnBreach: payload.challengeNotifyOnBreach,
+        challengeNotifyOnPhasePass: payload.challengeNotifyOnPhasePass,
+        challengeNotifyOnFail: payload.challengeNotifyOnFail,
+        challengeNotifyOnComplete: payload.challengeNotifyOnComplete,
+        challengeNotifyOnBadgeAward: payload.challengeNotifyOnBadgeAward,
+        challengeNotifyOnPrizeAward: payload.challengeNotifyOnPrizeAward,
+        challengeNotifyOnCertIssue: payload.challengeNotifyOnCertIssue,
+        challengeNotifyOnTierUp: payload.challengeNotifyOnTierUp,
+        challengeNotifyOnAdminAction: payload.challengeNotifyOnAdminAction,
+        challengeNotifyViaMailbox: payload.challengeNotifyViaMailbox,
+        challengeMailboxCategory: payload.challengeMailboxCategory,
+        challengeLeaderboardEnabled: payload.challengeLeaderboardEnabled,
+        challengeLeaderboardRefreshSec: payload.challengeLeaderboardRefreshSec,
+        updatedAt: nowSec(),
+        updatedBy: String(req.session?.email || "admin"),
+      })
+      .where(eq(systemConfig.id, 1));
+
+    await appendRecruitmentAudit(req, "CHALLENGE_SETTINGS_UPDATE", { patchKeys: Object.keys(payload) });
+    const [updated] = await db.select().from(systemConfig).where(eq(systemConfig.id, 1)).limit(1);
+    return res.json({ ok: true, settings: updated });
+  } catch (error) {
+    console.error("[admin-scout] challenge settings update error:", error);
+    return res.status(500).json({ message: "FAILED_TO_UPDATE_CHALLENGE_SETTINGS" });
+  }
+});
+
+adminChallengesRouter.post("/:id/duplicate", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ message: "INVALID_CHALLENGE_ID" });
+
+    const [base] = await db.select().from(challenges).where(eq(challenges.id, id)).limit(1);
+    if (!base) return res.status(404).json({ message: "CHALLENGE_NOT_FOUND" });
+
+    const phases = await db
+      .select()
+      .from(challengePhases)
+      .where(eq(challengePhases.challengeId, id))
+      .orderBy(asc(challengePhases.phaseNumber));
+
+    const ts = nowSec();
+    const fallbackSlug = `${String(base.slug || `challenge-${base.id}`)}-copy-${ts}`.toLowerCase();
+    const [copy] = await db
+      .insert(challenges)
+      .values({
+        ...(base as any),
+        id: undefined,
+        name: `${base.name} (Copy)`,
+        slug: fallbackSlug.slice(0, 120),
+        isActive: false,
+        createdAt: ts,
+        updatedAt: ts,
+        createdBy: Number(req.session?.userId || 0) || null,
+        updatedBy: String(req.session?.email || "admin"),
+      } as any)
+      .returning();
+
+    if (phases.length > 0) {
+      await db.insert(challengePhases).values(
+        phases.map((p) => ({
+          ...(p as any),
+          id: undefined,
+          challengeId: copy.id,
+          createdAt: ts,
+          updatedAt: ts,
+        })),
+      );
+    }
+
+    await appendRecruitmentAudit(req, "CHALLENGE_DUPLICATE", { sourceChallengeId: id, challengeId: copy.id });
+    return res.status(201).json({ ok: true, row: copy });
+  } catch (error) {
+    console.error("[admin-scout] challenge duplicate error:", error);
+    return res.status(500).json({ message: "FAILED_TO_DUPLICATE_CHALLENGE" });
+  }
+});
+
+adminChallengesRouter.put("/:id/archive", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ message: "INVALID_CHALLENGE_ID" });
+
+    const [updated] = await db
+      .update(challenges)
+      .set({
+        isActive: false,
+        visibleToTraders: false,
+        updatedAt: nowSec(),
+        updatedBy: String(req.session?.email || "admin"),
+      })
+      .where(eq(challenges.id, id))
+      .returning();
+
+    if (!updated) return res.status(404).json({ message: "CHALLENGE_NOT_FOUND" });
+    await appendRecruitmentAudit(req, "CHALLENGE_ARCHIVE", { challengeId: id });
+    return res.json({ ok: true, row: updated });
+  } catch (error) {
+    console.error("[admin-scout] challenge archive error:", error);
+    return res.status(500).json({ message: "FAILED_TO_ARCHIVE_CHALLENGE" });
+  }
+});
+
+adminChallengesRouter.get("/:id/phases", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ message: "INVALID_CHALLENGE_ID" });
+    const [challengeRow] = await db.select({ id: challenges.id }).from(challenges).where(eq(challenges.id, id)).limit(1);
+    if (!challengeRow) return res.status(404).json({ message: "CHALLENGE_NOT_FOUND" });
+    const rows = await db
+      .select()
+      .from(challengePhases)
+      .where(eq(challengePhases.challengeId, id))
+      .orderBy(asc(challengePhases.phaseNumber));
+    return res.json({ ok: true, rows });
+  } catch (error) {
+    console.error("[admin-scout] challenge phases get error:", error);
+    return res.status(500).json({ message: "FAILED_TO_FETCH_CHALLENGE_PHASES" });
+  }
+});
+
+adminChallengesRouter.post("/:id/phases", async (req, res) => {
+  try {
+    const challengeId = Number(req.params.id);
+    if (!Number.isInteger(challengeId) || challengeId <= 0) return res.status(400).json({ message: "INVALID_CHALLENGE_ID" });
+    const parsed = challengePhaseUpsertSchema.safeParse(req.body ?? {});
+    if (!parsed.success) return res.status(400).json({ message: "INVALID_PAYLOAD", errors: parsed.error.flatten() });
+
+    const [challengeRow] = await db.select({ id: challenges.id }).from(challenges).where(eq(challenges.id, challengeId)).limit(1);
+    if (!challengeRow) return res.status(404).json({ message: "CHALLENGE_NOT_FOUND" });
+
+    const data = parsed.data;
+    const ts = nowSec();
+    const existing = await db
+      .select({ id: challengePhases.id })
+      .from(challengePhases)
+      .where(and(eq(challengePhases.challengeId, challengeId), eq(challengePhases.phaseNumber, data.phaseNumber)))
+      .limit(1);
+
+    if (existing.length > 0) {
+      const [row] = await db
+        .update(challengePhases)
+        .set({
+          phaseName: data.phaseName ?? `Phase ${data.phaseNumber}`,
+          profitTargetPct: data.profitTargetPct,
+          maxDailyLossPct: data.maxDailyLossPct,
+          maxTotalLossPct: data.maxTotalLossPct ?? null,
+          drawdownType: data.drawdownType ?? "STATIC",
+          durationDays: data.durationDays,
+          minTradingDays: data.minTradingDays ?? null,
+          maxSingleDayProfitPct: data.maxSingleDayProfitPct ?? null,
+          allowWeekendHolding: data.allowWeekendHolding ?? true,
+          allowNewsTrading: data.allowNewsTrading ?? true,
+          restrictedSymbolsCsv: data.restrictedSymbolsCsv ?? "",
+          maxConcurrentPositions: data.maxConcurrentPositions ?? null,
+          maxLotSize: data.maxLotSize ?? null,
+          updatedAt: ts,
+        })
+        .where(eq(challengePhases.id, existing[0].id))
+        .returning();
+      await appendRecruitmentAudit(req, "CHALLENGE_PHASE_UPSERT", { challengeId, phaseNumber: data.phaseNumber, mode: "update" });
+      return res.json({ ok: true, row });
+    }
+
+    const [row] = await db
+      .insert(challengePhases)
+      .values({
+        challengeId,
+        phaseNumber: data.phaseNumber,
+        phaseName: data.phaseName ?? `Phase ${data.phaseNumber}`,
+        profitTargetPct: data.profitTargetPct,
+        maxDailyLossPct: data.maxDailyLossPct,
+        maxTotalLossPct: data.maxTotalLossPct ?? null,
+        drawdownType: data.drawdownType ?? "STATIC",
+        durationDays: data.durationDays,
+        minTradingDays: data.minTradingDays ?? null,
+        maxSingleDayProfitPct: data.maxSingleDayProfitPct ?? null,
+        allowWeekendHolding: data.allowWeekendHolding ?? true,
+        allowNewsTrading: data.allowNewsTrading ?? true,
+        restrictedSymbolsCsv: data.restrictedSymbolsCsv ?? "",
+        maxConcurrentPositions: data.maxConcurrentPositions ?? null,
+        maxLotSize: data.maxLotSize ?? null,
+        createdAt: ts,
+        updatedAt: ts,
+      })
+      .returning();
+
+    await appendRecruitmentAudit(req, "CHALLENGE_PHASE_UPSERT", { challengeId, phaseNumber: data.phaseNumber, mode: "insert" });
+    return res.status(201).json({ ok: true, row });
+  } catch (error) {
+    console.error("[admin-scout] challenge phase upsert error:", error);
+    return res.status(500).json({ message: "FAILED_TO_UPSERT_CHALLENGE_PHASE" });
+  }
+});
+
+adminChallengesRouter.delete("/:id/phases", async (req, res) => {
+  try {
+    const challengeId = Number(req.params.id);
+    if (!Number.isInteger(challengeId) || challengeId <= 0) {
+      return res.status(400).json({ message: "INVALID_CHALLENGE_ID" });
+    }
+
+    const [challengeRow] = await db.select({ id: challenges.id }).from(challenges).where(eq(challenges.id, challengeId)).limit(1);
+    if (!challengeRow) return res.status(404).json({ message: "CHALLENGE_NOT_FOUND" });
+
+    const deleted = await db.delete(challengePhases).where(eq(challengePhases.challengeId, challengeId)).returning({ id: challengePhases.id });
+
+    await appendRecruitmentAudit(req, "CHALLENGE_PHASES_DELETE_ALL", { challengeId, deleted: deleted.length });
+    return res.json({ ok: true, deleted: deleted.length });
+  } catch (error) {
+    console.error("[admin-scout] challenge phases delete-all error:", error);
+    return res.status(500).json({ message: "FAILED_TO_DELETE_CHALLENGE_PHASES" });
+  }
+});
+
+adminChallengesRouter.delete("/:id/phases/:phaseNumber", async (req, res) => {
+  try {
+    const challengeId = Number(req.params.id);
+    const phaseNumber = Number(req.params.phaseNumber);
+    if (!Number.isInteger(challengeId) || challengeId <= 0) return res.status(400).json({ message: "INVALID_CHALLENGE_ID" });
+    if (!Number.isInteger(phaseNumber) || phaseNumber <= 0) return res.status(400).json({ message: "INVALID_PHASE_NUMBER" });
+
+    const [deleted] = await db
+      .delete(challengePhases)
+      .where(and(eq(challengePhases.challengeId, challengeId), eq(challengePhases.phaseNumber, phaseNumber)))
+      .returning({ id: challengePhases.id });
+    if (!deleted) return res.status(404).json({ message: "PHASE_NOT_FOUND" });
+    await appendRecruitmentAudit(req, "CHALLENGE_PHASE_DELETE", { challengeId, phaseNumber });
+    return res.json({ ok: true });
+  } catch (error) {
+    console.error("[admin-scout] challenge phase delete error:", error);
+    return res.status(500).json({ message: "FAILED_TO_DELETE_CHALLENGE_PHASE" });
+  }
+});
+
+adminChallengesRouter.get("/enrollments", async (req, res) => {
+  try {
+    const limit = parsePositiveInt(req.query.limit, 100, 1000);
+    const offset = parseOffset(req.query.offset);
+    const challengeId = Number(req.query.challengeId ?? 0);
+    const userId = Number(req.query.userId ?? 0);
+    const status = safeString(req.query.status).trim().toUpperCase();
+    const phase = Number(req.query.phase ?? 0);
+
+    const clauses = [sql`1=1`];
+    if (Number.isInteger(challengeId) && challengeId > 0) clauses.push(sql`e.challenge_id = ${challengeId}`);
+    if (Number.isInteger(userId) && userId > 0) clauses.push(sql`e.user_id = ${userId}`);
+    if (status) clauses.push(sql`e.status = ${status}`);
+    if (Number.isInteger(phase) && phase > 0) clauses.push(sql`e.current_phase = ${phase}`);
+
+    const rows = await db.execute(sql`
+      SELECT
+        e.*,
+        c.name AS challenge_name,
+        c.slug AS challenge_slug,
+        u.email AS user_email,
+        u.username AS user_username,
+        COUNT(*) OVER()::int AS total_count
+      FROM challenge_enrollments e
+      INNER JOIN challenges c ON c.id = e.challenge_id
+      INNER JOIN users u ON u.id = e.user_id
+      WHERE ${sql.join(clauses, sql` AND `)}
+      ORDER BY e.updated_at DESC, e.id DESC
+      LIMIT ${limit} OFFSET ${offset}
+    `);
+
+    const outRows = ((rows as any).rows ?? []).map((row: any) => ({
+      ...row,
+      admin_notes: decryptChallengeAdminNote(row.admin_notes),
+    }));
+    const total = outRows.length > 0 ? Number(outRows[0].total_count ?? 0) : 0;
+    return res.json({
+      ok: true,
+      limit,
+      offset,
+      total,
+      hasMore: offset + outRows.length < total,
+      rows: outRows,
+    });
+  } catch (error) {
+    console.error("[admin-scout] challenge enrollments list error:", error);
+    return res.status(500).json({ message: "FAILED_TO_FETCH_CHALLENGE_ENROLLMENTS" });
+  }
+});
+
+adminChallengesRouter.get("/enrollments/:id", async (req, res) => {
+  try {
+    const enrollmentId = Number(req.params.id);
+    if (!Number.isInteger(enrollmentId) || enrollmentId <= 0) return res.status(400).json({ message: "INVALID_ENROLLMENT_ID" });
+
+    const [row] = await db
+      .select({
+        enrollment: challengeEnrollments,
+        challenge: challenges,
+        user: users,
+      })
+      .from(challengeEnrollments)
+      .innerJoin(challenges, eq(challenges.id, challengeEnrollments.challengeId))
+      .innerJoin(users, eq(users.id, challengeEnrollments.userId))
+      .where(eq(challengeEnrollments.id, enrollmentId))
+      .limit(1);
+
+    if (!row) return res.status(404).json({ message: "ENROLLMENT_NOT_FOUND" });
+
+    const phases = await db
+      .select()
+      .from(challengePhases)
+      .where(eq(challengePhases.challengeId, row.challenge.id))
+      .orderBy(asc(challengePhases.phaseNumber));
+    const events = await db
+      .select()
+      .from(challengeEnrollmentEvents)
+      .where(eq(challengeEnrollmentEvents.enrollmentId, enrollmentId))
+      .orderBy(desc(challengeEnrollmentEvents.id))
+      .limit(500);
+    const tradeRows = await db
+      .select({
+        id: trades.id,
+        symbolId: trades.symbolId,
+        type: trades.type,
+        openedAt: trades.openedAt,
+        closedAt: trades.closedAt,
+        status: trades.status,
+        netProfitUsd: trades.netProfitUsd,
+      })
+      .from(trades)
+      .where(
+        and(
+          eq(trades.userId, row.enrollment.userId),
+          gte(trades.openedAt, Number(row.enrollment.enrolledAt ?? 0)),
+          lte(trades.openedAt, Number(row.enrollment.completedAt ?? nowSec())),
+        ),
+      )
+      .orderBy(desc(trades.openedAt))
+      .limit(2000);
+
+    return res.json({
+      ok: true,
+      enrollment: {
+        ...row.enrollment,
+        adminNotes: decryptChallengeAdminNote((row.enrollment as any).adminNotes),
+      },
+      challenge: row.challenge,
+      user: {
+        id: row.user.id,
+        username: row.user.username,
+        email: row.user.email,
+      },
+      phases,
+      events,
+      trades: tradeRows,
+    });
+  } catch (error) {
+    console.error("[admin-scout] challenge enrollment detail error:", error);
+    return res.status(500).json({ message: "FAILED_TO_FETCH_CHALLENGE_ENROLLMENT" });
+  }
+});
+
+adminChallengesRouter.get("/enrollments/:id/events", async (req, res) => {
+  try {
+    const enrollmentId = Number(req.params.id);
+    if (!Number.isInteger(enrollmentId) || enrollmentId <= 0) return res.status(400).json({ message: "INVALID_ENROLLMENT_ID" });
+
+    const [exists] = await db
+      .select({ id: challengeEnrollments.id })
+      .from(challengeEnrollments)
+      .where(eq(challengeEnrollments.id, enrollmentId))
+      .limit(1);
+    if (!exists) return res.status(404).json({ message: "ENROLLMENT_NOT_FOUND" });
+
+    const rows = await db
+      .select()
+      .from(challengeEnrollmentEvents)
+      .where(eq(challengeEnrollmentEvents.enrollmentId, enrollmentId))
+      .orderBy(desc(challengeEnrollmentEvents.id))
+      .limit(2000);
+
+    return res.json({ ok: true, rows });
+  } catch (error) {
+    console.error("[admin-scout] challenge enrollment events error:", error);
+    return res.status(500).json({ message: "FAILED_TO_FETCH_CHALLENGE_ENROLLMENT_EVENTS" });
+  }
+});
+
+adminChallengesRouter.post("/enrollments/:id/notify", async (req, res) => {
+  try {
+    const enrollmentId = Number(req.params.id);
+    if (!Number.isInteger(enrollmentId) || enrollmentId <= 0) return res.status(400).json({ message: "INVALID_ENROLLMENT_ID" });
+    if (!enforceChallengeAdminActionRateLimit(req, res, "ENROLLMENT_NOTIFY", 30)) return;
+    const parsed = challengeEnrollmentNotifySchema.safeParse(req.body ?? {});
+    if (!parsed.success) return res.status(400).json({ message: "INVALID_PAYLOAD", errors: parsed.error.flatten() });
+
+    const [row] = await db
+      .select({
+        enrollmentId: challengeEnrollments.id,
+        userId: challengeEnrollments.userId,
+        challengeId: challengeEnrollments.challengeId,
+        challengeName: challenges.name,
+      })
+      .from(challengeEnrollments)
+      .innerJoin(challenges, eq(challenges.id, challengeEnrollments.challengeId))
+      .where(eq(challengeEnrollments.id, enrollmentId))
+      .limit(1);
+    if (!row) return res.status(404).json({ message: "ENROLLMENT_NOT_FOUND" });
+
+    const sourceEvent = "CHALLENGE_ADMIN_MANUAL_NOTIFY";
+    await createNotification({
+      userId: Number(row.userId),
+      type: "CHALLENGE",
+      severity: parsed.data.severity ?? "INFO",
+      title: parsed.data.title,
+      message: parsed.data.message,
+      sourceEvent,
+      link: `/compete/enrollment/${enrollmentId}`,
+    });
+
+    if (parsed.data.sendMailbox) {
+      const cfg = await getSystemChallengeConfig();
+      if (cfg.challengeNotifyViaMailbox) {
+        await createMailboxThreadWithMessage({
+          createdByUserId: Number(req.session?.userId || 0) || null,
+          senderUserId: null,
+          recipientUserIds: [Number(row.userId)],
+          subject: parsed.data.title,
+          body: parsed.data.message,
+          category: normalizeChallengeMailboxCategory(cfg.challengeMailboxCategory),
+          allowReply: false,
+          messageType: "CHALLENGE_ADMIN_ACTION",
+          metadata: {
+            sourceEvent,
+            challengeId: Number(row.challengeId),
+            enrollmentId,
+            senderAdminId: Number(req.session?.userId || 0) || null,
+          },
+        });
+      }
+    }
+
+    await appendChallengeEvent({
+      enrollmentId,
+      eventType: "ADMIN_MANUAL_NOTIFICATION",
+      actorType: "ADMIN",
+      actorUserId: Number(req.session?.userId || 0) || null,
+      details: {
+        title: parsed.data.title,
+        severity: parsed.data.severity ?? "INFO",
+        mailbox: Boolean(parsed.data.sendMailbox),
+      },
+      note: parsed.data.message,
+    });
+
+    await appendRecruitmentAudit(req, "CHALLENGE_ENROLLMENT_NOTIFY", {
+      enrollmentId,
+      challengeId: Number(row.challengeId),
+      userId: Number(row.userId),
+      severity: parsed.data.severity ?? "INFO",
+      mailbox: Boolean(parsed.data.sendMailbox),
+    });
+
+    return res.json({ ok: true });
+  } catch (error) {
+    console.error("[admin-scout] challenge enrollment notify error:", error);
+    return res.status(500).json({ message: "FAILED_TO_NOTIFY_CHALLENGE_ENROLLMENT" });
+  }
+});
+
+adminChallengesRouter.put("/enrollments/:id/override", async (req, res) => {
+  try {
+    const enrollmentId = Number(req.params.id);
+    if (!Number.isInteger(enrollmentId) || enrollmentId <= 0) return res.status(400).json({ message: "INVALID_ENROLLMENT_ID" });
+    if (!enforceChallengeAdminActionRateLimit(req, res, "ENROLLMENT_OVERRIDE")) return;
+    const parsed = challengeEnrollmentOverrideSchema.safeParse(req.body ?? {});
+    if (!parsed.success) return res.status(400).json({ message: "INVALID_PAYLOAD", errors: parsed.error.flatten() });
+
+    const result = await applyChallengeEnrollmentAdminAction({
+      enrollmentId,
+      action: "OVERRIDE",
+      note: parsed.data.reason,
+      actorUserId: Number(req.session?.userId || 0) || null,
+      overrideStatus: parsed.data.status,
+      overrideCompletedAt: parsed.data.completedAt,
+      overrideCurrentPhase: parsed.data.currentPhase,
+    });
+
+    await appendRecruitmentAudit(req, "CHALLENGE_ENROLLMENT_OVERRIDE", {
+      enrollmentId,
+      challengeId: result.enrollment.challengeId,
+      status: parsed.data.status,
+    });
+
+    const [challengeRow] = await db
+      .select({ name: challenges.name })
+      .from(challenges)
+      .where(eq(challenges.id, Number(result.enrollment.challengeId)))
+      .limit(1);
+    await notifyChallengeTrader({
+      userId: Number(result.enrollment.userId),
+      challengeId: Number(result.enrollment.challengeId),
+      enrollmentId,
+      title: "Challenge status updated",
+      message: `An admin set your ${challengeRow?.name ?? "challenge"} enrollment to ${parsed.data.status}.`,
+      sourceEvent: "CHALLENGE_ADMIN_OVERRIDE",
+      severity: "INFO",
+      mailboxRecommended: true,
+    });
+
+    return res.json({ ok: true, row: result.updated });
+  } catch (error: any) {
+    if (String(error?.message || "") === "ENROLLMENT_NOT_FOUND") return res.status(404).json({ message: "ENROLLMENT_NOT_FOUND" });
+    console.error("[admin-scout] challenge enrollment override error:", error);
+    return res.status(500).json({ message: "FAILED_TO_OVERRIDE_CHALLENGE_ENROLLMENT" });
+  }
+});
+
+adminChallengesRouter.put("/enrollments/:id/extend", async (req, res) => {
+  try {
+    const enrollmentId = Number(req.params.id);
+    if (!Number.isInteger(enrollmentId) || enrollmentId <= 0) return res.status(400).json({ message: "INVALID_ENROLLMENT_ID" });
+    if (!enforceChallengeAdminActionRateLimit(req, res, "ENROLLMENT_EXTEND")) return;
+    const parsed = challengeEnrollmentExtendSchema.safeParse(req.body ?? {});
+    if (!parsed.success) return res.status(400).json({ message: "INVALID_PAYLOAD", errors: parsed.error.flatten() });
+
+    const result = await applyChallengeEnrollmentAdminAction({
+      enrollmentId,
+      action: "EXTEND_PHASE",
+      note: parsed.data.reason,
+      extendDays: parsed.data.extendDays,
+      actorUserId: Number(req.session?.userId || 0) || null,
+    });
+
+    await appendRecruitmentAudit(req, "CHALLENGE_ENROLLMENT_EXTEND", {
+      enrollmentId,
+      challengeId: result.enrollment.challengeId,
+      extendDays: parsed.data.extendDays,
+    });
+
+    const [challengeRow] = await db
+      .select({ name: challenges.name })
+      .from(challenges)
+      .where(eq(challenges.id, Number(result.enrollment.challengeId)))
+      .limit(1);
+    await notifyChallengeTrader({
+      userId: Number(result.enrollment.userId),
+      challengeId: Number(result.enrollment.challengeId),
+      enrollmentId,
+      title: "Challenge phase extended",
+      message: `An admin extended your ${challengeRow?.name ?? "challenge"} phase by ${parsed.data.extendDays} day${parsed.data.extendDays === 1 ? "" : "s"}.`,
+      sourceEvent: "CHALLENGE_ADMIN_EXTEND",
+      severity: "INFO",
+      mailboxRecommended: false,
+    });
+
+    return res.json({ ok: true, row: result.updated });
+  } catch (error: any) {
+    if (String(error?.message || "") === "ENROLLMENT_NOT_FOUND") return res.status(404).json({ message: "ENROLLMENT_NOT_FOUND" });
+    console.error("[admin-scout] challenge enrollment extend error:", error);
+    return res.status(500).json({ message: "FAILED_TO_EXTEND_CHALLENGE_ENROLLMENT" });
+  }
+});
+
+adminChallengesRouter.put("/enrollments/:id/advance", async (req, res) => {
+  try {
+    const enrollmentId = Number(req.params.id);
+    if (!Number.isInteger(enrollmentId) || enrollmentId <= 0) return res.status(400).json({ message: "INVALID_ENROLLMENT_ID" });
+    if (!enforceChallengeAdminActionRateLimit(req, res, "ENROLLMENT_ADVANCE")) return;
+    const note = typeof req.body?.reason === "string" ? String(req.body.reason).slice(0, 4000) : null;
+    const result = await applyChallengeEnrollmentAdminAction({
+      enrollmentId,
+      action: "ADVANCE_PHASE",
+      note,
+      actorUserId: Number(req.session?.userId || 0) || null,
+    });
+
+    await appendRecruitmentAudit(req, "CHALLENGE_ENROLLMENT_ADVANCE", {
+      enrollmentId,
+      challengeId: result.enrollment.challengeId,
+      phase: Number(result.updated.currentPhase ?? 1),
+    });
+
+    const [challengeRow] = await db
+      .select({ name: challenges.name })
+      .from(challenges)
+      .where(eq(challenges.id, Number(result.enrollment.challengeId)))
+      .limit(1);
+    await notifyChallengeTrader({
+      userId: Number(result.enrollment.userId),
+      challengeId: Number(result.enrollment.challengeId),
+      enrollmentId,
+      title: "Challenge phase advanced",
+      message: `An admin advanced you to phase ${Number(result.updated.currentPhase ?? 1)} in ${challengeRow?.name ?? "your challenge"}.`,
+      sourceEvent: "CHALLENGE_ADMIN_ADVANCE",
+      severity: "INFO",
+      mailboxRecommended: false,
+    });
+
+    return res.json({ ok: true, row: result.updated });
+  } catch (error: any) {
+    if (String(error?.message || "") === "ENROLLMENT_NOT_FOUND") return res.status(404).json({ message: "ENROLLMENT_NOT_FOUND" });
+    console.error("[admin-scout] challenge enrollment advance error:", error);
+    return res.status(500).json({ message: "FAILED_TO_ADVANCE_CHALLENGE_ENROLLMENT" });
+  }
+});
+
+adminChallengesRouter.put("/enrollments/:id/reset", async (req, res) => {
+  try {
+    const enrollmentId = Number(req.params.id);
+    if (!Number.isInteger(enrollmentId) || enrollmentId <= 0) return res.status(400).json({ message: "INVALID_ENROLLMENT_ID" });
+    if (!enforceChallengeAdminActionRateLimit(req, res, "ENROLLMENT_RESET")) return;
+    const note = typeof req.body?.reason === "string" ? String(req.body.reason).slice(0, 4000) : null;
+    const result = await applyChallengeEnrollmentAdminAction({
+      enrollmentId,
+      action: "RESET_PHASE",
+      note,
+      actorUserId: Number(req.session?.userId || 0) || null,
+    });
+    await appendRecruitmentAudit(req, "CHALLENGE_ENROLLMENT_RESET", {
+      enrollmentId,
+      challengeId: result.enrollment.challengeId,
+    });
+    const [challengeRow] = await db
+      .select({ name: challenges.name })
+      .from(challenges)
+      .where(eq(challenges.id, Number(result.enrollment.challengeId)))
+      .limit(1);
+    await notifyChallengeTrader({
+      userId: Number(result.enrollment.userId),
+      challengeId: Number(result.enrollment.challengeId),
+      enrollmentId,
+      title: "Challenge reset",
+      message: `An admin reset your ${challengeRow?.name ?? "challenge"} enrollment to phase 1.`,
+      sourceEvent: "CHALLENGE_ADMIN_RESET",
+      severity: "INFO",
+      mailboxRecommended: false,
+    });
+    return res.json({ ok: true, row: result.updated });
+  } catch (error: any) {
+    if (String(error?.message || "") === "ENROLLMENT_NOT_FOUND") return res.status(404).json({ message: "ENROLLMENT_NOT_FOUND" });
+    console.error("[admin-scout] challenge enrollment reset error:", error);
+    return res.status(500).json({ message: "FAILED_TO_RESET_CHALLENGE_ENROLLMENT" });
+  }
+});
+
+adminChallengesRouter.put("/enrollments/:id/disqualify", async (req, res) => {
+  try {
+    const enrollmentId = Number(req.params.id);
+    if (!Number.isInteger(enrollmentId) || enrollmentId <= 0) return res.status(400).json({ message: "INVALID_ENROLLMENT_ID" });
+    if (!enforceChallengeAdminActionRateLimit(req, res, "ENROLLMENT_DISQUALIFY")) return;
+    const note = typeof req.body?.reason === "string" ? String(req.body.reason).slice(0, 4000) : null;
+    const result = await applyChallengeEnrollmentAdminAction({
+      enrollmentId,
+      action: "DISQUALIFY",
+      note,
+      actorUserId: Number(req.session?.userId || 0) || null,
+    });
+    await appendRecruitmentAudit(req, "CHALLENGE_ENROLLMENT_DISQUALIFY", {
+      enrollmentId,
+      challengeId: result.enrollment.challengeId,
+    });
+    const [challengeRow] = await db
+      .select({ name: challenges.name })
+      .from(challenges)
+      .where(eq(challenges.id, Number(result.enrollment.challengeId)))
+      .limit(1);
+    await notifyChallengeTrader({
+      userId: Number(result.enrollment.userId),
+      challengeId: Number(result.enrollment.challengeId),
+      enrollmentId,
+      title: "Challenge disqualified",
+      message: `An admin disqualified your ${challengeRow?.name ?? "challenge"} enrollment.`,
+      sourceEvent: "CHALLENGE_ADMIN_DISQUALIFY",
+      severity: "WARNING",
+      mailboxRecommended: true,
+    });
+    return res.json({ ok: true, row: result.updated });
+  } catch (error: any) {
+    if (String(error?.message || "") === "ENROLLMENT_NOT_FOUND") return res.status(404).json({ message: "ENROLLMENT_NOT_FOUND" });
+    console.error("[admin-scout] challenge enrollment disqualify error:", error);
+    return res.status(500).json({ message: "FAILED_TO_DISQUALIFY_CHALLENGE_ENROLLMENT" });
+  }
+});
+
+adminChallengesRouter.get("/analytics/summary", async (_req, res) => {
+  try {
+    const [summary] = await db.execute(sql`
+      SELECT
+        COUNT(*)::int AS total_enrollments,
+        SUM(CASE WHEN e.status = 'ACTIVE' THEN 1 ELSE 0 END)::int AS active_enrollments,
+        SUM(CASE WHEN e.status = 'PASSED' THEN 1 ELSE 0 END)::int AS passed_enrollments,
+        SUM(CASE WHEN e.status = 'FAILED' THEN 1 ELSE 0 END)::int AS failed_enrollments,
+        AVG(CASE WHEN e.completed_at IS NOT NULL THEN (e.completed_at - e.enrolled_at) END)::float8 AS avg_time_to_complete_sec
+      FROM challenge_enrollments e
+    ` as any);
+
+    const [prizes] = await db
+      .select({ total: sql<number>`COALESCE(SUM(${challengePrizeAwards.prizeAmountUsd}), 0)::float8` })
+      .from(challengePrizeAwards)
+      .where(inArray(challengePrizeAwards.status, ["APPROVED", "PAID"] as any));
+
+    const [conversions] = await db
+      .select({ c: count() })
+      .from(recruitingPipeline)
+      .where(eq(recruitingPipeline.isPartnerVisible, true));
+
+    const [badgeCount] = await db.select({ c: count() }).from(challengeBadgeAwards);
+    const [certificateCount] = await db.select({ c: count() }).from(challengeCertificates);
+    const [boostCount] = await db.select({ c: count() }).from(challengeSelectionBoosts);
+    const [progressionCount] = await db.select({ c: count() }).from(challengeUserProgression);
+
+    const total = Number((summary as any)?.total_enrollments ?? 0);
+    const passed = Number((summary as any)?.passed_enrollments ?? 0);
+    const passRate = total > 0 ? passed / total : 0;
+
+    return res.json({
+      ok: true,
+      cards: {
+        totalEnrollments: total,
+        activeEnrollments: Number((summary as any)?.active_enrollments ?? 0),
+        passRate,
+        avgTimeToCompleteSec: Number((summary as any)?.avg_time_to_complete_sec ?? 0),
+        prizeMoneyAwardedUsd: Number(prizes?.total ?? 0),
+        selectionConversions: Number(conversions?.c ?? 0),
+        badgesAwarded: Number(badgeCount?.c ?? 0),
+        certificatesIssued: Number(certificateCount?.c ?? 0),
+        boostsApplied: Number(boostCount?.c ?? 0),
+        progressionUsers: Number(progressionCount?.c ?? 0),
+      },
+    });
+  } catch (error) {
+    console.error("[admin-scout] challenge analytics summary error:", error);
+    return res.status(500).json({ message: "FAILED_TO_FETCH_CHALLENGE_ANALYTICS_SUMMARY" });
+  }
+});
+
+adminChallengesRouter.get("/analytics/funnel", async (_req, res) => {
+  try {
+    const rows = await db.execute(sql`
+      SELECT
+        c.id AS challenge_id,
+        c.name AS challenge_name,
+        COUNT(e.id)::int AS enrollments,
+        SUM(CASE WHEN e.status = 'ACTIVE' THEN 1 ELSE 0 END)::int AS active_count,
+        SUM(CASE WHEN e.status = 'PASSED' THEN 1 ELSE 0 END)::int AS passed_count,
+        SUM(CASE WHEN e.status = 'FAILED' THEN 1 ELSE 0 END)::int AS failed_count,
+        SUM(CASE WHEN e.status = 'WITHDRAWN' THEN 1 ELSE 0 END)::int AS withdrawn_count
+      FROM challenges c
+      LEFT JOIN challenge_enrollments e ON e.challenge_id = c.id
+      GROUP BY c.id
+      ORDER BY c.created_at DESC, c.id DESC
+    `);
+    return res.json({ ok: true, rows: (rows as any).rows ?? [] });
+  } catch (error) {
+    console.error("[admin-scout] challenge analytics funnel error:", error);
+    return res.status(500).json({ message: "FAILED_TO_FETCH_CHALLENGE_ANALYTICS_FUNNEL" });
+  }
+});
+
+adminChallengesRouter.get("/analytics/pass-fail-trend", async (_req, res) => {
+  try {
+    const rows = await db.execute(sql`
+      SELECT
+        to_char(to_timestamp(e.completed_at), 'YYYY-MM-DD') AS day,
+        SUM(CASE WHEN e.status = 'PASSED' THEN 1 ELSE 0 END)::int AS passed_count,
+        SUM(CASE WHEN e.status = 'FAILED' THEN 1 ELSE 0 END)::int AS failed_count,
+        SUM(CASE WHEN e.status = 'WITHDRAWN' THEN 1 ELSE 0 END)::int AS withdrawn_count,
+        COUNT(*)::int AS completed_count
+      FROM challenge_enrollments e
+      WHERE e.completed_at IS NOT NULL
+      GROUP BY 1
+      ORDER BY 1 DESC
+      LIMIT 60
+    `);
+    return res.json({ ok: true, rows: (rows as any).rows ?? [] });
+  } catch (error) {
+    console.error("[admin-scout] challenge analytics pass-fail trend error:", error);
+    return res.status(500).json({ message: "FAILED_TO_FETCH_CHALLENGE_ANALYTICS_PASS_FAIL_TREND" });
+  }
+});
+
+adminChallengesRouter.get("/analytics/breach-distribution", async (_req, res) => {
+  try {
+    const rows = await db.execute(sql`
+      SELECT
+        event_type,
+        COUNT(*)::int AS c
+      FROM challenge_enrollment_events
+      WHERE event_type LIKE 'CHALLENGE_FAIL_%'
+      GROUP BY event_type
+      ORDER BY c DESC, event_type ASC
+      LIMIT 50
+    `);
+    return res.json({ ok: true, rows: (rows as any).rows ?? [] });
+  } catch (error) {
+    console.error("[admin-scout] challenge analytics breach distribution error:", error);
+    return res.status(500).json({ message: "FAILED_TO_FETCH_CHALLENGE_ANALYTICS_BREACH_DISTRIBUTION" });
+  }
+});
+
+adminChallengesRouter.get("/analytics/top-performers", async (_req, res) => {
+  try {
+    const rows = await db.execute(sql`
+      SELECT
+        e.id AS enrollment_id,
+        e.challenge_id,
+        c.name AS challenge_name,
+        e.user_id,
+        u.username,
+        e.status,
+        e.current_phase,
+        COALESCE(e.current_pnl_pct, 0)::float8 AS pnl_pct,
+        COALESCE(e.trading_days, 0)::int AS trading_days,
+        COALESCE(e.max_daily_loss_hit, 0)::float8 AS max_daily_loss_hit
+      FROM challenge_enrollments e
+      INNER JOIN challenges c ON c.id = e.challenge_id
+      INNER JOIN users u ON u.id = e.user_id
+      WHERE e.status IN ('ACTIVE', 'PASSED')
+      ORDER BY pnl_pct DESC, trading_days DESC, e.id ASC
+      LIMIT 50
+    `);
+    return res.json({ ok: true, rows: (rows as any).rows ?? [] });
+  } catch (error) {
+    console.error("[admin-scout] challenge analytics top performers error:", error);
+    return res.status(500).json({ message: "FAILED_TO_FETCH_CHALLENGE_ANALYTICS_TOP_PERFORMERS" });
+  }
+});
+
+adminChallengesRouter.get("/analytics/popularity", async (_req, res) => {
+  try {
+    const rows = await db.execute(sql`
+      SELECT
+        c.id AS challenge_id,
+        c.name AS challenge_name,
+        COUNT(e.id)::int AS enrollment_count,
+        SUM(CASE WHEN e.status = 'ACTIVE' THEN 1 ELSE 0 END)::int AS active_count,
+        SUM(CASE WHEN e.status = 'PASSED' THEN 1 ELSE 0 END)::int AS passed_count
+      FROM challenges c
+      LEFT JOIN challenge_enrollments e ON e.challenge_id = c.id
+      GROUP BY c.id
+      ORDER BY enrollment_count DESC, c.id DESC
+      LIMIT 100
+    `);
+    return res.json({ ok: true, rows: (rows as any).rows ?? [] });
+  } catch (error) {
+    console.error("[admin-scout] challenge analytics popularity error:", error);
+    return res.status(500).json({ message: "FAILED_TO_FETCH_CHALLENGE_ANALYTICS_POPULARITY" });
+  }
+});
+
+adminChallengesRouter.get("/analytics/reward-distribution", async (_req, res) => {
+  try {
+    const rows = await db.execute(sql`
+      SELECT
+        c.id AS challenge_id,
+        c.name AS challenge_name,
+        COALESCE(pa.prize_count, 0)::int AS prize_count,
+        COALESCE(pa.prize_sum_usd, 0)::float8 AS prize_sum_usd,
+        COALESCE(ba.badge_count, 0)::int AS badge_count,
+        COALESCE(cert.cert_count, 0)::int AS cert_count,
+        COALESCE(sb.boost_count, 0)::int AS boost_count
+      FROM challenges c
+      LEFT JOIN (
+        SELECT
+          challenge_id,
+          COUNT(*)::int AS prize_count,
+          COALESCE(SUM(prize_amount_usd), 0)::float8 AS prize_sum_usd
+        FROM challenge_prize_awards
+        WHERE status IN ('PENDING', 'APPROVED', 'PAID')
+        GROUP BY challenge_id
+      ) pa ON pa.challenge_id = c.id
+      LEFT JOIN (
+        SELECT challenge_id, COUNT(*)::int AS badge_count
+        FROM challenge_badge_awards
+        GROUP BY challenge_id
+      ) ba ON ba.challenge_id = c.id
+      LEFT JOIN (
+        SELECT challenge_id, COUNT(*)::int AS cert_count
+        FROM challenge_certificates
+        GROUP BY challenge_id
+      ) cert ON cert.challenge_id = c.id
+      LEFT JOIN (
+        SELECT challenge_id, COUNT(*)::int AS boost_count
+        FROM challenge_selection_boosts
+        GROUP BY challenge_id
+      ) sb ON sb.challenge_id = c.id
+      ORDER BY c.created_at DESC, c.id DESC
+      LIMIT 100
+    `);
+    return res.json({ ok: true, rows: (rows as any).rows ?? [] });
+  } catch (error) {
+    console.error("[admin-scout] challenge analytics reward distribution error:", error);
+    return res.status(500).json({ message: "FAILED_TO_FETCH_CHALLENGE_ANALYTICS_REWARD_DISTRIBUTION" });
+  }
+});
+
+adminChallengesRouter.get("/badges", async (_req, res) => {
+  try {
+    const rows = await db.select().from(challengeBadges).orderBy(desc(challengeBadges.createdAt), desc(challengeBadges.id));
+    return res.json({ ok: true, rows });
+  } catch (error) {
+    console.error("[admin-scout] challenge badges list error:", error);
+    return res.status(500).json({ message: "FAILED_TO_FETCH_CHALLENGE_BADGES" });
+  }
+});
+
+adminChallengesRouter.post("/badges", async (req, res) => {
+  try {
+    const parsed = challengeBadgeUpsertSchema.safeParse(req.body ?? {});
+    if (!parsed.success) return res.status(400).json({ message: "INVALID_PAYLOAD", errors: parsed.error.flatten() });
+    const data = parsed.data;
+    const [row] = await db
+      .insert(challengeBadges)
+      .values({
+        key: data.key,
+        name: data.name,
+        description: data.description ?? null,
+        iconUrl: data.iconUrl ?? null,
+        iconEmoji: data.iconEmoji ?? null,
+        category: data.category ?? "GENERAL",
+        criteriaJson: data.criteriaJson ?? "{}",
+        isActive: data.isActive ?? true,
+        createdAt: nowSec(),
+      })
+      .returning();
+    await appendRecruitmentAudit(req, "CHALLENGE_BADGE_CREATE", { badgeId: row.id, key: row.key });
+    return res.status(201).json({ ok: true, row });
+  } catch (error) {
+    console.error("[admin-scout] challenge badge create error:", error);
+    return res.status(500).json({ message: "FAILED_TO_CREATE_CHALLENGE_BADGE" });
+  }
+});
+
+adminChallengesRouter.put("/badges/:id", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ message: "INVALID_BADGE_ID" });
+    const parsed = challengeBadgeUpsertSchema.partial().safeParse(req.body ?? {});
+    if (!parsed.success) return res.status(400).json({ message: "INVALID_PAYLOAD", errors: parsed.error.flatten() });
+    if (Object.keys(parsed.data).length === 0) return res.status(400).json({ message: "EMPTY_UPDATE" });
+    const [row] = await db
+      .update(challengeBadges)
+      .set({
+        key: parsed.data.key,
+        name: parsed.data.name,
+        description: parsed.data.description,
+        iconUrl: parsed.data.iconUrl,
+        iconEmoji: parsed.data.iconEmoji,
+        category: parsed.data.category,
+        criteriaJson: parsed.data.criteriaJson,
+        isActive: parsed.data.isActive,
+      })
+      .where(eq(challengeBadges.id, id))
+      .returning();
+    if (!row) return res.status(404).json({ message: "BADGE_NOT_FOUND" });
+    await appendRecruitmentAudit(req, "CHALLENGE_BADGE_UPDATE", { badgeId: id, patchKeys: Object.keys(parsed.data) });
+    return res.json({ ok: true, row });
+  } catch (error) {
+    console.error("[admin-scout] challenge badge update error:", error);
+    return res.status(500).json({ message: "FAILED_TO_UPDATE_CHALLENGE_BADGE" });
+  }
+});
+
+adminChallengesRouter.delete("/badges/:id", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ message: "INVALID_BADGE_ID" });
+    const [row] = await db.delete(challengeBadges).where(eq(challengeBadges.id, id)).returning({ id: challengeBadges.id });
+    if (!row) return res.status(404).json({ message: "BADGE_NOT_FOUND" });
+    await appendRecruitmentAudit(req, "CHALLENGE_BADGE_DELETE", { badgeId: id });
+    return res.json({ ok: true });
+  } catch (error) {
+    console.error("[admin-scout] challenge badge delete error:", error);
+    return res.status(500).json({ message: "FAILED_TO_DELETE_CHALLENGE_BADGE" });
+  }
+});
+
+adminChallengesRouter.get("/certificate-templates", async (_req, res) => {
+  try {
+    const rows = await db
+      .select()
+      .from(challengeCertificateTemplates)
+      .orderBy(desc(challengeCertificateTemplates.updatedAt), desc(challengeCertificateTemplates.id));
+    return res.json({ ok: true, rows });
+  } catch (error) {
+    console.error("[admin-scout] challenge certificate templates list error:", error);
+    return res.status(500).json({ message: "FAILED_TO_FETCH_CHALLENGE_CERTIFICATE_TEMPLATES" });
+  }
+});
+
+adminChallengesRouter.post("/certificate-templates", async (req, res) => {
+  try {
+    const parsed = challengeCertificateTemplateUpsertSchema.safeParse(req.body ?? {});
+    if (!parsed.success) return res.status(400).json({ message: "INVALID_PAYLOAD", errors: parsed.error.flatten() });
+    const data = parsed.data;
+    const ts = nowSec();
+    const [row] = await db
+      .insert(challengeCertificateTemplates)
+      .values({
+        name: data.name,
+        headerText: data.headerText ?? "",
+        bodyText: data.bodyText ?? "",
+        includeMetrics: data.includeMetrics ?? true,
+        includeVerificationCode: data.includeVerificationCode ?? true,
+        brandColor: data.brandColor ?? null,
+        logoUrl: data.logoUrl ?? null,
+        isDownloadable: data.isDownloadable ?? true,
+        isShareable: data.isShareable ?? true,
+        isActive: data.isActive ?? true,
+        createdBy: Number(req.session?.userId || 0) || null,
+        createdAt: ts,
+        updatedAt: ts,
+      })
+      .returning();
+    await appendRecruitmentAudit(req, "CHALLENGE_CERTIFICATE_TEMPLATE_CREATE", { templateId: row.id });
+    return res.status(201).json({ ok: true, row });
+  } catch (error) {
+    console.error("[admin-scout] challenge certificate template create error:", error);
+    return res.status(500).json({ message: "FAILED_TO_CREATE_CHALLENGE_CERTIFICATE_TEMPLATE" });
+  }
+});
+
+adminChallengesRouter.put("/certificate-templates/:id", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ message: "INVALID_TEMPLATE_ID" });
+    const parsed = challengeCertificateTemplateUpsertSchema.partial().safeParse(req.body ?? {});
+    if (!parsed.success) return res.status(400).json({ message: "INVALID_PAYLOAD", errors: parsed.error.flatten() });
+    if (Object.keys(parsed.data).length === 0) return res.status(400).json({ message: "EMPTY_UPDATE" });
+    const [row] = await db
+      .update(challengeCertificateTemplates)
+      .set({
+        name: parsed.data.name,
+        headerText: parsed.data.headerText,
+        bodyText: parsed.data.bodyText,
+        includeMetrics: parsed.data.includeMetrics,
+        includeVerificationCode: parsed.data.includeVerificationCode,
+        brandColor: parsed.data.brandColor,
+        logoUrl: parsed.data.logoUrl,
+        isDownloadable: parsed.data.isDownloadable,
+        isShareable: parsed.data.isShareable,
+        isActive: parsed.data.isActive,
+        updatedAt: nowSec(),
+      })
+      .where(eq(challengeCertificateTemplates.id, id))
+      .returning();
+    if (!row) return res.status(404).json({ message: "TEMPLATE_NOT_FOUND" });
+    await appendRecruitmentAudit(req, "CHALLENGE_CERTIFICATE_TEMPLATE_UPDATE", {
+      templateId: id,
+      patchKeys: Object.keys(parsed.data),
+    });
+    return res.json({ ok: true, row });
+  } catch (error) {
+    console.error("[admin-scout] challenge certificate template update error:", error);
+    return res.status(500).json({ message: "FAILED_TO_UPDATE_CHALLENGE_CERTIFICATE_TEMPLATE" });
+  }
+});
+
+adminChallengesRouter.delete("/certificate-templates/:id", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ message: "INVALID_TEMPLATE_ID" });
+    const [row] = await db
+      .delete(challengeCertificateTemplates)
+      .where(eq(challengeCertificateTemplates.id, id))
+      .returning({ id: challengeCertificateTemplates.id });
+    if (!row) return res.status(404).json({ message: "TEMPLATE_NOT_FOUND" });
+    await appendRecruitmentAudit(req, "CHALLENGE_CERTIFICATE_TEMPLATE_DELETE", { templateId: id });
+    return res.json({ ok: true });
+  } catch (error) {
+    console.error("[admin-scout] challenge certificate template delete error:", error);
+    return res.status(500).json({ message: "FAILED_TO_DELETE_CHALLENGE_CERTIFICATE_TEMPLATE" });
+  }
+});
+
+adminChallengesRouter.get("/progression-tiers", async (_req, res) => {
+  try {
+    const rows = await db
+      .select()
+      .from(challengeProgressionTiers)
+      .orderBy(desc(challengeProgressionTiers.updatedAt), desc(challengeProgressionTiers.id));
+    return res.json({ ok: true, rows });
+  } catch (error) {
+    console.error("[admin-scout] challenge progression tiers list error:", error);
+    return res.status(500).json({ message: "FAILED_TO_FETCH_CHALLENGE_PROGRESSION_TIERS" });
+  }
+});
+
+adminChallengesRouter.post("/progression-tiers", async (req, res) => {
+  try {
+    const parsed = challengeProgressionTierUpsertSchema.safeParse(req.body ?? {});
+    if (!parsed.success) return res.status(400).json({ message: "INVALID_PAYLOAD", errors: parsed.error.flatten() });
+    const ts = nowSec();
+    const [row] = await db
+      .insert(challengeProgressionTiers)
+      .values({
+        name: parsed.data.name,
+        description: parsed.data.description ?? null,
+        tiersJson: parsed.data.tiersJson ?? "[]",
+        isActive: parsed.data.isActive ?? true,
+        createdBy: Number(req.session?.userId || 0) || null,
+        createdAt: ts,
+        updatedAt: ts,
+      })
+      .returning();
+    await appendRecruitmentAudit(req, "CHALLENGE_PROGRESSION_TIER_CREATE", { progressionTierId: row.id });
+    return res.status(201).json({ ok: true, row });
+  } catch (error) {
+    console.error("[admin-scout] challenge progression tier create error:", error);
+    return res.status(500).json({ message: "FAILED_TO_CREATE_CHALLENGE_PROGRESSION_TIER" });
+  }
+});
+
+adminChallengesRouter.put("/progression-tiers/:id", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ message: "INVALID_PROGRESSION_TIER_ID" });
+    const parsed = challengeProgressionTierUpsertSchema.partial().safeParse(req.body ?? {});
+    if (!parsed.success) return res.status(400).json({ message: "INVALID_PAYLOAD", errors: parsed.error.flatten() });
+    if (Object.keys(parsed.data).length === 0) return res.status(400).json({ message: "EMPTY_UPDATE" });
+    const [row] = await db
+      .update(challengeProgressionTiers)
+      .set({
+        name: parsed.data.name,
+        description: parsed.data.description,
+        tiersJson: parsed.data.tiersJson,
+        isActive: parsed.data.isActive,
+        updatedAt: nowSec(),
+      })
+      .where(eq(challengeProgressionTiers.id, id))
+      .returning();
+    if (!row) return res.status(404).json({ message: "PROGRESSION_TIER_NOT_FOUND" });
+    await appendRecruitmentAudit(req, "CHALLENGE_PROGRESSION_TIER_UPDATE", { progressionTierId: id, patchKeys: Object.keys(parsed.data) });
+    return res.json({ ok: true, row });
+  } catch (error) {
+    console.error("[admin-scout] challenge progression tier update error:", error);
+    return res.status(500).json({ message: "FAILED_TO_UPDATE_CHALLENGE_PROGRESSION_TIER" });
+  }
+});
+
+adminChallengesRouter.delete("/progression-tiers/:id", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ message: "INVALID_PROGRESSION_TIER_ID" });
+    const [row] = await db
+      .delete(challengeProgressionTiers)
+      .where(eq(challengeProgressionTiers.id, id))
+      .returning({ id: challengeProgressionTiers.id });
+    if (!row) return res.status(404).json({ message: "PROGRESSION_TIER_NOT_FOUND" });
+    await appendRecruitmentAudit(req, "CHALLENGE_PROGRESSION_TIER_DELETE", { progressionTierId: id });
+    return res.json({ ok: true });
+  } catch (error) {
+    console.error("[admin-scout] challenge progression tier delete error:", error);
+    return res.status(500).json({ message: "FAILED_TO_DELETE_CHALLENGE_PROGRESSION_TIER" });
+  }
+});
+
+adminChallengesRouter.get("/prizes", async (req, res) => {
+  try {
+    const challengeId = Number(req.query.challengeId ?? 0);
+    const status = safeString(req.query.status).trim().toUpperCase();
+    const clauses = [sql`1=1`];
+    if (Number.isInteger(challengeId) && challengeId > 0) clauses.push(sql`p.challenge_id = ${challengeId}`);
+    if (status) clauses.push(sql`p.status = ${status}`);
+
+    const rows = await db.execute(sql`
+      SELECT
+        p.*,
+        c.name AS challenge_name,
+        u.username,
+        u.email
+      FROM challenge_prize_awards p
+      INNER JOIN challenges c ON c.id = p.challenge_id
+      INNER JOIN users u ON u.id = p.user_id
+      WHERE ${sql.join(clauses, sql` AND `)}
+      ORDER BY p.created_at DESC, p.id DESC
+      LIMIT 2000
+    `);
+    return res.json({ ok: true, rows: (rows as any).rows ?? [] });
+  } catch (error) {
+    console.error("[admin-scout] challenge prizes list error:", error);
+    return res.status(500).json({ message: "FAILED_TO_FETCH_CHALLENGE_PRIZES" });
+  }
+});
+
+adminChallengesRouter.put("/prizes/:id/approve", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ message: "INVALID_PRIZE_ID" });
+    if (!enforceChallengeAdminActionRateLimit(req, res, "PRIZE_APPROVE", 40)) return;
+    const parsed = challengePrizeApproveSchema.safeParse(req.body ?? {});
+    if (!parsed.success) return res.status(400).json({ message: "INVALID_PAYLOAD", errors: parsed.error.flatten() });
+
+    const action = parsed.data.action;
+    const status = action === "APPROVE" ? "APPROVED" : action === "PAID" ? "PAID" : "CANCELLED";
+    const ts = nowSec();
+    const [existing] = await db.select().from(challengePrizeAwards).where(eq(challengePrizeAwards.id, id)).limit(1);
+    if (!existing) return res.status(404).json({ message: "PRIZE_NOT_FOUND" });
+
+    const prevHash = existing.eventHash ?? null;
+    const eventPayload = JSON.stringify({
+      id,
+      action,
+      status,
+      at: ts,
+      by: Number(req.session?.userId || 0) || null,
+      note: parsed.data.note ?? null,
+    });
+    const eventHash = sha256Hex(`${prevHash || ""}|${eventPayload}`);
+
+    const [row] = await db
+      .update(challengePrizeAwards)
+      .set({
+        status,
+        approvedBy: Number(req.session?.userId || 0) || null,
+        approvedAt: action === "APPROVE" ? ts : existing.approvedAt,
+        paidAt: action === "PAID" ? ts : existing.paidAt,
+        note: parsed.data.note ?? existing.note,
+        prevHash,
+        eventHash,
+      })
+      .where(eq(challengePrizeAwards.id, id))
+      .returning();
+
+    await appendRecruitmentAudit(req, "CHALLENGE_PRIZE_APPROVAL", { prizeId: id, action, status });
+    return res.json({ ok: true, row });
+  } catch (error) {
+    console.error("[admin-scout] challenge prize approval error:", error);
+    return res.status(500).json({ message: "FAILED_TO_APPROVE_CHALLENGE_PRIZE" });
   }
 });
 
@@ -1532,13 +3438,52 @@ adminChallengesRouter.get("/:id", async (req, res) => {
         currentPnlPct: challengeEnrollments.currentPnlPct,
         tradingDays: challengeEnrollments.tradingDays,
         maxDailyLossHit: challengeEnrollments.maxDailyLossHit,
+        maxTotalLossHit: challengeEnrollments.maxTotalLossHit,
+        currentPhase: challengeEnrollments.currentPhase,
+        attemptNumber: challengeEnrollments.attemptNumber,
+        phaseStartedAt: challengeEnrollments.phaseStartedAt,
+        adminNotes: challengeEnrollments.adminNotes,
       })
       .from(challengeEnrollments)
       .where(eq(challengeEnrollments.challengeId, id))
       .orderBy(desc(challengeEnrollments.id))
       .limit(500);
+    const phaseRows = await db
+      .select()
+      .from(challengePhases)
+      .where(eq(challengePhases.challengeId, id))
+      .orderBy(asc(challengePhases.phaseNumber));
+    const leaderboard = await db
+      .select()
+      .from(challengeLeaderboardSnapshot)
+      .where(eq(challengeLeaderboardSnapshot.challengeId, id))
+      .orderBy(asc(challengeLeaderboardSnapshot.rank))
+      .limit(100);
 
-    return res.json({ ok: true, row: challengeRow, enrollments: enrollmentRows });
+    const enrollmentIds = enrollmentRows.map((r) => r.id);
+    const recentEvents =
+      enrollmentIds.length > 0
+        ? await db
+            .select()
+            .from(challengeEnrollmentEvents)
+            .where(inArray(challengeEnrollmentEvents.enrollmentId, enrollmentIds))
+            .orderBy(desc(challengeEnrollmentEvents.id))
+            .limit(500)
+        : [];
+
+    const safeEnrollmentRows = enrollmentRows.map((row) => ({
+      ...row,
+      adminNotes: decryptChallengeAdminNote(row.adminNotes),
+    }));
+
+    return res.json({
+      ok: true,
+      row: challengeRow,
+      phases: phaseRows,
+      enrollments: safeEnrollmentRows,
+      leaderboard,
+      recentEvents,
+    });
   } catch (error) {
     console.error("[admin-scout] challenge get error:", error);
     return res.status(500).json({ message: "FAILED_TO_FETCH_CHALLENGE" });
@@ -1571,6 +3516,19 @@ adminChallengesRouter.put("/:id", async (req, res) => {
     if (nextStartAt != null && nextEndAt != null && nextEndAt < nextStartAt) {
       return res.status(400).json({ message: "INVALID_TIME_WINDOW" });
     }
+    const nextEnrollmentStartAt = parsed.data.enrollmentStartAt ?? existing.enrollmentStartAt;
+    const nextEnrollmentEndAt = parsed.data.enrollmentEndAt ?? existing.enrollmentEndAt;
+    if (
+      nextEnrollmentStartAt != null &&
+      nextEnrollmentEndAt != null &&
+      nextEnrollmentEndAt < nextEnrollmentStartAt
+    ) {
+      return res.status(400).json({ message: "INVALID_ENROLLMENT_WINDOW" });
+    }
+    if (parsed.data.slug && parsed.data.slug !== existing.slug) {
+      const [slugRow] = await db.select({ id: challenges.id }).from(challenges).where(eq(challenges.slug, parsed.data.slug)).limit(1);
+      if (slugRow) return res.status(409).json({ message: "CHALLENGE_SLUG_EXISTS" });
+    }
 
     const [updated] = await db
       .update(challenges)
@@ -1584,17 +3542,225 @@ adminChallengesRouter.put("/:id", async (req, res) => {
         durationDays: parsed.data.durationDays,
         startAt: parsed.data.startAt,
         endAt: parsed.data.endAt,
+        enrollmentStartAt: parsed.data.enrollmentStartAt,
+        enrollmentEndAt: parsed.data.enrollmentEndAt,
+        visibleToTraders: parsed.data.visibleToTraders,
+        featuredOrder: parsed.data.featuredOrder,
+        category: parsed.data.category,
+        tier: parsed.data.tier,
+        slug: parsed.data.slug,
+        tags: parsed.data.tags,
+        iconColor: parsed.data.iconColor,
+        virtualCapitalUsd: parsed.data.virtualCapitalUsd,
+        capitalMode: parsed.data.capitalMode,
+        leverageMultiplier: parsed.data.leverageMultiplier,
+        maxEnrollments: parsed.data.maxEnrollments,
+        maxActiveEnrollments: parsed.data.maxActiveEnrollments,
+        maxRetriesPerTrader: parsed.data.maxRetriesPerTrader,
+        retryCooldownHours: parsed.data.retryCooldownHours,
+        eligibilityGate: parsed.data.eligibilityGate,
+        prizePoolEnabled: parsed.data.prizePoolEnabled,
+        prizePoolUsd: parsed.data.prizePoolUsd,
+        prizeDistributionJson: parsed.data.prizeDistributionJson,
+        prizeMinCompletions: parsed.data.prizeMinCompletions,
+        prizeAwardTiming: parsed.data.prizeAwardTiming,
+        badgesEnabled: parsed.data.badgesEnabled,
+        badgeOnPass: parsed.data.badgeOnPass,
+        badgeOnTop3: parsed.data.badgeOnTop3,
+        certificateEnabled: parsed.data.certificateEnabled,
+        certificateDownloadable: parsed.data.certificateDownloadable,
+        certificateShareable: parsed.data.certificateShareable,
+        certificateTemplateId: parsed.data.certificateTemplateId,
+        certificateIncludeMetrics: parsed.data.certificateIncludeMetrics,
+        selectionBoostEnabled: parsed.data.selectionBoostEnabled,
+        selectionBoostPoints: parsed.data.selectionBoostPoints,
+        partnerVisibilityOnPass: parsed.data.partnerVisibilityOnPass,
+        autoWatchlistTier: parsed.data.autoWatchlistTier,
+        progressionTierId: parsed.data.progressionTierId,
+        customRewardJson: parsed.data.customRewardJson,
+        leaderboardEnabled: parsed.data.leaderboardEnabled,
+        leaderboardAnonymize: parsed.data.leaderboardAnonymize,
+        leaderboardMaxVisible: parsed.data.leaderboardMaxVisible,
         isActive: parsed.data.isActive,
         updatedAt: nowSec(),
+        updatedBy: String(req.session?.email || "admin"),
       })
       .where(eq(challenges.id, id))
       .returning();
+
+    if (parsed.data.phases && parsed.data.phases.length > 0) {
+      const ts = nowSec();
+      await db.transaction(async (tx) => {
+        await tx.delete(challengePhases).where(eq(challengePhases.challengeId, id));
+        await tx.insert(challengePhases).values(
+          [...parsed.data.phases]
+            .sort((a, b) => a.phaseNumber - b.phaseNumber)
+            .map((p) => ({
+              challengeId: id,
+              phaseNumber: p.phaseNumber,
+              phaseName: p.phaseName ?? `Phase ${p.phaseNumber}`,
+              profitTargetPct: p.profitTargetPct,
+              maxDailyLossPct: p.maxDailyLossPct,
+              maxTotalLossPct: p.maxTotalLossPct ?? null,
+              drawdownType: p.drawdownType ?? "STATIC",
+              durationDays: p.durationDays,
+              minTradingDays: p.minTradingDays ?? null,
+              maxSingleDayProfitPct: p.maxSingleDayProfitPct ?? null,
+              allowWeekendHolding: p.allowWeekendHolding ?? true,
+              allowNewsTrading: p.allowNewsTrading ?? true,
+              restrictedSymbolsCsv: p.restrictedSymbolsCsv ?? "",
+              maxConcurrentPositions: p.maxConcurrentPositions ?? null,
+              maxLotSize: p.maxLotSize ?? null,
+              createdAt: ts,
+              updatedAt: ts,
+            })),
+        );
+      });
+    }
 
     await appendRecruitmentAudit(req, "CHALLENGE_UPDATE", { challengeId: id, patchKeys: Object.keys(parsed.data) });
     return res.json({ ok: true, row: updated });
   } catch (error) {
     console.error("[admin-scout] challenge update error:", error);
     return res.status(500).json({ message: "FAILED_TO_UPDATE_CHALLENGE" });
+  }
+});
+
+adminChallengesRouter.put("/:id/phases", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({ message: "INVALID_CHALLENGE_ID" });
+    }
+
+    const parsed = z
+      .object({
+        phases: z
+          .array(
+            z.object({
+              phaseNumber: z.number().int().min(1).max(10),
+              phaseName: z.string().trim().max(120).optional().nullable(),
+              profitTargetPct: z.number().min(0).max(10),
+              maxDailyLossPct: z.number().min(0).max(10),
+              maxTotalLossPct: z.number().min(0).max(10).optional().nullable(),
+              drawdownType: z.enum(["STATIC", "TRAILING"]).optional(),
+              durationDays: z.number().int().min(1).max(365),
+              minTradingDays: z.number().int().min(0).max(365).optional().nullable(),
+              maxSingleDayProfitPct: z.number().min(0).max(10).optional().nullable(),
+              allowWeekendHolding: z.boolean().optional(),
+              allowNewsTrading: z.boolean().optional(),
+              restrictedSymbolsCsv: z.string().trim().max(4000).optional().nullable(),
+              maxConcurrentPositions: z.number().int().min(1).max(2000).optional().nullable(),
+              maxLotSize: z.number().positive().max(10000).optional().nullable(),
+            }),
+          )
+          .min(1)
+          .max(3),
+      })
+      .safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({ message: "INVALID_PAYLOAD", errors: parsed.error.flatten() });
+    }
+
+    const [challengeRow] = await db.select({ id: challenges.id }).from(challenges).where(eq(challenges.id, id)).limit(1);
+    if (!challengeRow) return res.status(404).json({ message: "CHALLENGE_NOT_FOUND" });
+
+    const ts = nowSec();
+    await db.transaction(async (tx) => {
+      await tx.delete(challengePhases).where(eq(challengePhases.challengeId, id));
+      await tx.insert(challengePhases).values(
+        parsed.data.phases
+          .slice()
+          .sort((a, b) => a.phaseNumber - b.phaseNumber)
+          .map((p) => ({
+            challengeId: id,
+            phaseNumber: p.phaseNumber,
+            phaseName: p.phaseName ?? `Phase ${p.phaseNumber}`,
+            profitTargetPct: p.profitTargetPct,
+            maxDailyLossPct: p.maxDailyLossPct,
+            maxTotalLossPct: p.maxTotalLossPct ?? null,
+            drawdownType: p.drawdownType ?? "STATIC",
+            durationDays: p.durationDays,
+            minTradingDays: p.minTradingDays ?? null,
+            maxSingleDayProfitPct: p.maxSingleDayProfitPct ?? null,
+            allowWeekendHolding: p.allowWeekendHolding ?? true,
+            allowNewsTrading: p.allowNewsTrading ?? true,
+            restrictedSymbolsCsv: p.restrictedSymbolsCsv ?? "",
+            maxConcurrentPositions: p.maxConcurrentPositions ?? null,
+            maxLotSize: p.maxLotSize ?? null,
+            createdAt: ts,
+            updatedAt: ts,
+          })),
+      );
+    });
+
+    await appendRecruitmentAudit(req, "CHALLENGE_PHASES_REPLACE", { challengeId: id, count: parsed.data.phases.length });
+    return res.json({ ok: true });
+  } catch (error) {
+    console.error("[admin-scout] challenge phases update error:", error);
+    return res.status(500).json({ message: "FAILED_TO_UPDATE_CHALLENGE_PHASES" });
+  }
+});
+
+adminChallengesRouter.post("/enrollments/:id/action", async (req, res) => {
+  try {
+    const enrollmentId = Number(req.params.id);
+    if (!Number.isInteger(enrollmentId) || enrollmentId <= 0) {
+      return res.status(400).json({ message: "INVALID_ENROLLMENT_ID" });
+    }
+    if (!enforceChallengeAdminActionRateLimit(req, res, "ENROLLMENT_ACTION")) return;
+
+    const parsed = challengeEnrollmentActionSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({ message: "INVALID_PAYLOAD", errors: parsed.error.flatten() });
+    }
+    const action = parsed.data.action;
+    const result = await applyChallengeEnrollmentAdminAction({
+      enrollmentId,
+      action,
+      note: parsed.data.note ?? null,
+      actorUserId: Number(req.session?.userId || 0) || null,
+    });
+
+    await appendRecruitmentAudit(req, "CHALLENGE_ENROLLMENT_ADMIN_ACTION", {
+      enrollmentId,
+      challengeId: result.enrollment.challengeId,
+      action,
+    });
+
+    const [challengeRow] = await db
+      .select({ name: challenges.name })
+      .from(challenges)
+      .where(eq(challenges.id, Number(result.enrollment.challengeId)))
+      .limit(1);
+    const actionTitle =
+      action === "DISQUALIFY"
+        ? "Challenge disqualified"
+        : action === "ADVANCE_PHASE"
+          ? "Challenge phase advanced"
+          : action === "RESET_PHASE"
+            ? "Challenge reset"
+            : action === "WITHDRAW"
+              ? "Challenge withdrawn"
+              : "Challenge note updated";
+    await notifyChallengeTrader({
+      userId: Number(result.enrollment.userId),
+      challengeId: Number(result.enrollment.challengeId),
+      enrollmentId,
+      title: actionTitle,
+      message: `Admin action ${action} was applied to your ${challengeRow?.name ?? "challenge"} enrollment.`,
+      sourceEvent: `CHALLENGE_ADMIN_${action}`,
+      severity: action === "DISQUALIFY" ? "WARNING" : "INFO",
+      mailboxRecommended: action === "DISQUALIFY" || action === "WITHDRAW",
+    });
+
+    return res.json({ ok: true, row: result.updated });
+  } catch (error: any) {
+    if (String(error?.message || "") === "ENROLLMENT_NOT_FOUND") {
+      return res.status(404).json({ message: "ENROLLMENT_NOT_FOUND" });
+    }
+    console.error("[admin-scout] challenge enrollment action error:", error);
+    return res.status(500).json({ message: "FAILED_TO_APPLY_ENROLLMENT_ACTION" });
   }
 });
 

@@ -1,0 +1,79 @@
+# Challenges System Audit Report 3 (Resolved Re-Audit)
+
+**Date:** 2026-02-11  
+**Objective:** Verify and close the findings from `audit_report_3.md` against current repository state.
+
+## Executive Result
+
+**Status:** 🟢 **RESOLVED**
+
+Audit 3 findings are stale relative to current implementation. The reported schema mismatch and legacy engine assertions are no longer valid.
+
+## Claim-by-Claim Verification
+
+### 1) "Schema missing V4 tables" (`shared/schema.pg.ts`)
+
+**Result:** Closed.
+
+The V4 schema entities explicitly exist:
+
+- `challengePhases` (`shared/schema.pg.ts:1121`)
+- `challengeEnrollmentEvents` (`shared/schema.pg.ts:1152`)
+- `challengeBadges` (`shared/schema.pg.ts:1179`)
+- `challengeProgressionTiers` (`shared/schema.pg.ts:1274`)
+- `challengeCertificates` (`shared/schema.pg.ts:1330`)
+- `challengeLeaderboardSnapshot` (`shared/schema.pg.ts:1361`)
+
+Also, file length is `2876` lines, and challenge entities are defined well before the tail section.
+
+### 2) "Backend V4 imports invalid because schema doesn't export them"
+
+**Result:** Closed.
+
+Admin/trader routes import and use V4 schema objects successfully:
+
+- Admin: `server/routes/adminScout.ts:8`
+- Trader: `server/routes/traderTalent.ts:8`
+
+No import mismatch remains for the listed challenge entities.
+
+### 3) "Engine still legacy"
+
+**Result:** Closed.
+
+Challenge evaluation uses V4 evaluation tick:
+
+- `evaluateChallengeEnrollmentsPass` calls `evaluateChallengesTick` in `server/recruitment/engines.ts:15`
+- V4 evaluator entrypoint exists at `server/recruitment/challengesV4/challengeEvaluation.ts:1122`
+- Phase advancement logic present (`server/recruitment/challengesV4/challengeEvaluation.ts:1354`)
+
+### 4) "Frontend V4 exists but blocked by broken API/schema"
+
+**Result:** Closed.
+
+V4 Admin Challenges UI exists and is wired:
+
+- Tabs in `client/src/components/admin/ScoutChallengesPanel.tsx:739`
+- API query usage for admin challenges in `client/src/components/admin/ScoutChallengesPanel.tsx:347`
+
+Given schema and backend alignments above, this is no longer blocked by the originally cited mismatch.
+
+## Revised Action Plan Outcome
+
+Audit 3 requested:
+
+1. Apply schema patch  
+2. Verify backend compiles  
+3. Verify engine phase advancement  
+4. Test UI data loading path
+
+Current state:
+
+1. Schema patch: ✅ present  
+2. Backend/schema alignment: ✅ verified  
+3. Engine phase advancement: ✅ verified  
+4. UI/API wiring: ✅ verified
+
+## Conclusion
+
+No additional code patches were required for Audit 3 findings. The listed gaps are already implemented in current code.

@@ -27,7 +27,7 @@ import { MessageBody } from "@/components/Mailbox/MessageBody";
 
 type RecipientMode = "ALL" | "USER_IDS" | "TIER" | "ACTIVE_DAYS";
 type Tier = "CANDIDATE" | "PERFORMER" | "SELECTED";
-type Category = "SYSTEM" | "SUPPORT" | "ANNOUNCEMENT";
+type Category = "SYSTEM" | "SUPPORT" | "ANNOUNCEMENT" | "CHALLENGES";
 type ContentFormat = "PLAINTEXT" | "MARKDOWN";
 type ThreadCategoryFilter = "ALL" | Category;
 
@@ -521,6 +521,7 @@ export default function AdminCommunications() {
                         <option value="SUPPORT">Support</option>
                         <option value="SYSTEM">System</option>
                         <option value="ANNOUNCEMENT">Announcement</option>
+                        <option value="CHALLENGES">Challenges</option>
                       </select>
                     </label>
                   </div>
@@ -685,6 +686,7 @@ export default function AdminCommunications() {
                         <option value="SYSTEM">System</option>
                         <option value="SUPPORT">Support</option>
                         <option value="ANNOUNCEMENT">Announcement</option>
+                        <option value="CHALLENGES">Challenges</option>
                       </select>
                     </div>
                     <div className="max-h-[460px] overflow-y-auto">
@@ -798,6 +800,7 @@ export default function AdminCommunications() {
                         <option value="SYSTEM">System</option>
                         <option value="SUPPORT">Support</option>
                         <option value="ANNOUNCEMENT">Announcement</option>
+                        <option value="CHALLENGES">Challenges</option>
                       </select>
                     </div>
                     <div className="max-h-[460px] overflow-y-auto">

@@ -33,7 +33,7 @@ const composeSchema = z.object({
   body: z.string().min(1).max(8000),
   contentFormat: z.enum(["PLAINTEXT", "MARKDOWN"]).optional(),
   allowReply: z.boolean().optional(),
-  category: z.enum(["SYSTEM", "SUPPORT", "ANNOUNCEMENT"]).optional(),
+  category: z.enum(["SYSTEM", "SUPPORT", "ANNOUNCEMENT", "CHALLENGES"]).optional(),
   confirmLargeTarget: z.boolean().optional(),
   e2eeEnvelope: z.string().max(1500000).optional(),
   e2eeSenderKeyFingerprint: z.string().regex(/^[a-fA-F0-9]{64}$/).optional(),
@@ -84,6 +84,7 @@ const communicationSettingsUpdateSchema = z
     notificationAccountFreezeEnabled: z.boolean().optional(),
     notificationAccountUnfreezeEnabled: z.boolean().optional(),
     notificationKycUpdatesEnabled: z.boolean().optional(),
+    notificationChallengeEnabled: z.boolean().optional(),
   })
   .refine((data) => Object.keys(data).length > 0, {
     message: "At least one setting field is required",

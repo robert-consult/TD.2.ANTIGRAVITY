@@ -5,6 +5,7 @@ import { Trade, globalSettings, systemConfig, symbolConfigs } from '@shared/sche
 import { db } from "@db";
 import { eq } from "drizzle-orm";
 import { getLatestQuoteRow } from './services/quoteService';
+import { getActiveTradeConstraintsForUser } from "./recruitment/challengesV4/challengeService";
 
 /**
  * Risk management middleware for the TradeQuip platform
@@ -257,6 +258,48 @@ export async function riskMiddleware(req: Request, res: Response, next: NextFunc
   const openTrades = await storage.getOpenTradesByUserId(userId);
   const pendingTrades = await storage.getPendingTradesByUserId(userId);
   const activeTrades = [...openTrades, ...pendingTrades];
+
+  // Challenge v4 runtime constraints (best-effort hard guard on trade entry).
+  const challengeConstraints = await getActiveTradeConstraintsForUser(userId);
+  if (challengeConstraints) {
+    const requestedLots = Number(req.body.lots ?? req.body.size ?? 0);
+    if (challengeConstraints.maxLotSize != null && requestedLots > challengeConstraints.maxLotSize) {
+      return res.status(409).json({
+        code: "CHALLENGE_MAX_LOT_SIZE",
+        message: `Lot size exceeds active challenge limit (${challengeConstraints.maxLotSize}).`,
+        limit: challengeConstraints.maxLotSize,
+        requestedLots,
+      });
+    }
+
+    if (
+      challengeConstraints.maxConcurrentPositions != null &&
+      activeTrades.length >= challengeConstraints.maxConcurrentPositions
+    ) {
+      return res.status(409).json({
+        code: "CHALLENGE_MAX_CONCURRENT_POSITIONS",
+        message: `Active challenge position limit reached (${challengeConstraints.maxConcurrentPositions}).`,
+        limit: challengeConstraints.maxConcurrentPositions,
+        activePositions: activeTrades.length,
+      });
+    }
+
+    const symbolId = Number(req.body.symbolId ?? 0);
+    if (Number.isInteger(symbolId) && symbolId > 0 && challengeConstraints.restrictedSymbols.size > 0) {
+      const symbolCfg = await db.query.symbolConfigs.findFirst({
+        where: eq(symbolConfigs.id, symbolId),
+      });
+
+      const symbol = String(symbolCfg?.symbol ?? "").toUpperCase();
+      if (symbol && challengeConstraints.restrictedSymbols.has(symbol)) {
+        return res.status(409).json({
+          code: "CHALLENGE_RESTRICTED_SYMBOL",
+          message: `Symbol ${symbol} is restricted for your active challenge phase.`,
+          symbol,
+        });
+      }
+    }
+  }
 
   // 1. Check max concurrent trades per user (OPEN + PENDING)
   if (activeTrades.length >= limits.maxTradesPerUser) {

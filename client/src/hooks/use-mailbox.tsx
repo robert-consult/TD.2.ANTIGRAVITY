@@ -553,7 +553,7 @@ export function useAdminMailboxCompose() {
       body: string;
       contentFormat?: "PLAINTEXT" | "MARKDOWN";
       allowReply?: boolean;
-      category?: "SYSTEM" | "SUPPORT" | "ANNOUNCEMENT";
+      category?: "SYSTEM" | "SUPPORT" | "ANNOUNCEMENT" | "CHALLENGES";
       confirmLargeTarget?: boolean;
       e2eeEnvelope?: string;
       e2eeSenderKeyFingerprint?: string;

@@ -821,14 +821,52 @@ partnerPortalRouter.get("/tear-sheet/:hashId", requirePartnerGate("viewDataRoom"
 
     const challengeRes = await db.execute(sql`
       SELECT
+        e.id AS enrollment_id,
         e.challenge_id,
         c.name,
+        c.slug,
         e.status,
+        e.current_phase,
+        e.attempt_number,
         e.enrolled_at,
         e.completed_at,
         e.current_pnl_pct,
         e.trading_days,
-        e.max_daily_loss_hit
+        e.max_daily_loss_hit,
+        e.max_total_loss_hit,
+        c.prize_pool_enabled,
+        c.badges_enabled,
+        c.certificate_enabled,
+        c.selection_boost_enabled,
+        COALESCE((
+          SELECT SUM(p.prize_amount_usd)
+          FROM challenge_prize_awards p
+          WHERE p.enrollment_id = e.id
+            AND p.status IN ('PENDING', 'APPROVED', 'PAID')
+        ), 0)::float8 AS prize_amount_usd,
+        COALESCE((
+          SELECT COUNT(*)
+          FROM challenge_badge_awards b
+          WHERE b.enrollment_id = e.id
+        ), 0)::int AS badge_count,
+        EXISTS(
+          SELECT 1
+          FROM challenge_certificates cc
+          WHERE cc.enrollment_id = e.id
+        ) AS has_certificate,
+        COALESCE((
+          SELECT SUM(sb.points)
+          FROM challenge_selection_boosts sb
+          WHERE sb.enrollment_id = e.id
+        ), 0)::float8 AS selection_boost_points,
+        (
+          SELECT s.rank
+          FROM challenge_leaderboard_snapshot s
+          WHERE s.challenge_id = e.challenge_id
+            AND s.user_id = e.user_id
+          ORDER BY s.calculated_at DESC
+          LIMIT 1
+        )::int AS leaderboard_rank
       FROM challenge_enrollments e
       INNER JOIN challenges c ON c.id = e.challenge_id
       WHERE e.user_id = ${userId}
@@ -873,14 +911,30 @@ partnerPortalRouter.get("/tear-sheet/:hashId", requirePartnerGate("viewDataRoom"
       topTrades,
       bottomTrades,
       challenges: ((challengeRes as any).rows ?? []).map((r: any) => ({
+        enrollmentId: Number(r.enrollment_id),
         challengeId: Number(r.challenge_id),
         name: r.name,
+        slug: r.slug,
         status: r.status,
+        currentPhase: Number(r.current_phase ?? 1),
+        attemptNumber: Number(r.attempt_number ?? 1),
         enrolledAt: Number(r.enrolled_at),
         completedAt: r.completed_at == null ? null : Number(r.completed_at),
         currentPnlPct: Number(r.current_pnl_pct ?? 0),
         tradingDays: Number(r.trading_days ?? 0),
         maxDailyLossHit: r.max_daily_loss_hit == null ? null : Number(r.max_daily_loss_hit),
+        maxTotalLossHit: r.max_total_loss_hit == null ? null : Number(r.max_total_loss_hit),
+        rewardSummary: {
+          prizePoolEnabled: Boolean(r.prize_pool_enabled),
+          badgesEnabled: Boolean(r.badges_enabled),
+          certificateEnabled: Boolean(r.certificate_enabled),
+          selectionBoostEnabled: Boolean(r.selection_boost_enabled),
+          prizeAmountUsd: Number(r.prize_amount_usd ?? 0),
+          badgeCount: Number(r.badge_count ?? 0),
+          hasCertificate: Boolean(r.has_certificate),
+          selectionBoostPoints: Number(r.selection_boost_points ?? 0),
+        },
+        leaderboardRank: r.leaderboard_rank == null ? null : Number(r.leaderboard_rank),
       })),
     });
   } catch (error) {

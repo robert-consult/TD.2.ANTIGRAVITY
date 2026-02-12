@@ -7,6 +7,7 @@ import { AuthProvider, useAuth } from "@/hooks/use-auth";
 import { VerificationReminderPopup } from "@/components/VerificationReminderPopup";
 import { LegalReacceptGate } from "@/components/LegalReacceptGate";
 import { installAxiosIdentityHeaders } from "./lib/axiosIdentity";
+import { installGlobalCsrfFetch } from "./lib/csrf";
 import { startGriftPing } from "./lib/griftPing";
 import { I18nProvider } from "@/i18n/I18nProvider";
 import { useI18n } from "@/i18n";
@@ -16,6 +17,7 @@ import { QuotesProvider } from "@/live/QuotesProvider";
 import { ConfigSync } from "@/live/ConfigSync";
 import { lazyWithPing, useLazyPing } from "@/lib/lazyWithPing";
 
+installGlobalCsrfFetch();
 installAxiosIdentityHeaders();
 
 const NotFound = lazyWithPing(() => import("@/pages/not-found"));

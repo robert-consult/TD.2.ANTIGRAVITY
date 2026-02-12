@@ -51,6 +51,7 @@ notificationsRouter.get("/config", async (_req, res) => {
       notificationAccountFreezeEnabled: settings.notificationAccountFreezeEnabled,
       notificationAccountUnfreezeEnabled: settings.notificationAccountUnfreezeEnabled,
       notificationKycUpdatesEnabled: settings.notificationKycUpdatesEnabled,
+      notificationChallengeEnabled: settings.notificationChallengeEnabled,
       updatedAt: settings.updatedAt,
     });
   } catch (error) {

@@ -14,13 +14,13 @@ import { publishLiveEvent } from "./liveBus";
 import { decryptString, encryptString, sha256Hex } from "./crypto";
 import crypto from "crypto";
 
-export type MailboxCategory = "SYSTEM" | "SUPPORT" | "ANNOUNCEMENT";
-export type NotificationType = "TRADE" | "SYSTEM" | "ACCOUNT" | "SECURITY" | "KYC";
+export type MailboxCategory = "SYSTEM" | "SUPPORT" | "ANNOUNCEMENT" | "CHALLENGES";
+export type NotificationType = "TRADE" | "SYSTEM" | "ACCOUNT" | "SECURITY" | "KYC" | "CHALLENGE";
 export type NotificationSeverity = "INFO" | "SUCCESS" | "WARNING" | "CRITICAL";
 export type RecipientMode = "ALL" | "USER_IDS" | "TIER" | "ACTIVE_DAYS";
 
-const VALID_MAILBOX_CATEGORIES = new Set<MailboxCategory>(["SYSTEM", "SUPPORT", "ANNOUNCEMENT"]);
-const VALID_NOTIFICATION_TYPES = new Set<NotificationType>(["TRADE", "SYSTEM", "ACCOUNT", "SECURITY", "KYC"]);
+const VALID_MAILBOX_CATEGORIES = new Set<MailboxCategory>(["SYSTEM", "SUPPORT", "ANNOUNCEMENT", "CHALLENGES"]);
+const VALID_NOTIFICATION_TYPES = new Set<NotificationType>(["TRADE", "SYSTEM", "ACCOUNT", "SECURITY", "KYC", "CHALLENGE"]);
 const VALID_NOTIFICATION_SEVERITIES = new Set<NotificationSeverity>(["INFO", "SUCCESS", "WARNING", "CRITICAL"]);
 
 const MAX_SUBJECT_LEN = 160;
@@ -88,6 +88,7 @@ export type CommunicationSettingsResolved = {
   notificationAccountFreezeEnabled: boolean;
   notificationAccountUnfreezeEnabled: boolean;
   notificationKycUpdatesEnabled: boolean;
+  notificationChallengeEnabled: boolean;
   updatedAt: number;
   updatedBy: string | null;
 };
@@ -183,6 +184,7 @@ function normalizeCommunicationSettings(
     notificationAccountFreezeEnabled: Boolean(row?.notificationAccountFreezeEnabled ?? true),
     notificationAccountUnfreezeEnabled: Boolean(row?.notificationAccountUnfreezeEnabled ?? true),
     notificationKycUpdatesEnabled: Boolean(row?.notificationKycUpdatesEnabled ?? true),
+    notificationChallengeEnabled: Boolean(row?.notificationChallengeEnabled ?? true),
     updatedAt: clampInt(row?.updatedAt, nowSec(), 1, 4_102_444_800),
     updatedBy: updatedByRaw ? updatedByRaw.slice(0, 160) : null,
   };
@@ -214,6 +216,7 @@ function toCommunicationSettingsWritableValues(settings: CommunicationSettingsRe
     notificationAccountFreezeEnabled: settings.notificationAccountFreezeEnabled,
     notificationAccountUnfreezeEnabled: settings.notificationAccountUnfreezeEnabled,
     notificationKycUpdatesEnabled: settings.notificationKycUpdatesEnabled,
+    notificationChallengeEnabled: settings.notificationChallengeEnabled,
     updatedAt: settings.updatedAt,
     updatedBy: settings.updatedBy,
   };
@@ -1169,6 +1172,10 @@ function isNotificationEnabledForEvent(
 
   if (type === "KYC" || sourceEventStartsWith(input.sourceEvent, "KYC_")) {
     return settings.notificationKycUpdatesEnabled;
+  }
+
+  if (type === "CHALLENGE" || sourceEventStartsWith(input.sourceEvent, "CHALLENGE_")) {
+    return settings.notificationChallengeEnabled;
   }
 
   return true;

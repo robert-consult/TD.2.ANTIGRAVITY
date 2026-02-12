@@ -105,9 +105,26 @@ export async function setupSlow4gMidCpuAudit(page: Page, opts?: { cpuThrottlingR
 }
 
 export async function login(page: Page, email: string, password: string) {
+  const emailInput = page.getByPlaceholder("email@example.com");
+  const passwordInput = page.getByPlaceholder("********");
+
+  const waitForLoginForm = async (timeoutMs: number) => {
+    await expect(emailInput).toBeVisible({ timeout: timeoutMs });
+    await expect(passwordInput).toBeVisible({ timeout: Math.min(timeoutMs, 20_000) });
+  };
+
   await page.goto("/login");
-  await page.getByPlaceholder("email@example.com").fill(email);
-  await page.getByPlaceholder("********").fill(password);
+  try {
+    await waitForLoginForm(20_000);
+  } catch {
+    // Under throttled network emulation, Chromium can transiently surface
+    // net::ERR_NETWORK_CHANGED while loading lazy chunks. Retry once.
+    await page.goto("/login", { waitUntil: "domcontentloaded" });
+    await waitForLoginForm(60_000);
+  }
+
+  await emailInput.fill(email);
+  await passwordInput.fill(password);
   await page.getByRole("button", { name: "Login" }).click();
   await expect(page.getByText("Live Quotes")).toBeVisible();
 }

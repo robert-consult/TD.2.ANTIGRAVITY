@@ -8,6 +8,14 @@ import tzlookup from "@photostructure/tz-lookup";
 import { UAParser } from "ua-parser-js";
 import { normalizeIpKey } from "../grift/griftIpAsn";
 import { getTrustedProxyCountryIso2, getTrustedProxyHeaderValue } from "./proxyHeaders";
+import {
+  IDENTITY_HEADER_CLIENT_LANG,
+  IDENTITY_HEADER_CLIENT_TZ,
+  IDENTITY_HEADER_DEVICE_FP,
+  IDENTITY_HEADER_DEVICE_INSTALL_ID,
+  readIdentityHeader,
+} from "@shared/identity/headers";
+import { getClientIpFromRequest, getUserAgentFromRequest } from "@shared/security/requestIdentity";
 
 export type GeoContext = {
   countryCode?: string;
@@ -25,13 +33,6 @@ export type DeviceContext = {
 };
 
 const nowUnix = () => Math.floor(Date.now() / 1000);
-
-function readHeader(req: any, name: string): string | undefined {
-  const v = req.headers?.[name] ?? req.headers?.[name.toLowerCase()];
-  if (!v) return undefined;
-  if (Array.isArray(v)) return String(v[0] ?? "");
-  return String(v);
-}
 
 function cleanString(value: string | undefined, maxLen: number): string | undefined {
   if (!value) return undefined;
@@ -51,34 +52,6 @@ function normalizeCountryCode(value: string | undefined): string | undefined {
   if (!trimmed) return undefined;
   const upper = trimmed.toUpperCase();
   return /^[A-Z]{2}$/.test(upper) ? upper : undefined;
-}
-
-function isPrivateIp(ip: string): boolean {
-  const key = normalizeIpKey(ip) ?? ip;
-  if (!key) return true;
-  if (key === "::1") return true;
-  if (key.startsWith("fe80:")) return true;
-  if (key.startsWith("fc") || key.startsWith("fd")) return true;
-
-  const m = key.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
-  if (!m) return false;
-  const a = Number(m[1]);
-  const b = Number(m[2]);
-  if (a === 10) return true;
-  if (a === 127) return true;
-  if (a === 169 && b === 254) return true;
-  if (a === 192 && b === 168) return true;
-  if (a === 172 && b >= 16 && b <= 31) return true;
-  return false;
-}
-
-function parseForwardedFor(value: string | undefined): string[] {
-  if (!value) return [];
-  const forMatches = value.match(/for=([^;,\s]+)/gi);
-  if (!forMatches) return [];
-  return forMatches
-    .map((part) => part.replace(/for=/i, "").replace(/"/g, "").trim())
-    .filter(Boolean);
 }
 
 export function extractGeoHints(req: any): Partial<GeoContext> {
@@ -108,53 +81,11 @@ export function extractGeoHints(req: any): Partial<GeoContext> {
 }
 
 export function getClientIp(req: any): string {
-  const candidates: string[] = [];
-  const cfIp = readHeader(req, "cf-connecting-ip");
-  if (cfIp) candidates.push(cfIp);
-
-  const trueClientIp = readHeader(req, "true-client-ip") ?? readHeader(req, "x-client-ip");
-  if (trueClientIp) candidates.push(trueClientIp);
-
-  const xff = readHeader(req, "x-forwarded-for");
-  if (xff) {
-    candidates.push(
-      ...xff
-        .split(",")
-        .map((part) => part.trim())
-        .filter(Boolean)
-    );
-  }
-
-  const forwarded = readHeader(req, "forwarded");
-  if (forwarded) {
-    candidates.push(...parseForwardedFor(forwarded));
-  }
-
-  const xRealIp = readHeader(req, "x-real-ip");
-  if (xRealIp) candidates.push(xRealIp);
-
-  if (req.ip) candidates.push(String(req.ip));
-  if (req.socket?.remoteAddress) candidates.push(String(req.socket.remoteAddress));
-
-  const normalized = candidates
-    .map((ip) => normalizeIpKey(ip))
-    .filter(Boolean) as string[];
-
-  if (normalized.length === 0) return candidates[0] ?? "0.0.0.0";
-  const publicIp = normalized.find((ip) => !isPrivateIp(ip));
-  return publicIp || normalized[0];
+  return getClientIpFromRequest(req as any) ?? "0.0.0.0";
 }
 
 export function getUserAgent(req: any): string {
-  const ua = cleanString(readHeader(req, "user-agent"), 512);
-  if (ua) return ua;
-  const chUa = cleanString(readHeader(req, "sec-ch-ua"), 512);
-  const platform = cleanString(readHeader(req, "sec-ch-ua-platform"), 128);
-  const mobile = cleanString(readHeader(req, "sec-ch-ua-mobile"), 16);
-  const fallback = [chUa, platform ? `platform=${platform}` : null, mobile ? `mobile=${mobile}` : null]
-    .filter(Boolean)
-    .join(" ");
-  return fallback || "unknown";
+  return getUserAgentFromRequest(req as any) ?? "unknown";
 }
 
 export function parseDevice(userAgent: string): DeviceContext {
@@ -210,10 +141,13 @@ export type ClientIdentityContext = {
 
 export function extractClientIdentity(req: any): ClientIdentityContext {
   return {
-    deviceFp: cleanString(readHeader(req, "x-device-fp"), 256),
-    deviceInstallId: cleanString(readHeader(req, "x-device-install-id"), 128),
-    clientTz: cleanString(readHeader(req, "x-client-tz"), 64),
-    clientLang: cleanString(readHeader(req, "x-client-lang"), 32),
+    deviceFp: cleanString(readIdentityHeader(req.headers ?? {}, IDENTITY_HEADER_DEVICE_FP) ?? undefined, 256),
+    deviceInstallId: cleanString(
+      readIdentityHeader(req.headers ?? {}, IDENTITY_HEADER_DEVICE_INSTALL_ID) ?? undefined,
+      128,
+    ),
+    clientTz: cleanString(readIdentityHeader(req.headers ?? {}, IDENTITY_HEADER_CLIENT_TZ) ?? undefined, 64),
+    clientLang: cleanString(readIdentityHeader(req.headers ?? {}, IDENTITY_HEADER_CLIENT_LANG) ?? undefined, 32),
   };
 }
 

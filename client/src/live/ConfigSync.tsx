@@ -2,6 +2,7 @@ import { useCallback, useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useLiveUpdates } from "@/live/LiveUpdatesProvider";
 import { useAuth } from "@/hooks/use-auth";
+import { WS_MSG_QUOTE_SUBSCRIPTIONS_UPDATED } from "@shared/ws/protocol";
 
 export function ConfigSync() {
   const { isAuthenticated } = useAuth();
@@ -47,7 +48,7 @@ export function ConfigSync() {
         return;
       }
 
-      if (message.type === "quote-subscriptions:updated") {
+      if (message.type === WS_MSG_QUOTE_SUBSCRIPTIONS_UPDATED) {
         queryClient.invalidateQueries({ queryKey: ["/api/quote-subscriptions/allowed-symbols"] });
         queryClient.invalidateQueries({ queryKey: ["/api/quote-subscriptions/me"] });
         queryClient.invalidateQueries({ queryKey: ["/api/quote-subscriptions/me/subscriptions"] });

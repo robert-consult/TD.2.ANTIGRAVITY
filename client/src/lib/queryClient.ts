@@ -3,6 +3,8 @@ import { getIdentityHeaders } from "./identity";
 import { solveBotChallenge } from "./botProof";
 import { resolveApiUrl } from "./appUrl";
 import { attachCsrfHeader, isCsrfFailureResponse, refreshCsrfToken } from "./csrf";
+import { BOT_CHALLENGE_REQUIRED_CODE } from "@shared/security/botChallenge";
+import { IDENTITY_HEADER_BOT_PROOF } from "@shared/identity/headers";
 
 export class ApiError extends Error {
   status: number;
@@ -85,12 +87,12 @@ export async function apiRequest(
       payload = null;
     }
 
-    if (payload?.code === "BOT_CHALLENGE_REQUIRED" && payload?.challenge) {
+    if (payload?.code === BOT_CHALLENGE_REQUIRED_CODE && payload?.challenge) {
       const proof = await solveBotChallenge(payload.challenge, baseHeaders);
-      res = await doFetch({ "x-bot-proof": proof });
+      res = await doFetch({ [IDENTITY_HEADER_BOT_PROOF]: proof });
       if (await isCsrfFailureResponse(res)) {
         await refreshCsrfToken();
-        res = await doFetch({ "x-bot-proof": proof }, { forceCsrfRefresh: true });
+        res = await doFetch({ [IDENTITY_HEADER_BOT_PROOF]: proof }, { forceCsrfRefresh: true });
       }
     }
   }

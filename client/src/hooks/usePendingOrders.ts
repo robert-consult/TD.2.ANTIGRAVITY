@@ -5,6 +5,7 @@ import { fetchWithIdentity } from "@/lib/fetchWithIdentity";
 import { useAuth } from "@/hooks/use-auth";
 import { useLiveUpdates } from "@/live/LiveUpdatesProvider";
 import { recommendedPollIntervalMs } from "@/lib/perfHints";
+import { WS_MSG_TRADES_UPDATE, WS_MSG_TRADES_UPDATED } from "@shared/ws/protocol";
 
 type UsePendingOrdersOptions = {
   enabled?: boolean;
@@ -21,7 +22,7 @@ export const usePendingOrders = (options: UsePendingOrdersOptions = {}) => {
     if (!user) return;
     return subscribe((message) => {
       if (!message || typeof message !== "object") return;
-      if (message.type !== "trades:updated" && message.type !== "trades:update") return;
+      if (message.type !== WS_MSG_TRADES_UPDATED && message.type !== WS_MSG_TRADES_UPDATE) return;
       const messageUserId = (message as any).userId;
       if (messageUserId && user.id && messageUserId !== user.id) return;
       queryClient.invalidateQueries({ queryKey: ["/api/trades/pending"] });

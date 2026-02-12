@@ -3,6 +3,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef } fr
 import { useWebSocket } from "@/hooks/use-websocket";
 import { getWsUrl } from "@/lib/wsUrl";
 import { useAuth } from "@/hooks/use-auth";
+import { WS_MSG_AUTH_HELLO } from "@shared/ws/protocol";
 
 type LiveUpdateMessage = Record<string, any>;
 type LiveUpdateListener = (message: LiveUpdateMessage) => void;
@@ -34,7 +35,7 @@ export function LiveUpdatesProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (isConnected) {
-      sendMessage({ type: "auth:hello" });
+      sendMessage({ type: WS_MSG_AUTH_HELLO });
     }
   }, [isConnected, sendMessage]);
 

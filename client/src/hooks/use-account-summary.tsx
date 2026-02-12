@@ -3,6 +3,13 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "./use-auth";
 import { useLiveUpdates } from "@/live/LiveUpdatesProvider";
 import { recommendedPollIntervalMs } from "@/lib/perfHints";
+import {
+  WS_MSG_ACCOUNT_SNAPSHOT,
+  WS_MSG_ACCOUNT_SUBSCRIBE,
+  WS_MSG_ACCOUNT_UNSUBSCRIBE,
+  WS_MSG_ACCOUNT_UPDATE,
+  WS_MSG_ACCOUNT_UPDATED,
+} from "@shared/ws/protocol";
 
 export interface AccountSummary {
   balance: number;
@@ -30,16 +37,20 @@ export function useAccountSummary(options: UseAccountSummaryOptions = {}) {
 
   useEffect(() => {
     if (!user || !isWsConnected) return;
-    sendMessage({ type: "account:subscribe" });
+    sendMessage({ type: WS_MSG_ACCOUNT_SUBSCRIBE });
     return () => {
-      sendMessage({ type: "account:unsubscribe" });
+      sendMessage({ type: WS_MSG_ACCOUNT_UNSUBSCRIBE });
     };
   }, [user?.id, isWsConnected, sendMessage]);
 
   useEffect(() => {
     return subscribe((message) => {
       if (!message || typeof message !== "object") return;
-      if (message.type !== "account:updated" && message.type !== "account:update" && message.type !== "account:snapshot") return;
+      if (
+        message.type !== WS_MSG_ACCOUNT_UPDATED &&
+        message.type !== WS_MSG_ACCOUNT_UPDATE &&
+        message.type !== WS_MSG_ACCOUNT_SNAPSHOT
+      ) return;
 
       const messageUserId = message.userId;
       const currentUserId = user?.id;

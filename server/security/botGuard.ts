@@ -4,6 +4,13 @@ import { eq } from "drizzle-orm";
 import { botRiskAssessments, systemConfig } from "@shared/schema";
 import { issueBotChallenge, verifyBotProof } from "./botChallenge";
 import { valkeyIncrWithTtl, valkeySAddWithTtl } from "../services/valkey";
+import {
+  IDENTITY_HEADER_BOT_PROOF,
+  IDENTITY_HEADER_CLIENT_TZ,
+  IDENTITY_HEADER_DEVICE_FP,
+  IDENTITY_HEADER_DEVICE_INSTALL_ID,
+} from "@shared/identity/headers";
+import { BOT_CHALLENGE_REQUIRED_CODE } from "@shared/security/botChallenge";
 
 type BotConfig = {
   botScoreThreshold: number; // default 40
@@ -134,15 +141,15 @@ function getUa(req: Request) {
 }
 
 function getDeviceFp(req: Request) {
-  return (req.headers["x-device-fp"] as string | undefined) ?? "";
+  return (req.headers[IDENTITY_HEADER_DEVICE_FP] as string | undefined) ?? "";
 }
 
 function getInstallId(req: Request) {
-  return (req.headers["x-device-install-id"] as string | undefined) ?? "";
+  return (req.headers[IDENTITY_HEADER_DEVICE_INSTALL_ID] as string | undefined) ?? "";
 }
 
 function getClientTz(req: Request) {
-  return (req.headers["x-client-tz"] as string | undefined) ?? "";
+  return (req.headers[IDENTITY_HEADER_CLIENT_TZ] as string | undefined) ?? "";
 }
 
 function uaHeuristicsScore(ua: string): number {
@@ -286,7 +293,7 @@ export async function botGuard(
       (opts.action === "LOGIN" && cfg.powEnforceLogin && score >= cfg.powChallengeScore) ||
       (opts.action === "TRADE" && score >= cfg.powChallengeScore + 10));
 
-  const proofHdr = (req.headers["x-bot-proof"] as string | undefined) ?? "";
+  const proofHdr = (req.headers[IDENTITY_HEADER_BOT_PROOF] as string | undefined) ?? "";
   let proofResult: BotGuardProof = cfg.powEnabled ? "NOT_REQUIRED" : "SKIPPED";
 
   if (cfg.powEnabled && requiresProof) {
@@ -329,7 +336,7 @@ export async function botGuard(
     const ch = await issueBotChallenge(req, difficulty, cfg.powTtlSec, { valkeyEnabled: cfg.valkeyEnabled });
 
     res.status(428).json({
-      code: "BOT_CHALLENGE_REQUIRED",
+      code: BOT_CHALLENGE_REQUIRED_CODE,
       message: "Proof required before continuing.",
       challenge: ch,
     });

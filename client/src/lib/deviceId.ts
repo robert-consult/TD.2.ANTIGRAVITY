@@ -1,17 +1,16 @@
 // client/src/lib/deviceId.ts
-const DEVICE_ID_KEY = "grift_device_id";
+import { LEGACY_DEVICE_ID_STORAGE_KEY } from "@shared/identity/headers";
+import { generateIdentityId } from "@shared/identity/device";
 
 function generateDeviceId(): string {
-  const array = new Uint8Array(16);
-  crypto.getRandomValues(array);
-  return Array.from(array, (b) => b.toString(16).padStart(2, "0")).join("");
+  return generateIdentityId();
 }
 
 export function getDeviceId(): string {
-  let deviceId = localStorage.getItem(DEVICE_ID_KEY);
+  let deviceId = localStorage.getItem(LEGACY_DEVICE_ID_STORAGE_KEY);
   if (!deviceId) {
     deviceId = generateDeviceId();
-    localStorage.setItem(DEVICE_ID_KEY, deviceId);
+    localStorage.setItem(LEGACY_DEVICE_ID_STORAGE_KEY, deviceId);
   }
   return deviceId;
 }

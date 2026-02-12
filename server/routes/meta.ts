@@ -1,26 +1,7 @@
 ﻿import type { Express, Request, Response } from "express";
 import { getTimeZones } from "@vvo/tzdb";
 import { getOffsetMinutes, fmtUtcOffset } from "../utils/tzOffset";
-
-interface TimezoneInfo {
-  name: string;
-  countryCode: string;
-  countryName: string;
-  alternativeName: string;
-  mainCities: string[];
-  rawOffsetInMinutes: number;
-  abbreviation: string;
-  rawFormat: string;
-  label: string;
-  currentOffsetMinutes: number;
-}
-
-interface LanguageInfo {
-  code: string;
-  name: string;
-  nativeName: string;
-  rtl?: boolean;
-}
+import type { LanguageInfo, TimezoneInfo } from "@shared/locale/metadata";
 
 const LANGUAGES: LanguageInfo[] = [
   { code: "en", name: "English", nativeName: "English" },
@@ -465,4 +446,3 @@ export function registerMetaRoutes(app: Express) {
     res.json({ rows });
   });
 }
-

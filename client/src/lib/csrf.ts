@@ -5,9 +5,9 @@ import {
   isCsrfSafeMethod,
   normalizeHttpMethod,
 } from "@shared/security/csrf";
+import { isApiPath } from "@shared/transport/httpProtocol";
 import { resolveApiUrl } from "./appUrl";
 
-const API_PREFIX = "/api";
 const CSRF_TOKEN_MIN_LEN = 32;
 const CSRF_TOKEN_MAX_LEN = 256;
 const CSRF_TOKEN_PATTERN = /^[A-Za-z0-9_-]+$/;
@@ -83,7 +83,7 @@ function resolveRawUrl(rawUrl: string | undefined | null): URL | null {
 }
 
 function isApiPathname(pathname: string): boolean {
-  return pathname === API_PREFIX || pathname.startsWith(`${API_PREFIX}/`);
+  return isApiPath(pathname);
 }
 
 export function shouldAttachCsrf(input: RequestInfo | URL, init?: RequestInit): boolean {

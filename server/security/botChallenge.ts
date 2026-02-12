@@ -2,6 +2,9 @@ import type { Request } from "express";
 import { randomUUID } from "crypto";
 import { sha256Hex } from "../services/crypto";
 import { valkeyGetJson, valkeyIncrWithTtl, valkeySetJson } from "../services/valkey";
+import { IDENTITY_HEADER_DEVICE_FP, IDENTITY_HEADER_DEVICE_INSTALL_ID } from "@shared/identity/headers";
+import { leadingZeroBitsOfHex } from "@shared/security/botChallenge";
+import type { BotChallengePayload, BotProofToken } from "@shared/security/botChallenge";
 
 type ChallengeRecord = {
   id: string;
@@ -11,22 +14,6 @@ type ChallengeRecord = {
   ip: string;
   deviceFp?: string;
   deviceInstallId?: string;
-};
-
-export type BotChallengePayload = {
-  id: string;
-  serverNonce: string;
-  difficulty: number;
-  expiresAt: number; // unix seconds
-};
-
-type BotProofToken = {
-  id: string;
-  solutionNonce: number;
-  ts: number;
-  deviceFp?: string;
-  deviceInstallId?: string;
-  digest: string; // sha256 hex of proof material
 };
 
 const memChallenges = new Map<string, ChallengeRecord>();
@@ -43,11 +30,11 @@ function getIp(req: Request): string {
 }
 
 function getDeviceFp(req: Request) {
-  return (req.headers["x-device-fp"] as string | undefined) || undefined;
+  return (req.headers[IDENTITY_HEADER_DEVICE_FP] as string | undefined) || undefined;
 }
 
 function getDeviceInstallId(req: Request) {
-  return (req.headers["x-device-install-id"] as string | undefined) || undefined;
+  return (req.headers[IDENTITY_HEADER_DEVICE_INSTALL_ID] as string | undefined) || undefined;
 }
 
 function b64urlDecodeUtf8(s: string): string {
@@ -116,22 +103,6 @@ export async function issueBotChallenge(
   }
 
   return { id, serverNonce, difficulty, expiresAt: exp };
-}
-
-function leadingZeroBitsOfHex(hex: string): number {
-  let bits = 0;
-  for (let i = 0; i < hex.length; i++) {
-    const v = parseInt(hex[i]!, 16);
-    if (v === 0) {
-      bits += 4;
-      continue;
-    }
-    if (v < 8) bits += 1;
-    if (v < 4) bits += 1;
-    if (v < 2) bits += 1;
-    return bits;
-  }
-  return bits;
 }
 
 async function loadChallenge(id: string, opts?: BotChallengeOpts): Promise<ChallengeRecord | null> {

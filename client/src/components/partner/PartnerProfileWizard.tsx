@@ -2,6 +2,7 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
 import { Building2, FileCheck2, MessageSquareLock, ShieldCheck, Sparkles } from "lucide-react";
+import { formatUnixSecondsToLocaleString } from "@shared/time/format";
 
 type PartnerWizardGateEval = {
   reason: string | null;
@@ -46,8 +47,7 @@ type WizardStep = {
 };
 
 function fmtWhen(utcSec: number | null | undefined): string {
-  if (!utcSec || !Number.isFinite(utcSec)) return "-";
-  return new Date(utcSec * 1000).toLocaleString();
+  return formatUnixSecondsToLocaleString(utcSec);
 }
 
 function buildWizardSteps(state: PartnerWizardState): WizardStep[] {

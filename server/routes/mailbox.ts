@@ -3,6 +3,7 @@ import { z } from "zod";
 import { requireAuth } from "../middleware/auth";
 import { requireAdmin } from "../middleware/requireAdmin";
 import { appendIdentityAudit } from "../services/identityAudit";
+import { MAX_E2EE_ENVELOPE_BYTES, normalizeHexSha256 } from "@shared/e2ee/envelope";
 import {
   createMailboxThreadWithMessage,
   getMailboxPublicKeyForUser,
@@ -35,7 +36,7 @@ const composeSchema = z.object({
   allowReply: z.boolean().optional(),
   category: z.enum(["SYSTEM", "SUPPORT", "ANNOUNCEMENT", "CHALLENGES"]).optional(),
   confirmLargeTarget: z.boolean().optional(),
-  e2eeEnvelope: z.string().max(1500000).optional(),
+  e2eeEnvelope: z.string().max(MAX_E2EE_ENVELOPE_BYTES).optional(),
   e2eeSenderKeyFingerprint: z.string().regex(/^[a-fA-F0-9]{64}$/).optional(),
   bodyDigestSha256: z.string().regex(/^[a-fA-F0-9]{64}$/).optional(),
 });
@@ -43,7 +44,7 @@ const composeSchema = z.object({
 const replySchema = z.object({
   body: z.string().min(1).max(8000),
   contentFormat: z.enum(["PLAINTEXT", "MARKDOWN"]).optional(),
-  e2eeEnvelope: z.string().max(1500000).optional(),
+  e2eeEnvelope: z.string().max(MAX_E2EE_ENVELOPE_BYTES).optional(),
   e2eeSenderKeyFingerprint: z.string().regex(/^[a-fA-F0-9]{64}$/).optional(),
   bodyDigestSha256: z.string().regex(/^[a-fA-F0-9]{64}$/).optional(),
 });
@@ -110,9 +111,7 @@ function parseThreadId(raw: unknown): number | null {
 }
 
 function normalizeSha256Fingerprint(value: unknown): string | null {
-  const text = String(value ?? "").trim().toLowerCase();
-  if (/^[a-f0-9]{64}$/.test(text)) return text;
-  return null;
+  return normalizeHexSha256(value);
 }
 
 type RateLimitEntry = {

@@ -9,6 +9,7 @@ Shared code used by server and clients:
 ## Non-negotiables
 - Changes here are cross-cutting: update server + web/mobile callers and tests.
 - Treat schema and policy changes as contract changes: document and verify downstream impacts.
+- Shared-first rule: when feature logic can be common, define it here first, then consume it from `server/`, `client/`, and `NATIVE/`.
 
 ## Key files
 - DB schema (source of truth): `shared/schema.pg.ts`
@@ -38,4 +39,3 @@ When changing WS message shapes:
 - Typecheck: `npm run check`
 - If you changed schema: `npm run db:migrate:drizzle` + `npm run db:audit`
 - If behavior changes: update `AUDIT_REPORT.md`/runbooks where appropriate
-

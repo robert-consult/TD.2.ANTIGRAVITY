@@ -4,6 +4,12 @@ import { useQuery } from "@tanstack/react-query";
 import { useLiveUpdates } from "@/live/LiveUpdatesProvider";
 import { recommendedPollIntervalMs, recommendedQuoteFlushIntervalMs } from "@/lib/perfHints";
 import { useAuth } from "@/hooks/use-auth";
+import {
+  WS_MSG_QUOTES_SNAPSHOT,
+  WS_MSG_QUOTES_SUBSCRIBE,
+  WS_MSG_QUOTES_UNSUBSCRIBE,
+  WS_MSG_QUOTES_UPDATE,
+} from "@shared/ws/protocol";
 
 interface Quote {
   symbol: string;
@@ -172,11 +178,11 @@ export function QuotesProvider({ children }: { children: ReactNode }) {
     }
     if (!requestedSymbols.length) {
       if (prevSymbolsRef.current.length) {
-        sendMessage({ type: "quotes:unsubscribe", symbols: prevSymbolsRef.current });
+        sendMessage({ type: WS_MSG_QUOTES_UNSUBSCRIBE, symbols: prevSymbolsRef.current });
         prevSymbolsRef.current = [];
       }
       // Ensure server-side subscriptions are cleared even if we don't know the previous set.
-      sendMessage({ type: "quotes:unsubscribe" });
+      sendMessage({ type: WS_MSG_QUOTES_UNSUBSCRIBE });
       return;
     }
 
@@ -187,10 +193,10 @@ export function QuotesProvider({ children }: { children: ReactNode }) {
     const unsubscribeSymbols = [...prev].filter((s) => !next.has(s));
 
     if (subscribeSymbols.length) {
-      sendMessage({ type: "quotes:subscribe", symbols: subscribeSymbols });
+      sendMessage({ type: WS_MSG_QUOTES_SUBSCRIBE, symbols: subscribeSymbols });
     }
     if (unsubscribeSymbols.length) {
-      sendMessage({ type: "quotes:unsubscribe", symbols: unsubscribeSymbols });
+      sendMessage({ type: WS_MSG_QUOTES_UNSUBSCRIBE, symbols: unsubscribeSymbols });
     }
 
     prevSymbolsRef.current = requestedSymbols;
@@ -253,10 +259,10 @@ export function QuotesProvider({ children }: { children: ReactNode }) {
     if (!isAuthenticated) return;
     return subscribe((message) => {
       if (!message || typeof message !== "object") return;
-      if (message.type === "quotes:snapshot") {
+      if (message.type === WS_MSG_QUOTES_SNAPSHOT) {
         applyQuoteRows(message.rows ?? [], true);
       }
-      if (message.type === "quotes:update") {
+      if (message.type === WS_MSG_QUOTES_UPDATE) {
         applyQuoteRows(message.rows ?? [], false);
       }
     });

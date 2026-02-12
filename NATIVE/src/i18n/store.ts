@@ -6,6 +6,7 @@
 
 import { MMKV } from 'react-native-mmkv';
 import { NativeModules, Platform } from 'react-native';
+import { DEFAULT_LOCALE, LOCALE_STORAGE_KEY } from '@shared/locale/preferences';
 
 const storage = new MMKV();
 
@@ -27,7 +28,7 @@ export type I18nState = {
     bundle: I18nBundle | null;
 };
 
-const LOCALE_KEY = 'i18n.locale';
+const LOCALE_KEY = LOCALE_STORAGE_KEY;
 const BUNDLE_CACHE_PREFIX = 'i18n.bundle.';
 const CONFIG_KEY = 'i18n.config';
 
@@ -38,7 +39,7 @@ const FALLBACK_SUPPORTED_LOCALES = [
 
 const FALLBACK_CONFIG: I18nConfig = {
     enabled: true,
-    defaultLocale: 'en',
+    defaultLocale: DEFAULT_LOCALE.split('-')[0],
     supportedLocales: FALLBACK_SUPPORTED_LOCALES,
 };
 
@@ -66,7 +67,7 @@ function getDeviceLocale(): string {
     } catch {
         // Ignore errors
     }
-    return 'en';
+    return DEFAULT_LOCALE.split('-')[0];
 }
 
 /**

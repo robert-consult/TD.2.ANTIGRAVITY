@@ -9,6 +9,12 @@ import {
   userSessions,
   users,
 } from "@shared/schema";
+import {
+  E2EE_DATA_ALGO_AES_256_GCM,
+  E2EE_KEY_ALGO_RSA_OAEP_256_V1,
+  normalizeHexSha256,
+  parseAndValidateE2eeEnvelope,
+} from "@shared/e2ee/envelope";
 import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { publishLiveEvent } from "./liveBus";
 import { decryptString, encryptString, sha256Hex } from "./crypto";
@@ -45,20 +51,7 @@ const NOTIFICATION_CONTENT_ENCODING_E2EE = "E2EE_ENVELOPE_V1";
 const ENCRYPTED_NOTIFICATION_PLACEHOLDER = "Encrypted notification";
 const MAILBOX_CONTENT_FORMAT_PLAINTEXT = "PLAINTEXT";
 const MAILBOX_CONTENT_FORMAT_MARKDOWN = "MARKDOWN";
-const E2EE_KEY_ALGO_RSA_OAEP_256_V1 = "RSA_OAEP_256_V1";
 const E2EE_KEY_ALGO_FALLBACK = E2EE_KEY_ALGO_RSA_OAEP_256_V1;
-const E2EE_DATA_ALGO_AES_256_GCM = "AES_256_GCM";
-const MAX_E2EE_ENVELOPE_BYTES = 1_500_000;
-const E2EE_ENVELOPE_MAX_CREATED_AT_FUTURE_SKEW_SEC = 10 * 60;
-const E2EE_ENCRYPTED_KEY_BASE64_MIN_LEN = 128;
-const E2EE_ENCRYPTED_KEY_BASE64_MAX_LEN = 8192;
-const E2EE_IV_BASE64_MIN_LEN = 16;
-const E2EE_IV_BASE64_MAX_LEN = 128;
-const E2EE_TAG_BASE64_MIN_LEN = 16;
-const E2EE_TAG_BASE64_MAX_LEN = 128;
-const E2EE_CIPHERTEXT_BASE64_MIN_LEN = 4;
-const E2EE_CIPHERTEXT_BASE64_MAX_LEN = 1_400_000;
-const BASE64_FIELD_PATTERN = /^[A-Za-z0-9+/]+={0,2}$/;
 const MAILBOX_PUBLIC_KEY_MODULUS_MIN_BITS = 2048;
 const MAILBOX_PUBLIC_KEY_MODULUS_MAX_BITS = 8192;
 
@@ -399,12 +392,6 @@ function normalizeE2eeKeyAlgo(value: unknown): string {
   return E2EE_KEY_ALGO_FALLBACK;
 }
 
-function normalizeHexSha256(value: unknown): string | null {
-  const text = String(value ?? "").trim().toLowerCase();
-  if (/^[a-f0-9]{64}$/.test(text)) return text;
-  return null;
-}
-
 function normalizeSenderKeyFingerprint(value: unknown): string | null {
   return normalizeHexSha256(value);
 }
@@ -413,122 +400,8 @@ function normalizePublicKeyFingerprint(value: unknown): string | null {
   return normalizeHexSha256(value);
 }
 
-function normalizeBase64Field(value: unknown, minLen: number, maxLen: number): string | null {
-  const text = String(value ?? "").trim();
-  if (!text) return null;
-  if (text.length < minLen || text.length > maxLen) return null;
-  if (text.length % 4 !== 0) return null;
-  if (!BASE64_FIELD_PATTERN.test(text)) return null;
-  return text;
-}
-
 function parseAndValidateMailboxE2eeEnvelope(rawEnvelope: string, recipientUserIds: number[]): string {
-  const trimmed = String(rawEnvelope ?? "").trim();
-  if (!trimmed) throw new Error("E2EE_ENVELOPE_REQUIRED");
-  if (Buffer.byteLength(trimmed, "utf8") > MAX_E2EE_ENVELOPE_BYTES) {
-    throw new Error("E2EE_ENVELOPE_TOO_LARGE");
-  }
-
-  let parsed: any;
-  try {
-    parsed = JSON.parse(trimmed);
-  } catch {
-    throw new Error("E2EE_ENVELOPE_INVALID");
-  }
-
-  if (!parsed || typeof parsed !== "object") throw new Error("E2EE_ENVELOPE_INVALID");
-  const recipients = parsed.recipients;
-  if (!recipients || typeof recipients !== "object") throw new Error("E2EE_ENVELOPE_RECIPIENTS_INVALID");
-  if (Array.isArray(recipients)) throw new Error("E2EE_ENVELOPE_RECIPIENTS_INVALID");
-
-  const version = Number(parsed.version);
-  if (!Number.isInteger(version) || version !== 1) throw new Error("E2EE_ENVELOPE_VERSION_INVALID");
-  const keyAlgorithm = String(parsed.keyAlgorithm ?? "")
-    .trim()
-    .toUpperCase();
-  if (keyAlgorithm !== E2EE_KEY_ALGO_RSA_OAEP_256_V1) throw new Error("E2EE_ENVELOPE_KEY_ALGO_INVALID");
-  const dataAlgorithm = String(parsed.dataAlgorithm ?? "")
-    .trim()
-    .toUpperCase();
-  if (dataAlgorithm !== E2EE_DATA_ALGO_AES_256_GCM) throw new Error("E2EE_ENVELOPE_DATA_ALGO_INVALID");
-
-  const createdAt = Number(parsed.createdAt);
-  if (!Number.isInteger(createdAt) || createdAt <= 0) throw new Error("E2EE_ENVELOPE_CREATED_AT_INVALID");
-  const maxAllowedCreatedAt = nowSec() + E2EE_ENVELOPE_MAX_CREATED_AT_FUTURE_SKEW_SEC;
-  if (createdAt > maxAllowedCreatedAt) throw new Error("E2EE_ENVELOPE_CREATED_AT_INVALID");
-
-  const iv = normalizeBase64Field(parsed.iv, E2EE_IV_BASE64_MIN_LEN, E2EE_IV_BASE64_MAX_LEN);
-  if (!iv) throw new Error("E2EE_ENVELOPE_IV_INVALID");
-  const tag = normalizeBase64Field(parsed.tag, E2EE_TAG_BASE64_MIN_LEN, E2EE_TAG_BASE64_MAX_LEN);
-  if (!tag) throw new Error("E2EE_ENVELOPE_TAG_INVALID");
-  const ciphertext = normalizeBase64Field(
-    parsed.ciphertext,
-    E2EE_CIPHERTEXT_BASE64_MIN_LEN,
-    E2EE_CIPHERTEXT_BASE64_MAX_LEN,
-  );
-  if (!ciphertext) throw new Error("E2EE_ENVELOPE_CIPHERTEXT_INVALID");
-
-  const expectedRecipientIds = dedupePositiveInts(recipientUserIds || []);
-  if (!expectedRecipientIds.length) throw new Error("E2EE_ENVELOPE_RECIPIENTS_INVALID");
-  const expectedRecipientIdSet = new Set(expectedRecipientIds.map((id) => String(id)));
-
-  const recipientKeys = Object.keys(recipients as Record<string, unknown>);
-  if (!recipientKeys.length) throw new Error("E2EE_ENVELOPE_RECIPIENTS_INVALID");
-  if (recipientKeys.length !== expectedRecipientIds.length) {
-    throw new Error("E2EE_ENVELOPE_RECIPIENT_COUNT_INVALID");
-  }
-  for (const recipientIdText of recipientKeys) {
-    if (!/^\d+$/.test(recipientIdText)) {
-      throw new Error("E2EE_ENVELOPE_RECIPIENT_EXTRA");
-    }
-    if (!expectedRecipientIdSet.has(recipientIdText)) {
-      throw new Error("E2EE_ENVELOPE_RECIPIENT_EXTRA");
-    }
-  }
-
-  const normalizedRecipients: Record<string, { keyAlgorithm: string; encryptedKey: string }> = {};
-  for (const recipientId of [...expectedRecipientIds].sort((a, b) => a - b)) {
-    const recipientIdText = String(recipientId);
-    const recipientEntry = (recipients as Record<string, unknown>)[recipientIdText];
-    if (!recipientEntry || typeof recipientEntry !== "object" || Array.isArray(recipientEntry)) {
-      throw new Error("E2EE_ENVELOPE_RECIPIENT_INVALID");
-    }
-
-    const recipientKeyAlgorithm = String((recipientEntry as any).keyAlgorithm ?? "")
-      .trim()
-      .toUpperCase();
-    if (recipientKeyAlgorithm !== E2EE_KEY_ALGO_RSA_OAEP_256_V1) {
-      throw new Error("E2EE_ENVELOPE_RECIPIENT_KEY_ALGO_INVALID");
-    }
-    const encryptedKey = normalizeBase64Field(
-      (recipientEntry as any).encryptedKey,
-      E2EE_ENCRYPTED_KEY_BASE64_MIN_LEN,
-      E2EE_ENCRYPTED_KEY_BASE64_MAX_LEN,
-    );
-    if (!encryptedKey) throw new Error("E2EE_ENVELOPE_RECIPIENT_KEY_INVALID");
-
-    normalizedRecipients[recipientIdText] = {
-      keyAlgorithm: E2EE_KEY_ALGO_RSA_OAEP_256_V1,
-      encryptedKey,
-    };
-  }
-
-  for (const recipientId of expectedRecipientIds) {
-    if (!Object.prototype.hasOwnProperty.call(normalizedRecipients, String(recipientId))) {
-      throw new Error("E2EE_ENVELOPE_RECIPIENT_MISSING");
-    }
-  }
-
-  return JSON.stringify({
-    version: 1,
-    keyAlgorithm: E2EE_KEY_ALGO_RSA_OAEP_256_V1,
-    dataAlgorithm: E2EE_DATA_ALGO_AES_256_GCM,
-    recipients: normalizedRecipients,
-    iv,
-    tag,
-    ciphertext,
-    createdAt,
-  });
+  return parseAndValidateE2eeEnvelope(rawEnvelope, recipientUserIds, nowSec());
 }
 
 type MailboxBodyStorage = {

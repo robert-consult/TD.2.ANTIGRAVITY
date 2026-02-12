@@ -3,15 +3,15 @@ import { and, desc, eq, isNull } from "drizzle-orm";
 import { db } from "@db";
 import { userSessions, userLoginHistory } from "@shared/schema";
 import { revokeSession, getAllSessions, getRecentLoginActivity } from "../security/sessionTrail";
+import { resolveAdminUserId } from "../middleware/auth";
 
 function requireAdmin(req: any, res: Response): { adminUserId: number } | null {
-  const userId = req.session?.userId;
-  const isAdmin = Boolean(req.session?.isAdmin);
-  if (!userId || !isAdmin) {
+  const adminUserId = resolveAdminUserId(req);
+  if (!adminUserId) {
     res.status(403).json({ error: "forbidden" });
     return null;
   }
-  return { adminUserId: Number(userId) };
+  return { adminUserId };
 }
 
 function toCsv(rows: Array<Record<string, any>>): string {

@@ -3,12 +3,18 @@ import type { Request } from "express";
 import geoip from "geoip-lite";
 import { normalizeIpKey } from "./griftIpAsn";
 import { getTrustedProxyCountryIso2, getTrustedProxyHeaderValue } from "../security/proxyHeaders";
+import { readRequestHeader } from "@shared/security/requestIdentity";
+import {
+  IDENTITY_HEADER_CLIENT_LANG,
+  IDENTITY_HEADER_CLIENT_TZ,
+  IDENTITY_HEADER_DEVICE_FP,
+  IDENTITY_HEADER_DEVICE_FP_FALLBACK,
+  IDENTITY_HEADER_DEVICE_ID,
+  IDENTITY_HEADER_DEVICE_INSTALL_ID,
+} from "@shared/identity/headers";
 
 function headerString(req: Request, key: string): string | null {
-  const value = req.headers[key];
-  if (typeof value === "string") return value;
-  if (Array.isArray(value) && typeof value[0] === "string") return value[0];
-  return null;
+  return readRequestHeader(req as any, key) ?? null;
 }
 
 function cleanString(input: string | null, maxLen: number): string | null {
@@ -70,21 +76,21 @@ export function extractIp(req: Request): string | null {
 
 // Extract device ID from headers (case-insensitive)
 export function extractDeviceInstallId(req: Request): string | null {
-  const header = headerString(req, "x-device-install-id");
+  const header = headerString(req, IDENTITY_HEADER_DEVICE_INSTALL_ID);
   const bodyValue = (req.body as any)?.deviceInstallId;
   const raw = typeof bodyValue === "string" ? bodyValue : header;
   return cleanToken(raw ?? null, 128);
 }
 
 export function extractDeviceFingerprint(req: Request): string | null {
-  const headerFp = headerString(req, "x-device-fp") ?? headerString(req, "x-fingerprint");
+  const headerFp = headerString(req, IDENTITY_HEADER_DEVICE_FP) ?? headerString(req, IDENTITY_HEADER_DEVICE_FP_FALLBACK);
   const bodyValue = (req.body as any)?.deviceFp;
   const raw = typeof bodyValue === "string" ? bodyValue : headerFp;
   return cleanToken(raw ?? null, 256);
 }
 
 export function extractLegacyDeviceId(req: Request): string | null {
-  const headerId = headerString(req, "x-device-id");
+  const headerId = headerString(req, IDENTITY_HEADER_DEVICE_ID);
   const bodyValue = (req.body as any)?.deviceId;
   const raw = typeof bodyValue === "string" ? bodyValue : headerId;
   return cleanToken(raw ?? null, 128);
@@ -196,8 +202,8 @@ export function extractGriftContext(req: Request): GriftRequestContext {
     deviceIdLegacy: legacyDeviceId,
     deviceInstallId,
     deviceFp: extractDeviceFingerprint(req),
-    clientTz: cleanString(headerString(req, "x-client-tz"), 64),
-    clientLang: cleanString(headerString(req, "x-client-lang"), 32),
+    clientTz: cleanString(headerString(req, IDENTITY_HEADER_CLIENT_TZ), 64),
+    clientLang: cleanString(headerString(req, IDENTITY_HEADER_CLIENT_LANG), 32),
     userAgent: cleanString(headerString(req, "user-agent"), 512),
     asn: extractAsn(req),
     org: extractOrg(req),

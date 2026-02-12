@@ -6,6 +6,12 @@ import { useAuth } from "./use-auth";
 import { useToast } from "./use-toast";
 import { useLiveUpdates } from "@/live/LiveUpdatesProvider";
 import { recommendedPollIntervalMs } from "@/lib/perfHints";
+import {
+  WS_MSG_TRADES_SUBSCRIBE,
+  WS_MSG_TRADES_UNSUBSCRIBE,
+  WS_MSG_TRADES_UPDATE,
+  WS_MSG_TRADES_UPDATED,
+} from "@shared/ws/protocol";
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -18,16 +24,16 @@ export function useTrades() {
 
   useEffect(() => {
     if (!user || !isTradeWsConnected) return;
-    sendMessage({ type: "trades:subscribe" });
+    sendMessage({ type: WS_MSG_TRADES_SUBSCRIBE });
     return () => {
-      sendMessage({ type: "trades:unsubscribe" });
+      sendMessage({ type: WS_MSG_TRADES_UNSUBSCRIBE });
     };
   }, [user?.id, isTradeWsConnected, sendMessage]);
 
   useEffect(() => {
     return subscribe((message) => {
       if (!message || typeof message !== "object") return;
-      if (message.type !== "trades:updated" && message.type !== "trades:update") return;
+      if (message.type !== WS_MSG_TRADES_UPDATED && message.type !== WS_MSG_TRADES_UPDATE) return;
 
       const messageUserId = message.userId;
       const currentUserId = user?.id;

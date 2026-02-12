@@ -1,3 +1,5 @@
+import { DEFAULT_LOCALE, LOCALE_STORAGE_KEY } from "@shared/locale/preferences";
+
 type Listener = () => void;
 
 export type I18nBundle = {
@@ -23,8 +25,8 @@ const listeners = new Set<Listener>();
 const BUNDLE_STORAGE_PREFIX = "i18n.bundle.";
 
 function baseLocale(locale: string | null | undefined): string {
-  if (!locale) return "en";
-  return String(locale).trim().toLowerCase().split("-")[0] || "en";
+  if (!locale) return DEFAULT_LOCALE.split("-")[0];
+  return String(locale).trim().toLowerCase().split("-")[0] || DEFAULT_LOCALE.split("-")[0];
 }
 
 function parseBundle(raw: string | null): I18nBundle | null {
@@ -72,8 +74,8 @@ function persistBundle(bundle: I18nBundle) {
 
 const initialLocale =
   typeof window !== "undefined"
-    ? (window.localStorage.getItem("i18n.locale") || "en")
-    : "en";
+    ? (window.localStorage.getItem(LOCALE_STORAGE_KEY) || DEFAULT_LOCALE.split("-")[0])
+    : DEFAULT_LOCALE.split("-")[0];
 const initialBundle = getCachedBundle(initialLocale);
 
 let state: I18nState = {

@@ -7,6 +7,27 @@ import axios, { AxiosInstance, InternalAxiosRequestConfig, AxiosResponse } from 
 import { MMKV } from 'react-native-mmkv';
 import DeviceInfo from 'react-native-device-info';
 import { Platform } from 'react-native';
+import {
+    DEVICE_INSTALL_ID_STORAGE_KEY,
+    IDENTITY_HEADER_APP_VERSION,
+    IDENTITY_HEADER_BOT_PROOF,
+    IDENTITY_HEADER_CLIENT_LANG,
+    IDENTITY_HEADER_CLIENT_TZ,
+    IDENTITY_HEADER_DEVICE_FP,
+    IDENTITY_HEADER_DEVICE_ID,
+    IDENTITY_HEADER_DEVICE_INSTALL_ID,
+    IDENTITY_HEADER_PLATFORM,
+    LEGACY_DEVICE_ID_STORAGE_KEY,
+} from '@shared/identity/headers';
+import { generateIdentityId } from '@shared/identity/device';
+import { DEFAULT_LOCALE, DEFAULT_TIMEZONE } from '@shared/locale/preferences';
+import {
+    BOT_CHALLENGE_REQUIRED_CODE,
+    BOT_PROOF_MAX_SOLVE_MS,
+    BOT_PROOF_YIELD_EVERY,
+    leadingZeroBitsOfHex,
+} from '@shared/security/botChallenge';
+import type { BotChallengePayload } from '@shared/security/botChallenge';
 
 const storage = new MMKV();
 
@@ -19,22 +40,13 @@ const DEV_API_BASE_URL =
 
 const API_BASE_URL = __DEV__ ? DEV_API_BASE_URL : 'https://your-production-domain.com';
 
-const INSTALL_ID_KEY = 'grift_device_install_id';
-const LEGACY_ID_KEY = 'grift_device_id';
 let fingerprintPromise: Promise<string> | null = null;
 
 /**
  * Get device identity headers matching webapp identity.ts
  */
 function generateId(): string {
-    const cryptoObj: any = (globalThis as any).crypto;
-    if (cryptoObj?.randomUUID) return cryptoObj.randomUUID();
-    if (cryptoObj?.getRandomValues) {
-        const bytes = new Uint8Array(16);
-        cryptoObj.getRandomValues(bytes);
-        return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
-    }
-    return Math.random().toString(16).slice(2) + Date.now().toString(16);
+    return generateIdentityId();
 }
 
 function getOrCreateString(key: string): string {
@@ -47,17 +59,17 @@ function getOrCreateString(key: string): string {
 
 function getClientTimezone(): string {
     try {
-        return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+        return Intl.DateTimeFormat().resolvedOptions().timeZone || DEFAULT_TIMEZONE;
     } catch {
-        return 'UTC';
+        return DEFAULT_TIMEZONE;
     }
 }
 
 function getClientLanguage(): string {
     try {
-        return Intl.DateTimeFormat().resolvedOptions().locale || 'en-US';
+        return Intl.DateTimeFormat().resolvedOptions().locale || DEFAULT_LOCALE;
     } catch {
-        return 'en-US';
+        return DEFAULT_LOCALE;
     }
 }
 
@@ -218,7 +230,7 @@ async function getDeviceFingerprint(): Promise<string> {
     if (fingerprintPromise) return fingerprintPromise;
 
     fingerprintPromise = (async () => {
-        const installId = getOrCreateString(INSTALL_ID_KEY);
+        const installId = getOrCreateString(DEVICE_INSTALL_ID_STORAGE_KEY);
         const components = [
             await DeviceInfo.getUniqueId(),
             DeviceInfo.getDeviceId(),
@@ -235,36 +247,20 @@ async function getDeviceFingerprint(): Promise<string> {
 }
 
 async function getIdentityHeaders(): Promise<Record<string, string>> {
-    const deviceInstallId = getOrCreateString(INSTALL_ID_KEY);
-    const deviceIdLegacy = getOrCreateString(LEGACY_ID_KEY);
+    const deviceInstallId = getOrCreateString(DEVICE_INSTALL_ID_STORAGE_KEY);
+    const deviceIdLegacy = getOrCreateString(LEGACY_DEVICE_ID_STORAGE_KEY);
     const deviceFp = await getDeviceFingerprint();
 
     return {
-        'x-device-install-id': deviceInstallId,
-        'x-device-id': deviceIdLegacy,
-        'x-device-fp': deviceFp,
-        'x-client-tz': getClientTimezone(),
-        'x-client-lang': getClientLanguage(),
+        [IDENTITY_HEADER_DEVICE_INSTALL_ID]: deviceInstallId,
+        [IDENTITY_HEADER_DEVICE_ID]: deviceIdLegacy,
+        [IDENTITY_HEADER_DEVICE_FP]: deviceFp,
+        [IDENTITY_HEADER_CLIENT_TZ]: getClientTimezone(),
+        [IDENTITY_HEADER_CLIENT_LANG]: getClientLanguage(),
         // Helpful server-side visibility for native clients (not used for auth)
-        'x-platform': Platform.OS === 'android' ? 'android-native' : 'ios-native',
-        'x-app-version': DeviceInfo.getVersion(),
+        [IDENTITY_HEADER_PLATFORM]: Platform.OS === 'android' ? 'android-native' : 'ios-native',
+        [IDENTITY_HEADER_APP_VERSION]: DeviceInfo.getVersion(),
     };
-}
-
-function leadingZeroBits(hex: string): number {
-    let bits = 0;
-    for (let i = 0; i < hex.length; i++) {
-        const v = parseInt(hex[i]!, 16);
-        if (v === 0) {
-            bits += 4;
-            continue;
-        }
-        if (v < 8) bits += 1;
-        if (v < 4) bits += 1;
-        if (v < 2) bits += 1;
-        return bits;
-    }
-    return bits;
 }
 
 function base64UrlEncode(bytes: Uint8Array): string {
@@ -332,9 +328,9 @@ function createApiInstance(): AxiosInstance {
             // Handle 428 Bot Challenge (matching webapp botProof.ts)
             if (error.response?.status === 428) {
                 const payload = error.response.data;
-                if (payload?.code === 'BOT_CHALLENGE_REQUIRED' && payload?.challenge) {
+                if (payload?.code === BOT_CHALLENGE_REQUIRED_CODE && payload?.challenge) {
                     const proof = await solveBotChallenge(payload.challenge);
-                    originalRequest.headers['x-bot-proof'] = proof;
+                    originalRequest.headers[IDENTITY_HEADER_BOT_PROOF] = proof;
                     originalRequest._retry = true;
                     return api(originalRequest);
                 }
@@ -347,32 +343,22 @@ function createApiInstance(): AxiosInstance {
     return api;
 }
 
-/**
- * Solve bot challenge (PoW) matching server/security/botChallenge.ts + web botProof.ts
- */
-type BotChallengePayload = {
-    id: string;
-    serverNonce: string;
-    difficulty: number;
-    expiresAt: number;
-};
-
 async function solveBotChallenge(challenge: BotChallengePayload): Promise<string> {
     const identity = await getIdentityHeaders();
-    const deviceFp = identity['x-device-fp'] || '';
-    const deviceInstallId = identity['x-device-install-id'] || '';
+    const deviceFp = identity[IDENTITY_HEADER_DEVICE_FP] || '';
+    const deviceInstallId = identity[IDENTITY_HEADER_DEVICE_INSTALL_ID] || '';
 
     const start = Date.now();
     let nonce = 0;
 
     // Guardrails so we don't hang the UI thread
-    const maxMs = 2500;
-    const yieldEvery = 250;
+    const maxMs = BOT_PROOF_MAX_SOLVE_MS;
+    const yieldEvery = BOT_PROOF_YIELD_EVERY;
 
     while (Date.now() - start < maxMs) {
         const material = `${challenge.id}|${challenge.serverNonce}|${nonce}|${deviceFp}|${deviceInstallId}`;
         const digest = await sha256Hex(material);
-        if (leadingZeroBits(digest) >= challenge.difficulty) {
+        if (leadingZeroBitsOfHex(digest) >= challenge.difficulty) {
             const tokenObj = {
                 id: challenge.id,
                 solutionNonce: nonce,

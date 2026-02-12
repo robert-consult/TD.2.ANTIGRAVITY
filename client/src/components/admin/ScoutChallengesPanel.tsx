@@ -20,6 +20,11 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
+import {
+  formatUnixSecondsToLocaleString,
+  localDateTimeInputToUnixSeconds as localDateTimeInputToUtcSec,
+  unixSecondsToLocalDateTimeInput as utcSecToLocalDateTimeInput,
+} from "@shared/time/format";
 
 type AnyRow = Record<string, any>;
 type InlineTemplateDraft = { profitTargetPct: string; maxDailyLossPct: string; durationDays: string };
@@ -339,9 +344,7 @@ function formatUsd(value: unknown): string {
 }
 
 function formatWhen(utcSec: unknown): string {
-  const n = Number(utcSec);
-  if (!Number.isFinite(n) || n <= 0) return "-";
-  return new Date(n * 1000).toLocaleString();
+  return formatUnixSecondsToLocaleString(Number(utcSec));
 }
 
 function statusVariant(status: unknown): "default" | "secondary" | "destructive" | "outline" {
@@ -625,6 +628,7 @@ export default function ScoutChallengesPanel() {
     mutationFn: (payload: { id: number; patch: AnyRow }) => axios.put(`/api/admin/challenges/${payload.id}`, payload.patch).then((r) => r.data),
     onSuccess: (data, vars) => {
       const updatedRow = data?.row ? toChallengeListRowPatch(data.row) : null;
+      const patchedPhases = Array.isArray(vars.patch?.phases) ? vars.patch.phases : null;
       if (updatedRow) {
         queryClient.setQueryData(["/api/admin/challenges"], (prev: any) => {
           if (!prev || !Array.isArray(prev.rows)) return prev;
@@ -637,7 +641,11 @@ export default function ScoutChallengesPanel() {
         });
         queryClient.setQueryData(["/api/admin/challenges/detail", vars.id], (prev: any) => {
           if (!prev || typeof prev !== "object") return prev;
-          return { ...prev, row: { ...(prev.row ?? {}), ...updatedRow, ...data.row } };
+          return {
+            ...prev,
+            row: { ...(prev.row ?? {}), ...updatedRow, ...data.row },
+            phases: patchedPhases ?? prev.phases,
+          };
         });
       }
       queryClient.invalidateQueries({ queryKey: ["/api/admin/challenges"] });
@@ -931,11 +939,46 @@ export default function ScoutChallengesPanel() {
     if (!Number.isInteger(id) || id <= 0) return;
     const baseline = buildInlineTemplateDraft(row);
     const input = inlineDraftById[id] ?? baseline;
-    const patch = {
+    const patch: AnyRow = {
       profitTargetPct: Math.max(0, Math.min(10, toNum(input.profitTargetPct, toNum(baseline.profitTargetPct, 0.1)))),
       maxDailyLossPct: Math.max(0, Math.min(10, toNum(input.maxDailyLossPct, toNum(baseline.maxDailyLossPct, 0.03)))),
       durationDays: Math.max(1, Math.min(365, toInt(input.durationDays, toInt(baseline.durationDays, 30)))),
     };
+
+    const detailCache = queryClient.getQueryData(["/api/admin/challenges/detail", id]) as AnyRow | undefined;
+    const existingPhases = Array.isArray(detailCache?.phases) ? detailCache.phases : [];
+    if (existingPhases.length > 0) {
+      const normalized = existingPhases
+        .map((phase: AnyRow, idx: number) => ({
+          phaseNumber: Math.max(1, toInt(phase.phaseNumber ?? phase.phase_number, idx + 1)),
+          phaseName: String(phase.phaseName ?? phase.phase_name ?? `Phase ${idx + 1}`),
+          profitTargetPct: toNum(phase.profitTargetPct ?? phase.profit_target_pct, patch.profitTargetPct),
+          maxDailyLossPct: toNum(phase.maxDailyLossPct ?? phase.max_daily_loss_pct, patch.maxDailyLossPct),
+          maxTotalLossPct: phase.maxTotalLossPct ?? phase.max_total_loss_pct ?? null,
+          drawdownType: String(phase.drawdownType ?? phase.drawdown_type ?? "STATIC"),
+          durationDays: Math.max(1, toInt(phase.durationDays ?? phase.duration_days, patch.durationDays)),
+          minTradingDays: phase.minTradingDays ?? phase.min_trading_days ?? null,
+          maxSingleDayProfitPct: phase.maxSingleDayProfitPct ?? phase.max_single_day_profit_pct ?? null,
+          allowWeekendHolding: phase.allowWeekendHolding ?? phase.allow_weekend_holding ?? true,
+          allowNewsTrading: phase.allowNewsTrading ?? phase.allow_news_trading ?? true,
+          restrictedSymbolsCsv: String(phase.restrictedSymbolsCsv ?? phase.restricted_symbols_csv ?? ""),
+          maxConcurrentPositions: phase.maxConcurrentPositions ?? phase.max_concurrent_positions ?? null,
+          maxLotSize: phase.maxLotSize ?? phase.max_lot_size ?? null,
+        }))
+        .sort((a, b) => a.phaseNumber - b.phaseNumber);
+
+      const firstPhaseIdx = normalized.findIndex((phase) => phase.phaseNumber === 1);
+      const phaseIndex = firstPhaseIdx >= 0 ? firstPhaseIdx : 0;
+      if (normalized[phaseIndex]) {
+        normalized[phaseIndex] = {
+          ...normalized[phaseIndex],
+          profitTargetPct: patch.profitTargetPct,
+          maxDailyLossPct: patch.maxDailyLossPct,
+          durationDays: patch.durationDays,
+        };
+      }
+      patch.phases = normalized;
+    }
 
     await updateTemplateMutation.mutateAsync({ id, patch });
     resetInlineDraft(id);
@@ -1057,10 +1100,46 @@ export default function ScoutChallengesPanel() {
                   <Input type="number" value={draft.retryCooldownHours} onChange={(e) => setDraft((p) => ({ ...p, retryCooldownHours: Math.max(0, toInt(e.target.value, p.retryCooldownHours)) }))} className="bg-neutral-700 border-neutral-600" placeholder="Retry cooldown hours" />
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-5 gap-2">
-                  <Input type="number" value={draft.startAt ?? ""} onChange={(e) => setDraft((p) => ({ ...p, startAt: toOptInt(e.target.value) }))} className="bg-neutral-700 border-neutral-600" placeholder="startAt (unix sec)" />
-                  <Input type="number" value={draft.endAt ?? ""} onChange={(e) => setDraft((p) => ({ ...p, endAt: toOptInt(e.target.value) }))} className="bg-neutral-700 border-neutral-600" placeholder="endAt (unix sec)" />
-                  <Input type="number" value={draft.enrollmentStartAt ?? ""} onChange={(e) => setDraft((p) => ({ ...p, enrollmentStartAt: toOptInt(e.target.value) }))} className="bg-neutral-700 border-neutral-600" placeholder="enrollmentStartAt (unix sec)" />
-                  <Input type="number" value={draft.enrollmentEndAt ?? ""} onChange={(e) => setDraft((p) => ({ ...p, enrollmentEndAt: toOptInt(e.target.value) }))} className="bg-neutral-700 border-neutral-600" placeholder="enrollmentEndAt (unix sec)" />
+                  <Input
+                    type="datetime-local"
+                    step={60}
+                    value={utcSecToLocalDateTimeInput(draft.startAt)}
+                    onChange={(e) => setDraft((p) => ({ ...p, startAt: localDateTimeInputToUtcSec(e.target.value) }))}
+                    className="bg-neutral-700 border-neutral-600"
+                    data-hint="Challenge start date/time (local)"
+                    aria-label="Challenge start date/time (local)"
+                  />
+                  <Input
+                    type="datetime-local"
+                    step={60}
+                    value={utcSecToLocalDateTimeInput(draft.endAt)}
+                    onChange={(e) => setDraft((p) => ({ ...p, endAt: localDateTimeInputToUtcSec(e.target.value) }))}
+                    className="bg-neutral-700 border-neutral-600"
+                    data-hint="Challenge end date/time (local)"
+                    aria-label="Challenge end date/time (local)"
+                  />
+                  <Input
+                    type="datetime-local"
+                    step={60}
+                    value={utcSecToLocalDateTimeInput(draft.enrollmentStartAt)}
+                    onChange={(e) =>
+                      setDraft((p) => ({ ...p, enrollmentStartAt: localDateTimeInputToUtcSec(e.target.value) }))
+                    }
+                    className="bg-neutral-700 border-neutral-600"
+                    data-hint="Enrollment start date/time (local)"
+                    aria-label="Enrollment start date/time (local)"
+                  />
+                  <Input
+                    type="datetime-local"
+                    step={60}
+                    value={utcSecToLocalDateTimeInput(draft.enrollmentEndAt)}
+                    onChange={(e) =>
+                      setDraft((p) => ({ ...p, enrollmentEndAt: localDateTimeInputToUtcSec(e.target.value) }))
+                    }
+                    className="bg-neutral-700 border-neutral-600"
+                    data-hint="Enrollment end date/time (local)"
+                    aria-label="Enrollment end date/time (local)"
+                  />
                   <Input value={draft.eligibilityGate} onChange={(e) => setDraft((p) => ({ ...p, eligibilityGate: e.target.value }))} className="bg-neutral-700 border-neutral-600" placeholder="eligibility gate json/mode" />
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
@@ -1245,11 +1324,24 @@ export default function ScoutChallengesPanel() {
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                               <div className="rounded border border-neutral-700 p-2 text-xs space-y-1">
                                 <div className="text-gray-400">Phase Breakdown</div>
-                                {(detail?.phases ?? []).map((p: AnyRow) => (
-                                  <div key={p.id} className="rounded border border-neutral-700 p-2">
-                                    {p.phaseName || `Phase ${p.phaseNumber}`}: {formatPct(p.profitTargetPct)} target | {formatPct(p.maxDailyLossPct)} daily | {toInt(p.durationDays, 0)}d
-                                  </div>
-                                ))}
+                                {(detail?.phases ?? []).map((p: AnyRow, phaseIdx: number) => {
+                                  const phaseNumber = Math.max(1, toInt(p.phaseNumber ?? p.phase_number, phaseIdx + 1));
+                                  const isPhaseOne = phaseNumber === 1;
+                                  const phaseTarget = isPhaseOne
+                                    ? toNum(inlineDraft.profitTargetPct, toNum(p.profitTargetPct ?? p.profit_target_pct, toNum(row.profitTargetPct ?? row.profit_target_pct, 0.1)))
+                                    : toNum(p.profitTargetPct ?? p.profit_target_pct, 0.1);
+                                  const phaseDaily = isPhaseOne
+                                    ? toNum(inlineDraft.maxDailyLossPct, toNum(p.maxDailyLossPct ?? p.max_daily_loss_pct, toNum(row.maxDailyLossPct ?? row.max_daily_loss_pct, 0.03)))
+                                    : toNum(p.maxDailyLossPct ?? p.max_daily_loss_pct, 0.03);
+                                  const phaseDuration = isPhaseOne
+                                    ? Math.max(1, toInt(inlineDraft.durationDays, toInt(p.durationDays ?? p.duration_days, toInt(row.durationDays ?? row.duration_days, 30))))
+                                    : Math.max(1, toInt(p.durationDays ?? p.duration_days, 30));
+                                  return (
+                                    <div key={p.id ?? `${rowId}-${phaseNumber}`} className="rounded border border-neutral-700 p-2">
+                                      {p.phaseName || p.phase_name || `Phase ${phaseNumber}`}: {formatPct(phaseTarget)} target | {formatPct(phaseDaily)} daily | {phaseDuration}d
+                                    </div>
+                                  );
+                                })}
                                 {!(detail?.phases ?? []).length ? <div className="text-gray-500">No phases loaded.</div> : null}
                               </div>
                               <div className="rounded border border-neutral-700 p-2 text-xs space-y-1">

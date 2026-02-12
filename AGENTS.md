@@ -10,8 +10,9 @@ TradeQuip (a.k.a. “tradehub”) is a self-hosted trading platform (web + mobil
 1) Read this file first.
 2) If you work inside a subproject directory, also read the nearest `AGENTS.md` in that tree (nearest wins).
 3) If `AGENTS.local.md` exists, read it but **do not commit it**.
-4) Before finalizing any change, complete the required checklists referenced below.
-5) If you discover any new production/runtime/deployment requirement, update `.agents/PRODUCTION_REQUIREMENTS.md` in the same change.
+4) Before adding new feature utilities/protocol helpers, scan `@/.agents/shared-services.md` and reuse/extend `shared/` first.
+5) Before finalizing any change, complete the required checklists referenced below.
+6) If you discover any new production/runtime/deployment requirement, update `.agents/PRODUCTION_REQUIREMENTS.md` in the same change.
 
 ## Production Requirements Ledger (mandatory)
 - Canonical file: `.agents/PRODUCTION_REQUIREMENTS.md`

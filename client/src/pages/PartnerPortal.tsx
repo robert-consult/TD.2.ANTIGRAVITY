@@ -49,6 +49,7 @@ import {
   TrendingUp,
   WalletCards,
 } from "lucide-react";
+import { formatUnixSecondsToLocaleString } from "@shared/time/format";
 
 type PartnerConfigResp = {
   ok: boolean;
@@ -265,8 +266,21 @@ function fmtUsd(value: number | null | undefined): string {
 }
 
 function fmtWhen(utcSec: number | null | undefined): string {
-  if (!utcSec || !Number.isFinite(utcSec)) return "-";
-  return new Date(utcSec * 1000).toLocaleString();
+  return formatUnixSecondsToLocaleString(utcSec);
+}
+
+function readApiErrorCode(error: unknown): string | null {
+  if (!error) return null;
+  if (axios.isAxiosError(error)) {
+    const code = error.response?.data?.message;
+    if (typeof code === "string" && code.trim().length > 0) return code.trim();
+    if (typeof error.message === "string" && error.message.trim().length > 0) return error.message.trim();
+    return null;
+  }
+  if (error instanceof Error && error.message.trim().length > 0) {
+    return error.message.trim();
+  }
+  return null;
 }
 
 function trimToNull(value: unknown): string | null {
@@ -985,6 +999,30 @@ export default function PartnerPortal() {
   const inquiryMissingKeyCount = Number(inquiryRecipientsQuery.data?.missingKeyCount ?? 0);
   const inquiryInboxAlias = String(inquiryRecipientsQuery.data?.inboxAlias || "inquiries@");
   const onboardingState = onboardingQuery.data?.state;
+  const onboardingErrorCode = readApiErrorCode(onboardingQuery.error);
+  const onboardingLoadErrorCode =
+    !onboardingState && onboardingQuery.isError ? onboardingErrorCode || "FAILED_TO_FETCH_ONBOARDING_STATE" : null;
+  const onboardingLoadErrorMessage = onboardingLoadErrorCode
+    ? onboardingLoadErrorCode === "PARTNER_AUTH_FAILED"
+      ? "Partner key was rejected. Reconnect with a valid key."
+      : onboardingLoadErrorCode === "PARTNER_KEY_REQUIRED"
+        ? "Partner key is missing. Connect with a valid key first."
+        : onboardingLoadErrorCode === "PARTNER_INVITE_EXPIRED"
+          ? "Partner invite has expired. Ask admin to refresh the invite."
+          : onboardingLoadErrorCode === "PARTNER_REVOKED"
+            ? "Partner access was revoked. Contact admin for reactivation."
+            : onboardingLoadErrorCode === "PARTNER_IP_NOT_ALLOWED"
+              ? "Current IP is not in the partner whitelist. Contact admin."
+              : onboardingLoadErrorCode === "PARTNER_PORTAL_DISABLED"
+                ? "Partner portal is currently disabled in admin settings."
+                : onboardingLoadErrorCode === "PARTNER_HTTPS_REQUIRED"
+                  ? "HTTPS is required for partner access in this environment."
+                  : onboardingLoadErrorCode === "PARTNER_NOT_FOUND"
+                    ? "Partner record is unavailable for this key."
+                    : onboardingLoadErrorCode === "FAILED_TO_FETCH_ONBOARDING_STATE"
+                      ? "Unable to load onboarding state right now. Retry in a moment."
+                      : `Onboarding request failed (${onboardingLoadErrorCode}).`
+    : null;
   const gateViewDataRoom = Boolean(onboardingState?.gates.viewDataRoom ?? true);
   const gateRunSimulations = Boolean(onboardingState?.gates.runSimulations ?? false);
   const gateRequestAllocation = Boolean(onboardingState?.gates.requestAllocation ?? false);
@@ -1077,7 +1115,7 @@ export default function PartnerPortal() {
                 : createInquiry.isPending
                   ? "Inquiry submission is in progress."
                   : null;
-  const showOnboardingProfileTabs = Boolean(keyReady && partnerPortalEnabled && onboardingState);
+  const showOnboardingProfileTabs = Boolean(keyReady && partnerPortalEnabled);
   const showTraderAccessMiniTabs = !showOnboardingProfileTabs || onboardingPanelTab === "trader-access";
 
   const scrollToProfileStep = () => {
@@ -1362,6 +1400,24 @@ export default function PartnerPortal() {
                 onScrollToProfile={scrollToProfileStep}
                 onScrollToLegal={scrollToLegalStep}
               />
+            ) : onboardingLoadErrorMessage ? (
+              <div className="rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
+                <div className="font-semibold">Unable to load onboarding wizard.</div>
+                <div className="mt-1">{onboardingLoadErrorMessage}</div>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="border-amber-300/40 text-amber-100 hover:bg-amber-500/10"
+                    onClick={() => {
+                      void onboardingQuery.refetch();
+                    }}
+                  >
+                    Retry
+                  </Button>
+                  <span className="text-[11px] text-amber-200/90">Code: {onboardingLoadErrorCode}</span>
+                </div>
+              </div>
             ) : (
               <div className="rounded border border-neutral-700 bg-neutral-900/60 px-3 py-2 text-xs text-gray-400">
                 Loading onboarding wizard…
@@ -1383,7 +1439,7 @@ export default function PartnerPortal() {
             ) : null}
 
             <Tabs
-              value={showOnboardingProfileTabs ? onboardingPanelTab : "identity"}
+              value={onboardingPanelTab}
               onValueChange={(value) => {
                 if (value === "identity" || value === "legal" || value === "trader-access") {
                   setOnboardingPanelTab(value);

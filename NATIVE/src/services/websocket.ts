@@ -4,6 +4,16 @@
  */
 
 import { Platform } from 'react-native';
+import {
+    WS_MSG_ACCOUNT_SUBSCRIBE,
+    WS_MSG_ACCOUNT_UNSUBSCRIBE,
+    WS_MSG_AUTH_HELLO,
+    WS_MSG_QUOTES_SUBSCRIBE,
+    WS_MSG_QUOTES_UNSUBSCRIBE,
+    WS_MSG_TRADES_SUBSCRIBE,
+    WS_MSG_TRADES_UNSUBSCRIBE,
+    resolveWsUrl,
+} from '@shared/ws/protocol';
 
 type MessageHandler = (message: any) => void;
 type ConnectionHandler = () => void;
@@ -62,7 +72,7 @@ class WebSocketService {
                 this.reconnectAttempts = 0;
                 this.onConnectHandlers.forEach((handler) => handler());
                 // Optional handshake for scope discovery (safe even when unauthenticated)
-                this.send({ type: 'auth:hello' });
+                this.send({ type: WS_MSG_AUTH_HELLO });
             };
 
             this.ws.onmessage = (event) => {
@@ -193,42 +203,42 @@ class WebSocketService {
      * Subscribe to specific trade updates
      */
     subscribeTrades(): void {
-        this.send({ type: 'trades:subscribe' });
+        this.send({ type: WS_MSG_TRADES_SUBSCRIBE });
     }
 
     /**
      * Unsubscribe from trade updates
      */
     unsubscribeTrades(): void {
-        this.send({ type: 'trades:unsubscribe' });
+        this.send({ type: WS_MSG_TRADES_UNSUBSCRIBE });
     }
 
     /**
      * Subscribe to account summary updates (requires authenticated WS session)
      */
     subscribeAccount(): void {
-        this.send({ type: 'account:subscribe' });
+        this.send({ type: WS_MSG_ACCOUNT_SUBSCRIBE });
     }
 
     /**
      * Unsubscribe from account updates
      */
     unsubscribeAccount(): void {
-        this.send({ type: 'account:unsubscribe' });
+        this.send({ type: WS_MSG_ACCOUNT_UNSUBSCRIBE });
     }
 
     /**
      * Subscribe to quote updates
      */
     subscribeQuotes(symbols?: string[]): void {
-        this.send({ type: 'quotes:subscribe', symbols });
+        this.send({ type: WS_MSG_QUOTES_SUBSCRIBE, symbols });
     }
 
     /**
      * Unsubscribe from quote updates
      */
     unsubscribeQuotes(): void {
-        this.send({ type: 'quotes:unsubscribe' });
+        this.send({ type: WS_MSG_QUOTES_UNSUBSCRIBE });
     }
 }
 
@@ -239,7 +249,7 @@ const DEV_WS_BASE_URL =
         ? 'ws://10.0.2.2:5000/ws'
         : 'ws://localhost:5000/ws';
 
-const WS_BASE_URL = __DEV__ ? DEV_WS_BASE_URL : 'wss://your-production-domain.com/ws';
+const WS_BASE_URL = resolveWsUrl(__DEV__ ? DEV_WS_BASE_URL : 'https://your-production-domain.com');
 
 export const wsService = new WebSocketService({
     baseUrl: WS_BASE_URL,

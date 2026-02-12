@@ -1,9 +1,10 @@
-export type BotChallengePayload = {
-  id: string;
-  serverNonce: string;
-  difficulty: number; // leading zero bits required
-  expiresAt: number; // unix seconds
-};
+import {
+  BOT_PROOF_MAX_SOLVE_MS,
+  BOT_PROOF_YIELD_EVERY,
+  BotChallengePayload,
+  leadingZeroBitsOfHex,
+} from "@shared/security/botChallenge";
+import { IDENTITY_HEADER_DEVICE_FP, IDENTITY_HEADER_DEVICE_INSTALL_ID } from "@shared/identity/headers";
 
 function b64urlEncodeUtf8(s: string): string {
   const b64 = btoa(unescape(encodeURIComponent(s)));
@@ -19,37 +20,21 @@ async function sha256Hex(s: string): Promise<string> {
     .join("");
 }
 
-function leadingZeroBits(hex: string): number {
-  let bits = 0;
-  for (let i = 0; i < hex.length; i++) {
-    const v = parseInt(hex[i]!, 16);
-    if (v === 0) {
-      bits += 4;
-      continue;
-    }
-    if (v < 8) bits += 1;
-    if (v < 4) bits += 1;
-    if (v < 2) bits += 1;
-    return bits;
-  }
-  return bits;
-}
-
 export async function solveBotChallenge(ch: BotChallengePayload, identity: Record<string, string>): Promise<string> {
-  const deviceFp = identity["x-device-fp"] || "";
-  const deviceInstallId = identity["x-device-install-id"] || "";
+  const deviceFp = identity[IDENTITY_HEADER_DEVICE_FP] || "";
+  const deviceInstallId = identity[IDENTITY_HEADER_DEVICE_INSTALL_ID] || "";
 
   const start = Date.now();
   let nonce = 0;
 
   // Guardrails so we don't hang
-  const maxMs = 2500;
-  const yieldEvery = 250;
+  const maxMs = BOT_PROOF_MAX_SOLVE_MS;
+  const yieldEvery = BOT_PROOF_YIELD_EVERY;
 
   while (Date.now() - start < maxMs) {
     const material = `${ch.id}|${ch.serverNonce}|${nonce}|${deviceFp}|${deviceInstallId}`;
     const digest = await sha256Hex(material);
-    if (leadingZeroBits(digest) >= ch.difficulty) {
+    if (leadingZeroBitsOfHex(digest) >= ch.difficulty) {
       const tokenObj = {
         id: ch.id,
         solutionNonce: nonce,
@@ -66,4 +51,3 @@ export async function solveBotChallenge(ch: BotChallengePayload, identity: Recor
 
   throw new Error("BOT_PROOF_TIMEOUT");
 }
-

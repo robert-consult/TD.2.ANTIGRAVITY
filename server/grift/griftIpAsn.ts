@@ -1,5 +1,6 @@
 import type { GriftDb } from "./griftDb";
 import { lookupIp2Asn, maybeImportIp2AsnDataset } from "./griftIp2AsnDataset";
+import { isPrivateOrLoopbackIp, normalizeIpKey as normalizeRequestIpKey } from "@shared/security/requestIdentity";
 
 export type IpAsnOrg = {
   ip: string;
@@ -33,41 +34,11 @@ function cleanString(v: unknown, maxLen: number): string | null {
 }
 
 export function normalizeIpKey(input: string | null | undefined): string | null {
-  if (!input) return null;
-  let ip = String(input).trim();
-  if (!ip) return null;
-  if (ip.includes(",")) ip = ip.split(",")[0]!.trim();
-  // Strip IPv4-mapped IPv6 prefix (common in Node/Express)
-  if (ip.toLowerCase().startsWith("::ffff:")) ip = ip.slice("::ffff:".length);
-  // Strip bracketed IPv6 with port: [::1]:1234
-  const bracket = ip.match(/^\[([^\]]+)\](?::\d+)?$/);
-  if (bracket?.[1]) ip = bracket[1];
-  // Strip IPv4 port: 1.2.3.4:1234
-  const ipv4Port = ip.match(/^(\d{1,3}(?:\.\d{1,3}){3}):\d+$/);
-  if (ipv4Port?.[1]) ip = ipv4Port[1];
-  return ip.trim().toLowerCase() || null;
+  return normalizeRequestIpKey(input);
 }
 
 function isPrivateIp(ip: string): boolean {
-  const key = normalizeIpKey(ip);
-  if (!key) return true;
-
-  // IPv6 loopback/link-local/ULA
-  if (key === "::1") return true;
-  if (key.startsWith("fe80:")) return true;
-  if (key.startsWith("fc") || key.startsWith("fd")) return true;
-
-  // IPv4 private ranges
-  const m = key.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
-  if (!m) return false;
-  const a = Number(m[1]);
-  const b = Number(m[2]);
-  if (a === 10) return true;
-  if (a === 127) return true;
-  if (a === 169 && b === 254) return true;
-  if (a === 192 && b === 168) return true;
-  if (a === 172 && b >= 16 && b <= 31) return true;
-  return false;
+  return isPrivateOrLoopbackIp(ip);
 }
 
 function backoffMs(attemptCount: number) {

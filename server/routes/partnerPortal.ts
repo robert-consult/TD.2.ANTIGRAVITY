@@ -43,6 +43,7 @@ import {
   PARTNER_CONTACT_CHANNEL_OPTIONS,
   normalizePartnerInstitutionProfile,
 } from "@shared/partnerProfile";
+import { MAX_E2EE_ENVELOPE_BYTES, normalizeHexSha256 } from "@shared/e2ee/envelope";
 
 const partnerAuthRouter = Router();
 
@@ -1345,13 +1346,13 @@ partnerPortalRouter.post("/inquiries", async (req, res) => {
     if (!senderEmail || senderEmail.length > 254 || !isValidEmailAddress(senderEmail)) {
       return res.status(400).json({ message: "INVALID_SENDER_EMAIL" });
     }
-    if (!e2eeEnvelope || e2eeEnvelope.length > 1_500_000) {
+    if (!e2eeEnvelope || e2eeEnvelope.length > MAX_E2EE_ENVELOPE_BYTES) {
       return res.status(409).json({ message: "INQUIRY_E2EE_REQUIRED" });
     }
-    if (e2eeSenderKeyFingerprint && !/^[a-fA-F0-9]{64}$/.test(e2eeSenderKeyFingerprint)) {
+    if (e2eeSenderKeyFingerprint && !normalizeHexSha256(e2eeSenderKeyFingerprint)) {
       return res.status(400).json({ message: "INVALID_E2EE_SENDER_FINGERPRINT" });
     }
-    if (bodyDigestSha256 && !/^[a-fA-F0-9]{64}$/.test(bodyDigestSha256)) {
+    if (bodyDigestSha256 && !normalizeHexSha256(bodyDigestSha256)) {
       return res.status(400).json({ message: "INVALID_BODY_DIGEST" });
     }
 

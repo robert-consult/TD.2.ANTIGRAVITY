@@ -61,8 +61,15 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
   }
 }
 
+export function resolveAdminUserId(req: Request): number | null {
+  const userId = Number(req.session?.userId ?? 0);
+  const isAdmin = Boolean(req.session?.isAdmin);
+  if (!isAdmin || !Number.isFinite(userId) || userId <= 0) return null;
+  return userId;
+}
+
 export function requireAdmin(req: Request, res: Response, next: NextFunction) {
-  if (!req.session.userId || !req.session.isAdmin)
+  if (!resolveAdminUserId(req))
     return res.status(403).json({ message: "Forbidden" });
   next();
 }

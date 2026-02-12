@@ -89,6 +89,28 @@ import { adminChallengesRouter, adminPartnersRouter, adminScoutRouter } from "./
 import { partnerAuthRouter, partnerPortalRouter } from "./routes/partnerPortal";
 import { traderTalentPublicRouter, traderTalentRouter } from "./routes/traderTalent";
 import { createCsrfProtection } from "./security/csrf";
+import {
+  WS_MSG_ACCOUNT_SNAPSHOT,
+  WS_MSG_ACCOUNT_SUBSCRIBE,
+  WS_MSG_ACCOUNT_UNSUBSCRIBE,
+  WS_MSG_AUTH_HELLO,
+  WS_MSG_AUTH_OK,
+  WS_MSG_ERROR,
+  WS_MSG_PING,
+  WS_MSG_PONG,
+  WS_MSG_QUOTE_SUBSCRIPTIONS_UPDATED,
+  WS_MSG_QUOTES_SNAPSHOT,
+  WS_MSG_QUOTES_SUBSCRIBE,
+  WS_MSG_QUOTES_UNSUBSCRIBE,
+  WS_MSG_QUOTES_UPDATE,
+  WS_MSG_TRADES_SUBSCRIBE,
+  WS_MSG_TRADES_UNSUBSCRIBE,
+  WS_MSG_TRADES_UPDATE,
+  WS_MSG_TRADES_UPDATED,
+  WS_MSG_ACCOUNT_UPDATE,
+  WS_MSG_ACCOUNT_UPDATED,
+  WS_PROTOCOL_VERSION,
+} from "@shared/ws/protocol";
 
 /**
  * Precision-aware price comparison utilities for forex trading.
@@ -3413,7 +3435,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // Include userId in payload so clients can filter, but also send to unauth'd clients
         const targetUserId = req.session.userId;
         broadcast(
-          { type: "trades:updated", userId: targetUserId },
+          { type: WS_MSG_TRADES_UPDATED, userId: targetUserId },
           (client) => client.userId === targetUserId || client.userId === undefined
         );
 
@@ -3830,7 +3852,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // Include userId in payload so clients can filter, but also send to unauth'd clients
         const targetUserId = req.session.userId;
         broadcast(
-          { type: "trades:updated", userId: targetUserId },
+          { type: WS_MSG_TRADES_UPDATED, userId: targetUserId },
           (client) => client.userId === targetUserId || client.userId === undefined
         );
 
@@ -4167,7 +4189,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // Notify ALL browser sessions for this user that trades changed (multi-device sync)
         const targetUserId = session.userId;
         broadcast(
-          { type: "trades:updated", userId: targetUserId },
+          { type: WS_MSG_TRADES_UPDATED, userId: targetUserId },
           (client) => client.userId === targetUserId || client.userId === undefined
         );
 
@@ -4314,7 +4336,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // Notify ALL browser sessions for this user that trades changed (multi-device sync)
         const targetUserId = session.userId;
         broadcast(
-          { type: "trades:updated", userId: targetUserId },
+          { type: WS_MSG_TRADES_UPDATED, userId: targetUserId },
           (client) => client.userId === targetUserId || client.userId === undefined
         );
 
@@ -5063,7 +5085,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     );
   });
 
-  const WS_PROTOCOL_VERSION = 1;
   const wsTransportTlsRequired =
     process.env.NODE_ENV === "production" &&
     process.env.COOKIE_SECURE !== "false" &&
@@ -5274,7 +5295,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   async function wsCloseWithPolicy(socket: WebSocket, client: LiveClient, decision: any) {
     wsSendJson(socket, {
-      type: "ws:error",
+      type: WS_MSG_ERROR,
       code: decision?.code ?? "JURISDICTION_RESTRICTED",
       reasonCode: decision?.reasonCode ?? null,
       message: decision?.message ?? "Access restricted.",
@@ -5303,7 +5324,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   }
 
   function wsCloseUnauthorized(socket: WebSocket, reason: string) {
-    wsSendJson(socket, { type: "ws:error", code: "WS_UNAUTHORIZED", message: "Unauthorized", reason });
+    wsSendJson(socket, { type: WS_MSG_ERROR, code: "WS_UNAUTHORIZED", message: "Unauthorized", reason });
     try {
       socket.close(4401, "UNAUTHORIZED");
     } catch { }
@@ -5336,7 +5357,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   async function sendQuoteSnapshot(socket: WebSocket, symbols?: string[]) {
     if (Array.isArray(symbols) && symbols.length === 0) {
       wsSendJson(socket, {
-        type: "quotes:snapshot",
+        type: WS_MSG_QUOTES_SNAPSHOT,
         protocolVersion: WS_PROTOCOL_VERSION,
         seq: 0,
         asOf: Date.now(),
@@ -5347,7 +5368,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
     const snapshot = await buildQuoteSnapshotResponse(symbols);
     wsSendJson(socket, {
-      type: "quotes:snapshot",
+      type: WS_MSG_QUOTES_SNAPSHOT,
       protocolVersion: WS_PROTOCOL_VERSION,
       seq: snapshot.seq,
       asOf: snapshot.asOf,
@@ -5416,7 +5437,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
     if (wsTransportTlsRequired && !isWsRequestTransportSecure(req)) {
       wsSendJson(socket, {
-        type: "ws:error",
+        type: WS_MSG_ERROR,
         code: "TRANSPORT_TLS_REQUIRED",
         message: "Secure transport required",
       });
@@ -5431,7 +5452,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     if (!isWsOriginAllowed(req)) {
       metricWsOriginRejectedTotal += 1;
       wsSendJson(socket, {
-        type: "ws:error",
+        type: WS_MSG_ERROR,
         code: "WS_ORIGIN_FORBIDDEN",
         message: "WebSocket origin not allowed",
       });
@@ -5461,7 +5482,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           return wsCloseUnauthorized(socket, "AUTH_MISMATCH");
         }
 
-        if (type === "auth:hello") {
+        if (type === WS_MSG_AUTH_HELLO) {
           const scopes = [
             "quotes",
             client.userId ? "trades" : null,
@@ -5469,7 +5490,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             client.isAdmin ? "admin" : null,
           ].filter(Boolean);
           return wsSendJson(socket, {
-            type: "auth:ok",
+            type: WS_MSG_AUTH_OK,
             userIdMasked: maskUserId(client.userId),
             isAdmin: client.isAdmin,
             scopes,
@@ -5477,7 +5498,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           });
         }
 
-        if (type === "quotes:subscribe") {
+        if (type === WS_MSG_QUOTES_SUBSCRIBE) {
           const symbols = normalizeSymbolsInput((msg as any).symbols);
           const allowedSymbols = client.allowedQuoteSymbols ?? new Set<string>();
           if (!symbols.length) {
@@ -5497,7 +5518,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           return;
         }
 
-        if (type === "quotes:unsubscribe") {
+        if (type === WS_MSG_QUOTES_UNSUBSCRIBE) {
           const symbols = normalizeSymbolsInput((msg as any).symbols);
           if (!symbols.length) {
             client.wantsQuotesAll = false;
@@ -5515,18 +5536,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
           return;
         }
 
-        if (type === "trades:subscribe") {
+        if (type === WS_MSG_TRADES_SUBSCRIBE) {
           if (!client.userId) return wsCloseUnauthorized(socket, "AUTH_REQUIRED");
           client.wantsTrades = true;
           return;
         }
 
-        if (type === "trades:unsubscribe") {
+        if (type === WS_MSG_TRADES_UNSUBSCRIBE) {
           client.wantsTrades = false;
           return;
         }
 
-        if (type === "account:subscribe") {
+        if (type === WS_MSG_ACCOUNT_SUBSCRIBE) {
           if (!client.userId) return wsCloseUnauthorized(socket, "AUTH_REQUIRED");
           client.wantsAccount = true;
           try {
@@ -5534,7 +5555,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             const metrics = await recalcAccount(client.userId);
             if (metrics) {
               wsSendJson(socket, {
-                type: "account:snapshot",
+                type: WS_MSG_ACCOUNT_SNAPSHOT,
                 protocolVersion: WS_PROTOCOL_VERSION,
                 userId: client.userId,
                 payload: {
@@ -5559,13 +5580,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
           return;
         }
 
-        if (type === "account:unsubscribe") {
+        if (type === WS_MSG_ACCOUNT_UNSUBSCRIBE) {
           client.wantsAccount = false;
           return;
         }
 
-        if (type === "ping") {
-          return wsSendJson(socket, { type: "pong" });
+        if (type === WS_MSG_PING) {
+          return wsSendJson(socket, { type: WS_MSG_PONG });
         }
       } catch (err) {
         console.error("Invalid WS message:", err);
@@ -5577,7 +5598,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!consumeWsMessageRate(client)) {
         metricWsMessageRateLimitedTotal += 1;
         wsSendJson(socket, {
-          type: "ws:error",
+          type: WS_MSG_ERROR,
           code: "WS_MESSAGE_RATE_LIMITED",
           message: "Message rate limit exceeded",
           retryAfterMs: wsMessageRateWindowMs,
@@ -5671,7 +5692,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           if (concurrentConnections >= wsUserConnectionLimit) {
             metricWsUserConnectionLimitRejectedTotal += 1;
             wsSendJson(socket, {
-              type: "ws:error",
+              type: WS_MSG_ERROR,
               code: "WS_CONNECTION_LIMIT_REACHED",
               message: "Too many active websocket connections for this user",
               limit: wsUserConnectionLimit,
@@ -5733,7 +5754,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Bridge internal live events to WebSocket clients (user-scoped when userId is present)
   onLiveEvent((event) => {
     const ev = event as any;
-    if (ev?.type === "quote-subscriptions:updated") {
+    if (ev?.type === WS_MSG_QUOTE_SUBSCRIPTIONS_UPDATED) {
       const userIds = Array.isArray(ev?.payload?.userIds)
         ? new Set(
           (ev.payload.userIds as any[])
@@ -5744,7 +5765,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const targetUserIds = userIds && userIds.size > 0 ? userIds : undefined;
       const eventPayload = {
-        type: "quote-subscriptions:updated",
+        type: WS_MSG_QUOTE_SUBSCRIPTIONS_UPDATED,
         payload: ev?.payload ?? null,
       };
 
@@ -5757,7 +5778,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return;
     }
 
-    if (ev?.type === "quotes:update" && Array.isArray(ev?.payload?.rows)) {
+    if (ev?.type === WS_MSG_QUOTES_UPDATE && Array.isArray(ev?.payload?.rows)) {
       const seq = Number(ev.payload?.seq ?? 0);
       const asOf = Number(ev.payload?.asOf ?? Date.now());
       applyQuoteUpdate(ev.payload.rows, { seq, asOf });
@@ -5799,7 +5820,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         let serialized = "";
         try {
           serialized = JSON.stringify({
-            type: "quotes:update",
+            type: WS_MSG_QUOTES_UPDATE,
             protocolVersion: WS_PROTOCOL_VERSION,
             seq,
             asOf,
@@ -5822,7 +5843,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
 
     const userId = ev?.userId;
-    if (ev?.type === "trades:updated" || ev?.type === "trades:update") {
+    if (ev?.type === WS_MSG_TRADES_UPDATED || ev?.type === WS_MSG_TRADES_UPDATE) {
       if (typeof userId === "number") {
         broadcast(ev, (client) => client.userId === userId && client.wantsTrades);
       } else {
@@ -5831,7 +5852,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return;
     }
 
-    if (ev?.type === "account:updated" || ev?.type === "account:update") {
+    if (ev?.type === WS_MSG_ACCOUNT_UPDATED || ev?.type === WS_MSG_ACCOUNT_UPDATE) {
       if (typeof userId === "number") {
         broadcast(ev, (client) => client.userId === userId && client.wantsAccount);
       } else {

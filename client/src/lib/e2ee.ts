@@ -1,4 +1,9 @@
-const E2EE_KEY_ALGO = "RSA_OAEP_256_V1";
+import {
+  E2EE_DATA_ALGO_AES_256_GCM,
+  E2EE_KEY_ALGO_RSA_OAEP_256_V1,
+} from "@shared/e2ee/envelope";
+
+const E2EE_KEY_ALGO = E2EE_KEY_ALGO_RSA_OAEP_256_V1;
 const STORAGE_PREFIX = "tq.mailbox.e2ee.v1";
 
 type RecipientKey = {
@@ -225,7 +230,7 @@ export async function encryptTextForMailboxRecipients(
   const envelope = JSON.stringify({
     version: 1,
     keyAlgorithm: E2EE_KEY_ALGO,
-    dataAlgorithm: "AES_256_GCM",
+    dataAlgorithm: E2EE_DATA_ALGO_AES_256_GCM,
     recipients: recipientMap,
     iv: toBase64(iv),
     tag: toBase64(tag),

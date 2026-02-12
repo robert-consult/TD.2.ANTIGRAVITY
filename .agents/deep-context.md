@@ -7,6 +7,7 @@ Use this file to locate the right entrypoints quickly; do not “read the whole 
 
 ## Start here (always)
 - Repo router: `AGENTS.md`
+- Shared-first router: `.agents/shared-services.md`
 - Structure guide: `PROJECT_STRUCTURE.md`
 - Security invariants: `AUDIT_REPORT.md`, `REAUDIT_REPORT.md`, `AUDIT_COMPLIANCE_STATUS.md`
 - Compliance runbooks: `JURISDICTION_CONTROLS_VERIFICATION_RUNBOOK.md`, `CODEX_COUNTRY_TIMEZONE_CONTROLS.md`
@@ -88,4 +89,3 @@ Use this file to locate the right entrypoints quickly; do not “read the whole 
 - Find WS message types: `rg -n \"quotes:|trades:|auth:\" server/routes.ts client/src/live`
 - Find policy gates: `rg -n \"requirePolicy\\(|decidePolicy\\(|featureGates\\(\" server shared`
 - Find audit writes: `rg -n \"writeTradeAudit\\(|appendIdentityAudit\\(\" server`
-

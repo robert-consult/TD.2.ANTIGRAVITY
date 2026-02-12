@@ -1,5 +1,15 @@
-const INSTALL_ID_KEY = "grift_device_install_id";
-const LEGACY_ID_KEY = "grift_device_id";
+import {
+  DEVICE_INSTALL_ID_STORAGE_KEY,
+  IDENTITY_HEADER_CLIENT_LANG,
+  IDENTITY_HEADER_CLIENT_TZ,
+  IDENTITY_HEADER_DEVICE_FP,
+  IDENTITY_HEADER_DEVICE_ID,
+  IDENTITY_HEADER_DEVICE_INSTALL_ID,
+  LEGACY_DEVICE_ID_STORAGE_KEY,
+} from "@shared/identity/headers";
+import { generateIdentityId } from "@shared/identity/device";
+import { DEFAULT_LOCALE, LOCALE_STORAGE_KEY } from "@shared/locale/preferences";
+
 let fingerprintPromise: Promise<string> | null = null;
 
 function safeGetItem(key: string): string | null {
@@ -18,33 +28,20 @@ function safeSetItem(key: string, value: string) {
   }
 }
 
-function generateId(): string {
-  const cryptoObj = typeof globalThis.crypto !== "undefined" ? globalThis.crypto : undefined;
-  if (cryptoObj?.randomUUID) {
-    return cryptoObj.randomUUID();
-  }
-  if (cryptoObj?.getRandomValues) {
-    const bytes = new Uint8Array(16);
-    cryptoObj.getRandomValues(bytes);
-    return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
-  }
-  return Math.random().toString(16).slice(2) + Date.now().toString(16);
-}
-
 export function getDeviceInstallId(): string {
-  let id = safeGetItem(INSTALL_ID_KEY);
+  let id = safeGetItem(DEVICE_INSTALL_ID_STORAGE_KEY);
   if (!id) {
-    id = generateId();
-    safeSetItem(INSTALL_ID_KEY, id);
+    id = generateIdentityId();
+    safeSetItem(DEVICE_INSTALL_ID_STORAGE_KEY, id);
   }
   return id;
 }
 
 export function getLegacyDeviceId(): string {
-  let id = safeGetItem(LEGACY_ID_KEY);
+  let id = safeGetItem(LEGACY_DEVICE_ID_STORAGE_KEY);
   if (!id) {
-    id = generateId();
-    safeSetItem(LEGACY_ID_KEY, id);
+    id = generateIdentityId();
+    safeSetItem(LEGACY_DEVICE_ID_STORAGE_KEY, id);
   }
   return id;
 }
@@ -128,23 +125,23 @@ export function getClientTimezone(): string {
 }
 
 export function getClientLanguage(): string {
-  const saved = safeGetItem("i18n.locale");
+  const saved = safeGetItem(LOCALE_STORAGE_KEY);
   if (saved) return saved;
-  return navigator.language || "en-US";
+  return navigator.language || DEFAULT_LOCALE;
 }
 
 export async function getIdentityHeaders(): Promise<Record<string, string>> {
   const deviceFp = await getDeviceFingerprint();
   const headers: Record<string, string> = {
-    "x-device-install-id": getDeviceInstallId(),
-    "x-device-id": getLegacyDeviceId(),
-    "x-device-fp": deviceFp,
-    "x-client-tz": getClientTimezone(),
-    "x-client-lang": getClientLanguage(),
+    [IDENTITY_HEADER_DEVICE_INSTALL_ID]: getDeviceInstallId(),
+    [IDENTITY_HEADER_DEVICE_ID]: getLegacyDeviceId(),
+    [IDENTITY_HEADER_DEVICE_FP]: deviceFp,
+    [IDENTITY_HEADER_CLIENT_TZ]: getClientTimezone(),
+    [IDENTITY_HEADER_CLIENT_LANG]: getClientLanguage(),
   };
 
-  if (!headers["x-device-id"]) {
-    delete headers["x-device-id"];
+  if (!headers[IDENTITY_HEADER_DEVICE_ID]) {
+    delete headers[IDENTITY_HEADER_DEVICE_ID];
   }
 
   return headers;

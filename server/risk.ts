@@ -6,6 +6,9 @@ import { db } from "@db";
 import { eq } from "drizzle-orm";
 import { getLatestQuoteRow } from './services/quoteService';
 import { getActiveTradeConstraintsForUser } from "./recruitment/challengesV4/challengeService";
+import { appendIdentityAudit } from "./services/identityAudit";
+import { appendChallengeEvent } from "./recruitment/challengesV4/challengeEvents";
+import { getSystemChallengeConfig } from "./recruitment/challengesV4/challengeConfig";
 
 /**
  * Risk management middleware for the TradeQuip platform
@@ -28,6 +31,166 @@ const DEFAULTS = {
   enableLossLimits: true,
   minHoldSec: 60,
 };
+
+type NewsBlackoutWindow = {
+  startAt: number;
+  endAt: number;
+  symbols: Set<string>;
+  label: string | null;
+};
+
+type ChallengeBlockTrackerRecord = { count: number; resetAtMs: number };
+const challengeBlockTracker = new Map<string, ChallengeBlockTrackerRecord>();
+const CHALLENGE_BLOCK_WINDOW_MS = 60_000;
+const CHALLENGE_BLOCK_SUSPICIOUS_THRESHOLD = 3;
+const challengeBlockCleanupHandle = setInterval(() => {
+  const now = Date.now();
+  for (const [k, v] of challengeBlockTracker.entries()) {
+    if (v.resetAtMs <= now) challengeBlockTracker.delete(k);
+  }
+}, 60_000);
+(challengeBlockCleanupHandle as any)?.unref?.();
+
+function toUnixSec(value: unknown): number | null {
+  if (value == null) return null;
+  if (typeof value === "number") {
+    if (!Number.isFinite(value) || value <= 0) return null;
+    return value > 1e12 ? Math.trunc(value / 1000) : Math.trunc(value);
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    const n = Number(trimmed);
+    if (Number.isFinite(n) && n > 0) return n > 1e12 ? Math.trunc(n / 1000) : Math.trunc(n);
+    const parsed = Date.parse(trimmed);
+    if (!Number.isNaN(parsed) && parsed > 0) return Math.trunc(parsed / 1000);
+  }
+  return null;
+}
+
+function parseNewsBlackoutWindows(raw: unknown): NewsBlackoutWindow[] {
+  if (typeof raw !== "string" || !raw.trim()) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(parsed)) return [];
+
+  const out: NewsBlackoutWindow[] = [];
+  for (const row of parsed) {
+    if (!row || typeof row !== "object") continue;
+    const item = row as Record<string, unknown>;
+    const startAt = toUnixSec(item.startAt ?? item.start ?? item.from ?? item.startTs);
+    const endAt = toUnixSec(item.endAt ?? item.end ?? item.to ?? item.endTs);
+    if (startAt == null || endAt == null || endAt < startAt) continue;
+
+    const symbolValues = Array.isArray(item.symbols)
+      ? item.symbols
+      : typeof item.symbolsCsv === "string"
+        ? String(item.symbolsCsv).split(",")
+        : [];
+    const symbols = new Set<string>();
+    for (const symbolValue of symbolValues) {
+      const s = String(symbolValue ?? "").trim().toUpperCase();
+      if (s) symbols.add(s);
+    }
+
+    out.push({
+      startAt,
+      endAt,
+      symbols,
+      label: item.label == null ? null : String(item.label),
+    });
+  }
+  return out.slice(0, 200);
+}
+
+function hoursUntilWeekendBoundaryUtc(nowMs: number): number {
+  const now = new Date(nowMs);
+  const day = now.getUTCDay(); // 0 Sun ... 6 Sat
+  if (day === 0 || day === 6) return 0;
+
+  const weekendStart = new Date(nowMs);
+  const daysToSaturday = (6 - day + 7) % 7;
+  weekendStart.setUTCDate(now.getUTCDate() + daysToSaturday);
+  weekendStart.setUTCHours(0, 0, 0, 0);
+
+  return Math.max(0, (weekendStart.getTime() - nowMs) / 3600000);
+}
+
+function emitChallengeTradeBlockTelemetry(input: {
+  userId: number;
+  sessionId: string | null;
+  ip: string | null;
+  userAgent: string | null;
+  enrollmentIds: number[];
+  reasonCode: string;
+  detail: Record<string, unknown>;
+  anomalyDetectionEnabled?: boolean;
+}) {
+  appendIdentityAudit({
+    userId: input.userId,
+    category: "RECRUITMENT",
+    type: "CHALLENGE_TRADE_BLOCKED",
+    actorType: "SYSTEM",
+    actorUserId: null,
+    sessionId: input.sessionId,
+    ip: input.ip,
+    userAgent: input.userAgent,
+    data: {
+      reasonCode: input.reasonCode,
+      enrollmentIds: input.enrollmentIds,
+      ...input.detail,
+    },
+  });
+
+  for (const enrollmentId of input.enrollmentIds.slice(0, 20)) {
+    void appendChallengeEvent({
+      enrollmentId,
+      eventType: "CHALLENGE_TRADE_BLOCKED",
+      details: {
+        reasonCode: input.reasonCode,
+        ...input.detail,
+      },
+      note: `Trade open blocked by challenge rule (${input.reasonCode})`,
+    }).catch((error) => {
+      console.error("[risk] failed to append challenge block event:", error);
+    });
+  }
+
+  if (input.anomalyDetectionEnabled === false) return;
+
+  const key = `${input.userId}:${input.reasonCode}`;
+  const now = Date.now();
+  const tracked = challengeBlockTracker.get(key);
+  if (!tracked || tracked.resetAtMs <= now) {
+    challengeBlockTracker.set(key, { count: 1, resetAtMs: now + CHALLENGE_BLOCK_WINDOW_MS });
+    return;
+  }
+
+  tracked.count += 1;
+  challengeBlockTracker.set(key, tracked);
+  if (tracked.count < CHALLENGE_BLOCK_SUSPICIOUS_THRESHOLD) return;
+
+  appendIdentityAudit({
+    userId: input.userId,
+    category: "RECRUITMENT",
+    type: "CHALLENGE_SUSPICIOUS_ACTIVITY",
+    actorType: "SYSTEM",
+    actorUserId: null,
+    sessionId: input.sessionId,
+    ip: input.ip,
+    userAgent: input.userAgent,
+    data: {
+      reasonCode: input.reasonCode,
+      attemptsInWindow: tracked.count,
+      windowMs: CHALLENGE_BLOCK_WINDOW_MS,
+      ...input.detail,
+    },
+  });
+}
 
 async function getGlobalSettings() {
   const gs = await db.query.globalSettings.findFirst({
@@ -262,8 +425,95 @@ export async function riskMiddleware(req: Request, res: Response, next: NextFunc
   // Challenge v4 runtime constraints (best-effort hard guard on trade entry).
   const challengeConstraints = await getActiveTradeConstraintsForUser(userId);
   if (challengeConstraints) {
+    const sessionId = String((req as any).sessionID || "") || null;
+    const ip = String(req.ip || "") || null;
+    const userAgent = String(req.get("user-agent") || "") || null;
+    const nowMs = Date.now();
+    const challengeCfg = await getSystemChallengeConfig().catch(() => null);
+    const weekendCutoffHours = challengeCfg != null ? Math.max(0, Number(challengeCfg.challengeWeekendCutoffHours ?? 0)) : 0;
+    const weekendHoursRemaining = hoursUntilWeekendBoundaryUtc(nowMs);
+    const inWeekend = weekendHoursRemaining <= 0;
+    const insideWeekendCutoff = weekendCutoffHours > 0 && weekendHoursRemaining <= weekendCutoffHours;
+    if (!challengeConstraints.allowWeekendHolding && (inWeekend || insideWeekendCutoff)) {
+      emitChallengeTradeBlockTelemetry({
+        userId,
+        sessionId,
+        ip,
+        userAgent,
+        enrollmentIds: challengeConstraints.enrollmentIds,
+        reasonCode: "CHALLENGE_WEEKEND_HOLDING_BLOCKED",
+        anomalyDetectionEnabled: Boolean(challengeCfg?.challengeAnomalyDetectionEnabled ?? true),
+        detail: {
+          weekendCutoffHours,
+          weekendHoursRemaining,
+          inWeekend,
+        },
+      });
+      return res.status(409).json({
+        code: "CHALLENGE_WEEKEND_HOLDING_BLOCKED",
+        message: "Opening new positions is blocked by active challenge weekend-holding rules.",
+        weekendCutoffHours,
+        weekendHoursRemaining,
+      });
+    }
+
+    let symbolForChallengeChecks = "";
+    const symbolId = Number(req.body.symbolId ?? 0);
+    if (Number.isInteger(symbolId) && symbolId > 0) {
+      const symbolCfg = await db.query.symbolConfigs.findFirst({
+        where: eq(symbolConfigs.id, symbolId),
+      });
+      symbolForChallengeChecks = String(symbolCfg?.symbol ?? "").trim().toUpperCase();
+    }
+
+    if (!challengeConstraints.allowNewsTrading) {
+      const windows = parseNewsBlackoutWindows(challengeCfg?.challengeNewsBlackoutWindowsJson ?? "[]");
+      const nowSec = Math.floor(nowMs / 1000);
+      const activeWindow =
+        windows.find((w) => nowSec >= w.startAt && nowSec <= w.endAt && (!w.symbols.size || w.symbols.has(symbolForChallengeChecks))) ??
+        null;
+      if (activeWindow) {
+        emitChallengeTradeBlockTelemetry({
+          userId,
+          sessionId,
+          ip,
+          userAgent,
+          enrollmentIds: challengeConstraints.enrollmentIds,
+          reasonCode: "CHALLENGE_NEWS_BLACKOUT_BLOCKED",
+          anomalyDetectionEnabled: Boolean(challengeCfg?.challengeAnomalyDetectionEnabled ?? true),
+          detail: {
+            windowStartAt: activeWindow.startAt,
+            windowEndAt: activeWindow.endAt,
+            windowLabel: activeWindow.label,
+            symbol: symbolForChallengeChecks || null,
+          },
+        });
+        return res.status(409).json({
+          code: "CHALLENGE_NEWS_BLACKOUT_BLOCKED",
+          message: "Opening new positions is blocked during configured challenge news blackout windows.",
+          windowStartAt: activeWindow.startAt,
+          windowEndAt: activeWindow.endAt,
+          windowLabel: activeWindow.label,
+          symbol: symbolForChallengeChecks || null,
+        });
+      }
+    }
+
     const requestedLots = Number(req.body.lots ?? req.body.size ?? 0);
     if (challengeConstraints.maxLotSize != null && requestedLots > challengeConstraints.maxLotSize) {
+      emitChallengeTradeBlockTelemetry({
+        userId,
+        sessionId,
+        ip,
+        userAgent,
+        enrollmentIds: challengeConstraints.enrollmentIds,
+        reasonCode: "CHALLENGE_MAX_LOT_SIZE",
+        anomalyDetectionEnabled: Boolean(challengeCfg?.challengeAnomalyDetectionEnabled ?? true),
+        detail: {
+          requestedLots,
+          maxLotSize: challengeConstraints.maxLotSize,
+        },
+      });
       return res.status(409).json({
         code: "CHALLENGE_MAX_LOT_SIZE",
         message: `Lot size exceeds active challenge limit (${challengeConstraints.maxLotSize}).`,
@@ -276,6 +526,19 @@ export async function riskMiddleware(req: Request, res: Response, next: NextFunc
       challengeConstraints.maxConcurrentPositions != null &&
       activeTrades.length >= challengeConstraints.maxConcurrentPositions
     ) {
+      emitChallengeTradeBlockTelemetry({
+        userId,
+        sessionId,
+        ip,
+        userAgent,
+        enrollmentIds: challengeConstraints.enrollmentIds,
+        reasonCode: "CHALLENGE_MAX_CONCURRENT_POSITIONS",
+        anomalyDetectionEnabled: Boolean(challengeCfg?.challengeAnomalyDetectionEnabled ?? true),
+        detail: {
+          activePositions: activeTrades.length,
+          maxConcurrentPositions: challengeConstraints.maxConcurrentPositions,
+        },
+      });
       return res.status(409).json({
         code: "CHALLENGE_MAX_CONCURRENT_POSITIONS",
         message: `Active challenge position limit reached (${challengeConstraints.maxConcurrentPositions}).`,
@@ -284,18 +547,24 @@ export async function riskMiddleware(req: Request, res: Response, next: NextFunc
       });
     }
 
-    const symbolId = Number(req.body.symbolId ?? 0);
-    if (Number.isInteger(symbolId) && symbolId > 0 && challengeConstraints.restrictedSymbols.size > 0) {
-      const symbolCfg = await db.query.symbolConfigs.findFirst({
-        where: eq(symbolConfigs.id, symbolId),
-      });
-
-      const symbol = String(symbolCfg?.symbol ?? "").toUpperCase();
-      if (symbol && challengeConstraints.restrictedSymbols.has(symbol)) {
+    if (symbolForChallengeChecks && challengeConstraints.restrictedSymbols.size > 0) {
+      if (challengeConstraints.restrictedSymbols.has(symbolForChallengeChecks)) {
+        emitChallengeTradeBlockTelemetry({
+          userId,
+          sessionId,
+          ip,
+          userAgent,
+          enrollmentIds: challengeConstraints.enrollmentIds,
+          reasonCode: "CHALLENGE_RESTRICTED_SYMBOL",
+          anomalyDetectionEnabled: Boolean(challengeCfg?.challengeAnomalyDetectionEnabled ?? true),
+          detail: {
+            symbol: symbolForChallengeChecks,
+          },
+        });
         return res.status(409).json({
           code: "CHALLENGE_RESTRICTED_SYMBOL",
-          message: `Symbol ${symbol} is restricted for your active challenge phase.`,
-          symbol,
+          message: `Symbol ${symbolForChallengeChecks} is restricted for your active challenge phase.`,
+          symbol: symbolForChallengeChecks,
         });
       }
     }

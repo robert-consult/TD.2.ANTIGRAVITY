@@ -363,6 +363,11 @@ export type ChallengeTradeConstraints = {
   maxLotSize: number | null;
   maxConcurrentPositions: number | null;
   restrictedSymbols: Set<string>;
+  allowWeekendHolding: boolean;
+  allowNewsTrading: boolean;
+  leverageMultiplier: number;
+  enrollmentIds: number[];
+  challengeIds: number[];
 };
 
 const constraintsCache = new Map<number, { at: number; value: ChallengeTradeConstraints | null }>();
@@ -387,19 +392,26 @@ export async function getActiveTradeConstraintsForUser(userId: number): Promise<
     return null;
   }
 
-  const challengeIds = activeEnrolls.map((r) => r.challenge.id);
+  const activeChallengeIds = activeEnrolls.map((r) => r.challenge.id);
   const phases = await db
     .select()
     .from(challengePhases)
-    .where(inArray(challengePhases.challengeId, challengeIds));
+    .where(inArray(challengePhases.challengeId, activeChallengeIds));
 
   let maxLot: number | null = null;
   let maxPos: number | null = null;
   const restricted = new Set<string>();
+  let allowWeekendHolding = true;
+  let allowNewsTrading = true;
+  let leverageMultiplier = Number.POSITIVE_INFINITY;
+  const enrollmentIds: number[] = [];
+  const challengeIds: number[] = [];
 
   for (const r of activeEnrolls) {
     const phaseNum = Number((r.enrollment as any).currentPhase ?? 1);
     const phase = phases.find((p) => p.challengeId === r.challenge.id && p.phaseNumber === phaseNum);
+    enrollmentIds.push(Number((r.enrollment as any).id));
+    challengeIds.push(Number((r.challenge as any).id));
 
     if (phase?.maxLotSize != null) {
       maxLot = maxLot == null ? phase.maxLotSize : Math.min(maxLot, phase.maxLotSize);
@@ -410,9 +422,32 @@ export async function getActiveTradeConstraintsForUser(userId: number): Promise<
 
     const phaseRestricted = parseCsvSet(phase?.restrictedSymbolsCsv);
     for (const sym of phaseRestricted) restricted.add(sym);
+
+    if (phase?.allowWeekendHolding === false) {
+      allowWeekendHolding = false;
+    }
+
+    if (phase?.allowNewsTrading === false) {
+      allowNewsTrading = false;
+    }
+
+    const challengeLeverage = Number((r.challenge as any)?.leverageMultiplier ?? 1);
+    if (Number.isFinite(challengeLeverage) && challengeLeverage > 0) {
+      leverageMultiplier = Math.min(leverageMultiplier, challengeLeverage);
+    }
   }
 
-  const value: ChallengeTradeConstraints = { maxLotSize: maxLot, maxConcurrentPositions: maxPos, restrictedSymbols: restricted };
+  const value: ChallengeTradeConstraints = {
+    maxLotSize: maxLot,
+    maxConcurrentPositions: maxPos,
+    restrictedSymbols: restricted,
+    allowWeekendHolding,
+    allowNewsTrading,
+    leverageMultiplier:
+      leverageMultiplier === Number.POSITIVE_INFINITY ? 1 : Math.max(0.01, Math.min(100, leverageMultiplier)),
+    enrollmentIds,
+    challengeIds,
+  };
   constraintsCache.set(userId, { at: nowMs, value });
   return value;
 }

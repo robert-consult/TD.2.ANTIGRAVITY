@@ -18,6 +18,7 @@ import { applyUserBalanceDelta, releaseUserMargin, reserveUserMargin } from "../
 import { computeCloseSettlementCosts, computeOpenSideCosts } from "../services/tradeCosts";
 import { createNotification } from "../services/messaging";
 import { clearTradeExcursion, initTradeExcursion, resolveTradeExcursionForClose, trackTradeExcursion } from "../trades/excursionTracking";
+import { getActiveTradeConstraintsForUser } from "../recruitment/challengesV4/challengeService";
 import { 
   writeTradeAudit, 
   generateCorrelationId, 
@@ -498,8 +499,13 @@ async function processPendingForSymbol(symbol: string, q: Quote) {
     const effectiveMaxConcurrent = Number(r.s?.maxConcurrent ?? globalLimits.maxTradesPerUser);
     const effectiveMaxConcurrentLots = Number(r.s?.maxConcurrentLots ?? globalLimits.maxConcurrentLots);
     const effectiveMaxTradesPerInstrument = Number(r.s?.maxConcurrentPerInstrument ?? globalLimits.maxTradesPerInstrument);
+    const challengeConstraints = await getActiveTradeConstraintsForUser(u.id);
+    const challengeLeverageMultiplier = Math.max(0.01, Number(challengeConstraints?.leverageMultiplier ?? 1));
     // Leverage: user override takes precedence over global (can exceed)
-    const effectiveLeverage = Number(u.leverage ?? globalLimits.defaultLeverage);
+    const effectiveLeverage = Math.max(
+      0.01,
+      Number(u.leverage ?? globalLimits.defaultLeverage) * challengeLeverageMultiplier,
+    );
 
     const executionId = generateExecutionId();
     const positionId = (t as any).positionId || generatePositionId();
@@ -569,6 +575,43 @@ async function processPendingForSymbol(symbol: string, q: Quote) {
         .from(trades)
         .where(and(eq(trades.userId, u.id), eq(trades.status, "OPEN")));
       const openCount = openCountRows.length;
+
+      if (challengeConstraints?.maxLotSize != null && lots > challengeConstraints.maxLotSize) {
+        const canceled = await cancelPendingWithAudit({
+          riskCheckName: "CHALLENGE_MAX_LOT_SIZE",
+          riskLimitValue: challengeConstraints.maxLotSize,
+          riskObservedValue: lots,
+          reasonCode: "CHALLENGE_MAX_LOT_SIZE",
+          note: `Challenge max lot size exceeded (requested=${lots}, limit=${challengeConstraints.maxLotSize})`,
+        });
+        return canceled ? { action: "CANCELED" as const } : { action: "SKIP" as const };
+      }
+
+      if (challengeConstraints?.restrictedSymbols?.has(symbol)) {
+        const canceled = await cancelPendingWithAudit({
+          riskCheckName: "CHALLENGE_RESTRICTED_SYMBOL",
+          riskLimitValue: 1,
+          riskObservedValue: 1,
+          reasonCode: "CHALLENGE_RESTRICTED_SYMBOL",
+          note: `Challenge restricted symbol blocked execution for ${symbol}`,
+        });
+        return canceled ? { action: "CANCELED" as const } : { action: "SKIP" as const };
+      }
+
+      if (
+        challengeConstraints?.maxConcurrentPositions != null &&
+        openCount >= challengeConstraints.maxConcurrentPositions
+      ) {
+        const canceled = await cancelPendingWithAudit({
+          riskCheckName: "CHALLENGE_MAX_CONCURRENT_POSITIONS",
+          riskLimitValue: challengeConstraints.maxConcurrentPositions,
+          riskObservedValue: openCount,
+          reasonCode: "CHALLENGE_MAX_CONCURRENT_POSITIONS",
+          note: `Challenge max concurrent positions exceeded (open=${openCount}, limit=${challengeConstraints.maxConcurrentPositions})`,
+        });
+        return canceled ? { action: "CANCELED" as const } : { action: "SKIP" as const };
+      }
+
       if (openCount >= effectiveMaxConcurrent) {
         const canceled = await cancelPendingWithAudit({
           riskCheckName: "MAX_CONCURRENT_TRADES",

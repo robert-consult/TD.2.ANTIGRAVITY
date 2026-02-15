@@ -22,7 +22,16 @@ function normalizeCountryIso2(raw: unknown): string | null {
 }
 
 router.get("/public-config", async (req, res) => {
-  const [cfg] = await db.select().from(systemConfig).where(eq(systemConfig.id, 1)).limit(1);
+  const [cfg] = await db
+    .select({
+      signupCaptchaEnforce: systemConfig.signupCaptchaEnforce,
+      captchaProvider: systemConfig.captchaProvider,
+      signupPhoneEnforce: systemConfig.signupPhoneEnforce,
+      legalCoverageEnforce: systemConfig.legalCoverageEnforce,
+    })
+    .from(systemConfig)
+    .where(eq(systemConfig.id, 1))
+    .limit(1);
   const enforceSignupCaptcha = Boolean(cfg?.signupCaptchaEnforce ?? true);
   const selectedCaptchaProvider = String(cfg?.captchaProvider ?? "SLIDER").toUpperCase() as any;
   const captchaProvider = resolveCaptchaProvider(selectedCaptchaProvider).provider;

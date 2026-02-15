@@ -38,9 +38,32 @@ export type SystemChallengeConfig = {
   challengeMailboxCategory: string;
   // If maxDailyLossPct=5 and threshold=0.8 -> warn once at >=4.0%.
   challengeWarningThresholdPct: number;
+  challengeBreachPolicyDefault: "FAIL" | "BREACH_AND_CONTINUE" | "MANUAL_REVIEW";
+  challengeSingleDayProfitBasis: "PNL_PCT" | "EQUITY_PCT" | "REALIZED_ONLY";
 
   challengeLeaderboardEnabled: boolean;
   challengeLeaderboardRefreshSec: number;
+  challengeLeaderboardSnapshotIntervalSec: number;
+  challengeLeaderboardRankingMetric: "COMPOSITE_SCORE" | "PNL_PCT";
+  challengePrizeAwardTimingDefault: "ON_COMPLETE" | "ON_CHALLENGE_END" | "MANUAL";
+  challengePrizeCandidatesDefault: "PASSED_ONLY" | "INCLUDE_ACTIVE";
+  challengeNewsBlackoutWindowsJson: string;
+  challengeWeekendCutoffHours: number;
+  challengeForceCloseBeforeWeekend: boolean;
+  challengeLeverageMultiplierDefault: number;
+  challengeMaxActiveEnrollmentsUser: number;
+  challengeMaxActiveEnrollmentsPerChallenge: number;
+  challengeCooldownHoursAfterFail: number;
+  challengeCooldownHoursAfterWithdraw: number;
+  challengeCertificateDefaultTemplateId: number | null;
+  challengeCertificateIncludeMetricsDefault: boolean;
+  challengeCertificateIncludeQrDefault: boolean;
+  challengeCertificateVerificationKeyId: string;
+  challengeEvaluationIntervalSec: number;
+  challengeAuditStrictMode: boolean;
+  challengeAnomalyDetectionEnabled: boolean;
+  challengeManualReviewEnabled: boolean;
+  challengeManualReviewSuspiciousThreshold: number;
   challengeEvalEnabled: boolean;
   challengeEvalIntervalMin: number;
   challengeEvalMaxRows: number;
@@ -76,6 +99,39 @@ function normalizeCapitalMode(value: unknown): "VIRTUAL" | "SNAPSHOT_EQUITY" {
     return "SNAPSHOT_EQUITY";
   }
   return "VIRTUAL";
+}
+
+function normalizeBreachPolicy(value: unknown): "FAIL" | "BREACH_AND_CONTINUE" | "MANUAL_REVIEW" {
+  const raw = String(value ?? "").trim().toUpperCase();
+  if (raw === "BREACH_AND_CONTINUE") return "BREACH_AND_CONTINUE";
+  if (raw === "MANUAL_REVIEW") return "MANUAL_REVIEW";
+  return "FAIL";
+}
+
+function normalizeSingleDayProfitBasis(value: unknown): "PNL_PCT" | "EQUITY_PCT" | "REALIZED_ONLY" {
+  const raw = String(value ?? "").trim().toUpperCase();
+  if (raw === "EQUITY_PCT") return "EQUITY_PCT";
+  if (raw === "REALIZED_ONLY") return "REALIZED_ONLY";
+  return "PNL_PCT";
+}
+
+function normalizeLeaderboardRankingMetric(value: unknown): "COMPOSITE_SCORE" | "PNL_PCT" {
+  const raw = String(value ?? "").trim().toUpperCase();
+  if (raw === "PNL_PCT") return "PNL_PCT";
+  return "COMPOSITE_SCORE";
+}
+
+function normalizePrizeAwardTiming(value: unknown): "ON_COMPLETE" | "ON_CHALLENGE_END" | "MANUAL" {
+  const raw = String(value ?? "").trim().toUpperCase();
+  if (raw === "ON_CHALLENGE_END") return "ON_CHALLENGE_END";
+  if (raw === "MANUAL") return "MANUAL";
+  return "ON_COMPLETE";
+}
+
+function normalizePrizeCandidates(value: unknown): "PASSED_ONLY" | "INCLUDE_ACTIVE" {
+  const raw = String(value ?? "").trim().toUpperCase();
+  if (raw === "INCLUDE_ACTIVE") return "INCLUDE_ACTIVE";
+  return "PASSED_ONLY";
 }
 
 export async function getSystemChallengeConfig(force = false): Promise<SystemChallengeConfig> {
@@ -123,11 +179,66 @@ export async function getSystemChallengeConfig(force = false): Promise<SystemCha
     challengeNotifyViaMailbox: Boolean((row as any)?.challengeNotifyViaMailbox ?? false),
     challengeMailboxCategory: String((row as any)?.challengeMailboxCategory ?? "SYSTEM"),
     challengeWarningThresholdPct: clamp((row as any)?.challengeWarningThresholdPct, 0.8, 0.01, 0.99),
+    challengeBreachPolicyDefault: normalizeBreachPolicy((row as any)?.challengeBreachPolicyDefault),
+    challengeSingleDayProfitBasis: normalizeSingleDayProfitBasis((row as any)?.challengeSingleDayProfitBasis),
 
     challengeLeaderboardEnabled: Boolean((row as any)?.challengeLeaderboardEnabled ?? true),
     challengeLeaderboardRefreshSec: Math.max(
       10,
       Math.trunc(clamp((row as any)?.challengeLeaderboardRefreshSec, 60, 10, 24 * 3600)),
+    ),
+    challengeLeaderboardSnapshotIntervalSec: Math.max(
+      10,
+      Math.trunc(clamp((row as any)?.challengeLeaderboardSnapshotIntervalSec, 60, 10, 24 * 3600)),
+    ),
+    challengeLeaderboardRankingMetric: normalizeLeaderboardRankingMetric((row as any)?.challengeLeaderboardRankingMetric),
+    challengePrizeAwardTimingDefault: normalizePrizeAwardTiming((row as any)?.challengePrizeAwardTimingDefault),
+    challengePrizeCandidatesDefault: normalizePrizeCandidates((row as any)?.challengePrizeCandidatesDefault),
+    challengeNewsBlackoutWindowsJson: String((row as any)?.challengeNewsBlackoutWindowsJson ?? "[]"),
+    challengeWeekendCutoffHours: Math.max(
+      0,
+      Math.trunc(clamp((row as any)?.challengeWeekendCutoffHours, 6, 0, 72)),
+    ),
+    challengeForceCloseBeforeWeekend: Boolean((row as any)?.challengeForceCloseBeforeWeekend ?? false),
+    challengeLeverageMultiplierDefault: Math.max(
+      0.01,
+      clamp((row as any)?.challengeLeverageMultiplierDefault, 1, 0.01, 100),
+    ),
+    challengeMaxActiveEnrollmentsUser: Math.max(
+      1,
+      Math.trunc(clamp((row as any)?.challengeMaxActiveEnrollmentsUser, 5, 1, 1000)),
+    ),
+    challengeMaxActiveEnrollmentsPerChallenge: Math.max(
+      1,
+      Math.trunc(clamp((row as any)?.challengeMaxActiveEnrollmentsPerChallenge, 1, 1, 1000)),
+    ),
+    challengeCooldownHoursAfterFail: Math.max(
+      0,
+      Math.trunc(clamp((row as any)?.challengeCooldownHoursAfterFail, 24, 0, 24 * 365)),
+    ),
+    challengeCooldownHoursAfterWithdraw: Math.max(
+      0,
+      Math.trunc(clamp((row as any)?.challengeCooldownHoursAfterWithdraw, 12, 0, 24 * 365)),
+    ),
+    challengeCertificateDefaultTemplateId:
+      Number((row as any)?.challengeCertificateDefaultTemplateId ?? 0) > 0
+        ? Math.trunc(Number((row as any)?.challengeCertificateDefaultTemplateId))
+        : null,
+    challengeCertificateIncludeMetricsDefault: Boolean(
+      (row as any)?.challengeCertificateIncludeMetricsDefault ?? true,
+    ),
+    challengeCertificateIncludeQrDefault: Boolean((row as any)?.challengeCertificateIncludeQrDefault ?? true),
+    challengeCertificateVerificationKeyId: String((row as any)?.challengeCertificateVerificationKeyId ?? "v1"),
+    challengeEvaluationIntervalSec: Math.max(
+      60,
+      Math.trunc(clamp((row as any)?.challengeEvaluationIntervalSec, 3600, 60, 24 * 3600)),
+    ),
+    challengeAuditStrictMode: Boolean((row as any)?.challengeAuditStrictMode ?? true),
+    challengeAnomalyDetectionEnabled: Boolean((row as any)?.challengeAnomalyDetectionEnabled ?? true),
+    challengeManualReviewEnabled: Boolean((row as any)?.challengeManualReviewEnabled ?? false),
+    challengeManualReviewSuspiciousThreshold: Math.max(
+      1,
+      Math.trunc(clamp((row as any)?.challengeManualReviewSuspiciousThreshold, 3, 1, 100)),
     ),
     challengeEvalEnabled: Boolean((row as any)?.challengeEvalEnabled ?? true),
     challengeEvalIntervalMin: Math.max(1, Math.trunc(clamp((row as any)?.challengeEvalIntervalMin, 60, 1, 24 * 60))),

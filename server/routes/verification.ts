@@ -751,7 +751,12 @@ router.post("/sms/confirm", async (req: Request, res: Response) => {
     }
 
     const otpRows = await db
-      .select()
+      .select({
+        id: smsOtpTokens.id,
+        otpHash: smsOtpTokens.otpHash,
+        expiresAt: smsOtpTokens.expiresAt,
+        consumedAt: smsOtpTokens.consumedAt,
+      })
       .from(smsOtpTokens)
       .where(and(eq(smsOtpTokens.userId, userId), eq(smsOtpTokens.phoneE164, verification.phoneE164)))
       .orderBy(desc(smsOtpTokens.createdAt))

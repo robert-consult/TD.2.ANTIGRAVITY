@@ -5,10 +5,13 @@ import {
   challengeCertificates,
   challengeCertificateTemplates,
   challengeEnrollments,
+  challengeEvaluationRuns,
   challengeLeaderboardSnapshot,
+  challengePhaseSnapshots,
   challengePhases,
   challengePrizeAwards,
   challengeProgressionTiers,
+  challengeRewardLedger,
   challengeSelectionBoosts,
   challengeUserProgression,
   challenges,
@@ -18,8 +21,16 @@ import {
 } from "@shared/schema";
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { createMailboxThreadWithMessage, createNotification } from "../../services/messaging";
+import { appendIdentityAudit } from "../../services/identityAudit";
 import { appendChallengeEvent } from "./challengeEvents";
 import { getSystemChallengeConfig, type SystemChallengeConfig } from "./challengeConfig";
+import { generateCertificateVerificationBundle } from "./certificateCode";
+import {
+  parseCustomRewardRules,
+  scopedCustomRewardKey,
+  type CustomRewardActionType,
+  type CustomRewardTrigger,
+} from "./customRewards";
 import { chainHash, stableStringify } from "./hashChain";
 import { getPhaseForEnrollment, hasRestrictedSymbolTrade, nowSec, parseCsvSet } from "./challengeService";
 
@@ -31,7 +42,11 @@ type EvalResult = {
   warned: number;
 };
 
-type PhaseStats = {
+export type PhaseStats = {
+  pnlBasis: "REALIZED_ONLY";
+  roundingMode: "HALF_AWAY_FROM_ZERO_8DP";
+  inputHash: string;
+  tradeCount: number;
   totalPnl: number;
   pnlPct: number;
   tradingDays: number;
@@ -63,6 +78,54 @@ type TierRule = {
   maxDqs: number | null;
   order: number;
 };
+
+const EVALUATION_RUN_LOCK_KEY = 920_451_172;
+const customRewardRuleCache = new Map<string, ReturnType<typeof parseCustomRewardRules>>();
+
+function buildEvalRunId(now: number): string {
+  return `challenge-eval-${now}-${Math.floor(Math.random() * 1_000_000_000).toString(36)}`;
+}
+
+function withRunDetails(details: unknown, runId: string): Record<string, unknown> {
+  if (details && typeof details === "object" && !Array.isArray(details)) {
+    return { ...(details as Record<string, unknown>), runId };
+  }
+  return { runId, details: details ?? null };
+}
+
+async function appendChallengeEventWithRun(
+  input: Parameters<typeof appendChallengeEvent>[0],
+  runId: string,
+): Promise<void> {
+  await appendChallengeEvent({
+    ...input,
+    details: withRunDetails(input.details, runId),
+  });
+}
+
+function appendChallengeTransitionAudit(input: {
+  runId: string;
+  userId: number;
+  challengeId: number;
+  enrollmentId: number;
+  type: string;
+  data?: Record<string, unknown>;
+}) {
+  appendIdentityAudit({
+    userId: input.userId,
+    category: "RECRUITMENT",
+    type: input.type,
+    actorType: "SYSTEM",
+    actorUserId: null,
+    correlationId: input.runId,
+    data: {
+      challengeId: input.challengeId,
+      enrollmentId: input.enrollmentId,
+      runId: input.runId,
+      ...(input.data ?? {}),
+    },
+  });
+}
 
 function normalizeChallengeMailboxCategory(raw: unknown): "SYSTEM" | "SUPPORT" | "ANNOUNCEMENT" | "CHALLENGES" {
   const value = String(raw ?? "").trim().toUpperCase();
@@ -122,6 +185,13 @@ function toNumber(value: unknown, fallback = 0): number {
 
 function roundMoney(value: number): number {
   return Math.round(value * 100) / 100;
+}
+
+function roundDeterministic(value: number, decimals = 8): number {
+  const v = Number(value);
+  if (!Number.isFinite(v)) return 0;
+  const factor = 10 ** decimals;
+  return Math.round(v * factor) / factor;
 }
 
 function parseJsonValue(raw: unknown): unknown {
@@ -239,6 +309,7 @@ async function issueCertificate(args: {
   challengeId: number;
   enrollmentId: number;
   templateId: number | null;
+  verificationKeyId: string;
   isDownloadable: boolean;
   isShareable: boolean;
   includeMetrics: boolean;
@@ -264,16 +335,10 @@ async function issueCertificate(args: {
       templateId = tmpl?.id ?? null;
     }
 
-    const verificationCodeHmac = chainHash(null, {
-      kind: "challenge-cert",
-      enrollmentId: args.enrollmentId,
-      userId: args.userId,
-      challengeId: args.challengeId,
-      issuedAt: args.issuedAt,
-    });
+    const verification = generateCertificateVerificationBundle(args.verificationKeyId);
 
     const shareTokenHash = args.isShareable
-      ? chainHash(verificationCodeHmac, {
+      ? chainHash(verification.hmac, {
           kind: "challenge-cert-share",
           enrollmentId: args.enrollmentId,
           issuedAt: args.issuedAt,
@@ -298,7 +363,9 @@ async function issueCertificate(args: {
         userId: args.userId,
         challengeId: args.challengeId,
         templateId,
-        verificationCodeHmac,
+        verificationCodeNonce: verification.nonce,
+        verificationHmacKeyId: verification.keyId,
+        verificationCodeHmac: verification.hmac,
         metricsJson,
         isDownloadable: args.isDownloadable,
         isShareable: args.isShareable,
@@ -340,6 +407,243 @@ async function awardSelectionBoost(args: {
     .returning({ id: challengeSelectionBoosts.id });
 
   return inserted.length > 0;
+}
+
+async function claimCustomRewardLedger(args: {
+  enrollmentId: number;
+  challengeId: number;
+  userId: number;
+  trigger: CustomRewardTrigger;
+  rewardKey: string;
+  actionType: CustomRewardActionType;
+  runId: string;
+  details: Record<string, unknown>;
+  now: number;
+}): Promise<boolean> {
+  const inserted = await db
+    .insert(challengeRewardLedger)
+    .values({
+      enrollmentId: args.enrollmentId,
+      challengeId: args.challengeId,
+      userId: args.userId,
+      trigger: args.trigger,
+      rewardKey: args.rewardKey,
+      actionType: args.actionType,
+      runId: args.runId,
+      detailsJson: stableStringify(args.details),
+      createdAt: args.now,
+    })
+    .onConflictDoNothing()
+    .returning({ id: challengeRewardLedger.id });
+  return inserted.length > 0;
+}
+
+async function executeCustomRewardAction(args: {
+  enrollment: any;
+  challenge: any;
+  cfg: SystemChallengeConfig;
+  trigger: CustomRewardTrigger;
+  actionType: CustomRewardActionType;
+  rewardKey: string;
+  payload: Record<string, unknown>;
+  rank?: number | null;
+  now: number;
+}): Promise<boolean> {
+  const challengeName = String(args.challenge.name ?? `Challenge ${args.challenge.id}`);
+
+  if (args.actionType === "BADGE_AWARD") {
+    const badgeRef = args.payload.badgeRef ?? args.payload.badgeId ?? args.payload.badgeKey;
+    if (badgeRef == null || String(badgeRef).trim() === "") return false;
+    const awarded = await awardBadge({
+      userId: args.enrollment.userId,
+      challengeId: args.challenge.id,
+      enrollmentId: args.enrollment.id,
+      badgeRef,
+      reason: String(args.payload.reason ?? `CUSTOM_REWARD_${args.trigger}`),
+      awardedAt: args.now,
+    });
+    return awarded.awarded;
+  }
+
+  if (args.actionType === "SELECTION_BOOST") {
+    const points = toNumber(args.payload.points, 0);
+    if (!Number.isFinite(points) || points <= 0) return false;
+    return awardSelectionBoost({
+      userId: args.enrollment.userId,
+      challengeId: args.challenge.id,
+      enrollmentId: args.enrollment.id,
+      points,
+      reason: String(args.payload.reason ?? `CUSTOM_REWARD_${args.trigger}`),
+      awardedAt: args.now,
+      createdBy: Number(args.challenge.createdBy ?? 0) > 0 ? Number(args.challenge.createdBy) : null,
+    });
+  }
+
+  if (args.actionType === "INBOX_MESSAGE") {
+    const subject = String(args.payload.subject ?? "").trim();
+    const body = String(args.payload.body ?? "").trim();
+    if (!subject || !body) return false;
+    await createMailboxThreadWithMessage({
+      createdByUserId: null,
+      senderUserId: null,
+      recipientUserIds: [args.enrollment.userId],
+      subject,
+      body,
+      category: normalizeChallengeMailboxCategory(args.payload.category),
+      allowReply: false,
+      messageType: "CHALLENGE_EVENT",
+      metadata: {
+        sourceEvent: "CHALLENGE_CUSTOM_REWARD",
+        trigger: args.trigger,
+        rewardKey: args.rewardKey,
+        challengeId: args.challenge.id,
+        enrollmentId: args.enrollment.id,
+        rank: args.rank ?? null,
+      },
+    });
+    return true;
+  }
+
+  if (args.actionType === "NOTIFY") {
+    const title = String(args.payload.title ?? "").trim();
+    const message = String(args.payload.message ?? "").trim();
+    if (!title || !message) return false;
+    const severityRaw = String(args.payload.severity ?? "INFO").trim().toUpperCase();
+    const severity = severityRaw === "SUCCESS" || severityRaw === "WARNING" || severityRaw === "CRITICAL" ? severityRaw : "INFO";
+    await createNotification({
+      userId: args.enrollment.userId,
+      type: "CHALLENGE",
+      severity: severity as any,
+      title,
+      message,
+      sourceEvent: String(args.payload.sourceEvent ?? "CHALLENGE_CUSTOM_REWARD"),
+      link: String(args.payload.link ?? "").trim() || undefined,
+    });
+    return true;
+  }
+
+  console.warn("[challenges-v4] unsupported custom reward action ignored:", {
+    actionType: args.actionType,
+    trigger: args.trigger,
+    challengeId: args.challenge.id,
+    enrollmentId: args.enrollment.id,
+    challengeName,
+  });
+  return false;
+}
+
+async function applyCustomRewardsForTrigger(args: {
+  cfg: SystemChallengeConfig;
+  enrollment: any;
+  challenge: any;
+  trigger: CustomRewardTrigger;
+  now: number;
+  runId: string;
+  phaseNumber?: number | null;
+  rank?: number | null;
+}): Promise<void> {
+  if (!args.cfg.challengeCustomRewardsEnabled) return;
+
+  const cacheKey = `${Number(args.challenge.id)}:${String(args.challenge.customRewardJson ?? "")}`;
+  let allRules = customRewardRuleCache.get(cacheKey);
+  if (!allRules) {
+    allRules = parseCustomRewardRules(args.challenge.customRewardJson);
+    customRewardRuleCache.set(cacheKey, allRules);
+    if (customRewardRuleCache.size > 1000) customRewardRuleCache.clear();
+  }
+  if (!allRules.length) return;
+
+  const matching = allRules.filter((rule) => rule.trigger === args.trigger);
+  for (const rule of matching) {
+    if (rule.trigger === "ON_RANK_TOP_N") {
+      const rank = Number(args.rank ?? 0);
+      if (!Number.isFinite(rank) || rank <= 0) continue;
+      const topN = Number(rule.topN ?? 0);
+      if (topN > 0 && rank > topN) continue;
+    }
+
+    const rewardKey = scopedCustomRewardKey({
+      rewardKey: rule.rewardKey,
+      trigger: rule.trigger,
+      phaseNumber: args.phaseNumber ?? null,
+    });
+
+    const claimed = await claimCustomRewardLedger({
+      enrollmentId: args.enrollment.id,
+      challengeId: args.challenge.id,
+      userId: args.enrollment.userId,
+      trigger: rule.trigger,
+      rewardKey,
+      actionType: rule.actionType,
+      runId: args.runId,
+      now: args.now,
+      details: {
+        trigger: rule.trigger,
+        actionType: rule.actionType,
+        rewardKey,
+        phaseNumber: args.phaseNumber ?? null,
+        rank: args.rank ?? null,
+        topN: rule.topN ?? null,
+      },
+    });
+    if (!claimed) continue;
+
+    let applied = false;
+    try {
+      applied = await executeCustomRewardAction({
+        enrollment: args.enrollment,
+        challenge: args.challenge,
+        cfg: args.cfg,
+        trigger: rule.trigger,
+        actionType: rule.actionType,
+        rewardKey,
+        payload: rule.payload,
+        rank: args.rank,
+        now: args.now,
+      });
+    } catch (error) {
+      console.error("[challenges-v4] custom reward action failed:", {
+        challengeId: args.challenge.id,
+        enrollmentId: args.enrollment.id,
+        trigger: rule.trigger,
+        actionType: rule.actionType,
+        rewardKey,
+        error,
+      });
+    }
+
+    await appendChallengeEventWithRun(
+      {
+        enrollmentId: args.enrollment.id,
+        eventType: "CHALLENGE_CUSTOM_REWARD_EXECUTED",
+        phaseNumber: Number(args.phaseNumber ?? args.enrollment.currentPhase ?? 1),
+        details: {
+          trigger: rule.trigger,
+          actionType: rule.actionType,
+          rewardKey,
+          rank: args.rank ?? null,
+          topN: rule.topN ?? null,
+          applied,
+        },
+      },
+      args.runId,
+    );
+    appendChallengeTransitionAudit({
+      runId: args.runId,
+      userId: args.enrollment.userId,
+      challengeId: args.challenge.id,
+      enrollmentId: args.enrollment.id,
+      type: "CHALLENGE_CUSTOM_REWARD_EXECUTED",
+      data: {
+        trigger: rule.trigger,
+        actionType: rule.actionType,
+        rewardKey,
+        rank: args.rank ?? null,
+        topN: rule.topN ?? null,
+        applied,
+      },
+    });
+  }
 }
 
 async function upsertPipelineVisibility(args: {
@@ -406,7 +710,39 @@ async function upsertPipelineVisibility(args: {
   return true;
 }
 
-async function rankPassedEnrollments(challengeId: number): Promise<RankedPassedRow[]> {
+function resolvePrizeAwardTiming(challenge: any, cfg: SystemChallengeConfig): "ON_COMPLETE" | "ON_CHALLENGE_END" | "MANUAL" {
+  const raw = String(challenge?.prizeAwardTiming ?? cfg.challengePrizeAwardTimingDefault ?? "ON_COMPLETE").trim().toUpperCase();
+  if (raw === "ON_CHALLENGE_END") return "ON_CHALLENGE_END";
+  if (raw === "MANUAL") return "MANUAL";
+  return "ON_COMPLETE";
+}
+
+function resolveBreachPolicy(challenge: any, cfg: SystemChallengeConfig): "FAIL" | "BREACH_AND_CONTINUE" | "MANUAL_REVIEW" {
+  const overrideRaw = String((challenge as any)?.breachPolicy ?? "").trim().toUpperCase();
+  if (overrideRaw === "FAIL" || overrideRaw === "BREACH_AND_CONTINUE" || overrideRaw === "MANUAL_REVIEW") {
+    return overrideRaw;
+  }
+  const raw = String(cfg.challengeBreachPolicyDefault ?? "FAIL").trim().toUpperCase();
+  if (raw === "BREACH_AND_CONTINUE" || raw === "MANUAL_REVIEW") return raw;
+  return "FAIL";
+}
+
+function resolvePrizeCandidateMode(challenge: any, cfg: SystemChallengeConfig): "PASSED_ONLY" | "INCLUDE_ACTIVE" {
+  const overrideRaw = String((challenge as any)?.prizeCandidatesMode ?? "").trim().toUpperCase();
+  if (overrideRaw === "INCLUDE_ACTIVE" || overrideRaw === "PASSED_ONLY") {
+    return overrideRaw;
+  }
+
+  const raw = String(cfg.challengePrizeCandidatesDefault ?? "PASSED_ONLY").trim().toUpperCase();
+  if (raw === "INCLUDE_ACTIVE") return "INCLUDE_ACTIVE";
+  return "PASSED_ONLY";
+}
+
+async function rankPrizeCandidates(
+  challengeId: number,
+  candidateMode: "PASSED_ONLY" | "INCLUDE_ACTIVE",
+): Promise<RankedPassedRow[]> {
+  const statusFilter = candidateMode === "INCLUDE_ACTIVE" ? ["PASSED", "ACTIVE"] : ["PASSED"];
   const rows = await db
     .select({
       enrollmentId: challengeEnrollments.id,
@@ -416,7 +752,7 @@ async function rankPassedEnrollments(challengeId: number): Promise<RankedPassedR
       completedAt: challengeEnrollments.completedAt,
     })
     .from(challengeEnrollments)
-    .where(and(eq(challengeEnrollments.challengeId, challengeId), eq(challengeEnrollments.status, "PASSED")))
+    .where(and(eq(challengeEnrollments.challengeId, challengeId), inArray(challengeEnrollments.status, statusFilter as any)))
     .orderBy(
       desc(challengeEnrollments.currentPnlPct),
       desc(challengeEnrollments.tradingDays),
@@ -436,11 +772,11 @@ async function rankPassedEnrollments(challengeId: number): Promise<RankedPassedR
 async function recomputePrizeAwards(args: {
   challenge: any;
   cfg: SystemChallengeConfig;
-  rankedPassed: RankedPassedRow[];
+  rankedCandidates: RankedPassedRow[];
   now: number;
 }): Promise<PrizeRecomputeResult> {
   const rankByEnrollmentId = new Map<number, number>();
-  for (const row of args.rankedPassed) rankByEnrollmentId.set(row.enrollmentId, row.rank);
+  for (const row of args.rankedCandidates) rankByEnrollmentId.set(row.enrollmentId, row.rank);
 
   const newlyAwardedEnrollmentIds = new Set<number>();
 
@@ -457,7 +793,7 @@ async function recomputePrizeAwards(args: {
   }
 
   const minCompletions = toPositiveInt(args.challenge.prizeMinCompletions, 0);
-  if (args.rankedPassed.length < minCompletions) {
+  if (args.rankedCandidates.length < minCompletions) {
     return { rankByEnrollmentId, newlyAwardedEnrollmentIds };
   }
 
@@ -468,7 +804,7 @@ async function recomputePrizeAwards(args: {
 
   const winners = distribution
     .map((d) => {
-      const row = args.rankedPassed[d.rank - 1];
+      const row = args.rankedCandidates[d.rank - 1];
       if (!row) return null;
       return {
         rank: d.rank,
@@ -718,43 +1054,75 @@ async function refreshChallengeLeaderboard(args: {
   challengeId: number;
   maxVisible: number;
   calculatedAt: number;
+  rankingMetric: "COMPOSITE_SCORE" | "PNL_PCT";
 }): Promise<void> {
   const maxVisible = Math.max(1, Math.min(500, toPositiveInt(args.maxVisible, 100) || 100));
 
   await db.transaction(async (tx) => {
     await tx.delete(challengeLeaderboardSnapshot).where(eq(challengeLeaderboardSnapshot.challengeId, args.challengeId));
 
-    const ranked = await tx.execute(sql`
-      WITH ranked AS (
-        SELECT
-          e.user_id,
-          ROW_NUMBER() OVER (
-            ORDER BY
-              CASE WHEN e.status = 'PASSED' THEN 1 ELSE 0 END DESC,
-              COALESCE(e.current_phase, 1) DESC,
-              COALESCE(e.current_pnl_pct, 0) DESC,
-              COALESCE(e.trading_days, 0) DESC,
-              COALESCE(e.max_daily_loss_hit, 0) ASC,
-              e.id ASC
-          )::int AS rank,
-          COALESCE(e.current_pnl_pct, 0)::float8 AS pnl_pct,
-          COALESCE(e.trading_days, 0)::int AS trading_days,
-          e.max_daily_loss_hit::float8 AS max_daily_loss_hit,
-          (
-            (CASE WHEN e.status = 'PASSED' THEN 100000 ELSE 0 END)::float8 +
-            COALESCE(e.current_phase, 1)::float8 * 1000 +
-            COALESCE(e.current_pnl_pct, 0)::float8 * 100 -
-            COALESCE(e.max_daily_loss_hit, 0)::float8 * 10
-          )::float8 AS composite_score
-        FROM challenge_enrollments e
-        WHERE e.challenge_id = ${args.challengeId}
-          AND e.status IN ('ACTIVE', 'PASSED')
-      )
-      SELECT *
-      FROM ranked
-      ORDER BY rank ASC
-      LIMIT ${maxVisible}
-    `);
+    const ranked =
+      args.rankingMetric === "PNL_PCT"
+        ? await tx.execute(sql`
+            WITH ranked AS (
+              SELECT
+                e.user_id,
+                ROW_NUMBER() OVER (
+                  ORDER BY
+                    COALESCE(e.current_pnl_pct, 0)::float8 DESC,
+                    COALESCE(e.max_total_loss_hit, e.max_daily_loss_hit, 0)::float8 ASC,
+                    COALESCE(e.max_daily_loss_hit, 0)::float8 ASC,
+                    COALESCE(e.completed_at, 2147483647)::int ASC,
+                    e.id ASC
+                )::int AS rank,
+                COALESCE(e.current_pnl_pct, 0)::float8 AS pnl_pct,
+                COALESCE(e.trading_days, 0)::int AS trading_days,
+                e.max_daily_loss_hit::float8 AS max_daily_loss_hit,
+                COALESCE(e.current_pnl_pct, 0)::float8 AS composite_score
+              FROM challenge_enrollments e
+              WHERE e.challenge_id = ${args.challengeId}
+                AND e.status IN ('ACTIVE', 'PASSED')
+            )
+            SELECT *
+            FROM ranked
+            ORDER BY rank ASC
+            LIMIT ${maxVisible}
+          `)
+        : await tx.execute(sql`
+            WITH ranked AS (
+              SELECT
+                e.user_id,
+                ROW_NUMBER() OVER (
+                  ORDER BY
+                    (
+                      (CASE WHEN e.status = 'PASSED' THEN 100000 ELSE 0 END)::float8 +
+                      COALESCE(e.current_phase, 1)::float8 * 1000 +
+                      COALESCE(e.current_pnl_pct, 0)::float8 * 100 -
+                      COALESCE(e.max_daily_loss_hit, 0)::float8 * 10
+                    ) DESC,
+                    COALESCE(e.max_total_loss_hit, e.max_daily_loss_hit, 0)::float8 ASC,
+                    COALESCE(e.max_daily_loss_hit, 0)::float8 ASC,
+                    COALESCE(e.completed_at, 2147483647)::int ASC,
+                    e.id ASC
+                )::int AS rank,
+                COALESCE(e.current_pnl_pct, 0)::float8 AS pnl_pct,
+                COALESCE(e.trading_days, 0)::int AS trading_days,
+                e.max_daily_loss_hit::float8 AS max_daily_loss_hit,
+                (
+                  (CASE WHEN e.status = 'PASSED' THEN 100000 ELSE 0 END)::float8 +
+                  COALESCE(e.current_phase, 1)::float8 * 1000 +
+                  COALESCE(e.current_pnl_pct, 0)::float8 * 100 -
+                  COALESCE(e.max_daily_loss_hit, 0)::float8 * 10
+                )::float8 AS composite_score
+              FROM challenge_enrollments e
+              WHERE e.challenge_id = ${args.challengeId}
+                AND e.status IN ('ACTIVE', 'PASSED')
+            )
+            SELECT *
+            FROM ranked
+            ORDER BY rank ASC
+            LIMIT ${maxVisible}
+          `);
 
     const rows = ((ranked as any).rows ?? []) as Array<any>;
     if (!rows.length) return;
@@ -799,6 +1167,7 @@ async function maybeRefreshChallengeLeaderboard(args: {
     challengeId: args.challenge.id,
     maxVisible: Number(args.challenge.leaderboardMaxVisible ?? 100),
     calculatedAt: args.now,
+    rankingMetric: args.cfg.challengeLeaderboardRankingMetric,
   });
 }
 
@@ -808,11 +1177,22 @@ async function applyCompletionRewards(args: {
   stats: PhaseStats;
   cfg: SystemChallengeConfig;
   now: number;
+  runId: string;
 }): Promise<void> {
-  const { enrollment, challenge, stats, cfg, now } = args;
+  const { enrollment, challenge, stats, cfg, now, runId } = args;
   const challengeName = String(challenge.name ?? `Challenge ${challenge.id}`);
 
   try {
+    await applyCustomRewardsForTrigger({
+      cfg,
+      enrollment,
+      challenge,
+      trigger: "ON_CHALLENGE_PASS",
+      now,
+      runId,
+      phaseNumber: Number(enrollment.currentPhase ?? 1),
+    });
+
     if (cfg.challengeRewardsEnabled && cfg.challengeBadgesEnabled && Boolean(challenge.badgesEnabled) && challenge.badgeOnPass) {
       const badge = await awardBadge({
         userId: enrollment.userId,
@@ -824,7 +1204,7 @@ async function applyCompletionRewards(args: {
       });
 
       if (badge.awarded) {
-        await appendChallengeEvent({
+        await appendChallengeEventWithRun({
           enrollmentId: enrollment.id,
           eventType: "CHALLENGE_REWARD_BADGE",
           phaseNumber: Number(enrollment.currentPhase ?? 1),
@@ -832,6 +1212,14 @@ async function applyCompletionRewards(args: {
             kind: "PASS",
             badgeName: badge.badgeName,
           },
+        }, runId);
+        appendChallengeTransitionAudit({
+          runId,
+          userId: enrollment.userId,
+          challengeId: challenge.id,
+          enrollmentId: enrollment.id,
+          type: "CHALLENGE_REWARD_BADGE",
+          data: { kind: "PASS", badgeName: badge.badgeName },
         });
 
         if (cfg.challengeNotifyOnBadgeAward) {
@@ -865,12 +1253,12 @@ async function applyCompletionRewards(args: {
       });
 
       if (boosted) {
-        await appendChallengeEvent({
+        await appendChallengeEventWithRun({
           enrollmentId: enrollment.id,
           eventType: "CHALLENGE_REWARD_SELECTION_BOOST",
           phaseNumber: Number(enrollment.currentPhase ?? 1),
           details: { points },
-        });
+        }, runId);
       }
     }
 
@@ -879,20 +1267,32 @@ async function applyCompletionRewards(args: {
         userId: enrollment.userId,
         challengeId: challenge.id,
         enrollmentId: enrollment.id,
-        templateId: Number(challenge.certificateTemplateId ?? 0) > 0 ? Number(challenge.certificateTemplateId) : null,
+        templateId:
+          Number(challenge.certificateTemplateId ?? 0) > 0
+            ? Number(challenge.certificateTemplateId)
+            : cfg.challengeCertificateDefaultTemplateId,
+        verificationKeyId: String(cfg.challengeCertificateVerificationKeyId || "v1"),
         isDownloadable: cfg.challengeCertificatesDownloadable && Boolean(challenge.certificateDownloadable),
         isShareable: cfg.challengeCertificatesShareable && Boolean(challenge.certificateShareable),
-        includeMetrics: Boolean(challenge.certificateIncludeMetrics),
+        includeMetrics: Boolean(challenge.certificateIncludeMetrics ?? cfg.challengeCertificateIncludeMetricsDefault),
         metrics: stats,
         issuedAt: now,
       });
 
       if (cert.issued) {
-        await appendChallengeEvent({
+        await appendChallengeEventWithRun({
           enrollmentId: enrollment.id,
           eventType: "CHALLENGE_REWARD_CERTIFICATE",
           phaseNumber: Number(enrollment.currentPhase ?? 1),
           details: { certificateId: cert.certificateId },
+        }, runId);
+        appendChallengeTransitionAudit({
+          runId,
+          userId: enrollment.userId,
+          challengeId: challenge.id,
+          enrollmentId: enrollment.id,
+          type: "CHALLENGE_REWARD_CERTIFICATE",
+          data: { certificateId: cert.certificateId },
         });
 
         if (cfg.challengeNotifyOnCertIssue) {
@@ -919,23 +1319,40 @@ async function applyCompletionRewards(args: {
       });
 
       if (promoted) {
-        await appendChallengeEvent({
+        await appendChallengeEventWithRun({
           enrollmentId: enrollment.id,
           eventType: "CHALLENGE_PIPELINE_PROMOTION",
           details: { to: "WATCHLIST" },
-        });
+        }, runId);
       }
     }
 
-    const rankedPassed = await rankPassedEnrollments(challenge.id);
-    const prizeResult = await recomputePrizeAwards({
-      challenge,
-      cfg,
-      rankedPassed,
-      now,
-    });
+    const prizeTiming = resolvePrizeAwardTiming(challenge, cfg);
+    const prizeCandidateMode = resolvePrizeCandidateMode(challenge, cfg);
+    const rankedCandidates = await rankPrizeCandidates(challenge.id, prizeCandidateMode);
+    const prizeResult =
+      prizeTiming === "ON_COMPLETE"
+        ? await recomputePrizeAwards({
+            challenge,
+            cfg,
+            rankedCandidates,
+            now,
+          })
+        : { rankByEnrollmentId: new Map<number, number>(), newlyAwardedEnrollmentIds: new Set<number>() };
 
     const thisRank = prizeResult.rankByEnrollmentId.get(enrollment.id) ?? null;
+    if (thisRank != null) {
+      await applyCustomRewardsForTrigger({
+        cfg,
+        enrollment,
+        challenge,
+        trigger: "ON_RANK_TOP_N",
+        now,
+        runId,
+        phaseNumber: Number(enrollment.currentPhase ?? 1),
+        rank: thisRank,
+      });
+    }
 
     if (thisRank != null && thisRank <= 3 && cfg.challengeRewardsEnabled && cfg.challengeBadgesEnabled && Boolean(challenge.badgesEnabled) && challenge.badgeOnTop3) {
       const top3Badge = await awardBadge({
@@ -948,13 +1365,21 @@ async function applyCompletionRewards(args: {
       });
 
       if (top3Badge.awarded) {
-        await appendChallengeEvent({
+        await appendChallengeEventWithRun({
           enrollmentId: enrollment.id,
           eventType: "CHALLENGE_REWARD_BADGE_TOP3",
           details: {
             rank: thisRank,
             badgeName: top3Badge.badgeName,
           },
+        }, runId);
+        appendChallengeTransitionAudit({
+          runId,
+          userId: enrollment.userId,
+          challengeId: challenge.id,
+          enrollmentId: enrollment.id,
+          type: "CHALLENGE_REWARD_BADGE",
+          data: { kind: "TOP_RANK", rank: thisRank, badgeName: top3Badge.badgeName },
         });
 
         if (cfg.challengeNotifyOnBadgeAward) {
@@ -970,7 +1395,35 @@ async function applyCompletionRewards(args: {
       }
     }
 
-    if (prizeResult.newlyAwardedEnrollmentIds.has(enrollment.id) && cfg.challengeNotifyOnPrizeAward) {
+    if (prizeTiming === "MANUAL") {
+      await appendChallengeEventWithRun(
+        {
+          enrollmentId: enrollment.id,
+          eventType: "CHALLENGE_PRIZE_MANUAL_REVIEW_REQUIRED",
+          details: {
+            candidateMode: prizeCandidateMode,
+            timing: prizeTiming,
+          },
+        },
+        runId,
+      );
+      appendChallengeTransitionAudit({
+        runId,
+        userId: enrollment.userId,
+        challengeId: challenge.id,
+        enrollmentId: enrollment.id,
+        type: "CHALLENGE_PRIZE_MANUAL_REVIEW_REQUIRED",
+        data: { candidateMode: prizeCandidateMode },
+      });
+    } else if (prizeResult.newlyAwardedEnrollmentIds.has(enrollment.id) && cfg.challengeNotifyOnPrizeAward) {
+      appendChallengeTransitionAudit({
+        runId,
+        userId: enrollment.userId,
+        challengeId: challenge.id,
+        enrollmentId: enrollment.id,
+        type: "CHALLENGE_REWARD_PRIZE",
+        data: { created: true, timing: prizeTiming, candidateMode: prizeCandidateMode },
+      });
       await createNotification({
         userId: enrollment.userId,
         type: "CHALLENGE",
@@ -999,11 +1452,11 @@ async function applyCompletionRewards(args: {
       });
 
       if (progression.tierChanged) {
-        await appendChallengeEvent({
+        await appendChallengeEventWithRun({
           enrollmentId: enrollment.id,
           eventType: "CHALLENGE_PROGRESSION_TIER_UP",
           details: { tier: progression.currentTier, progressionPlanId: progression.planId },
-        });
+        }, runId);
 
         if (cfg.challengeNotifyOnTierUp) {
           await createNotification({
@@ -1027,7 +1480,66 @@ async function applyCompletionRewards(args: {
   }
 }
 
-async function computePhaseStats(args: {
+async function notifyPrizeAwardsForChallenge(args: {
+  challenge: any;
+  cfg: SystemChallengeConfig;
+  runId: string;
+  newlyAwardedEnrollmentIds: Set<number>;
+}): Promise<void> {
+  if (!args.newlyAwardedEnrollmentIds.size) return;
+  if (!args.cfg.challengeNotifyOnPrizeAward) return;
+
+  const enrollmentIds = Array.from(args.newlyAwardedEnrollmentIds).slice(0, 500);
+  if (!enrollmentIds.length) return;
+
+  const rows = await db
+    .select({
+      id: challengeEnrollments.id,
+      userId: challengeEnrollments.userId,
+    })
+    .from(challengeEnrollments)
+    .where(inArray(challengeEnrollments.id, enrollmentIds as any));
+
+  const challengeName = String(args.challenge?.name ?? `Challenge ${args.challenge?.id ?? ""}`);
+  for (const row of rows) {
+    await appendChallengeEventWithRun(
+      {
+        enrollmentId: Number(row.id),
+        eventType: "CHALLENGE_REWARD_PRIZE",
+        details: { timing: "ON_CHALLENGE_END" },
+      },
+      args.runId,
+    );
+    appendChallengeTransitionAudit({
+      runId: args.runId,
+      userId: Number(row.userId),
+      challengeId: Number(args.challenge.id),
+      enrollmentId: Number(row.id),
+      type: "CHALLENGE_REWARD_PRIZE",
+      data: { created: true, timing: "ON_CHALLENGE_END" },
+    });
+
+    await createNotification({
+      userId: Number(row.userId),
+      type: "CHALLENGE",
+      severity: "SUCCESS",
+      title: "Prize award created",
+      message: `A prize award entry has been created for your ${challengeName} completion.`,
+      sourceEvent: "CHALLENGE_PRIZE_AWARD_CREATED",
+    });
+    await maybeSendChallengeMailboxMessage({
+      cfg: args.cfg,
+      userId: Number(row.userId),
+      challengeId: Number(args.challenge.id),
+      enrollmentId: Number(row.id),
+      sourceEvent: "CHALLENGE_PRIZE_AWARD_CREATED",
+      subject: `Prize award created: ${challengeName}`,
+      body: `A prize award entry has been created for your completion of ${challengeName}.`,
+    });
+  }
+}
+
+export async function computePhaseStats(args: {
   userId: number;
   startAt: number;
   endAt: number;
@@ -1038,6 +1550,7 @@ async function computePhaseStats(args: {
   const q = await db.execute(sql`
     WITH t AS (
       SELECT
+        tr.id AS id,
         tr.closed_at AS closed_at,
         COALESCE(
           tr.net_profit_usd::numeric,
@@ -1062,8 +1575,11 @@ async function computePhaseStats(args: {
     ),
     equity AS (
       SELECT
+        id,
         closed_at,
-        SUM(net_profit) OVER (ORDER BY closed_at ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS cum
+        net_profit,
+        ROW_NUMBER() OVER (ORDER BY closed_at, id) AS seq,
+        SUM(net_profit) OVER (ORDER BY closed_at, id ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS cum
       FROM t
     ),
     eq2 AS (
@@ -1080,27 +1596,70 @@ async function computePhaseStats(args: {
       COALESCE((SELECT MAX(pnl) FROM daily), 0) AS best_day_pnl,
       COALESCE((SELECT MIN(cum) FROM equity), 0) AS min_cum,
       COALESCE((SELECT MAX(peak_cum) FROM eq2), 0) AS peak_cum,
-      COALESCE((SELECT MAX((peak_cum - cum) / NULLIF((${capitalBase} + peak_cum), 0)) FROM eq2), 0) AS trailing_dd
+      COALESCE((SELECT MAX((peak_cum - cum) / NULLIF((${capitalBase} + peak_cum), 0)) FROM eq2), 0) AS trailing_dd,
+      COALESCE((SELECT COUNT(*)::int FROM t), 0) AS trade_count,
+      COALESCE((SELECT MIN(closed_at)::bigint FROM t), 0) AS first_trade_at,
+      COALESCE((SELECT MAX(closed_at)::bigint FROM t), 0) AS last_trade_at,
+      COALESCE((SELECT SUM(ROUND(net_profit * 100000)::bigint) FROM t), 0)::bigint AS pnl_scaled_sum,
+      COALESCE((
+        SELECT SUM(
+          (
+            (closed_at::bigint * 31) +
+            (ROUND(net_profit * 100000)::bigint * 17) +
+            (seq::bigint * 13)
+          )::bigint
+        )
+        FROM equity
+      ), 0)::bigint AS seq_signature_a,
+      COALESCE((
+        SELECT SUM(
+          (
+            (ROUND(cum * 100000)::bigint * 19) +
+            (seq::bigint * 7)
+          )::bigint
+        )
+        FROM equity
+      ), 0)::bigint AS seq_signature_b
   `);
 
   const row: any = (q as any).rows?.[0] ?? {};
 
-  const totalPnl = Number(row.total_pnl ?? 0);
-  const tradingDays = Number(row.trading_days ?? 0);
-  const worstDayPnl = Number(row.worst_day_pnl ?? 0);
-  const bestDayPnl = Number(row.best_day_pnl ?? 0);
-  const minCum = Number(row.min_cum ?? 0);
-  const peakCum = Number(row.peak_cum ?? 0);
-  const trailingDd = Number(row.trailing_dd ?? 0);
+  const totalPnl = roundDeterministic(Number(row.total_pnl ?? 0));
+  const tradingDays = Math.max(0, Math.trunc(Number(row.trading_days ?? 0)));
+  const worstDayPnl = roundDeterministic(Number(row.worst_day_pnl ?? 0));
+  const bestDayPnl = roundDeterministic(Number(row.best_day_pnl ?? 0));
+  const minCum = roundDeterministic(Number(row.min_cum ?? 0));
+  const peakCum = roundDeterministic(Number(row.peak_cum ?? 0));
+  const trailingDd = roundDeterministic(Number(row.trailing_dd ?? 0));
+  const tradeCount = Math.max(0, Math.trunc(Number(row.trade_count ?? 0)));
 
-  const pnlPct = capitalBase > 0 ? totalPnl / capitalBase : 0;
-  const worstDayLossPct = capitalBase > 0 ? Math.max(0, -worstDayPnl / capitalBase) : 0;
-  const bestDayProfitPct = capitalBase > 0 ? Math.max(0, bestDayPnl / capitalBase) : 0;
-  const startDdPct = capitalBase > 0 ? Math.max(0, -minCum / capitalBase) : 0;
-  const trailingDdPct = Math.max(0, trailingDd);
-  const peakEquity = capitalBase + peakCum;
+  const pnlPct = roundDeterministic(capitalBase > 0 ? totalPnl / capitalBase : 0);
+  const worstDayLossPct = roundDeterministic(capitalBase > 0 ? Math.max(0, -worstDayPnl / capitalBase) : 0);
+  const bestDayProfitPct = roundDeterministic(capitalBase > 0 ? Math.max(0, bestDayPnl / capitalBase) : 0);
+  const startDdPct = roundDeterministic(capitalBase > 0 ? Math.max(0, -minCum / capitalBase) : 0);
+  const trailingDdPct = roundDeterministic(Math.max(0, trailingDd));
+  const peakEquity = roundDeterministic(capitalBase + peakCum);
+
+  const inputHash = chainHash(null, {
+    basis: "REALIZED_ONLY",
+    roundingMode: "HALF_AWAY_FROM_ZERO_8DP",
+    userId,
+    startAt,
+    endAt,
+    capitalBase: roundDeterministic(capitalBase),
+    tradeCount,
+    firstTradeAt: Math.max(0, Math.trunc(Number(row.first_trade_at ?? 0))),
+    lastTradeAt: Math.max(0, Math.trunc(Number(row.last_trade_at ?? 0))),
+    pnlScaledSum: String(row.pnl_scaled_sum ?? "0"),
+    seqSignatureA: String(row.seq_signature_a ?? "0"),
+    seqSignatureB: String(row.seq_signature_b ?? "0"),
+  });
 
   return {
+    pnlBasis: "REALIZED_ONLY",
+    roundingMode: "HALF_AWAY_FROM_ZERO_8DP",
+    inputHash,
+    tradeCount,
     totalPnl,
     pnlPct,
     tradingDays,
@@ -1112,6 +1671,41 @@ async function computePhaseStats(args: {
   };
 }
 
+async function persistPhaseSnapshot(args: {
+  enrollmentId: number;
+  challengeId: number;
+  userId: number;
+  phaseNumber: number;
+  runId: string;
+  computedAt: number;
+  stats: PhaseStats;
+}) {
+  await db
+    .insert(challengePhaseSnapshots)
+    .values({
+      enrollmentId: args.enrollmentId,
+      challengeId: args.challengeId,
+      userId: args.userId,
+      phaseNumber: args.phaseNumber,
+      runId: args.runId,
+      pnlBasis: args.stats.pnlBasis,
+      roundingMode: args.stats.roundingMode,
+      inputHash: args.stats.inputHash,
+      tradeCount: args.stats.tradeCount,
+      totalPnl: args.stats.totalPnl,
+      pnlPct: args.stats.pnlPct,
+      tradingDays: args.stats.tradingDays,
+      worstDayLossPct: args.stats.worstDayLossPct,
+      bestDayProfitPct: args.stats.bestDayProfitPct,
+      startDdPct: args.stats.startDdPct,
+      trailingDdPct: args.stats.trailingDdPct,
+      peakEquity: args.stats.peakEquity,
+      computedAt: args.computedAt,
+      createdAt: args.computedAt,
+    })
+    .onConflictDoNothing();
+}
+
 function nearLimit(hit: number, limit: number, thresholdPct: number): boolean {
   if (!Number.isFinite(limit) || limit <= 0) return false;
   const threshold = Math.max(0, Math.min(1, thresholdPct));
@@ -1119,15 +1713,67 @@ function nearLimit(hit: number, limit: number, thresholdPct: number): boolean {
   return hit >= warnAt && hit < limit;
 }
 
-export async function evaluateChallengesTick(options?: { batchSize?: number }): Promise<EvalResult> {
+export async function evaluateChallengesTick(options?: { batchSize?: number; runId?: string }): Promise<EvalResult> {
   const batchSize = options?.batchSize ?? 500;
-  const cfg = await getSystemChallengeConfig();
+  const emptyResult: EvalResult = { processed: 0, advanced: 0, passed: 0, failed: 0, warned: 0 };
+  const runStartedAt = nowSec();
+  const runId = String(options?.runId ?? "").trim() || buildEvalRunId(runStartedAt);
+  let runInserted = false;
+  let lockAcquired = false;
 
-  if (!cfg.traderCompeteEnabled || !cfg.challengeEvalEnabled) {
-    return { processed: 0, advanced: 0, passed: 0, failed: 0, warned: 0 };
-  }
+  const finishRun = async (status: "SUCCESS" | "FAILED", result: EvalResult, error?: unknown) => {
+    if (!runInserted) return;
+    await db
+      .update(challengeEvaluationRuns)
+      .set({
+        status,
+        endedAt: nowSec(),
+        processedCount: result.processed,
+        advancedCount: result.advanced,
+        passedCount: result.passed,
+        failedCount: result.failed,
+        warnedCount: result.warned,
+        errorJson: error ? stableStringify({ message: String((error as any)?.message ?? error), error }) : null,
+      })
+      .where(eq(challengeEvaluationRuns.runId, runId));
+  };
 
-  const now = nowSec();
+  try {
+    const lockRow = await db.execute(sql`SELECT pg_try_advisory_lock(${EVALUATION_RUN_LOCK_KEY}) AS locked`);
+    lockAcquired = Boolean((lockRow as any).rows?.[0]?.locked);
+    if (!lockAcquired) {
+      await db
+        .insert(challengeEvaluationRuns)
+        .values({
+          runId,
+          status: "SKIPPED_LOCK",
+          startedAt: runStartedAt,
+          endedAt: runStartedAt,
+          createdAt: runStartedAt,
+        })
+        .onConflictDoNothing();
+      return emptyResult;
+    }
+
+    await db
+      .insert(challengeEvaluationRuns)
+      .values({
+        runId,
+        status: "RUNNING",
+        startedAt: runStartedAt,
+        createdAt: runStartedAt,
+      })
+      .onConflictDoNothing();
+    runInserted = true;
+
+    const cfg = await getSystemChallengeConfig();
+
+    if (!cfg.traderCompeteEnabled || !cfg.challengeEvalEnabled) {
+      await finishRun("SUCCESS", emptyResult);
+      return emptyResult;
+    }
+
+    const now = nowSec();
 
   const enrolls = await db
     .select({
@@ -1140,9 +1786,10 @@ export async function evaluateChallengesTick(options?: { batchSize?: number }): 
     .orderBy(asc(challengeEnrollments.updatedAt))
     .limit(batchSize);
 
-  if (!enrolls.length) {
-    return { processed: 0, advanced: 0, passed: 0, failed: 0, warned: 0 };
-  }
+    if (!enrolls.length) {
+      await finishRun("SUCCESS", emptyResult);
+      return emptyResult;
+    }
 
   const challengeIds = Array.from(new Set(enrolls.map((r) => r.challenge.id)));
   const challengeById = new Map<number, any>();
@@ -1185,6 +1832,15 @@ export async function evaluateChallengesTick(options?: { batchSize?: number }): 
         endAt: evalEnd,
         capitalBase,
       });
+      await persistPhaseSnapshot({
+        enrollmentId: enrollment.id,
+        challengeId: challenge.id,
+        userId: enrollment.userId,
+        phaseNumber: currentPhase,
+        runId,
+        computedAt: now,
+        stats,
+      });
 
       const profitTarget = Number((phaseRules as any).profitTargetPct ?? challenge.profitTargetPct ?? 0);
       const maxDailyLoss = Number((phaseRules as any).maxDailyLossPct ?? challenge.maxDailyLossPct ?? 1);
@@ -1217,7 +1873,8 @@ export async function evaluateChallengesTick(options?: { batchSize?: number }): 
         updatedAt: now,
       };
 
-      if (dailyBreach || totalBreach || consistencyBreach || restrictedHit || timeoutFail) {
+      const ruleBreach = dailyBreach || totalBreach || consistencyBreach || restrictedHit;
+      if (ruleBreach || timeoutFail) {
         const reason = dailyBreach
           ? "MAX_DAILY_LOSS_BREACH"
           : totalBreach
@@ -1227,17 +1884,131 @@ export async function evaluateChallengesTick(options?: { batchSize?: number }): 
               : restrictedHit
                 ? "RESTRICTED_SYMBOL_BREACH"
                 : "DEADLINE_EXPIRED";
+        const breachPolicy = timeoutFail ? "FAIL" : resolveBreachPolicy(challenge, cfg);
+
+        if (!timeoutFail && breachPolicy === "BREACH_AND_CONTINUE") {
+          await db
+            .update(challengeEnrollments)
+            .set({
+              ...nowUpdate,
+              lastWarningEvent: `CHALLENGE_BREACH_CONTINUE_${reason}`,
+              lastWarningAt: now,
+            })
+            .where(eq(challengeEnrollments.id, enrollment.id));
+
+          await appendChallengeEventWithRun(
+            {
+              enrollmentId: enrollment.id,
+              eventType: `CHALLENGE_BREACH_CONTINUE_${reason}`,
+              phaseNumber: currentPhase,
+              details: {
+                pnlInputHash: stats.inputHash,
+                breachPolicy,
+                reason,
+                pnlPct: stats.pnlPct,
+                tradingDays: stats.tradingDays,
+                worstDayLossPct: stats.worstDayLossPct,
+                totalDdHit,
+                bestDayProfitPct: stats.bestDayProfitPct,
+              },
+            },
+            runId,
+          );
+          appendChallengeTransitionAudit({
+            runId,
+            userId: enrollment.userId,
+            challengeId: challenge.id,
+            enrollmentId: enrollment.id,
+            type: "CHALLENGE_BREACH_CONTINUED",
+            data: { reason, phaseNumber: currentPhase, breachPolicy },
+          });
+
+          if (cfg.challengeNotifyOnBreach) {
+            await createNotification({
+              userId: enrollment.userId,
+              type: "CHALLENGE",
+              severity: "WARNING",
+              title: "Challenge rule breached",
+              message: `A breach was recorded in Phase ${currentPhase} of ${challenge.name}, but progression remains active (${reason}).`,
+              sourceEvent: `CHALLENGE_BREACH_CONTINUE_${reason}`,
+            });
+          }
+
+          warned += 1;
+          continue;
+        }
+
+        if (!timeoutFail && breachPolicy === "MANUAL_REVIEW" && cfg.challengeManualReviewEnabled) {
+          await db
+            .update(challengeEnrollments)
+            .set({ ...nowUpdate, status: "REVIEW_REQUIRED", completedAt: now })
+            .where(eq(challengeEnrollments.id, enrollment.id));
+
+          await appendChallengeEventWithRun(
+            {
+              enrollmentId: enrollment.id,
+              eventType: "CHALLENGE_REVIEW_REQUIRED",
+              phaseNumber: currentPhase,
+              details: {
+                pnlInputHash: stats.inputHash,
+                breachPolicy,
+                reason,
+                pnlPct: stats.pnlPct,
+                tradingDays: stats.tradingDays,
+                worstDayLossPct: stats.worstDayLossPct,
+                totalDdHit,
+                bestDayProfitPct: stats.bestDayProfitPct,
+                phaseDeadline,
+              },
+            },
+            runId,
+          );
+          appendChallengeTransitionAudit({
+            runId,
+            userId: enrollment.userId,
+            challengeId: challenge.id,
+            enrollmentId: enrollment.id,
+            type: "CHALLENGE_REVIEW_REQUIRED",
+            data: { reason, phaseNumber: currentPhase, breachPolicy },
+          });
+
+          if (cfg.challengeNotifyOnBreach) {
+            await createNotification({
+              userId: enrollment.userId,
+              type: "CHALLENGE",
+              severity: "WARNING",
+              title: "Challenge under review",
+              message: `Your ${challenge.name} enrollment is now in manual review (${reason}).`,
+              sourceEvent: "CHALLENGE_REVIEW_REQUIRED",
+            });
+            await maybeSendChallengeMailboxMessage({
+              cfg,
+              userId: enrollment.userId,
+              challengeId: challenge.id,
+              enrollmentId: enrollment.id,
+              sourceEvent: "CHALLENGE_REVIEW_REQUIRED",
+              subject: `Manual review required: ${challenge.name}`,
+              body: `Your enrollment was moved to manual review in Phase ${currentPhase} (${reason}).`,
+            });
+          }
+
+          warned += 1;
+          forceLeaderboardRefresh.add(challenge.id);
+          continue;
+        }
 
         await db
           .update(challengeEnrollments)
           .set({ ...nowUpdate, status: "FAILED", completedAt: now })
           .where(eq(challengeEnrollments.id, enrollment.id));
 
-        await appendChallengeEvent({
+        await appendChallengeEventWithRun({
           enrollmentId: enrollment.id,
           eventType: `CHALLENGE_FAIL_${reason}`,
           phaseNumber: currentPhase,
           details: {
+            pnlInputHash: stats.inputHash,
+            breachPolicy,
             pnlPct: stats.pnlPct,
             tradingDays: stats.tradingDays,
             worstDayLossPct: stats.worstDayLossPct,
@@ -1254,6 +2025,14 @@ export async function evaluateChallengesTick(options?: { batchSize?: number }): 
           dailyLossSnapshot: stats.worstDayLossPct,
           totalDdSnapshot: totalDdHit,
           tradingDaysSnapshot: stats.tradingDays,
+        }, runId);
+        appendChallengeTransitionAudit({
+          runId,
+          userId: enrollment.userId,
+          challengeId: challenge.id,
+          enrollmentId: enrollment.id,
+          type: "CHALLENGE_FAILED",
+          data: { reason, phaseNumber: currentPhase, breachPolicy },
         });
 
         if (cfg.challengeNotifyOnFail || cfg.challengeNotifyOnBreach) {
@@ -1282,15 +2061,32 @@ export async function evaluateChallengesTick(options?: { batchSize?: number }): 
       }
 
       if (targetHit && daysOk) {
-        await appendChallengeEvent({
+        await appendChallengeEventWithRun({
           enrollmentId: enrollment.id,
           eventType: "CHALLENGE_PHASE_PASS",
           phaseNumber: currentPhase,
-          details: { pnlPct: stats.pnlPct, tradingDays: stats.tradingDays },
+          details: { pnlInputHash: stats.inputHash, pnlPct: stats.pnlPct, tradingDays: stats.tradingDays },
           pnlSnapshotPct: stats.pnlPct,
           dailyLossSnapshot: stats.worstDayLossPct,
           totalDdSnapshot: totalDdHit,
           tradingDaysSnapshot: stats.tradingDays,
+        }, runId);
+        appendChallengeTransitionAudit({
+          runId,
+          userId: enrollment.userId,
+          challengeId: challenge.id,
+          enrollmentId: enrollment.id,
+          type: "CHALLENGE_PHASE_PASS",
+          data: { phaseNumber: currentPhase },
+        });
+        await applyCustomRewardsForTrigger({
+          cfg,
+          enrollment,
+          challenge,
+          trigger: "ON_PHASE_PASS",
+          now,
+          runId,
+          phaseNumber: currentPhase,
         });
 
         const maxPhase = phases
@@ -1303,11 +2099,12 @@ export async function evaluateChallengesTick(options?: { batchSize?: number }): 
             .set({ ...nowUpdate, status: "PASSED", completedAt: now, lastWarningEvent: null, lastWarningAt: null })
             .where(eq(challengeEnrollments.id, enrollment.id));
 
-          await appendChallengeEvent({
+          await appendChallengeEventWithRun({
             enrollmentId: enrollment.id,
             eventType: "CHALLENGE_COMPLETE",
             phaseNumber: currentPhase,
             details: {
+              pnlInputHash: stats.inputHash,
               pnlPct: stats.pnlPct,
               tradingDays: stats.tradingDays,
               maxPhase,
@@ -1316,6 +2113,14 @@ export async function evaluateChallengesTick(options?: { batchSize?: number }): 
             dailyLossSnapshot: stats.worstDayLossPct,
             totalDdSnapshot: totalDdHit,
             tradingDaysSnapshot: stats.tradingDays,
+          }, runId);
+          appendChallengeTransitionAudit({
+            runId,
+            userId: enrollment.userId,
+            challengeId: challenge.id,
+            enrollmentId: enrollment.id,
+            type: "CHALLENGE_COMPLETE",
+            data: { phaseNumber: currentPhase, maxPhase },
           });
 
           if (cfg.challengeNotifyOnComplete) {
@@ -1344,6 +2149,7 @@ export async function evaluateChallengesTick(options?: { batchSize?: number }): 
             stats,
             cfg,
             now,
+            runId,
           });
 
           passed += 1;
@@ -1364,11 +2170,19 @@ export async function evaluateChallengesTick(options?: { batchSize?: number }): 
             })
             .where(eq(challengeEnrollments.id, enrollment.id));
 
-          await appendChallengeEvent({
+          await appendChallengeEventWithRun({
             enrollmentId: enrollment.id,
             eventType: "CHALLENGE_PHASE_ADVANCE",
             phaseNumber: nextPhase,
             details: { fromPhase: currentPhase, toPhase: nextPhase },
+          }, runId);
+          appendChallengeTransitionAudit({
+            runId,
+            userId: enrollment.userId,
+            challengeId: challenge.id,
+            enrollmentId: enrollment.id,
+            type: "CHALLENGE_PHASE_ADVANCE",
+            data: { fromPhase: currentPhase, toPhase: nextPhase },
           });
 
           if (cfg.challengeNotifyOnPhasePass) {
@@ -1400,11 +2214,12 @@ export async function evaluateChallengesTick(options?: { batchSize?: number }): 
             .set({ ...nowUpdate, lastWarningEvent: warningEvent, lastWarningAt: now })
             .where(eq(challengeEnrollments.id, enrollment.id));
 
-          await appendChallengeEvent({
+          await appendChallengeEventWithRun({
             enrollmentId: enrollment.id,
             eventType: warningEvent,
             phaseNumber: currentPhase,
             details: {
+              pnlInputHash: stats.inputHash,
               maxDailyLoss,
               maxTotalLoss,
               totalDdHit,
@@ -1414,7 +2229,7 @@ export async function evaluateChallengesTick(options?: { batchSize?: number }): 
             dailyLossSnapshot: stats.worstDayLossPct,
             totalDdSnapshot: totalDdHit,
             tradingDaysSnapshot: stats.tradingDays,
-          });
+          }, runId);
 
           if (cfg.challengeNotifyOnPhaseWarning) {
             await createNotification({
@@ -1451,6 +2266,40 @@ export async function evaluateChallengesTick(options?: { batchSize?: number }): 
       const challenge = challengeById.get(challengeId);
       if (!challenge) continue;
 
+      const prizeTiming = resolvePrizeAwardTiming(challenge, cfg);
+      if (prizeTiming !== "ON_CHALLENGE_END") continue;
+
+      const endAt = Number(challenge.endAt ?? 0);
+      if (!Number.isFinite(endAt) || endAt <= 0 || now < endAt) continue;
+
+      const prizeCandidateMode = resolvePrizeCandidateMode(challenge, cfg);
+      const rankedCandidates = await rankPrizeCandidates(challengeId, prizeCandidateMode);
+      const prizeResult = await recomputePrizeAwards({
+        challenge,
+        cfg,
+        rankedCandidates,
+        now,
+      });
+      await notifyPrizeAwardsForChallenge({
+        challenge,
+        cfg,
+        runId,
+        newlyAwardedEnrollmentIds: prizeResult.newlyAwardedEnrollmentIds,
+      });
+    } catch (error) {
+      console.error("[challenges-v4] challenge-end prize processing failed:", {
+        runId,
+        challengeId,
+        error,
+      });
+    }
+  }
+
+  for (const challengeId of touchedChallenges) {
+    try {
+      const challenge = challengeById.get(challengeId);
+      if (!challenge) continue;
+
       await maybeRefreshChallengeLeaderboard({
         challenge,
         cfg,
@@ -1465,5 +2314,16 @@ export async function evaluateChallengesTick(options?: { batchSize?: number }): 
     }
   }
 
-  return { processed, advanced, passed, failed, warned };
+    const result: EvalResult = { processed, advanced, passed, failed, warned };
+    await finishRun("SUCCESS", result);
+    return result;
+  } catch (error) {
+    console.error("[challenges-v4] evaluation run failed:", { runId, error });
+    await finishRun("FAILED", emptyResult, error);
+    return emptyResult;
+  } finally {
+    if (lockAcquired) {
+      await db.execute(sql`SELECT pg_advisory_unlock(${EVALUATION_RUN_LOCK_KEY})`);
+    }
+  }
 }

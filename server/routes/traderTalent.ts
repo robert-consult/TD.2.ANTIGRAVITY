@@ -1,6 +1,7 @@
 // @ts-nocheck
 import { Router } from "express";
 import { and, asc, desc, eq, sql } from "drizzle-orm";
+import crypto from "crypto";
 import { z } from "zod";
 import { db } from "@db";
 import {
@@ -14,6 +15,7 @@ import {
   challengePhases,
   challengePrizeAwards,
   challengeProgressionTiers,
+  challengeRewardLedger,
   challengeUserProgression,
   challengeSelectionBoosts,
   challenges,
@@ -30,6 +32,13 @@ import { appendIdentityAudit } from "../services/identityAudit";
 import { createMailboxThreadWithMessage, createNotification } from "../services/messaging";
 import { appendChallengeEvent } from "../recruitment/challengesV4/challengeEvents";
 import { getSystemChallengeConfig } from "../recruitment/challengesV4/challengeConfig";
+import {
+  computeVerificationCodeHmac,
+  deriveCertificatePublicCode,
+  parseVerificationCodeKeyId,
+} from "../recruitment/challengesV4/certificateCode";
+import { renderChallengeCertificatePdf } from "../recruitment/challengesV4/certificatePdf";
+import { parseCustomRewardRules, scopedCustomRewardKey } from "../recruitment/challengesV4/customRewards";
 
 const traderTalentPublicRouter = Router();
 const traderTalentRouter = Router();
@@ -43,6 +52,19 @@ const profileUpdateSchema = z.object({
 
 function nowSec(): number {
   return Math.floor(Date.now() / 1000);
+}
+
+function toTraderCertificateRow(cert: Record<string, unknown>) {
+  const verificationCode = deriveCertificatePublicCode({
+    verificationCodeNonce: cert.verificationCodeNonce as string | null | undefined,
+    verificationHmacKeyId: cert.verificationHmacKeyId as string | null | undefined,
+    verificationCodeHmac: String(cert.verificationCodeHmac ?? ""),
+  });
+  const safe = { ...cert, verificationCode } as Record<string, unknown>;
+  delete safe.verificationCodeHmac;
+  delete safe.verificationCodeNonce;
+  delete safe.verificationHmacKeyId;
+  return safe;
 }
 
 function parsePinnedTradeIds(raw: unknown): number[] {
@@ -67,6 +89,21 @@ function parsePinnedTradeIds(raw: unknown): number[] {
   }
 
   return [];
+}
+
+function getChallengeLeaderboardPepper(): string {
+  const configured = String(process.env.CHALLENGE_LEADERBOARD_ANON_PEPPER || "").trim();
+  if (configured.length >= 16) return configured;
+  const legal = String(process.env.LEGAL_TERMS_HMAC_SECRET || "").trim();
+  if (legal.length >= 16) return legal;
+  const session = String(process.env.SESSION_SECRET || "").trim();
+  if (session.length >= 16) return session;
+  return "tradequip-challenge-anon-dev-pepper";
+}
+
+function buildChallengeAnonId(challengeId: number, userId: number): string {
+  const input = `${challengeId}:${userId}`;
+  return crypto.createHmac("sha256", getChallengeLeaderboardPepper()).update(input, "utf8").digest("hex").slice(0, 8);
 }
 
 type ChallengeRateRecord = { count: number; resetAtMs: number };
@@ -184,6 +221,233 @@ async function sendChallengeMailboxMessage(input: {
   }
 }
 
+async function resolveBadgeForCustomReward(ref: unknown): Promise<{ id: number; name: string } | null> {
+  const raw = String(ref ?? "").trim();
+  if (!raw) return null;
+
+  const id = Number(raw);
+  if (Number.isInteger(id) && id > 0) {
+    const [row] = await db.select({ id: challengeBadges.id, name: challengeBadges.name }).from(challengeBadges).where(eq(challengeBadges.id, id)).limit(1);
+    if (row) return row;
+  }
+
+  const [byKey] = await db.select({ id: challengeBadges.id, name: challengeBadges.name }).from(challengeBadges).where(eq(challengeBadges.key, raw)).limit(1);
+  if (byKey) return byKey;
+
+  const [byName] = await db.select({ id: challengeBadges.id, name: challengeBadges.name }).from(challengeBadges).where(eq(challengeBadges.name, raw)).limit(1);
+  return byName ?? null;
+}
+
+async function applyEnrollCustomRewards(args: {
+  req: any;
+  cfg: Awaited<ReturnType<typeof getRecruitmentConfig>>;
+  challenge: any;
+  enrollment: any;
+  userId: number;
+  now: number;
+}) {
+  if (!args.cfg.challengeCustomRewardsEnabled) return;
+
+  const rules = parseCustomRewardRules(args.challenge.customRewardJson).filter((rule) => rule.trigger === "ON_ENROLL");
+  for (const rule of rules) {
+    const rewardKey = scopedCustomRewardKey({
+      rewardKey: rule.rewardKey,
+      trigger: rule.trigger,
+      phaseNumber: Number(args.enrollment.currentPhase ?? 1),
+    });
+
+    const claimed = await db
+      .insert(challengeRewardLedger)
+      .values({
+        enrollmentId: Number(args.enrollment.id),
+        challengeId: Number(args.challenge.id),
+        userId: args.userId,
+        trigger: rule.trigger,
+        rewardKey,
+        actionType: rule.actionType,
+        runId: `enroll-${args.now}`,
+        detailsJson: JSON.stringify({
+          trigger: rule.trigger,
+          actionType: rule.actionType,
+          rewardKey,
+          phaseNumber: Number(args.enrollment.currentPhase ?? 1),
+        }),
+        createdAt: args.now,
+      })
+      .onConflictDoNothing()
+      .returning({ id: challengeRewardLedger.id });
+    if (!claimed.length) continue;
+
+    let applied = false;
+    try {
+      if (rule.actionType === "BADGE_AWARD") {
+        const badgeRef = rule.payload.badgeRef ?? rule.payload.badgeId ?? rule.payload.badgeKey;
+        const badge = await resolveBadgeForCustomReward(badgeRef);
+        if (badge) {
+          const inserted = await db
+            .insert(challengeBadgeAwards)
+            .values({
+              userId: args.userId,
+              badgeId: Number(badge.id),
+              challengeId: Number(args.challenge.id),
+              enrollmentId: Number(args.enrollment.id),
+              awardedAt: args.now,
+              awardedReason: String(rule.payload.reason ?? "CUSTOM_REWARD_ON_ENROLL"),
+            })
+            .onConflictDoNothing()
+            .returning({ id: challengeBadgeAwards.id });
+          applied = inserted.length > 0;
+        }
+      } else if (rule.actionType === "SELECTION_BOOST") {
+        const points = Number(rule.payload.points ?? 0);
+        if (Number.isFinite(points) && points > 0) {
+          const inserted = await db
+            .insert(challengeSelectionBoosts)
+            .values({
+              challengeId: Number(args.challenge.id),
+              enrollmentId: Number(args.enrollment.id),
+              userId: args.userId,
+              points,
+              reason: String(rule.payload.reason ?? "CUSTOM_REWARD_ON_ENROLL"),
+              awardedAt: args.now,
+              createdBy: Number(args.challenge.createdBy ?? 0) > 0 ? Number(args.challenge.createdBy) : null,
+              createdAt: args.now,
+            })
+            .onConflictDoNothing()
+            .returning({ id: challengeSelectionBoosts.id });
+          applied = inserted.length > 0;
+        }
+      } else if (rule.actionType === "INBOX_MESSAGE") {
+        const subject = String(rule.payload.subject ?? "").trim();
+        const body = String(rule.payload.body ?? "").trim();
+        if (subject && body) {
+          await createMailboxThreadWithMessage({
+            createdByUserId: null,
+            senderUserId: null,
+            recipientUserIds: [args.userId],
+            subject,
+            body,
+            category: normalizeChallengeMailboxCategory(rule.payload.category),
+            allowReply: false,
+            messageType: "CHALLENGE_EVENT",
+            metadata: {
+              sourceEvent: "CHALLENGE_CUSTOM_REWARD",
+              challengeId: Number(args.challenge.id),
+              enrollmentId: Number(args.enrollment.id),
+              trigger: rule.trigger,
+              rewardKey,
+            },
+          });
+          applied = true;
+        }
+      } else if (rule.actionType === "NOTIFY") {
+        const title = String(rule.payload.title ?? "").trim();
+        const message = String(rule.payload.message ?? "").trim();
+        if (title && message) {
+          const severityRaw = String(rule.payload.severity ?? "INFO").trim().toUpperCase();
+          const severity = severityRaw === "SUCCESS" || severityRaw === "WARNING" || severityRaw === "CRITICAL" ? severityRaw : "INFO";
+          await createNotification({
+            userId: args.userId,
+            type: "CHALLENGE",
+            severity: severity as any,
+            title,
+            message,
+            sourceEvent: String(rule.payload.sourceEvent ?? "CHALLENGE_CUSTOM_REWARD"),
+            link: String(rule.payload.link ?? "").trim() || undefined,
+          });
+          applied = true;
+        }
+      }
+    } catch (error) {
+      console.error("[trader-talent] custom reward execution error:", {
+        challengeId: args.challenge.id,
+        enrollmentId: args.enrollment.id,
+        trigger: rule.trigger,
+        actionType: rule.actionType,
+        rewardKey,
+        error,
+      });
+    }
+
+    await appendChallengeEvent({
+      enrollmentId: Number(args.enrollment.id),
+      eventType: "CHALLENGE_CUSTOM_REWARD_EXECUTED",
+      eventAt: args.now,
+      actorType: "SYSTEM",
+      actorUserId: null,
+      phaseNumber: Number(args.enrollment.currentPhase ?? 1),
+      details: {
+        trigger: rule.trigger,
+        actionType: rule.actionType,
+        rewardKey,
+        applied,
+      },
+      note: "Custom reward processed",
+    });
+
+    appendIdentityAudit({
+      userId: args.userId,
+      category: "RECRUITMENT",
+      type: "CHALLENGE_CUSTOM_REWARD_EXECUTED",
+      actorType: "SYSTEM",
+      actorUserId: null,
+      sessionId: String(args.req.sessionID || ""),
+      ip: String(args.req.ip || ""),
+      userAgent: String(args.req.get("user-agent") || ""),
+      data: {
+        challengeId: Number(args.challenge.id),
+        enrollmentId: Number(args.enrollment.id),
+        trigger: rule.trigger,
+        actionType: rule.actionType,
+        rewardKey,
+        applied,
+      },
+    });
+  }
+}
+
+function emitChallengeSuspiciousActivity(input: {
+  req: any;
+  userId: number;
+  challengeId?: number | null;
+  enrollmentId?: number | null;
+  reason: string;
+  details?: Record<string, unknown>;
+}) {
+  const details = {
+    reason: input.reason,
+    challengeId: input.challengeId ?? null,
+    enrollmentId: input.enrollmentId ?? null,
+    ...(input.details ?? {}),
+  };
+
+  appendIdentityAudit({
+    userId: input.userId,
+    category: "RECRUITMENT",
+    type: "CHALLENGE_SUSPICIOUS_ACTIVITY",
+    actorType: "USER",
+    actorUserId: input.userId,
+    sessionId: String(input.req.sessionID || ""),
+    ip: String(input.req.ip || ""),
+    userAgent: String(input.req.get("user-agent") || ""),
+    data: details,
+  });
+
+  if (Number.isInteger(input.enrollmentId) && Number(input.enrollmentId) > 0) {
+    void appendChallengeEvent({
+      enrollmentId: Number(input.enrollmentId),
+      eventType: "CHALLENGE_SUSPICIOUS_ACTIVITY",
+      eventAt: nowSec(),
+      actorType: "TRADER",
+      actorUserId: input.userId,
+      details,
+      note: `Suspicious activity detected (${input.reason})`,
+    }).catch((error) => {
+      console.error("[trader-talent] suspicious challenge event append failed:", error);
+    });
+  }
+}
+
 traderTalentRouter.get("/leaderboard-mode", async (_req, res) => {
   try {
     const cfg = await getRecruitmentConfig();
@@ -206,7 +470,17 @@ traderTalentRouter.get("/profile", async (req, res) => {
     }
 
     const userId = Number(req.session?.userId || 0);
-    const [profile] = await db.select().from(traderProfiles).where(eq(traderProfiles.userId, userId)).limit(1);
+    const [profile] = await db
+      .select({
+        userId: traderProfiles.userId,
+        bio: traderProfiles.bio,
+        strategy: traderProfiles.strategy,
+        pinnedTradeIds: traderProfiles.pinnedTradeIds,
+        updatedAt: traderProfiles.updatedAt,
+      })
+      .from(traderProfiles)
+      .where(eq(traderProfiles.userId, userId))
+      .limit(1);
 
     const row =
       profile ??
@@ -273,7 +547,17 @@ traderTalentRouter.put("/profile", async (req, res) => {
         },
       });
 
-    const [updated] = await db.select().from(traderProfiles).where(eq(traderProfiles.userId, userId)).limit(1);
+    const [updated] = await db
+      .select({
+        userId: traderProfiles.userId,
+        bio: traderProfiles.bio,
+        strategy: traderProfiles.strategy,
+        pinnedTradeIds: traderProfiles.pinnedTradeIds,
+        updatedAt: traderProfiles.updatedAt,
+      })
+      .from(traderProfiles)
+      .where(eq(traderProfiles.userId, userId))
+      .limit(1);
 
     return res.json({
       ok: true,
@@ -520,7 +804,17 @@ traderTalentRouter.get("/challenges/my-progression", async (req, res) => {
 
     const userId = Number(req.session?.userId || 0);
     const [progression] = await db
-      .select()
+      .select({
+        userId: challengeUserProgression.userId,
+        currentTier: challengeUserProgression.currentTier,
+        challengesPassed: challengeUserProgression.challengesPassed,
+        top3Count: challengeUserProgression.top3Count,
+        avgPnlPct: challengeUserProgression.avgPnlPct,
+        totalDqs: challengeUserProgression.totalDqs,
+        tierAdvancedAt: challengeUserProgression.tierAdvancedAt,
+        progressionPlanId: challengeUserProgression.progressionPlanId,
+        updatedAt: challengeUserProgression.updatedAt,
+      })
       .from(challengeUserProgression)
       .where(eq(challengeUserProgression.userId, userId))
       .limit(1);
@@ -572,6 +866,8 @@ traderTalentRouter.get("/challenges/my-certificates", async (req, res) => {
         issuedAt: challengeCertificates.issuedAt,
         isDownloadable: challengeCertificates.isDownloadable,
         isShareable: challengeCertificates.isShareable,
+        verificationCodeNonce: challengeCertificates.verificationCodeNonce,
+        verificationHmacKeyId: challengeCertificates.verificationHmacKeyId,
         verificationCodeHmac: challengeCertificates.verificationCodeHmac,
         downloadedAt: challengeCertificates.downloadedAt,
         challengeName: challenges.name,
@@ -584,7 +880,7 @@ traderTalentRouter.get("/challenges/my-certificates", async (req, res) => {
       .where(eq(challengeCertificates.userId, userId))
       .orderBy(desc(challengeCertificates.issuedAt), desc(challengeCertificates.id));
 
-    return res.json({ ok: true, rows });
+    return res.json({ ok: true, rows: rows.map((row) => toTraderCertificateRow(row as Record<string, unknown>)) });
   } catch (error) {
     console.error("[trader-talent] my-certificates error:", error);
     return res.status(500).json({ message: "FAILED_TO_FETCH_CERTIFICATES" });
@@ -613,19 +909,94 @@ traderTalentRouter.get("/challenges/:id", async (req, res) => {
       return res.status(400).json({ message: "INVALID_CHALLENGE_ID" });
     }
 
-    const [ch] = await db.select().from(challenges).where(eq(challenges.id, challengeId)).limit(1);
+    const [ch] = await db
+      .select({
+        id: challenges.id,
+        name: challenges.name,
+        slug: challenges.slug,
+        description: challenges.description,
+        category: challenges.category,
+        tier: challenges.tier,
+        tags: challenges.tags,
+        iconColor: challenges.iconColor,
+        profitTargetPct: challenges.profitTargetPct,
+        maxDailyLossPct: challenges.maxDailyLossPct,
+        maxTotalLossPct: challenges.maxTotalLossPct,
+        durationDays: challenges.durationDays,
+        minTradingDays: challenges.minTradingDays,
+        virtualCapitalUsd: challenges.virtualCapitalUsd,
+        capitalMode: challenges.capitalMode,
+        leverageMultiplier: challenges.leverageMultiplier,
+        startAt: challenges.startAt,
+        endAt: challenges.endAt,
+        enrollmentStartAt: challenges.enrollmentStartAt,
+        enrollmentEndAt: challenges.enrollmentEndAt,
+        visibleToTraders: challenges.visibleToTraders,
+        featuredOrder: challenges.featuredOrder,
+        prizePoolEnabled: challenges.prizePoolEnabled,
+        prizePoolUsd: challenges.prizePoolUsd,
+        prizeMinCompletions: challenges.prizeMinCompletions,
+        badgesEnabled: challenges.badgesEnabled,
+        certificateEnabled: challenges.certificateEnabled,
+        selectionBoostEnabled: challenges.selectionBoostEnabled,
+        selectionBoostPoints: challenges.selectionBoostPoints,
+        leaderboardEnabled: challenges.leaderboardEnabled,
+        leaderboardAnonymize: challenges.leaderboardAnonymize,
+        leaderboardMaxVisible: challenges.leaderboardMaxVisible,
+        isActive: challenges.isActive,
+      })
+      .from(challenges)
+      .where(eq(challenges.id, challengeId))
+      .limit(1);
     if (!ch || !ch.visibleToTraders) {
       return res.status(404).json({ message: "CHALLENGE_NOT_FOUND" });
     }
 
     const phases = await db
-      .select()
+      .select({
+        id: challengePhases.id,
+        challengeId: challengePhases.challengeId,
+        phaseNumber: challengePhases.phaseNumber,
+        phaseName: challengePhases.phaseName,
+        profitTargetPct: challengePhases.profitTargetPct,
+        maxDailyLossPct: challengePhases.maxDailyLossPct,
+        maxTotalLossPct: challengePhases.maxTotalLossPct,
+        drawdownType: challengePhases.drawdownType,
+        durationDays: challengePhases.durationDays,
+        minTradingDays: challengePhases.minTradingDays,
+        maxSingleDayProfitPct: challengePhases.maxSingleDayProfitPct,
+        allowWeekendHolding: challengePhases.allowWeekendHolding,
+        allowNewsTrading: challengePhases.allowNewsTrading,
+        restrictedSymbolsCsv: challengePhases.restrictedSymbolsCsv,
+        maxConcurrentPositions: challengePhases.maxConcurrentPositions,
+        maxLotSize: challengePhases.maxLotSize,
+      })
       .from(challengePhases)
       .where(eq(challengePhases.challengeId, challengeId))
       .orderBy(challengePhases.phaseNumber);
 
     const [enrollment] = await db
-      .select()
+      .select({
+        id: challengeEnrollments.id,
+        challengeId: challengeEnrollments.challengeId,
+        userId: challengeEnrollments.userId,
+        status: challengeEnrollments.status,
+        enrolledAt: challengeEnrollments.enrolledAt,
+        completedAt: challengeEnrollments.completedAt,
+        currentPnlPct: challengeEnrollments.currentPnlPct,
+        maxDailyLossHit: challengeEnrollments.maxDailyLossHit,
+        currentPhase: challengeEnrollments.currentPhase,
+        snapshotEquity: challengeEnrollments.snapshotEquity,
+        capitalBaseUsed: challengeEnrollments.capitalBaseUsed,
+        attemptNumber: challengeEnrollments.attemptNumber,
+        maxTotalLossHit: challengeEnrollments.maxTotalLossHit,
+        peakEquity: challengeEnrollments.peakEquity,
+        phaseStartedAt: challengeEnrollments.phaseStartedAt,
+        lastWarningEvent: challengeEnrollments.lastWarningEvent,
+        lastWarningAt: challengeEnrollments.lastWarningAt,
+        tradingDays: challengeEnrollments.tradingDays,
+        updatedAt: challengeEnrollments.updatedAt,
+      })
       .from(challengeEnrollments)
       .where(and(eq(challengeEnrollments.challengeId, challengeId), eq(challengeEnrollments.userId, userId)))
       .orderBy(desc(challengeEnrollments.attemptNumber))
@@ -661,7 +1032,27 @@ traderTalentRouter.get("/challenges/:id/status", async (req, res) => {
     }
 
     const [enrollment] = await db
-      .select()
+      .select({
+        id: challengeEnrollments.id,
+        challengeId: challengeEnrollments.challengeId,
+        userId: challengeEnrollments.userId,
+        status: challengeEnrollments.status,
+        enrolledAt: challengeEnrollments.enrolledAt,
+        completedAt: challengeEnrollments.completedAt,
+        currentPnlPct: challengeEnrollments.currentPnlPct,
+        maxDailyLossHit: challengeEnrollments.maxDailyLossHit,
+        currentPhase: challengeEnrollments.currentPhase,
+        snapshotEquity: challengeEnrollments.snapshotEquity,
+        capitalBaseUsed: challengeEnrollments.capitalBaseUsed,
+        attemptNumber: challengeEnrollments.attemptNumber,
+        maxTotalLossHit: challengeEnrollments.maxTotalLossHit,
+        peakEquity: challengeEnrollments.peakEquity,
+        phaseStartedAt: challengeEnrollments.phaseStartedAt,
+        lastWarningEvent: challengeEnrollments.lastWarningEvent,
+        lastWarningAt: challengeEnrollments.lastWarningAt,
+        tradingDays: challengeEnrollments.tradingDays,
+        updatedAt: challengeEnrollments.updatedAt,
+      })
       .from(challengeEnrollments)
       .where(and(eq(challengeEnrollments.challengeId, challengeId), eq(challengeEnrollments.userId, userId)))
       .orderBy(desc(challengeEnrollments.attemptNumber), desc(challengeEnrollments.id))
@@ -671,7 +1062,24 @@ traderTalentRouter.get("/challenges/:id/status", async (req, res) => {
     }
 
     const [phase] = await db
-      .select()
+      .select({
+        id: challengePhases.id,
+        challengeId: challengePhases.challengeId,
+        phaseNumber: challengePhases.phaseNumber,
+        phaseName: challengePhases.phaseName,
+        profitTargetPct: challengePhases.profitTargetPct,
+        maxDailyLossPct: challengePhases.maxDailyLossPct,
+        maxTotalLossPct: challengePhases.maxTotalLossPct,
+        drawdownType: challengePhases.drawdownType,
+        durationDays: challengePhases.durationDays,
+        minTradingDays: challengePhases.minTradingDays,
+        maxSingleDayProfitPct: challengePhases.maxSingleDayProfitPct,
+        allowWeekendHolding: challengePhases.allowWeekendHolding,
+        allowNewsTrading: challengePhases.allowNewsTrading,
+        restrictedSymbolsCsv: challengePhases.restrictedSymbolsCsv,
+        maxConcurrentPositions: challengePhases.maxConcurrentPositions,
+        maxLotSize: challengePhases.maxLotSize,
+      })
       .from(challengePhases)
       .where(and(eq(challengePhases.challengeId, challengeId), eq(challengePhases.phaseNumber, enrollment.currentPhase)))
       .limit(1);
@@ -698,6 +1106,13 @@ traderTalentRouter.post("/challenges/:id/enroll", async (req, res) => {
 
     const enrollRate = consumeChallengeRateLimit(`enroll:${userId}`, 5, 60_000);
     if (!enrollRate.allowed) {
+      emitChallengeSuspiciousActivity({
+        req,
+        userId,
+        challengeId,
+        reason: "ENROLL_RATE_LIMIT",
+        details: { retryAfterSec: enrollRate.retryAfterSec },
+      });
       res.setHeader("Retry-After", String(enrollRate.retryAfterSec));
       return res.status(429).json({
         message: "RATE_LIMITED",
@@ -707,7 +1122,27 @@ traderTalentRouter.post("/challenges/:id/enroll", async (req, res) => {
     }
 
     const ts = nowSec();
-    const [ch] = await db.select().from(challenges).where(eq(challenges.id, challengeId)).limit(1);
+    const [ch] = await db
+      .select({
+        id: challenges.id,
+        name: challenges.name,
+        isActive: challenges.isActive,
+        visibleToTraders: challenges.visibleToTraders,
+        enrollmentStartAt: challenges.enrollmentStartAt,
+        enrollmentEndAt: challenges.enrollmentEndAt,
+        eligibilityGate: challenges.eligibilityGate,
+        maxEnrollments: challenges.maxEnrollments,
+        maxActiveEnrollments: challenges.maxActiveEnrollments,
+        maxRetriesPerTrader: challenges.maxRetriesPerTrader,
+        retryCooldownHours: challenges.retryCooldownHours,
+        capitalMode: challenges.capitalMode,
+        virtualCapitalUsd: challenges.virtualCapitalUsd,
+        customRewardJson: challenges.customRewardJson,
+        createdBy: challenges.createdBy,
+      })
+      .from(challenges)
+      .where(eq(challenges.id, challengeId))
+      .limit(1);
     if (!ch || !ch.isActive || !ch.visibleToTraders) {
       return res.status(404).json({ message: "CHALLENGE_NOT_FOUND" });
     }
@@ -722,171 +1157,210 @@ traderTalentRouter.post("/challenges/:id/enroll", async (req, res) => {
       return res.status(403).json({ message: "NOT_ELIGIBLE", reason: gate.reason ?? "UNKNOWN" });
     }
 
-    const existing = await db
-      .select()
-      .from(challengeEnrollments)
-      .where(and(eq(challengeEnrollments.challengeId, challengeId), eq(challengeEnrollments.userId, userId)))
-      .orderBy(desc(challengeEnrollments.attemptNumber))
-      .limit(1);
+    const enrollmentResult = await db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT id FROM users WHERE id = ${userId} FOR UPDATE`);
 
-    const latest = existing[0] ?? null;
+      const existing = await tx
+        .select({
+          id: challengeEnrollments.id,
+          challengeId: challengeEnrollments.challengeId,
+          userId: challengeEnrollments.userId,
+          status: challengeEnrollments.status,
+          enrolledAt: challengeEnrollments.enrolledAt,
+          completedAt: challengeEnrollments.completedAt,
+          currentPhase: challengeEnrollments.currentPhase,
+          attemptNumber: challengeEnrollments.attemptNumber,
+        })
+        .from(challengeEnrollments)
+        .where(and(eq(challengeEnrollments.challengeId, challengeId), eq(challengeEnrollments.userId, userId)))
+        .orderBy(desc(challengeEnrollments.attemptNumber))
+        .limit(1);
+      const latest = existing[0] ?? null;
 
-    if (latest && latest.status === "ACTIVE") {
-      return res.json({ ok: true, reused: true, enrollment: latest });
-    }
+      if (latest && latest.status === "ACTIVE") {
+        return { type: "reused" as const, enrollment: latest };
+      }
+      if (latest && latest.status === "REVIEW_REQUIRED") {
+        return {
+          type: "deny" as const,
+          status: 409,
+          payload: {
+            message: "MANUAL_REVIEW_REQUIRED",
+            detail: "Previous attempt is pending manual review.",
+          },
+        };
+      }
 
-    const maxEnrollments = Number(ch.maxEnrollments ?? 0);
-    if (!latest && Number.isFinite(maxEnrollments) && maxEnrollments > 0) {
-      const [totalEnrollmentsRow] = await db
+      const [activeUserRow] = await tx
         .select({ c: sql<number>`count(*)` })
         .from(challengeEnrollments)
-        .where(eq(challengeEnrollments.challengeId, challengeId));
-      const totalEnrollments = Number(totalEnrollmentsRow?.c ?? 0);
-      if (totalEnrollments >= Math.trunc(maxEnrollments)) {
-        return res.status(409).json({ message: "MAX_ENROLLMENTS_REACHED" });
+        .where(and(eq(challengeEnrollments.userId, userId), eq(challengeEnrollments.status, "ACTIVE")));
+      const activeUserEnrollments = Number(activeUserRow?.c ?? 0);
+      if (activeUserEnrollments >= Math.max(1, Number(challengeCfg.challengeMaxActiveEnrollmentsUser ?? 1))) {
+        return {
+          type: "deny" as const,
+          status: 409,
+          payload: {
+            message: "MAX_ACTIVE_ENROLLMENTS_USER_REACHED",
+            limit: Math.max(1, Number(challengeCfg.challengeMaxActiveEnrollmentsUser ?? 1)),
+            active: activeUserEnrollments,
+          },
+        };
       }
-    }
 
-    const maxActiveEnrollments = Number(ch.maxActiveEnrollments ?? 0);
-    if (Number.isFinite(maxActiveEnrollments) && maxActiveEnrollments > 0) {
-      const [activeEnrollmentsRow] = await db
+      const maxEnrollments = Number(ch.maxEnrollments ?? 0);
+      if (!latest && Number.isFinite(maxEnrollments) && maxEnrollments > 0) {
+        const [totalEnrollmentsRow] = await tx
+          .select({ c: sql<number>`count(*)` })
+          .from(challengeEnrollments)
+          .where(eq(challengeEnrollments.challengeId, challengeId));
+        const totalEnrollments = Number(totalEnrollmentsRow?.c ?? 0);
+        if (totalEnrollments >= Math.trunc(maxEnrollments)) {
+          return { type: "deny" as const, status: 409, payload: { message: "MAX_ENROLLMENTS_REACHED" } };
+        }
+      }
+
+      const configuredPerChallengeCap = Number(ch.maxActiveEnrollments ?? 0);
+      const globalPerChallengeCap = Math.max(1, Number(challengeCfg.challengeMaxActiveEnrollmentsPerChallenge ?? 1));
+      const effectivePerChallengeCap =
+        Number.isFinite(configuredPerChallengeCap) && configuredPerChallengeCap > 0
+          ? Math.trunc(configuredPerChallengeCap)
+          : globalPerChallengeCap;
+      const [activeEnrollmentsRow] = await tx
         .select({ c: sql<number>`count(*)` })
         .from(challengeEnrollments)
         .where(and(eq(challengeEnrollments.challengeId, challengeId), eq(challengeEnrollments.status, "ACTIVE")));
       const activeEnrollments = Number(activeEnrollmentsRow?.c ?? 0);
-      if (activeEnrollments >= Math.trunc(maxActiveEnrollments)) {
-        return res.status(409).json({ message: "MAX_ACTIVE_ENROLLMENTS_REACHED" });
+      if (activeEnrollments >= effectivePerChallengeCap) {
+        return {
+          type: "deny" as const,
+          status: 409,
+          payload: {
+            message: "MAX_ACTIVE_ENROLLMENTS_REACHED",
+            limit: effectivePerChallengeCap,
+            active: activeEnrollments,
+          },
+        };
       }
-    }
 
-    // Retry logic
-    const maxRetries = Math.max(0, Number(ch.maxRetriesPerTrader ?? 0));
-    const cooldownHrs = Math.max(0, Number(ch.retryCooldownHours ?? 0));
+      const maxRetries = Math.max(0, Number(ch.maxRetriesPerTrader ?? challengeCfg.challengeDefaultMaxRetries ?? 0));
+      const challengeCooldownHrs = Math.max(0, Number(ch.retryCooldownHours ?? challengeCfg.challengeDefaultRetryCooldownHours ?? 0));
+      const statusCooldownHrs =
+        latest?.status === "FAILED"
+          ? Math.max(0, Number(challengeCfg.challengeCooldownHoursAfterFail ?? 0))
+          : latest?.status === "WITHDRAWN"
+            ? Math.max(0, Number(challengeCfg.challengeCooldownHoursAfterWithdraw ?? 0))
+            : 0;
+      const effectiveCooldownHrs = Math.max(challengeCooldownHrs, statusCooldownHrs);
 
-    const nextAttempt = latest ? Number(latest.attemptNumber ?? 1) + 1 : 1;
-    if (latest && nextAttempt > maxRetries + 1) {
-      return res.status(403).json({ message: "MAX_RETRIES_EXCEEDED" });
-    }
-
-    if (latest && cooldownHrs > 0 && latest.completedAt != null) {
-      const coolUntil = Number(latest.completedAt) + cooldownHrs * 3600;
-      if (ts < coolUntil) {
-        return res.status(403).json({ message: "RETRY_COOLDOWN", retryAt: coolUntil });
+      const nextAttempt = latest ? Number(latest.attemptNumber ?? 1) + 1 : 1;
+      if (latest && nextAttempt > maxRetries + 1) {
+        return { type: "deny" as const, status: 403, payload: { message: "MAX_RETRIES_EXCEEDED" } };
       }
-    }
 
-    const [u] = await db.select({ equity: users.equity, startingEquity: users.startingEquity }).from(users).where(eq(users.id, userId)).limit(1);
-    const snapshotEquity = Number(u?.equity ?? u?.startingEquity ?? 1_000_000);
+      if (latest && effectiveCooldownHrs > 0 && latest.completedAt != null) {
+        const coolUntil = Number(latest.completedAt) + effectiveCooldownHrs * 3600;
+        if (ts < coolUntil) {
+          return {
+            type: "deny" as const,
+            status: 403,
+            payload: {
+              message: "RETRY_COOLDOWN",
+              retryAt: coolUntil,
+              cooldownHours: effectiveCooldownHrs,
+              priorStatus: latest.status,
+            },
+          };
+        }
+      }
 
-    const effectiveCapitalMode = String(ch.capitalMode || "").toUpperCase() === "VIRTUAL" ? "VIRTUAL" : "TRADER_EQUITY";
-    const capitalBaseUsed = effectiveCapitalMode === "VIRTUAL" ? Number(ch.virtualCapitalUsd ?? snapshotEquity) : snapshotEquity;
+      const [u] = await tx
+        .select({ equity: users.equity, startingEquity: users.startingEquity })
+        .from(users)
+        .where(eq(users.id, userId))
+        .limit(1);
+      const snapshotEquity = Number(u?.equity ?? u?.startingEquity ?? 1_000_000);
 
-    if (latest) {
-      const [updated] = await db
-        .update(challengeEnrollments)
-        .set({
+      const effectiveCapitalMode = String(ch.capitalMode || "").toUpperCase() === "VIRTUAL" ? "VIRTUAL" : "TRADER_EQUITY";
+      const capitalBaseUsed = effectiveCapitalMode === "VIRTUAL" ? Number(ch.virtualCapitalUsd ?? snapshotEquity) : snapshotEquity;
+
+      if (latest) {
+        const [updated] = await tx
+          .update(challengeEnrollments)
+          .set({
+            status: "ACTIVE",
+            enrolledAt: ts,
+            completedAt: null,
+            attemptNumber: nextAttempt,
+            currentPhase: 1,
+            phaseStartedAt: ts,
+            currentPnlPct: 0,
+            maxDailyLossHit: null,
+            maxTotalLossHit: null,
+            peakEquity: capitalBaseUsed,
+            tradingDays: 0,
+            lastWarningEvent: null,
+            lastWarningAt: null,
+            snapshotEquity,
+            capitalBaseUsed,
+            updatedAt: ts,
+          })
+          .where(eq(challengeEnrollments.id, latest.id))
+          .returning();
+
+        return { type: "updated" as const, enrollment: updated };
+      }
+
+      const [created] = await tx
+        .insert(challengeEnrollments)
+        .values({
+          challengeId,
+          userId,
           status: "ACTIVE",
           enrolledAt: ts,
           completedAt: null,
           attemptNumber: nextAttempt,
           currentPhase: 1,
           phaseStartedAt: ts,
-          currentPnlPct: 0,
-          maxDailyLossHit: null,
-          maxTotalLossHit: null,
-          peakEquity: capitalBaseUsed,
-          tradingDays: 0,
-          lastWarningEvent: null,
-          lastWarningAt: null,
           snapshotEquity,
           capitalBaseUsed,
+          peakEquity: capitalBaseUsed,
           updatedAt: ts,
         })
-        .where(eq(challengeEnrollments.id, latest.id))
         .returning();
 
-      await appendChallengeEvent({
-        enrollmentId: Number(updated.id),
-        eventType: "CHALLENGE_ENROLLED",
-        eventAt: ts,
-        actorType: "TRADER",
-        actorUserId: userId,
-        phaseNumber: Number(updated.currentPhase ?? 1),
-        details: {
-          challengeId,
-          attemptNumber: Number(updated.attemptNumber ?? 1),
-          resumedEnrollmentId: Number(updated.id),
-        },
-      });
+      return { type: "created" as const, enrollment: created };
+    });
 
-      appendIdentityAudit({
+    if (enrollmentResult.type === "deny") {
+      emitChallengeSuspiciousActivity({
+        req,
         userId,
-        category: "RECRUITMENT",
-        type: "CHALLENGE_ENROLLED",
-        actorType: "USER",
-        actorUserId: userId,
-        sessionId: String(req.sessionID || ""),
-        ip: String(req.ip || ""),
-        userAgent: String(req.get("user-agent") || ""),
-        data: {
-          challengeId,
-          enrollmentId: Number(updated.id),
-          attemptNumber: Number(updated.attemptNumber ?? 1),
-          resumed: true,
-        },
+        challengeId,
+        reason: String(enrollmentResult.payload?.message ?? "ENROLL_BLOCKED"),
+        details: enrollmentResult.payload ?? {},
       });
-
-      if (challengeCfg.challengeNotifyOnEnroll) {
-        await createNotification({
-          userId,
-          type: "CHALLENGE",
-          severity: "INFO",
-          title: "Challenge enrolled",
-          message: `You are enrolled in ${ch.name}. Attempt #${Number(updated.attemptNumber ?? 1)} is now active.`,
-          sourceEvent: "CHALLENGE_ENROLLED",
-          link: `/compete/enrollment/${Number(updated.id)}`,
-        });
-        await sendChallengeMailboxMessage({
-          userId,
-          challengeId,
-          enrollmentId: Number(updated.id),
-          sourceEvent: "CHALLENGE_ENROLLED",
-          subject: `Challenge enrolled: ${ch.name}`,
-          body: `Attempt #${Number(updated.attemptNumber ?? 1)} is active for ${ch.name}.`,
-        });
-      }
-      return res.json({ ok: true, reused: false, enrollment: updated });
+      return res.status(enrollmentResult.status).json(enrollmentResult.payload);
     }
 
-    const [created] = await db
-      .insert(challengeEnrollments)
-      .values({
-        challengeId,
-        userId,
-        status: "ACTIVE",
-        enrolledAt: ts,
-        completedAt: null,
-        attemptNumber: nextAttempt,
-        currentPhase: 1,
-        phaseStartedAt: ts,
-        snapshotEquity,
-        capitalBaseUsed,
-        peakEquity: capitalBaseUsed,
-        updatedAt: ts,
-      })
-      .returning();
+    if (enrollmentResult.type === "reused") {
+      return res.json({ ok: true, reused: true, enrollment: enrollmentResult.enrollment });
+    }
+
+    const enrollment = enrollmentResult.enrollment;
+    const resumed = enrollmentResult.type === "updated";
 
     await appendChallengeEvent({
-      enrollmentId: Number(created.id),
+      enrollmentId: Number(enrollment.id),
       eventType: "CHALLENGE_ENROLLED",
       eventAt: ts,
       actorType: "TRADER",
       actorUserId: userId,
-      phaseNumber: 1,
+      phaseNumber: Number(enrollment.currentPhase ?? 1),
       details: {
         challengeId,
-        attemptNumber: Number(created.attemptNumber ?? 1),
-        resumedEnrollmentId: null,
+        attemptNumber: Number(enrollment.attemptNumber ?? 1),
+        resumedEnrollmentId: resumed ? Number(enrollment.id) : null,
       },
     });
 
@@ -901,10 +1375,19 @@ traderTalentRouter.post("/challenges/:id/enroll", async (req, res) => {
       userAgent: String(req.get("user-agent") || ""),
       data: {
         challengeId,
-        enrollmentId: Number(created.id),
-        attemptNumber: Number(created.attemptNumber ?? 1),
-        resumed: false,
+        enrollmentId: Number(enrollment.id),
+        attemptNumber: Number(enrollment.attemptNumber ?? 1),
+        resumed,
       },
+    });
+
+    await applyEnrollCustomRewards({
+      req,
+      cfg,
+      challenge: ch,
+      enrollment,
+      userId,
+      now: ts,
     });
 
     if (challengeCfg.challengeNotifyOnEnroll) {
@@ -913,21 +1396,23 @@ traderTalentRouter.post("/challenges/:id/enroll", async (req, res) => {
         type: "CHALLENGE",
         severity: "INFO",
         title: "Challenge enrolled",
-        message: `You are enrolled in ${ch.name}. Good luck.`,
+        message: resumed
+          ? `You are enrolled in ${ch.name}. Attempt #${Number(enrollment.attemptNumber ?? 1)} is now active.`
+          : `You are enrolled in ${ch.name}. Good luck.`,
         sourceEvent: "CHALLENGE_ENROLLED",
-        link: `/compete/enrollment/${Number(created.id)}`,
+        link: `/compete/enrollment/${Number(enrollment.id)}`,
       });
       await sendChallengeMailboxMessage({
         userId,
         challengeId,
-        enrollmentId: Number(created.id),
+        enrollmentId: Number(enrollment.id),
         sourceEvent: "CHALLENGE_ENROLLED",
         subject: `Challenge enrolled: ${ch.name}`,
-        body: `Attempt #${Number(created.attemptNumber ?? 1)} is active for ${ch.name}.`,
+        body: `Attempt #${Number(enrollment.attemptNumber ?? 1)} is active for ${ch.name}.`,
       });
     }
 
-    return res.json({ ok: true, reused: false, enrollment: created });
+    return res.json({ ok: true, reused: false, enrollment });
   } catch (error) {
     console.error("[trader-talent] enroll error:", error);
     return res.status(500).json({ message: "FAILED_TO_ENROLL" });
@@ -958,7 +1443,14 @@ traderTalentRouter.post("/challenges/:id/withdraw", async (req, res) => {
     }
 
     const [enrollment] = await db
-      .select()
+      .select({
+        id: challengeEnrollments.id,
+        challengeId: challengeEnrollments.challengeId,
+        userId: challengeEnrollments.userId,
+        status: challengeEnrollments.status,
+        currentPhase: challengeEnrollments.currentPhase,
+        attemptNumber: challengeEnrollments.attemptNumber,
+      })
       .from(challengeEnrollments)
       .where(and(eq(challengeEnrollments.challengeId, challengeId), eq(challengeEnrollments.userId, userId)))
       .orderBy(desc(challengeEnrollments.attemptNumber))
@@ -1028,8 +1520,16 @@ traderTalentRouter.get("/challenges/:id/leaderboard", async (req, res) => {
     }
 
     const userId = Number(req.session?.userId || 0);
+    const challengeId = Number(req.params.id || 0);
     const leaderboardRate = consumeChallengeRateLimit(`leaderboard:${userId}`, 30, 60_000);
     if (!leaderboardRate.allowed) {
+      emitChallengeSuspiciousActivity({
+        req,
+        userId,
+        challengeId: Number.isInteger(challengeId) && challengeId > 0 ? challengeId : null,
+        reason: "LEADERBOARD_SCRAPE_RATE_LIMIT",
+        details: { retryAfterSec: leaderboardRate.retryAfterSec },
+      });
       res.setHeader("Retry-After", String(leaderboardRate.retryAfterSec));
       return res.status(429).json({
         message: "RATE_LIMITED",
@@ -1037,7 +1537,6 @@ traderTalentRouter.get("/challenges/:id/leaderboard", async (req, res) => {
         retryAfterSec: leaderboardRate.retryAfterSec,
       });
     }
-    const challengeId = Number(req.params.id || 0);
     if (!Number.isInteger(challengeId) || challengeId <= 0) {
       return res.status(400).json({ message: "INVALID_CHALLENGE_ID" });
     }
@@ -1076,14 +1575,19 @@ traderTalentRouter.get("/challenges/:id/leaderboard", async (req, res) => {
     const out = ((rows as any).rows ?? []).map((r: any) => {
       const id = Number(r.user_id);
       const uname = String(r.username ?? "");
-      const displayName = ch.leaderboardAnonymize && id !== userId ? `Trader #${id}` : uname || `Trader #${id}`;
-      return {
+      const anonymize = Boolean(ch.leaderboardAnonymize);
+      const anonId = anonymize ? buildChallengeAnonId(challengeId, id) : null;
+      const displayName = anonymize
+        ? `Trader #${anonId}`
+        : uname || `Trader #${id}`;
+      const base = {
         rank: Number(r.rank),
         pnlPct: Number(r.pnl_pct),
-        userId: id,
+        anonId,
         displayName,
         isYou: id === userId,
       };
+      return anonymize ? base : { ...base, userId: id };
     });
 
     return res.json({ ok: true, challengeId, rows: out });
@@ -1108,8 +1612,43 @@ traderTalentRouter.get("/challenges/enrollment/:id", async (req, res) => {
 
     const [row] = await db
       .select({
-        enrollment: challengeEnrollments,
-        challenge: challenges,
+        enrollment: {
+          id: challengeEnrollments.id,
+          challengeId: challengeEnrollments.challengeId,
+          userId: challengeEnrollments.userId,
+          status: challengeEnrollments.status,
+          enrolledAt: challengeEnrollments.enrolledAt,
+          completedAt: challengeEnrollments.completedAt,
+          currentPnlPct: challengeEnrollments.currentPnlPct,
+          maxDailyLossHit: challengeEnrollments.maxDailyLossHit,
+          currentPhase: challengeEnrollments.currentPhase,
+          snapshotEquity: challengeEnrollments.snapshotEquity,
+          capitalBaseUsed: challengeEnrollments.capitalBaseUsed,
+          attemptNumber: challengeEnrollments.attemptNumber,
+          maxTotalLossHit: challengeEnrollments.maxTotalLossHit,
+          peakEquity: challengeEnrollments.peakEquity,
+          phaseStartedAt: challengeEnrollments.phaseStartedAt,
+          lastWarningEvent: challengeEnrollments.lastWarningEvent,
+          lastWarningAt: challengeEnrollments.lastWarningAt,
+          tradingDays: challengeEnrollments.tradingDays,
+          updatedAt: challengeEnrollments.updatedAt,
+        },
+        challenge: {
+          id: challenges.id,
+          name: challenges.name,
+          slug: challenges.slug,
+          category: challenges.category,
+          tier: challenges.tier,
+          profitTargetPct: challenges.profitTargetPct,
+          maxDailyLossPct: challenges.maxDailyLossPct,
+          maxTotalLossPct: challenges.maxTotalLossPct,
+          durationDays: challenges.durationDays,
+          minTradingDays: challenges.minTradingDays,
+          startAt: challenges.startAt,
+          endAt: challenges.endAt,
+          enrollmentStartAt: challenges.enrollmentStartAt,
+          enrollmentEndAt: challenges.enrollmentEndAt,
+        },
       })
       .from(challengeEnrollments)
       .innerJoin(challenges, eq(challenges.id, challengeEnrollments.challengeId))
@@ -1121,7 +1660,24 @@ traderTalentRouter.get("/challenges/enrollment/:id", async (req, res) => {
     }
 
     const phases = await db
-      .select()
+      .select({
+        id: challengePhases.id,
+        challengeId: challengePhases.challengeId,
+        phaseNumber: challengePhases.phaseNumber,
+        phaseName: challengePhases.phaseName,
+        profitTargetPct: challengePhases.profitTargetPct,
+        maxDailyLossPct: challengePhases.maxDailyLossPct,
+        maxTotalLossPct: challengePhases.maxTotalLossPct,
+        drawdownType: challengePhases.drawdownType,
+        durationDays: challengePhases.durationDays,
+        minTradingDays: challengePhases.minTradingDays,
+        maxSingleDayProfitPct: challengePhases.maxSingleDayProfitPct,
+        allowWeekendHolding: challengePhases.allowWeekendHolding,
+        allowNewsTrading: challengePhases.allowNewsTrading,
+        restrictedSymbolsCsv: challengePhases.restrictedSymbolsCsv,
+        maxConcurrentPositions: challengePhases.maxConcurrentPositions,
+        maxLotSize: challengePhases.maxLotSize,
+      })
       .from(challengePhases)
       .where(eq(challengePhases.challengeId, row.challenge.id))
       .orderBy(asc(challengePhases.phaseNumber));
@@ -1288,6 +1844,8 @@ traderTalentRouter.get("/challenges/:id/my-rewards", async (req, res) => {
             isDownloadable: challengeCertificates.isDownloadable,
             isShareable: challengeCertificates.isShareable,
             shareTokenHash: challengeCertificates.shareTokenHash,
+            verificationCodeNonce: challengeCertificates.verificationCodeNonce,
+            verificationHmacKeyId: challengeCertificates.verificationHmacKeyId,
             verificationCodeHmac: challengeCertificates.verificationCodeHmac,
             metricsJson: challengeCertificates.metricsJson,
           })
@@ -1330,7 +1888,7 @@ traderTalentRouter.get("/challenges/:id/my-rewards", async (req, res) => {
       ok: true,
       enrollmentId,
       badges: badgeRows,
-      certificate: cert ?? null,
+      certificate: cert ? toTraderCertificateRow(cert as Record<string, unknown>) : null,
       boosts,
       prizes,
     });
@@ -1339,52 +1897,6 @@ traderTalentRouter.get("/challenges/:id/my-rewards", async (req, res) => {
     return res.status(500).json({ message: "FAILED_TO_FETCH_REWARDS" });
   }
 });
-
-function escapePdfText(value: string): string {
-  return value.replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
-}
-
-function buildSimplePdf(lines: string[]): Buffer {
-  const safeLines = lines
-    .map((line) => String(line ?? "").replace(/\r?\n/g, " ").trim())
-    .filter((line) => line.length > 0)
-    .slice(0, 42);
-
-  const streamParts: string[] = ["BT", "/F1 12 Tf", "50 770 Td"];
-  for (let i = 0; i < safeLines.length; i += 1) {
-    const text = escapePdfText(safeLines[i].slice(0, 160));
-    if (i > 0) streamParts.push("0 -16 Td");
-    streamParts.push(`(${text}) Tj`);
-  }
-  streamParts.push("ET");
-  const contentStream = streamParts.join("\n");
-
-  const objects = [
-    "",
-    "<< /Type /Catalog /Pages 2 0 R >>",
-    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
-    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
-    `<< /Length ${Buffer.byteLength(contentStream, "utf8")} >>\nstream\n${contentStream}\nendstream`,
-  ];
-
-  let pdf = "%PDF-1.4\n";
-  const offsets: number[] = [];
-  for (let i = 1; i < objects.length; i += 1) {
-    offsets[i] = Buffer.byteLength(pdf, "utf8");
-    pdf += `${i} 0 obj\n${objects[i]}\nendobj\n`;
-  }
-
-  const xrefOffset = Buffer.byteLength(pdf, "utf8");
-  pdf += `xref\n0 ${objects.length}\n`;
-  pdf += "0000000000 65535 f \n";
-  for (let i = 1; i < objects.length; i += 1) {
-    pdf += `${String(offsets[i]).padStart(10, "0")} 00000 n \n`;
-  }
-  pdf += `trailer\n<< /Size ${objects.length} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
-
-  return Buffer.from(pdf, "utf8");
-}
 
 const certificateIdSchema = z.object({ id: z.coerce.number().int().positive() });
 
@@ -1400,6 +1912,8 @@ async function getOwnedCertificateBundle(userId: number, certificateId: number) 
       isDownloadable: challengeCertificates.isDownloadable,
       isShareable: challengeCertificates.isShareable,
       shareTokenHash: challengeCertificates.shareTokenHash,
+      verificationCodeNonce: challengeCertificates.verificationCodeNonce,
+      verificationHmacKeyId: challengeCertificates.verificationHmacKeyId,
       verificationCodeHmac: challengeCertificates.verificationCodeHmac,
       metricsJson: challengeCertificates.metricsJson,
       downloadedAt: challengeCertificates.downloadedAt,
@@ -1435,7 +1949,11 @@ async function getOwnedCertificateBundle(userId: number, certificateId: number) 
     .where(eq(challenges.id, cert.challengeId))
     .limit(1);
 
-  return { cert, tmpl: tmpl ?? null, challenge: challenge ?? null };
+  return {
+    cert: toTraderCertificateRow(cert as Record<string, unknown>),
+    tmpl: tmpl ?? null,
+    challenge: challenge ?? null,
+  };
 }
 
 async function handleCertificateDetail(req: any, res: any) {
@@ -1464,6 +1982,7 @@ traderTalentRouter.get("/challenges/certificate/:id", handleCertificateDetail);
 traderTalentRouter.get("/challenges/certificate/:id/download", async (req, res) => {
   try {
     const cfg = await getRecruitmentConfig();
+    const challengeCfg = await getSystemChallengeConfig();
     if (!cfg.traderCompeteEnabled) return res.status(403).json({ message: "TRADER_COMPETE_DISABLED" });
     if (!cfg.challengeCertificatesEnabled) return res.status(403).json({ message: "CERTIFICATES_DISABLED" });
     if (!cfg.challengeCertificatesDownloadable) return res.status(403).json({ message: "CERTIFICATE_DOWNLOAD_DISABLED" });
@@ -1482,40 +2001,43 @@ traderTalentRouter.get("/challenges/certificate/:id/download", async (req, res) 
       .set({ downloadedAt: ts })
       .where(eq(challengeCertificates.id, bundle.cert.id));
 
-    let metricsPretty = "{}";
     let parsedMetrics: Record<string, unknown> = {};
     try {
       parsedMetrics = JSON.parse(String(bundle.cert.metricsJson || "{}")) as Record<string, unknown>;
-      metricsPretty = JSON.stringify(parsedMetrics);
-    } catch {
-      metricsPretty = String(bundle.cert.metricsJson || "{}");
-    }
+    } catch {}
 
     const issuedIso = new Date(Number(bundle.cert.issuedAt || 0) * 1000).toISOString();
     const bodyText = String(bundle.tmpl?.bodyText ?? "")
       .replaceAll("{{challenge_name}}", String(bundle.challenge?.name ?? "Challenge"))
       .replaceAll("{{completion_date}}", issuedIso.split("T")[0] || issuedIso)
       .replaceAll("{{certificate_id}}", String(bundle.cert.id))
-      .replaceAll("{{verification_code}}", String(bundle.cert.verificationCodeHmac ?? ""));
+      .replaceAll("{{verification_code}}", String(bundle.cert.verificationCode ?? ""));
+    const verificationUrl = `${req.protocol}://${req.get("host")}/api/public/trader/challenges/certificate/${encodeURIComponent(
+      String(bundle.cert.verificationCode ?? ""),
+    )}/verify`;
+    const includeVerificationCode = bundle.tmpl?.includeVerificationCode !== false;
+    const includeMetrics = bundle.tmpl?.includeMetrics !== false;
+    const includeQr =
+      Boolean(challengeCfg.challengeCertificateIncludeQrDefault) &&
+      Boolean(bundle.cert.isShareable) &&
+      includeVerificationCode;
 
-    const lines = [
-      "TradeQuip Challenge Certificate",
-      String(bundle.tmpl?.headerText || "").trim() || "Completion Certificate",
-      `Challenge: ${bundle.challenge?.name ?? "Unknown Challenge"}`,
-      `Certificate ID: ${bundle.cert.id}`,
-      `Issued: ${issuedIso}`,
-      bodyText || "This certifies successful completion of the challenge assessment.",
-      bundle.tmpl?.includeVerificationCode !== false
-        ? `Verification Code: ${bundle.cert.verificationCodeHmac}`
-        : "",
-      bundle.tmpl?.includeMetrics !== false
-        ? `Metrics: pnlPct=${String(parsedMetrics.pnlPct ?? "-")} tradingDays=${String(parsedMetrics.tradingDays ?? "-")} maxDD=${String(parsedMetrics.maxTotalLossHit ?? "-")}`
-        : "",
-      bundle.tmpl?.includeMetrics !== false ? `Metrics Json: ${metricsPretty}` : "",
-      `Template: ${bundle.tmpl?.name ?? "Default"}`,
-    ].filter(Boolean);
-
-    const pdf = buildSimplePdf(lines);
+    const pdf = renderChallengeCertificatePdf({
+      certificateId: Number(bundle.cert.id),
+      challengeName: String(bundle.challenge?.name ?? "Unknown Challenge"),
+      templateName: String(bundle.tmpl?.name ?? "Default"),
+      headerText: String(bundle.tmpl?.headerText || "Completion Certificate"),
+      bodyText: bodyText || "This certifies successful completion of the challenge assessment.",
+      issuedIso,
+      brandColor: bundle.tmpl?.brandColor == null ? null : String(bundle.tmpl.brandColor),
+      logoUrl: bundle.tmpl?.logoUrl == null ? null : String(bundle.tmpl.logoUrl),
+      includeMetrics,
+      includeVerificationCode,
+      includeQr,
+      verificationCode: String(bundle.cert.verificationCode ?? ""),
+      verificationUrl,
+      metrics: parsedMetrics,
+    });
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `attachment; filename=\"challenge-certificate-${bundle.cert.id}.pdf\"`);
     res.setHeader("Content-Length", String(pdf.byteLength));
@@ -1542,27 +2064,49 @@ async function handleCertificateVerify(req: any, res: any) {
       });
     }
 
-    const code = String(req.params.code || req.params.verificationCode || "").trim();
-    if (!code || code.length < 16) return res.status(400).json({ message: "INVALID_CODE" });
+    const legacyCode = String(req.params.code || req.params.verificationCode || "").trim();
+    const code = legacyCode.toUpperCase();
+    if (!legacyCode || legacyCode.length < 16) return res.status(400).json({ message: "INVALID_CODE" });
 
-    const [cert] = await db
-      .select({
-        id: challengeCertificates.id,
-        userId: challengeCertificates.userId,
-        challengeId: challengeCertificates.challengeId,
-        enrollmentId: challengeCertificates.enrollmentId,
-        templateId: challengeCertificates.templateId,
-        issuedAt: challengeCertificates.issuedAt,
-        isShareable: challengeCertificates.isShareable,
-        verificationCodeHmac: challengeCertificates.verificationCodeHmac,
-        metricsJson: challengeCertificates.metricsJson,
-      })
-      .from(challengeCertificates)
-      .where(eq(challengeCertificates.verificationCodeHmac, code))
-      .limit(1);
+    const certSelect = {
+      id: challengeCertificates.id,
+      userId: challengeCertificates.userId,
+      challengeId: challengeCertificates.challengeId,
+      enrollmentId: challengeCertificates.enrollmentId,
+      templateId: challengeCertificates.templateId,
+      issuedAt: challengeCertificates.issuedAt,
+      isShareable: challengeCertificates.isShareable,
+      verificationCodeNonce: challengeCertificates.verificationCodeNonce,
+      verificationHmacKeyId: challengeCertificates.verificationHmacKeyId,
+      verificationCodeHmac: challengeCertificates.verificationCodeHmac,
+      metricsJson: challengeCertificates.metricsJson,
+    } as const;
+
+    let cert: any = null;
+    const keyId = parseVerificationCodeKeyId(code);
+    if (keyId) {
+      const codeHmac = computeVerificationCodeHmac(code, keyId);
+      const [row] = await db
+        .select(certSelect)
+        .from(challengeCertificates)
+        .where(and(eq(challengeCertificates.verificationCodeHmac, codeHmac), eq(challengeCertificates.verificationHmacKeyId, keyId)))
+        .limit(1);
+      cert = row ?? null;
+    }
+
+    if (!cert) {
+      const [legacyRow] = await db
+        .select(certSelect)
+        .from(challengeCertificates)
+        .where(eq(challengeCertificates.verificationCodeHmac, legacyCode))
+        .limit(1);
+      cert = legacyRow ?? null;
+    }
 
     if (!cert) return res.status(404).json({ message: "NOT_FOUND" });
     if (!cert.isShareable) return res.status(404).json({ message: "NOT_FOUND" });
+
+    const publicCert = toTraderCertificateRow(cert as Record<string, unknown>) as Record<string, unknown>;
 
     const [u] = await db.select({ username: users.username }).from(users).where(eq(users.id, cert.userId)).limit(1);
     const [ch] = await db.select({ name: challenges.name }).from(challenges).where(eq(challenges.id, cert.challengeId)).limit(1);
@@ -1576,6 +2120,7 @@ async function handleCertificateVerify(req: any, res: any) {
         challengeName: ch?.name ?? null,
         userId: cert.userId,
         username: u?.username ?? null,
+        verificationCode: publicCert.verificationCode ?? code,
         metricsJson: cert.metricsJson,
       },
     });

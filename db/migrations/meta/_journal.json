@@ -197,6 +197,20 @@
       "when": 1776201603000,
       "tag": "0027_challenge_default_category_tier",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1776201604000,
+      "tag": "0028_challenge_hardening_controls",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1776201605000,
+      "tag": "0029_challenge_phase_snapshot_and_review",
+      "breakpoints": true
     }
   ]
 }

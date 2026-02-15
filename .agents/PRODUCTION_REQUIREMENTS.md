@@ -215,3 +215,15 @@ Failure Mode if Missing:
   - Run `npm audit --audit-level=high` and verify no axios advisory appears.
   - Confirm lockfile resolves `axios@1.13.5` or newer.
 - Failure Mode if Missing: known high-severity dependency vulnerability remains exploitable in production dependency graph.
+
+### PRD-CHL-007
+- ID: `PRD-CHL-007`
+- Date (UTC): `2026-02-15`
+- Scope: `Challenge certificate verification integrity`
+- Requirement: Production must configure `CHALLENGE_CERT_VERIFICATION_SECRET` (minimum 32 characters) and rotate `challengeCertificateVerificationKeyId` when certificate verification keys are rotated.
+- Enforcement: `server/recruitment/challengesV4/certificateCode.ts` (HMAC derivation for public verification codes), `server/recruitment/challengesV4/challengeConfig.ts` (runtime key-id config), and `server/routes/adminScout.ts` / `client/src/components/admin/ScoutChallengesPanel.tsx` (admin settings surface for key-id management).
+- Validation:
+  - Set `CHALLENGE_CERT_VERIFICATION_SECRET` in runtime secret manager and restart service.
+  - Issue a new certificate and verify using `/api/public/trader/challenges/certificate/:verificationCode/verify`.
+  - Change `challengeCertificateVerificationKeyId`, issue another certificate, and verify both old and new certificates still validate.
+- Failure Mode if Missing: certificate verification codes become weakly derived from fallback secrets, and key rotations can cause verification drift or invalid proofs.

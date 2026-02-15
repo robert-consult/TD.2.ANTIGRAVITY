@@ -768,8 +768,31 @@ export const systemConfig = pgTable("system_config", {
   challengeNotifyViaMailbox: boolean("challenge_notify_via_mailbox").notNull().default(false),
   challengeMailboxCategory: text("challenge_mailbox_category").notNull().default("SYSTEM"),
   challengeWarningThresholdPct: real("challenge_warning_threshold_pct").notNull().default(0.8),
+  challengeBreachPolicyDefault: text("challenge_breach_policy_default").notNull().default("FAIL"), // FAIL | BREACH_AND_CONTINUE | MANUAL_REVIEW
+  challengeSingleDayProfitBasis: text("challenge_single_day_profit_basis").notNull().default("PNL_PCT"), // PNL_PCT | EQUITY_PCT | REALIZED_ONLY
   challengeLeaderboardEnabled: boolean("challenge_leaderboard_enabled").notNull().default(true),
   challengeLeaderboardRefreshSec: integer("challenge_leaderboard_refresh_sec").notNull().default(60),
+  challengeLeaderboardSnapshotIntervalSec: integer("challenge_leaderboard_snapshot_interval_sec").notNull().default(60),
+  challengeLeaderboardRankingMetric: text("challenge_leaderboard_ranking_metric").notNull().default("COMPOSITE_SCORE"), // COMPOSITE_SCORE | PNL_PCT
+  challengePrizeAwardTimingDefault: text("challenge_prize_award_timing_default").notNull().default("ON_COMPLETE"), // ON_COMPLETE | ON_CHALLENGE_END | MANUAL
+  challengePrizeCandidatesDefault: text("challenge_prize_candidates_default").notNull().default("PASSED_ONLY"), // PASSED_ONLY | INCLUDE_ACTIVE
+  challengeNewsBlackoutWindowsJson: text("challenge_news_blackout_windows_json").notNull().default("[]"),
+  challengeWeekendCutoffHours: integer("challenge_weekend_cutoff_hours").notNull().default(6),
+  challengeForceCloseBeforeWeekend: boolean("challenge_force_close_before_weekend").notNull().default(false),
+  challengeLeverageMultiplierDefault: real("challenge_leverage_multiplier_default").notNull().default(1),
+  challengeMaxActiveEnrollmentsUser: integer("challenge_max_active_enrollments_user").notNull().default(5),
+  challengeMaxActiveEnrollmentsPerChallenge: integer("challenge_max_active_enrollments_per_challenge").notNull().default(1),
+  challengeCooldownHoursAfterFail: integer("challenge_cooldown_hours_after_fail").notNull().default(24),
+  challengeCooldownHoursAfterWithdraw: integer("challenge_cooldown_hours_after_withdraw").notNull().default(12),
+  challengeCertificateDefaultTemplateId: integer("challenge_certificate_default_template_id"),
+  challengeCertificateIncludeMetricsDefault: boolean("challenge_certificate_include_metrics_default").notNull().default(true),
+  challengeCertificateIncludeQrDefault: boolean("challenge_certificate_include_qr_default").notNull().default(true),
+  challengeCertificateVerificationKeyId: text("challenge_certificate_verification_key_id").notNull().default("v1"),
+  challengeEvaluationIntervalSec: integer("challenge_evaluation_interval_sec").notNull().default(3600),
+  challengeAuditStrictMode: boolean("challenge_audit_strict_mode").notNull().default(true),
+  challengeAnomalyDetectionEnabled: boolean("challenge_anomaly_detection_enabled").notNull().default(true),
+  challengeManualReviewEnabled: boolean("challenge_manual_review_enabled").notNull().default(false),
+  challengeManualReviewSuspiciousThreshold: integer("challenge_manual_review_suspicious_threshold").notNull().default(3),
   challengeEvalEnabled: boolean("challenge_eval_enabled").notNull().default(true),
   challengeEvalIntervalMin: integer("challenge_eval_interval_min").notNull().default(60),
   challengeEvalMaxRows: integer("challenge_eval_max_rows").notNull().default(500),
@@ -1093,7 +1116,7 @@ export const challengeEnrollments = pgTable(
     userId: integer("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    status: text("status").notNull().default("ACTIVE"), // ACTIVE | PASSED | FAILED | WITHDRAWN
+    status: text("status").notNull().default("ACTIVE"), // ACTIVE | PASSED | FAILED | WITHDRAWN | REVIEW_REQUIRED
     enrolledAt: integer("enrolled_at").notNull().default(nowUnix),
     completedAt: integer("completed_at"),
     currentPnlPct: real("current_pnl_pct").notNull().default(0),
@@ -1341,6 +1364,8 @@ export const challengeCertificates = pgTable(
       .notNull()
       .references(() => challenges.id, { onDelete: "cascade" }),
     templateId: integer("template_id").references(() => challengeCertificateTemplates.id, { onDelete: "set null" }),
+    verificationCodeNonce: text("verification_code_nonce"),
+    verificationHmacKeyId: text("verification_hmac_key_id").notNull().default("legacy"),
     verificationCodeHmac: text("verification_code_hmac").notNull(),
     metricsJson: text("metrics_json").notNull().default("{}"),
     isDownloadable: boolean("is_downloadable").notNull().default(true),
@@ -1355,6 +1380,93 @@ export const challengeCertificates = pgTable(
     userIssuedIdx: index("challenge_certificates_user_issued_idx").on(table.userId, table.issuedAt),
     verifyIdx: index("challenge_certificates_verify_idx").on(table.verificationCodeHmac),
     shareIdx: index("challenge_certificates_share_idx").on(table.shareTokenHash),
+  }),
+);
+
+export const challengeRewardLedger = pgTable(
+  "challenge_reward_ledger",
+  {
+    id: serial("id").primaryKey(),
+    enrollmentId: integer("enrollment_id")
+      .notNull()
+      .references(() => challengeEnrollments.id, { onDelete: "cascade" }),
+    challengeId: integer("challenge_id")
+      .notNull()
+      .references(() => challenges.id, { onDelete: "cascade" }),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    trigger: text("trigger").notNull(),
+    rewardKey: text("reward_key").notNull(),
+    actionType: text("action_type").notNull(),
+    runId: text("run_id"),
+    detailsJson: text("details_json").notNull().default("{}"),
+    createdAt: integer("created_at").notNull().default(nowUnix),
+  },
+  (table) => ({
+    uniq: uniqueIndex("challenge_reward_ledger_uidx").on(table.enrollmentId, table.trigger, table.rewardKey),
+    challengeIdx: index("challenge_reward_ledger_challenge_idx").on(table.challengeId, table.createdAt),
+    userIdx: index("challenge_reward_ledger_user_idx").on(table.userId, table.createdAt),
+    runIdx: index("challenge_reward_ledger_run_idx").on(table.runId, table.createdAt),
+  }),
+);
+
+export const challengeEvaluationRuns = pgTable(
+  "challenge_evaluation_runs",
+  {
+    id: serial("id").primaryKey(),
+    runId: text("run_id").notNull(),
+    status: text("status").notNull().default("RUNNING"), // RUNNING | SUCCESS | FAILED | SKIPPED_LOCK
+    startedAt: integer("started_at").notNull().default(nowUnix),
+    endedAt: integer("ended_at"),
+    processedCount: integer("processed_count").notNull().default(0),
+    advancedCount: integer("advanced_count").notNull().default(0),
+    passedCount: integer("passed_count").notNull().default(0),
+    failedCount: integer("failed_count").notNull().default(0),
+    warnedCount: integer("warned_count").notNull().default(0),
+    errorJson: text("error_json"),
+    createdAt: integer("created_at").notNull().default(nowUnix),
+  },
+  (table) => ({
+    runUid: uniqueIndex("challenge_evaluation_runs_run_uidx").on(table.runId),
+    statusStartedIdx: index("challenge_evaluation_runs_status_started_idx").on(table.status, table.startedAt),
+  }),
+);
+
+export const challengePhaseSnapshots = pgTable(
+  "challenge_phase_snapshots",
+  {
+    id: serial("id").primaryKey(),
+    enrollmentId: integer("enrollment_id")
+      .notNull()
+      .references(() => challengeEnrollments.id, { onDelete: "cascade" }),
+    challengeId: integer("challenge_id")
+      .notNull()
+      .references(() => challenges.id, { onDelete: "cascade" }),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    phaseNumber: integer("phase_number").notNull(),
+    runId: text("run_id"),
+    pnlBasis: text("pnl_basis").notNull().default("REALIZED_ONLY"),
+    roundingMode: text("rounding_mode").notNull().default("HALF_AWAY_FROM_ZERO_8DP"),
+    inputHash: text("input_hash").notNull(),
+    tradeCount: integer("trade_count").notNull().default(0),
+    totalPnl: real("total_pnl").notNull().default(0),
+    pnlPct: real("pnl_pct").notNull().default(0),
+    tradingDays: integer("trading_days").notNull().default(0),
+    worstDayLossPct: real("worst_day_loss_pct").notNull().default(0),
+    bestDayProfitPct: real("best_day_profit_pct").notNull().default(0),
+    startDdPct: real("start_dd_pct").notNull().default(0),
+    trailingDdPct: real("trailing_dd_pct").notNull().default(0),
+    peakEquity: real("peak_equity").notNull().default(0),
+    computedAt: integer("computed_at").notNull().default(nowUnix),
+    createdAt: integer("created_at").notNull().default(nowUnix),
+  },
+  (table) => ({
+    uniq: uniqueIndex("challenge_phase_snapshots_uidx").on(table.enrollmentId, table.phaseNumber, table.inputHash),
+    challengeComputedIdx: index("challenge_phase_snapshots_challenge_computed_idx").on(table.challengeId, table.computedAt),
+    runIdx: index("challenge_phase_snapshots_run_idx").on(table.runId, table.computedAt),
   }),
 );
 

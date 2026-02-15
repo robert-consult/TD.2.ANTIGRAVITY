@@ -130,6 +130,7 @@ const DEFAULT_SETTINGS: Record<string, any> = {
   challengeAutoAdvancePhase: true,
   challengeEvalIntervalMin: 60,
   challengeEvalMaxRows: 500,
+  challengeEvaluationIntervalSec: 3600,
   challengeWarningThresholdPct: 0.8,
   challengeDefaultDrawdownType: "STATIC",
   challengeDefaultCapitalMode: "VIRTUAL",
@@ -163,6 +164,28 @@ const DEFAULT_SETTINGS: Record<string, any> = {
   challengeMailboxCategory: "SYSTEM",
   challengeLeaderboardEnabled: true,
   challengeLeaderboardRefreshSec: 60,
+  challengeLeaderboardSnapshotIntervalSec: 60,
+  challengeLeaderboardRankingMetric: "COMPOSITE_SCORE",
+  challengePrizeAwardTimingDefault: "ON_COMPLETE",
+  challengePrizeCandidatesDefault: "PASSED_ONLY",
+  challengeBreachPolicyDefault: "FAIL",
+  challengeSingleDayProfitBasis: "PNL_PCT",
+  challengeNewsBlackoutWindowsJson: "[]",
+  challengeWeekendCutoffHours: 6,
+  challengeForceCloseBeforeWeekend: false,
+  challengeLeverageMultiplierDefault: 1,
+  challengeMaxActiveEnrollmentsUser: 5,
+  challengeMaxActiveEnrollmentsPerChallenge: 1,
+  challengeCooldownHoursAfterFail: 24,
+  challengeCooldownHoursAfterWithdraw: 12,
+  challengeCertificateDefaultTemplateId: null as number | null,
+  challengeCertificateIncludeMetricsDefault: true,
+  challengeCertificateIncludeQrDefault: true,
+  challengeCertificateVerificationKeyId: "v1",
+  challengeAuditStrictMode: true,
+  challengeAnomalyDetectionEnabled: true,
+  challengeManualReviewEnabled: false,
+  challengeManualReviewSuspiciousThreshold: 3,
 };
 
 const SYSTEM_TOGGLES = ["traderCompeteEnabled", "challengeAutoAdvancePhase", "challengeLeaderboardEnabled"];
@@ -190,6 +213,14 @@ const NOTIFY_TOGGLES = [
   "challengeNotifyOnTierUp",
   "challengeNotifyOnAdminAction",
   "challengeNotifyViaMailbox",
+];
+const CONTROL_TOGGLES = [
+  "challengeForceCloseBeforeWeekend",
+  "challengeCertificateIncludeMetricsDefault",
+  "challengeCertificateIncludeQrDefault",
+  "challengeAuditStrictMode",
+  "challengeAnomalyDetectionEnabled",
+  "challengeManualReviewEnabled",
 ];
 const ELIGIBILITY_GATE_MODES = new Set(["NONE", "EMAIL_VERIFIED", "CONTENDER", "ADMIN_APPROVED"]);
 const HOVER_HINT_SELECTOR = "input,select,textarea,button,[role='switch']";
@@ -351,6 +382,7 @@ function statusVariant(status: unknown): "default" | "secondary" | "destructive"
   const s = String(status || "").toUpperCase();
   if (s === "PASSED" || s === "COMPLETED") return "default";
   if (s === "FAILED" || s === "DISQUALIFIED") return "destructive";
+  if (s === "REVIEW_REQUIRED") return "outline";
   if (s === "ACTIVE") return "secondary";
   return "outline";
 }
@@ -1052,7 +1084,7 @@ export default function ScoutChallengesPanel() {
                     className="bg-neutral-700 border-neutral-600"
                   />
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
+                <div className="grid grid-cols-1 md:grid-cols-5 gap-2">
                   <Input
                     placeholder="Tags (csv)"
                     value={draft.tags}
@@ -1093,7 +1125,7 @@ export default function ScoutChallengesPanel() {
                   <Input type="number" value={draft.virtualCapitalUsd} onChange={(e) => setDraft((p) => ({ ...p, virtualCapitalUsd: Math.max(1, toNum(e.target.value, p.virtualCapitalUsd)) }))} className="bg-neutral-700 border-neutral-600" placeholder="Virtual capital USD" />
                   <Input type="number" value={draft.featuredOrder} onChange={(e) => setDraft((p) => ({ ...p, featuredOrder: Math.max(0, toInt(e.target.value, p.featuredOrder)) }))} className="bg-neutral-700 border-neutral-600" placeholder="Featured order" />
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
+                <div className="grid grid-cols-1 md:grid-cols-5 gap-2">
                   <Input type="number" value={draft.maxEnrollments ?? ""} onChange={(e) => setDraft((p) => ({ ...p, maxEnrollments: toOptInt(e.target.value) }))} className="bg-neutral-700 border-neutral-600" placeholder="Max enrollments" />
                   <Input type="number" value={draft.maxActiveEnrollments ?? ""} onChange={(e) => setDraft((p) => ({ ...p, maxActiveEnrollments: toOptInt(e.target.value) }))} className="bg-neutral-700 border-neutral-600" placeholder="Max active" />
                   <Input type="number" value={draft.maxRetriesPerTrader} onChange={(e) => setDraft((p) => ({ ...p, maxRetriesPerTrader: Math.max(0, toInt(e.target.value, p.maxRetriesPerTrader)) }))} className="bg-neutral-700 border-neutral-600" placeholder="Max retries" />
@@ -1389,6 +1421,7 @@ export default function ScoutChallengesPanel() {
                 <option value="PASSED">PASSED</option>
                 <option value="FAILED">FAILED</option>
                 <option value="WITHDRAWN">WITHDRAWN</option>
+                <option value="REVIEW_REQUIRED">REVIEW_REQUIRED</option>
                 <option value="DISQUALIFIED">DISQUALIFIED</option>
               </select>
               <Input
@@ -1622,6 +1655,7 @@ export default function ScoutChallengesPanel() {
                           <option value="PASSED">PASSED</option>
                           <option value="FAILED">FAILED</option>
                           <option value="WITHDRAWN">WITHDRAWN</option>
+                          <option value="REVIEW_REQUIRED">REVIEW_REQUIRED</option>
                         </select>
                         <Input
                           value={overridePhase}
@@ -2213,6 +2247,122 @@ export default function ScoutChallengesPanel() {
                     placeholder="Default challenge tier"
                   />
                 </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                  {CONTROL_TOGGLES.map((key) => (
+                    <label key={key} className="flex items-center justify-between rounded border border-neutral-700 px-3 py-2 text-xs">
+                      <span>{key}</span>
+                      <Switch checked={Boolean(settingsDraft[key])} onCheckedChange={(c) => setSettingsDraft((p) => ({ ...p, [key]: Boolean(c) }))} />
+                    </label>
+                  ))}
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
+                  <Input
+                    type="number"
+                    value={settingsDraft.challengeEvaluationIntervalSec}
+                    onChange={(e) => setSettingsDraft((p) => ({ ...p, challengeEvaluationIntervalSec: Math.max(60, toInt(e.target.value, p.challengeEvaluationIntervalSec)) }))}
+                    className="bg-neutral-700 border-neutral-600"
+                    placeholder="Evaluation interval (sec)"
+                  />
+                  <Input
+                    type="number"
+                    value={settingsDraft.challengeLeaderboardSnapshotIntervalSec}
+                    onChange={(e) => setSettingsDraft((p) => ({ ...p, challengeLeaderboardSnapshotIntervalSec: Math.max(10, toInt(e.target.value, p.challengeLeaderboardSnapshotIntervalSec)) }))}
+                    className="bg-neutral-700 border-neutral-600"
+                    placeholder="Leaderboard snapshot (sec)"
+                  />
+                  <Input
+                    type="number"
+                    step="0.01"
+                    value={settingsDraft.challengeLeverageMultiplierDefault}
+                    onChange={(e) => setSettingsDraft((p) => ({ ...p, challengeLeverageMultiplierDefault: Math.max(0.01, toNum(e.target.value, p.challengeLeverageMultiplierDefault)) }))}
+                    className="bg-neutral-700 border-neutral-600"
+                    placeholder="Default leverage multiplier"
+                  />
+                  <Input
+                    type="number"
+                    value={settingsDraft.challengeWeekendCutoffHours}
+                    onChange={(e) => setSettingsDraft((p) => ({ ...p, challengeWeekendCutoffHours: Math.max(0, toInt(e.target.value, p.challengeWeekendCutoffHours)) }))}
+                    className="bg-neutral-700 border-neutral-600"
+                    placeholder="Weekend cutoff (hours)"
+                  />
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
+                  <Input
+                    type="number"
+                    value={settingsDraft.challengeMaxActiveEnrollmentsUser}
+                    onChange={(e) => setSettingsDraft((p) => ({ ...p, challengeMaxActiveEnrollmentsUser: Math.max(1, toInt(e.target.value, p.challengeMaxActiveEnrollmentsUser)) }))}
+                    className="bg-neutral-700 border-neutral-600"
+                    placeholder="Max active enrollments/user"
+                  />
+                  <Input
+                    type="number"
+                    value={settingsDraft.challengeMaxActiveEnrollmentsPerChallenge}
+                    onChange={(e) => setSettingsDraft((p) => ({ ...p, challengeMaxActiveEnrollmentsPerChallenge: Math.max(1, toInt(e.target.value, p.challengeMaxActiveEnrollmentsPerChallenge)) }))}
+                    className="bg-neutral-700 border-neutral-600"
+                    placeholder="Max active enrollments/challenge"
+                  />
+                  <Input
+                    type="number"
+                    value={settingsDraft.challengeCooldownHoursAfterFail}
+                    onChange={(e) => setSettingsDraft((p) => ({ ...p, challengeCooldownHoursAfterFail: Math.max(0, toInt(e.target.value, p.challengeCooldownHoursAfterFail)) }))}
+                    className="bg-neutral-700 border-neutral-600"
+                    placeholder="Cooldown after fail (hours)"
+                  />
+                  <Input
+                    type="number"
+                    value={settingsDraft.challengeCooldownHoursAfterWithdraw}
+                    onChange={(e) => setSettingsDraft((p) => ({ ...p, challengeCooldownHoursAfterWithdraw: Math.max(0, toInt(e.target.value, p.challengeCooldownHoursAfterWithdraw)) }))}
+                    className="bg-neutral-700 border-neutral-600"
+                    placeholder="Cooldown after withdraw (hours)"
+                  />
+                  <Input
+                    type="number"
+                    value={settingsDraft.challengeManualReviewSuspiciousThreshold}
+                    onChange={(e) => setSettingsDraft((p) => ({ ...p, challengeManualReviewSuspiciousThreshold: Math.max(1, toInt(e.target.value, p.challengeManualReviewSuspiciousThreshold)) }))}
+                    className="bg-neutral-700 border-neutral-600"
+                    placeholder="Manual review suspicious threshold"
+                  />
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-5 gap-2">
+                  <Input
+                    type="number"
+                    value={settingsDraft.challengeCertificateDefaultTemplateId ?? ""}
+                    onChange={(e) => setSettingsDraft((p) => ({ ...p, challengeCertificateDefaultTemplateId: toOptInt(e.target.value) }))}
+                    className="bg-neutral-700 border-neutral-600"
+                    placeholder="Default certificate template id"
+                  />
+                  <Input
+                    value={settingsDraft.challengeCertificateVerificationKeyId ?? "v1"}
+                    onChange={(e) => setSettingsDraft((p) => ({ ...p, challengeCertificateVerificationKeyId: e.target.value }))}
+                    className="bg-neutral-700 border-neutral-600"
+                    placeholder="Certificate verification key id"
+                  />
+                  <select
+                    value={String(settingsDraft.challengeLeaderboardRankingMetric || "COMPOSITE_SCORE")}
+                    onChange={(e) => setSettingsDraft((p) => ({ ...p, challengeLeaderboardRankingMetric: e.target.value }))}
+                    className="h-10 rounded-md border border-neutral-600 bg-neutral-700 px-3 text-sm"
+                  >
+                    <option value="COMPOSITE_SCORE">COMPOSITE_SCORE</option>
+                    <option value="PNL_PCT">PNL_PCT</option>
+                  </select>
+                  <select
+                    value={String(settingsDraft.challengePrizeAwardTimingDefault || "ON_COMPLETE")}
+                    onChange={(e) => setSettingsDraft((p) => ({ ...p, challengePrizeAwardTimingDefault: e.target.value }))}
+                    className="h-10 rounded-md border border-neutral-600 bg-neutral-700 px-3 text-sm"
+                  >
+                    <option value="ON_COMPLETE">ON_COMPLETE</option>
+                    <option value="ON_CHALLENGE_END">ON_CHALLENGE_END</option>
+                    <option value="MANUAL">MANUAL</option>
+                  </select>
+                  <select
+                    value={String(settingsDraft.challengePrizeCandidatesDefault || "PASSED_ONLY")}
+                    onChange={(e) => setSettingsDraft((p) => ({ ...p, challengePrizeCandidatesDefault: e.target.value }))}
+                    className="h-10 rounded-md border border-neutral-600 bg-neutral-700 px-3 text-sm"
+                  >
+                    <option value="PASSED_ONLY">PASSED_ONLY</option>
+                    <option value="INCLUDE_ACTIVE">INCLUDE_ACTIVE</option>
+                  </select>
+                </div>
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
                   <select
                     value={String(settingsDraft.challengeMailboxCategory || "SYSTEM")}
@@ -2243,6 +2393,32 @@ export default function ScoutChallengesPanel() {
                     <option value="VIRTUAL">VIRTUAL</option>
                     <option value="SNAPSHOT_EQUITY">SNAPSHOT_EQUITY</option>
                   </select>
+                  <select
+                    value={String(settingsDraft.challengeBreachPolicyDefault || "FAIL")}
+                    onChange={(e) => setSettingsDraft((p) => ({ ...p, challengeBreachPolicyDefault: e.target.value }))}
+                    className="h-10 rounded-md border border-neutral-600 bg-neutral-700 px-3 text-sm"
+                  >
+                    <option value="FAIL">FAIL</option>
+                    <option value="BREACH_AND_CONTINUE">BREACH_AND_CONTINUE</option>
+                    <option value="MANUAL_REVIEW">MANUAL_REVIEW</option>
+                  </select>
+                  <select
+                    value={String(settingsDraft.challengeSingleDayProfitBasis || "PNL_PCT")}
+                    onChange={(e) => setSettingsDraft((p) => ({ ...p, challengeSingleDayProfitBasis: e.target.value }))}
+                    className="h-10 rounded-md border border-neutral-600 bg-neutral-700 px-3 text-sm"
+                  >
+                    <option value="PNL_PCT">PNL_PCT</option>
+                    <option value="EQUITY_PCT">EQUITY_PCT</option>
+                    <option value="REALIZED_ONLY">REALIZED_ONLY</option>
+                  </select>
+                </div>
+                <Textarea
+                  value={String(settingsDraft.challengeNewsBlackoutWindowsJson ?? "[]")}
+                  onChange={(e) => setSettingsDraft((p) => ({ ...p, challengeNewsBlackoutWindowsJson: e.target.value }))}
+                  className="bg-neutral-700 border-neutral-600 min-h-[72px]"
+                  placeholder="News blackout windows JSON"
+                />
+                <div className="flex justify-end">
                   <Button onClick={() => saveSettingsMutation.mutate(settingsDraft)} disabled={saveSettingsMutation.isPending}>
                     {saveSettingsMutation.isPending ? "Saving..." : "Save Settings"}
                   </Button>

@@ -12,6 +12,7 @@ import {
   challengeCertificateTemplates,
   challengeCertificates,
   challengeLeaderboardSnapshot,
+  challengePhaseSnapshots,
   challengePhases,
   challengePrizeAwards,
   challengeProgressionTiers,
@@ -41,6 +42,7 @@ import {
 } from "../recruitment/pipelineService";
 import { appendChallengeEvent } from "../recruitment/challengesV4/challengeEvents";
 import { getSystemChallengeConfig } from "../recruitment/challengesV4/challengeConfig";
+import { computePhaseStats } from "../recruitment/challengesV4/challengeEvaluation";
 import { listAdminScoutCandidates } from "../scout/scoutService";
 import {
   getPartnerInquiryRoutingConfig,
@@ -116,6 +118,22 @@ function decryptChallengeAdminNote(value: unknown): string | null {
     // Backward compatibility for legacy plaintext notes.
     return text;
   }
+}
+
+function toFiniteNumber(value: unknown, fallback = 0): number {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function parseBooleanQuery(value: unknown, fallback = false): boolean {
+  if (value == null) return fallback;
+  const raw = String(value).trim().toLowerCase();
+  if (!raw) return fallback;
+  return raw === "1" || raw === "true" || raw === "yes" || raw === "on";
+}
+
+function driftAbs(a: unknown, b: unknown): number {
+  return Math.abs(toFiniteNumber(a, 0) - toFiniteNumber(b, 0));
 }
 
 const watchlistInputSchema = z.object({
@@ -257,6 +275,7 @@ const challengeSettingsPatchSchema = z.object({
   challengeAutoAdvancePhase: z.boolean().optional(),
   challengeEvalIntervalMin: z.coerce.number().int().min(1).max(24 * 60).optional(),
   challengeEvalMaxRows: z.coerce.number().int().min(1).max(5000).optional(),
+  challengeEvaluationIntervalSec: z.coerce.number().int().min(60).max(24 * 3600).optional(),
   challengeWarningThresholdPct: z.coerce.number().min(0.01).max(0.99).optional(),
   challengeDefaultDrawdownType: z.enum(["STATIC", "TRAILING"]).optional(),
   challengeDefaultCapitalMode: z.enum(["VIRTUAL", "SNAPSHOT_EQUITY"]).optional(),
@@ -295,6 +314,35 @@ const challengeSettingsPatchSchema = z.object({
   challengeMailboxCategory: z.enum(["SYSTEM", "SUPPORT", "ANNOUNCEMENT", "CHALLENGES"]).optional(),
   challengeLeaderboardEnabled: z.boolean().optional(),
   challengeLeaderboardRefreshSec: z.coerce.number().int().min(10).max(24 * 3600).optional(),
+  challengeLeaderboardSnapshotIntervalSec: z.coerce.number().int().min(10).max(24 * 3600).optional(),
+  challengeLeaderboardRankingMetric: z.enum(["COMPOSITE_SCORE", "PNL_PCT"]).optional(),
+  challengePrizeAwardTimingDefault: z.enum(["ON_COMPLETE", "ON_CHALLENGE_END", "MANUAL"]).optional(),
+  challengePrizeCandidatesDefault: z.enum(["PASSED_ONLY", "INCLUDE_ACTIVE"]).optional(),
+  challengeBreachPolicyDefault: z.enum(["FAIL", "BREACH_AND_CONTINUE", "MANUAL_REVIEW"]).optional(),
+  challengeSingleDayProfitBasis: z.enum(["PNL_PCT", "EQUITY_PCT", "REALIZED_ONLY"]).optional(),
+  challengeNewsBlackoutWindowsJson: z
+    .string()
+    .trim()
+    .max(20000)
+    .optional()
+    .refine((value) => value == null || value === "" || isJsonStringValid(value, "OBJECT_OR_ARRAY"), {
+      message: "INVALID_NEWS_BLACKOUT_WINDOWS_JSON",
+    }),
+  challengeWeekendCutoffHours: z.coerce.number().int().min(0).max(72).optional(),
+  challengeForceCloseBeforeWeekend: z.boolean().optional(),
+  challengeLeverageMultiplierDefault: z.coerce.number().min(0.01).max(100).optional(),
+  challengeMaxActiveEnrollmentsUser: z.coerce.number().int().min(1).max(1000).optional(),
+  challengeMaxActiveEnrollmentsPerChallenge: z.coerce.number().int().min(1).max(1000).optional(),
+  challengeCooldownHoursAfterFail: z.coerce.number().int().min(0).max(24 * 365).optional(),
+  challengeCooldownHoursAfterWithdraw: z.coerce.number().int().min(0).max(24 * 365).optional(),
+  challengeCertificateDefaultTemplateId: z.coerce.number().int().min(1).max(1_000_000).nullable().optional(),
+  challengeCertificateIncludeMetricsDefault: z.boolean().optional(),
+  challengeCertificateIncludeQrDefault: z.boolean().optional(),
+  challengeCertificateVerificationKeyId: z.string().trim().min(1).max(32).optional(),
+  challengeAuditStrictMode: z.boolean().optional(),
+  challengeAnomalyDetectionEnabled: z.boolean().optional(),
+  challengeManualReviewEnabled: z.boolean().optional(),
+  challengeManualReviewSuspiciousThreshold: z.coerce.number().int().min(1).max(100).optional(),
 });
 
 const challengeBadgeUpsertSchema = z.object({
@@ -349,7 +397,7 @@ const challengePrizeApproveSchema = z.object({
 });
 
 const challengeEnrollmentOverrideSchema = z.object({
-  status: z.enum(["ACTIVE", "PASSED", "FAILED", "WITHDRAWN"]),
+  status: z.enum(["ACTIVE", "PASSED", "FAILED", "WITHDRAWN", "REVIEW_REQUIRED"]),
   reason: z.string().trim().min(3).max(4000),
   currentPhase: z.number().int().min(1).max(10).optional(),
   completedAt: z.number().int().nonnegative().optional().nullable(),
@@ -559,7 +607,7 @@ async function applyChallengeEnrollmentAdminAction(input: {
   action: "ADVANCE_PHASE" | "RESET_PHASE" | "DISQUALIFY" | "WITHDRAW" | "ADD_NOTE" | "OVERRIDE" | "EXTEND_PHASE";
   note?: string | null;
   actorUserId: number | null;
-  overrideStatus?: "ACTIVE" | "PASSED" | "FAILED" | "WITHDRAWN";
+  overrideStatus?: "ACTIVE" | "PASSED" | "FAILED" | "WITHDRAWN" | "REVIEW_REQUIRED";
   overrideCompletedAt?: number | null;
   overrideCurrentPhase?: number;
   extendDays?: number;
@@ -2119,6 +2167,7 @@ adminChallengesRouter.get("/settings", async (_req, res) => {
         challengeAutoAdvancePhase: Boolean((row as any)?.challengeAutoAdvancePhase ?? true),
         challengeEvalIntervalMin: clampInt((row as any)?.challengeEvalIntervalMin, 60, 1, 24 * 60),
         challengeEvalMaxRows: clampInt((row as any)?.challengeEvalMaxRows, 500, 1, 5000),
+        challengeEvaluationIntervalSec: clampInt((row as any)?.challengeEvaluationIntervalSec, 3600, 60, 24 * 3600),
         challengeWarningThresholdPct: Number((row as any)?.challengeWarningThresholdPct ?? 0.8),
         challengeDefaultDrawdownType: String((row as any)?.challengeDefaultDrawdownType ?? "STATIC"),
         challengeDefaultCapitalMode: String((row as any)?.challengeDefaultCapitalMode ?? "VIRTUAL"),
@@ -2157,6 +2206,53 @@ adminChallengesRouter.get("/settings", async (_req, res) => {
         challengeMailboxCategory: String((row as any)?.challengeMailboxCategory ?? "SYSTEM"),
         challengeLeaderboardEnabled: Boolean((row as any)?.challengeLeaderboardEnabled ?? true),
         challengeLeaderboardRefreshSec: clampInt((row as any)?.challengeLeaderboardRefreshSec, 60, 10, 24 * 3600),
+        challengeLeaderboardSnapshotIntervalSec: clampInt(
+          (row as any)?.challengeLeaderboardSnapshotIntervalSec,
+          60,
+          10,
+          24 * 3600,
+        ),
+        challengeLeaderboardRankingMetric: String((row as any)?.challengeLeaderboardRankingMetric ?? "COMPOSITE_SCORE"),
+        challengePrizeAwardTimingDefault: String((row as any)?.challengePrizeAwardTimingDefault ?? "ON_COMPLETE"),
+        challengePrizeCandidatesDefault: String((row as any)?.challengePrizeCandidatesDefault ?? "PASSED_ONLY"),
+        challengeBreachPolicyDefault: String((row as any)?.challengeBreachPolicyDefault ?? "FAIL"),
+        challengeSingleDayProfitBasis: String((row as any)?.challengeSingleDayProfitBasis ?? "PNL_PCT"),
+        challengeNewsBlackoutWindowsJson: String((row as any)?.challengeNewsBlackoutWindowsJson ?? "[]"),
+        challengeWeekendCutoffHours: clampInt((row as any)?.challengeWeekendCutoffHours, 6, 0, 72),
+        challengeForceCloseBeforeWeekend: Boolean((row as any)?.challengeForceCloseBeforeWeekend ?? false),
+        challengeLeverageMultiplierDefault: Number((row as any)?.challengeLeverageMultiplierDefault ?? 1),
+        challengeMaxActiveEnrollmentsUser: clampInt((row as any)?.challengeMaxActiveEnrollmentsUser, 5, 1, 1000),
+        challengeMaxActiveEnrollmentsPerChallenge: clampInt(
+          (row as any)?.challengeMaxActiveEnrollmentsPerChallenge,
+          1,
+          1,
+          1000,
+        ),
+        challengeCooldownHoursAfterFail: clampInt((row as any)?.challengeCooldownHoursAfterFail, 24, 0, 24 * 365),
+        challengeCooldownHoursAfterWithdraw: clampInt(
+          (row as any)?.challengeCooldownHoursAfterWithdraw,
+          12,
+          0,
+          24 * 365,
+        ),
+        challengeCertificateDefaultTemplateId:
+          Number((row as any)?.challengeCertificateDefaultTemplateId ?? 0) > 0
+            ? Math.trunc(Number((row as any)?.challengeCertificateDefaultTemplateId))
+            : null,
+        challengeCertificateIncludeMetricsDefault: Boolean(
+          (row as any)?.challengeCertificateIncludeMetricsDefault ?? true,
+        ),
+        challengeCertificateIncludeQrDefault: Boolean((row as any)?.challengeCertificateIncludeQrDefault ?? true),
+        challengeCertificateVerificationKeyId: String((row as any)?.challengeCertificateVerificationKeyId ?? "v1"),
+        challengeAuditStrictMode: Boolean((row as any)?.challengeAuditStrictMode ?? true),
+        challengeAnomalyDetectionEnabled: Boolean((row as any)?.challengeAnomalyDetectionEnabled ?? true),
+        challengeManualReviewEnabled: Boolean((row as any)?.challengeManualReviewEnabled ?? false),
+        challengeManualReviewSuspiciousThreshold: clampInt(
+          (row as any)?.challengeManualReviewSuspiciousThreshold,
+          3,
+          1,
+          100,
+        ),
       },
     });
   } catch (error) {
@@ -2188,6 +2284,7 @@ adminChallengesRouter.put("/settings", async (req, res) => {
         challengeAutoAdvancePhase: payload.challengeAutoAdvancePhase,
         challengeEvalIntervalMin: payload.challengeEvalIntervalMin,
         challengeEvalMaxRows: payload.challengeEvalMaxRows,
+        challengeEvaluationIntervalSec: payload.challengeEvaluationIntervalSec,
         challengeWarningThresholdPct: payload.challengeWarningThresholdPct,
         challengeDefaultDrawdownType: payload.challengeDefaultDrawdownType,
         challengeDefaultCapitalMode: payload.challengeDefaultCapitalMode,
@@ -2221,6 +2318,28 @@ adminChallengesRouter.put("/settings", async (req, res) => {
         challengeMailboxCategory: payload.challengeMailboxCategory,
         challengeLeaderboardEnabled: payload.challengeLeaderboardEnabled,
         challengeLeaderboardRefreshSec: payload.challengeLeaderboardRefreshSec,
+        challengeLeaderboardSnapshotIntervalSec: payload.challengeLeaderboardSnapshotIntervalSec,
+        challengeLeaderboardRankingMetric: payload.challengeLeaderboardRankingMetric,
+        challengePrizeAwardTimingDefault: payload.challengePrizeAwardTimingDefault,
+        challengePrizeCandidatesDefault: payload.challengePrizeCandidatesDefault,
+        challengeBreachPolicyDefault: payload.challengeBreachPolicyDefault,
+        challengeSingleDayProfitBasis: payload.challengeSingleDayProfitBasis,
+        challengeNewsBlackoutWindowsJson: payload.challengeNewsBlackoutWindowsJson,
+        challengeWeekendCutoffHours: payload.challengeWeekendCutoffHours,
+        challengeForceCloseBeforeWeekend: payload.challengeForceCloseBeforeWeekend,
+        challengeLeverageMultiplierDefault: payload.challengeLeverageMultiplierDefault,
+        challengeMaxActiveEnrollmentsUser: payload.challengeMaxActiveEnrollmentsUser,
+        challengeMaxActiveEnrollmentsPerChallenge: payload.challengeMaxActiveEnrollmentsPerChallenge,
+        challengeCooldownHoursAfterFail: payload.challengeCooldownHoursAfterFail,
+        challengeCooldownHoursAfterWithdraw: payload.challengeCooldownHoursAfterWithdraw,
+        challengeCertificateDefaultTemplateId: payload.challengeCertificateDefaultTemplateId,
+        challengeCertificateIncludeMetricsDefault: payload.challengeCertificateIncludeMetricsDefault,
+        challengeCertificateIncludeQrDefault: payload.challengeCertificateIncludeQrDefault,
+        challengeCertificateVerificationKeyId: payload.challengeCertificateVerificationKeyId,
+        challengeAuditStrictMode: payload.challengeAuditStrictMode,
+        challengeAnomalyDetectionEnabled: payload.challengeAnomalyDetectionEnabled,
+        challengeManualReviewEnabled: payload.challengeManualReviewEnabled,
+        challengeManualReviewSuspiciousThreshold: payload.challengeManualReviewSuspiciousThreshold,
         updatedAt: nowSec(),
         updatedBy: String(req.session?.email || "admin"),
       })
@@ -2904,6 +3023,7 @@ adminChallengesRouter.get("/analytics/summary", async (_req, res) => {
         SUM(CASE WHEN e.status = 'ACTIVE' THEN 1 ELSE 0 END)::int AS active_enrollments,
         SUM(CASE WHEN e.status = 'PASSED' THEN 1 ELSE 0 END)::int AS passed_enrollments,
         SUM(CASE WHEN e.status = 'FAILED' THEN 1 ELSE 0 END)::int AS failed_enrollments,
+        SUM(CASE WHEN e.status = 'REVIEW_REQUIRED' THEN 1 ELSE 0 END)::int AS review_required_enrollments,
         AVG(CASE WHEN e.completed_at IS NOT NULL THEN (e.completed_at - e.enrolled_at) END)::float8 AS avg_time_to_complete_sec
       FROM challenge_enrollments e
     ` as any);
@@ -2932,6 +3052,7 @@ adminChallengesRouter.get("/analytics/summary", async (_req, res) => {
       cards: {
         totalEnrollments: total,
         activeEnrollments: Number((summary as any)?.active_enrollments ?? 0),
+        reviewRequiredEnrollments: Number((summary as any)?.review_required_enrollments ?? 0),
         passRate,
         avgTimeToCompleteSec: Number((summary as any)?.avg_time_to_complete_sec ?? 0),
         prizeMoneyAwardedUsd: Number(prizes?.total ?? 0),
@@ -2958,6 +3079,7 @@ adminChallengesRouter.get("/analytics/funnel", async (_req, res) => {
         SUM(CASE WHEN e.status = 'ACTIVE' THEN 1 ELSE 0 END)::int AS active_count,
         SUM(CASE WHEN e.status = 'PASSED' THEN 1 ELSE 0 END)::int AS passed_count,
         SUM(CASE WHEN e.status = 'FAILED' THEN 1 ELSE 0 END)::int AS failed_count,
+        SUM(CASE WHEN e.status = 'REVIEW_REQUIRED' THEN 1 ELSE 0 END)::int AS review_required_count,
         SUM(CASE WHEN e.status = 'WITHDRAWN' THEN 1 ELSE 0 END)::int AS withdrawn_count
       FROM challenges c
       LEFT JOIN challenge_enrollments e ON e.challenge_id = c.id
@@ -3105,6 +3227,278 @@ adminChallengesRouter.get("/analytics/reward-distribution", async (_req, res) =>
   } catch (error) {
     console.error("[admin-scout] challenge analytics reward distribution error:", error);
     return res.status(500).json({ message: "FAILED_TO_FETCH_CHALLENGE_ANALYTICS_REWARD_DISTRIBUTION" });
+  }
+});
+
+adminChallengesRouter.get("/analytics/reconciliation", async (req, res) => {
+  try {
+    const limitRaw = Number(req.query.limit);
+    const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(200, Math.trunc(limitRaw))) : 50;
+    const challengeIdRaw = Number(req.query.challengeId);
+    const challengeId = Number.isInteger(challengeIdRaw) && challengeIdRaw > 0 ? challengeIdRaw : null;
+    const recompute = parseBooleanQuery(req.query.recompute, false);
+    const epsilonRaw = Number(req.query.epsilon);
+    const epsilon = Number.isFinite(epsilonRaw) ? Math.max(0, Math.min(0.05, epsilonRaw)) : 0.000001;
+
+    const statusFilter = ["ACTIVE", "PASSED", "FAILED", "REVIEW_REQUIRED"];
+    const whereClause = challengeId
+      ? and(inArray(challengeEnrollments.status, statusFilter as any), eq(challengeEnrollments.challengeId, challengeId))
+      : inArray(challengeEnrollments.status, statusFilter as any);
+
+    const enrollments = await db
+      .select({
+        id: challengeEnrollments.id,
+        challengeId: challengeEnrollments.challengeId,
+        userId: challengeEnrollments.userId,
+        status: challengeEnrollments.status,
+        currentPhase: challengeEnrollments.currentPhase,
+        enrolledAt: challengeEnrollments.enrolledAt,
+        phaseStartedAt: challengeEnrollments.phaseStartedAt,
+        currentPnlPct: challengeEnrollments.currentPnlPct,
+        tradingDays: challengeEnrollments.tradingDays,
+        maxDailyLossHit: challengeEnrollments.maxDailyLossHit,
+        maxTotalLossHit: challengeEnrollments.maxTotalLossHit,
+        peakEquity: challengeEnrollments.peakEquity,
+        capitalBaseUsed: challengeEnrollments.capitalBaseUsed,
+        updatedAt: challengeEnrollments.updatedAt,
+        challengeName: challenges.name,
+        challengeDurationDays: challenges.durationDays,
+        challengeVirtualCapitalUsd: challenges.virtualCapitalUsd,
+      })
+      .from(challengeEnrollments)
+      .innerJoin(challenges, eq(challengeEnrollments.challengeId, challenges.id))
+      .where(whereClause)
+      .orderBy(desc(challengeEnrollments.updatedAt), desc(challengeEnrollments.id))
+      .limit(limit);
+
+    if (!enrollments.length) {
+      return res.json({
+        ok: true,
+        params: { limit, challengeId, recompute, epsilon },
+        summary: {
+          checkedEnrollments: 0,
+          withSnapshots: 0,
+          missingSnapshots: 0,
+          phaseMismatchCount: 0,
+          enrollmentSnapshotDriftCount: 0,
+          recomputedCount: 0,
+          recomputeMismatchCount: 0,
+          hashMismatchCount: 0,
+        },
+        mismatches: [],
+      });
+    }
+
+    const enrollmentIds = enrollments.map((row) => Number(row.id));
+    const challengeIds = Array.from(new Set(enrollments.map((row) => Number(row.challengeId))));
+
+    const snapshotRows = await db
+      .select({
+        enrollmentId: challengePhaseSnapshots.enrollmentId,
+        phaseNumber: challengePhaseSnapshots.phaseNumber,
+        runId: challengePhaseSnapshots.runId,
+        inputHash: challengePhaseSnapshots.inputHash,
+        pnlPct: challengePhaseSnapshots.pnlPct,
+        tradingDays: challengePhaseSnapshots.tradingDays,
+        worstDayLossPct: challengePhaseSnapshots.worstDayLossPct,
+        startDdPct: challengePhaseSnapshots.startDdPct,
+        trailingDdPct: challengePhaseSnapshots.trailingDdPct,
+        peakEquity: challengePhaseSnapshots.peakEquity,
+        computedAt: challengePhaseSnapshots.computedAt,
+      })
+      .from(challengePhaseSnapshots)
+      .where(inArray(challengePhaseSnapshots.enrollmentId, enrollmentIds))
+      .orderBy(desc(challengePhaseSnapshots.computedAt), desc(challengePhaseSnapshots.id));
+
+    const latestSnapshotByEnrollment = new Map<number, any>();
+    for (const row of snapshotRows) {
+      const key = Number(row.enrollmentId);
+      if (!latestSnapshotByEnrollment.has(key)) {
+        latestSnapshotByEnrollment.set(key, row);
+      }
+    }
+
+    const phaseRows = await db
+      .select({
+        challengeId: challengePhases.challengeId,
+        phaseNumber: challengePhases.phaseNumber,
+        durationDays: challengePhases.durationDays,
+      })
+      .from(challengePhases)
+      .where(inArray(challengePhases.challengeId, challengeIds));
+    const phaseDurationByKey = new Map<string, number>();
+    for (const row of phaseRows) {
+      const key = `${Number(row.challengeId)}:${Number(row.phaseNumber)}`;
+      phaseDurationByKey.set(key, toFiniteNumber(row.durationDays, 0));
+    }
+
+    const mismatches: any[] = [];
+    let missingSnapshots = 0;
+    let phaseMismatchCount = 0;
+    let enrollmentSnapshotDriftCount = 0;
+    let recomputedCount = 0;
+    let recomputeMismatchCount = 0;
+    let hashMismatchCount = 0;
+
+    const now = Math.floor(Date.now() / 1000);
+    for (const enrollment of enrollments) {
+      const snapshot = latestSnapshotByEnrollment.get(Number(enrollment.id)) ?? null;
+      const reasons: string[] = [];
+      const drift: Record<string, number> = {};
+      let recomputed: any = null;
+
+      if (!snapshot) {
+        missingSnapshots += 1;
+        reasons.push("MISSING_SNAPSHOT");
+      } else {
+        if (Number(snapshot.phaseNumber) !== Number(enrollment.currentPhase)) {
+          phaseMismatchCount += 1;
+          reasons.push("PHASE_MISMATCH");
+        }
+
+        const pnlDrift = driftAbs(enrollment.currentPnlPct, snapshot.pnlPct);
+        if (pnlDrift > epsilon) {
+          drift.pnlPct = pnlDrift;
+        }
+        const tradingDaysDrift = Math.abs(Math.trunc(toFiniteNumber(enrollment.tradingDays, 0)) - Math.trunc(toFiniteNumber(snapshot.tradingDays, 0)));
+        if (tradingDaysDrift > 0) {
+          drift.tradingDays = tradingDaysDrift;
+        }
+        const dailyDrift = driftAbs(enrollment.maxDailyLossHit, snapshot.worstDayLossPct);
+        if (dailyDrift > epsilon) {
+          drift.maxDailyLossHit = dailyDrift;
+        }
+        const peakDrift = driftAbs(enrollment.peakEquity, snapshot.peakEquity);
+        if (peakDrift > epsilon) {
+          drift.peakEquity = peakDrift;
+        }
+        const totalLossHit = toFiniteNumber(enrollment.maxTotalLossHit, 0);
+        const ddDrift = Math.min(
+          Math.abs(totalLossHit - toFiniteNumber(snapshot.startDdPct, 0)),
+          Math.abs(totalLossHit - toFiniteNumber(snapshot.trailingDdPct, 0)),
+        );
+        if (ddDrift > epsilon) {
+          drift.maxTotalLossHit = ddDrift;
+        }
+        if (Object.keys(drift).length) {
+          enrollmentSnapshotDriftCount += 1;
+          reasons.push("ENROLLMENT_SNAPSHOT_DRIFT");
+        }
+      }
+
+      if (recompute) {
+        recomputedCount += 1;
+        const phaseStart = Math.max(0, Math.trunc(toFiniteNumber(enrollment.phaseStartedAt, enrollment.enrolledAt)));
+        const phaseDurationDays =
+          phaseDurationByKey.get(`${Number(enrollment.challengeId)}:${Number(enrollment.currentPhase)}`) ??
+          toFiniteNumber(enrollment.challengeDurationDays, 0);
+        const phaseDeadline = phaseDurationDays > 0 ? phaseStart + phaseDurationDays * 86400 : null;
+        const evalEnd = phaseDeadline ? Math.min(now, phaseDeadline) : now;
+        const fallbackCapital = toFiniteNumber(enrollment.challengeVirtualCapitalUsd, 100000);
+        const capitalBaseRaw = toFiniteNumber(enrollment.capitalBaseUsed, fallbackCapital);
+        const capitalBase = capitalBaseRaw > 0 ? capitalBaseRaw : Math.max(1, fallbackCapital);
+
+        recomputed = await computePhaseStats({
+          userId: Number(enrollment.userId),
+          startAt: phaseStart,
+          endAt: evalEnd,
+          capitalBase,
+        });
+
+        const recomputeDrift: Record<string, number> = {};
+        if (snapshot) {
+          if (String(snapshot.inputHash || "") !== String(recomputed.inputHash || "")) {
+            hashMismatchCount += 1;
+            reasons.push("INPUT_HASH_MISMATCH");
+          }
+          const recomputePnlDrift = driftAbs(recomputed.pnlPct, snapshot.pnlPct);
+          if (recomputePnlDrift > epsilon) recomputeDrift.snapshotPnlPct = recomputePnlDrift;
+          const recomputeDailyDrift = driftAbs(recomputed.worstDayLossPct, snapshot.worstDayLossPct);
+          if (recomputeDailyDrift > epsilon) recomputeDrift.snapshotMaxDailyLossHit = recomputeDailyDrift;
+          const recomputePeakDrift = driftAbs(recomputed.peakEquity, snapshot.peakEquity);
+          if (recomputePeakDrift > epsilon) recomputeDrift.snapshotPeakEquity = recomputePeakDrift;
+        }
+        const enrollmentPnlDrift = driftAbs(recomputed.pnlPct, enrollment.currentPnlPct);
+        if (enrollmentPnlDrift > epsilon) recomputeDrift.enrollmentPnlPct = enrollmentPnlDrift;
+        const enrollmentDailyDrift = driftAbs(recomputed.worstDayLossPct, enrollment.maxDailyLossHit);
+        if (enrollmentDailyDrift > epsilon) recomputeDrift.enrollmentMaxDailyLossHit = enrollmentDailyDrift;
+        const enrollmentPeakDrift = driftAbs(recomputed.peakEquity, enrollment.peakEquity);
+        if (enrollmentPeakDrift > epsilon) recomputeDrift.enrollmentPeakEquity = enrollmentPeakDrift;
+
+        if (Object.keys(recomputeDrift).length) {
+          recomputeMismatchCount += 1;
+          reasons.push("RECOMPUTE_DRIFT");
+          drift.recompute = recomputeDrift;
+        }
+      }
+
+      if (reasons.length) {
+        mismatches.push({
+          enrollmentId: Number(enrollment.id),
+          challengeId: Number(enrollment.challengeId),
+          challengeName: enrollment.challengeName,
+          userId: Number(enrollment.userId),
+          status: enrollment.status,
+          phaseNumber: Number(enrollment.currentPhase),
+          reasons,
+          drift,
+          enrollment: {
+            currentPnlPct: toFiniteNumber(enrollment.currentPnlPct, 0),
+            tradingDays: Math.trunc(toFiniteNumber(enrollment.tradingDays, 0)),
+            maxDailyLossHit: toFiniteNumber(enrollment.maxDailyLossHit, 0),
+            maxTotalLossHit: toFiniteNumber(enrollment.maxTotalLossHit, 0),
+            peakEquity: toFiniteNumber(enrollment.peakEquity, 0),
+            updatedAt: toFiniteNumber(enrollment.updatedAt, 0),
+          },
+          snapshot: snapshot
+            ? {
+                phaseNumber: Number(snapshot.phaseNumber),
+                runId: String(snapshot.runId),
+                inputHash: String(snapshot.inputHash),
+                pnlPct: toFiniteNumber(snapshot.pnlPct, 0),
+                tradingDays: Math.trunc(toFiniteNumber(snapshot.tradingDays, 0)),
+                worstDayLossPct: toFiniteNumber(snapshot.worstDayLossPct, 0),
+                startDdPct: toFiniteNumber(snapshot.startDdPct, 0),
+                trailingDdPct: toFiniteNumber(snapshot.trailingDdPct, 0),
+                peakEquity: toFiniteNumber(snapshot.peakEquity, 0),
+                computedAt: toFiniteNumber(snapshot.computedAt, 0),
+              }
+            : null,
+          recomputed: recomputed
+            ? {
+                inputHash: recomputed.inputHash,
+                pnlPct: recomputed.pnlPct,
+                tradingDays: recomputed.tradingDays,
+                worstDayLossPct: recomputed.worstDayLossPct,
+                startDdPct: recomputed.startDdPct,
+                trailingDdPct: recomputed.trailingDdPct,
+                peakEquity: recomputed.peakEquity,
+                tradeCount: recomputed.tradeCount,
+              }
+            : null,
+        });
+      }
+    }
+
+    return res.json({
+      ok: true,
+      params: { limit, challengeId, recompute, epsilon },
+      summary: {
+        checkedEnrollments: enrollments.length,
+        withSnapshots: enrollments.length - missingSnapshots,
+        missingSnapshots,
+        phaseMismatchCount,
+        enrollmentSnapshotDriftCount,
+        recomputedCount,
+        recomputeMismatchCount,
+        hashMismatchCount,
+        mismatchCount: mismatches.length,
+      },
+      mismatches: mismatches.slice(0, 500),
+    });
+  } catch (error) {
+    console.error("[admin-scout] challenge analytics reconciliation error:", error);
+    return res.status(500).json({ message: "FAILED_TO_FETCH_CHALLENGE_ANALYTICS_RECONCILIATION" });
   }
 });
 

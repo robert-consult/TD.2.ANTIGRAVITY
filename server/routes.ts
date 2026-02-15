@@ -42,6 +42,7 @@ import { maybeApplyAutoEnforcement } from "./grift/griftAutoEnforcement";
 import { getRecentLoginActivity, getActiveSessions, createUserSession, touchSession, recordLoginAttempt, endSession, revokeSession, revokeAllSessionsForUser, getClientIp, getUserAgent, buildGeoContext, parseDevice, extractClientIdentity, extractGeoHints } from "./security/sessionTrail";
 import type { AuditContext as GriftAuditContext } from "./grift/griftTypes";
 import { riskMiddleware, getEffectiveMinHoldSec } from "./risk";
+import { getActiveTradeConstraintsForUser } from "./recruitment/challengesV4/challengeService";
 import { impersonationGuard } from "./middleware/auth";
 import { requirePolicy } from "./middleware/requirePolicy";
 import { recalcAccount } from "./recalcAccount";
@@ -342,7 +343,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
   };
 
   const getSignupPublicConfig = async () => {
-    const [row] = await db.select().from(systemConfig).where(eq(systemConfig.id, 1)).limit(1);
+    const [row] = await db
+      .select({
+        signupCaptchaEnforce: systemConfig.signupCaptchaEnforce,
+        captchaProvider: systemConfig.captchaProvider,
+        signupFreeze: systemConfig.signupFreeze,
+        signupFreezeMessage: systemConfig.signupFreezeMessage,
+        signupWaitlistEnabled: systemConfig.signupWaitlistEnabled,
+        signupWaitlistPolicyVersion: systemConfig.signupWaitlistPolicyVersion,
+        signupWaitlistPolicyContent: systemConfig.signupWaitlistPolicyContent,
+      })
+      .from(systemConfig)
+      .where(eq(systemConfig.id, 1))
+      .limit(1);
     const waitlistPolicyContent = String((row as any)?.signupWaitlistPolicyContent ?? "");
     const waitlistPolicyVersion = String((row as any)?.signupWaitlistPolicyVersion ?? "1");
     const waitlistPolicySha256 = sha256(waitlistPolicyContent);
@@ -482,7 +495,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Public waitlist policy (communications privacy notice)
   app.get("/api/auth/waitlist-policy", async (_req: Request, res: Response) => {
-    const [row] = await db.select().from(systemConfig).where(eq(systemConfig.id, 1)).limit(1);
+    const [row] = await db
+      .select({
+        signupWaitlistPolicyVersion: systemConfig.signupWaitlistPolicyVersion,
+        signupWaitlistPolicyContent: systemConfig.signupWaitlistPolicyContent,
+      })
+      .from(systemConfig)
+      .where(eq(systemConfig.id, 1))
+      .limit(1);
     const version = String((row as any)?.signupWaitlistPolicyVersion ?? "1");
     const content = String((row as any)?.signupWaitlistPolicyContent ?? "");
     return res.json({ ok: true, version, sha256: sha256(content), content });
@@ -490,7 +510,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Public invite waitlist join (when signups are frozen)
   app.post("/api/waitlist", async (req: Request, res: Response) => {
-    const [row] = await db.select().from(systemConfig).where(eq(systemConfig.id, 1)).limit(1);
+    const [row] = await db
+      .select({
+        signupFreeze: systemConfig.signupFreeze,
+        signupWaitlistEnabled: systemConfig.signupWaitlistEnabled,
+        signupCaptchaEnforce: systemConfig.signupCaptchaEnforce,
+        captchaProvider: systemConfig.captchaProvider,
+        signupWaitlistPolicyVersion: systemConfig.signupWaitlistPolicyVersion,
+        signupWaitlistPolicyContent: systemConfig.signupWaitlistPolicyContent,
+      })
+      .from(systemConfig)
+      .where(eq(systemConfig.id, 1))
+      .limit(1);
     const signupsFrozen = Boolean((row as any)?.signupFreeze ?? false);
     const waitlistEnabled = Boolean((row as any)?.signupWaitlistEnabled ?? true);
 
@@ -565,7 +596,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
 
     const [existing] = await db
-      .select()
+      .select({
+        id: signupWaitlist.id,
+        recordHash: signupWaitlist.recordHash,
+      })
       .from(signupWaitlist)
       .where(eq(signupWaitlist.emailLower, emailLower))
       .limit(1);
@@ -2386,7 +2420,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!user) return res.status(404).json({ message: "User not found" });
 
       // Policy: admin controls timezone editability
-      const [cfg] = await db.select().from(systemConfig).where(eq(systemConfig.id, 1)).limit(1);
+      const [cfg] = await db
+        .select({ allowUserTimezoneEdit: systemConfig.allowUserTimezoneEdit })
+        .from(systemConfig)
+        .where(eq(systemConfig.id, 1))
+        .limit(1);
       const allowUserTimezoneEdit = cfg ? Boolean((cfg as any).allowUserTimezoneEdit ?? true) : true;
 
       const updateData: Record<string, string> = {};
@@ -2458,7 +2496,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "User not found" });
       }
 
-      const [cfg] = await db.select().from(systemConfig).where(eq(systemConfig.id, 1)).limit(1);
+      const [cfg] = await db
+        .select({ allowUserTimezoneEdit: systemConfig.allowUserTimezoneEdit })
+        .from(systemConfig)
+        .where(eq(systemConfig.id, 1))
+        .limit(1);
       const allowUserTimezoneEdit = cfg ? Boolean((cfg as any).allowUserTimezoneEdit ?? true) : true;
       const countryRaw = (user as any).countryIso2 || (user as any).country || null;
       const countryIso2 = countryRaw ? String(countryRaw).trim().toUpperCase() : null;
@@ -3133,7 +3175,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const globalDefaultLeverage = Number(gs?.defaultLeverage ?? 50);
 
         // Effective leverage: user override takes precedence over global
-        const effectiveLeverage = Number(updatedUser.leverage ?? globalDefaultLeverage);
+        const challengeTradeConstraints = await getActiveTradeConstraintsForUser(req.session.userId);
+        const challengeLeverageMultiplier = Math.max(
+          0.01,
+          Number(challengeTradeConstraints?.leverageMultiplier ?? 1),
+        );
+        const effectiveLeverage = Math.max(
+          0.01,
+          Number(updatedUser.leverage ?? globalDefaultLeverage) * challengeLeverageMultiplier,
+        );
 
         // How much margin will this order need?
         const neededMargin = requiredMargin(

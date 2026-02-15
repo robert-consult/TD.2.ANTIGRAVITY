@@ -180,9 +180,24 @@ export default function AccountScreen() {
     return `$${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   };
 
+  const startingBalance = (() => {
+    const fromSummary = Number(summary?.startingBalance);
+    if (Number.isFinite(fromSummary) && fromSummary > 0) return fromSummary;
+    const fromUser = Number((user as any)?.startingEquity);
+    if (Number.isFinite(fromUser) && fromUser > 0) return fromUser;
+    return null;
+  })();
+
+  const valueToneClass = (value: number | undefined | null) => {
+    if (!Number.isFinite(Number(value)) || startingBalance == null) return "text-white";
+    if (Number(value) > startingBalance) return "text-green-400";
+    if (Number(value) < startingBalance) return "text-red-400";
+    return "text-white";
+  };
+
   return (
-    <div className="h-full flex flex-col bg-neutral-900 overflow-auto" style={{ containerType: 'inline-size', containerName: 'account' }}>
-      <div className="tq-page-header">
+    <div className="tq-account-screen h-full flex flex-col bg-neutral-900 overflow-auto" style={{ containerType: 'inline-size', containerName: 'account' }}>
+      <div className="tq-panel-header tq-page-header">
         <h1 className="tq-page-title inline-flex items-center gap-2">
           Account
           {mailboxUnreadCount > 0 ? <span className="h-2.5 w-2.5 rounded-full bg-sky-400" title="Unread mailbox messages" /> : null}
@@ -192,11 +207,11 @@ export default function AccountScreen() {
       <div className="flex-1 p-3 sm:p-6">
         <div className="max-w-4xl">
           <Tabs defaultValue="account" className="space-y-4 sm:space-y-6">
-            <TabsList className="bg-neutral-800 border border-gray-700 h-auto p-1 w-full max-w-sm grid grid-cols-2 gap-1">
-              <TabsTrigger value="account" className="text-xs sm:text-sm data-[state=active]:bg-neutral-700">
+            <TabsList className="tq-account-tabs bg-neutral-800 border border-gray-700 h-auto p-1 w-full max-w-sm grid grid-cols-2 gap-1">
+              <TabsTrigger value="account" className="tq-account-tab text-xs sm:text-sm data-[state=active]:bg-neutral-700">
                 Account
               </TabsTrigger>
-              <TabsTrigger value="mailbox" className="text-xs sm:text-sm data-[state=active]:bg-neutral-700">
+              <TabsTrigger value="mailbox" className="tq-account-tab text-xs sm:text-sm data-[state=active]:bg-neutral-700">
                 <span className="inline-flex items-center gap-1.5">
                   Mailbox
                   {mailboxUnreadCount > 0 ? <span className="h-2 w-2 rounded-full bg-sky-400" title="Unread mailbox messages" /> : null}
@@ -211,7 +226,7 @@ export default function AccountScreen() {
             <TabsContent value="account" className="space-y-4 sm:space-y-6 mt-0">
           {/* Stale Pricing Warning Banner */}
           {summary?.pricingStale && (
-            <Alert className="bg-yellow-900/30 border-yellow-600">
+            <Alert className="tq-account-alert bg-yellow-900/30 border-yellow-600">
               <AlertTriangle className="h-4 w-4 text-yellow-500" />
               <AlertDescription className="text-yellow-200">
                 P/L and margin values are frozen due to stale or missing price data
@@ -222,7 +237,7 @@ export default function AccountScreen() {
             </Alert>
           )}
 
-          <Card className="bg-neutral-800 border-gray-700">
+          <Card className="tq-account-card bg-neutral-800 border-gray-700">
 	            <CardHeader className="pb-2 sm:pb-3 px-3 sm:px-6">
 	              <CardTitle className="flex items-center gap-2 text-white text-sm sm:text-base">
 	                <User className="h-4 w-4 sm:h-5 sm:w-5 text-primary" />
@@ -265,7 +280,7 @@ export default function AccountScreen() {
           </Card>
 
           <div className="grid-auto-fit grid-min-18" style={{ containerType: 'inline-size', containerName: 'panel' }}>
-            <Card className="bg-neutral-800 border-gray-700">
+            <Card className="tq-account-metric-card bg-neutral-800 border-gray-700">
               <CardContent className="pt-4 px-card">
                 <div className="flex items-center justify-between">
                   <div>
@@ -273,7 +288,7 @@ export default function AccountScreen() {
                     {isLoading ? (
                       <Skeleton className="h-5 w-20 mt-1" />
                     ) : (
-                      <p className="price-display text-white">{formatCurrency(summary?.balance)}</p>
+                      <p className={`price-display ${valueToneClass(summary?.balance)}`}>{formatCurrency(summary?.balance)}</p>
                     )}
 	                  </div>
 	                  <Wallet className="h-6 w-6 text-primary" />
@@ -281,7 +296,7 @@ export default function AccountScreen() {
 	              </CardContent>
 	            </Card>
 
-            <Card className="bg-neutral-800 border-gray-700">
+            <Card className="tq-account-metric-card bg-neutral-800 border-gray-700">
               <CardContent className="pt-4 px-card">
                 <div className="flex items-center justify-between">
                   <div>
@@ -289,7 +304,7 @@ export default function AccountScreen() {
                     {isLoading ? (
                       <Skeleton className="h-5 w-20 mt-1" />
                     ) : (
-                      <p className={`price-display ${summary?.pricingStale ? 'text-yellow-400' : 'text-white'}`}>
+                      <p className={`price-display ${valueToneClass(summary?.equity)}`}>
                         {formatCurrency(summary?.equity)}
                         {summary?.pricingStale && <span className="text-cq-xs ml-1">(stale)</span>}
                       </p>
@@ -300,7 +315,7 @@ export default function AccountScreen() {
               </CardContent>
             </Card>
 
-            <Card className="bg-neutral-800 border-gray-700">
+            <Card className="tq-account-metric-card bg-neutral-800 border-gray-700">
               <CardContent className="pt-4 px-card">
                 <div className="flex items-center justify-between">
                   <div>
@@ -319,7 +334,7 @@ export default function AccountScreen() {
               </CardContent>
             </Card>
 
-            <Card className="bg-neutral-800 border-gray-700">
+            <Card className="tq-account-metric-card bg-neutral-800 border-gray-700">
               <CardContent className="pt-4 px-card">
                 <div className="flex items-center justify-between">
                   <div>
@@ -335,7 +350,7 @@ export default function AccountScreen() {
               </CardContent>
             </Card>
 
-            <Card className="bg-neutral-800 border-gray-700">
+            <Card className="tq-account-metric-card bg-neutral-800 border-gray-700">
               <CardContent className="pt-4 px-card">
                 <div className="flex items-center justify-between">
                   <div>
@@ -357,7 +372,7 @@ export default function AccountScreen() {
               </CardContent>
             </Card>
 
-            <Card className="bg-neutral-800 border-gray-700">
+            <Card className="tq-account-metric-card bg-neutral-800 border-gray-700">
               <CardContent className="pt-4 sm:pt-6 px-3 sm:px-6">
                 <div className="flex items-center justify-between">
                   <div>
@@ -378,7 +393,7 @@ export default function AccountScreen() {
             </Card>
           </div>
 
-	          <Card className="bg-neutral-800 border-gray-700">
+	          <Card className="tq-account-card bg-neutral-800 border-gray-700">
 	            <CardHeader className="pb-2 sm:pb-3 px-3 sm:px-6">
 	              <CardTitle className="flex items-center gap-2 text-white text-sm sm:text-base">
 	                <TrendingUp className="h-4 w-4 sm:h-5 sm:w-5 text-primary" />
@@ -407,7 +422,7 @@ export default function AccountScreen() {
               </div>
               <div className="mt-3 sm:mt-4 p-2 sm:p-card bg-neutral-700/50 rounded-lg">
                 <div className="flex justify-between items-center">
-                  <span className="text-gray-400 text-xs sm:text-sm"><span className="hidden sm:inline">Total </span>Realized P/L</span>
+                  <span className="text-gray-400 text-xs sm:text-sm">Total Realized P/L</span>
                   <span className={`text-base sm:text-lg md:text-xl font-bold ${totalProfit >= 0 ? 'text-green-500' : 'text-red-500'}`}>
                     {formatCurrency(totalProfit)}
                   </span>
@@ -417,7 +432,7 @@ export default function AccountScreen() {
           </Card>
 
           {/* Trader Insights Card */}
-          <Card className="bg-neutral-800 border-gray-700">
+          <Card className="tq-account-insights-card bg-neutral-800 border-gray-700">
             <CardHeader className="pb-2 sm:pb-3 px-3 sm:px-6">
               <CardTitle className="flex items-center gap-2 text-white text-sm sm:text-base">
                 <Lightbulb className="h-4 w-4 sm:h-5 sm:w-5 text-amber-400" />
@@ -427,11 +442,11 @@ export default function AccountScreen() {
             </CardHeader>
             <CardContent className="px-3 sm:px-6">
               {closedTrades.length === 0 ? (
-                <div className="text-xs sm:text-sm text-gray-400 p-2 sm:p-card text-center">
+                <div className="text-xs sm:text-sm text-gray-400 p-2 sm:p-card text-center bg-neutral-700/50 rounded-lg">
                   No closed trades yet. Insights will appear once you have realized P/L history.
                 </div>
               ) : closedTrades.length < 5 ? (
-                <div className="text-xs sm:text-sm text-gray-400 p-2 sm:p-card text-center">
+                <div className="text-xs sm:text-sm text-gray-400 p-2 sm:p-card text-center bg-neutral-700/50 rounded-lg">
                   Need at least 5 closed trades for meaningful insights. You have {closedTrades.length} so far.
                 </div>
               ) : (

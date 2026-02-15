@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TradeQuip - History Render</title>
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&family=Rajdhani:wght@500;600;700&display=swap"
+        rel="stylesheet">
+
+    <style>
+        :root {
+            /* Palette */
+            --bg-deep: #05050A;
+            --bg-surface: #0B0E14;
+            --text-main: #E2E8F0;
+            --text-muted: #94A3B8;
+
+            /* Accents */
+            --primary-cyan: #00F0FF;
+            --neon-violet: #7000FF;
+            --success-green: #00FF94;
+            --danger-red: #FF2A55;
+
+            /* Glassmorphism */
+            --glass-bg: rgba(255, 255, 255, 0.03);
+            --glass-border: 1px solid rgba(255, 255, 255, 0.08);
+            --glass-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+
+            /* Layout */
+            --sidebar-width: 260px;
+            --header-height: 70px;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background-color: var(--bg-deep);
+            color: var(--text-main);
+            font-family: 'Inter', sans-serif;
+            height: 100vh;
+            overflow: hidden;
+            background-image:
+                radial-gradient(circle at 10% 20%, rgba(112, 0, 255, 0.05) 0%, transparent 40%),
+                radial-gradient(circle at 90% 80%, rgba(0, 240, 255, 0.05) 0%, transparent 40%);
+        }
+
+        /* Typography */
+        h1,
+        h2,
+        h3 {
+            font-family: 'Rajdhani', sans-serif;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .font-mono {
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        /* Layout Grid */
+        .app-container {
+            display: grid;
+            grid-template-columns: var(--sidebar-width) 1fr;
+            grid-template-rows: var(--header-height) 1fr;
+            height: 100vh;
+        }
+
+        /* Sidebar - Floating Dock Style */
+        .sidebar {
+            grid-row: 1 / -1;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            background: rgba(11, 14, 20, 0.4);
+            border-right: var(--glass-border);
+            backdrop-filter: blur(10px);
+        }
+
+        .logo {
+            font-size: 24px;
+            font-weight: 700;
+            color: var(--text-main);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 30px;
+        }
+
+        .logo-icon {
+            width: 32px;
+            height: 32px;
+            background: linear-gradient(135deg, var(--primary-cyan), var(--neon-violet));
+            border-radius: 8px;
+            box-shadow: 0 0 15px rgba(0, 240, 255, 0.3);
+        }
+
+        .nav-item {
+            padding: 12px 16px;
+            border-radius: 12px;
+            color: var(--text-muted);
+            text-decoration: none;
+            font-weight: 500;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .nav-item:hover {
+            background: rgba(255, 255, 255, 0.05);
+            color: #fff;
+        }
+
+        .nav-item.active {
+            background: linear-gradient(90deg, rgba(0, 240, 255, 0.1) 0%, transparent 100%);
+            border-left: 3px solid var(--primary-cyan);
+            color: var(--primary-cyan);
+            text-shadow: 0 0 10px rgba(0, 240, 255, 0.4);
+        }
+
+        /* Header */
+        .header {
+            grid-column: 2;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 30px;
+            border-bottom: var(--glass-border);
+            background: rgba(5, 5, 10, 0.8);
+            backdrop-filter: blur(10px);
+        }
+
+        .page-title {
+            font-size: 28px;
+            font-weight: 600;
+            background: linear-gradient(to right, #fff, #94A3B8);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .user-profile {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .balance-badge {
+            background: rgba(0, 240, 255, 0.1);
+            color: var(--primary-cyan);
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 14px;
+            border: 1px solid rgba(0, 240, 255, 0.2);
+            box-shadow: 0 0 10px rgba(0, 240, 255, 0.1);
+        }
+
+        /* Main Content */
+        .main-content {
+            grid-column: 2;
+            padding: 30px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            overflow-y: auto;
+        }
+
+        /* History Filters */
+        .filters-bar {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 20px;
+            align-items: center;
+        }
+
+        .filter-input {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            padding: 10px 15px;
+            color: #fff;
+            min-width: 200px;
+        }
+
+        .filter-btn-group {
+            display: flex;
+            background: rgba(255, 255, 255, 0.05);
+            padding: 4px;
+            border-radius: 8px;
+        }
+
+        .filter-btn {
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            padding: 6px 15px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+
+        .filter-btn.active {
+            background: rgba(255, 255, 255, 0.1);
+            color: #fff;
+        }
+
+        /* Stats Cards */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        .stat-card {
+            background: var(--glass-bg);
+            border: var(--glass-border);
+            border-radius: 12px;
+            padding: 20px;
+            backdrop-filter: blur(12px);
+        }
+
+        .stat-label {
+            color: var(--text-muted);
+            font-size: 11px;
+            text-transform: uppercase;
+            margin-bottom: 10px;
+        }
+
+        .stat-value {
+            font-size: 24px;
+            font-weight: 700;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .pos-val {
+            color: var(--success-green);
+        }
+
+        /* Table */
+        .table-container {
+            background: var(--glass-bg);
+            border: var(--glass-border);
+            border-radius: 16px;
+            overflow: hidden;
+            backdrop-filter: blur(12px);
+            flex: 1;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th {
+            text-align: left;
+            padding: 16px 24px;
+            color: var(--text-muted);
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            background: rgba(0, 0, 0, 0.2);
+        }
+
+        td {
+            padding: 16px 24px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            font-size: 14px;
+            vertical-align: middle;
+        }
+
+        tr:hover td {
+            background: rgba(255, 255, 255, 0.02);
+        }
+
+        .pos-buy {
+            color: var(--success-green);
+        }
+
+        .pos-sell {
+            color: var(--danger-red);
+        }
+
+        .pnl-value {
+            font-family: 'JetBrains Mono', monospace;
+            font-weight: 600;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="app-container">
+        <!-- Navigation -->
+        <nav class="sidebar">
+            <div class="logo">
+                <div class="logo-icon"></div>
+                TradeQuip
+            </div>
+
+            <a href="#" class="nav-item">
+                <span>📊</span> Quotes
+            </a>
+            <a href="#" class="nav-item">
+                <span>📈</span> Chart
+            </a>
+            <a href="#" class="nav-item">
+                <span>⚡</span> Trade
+            </a>
+            <a href="#" class="nav-item active">
+                <span>📜</span> History
+            </a>
+            <a href="#" class="nav-item">
+                <span>🏆</span> Leaderboard
+            </a>
+            <a href="#" class="nav-item">
+                <span>👤</span> Account
+            </a>
+        </nav>
+
+        <!-- Header -->
+        <header class="header">
+            <h1 class="page-title">Trading History</h1>
+
+            <div class="user-profile">
+                <div class="balance-badge font-mono">
+                    BAL: $1,054,412.30
+                </div>
+                <div
+                    style="width: 36px; height: 36px; background: #333; border-radius: 50%; background-image: url('https://ui-avatars.com/api/?name=User&background=random'); background-size: cover;">
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content">
+
+            <!-- Filters -->
+            <div class="filters-bar">
+                <div class="filter-btn-group">
+                    <button class="filter-btn active">Today</button>
+                    <button class="filter-btn">Last Week</button>
+                    <button class="filter-btn">Last Month</button>
+                    <button class="filter-btn">Custom</button>
+                </div>
+
+                <input type="date" class="filter-input" style="color-scheme: dark;">
+                <input type="text" class="filter-input" placeholder="Filter by Symbol...">
+            </div>
+
+            <!-- Stats -->
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-label">Total Net Profit</div>
+                    <div class="stat-value pos-val">+$12,450.50</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Total Trades</div>
+                    <div class="stat-value" style="color: #fff;">142</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Win Rate</div>
+                    <div class="stat-value" style="color: var(--primary-cyan);">68.5%</div>
+                </div>
+            </div>
+
+            <!-- History Table -->
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>Ticket</th>
+                            <th>Symbol</th>
+                            <th>Type</th>
+                            <th>Volume</th>
+                            <th>Open Price</th>
+                            <th>Close Price</th>
+                            <th>Profit</th>
+                        </tr>
+                    </thead>
+                    <tbody class="font-mono">
+                        <!-- Trade 1 -->
+                        <tr>
+                            <td style="color: var(--text-muted); font-size: 12px;">Feb 12, 14:30</td>
+                            <td class="text-muted">#102388</td>
+                            <td style="color:#fff; font-weight:600; font-family:'Rajdhani'">EURUSD</td>
+                            <td class="pos-buy">BUY</td>
+                            <td>1.00</td>
+                            <td>1.09100</td>
+                            <td>1.09250</td>
+                            <td class="pos-buy pnl-value">+$1,500.00</td>
+                        </tr>
+
+                        <!-- Trade 2 -->
+                        <tr>
+                            <td style="color: var(--text-muted); font-size: 12px;">Feb 12, 12:15</td>
+                            <td class="text-muted">#102385</td>
+                            <td style="color:#fff; font-weight:600; font-family:'Rajdhani'">GBPUSD</td>
+                            <td class="pos-sell">SELL</td>
+                            <td>0.50</td>
+                            <td>1.26400</td>
+                            <td>1.26500</td>
+                            <td class="pos-sell pnl-value">-$500.00</td>
+                        </tr>
+
+                        <!-- Trade 3 -->
+                        <tr>
+                            <td style="color: var(--text-muted); font-size: 12px;">Feb 11, 16:20</td>
+                            <td class="text-muted">#102340</td>
+                            <td style="color:#fff; font-weight:600; font-family:'Rajdhani'">XAUUSD</td>
+                            <td class="pos-buy">BUY</td>
+                            <td>2.00</td>
+                            <td>2,025.00</td>
+                            <td>2,030.00</td>
+                            <td class="pos-buy pnl-value">+$1,000.00</td>
+                        </tr>
+
+                        <!-- Trade 4 -->
+                        <tr>
+                            <td style="color: var(--text-muted); font-size: 12px;">Feb 11, 09:45</td>
+                            <td class="text-muted">#102338</td>
+                            <td style="color:#fff; font-weight:600; font-family:'Rajdhani'">US30</td>
+                            <td class="pos-sell">SELL</td>
+                            <td>10.0</td>
+                            <td>38,700.0</td>
+                            <td>38,650.0</td>
+                            <td class="pos-buy pnl-value">+$5,000.00</td>
+                        </tr>
+
+                        <!-- Trade 5 -->
+                        <tr>
+                            <td style="color: var(--text-muted); font-size: 12px;">Feb 10, 20:05</td>
+                            <td class="text-muted">#102312</td>
+                            <td style="color:#fff; font-weight:600; font-family:'Rajdhani'">BTCUSD</td>
+                            <td class="pos-buy">BUY</td>
+                            <td>0.05</td>
+                            <td>50,500.0</td>
+                            <td>50,200.0</td>
+                            <td class="pos-sell pnl-value">-$15.00</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+        </main>
+    </div>
+
+</body>
+
+</html>

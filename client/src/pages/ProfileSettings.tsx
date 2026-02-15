@@ -21,6 +21,25 @@ import { PhoneNumberInput } from "@/components/PhoneNumberInput";
 import { fetchWithIdentity } from "@/lib/fetchWithIdentity";
 import { useI18n } from "@/i18n";
 
+function sanitizeTimezoneLabel(label: string): string {
+  const replacements: Array<[string, string]> = [
+    ["Â", ""],
+    ["â€”", "-"],
+    ["â€“", "-"],
+    ["â€˜", "'"],
+    ["â€™", "'"],
+    ["â€œ", "\""],
+    ["â€", "\""],
+  ];
+
+  let normalized = String(label || "");
+  for (const [from, to] of replacements) {
+    normalized = normalized.split(from).join(to);
+  }
+
+  return normalized.replace(/\s{2,}/g, " ").trim();
+}
+
 export default function ProfileSettings() {
   const { user, checkAuth, updateUser, logout } = useAuth();
   const { toast } = useToast();
@@ -406,7 +425,13 @@ export default function ProfileSettings() {
   const countryLocked = preferencePolicy.countryLocked || Boolean(effectiveCountryIso2);
 
   const timezoneRows = useMemo(() => {
-    const rows = timezonesData?.rows ?? [];
+    const rows = (timezonesData?.rows ?? []).map((row) => {
+      const cleanedLabel = sanitizeTimezoneLabel(row.label);
+      return {
+        ...row,
+        label: cleanedLabel || row.name,
+      };
+    });
     if (!rows.length) return [];
     if (!effectiveCountryIso2) return rows;
 
@@ -773,10 +798,10 @@ export default function ProfileSettings() {
     || !accountConfirmMatches;
 
   return (
-    <div className="min-h-screen min-h-dvh bg-neutral-900 text-white flex flex-col">
+    <div className="tq-profile-screen min-h-screen min-h-dvh bg-neutral-900 text-white flex flex-col">
       <Header title="TradeQuip" />
 
-      <main className="flex-1 page-pad">
+      <main className="tq-profile-main flex-1 page-pad">
         <div className="max-w-5xl w-full mx-auto space-y-6 @container">
           <div className="flex items-center justify-between gap-4">
             <div className="flex items-center gap-3 min-w-0 flex-1">
@@ -793,7 +818,7 @@ export default function ProfileSettings() {
             <TierBadge tier={((user as any)?.userTier as UserTier) || "CANDIDATE"} size="responsive" />
           </div>
 
-          <div className="-mx-2 px-2 overflow-x-auto">
+          <div className="tq-profile-section-strip -mx-2 px-2 overflow-x-auto">
             <div className="flex gap-2 min-w-max pb-2">
               {profileSections.map((section) => {
                 const Icon = section.icon;
@@ -803,7 +828,7 @@ export default function ProfileSettings() {
                     key={section.key}
                     type="button"
                     onClick={() => setActiveSection(section.key)}
-                    className={`shrink-0 flex items-center gap-2 rounded-full px-4 py-2 text-sm transition-colors ${isActive ? "bg-white/10 text-white" : "bg-white/5 text-gray-400 hover:text-white"}`}
+                    className={`tq-profile-section-chip shrink-0 flex items-center gap-2 rounded-full px-4 py-2 text-sm transition-colors ${isActive ? "bg-white/10 text-white" : "bg-white/5 text-gray-400 hover:text-white"}`}
                     aria-pressed={isActive}
                   >
                     <Icon className={`h-4 w-4 ${isActive ? "text-primary" : "text-gray-400"}`} />
@@ -815,7 +840,7 @@ export default function ProfileSettings() {
           </div>
 
           {activeSection === "profile" && (
-            <Card className="bg-neutral-800 border-gray-700 w-full">
+            <Card className="tq-profile-card bg-neutral-800 border-gray-700 w-full">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <User className="h-5 w-5 text-primary shrink-0" />
@@ -897,7 +922,7 @@ export default function ProfileSettings() {
 
           {activeSection === "security" && (
             <>
-              <Card className="bg-neutral-800 border-gray-700 w-full">
+              <Card className="tq-profile-card bg-neutral-800 border-gray-700 w-full">
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
                     <Shield className="h-5 w-5 text-green-500 shrink-0" />
@@ -906,7 +931,7 @@ export default function ProfileSettings() {
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-3">
-                    <div className="flex justify-between items-center p-3 bg-neutral-700 rounded-lg gap-2 flex-wrap">
+                    <div className="tq-profile-surface flex justify-between items-center p-3 bg-neutral-700 rounded-lg gap-2 flex-wrap">
                       <div className="min-w-0 flex-1">
                         <div className="text-cq-sm font-medium">Account Status</div>
                         <div className="text-cq-xs text-gray-400">Your account is active and in good standing</div>
@@ -914,7 +939,7 @@ export default function ProfileSettings() {
                       <span className="px-2 py-1 bg-green-600 text-white text-cq-xs rounded shrink-0">Active</span>
                     </div>
 
-                    <div className="flex justify-between items-center p-3 bg-neutral-700 rounded-lg gap-2 flex-wrap">
+                    <div className="tq-profile-surface flex justify-between items-center p-3 bg-neutral-700 rounded-lg gap-2 flex-wrap">
                       <div className="min-w-0 flex-1">
                         <div className="text-cq-sm font-medium">Member Since</div>
                         <div className="text-cq-xs text-gray-400">
@@ -933,7 +958,7 @@ export default function ProfileSettings() {
                       </div>
                     </div>
 
-                    <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start p-3 bg-neutral-700 rounded-lg gap-3">
+                    <div className="tq-profile-surface flex flex-col sm:flex-row sm:justify-between sm:items-start p-3 bg-neutral-700 rounded-lg gap-3">
                       <div className="flex items-start gap-2 min-w-0">
                         <Smartphone className="h-4 w-4 text-gray-400 shrink-0 mt-0.5" />
                         <div className="min-w-0">
@@ -982,7 +1007,7 @@ export default function ProfileSettings() {
                 </CardContent>
               </Card>
 
-              <Card className="bg-neutral-800 border-gray-700 w-full">
+              <Card className="tq-profile-card bg-neutral-800 border-gray-700 w-full">
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
                     <Key className="h-5 w-5 text-yellow-500 shrink-0" />
@@ -1061,7 +1086,7 @@ export default function ProfileSettings() {
                 </CardContent>
               </Card>
 
-              <Card className="bg-neutral-800 border-gray-700 w-full">
+              <Card className="tq-profile-card bg-neutral-800 border-gray-700 w-full">
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2 flex-wrap">
                     <AlertTriangle className="h-5 w-5 text-amber-500 shrink-0" />
@@ -1096,14 +1121,16 @@ export default function ProfileSettings() {
 
           {activeSection === "identity" && (
             <>
-              <TierProgressCard tier={((user as any)?.userTier as UserTier) || "CANDIDATE"} />
-              <VerificationSection />
+              <TierProgressCard tier={((user as any)?.userTier as UserTier) || "CANDIDATE"} className="tq-profile-tier-card" />
+              <div className="tq-profile-verify-section">
+                <VerificationSection />
+              </div>
             </>
           )}
 
           {activeSection === "devices" && (
             <>
-              <Card className="bg-neutral-800 border-gray-700 w-full">
+              <Card className="tq-profile-card bg-neutral-800 border-gray-700 w-full">
                 <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                   <CardTitle className="flex items-center gap-2">
                     <LogOut className="h-5 w-5 text-orange-500 shrink-0" />
@@ -1125,7 +1152,7 @@ export default function ProfileSettings() {
                   <div className="space-y-2">
                     {Array.isArray(activeSessions) && activeSessions.length > 0 ? (
                       activeSessions.map((session: any) => (
-                        <div key={session.id} className={`flex flex-col sm:flex-row sm:justify-between sm:items-center p-3 rounded-lg gap-2 ${session.isCurrent ? 'bg-green-900/30 border border-green-600/50' : 'bg-neutral-700'}`}>
+                        <div key={session.id} className={`tq-profile-surface flex flex-col sm:flex-row sm:justify-between sm:items-center p-3 rounded-lg gap-2 ${session.isCurrent ? 'bg-green-900/30 border border-green-600/50' : 'bg-neutral-700'}`}>
                           <div className="flex items-center gap-3 min-w-0">
                             <Monitor className="h-4 w-4 text-gray-400 shrink-0" />
                             <div className="min-w-0">
@@ -1169,7 +1196,7 @@ export default function ProfileSettings() {
                 </CardContent>
               </Card>
 
-              <Card className="bg-neutral-800 border-gray-700 w-full">
+              <Card className="tq-profile-card bg-neutral-800 border-gray-700 w-full">
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
                     <Monitor className="h-5 w-5 text-blue-500 shrink-0" />
@@ -1180,7 +1207,7 @@ export default function ProfileSettings() {
                   <div className="space-y-2">
                     {Array.isArray(loginHistory) && loginHistory.length > 0 ? (
                       loginHistory.slice(0, 5).map((login: any, index: number) => (
-                        <div key={index} className="flex flex-col sm:flex-row sm:justify-between sm:items-center p-3 bg-neutral-700 rounded-lg gap-2">
+                        <div key={index} className="tq-profile-surface flex flex-col sm:flex-row sm:justify-between sm:items-center p-3 bg-neutral-700 rounded-lg gap-2">
                           <div className="flex items-start gap-3 min-w-0">
                             <Clock className="h-4 w-4 text-gray-400 shrink-0 mt-0.5" />
                             <div className="min-w-0">
@@ -1222,7 +1249,7 @@ export default function ProfileSettings() {
 
           {activeSection === "preferences" && (
             <>
-              <Card className="bg-neutral-800 border-gray-700 w-full">
+              <Card className="tq-profile-card bg-neutral-800 border-gray-700 w-full">
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
                     <Globe className="h-5 w-5 text-cyan-500 shrink-0" />
@@ -1240,18 +1267,18 @@ export default function ProfileSettings() {
                         value={preferences.timezone}
                         onValueChange={(value) => setPreferences({ ...preferences, timezone: value })}
                       >
-                        <SelectTrigger className="bg-neutral-700 border-gray-600" disabled={!preferencePolicy.timezoneEditable}>
+                        <SelectTrigger className="tq-profile-select-trigger bg-neutral-700 border-gray-600" disabled={!preferencePolicy.timezoneEditable}>
                           <SelectValue placeholder="Select timezone" />
                         </SelectTrigger>
-                        <SelectContent className="max-h-[300px]">
+                        <SelectContent className="tq-profile-select-content max-h-[300px]">
                           {timezoneRows.length > 0 ? (
                             timezoneRows.map((tz) => (
-                              <SelectItem key={tz.name} value={tz.name}>
+                              <SelectItem key={tz.name} value={tz.name} className="tq-profile-select-item">
                                 {tz.label}
                               </SelectItem>
                             ))
                           ) : (
-                            <SelectItem value="UTC">UTC</SelectItem>
+                            <SelectItem value="UTC" className="tq-profile-select-item">UTC</SelectItem>
                           )}
                         </SelectContent>
                       </Select>
@@ -1273,18 +1300,18 @@ export default function ProfileSettings() {
                           void handleLanguageChange(value);
                         }}
                       >
-                        <SelectTrigger className="bg-neutral-700 border-gray-600">
+                        <SelectTrigger className="tq-profile-select-trigger bg-neutral-700 border-gray-600">
                           <SelectValue placeholder="Select language" />
                         </SelectTrigger>
-                        <SelectContent className="max-h-[300px]">
+                        <SelectContent className="tq-profile-select-content max-h-[300px]">
                           {languageOptions.length > 0 ? (
                             languageOptions.map((lang) => (
-                              <SelectItem key={lang.code} value={lang.code}>
+                              <SelectItem key={lang.code} value={lang.code} className="tq-profile-select-item">
                                 {lang.nativeName} ({lang.name})
                               </SelectItem>
                             ))
                           ) : (
-                            <SelectItem value="en">English</SelectItem>
+                            <SelectItem value="en" className="tq-profile-select-item">English</SelectItem>
                           )}
                         </SelectContent>
                       </Select>
@@ -1304,13 +1331,13 @@ export default function ProfileSettings() {
                         value={preferences.country || effectiveCountryIso2 || "none"}
                         onValueChange={(value) => setPreferences({ ...preferences, country: value === "none" ? "" : value })}
                       >
-                        <SelectTrigger className="bg-neutral-700 border-gray-600" disabled={countryLocked}>
+                        <SelectTrigger className="tq-profile-select-trigger bg-neutral-700 border-gray-600" disabled={countryLocked}>
                           <SelectValue placeholder="Select country" />
                         </SelectTrigger>
-                        <SelectContent className="max-h-[300px]">
-                          <SelectItem value="none">Not specified</SelectItem>
+                        <SelectContent className="tq-profile-select-content max-h-[300px]">
+                          <SelectItem value="none" className="tq-profile-select-item">Not specified</SelectItem>
                           {countriesData?.rows?.map((c) => (
-                            <SelectItem key={c.code} value={c.code}>
+                            <SelectItem key={c.code} value={c.code} className="tq-profile-select-item">
                               {c.name}
                             </SelectItem>
                           ))}
@@ -1330,7 +1357,7 @@ export default function ProfileSettings() {
                 </CardContent>
               </Card>
 
-              <Card className="bg-neutral-800 border-gray-700 w-full">
+              <Card className="tq-profile-card bg-neutral-800 border-gray-700 w-full">
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
                     <Bell className="h-5 w-5 text-amber-500 shrink-0" />
@@ -1401,7 +1428,7 @@ export default function ProfileSettings() {
                 </CardContent>
               </Card>
 
-              <Card className="bg-neutral-800 border-gray-700 w-full">
+              <Card className="tq-profile-card bg-neutral-800 border-gray-700 w-full">
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
                     <Settings className="h-5 w-5 text-purple-500 shrink-0" />
@@ -1415,11 +1442,11 @@ export default function ProfileSettings() {
                       Contact support if you need adjustments.
                     </p>
                     <div className="grid grid-cols-2 gap-3">
-                      <div className="p-3 bg-neutral-700 rounded-lg">
+                      <div className="tq-profile-surface p-3 bg-neutral-700 rounded-lg">
                         <div className="text-cq-xs text-gray-500">Leverage</div>
                         <div className="text-cq-sm font-medium text-white">{(user as any)?.leverage || 50}x</div>
                       </div>
-                      <div className="p-3 bg-neutral-700 rounded-lg">
+                      <div className="tq-profile-surface p-3 bg-neutral-700 rounded-lg">
                         <div className="text-cq-xs text-gray-500">Max Trades</div>
                         <div className="text-cq-sm font-medium text-white">{(user as any)?.maxConcurrent || 5}</div>
                       </div>
@@ -1437,7 +1464,7 @@ export default function ProfileSettings() {
       {/* 2FA Setup Dialog */}
       < Dialog open={mfaSetupDialog} onOpenChange={(open) => !open && closeMfaSetupDialog()
       }>
-        <DialogContent className="bg-neutral-800 border-gray-700 max-w-md">
+        <DialogContent className="tq-popup-panel tq-profile-dialog bg-neutral-800 border-gray-700 max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Shield className="h-5 w-5 text-primary" />
@@ -1518,7 +1545,7 @@ export default function ProfileSettings() {
 
       {/* 2FA Disable Dialog */}
       < Dialog open={mfaDisableDialog} onOpenChange={setMfaDisableDialog} >
-        <DialogContent className="bg-neutral-800 border-gray-700 max-w-md">
+        <DialogContent className="tq-popup-panel tq-profile-dialog bg-neutral-800 border-gray-700 max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-red-400">
               <AlertTriangle className="h-5 w-5" />
@@ -1569,7 +1596,7 @@ export default function ProfileSettings() {
           }
         }}
       >
-        <DialogContent className="bg-neutral-800 border-gray-700 max-w-lg">
+        <DialogContent className="tq-popup-panel tq-profile-dialog bg-neutral-800 border-gray-700 max-w-lg">
           <DialogHeader>
             <DialogTitle
               className={`flex items-center gap-2 ${accountAction === "delete" ? "text-red-400" : "text-amber-400"}`}
@@ -1588,12 +1615,12 @@ export default function ProfileSettings() {
             <div className="space-y-2">
               <Label>Reason</Label>
               <Select value={accountReasonCode} onValueChange={setAccountReasonCode}>
-                <SelectTrigger className="bg-neutral-700 border-gray-600">
+                <SelectTrigger className="tq-profile-select-trigger bg-neutral-700 border-gray-600">
                   <SelectValue placeholder="Select a reason" />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className="tq-profile-select-content">
                   {accountReasonOptions.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>
+                    <SelectItem key={option.value} value={option.value} className="tq-profile-select-item">
                       {option.label}
                     </SelectItem>
                   ))}

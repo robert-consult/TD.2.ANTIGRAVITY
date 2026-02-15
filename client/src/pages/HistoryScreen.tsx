@@ -440,13 +440,13 @@ export default function HistoryScreen() {
   };
 
   return (
-    <div className="h-full flex flex-col bg-neutral-900">
-      <div className="tq-page-header">
+    <div className="tq-history-screen h-full flex flex-col bg-neutral-900">
+      <div className="tq-panel-header tq-page-header">
         <h2 className="tq-page-title">Trade History</h2>
       </div>
 
       {/* Filters - Compact responsive layout */}
-      <div className="px-gutter py-2 border-b border-gray-800">
+      <div className="tq-history-filters px-gutter py-2 border-b border-gray-800">
         {/* Search - full width on mobile, constrained on desktop */}
         <div className="relative mb-2 md:mb-0 md:max-w-xs md:inline-block md:mr-3">
           <div className="absolute inset-y-0 left-0 pl-2 flex items-center pointer-events-none">
@@ -467,7 +467,7 @@ export default function HistoryScreen() {
           <Input
             type="text"
             placeholder="Search..."
-            className="block w-full pl-7 pr-2 py-1.5 text-sm border border-gray-700 bg-neutral-850 rounded-md text-white placeholder:text-gray-400 focus-visible:ring-1 focus-visible:ring-primary"
+            className="tq-history-input block w-full pl-7 pr-2 py-1.5 text-sm border border-gray-700 bg-neutral-850 rounded-md text-white placeholder:text-gray-400 focus-visible:ring-1 focus-visible:ring-primary"
             value={search}
             onChange={(e) => {
               setSearch(e.target.value);
@@ -482,13 +482,13 @@ export default function HistoryScreen() {
             setSymbolFilter(val);
             setCurrentPage(1);
           }}>
-            <SelectTrigger className="min-w-[100px] w-auto h-8 text-xs bg-neutral-850 border-gray-700 text-white">
+            <SelectTrigger className="tq-history-select min-w-[100px] w-auto h-8 text-xs bg-neutral-850 border-gray-700 text-white">
               <SelectValue placeholder="Symbol" />
             </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Symbols</SelectItem>
+            <SelectContent className="tq-history-select-content">
+              <SelectItem className="tq-history-select-item" value="all">All Symbols</SelectItem>
               {symbols.map((symbol: any) => (
-                <SelectItem key={symbol.id} value={symbol.symbol}>
+                <SelectItem className="tq-history-select-item" key={symbol.id} value={symbol.symbol}>
                   {symbol.symbol}
                 </SelectItem>
               ))}
@@ -509,16 +509,16 @@ export default function HistoryScreen() {
               setCustomDateRange(undefined);
             }}
           >
-            <SelectTrigger className="min-w-[90px] w-auto h-8 text-xs bg-neutral-850 border-gray-700 text-white">
+            <SelectTrigger className="tq-history-select min-w-[90px] w-auto h-8 text-xs bg-neutral-850 border-gray-700 text-white">
               <SelectValue placeholder="Time" />
             </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="today">Today</SelectItem>
-              <SelectItem value="7days">7 days</SelectItem>
-              <SelectItem value="30days">30 days</SelectItem>
-              <SelectItem value="90days">90 days</SelectItem>
-              <SelectItem value="all">All</SelectItem>
-              <SelectItem value="custom">Custom...</SelectItem>
+            <SelectContent className="tq-history-select-content">
+              <SelectItem className="tq-history-select-item" value="today">Today</SelectItem>
+              <SelectItem className="tq-history-select-item" value="7days">7 days</SelectItem>
+              <SelectItem className="tq-history-select-item" value="30days">30 days</SelectItem>
+              <SelectItem className="tq-history-select-item" value="90days">90 days</SelectItem>
+              <SelectItem className="tq-history-select-item" value="all">All</SelectItem>
+              <SelectItem className="tq-history-select-item" value="custom">Custom...</SelectItem>
             </SelectContent>
           </Select>
 
@@ -529,13 +529,13 @@ export default function HistoryScreen() {
               setCurrentPage(1);
             }}
           >
-            <SelectTrigger className="min-w-[90px] w-auto h-8 text-xs bg-neutral-850 border-gray-700 text-white">
+            <SelectTrigger className="tq-history-select min-w-[90px] w-auto h-8 text-xs bg-neutral-850 border-gray-700 text-white">
               <SelectValue placeholder="Reason" />
             </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Reasons</SelectItem>
+            <SelectContent className="tq-history-select-content">
+              <SelectItem className="tq-history-select-item" value="all">All Reasons</SelectItem>
               {traderCloseReasons.map((reason) => (
-                <SelectItem key={reason.code} value={reason.code}>
+                <SelectItem className="tq-history-select-item" key={reason.code} value={reason.code}>
                   {reason.shortLabel}
                 </SelectItem>
               ))}
@@ -723,7 +723,7 @@ export default function HistoryScreen() {
       )}
 
       {/* Trade history table */}
-      <div ref={containerRef} className="flex-1 overflow-auto">
+      <div ref={containerRef} className="tq-history-table-region flex-1 overflow-auto">
         {useCompactView ? (
           /* Compact view: Expandable rows (when container too narrow for full table) */
           <div className="divide-y divide-gray-800">
@@ -737,7 +737,7 @@ export default function HistoryScreen() {
             ))}
 
             {!isLoading && paginatedTrades.length === 0 && (
-              <div className="text-center py-8 text-gray-500">
+              <div className="tq-history-empty text-center py-8 text-gray-500">
                 No trades found
               </div>
             )}
@@ -760,7 +760,7 @@ export default function HistoryScreen() {
                 <div key={trade.id}>
                   {/* Compact row header */}
                   <div
-                    className="px-4 py-3 flex items-center cursor-pointer hover:bg-neutral-850 active:bg-neutral-800"
+                    className="tq-history-row px-4 py-3 flex items-center cursor-pointer hover:bg-neutral-850 active:bg-neutral-800"
                     onClick={() => toggleRowExpand(trade.id)}
                   >
                     {/* Symbol - fixed width */}
@@ -786,7 +786,7 @@ export default function HistoryScreen() {
                     <div className={`font-mono font-semibold text-sm w-[80px] shrink-0 text-right ${isProfit ? "text-green-500" : "text-red-500"}`}>
                       {hasProfitValue ? (
                         <>
-                          {isProfit ? "+" : ""}${Math.abs(profitValue).toFixed(2)}
+                          {isProfit ? "+" : "-"}${Math.abs(profitValue).toFixed(2)}
                         </>
                       ) : "—"}
                     </div>
@@ -866,7 +866,7 @@ export default function HistoryScreen() {
         ) : (
           /* Full table: Only shown when container is wide enough (≥900px) */
           <div className="w-full">
-            <Table className="w-full">
+            <Table className="tq-history-table w-full">
               <TableHeader className="bg-neutral-850">
                 <TableRow>
                   <SortableHeader column="ticket" label="Ticket" currentSort={sortConfig} onSort={handleSort} />
@@ -903,8 +903,8 @@ export default function HistoryScreen() {
                     ))}
 
                 {!isLoading && paginatedTrades.length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={11} className="text-center py-8 text-gray-500">
+                  <TableRow className="tq-history-empty-row">
+                    <TableCell colSpan={11} className="tq-history-empty-cell text-center py-8 text-gray-500">
                       No trades found
                     </TableCell>
                   </TableRow>
@@ -981,7 +981,7 @@ export default function HistoryScreen() {
                                 : "text-red-500"
                                 }`}
                             >
-                              {rawProfit >= 0 ? "+" : ""}
+                              {rawProfit >= 0 ? "+" : "-"}
                               {Math.abs(rawProfit).toFixed(2)}
                             </div>
                           );
@@ -1017,7 +1017,7 @@ export default function HistoryScreen() {
 
       {/* Pagination */}
       {sortedTrades.length > 0 && (
-        <div className="px-gutter py-3 flex items-center justify-between border-t border-gray-800">
+        <div className="tq-history-pagination px-gutter py-3 flex items-center justify-between border-t border-gray-800">
           <div className="flex-1 flex justify-between sm:hidden">
             <button
               className="relative inline-flex items-center px-4 py-2 border border-gray-700 text-sm font-medium rounded-md text-gray-300 bg-neutral-850 hover:bg-neutral-800"

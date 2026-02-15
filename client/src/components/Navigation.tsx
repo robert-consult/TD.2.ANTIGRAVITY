@@ -1,4 +1,3 @@
-import { useLocation } from "wouter";
 import { Trophy, User } from "lucide-react";
 
 interface NavigationProps {
@@ -8,13 +7,14 @@ interface NavigationProps {
 
 export function MobileNavigation({ activeTab, setActiveTab }: NavigationProps) {
   return (
-    <div className="bg-neutral-850 border-t border-gray-800 shrink-0 pb-[env(safe-area-inset-bottom)]">
+    <div className="tq-mobile-nav bg-neutral-850 border-t border-gray-800 shrink-0 pb-[env(safe-area-inset-bottom)]">
       <div className="grid grid-cols-6">
         <button
-          className={`flex flex-col items-center justify-center gap-1 py-2 text-[11px] font-medium text-gray-400 border-t-2 ${
+          data-active={activeTab === "quotes"}
+          className={`tq-mobile-nav-btn flex flex-col items-center justify-center gap-1 py-2 text-[11px] font-medium border-t-2 ${
             activeTab === "quotes"
               ? "border-primary text-primary"
-              : "border-transparent"
+              : "border-transparent text-gray-400"
           }`}
           onClick={() => setActiveTab("quotes")}
         >
@@ -38,10 +38,11 @@ export function MobileNavigation({ activeTab, setActiveTab }: NavigationProps) {
           Quotes
         </button>
         <button
-          className={`flex flex-col items-center justify-center gap-1 py-2 text-[11px] font-medium text-gray-400 border-t-2 ${
+          data-active={activeTab === "chart"}
+          className={`tq-mobile-nav-btn flex flex-col items-center justify-center gap-1 py-2 text-[11px] font-medium border-t-2 ${
             activeTab === "chart"
               ? "border-primary text-primary"
-              : "border-transparent"
+              : "border-transparent text-gray-400"
           }`}
           onClick={() => setActiveTab("chart")}
         >
@@ -63,10 +64,11 @@ export function MobileNavigation({ activeTab, setActiveTab }: NavigationProps) {
           Chart
         </button>
         <button
-          className={`flex flex-col items-center justify-center gap-1 py-2 text-[11px] font-medium text-gray-400 border-t-2 ${
+          data-active={activeTab === "trade"}
+          className={`tq-mobile-nav-btn flex flex-col items-center justify-center gap-1 py-2 text-[11px] font-medium border-t-2 ${
             activeTab === "trade"
               ? "border-primary text-primary"
-              : "border-transparent"
+              : "border-transparent text-gray-400"
           }`}
           onClick={() => setActiveTab("trade")}
         >
@@ -88,10 +90,11 @@ export function MobileNavigation({ activeTab, setActiveTab }: NavigationProps) {
           Trade
         </button>
         <button
-          className={`flex flex-col items-center justify-center gap-1 py-2 text-[11px] font-medium text-gray-400 border-t-2 ${
+          data-active={activeTab === "history"}
+          className={`tq-mobile-nav-btn flex flex-col items-center justify-center gap-1 py-2 text-[11px] font-medium border-t-2 ${
             activeTab === "history"
               ? "border-primary text-primary"
-              : "border-transparent"
+              : "border-transparent text-gray-400"
           }`}
           onClick={() => setActiveTab("history")}
         >
@@ -111,10 +114,11 @@ export function MobileNavigation({ activeTab, setActiveTab }: NavigationProps) {
           History
         </button>
         <button
-          className={`flex flex-col items-center justify-center gap-1 py-2 text-[11px] font-medium text-gray-400 border-t-2 ${
+          data-active={activeTab === "leaderboard"}
+          className={`tq-mobile-nav-btn flex flex-col items-center justify-center gap-1 py-2 text-[11px] font-medium border-t-2 ${
             activeTab === "leaderboard"
               ? "border-primary text-primary"
-              : "border-transparent"
+              : "border-transparent text-gray-400"
           }`}
           onClick={() => setActiveTab("leaderboard")}
         >
@@ -122,10 +126,11 @@ export function MobileNavigation({ activeTab, setActiveTab }: NavigationProps) {
           Leaders
         </button>
         <button
-          className={`flex flex-col items-center justify-center gap-1 py-2 text-[11px] font-medium text-gray-400 border-t-2 ${
+          data-active={activeTab === "account"}
+          className={`tq-mobile-nav-btn flex flex-col items-center justify-center gap-1 py-2 text-[11px] font-medium border-t-2 ${
             activeTab === "account"
               ? "border-primary text-primary"
-              : "border-transparent"
+              : "border-transparent text-gray-400"
           }`}
           onClick={() => setActiveTab("account")}
         >
@@ -138,15 +143,14 @@ export function MobileNavigation({ activeTab, setActiveTab }: NavigationProps) {
 }
 
 export function SideNavigation({ activeTab, setActiveTab }: NavigationProps) {
-  const [, setLocation] = useLocation();
-
   return (
-    <div className="h-full w-full bg-neutral-850 border-r border-gray-800">
+    <div className="tq-side-nav h-full w-full bg-neutral-850 border-r border-gray-800">
       <nav className="py-4 sticky top-0">
         <div className="space-y-1 px-3">
           <button
-            className={`w-full flex items-center px-3 py-2.5 text-left text-sm font-medium rounded-md text-gray-300 hover:bg-gray-800 ${
-              activeTab === "quotes" ? "bg-gray-800 text-white" : ""
+            data-active={activeTab === "quotes"}
+            className={`tq-side-nav-btn w-full flex items-center px-3 py-2.5 text-left text-sm font-medium rounded-md hover:bg-gray-800 ${
+              activeTab === "quotes" ? "bg-gray-800 text-white" : "text-gray-300"
             }`}
             onClick={() => setActiveTab("quotes")}
           >
@@ -172,8 +176,9 @@ export function SideNavigation({ activeTab, setActiveTab }: NavigationProps) {
             Quotes
           </button>
           <button
-            className={`w-full flex items-center px-3 py-2.5 text-left text-sm font-medium rounded-md text-gray-300 hover:bg-gray-800 ${
-              activeTab === "chart" ? "bg-gray-800 text-white" : ""
+            data-active={activeTab === "chart"}
+            className={`tq-side-nav-btn w-full flex items-center px-3 py-2.5 text-left text-sm font-medium rounded-md hover:bg-gray-800 ${
+              activeTab === "chart" ? "bg-gray-800 text-white" : "text-gray-300"
             }`}
             onClick={() => setActiveTab("chart")}
           >
@@ -198,8 +203,9 @@ export function SideNavigation({ activeTab, setActiveTab }: NavigationProps) {
             Chart
           </button>
           <button
-            className={`w-full flex items-center px-3 py-2.5 text-left text-sm font-medium rounded-md text-gray-300 hover:bg-gray-800 ${
-              activeTab === "trade" ? "bg-gray-800 text-white" : ""
+            data-active={activeTab === "trade"}
+            className={`tq-side-nav-btn w-full flex items-center px-3 py-2.5 text-left text-sm font-medium rounded-md hover:bg-gray-800 ${
+              activeTab === "trade" ? "bg-gray-800 text-white" : "text-gray-300"
             }`}
             onClick={() => setActiveTab("trade")}
           >
@@ -223,8 +229,9 @@ export function SideNavigation({ activeTab, setActiveTab }: NavigationProps) {
             Trade
           </button>
           <button
-            className={`w-full flex items-center px-3 py-2.5 text-left text-sm font-medium rounded-md text-gray-300 hover:bg-gray-800 ${
-              activeTab === "history" ? "bg-gray-800 text-white" : ""
+            data-active={activeTab === "history"}
+            className={`tq-side-nav-btn w-full flex items-center px-3 py-2.5 text-left text-sm font-medium rounded-md hover:bg-gray-800 ${
+              activeTab === "history" ? "bg-gray-800 text-white" : "text-gray-300"
             }`}
             onClick={() => setActiveTab("history")}
           >
@@ -249,8 +256,9 @@ export function SideNavigation({ activeTab, setActiveTab }: NavigationProps) {
             History
           </button>
           <button
-            className={`w-full flex items-center px-3 py-2.5 text-left text-sm font-medium rounded-md text-gray-300 hover:bg-gray-800 ${
-              activeTab === "leaderboard" ? "bg-gray-800 text-white" : ""
+            data-active={activeTab === "leaderboard"}
+            className={`tq-side-nav-btn w-full flex items-center px-3 py-2.5 text-left text-sm font-medium rounded-md hover:bg-gray-800 ${
+              activeTab === "leaderboard" ? "bg-gray-800 text-white" : "text-gray-300"
             }`}
             onClick={() => setActiveTab("leaderboard")}
           >
@@ -262,8 +270,9 @@ export function SideNavigation({ activeTab, setActiveTab }: NavigationProps) {
             Leaderboard
           </button>
           <button
-            className={`w-full flex items-center px-3 py-2.5 text-left text-sm font-medium rounded-md text-gray-300 hover:bg-gray-800 ${
-              activeTab === "account" ? "bg-gray-800 text-white" : ""
+            data-active={activeTab === "account"}
+            className={`tq-side-nav-btn w-full flex items-center px-3 py-2.5 text-left text-sm font-medium rounded-md hover:bg-gray-800 ${
+              activeTab === "account" ? "bg-gray-800 text-white" : "text-gray-300"
             }`}
             onClick={() => setActiveTab("account")}
           >

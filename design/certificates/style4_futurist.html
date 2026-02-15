@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Certificate: The Futurist</title>
+    <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;700&display=swap" rel="stylesheet">
+    <style>
+        @page {
+            size: A4 landscape;
+            margin: 0;
+        }
+
+        @media print {
+            body {
+                -webkit-print-color-adjust: exact;
+                print-color-adjust: exact;
+            }
+        }
+
+        :root {
+            --hud-bg: #041018;
+            --hud-green: #00ff9d;
+            --hud-blue: #00a8ff;
+        }
+
+        body {
+            background-color: #111;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            font-family: 'Rajdhani', sans-serif;
+        }
+
+        .certificate-sheet {
+            width: 297mm;
+            height: 210mm;
+            background-color: var(--hud-bg);
+            position: relative;
+            padding: 10mm;
+            box-sizing: border-box;
+            color: var(--hud-blue);
+            clip-path: polygon(20px 0, 100% 0,
+                    100% calc(100% - 20px), calc(100% - 20px) 100%,
+                    0 100%, 0 20px);
+            /* HUD Shape */
+        }
+
+        /* HUD Frame */
+        .hud-frame {
+            position: absolute;
+            inset: 10mm;
+            border: 1px solid rgba(0, 168, 255, 0.3);
+            pointer-events: none;
+        }
+
+        .header-bar {
+            background: linear-gradient(90deg, rgba(0, 168, 255, 0.1), transparent);
+            padding: 5px 10px;
+            font-size: 0.8rem;
+            letter-spacing: 2px;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        /* Large Chart Background */
+        .chart-bg {
+            position: absolute;
+            top: 25%;
+            left: 10%;
+            right: 10%;
+            height: 40%;
+            background: linear-gradient(to top, rgba(0, 255, 157, 0.1), transparent);
+            clip-path: polygon(0 100%, 10% 90%, 20% 95%, 30% 70%, 40% 80%, 50% 50%, 60% 60%, 70% 30%, 80% 40%, 90% 10%, 100% 20%, 100% 100%);
+            border-top: 2px solid var(--hud-green);
+        }
+
+        .stats-row {
+            position: absolute;
+            bottom: 15mm;
+            left: 15mm;
+            right: 15mm;
+            display: flex;
+            justify-content: space-between;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+            padding-top: 10px;
+        }
+
+        .stat-item .val {
+            font-size: 1.5rem;
+            color: var(--hud-green);
+            font-weight: bold;
+        }
+
+        .stat-item .label {
+            font-size: 0.8rem;
+            color: #555;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="certificate-sheet">
+        <div class="hud-frame"></div>
+
+        <div class="header-bar">
+            <span>SECURE CONNECTION ESTABLISHED</span>
+            <span>ID: 9942</span>
+        </div>
+
+        <div class="chart-bg"></div>
+
+        <div style="position: relative; z-index: 10; padding-top: 20mm; padding-left: 10mm;">
+            <div style="font-size: 1rem; color: #555;">SECURITY CLEARANCE LEVEL 9</div>
+            <h1 style="font-size: 3rem; color: white; margin: 0;">BEN KORBACH</h1>
+        </div>
+
+        <div class="stats-row">
+            <div class="stat-item">
+                <div class="val">+58,712.33</div>
+                <div class="label">NET PROFIT</div>
+            </div>
+            <div class="stat-item">
+                <div class="val">78.4%</div>
+                <div class="label">WIN RATE</div>
+            </div>
+            <div class="stat-item">
+                <div class="val">12.35</div>
+                <div class="label">PROFIT FACTOR</div>
+            </div>
+        </div>
+
+        <div
+            style="position: absolute; bottom: 10mm; right: 10mm; font-family: monospace; font-size: 0.7rem; color: #333;">
+            |||| ||| | ||||| || ||| ||||
+        </div>
+    </div>
+
+</body>
+
+</html>

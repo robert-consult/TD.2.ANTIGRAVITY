@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useAuth } from "@/hooks/use-auth";
 import { Link } from "wouter";
 import { Settings, LogOut, ChevronDown, Shield } from "lucide-react";
@@ -8,6 +8,9 @@ import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { NotificationBell } from "@/components/NotificationBell";
 import { useMailboxE2eeBootstrap } from "@/hooks/use-mailbox";
+
+const CLOSE_NOTIFICATIONS_EVENT = "tq:close-notifications";
+const CLOSE_HEADER_MENU_EVENT = "tq:close-header-menu";
 
 type HeaderProps = {
   title?: string;
@@ -20,6 +23,12 @@ export function Header({ title = "TradeQuip", showBalance = false }: HeaderProps
   const { toast } = useToast();
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [isPromotingAdmin, setIsPromotingAdmin] = useState(false);
+
+  useEffect(() => {
+    const handleClose = () => setDropdownOpen(false);
+    window.addEventListener(CLOSE_HEADER_MENU_EVENT, handleClose);
+    return () => window.removeEventListener(CLOSE_HEADER_MENU_EVENT, handleClose);
+  }, []);
 
   const shortTitle = (() => {
     const trimmed = title.trim();
@@ -65,15 +74,35 @@ export function Header({ title = "TradeQuip", showBalance = false }: HeaderProps
     ? user.username.slice(0, 2).toUpperCase()
     : user?.email?.slice(0, 2).toUpperCase() || "U";
 
-  const formattedBalance = (() => {
+  const numericBalance = (() => {
     const raw = (user as any)?.balance;
     const value = typeof raw === "number" ? raw : Number(raw);
-    if (!Number.isFinite(value)) return raw ? String(raw) : "—";
-    return `$${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    return Number.isFinite(value) ? value : null;
+  })();
+
+  const startingEquity = (() => {
+    const raw = (user as any)?.startingEquity;
+    const value = typeof raw === "number" ? raw : Number(raw);
+    return Number.isFinite(value) && value > 0 ? value : null;
+  })();
+
+  const balanceToneClass = (() => {
+    if (numericBalance == null || startingEquity == null) return "text-white/90";
+    if (numericBalance > startingEquity) return "text-green-400";
+    if (numericBalance < startingEquity) return "text-red-400";
+    return "text-white/90";
+  })();
+
+  const formattedBalance = (() => {
+    if (numericBalance == null) {
+      const raw = (user as any)?.balance;
+      return raw ? String(raw) : "—";
+    }
+    return `$${numericBalance.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   })();
 
   return (
-    <header className="bg-[#0F0F0F] border-b border-white/5 py-2 md:py-3 px-gutter shrink-0">
+    <header className="bg-[#0F0F0F] border-b border-white/5 py-2 md:py-3 px-gutter shrink-0 relative z-[140] overflow-visible">
       <div className="flex justify-between items-center">
         <div className="flex items-center">
           <h1 className="font-bold text-white leading-none text-[clamp(1rem,0.9rem+0.8vw,1.25rem)]">
@@ -97,7 +126,7 @@ export function Header({ title = "TradeQuip", showBalance = false }: HeaderProps
         </div>
 
         {user && (
-          <div className="flex items-center relative gap-2">
+          <div className="flex items-center relative gap-2 z-[150]">
             <NotificationBell />
             {showBalance ? (
               <div className="flex items-center gap-[clamp(0.2rem,0.8vw,0.35rem)] rounded-full bg-white/[0.03] border border-white/10 px-[clamp(0.4rem,1.4vw,0.65rem)] py-[clamp(0.2rem,0.8vw,0.35rem)] min-w-0">
@@ -105,14 +134,17 @@ export function Header({ title = "TradeQuip", showBalance = false }: HeaderProps
                   <span className="hidden min-[420px]:inline">BAL:</span>
                   <span className="min-[420px]:hidden">BL:</span>
                 </span>
-                <span className="min-w-0 text-[clamp(0.62rem,0.58rem+0.3vw,0.78rem)] font-mono text-white/90 whitespace-nowrap truncate leading-none">
+                <span className={`min-w-0 text-[clamp(0.62rem,0.58rem+0.3vw,0.78rem)] font-mono whitespace-nowrap truncate leading-none ${balanceToneClass}`}>
                   {formattedBalance}
                 </span>
               </div>
             ) : null}
             <button
-              onClick={() => setDropdownOpen(!dropdownOpen)}
-              className="flex items-center gap-3 bg-white/[0.03] hover:bg-white/[0.08] border border-white/10 hover:border-white/20 px-2 py-1.5 rounded-full transition-all duration-200 group"
+              onClick={() => {
+                window.dispatchEvent(new Event(CLOSE_NOTIFICATIONS_EVENT));
+                setDropdownOpen((prev) => !prev);
+              }}
+              className="tq-header-user-trigger flex items-center gap-3 bg-white/[0.03] hover:bg-white/[0.08] border border-white/10 hover:border-white/20 px-2 py-1.5 rounded-full transition-all duration-200 group"
             >
               <div className="h-8 w-8 rounded-full bg-gradient-to-br from-primary/80 to-primary/40 flex items-center justify-center ring-2 ring-[#1A1A1A]">
                 <span className="text-xs font-semibold text-white">{userInitials}</span>
@@ -127,11 +159,11 @@ export function Header({ title = "TradeQuip", showBalance = false }: HeaderProps
             {dropdownOpen && (
               <>
                 <div 
-                  className="fixed inset-0 z-40" 
+                  className="tq-overlay-backdrop fixed inset-0 z-[210]" 
                   onClick={() => setDropdownOpen(false)}
                 />
-                <div className="absolute right-0 top-full mt-2 w-64 bg-[#1A1A1A] border border-white/10 rounded-xl shadow-[0_10px_40px_rgba(0,0,0,0.5)] z-50 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
-                  <div className="p-4 border-b border-white/5">
+                <div className="tq-popup-panel tq-header-menu absolute right-0 top-full mt-2 w-64 bg-[#1A1A1A] border border-white/10 rounded-xl shadow-[0_10px_40px_rgba(0,0,0,0.5)] z-[220] overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
+                  <div className="tq-header-menu-profile p-4 border-b border-white/5">
                     <div className="flex items-center gap-3">
                       <div className="h-10 w-10 rounded-full bg-gradient-to-br from-primary/80 to-primary/40 flex items-center justify-center ring-2 ring-white/10">
                         <span className="text-sm font-semibold text-white">{userInitials}</span>
@@ -155,7 +187,7 @@ export function Header({ title = "TradeQuip", showBalance = false }: HeaderProps
                     {showBalance ? (
                       <div className="flex items-center justify-between gap-3 mt-3 text-xs">
                         <span className="text-gray-500">Balance</span>
-                        <span className="font-mono text-white truncate">{formattedBalance}</span>
+                        <span className={`font-mono truncate ${balanceToneClass}`}>{formattedBalance}</span>
                       </div>
                     ) : null}
                   </div>
@@ -165,7 +197,7 @@ export function Header({ title = "TradeQuip", showBalance = false }: HeaderProps
                       <Link
                         href="/admin"
                         onClick={() => setDropdownOpen(false)}
-                        className="flex items-center gap-3 px-3 py-2.5 text-sm text-gray-300 hover:text-white hover:bg-white/5 rounded-lg transition-colors"
+                        className="tq-header-menu-item flex items-center gap-3 px-3 py-2.5 text-sm text-gray-300 hover:text-white hover:bg-white/5 rounded-lg transition-colors"
                       >
                         <Shield className="h-4 w-4" />
                         Admin Dashboard
@@ -175,29 +207,29 @@ export function Header({ title = "TradeQuip", showBalance = false }: HeaderProps
                         type="button"
                         onClick={promoteToAdmin}
                         disabled={isPromotingAdmin}
-                        className="w-full flex items-center gap-3 px-3 py-2.5 text-sm text-gray-300 hover:text-white hover:bg-white/5 rounded-lg transition-colors disabled:opacity-50 disabled:pointer-events-none"
+                        className="tq-header-menu-item w-full flex items-center gap-3 px-3 py-2.5 text-sm text-gray-300 hover:text-white hover:bg-white/5 rounded-lg transition-colors disabled:opacity-50 disabled:pointer-events-none"
                       >
                         <Shield className="h-4 w-4" />
                         {isPromotingAdmin ? "Enabling Admin…" : "Enable Admin Mode"}
                       </button>
                     )}
 
-                    <div className="h-px bg-white/5 my-2" />
+                    <div className="tq-header-menu-separator h-px bg-white/5 my-2" />
 
                     <Link 
                       href="/profile"
                       onClick={() => setDropdownOpen(false)}
-                      className="flex items-center gap-3 px-3 py-2.5 text-sm text-gray-300 hover:text-white hover:bg-white/5 rounded-lg transition-colors"
+                      className="tq-header-menu-item flex items-center gap-3 px-3 py-2.5 text-sm text-gray-300 hover:text-white hover:bg-white/5 rounded-lg transition-colors"
                     >
                       <Settings className="h-4 w-4" />
                       Profile Settings
                     </Link>
                     
-                    <div className="h-px bg-white/5 my-2" />
+                    <div className="tq-header-menu-separator h-px bg-white/5 my-2" />
                     
                     <button
                       onClick={handleLogout}
-                      className="w-full flex items-center gap-3 px-3 py-2.5 text-sm text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded-lg transition-colors"
+                      className="tq-header-menu-item tq-header-menu-item-destructive w-full flex items-center gap-3 px-3 py-2.5 text-sm text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded-lg transition-colors"
                     >
                       <LogOut className="h-4 w-4" />
                       Sign out

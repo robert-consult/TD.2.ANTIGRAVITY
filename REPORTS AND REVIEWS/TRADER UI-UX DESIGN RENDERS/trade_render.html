@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TradeQuip - Trade Render</title>
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&family=Rajdhani:wght@500;600;700&display=swap"
+        rel="stylesheet">
+
+    <style>
+        :root {
+            /* Palette */
+            --bg-deep: #05050A;
+            --bg-surface: #0B0E14;
+            --text-main: #E2E8F0;
+            --text-muted: #94A3B8;
+
+            /* Accents */
+            --primary-cyan: #00F0FF;
+            --neon-violet: #7000FF;
+            --success-green: #00FF94;
+            --danger-red: #FF2A55;
+
+            /* Glassmorphism */
+            --glass-bg: rgba(255, 255, 255, 0.03);
+            --glass-border: 1px solid rgba(255, 255, 255, 0.08);
+            --glass-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+
+            /* Layout */
+            --sidebar-width: 260px;
+            --header-height: 70px;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background-color: var(--bg-deep);
+            color: var(--text-main);
+            font-family: 'Inter', sans-serif;
+            height: 100vh;
+            overflow: hidden;
+            background-image:
+                radial-gradient(circle at 10% 20%, rgba(112, 0, 255, 0.05) 0%, transparent 40%),
+                radial-gradient(circle at 90% 80%, rgba(0, 240, 255, 0.05) 0%, transparent 40%);
+        }
+
+        /* Typography */
+        h1,
+        h2,
+        h3 {
+            font-family: 'Rajdhani', sans-serif;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .font-mono {
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        /* Layout Grid */
+        .app-container {
+            display: grid;
+            grid-template-columns: var(--sidebar-width) 1fr;
+            grid-template-rows: var(--header-height) 1fr;
+            height: 100vh;
+        }
+
+        /* Sidebar - Floating Dock Style */
+        .sidebar {
+            grid-row: 1 / -1;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            background: rgba(11, 14, 20, 0.4);
+            border-right: var(--glass-border);
+            backdrop-filter: blur(10px);
+        }
+
+        .logo {
+            font-size: 24px;
+            font-weight: 700;
+            color: var(--text-main);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 30px;
+        }
+
+        .logo-icon {
+            width: 32px;
+            height: 32px;
+            background: linear-gradient(135deg, var(--primary-cyan), var(--neon-violet));
+            border-radius: 8px;
+            box-shadow: 0 0 15px rgba(0, 240, 255, 0.3);
+        }
+
+        .nav-item {
+            padding: 12px 16px;
+            border-radius: 12px;
+            color: var(--text-muted);
+            text-decoration: none;
+            font-weight: 500;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .nav-item:hover {
+            background: rgba(255, 255, 255, 0.05);
+            color: #fff;
+        }
+
+        .nav-item.active {
+            background: linear-gradient(90deg, rgba(0, 240, 255, 0.1) 0%, transparent 100%);
+            border-left: 3px solid var(--primary-cyan);
+            color: var(--primary-cyan);
+            text-shadow: 0 0 10px rgba(0, 240, 255, 0.4);
+        }
+
+        /* Header */
+        .header {
+            grid-column: 2;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 30px;
+            border-bottom: var(--glass-border);
+            background: rgba(5, 5, 10, 0.8);
+            backdrop-filter: blur(10px);
+        }
+
+        .page-title {
+            font-size: 28px;
+            font-weight: 600;
+            background: linear-gradient(to right, #fff, #94A3B8);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .user-profile {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .balance-badge {
+            background: rgba(0, 240, 255, 0.1);
+            color: var(--primary-cyan);
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 14px;
+            border: 1px solid rgba(0, 240, 255, 0.2);
+            box-shadow: 0 0 10px rgba(0, 240, 255, 0.1);
+        }
+
+        /* Main Content */
+        .main-content {
+            grid-column: 2;
+            padding: 30px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            overflow-y: auto;
+        }
+
+        /* Account Summary Bar */
+        .summary-bar {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 20px;
+        }
+
+        .summary-card {
+            background: var(--glass-bg);
+            border: var(--glass-border);
+            border-radius: 12px;
+            padding: 15px 20px;
+            backdrop-filter: blur(12px);
+        }
+
+        .summary-label {
+            font-size: 11px;
+            text-transform: uppercase;
+            color: var(--text-muted);
+            margin-bottom: 5px;
+            letter-spacing: 0.05em;
+        }
+
+        .summary-value {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 18px;
+            font-weight: 600;
+            color: #fff;
+        }
+
+        /* Tabs */
+        .tabs {
+            display: flex;
+            gap: 30px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            margin-bottom: 10px;
+        }
+
+        .tab {
+            padding-bottom: 15px;
+            color: var(--text-muted);
+            cursor: pointer;
+            position: relative;
+            font-weight: 500;
+        }
+
+        .tab.active {
+            color: var(--primary-cyan);
+        }
+
+        .tab.active::after {
+            content: '';
+            position: absolute;
+            bottom: -1px;
+            left: 0;
+            width: 100%;
+            height: 2px;
+            background: var(--primary-cyan);
+            box-shadow: 0 0 10px var(--primary-cyan);
+        }
+
+        /* Table */
+        .table-container {
+            background: var(--glass-bg);
+            border: var(--glass-border);
+            border-radius: 16px;
+            overflow: hidden;
+            backdrop-filter: blur(12px);
+            flex: 1;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th {
+            text-align: left;
+            padding: 16px 24px;
+            color: var(--text-muted);
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            background: rgba(0, 0, 0, 0.2);
+        }
+
+        td {
+            padding: 16px 24px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            font-size: 14px;
+            vertical-align: middle;
+        }
+
+        tr:hover td {
+            background: rgba(255, 255, 255, 0.02);
+        }
+
+        .pos-buy {
+            color: var(--success-green);
+        }
+
+        .pos-sell {
+            color: var(--danger-red);
+        }
+
+        .pnl-value {
+            font-family: 'JetBrains Mono', monospace;
+            font-weight: 600;
+        }
+
+        .action-btn-sm {
+            padding: 6px 12px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 6px;
+            color: var(--text-main);
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .action-btn-sm:hover {
+            background: rgba(255, 255, 255, 0.1);
+            border-color: rgba(255, 255, 255, 0.2);
+        }
+
+        .close-btn {
+            color: var(--danger-red);
+            border-color: rgba(255, 42, 85, 0.3);
+            background: rgba(255, 42, 85, 0.1);
+        }
+
+        .close-btn:hover {
+            background: rgba(255, 42, 85, 0.2);
+            border-color: var(--danger-red);
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="app-container">
+        <!-- Navigation -->
+        <nav class="sidebar">
+            <div class="logo">
+                <div class="logo-icon"></div>
+                TradeQuip
+            </div>
+
+            <a href="#" class="nav-item">
+                <span>📊</span> Quotes
+            </a>
+            <a href="#" class="nav-item">
+                <span>📈</span> Chart
+            </a>
+            <a href="#" class="nav-item active">
+                <span>⚡</span> Trade
+            </a>
+            <a href="#" class="nav-item">
+                <span>📜</span> History
+            </a>
+            <a href="#" class="nav-item">
+                <span>🏆</span> Leaderboard
+            </a>
+            <a href="#" class="nav-item">
+                <span>👤</span> Account
+            </a>
+        </nav>
+
+        <!-- Header -->
+        <header class="header">
+            <h1 class="page-title">Trade Management</h1>
+
+            <div class="user-profile">
+                <div class="balance-badge font-mono">
+                    BAL: $1,054,412.30
+                </div>
+                <div
+                    style="width: 36px; height: 36px; background: #333; border-radius: 50%; background-image: url('https://ui-avatars.com/api/?name=User&background=random'); background-size: cover;">
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content">
+
+            <!-- Account Summary -->
+            <div class="summary-bar">
+                <div class="summary-card">
+                    <div class="summary-label">Balance</div>
+                    <div class="summary-value">$1,054,412.30</div>
+                </div>
+                <div class="summary-card">
+                    <div class="summary-label">Equity</div>
+                    <div class="summary-value" style="color: var(--success-green);">$1,055,840.50</div>
+                </div>
+                <div class="summary-card">
+                    <div class="summary-label">Free Margin</div>
+                    <div class="summary-value">$1,040,100.00</div>
+                </div>
+                <div class="summary-card">
+                    <div class="summary-label">Margin Level</div>
+                    <div class="summary-value">6,250%</div>
+                </div>
+            </div>
+
+            <!-- Content Area -->
+            <div>
+                <div class="tabs">
+                    <div class="tab">Place Order</div>
+                    <div class="tab active">Active Positions (4)</div>
+                    <div class="tab">Pending Orders (0)</div>
+                </div>
+
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Ticket</th>
+                                <th>Symbol</th>
+                                <th>Type</th>
+                                <th>Size</th>
+                                <th>Open Price</th>
+                                <th>Current Price</th>
+                                <th>S/L</th>
+                                <th>T/P</th>
+                                <th>Profit</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody class="font-mono">
+                            <!-- Winning Buy Trade -->
+                            <tr>
+                                <td class="text-muted">#102394</td>
+                                <td style="color:#fff; font-weight:600; font-family:'Rajdhani'">EURUSD</td>
+                                <td class="pos-buy">BUY</td>
+                                <td>1.00</td>
+                                <td>1.09100</td>
+                                <td>1.09245</td>
+                                <td>1.08900</td>
+                                <td>—</td>
+                                <td class="pos-buy pnl-value">+$1,450.00</td>
+                                <td>
+                                    <button class="action-btn-sm close-btn">Close</button>
+                                    <button class="action-btn-sm">Modify</button>
+                                </td>
+                            </tr>
+
+                            <!-- Losing Sell Trade -->
+                            <tr>
+                                <td class="text-muted">#102398</td>
+                                <td style="color:#fff; font-weight:600; font-family:'Rajdhani'">USDJPY</td>
+                                <td class="pos-sell">SELL</td>
+                                <td>2.50</td>
+                                <td>148.000</td>
+                                <td>148.120</td>
+                                <td>148.500</td>
+                                <td>147.000</td>
+                                <td class="pos-sell pnl-value">-$300.25</td>
+                                <td>
+                                    <button class="action-btn-sm close-btn">Close</button>
+                                    <button class="action-btn-sm">Modify</button>
+                                </td>
+                            </tr>
+
+                            <!-- Winning Buy Trade -->
+                            <tr>
+                                <td class="text-muted">#102401</td>
+                                <td style="color:#fff; font-weight:600; font-family:'Rajdhani'">XAUUSD</td>
+                                <td class="pos-buy">BUY</td>
+                                <td>0.50</td>
+                                <td>2,030.00</td>
+                                <td>2,034.50</td>
+                                <td>2,025.00</td>
+                                <td>2,050.00</td>
+                                <td class="pos-buy pnl-value">+$225.00</td>
+                                <td>
+                                    <button class="action-btn-sm close-btn">Close</button>
+                                    <button class="action-btn-sm">Modify</button>
+                                </td>
+                            </tr>
+
+                            <!-- Winning Buy Trade -->
+                            <tr>
+                                <td class="text-muted">#102405</td>
+                                <td style="color:#fff; font-weight:600; font-family:'Rajdhani'">BTCUSD</td>
+                                <td class="pos-buy">BUY</td>
+                                <td>0.10</td>
+                                <td>51,400.00</td>
+                                <td>51,450.00</td>
+                                <td>51,000.00</td>
+                                <td>55,000.00</td>
+                                <td class="pos-buy pnl-value">+$53.50</td>
+                                <td>
+                                    <button class="action-btn-sm close-btn">Close</button>
+                                    <button class="action-btn-sm">Modify</button>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+        </main>
+    </div>
+
+</body>
+
+</html>

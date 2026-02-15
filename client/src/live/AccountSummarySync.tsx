@@ -9,12 +9,16 @@ export function AccountSummarySync() {
   useEffect(() => {
     if (!user || !summary) return;
 
+    const nextStartingEquity = Number.isFinite(summary.startingBalance)
+      ? summary.startingBalance
+      : user.startingEquity;
     const nextBalance = Number.isFinite(summary.balance) ? summary.balance.toFixed(2) : user.balance;
     const nextEquity = Number.isFinite(summary.equity) ? summary.equity : user.equity;
     const nextFreeMargin = Number.isFinite(summary.freeMargin) ? summary.freeMargin : user.freeMargin;
     const nextUsedMargin = Number.isFinite(summary.usedMargin) ? summary.usedMargin : user.usedMargin;
 
     if (
+      user.startingEquity === nextStartingEquity &&
       user.balance === nextBalance &&
       user.equity === nextEquity &&
       user.freeMargin === nextFreeMargin &&
@@ -24,6 +28,7 @@ export function AccountSummarySync() {
     }
 
     updateUser({
+      startingEquity: nextStartingEquity,
       balance: nextBalance,
       equity: nextEquity,
       freeMargin: nextFreeMargin,
@@ -33,4 +38,3 @@ export function AccountSummarySync() {
 
   return null;
 }
-

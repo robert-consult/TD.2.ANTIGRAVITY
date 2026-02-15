@@ -958,6 +958,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         countryIso2: user.countryIso2 || null,
         language: (user as any).language || "en",
         balance: user.balance,
+        startingEquity: user.startingEquity,
         isAdmin: user.isAdmin,
         createdAt: user.createdAt,
         emailVerified: emailVerifiedLogin,
@@ -1408,6 +1409,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         language: (user as any).language || "en",
         phone: user.phone || "",
         balance: user.balance,
+        startingEquity: user.startingEquity,
         createdAt: user.createdAt,
         emailVerified: false,
         emailVerifiedAt: null,
@@ -1506,6 +1508,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             countryIso2: updatedUser.countryIso2 || null,
             language: (updatedUser as any).language || "en",
             balance: updatedUser.balance,
+            startingEquity: updatedUser.startingEquity,
             isAdmin: updatedUser.isAdmin,
             equity: updatedUser.equity,
             freeMargin: updatedUser.freeMargin,
@@ -1573,6 +1576,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         countryIso2: user.countryIso2 || null,
         language: (user as any).language || "en",
         balance: user.balance,
+        startingEquity: user.startingEquity,
         isAdmin: user.isAdmin,
         equity: user.equity,
         freeMargin: user.freeMargin,
@@ -2685,6 +2689,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Return MT5-style account summary with stale pricing indicators
       res.json({
+        startingBalance: metrics.startingBalance,
         balance: metrics.balance,
         equity: metrics.equity,
         floatingPnl: metrics.floatingPnl,
@@ -5560,6 +5565,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 userId: client.userId,
                 payload: {
                   summary: {
+                    startingBalance: metrics.startingBalance,
                     balance: metrics.balance,
                     equity: metrics.equity,
                     floatingPnl: metrics.floatingPnl,

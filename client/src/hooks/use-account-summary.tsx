@@ -12,6 +12,7 @@ import {
 } from "@shared/ws/protocol";
 
 export interface AccountSummary {
+  startingBalance?: number;
   balance: number;
   equity: number;
   floatingPnl: number;

@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Certificate: The Quant (Data-Driven)</title>
+    <link href="https://fonts.googleapis.com/css2?family=Exo+2:wght@400;700&family=Roboto+Mono:wght@400&display=swap"
+        rel="stylesheet">
+    <style>
+        @page {
+            size: A4 landscape;
+            margin: 0;
+        }
+
+        @media print {
+            body {
+                -webkit-print-color-adjust: exact;
+                print-color-adjust: exact;
+            }
+        }
+
+        :root {
+            --bg-dark: #0b1116;
+            --neon-blue: #00f2ff;
+            --text-grey: #a0a0a0;
+        }
+
+        body {
+            background-color: #222;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            font-family: 'Exo 2', sans-serif;
+        }
+
+        .certificate-sheet {
+            width: 297mm;
+            height: 210mm;
+            background-color: var(--bg-dark);
+            /* Tech background texture */
+            background-image:
+                linear-gradient(rgba(0, 242, 255, 0.05) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0, 242, 255, 0.05) 1px, transparent 1px);
+            background-size: 20px 20px;
+            position: relative;
+            box-shadow: 0 0 40px rgba(0, 242, 255, 0.2);
+            padding: 15mm;
+            box-sizing: border-box;
+            color: #fff;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            /* Neon Border */
+            border: 2px solid var(--neon-blue);
+            box-shadow:
+                inset 0 0 20px rgba(0, 242, 255, 0.3),
+                0 0 20px rgba(0, 242, 255, 0.3);
+            border-radius: 8px;
+        }
+
+        /* Corner Accents */
+        .corner {
+            position: absolute;
+            width: 20mm;
+            height: 20mm;
+            border: 2px solid white;
+            opacity: 0.5;
+        }
+
+        .tl {
+            top: 5mm;
+            left: 5mm;
+            border-right: none;
+            border-bottom: none;
+            border-radius: 8px 0 0 0;
+        }
+
+        .tr {
+            top: 5mm;
+            right: 5mm;
+            border-left: none;
+            border-bottom: none;
+            border-radius: 0 8px 0 0;
+        }
+
+        .bl {
+            bottom: 5mm;
+            left: 5mm;
+            border-right: none;
+            border-top: none;
+            border-radius: 0 0 0 8px;
+        }
+
+        .br {
+            bottom: 5mm;
+            right: 5mm;
+            border-left: none;
+            border-top: none;
+            border-radius: 0 0 8px 0;
+        }
+
+        h1 {
+            font-family: 'Exo 2', sans-serif;
+            font-weight: 700;
+            font-size: 2.5rem;
+            text-transform: uppercase;
+            letter-spacing: 4px;
+            background: linear-gradient(90deg, #fff, var(--neon-blue));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 5px;
+        }
+
+        .recipient {
+            font-size: 3rem;
+            font-weight: 400;
+            color: white;
+            margin: 10mm 0;
+        }
+
+        .description {
+            color: var(--text-grey);
+            max-width: 60%;
+            text-align: center;
+            font-size: 0.9rem;
+            line-height: 1.6;
+            margin-bottom: 15mm;
+        }
+
+        /* Gold Seal in a Tech Context (per reference) */
+        .gold-seal {
+            position: absolute;
+            bottom: 10mm;
+            right: 15mm;
+            width: 40mm;
+            height: 40mm;
+            background: radial-gradient(circle, #fcd34d, #d97706);
+            border-radius: 50%;
+            box-shadow: 0 0 20px rgba(251, 191, 36, 0.4);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #78350f;
+            font-weight: bold;
+            font-size: 0.7rem;
+            text-align: center;
+        }
+
+        .gold-seal-inner {
+            border: 1px dashed #78350f;
+            width: 34mm;
+            height: 34mm;
+            border-radius: 50%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+
+        /* Floating Code Snippets */
+        .code-float {
+            position: absolute;
+            font-family: 'Roboto Mono', monospace;
+            font-size: 0.6rem;
+            color: rgba(0, 242, 255, 0.4);
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="certificate-sheet">
+        <div class="corner tl"></div>
+        <div class="corner tr"></div>
+        <div class="corner bl"></div>
+        <div class="corner br"></div>
+
+        <div class="code-float" style="top: 20%; left: 10%;">01010101...</div>
+        <div class="code-float" style="bottom: 30%; left: 15%;">ETH_HASH_V...</div>
+
+        <h1>Certificate of Completion</h1>
+
+        <div class="recipient">Stephane Name</div>
+
+        <div class="description">
+            Awarded for exceptional performance in algorithmic strategy deployment.
+            Verified on the blockchain.
+        </div>
+
+        <div style="font-family: 'Roboto Mono'; color: var(--neon-blue); font-size: 0.8rem; letter-spacing: 2px;">
+            APRIL 22, 2026
+        </div>
+
+        <div class="gold-seal">
+            <div class="gold-seal-inner">
+                VERIFIED<br>QUANT<br>ACADEMY
+            </div>
+        </div>
+    </div>
+
+</body>
+
+</html>

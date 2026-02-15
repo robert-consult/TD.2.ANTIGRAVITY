@@ -156,6 +156,7 @@ export default function ChartScreen({ selectedSymbol }: ChartScreenProps) {
   // Chart refs and state
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const [tradingViewLoaded, setTradingViewLoaded] = useState(false);
+  const [chartRenderReady, setChartRenderReady] = useState(false);
   const [tradingViewError, setTradingViewError] = useState<string | null>(null);
   const [chartSize, setChartSize] = useState({ width: 0, height: 0 });
   const [tradingViewReloadKey, setTradingViewReloadKey] = useState(0);
@@ -262,6 +263,7 @@ export default function ChartScreen({ selectedSymbol }: ChartScreenProps) {
     let cancelled = false;
 
     setTradingViewLoaded(false);
+    setChartRenderReady(false);
     setTradingViewError(null);
 
     loadTradingViewScript()
@@ -331,6 +333,32 @@ export default function ChartScreen({ selectedSymbol }: ChartScreenProps) {
     if (chartSize.width < 100 || chartSize.height < 100) return;
 
     const container = chartContainerRef.current;
+    let renderTimeoutId: number | null = null;
+    let renderObserver: MutationObserver | null = null;
+    let disposed = false;
+
+    const clearRenderWatchers = () => {
+      if (renderObserver) {
+        renderObserver.disconnect();
+        renderObserver = null;
+      }
+      if (renderTimeoutId !== null) {
+        window.clearTimeout(renderTimeoutId);
+        renderTimeoutId = null;
+      }
+    };
+
+    const hasRenderedChartDom = () => Boolean(container.querySelector("iframe, canvas, svg"));
+
+    const markChartRendered = () => {
+      if (disposed) return false;
+      if (!hasRenderedChartDom()) return false;
+      clearRenderWatchers();
+      setChartRenderReady(true);
+      return true;
+    };
+
+    setChartRenderReady(false);
 
     // Re-create deterministically (container size can change due to layout, sidebar, etc.)
     try {
@@ -368,7 +396,27 @@ export default function ChartScreen({ selectedSymbol }: ChartScreenProps) {
         backgroundColor: "#121212",
         toolbar_bg: "#121212",
       });
+
+      if (!markChartRendered()) {
+        renderObserver = new MutationObserver(() => {
+          markChartRendered();
+        });
+        renderObserver.observe(container, { childList: true, subtree: true });
+
+        renderTimeoutId = window.setTimeout(() => {
+          if (!markChartRendered()) {
+            setTradingViewError("Chart failed to render. Please retry.");
+          }
+        }, 8000);
+      }
+    } else {
+      setTradingViewError("TradingView widget API is unavailable.");
     }
+
+    return () => {
+      disposed = true;
+      clearRenderWatchers();
+    };
   }, [selectedSymbol, activePeriod, tradingViewLoaded, tradingViewError, chartSize.height, chartSize.width]);
 
   const executeTrade = useMutation({
@@ -505,9 +553,9 @@ export default function ChartScreen({ selectedSymbol }: ChartScreenProps) {
   const pricePrecision = getQuoteDecimals(pipCfg);
 
   return (
-    <div className="h-full flex flex-col bg-[#0F0F0F] overflow-hidden">
+    <div className="tq-chart-screen h-full flex flex-col overflow-hidden">
       {/* Top bar with title and quote information */}
-      <div className="shrink-0 tq-page-header flex items-center justify-between gap-3">
+      <div className="shrink-0 tq-page-header tq-chart-info-bar flex items-center justify-between gap-3">
         <div className="min-w-0">
           <h1 className="tq-page-title truncate">{selectedSymbol}</h1>
           <p className="text-[clamp(0.7rem,0.65rem+0.3vw,0.8rem)] text-gray-400">
@@ -548,13 +596,13 @@ export default function ChartScreen({ selectedSymbol }: ChartScreenProps) {
       </div>
 
       {/* Chart area - takes remaining space */}
-      <div className="flex-1 min-h-0 relative bg-neutral-900">
+      <div className="tq-chart-surface flex-1 min-h-0 relative">
         {/* TradingView Chart Container */}
         <div className="absolute inset-0 overflow-hidden">
           <div
             ref={chartContainerRef}
             id="tradingview_chart"
-            className="w-full h-full bg-[#121212]"
+            className="tq-chart-canvas w-full h-full"
           />
         </div>
 
@@ -572,9 +620,9 @@ export default function ChartScreen({ selectedSymbol }: ChartScreenProps) {
               </Button>
             </div>
           </div>
-        ) : !tradingViewLoaded ? (
+        ) : !tradingViewLoaded || !chartRenderReady ? (
           <div className="absolute inset-0 z-20 flex items-center justify-center">
-            <div className="text-sm text-gray-400">Loading chart…</div>
+            <div className="text-sm text-gray-400">{tradingViewLoaded ? "Rendering chart…" : "Loading chart…"}</div>
           </div>
         ) : null}
 
@@ -606,13 +654,13 @@ export default function ChartScreen({ selectedSymbol }: ChartScreenProps) {
               <X className="h-4 w-4" />
             </button>
             <div className="grid grid-cols-[auto_minmax(0,1fr)] gap-[clamp(0.25rem,0.8vw,0.5rem)]">
-              <span className="text-gray-400">Bid:</span>
-              <span className="font-mono text-danger-500 font-medium text-right">
-                {bid?.toFixed(pricePrecision) ?? "-"}
-              </span>
               <span className="text-gray-400">Ask:</span>
               <span className="font-mono text-success-500 font-medium text-right">
                 {ask?.toFixed(pricePrecision) ?? "-"}
+              </span>
+              <span className="text-gray-400">Bid:</span>
+              <span className="font-mono text-danger-500 font-medium text-right">
+                {bid?.toFixed(pricePrecision) ?? "-"}
               </span>
               <span className="text-gray-400">Spread:</span>
               <span className="font-mono text-white text-right">
@@ -644,11 +692,7 @@ export default function ChartScreen({ selectedSymbol }: ChartScreenProps) {
       <div className="shrink-0 border-t border-neutral-800 bg-[#111111] px-gutter py-2 sm:py-3">
         <div className="flex items-center gap-1.5 sm:gap-3">
           <Button
-            className={`flex-1 min-w-0 h-10 sm:h-12 font-bold text-xs sm:text-base px-2 sm:px-4 ${
-              currentTradeType === "SELL"
-                ? "bg-red-600 hover:bg-red-700"
-                : "bg-red-500 hover:bg-red-600"
-            } text-white uppercase`}
+            className="btn-sell flex-1 min-w-0 h-10 sm:h-12 py-3 px-4 text-white font-bold bg-orange-500 hover:bg-orange-600 shadow-md transition-all uppercase text-xs sm:text-base"
             onClick={() => handleTrade("sell")}
             disabled={executeTrade.isPending}
           >
@@ -685,11 +729,7 @@ export default function ChartScreen({ selectedSymbol }: ChartScreenProps) {
           </div>
 
           <Button
-            className={`flex-1 min-w-0 h-10 sm:h-12 font-bold text-xs sm:text-base px-2 sm:px-4 ${
-              currentTradeType === "BUY"
-                ? "bg-lime-600 hover:bg-lime-700"
-                : "bg-lime-500 hover:bg-lime-600"
-            } text-white uppercase`}
+            className="btn-buy flex-1 min-w-0 h-10 sm:h-12 py-3 px-4 text-black font-bold bg-lime-500 hover:bg-lime-600 shadow-md transition-all uppercase text-xs sm:text-base"
             onClick={() => handleTrade("buy")}
             disabled={executeTrade.isPending}
           >

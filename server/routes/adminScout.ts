@@ -1928,6 +1928,15 @@ adminScoutRouter.put("/config", async (req, res) => {
       patchKeys: Object.keys(parsed.data),
     });
 
+    publishLiveEvent({
+      type: "system-config:updated",
+      payload: {
+        updatedAt: ts,
+        scope: "SCOUT_CONFIG",
+        patchKeys: Object.keys(parsed.data),
+      },
+    });
+
     return res.json({ ok: true, config: updated });
   } catch (error) {
     console.error("[admin-scout] config update error:", error);

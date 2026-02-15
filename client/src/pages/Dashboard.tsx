@@ -13,6 +13,27 @@ const HistoryScreen = lazyWithPing(() => import("./HistoryScreen"));
 const LeaderboardScreen = lazyWithPing(() => import("./LeaderboardScreen"));
 const AccountScreen = lazyWithPing(() => import("./AccountScreen"));
 
+function DashboardLoadingFallback({ activeTab }: { activeTab: string }) {
+  const tabLabelMap: Record<string, string> = {
+    quotes: "quotes",
+    chart: "chart",
+    trade: "trade",
+    history: "history",
+    leaderboard: "leaderboard",
+    account: "account",
+  };
+  const label = tabLabelMap[activeTab] ?? "panel";
+
+  return (
+    <div className="px-gutter py-4">
+      <div className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-neutral-900/60 px-3 py-2 text-sm text-gray-400">
+        <span className="h-2 w-2 rounded-full bg-sky-400 animate-pulse" />
+        <span>Loading {label}…</span>
+      </div>
+    </div>
+  );
+}
+
 export default function Dashboard() {
   const [activeTab, setActiveTab] = useState("quotes");
   const [selectedSymbol, setSelectedSymbol] = useState("");
@@ -59,6 +80,8 @@ export default function Dashboard() {
 
   return (
     <AppShell
+      className="tq-dashboard-shell"
+      contentClassName="tq-dashboard-main"
       header={
         <>
           <Header showBalance />
@@ -67,7 +90,7 @@ export default function Dashboard() {
       mobileNav={<MobileNavigation activeTab={activeTab} setActiveTab={setActiveTab} />}
       sidebar={<SideNavigation activeTab={activeTab} setActiveTab={setActiveTab} />}
     >
-      <Suspense fallback={<div className="px-gutter py-4 text-sm text-muted-foreground">Loading…</div>}>
+      <Suspense fallback={<DashboardLoadingFallback activeTab={activeTab} />}>
         {activeTab === "quotes" && <QuotesScreen onSelectSymbol={handleSelectSymbol} />}
 
         {(activeTab === "chart" || activeTab === "trade") && !selectedSymbol && (

@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Badge Stage 1: Minimalist Modern (Refined)</title>
+    <style>
+        body {
+            background: #f0f4f8;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+
+        .badge {
+            width: 200px;
+            height: 200px;
+            border-radius: 50%;
+            /* Soft Neumorphic/Material Gradient from reference */
+            background: linear-gradient(135deg, #74ebd5 0%, #9face6 100%);
+            box-shadow:
+                20px 20px 60px #cad4db,
+                -20px -20px 60px #ffffff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+        }
+
+        /* Mountain Icon */
+        .badge svg {
+            width: 50%;
+            filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.2));
+        }
+    </style>
+</head>
+
+<body>
+    <div class="badge">
+        <svg viewBox="0 0 100 100">
+            <path d="M50 20 L20 80 H80 Z" fill="white" />
+            <path d="M50 20 L65 80 H35 Z" fill="#e0e7ff" /> <!-- Inner dimension -->
+        </svg>
+    </div>
+</body>
+
+</html>

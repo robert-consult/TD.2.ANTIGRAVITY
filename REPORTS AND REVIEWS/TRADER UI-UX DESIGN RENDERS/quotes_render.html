@@ -1,0 +1,598 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TradeQuip - Quotes Render</title>
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&family=Rajdhani:wght@500;600;700&display=swap"
+        rel="stylesheet">
+
+    <style>
+        :root {
+            /* Palette */
+            --bg-deep: #05050A;
+            --bg-surface: #0B0E14;
+            --text-main: #E2E8F0;
+            --text-muted: #94A3B8;
+
+            /* Accents */
+            --primary-cyan: #00F0FF;
+            --neon-violet: #7000FF;
+            --success-green: #00FF94;
+            --danger-red: #FF2A55;
+            --warning-yellow: #FFD600;
+
+            /* Glassmorphism */
+            --glass-bg: rgba(255, 255, 255, 0.03);
+            --glass-border: 1px solid rgba(255, 255, 255, 0.08);
+            --glass-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+
+            /* Layout */
+            --sidebar-width: 260px;
+            --header-height: 70px;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background-color: var(--bg-deep);
+            color: var(--text-main);
+            font-family: 'Inter', sans-serif;
+            height: 100vh;
+            overflow: hidden;
+            background-image:
+                radial-gradient(circle at 10% 20%, rgba(112, 0, 255, 0.05) 0%, transparent 40%),
+                radial-gradient(circle at 90% 80%, rgba(0, 240, 255, 0.05) 0%, transparent 40%);
+        }
+
+        /* Typography */
+        h1,
+        h2,
+        h3 {
+            font-family: 'Rajdhani', sans-serif;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .font-mono {
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        /* Layout Grid */
+        .app-container {
+            display: grid;
+            grid-template-columns: var(--sidebar-width) 1fr;
+            grid-template-rows: var(--header-height) 1fr;
+            height: 100vh;
+        }
+
+        /* Sidebar - Floating Dock Style */
+        .sidebar {
+            grid-row: 1 / -1;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            background: rgba(11, 14, 20, 0.4);
+            border-right: var(--glass-border);
+            backdrop-filter: blur(10px);
+        }
+
+        .logo {
+            font-size: 24px;
+            font-weight: 700;
+            color: var(--text-main);
+            margin-bottom: 30px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .logo-icon {
+            width: 32px;
+            height: 32px;
+            background: linear-gradient(135deg, var(--primary-cyan), var(--neon-violet));
+            border-radius: 8px;
+            box-shadow: 0 0 15px rgba(0, 240, 255, 0.3);
+        }
+
+        .nav-item {
+            padding: 12px 16px;
+            border-radius: 12px;
+            color: var(--text-muted);
+            text-decoration: none;
+            font-weight: 500;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .nav-item:hover {
+            background: rgba(255, 255, 255, 0.05);
+            color: #fff;
+        }
+
+        .nav-item.active {
+            background: linear-gradient(90deg, rgba(0, 240, 255, 0.1) 0%, transparent 100%);
+            border-left: 3px solid var(--primary-cyan);
+            color: var(--primary-cyan);
+            text-shadow: 0 0 10px rgba(0, 240, 255, 0.4);
+        }
+
+        /* Header */
+        .header {
+            grid-column: 2;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 30px;
+            border-bottom: var(--glass-border);
+            background: rgba(5, 5, 10, 0.8);
+            backdrop-filter: blur(10px);
+        }
+
+        .page-title {
+            font-size: 28px;
+            font-weight: 600;
+            background: linear-gradient(to right, #fff, #94A3B8);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .connection-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+            color: var(--success-green);
+            background: rgba(0, 255, 148, 0.1);
+            padding: 4px 8px;
+            border-radius: 12px;
+            border: 1px solid rgba(0, 255, 148, 0.2);
+        }
+
+        .status-dot {
+            width: 6px;
+            height: 6px;
+            background: var(--success-green);
+            border-radius: 50%;
+            box-shadow: 0 0 8px var(--success-green);
+        }
+
+        .user-profile {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .balance-badge {
+            background: rgba(0, 240, 255, 0.1);
+            color: var(--primary-cyan);
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 14px;
+            border: 1px solid rgba(0, 240, 255, 0.2);
+            box-shadow: 0 0 10px rgba(0, 240, 255, 0.1);
+        }
+
+        /* Main Content */
+        .main-content {
+            grid-column: 2;
+            padding: 0;
+            /* Remove padding to allow full-width scroll area */
+            overflow-y: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Quotes Toolbar */
+        .quotes-toolbar {
+            padding: 20px 30px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: var(--glass-border);
+            background: rgba(5, 5, 10, 0.3);
+        }
+
+        .search-bar {
+            position: relative;
+            width: 300px;
+        }
+
+        .search-input {
+            width: 100%;
+            padding: 10px 15px 10px 35px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            color: #fff;
+            font-family: 'Inter', sans-serif;
+            font-size: 14px;
+        }
+
+        .search-icon {
+            position: absolute;
+            left: 10px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--text-muted);
+        }
+
+        .filter-group {
+            display: flex;
+            gap: 10px;
+        }
+
+        .filter-btn {
+            background: transparent;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: var(--text-muted);
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .filter-btn:hover,
+        .filter-btn.active {
+            border-color: var(--primary-cyan);
+            color: var(--primary-cyan);
+            background: rgba(0, 240, 255, 0.05);
+        }
+
+        .add-btn {
+            background: var(--primary-cyan);
+            color: #000;
+            border: none;
+            width: 32px;
+            height: 32px;
+            border-radius: 8px;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            box-shadow: 0 0 10px rgba(0, 240, 255, 0.4);
+        }
+
+        /* Quotes List */
+        .quotes-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 0 30px 30px 30px;
+        }
+
+        .quote-row {
+            display: grid;
+            grid-template-columns: 2fr 1.5fr 1.5fr 1.5fr 0.5fr;
+            align-items: center;
+            padding: 15px 20px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            transition: all 0.2s;
+            cursor: pointer;
+        }
+
+        .quote-row:hover {
+            background: rgba(255, 255, 255, 0.03);
+            transform: translateX(5px);
+            border-left: 2px solid var(--primary-cyan);
+        }
+
+        .symbol-cell {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .symbol-name {
+            font-family: 'Rajdhani', sans-serif;
+            font-weight: 700;
+            font-size: 18px;
+            color: #fff;
+            letter-spacing: 0.05em;
+        }
+
+        .symbol-desc {
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        .price-cell {
+            text-align: right;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 16px;
+            font-weight: 500;
+            color: #fff;
+        }
+
+        .change-cell {
+            text-align: right;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 14px;
+        }
+
+        .change-pos {
+            color: var(--success-green);
+        }
+
+        .change-neg {
+            color: var(--danger-red);
+        }
+
+        .bid-ask-cell {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            text-align: right;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px;
+        }
+
+        .spread-badge {
+            background: rgba(255, 255, 255, 0.1);
+            color: var(--text-muted);
+            font-size: 10px;
+            padding: 2px 6px;
+            border-radius: 4px;
+            display: inline-block;
+            margin-top: 2px;
+        }
+
+        .arrow-icon {
+            color: var(--text-muted);
+            justify-self: end;
+        }
+
+        /* Headers for List */
+        .list-header {
+            display: grid;
+            grid-template-columns: 2fr 1.5fr 1.5fr 1.5fr 0.5fr;
+            padding: 15px 20px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            color: var(--text-muted);
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            background: rgba(0, 0, 0, 0.2);
+            position: sticky;
+            top: 0;
+            backdrop-filter: blur(10px);
+            z-index: 10;
+        }
+
+        div.text-right {
+            text-align: right;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="app-container">
+        <!-- Navigation -->
+        <nav class="sidebar">
+            <div class="logo">
+                <div class="logo-icon"></div>
+                TradeQuip
+            </div>
+
+            <a href="#" class="nav-item active">
+                <span>📊</span> Quotes
+            </a>
+            <a href="#" class="nav-item">
+                <span>📈</span> Chart
+            </a>
+            <a href="#" class="nav-item">
+                <span>⚡</span> Trade
+            </a>
+            <a href="#" class="nav-item">
+                <span>📜</span> History
+            </a>
+            <a href="#" class="nav-item">
+                <span>🏆</span> Leaderboard
+            </a>
+            <a href="#" class="nav-item">
+                <span>👤</span> Account
+            </a>
+        </nav>
+
+        <!-- Header -->
+        <header class="header">
+            <div style="display: flex; align-items: center; gap: 15px;">
+                <h1 class="page-title">Live Quotes</h1>
+                <div class="connection-status">
+                    <div class="status-dot"></div>
+                    Real-time Data
+                </div>
+            </div>
+
+            <div class="user-profile">
+                <div class="balance-badge font-mono">
+                    BAL: $1,054,412.30
+                </div>
+                <div
+                    style="width: 36px; height: 36px; background: #333; border-radius: 50%; background-image: url('https://ui-avatars.com/api/?name=User&background=random'); background-size: cover;">
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content">
+
+            <!-- Toolbar -->
+            <div class="quotes-toolbar">
+                <div class="search-bar">
+                    <span class="search-icon">🔍</span>
+                    <input type="text" class="search-input" placeholder="Search instruments (e.g. BTC, EUR)...">
+                </div>
+
+                <div class="filter-group">
+                    <button class="filter-btn active">All</button>
+                    <button class="filter-btn">Forex</button>
+                    <button class="filter-btn">Crypto</button>
+                    <button class="filter-btn">Commodities</button>
+                    <button class="filter-btn">Indices</button>
+                </div>
+
+                <button class="add-btn" title="Add Symbol">+</button>
+            </div>
+
+            <!-- List Header -->
+            <div class="list-header">
+                <div>Symbol / Name</div>
+                <div class="text-right">Price</div>
+                <div class="text-right">Change (24h)</div>
+                <div class="text-right">Bid / Ask</div>
+                <div></div>
+            </div>
+
+            <!-- Scrollable List -->
+            <div class="quotes-list">
+
+                <!-- EURUSD -->
+                <div class="quote-row">
+                    <div class="symbol-cell">
+                        <span class="symbol-name">EURUSD</span>
+                        <span class="symbol-desc">Euro / US Dollar</span>
+                    </div>
+                    <div class="price-cell">1.09245</div>
+                    <div class="change-cell change-pos">+0.12%</div>
+                    <div class="bid-ask-cell">
+                        <div><span style="color:#94A3B8">B:</span> 1.09242</div>
+                        <div><span style="color:#94A3B8">A:</span> 1.09248</div>
+                        <div style="text-align:right"><span class="spread-badge">0.6</span></div>
+                    </div>
+                    <div class="arrow-icon">›</div>
+                </div>
+
+                <!-- GBPUSD -->
+                <div class="quote-row">
+                    <div class="symbol-cell">
+                        <span class="symbol-name">GBPUSD</span>
+                        <span class="symbol-desc">Great Britain Pound / US Dollar</span>
+                    </div>
+                    <div class="price-cell">1.26350</div>
+                    <div class="change-cell change-pos">+0.05%</div>
+                    <div class="bid-ask-cell">
+                        <div><span style="color:#94A3B8">B:</span> 1.26345</div>
+                        <div><span style="color:#94A3B8">A:</span> 1.26355</div>
+                        <div style="text-align:right"><span class="spread-badge">1.0</span></div>
+                    </div>
+                    <div class="arrow-icon">›</div>
+                </div>
+
+                <!-- USDJPY -->
+                <div class="quote-row">
+                    <div class="symbol-cell">
+                        <span class="symbol-name">USDJPY</span>
+                        <span class="symbol-desc">US Dollar / Japanese Yen</span>
+                    </div>
+                    <div class="price-cell">148.120</div>
+                    <div class="change-cell change-neg">-0.24%</div>
+                    <div class="bid-ask-cell">
+                        <div><span style="color:#94A3B8">B:</span> 148.115</div>
+                        <div><span style="color:#94A3B8">A:</span> 148.125</div>
+                        <div style="text-align:right"><span class="spread-badge">1.0</span></div>
+                    </div>
+                    <div class="arrow-icon">›</div>
+                </div>
+
+                <!-- XAUUSD -->
+                <div class="quote-row">
+                    <div class="symbol-cell">
+                        <span class="symbol-name" style="color: #FFD700;">XAUUSD</span>
+                        <span class="symbol-desc">Gold / US Dollar</span>
+                    </div>
+                    <div class="price-cell">2,034.50</div>
+                    <div class="change-cell change-pos">+0.85%</div>
+                    <div class="bid-ask-cell">
+                        <div><span style="color:#94A3B8">B:</span> 2034.20</div>
+                        <div><span style="color:#94A3B8">A:</span> 2034.80</div>
+                        <div style="text-align:right"><span class="spread-badge">6.0</span></div>
+                    </div>
+                    <div class="arrow-icon">›</div>
+                </div>
+
+                <!-- BTCUSD -->
+                <div class="quote-row">
+                    <div class="symbol-cell">
+                        <span class="symbol-name" style="color: #F7931A;">BTCUSD</span>
+                        <span class="symbol-desc">Bitcoin / US Dollar</span>
+                    </div>
+                    <div class="price-cell">51,450.00</div>
+                    <div class="change-cell change-pos">+2.40%</div>
+                    <div class="bid-ask-cell">
+                        <div><span style="color:#94A3B8">B:</span> 51445.0</div>
+                        <div><span style="color:#94A3B8">A:</span> 51455.0</div>
+                        <div style="text-align:right"><span class="spread-badge">10.0</span></div>
+                    </div>
+                    <div class="arrow-icon">›</div>
+                </div>
+
+                <!-- ETHUSD -->
+                <div class="quote-row">
+                    <div class="symbol-cell">
+                        <span class="symbol-name" style="color: #627EEA;">ETHUSD</span>
+                        <span class="symbol-desc">Ethereum / US Dollar</span>
+                    </div>
+                    <div class="price-cell">2,980.50</div>
+                    <div class="change-cell change-pos">+3.15%</div>
+                    <div class="bid-ask-cell">
+                        <div><span style="color:#94A3B8">B:</span> 2980.00</div>
+                        <div><span style="color:#94A3B8">A:</span> 2981.00</div>
+                        <div style="text-align:right"><span class="spread-badge">1.0</span></div>
+                    </div>
+                    <div class="arrow-icon">›</div>
+                </div>
+
+                <!-- US30 -->
+                <div class="quote-row">
+                    <div class="symbol-cell">
+                        <span class="symbol-name">US30</span>
+                        <span class="symbol-desc">US Wall Street 30 Index</span>
+                    </div>
+                    <div class="price-cell">38,650.0</div>
+                    <div class="change-cell change-neg">-0.10%</div>
+                    <div class="bid-ask-cell">
+                        <div><span style="color:#94A3B8">B:</span> 38648.0</div>
+                        <div><span style="color:#94A3B8">A:</span> 38652.0</div>
+                        <div style="text-align:right"><span class="spread-badge">4.0</span></div>
+                    </div>
+                    <div class="arrow-icon">›</div>
+                </div>
+
+                <!-- NAS100 -->
+                <div class="quote-row">
+                    <div class="symbol-cell">
+                        <span class="symbol-name">NAS100</span>
+                        <span class="symbol-desc">US Tech 100 Index</span>
+                    </div>
+                    <div class="price-cell">17,850.5</div>
+                    <div class="change-cell change-pos">+0.45%</div>
+                    <div class="bid-ask-cell">
+                        <div><span style="color:#94A3B8">B:</span> 17850.0</div>
+                        <div><span style="color:#94A3B8">A:</span> 17851.0</div>
+                        <div style="text-align:right"><span class="spread-badge">1.0</span></div>
+                    </div>
+                    <div class="arrow-icon">›</div>
+                </div>
+
+            </div>
+
+        </main>
+    </div>
+
+</body>
+
+</html>

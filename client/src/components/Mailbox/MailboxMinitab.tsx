@@ -3,6 +3,7 @@ import { Lock, Mail, SendHorizontal } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useAuth } from "@/hooks/use-auth";
 import {
   useMailboxConfig,
@@ -128,7 +129,7 @@ export function MailboxMinitab() {
   };
 
   return (
-    <Card className="bg-neutral-800 border-gray-700">
+    <Card className="tq-account-card tq-mailbox-card bg-neutral-800 border-gray-700">
       <CardHeader className="pb-3 px-3 sm:px-6">
         <CardTitle className="flex items-center justify-between gap-2 text-white text-sm sm:text-base">
           <span className="inline-flex items-center gap-2">
@@ -145,20 +146,24 @@ export function MailboxMinitab() {
       </CardHeader>
       <CardContent className="px-3 sm:px-6 pb-4">
         <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-3">
-          <div className="rounded-lg border border-gray-700 bg-neutral-900/40 overflow-hidden">
-            <div className="px-3 py-2 text-xs text-gray-400 border-b border-gray-700 flex items-center justify-between gap-2">
+          <div className="tq-mailbox-threads rounded-lg border border-gray-700 bg-neutral-900/40 overflow-hidden">
+            <div className="tq-mailbox-strip px-3 py-2 text-xs text-gray-400 border-b border-gray-700 flex items-center justify-between gap-2">
               <span>Threads</span>
-              <select
+              <Select
                 value={categoryFilter}
-                onChange={(event) => setCategoryFilter(event.target.value as ThreadCategoryFilter)}
-                className="rounded border border-gray-700 bg-neutral-950 text-[11px] text-gray-200 px-2 py-1"
+                onValueChange={(value) => setCategoryFilter(value as ThreadCategoryFilter)}
               >
-                <option value="ALL">All</option>
-                <option value="SYSTEM">System</option>
-                <option value="SUPPORT">Support</option>
-                <option value="ANNOUNCEMENT">Announcement</option>
-                <option value="CHALLENGES">Challenges</option>
-              </select>
+                <SelectTrigger className="tq-mailbox-select-trigger h-7 min-w-[104px] bg-neutral-950 border-gray-700 text-[11px] px-2">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="tq-mailbox-select-content">
+                  <SelectItem className="tq-mailbox-select-item" value="ALL">All</SelectItem>
+                  <SelectItem className="tq-mailbox-select-item" value="SYSTEM">System</SelectItem>
+                  <SelectItem className="tq-mailbox-select-item" value="SUPPORT">Support</SelectItem>
+                  <SelectItem className="tq-mailbox-select-item" value="ANNOUNCEMENT">Announcement</SelectItem>
+                  <SelectItem className="tq-mailbox-select-item" value="CHALLENGES">Challenges</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
             <div className="max-h-[420px] overflow-y-auto">
               {isThreadsLoading ? (
@@ -174,7 +179,7 @@ export function MailboxMinitab() {
                       key={threadRow.threadId}
                       type="button"
                       onClick={() => setSelectedThreadId(Number(threadRow.threadId))}
-                      className={`w-full text-left px-3 py-2 border-b border-gray-800/80 hover:bg-white/[0.04] transition-colors ${isActive ? "bg-sky-500/10" : ""}`}
+                      className={`tq-mailbox-thread-row w-full text-left px-3 py-2 border-b border-gray-800/80 hover:bg-white/[0.04] transition-colors ${isActive ? "is-active bg-sky-500/10" : ""}`}
                     >
                       <div className="flex items-center justify-between gap-2">
                         <div className="text-sm font-medium text-white truncate">{threadRow.subject || "Message"}</div>
@@ -189,8 +194,8 @@ export function MailboxMinitab() {
             </div>
           </div>
 
-          <div className="rounded-lg border border-gray-700 bg-neutral-900/40 min-h-[420px] flex flex-col">
-            <div className="px-3 py-2 text-xs text-gray-400 border-b border-gray-700">
+          <div className="tq-mailbox-convo rounded-lg border border-gray-700 bg-neutral-900/40 min-h-[420px] flex flex-col">
+            <div className="tq-mailbox-strip px-3 py-2 text-xs text-gray-400 border-b border-gray-700">
               {thread ? thread.subject || "Conversation" : "Select a thread"}
             </div>
 
@@ -207,7 +212,7 @@ export function MailboxMinitab() {
                   return (
                     <div
                       key={message.id}
-                      className={`max-w-[92%] rounded-lg px-3 py-2 ${sentByCurrentUser ? "ml-auto bg-sky-600/20 border border-sky-500/30" : "mr-auto bg-white/[0.03] border border-white/10"}`}
+                      className={`tq-mailbox-msg max-w-[92%] rounded-lg px-3 py-2 ${sentByCurrentUser ? "tq-mailbox-msg-own ml-auto bg-sky-600/20 border border-sky-500/30" : "tq-mailbox-msg-peer mr-auto bg-white/[0.03] border border-white/10"}`}
                     >
                       <div className="text-xs text-gray-400 mb-1">
                         {message.senderUsername || (message.senderId ? "User" : "System")}
@@ -224,25 +229,29 @@ export function MailboxMinitab() {
               )}
             </div>
 
-            <form onSubmit={onReplySubmit} className="border-t border-gray-700 p-3 space-y-2">
+            <form onSubmit={onReplySubmit} className="tq-mailbox-compose border-t border-gray-700 p-3 space-y-2">
               {canReply ? (
                 <>
                   <div className="flex items-center justify-between gap-2 text-xs text-gray-400">
                     <span>Reply format</span>
-                    <select
+                    <Select
                       value={replyFormat}
-                      onChange={(event) => setReplyFormat(event.target.value as ReplyFormat)}
-                      className="rounded border border-gray-700 bg-neutral-950 text-[11px] text-gray-200 px-2 py-1"
+                      onValueChange={(value) => setReplyFormat(value as ReplyFormat)}
                     >
-                      <option value="PLAINTEXT">Plain text</option>
-                      <option value="MARKDOWN">Markdown</option>
-                    </select>
+                      <SelectTrigger className="tq-mailbox-select-trigger h-7 min-w-[120px] bg-neutral-950 border-gray-700 text-[11px] px-2">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent className="tq-mailbox-select-content">
+                        <SelectItem className="tq-mailbox-select-item" value="PLAINTEXT">Plain text</SelectItem>
+                        <SelectItem className="tq-mailbox-select-item" value="MARKDOWN">Markdown</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
                   <Textarea
                     value={replyBody}
                     onChange={(event) => setReplyBody(event.target.value)}
                     placeholder="Write a reply…"
-                    className="min-h-[84px] bg-neutral-950 border-gray-700 text-white"
+                    className="tq-mailbox-textarea min-h-[84px] bg-neutral-950 border-gray-700 text-white"
                     disabled={!selectedThreadId || replyMutation.isPending || !messagingEnabled}
                   />
                   <div className="flex justify-end">

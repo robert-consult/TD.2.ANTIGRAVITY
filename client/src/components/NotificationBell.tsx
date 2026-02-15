@@ -3,6 +3,9 @@ import { Bell, CheckCheck, Volume2, VolumeX } from "lucide-react";
 import { useNotifications } from "@/hooks/use-notifications";
 import { isNotificationSoundEnabled, setNotificationSoundEnabled } from "@/lib/notificationSound";
 
+const CLOSE_NOTIFICATIONS_EVENT = "tq:close-notifications";
+const CLOSE_HEADER_MENU_EVENT = "tq:close-header-menu";
+
 function toLocalDateLabel(value: number | null | undefined): string {
   if (!value) return "";
   const ms = value < 1e12 ? value * 1000 : value;
@@ -94,14 +97,23 @@ export function NotificationBell() {
     };
   }, [open]);
 
+  useEffect(() => {
+    const handleClose = () => setOpen(false);
+    window.addEventListener(CLOSE_NOTIFICATIONS_EVENT, handleClose);
+    return () => window.removeEventListener(CLOSE_NOTIFICATIONS_EVENT, handleClose);
+  }, []);
+
   return (
     <div className="relative">
       <button
         ref={triggerRef}
         type="button"
-        onClick={() => setOpen((prev) => !prev)}
+        onClick={() => {
+          window.dispatchEvent(new Event(CLOSE_HEADER_MENU_EVENT));
+          setOpen((prev) => !prev);
+        }}
         data-testid="notifications-trigger"
-        className="relative h-10 w-10 rounded-full border border-white/10 bg-white/[0.03] text-gray-300 hover:text-white hover:bg-white/10 transition-colors flex items-center justify-center"
+        className="tq-notify-trigger relative h-10 w-10 rounded-full border border-white/10 bg-white/[0.03] text-gray-300 hover:text-white hover:bg-white/10 transition-colors flex items-center justify-center"
         aria-label="Notifications"
       >
         <Bell className="h-4 w-4" />
@@ -117,12 +129,12 @@ export function NotificationBell() {
           <button
             type="button"
             aria-label="Close notifications"
-            className="fixed inset-0 z-40 cursor-default"
+            className="tq-overlay-backdrop fixed inset-0 z-40 cursor-default"
             onClick={() => setOpen(false)}
           />
           <div
             data-testid="notifications-panel"
-            className="fixed bg-[#151515] border border-white/10 rounded-xl shadow-[0_12px_36px_rgba(0,0,0,0.45)] z-50 overflow-hidden flex flex-col"
+            className="tq-popup-panel tq-notify-panel fixed bg-[#151515] border border-white/10 rounded-xl shadow-[0_12px_36px_rgba(0,0,0,0.45)] z-50 overflow-hidden flex flex-col"
             style={{
               top: `${panelStyle.top}px`,
               left: `${panelStyle.left}px`,
@@ -130,7 +142,7 @@ export function NotificationBell() {
               maxHeight: `${panelStyle.maxHeight}px`,
             }}
           >
-            <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between gap-2">
+            <div className="tq-notify-head px-4 py-3 border-b border-white/10 flex items-center justify-between gap-2">
               <div className="text-sm font-semibold text-white">Notifications</div>
               <div className="flex items-center gap-2">
                 <button
@@ -142,7 +154,7 @@ export function NotificationBell() {
                     setNotificationSoundEnabled(next);
                   }}
                   disabled={!globalSoundEnabled}
-                  className="text-xs px-2 py-1 rounded-md border border-white/15 text-gray-300 hover:text-white hover:bg-white/10 disabled:opacity-40 disabled:pointer-events-none transition-colors"
+                  className="tq-notify-head-action text-xs px-2 py-1 rounded-md border border-white/15 text-gray-300 hover:text-white hover:bg-white/10 disabled:opacity-40 disabled:pointer-events-none transition-colors"
                   title={globalSoundEnabled ? "Toggle notification sound" : "Sound is disabled by admin"}
                 >
                   {globalSoundEnabled && soundEnabled ? <Volume2 className="h-3.5 w-3.5" /> : <VolumeX className="h-3.5 w-3.5" />}
@@ -151,7 +163,7 @@ export function NotificationBell() {
                   type="button"
                   onClick={() => markAllRead()}
                   disabled={!unreadIds.length || markReadMutation.isPending}
-                  className="text-xs px-2 py-1 rounded-md border border-white/15 text-gray-300 hover:text-white hover:bg-white/10 disabled:opacity-50 disabled:pointer-events-none transition-colors inline-flex items-center gap-1"
+                  className="tq-notify-head-action text-xs px-2 py-1 rounded-md border border-white/15 text-gray-300 hover:text-white hover:bg-white/10 disabled:opacity-50 disabled:pointer-events-none transition-colors inline-flex items-center gap-1"
                 >
                   <CheckCheck className="h-3.5 w-3.5" />
                   Mark all
@@ -171,7 +183,7 @@ export function NotificationBell() {
                   <button
                     key={row.id}
                     type="button"
-                    className={`w-full text-left px-4 py-3 border-b border-white/5 hover:bg-white/[0.04] transition-colors ${row.isRead ? "opacity-75" : ""}`}
+                    className={`tq-notify-row w-full text-left px-4 py-3 border-b border-white/5 hover:bg-white/[0.04] transition-colors ${row.isRead ? "opacity-75" : ""}`}
                     onClick={() => {
                       if (!row.isRead) {
                         markRead([row.id]);

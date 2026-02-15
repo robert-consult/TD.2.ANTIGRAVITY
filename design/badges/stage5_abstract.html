@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Badge Stage 5: Abstract (Refined)</title>
+    <style>
+        body {
+            background: #eee;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+
+        .glass-cube {
+            width: 160px;
+            height: 160px;
+            background: linear-gradient(135deg, rgba(200, 200, 255, 0.4), rgba(255, 255, 255, 0.1));
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.6);
+            border-radius: 20px;
+            box-shadow:
+                10px 10px 30px rgba(0, 0, 0, 0.1),
+                inset 0 0 20px rgba(255, 255, 255, 0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transform: perspective(800px) rotateY(15deg) rotateX(10deg);
+        }
+
+        .inner-glow {
+            width: 80px;
+            height: 80px;
+            background: radial-gradient(circle, #ff9a9e, transparent);
+            filter: blur(15px);
+            opacity: 0.8;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="glass-cube">
+        <div class="inner-glow"></div>
+    </div>
+</body>
+
+</html>

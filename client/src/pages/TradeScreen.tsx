@@ -51,6 +51,13 @@ const tradeFormSchema = z.object({
 
 type TradeFormValues = z.infer<typeof tradeFormSchema>;
 
+function accountValueToneClass(value: number | null | undefined, baseline: number | null): string {
+  if (!Number.isFinite(Number(value)) || baseline == null) return "text-white";
+  if (Number(value) > baseline) return "text-green-400";
+  if (Number(value) < baseline) return "text-red-400";
+  return "text-white";
+}
+
 export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScreenProps) {
   const [orderType, setOrderType] = useState<string>("Market");
   const [tradeDirection, setTradeDirection] = useState<"BUY" | "SELL" | null>(null);
@@ -74,6 +81,15 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
   const { pendingOrders = [], isLoading: isLoadingPending, cancelOrder } = usePendingOrders();
   const openTradesCount = Array.isArray(openTrades) ? openTrades.length : 0;
   const pendingOrdersCount = Array.isArray(pendingOrders) ? pendingOrders.length : 0;
+  const startingAccountBalance = useMemo(() => {
+    const fromSummary = Number(accountSummary?.startingBalance);
+    if (Number.isFinite(fromSummary) && fromSummary > 0) return fromSummary;
+    const fromUser = Number((user as any)?.startingEquity);
+    if (Number.isFinite(fromUser) && fromUser > 0) return fromUser;
+    return null;
+  }, [accountSummary?.startingBalance, user]);
+  const balanceToneClass = accountValueToneClass(accountSummary?.balance, startingAccountBalance);
+  const equityToneClass = accountValueToneClass(accountSummary?.equity, startingAccountBalance);
 
   // Collapse the fixed header on mobile when the main tab content scrolls.
   const tabScrollRef = useRef<HTMLDivElement>(null);
@@ -1264,12 +1280,12 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
   };
 
   return (
-    <div className="h-full flex flex-col bg-neutral-900 overflow-hidden @container/trade" style={{ containerType: 'inline-size', containerName: 'trade' }}>
+    <div className="tq-trade-screen h-full flex flex-col bg-neutral-900 overflow-hidden @container/trade" style={{ containerType: 'inline-size', containerName: 'trade' }}>
       {/* Symbol info header */}
       <div
         ref={headerShellRef}
         data-testid="trade-header-shell"
-        className="border-b border-gray-800 shrink-0 relative overflow-hidden"
+        className="tq-trade-header-shell border-b border-gray-800 shrink-0 relative overflow-hidden"
         style={{ willChange: collapseHeaderOnMobile ? "height" : undefined }}
       >
         {/* Compact overlay (fades/slides in progressively as the tab content scrolls) */}
@@ -1281,7 +1297,7 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
 	            tabScrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
 	            applyTradeHeaderCollapse(0);
 	          }}
-	            className="absolute inset-x-0 top-0 z-10 w-full px-3 sm:px-gutter py-2 text-left hover:bg-white/[0.02] transition-colors opacity-0 pointer-events-none"
+	            className="tq-trade-header-compact absolute inset-x-0 top-0 z-10 w-full px-3 sm:px-gutter py-2 text-left hover:bg-white/[0.02] transition-colors opacity-0 pointer-events-none"
 	            aria-label="Scroll to top to expand market and account details"
 	            style={{ willChange: "opacity, transform", backfaceVisibility: "hidden" }}
 	          >
@@ -1308,10 +1324,16 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
 	              <div className="mt-0.5 text-[11px] text-gray-400 font-mono overflow-x-auto whitespace-nowrap" style={{ scrollbarWidth: "none" }}>
 	                {accountSummary ? (
 	                  <>
-	                    Eq: ${accountSummary.equity.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}{" "}
+	                    Eq:{" "}
+                      <span className={equityToneClass}>
+                        ${accountSummary.equity.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </span>{" "}
 	                    | FM: ${accountSummary.freeMargin.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}{" "}
 	                    | UM: ${accountSummary.usedMargin.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}{" "}
-	                    | Bal: ${accountSummary.balance.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+	                    | Bal:{" "}
+                      <span className={balanceToneClass}>
+                        ${accountSummary.balance.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </span>
 	                  </>
 	                ) : (
 	                  <>
@@ -1328,52 +1350,48 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
         {/* Full header (shrinks progressively; clipped by the shell height) */}
         <div
           ref={headerExpandedRef}
-          className="px-3 sm:px-gutter py-3 sm:py-4"
+          className="tq-trade-header-expanded px-3 sm:px-gutter py-3 sm:py-4"
           style={{ willChange: "opacity, transform", backfaceVisibility: "hidden" }}
         >
-          <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-8 gap-y-2 items-start">
+          <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 sm:gap-x-8 gap-y-2 items-start">
             <div className="min-w-0">
-              <div className="flex flex-wrap items-end gap-x-8 gap-y-3">
+              <div className="flex flex-wrap items-start gap-x-3 sm:gap-x-8 gap-y-2 sm:gap-y-3">
                 <div className="min-w-0">
                   {currentQuote ? (
                     <>
                       <h3 className="font-semibold text-primary text-[clamp(0.875rem,0.8rem+0.35cqi,1rem)]">{selectedSymbol}</h3>
-                      <p className="text-cq-xs text-gray-400 truncate max-w-[120px] @[400px]/trade:max-w-[150px] @[600px]/trade:max-w-none">{currentQuote.name}</p>
                     </>
                   ) : (
-                    <>
-                      <Skeleton className="h-6 w-24 mb-1" />
-                      <Skeleton className="h-4 w-40" />
-                    </>
+                    <Skeleton className="h-6 w-24" />
                   )}
                 </div>
 
                 {/* Bid/Ask/Spread row (wraps below symbol when space is tight; moves inline when space allows) */}
-                <div className="flex flex-wrap gap-x-6 gap-y-2">
-                  <div className="flex flex-col min-w-[60px]">
+                <div className="grid w-full grid-cols-3 gap-x-2.5 sm:gap-x-6 gap-y-1">
+                  <div className="flex flex-col min-w-0">
                     <span className="text-cq-xs text-gray-400">Bid</span>
                     {bidPrice ? (
-                      <span className="data-cell text-danger-500">
+                      <span className="font-mono text-[0.8rem] sm:text-[0.875rem] leading-tight text-danger-500 truncate">
                         {bidPrice.toFixed(priceDecimals)}
                       </span>
                     ) : (
                       <Skeleton className="h-4 w-16" />
                     )}
                   </div>
-                  <div className="flex flex-col min-w-[60px]">
+                  <div className="flex flex-col min-w-0">
                     <span className="text-cq-xs text-gray-400">Ask</span>
                     {askPrice ? (
-                      <span className="data-cell text-success-500">
+                      <span className="font-mono text-[0.8rem] sm:text-[0.875rem] leading-tight text-success-500 truncate">
                         {askPrice.toFixed(priceDecimals)}
                       </span>
                     ) : (
                       <Skeleton className="h-4 w-16" />
                     )}
                   </div>
-                  <div className="flex flex-col min-w-[60px]">
+                  <div className="flex flex-col min-w-0">
                     <span className="text-cq-xs text-gray-400">Spread</span>
                     {spread ? (
-                      <span className="data-cell">
+                      <span className="font-mono text-[0.8rem] sm:text-[0.875rem] leading-tight text-white truncate">
                         {spread.toFixed(priceDecimals)}
                       </span>
                     ) : (
@@ -1390,11 +1408,12 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
 	                  <div className="font-mono font-semibold tabular-nums text-white whitespace-nowrap leading-none text-[clamp(0.9rem,0.85rem+0.6cqi,1.25rem)]">
 	                    {currentPrice.toFixed(priceDecimals)}
 	                  </div>
-                  <div className={`text-cq-sm ${currentQuote?.changePct && currentQuote.changePct >= 0
+                  <div className={`font-mono text-[0.72rem] sm:text-[0.8rem] leading-tight ${currentQuote?.changePct && currentQuote.changePct >= 0
                     ? "text-success-500"
                     : "text-danger-500"}`}>
                     {currentQuote?.changePct && currentQuote.changePct >= 0 ? "+" : ""}
-                    {currentQuote?.changePct !== undefined ? currentQuote.changePct.toFixed(2) : "0.00"}%<span className="cq-hide-narrow"> today</span>
+                    {currentQuote?.changePct !== undefined ? currentQuote.changePct.toFixed(2) : "0.00"}%
+                    <span className="cq-hide-narrow">{" "}today</span>
                   </div>
                 </>
               ) : (
@@ -1409,14 +1428,11 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
           {/* Account metrics - responsive grid with real-time data */}
           <div className="w-full mt-4">
             <span className="text-xs text-gray-400 mb-1 block">Account</span>
-            <div
-              className="grid gap-2 bg-neutral-800 p-2 rounded-md"
-              style={{ gridTemplateColumns: "repeat(auto-fit, minmax(min(8rem, 100%), 1fr))" }}
-            >
+            <div className="tq-trade-account-strip grid grid-cols-2 sm:grid-cols-4 gap-1.5 sm:gap-2 bg-neutral-800 p-2 rounded-md">
               <div className="flex flex-col min-w-0">
                 <span className="text-[10px] text-gray-500">Balance</span>
                 {accountSummary ? (
-                  <span className="font-mono text-white text-xs truncate">
+                  <span className={`font-mono text-xs truncate ${balanceToneClass}`}>
                     ${accountSummary.balance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </span>
                 ) : (
@@ -1427,7 +1443,7 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
               <div className="flex flex-col min-w-0">
                 <span className="text-[10px] text-gray-500">Equity</span>
                 {accountSummary ? (
-                  <span className={`font-mono text-xs truncate ${accountSummary.floatingPnl >= 0 ? 'text-success-500' : 'text-danger-500'}`}>
+                  <span className={`font-mono text-xs truncate ${equityToneClass}`}>
                     ${accountSummary.equity.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </span>
                 ) : (
@@ -1473,11 +1489,11 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
 	          onValueChange={setActiveTab}
 	          className="w-full min-h-full flex flex-col"
 	        >
-		          <TabsList className="w-full grid grid-cols-3 rounded-none bg-neutral-800 shrink-0 sticky top-0 z-20 border-b border-gray-800">
+		          <TabsList className="tq-trade-tabs w-full grid grid-cols-3 rounded-none bg-neutral-800 shrink-0 sticky top-0 z-20 border-b border-gray-800">
 	            <TabsTrigger
 	              value="place-order"
 	              aria-label="Place Order"
-	              className="data-[state=active]:bg-neutral-700 rounded-none text-cq-sm px-1"
+	              className="tq-trade-tab data-[state=active]:bg-neutral-700 rounded-none text-cq-sm px-1"
 	            >
               <span className="cq-hide-narrow">Place Order</span>
               <span className="cq-show-narrow-only">Order</span>
@@ -1485,7 +1501,7 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
             <TabsTrigger
               value="active-positions"
               aria-label="Active Positions"
-              className="data-[state=active]:bg-neutral-700 rounded-none text-cq-sm px-1"
+              className="tq-trade-tab data-[state=active]:bg-neutral-700 rounded-none text-cq-sm px-1"
             >
               <span className="cq-hide-narrow">Active Positions</span>
               <span className="cq-show-narrow-only">Positions</span>
@@ -1493,7 +1509,7 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
             <TabsTrigger
               value="pending-orders"
               aria-label="Pending Orders"
-              className="data-[state=active]:bg-neutral-700 rounded-none text-cq-sm px-1"
+              className="tq-trade-tab data-[state=active]:bg-neutral-700 rounded-none text-cq-sm px-1"
             >
               <span className="cq-hide-narrow">Pending Orders</span>
               <span className="cq-show-narrow-only">Pending</span>
@@ -1597,13 +1613,18 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
                                   </SelectTrigger>
                                 </FormControl>
                                 <SelectContent
-                                  className="max-h-[calc(8*2.25rem)] overflow-y-auto w-24 bg-neutral-900 border-gray-700"
+                                  className="w-[4.75rem] min-w-[4.75rem] overflow-y-auto bg-neutral-900 border-gray-700"
+                                  style={{
+                                    // Adaptive viewport fit: keeps ~3 rows minimum on short screens,
+                                    // preserves current desktop max window (~8 visible rows).
+                                    maxHeight: "clamp(6.75rem, calc(100dvh - 24rem), 18rem)",
+                                  }}
                                 >
                                   {lotDropdownOptions.map((lot) => (
                                     <SelectItem
                                       key={lot}
                                       value={lot.toString()}
-                                      className="text-white hover:bg-neutral-800"
+                                      className="h-9 text-sm text-white hover:bg-neutral-800"
                                     >
                                       {lot}
                                     </SelectItem>
@@ -1617,10 +1638,7 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
                             <div className="text-xs text-gray-400 mt-1">
                               1 lot = $100,000 (${Number(field.value || 1) * 100000} total)
                             </div>
-                            <div
-                              className="mt-2 grid gap-2"
-                              style={{ gridTemplateColumns: "repeat(auto-fit, minmax(min(6rem, 100%), 1fr))" }}
-                            >
+                            <div className="mt-2 flex flex-wrap gap-1.5 sm:gap-2">
                               {lotPresetCards.map((preset) => {
                                 const value = preset.toString();
                                 return (
@@ -1628,7 +1646,7 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
                                     key={value}
                                     type="button"
                                     variant="outline"
-                                    className={`py-1 px-2 text-xs ${field.value === value
+                                    className={`h-9 px-1.5 text-[0.7rem] sm:text-xs leading-none grow shrink basis-[18%] sm:basis-[31%] ${field.value === value
                                       ? "bg-primary-800 text-white font-medium"
                                       : "bg-neutral-800 text-gray-300"
                                       }`}
@@ -1777,7 +1795,7 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
 
           {/* Active Positions Tab */}
 		          <TabsContent value="active-positions" className="p-0 m-0 flex-1 min-h-0">
-	            <div ref={positionsContainerRef} data-testid="trade-active-positions" className="p-4">
+	            <div ref={positionsContainerRef} data-testid="trade-active-positions" className="tq-trade-table-wrap p-4">
 	              {isLoadingOpenTrades ? (
 	                <div className="flex justify-center py-8">
 	                  <div className="animate-spin h-6 w-6 border-2 border-primary rounded-full border-t-transparent"></div>
@@ -1789,8 +1807,8 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
               ) : (
                 <div>
                   {/* Progressive table view - always table, columns appear as space allows */}
-                  <div className="overflow-x-auto">
-                    <Table ref={positionsTableRef} className="w-full [&_th]:!p-2 [&_td]:!p-2">
+                  <div className="tq-trade-table-shell overflow-x-auto">
+                    <Table ref={positionsTableRef} className="tq-trade-table w-full [&_th]:!p-2 [&_td]:!p-2">
                       <TableHeader>
                         <TableRow>
                           <TableHead className="whitespace-nowrap">Symbol</TableHead>
@@ -2024,7 +2042,7 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
 
           {/* Pending Orders Tab */}
 		          <TabsContent value="pending-orders" className="p-0 m-0 flex-1 min-h-0">
-	            <div ref={ordersContainerRef} data-testid="trade-pending-orders" className="p-4">
+	            <div ref={ordersContainerRef} data-testid="trade-pending-orders" className="tq-trade-table-wrap p-4">
 	              {isLoadingPending ? (
 	                <div className="flex justify-center py-8">
 	                  <div className="animate-spin h-6 w-6 border-2 border-primary rounded-full border-t-transparent"></div>
@@ -2036,8 +2054,8 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
               ) : (
                 <div>
                   {/* Progressive table view - always table, columns appear as space allows */}
-                  <div className="overflow-x-auto">
-                    <Table ref={ordersTableRef} className="w-full [&_th]:!p-2 [&_td]:!p-2">
+                  <div className="tq-trade-table-shell overflow-x-auto">
+                    <Table ref={ordersTableRef} className="tq-trade-table w-full [&_th]:!p-2 [&_td]:!p-2">
                       <TableHeader>
                         <TableRow>
                           <TableHead className="whitespace-nowrap">Symbol</TableHead>
@@ -2216,7 +2234,7 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
 
         {activeTab === "place-order" && (
           <div
-            className="shrink-0 border-t border-gray-800 bg-neutral-900 px-3 sm:px-gutter"
+            className="tq-trade-action-bar shrink-0 border-t border-gray-800 bg-neutral-900 px-3 sm:px-gutter"
             style={{
               paddingTop: "clamp(0.5rem, 1cqi, 0.75rem)",
               paddingBottom: "calc(env(safe-area-inset-bottom) + clamp(0.5rem, 1cqi, 0.75rem))",

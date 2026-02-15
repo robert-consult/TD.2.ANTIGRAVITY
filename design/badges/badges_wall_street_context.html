@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Badges: Wall Street Context</title>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=Roboto+Mono:wght@500&display=swap"
+        rel="stylesheet">
+    <style>
+        :root {
+            --slate-900: #0f172a;
+            --slate-800: #1e293b;
+            --fast-green: #22c55e;
+            --alert-red: #ef4444;
+            --border-color: #334155;
+        }
+
+        body {
+            background-color: var(--slate-900);
+            font-family: 'Inter', sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 40px;
+            color: white;
+        }
+
+        h1 {
+            margin-bottom: 50px;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            color: var(--fast-green);
+        }
+
+        .badge-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: 40px;
+            width: 100%;
+            max-width: 1200px;
+        }
+
+        .badge-card {
+            background: var(--slate-800);
+            border: 1px solid var(--border-color);
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            transition: transform 0.2s;
+        }
+
+        .badge-card:hover {
+            transform: translateY(-5px);
+            border-color: var(--fast-green);
+        }
+
+        /* --- Badge Base Style: Corporate Tag --- */
+        .ws-badge {
+            width: 120px;
+            height: 120px;
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 20px;
+        }
+
+        /* 1. Target Smasher: Bar Chart Up */
+        .badge-target {
+            background: #fff;
+            border: 4px solid var(--slate-900);
+            border-radius: 4px;
+            /* Slight round, mostly square */
+            box-shadow: 5px 5px 0 var(--fast-green);
+        }
+
+        .badge-target .icon {
+            font-size: 3rem;
+            color: var(--slate-900);
+        }
+
+        .badge-target::after {
+            content: '+110%';
+            position: absolute;
+            bottom: -10px;
+            right: -10px;
+            background: var(--fast-green);
+            color: black;
+            font-family: 'Roboto Mono';
+            font-weight: bold;
+            font-size: 0.8rem;
+            padding: 2px 6px;
+        }
+
+        /* 2. Risk Manager: Shield / Low Drawdown */
+        .badge-risk {
+            border: 2px solid var(--border-color);
+            border-radius: 50%;
+            background: radial-gradient(circle, #334155 0%, var(--slate-900) 100%);
+        }
+
+        .badge-risk .shield-path {
+            width: 60%;
+            height: 70%;
+            background: var(--fast-green);
+            clip-path: path("M50 0 L100 25 V60 C100 85 50 100 50 100 C50 100 0 85 0 60 V25 L50 0 Z");
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .badge-risk .val {
+            color: var(--slate-900);
+            font-weight: 800;
+            font-size: 1.2rem;
+        }
+
+        /* 3. Consistency King: Straight Line Graph */
+        .badge-consistency {
+            background: var(--slate-900);
+            border: 1px dashed var(--fast-green);
+            border-radius: 5px;
+        }
+
+        .badge-consistency .graph-line {
+            width: 80px;
+            height: 80px;
+            border-left: 2px solid #555;
+            border-bottom: 2px solid #555;
+            position: relative;
+        }
+
+        .badge-consistency .graph-line::before {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(45deg, transparent 48%, var(--fast-green) 48%, var(--fast-green) 52%, transparent 52%);
+        }
+
+        /* 4. Phase Survivor: Dog Tag Style */
+        .badge-phase {
+            width: 80px;
+            height: 130px;
+            background: #e2e8f0;
+            border-radius: 10px;
+            border: 4px double #94a3b8;
+            box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.2);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: space-evenly;
+        }
+
+        .badge-phase .hole {
+            width: 10px;
+            height: 10px;
+            background: #333;
+            border-radius: 50%;
+            box-shadow: inset 1px 1px 2px black;
+        }
+
+        .badge-phase .text {
+            font-family: 'Roboto Mono';
+            font-size: 0.7rem;
+            color: #555;
+            letter-spacing: 1px;
+            text-align: center;
+            writing-mode: vertical-rl;
+            text-orientation: mixed;
+            transform: rotate(180deg);
+        }
+
+
+        .label {
+            font-family: 'Roboto Mono';
+            font-size: 0.9rem;
+            color: var(--fast-green);
+            text-transform: uppercase;
+            margin-top: 10px;
+        }
+
+        .desc {
+            font-size: 0.8rem;
+            color: #94a3b8;
+            text-align: center;
+            margin-top: 5px;
+            line-height: 1.4;
+        }
+    </style>
+</head>
+
+<body>
+
+    <h1>Wall Street Context Badges</h1>
+
+    <div class="badge-grid">
+
+        <!-- 1. Target Smasher -->
+        <div class="badge-card">
+            <div class="ws-badge badge-target">
+                <div class="icon">📈</div>
+            </div>
+            <div class="label">Target Smasher</div>
+            <div class="desc">Achieved Phase Profit Target > 10% within 5 trading days.</div>
+        </div>
+
+        <!-- 2. Risk Manager -->
+        <div class="badge-card">
+            <div class="ws-badge badge-risk">
+                <div class="shield-path">
+                    <div class="val">&lt;1%</div>
+                </div>
+            </div>
+            <div class="label">Risk Guardian</div>
+            <div class="desc">Completed Phase with Max Daily Loss never exceeding 1%.</div>
+        </div>
+
+        <!-- 3. Consistency King -->
+        <div class="badge-card">
+            <div class="ws-badge badge-consistency">
+                <div class="graph-line"></div>
+            </div>
+            <div class="label">Consistency King</div>
+            <div class="desc">Maintained positive PnL for 10 consecutive trading days.</div>
+        </div>
+
+        <!-- 4. Phase 1 Survivor -->
+        <div class="badge-card">
+            <div class="ws-badge badge-phase">
+                <div class="hole"></div>
+                <div class="text">PHASE 1<br>SURVIVOR</div>
+                <div class="hole"></div>
+            </div>
+            <div class="label">Phase 1 Survivor</div>
+            <div class="desc">Successfully passed the Evaluation Phase without breach.</div>
+        </div>
+
+    </div>
+
+</body>
+
+</html>

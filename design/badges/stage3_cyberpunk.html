@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Badge Stage 3: Cyberpunk (Refined)</title>
+    <style>
+        body {
+            background: #000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+
+        .neon-badge {
+            width: 180px;
+            height: 200px;
+            clip-path: path("M 90 0 L 180 40 V 120 C 180 170 90 200 90 200 C 90 200 0 170 0 120 V 40 L 90 0 Z");
+            background: rgba(0, 0, 255, 0.1);
+            position: relative;
+            /* Blue Glow from reference */
+            filter: drop-shadow(0 0 10px #00f2ff);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* Outline */
+        .neon-badge::before {
+            content: '';
+            position: absolute;
+            inset: 2px;
+            clip-path: path("M 90 0 L 180 40 V 120 C 180 170 90 200 90 200 C 90 200 0 170 0 120 V 40 L 90 0 Z");
+            background: transparent;
+            border: 2px solid cyan;
+            box-shadow: inset 0 0 20px cyan;
+        }
+
+        .bolt {
+            font-size: 5rem;
+            color: #ff00ff;
+            filter: drop-shadow(0 0 10px #ff00ff);
+        }
+    </style>
+</head>
+
+<body>
+    <div class="neon-badge">
+        <div class="bolt">⚡</div>
+    </div>
+</body>
+
+</html>

@@ -40,7 +40,10 @@ export function ConfigSync() {
 
       if (message.type === "system-config:updated") {
         queryClient.invalidateQueries({ queryKey: ["/api/admin/system-config"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/admin/scout/config"] });
         queryClient.invalidateQueries({ queryKey: ["/api/admin/market-data/providers"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/trader/leaderboard-mode"] });
+        return;
       }
 
       if (message.type === "market-data:providers-updated") {

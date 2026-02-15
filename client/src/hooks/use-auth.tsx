@@ -11,6 +11,7 @@ interface User {
   countryIso2?: string | null;
   language?: string;
   balance: string;
+  startingEquity?: number;
   equity?: number;
   freeMargin?: number;
   usedMargin?: number;

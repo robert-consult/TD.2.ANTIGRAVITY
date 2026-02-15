@@ -23,6 +23,7 @@ interface QuoteData {
 }
 
 interface RecalcResult {
+  startingBalance: number;
   balance: number;
   usedMargin: number;
   equity: number;
@@ -67,6 +68,11 @@ export async function recalcAccount(
     }
     
     const balance = parseFloat(user.balance);
+    const startingBalanceRaw = Number((user as any).startingEquity ?? balance);
+    const startingBalance =
+      Number.isFinite(startingBalanceRaw) && startingBalanceRaw > 0
+        ? startingBalanceRaw
+        : balance;
     const asOf = new Date();
     
     // Get all open trades for the user with their symbols
@@ -83,6 +89,7 @@ export async function recalcAccount(
     // If no open positions, return clean state
     if (openTrades.length === 0) {
       const result: RecalcResult = {
+        startingBalance,
         balance,
         usedMargin: 0,
         equity: balance,
@@ -106,6 +113,7 @@ export async function recalcAccount(
       
       if (opts?.emit) {
         const summary = {
+          startingBalance: result.startingBalance,
           balance: result.balance,
           equity: result.equity,
           floatingPnl: result.floatingPnl,
@@ -176,6 +184,7 @@ export async function recalcAccount(
 
     if (!quoteRows.length) {
       const result: RecalcResult = {
+        startingBalance,
         balance,
         usedMargin: user.usedMargin ?? 0,
         equity: user.equity ?? balance,
@@ -189,6 +198,7 @@ export async function recalcAccount(
       };
       if (opts?.emit) {
         const summary = {
+          startingBalance: result.startingBalance,
           balance: result.balance,
           equity: result.equity,
           floatingPnl: result.floatingPnl,
@@ -250,6 +260,7 @@ export async function recalcAccount(
       console.log(`User ${userId} pricing stale: symbols=${staleSymbols.join(',')} fxStale=${fxStale}`);
       
       const result: RecalcResult = {
+        startingBalance,
         balance,
         usedMargin: user.usedMargin ?? 0,
         equity: user.equity ?? balance,
@@ -265,6 +276,7 @@ export async function recalcAccount(
       };
       if (opts?.emit) {
         const summary = {
+          startingBalance: result.startingBalance,
           balance: result.balance,
           equity: result.equity,
           floatingPnl: result.floatingPnl,
@@ -394,6 +406,7 @@ export async function recalcAccount(
     );
     
     const result: RecalcResult = {
+      startingBalance,
       balance,
       usedMargin,
       equity,
@@ -407,6 +420,7 @@ export async function recalcAccount(
     };
     if (opts?.emit) {
       const summary = {
+        startingBalance: result.startingBalance,
         balance: result.balance,
         equity: result.equity,
         floatingPnl: result.floatingPnl,

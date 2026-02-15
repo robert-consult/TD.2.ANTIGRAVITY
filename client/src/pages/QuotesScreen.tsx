@@ -1,6 +1,6 @@
 import { useQuotes } from "@/hooks/use-quotes";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import SpreadBadge from "@/components/SpreadBadge";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -23,6 +23,12 @@ export default function QuotesScreen({ onSelectSymbol }: QuotesScreenProps) {
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [manageDialogOpen, setManageDialogOpen] = useState(false);
+  const [quoteHighlight, setQuoteHighlight] = useState({
+    top: 0,
+    height: 0,
+    visible: false,
+  });
+  const quoteListRef = useRef<HTMLDivElement | null>(null);
 
   const { data: allowedSymbolsData = { symbols: [] } } = useQuery<{ symbols: any[] }>({
     queryKey: ["/api/quote-subscriptions/allowed-symbols"],
@@ -104,9 +110,28 @@ export default function QuotesScreen({ onSelectSymbol }: QuotesScreenProps) {
     }
   };
 
+  const revealQuoteHighlight = (row: HTMLDivElement) => {
+    const container = quoteListRef.current;
+    if (!container) return;
+    const nextTop = row.offsetTop;
+    const nextHeight = row.offsetHeight;
+    setQuoteHighlight((prev) => {
+      if (prev.visible && prev.top === nextTop && prev.height === nextHeight) return prev;
+      return {
+        top: nextTop,
+        height: nextHeight,
+        visible: true,
+      };
+    });
+  };
+
+  const hideQuoteHighlight = () => {
+    setQuoteHighlight((prev) => (prev.visible ? { ...prev, visible: false } : prev));
+  };
+
   return (
-    <div className="h-full flex flex-col bg-neutral-900">
-      <div className="tq-page-header flex flex-col sticky top-0 z-10 gap-[clamp(0.35rem,1.2vw,0.5rem)]">
+    <div className="tq-quotes-screen h-full flex flex-col bg-neutral-900">
+      <div className="tq-panel-header tq-page-header tq-quotes-header flex flex-col sticky top-0 z-10 gap-[clamp(0.35rem,1.2vw,0.5rem)]">
         <div className="flex justify-between items-center">
           <h2 className="tq-page-title">Live Quotes</h2>
           <div className="flex items-center gap-2">
@@ -177,18 +202,18 @@ export default function QuotesScreen({ onSelectSymbol }: QuotesScreenProps) {
             placeholder="Search instruments..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="pl-8 bg-neutral-800 border-neutral-700 text-white"
+            className="tq-quotes-search-input pl-8 bg-neutral-800 border-neutral-700 text-white"
           />
           <Search className="absolute left-2 top-2.5 h-4 w-4 text-neutral-500" />
         </div>
         
         {/* Sort controls */}
-        <div className="flex justify-between text-xs text-neutral-400 px-1">
+        <div className="tq-quotes-sort flex justify-between text-xs text-neutral-400 px-1">
           <div className="flex items-center gap-2">
             <Button 
               variant="ghost" 
               size="sm" 
-              className={`px-2 py-1 h-7 ${sortField === 'symbol' ? 'text-white' : 'text-neutral-400'}`}
+              className={`tq-quotes-sort-btn px-2 py-1 h-7 ${sortField === 'symbol' ? 'text-white' : 'text-neutral-400'}`}
               onClick={() => toggleSort('symbol')}
             >
               Symbol {sortField === 'symbol' && (sortDirection === 'asc' ? '↑' : '↓')}
@@ -198,7 +223,7 @@ export default function QuotesScreen({ onSelectSymbol }: QuotesScreenProps) {
             <Button 
               variant="ghost" 
               size="sm" 
-              className={`px-2 py-1 h-7 ${sortField === 'price' ? 'text-white' : 'text-neutral-400'}`}
+              className={`tq-quotes-sort-btn px-2 py-1 h-7 ${sortField === 'price' ? 'text-white' : 'text-neutral-400'}`}
               onClick={() => toggleSort('price')}
             >
               Price {sortField === 'price' && (sortDirection === 'asc' ? '↑' : '↓')}
@@ -206,7 +231,7 @@ export default function QuotesScreen({ onSelectSymbol }: QuotesScreenProps) {
             <Button 
               variant="ghost" 
               size="sm" 
-              className={`px-2 py-1 h-7 ${sortField === 'change' ? 'text-white' : 'text-neutral-400'}`}
+              className={`tq-quotes-sort-btn px-2 py-1 h-7 ${sortField === 'change' ? 'text-white' : 'text-neutral-400'}`}
               onClick={() => toggleSort('change')}
             >
               Change {sortField === 'change' && (sortDirection === 'asc' ? '↑' : '↓')}
@@ -215,8 +240,20 @@ export default function QuotesScreen({ onSelectSymbol }: QuotesScreenProps) {
         </div>
       </div>
 
-      <div className="flex-1 min-h-0 app-scroll" style={{ scrollbarWidth: "thin" }}>
-        <div className="divide-y divide-gray-800">
+      <div className="tq-quotes-scroll flex-1 min-h-0 app-scroll" style={{ scrollbarWidth: "thin" }}>
+        <div
+          ref={quoteListRef}
+          onMouseLeave={hideQuoteHighlight}
+          className="tq-quotes-list relative divide-y divide-gray-800"
+        >
+          <div
+            aria-hidden
+            className={`tq-quotes-highlight ${quoteHighlight.visible ? "is-visible" : ""}`}
+            style={{
+              transform: `translateY(${quoteHighlight.top}px)`,
+              height: `${quoteHighlight.height}px`,
+            }}
+          />
           {isLoading &&
             Array(8) // Show more skeletons to match larger list
               .fill(null)
@@ -262,15 +299,16 @@ export default function QuotesScreen({ onSelectSymbol }: QuotesScreenProps) {
               return (
                 <div
                   key={quote.symbol}
-                  className="flex items-center justify-between gap-3 px-gutter py-3 hover:bg-neutral-850 transition-colors cursor-pointer"
+                  className="tq-quote-row flex items-center justify-between gap-3 px-gutter py-2.5 hover:bg-neutral-850 transition-colors cursor-pointer"
+                  onMouseEnter={(event) => revealQuoteHighlight(event.currentTarget)}
                   onClick={() => onSelectSymbol(quote.symbol)}
                 >
-                  <div className="min-w-0">
-                    <div className="flex items-start gap-2">
-                      <div className="w-20 shrink-0 font-medium text-base">{quote.symbol}</div>
-                      <div className="text-sm text-gray-400 mt-0.5 truncate">
-                        {quote.name}
-                      </div>
+                  <div className="min-w-0 flex flex-col justify-center leading-tight">
+                    <div className="font-medium text-[clamp(1.02rem,0.97rem+0.18vw,1.2rem)] tracking-[0.02em] text-white">
+                      {quote.symbol}
+                    </div>
+                    <div className="mt-0.5 text-[clamp(0.69rem,0.66rem+0.14vw,0.8rem)] text-gray-400 truncate max-w-[clamp(8rem,26vw,15rem)] leading-[1.15]">
+                      {quote.name}
                     </div>
                   </div>
 

@@ -44,7 +44,15 @@ export function AppShell({
         </div>
 
         {mobileNav ? (
-          <div className="shrink-0 @3xl/app:hidden">{mobileNav}</div>
+          <>
+            <div
+              aria-hidden
+              className="shrink-0 h-[calc(4.5rem+env(safe-area-inset-bottom))] @3xl/app:hidden"
+            />
+            <div className="fixed inset-x-0 bottom-0 z-40 @3xl/app:hidden">
+              {mobileNav}
+            </div>
+          </>
         ) : null}
       </div>
     </div>

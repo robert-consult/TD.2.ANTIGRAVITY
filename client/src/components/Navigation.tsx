@@ -7,8 +7,8 @@ interface NavigationProps {
 
 export function MobileNavigation({ activeTab, setActiveTab }: NavigationProps) {
   return (
-    <div className="tq-mobile-nav bg-neutral-850 border-t border-gray-800 shrink-0 pb-[env(safe-area-inset-bottom)]">
-      <div className="grid grid-cols-6">
+    <div className="tq-mobile-nav h-[calc(4.5rem+env(safe-area-inset-bottom))] overflow-hidden bg-neutral-850 border-t border-gray-800 shrink-0 pb-[env(safe-area-inset-bottom)]">
+      <div className="grid h-[4.5rem] grid-cols-6">
         <button
           data-active={activeTab === "quotes"}
           className={`tq-mobile-nav-btn flex flex-col items-center justify-center gap-1 py-2 text-[11px] font-medium border-t-2 ${

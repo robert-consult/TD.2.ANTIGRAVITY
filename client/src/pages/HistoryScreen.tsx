@@ -150,15 +150,19 @@ function getTradeNetProfitUsd(trade: any): number | null {
 function getDuration(openedAt: unknown, closedAt: unknown): string {
   const openMs = toMs(openedAt);
   const closeMs = toMs(closedAt);
-  if (!openMs || !closeMs) return "—";
+  if (openMs === null || closeMs === null) return "—";
   const diffMs = closeMs - openMs;
   if (diffMs < 0) return "—";
-  const mins = Math.floor(diffMs / 60000);
-  const hours = Math.floor(mins / 60);
-  const days = Math.floor(hours / 24);
-  if (days > 0) return `${days}d ${hours % 24}h`;
-  if (hours > 0) return `${hours}h ${mins % 60}m`;
-  return `${mins}m`;
+  const totalSeconds = Math.floor(diffMs / 1000);
+  const days = Math.floor(totalSeconds / 86400);
+  const hours = Math.floor((totalSeconds % 86400) / 3600);
+  const mins = Math.floor((totalSeconds % 3600) / 60);
+  const secs = totalSeconds % 60;
+
+  if (days > 0) return `${days}d ${hours}h ${mins}m`;
+  if (hours > 0) return `${hours}h ${mins}m ${secs}s`;
+  if (mins > 0) return `${mins}m ${secs}s`;
+  return `${secs}s`;
 }
 
 export default function HistoryScreen() {
@@ -402,8 +406,8 @@ export default function HistoryScreen() {
         const aClose = toMs(a.closedAt);
         const bOpen = toMs(b.openedAt);
         const bClose = toMs(b.closedAt);
-        aValue = (aOpen && aClose) ? (aClose - aOpen) : 0;
-        bValue = (bOpen && bClose) ? (bClose - bOpen) : 0;
+        aValue = (aOpen !== null && aClose !== null) ? (aClose - aOpen) : 0;
+        bValue = (bOpen !== null && bClose !== null) ? (bClose - bOpen) : 0;
         break;
       case "closeReason":
         aValue = closeReasonShortLabel(a.closeReason, "");

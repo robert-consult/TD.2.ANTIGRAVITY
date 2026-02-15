@@ -136,24 +136,83 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
     prices: boolean;
   };
 
-  const [positionColumns, setPositionColumns] = useState<PositionColumnState>(() => ({
-    actions: true,
-    size: true,
-    tpSl: true,
-    prices: true,
-    time: true,
-  }));
-  const [orderColumns, setOrderColumns] = useState<OrderColumnState>(() => ({
-    actions: true,
-    size: true,
-    tpSl: true,
-    prices: true,
-  }));
+  const getPositionColumnsForWidth = (width: number): PositionColumnState => {
+    if (width < 900) {
+      return { actions: false, size: false, tpSl: false, prices: false, time: false };
+    }
+    if (width < 1100) {
+      return { actions: false, size: true, tpSl: false, prices: false, time: false };
+    }
+    if (width < 1300) {
+      return { actions: true, size: true, tpSl: false, prices: true, time: false };
+    }
+    return { actions: true, size: true, tpSl: true, prices: true, time: true };
+  };
+
+  const getOrderColumnsForWidth = (width: number): OrderColumnState => {
+    if (width < 900) {
+      return { actions: false, size: false, tpSl: false, prices: false };
+    }
+    if (width < 1080) {
+      return { actions: false, size: true, tpSl: false, prices: false };
+    }
+    if (width < 1260) {
+      return { actions: true, size: true, tpSl: false, prices: true };
+    }
+    return { actions: true, size: true, tpSl: true, prices: true };
+  };
+
+  const samePositionColumns = (a: PositionColumnState, b: PositionColumnState) =>
+    a.actions === b.actions
+    && a.size === b.size
+    && a.tpSl === b.tpSl
+    && a.prices === b.prices
+    && a.time === b.time;
+
+  const sameOrderColumns = (a: OrderColumnState, b: OrderColumnState) =>
+    a.actions === b.actions
+    && a.size === b.size
+    && a.tpSl === b.tpSl
+    && a.prices === b.prices;
+
+  const [positionColumns, setPositionColumns] = useState<PositionColumnState>(() =>
+    getPositionColumnsForWidth(typeof window !== "undefined" ? Math.round(window.innerWidth) : 1200)
+  );
+  const [orderColumns, setOrderColumns] = useState<OrderColumnState>(() =>
+    getOrderColumnsForWidth(typeof window !== "undefined" ? Math.round(window.innerWidth) : 1200)
+  );
 
   const positionColumnsRef = useRef(positionColumns);
   const orderColumnsRef = useRef(orderColumns);
   const positionsWidthRef = useRef(positionsContainerWidth);
   const ordersWidthRef = useRef(ordersContainerWidth);
+
+  const handleTradeTabChange = (nextTab: string) => {
+    if (nextTab === "active-positions") {
+      const width = Math.max(
+        0,
+        Math.round(
+          positionsContainerRef.current?.clientWidth
+          ?? positionsWidthRef.current
+          ?? window.innerWidth
+        ),
+      );
+      const preset = getPositionColumnsForWidth(width);
+      setPositionColumns((prevState) => (samePositionColumns(prevState, preset) ? prevState : preset));
+    } else if (nextTab === "pending-orders") {
+      const width = Math.max(
+        0,
+        Math.round(
+          ordersContainerRef.current?.clientWidth
+          ?? ordersWidthRef.current
+          ?? window.innerWidth
+        ),
+      );
+      const preset = getOrderColumnsForWidth(width);
+      setOrderColumns((prevState) => (sameOrderColumns(prevState, preset) ? prevState : preset));
+    }
+    setActiveTab(nextTab);
+  };
 
   // Check if there are any hidden columns (for showing expand chevron)
   // Show chevron when any column (including actions) is hidden
@@ -502,10 +561,20 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
   }, [activeTab, collapseHeaderOnMobile]);
 
   // Fit table columns to available width (fluid, content-aware).
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (activeTab !== "active-positions") return;
     if (isLoadingOpenTrades) return;
     if (!Array.isArray(openTrades) || openTrades.length === 0) return;
+
+    const effectiveWidth = positionsContainerWidth > 0
+      ? positionsContainerWidth
+      : (typeof window !== "undefined" ? Math.round(window.innerWidth) : 1200);
+
+    if (effectiveWidth < 1100) {
+      const preset = getPositionColumnsForWidth(effectiveWidth);
+      setPositionColumns((prevState) => (samePositionColumns(prevState, preset) ? prevState : preset));
+      return;
+    }
 
     let cancelled = false;
     const nextPaint = () => new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
@@ -534,16 +603,7 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
         for (const key of hideOrder) {
           if (next[key] === false) continue;
           next = { ...next, [key]: false };
-          setPositionColumns((prevState) => {
-            if (
-              prevState.actions === next.actions
-              && prevState.size === next.size
-              && prevState.tpSl === next.tpSl
-              && prevState.prices === next.prices
-              && prevState.time === next.time
-            ) return prevState;
-            return next;
-          });
+          setPositionColumns((prevState) => (samePositionColumns(prevState, next) ? prevState : next));
           await nextPaint();
           if (cancelled) return;
           if (fits()) break;
@@ -555,31 +615,13 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
         for (const key of showOrder) {
           if (next[key] === true) continue;
           const candidate = { ...next, [key]: true };
-          setPositionColumns((prevState) => {
-            if (
-              prevState.actions === candidate.actions
-              && prevState.size === candidate.size
-              && prevState.tpSl === candidate.tpSl
-              && prevState.prices === candidate.prices
-              && prevState.time === candidate.time
-            ) return prevState;
-            return candidate;
-          });
+          setPositionColumns((prevState) => (samePositionColumns(prevState, candidate) ? prevState : candidate));
           await nextPaint();
           if (cancelled) return;
           if (!fits()) {
             // Revert last change if it caused overflow.
             next = { ...next, [key]: false };
-            setPositionColumns((prevState) => {
-              if (
-                prevState.actions === next.actions
-                && prevState.size === next.size
-                && prevState.tpSl === next.tpSl
-                && prevState.prices === next.prices
-                && prevState.time === next.time
-              ) return prevState;
-              return next;
-            });
+            setPositionColumns((prevState) => (samePositionColumns(prevState, next) ? prevState : next));
             await nextPaint();
             break;
           }
@@ -588,13 +630,7 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
       }
     };
 
-    if (positionsColumnTuneTimeoutRef.current !== null) {
-      window.clearTimeout(positionsColumnTuneTimeoutRef.current);
-    }
-    positionsColumnTuneTimeoutRef.current = window.setTimeout(() => {
-      positionsColumnTuneTimeoutRef.current = null;
-      void run();
-    }, 140);
+    void run();
 
     return () => {
       cancelled = true;
@@ -605,10 +641,20 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
     };
   }, [activeTab, positionsContainerWidth, isLoadingOpenTrades, openTradesCount]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (activeTab !== "pending-orders") return;
     if (isLoadingPending) return;
     if (!Array.isArray(pendingOrders) || pendingOrders.length === 0) return;
+
+    const effectiveWidth = ordersContainerWidth > 0
+      ? ordersContainerWidth
+      : (typeof window !== "undefined" ? Math.round(window.innerWidth) : 1200);
+
+    if (effectiveWidth < 1080) {
+      const preset = getOrderColumnsForWidth(effectiveWidth);
+      setOrderColumns((prevState) => (sameOrderColumns(prevState, preset) ? prevState : preset));
+      return;
+    }
 
     let cancelled = false;
     const nextPaint = () => new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
@@ -636,15 +682,7 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
         for (const key of hideOrder) {
           if (next[key] === false) continue;
           next = { ...next, [key]: false };
-          setOrderColumns((prevState) => {
-            if (
-              prevState.actions === next.actions
-              && prevState.size === next.size
-              && prevState.tpSl === next.tpSl
-              && prevState.prices === next.prices
-            ) return prevState;
-            return next;
-          });
+          setOrderColumns((prevState) => (sameOrderColumns(prevState, next) ? prevState : next));
           await nextPaint();
           if (cancelled) return;
           if (fits()) break;
@@ -655,28 +693,12 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
         for (const key of showOrder) {
           if (next[key] === true) continue;
           const candidate = { ...next, [key]: true };
-          setOrderColumns((prevState) => {
-            if (
-              prevState.actions === candidate.actions
-              && prevState.size === candidate.size
-              && prevState.tpSl === candidate.tpSl
-              && prevState.prices === candidate.prices
-            ) return prevState;
-            return candidate;
-          });
+          setOrderColumns((prevState) => (sameOrderColumns(prevState, candidate) ? prevState : candidate));
           await nextPaint();
           if (cancelled) return;
           if (!fits()) {
             next = { ...next, [key]: false };
-            setOrderColumns((prevState) => {
-              if (
-                prevState.actions === next.actions
-                && prevState.size === next.size
-                && prevState.tpSl === next.tpSl
-                && prevState.prices === next.prices
-              ) return prevState;
-              return next;
-            });
+            setOrderColumns((prevState) => (sameOrderColumns(prevState, next) ? prevState : next));
             await nextPaint();
             break;
           }
@@ -685,13 +707,7 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
       }
     };
 
-    if (ordersColumnTuneTimeoutRef.current !== null) {
-      window.clearTimeout(ordersColumnTuneTimeoutRef.current);
-    }
-    ordersColumnTuneTimeoutRef.current = window.setTimeout(() => {
-      ordersColumnTuneTimeoutRef.current = null;
-      void run();
-    }, 140);
+    void run();
 
     return () => {
       cancelled = true;
@@ -1486,7 +1502,7 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
       >
 	        <Tabs
 	          value={activeTab}
-	          onValueChange={setActiveTab}
+	          onValueChange={handleTradeTabChange}
 	          className="w-full min-h-full flex flex-col"
 	        >
 		          <TabsList className="tq-trade-tabs w-full grid grid-cols-3 rounded-none bg-neutral-800 shrink-0 sticky top-0 z-20 border-b border-gray-800">
@@ -1794,7 +1810,11 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
           </TabsContent>
 
           {/* Active Positions Tab */}
-		          <TabsContent value="active-positions" className="p-0 m-0 flex-1 min-h-0">
+		          <TabsContent
+                forceMount
+                value="active-positions"
+                className="p-0 m-0 flex-1 min-h-0 data-[state=inactive]:hidden"
+              >
 	            <div ref={positionsContainerRef} data-testid="trade-active-positions" className="tq-trade-table-wrap p-4">
 	              {isLoadingOpenTrades ? (
 	                <div className="flex justify-center py-8">
@@ -1949,23 +1969,24 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
                                 )}
                               </TableRow>
                               {/* Expandable details for hidden columns */}
-                              {isExpanded && hasHiddenPositionColumns && (
-                                <TableRow key={`${trade.id}-expanded`} className="bg-neutral-850">
+                              {hasHiddenPositionColumns && (
+                                <TableRow
+                                  key={`${trade.id}-expanded`}
+                                  aria-hidden={!isExpanded}
+                                  className={`bg-neutral-850 ${isExpanded ? "" : "hidden"}`}
+                                >
                                   <TableCell colSpan={100} className="py-3">
-                                    <div
-                                      className="grid gap-3 text-sm"
-                                      style={{ gridTemplateColumns: "repeat(auto-fit, minmax(min(12rem, 100%), 1fr))" }}
-                                    >
+                                    <div className="grid grid-cols-2 gap-x-3 gap-y-3 text-sm sm:gap-x-4">
                                       {!positionColumns.size && (
-                                        <div>
+                                        <div className="min-w-0">
                                           <span className="text-gray-500 text-xs">Size</span>
                                           <div className="text-white">{trade.lots} Lot{trade.lots > 1 ? 's' : ''}</div>
                                         </div>
                                       )}
                                       {!positionColumns.time && (
-                                        <div>
+                                        <div className="min-w-0">
                                           <span className="text-gray-500 text-xs">Open Time</span>
-                                          <div className="text-gray-300 text-xs">
+                                          <div className="break-words text-gray-300 text-xs leading-snug">
                                             {(() => {
                                               const timestamp = trade.openedAt || trade.createdAt || trade.executedAt;
                                               if (!timestamp) return new Date().toLocaleString();
@@ -1981,25 +2002,25 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
                                       )}
                                       {!positionColumns.prices && (
                                         <>
-                                          <div>
+                                          <div className="min-w-0">
                                             <span className="text-gray-500 text-xs">Open Price</span>
-                                            <div className="text-white font-mono">{trade.openPrice.toFixed(isJpy ? 2 : 4)}</div>
+                                            <div className="text-white font-mono break-all">{trade.openPrice.toFixed(isJpy ? 2 : 4)}</div>
                                           </div>
-                                          <div>
+                                          <div className="min-w-0">
                                             <span className="text-gray-500 text-xs">Current Price</span>
-                                            <div className="text-white font-mono">{currentTradePrice?.toFixed(isJpy ? 2 : 4) || '—'}</div>
+                                            <div className="text-white font-mono break-all">{currentTradePrice?.toFixed(isJpy ? 2 : 4) || '—'}</div>
                                           </div>
                                         </>
                                       )}
                                       {!positionColumns.tpSl && (
                                         <>
-                                          <div>
+                                          <div className="min-w-0">
                                             <span className="text-gray-500 text-xs">Take Profit</span>
-                                            <div>{renderTargetPill("TP", trade.takeProfit, tradeSymbol, trade.type, trade.openPrice)}</div>
+                                            <div className="min-w-0">{renderTargetPill("TP", trade.takeProfit, tradeSymbol, trade.type, trade.openPrice)}</div>
                                           </div>
-                                          <div>
+                                          <div className="min-w-0">
                                             <span className="text-gray-500 text-xs">Stop Loss</span>
-                                            <div>{renderTargetPill("SL", trade.stopLoss, tradeSymbol, trade.type, trade.openPrice)}</div>
+                                            <div className="min-w-0">{renderTargetPill("SL", trade.stopLoss, tradeSymbol, trade.type, trade.openPrice)}</div>
                                           </div>
                                         </>
                                       )}
@@ -2041,7 +2062,11 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
           </TabsContent>
 
           {/* Pending Orders Tab */}
-		          <TabsContent value="pending-orders" className="p-0 m-0 flex-1 min-h-0">
+			          <TabsContent
+                forceMount
+                value="pending-orders"
+                className="p-0 m-0 flex-1 min-h-0 data-[state=inactive]:hidden"
+              >
 	            <div ref={ordersContainerRef} data-testid="trade-pending-orders" className="tq-trade-table-wrap p-4">
 	              {isLoadingPending ? (
 	                <div className="flex justify-center py-8">
@@ -2162,34 +2187,35 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
                                 )}
                               </TableRow>
                               {/* Expandable details for hidden columns */}
-                              {isExpanded && hasHiddenOrderColumns && (
-                                <TableRow key={`${order.id}-expanded`} className="bg-neutral-850">
+                              {hasHiddenOrderColumns && (
+                                <TableRow
+                                  key={`${order.id}-expanded`}
+                                  aria-hidden={!isExpanded}
+                                  className={`bg-neutral-850 ${isExpanded ? "" : "hidden"}`}
+                                >
                                   <TableCell colSpan={100} className="py-3">
-                                    <div
-                                      className="grid gap-3 text-sm"
-                                      style={{ gridTemplateColumns: "repeat(auto-fit, minmax(min(12rem, 100%), 1fr))" }}
-                                    >
+                                    <div className="grid grid-cols-2 gap-x-3 gap-y-3 text-sm sm:gap-x-4">
                                       {!orderColumns.size && (
-                                        <div>
+                                        <div className="min-w-0">
                                           <span className="text-gray-500 text-xs">Size</span>
                                           <div className="text-white">{order.lots} lots</div>
                                         </div>
                                       )}
                                       {!orderColumns.prices && (
-                                        <div>
+                                        <div className="min-w-0">
                                           <span className="text-gray-500 text-xs">Order Price</span>
-                                          <div className="text-white font-mono">{formatPx(orderPrice, orderSymbol)}</div>
+                                          <div className="text-white font-mono break-all">{formatPx(orderPrice, orderSymbol)}</div>
                                         </div>
                                       )}
                                       {!orderColumns.tpSl && (
                                         <>
-                                          <div>
+                                          <div className="min-w-0">
                                             <span className="text-gray-500 text-xs">Take Profit</span>
-                                            <div>{renderTargetPill("TP", order.takeProfit, orderSymbol, order.type, entry)}</div>
+                                            <div className="min-w-0">{renderTargetPill("TP", order.takeProfit, orderSymbol, order.type, entry)}</div>
                                           </div>
-                                          <div>
+                                          <div className="min-w-0">
                                             <span className="text-gray-500 text-xs">Stop Loss</span>
-                                            <div>{renderTargetPill("SL", order.stopLoss, orderSymbol, order.type, entry)}</div>
+                                            <div className="min-w-0">{renderTargetPill("SL", order.stopLoss, orderSymbol, order.type, entry)}</div>
                                           </div>
                                         </>
                                       )}

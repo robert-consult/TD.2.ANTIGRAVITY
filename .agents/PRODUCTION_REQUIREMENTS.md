@@ -227,3 +227,63 @@ Failure Mode if Missing:
   - Issue a new certificate and verify using `/api/public/trader/challenges/certificate/:verificationCode/verify`.
   - Change `challengeCertificateVerificationKeyId`, issue another certificate, and verify both old and new certificates still validate.
 - Failure Mode if Missing: certificate verification codes become weakly derived from fallback secrets, and key rotations can cause verification drift or invalid proofs.
+
+### PRD-PERF-001
+- ID: `PRD-PERF-001`
+- Date (UTC): `2026-02-15`
+- Scope: `Web app-shell caching safety boundary`
+- Requirement: Service Worker cache strategy must never cache or proxy authenticated API and WebSocket traffic (`/api/*`, `/ws`) and must serve worker script with revalidation semantics (no immutable worker caching).
+- Enforcement: Planned implementation in client SW module (`client/src/sw.ts` or `client/public/sw.js`) plus static serving behavior in `server/vite.ts` (worker delivery + SPA fallback exclusions).
+- Validation:
+  - Register SW and inspect network behavior for `/api/*` and `/ws`; requests must always hit network.
+  - Verify worker script (`/sw.js`) is fetched with `Cache-Control: no-cache` semantics and updates are detected after deploy.
+  - Validate offline shell still works for static assets without serving stale API data.
+- Failure Mode if Missing: stale/poisoned worker state can persist, API responses may be incorrectly cached, and authentication/session behavior may become inconsistent or unsafe.
+
+### PRD-SEC-004
+- ID: `PRD-SEC-004`
+- Date (UTC): `2026-02-15`
+- Scope: `Client encrypted cache isolation and lifecycle`
+- Requirement: Any client-side encrypted cache for account/config/query hydration must be user-scoped and fully purged on logout/session-user change.
+- Enforcement: Planned cache lifecycle controls in `client/src/lib/secureCache.ts`, logout/session transitions in `client/src/hooks/use-auth.tsx`, and persistence wiring in `client/src/lib/queryPersistence.ts`.
+- Validation:
+  - Authenticate as User A, populate cache, logout, and verify user-scoped entries are removed.
+  - Authenticate as User B on same device/profile and verify no User A cached state is readable/hydrated.
+  - Corrupt cache entries and confirm safe fallback to network without state bleed.
+- Failure Mode if Missing: cross-account data leakage on shared devices and stale sensitive account data exposure after logout.
+
+### PRD-SEC-005
+- ID: `PRD-SEC-005`
+- Date (UTC): `2026-02-15`
+- Scope: `Browser runtime hardening for persistent client cache`
+- Requirement: Before enabling production persistent encrypted cache, server must enforce a Content Security Policy that constrains script execution to trusted sources and blocks obvious inline/eval injection vectors.
+- Enforcement: Planned HTTP response header middleware in `server/index.ts` with rollout documentation and compatibility validation.
+- Validation:
+  - Verify `Content-Security-Policy` header is present on app shell responses in production profile.
+  - Run regression checks for app boot, lazy routes, and i18n loading under CSP.
+  - Run XSS probe tests confirming blocked inline/eval payloads.
+- Failure Mode if Missing: XSS payloads can read/abuse persistent cache and key material, materially increasing account data exposure risk.
+
+### PRD-MOB-001
+- ID: `PRD-MOB-001`
+- Date (UTC): `2026-02-15`
+- Scope: `Mobile/native production transport enforcement`
+- Requirement: Production mobile and native builds must reject cleartext backend endpoints (`http://`, `ws://`) and use HTTPS/WSS only.
+- Enforcement: Planned release-time config validation in `MOBILE/capacitor.config.ts`, native endpoint configuration in `NATIVE/src/services/api.ts` and `NATIVE/src/services/websocket.ts`, plus Android/iOS network policy manifests.
+- Validation:
+  - Produce release config and verify configured API/WS endpoints are HTTPS/WSS.
+  - Attempt to set production endpoint to cleartext and verify build/release guard fails.
+  - Validate runtime connectivity over secure transport only.
+- Failure Mode if Missing: credentials/session metadata and trading traffic can traverse insecure channels due to misconfiguration.
+
+### PRD-SEC-006
+- ID: `PRD-SEC-006`
+- Date (UTC): `2026-02-15`
+- Scope: `Mailbox E2EE key material local persistence`
+- Requirement: Web mailbox private key material must not remain in plaintext `localStorage` in production; migration path to safer storage must be implemented with backward-compatible cleanup.
+- Enforcement: Planned migration in `client/src/lib/e2ee.ts` to secure cache storage layer and cleanup of `tq.mailbox.e2ee.v1.*` localStorage keys.
+- Validation:
+  - Existing user with legacy localStorage key logs in; key is migrated and legacy key removed.
+  - Mailbox encrypt/decrypt still functions after migration.
+  - New key generation path writes only to new storage mechanism.
+- Failure Mode if Missing: private E2EE key material remains directly script-readable via localStorage, increasing impact of XSS/browser compromise.

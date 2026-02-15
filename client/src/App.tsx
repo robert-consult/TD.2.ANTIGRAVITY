@@ -114,7 +114,7 @@ function AppRoutes() {
     if (!loading && !isAuthenticated && location !== "/login") {
       navigate("/login");
     }
-    
+
     if (!loading && isAuthenticated && location === "/login") {
       navigate("/");
     }

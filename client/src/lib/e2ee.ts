@@ -264,8 +264,8 @@ export async function decryptMailboxEnvelopeForUser(input: {
     typeof recipient?.encryptedKey === "string" && recipient.encryptedKey.trim()
       ? recipient.encryptedKey.trim()
       : Number(envelope?.recipientUserId) === Number(input.userId) &&
-          typeof envelope?.encryptedKey === "string" &&
-          envelope.encryptedKey.trim()
+        typeof envelope?.encryptedKey === "string" &&
+        envelope.encryptedKey.trim()
         ? envelope.encryptedKey.trim()
         : "";
   const recipientKeyAlgorithm =

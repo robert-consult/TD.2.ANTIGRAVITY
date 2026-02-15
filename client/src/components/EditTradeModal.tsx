@@ -15,7 +15,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { useQuotes } from "@/hooks/use-quotes";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronUp, Check } from "lucide-react";
+import { ChevronUp, Check, Info } from "lucide-react";
 import { useTranslation } from "@/i18n";
 import { ApiError, apiRequest } from "@/lib/queryClient";
 import { useLotSettings } from "@/hooks/use-lot-settings";
@@ -435,24 +435,26 @@ export function EditTradeModal({ trade, open, onOpenChange }: EditTradeModalProp
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>{textTemplates.modalTitle.text}</DialogTitle>
-          <DialogDescription>
+      <DialogContent className="w-[calc(100vw-1rem)] max-w-[42rem] max-h-[calc(100vh-1rem)] overflow-x-hidden p-3 sm:w-[calc(100vw-2rem)] sm:max-w-lg sm:p-6">
+        <DialogHeader className="space-y-2 pr-8 text-left">
+          <DialogTitle className="text-[clamp(1.15rem,2.1vw,1.9rem)] leading-tight">
+            {textTemplates.modalTitle.text}
+          </DialogTitle>
+          <DialogDescription className="break-words text-[clamp(0.75rem,2.2vw,0.95rem)] leading-relaxed">
             {trade.status === 'PENDING' ? 'Order price' : 'Current price'}: {safeRefPrice} | Trade: {getSideLabel(trade.type)} {trade.lots} lots {tradeSymbol}
           </DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
+        <form onSubmit={form.handleSubmit(handleSubmit)} className="min-w-0 space-y-4">
+          <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4">
+            <div className="min-w-0 space-y-2">
               <Label htmlFor="takeProfit" className="text-green-500">Take Profit</Label>
               <Input
                 id="takeProfit"
                 type="number"
                 step="0.00001"
                 placeholder={pricePlaceholder}
-                className="placeholder:text-gray-400 border-2 border-green-500 focus:border-green-400 focus:ring-green-500/20 text-green-400"
+                className="h-12 w-full min-w-0 border-2 border-green-500 text-[clamp(1rem,4vw,1.7rem)] text-green-400 placeholder:text-[clamp(0.65rem,2.1vw,0.85rem)] placeholder:text-gray-400 focus:border-green-400 focus:ring-green-500/20 sm:h-14"
                 {...form.register("takeProfit", {
                   valueAsNumber: true,
                   onChange: (e) => {
@@ -463,18 +465,18 @@ export function EditTradeModal({ trade, open, onOpenChange }: EditTradeModalProp
                 })}
               />
               {validationMessages.tp && (
-                <p className="text-sm text-red-500 mt-1">{validationMessages.tp}</p>
+                <p className="mt-1 break-words text-[clamp(0.68rem,2.1vw,0.9rem)] leading-snug text-red-500">{validationMessages.tp}</p>
               )}
             </div>
 
-            <div className="space-y-2">
+            <div className="min-w-0 space-y-2">
               <Label htmlFor="stopLoss" className="text-red-500">Stop Loss</Label>
               <Input
                 id="stopLoss"
                 type="number"
                 step="0.00001"
                 placeholder={pricePlaceholder}
-                className="placeholder:text-gray-400 border-2 border-red-500 focus:border-red-400 focus:ring-red-500/20 text-red-400"
+                className="h-12 w-full min-w-0 border-2 border-red-500 text-[clamp(1rem,4vw,1.7rem)] text-red-400 placeholder:text-[clamp(0.65rem,2.1vw,0.85rem)] placeholder:text-gray-400 focus:border-red-400 focus:ring-red-500/20 sm:h-14"
                 {...form.register("stopLoss", {
                   valueAsNumber: true,
                   onChange: (e) => {
@@ -485,7 +487,7 @@ export function EditTradeModal({ trade, open, onOpenChange }: EditTradeModalProp
                 })}
               />
               {validationMessages.sl && (
-                <p className="text-sm text-red-500 mt-1">{validationMessages.sl}</p>
+                <p className="mt-1 break-words text-[clamp(0.68rem,2.1vw,0.9rem)] leading-snug text-red-500">{validationMessages.sl}</p>
               )}
             </div>
           </div>
@@ -493,14 +495,14 @@ export function EditTradeModal({ trade, open, onOpenChange }: EditTradeModalProp
           {/* Auto-Fix UI with drop-up preset selector (shows when validation errors exist) */}
           {Object.keys(validationMessages).length > 0 && (
             <div className="rounded-md border border-amber-500/20 bg-amber-500/5 p-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-              <div className="text-xs sm:text-sm text-amber-200">{invalidTargetsText}</div>
+              <div className="min-w-0 break-words text-xs text-amber-200 sm:text-sm">{invalidTargetsText}</div>
 
-              <div className="flex items-center gap-2">
+              <div className="grid w-full min-w-0 grid-cols-1 gap-2 min-[420px]:grid-cols-2 sm:w-auto sm:flex sm:flex-wrap sm:justify-end">
                 <Button
                   type="button"
                   variant="outline"
                   disabled={!referencePrice || referencePrice <= 0}
-                  className="border-emerald-500/25 bg-emerald-500/5 hover:bg-emerald-500/10"
+                  className="w-full border-emerald-500/25 bg-emerald-500/5 hover:bg-emerald-500/10 sm:w-auto"
                   onClick={() => {
                     autoFixTargets(lastPresetPoints);
                     toastPresetApplied(lastPresetPoints);
@@ -518,7 +520,7 @@ export function EditTradeModal({ trade, open, onOpenChange }: EditTradeModalProp
                       type="button"
                       variant="secondary"
                       disabled={!referencePrice || referencePrice <= 0}
-                      className="gap-2"
+                      className="w-full gap-2 sm:w-auto"
                     >
                       Presets
                       <ChevronUp className="h-4 w-4" />
@@ -549,14 +551,14 @@ export function EditTradeModal({ trade, open, onOpenChange }: EditTradeModalProp
           {/* Quick presets when targets are already valid */}
           {Object.keys(validationMessages).length === 0 && (
             <div className="rounded-md border border-white/10 bg-white/5 p-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-              <div className="text-xs sm:text-sm text-gray-200">{quickPresetsText}</div>
+              <div className="min-w-0 break-words text-xs text-gray-200 sm:text-sm">{quickPresetsText}</div>
 
-              <div className="flex items-center gap-2">
+              <div className="grid w-full min-w-0 grid-cols-1 gap-2 min-[420px]:grid-cols-2 sm:w-auto sm:flex sm:flex-wrap sm:justify-end">
                 <Button
                   type="button"
                   variant="outline"
                   disabled={!referencePrice || referencePrice <= 0}
-                  className="border-emerald-500/25 bg-emerald-500/5 hover:bg-emerald-500/10"
+                  className="w-full border-emerald-500/25 bg-emerald-500/5 hover:bg-emerald-500/10 sm:w-auto"
                   onClick={() => {
                     autoFixTargets(lastPresetPoints);
                     toastPresetApplied(lastPresetPoints);
@@ -574,7 +576,7 @@ export function EditTradeModal({ trade, open, onOpenChange }: EditTradeModalProp
                       type="button"
                       variant="secondary"
                       disabled={!referencePrice || referencePrice <= 0}
-                      className="gap-2"
+                      className="w-full gap-2 sm:w-auto"
                     >
                       Presets
                       <ChevronUp className="h-4 w-4" />
@@ -603,34 +605,76 @@ export function EditTradeModal({ trade, open, onOpenChange }: EditTradeModalProp
           )}
 
           {/* Trading Rules Info */}
-          <div className="bg-gray-50 dark:bg-gray-800 p-3 rounded-md text-xs sm:text-sm">
-            <p className="font-medium mb-1 text-gray-900 dark:text-gray-100">Trading Rules:</p>
-            {trade.type === 'BUY' ? (
-              <>
-                <p className="text-green-600 dark:text-green-400">• Take Profit must be above current price by {minPips}+ pips</p>
-                <p className="text-red-600 dark:text-red-400">• Stop Loss must be below current price by {minPips}+ pips</p>
-              </>
-            ) : (
-              <>
-                <p className="text-green-600 dark:text-green-400">• Take Profit must be below current price by {minPips}+ pips</p>
-                <p className="text-red-600 dark:text-red-400">• Stop Loss must be above current price by {minPips}+ pips</p>
-              </>
-            )}
+          <div className="relative overflow-hidden rounded-lg border border-white/10 bg-gradient-to-br from-white/[0.03] to-white/[0.01] p-4 shadow-[0_8px_24px_rgba(0,0,0,0.35)] backdrop-blur-sm">
+            <div className="pointer-events-none absolute left-0 top-0 h-px w-full bg-gradient-to-r from-transparent via-white/20 to-transparent" />
+
+            <div className="mb-3 flex items-center gap-2">
+              <Info className="h-4 w-4 text-cyan-300" />
+              <p className="text-[clamp(0.5625rem,0.48rem+0.35vw,0.625rem)] font-semibold uppercase tracking-[0.18em] text-cyan-300/90">
+                Trading Rules
+              </p>
+            </div>
+
+            <div className="space-y-2 font-mono text-[clamp(0.625rem,0.54rem+0.45vw,0.75rem)]">
+              {trade.type === "BUY" ? (
+                <>
+                  <div className="flex items-start gap-3">
+                    <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-emerald-400 shadow-[0_0_10px_rgba(52,211,153,0.75)]" />
+                    <p className="leading-relaxed text-emerald-300/95">
+                      Take Profit must be above current price by{" "}
+                      <span className="rounded bg-emerald-500/15 px-1.5 font-bold text-emerald-200">
+                        {minPips}+ pips
+                      </span>
+                    </p>
+                  </div>
+                  <div className="flex items-start gap-3">
+                    <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-red-400 shadow-[0_0_10px_rgba(248,113,113,0.75)]" />
+                    <p className="leading-relaxed text-rose-300/95">
+                      Stop Loss must be below current price by{" "}
+                      <span className="rounded bg-red-500/15 px-1.5 font-bold text-rose-200">
+                        {minPips}+ pips
+                      </span>
+                    </p>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="flex items-start gap-3">
+                    <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-emerald-400 shadow-[0_0_10px_rgba(52,211,153,0.75)]" />
+                    <p className="leading-relaxed text-emerald-300/95">
+                      Take Profit must be below current price by{" "}
+                      <span className="rounded bg-emerald-500/15 px-1.5 font-bold text-emerald-200">
+                        {minPips}+ pips
+                      </span>
+                    </p>
+                  </div>
+                  <div className="flex items-start gap-3">
+                    <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-red-400 shadow-[0_0_10px_rgba(248,113,113,0.75)]" />
+                    <p className="leading-relaxed text-rose-300/95">
+                      Stop Loss must be above current price by{" "}
+                      <span className="rounded bg-red-500/15 px-1.5 font-bold text-rose-200">
+                        {minPips}+ pips
+                      </span>
+                    </p>
+                  </div>
+                </>
+              )}
+            </div>
           </div>
 
-          <div className="flex gap-2 pt-4">
+          <div className="flex flex-col gap-2 pt-4 min-[420px]:flex-row">
             <Button
               type="button"
               variant="outline"
               onClick={() => onOpenChange(false)}
-              className="flex-1 border-2 border-gray-400 bg-gray-700 hover:bg-gray-600 text-white font-semibold"
+              className="w-full min-[420px]:flex-1 border-2 border-gray-400 bg-gray-700 hover:bg-gray-600 text-white font-semibold"
             >
               Cancel
             </Button>
             <Button
               type="submit"
               disabled={updateTargets.isPending || Object.keys(validationMessages).length > 0}
-              className="flex-1"
+              className="w-full min-[420px]:flex-1"
             >
               {updateTargets.isPending ? "Saving..." : "Save Changes"}
             </Button>

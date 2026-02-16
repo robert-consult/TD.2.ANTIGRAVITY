@@ -107,8 +107,20 @@ export async function setupSlow4gMidCpuAudit(page: Page, opts?: { cpuThrottlingR
 export async function login(page: Page, email: string, password: string) {
   const emailInput = page.getByPlaceholder("email@example.com");
   const passwordInput = page.getByPlaceholder("********");
+  const openPlatform = page.getByRole("button", { name: "Open Platform" });
 
   const waitForLoginForm = async (timeoutMs: number) => {
+    await page.evaluate(() => {
+      const start = (window as any).__tqBootNow;
+      if (typeof start === "function") start();
+    });
+    if (await openPlatform.isVisible().catch(() => false)) {
+      await openPlatform.click().catch(() => undefined);
+      await page.evaluate(() => {
+        const start = (window as any).__tqBootNow;
+        if (typeof start === "function") start();
+      });
+    }
     await expect(emailInput).toBeVisible({ timeout: timeoutMs });
     await expect(passwordInput).toBeVisible({ timeout: Math.min(timeoutMs, 20_000) });
   };

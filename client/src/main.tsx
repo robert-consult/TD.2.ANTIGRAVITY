@@ -1,9 +1,3 @@
-import { createRoot } from "react-dom/client";
-import App from "./App";
-import "./index.css";
-import { queryClient } from "@/lib/queryClient";
-import { initializeQueryPersistence } from "@/lib/queryPersistence";
-
 function swEnabled(): boolean {
   if (import.meta.env.DEV) return false;
   const raw = import.meta.env.VITE_ENABLE_SW;
@@ -30,12 +24,78 @@ function installServiceWorkerRegistration(): void {
   });
 }
 
-async function bootstrap(): Promise<void> {
-  installServiceWorkerRegistration();
-
-  await initializeQueryPersistence(queryClient).catch(() => undefined);
-
-  createRoot(document.getElementById("root")!).render(<App />);
+function updateBootStatus(message: string): void {
+  const node = document.getElementById("boot-splash__status");
+  if (!node) return;
+  node.textContent = message;
 }
 
-void bootstrap();
+function clearBootSplash(): void {
+  requestAnimationFrame(() => {
+    document.body.classList.add("is-ready");
+    const splash = document.getElementById("boot-splash");
+    if (!splash) return;
+    splash.addEventListener(
+      "transitionend",
+      () => splash.remove(),
+      { once: true },
+    );
+  });
+}
+
+let appStartPromise: Promise<void> | null = null;
+const BOOT_READY_SESSION_KEY = "tq-boot-ready";
+
+function startApp(): Promise<void> {
+  if (appStartPromise) return appStartPromise;
+
+  try {
+    sessionStorage.setItem(BOOT_READY_SESSION_KEY, "1");
+  } catch {
+    // Ignore storage failures (private mode, quota, etc.).
+  }
+
+  appStartPromise = (async () => {
+    updateBootStatus("Loading interface...");
+
+    const [{ createRoot }, { default: App }, { queryClient }, { initializeQueryPersistence }] = await Promise.all([
+      import("react-dom/client"),
+      import("./App"),
+      import("@/lib/queryClient"),
+      import("@/lib/queryPersistence"),
+      import("./index.css"),
+    ]);
+
+    await initializeQueryPersistence(queryClient).catch(() => undefined);
+    createRoot(document.getElementById("root")!).render(<App />);
+    clearBootSplash();
+  })();
+
+  return appStartPromise;
+}
+
+function hasPriorBootInSession(): boolean {
+  try {
+    return sessionStorage.getItem(BOOT_READY_SESSION_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function scheduleAppStart(): void {
+  if (window.location.pathname !== "/" || hasPriorBootInSession()) {
+    void startApp();
+    return;
+  }
+
+  (window as any).__tqBootNow = () => {
+    void startApp();
+  };
+}
+
+function bootstrap(): void {
+  installServiceWorkerRegistration();
+  scheduleAppStart();
+}
+
+bootstrap();

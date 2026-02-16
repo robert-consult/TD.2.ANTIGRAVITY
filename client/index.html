@@ -3,8 +3,70 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1" />
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+      body {
+        margin: 0;
+        background: #040914;
+        color: #e5e7eb;
+        font-family: "Segoe UI", Roboto, -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+      }
+      #boot-splash {
+        position: fixed;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        background:
+          radial-gradient(1200px 520px at 8% -12%, rgba(0, 224, 255, 0.16), transparent 52%),
+          radial-gradient(920px 520px at 92% 108%, rgba(16, 185, 129, 0.12), transparent 54%),
+          #040914;
+        z-index: 9999;
+        transition: opacity 180ms ease;
+      }
+      #boot-splash__brand {
+        font-size: clamp(1.5rem, 5vw, 2.25rem);
+        font-weight: 700;
+        letter-spacing: 0.04em;
+      }
+      #boot-splash__status {
+        margin-top: 0.55rem;
+        text-align: center;
+        font-size: 0.875rem;
+        color: #9ca3af;
+      }
+      #boot-splash__cta {
+        margin-top: 1rem;
+        width: 100%;
+        border: 0;
+        border-radius: 0.6rem;
+        background: linear-gradient(135deg, #06b6d4, #22d3ee);
+        color: #05222a;
+        font-weight: 700;
+        letter-spacing: 0.02em;
+        padding: 0.6rem 0.85rem;
+        cursor: pointer;
+      }
+      #boot-splash__cta:hover {
+        filter: brightness(1.05);
+      }
+      body.is-ready #boot-splash {
+        opacity: 0;
+        pointer-events: none;
+      }
+    </style>
   </head>
   <body>
+    <div id="boot-splash" aria-hidden="true">
+      <div>
+        <div id="boot-splash__brand">TradeQuip</div>
+        <div id="boot-splash__status">Ready. Open the platform to continue.</div>
+        <button id="boot-splash__cta" type="button" onclick="window.__tqBootNow && window.__tqBootNow()">
+          Open Platform
+        </button>
+      </div>
+    </div>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

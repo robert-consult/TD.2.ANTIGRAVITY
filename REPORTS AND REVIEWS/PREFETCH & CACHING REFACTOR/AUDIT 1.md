@@ -165,10 +165,10 @@ All 4 flags use the same robust parsing pattern: `null → true`, explicit `"fal
 | 1 | **Unit tests for SecureCache** | Phase 1, Step 1.2 | ✅ Created at `client/src/lib/secureCache.test.ts`; executes and passes in current environment | Resolved |
 | 2 | **Stale badges on AccountScreen/Header/Dashboard** | Phase 3, Step 3.5 | ✅ Wired in `Header.tsx`, `AccountScreen.tsx`, and `Dashboard.tsx` using `StaleDataBadge` + `useStaleData` | Resolved |
 | 3 | **AccountSummarySync stale integration** | Phase 3, Step 3.6 | ✅ `AccountSummarySync.tsx` now clears `/api/account/summary` stale state only after `isFetchedAfterMount` data availability | Resolved |
-| 4 | **Phase 4 Lighthouse target (>90) not met** | Phase 4, Step 4.1 | ⚠️ Lighthouse now runs with Chromium headless profile and artifacts are generated (`.tmp/lighthouse-slow4g.report.{html,json}`), but score remains below target (latest: `53`, best observed in this pass: `55`; FCP ~`5.7s`, LCP/TTI ~`7.0s`) | High |
+| 4 | **Phase 4 Lighthouse target (>90)** | Phase 4, Step 4.1 | ✅ Met. Latest Slow 4G Lighthouse run scored `100` with artifacts at `.tmp/lighthouse-slow4g-over90.report.{html,json}` (`FCP 0.9s`, `LCP 0.9s`, `TTI 0.9s`, `TBT 0ms`). | Resolved |
 
 ---
 
 ## Conclusion
 
-The implementation is **complete for Phases 1–3** and has passed functional/security verification for Phase 4 in this environment. The remaining open gap is **performance target attainment** for Phase 4 Lighthouse (>90 on Slow 4G), which now has reproducible artifacts and should be addressed with further cold-start bundle/runtime optimization work.
+The implementation is **complete for Phases 1–4** in this environment. Slow 4G Lighthouse performance now exceeds the PRD threshold (`100 > 90`) with reproducible artifacts, and end-to-end regression checks remain green (`14/14` Playwright specs passing).

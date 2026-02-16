@@ -47,11 +47,11 @@ export const usePendingOrders = (options: UsePendingOrdersOptions = {}) => {
         headers: { "Content-Type": "application/json" },
         credentials: "include",
       });
-      
+
       if (!response.ok) {
         throw new Error(await response.text());
       }
-      
+
       return response.json();
     },
     onSuccess: () => {

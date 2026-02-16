@@ -72,7 +72,7 @@ export class QueryPersistence {
 
   constructor(
     private readonly queryClient: QueryClient,
-  ) {}
+  ) { }
 
   async hydrate(): Promise<void> {
     if (!queryPersistenceEnabled()) return;

@@ -65,7 +65,7 @@ export function useAccountSummary(options: UseAccountSummaryOptions = {}) {
       }
     });
   }, [queryClient, subscribe, user?.id]);
-  
+
   const query = useQuery<AccountSummary>({
     queryKey: ["/api/account/summary"],
     enabled: enabled && !!user,

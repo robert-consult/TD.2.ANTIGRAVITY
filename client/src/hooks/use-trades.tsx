@@ -47,11 +47,11 @@ export function useTrades() {
   }, [queryClient, subscribe, user?.id]);
 
   // Get all trades
-  const { 
+  const {
     data: trades = [],
     isLoading: isLoadingTrades,
     error: tradesError,
-    refetch: refetchTrades 
+    refetch: refetchTrades
   } = useQuery({
     queryKey: ["/api/trades"],
     enabled: !!user,
@@ -59,7 +59,7 @@ export function useTrades() {
   });
 
   // Get open trades
-  const { 
+  const {
     data: openTrades = [],
     isLoading: isLoadingOpenTrades,
     error: openTradesError,

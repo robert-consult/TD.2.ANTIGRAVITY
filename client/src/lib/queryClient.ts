@@ -106,22 +106,22 @@ export const getQueryFn: <T>(options: {
   on401: UnauthorizedBehavior;
 }) => QueryFunction<T> =
   ({ on401: unauthorizedBehavior }) =>
-  async ({ queryKey }) => {
-    const identityHeaders = await getIdentityHeaders();
-    const url = resolveApiUrl(queryKey[0] as string);
-    
-    const res = await fetch(url, {
-      credentials: "include",
-      headers: identityHeaders,
-    });
+    async ({ queryKey }) => {
+      const identityHeaders = await getIdentityHeaders();
+      const url = resolveApiUrl(queryKey[0] as string);
 
-    if (unauthorizedBehavior === "returnNull" && res.status === 401) {
-      return null;
-    }
+      const res = await fetch(url, {
+        credentials: "include",
+        headers: identityHeaders,
+      });
 
-    await throwIfResNotOk(res);
-    return await res.json();
-  };
+      if (unauthorizedBehavior === "returnNull" && res.status === 401) {
+        return null;
+      }
+
+      await throwIfResNotOk(res);
+      return await res.json();
+    };
 
 export const queryClient = new QueryClient({
   defaultOptions: {

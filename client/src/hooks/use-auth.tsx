@@ -1,6 +1,15 @@
-import { createContext, useContext, useState, useCallback, useEffect } from "react";
-import { apiRequest } from "@/lib/queryClient";
+import { createContext, useContext, useState, useCallback, useEffect, useRef } from "react";
+import { ApiError, apiRequest } from "@/lib/queryClient";
 import { useQueryClient } from "@tanstack/react-query";
+import {
+  getSecureCacheScope,
+  secureClearAll,
+  secureDelete,
+  secureGet,
+  securePut,
+  setSecureCacheUserScope,
+} from "@/lib/secureCache";
+import { clearStaleData, markFreshData, markStaleData } from "@/lib/staleData";
 
 interface User {
   id: number;
@@ -50,6 +59,7 @@ interface AuthContextType {
   user: User | null;
   isAuthenticated: boolean;
   loading: boolean;
+  isCachedUserStale: boolean;
   login: (email: string, password: string) => Promise<void>;
   register: (email: string, username: string, password: string, opts?: RegisterOpts) => Promise<void>;
   logout: () => Promise<void>;
@@ -62,6 +72,7 @@ const AuthContext = createContext<AuthContextType>({
   user: null,
   isAuthenticated: false,
   loading: true,
+  isCachedUserStale: false,
   login: async () => {},
   register: async () => {},
   logout: async () => {},
@@ -72,6 +83,38 @@ const AuthContext = createContext<AuthContextType>({
 
 function baseLocale(value?: string | null): string {
   return String(value || "").trim().toLowerCase().split("-")[0] || "";
+}
+
+const AUTH_CACHE_KEY = "auth.current-user";
+const AUTH_CACHE_SCHEMA_VERSION = 1;
+const AUTH_STALE_KEY = "/api/auth/current-user";
+
+type CachedAuthRecord = {
+  schemaVersion: number;
+  user: User;
+  cachedAt: number;
+};
+
+function normalizeCachedUser(value: unknown): User | null {
+  if (!value || typeof value !== "object") return null;
+  const candidate = value as User;
+  const userId = Number((candidate as any).id);
+  if (!Number.isInteger(userId) || userId <= 0) return null;
+  if (typeof (candidate as any).email !== "string") return null;
+  return candidate;
+}
+
+function normalizeCachedAuthRecord(value: unknown): CachedAuthRecord | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Partial<CachedAuthRecord>;
+  if (Number(record.schemaVersion) !== AUTH_CACHE_SCHEMA_VERSION) return null;
+  const user = normalizeCachedUser(record.user);
+  if (!user) return null;
+  return {
+    schemaVersion: AUTH_CACHE_SCHEMA_VERSION,
+    user,
+    cachedAt: Number(record.cachedAt || Date.now()),
+  };
 }
 
 function applyStoredLocale(user: User | null): User | null {
@@ -93,30 +136,99 @@ function applyStoredLocale(user: User | null): User | null {
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isCachedUserStale, setIsCachedUserStale] = useState(false);
+  const activeUserIdRef = useRef<number | null>(null);
   const queryClient = useQueryClient();
+  const persistAuthState = useCallback(async (nextUser: User | null) => {
+    if (nextUser) {
+      await securePut<CachedAuthRecord>("user-state", AUTH_CACHE_KEY, {
+        schemaVersion: AUTH_CACHE_SCHEMA_VERSION,
+        user: nextUser,
+        cachedAt: Date.now(),
+      });
+      return;
+    }
+    await secureDelete("user-state", AUTH_CACHE_KEY).catch(() => undefined);
+  }, []);
+
+  const alignSecureCacheScope = useCallback(
+    async (nextUserId: number | null) => {
+      const currentScope = getSecureCacheScope();
+      const nextScope = Number.isInteger(nextUserId) && nextUserId && nextUserId > 0
+        ? `user:${nextUserId}`
+        : "app";
+      if (currentScope !== nextScope) {
+        await secureClearAll();
+        clearStaleData();
+      }
+      await setSecureCacheUserScope(nextUserId);
+      activeUserIdRef.current = nextUserId;
+    },
+    [],
+  );
+
   const updateUser = useCallback((patch: Partial<User>) => {
     setUser((prev) => (prev ? { ...prev, ...patch } : prev));
   }, []);
 
-  const checkAuth = useCallback(async () => {
+  const checkAuthInternal = useCallback(async (options?: { background?: boolean }) => {
+    const background = Boolean(options?.background);
     try {
-      setLoading(true);
+      if (!background) {
+        setLoading(true);
+      }
       const res = await apiRequest("GET", "/api/auth/current-user");
       const data = await res.json();
-      setUser(applyStoredLocale(data));
+      const nextUser = applyStoredLocale(data);
+      const nextUserId =
+        nextUser && Number.isInteger(Number(nextUser.id)) && Number(nextUser.id) > 0
+          ? Number(nextUser.id)
+          : null;
+      await alignSecureCacheScope(nextUserId);
+      setUser(nextUser);
+      setIsCachedUserStale(false);
+      markFreshData(AUTH_STALE_KEY);
+      await persistAuthState(nextUser);
     } catch (error) {
-      setUser(null);
+      const unauthorized = error instanceof ApiError && error.status === 401;
+      if (unauthorized) {
+        await alignSecureCacheScope(null);
+        setUser(null);
+        setIsCachedUserStale(false);
+        markFreshData(AUTH_STALE_KEY);
+        await persistAuthState(null);
+      } else if (background || activeUserIdRef.current !== null) {
+        setIsCachedUserStale(true);
+        markStaleData(AUTH_STALE_KEY);
+      } else {
+        setUser(null);
+        setIsCachedUserStale(false);
+        markFreshData(AUTH_STALE_KEY);
+      }
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [alignSecureCacheScope, persistAuthState]);
+
+  const checkAuth = useCallback(async () => {
+    await checkAuthInternal();
+  }, [checkAuthInternal]);
 
   const login = async (email: string, password: string) => {
     try {
       setLoading(true);
       const res = await apiRequest("POST", "/api/auth/login", { email, password });
       const data = await res.json();
-      setUser(applyStoredLocale(data));
+      const nextUser = applyStoredLocale(data);
+      const nextUserId =
+        nextUser && Number.isInteger(Number(nextUser.id)) && Number(nextUser.id) > 0
+          ? Number(nextUser.id)
+          : null;
+      await alignSecureCacheScope(nextUserId);
+      setUser(nextUser);
+      setIsCachedUserStale(false);
+      markFreshData(AUTH_STALE_KEY);
+      await persistAuthState(nextUser);
       queryClient.clear();
     } catch (error) {
       throw error;
@@ -135,7 +247,16 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         ...(opts || {}),
       });
       const data = await res.json();
-      setUser(applyStoredLocale(data));
+      const nextUser = applyStoredLocale(data);
+      const nextUserId =
+        nextUser && Number.isInteger(Number(nextUser.id)) && Number(nextUser.id) > 0
+          ? Number(nextUser.id)
+          : null;
+      await alignSecureCacheScope(nextUserId);
+      setUser(nextUser);
+      setIsCachedUserStale(false);
+      markFreshData(AUTH_STALE_KEY);
+      await persistAuthState(nextUser);
       queryClient.clear();
     } catch (error) {
       throw error;
@@ -152,8 +273,15 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       if (userId) {
         sessionStorage.removeItem(`verification_reminder_dismissed_${userId}`);
       }
+      await secureClearAll();
+      await setSecureCacheUserScope(null);
       setUser(null);
+      activeUserIdRef.current = null;
+      setIsCachedUserStale(false);
+      markFreshData(AUTH_STALE_KEY);
+      clearStaleData();
       queryClient.clear();
+      await persistAuthState(null);
     } catch (error) {
       console.error("Logout error:", error);
     } finally {
@@ -168,7 +296,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       const data = await res.json();
       if (data.success) {
         // Refresh user data to get back to admin session
-        await checkAuth();
+        await checkAuthInternal();
         queryClient.clear();
       }
     } catch (error) {
@@ -181,8 +309,29 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   // Check auth on mount
   useEffect(() => {
-    checkAuth();
-  }, [checkAuth]);
+    let cancelled = false;
+    void (async () => {
+      const cached = normalizeCachedAuthRecord(await secureGet<CachedAuthRecord>("user-state", AUTH_CACHE_KEY));
+      if (cached && !cancelled) {
+        await setSecureCacheUserScope(cached.user.id);
+        setUser(applyStoredLocale(cached.user));
+        activeUserIdRef.current = Number(cached.user.id);
+        setLoading(false);
+        setIsCachedUserStale(true);
+        markStaleData(AUTH_STALE_KEY);
+      }
+      await checkAuthInternal({ background: Boolean(cached) });
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [checkAuthInternal]);
+
+  useEffect(() => {
+    if (!user) return;
+    void persistAuthState(user);
+  }, [persistAuthState, user]);
 
   return (
     <AuthContext.Provider
@@ -190,6 +339,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         user,
         isAuthenticated: !!user,
         loading,
+        isCachedUserStale,
         login,
         register,
         logout,

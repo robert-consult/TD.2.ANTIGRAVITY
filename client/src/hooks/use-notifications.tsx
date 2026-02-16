@@ -54,7 +54,7 @@ function isMessageForUser(message: any, userId: number | undefined): boolean {
 
 async function decryptNotificationRows(rows: NotificationRow[], userId: number | undefined): Promise<NotificationRow[]> {
   if (!userId || !rows.length) return rows;
-  const key = getStoredMailboxE2eeKey(userId);
+  const key = await getStoredMailboxE2eeKey(userId);
   if (!key?.privateKeyJwk) return rows;
 
   const next = await Promise.all(

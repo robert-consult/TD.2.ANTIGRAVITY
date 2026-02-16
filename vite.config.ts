@@ -4,7 +4,12 @@ import path from "path";
 import runtimeErrorOverlay from "@replit/vite-plugin-runtime-error-modal";
 import { autoI18nPlugin } from "./client/vite.plugins/autoI18n";
 
+const buildHash = process.env.BUILD_HASH ?? Date.now().toString(36);
+
 export default defineConfig({
+  define: {
+    __TQ_BUILD_HASH__: JSON.stringify(buildHash),
+  },
   plugins: [
     autoI18nPlugin(),
     react(),
@@ -30,5 +35,15 @@ export default defineConfig({
   build: {
     outDir: path.resolve(import.meta.dirname, "dist/public"),
     emptyOutDir: true,
+    rollupOptions: {
+      input: {
+        main: path.resolve(import.meta.dirname, "client/index.html"),
+        sw: path.resolve(import.meta.dirname, "client/src/sw.ts"),
+      },
+      output: {
+        entryFileNames: (chunk) =>
+          chunk.name === "sw" ? "sw.js" : "assets/[name]-[hash].js",
+      },
+    },
   },
 });

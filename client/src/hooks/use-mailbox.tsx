@@ -158,7 +158,7 @@ async function decryptThreadMessagesForUser(
   userId: number | undefined,
 ): Promise<MailboxMessageRow[]> {
   if (!userId || !messages.length) return messages;
-  const localKey = getStoredMailboxE2eeKey(userId);
+  const localKey = await getStoredMailboxE2eeKey(userId);
   if (!localKey?.privateKeyJwk) return messages;
 
   const next = await Promise.all(

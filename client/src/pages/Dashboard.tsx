@@ -5,6 +5,8 @@ import { AppShell } from "@/components/layout/AppShell";
 import { useQuotes } from "@/hooks/use-quotes";
 import { useQuery } from "@tanstack/react-query";
 import { lazyWithPing } from "@/lib/lazyWithPing";
+import { StaleDataBadge } from "@/components/StaleDataBadge";
+import { useStaleData } from "@/lib/staleData";
 
 const QuotesScreen = lazyWithPing(() => import("./QuotesScreen"));
 const ChartScreen = lazyWithPing(() => import("./ChartScreen"));
@@ -38,6 +40,7 @@ export default function Dashboard() {
   const [activeTab, setActiveTab] = useState("quotes");
   const [selectedSymbol, setSelectedSymbol] = useState("");
   const { quotes } = useQuotes();
+  const hasHydratedDashboardData = useStaleData("/api/account/summary");
 
   const { data: symbols = [] } = useQuery<Array<{ symbol: string }>>({
     queryKey: ["/api/config/symbols"],
@@ -85,6 +88,11 @@ export default function Dashboard() {
       header={
         <>
           <Header showBalance />
+          {hasHydratedDashboardData ? (
+            <div className="px-gutter pb-2">
+              <StaleDataBadge />
+            </div>
+          ) : null}
         </>
       }
       mobileNav={<MobileNavigation activeTab={activeTab} setActiveTab={setActiveTab} />}

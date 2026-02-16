@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { acceptDoc1IfPrompted, login } from "./utils";
+import { acceptDoc1IfPrompted, ensureTradeCapacity, login } from "./utils";
 
 const DEMO = { email: "demo@tradingfx.com", password: "demo1234" };
 const ADMIN = { email: "admin@local.test", password: "changeme" };
@@ -12,7 +12,10 @@ async function navigateToTrade(page: Page) {
 async function closeOneIfPresent(page: Page): Promise<boolean> {
   await page.getByRole("tab", { name: /Positions/ }).click();
   const positionsPanel = page.locator('[data-testid="trade-active-positions"]');
-  const closeButtons = positionsPanel.getByRole("button", { name: /^Close$/ });
+  const firstRow = positionsPanel.locator("tbody tr").first();
+  if ((await firstRow.count()) === 0) return false;
+  await firstRow.click();
+  const closeButtons = positionsPanel.getByRole("button", { name: /close/i });
   const count = await closeButtons.count();
   if (count === 0) return false;
 
@@ -27,6 +30,7 @@ async function closeOneIfPresent(page: Page): Promise<boolean> {
 }
 
 async function openAndCloseOneTrade(page: Page) {
+  await ensureTradeCapacity(page, { symbol: "USDJPY", maxActivePerSymbol: 2 });
   await page.getByRole("tab", { name: "Place Order" }).click();
   const buyButton = page.locator("button.btn-buy");
   await expect(buyButton).toBeEnabled({ timeout: 60_000 });
@@ -55,13 +59,17 @@ async function openAndCloseOneTrade(page: Page) {
 
   await page.getByRole("tab", { name: /Positions/ }).click();
   const positionsPanel = page.locator('[data-testid="trade-active-positions"]');
-  await expect(positionsPanel.locator("tbody tr").first()).toBeVisible({ timeout: 60_000 });
+  const firstRow = positionsPanel.locator("tbody tr").first();
+  await expect(firstRow).toBeVisible({ timeout: 60_000 });
+  await firstRow.click();
+  const closeButton = positionsPanel.getByRole("button", { name: /close/i }).first();
+  await expect(closeButton).toBeVisible({ timeout: 60_000 });
 
   const closeReq = page.waitForResponse(
     (res) => /\/api\/trades\/\d+\/close$/.test(res.url()) && res.request().method() === "POST",
     { timeout: 60_000 },
   );
-  await positionsPanel.getByRole("button", { name: /^Close$/ }).first().click();
+  await closeButton.click();
   const closeRes = await closeReq;
   expect(closeRes.status(), await closeRes.text()).toBeLessThan(400);
 }

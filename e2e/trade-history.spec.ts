@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { acceptDoc1IfPrompted, login } from "./utils";
+import { acceptDoc1IfPrompted, ensureTradeCapacity, login } from "./utils";
 
 const DEMO = { email: "demo@tradingfx.com", password: "demo1234" };
 
@@ -17,7 +17,9 @@ test("Trade: closing a position shows in history", async ({ page }) => {
   test.setTimeout(180_000);
 
   await login(page, DEMO.email, DEMO.password);
+  await acceptDoc1IfPrompted(page);
   await navigateToTrade(page);
+  await ensureTradeCapacity(page, { symbol: "USDJPY", maxActivePerSymbol: 2 });
 
   const buyButton = page.locator("button.btn-buy");
   await expect(buyButton).toBeEnabled({ timeout: 60_000 });
@@ -46,13 +48,17 @@ test("Trade: closing a position shows in history", async ({ page }) => {
 
   await page.getByRole("tab", { name: /Positions/ }).click();
   const positionsPanel = page.locator('[data-testid="trade-active-positions"]');
-  await expect(positionsPanel.locator("tbody tr").first()).toBeVisible({ timeout: 60_000 });
+  const firstPositionRow = positionsPanel.locator("tbody tr").first();
+  await expect(firstPositionRow).toBeVisible({ timeout: 60_000 });
+  await firstPositionRow.click();
 
+  const closeButton = positionsPanel.getByRole("button", { name: /close/i }).first();
+  await expect(closeButton).toBeVisible({ timeout: 60_000 });
   const closeReq = page.waitForResponse(
     (res) => /\/api\/trades\/\d+\/close$/.test(res.url()) && res.request().method() === "POST",
     { timeout: 60_000 },
   );
-  await positionsPanel.getByRole("button", { name: /^Close$/ }).first().click();
+  await closeButton.click();
   const closeRes = await closeReq;
   expect(closeRes.status(), await closeRes.text()).toBeLessThan(400);
 

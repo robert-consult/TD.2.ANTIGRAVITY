@@ -1609,6 +1609,22 @@
     animation: tq-fade-up 240ms ease-out both;
   }
 
+  @keyframes tq-stale-pulse {
+    0%,
+    100% {
+      opacity: 0.55;
+    }
+
+    50% {
+      opacity: 1;
+    }
+  }
+
+  .tq-stale-indicator {
+    opacity: 0.78;
+    animation: tq-stale-pulse 1.2s ease-in-out infinite;
+  }
+
   .app-card {
     @apply rounded-2xl border border-white/10 bg-white/5 backdrop-blur-md shadow-glass-lg;
   }

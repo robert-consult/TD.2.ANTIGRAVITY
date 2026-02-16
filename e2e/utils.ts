@@ -149,6 +149,115 @@ export async function acceptDoc1IfPrompted(page: Page): Promise<boolean> {
   return true;
 }
 
+type EnsureTradeCapacityOptions = {
+  symbol?: string;
+  maxActivePerSymbol?: number;
+  maxIterations?: number;
+};
+
+export async function ensureTradeCapacity(
+  page: Page,
+  options?: EnsureTradeCapacityOptions,
+): Promise<void> {
+  const symbol = String(options?.symbol ?? "USDJPY").toUpperCase();
+  const maxActivePerSymbol = Math.max(0, Number(options?.maxActivePerSymbol ?? 1));
+  const maxIterations = Math.max(1, Number(options?.maxIterations ?? 8));
+
+  const result = await page.evaluate(
+    async ({ symbol, maxActivePerSymbol, maxIterations }) => {
+      const normalizeSymbol = (value: unknown): string => String(value ?? "").trim().toUpperCase();
+      const targetSymbol = normalizeSymbol(symbol);
+
+      const readRows = async (url: string): Promise<any[]> => {
+        try {
+          const res = await fetch(url, { credentials: "include" });
+          if (!res.ok) return [];
+          const body = await res.json().catch(() => []);
+          return Array.isArray(body) ? body : [];
+        } catch {
+          return [];
+        }
+      };
+
+      const rowSymbol = (row: any): string => {
+        if (row?.symbol && typeof row.symbol === "string") return normalizeSymbol(row.symbol);
+        if (row?.symbol && typeof row.symbol === "object") return normalizeSymbol(row.symbol.symbol);
+        return "";
+      };
+
+      const filterBySymbol = (rows: any[]) =>
+        rows.filter((row) => !targetSymbol || rowSymbol(row) === targetSymbol);
+
+      const countActive = (openRows: any[], pendingRows: any[]) =>
+        filterBySymbol(openRows).length + filterBySymbol(pendingRows).length;
+
+      let remaining = 0;
+      for (let attempt = 0; attempt < maxIterations; attempt += 1) {
+        const [openRows, pendingRows] = await Promise.all([
+          readRows("/api/trades/open"),
+          readRows("/api/trades/pending"),
+        ]);
+        remaining = countActive(openRows, pendingRows);
+        if (remaining <= maxActivePerSymbol) {
+          return { ok: true, remaining };
+        }
+
+        let didMutate = false;
+
+        for (const row of filterBySymbol(pendingRows)) {
+          if (remaining <= maxActivePerSymbol) break;
+          const id = Number(row?.id);
+          if (!Number.isInteger(id) || id <= 0) continue;
+          try {
+            const res = await fetch(`/api/trades/${id}/cancel`, {
+              method: "PATCH",
+              credentials: "include",
+            });
+            if (res.status < 500) {
+              didMutate = true;
+              remaining -= 1;
+            }
+          } catch {
+            // keep iterating
+          }
+        }
+
+        if (remaining > maxActivePerSymbol) {
+          for (const row of filterBySymbol(openRows)) {
+            if (remaining <= maxActivePerSymbol) break;
+            const id = Number(row?.id);
+            if (!Number.isInteger(id) || id <= 0) continue;
+            try {
+              const res = await fetch(`/api/trades/${id}/close`, {
+                method: "POST",
+                credentials: "include",
+              });
+              if (res.status < 400) {
+                didMutate = true;
+                remaining -= 1;
+              }
+            } catch {
+              // keep iterating
+            }
+          }
+        }
+
+        if (!didMutate) break;
+        await new Promise((resolve) => setTimeout(resolve, 150));
+      }
+
+      return { ok: remaining <= maxActivePerSymbol, remaining };
+    },
+    { symbol, maxActivePerSymbol, maxIterations },
+  );
+
+  if (!result.ok) {
+    throw new Error(
+      `Unable to reduce active trades for ${symbol} to <= ${maxActivePerSymbol}. Remaining: ${result.remaining}`,
+    );
+  }
+}
+
 export function installTradingViewStub(page: Page, tracker?: { called: () => void }) {
   const stub = [
     "(() => {",

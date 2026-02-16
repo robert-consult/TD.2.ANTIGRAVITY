@@ -1,10 +1,16 @@
 import { useEffect } from "react";
 import { useAuth } from "@/hooks/use-auth";
 import { useAccountSummary } from "@/hooks/use-account-summary";
+import { markFreshData } from "@/lib/staleData";
 
 export function AccountSummarySync() {
   const { user, isAuthenticated, updateUser } = useAuth();
-  const { summary } = useAccountSummary({ enabled: isAuthenticated });
+  const { summary, isFetchedAfterMount } = useAccountSummary({ enabled: isAuthenticated });
+
+  useEffect(() => {
+    if (!summary || !isFetchedAfterMount) return;
+    markFreshData("/api/account/summary");
+  }, [isFetchedAfterMount, summary]);
 
   useEffect(() => {
     if (!user || !summary) return;

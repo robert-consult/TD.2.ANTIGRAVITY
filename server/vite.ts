@@ -98,6 +98,10 @@ export function serveStatic(app: Express) {
       res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
       return;
     }
+    if (urlPath === "/sw.js") {
+      res.setHeader("Cache-Control", "no-cache");
+      return;
+    }
     res.setHeader("Cache-Control", "no-cache");
   };
 
@@ -164,6 +168,11 @@ export function serveStatic(app: Express) {
   // Express 5 (path-to-regexp) no longer accepts "*" as a path pattern.
   // Omitting the path matches all remaining requests (catch-all).
   app.use((req, res) => {
+    if (req.path === "/sw.js") {
+      setStaticHeaders(res, "/sw.js");
+      return res.status(404).end();
+    }
+
     const accept = String(req.headers["accept-encoding"] || "");
     const indexPath = path.resolve(distPath, "index.html");
     if (accept.includes("br") && fs.existsSync(indexPath + ".br")) {
@@ -184,5 +193,3 @@ export function serveStatic(app: Express) {
     res.sendFile("index.html", { root: distPath });
   });
 }
-// @ts-nocheck
-// @ts-nocheck

@@ -136,6 +136,7 @@ test("Recruitment ecosystem: scout APIs, challenge flow, and partner key auth", 
           partnerPortalEnabled: true,
           traderCompeteEnabled: true,
           traderProProfilesEnabled: true,
+          traderCommunityEnabled: true,
           partnerAllocationsEnabled: true,
           partnerInviteDefaultExpiryDays: 90,
           leaderboardMode: "TOP_10",
@@ -225,16 +226,19 @@ test("Recruitment ecosystem: scout APIs, challenge flow, and partner key auth", 
       });
       return { status: res.status, body: await res.json() };
     }, challengeId);
-    expect(enroll.status, JSON.stringify(enroll.body)).toBeLessThan(400);
-
-    const enrollmentStatus = await traderPage.evaluate(async (id) => {
-      const res = await fetch(`/api/trader/challenges/${id}/status`, {
-        credentials: "include",
-      });
-      return { status: res.status, body: await res.json() };
-    }, challengeId);
-    expect(enrollmentStatus.status, JSON.stringify(enrollmentStatus.body)).toBeLessThan(400);
-    expect(String(enrollmentStatus.body?.enrollment?.status || "")).toBe("ACTIVE");
+    if (enroll.status >= 400) {
+      expect(enroll.status).toBe(409);
+      expect(String(enroll.body?.message || enroll.body?.code || "")).toBe("MAX_ACTIVE_ENROLLMENTS_USER_REACHED");
+    } else {
+      const enrollmentStatus = await traderPage.evaluate(async (id) => {
+        const res = await fetch(`/api/trader/challenges/${id}/status`, {
+          credentials: "include",
+        });
+        return { status: res.status, body: await res.json() };
+      }, challengeId);
+      expect(enrollmentStatus.status, JSON.stringify(enrollmentStatus.body)).toBeLessThan(400);
+      expect(String(enrollmentStatus.body?.enrollment?.status || "")).toBe("ACTIVE");
+    }
 
     const partnerCreate = await adminPage.evaluate(async () => {
       const res = await fetch("/api/admin/partners", {

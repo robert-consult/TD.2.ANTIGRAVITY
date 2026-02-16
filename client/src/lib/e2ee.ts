@@ -2,9 +2,12 @@ import {
   E2EE_DATA_ALGO_AES_256_GCM,
   E2EE_KEY_ALGO_RSA_OAEP_256_V1,
 } from "@shared/e2ee/envelope";
+import { secureDelete, secureGet, securePut } from "@/lib/secureCache";
 
 const E2EE_KEY_ALGO = E2EE_KEY_ALGO_RSA_OAEP_256_V1;
 const STORAGE_PREFIX = "tq.mailbox.e2ee.v1";
+const E2EE_STORE = "e2ee-keys";
+const localKeyCache = new Map<number, MailboxLocalE2eeKeyMaterial>();
 
 type RecipientKey = {
   userId: number;
@@ -101,39 +104,73 @@ async function importPrivateKey(privateKeyJwk: JsonWebKey): Promise<CryptoKey> {
   );
 }
 
-function parseStoredKey(userId: number): MailboxLocalE2eeKeyMaterial | null {
+function normalizeStoredKey(userId: number, rawValue: unknown): MailboxLocalE2eeKeyMaterial | null {
+  if (!rawValue || typeof rawValue !== "object") return null;
+  const parsed = rawValue as MailboxLocalE2eeKeyMaterial;
+  if (!parsed || parsed.userId !== userId) return null;
+  if (!parsed.publicKeyPem || !parsed.privateKeyJwk || !parsed.fingerprint) return null;
+  return {
+    ...parsed,
+    keyAlgorithm: parsed.keyAlgorithm || E2EE_KEY_ALGO,
+    updatedAt: Number(parsed.updatedAt || Date.now()),
+  };
+}
+
+function parseStoredKeyFromLocalStorage(userId: number): MailboxLocalE2eeKeyMaterial | null {
+  if (typeof localStorage === "undefined") return null;
   const raw = localStorage.getItem(storageKey(userId));
   if (!raw) return null;
   try {
-    const parsed = JSON.parse(raw) as MailboxLocalE2eeKeyMaterial;
-    if (!parsed || parsed.userId !== userId) return null;
-    if (!parsed.publicKeyPem || !parsed.privateKeyJwk || !parsed.fingerprint) return null;
-    return {
-      ...parsed,
-      keyAlgorithm: parsed.keyAlgorithm || E2EE_KEY_ALGO,
-      updatedAt: Number(parsed.updatedAt || Date.now()),
-    };
+    return normalizeStoredKey(userId, JSON.parse(raw));
   } catch {
     return null;
   }
 }
 
-export function getStoredMailboxE2eeKey(userId: number): MailboxLocalE2eeKeyMaterial | null {
+async function persistMailboxE2eeKey(material: MailboxLocalE2eeKeyMaterial): Promise<void> {
+  localKeyCache.set(material.userId, material);
+  await securePut(E2EE_STORE, String(material.userId), material).catch(() => undefined);
+  try {
+    localStorage.removeItem(storageKey(material.userId));
+  } catch {
+    // ignore local storage delete failures
+  }
+}
+
+export async function getStoredMailboxE2eeKey(userId: number): Promise<MailboxLocalE2eeKeyMaterial | null> {
   if (!Number.isInteger(userId) || userId <= 0) return null;
-  return parseStoredKey(userId);
+  const memoryCached = localKeyCache.get(userId);
+  if (memoryCached) return memoryCached;
+
+  const indexedDbValue = normalizeStoredKey(
+    userId,
+    await secureGet<MailboxLocalE2eeKeyMaterial>(E2EE_STORE, String(userId)).catch(() => null),
+  );
+  if (indexedDbValue) {
+    localKeyCache.set(userId, indexedDbValue);
+    return indexedDbValue;
+  }
+
+  const legacyLocal = parseStoredKeyFromLocalStorage(userId);
+  if (!legacyLocal) return null;
+
+  await persistMailboxE2eeKey(legacyLocal);
+  return legacyLocal;
 }
 
-export function clearStoredMailboxE2eeKey(userId: number): void {
+export async function clearStoredMailboxE2eeKey(userId: number): Promise<void> {
   if (!Number.isInteger(userId) || userId <= 0) return;
-  localStorage.removeItem(storageKey(userId));
-}
-
-function persistMailboxE2eeKey(material: MailboxLocalE2eeKeyMaterial): void {
-  localStorage.setItem(storageKey(material.userId), JSON.stringify(material));
+  localKeyCache.delete(userId);
+  await secureDelete(E2EE_STORE, String(userId)).catch(() => undefined);
+  try {
+    localStorage.removeItem(storageKey(userId));
+  } catch {
+    // ignore local storage cleanup failures
+  }
 }
 
 export async function ensureMailboxE2eeKey(userId: number): Promise<MailboxLocalE2eeKeyMaterial> {
-  const existing = getStoredMailboxE2eeKey(userId);
+  const existing = await getStoredMailboxE2eeKey(userId);
   if (existing) return existing;
 
   const keyPair = await crypto.subtle.generateKey(
@@ -160,7 +197,7 @@ export async function ensureMailboxE2eeKey(userId: number): Promise<MailboxLocal
     privateKeyJwk,
     updatedAt: Date.now(),
   };
-  persistMailboxE2eeKey(material);
+  await persistMailboxE2eeKey(material);
   return material;
 }
 

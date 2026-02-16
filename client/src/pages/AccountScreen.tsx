@@ -10,6 +10,8 @@ import { Button } from "@/components/ui/button";
 import { useLocation } from "wouter";
 import { MailboxMinitab } from "@/components/Mailbox/MailboxMinitab";
 import { useMailboxThreads } from "@/hooks/use-mailbox";
+import { StaleDataBadge } from "@/components/StaleDataBadge";
+import { useStaleData } from "@/lib/staleData";
 
 export default function AccountScreen() {
   const sideLabels: Record<string, { label: string }> = {
@@ -40,6 +42,7 @@ export default function AccountScreen() {
   const { summary, isLoading } = useAccountSummary();
   const { data: mailboxSummary } = useMailboxThreads(1, 0);
   const mailboxUnreadCount = Number(mailboxSummary?.unreadCount ?? 0);
+  const hasHydratedSummary = useStaleData("/api/account/summary");
 
   const { data: trades = [] } = useQuery<any[]>({
     queryKey: ["/api/trades"],
@@ -201,6 +204,7 @@ export default function AccountScreen() {
         <h1 className="tq-page-title inline-flex items-center gap-2">
           Account
           {mailboxUnreadCount > 0 ? <span className="h-2.5 w-2.5 rounded-full bg-sky-400" title="Unread mailbox messages" /> : null}
+          {hasHydratedSummary ? <StaleDataBadge /> : null}
         </h1>
       </div>
 
@@ -288,7 +292,10 @@ export default function AccountScreen() {
                     {isLoading ? (
                       <Skeleton className="h-5 w-20 mt-1" />
                     ) : (
-                      <p className={`price-display ${valueToneClass(summary?.balance)}`}>{formatCurrency(summary?.balance)}</p>
+                      <p className={`price-display ${valueToneClass(summary?.balance)}`}>
+                        {formatCurrency(summary?.balance)}
+                        {hasHydratedSummary ? <span className="ml-2 align-middle"><StaleDataBadge /></span> : null}
+                      </p>
                     )}
 	                  </div>
 	                  <Wallet className="h-6 w-6 text-primary" />

@@ -200,7 +200,8 @@
   },
   "overrides": {
     "esbuild": "0.27.2",
-    "@isaacs/brace-expansion": "5.0.1"
+    "@isaacs/brace-expansion": "5.0.1",
+    "qs": "6.15.0"
   },
   "optionalDependencies": {
     "bufferutil": "^4.1.0"

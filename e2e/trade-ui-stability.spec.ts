@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { acceptDoc1IfPrompted, login } from "./utils";
+import { acceptDoc1IfPrompted, ensureTradeCapacity, login } from "./utils";
 
 const DEMO = { email: "demo@tradingfx.com", password: "demo1234" };
 
@@ -15,7 +15,9 @@ test("Trade: header collapse does not reset scroll + tables remain expandable on
   await page.setViewportSize({ width: narrowWidth, height: 760 });
 
   await login(page, DEMO.email, DEMO.password);
+  await acceptDoc1IfPrompted(page);
   await navigateToTrade(page);
+  await ensureTradeCapacity(page, { symbol: "USDJPY", maxActivePerSymbol: 2 });
 
   const scroll = page.locator('[data-testid="trade-tab-scroll"]');
   const header = page.locator('[data-testid="trade-header-shell"]');
@@ -68,6 +70,7 @@ test("Trade: header collapse does not reset scroll + tables remain expandable on
 
   const submitSingle = page.locator('button[type="submit"][form="trade-order-form"]').first();
   await expect(submitSingle).toBeEnabled({ timeout: 60_000 });
+  await ensureTradeCapacity(page, { symbol: "USDJPY", maxActivePerSymbol: 2 });
   const pendingPost = page.waitForResponse(
     (res) => res.url().endsWith("/api/trades") && res.request().method() === "POST",
     { timeout: 60_000 },
@@ -172,7 +175,7 @@ test("Trade: header collapse does not reset scroll + tables remain expandable on
   await page.setViewportSize({ width: 360, height: 760 });
   await expect(positionsPanel.getByRole("columnheader", { name: "Open Time" })).toBeHidden({ timeout: 10_000 });
   await positionsPanel.locator("tbody tr").first().click();
-  await expect(positionsPanel.getByText("Open Time")).toBeVisible();
+  await expect(positionsPanel.getByText("Open Time").first()).toBeVisible();
 
   // Pending Orders: confirm expandability for hidden TP/SL.
   await page.getByRole("tab", { name: /Pending/ }).click();
@@ -180,5 +183,5 @@ test("Trade: header collapse does not reset scroll + tables remain expandable on
   await expect(pendingPanel.locator("tbody tr").first()).toBeVisible({ timeout: 60_000 });
   await expect(pendingPanel.getByRole("columnheader", { name: "TP" })).toBeHidden({ timeout: 10_000 });
   await pendingPanel.locator("tbody tr").first().click();
-  await expect(pendingPanel.getByText("Take Profit")).toBeVisible();
+  await expect(pendingPanel.getByText("Take Profit").first()).toBeVisible();
 });

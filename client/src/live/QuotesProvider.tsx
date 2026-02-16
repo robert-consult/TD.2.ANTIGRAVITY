@@ -3,6 +3,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { useQuery } from "@tanstack/react-query";
 import { useLiveUpdates } from "@/live/LiveUpdatesProvider";
 import { recommendedPollIntervalMs, recommendedQuoteFlushIntervalMs } from "@/lib/perfHints";
+import { secureGet } from "@/lib/secureCache";
 import { useAuth } from "@/hooks/use-auth";
 import {
   WS_MSG_QUOTES_SNAPSHOT,
@@ -48,6 +49,12 @@ interface AllowedSymbolsResponse {
   includesBaseline: boolean;
 }
 
+type PersistedQueryEntry = {
+  schemaVersion?: number;
+  data?: unknown;
+  updatedAt?: number;
+};
+
 type QuotesState = {
   quotes: Quote[];
   isConnected: boolean;
@@ -69,6 +76,21 @@ function toNumber(value: any): number | null {
 function calculatePctChange(current: number | null, previous: number | null): number {
   if (!current || !previous || previous === 0) return 0;
   return ((current - previous) / previous) * 100;
+}
+
+function normalizeAllowedSymbolsPayload(value: unknown): AllowedSymbolsResponse | null {
+  if (!value || typeof value !== "object") return null;
+  const candidate = value as Partial<AllowedSymbolsResponse>;
+  if (!Array.isArray(candidate.symbols)) return null;
+  return {
+    symbols: candidate.symbols as SymbolConfig[],
+    effectiveMode:
+      candidate.effectiveMode === "BASIC_PLUS_CUSTOM" || candidate.effectiveMode === "CUSTOM_ONLY"
+        ? candidate.effectiveMode
+        : "BASIC_ONLY",
+    supportsCustom: Boolean(candidate.supportsCustom),
+    includesBaseline: candidate.includesBaseline !== false,
+  };
 }
 
 export function QuotesProvider({ children }: { children: ReactNode }) {
@@ -94,6 +116,39 @@ export function QuotesProvider({ children }: { children: ReactNode }) {
     prevSymbolsRef.current = [];
     symbolNameMapRef.current = new Map();
     setQuotes([]);
+  }, [isAuthenticated]);
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    let cancelled = false;
+
+    void (async () => {
+      const cachedEntry = await secureGet<PersistedQueryEntry>(
+        "query-cache",
+        "/api/quote-subscriptions/allowed-symbols",
+      );
+      const payload =
+        normalizeAllowedSymbolsPayload(cachedEntry) ??
+        normalizeAllowedSymbolsPayload((cachedEntry as PersistedQueryEntry | null)?.data);
+      if (cancelled || !payload) return;
+
+      const nextMap = new Map<string, string>();
+      const nextAllowed = new Set<string>();
+      for (const row of payload.symbols) {
+        const symbol = String(row.symbol || "").toUpperCase().trim();
+        if (!symbol) continue;
+        nextAllowed.add(symbol);
+        nextMap.set(symbol, row.name || symbol);
+      }
+      if (!nextAllowed.size) return;
+
+      symbolNameMapRef.current = nextMap;
+      allowedSymbolsRef.current = nextAllowed;
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [isAuthenticated]);
 
   const flushNow = useCallback(() => {

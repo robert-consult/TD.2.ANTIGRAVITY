@@ -8,6 +8,8 @@ import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { NotificationBell } from "@/components/NotificationBell";
 import { useMailboxE2eeBootstrap } from "@/hooks/use-mailbox";
+import { StaleDataBadge } from "@/components/StaleDataBadge";
+import { useStaleData } from "@/lib/staleData";
 
 const CLOSE_NOTIFICATIONS_EVENT = "tq:close-notifications";
 const CLOSE_HEADER_MENU_EVENT = "tq:close-header-menu";
@@ -18,11 +20,12 @@ type HeaderProps = {
 };
 
 export function Header({ title = "TradeQuip", showBalance = false }: HeaderProps) {
-  const { user, logout, checkAuth } = useAuth();
+  const { user, logout, checkAuth, isCachedUserStale } = useAuth();
   useMailboxE2eeBootstrap();
   const { toast } = useToast();
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [isPromotingAdmin, setIsPromotingAdmin] = useState(false);
+  const hasHydratedStaleData = useStaleData(["/api/auth/current-user", "/api/account/summary"]);
 
   useEffect(() => {
     const handleClose = () => setDropdownOpen(false);
@@ -101,6 +104,8 @@ export function Header({ title = "TradeQuip", showBalance = false }: HeaderProps
     return `$${numericBalance.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   })();
 
+  const showBalanceStaleBadge = showBalance && (isCachedUserStale || hasHydratedStaleData);
+
   return (
     <header className="bg-[#0F0F0F] border-b border-white/5 py-2 md:py-3 px-gutter shrink-0 relative z-[140] overflow-visible">
       <div className="flex justify-between items-center">
@@ -137,6 +142,7 @@ export function Header({ title = "TradeQuip", showBalance = false }: HeaderProps
                 <span className={`min-w-0 text-[clamp(0.62rem,0.58rem+0.3vw,0.78rem)] font-mono whitespace-nowrap truncate leading-none ${balanceToneClass}`}>
                   {formattedBalance}
                 </span>
+                {showBalanceStaleBadge ? <StaleDataBadge className="hidden lg:inline-flex text-[0.6rem]" label="Updating" /> : null}
               </div>
             ) : null}
             <button
@@ -187,7 +193,10 @@ export function Header({ title = "TradeQuip", showBalance = false }: HeaderProps
                     {showBalance ? (
                       <div className="flex items-center justify-between gap-3 mt-3 text-xs">
                         <span className="text-gray-500">Balance</span>
-                        <span className={`font-mono truncate ${balanceToneClass}`}>{formattedBalance}</span>
+                        <span className="inline-flex items-center gap-2 min-w-0">
+                          <span className={`font-mono truncate ${balanceToneClass}`}>{formattedBalance}</span>
+                          {showBalanceStaleBadge ? <StaleDataBadge label="Updating" /> : null}
+                        </span>
                       </div>
                     ) : null}
                   </div>

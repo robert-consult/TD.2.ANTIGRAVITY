@@ -69,7 +69,12 @@ function startApp(): Promise<void> {
     await initializeQueryPersistence(queryClient).catch(() => undefined);
     createRoot(document.getElementById("root")!).render(<App />);
     clearBootSplash();
-  })();
+  })().catch((error) => {
+    appStartPromise = null;
+    updateBootStatus("Interface failed to load. Click Open Platform to retry.");
+    console.error("[boot] app startup failed", error);
+    throw error;
+  });
 
   return appStartPromise;
 }
@@ -83,14 +88,15 @@ function hasPriorBootInSession(): boolean {
 }
 
 function scheduleAppStart(): void {
-  if (window.location.pathname !== "/" || hasPriorBootInSession()) {
-    void startApp();
-    return;
-  }
-
   (window as any).__tqBootNow = () => {
     void startApp();
   };
+
+  if (window.location.pathname === "/" && !hasPriorBootInSession()) {
+    return;
+  }
+
+  void startApp();
 }
 
 function bootstrap(): void {

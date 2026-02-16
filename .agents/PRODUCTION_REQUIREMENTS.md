@@ -287,3 +287,52 @@ Failure Mode if Missing:
   - Mailbox encrypt/decrypt still functions after migration.
   - New key generation path writes only to new storage mechanism.
 - Failure Mode if Missing: private E2EE key material remains directly script-readable via localStorage, increasing impact of XSS/browser compromise.
+
+### PRD-AUTH-001
+- ID: `PRD-AUTH-001`
+- Date (UTC): `2026-02-16`
+- Scope: `Persistent-login token invalidation parity with session revocation`
+- Requirement: Any flow that terminates or revokes user sessions for security/account-state reasons must also revoke associated remember-me tokens, and auth middleware must reject stale stolen/aged tokens before request authorization.
+- Enforcement: `server/routes.ts` (`/api/auth/logout`, `/api/profile/change-password`, account deactivate/delete, `/api/auth/devices*`), `server/routes/meSessions.ts` (`/api/me/sessions/logout-others`, `/api/me/logout`), `server/storage.ts` (freeze/disable/bulk-disable paths), `server/middleware/auth.ts` (theft/absence handling + restoration gate), and `server/services/rememberMe.ts` (token revoke/verify primitives).
+- Validation:
+  - Login with remember-me enabled, then perform password change; verify active session is terminated and remembered session cannot auto-restore.
+  - Freeze/disable a user via admin flow and verify remembered device auto-login fails until account state is restored.
+  - Run `npm run check`, `npm run db:migrate:drizzle`, `npm run db:audit`, and `npm run e2e` to verify no contract/runtime regression.
+- Failure Mode if Missing: revoked or disabled accounts can silently regain access via persistent cookies even after explicit session termination, violating institutional session-control expectations.
+
+### PRD-PERF-002
+- ID: `PRD-PERF-002`
+- Date (UTC): `2026-02-16`
+- Scope: `App-shell availability and service-worker cache safety`
+- Requirement: Root app route (`/`) must never emit plaintext health payloads, and service-worker shell cache writes must only persist HTML index responses.
+- Enforcement: `server/index.ts` (`/status` probe endpoint + root app-shell passthrough), `client/src/sw.ts` (HTML-only shell caching for `/index.html` and navigation refresh), and `client/src/main.tsx`/`client/index.html` (boot retry fallback path).
+- Validation:
+  - Request `/` with `Accept: */*` and verify HTML app shell is returned (not `OK` plaintext).
+  - Request `/status` and verify `200 OK` plaintext health probe response.
+  - Register SW and confirm navigation cache entries are HTML shell documents only.
+  - Run `npm run build`, `npm run smoke:admin`, and `npm run e2e` to verify no app-shell/admin regressions.
+- Failure Mode if Missing: browsers can land on cached/plaintext non-shell responses (`OK`) that block app boot/login, causing false outage behavior and broken auth/admin entry paths.
+
+### PRD-AUTH-002
+- ID: `PRD-AUTH-002`
+- Date (UTC): `2026-02-16`
+- Scope: `Persistent-login selector abuse control`
+- Requirement: Remember-me selector misses (`NOT_FOUND`) must be rate-limited per client IP with bounded retry windows, and middleware must emit explicit 429 responses with retry hints once threshold is exceeded.
+- Enforcement: `server/middleware/auth.ts` (`getRememberMeNotFoundRateStatus`, `recordRememberMeTokenNotFound`, and `REMEMBER_ME_SELECTOR_RATE_LIMITED` response path in `tryRestoreSessionFromRememberMe`).
+- Validation:
+  - Send repeated authenticated requests with forged `tq_rm` cookie selectors from one IP.
+  - Verify initial misses return normal unauthenticated behavior, then transition to `429` with `code: REMEMBER_ME_SELECTOR_RATE_LIMITED` and `Retry-After`.
+  - Verify valid remember-me restores clear the miss window for that IP.
+- Failure Mode if Missing: attackers can enumerate selectors at high volume, driving unnecessary DB lookups and increasing token-discovery risk.
+
+### PRD-OPS-001
+- ID: `PRD-OPS-001`
+- Date (UTC): `2026-02-16`
+- Scope: `Remember-me token retention and maintenance visibility`
+- Requirement: Expired remember-me tokens must be purged by the account lifecycle scheduler, and each sweep must log purge counts for operational monitoring.
+- Enforcement: `server/services/accountLifecycleSweepScheduler.ts` (invokes `purgeExpiredRememberMeTokens()` and logs `purgedRememberMeTokens` in sweep completion output).
+- Validation:
+  - Insert expired rows in `remember_me_tokens`, run scheduler sweep routine, and verify rows are removed.
+  - Confirm logs include `purgedRememberMeTokens` count for each daily sweep cycle.
+  - Run `npm run check` and `npm run e2e` to confirm scheduler integration does not regress auth/admin flows.
+- Failure Mode if Missing: expired token rows accumulate indefinitely, increasing table bloat and reducing operator visibility into maintenance effectiveness.

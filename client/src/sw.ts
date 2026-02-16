@@ -6,7 +6,13 @@ const sw = self as unknown as ServiceWorkerGlobalScope;
 const BUILD_HASH = String(__TQ_BUILD_HASH__ || "dev");
 const CACHE_PREFIX = "tq-shell-v";
 const CACHE_NAME = `${CACHE_PREFIX}${BUILD_HASH}`;
-const SHELL_URLS = ["/", "/index.html"];
+const SHELL_URLS = ["/index.html"];
+
+function isHtmlResponse(response: Response | null | undefined): boolean {
+  if (!response) return false;
+  const contentType = String(response.headers.get("content-type") || "").toLowerCase();
+  return contentType.includes("text/html");
+}
 
 function isBypassPath(pathname: string): boolean {
   if (pathname.startsWith("/api/")) return true;
@@ -17,10 +23,9 @@ function isBypassPath(pathname: string): boolean {
 
 async function cacheIndexAndAssets(cache: Cache): Promise<void> {
   const htmlResponse = await fetch("/index.html", { cache: "no-store" }).catch(() => null);
-  if (!htmlResponse?.ok) return;
+  if (!htmlResponse?.ok || !isHtmlResponse(htmlResponse)) return;
 
   await cache.put("/index.html", htmlResponse.clone());
-  await cache.put("/", htmlResponse.clone());
 
   const html = await htmlResponse.text();
   const assetPaths = new Set<string>();
@@ -47,13 +52,12 @@ async function cacheIndexAndAssets(cache: Cache): Promise<void> {
 
 async function staleWhileRevalidateNavigation(request: Request): Promise<Response> {
   const cache = await caches.open(CACHE_NAME);
-  const cached = (await cache.match("/index.html")) ?? (await cache.match("/"));
+  const cached = await cache.match("/index.html");
 
   const networkPromise = fetch(request)
     .then(async (response) => {
-      if (response.ok) {
+      if (response.ok && isHtmlResponse(response)) {
         await cache.put("/index.html", response.clone());
-        await cache.put("/", response.clone());
       }
       return response;
     })

@@ -203,6 +203,15 @@ interface SystemConfigData {
   signupWaitlistInviteBatchCap: number;
   signupWaitlistPolicyVersion: string;
   signupWaitlistPolicyContent: string;
+  rememberMeEnabled: boolean;
+  rememberMeMaxAgeDays: number;
+  rememberMeMaxDevicesPerUser: number;
+  rememberMeReauthAfterAbsenceDays: number;
+  rememberMeTokenRotationEnabled: boolean;
+  rememberMeTheftAutoRevokeAll: boolean;
+  sessionCookieMaxAgeHours: number;
+  sessionIdleTimeoutMinutes: number;
+  logoutClearAllDeviceTokens: boolean;
   // Migration export/import chunking
   migrationChunkingEnabled: boolean;
   migrationChunkSizeMb: number;
@@ -1900,6 +1909,155 @@ function SystemConfigTab() {
                     checked={Boolean(config.allowUserTimezoneEdit)}
                     onCheckedChange={(checked) => {
                       setConfig(prev => prev ? { ...prev, allowUserTimezoneEdit: checked } : prev);
+                      setConfigChanged(true);
+                    }}
+                  />
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="bg-neutral-700 border-gray-600">
+              <CardHeader>
+                <CardTitle className="text-base">Session & Device Security</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex items-center justify-between py-3 border-b border-gray-600">
+                  <div>
+                    <Label className="text-base font-medium">Enable Remember Me</Label>
+                    <p className="text-xs text-gray-400 mt-1">
+                      Global kill switch for persistent login tokens.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={Boolean(config.rememberMeEnabled)}
+                    onCheckedChange={(checked) => {
+                      setConfig(prev => prev ? { ...prev, rememberMeEnabled: checked } : prev);
+                      setConfigChanged(true);
+                    }}
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <Label className="text-sm font-medium">Remember Me Max Age (days)</Label>
+                    <Input
+                      type="number"
+                      min={1}
+                      max={90}
+                      value={Number(config.rememberMeMaxAgeDays ?? 30)}
+                      onChange={(e) => {
+                        const value = Number(e.target.value);
+                        setConfig(prev => prev ? { ...prev, rememberMeMaxAgeDays: value } : prev);
+                        setConfigChanged(true);
+                      }}
+                      className="bg-neutral-600 mt-2"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-sm font-medium">Max Devices Per User</Label>
+                    <Input
+                      type="number"
+                      min={1}
+                      max={25}
+                      value={Number(config.rememberMeMaxDevicesPerUser ?? 10)}
+                      onChange={(e) => {
+                        const value = Number(e.target.value);
+                        setConfig(prev => prev ? { ...prev, rememberMeMaxDevicesPerUser: value } : prev);
+                        setConfigChanged(true);
+                      }}
+                      className="bg-neutral-600 mt-2"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-sm font-medium">Re-auth After Absence (days)</Label>
+                    <Input
+                      type="number"
+                      min={0}
+                      max={90}
+                      value={Number(config.rememberMeReauthAfterAbsenceDays ?? 7)}
+                      onChange={(e) => {
+                        const value = Number(e.target.value);
+                        setConfig(prev => prev ? { ...prev, rememberMeReauthAfterAbsenceDays: value } : prev);
+                        setConfigChanged(true);
+                      }}
+                      className="bg-neutral-600 mt-2"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-sm font-medium">Session Cookie Max Age (hours)</Label>
+                    <Input
+                      type="number"
+                      min={1}
+                      max={336}
+                      value={Number(config.sessionCookieMaxAgeHours ?? 24)}
+                      onChange={(e) => {
+                        const value = Number(e.target.value);
+                        setConfig(prev => prev ? { ...prev, sessionCookieMaxAgeHours: value } : prev);
+                        setConfigChanged(true);
+                      }}
+                      className="bg-neutral-600 mt-2"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-sm font-medium">Session Idle Timeout (minutes)</Label>
+                    <Input
+                      type="number"
+                      min={0}
+                      max={1440}
+                      value={Number(config.sessionIdleTimeoutMinutes ?? 0)}
+                      onChange={(e) => {
+                        const value = Number(e.target.value);
+                        setConfig(prev => prev ? { ...prev, sessionIdleTimeoutMinutes: value } : prev);
+                        setConfigChanged(true);
+                      }}
+                      className="bg-neutral-600 mt-2"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between py-3 border-t border-gray-600">
+                  <div>
+                    <Label className="text-base font-medium">Rotate Remember Tokens on Use</Label>
+                    <p className="text-xs text-gray-400 mt-1">
+                      Enables one-time token replay protection with rotation.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={Boolean(config.rememberMeTokenRotationEnabled)}
+                    onCheckedChange={(checked) => {
+                      setConfig(prev => prev ? { ...prev, rememberMeTokenRotationEnabled: checked } : prev);
+                      setConfigChanged(true);
+                    }}
+                  />
+                </div>
+
+                <div className="flex items-center justify-between py-3 border-t border-gray-600">
+                  <div>
+                    <Label className="text-base font-medium">Auto-Revoke All on Theft Detection</Label>
+                    <p className="text-xs text-gray-400 mt-1">
+                      Terminates all sessions and remembered devices when token theft is detected.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={Boolean(config.rememberMeTheftAutoRevokeAll)}
+                    onCheckedChange={(checked) => {
+                      setConfig(prev => prev ? { ...prev, rememberMeTheftAutoRevokeAll: checked } : prev);
+                      setConfigChanged(true);
+                    }}
+                  />
+                </div>
+
+                <div className="flex items-center justify-between py-3 border-t border-gray-600">
+                  <div>
+                    <Label className="text-base font-medium">Logout Clears All Device Tokens</Label>
+                    <p className="text-xs text-gray-400 mt-1">
+                      When disabled, explicit logout removes only the current device token.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={Boolean(config.logoutClearAllDeviceTokens)}
+                    onCheckedChange={(checked) => {
+                      setConfig(prev => prev ? { ...prev, logoutClearAllDeviceTokens: checked } : prev);
                       setConfigChanged(true);
                     }}
                   />

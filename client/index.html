@@ -61,8 +61,12 @@
     <div id="boot-splash" aria-hidden="true">
       <div>
         <div id="boot-splash__brand">TradeQuip</div>
-        <div id="boot-splash__status">Ready. Open the platform to continue.</div>
-        <button id="boot-splash__cta" type="button" onclick="window.__tqBootNow && window.__tqBootNow()">
+        <div id="boot-splash__status">Loading interface...</div>
+        <button
+          id="boot-splash__cta"
+          type="button"
+          onclick="window.__tqBootNow ? window.__tqBootNow() : window.location.reload()"
+        >
           Open Platform
         </button>
       </div>

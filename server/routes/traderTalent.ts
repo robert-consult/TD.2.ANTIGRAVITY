@@ -703,6 +703,7 @@ traderTalentRouter.get("/challenges", async (req, res) => {
       FROM challenges c
       LEFT JOIN latest_enroll le ON le.challenge_id = c.id
       WHERE c.visible_to_traders = true
+        AND c.is_active = true
         AND (c.start_at IS NULL OR c.start_at <= ${ts})
         AND (c.end_at IS NULL OR c.end_at >= ${ts})
       ORDER BY COALESCE(c.featured_order, 999999) ASC, c.id DESC
@@ -948,7 +949,7 @@ traderTalentRouter.get("/challenges/:id", async (req, res) => {
       .from(challenges)
       .where(eq(challenges.id, challengeId))
       .limit(1);
-    if (!ch || !ch.visibleToTraders) {
+    if (!ch || !ch.visibleToTraders || !ch.isActive) {
       return res.status(404).json({ message: "CHALLENGE_NOT_FOUND" });
     }
 

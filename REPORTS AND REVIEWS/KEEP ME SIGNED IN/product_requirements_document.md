@@ -1,7 +1,7 @@
 # Product Requirements Document: Persistent Login, Device Trust & Session Security Hardening
 
-> **Version**: 2.0 — Enriched  
-> **Last Updated**: 2026-02-15  
+> **Version**: 2.2 — Implementation + Regression Hardening  
+> **Last Updated**: 2026-02-16  
 > **Status**: Draft — Pending Review
 
 ---
@@ -9,6 +9,24 @@
 ## 1. Executive Summary
 
 This document defines the requirements for implementing a secure **"Remember Me" / Persistent Login** system, a **Trusted Device Registry**, and supporting **session security hardening** for the TradeQuip platform. The system must withstand class-leading attack vectors, integrate with the existing `secureCache` (AES-256-GCM encrypted IndexedDB), `sessionTrail` (geo/device/login-history audit infrastructure), and CSRF protections, and expose all configurable parameters through a new **"Session & Device Security"** card in the Admin System Config panel.
+
+---
+
+## 1.1 Pre-Implementation Gap Closure (Mandatory)
+
+The following gaps were identified before implementation and are addressed by this revision:
+
+| Gap ID | Gap | Why It Matters | Requirement Update |
+|---|---|---|---|
+| GAP-01 | Auth checks are split between `ensureAuth` (in `routes.ts`) and `requireAuth` (middleware). | Token restoration would be bypassed on some endpoints if only one path is updated. | Token fallback must be implemented in a reusable helper and used by both auth paths. |
+| GAP-02 | Session and token revocation semantics are not fully aligned for password change, disable/freeze, and logout-others. | Users could regain access via remembered tokens after session revocation. | All security-critical revocation flows must revoke persistent tokens in addition to active sessions. |
+| GAP-03 | Admin config requirements lacked explicit validation bounds. | Unsafe values can create risk (excessive persistence windows or zero limits). | Enforce server-side bounds for all new remember-me/system-session controls. |
+| GAP-04 | Trusted device UX was not mapped to current Profile layout and existing active-session controls. | Could introduce duplicated or conflicting UI actions. | Trusted Devices must live in Profile > Devices alongside Active Sessions with clear action labels. |
+| GAP-05 | Implementation loop request requires explicit verification cadence. | Hardening work can become ad-hoc without audit trail. | A 14-cycle build/test/fix log is required and appended in this document. |
+| GAP-06 | Root route (`/`) could return plain `OK` to non-HTML accepts, allowing shell poisoning in service-worker cache flows. | Users can land on a blank/plaintext page and never boot the app. | `/` must always serve app shell; health checks must use `/status`, `/health`, `/ready`. |
+| GAP-07 | `requireAdmin` did not run shared auth/session validation. | Revoked/expired/admin-restored sessions could bypass consistent auth checks. | `requireAdmin` must call shared auth validation before role enforcement. |
+| GAP-08 | Challenge template draft mapping mixed snake_case/camelCase inconsistently. | Editing a hidden/inactive challenge could unintentionally re-enable visibility/state. | Admin challenge editor must normalize both naming shapes before save. |
+| GAP-09 | Trader challenge browse/detail endpoints allowed `visible=true` while `isActive=false`. | Traders could see unenrollable challenges, creating broken UX and policy mismatch. | Challenge browse/detail exposure must enforce both `visibleToTraders` and `isActive`. |
 
 ---
 
@@ -161,11 +179,27 @@ This document defines the requirements for implementing a secure **"Remember Me"
 
 ### 5.6 Caching & Prefetch Integration
 
-- **Service Worker (`sw.ts`)**: No changes needed — already caches shell assets. The persistent token restoration happens server-side via cookie, which is transparently included in fetch requests.
+- **Service Worker (`sw.ts`)**: Shell caching is hardened to keep `/index.html` as the only navigation shell cache target and to reject non-HTML cache writes. Persistent-token restoration still remains server-side via cookie.
 - **`secureCache` (`secureCache.ts`)**: 
   - The `user-state` store already caches a non-sensitive "last known user" object for UX (show name/avatar instantly).
   - On token-based session restoration, the hook (`useAuth.tsx`) will update `secureCache` with the restored user data — no change needed.
-  - **On logout/revocation**: `secureClearAll()` is already called — this clears all AES-encrypted IndexedDB stores.
+- **On logout/revocation**: `secureClearAll()` is already called — this clears all AES-encrypted IndexedDB stores.
+
+### 5.7 Shell/Boot Reliability Requirements
+
+- Root app route (`/`) MUST serve the SPA shell and never return plaintext health payloads.
+- Health probes MUST use dedicated endpoints (`/status`, `/health`, `/ready`).
+- Service worker shell caching MUST cache only HTML responses for `/index.html` and must not persist non-HTML navigation fallbacks.
+- Boot splash CTA MUST be a functional retry path if initial module load fails.
+- `/login` route MUST auto-boot the app without requiring manual CTA interaction.
+
+### 5.8 Admin Enforcement Integrity Requirements
+
+- `requireAdmin` middleware MUST perform shared request authentication checks (including revoke/idle/token restoration logic) before role checks.
+- Challenge visibility for trader browse/detail MUST enforce both:
+  - `visibleToTraders === true`
+  - `isActive === true`
+- Admin challenge editor MUST preserve `visibleToTraders` and `isActive` values when data arrives in either camelCase or snake_case payload shape.
 
 ---
 
@@ -206,7 +240,7 @@ This document defines the requirements for implementing a secure **"Remember Me"
 #### Session Security
 - On token-based session restoration: always call `req.session.regenerate()` to prevent session fixation.
 - New CSRF token issued after session restoration (handled by existing `issueCsrfToken` middleware).
-- `express-session` cookie `maxAge` remains at 24h (short-lived session; remember-me token is the long-lived layer).
+- `express-session` cookie max-age is admin-configurable (`sessionCookieMaxAgeHours`) and enforced at login/restoration.
 
 #### E2E Encryption Integration
 - The `secureCache` already uses AES-256-GCM with PBKDF2 (100,000 iterations) for all client-side data.
@@ -238,7 +272,7 @@ This document defines the requirements for implementing a secure **"Remember Me"
 
 ## 7. Mobile (Capacitor) Specifics
 
-- Default `rememberMe = true` on mobile platforms (detect via `Capacitor.isNativePlatform()`).
+- Default `rememberMe = true` on mobile-class user agents; desktop defaults to off.
 - Capacitor's `CapacitorCookies` plugin handles `HttpOnly` cookies natively — no special handling needed.
 - `secureCache` IndexedDB works within Capacitor's WebView without modification.
 - On mobile app force-close and re-open: the `remember_me` cookie persists in the WebView cookie jar → seamless session restoration on next `checkAuth()` call.
@@ -308,6 +342,47 @@ Add the columns listed in §5.5 above.
 | [secureCache.ts](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/secureCache.ts) | `secureClearAll()` on logout, `securePut()` on session restoration |
 | [use-auth.tsx](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/hooks/use-auth.tsx) | `login()`, `logout()`, `checkAuth()` — all need updates |
 | [routes.ts](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes.ts) | Login/logout/current-user endpoints |
+| [meSessions.ts](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/meSessions.ts) | Logout-others/logout routes now revoke persistent tokens |
 | [auth.ts](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/middleware/auth.ts) | `requireAuth` middleware — add token fallback |
+| [rememberMe.ts](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/services/rememberMe.ts) | Token issue/verify/rotate/revoke/device APIs + config cache |
+| [admin.ts](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/admin.ts) | Session/device config controls and validation bounds |
+| [ProfileSettings.tsx](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/pages/ProfileSettings.tsx) | Trusted devices list and revoke actions |
+| [AdminDashboard.tsx](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/pages/AdminDashboard.tsx) | New "Session & Device Security" controls card |
 | [schema.pg.ts](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/shared/schema.pg.ts) | New `rememberMeTokens` table + `systemConfig` columns |
+
+---
+
+## 11. Fourteen-Cycle Build/Test/Fix Ledger
+
+| Cycle | Focus | Build/Test Step | Outcome |
+|---|---|---|---|
+| 1 | Gap closure in docs | PRD + design gap sections added | Completed; blockers identified before code edits |
+| 2 | Shared auth contract | Updated `loginSchema` and session/system config fields | Completed |
+| 3 | Persistence model | Added migration `0030_remember_me_tokens_and_session_controls.sql` | Completed |
+| 4 | Token service | Implemented `server/services/rememberMe.ts` | Completed |
+| 5 | Auth middleware integration | Added fallback restoration in `requireAuth` + shared auth helper for `ensureAuth` | Completed |
+| 6 | Login/logout integration | Issuance + revocation paths added in `server/routes.ts` | Completed |
+| 7 | Session lifecycle hardening | Password/deactivate/delete/disable/freeze flows revoke persistent tokens | Completed |
+| 8 | Device APIs | Added `GET/DELETE /api/auth/devices` endpoints | Completed |
+| 9 | Admin backend controls | Added remember/session fields + bounds in `/api/admin/system-config` | Completed |
+| 10 | Web login UX | Added "Stay logged in on this device" control | Completed |
+| 11 | Devices UX | Added Trusted Devices panel and revoke actions in Profile Settings | Completed |
+| 12 | Admin UX | Added Session & Device Security card in Admin Dashboard controls tab | Completed |
+| 13 | Unit/contract checks | `npx vitest run server/services/rememberMe.test.ts server/security/proxyHeaders.test.ts` | Passed |
+| 14 | Full verification | `npm run check`, `npm run build`, `npm run db:migrate:drizzle`, `npm run db:audit`, `npm run e2e` | Passed |
+
+Implementation status on **2026-02-16**: end-to-end integrated across shared schema, DB migration, server auth/session routes, admin config, and client login/profile/admin UI.
+
+## 11.1 Regression Hardening Cycles (Post-Integration)
+
+| Cycle | Focus | Build/Test Step | Outcome |
+|---|---|---|---|
+| RH-1 | Reproduce routing/boot regressions | Curl + browser route behavior audit (`/`, `/login`) | Found root health-response collision risk and splash retry gap |
+| RH-2 | Root health routing hardening | Moved plaintext probe behavior to `/status` | `/` now consistently serves app shell |
+| RH-3 | Service worker shell hardening | Restricted shell cache to HTML index responses | Prevented non-HTML shell poisoning |
+| RH-4 | Boot retry resilience | Boot startup catch/retry + CTA fallback reload path | `/login` boot retry is deterministic |
+| RH-5 | Admin auth enforcement | `requireAdmin` now runs shared auth/session validation | Admin enforcement path aligned with session revocation logic |
+| RH-6 | Scout challenge visibility data integrity | Fixed camelCase/snake_case mapping in admin challenge draft | Hidden/inactive flags preserved during edit/save |
+| RH-7 | Trader challenge exposure policy | Enforced `isActive` + `visibleToTraders` on browse/detail | Traders no longer see inactive challenge templates |
+| RH-8 | Integrated verification | `npm run check`, `npm run build`, `vitest`, `smoke:admin`, `e2e` | Passed (E2E rerun after clearing occupied port 5000) |
 

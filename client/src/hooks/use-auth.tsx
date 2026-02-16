@@ -10,6 +10,7 @@ import {
   setSecureCacheUserScope,
 } from "@/lib/secureCache";
 import { clearStaleData, markFreshData, markStaleData } from "@/lib/staleData";
+import { useToast } from "@/hooks/use-toast";
 
 interface User {
   id: number;
@@ -60,7 +61,7 @@ interface AuthContextType {
   isAuthenticated: boolean;
   loading: boolean;
   isCachedUserStale: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string, opts?: { rememberMe?: boolean }) => Promise<void>;
   register: (email: string, username: string, password: string, opts?: RegisterOpts) => Promise<void>;
   logout: () => Promise<void>;
   checkAuth: () => Promise<void>;
@@ -133,12 +134,25 @@ function applyStoredLocale(user: User | null): User | null {
   return user;
 }
 
+type AuthSecurityCode = "ABSENCE_REAUTH_REQUIRED" | "TOKEN_THEFT_DETECTED";
+
+function resolveAuthSecurityCode(error: unknown): AuthSecurityCode | null {
+  if (!(error instanceof ApiError)) return null;
+  const code = String(error.code || "").trim().toUpperCase();
+  if (code === "ABSENCE_REAUTH_REQUIRED" || code === "TOKEN_THEFT_DETECTED") {
+    return code;
+  }
+  return null;
+}
+
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [isCachedUserStale, setIsCachedUserStale] = useState(false);
   const activeUserIdRef = useRef<number | null>(null);
+  const lastSecurityNoticeRef = useRef<{ code: AuthSecurityCode; atMs: number } | null>(null);
   const queryClient = useQueryClient();
+  const { toast } = useToast();
   const persistAuthState = useCallback(async (nextUser: User | null) => {
     if (nextUser) {
       await securePut<CachedAuthRecord>("user-state", AUTH_CACHE_KEY, {
@@ -192,11 +206,41 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     } catch (error) {
       const unauthorized = error instanceof ApiError && error.status === 401;
       if (unauthorized) {
+        const securityCode = resolveAuthSecurityCode(error);
+        const nowMs = Date.now();
+        const shouldShowSecurityNotice =
+          securityCode &&
+          (!lastSecurityNoticeRef.current ||
+            lastSecurityNoticeRef.current.code !== securityCode ||
+            nowMs - lastSecurityNoticeRef.current.atMs > 15_000);
+
+        if (securityCode === "TOKEN_THEFT_DETECTED") {
+          await secureClearAll();
+          clearStaleData();
+        }
+
         await alignSecureCacheScope(null);
         setUser(null);
         setIsCachedUserStale(false);
         markFreshData(AUTH_STALE_KEY);
         await persistAuthState(null);
+
+        if (shouldShowSecurityNotice && securityCode) {
+          lastSecurityNoticeRef.current = { code: securityCode, atMs: nowMs };
+          if (securityCode === "ABSENCE_REAUTH_REQUIRED") {
+            toast({
+              title: "Please log in again",
+              description: "For your security, your remembered session expired after inactivity.",
+              variant: "destructive",
+            });
+          } else if (securityCode === "TOKEN_THEFT_DETECTED") {
+            toast({
+              title: "Security alert",
+              description: "We detected a token mismatch and signed out remembered sessions. Please log in again.",
+              variant: "destructive",
+            });
+          }
+        }
       } else if (background || activeUserIdRef.current !== null) {
         setIsCachedUserStale(true);
         markStaleData(AUTH_STALE_KEY);
@@ -208,16 +252,20 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     } finally {
       setLoading(false);
     }
-  }, [alignSecureCacheScope, persistAuthState]);
+  }, [alignSecureCacheScope, persistAuthState, toast]);
 
   const checkAuth = useCallback(async () => {
     await checkAuthInternal();
   }, [checkAuthInternal]);
 
-  const login = async (email: string, password: string) => {
+  const login = async (email: string, password: string, opts?: { rememberMe?: boolean }) => {
     try {
       setLoading(true);
-      const res = await apiRequest("POST", "/api/auth/login", { email, password });
+      const res = await apiRequest("POST", "/api/auth/login", {
+        email,
+        password,
+        rememberMe: Boolean(opts?.rememberMe),
+      });
       const data = await res.json();
       const nextUser = applyStoredLocale(data);
       const nextUserId =

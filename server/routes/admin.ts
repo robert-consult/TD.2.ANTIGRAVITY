@@ -29,6 +29,7 @@ import { onLiveEvent, publishLiveEvent } from "../services/liveBus";
 import { TRADER_SEARCH_CATEGORIES } from "@shared/admin/traderSearch";
 import { canonicalizeInstrumentCategory, normalizeInstrumentCategory } from "@shared/instruments/categories";
 import { createNotification, sendKycMailboxMessage } from "../services/messaging";
+import { invalidateRememberMeConfigCache } from "../services/rememberMe";
 
 let traderScoutCategoryLiveBusSubscribed = false;
 
@@ -2677,6 +2678,15 @@ FROM (
           signupWaitlistPolicyVersion: "1",
           signupWaitlistPolicyContent:
             "WAITLIST COMMUNICATIONS & PRIVACY NOTICE\n\nBy requesting an invite, you consent to receive an email when signup slots reopen.\n\nWhat we collect:\n- Your name and email address\n- Basic client metadata (IP address and user agent)\n\nHow we use it:\n- To notify you when signup slots open\n- We do not sell your data\n\nRetention:\n- We retain waitlist records until you are invited or you opt out\n\nOpt-out:\n- You can opt out by replying to an invite email or contacting support.",
+          rememberMeEnabled: true,
+          rememberMeMaxAgeDays: 30,
+          rememberMeMaxDevicesPerUser: 10,
+          rememberMeReauthAfterAbsenceDays: 7,
+          rememberMeTokenRotationEnabled: true,
+          rememberMeTheftAutoRevokeAll: true,
+          sessionCookieMaxAgeHours: 24,
+          sessionIdleTimeoutMinutes: 0,
+          logoutClearAllDeviceTokens: false,
           allowUserTimezoneEdit: true,
           scoutTabEnabled: true,
           migrationChunkingEnabled: false,
@@ -2710,6 +2720,15 @@ FROM (
         signupWaitlistInviteBatchCap: Number((config as any).signupWaitlistInviteBatchCap ?? 200),
         signupWaitlistPolicyVersion: String((config as any).signupWaitlistPolicyVersion ?? "1"),
         signupWaitlistPolicyContent: String((config as any).signupWaitlistPolicyContent ?? ""),
+        rememberMeEnabled: Boolean((config as any).rememberMeEnabled ?? true),
+        rememberMeMaxAgeDays: Number((config as any).rememberMeMaxAgeDays ?? 30),
+        rememberMeMaxDevicesPerUser: Number((config as any).rememberMeMaxDevicesPerUser ?? 10),
+        rememberMeReauthAfterAbsenceDays: Number((config as any).rememberMeReauthAfterAbsenceDays ?? 7),
+        rememberMeTokenRotationEnabled: Boolean((config as any).rememberMeTokenRotationEnabled ?? true),
+        rememberMeTheftAutoRevokeAll: Boolean((config as any).rememberMeTheftAutoRevokeAll ?? true),
+        sessionCookieMaxAgeHours: Number((config as any).sessionCookieMaxAgeHours ?? 24),
+        sessionIdleTimeoutMinutes: Number((config as any).sessionIdleTimeoutMinutes ?? 0),
+        logoutClearAllDeviceTokens: Boolean((config as any).logoutClearAllDeviceTokens ?? false),
         allowUserTimezoneEdit: Boolean((config as any).allowUserTimezoneEdit ?? true),
         scoutTabEnabled: Boolean((config as any).scoutTabEnabled ?? true),
         fxRolloverTz: (config as any).fxRolloverTz || "America/New_York",
@@ -2798,6 +2817,32 @@ FROM (
           body.signupWaitlistInviteBatchCap !== undefined ? Number(body.signupWaitlistInviteBatchCap) : undefined,
         signupWaitlistPolicyVersion: typeof body.signupWaitlistPolicyVersion === "string" ? body.signupWaitlistPolicyVersion : undefined,
         signupWaitlistPolicyContent: typeof body.signupWaitlistPolicyContent === "string" ? body.signupWaitlistPolicyContent : undefined,
+        rememberMeEnabled:
+          body.rememberMeEnabled !== undefined ? Boolean(body.rememberMeEnabled) : undefined,
+        rememberMeMaxAgeDays:
+          body.rememberMeMaxAgeDays !== undefined ? Number(body.rememberMeMaxAgeDays) : undefined,
+        rememberMeMaxDevicesPerUser:
+          body.rememberMeMaxDevicesPerUser !== undefined ? Number(body.rememberMeMaxDevicesPerUser) : undefined,
+        rememberMeReauthAfterAbsenceDays:
+          body.rememberMeReauthAfterAbsenceDays !== undefined
+            ? Number(body.rememberMeReauthAfterAbsenceDays)
+            : undefined,
+        rememberMeTokenRotationEnabled:
+          body.rememberMeTokenRotationEnabled !== undefined
+            ? Boolean(body.rememberMeTokenRotationEnabled)
+            : undefined,
+        rememberMeTheftAutoRevokeAll:
+          body.rememberMeTheftAutoRevokeAll !== undefined
+            ? Boolean(body.rememberMeTheftAutoRevokeAll)
+            : undefined,
+        sessionCookieMaxAgeHours:
+          body.sessionCookieMaxAgeHours !== undefined ? Number(body.sessionCookieMaxAgeHours) : undefined,
+        sessionIdleTimeoutMinutes:
+          body.sessionIdleTimeoutMinutes !== undefined ? Number(body.sessionIdleTimeoutMinutes) : undefined,
+        logoutClearAllDeviceTokens:
+          body.logoutClearAllDeviceTokens !== undefined
+            ? Boolean(body.logoutClearAllDeviceTokens)
+            : undefined,
         // Migration export/import chunking
         migrationChunkingEnabled:
           body.migrationChunkingEnabled !== undefined ? Boolean(body.migrationChunkingEnabled) : undefined,
@@ -2811,6 +2856,50 @@ FROM (
           return res.status(400).json({ message: "Invalid migrationChunkSizeMb" });
         }
         (next as any).migrationChunkSizeMb = Math.floor(mb);
+      }
+
+      if ((next as any).rememberMeMaxAgeDays !== undefined) {
+        const days = Number((next as any).rememberMeMaxAgeDays);
+        if (!Number.isFinite(days) || days < 1 || days > 90) {
+          return res.status(400).json({ message: "rememberMeMaxAgeDays must be between 1 and 90" });
+        }
+        (next as any).rememberMeMaxAgeDays = Math.floor(days);
+      }
+
+      if ((next as any).rememberMeMaxDevicesPerUser !== undefined) {
+        const devices = Number((next as any).rememberMeMaxDevicesPerUser);
+        if (!Number.isFinite(devices) || devices < 1 || devices > 25) {
+          return res.status(400).json({ message: "rememberMeMaxDevicesPerUser must be between 1 and 25" });
+        }
+        (next as any).rememberMeMaxDevicesPerUser = Math.floor(devices);
+      }
+
+      if ((next as any).rememberMeReauthAfterAbsenceDays !== undefined) {
+        const days = Number((next as any).rememberMeReauthAfterAbsenceDays);
+        if (!Number.isFinite(days) || days < 0 || days > 90) {
+          return res
+            .status(400)
+            .json({ message: "rememberMeReauthAfterAbsenceDays must be between 0 and 90" });
+        }
+        (next as any).rememberMeReauthAfterAbsenceDays = Math.floor(days);
+      }
+
+      if ((next as any).sessionCookieMaxAgeHours !== undefined) {
+        const hours = Number((next as any).sessionCookieMaxAgeHours);
+        if (!Number.isFinite(hours) || hours < 1 || hours > 24 * 14) {
+          return res.status(400).json({ message: "sessionCookieMaxAgeHours must be between 1 and 336" });
+        }
+        (next as any).sessionCookieMaxAgeHours = Math.floor(hours);
+      }
+
+      if ((next as any).sessionIdleTimeoutMinutes !== undefined) {
+        const minutes = Number((next as any).sessionIdleTimeoutMinutes);
+        if (!Number.isFinite(minutes) || minutes < 0 || minutes > 24 * 60) {
+          return res
+            .status(400)
+            .json({ message: "sessionIdleTimeoutMinutes must be between 0 and 1440" });
+        }
+        (next as any).sessionIdleTimeoutMinutes = Math.floor(minutes);
       }
 
       const nextFreeze = (next as any).signupFreeze ?? Boolean((existing as any)?.signupFreeze ?? false);
@@ -2874,6 +2963,36 @@ FROM (
             ),
             signupWaitlistPolicyVersion: (next as any).signupWaitlistPolicyVersion ?? (existing as any).signupWaitlistPolicyVersion ?? "1",
             signupWaitlistPolicyContent: (next as any).signupWaitlistPolicyContent ?? (existing as any).signupWaitlistPolicyContent ?? "",
+            rememberMeEnabled: (next as any).rememberMeEnabled ?? (existing as any).rememberMeEnabled ?? true,
+            rememberMeMaxAgeDays: Number(
+              (next as any).rememberMeMaxAgeDays ?? (existing as any).rememberMeMaxAgeDays ?? 30,
+            ),
+            rememberMeMaxDevicesPerUser: Number(
+              (next as any).rememberMeMaxDevicesPerUser ?? (existing as any).rememberMeMaxDevicesPerUser ?? 10,
+            ),
+            rememberMeReauthAfterAbsenceDays: Number(
+              (next as any).rememberMeReauthAfterAbsenceDays ??
+                (existing as any).rememberMeReauthAfterAbsenceDays ??
+                7,
+            ),
+            rememberMeTokenRotationEnabled:
+              (next as any).rememberMeTokenRotationEnabled ??
+              (existing as any).rememberMeTokenRotationEnabled ??
+              true,
+            rememberMeTheftAutoRevokeAll:
+              (next as any).rememberMeTheftAutoRevokeAll ??
+              (existing as any).rememberMeTheftAutoRevokeAll ??
+              true,
+            sessionCookieMaxAgeHours: Number(
+              (next as any).sessionCookieMaxAgeHours ?? (existing as any).sessionCookieMaxAgeHours ?? 24,
+            ),
+            sessionIdleTimeoutMinutes: Number(
+              (next as any).sessionIdleTimeoutMinutes ?? (existing as any).sessionIdleTimeoutMinutes ?? 0,
+            ),
+            logoutClearAllDeviceTokens:
+              (next as any).logoutClearAllDeviceTokens ??
+              (existing as any).logoutClearAllDeviceTokens ??
+              false,
             migrationChunkingEnabled:
               (next as any).migrationChunkingEnabled ?? (existing as any).migrationChunkingEnabled ?? false,
             migrationChunkSizeMb: Number(
@@ -2923,6 +3042,15 @@ FROM (
           signupWaitlistPolicyContent:
             (next as any).signupWaitlistPolicyContent ??
             "WAITLIST COMMUNICATIONS & PRIVACY NOTICE\n\nBy requesting an invite, you consent to receive an email when signup slots reopen.\n\nWhat we collect:\n- Your name and email address\n- Basic client metadata (IP address and user agent)\n\nHow we use it:\n- To notify you when signup slots open\n- We do not sell your data\n\nRetention:\n- We retain waitlist records until you are invited or you opt out\n\nOpt-out:\n- You can opt out by replying to an invite email or contacting support.",
+          rememberMeEnabled: (next as any).rememberMeEnabled ?? true,
+          rememberMeMaxAgeDays: Number((next as any).rememberMeMaxAgeDays ?? 30),
+          rememberMeMaxDevicesPerUser: Number((next as any).rememberMeMaxDevicesPerUser ?? 10),
+          rememberMeReauthAfterAbsenceDays: Number((next as any).rememberMeReauthAfterAbsenceDays ?? 7),
+          rememberMeTokenRotationEnabled: (next as any).rememberMeTokenRotationEnabled ?? true,
+          rememberMeTheftAutoRevokeAll: (next as any).rememberMeTheftAutoRevokeAll ?? true,
+          sessionCookieMaxAgeHours: Number((next as any).sessionCookieMaxAgeHours ?? 24),
+          sessionIdleTimeoutMinutes: Number((next as any).sessionIdleTimeoutMinutes ?? 0),
+          logoutClearAllDeviceTokens: (next as any).logoutClearAllDeviceTokens ?? false,
           migrationChunkingEnabled: (next as any).migrationChunkingEnabled ?? false,
           migrationChunkSizeMb: Number((next as any).migrationChunkSizeMb ?? 51200),
           updatedBy: adminUser
@@ -2931,6 +3059,10 @@ FROM (
 
       try {
         invalidateJurisdictionRestrictionPolicyCache();
+      } catch { }
+
+      try {
+        invalidateRememberMeConfigCache();
       } catch { }
 
       const updated = await db.query.systemConfig.findFirst({

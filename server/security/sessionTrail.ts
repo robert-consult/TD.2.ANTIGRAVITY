@@ -159,6 +159,7 @@ export async function createUserSession(args: {
   userAgent: string;
   identity?: ClientIdentityContext;
   geo?: GeoContext;
+  eventType?: string;
 }): Promise<{ geo: GeoContext; device: DeviceContext }> {
   const nowSec = nowUnix();
   const geo = args.geo ?? buildGeoContext(args.ip);
@@ -221,7 +222,7 @@ export async function createUserSession(args: {
     latitude: geo.latitude ?? null,
     longitude: geo.longitude ?? null,
     sessionId: args.sessionId,
-    eventType: "LOGIN_SUCCESS",
+    eventType: args.eventType || "LOGIN_SUCCESS",
     deviceFp: identity.deviceFp || null,
     deviceInstallId: identity.deviceInstallId || null,
     clientTz: identity.clientTz || null,
@@ -241,6 +242,7 @@ export async function recordLoginAttempt(args: {
   sessionId?: string;
   identity?: ClientIdentityContext;
   geo?: GeoContext;
+  eventType?: string;
 }): Promise<void> {
   const nowSec = nowUnix();
   const geo = args.geo ?? buildGeoContext(args.ip);
@@ -260,7 +262,7 @@ export async function recordLoginAttempt(args: {
     latitude: geo.latitude ?? null,
     longitude: geo.longitude ?? null,
     sessionId: args.sessionId || null,
-    eventType: args.success ? "LOGIN_SUCCESS" : "LOGIN_FAILED",
+    eventType: args.eventType || (args.success ? "LOGIN_SUCCESS" : "LOGIN_FAILED"),
     deviceFp: identity.deviceFp || null,
     deviceInstallId: identity.deviceInstallId || null,
     clientTz: identity.clientTz || null,

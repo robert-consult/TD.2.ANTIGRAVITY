@@ -2,8 +2,19 @@ import type { Express, Request, Response } from "express";
 import { db } from "@db";
 import { userSessions } from "@shared/schema";
 import { and, desc, eq, isNull, ne } from "drizzle-orm";
-import { revokeSession, endSession, getClientIp, getUserAgent, touchSession, buildGeoContext, extractGeoHints } from "../security/sessionTrail";
+import { revokeSession, endSession, getClientIp, getUserAgent, buildGeoContext, extractGeoHints } from "../security/sessionTrail";
 import { requireAuth } from "../middleware/auth";
+import {
+  clearRememberMeCookie,
+  decodeRememberMeCookie,
+  getRememberMeConfig,
+  readRememberMeCookie,
+  revokeAllRememberMeTokensForUser,
+  revokeOtherRememberMeTokensForUser,
+  revokeRememberMeTokenBySelector,
+} from "../services/rememberMe";
+
+const SESSION_COOKIE_NAME = "connect.sid";
 
 export function registerMeSessionsRoutes(app: Express) {
   // List sessions (active + currentSessionId for UI)
@@ -97,6 +108,18 @@ export function registerMeSessionsRoutes(app: Express) {
       });
     }
 
+    const rememberMeConfig = await getRememberMeConfig();
+    const currentRememberCookie = readRememberMeCookie(req);
+    const parsedCurrentRememberCookie = currentRememberCookie
+      ? decodeRememberMeCookie(currentRememberCookie)
+      : null;
+    if (rememberMeConfig.logoutClearAllDeviceTokens) {
+      await revokeAllRememberMeTokensForUser(userId);
+      clearRememberMeCookie(res);
+    } else {
+      await revokeOtherRememberMeTokensForUser(userId, parsedCurrentRememberCookie?.selector);
+    }
+
     res.json({ ok: true, revokedCount: others.length });
   });
 
@@ -106,9 +129,20 @@ export function registerMeSessionsRoutes(app: Express) {
     const sessionId = req.sessionID;
     const ip = getClientIp(req);
     const userAgent = getUserAgent(req);
+    const rememberMeConfig = await getRememberMeConfig();
+    const currentRememberCookie = readRememberMeCookie(req);
+    const parsedCurrentRememberCookie = currentRememberCookie
+      ? decodeRememberMeCookie(currentRememberCookie)
+      : null;
 
     // End the session in our tracking table
     await endSession({ userId, sessionId, ip, userAgent, geo: buildGeoContext(ip, extractGeoHints(req)) });
+
+    if (rememberMeConfig.logoutClearAllDeviceTokens) {
+      await revokeAllRememberMeTokensForUser(userId);
+    } else if (parsedCurrentRememberCookie?.selector) {
+      await revokeRememberMeTokenBySelector(parsedCurrentRememberCookie.selector, userId);
+    }
 
     // Destroy express session
     req.session.destroy((err) => {
@@ -117,6 +151,8 @@ export function registerMeSessionsRoutes(app: Express) {
       }
     });
 
+    clearRememberMeCookie(res);
+    res.clearCookie(SESSION_COOKIE_NAME);
     res.json({ ok: true });
   });
 }

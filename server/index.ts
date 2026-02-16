@@ -261,15 +261,8 @@ app.use("/api", (req, res, next) => {
 });
 
 // Lightweight health check - responds immediately before any middleware
-// This ensures deployment health checks pass quickly
-app.get("/", (req, res, next) => {
-  // Only respond to health checks (no accept header or accepts html)
-  const acceptHeader = req.headers.accept || "";
-  if (!acceptHeader || acceptHeader === "*/*" || acceptHeader.includes("text/plain")) {
-    return res.status(200).send("OK");
-  }
-  // Pass through to Vite/static handler for browser requests
-  next();
+app.get("/status", (_req, res) => {
+  res.status(200).send("OK");
 });
 
 app.get("/health", (_req, res) => {

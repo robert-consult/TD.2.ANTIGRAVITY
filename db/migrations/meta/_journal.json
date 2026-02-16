@@ -211,6 +211,13 @@
       "when": 1776201605000,
       "tag": "0029_challenge_phase_snapshot_and_review",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1776201606000,
+      "tag": "0030_remember_me_tokens_and_session_controls",
+      "breakpoints": true
     }
   ]
 }

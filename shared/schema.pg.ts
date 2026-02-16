@@ -156,6 +156,35 @@ export const userSessions = pgTable("user_sessions", {
   revokeReason: text("revoke_reason"),
 });
 
+// Persistent remember-me tokens (selector + hashed validator)
+export const rememberMeTokens = pgTable(
+  "remember_me_tokens",
+  {
+    id: serial("id").primaryKey(),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    selector: text("selector").notNull().unique(),
+    validatorHash: text("validator_hash").notNull(),
+    expiresAt: integer("expires_at").notNull(),
+    lastUsedAt: integer("last_used_at").notNull().default(nowUnix),
+    createdAt: integer("created_at").notNull().default(nowUnix),
+    userAgent: text("user_agent"),
+    ip: text("ip"),
+    deviceType: text("device_type"),
+    browser: text("browser"),
+    os: text("os"),
+    deviceFp: text("device_fp"),
+    deviceInstallId: text("device_install_id"),
+    countryCode: text("country_code"),
+    city: text("city"),
+  },
+  (table) => ({
+    userLastUsedIdx: index("remember_me_tokens_user_last_used_idx").on(table.userId, table.lastUsedAt),
+    expiresAtIdx: index("remember_me_tokens_expires_at_idx").on(table.expiresAt),
+  }),
+);
+
 // Symbol configurations
 export const symbolConfigs = pgTable("symbol_configs", {
   id: serial("id").primaryKey(),
@@ -326,6 +355,7 @@ export const loginSchema = z.object({
     .string()
     .min(8, "Password must be at least 8 characters")
     .max(25, "Password must be at most 25 characters"),
+  rememberMe: z.boolean().optional(),
 });
 
 export const insertSymbolConfigSchema = createInsertSchema(symbolConfigs);
@@ -707,6 +737,16 @@ export const systemConfig = pgTable("system_config", {
   deletionGraceDays: integer("deletion_grace_days").notNull().default(30),
   activityAutoQueueInactive: boolean("activity_auto_queue_inactive").notNull().default(true),
   activityAutoSoftDelete: boolean("activity_auto_soft_delete").notNull().default(false),
+  // Session and persistent-login controls
+  rememberMeEnabled: boolean("remember_me_enabled").notNull().default(true),
+  rememberMeMaxAgeDays: integer("remember_me_max_age_days").notNull().default(30),
+  rememberMeMaxDevicesPerUser: integer("remember_me_max_devices_per_user").notNull().default(10),
+  rememberMeReauthAfterAbsenceDays: integer("remember_me_reauth_after_absence_days").notNull().default(7),
+  rememberMeTokenRotationEnabled: boolean("remember_me_token_rotation_enabled").notNull().default(true),
+  rememberMeTheftAutoRevokeAll: boolean("remember_me_theft_auto_revoke_all").notNull().default(true),
+  sessionCookieMaxAgeHours: integer("session_cookie_max_age_hours").notNull().default(24),
+  sessionIdleTimeoutMinutes: integer("session_idle_timeout_minutes").notNull().default(0),
+  logoutClearAllDeviceTokens: boolean("logout_clear_all_device_tokens").notNull().default(false),
 
   // Bot detection (adaptive PoW + score storage)
   botScoreThreshold: integer("bot_score_threshold").notNull().default(40),
@@ -1929,6 +1969,7 @@ export const insertUserLoginHistorySchema = createInsertSchema(userLoginHistory)
 export const insertUserAccountEventSchema = createInsertSchema(userAccountEvents);
 export const insertUserAdminNoteSchema = createInsertSchema(userAdminNotes);
 export const insertUserSessionSchema = createInsertSchema(userSessions);
+export const insertRememberMeTokenSchema = createInsertSchema(rememberMeTokens);
 
 // Trader Journal for trade logging/notes
 export const traderJournal = pgTable("trader_journal", {
@@ -2931,6 +2972,8 @@ export type UserAdminNote = typeof userAdminNotes.$inferSelect;
 export type InsertUserAdminNote = z.infer<typeof insertUserAdminNoteSchema>;
 export type UserSession = typeof userSessions.$inferSelect;
 export type InsertUserSession = z.infer<typeof insertUserSessionSchema>;
+export type RememberMeToken = typeof rememberMeTokens.$inferSelect;
+export type InsertRememberMeToken = z.infer<typeof insertRememberMeTokenSchema>;
 export type TraderJournal = typeof traderJournal.$inferSelect;
 export type InsertTraderJournal = z.infer<typeof insertTraderJournalSchema>;
 export type AdminAction = typeof adminActions.$inferSelect;

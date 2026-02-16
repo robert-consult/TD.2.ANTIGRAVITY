@@ -17,12 +17,14 @@ export default defineConfig({
         alias: {
             '@': path.resolve(__dirname, './client/src'),
             '@shared': path.resolve(__dirname, './shared'),
+            '@db': path.resolve(__dirname, './db/index.ts'),
         },
     },
     resolve: {
         alias: {
             '@': path.resolve(__dirname, './client/src'),
             '@shared': path.resolve(__dirname, './shared'),
+            '@db': path.resolve(__dirname, './db/index.ts'),
         },
     },
 });

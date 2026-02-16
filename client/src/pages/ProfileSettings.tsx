@@ -380,6 +380,21 @@ export default function ProfileSettings() {
     enabled: !!user,
   });
 
+  const { data: trustedDevices, refetch: refetchTrustedDevices } = useQuery<Array<{
+    id: number;
+    deviceType: string | null;
+    browser: string | null;
+    os: string | null;
+    lastUsedAt: number | null;
+    createdAt: number | null;
+    countryCode: string | null;
+    city: string | null;
+    ip: string | null;
+  }>>({
+    queryKey: ["/api/auth/devices"],
+    enabled: !!user,
+  });
+
   // Helper for safe date formatting
   const safeFmt = (ts: number | Date | null | undefined) => {
     if (ts == null) return "Unknown";
@@ -691,6 +706,49 @@ export default function ProfileSettings() {
     onSuccess: () => {
       toast({ title: "Sessions terminated", description: "All other sessions have been logged out" });
       refetchSessions();
+      refetchTrustedDevices();
+    },
+    onError: (error: Error) => {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const revokeTrustedDeviceMutation = useMutation({
+    mutationFn: async (tokenId: number) => {
+      const response = await fetchWithIdentity(`/api/auth/devices/${tokenId}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || "Failed to revoke trusted device");
+      }
+      return response.json();
+    },
+    onSuccess: () => {
+      toast({ title: "Device revoked", description: "The trusted device token has been removed" });
+      refetchTrustedDevices();
+    },
+    onError: (error: Error) => {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const revokeAllTrustedDevicesMutation = useMutation({
+    mutationFn: async () => {
+      const response = await fetchWithIdentity("/api/auth/devices", {
+        method: "DELETE",
+        credentials: "include",
+      });
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || "Failed to revoke trusted devices");
+      }
+      return response.json();
+    },
+    onSuccess: () => {
+      toast({ title: "Trusted devices cleared", description: "All remembered devices were revoked" });
+      refetchTrustedDevices();
     },
     onError: (error: Error) => {
       toast({ title: "Error", description: error.message, variant: "destructive" });
@@ -1003,6 +1061,68 @@ export default function ProfileSettings() {
                         )}
                       </div>
                     </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card className="tq-profile-card bg-neutral-800 border-gray-700 w-full">
+                <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                  <CardTitle className="flex items-center gap-2">
+                    <Shield className="h-5 w-5 text-cyan-500 shrink-0" />
+                    <span className="text-cq-base sm:text-lg whitespace-nowrap">Trusted Devices</span>
+                  </CardTitle>
+                  {Array.isArray(trustedDevices) && trustedDevices.length > 0 && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => revokeAllTrustedDevicesMutation.mutate()}
+                      disabled={revokeAllTrustedDevicesMutation.isPending}
+                      className="text-red-400 border-red-600 hover:bg-red-900/30 w-full sm:w-auto"
+                    >
+                      {revokeAllTrustedDevicesMutation.isPending ? "..." : "Revoke All"}
+                    </Button>
+                  )}
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-2">
+                    {Array.isArray(trustedDevices) && trustedDevices.length > 0 ? (
+                      trustedDevices.map((device) => (
+                        <div key={device.id} className="tq-profile-surface flex flex-col sm:flex-row sm:justify-between sm:items-center p-3 bg-neutral-700 rounded-lg gap-2">
+                          <div className="flex items-center gap-3 min-w-0">
+                            <Shield className="h-4 w-4 text-cyan-400 shrink-0" />
+                            <div className="min-w-0">
+                              <div className="text-cq-sm font-medium flex items-center gap-2 flex-wrap">
+                                <span>{device.browser || device.deviceType || "Unknown Device"}</span>
+                              </div>
+                              <div className="text-cq-xs text-gray-400">
+                                IP: {device.ip || "Unknown"} • {device.os || "Unknown OS"}
+                              </div>
+                              <div className="text-cq-xs text-gray-500 sm:hidden">
+                                Last used: {safeFmt(device.lastUsedAt)}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0 justify-between sm:justify-end">
+                            <div className="text-cq-xs text-gray-500 text-right hidden sm:block">
+                              <div>Last used: {safeFmt(device.lastUsedAt)}</div>
+                              <div>Added: {safeFmt(device.createdAt)}</div>
+                              <div className="text-gray-600">{[device.city, device.countryCode].filter(Boolean).join(", ") || "Unknown location"}</div>
+                            </div>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => revokeTrustedDeviceMutation.mutate(device.id)}
+                              disabled={revokeTrustedDeviceMutation.isPending}
+                              className="text-red-400 hover:text-red-300 hover:bg-red-900/30"
+                            >
+                              <X className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="text-center text-gray-400 py-4">No trusted devices</div>
+                    )}
                   </div>
                 </CardContent>
               </Card>

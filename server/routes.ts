@@ -39,11 +39,11 @@ import { griftPublicRouter } from "./grift/griftPublicRouter";
 import { extractGriftContext } from "./grift/griftGeo";
 import { onLoginSuccess, onSessionActivity, onTradeSubmit } from "./grift/griftEngine";
 import { maybeApplyAutoEnforcement } from "./grift/griftAutoEnforcement";
-import { getRecentLoginActivity, getActiveSessions, createUserSession, touchSession, recordLoginAttempt, endSession, revokeSession, revokeAllSessionsForUser, getClientIp, getUserAgent, buildGeoContext, parseDevice, extractClientIdentity, extractGeoHints } from "./security/sessionTrail";
+import { getRecentLoginActivity, getActiveSessions, createUserSession, recordLoginAttempt, endSession, revokeSession, revokeAllSessionsForUser, getClientIp, getUserAgent, buildGeoContext, parseDevice, extractClientIdentity, extractGeoHints } from "./security/sessionTrail";
 import type { AuditContext as GriftAuditContext } from "./grift/griftTypes";
 import { riskMiddleware, getEffectiveMinHoldSec } from "./risk";
 import { getActiveTradeConstraintsForUser } from "./recruitment/challengesV4/challengeService";
-import { impersonationGuard } from "./middleware/auth";
+import { ensureRequestAuthenticated, impersonationGuard } from "./middleware/auth";
 import { requirePolicy } from "./middleware/requirePolicy";
 import { recalcAccount } from "./recalcAccount";
 import { requiredMargin } from "./lib/margin";
@@ -88,6 +88,20 @@ import { notificationsRouter } from "./routes/notifications";
 import { getMessagingMetrics, sendWelcomeMailboxMessage } from "./services/messaging";
 import { adminChallengesRouter, adminPartnersRouter, adminScoutRouter } from "./routes/adminScout";
 import { partnerAuthRouter, partnerPortalRouter } from "./routes/partnerPortal";
+import {
+  buildRememberMeCookieOptions,
+  clearRememberMeCookie,
+  decodeRememberMeCookie,
+  enforceRememberMeDeviceLimit,
+  getRememberMeConfig,
+  issueRememberMeToken,
+  listRememberMeDevices,
+  readRememberMeCookie,
+  REMEMBER_ME_COOKIE_NAME,
+  revokeAllRememberMeTokensForUser,
+  revokeRememberMeTokenById,
+  revokeRememberMeTokenBySelector,
+} from "./services/rememberMe";
 import { traderTalentPublicRouter, traderTalentRouter } from "./routes/traderTalent";
 import { createCsrfProtection } from "./security/csrf";
 import {
@@ -267,36 +281,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Authentication middleware helper
   const ensureAuth = async (req: Request, res: Response, next: NextFunction) => {
-    if (!req.session.userId) {
-      return res.status(401).json({ message: "Not authenticated" });
-    }
-
-    // Check if session has been revoked
-    const sessionId = req.sessionID;
-    if (sessionId) {
-      const [sessionRow] = await db
-        .select({ revokedAt: userSessions.revokedAt })
-        .from(userSessions)
-        .where(and(eq(userSessions.sessionId, sessionId), eq(userSessions.userId, req.session.userId)))
-        .limit(1);
-
-      if (sessionRow?.revokedAt) {
-        // Session has been revoked - destroy it and reject
-        req.session.destroy(() => { });
-        return res.status(401).json({
-          message: "Session has been terminated",
-          code: "SESSION_REVOKED"
-        });
-      }
-
-      // Touch session to update lastActiveAt (only for non-revoked sessions)
-      try {
-        await touchSession(sessionId);
-      } catch {
-        // Ignore touch errors
-      }
-    }
-
+    const ok = await ensureRequestAuthenticated(req, res, {
+      unauthorizedMessage: "Not authenticated",
+      revokedMessage: "Session has been terminated",
+      destroySessionOnRevoked: true,
+    });
+    if (!ok) return;
     next();
   };
 
@@ -763,7 +753,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Authentication endpoints
   app.post("/api/auth/login", async (req: Request, res: Response) => {
     try {
-      const { email, password } = loginSchema.parse(req.body);
+      const { email, password, rememberMe } = loginSchema.parse(req.body);
+      const rememberMeConfig = await getRememberMeConfig();
       const ip = getClientIp(req);
       const userAgent = getUserAgent(req);
       const clientIdentity = extractClientIdentity(req);
@@ -881,11 +872,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.error("Failed to persist bot risk assessment:", e);
       }
 
+      await new Promise<void>((resolve, reject) => {
+        req.session.regenerate((err) => {
+          if (err) return reject(err);
+          return resolve();
+        });
+      });
+
       req.session.userId = user.id;
       req.session.email = user.email;
       req.session.isAdmin = user.isAdmin;
       req.session.userCountryIso2 = userCountryIso2;
       req.session.ipCountryIso2 = ipCountryIso2;
+      req.session.cookie.maxAge = rememberMeConfig.sessionCookieMaxAgeHours * 60 * 60 * 1000;
 
       const { geo } = await createUserSession({
         sessionId: req.sessionID,
@@ -982,6 +981,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
         (req.session as any).legalReacceptRequired = legalReacceptRequired || legalReacceptBlocked;
       } catch (e) {
         console.error("[Legal] Failed to compute re-acceptance status on login:", e);
+      }
+
+      const shouldIssueRememberMeToken = Boolean(rememberMe) && rememberMeConfig.enabled;
+      if (shouldIssueRememberMeToken) {
+        try {
+          const issued = await issueRememberMeToken({
+            userId: user.id,
+            maxAgeDays: rememberMeConfig.maxAgeDays,
+            req,
+          });
+          await enforceRememberMeDeviceLimit(user.id, rememberMeConfig.maxDevicesPerUser);
+          res.cookie(
+            REMEMBER_ME_COOKIE_NAME,
+            issued.cookieValue,
+            buildRememberMeCookieOptions(rememberMeConfig.maxAgeDays),
+          );
+          await recordLoginAttempt({
+            userId: user.id,
+            email: user.email,
+            ip,
+            userAgent,
+            success: true,
+            sessionId: req.sessionID,
+            identity: clientIdentity,
+            geo: geoContext,
+            eventType: "PERSISTENT_TOKEN_ISSUED",
+          });
+        } catch (tokenErr) {
+          console.error("Failed to issue remember-me token:", tokenErr);
+        }
+      } else {
+        clearRememberMeCookie(res);
       }
 
       res.json({
@@ -1354,11 +1385,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // Don't fail registration if email fails - user can request resend
       }
 
+      await new Promise<void>((resolve, reject) => {
+        req.session.regenerate((err) => {
+          if (err) return reject(err);
+          return resolve();
+        });
+      });
+
       req.session.userId = user.id;
       req.session.email = user.email;
       req.session.isAdmin = Boolean(user.isAdmin);
       req.session.userCountryIso2 = user.countryIso2 || undefined;
       req.session.ipCountryIso2 = ipCountryIso2;
+      const rememberMeConfig = await getRememberMeConfig();
+      req.session.cookie.maxAge = rememberMeConfig.sessionCookieMaxAgeHours * 60 * 60 * 1000;
 
       const { geo } = await createUserSession({
         sessionId: req.sessionID,
@@ -1466,14 +1506,55 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const sessionId = req.sessionID;
     const ip = getClientIp(req);
     const userAgent = getUserAgent(req);
+    const identity = extractClientIdentity(req);
+    const geo = buildGeoContext(ip, extractGeoHints(req));
+
+    const rememberMeConfig = await getRememberMeConfig();
+    const currentRememberCookie = readRememberMeCookie(req);
+    const parsedRememberCookie = currentRememberCookie ? decodeRememberMeCookie(currentRememberCookie) : null;
 
     if (userId) {
       try {
-        await endSession({ userId, sessionId, ip, userAgent, geo: buildGeoContext(ip, extractGeoHints(req)) });
+        await endSession({ userId, sessionId, ip, userAgent, geo });
       } catch (err) {
         console.error("Error recording logout:", err);
       }
+
+      try {
+        if (rememberMeConfig.logoutClearAllDeviceTokens) {
+          await revokeAllRememberMeTokensForUser(userId);
+          await recordLoginAttempt({
+            userId,
+            email: req.session.email || "",
+            ip,
+            userAgent,
+            success: true,
+            sessionId,
+            identity,
+            geo,
+            eventType: "ALL_TOKENS_INVALIDATED",
+          });
+        } else if (parsedRememberCookie) {
+          await revokeRememberMeTokenBySelector(parsedRememberCookie.selector, userId);
+          await recordLoginAttempt({
+            userId,
+            email: req.session.email || "",
+            ip,
+            userAgent,
+            success: true,
+            sessionId,
+            identity,
+            geo,
+            eventType: "PERSISTENT_TOKEN_REVOKED",
+          });
+        }
+      } catch (tokenErr) {
+        console.error("Error revoking remember-me token(s) during logout:", tokenErr);
+      }
     }
+
+    clearRememberMeCookie(res);
+    res.clearCookie(SESSION_COOKIE_NAME);
 
     req.session.destroy((err) => {
       if (err) {
@@ -1485,12 +1566,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.get("/api/auth/current-user", async (req: Request, res: Response) => {
-    if (!req.session.userId) {
-      return res.status(401).json({ message: "Not authenticated" });
-    }
+    const authed = await ensureRequestAuthenticated(req, res, {
+      unauthorizedMessage: "Not authenticated",
+      revokedMessage: "Session has been terminated",
+      destroySessionOnRevoked: true,
+    });
+    if (!authed) return;
 
     try {
-      const user = await storage.getUserById(req.session.userId);
+      const user = await storage.getUserById(req.session.userId!);
 
       if (!user) {
         req.session.destroy(() => { });
@@ -1639,6 +1723,59 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.error("Get current user error:", error);
       res.status(500).json({ message: "Internal server error" });
     }
+  });
+
+  app.get("/api/auth/devices", ensureAuth, async (req: Request, res: Response) => {
+    const rows = await listRememberMeDevices(req.session.userId!);
+    const toMs = (value: number | null | undefined) => {
+      if (value == null) return null;
+      return value < 1e12 ? value * 1000 : value;
+    };
+    res.json(
+      rows.map((row) => ({
+        ...row,
+        createdAt: toMs(row.createdAt),
+        lastUsedAt: toMs(row.lastUsedAt),
+      })),
+    );
+  });
+
+  app.delete("/api/auth/devices/:id", ensureAuth, async (req: Request, res: Response) => {
+    const tokenId = Number.parseInt(String(req.params.id), 10);
+    if (!Number.isInteger(tokenId) || tokenId <= 0) {
+      return res.status(400).json({ message: "Invalid device token id" });
+    }
+
+    await revokeRememberMeTokenById(tokenId, req.session.userId!);
+    await recordLoginAttempt({
+      userId: req.session.userId!,
+      email: req.session.email || "",
+      ip: getClientIp(req),
+      userAgent: getUserAgent(req),
+      success: true,
+      sessionId: req.sessionID,
+      identity: extractClientIdentity(req),
+      geo: buildGeoContext(getClientIp(req), extractGeoHints(req)),
+      eventType: "PERSISTENT_TOKEN_REVOKED",
+    });
+    return res.json({ ok: true });
+  });
+
+  app.delete("/api/auth/devices", ensureAuth, async (req: Request, res: Response) => {
+    await revokeAllRememberMeTokensForUser(req.session.userId!);
+    clearRememberMeCookie(res);
+    await recordLoginAttempt({
+      userId: req.session.userId!,
+      email: req.session.email || "",
+      ip: getClientIp(req),
+      userAgent: getUserAgent(req),
+      success: true,
+      sessionId: req.sessionID,
+      identity: extractClientIdentity(req),
+      geo: buildGeoContext(getClientIp(req), extractGeoHints(req)),
+      eventType: "ALL_TOKENS_INVALIDATED",
+    });
+    return res.json({ ok: true });
   });
 
   // Profile update endpoint - with proper auth and validation
@@ -1914,8 +2051,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Hash new password and update using passwordHash field
       const hashedPassword = await bcrypt.hash(newPassword, 10);
       await storage.updateUser(req.session.userId!, { passwordHash: hashedPassword });
+      await revokeAllRememberMeTokensForUser(req.session.userId!);
+      await revokeAllSessionsForUser({
+        actorUserId: req.session.userId!,
+        targetUserId: req.session.userId!,
+        reason: "PASSWORD_CHANGED",
+      });
 
-      res.json({ message: "Password changed successfully" });
+      await recordLoginAttempt({
+        userId: req.session.userId!,
+        email: user.email,
+        ip: getClientIp(req),
+        userAgent: getUserAgent(req),
+        success: true,
+        sessionId: req.sessionID,
+        identity: extractClientIdentity(req),
+        geo: buildGeoContext(getClientIp(req), extractGeoHints(req)),
+        eventType: "ALL_TOKENS_INVALIDATED",
+      });
+
+      clearRememberMeCookie(res);
+      res.clearCookie(SESSION_COOKIE_NAME);
+      await new Promise<void>((resolve) => req.session.destroy(() => resolve()));
+
+      res.json({ message: "Password changed successfully. Please log in again.", reauthRequired: true });
     } catch (error) {
       console.error("Change password error:", error);
       res.status(500).json({ message: "Failed to change password" });
@@ -2006,7 +2165,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.error("Failed to revoke sessions after deactivation:", e);
       }
 
+      try {
+        await revokeAllRememberMeTokensForUser(user.id);
+      } catch (e) {
+        console.error("Failed to revoke remember-me tokens after deactivation:", e);
+      }
+
       await new Promise<void>((resolve) => req.session.destroy(() => resolve()));
+      clearRememberMeCookie(res);
       res.clearCookie(SESSION_COOKIE_NAME);
       res.json({ success: true, message: "Account deactivated" });
     } catch (error) {
@@ -2106,7 +2272,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.error("Failed to revoke sessions after deletion:", e);
       }
 
+      try {
+        await revokeAllRememberMeTokensForUser(user.id);
+      } catch (e) {
+        console.error("Failed to revoke remember-me tokens after deletion:", e);
+      }
+
       await new Promise<void>((resolve) => req.session.destroy(() => resolve()));
+      clearRememberMeCookie(res);
       res.clearCookie(SESSION_COOKIE_NAME);
       res.json({ success: true, message: "Account deleted" });
     } catch (error) {

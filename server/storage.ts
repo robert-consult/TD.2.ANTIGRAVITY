@@ -33,6 +33,7 @@ import crypto from "crypto";
 import { mirrorAccountEventToTradeAudit, type AccountActionProvenance } from "./lib/accountEventMirror";
 import { revokeAllSessionsForUser } from "./security/sessionTrail";
 import { createNotification, sendFreezeMailboxMessage, sendUnfreezeMailboxMessage } from "./services/messaging";
+import { revokeAllRememberMeTokensForUser } from "./services/rememberMe";
 
 // Type for signup fingerprint data
 export type SignupFingerprintData = {
@@ -1271,6 +1272,12 @@ export const storage = {
       console.error("Failed to revoke sessions after freeze:", e);
     }
 
+    try {
+      await revokeAllRememberMeTokensForUser(params.userId);
+    } catch (e) {
+      console.error("Failed to revoke remember-me tokens after freeze:", e);
+    }
+
     void createNotification({
       userId: params.userId,
       type: "ACCOUNT",
@@ -1416,6 +1423,12 @@ export const storage = {
       } catch (e) {
         console.error("Failed to revoke sessions after disable:", e);
       }
+
+      try {
+        await revokeAllRememberMeTokensForUser(userId);
+      } catch (e) {
+        console.error("Failed to revoke remember-me tokens after disable:", e);
+      }
     }
      
     return updated;
@@ -1464,6 +1477,12 @@ export const storage = {
           });
         } catch (e) {
           console.error("Failed to revoke sessions after bulk disable:", e);
+        }
+
+        try {
+          await revokeAllRememberMeTokensForUser(userId);
+        } catch (e) {
+          console.error("Failed to revoke remember-me tokens after bulk disable:", e);
         }
       }
     }

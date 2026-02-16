@@ -14,9 +14,23 @@ function log(message: string) {
   console.log(`[Smoke] ${message}`);
 }
 
-function getCookieFromSetCookie(headerValue: string | null): string {
-  if (!headerValue) return "";
-  return headerValue.split(";")[0] ?? "";
+function extractCookiePair(setCookieValue: string): string {
+  return String(setCookieValue || "").split(";")[0]?.trim() ?? "";
+}
+
+function getCookieFromResponse(res: Response): string {
+  const getSetCookie = (res.headers as any)?.getSetCookie;
+  if (typeof getSetCookie === "function") {
+    const values = getSetCookie.call(res.headers);
+    if (Array.isArray(values) && values.length > 0) {
+      const pairs = values.map(extractCookiePair).filter(Boolean);
+      if (pairs.length > 0) return pairs.join("; ");
+    }
+  }
+
+  const fallback = res.headers.get("set-cookie");
+  if (!fallback) return "";
+  return extractCookiePair(fallback);
 }
 
 async function fetchJson(url: string, options: RequestInit = {}) {
@@ -39,8 +53,7 @@ async function loginAdmin(): Promise<string> {
     const text = await res.text();
     throw new Error(`Admin login failed: HTTP ${res.status} ${res.statusText}: ${text}`);
   }
-  const setCookie = res.headers.get("set-cookie");
-  const cookie = getCookieFromSetCookie(setCookie);
+  const cookie = getCookieFromResponse(res);
   if (!cookie) throw new Error("Admin login failed: missing session cookie");
   return cookie;
 }
@@ -78,8 +91,12 @@ async function verifyQuotes(symbols: string[], cookie: string) {
 
 async function verifyWebSocket(symbols: string[], cookie: string) {
   const wsUrl = BASE_URL.replace(/^http/, "ws") + "/ws";
+  const wsOrigin = BASE_URL.startsWith("http://") || BASE_URL.startsWith("https://")
+    ? BASE_URL
+    : `http://${BASE_URL.replace(/^ws/, "")}`;
   return new Promise<void>((resolve, reject) => {
-    const headers = cookie ? { Cookie: cookie } : undefined;
+    const headers: Record<string, string> = { Origin: wsOrigin };
+    if (cookie) headers.Cookie = cookie;
     const ws = new WebSocket(wsUrl, { headers });
     let gotSnapshot = false;
     let gotUpdate = false;

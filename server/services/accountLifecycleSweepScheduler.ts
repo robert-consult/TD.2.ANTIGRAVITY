@@ -1,4 +1,5 @@
 import { runInactivitySweep } from "./accountLifecycle";
+import { purgeExpiredRememberMeTokens } from "./rememberMe";
 
 let started = false;
 
@@ -8,7 +9,15 @@ export function startAccountLifecycleSweepScheduler() {
 
   const run = async () => {
     try {
-      await runInactivitySweep({ dryRun: false, actorAdminId: null });
+      const sweep = await runInactivitySweep({ dryRun: false, actorAdminId: null });
+      const purgedRememberMeTokens = await purgeExpiredRememberMeTokens();
+      console.info("[AccountLifecycle] Sweep complete", {
+        foundInactive: sweep.foundInactive,
+        foundDue: sweep.foundDue,
+        autoQueueInactive: sweep.autoQueueInactive,
+        autoSoftDelete: sweep.autoSoftDelete,
+        purgedRememberMeTokens,
+      });
     } catch (e) {
       console.error("[AccountLifecycle] Sweep failed:", e);
     }
@@ -24,4 +33,3 @@ export function startAccountLifecycleSweepScheduler() {
     void run();
   }, 24 * 60 * 60 * 1000);
 }
-

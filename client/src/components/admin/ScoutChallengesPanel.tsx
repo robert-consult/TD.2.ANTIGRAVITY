@@ -460,8 +460,8 @@ function mapDetailToDraft(detail: AnyRow): typeof EMPTY_DRAFT {
     leaderboardEnabled: Boolean(row.leaderboardEnabled ?? true),
     leaderboardAnonymize: Boolean(row.leaderboardAnonymize),
     leaderboardMaxVisible: Math.max(1, toInt(row.leaderboardMaxVisible, 100)),
-    visibleToTraders: Boolean(row.visibleToTraders ?? true),
-    isActive: Boolean(row.isActive),
+    visibleToTraders: Boolean(row.visibleToTraders ?? row.visible_to_traders ?? true),
+    isActive: Boolean(row.isActive ?? row.is_active),
     phases,
   };
 }

@@ -74,6 +74,10 @@ export default function LoginPage() {
   const [showLoginPassword, setShowLoginPassword] = useState(false);
   const [showRegisterPassword, setShowRegisterPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [rememberMe, setRememberMe] = useState<boolean>(() => {
+    if (typeof navigator === "undefined") return false;
+    return /Android|iPhone|iPad|iPod|Mobile/i.test(String(navigator.userAgent || ""));
+  });
 
   const [legal, setLegal] = useState<LegalDocResponse | null>(null);
   const [legalLoading, setLegalLoading] = useState(false);
@@ -315,7 +319,7 @@ export default function LoginPage() {
 
   const onLoginSubmit = async (data: LoginFormValues) => {
     try {
-      await login(data.email, data.password);
+      await login(data.email, data.password, { rememberMe });
     } catch (error) {
       toast({
         title: "Login Failed",
@@ -569,6 +573,16 @@ export default function LoginPage() {
                       </FormItem>
                     )}
                   />
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      id="remember-me"
+                      checked={rememberMe}
+                      onCheckedChange={(checked) => setRememberMe(Boolean(checked))}
+                    />
+                    <label htmlFor="remember-me" className="text-sm text-muted-foreground select-none">
+                      Stay logged in on this device
+                    </label>
+                  </div>
                   <Button type="submit" className="w-full">
                     Login
                   </Button>

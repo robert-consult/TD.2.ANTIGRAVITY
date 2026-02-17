@@ -1,10 +1,11 @@
 import type { QueryClient } from "@tanstack/react-query";
 import { secureDelete, secureGet, securePut } from "@/lib/secureCache";
 import { markFreshData, markStaleData } from "@/lib/staleData";
+import { getPerfHints, tierHydrationTimeoutMs } from "@/lib/perfHints";
 
 export const QUERY_PERSIST_SCHEMA_VERSION = 1;
 export const QUERY_PERSIST_DEBOUNCE_MS = 500;
-export const QUERY_PERSIST_HYDRATE_TIMEOUT_MS = 200;
+export const QUERY_PERSIST_HYDRATE_TIMEOUT_MS_DEFAULT = 300;
 
 export const PERSIST_QUERY_KEYS = [
   "/api/config/symbols",
@@ -76,7 +77,7 @@ export class QueryPersistence {
 
   async hydrate(): Promise<void> {
     if (!queryPersistenceEnabled()) return;
-    const deadline = Date.now() + QUERY_PERSIST_HYDRATE_TIMEOUT_MS;
+    const deadline = Date.now() + getQueryPersistHydrateTimeoutMs();
 
     for (const key of PERSIST_QUERY_KEYS) {
       if (Date.now() > deadline) break;
@@ -145,6 +146,14 @@ export class QueryPersistence {
     } finally {
       this.persistInFlight = false;
     }
+  }
+}
+
+export function getQueryPersistHydrateTimeoutMs(): number {
+  try {
+    return tierHydrationTimeoutMs(getPerfHints());
+  } catch {
+    return QUERY_PERSIST_HYDRATE_TIMEOUT_MS_DEFAULT;
   }
 }
 

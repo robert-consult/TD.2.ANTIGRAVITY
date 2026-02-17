@@ -1,0 +1,325 @@
+# Feedback Report: Implementation vs Audit Findings
+
+**Date:** 2026-02-16
+**Scope:** All files referenced in [audit_network_optimization.md](file:///C:/Users/Rb/.gemini/antigravity/brain/e9b3d237-2b09-43b2-8bdb-6bf8baa1b2f6/audit_network_optimization.md)
+
+---
+
+## Summary
+
+| Category | Done | Partial | Open | Total |
+|----------|------|---------|------|-------|
+| Findings (F1-F12) | 12 | 0 | 0 | 12 |
+| Recommendations (R1-R13) | 13 | 0 | 0 | 13 |
+
+> [!NOTE]
+> The implementation is a **full from-scratch rebuild** — not a patch of the prior code. [perfHints.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts) went from ~65 lines to 479 lines. Every consumer file was rewritten to use the new APIs. This is production-grade work.
+
+---
+
+## Findings Scorecard
+
+### ✅ F1 — Binary `isConstrained` Conflates Device and Network — **DONE**
+
+**Before:** Single `isConstrained` boolean merged network + device into one flag.
+**After:** [perfHints.ts L166-171](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#L166-L171) — Independent [classifyNetworkTier()](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#104-126) and [classifyDeviceTier()](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#127-142) functions produce separate `networkTier` and `deviceTier` values. `isNetworkConstrained` and `isDeviceConstrained` are derived from tier rank ≥ CONSTRAINED. `isConstrained` kept as backward compat (`isNetworkConstrained || isDeviceConstrained`).
+
+```typescript
+const isNetworkConstrained = TIER_RANK[networkTier] >= TIER_RANK.CONSTRAINED;
+const isDeviceConstrained = TIER_RANK[deviceTier] >= TIER_RANK.CONSTRAINED;
+```
+
+---
+
+### ✅ F2 — No Continuous Scaling — Only 2 Tiers — **DONE**
+
+**Before:** `!hints.isConstrained ? base : base * multiplier` — 2 tiers.
+**After:** Full 5-tier system with `INSTANT | FAST | MODERATE | CONSTRAINED | MINIMAL`. Each tier has distinct behavior profiles across polling, flushing, prefetch, retry, hydration, and reconnect.
+
+[perfHints.ts L322-336](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#L322-L336) — [pollIntervalForTier()](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#322-337):
+| Tier | Effective Poll |
+|------|---------------|
+| INSTANT | ≤200ms |
+| FAST | ≤500ms |
+| MODERATE | ≥1,500ms |
+| CONSTRAINED | 2× base, min 4,000ms |
+| MINIMAL | 3× base, min 6,000ms |
+
+---
+
+### ✅ F3 — WebSocket Reconnect Ignores Own Library — **DONE**
+
+**Before:** Hardcoded `reconnectInterval: 1500`, `reconnectAttempts: 50`.
+**After:** [LiveUpdatesProvider.tsx L28-29](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/live/LiveUpdatesProvider.tsx#L28-L29):
+```typescript
+const reconnectInterval = wsReconnectBaseDelayMs(hints, performanceSettings);
+const reconnectAttempts = wsReconnectAttempts(performanceSettings);
+```
+- Uses [usePerfHints()](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#263-266) for reactive tier detection
+- [wsReconnectBaseDelayMs()](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#433-450) scales by network tier: INSTANT 0.34×, FAST 0.67×, MODERATE 1×, CONSTRAINED/MINIMAL 2×
+- [wsReconnectAttempts()](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#429-432) capped at 30 via [resolvePerformanceSettings()](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#275-321) (clamp 1-30)
+
+---
+
+### ✅ F4 — Static Snapshot, Never Re-Evaluates — **DONE**
+
+**Before:** [getPerfHints()](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#258-262) called once, cached in `useMemo(() => ..., [])`.
+**After:** [perfHints.ts L209-228](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#L209-L228) — [ensureNativeListeners()](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#209-229) subscribes to:
+- `navigator.connection` `change` event
+- `window` `online` / `offline` events
+
+React integration via `useSyncExternalStore`:
+```typescript
+export function usePerfHints(): PerfHints {
+  return useSyncExternalStore(subscribeHints, getHintsSnapshot, getHintsSnapshot);
+}
+```
+All consumers ([LiveUpdatesProvider](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/live/LiveUpdatesProvider.tsx#21-64), [QuotesProvider](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/live/QuotesProvider.tsx#97-373), `use-trades`, [usePendingOrders](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/hooks/usePendingOrders.ts#15-90), `use-account-summary`, [AuthenticatedShell](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/AuthenticatedShell.tsx#91-140)) use [usePerfHints()](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#263-266) — they **reactively re-render** when conditions change.
+
+---
+
+### ✅ F5 — Quote Flush Throttled Incorrectly — **DONE**
+
+**Before:** `hints.isConstrained ? 500 : 250` — network and device conflated.
+**After:** [perfHints.ts L338-351](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#L338-L351) — [flushIntervalForTier()](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#338-353) uses **`deviceTier`** (not `networkTier`):
+```typescript
+export function tierFlushIntervalMs(hints, settingsInput) {
+  const settings = resolvePerformanceSettings(settingsInput);
+  return flushIntervalForTier(hints.deviceTier, settings.quoteFlushIntervalMs);
+}
+```
+Fast device + slow network → 50ms flush (device can render quickly).
+Slow device + fast network → 400-1000ms flush (device needs breathing room).
+
+---
+
+### ✅ F6 — One-Shot Prefetch, Not Capability-Aware — **DONE**
+
+**Before:** All 9 or 3 chunks, always sequential, no defer.
+**After:** [routePrefetch.ts L90-109](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/routePrefetch.ts#L90-L109) — [tierPrefetchPlan()](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#372-399) drives scheduling:
+| Tier | Chunks | Mode | Delay |
+|------|--------|------|-------|
+| INSTANT | 9 | parallel (if device also INSTANT) | 0ms |
+| FAST | 9 | sequential | 0ms |
+| MODERATE | 6 | sequential | 3,000ms |
+| CONSTRAINED | 3 | sequential | 5,000ms |
+| MINIMAL | 0 | none | — |
+
+Also supports admin `prefetchStrategy: "all" | "critical" | "none"`.
+
+---
+
+### ✅ F7 — Hardcoded 200ms Hydration Timeout — **DONE**
+
+**Before:** `const deadline = Date.now() + 200`.
+**After:** [queryPersistence.ts L152-158](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/queryPersistence.ts#L152-L158):
+```typescript
+export function getQueryPersistHydrateTimeoutMs(): number {
+  return tierHydrationTimeoutMs(getPerfHints()); // INSTANT: 100, MODERATE: 300, MINIMAL: 800
+}
+```
+
+---
+
+### ✅ F8 — Service Worker Doesn't Pre-Cache Route Chunks — **DONE**
+
+**Before:** Only `index.html` + inline `<script src>` assets.
+**After:** [sw.ts L10-16, L95-149, L180](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/sw.ts#L10-L16):
+- Defines `CRITICAL_ROUTE_KEY_HINTS` (Dashboard, QuotesScreen, TradeScreen, ChartScreen)
+- [loadBuildManifest()](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/sw.ts#121-135) reads `/.vite/manifest.json` or `/manifest.json`
+- [collectManifestAssetPaths()](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/sw.ts#100-120) recursively resolves JS + CSS + imported chunks
+- [cacheCriticalRouteChunks()](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/sw.ts#136-151) pre-caches all critical route assets on [install](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/main.tsx#8-26)
+- [isCacheableResponse()](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/sw.ts#38-56) validates: 200 OK, non-opaque, same-origin, valid Content-Type
+
+```typescript
+// install event
+await cacheIndexAndAssets(cache);
+await cacheCriticalRouteChunks(cache); // ← NEW
+```
+
+---
+
+### ✅ F9 — All Polling Hooks Use Flawed [recommendedPollIntervalMs](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#469-475) — **DONE**
+
+All 4 polling hooks migrated to use [tierPollIntervalMs()](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#354-363) + [usePerfHints()](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#263-266) + [usePerformanceSettings()](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/hooks/use-performance-settings.ts#9-21):
+
+| Hook | Import | Evidence |
+|------|--------|----------|
+| [QuotesProvider.tsx L5](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/live/QuotesProvider.tsx#L5) | `tierPollIntervalMs, usePerfHints` | `refetchInterval: quotePollIntervalMs` |
+| [use-trades.tsx L8](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/hooks/use-trades.tsx#L8) | `tierPollIntervalMs, usePerfHints` | `refetchInterval: tradesPollIntervalMs` |
+| [usePendingOrders.ts L7](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/hooks/usePendingOrders.ts#L7) | `tierPollIntervalMs, usePerfHints` | Uses tier-computed interval |
+| [use-account-summary.tsx L5](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/hooks/use-account-summary.tsx#L5) | `tierPollIntervalMs, usePerfHints` | `refetchInterval: accountPollIntervalMs` |
+
+All hooks also use [usePerformanceSettings()](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/hooks/use-performance-settings.ts#9-21) to read admin-configured base interval.
+
+---
+
+### ✅ F10 — No [manualChunks](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/vite.config.ts#47-66) — **DONE**
+
+**Before:** No chunk splitting config.
+**After:** [vite.config.ts L47-65](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/vite.config.ts#L47-L65):
+```typescript
+manualChunks: (id) => {
+  if (id.includes("/src/pages/AdminDashboard") || id.includes("/src/components/admin/")) return "admin";
+  if (id.includes("node_modules/recharts") || id.includes("node_modules/d3")) return "charts-vendor";
+  if (id.includes("node_modules")) return "vendor";
+},
+```
+Also added `build: { manifest: true }` to generate the manifest.json that [sw.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/sw.ts) reads.
+
+---
+
+### ✅ F11 — Prefetch Fires on Mount, Not After Auth — **DONE**
+
+**Before:** `useEffect(() => { prefetchAllRoutes(); }, [])` — fires immediately.
+**After:** [AuthenticatedShell.tsx L102-106](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/AuthenticatedShell.tsx#L102-L106):
+```typescript
+useEffect(() => {
+  const slowTier = perfHints.tier === "CONSTRAINED" || perfHints.tier === "MINIMAL";
+  const startDelayMs = perfHints.tier === "MINIMAL" ? 10_000 : slowTier ? 7_000 : 0;
+  prefetchAllRoutes({ hints: perfHints, settings: perfSettings, startDelayMs });
+}, [perfHints, perfSettings]);
+```
+On slow tiers: 7-10 second defer. On INSTANT/FAST: immediate. Also reactive to tier changes.
+
+---
+
+### ✅ F12 — `staleTime: Infinity` with `retry: false` — **DONE**
+
+**Before:** `retry: false` — failed fetches never retried.
+**After (retry):** [queryClient.ts L146-150](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/queryClient.ts#L146-L150):
+```typescript
+retry: (failureCount, error) => {
+  if (shouldSkipRetry(error)) return false;
+  return failureCount < tierRetryCount(getPerfHints());
+},
+retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 10_000),
+```
+- ✅ Tier-aware retry count (1 for INSTANT/FAST, 2 MODERATE, 3 CONSTRAINED/MINIMAL)
+- ✅ Skips retry for 401, 403, and all 4xx errors
+- ✅ Exponential backoff capped at 10s
+
+**After (freshness while WS fallback is active):**
+- ✅ Focus/reconnect revalidation enabled for fallback polling queries so users do not wait for the next poll tick after background/foreground transitions:
+  - [QuotesProvider.tsx](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/live/QuotesProvider.tsx)
+  - [use-account-summary.tsx](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/hooks/use-account-summary.tsx)
+  - [use-trades.tsx](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/hooks/use-trades.tsx)
+  - [usePendingOrders.ts](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/hooks/usePendingOrders.ts)
+
+---
+
+## Recommendations Scorecard
+
+| # | Recommendation | Status | Evidence |
+|---|---------------|--------|----------|
+| R1 | Split `isConstrained` into network + device | ✅ Done | `isNetworkConstrained`, `isDeviceConstrained`, `networkTier`, `deviceTier` |
+| R2 | [getPerformanceTier()](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#267-270) → 5 tiers | ✅ Done | Full [classifyNetworkTier()](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#104-126), [classifyDeviceTier()](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#127-142), [combineTier()](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#143-146) |
+| R3 | Make hints reactive | ✅ Done | `useSyncExternalStore`, `connection.change`, `online`/`offline` events |
+| R4 | Integrate WS backoff into LiveUpdatesProvider | ✅ Done | [wsReconnectBaseDelayMs(hints)](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#433-450), capped at 30 |
+| R5 | Device-adaptive hydration timeout | ✅ Done | [tierHydrationTimeoutMs()](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#415-428): 100/300/500/800ms |
+| R6 | SW chunk pre-caching | ✅ Done | Manifest parsing + [cacheCriticalRouteChunks()](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/sw.ts#136-151) |
+| R7 | Capability-aware prefetch scheduling | ✅ Done | [tierPrefetchPlan()](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#372-399) with parallel/sequential/deferred |
+| R8 | Scale fallback poll intervals to tier | ✅ Done | [pollIntervalForTier()](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#322-337): ≤200ms → 6000ms |
+| R9 | Add retry to QueryClient defaults | ✅ Done | Tier-aware retry with 4xx skip |
+| R10 | Explicit [manualChunks](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/vite.config.ts#47-66) | ✅ Done | admin, charts-vendor, vendor chunks |
+| R11 | Defer prefetch on slow networks | ✅ Done | 7s defer CONSTRAINED, 10s defer MINIMAL |
+| R12 | "Remember Me" + cache instant reopen | ✅ Done | SW pre-caches critical chunks, hydration adaptive |
+| R13 | Admin-configurable performance settings | ✅ Done | Schema + API + Admin UI + propagation complete |
+
+---
+
+## R13 Deep Dive — Admin-Configurable Performance ✅ Complete
+
+### What's Done ✅
+
+1. **[PerformanceSettings](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#7-15) type** defined in [perfHints.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts) with 6 admin-tunable knobs:
+   - `restFallbackPollMs` (default: 500, range: 100-60K)
+   - `wsPushFrequencyMs` (default: 0, range: 0-1K)
+   - `quoteFlushIntervalMs` (default: 50, range: 20-5K)
+   - `maxWsReconnectAttempts` (default: 30, range: 1-30)
+   - [wsReconnectBaseDelayMs](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#433-450) (default: 1500, range: 100-30K)
+   - `prefetchStrategy` (default: "all", enum: "all" | "critical" | "none")
+
+2. **[resolvePerformanceSettings(input)](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#275-321)** safely parses, validates, and clamps any input into valid settings
+
+3. **[use-performance-settings.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/hooks/use-performance-settings.ts)** hook reads from `/api/global-settings` query (30s stale time) and resolves settings
+
+4. **All consumers** accept [PerformanceSettings](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#7-15) as parameter and apply tier multipliers on top of admin base
+
+5. **ConfigSync** already invalidates `/api/global-settings` on `global-settings:updated` WS event → triggers [usePerformanceSettings()](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/hooks/use-performance-settings.ts#9-21) refetch → all consumers re-render with new values. **Instant propagation works.**
+
+### Completion Evidence ✅
+
+- `global_settings` schema includes all six performance fields, with migration and defaults:
+  - [shared/schema.pg.ts](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/shared/schema.pg.ts)
+  - [0031_global_settings_performance_controls.sql](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/db/migrations/0031_global_settings_performance_controls.sql)
+- Admin API validates, clamps, persists, rate-limits, and audits performance-setting updates:
+  - [server/routes/admin.ts](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/admin.ts)
+- Public `/api/global-settings` serves sanitized performance fields:
+  - [server/routes.ts](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes.ts)
+- Admin UI includes dedicated market-performance controls in System Config:
+  - [client/src/pages/AdminDashboard.tsx](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/pages/AdminDashboard.tsx)
+
+---
+
+## Architecture Quality Notes
+
+### Strengths
+
+- **Clean separation of concerns:** Network tier and device tier classified independently, combined only at the final step
+- **Typed throughout:** [PerformanceTier](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#4-5), [PerfHints](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#16-30), [PerformanceSettings](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#7-15), [PrefetchPlan](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#31-36) — no `any` types in the public API
+- **Reactive by default:** [usePerfHints()](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#263-266) + `useSyncExternalStore` means tier changes propagate automatically
+- **Graceful degradation:** [resolvePerformanceSettings()](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#275-321) clamps all inputs, falls back to safe defaults on parse errors
+- **Admin-ready:** Every tier function accepts optional `settingsInput` parameter — the admin config slot is pre-wired
+- **SW manifest-driven:** Pre-caching uses the Vite build manifest, not hardcoded chunk names — survives chunk name changes across builds
+- **Cache versioning:** `CACHE_NAME` includes `BUILD_HASH` — stale caches purged on deploy via [activate](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/admin.ts#1617-1661) handler
+
+### Minor Observations
+
+1. **[ConfigSync.tsx](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/live/ConfigSync.tsx) unchanged** — It correctly invalidates `/api/global-settings` on WS event, which triggers [usePerformanceSettings()](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/hooks/use-performance-settings.ts#9-21) refetch. No explicit `updateAdminPerfConfig()` call needed since consumers use hooks that re-read settings on invalidation. This is cleaner than the earlier approach.
+
+2. **[recommendedPollIntervalMs()](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#469-475) retained as alias** — [perfHints.ts L469-474](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#L469-L474) aliases [tierPollIntervalMs()](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#354-363). Same for [recommendedQuoteFlushIntervalMs()](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#476-479). Forward-compatible — old callers still work.
+
+3. **`build: { manifest: true }`** in vite.config.ts — This generates the `.vite/manifest.json` that [sw.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/sw.ts) reads during install. The two features (manualChunks + manifest) work in concert.
+
+---
+
+## Final Verdict
+
+| Metric | Score |
+|--------|-------|
+| Findings addressed | **12/12** (100%) |
+| Recommendations implemented | **13/13** (100%) |
+| Partial items | 0 |
+| Open items | 0 critical |
+| Code quality | **Excellent** — properly typed, reactive, admin-ready |
+| Breaking changes | **None** — backward-compat aliases retained |
+
+All audit findings and implementation-plan recommendations listed in this report are now closed.
+
+---
+
+## Resolution Addendum (2026-02-16)
+
+The previously partial items have now been closed:
+
+1. **F12 (`staleTime: Infinity` behavior gap) — RESOLVED**
+   - Live polling hooks now force revalidation on focus/reconnect when WS is unavailable (while preserving WS-first behavior when connected):
+     - `client/src/live/QuotesProvider.tsx`
+     - `client/src/hooks/use-account-summary.tsx`
+     - `client/src/hooks/use-trades.tsx`
+     - `client/src/hooks/usePendingOrders.ts`
+
+2. **R13 (server-side persistence/validation/UI) — RESOLVED**
+   - Performance fields are implemented in schema + migration + admin/public API + admin UI and broadcast propagation paths:
+     - `shared/schema.pg.ts`
+     - `db/migrations/0031_global_settings_performance_controls.sql`
+     - `server/routes/admin.ts`
+     - `server/routes.ts`
+     - `client/src/pages/AdminDashboard.tsx`
+     - `client/src/hooks/use-performance-settings.ts`
+
+3. **Runtime hardening enhancement**
+   - Added server-side WS push-frequency enforcement and WS payload cap:
+     - `server/routes.ts`
+     - `.agents/PRODUCTION_REQUIREMENTS.md` (`PRD-PERF-004`)

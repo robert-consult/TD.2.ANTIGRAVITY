@@ -374,12 +374,18 @@ app.use((req, res, next) => {
   // this serves both the API and the client.
   // It is the only port that is not firewalled.
   const port = 5000;
+  const reusePortEnabled =
+    process.env.NODE_ENV === "production" &&
+    String(process.env.SERVER_REUSE_PORT ?? "0").trim() === "1";
   server.listen({
     port,
     host: "0.0.0.0",
-    reusePort: true,
+    ...(reusePortEnabled ? { reusePort: true } : {}),
   }, () => {
     log(`serving on port ${port}`);
+    if (reusePortEnabled) {
+      log("[Server] reusePort is enabled (SERVER_REUSE_PORT=1). Ensure all listeners run identical code.");
+    }
     
     // DEFERRED INITIALIZATION: Run expensive operations AFTER server is listening
     // This ensures health checks pass quickly during deployment

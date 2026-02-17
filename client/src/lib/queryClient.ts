@@ -5,6 +5,7 @@ import { resolveApiUrl } from "./appUrl";
 import { attachCsrfHeader, isCsrfFailureResponse, refreshCsrfToken } from "./csrf";
 import { BOT_CHALLENGE_REQUIRED_CODE } from "@shared/security/botChallenge";
 import { IDENTITY_HEADER_BOT_PROOF } from "@shared/identity/headers";
+import { getPerfHints, tierRetryCount } from "./perfHints";
 
 export class ApiError extends Error {
   status: number;
@@ -123,6 +124,18 @@ export const getQueryFn: <T>(options: {
       return await res.json();
     };
 
+function shouldSkipRetry(error: unknown): boolean {
+  if (error instanceof ApiError) {
+    if (error.status === 401 || error.status === 403) return true;
+    if (error.status >= 400 && error.status < 500) return true;
+    return false;
+  }
+
+  const status = Number((error as any)?.status);
+  if (Number.isFinite(status) && status >= 400 && status < 500) return true;
+  return false;
+}
+
 export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
@@ -130,7 +143,11 @@ export const queryClient = new QueryClient({
       refetchInterval: false,
       refetchOnWindowFocus: false,
       staleTime: Infinity,
-      retry: false,
+      retry: (failureCount, error) => {
+        if (shouldSkipRetry(error)) return false;
+        return failureCount < tierRetryCount(getPerfHints());
+      },
+      retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 10_000),
     },
     mutations: {
       retry: false,

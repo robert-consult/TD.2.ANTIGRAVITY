@@ -218,6 +218,20 @@
       "when": 1776201606000,
       "tag": "0030_remember_me_tokens_and_session_controls",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1776201607000,
+      "tag": "0031_global_settings_performance_controls",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1776201608000,
+      "tag": "0032_global_settings_tier_overrides",
+      "breakpoints": true
     }
   ]
 }

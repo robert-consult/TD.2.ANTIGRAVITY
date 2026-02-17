@@ -2,9 +2,10 @@ import type { ReactNode } from "react";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useLiveUpdates } from "@/live/LiveUpdatesProvider";
-import { recommendedPollIntervalMs, recommendedQuoteFlushIntervalMs } from "@/lib/perfHints";
+import { tierFlushIntervalMs, tierPollIntervalMs, usePerfHints } from "@/lib/perfHints";
 import { secureGet } from "@/lib/secureCache";
 import { useAuth } from "@/hooks/use-auth";
+import { usePerformanceSettings } from "@/hooks/use-performance-settings";
 import {
   WS_MSG_QUOTES_SNAPSHOT,
   WS_MSG_QUOTES_SUBSCRIBE,
@@ -104,6 +105,15 @@ export function QuotesProvider({ children }: { children: ReactNode }) {
   const pendingFlushRef = useRef(false);
 
   const { isConnected: isWsConnected, sendMessage, subscribe } = useLiveUpdates();
+  const perfHints = usePerfHints();
+  const performanceSettings = usePerformanceSettings();
+  const quoteFlushMs = tierFlushIntervalMs(perfHints, performanceSettings);
+  const quotePollIntervalMs = tierPollIntervalMs(
+    performanceSettings.restFallbackPollMs,
+    perfHints,
+    performanceSettings,
+  );
+  const wsFallbackRefetchMode = isWsConnected ? false : ("always" as const);
 
   useEffect(() => {
     if (isAuthenticated) return;
@@ -161,9 +171,8 @@ export function QuotesProvider({ children }: { children: ReactNode }) {
   const scheduleFlush = useCallback(() => {
     pendingFlushRef.current = true;
     if (flushTimerRef.current !== null) return;
-    const intervalMs = recommendedQuoteFlushIntervalMs();
-    flushTimerRef.current = window.setTimeout(flushNow, intervalMs);
-  }, [flushNow]);
+    flushTimerRef.current = window.setTimeout(flushNow, quoteFlushMs);
+  }, [flushNow, quoteFlushMs]);
 
   const { data: symbolsData, isLoading: isSymbolsLoading } = useQuery<AllowedSymbolsResponse>({
     queryKey: ["/api/quote-subscriptions/allowed-symbols"],
@@ -326,9 +335,10 @@ export function QuotesProvider({ children }: { children: ReactNode }) {
   const { data: latestQuotesData, isLoading, isError } = useQuery({
     queryKey: ["/api/quotes/latest", requestedSymbols.join("|")],
     enabled: isAuthenticated && requestedSymbols.length > 0,
-    refetchInterval: isWsConnected ? false : recommendedPollIntervalMs(5000),
-    refetchOnWindowFocus: false,
-    staleTime: Infinity,
+    refetchInterval: isWsConnected ? false : quotePollIntervalMs,
+    staleTime: isWsConnected ? Infinity : 15_000,
+    refetchOnWindowFocus: wsFallbackRefetchMode,
+    refetchOnReconnect: wsFallbackRefetchMode,
   });
 
   useEffect(() => {

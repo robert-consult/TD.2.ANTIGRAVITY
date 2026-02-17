@@ -3,6 +3,8 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef } fr
 import { useWebSocket } from "@/hooks/use-websocket";
 import { getWsUrl } from "@/lib/wsUrl";
 import { useAuth } from "@/hooks/use-auth";
+import { usePerfHints, wsReconnectAttempts, wsReconnectBaseDelayMs } from "@/lib/perfHints";
+import { usePerformanceSettings } from "@/hooks/use-performance-settings";
 import { WS_MSG_AUTH_HELLO } from "@shared/ws/protocol";
 
 type LiveUpdateMessage = Record<string, any>;
@@ -20,11 +22,16 @@ export function LiveUpdatesProvider({ children }: { children: ReactNode }) {
   const { isAuthenticated } = useAuth();
   const listenersRef = useRef(new Set<LiveUpdateListener>());
   const wsUrl = getWsUrl();
+  const hints = usePerfHints();
+  const performanceSettings = usePerformanceSettings();
+
+  const reconnectInterval = wsReconnectBaseDelayMs(hints, performanceSettings);
+  const reconnectAttempts = wsReconnectAttempts(performanceSettings);
 
   const { isConnected, sendMessage } = useWebSocket(wsUrl, {
     enabled: isAuthenticated,
-    reconnectInterval: 1500,
-    reconnectAttempts: 50,
+    reconnectInterval,
+    reconnectAttempts,
     onMessage: (message) => {
       if (!message || typeof message !== "object") return;
       for (const listener of listenersRef.current) {

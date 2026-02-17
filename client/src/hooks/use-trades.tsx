@@ -5,7 +5,8 @@ import { getTradeErrorToast } from "@/lib/tradeErrorMessages";
 import { useAuth } from "./use-auth";
 import { useToast } from "./use-toast";
 import { useLiveUpdates } from "@/live/LiveUpdatesProvider";
-import { recommendedPollIntervalMs } from "@/lib/perfHints";
+import { tierPollIntervalMs, usePerfHints } from "@/lib/perfHints";
+import { usePerformanceSettings } from "@/hooks/use-performance-settings";
 import {
   WS_MSG_TRADES_SUBSCRIBE,
   WS_MSG_TRADES_UNSUBSCRIBE,
@@ -19,8 +20,16 @@ export function useTrades() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const { user } = useAuth();
+  const perfHints = usePerfHints();
+  const performanceSettings = usePerformanceSettings();
+  const tradesPollIntervalMs = tierPollIntervalMs(
+    performanceSettings.restFallbackPollMs,
+    perfHints,
+    performanceSettings,
+  );
 
   const { isConnected: isTradeWsConnected, sendMessage, subscribe } = useLiveUpdates();
+  const wsFallbackRefetchMode = isTradeWsConnected ? false : ("always" as const);
 
   useEffect(() => {
     if (!user || !isTradeWsConnected) return;
@@ -55,7 +64,10 @@ export function useTrades() {
   } = useQuery({
     queryKey: ["/api/trades"],
     enabled: !!user,
-    refetchInterval: isTradeWsConnected ? false : recommendedPollIntervalMs(7000),
+    refetchInterval: isTradeWsConnected ? false : tradesPollIntervalMs,
+    staleTime: isTradeWsConnected ? Infinity : 15_000,
+    refetchOnWindowFocus: wsFallbackRefetchMode,
+    refetchOnReconnect: wsFallbackRefetchMode,
   });
 
   // Get open trades
@@ -67,7 +79,10 @@ export function useTrades() {
   } = useQuery({
     queryKey: ["/api/trades/open"],
     enabled: !!user,
-    refetchInterval: isTradeWsConnected ? false : recommendedPollIntervalMs(7000),
+    refetchInterval: isTradeWsConnected ? false : tradesPollIntervalMs,
+    staleTime: isTradeWsConnected ? Infinity : 15_000,
+    refetchOnWindowFocus: wsFallbackRefetchMode,
+    refetchOnReconnect: wsFallbackRefetchMode,
   });
 
   // Create a new trade

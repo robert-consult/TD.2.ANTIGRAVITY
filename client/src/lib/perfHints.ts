@@ -1,4 +1,27 @@
+import { useSyncExternalStore } from "react";
+
 export type NetEffectiveType = "slow-2g" | "2g" | "3g" | "4g" | "unknown";
+export type PerformanceTier = "INSTANT" | "FAST" | "MODERATE" | "CONSTRAINED" | "MINIMAL";
+export type PrefetchStrategy = "all" | "critical" | "none";
+
+export type PerformanceSettings = {
+  restFallbackPollMs: number;
+  wsPushFrequencyMs: number;
+  quoteFlushIntervalMs: number;
+  maxWsReconnectAttempts: number;
+  wsReconnectBaseDelayMs: number;
+  prefetchStrategy: PrefetchStrategy;
+  pollInstantMs: number;
+  pollFastMs: number;
+  pollModerateMs: number;
+  pollConstrainedMs: number;
+  pollMinimalMs: number;
+  flushInstantMs: number;
+  flushFastMs: number;
+  flushModerateMs: number;
+  flushConstrainedMs: number;
+  flushMinimalMs: number;
+};
 
 export type PerfHints = {
   effectiveType: NetEffectiveType;
@@ -7,40 +30,165 @@ export type PerfHints = {
   downlinkMbps: number | null;
   deviceMemoryGB: number | null;
   hardwareConcurrency: number | null;
+  isNetworkConstrained: boolean;
+  isDeviceConstrained: boolean;
   isConstrained: boolean;
+  networkTier: PerformanceTier;
+  deviceTier: PerformanceTier;
+  tier: PerformanceTier;
 };
+
+export type PrefetchPlan = {
+  count: number;
+  mode: "parallel" | "sequential" | "none";
+  startDelayMs: number;
+};
+
+type NavigatorLike = {
+  connection?: NetworkInfoLike;
+  mozConnection?: NetworkInfoLike;
+  webkitConnection?: NetworkInfoLike;
+  deviceMemory?: number;
+  hardwareConcurrency?: number;
+};
+
+type NetworkInfoLike = {
+  effectiveType?: string;
+  saveData?: boolean;
+  rtt?: number;
+  downlink?: number;
+  addEventListener?: (event: "change", listener: () => void) => void;
+  removeEventListener?: (event: "change", listener: () => void) => void;
+};
+
+export const PERFORMANCE_TIERS: readonly PerformanceTier[] = [
+  "INSTANT",
+  "FAST",
+  "MODERATE",
+  "CONSTRAINED",
+  "MINIMAL",
+] as const;
+
+const TIER_RANK: Record<PerformanceTier, number> = {
+  INSTANT: 0,
+  FAST: 1,
+  MODERATE: 2,
+  CONSTRAINED: 3,
+  MINIMAL: 4,
+};
+
+const NETWORK_CHANGE_EVENT = "change";
+
+export const DEFAULT_PERFORMANCE_SETTINGS: PerformanceSettings = {
+  restFallbackPollMs: 500,
+  wsPushFrequencyMs: 0,
+  quoteFlushIntervalMs: 50,
+  maxWsReconnectAttempts: 30,
+  wsReconnectBaseDelayMs: 1500,
+  prefetchStrategy: "all",
+  pollInstantMs: 200,
+  pollFastMs: 500,
+  pollModerateMs: 1500,
+  pollConstrainedMs: 4000,
+  pollMinimalMs: 6000,
+  flushInstantMs: 50,
+  flushFastMs: 150,
+  flushModerateMs: 300,
+  flushConstrainedMs: 500,
+  flushMinimalMs: 1000,
+};
+
+function getNavigatorLike(): NavigatorLike | undefined {
+  if (typeof navigator === "undefined") return undefined;
+  return navigator as NavigatorLike;
+}
 
 function numOrNull(value: unknown): number | null {
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
 }
 
-function clamp(n: number, lo: number, hi: number) {
+function clamp(n: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, n));
 }
 
-export function getPerfHints(): PerfHints {
-  const nav: any = typeof navigator !== "undefined" ? navigator : undefined;
-  const conn: any = nav?.connection || nav?.mozConnection || nav?.webkitConnection;
+function normalizeTier(tier: string | null | undefined): PerformanceTier {
+  const normalized = String(tier || "").trim().toUpperCase();
+  if (normalized === "INSTANT") return "INSTANT";
+  if (normalized === "FAST") return "FAST";
+  if (normalized === "MODERATE") return "MODERATE";
+  if (normalized === "CONSTRAINED") return "CONSTRAINED";
+  return "MINIMAL";
+}
 
-  const effectiveType: NetEffectiveType = (conn?.effectiveType as NetEffectiveType) || "unknown";
+function classifyNetworkTier(values: {
+  effectiveType: NetEffectiveType;
+  saveData: boolean;
+  rttMs: number | null;
+  downlinkMbps: number | null;
+}): PerformanceTier {
+  if (values.saveData) return "MINIMAL";
+  if (values.effectiveType === "slow-2g" || values.effectiveType === "2g" || values.effectiveType === "3g") {
+    return "MINIMAL";
+  }
+
+  const rtt = values.rttMs;
+  const downlink = values.downlinkMbps;
+
+  if (rtt != null && downlink != null && rtt < 50 && downlink > 10) return "INSTANT";
+  if (rtt != null && downlink != null && rtt < 150 && downlink > 5) return "FAST";
+  if ((rtt != null && rtt > 350) || (downlink != null && downlink < 1.5)) return "CONSTRAINED";
+  if ((rtt != null && rtt >= 150) || (downlink != null && downlink <= 5)) return "MODERATE";
+
+  if (values.effectiveType === "4g") return "FAST";
+  return "MODERATE";
+}
+
+function classifyDeviceTier(values: {
+  deviceMemoryGB: number | null;
+  hardwareConcurrency: number | null;
+}): PerformanceTier {
+  const memory = values.deviceMemoryGB;
+  const cores = values.hardwareConcurrency;
+
+  if (memory == null && cores == null) return "FAST";
+  if ((memory != null && memory < 2) || (cores != null && cores < 2)) return "MINIMAL";
+  if ((memory == null || memory >= 8) && (cores == null || cores >= 8)) return "INSTANT";
+  if ((memory == null || memory >= 4) && (cores == null || cores >= 4)) return "FAST";
+  if ((cores != null && cores >= 4) && (memory != null && memory >= 2)) return "MODERATE";
+  if ((memory != null && memory >= 2) || (cores != null && cores >= 2)) return "CONSTRAINED";
+  return "MODERATE";
+}
+
+function combineTier(networkTier: PerformanceTier, deviceTier: PerformanceTier): PerformanceTier {
+  return TIER_RANK[networkTier] >= TIER_RANK[deviceTier] ? networkTier : deviceTier;
+}
+
+function createPerfHints(): PerfHints {
+  const nav = getNavigatorLike();
+  const conn = nav?.connection || nav?.mozConnection || nav?.webkitConnection;
+
+  const effectiveTypeRaw = String(conn?.effectiveType || "").trim().toLowerCase();
+  const effectiveType: NetEffectiveType =
+    effectiveTypeRaw === "slow-2g" ||
+    effectiveTypeRaw === "2g" ||
+    effectiveTypeRaw === "3g" ||
+    effectiveTypeRaw === "4g"
+      ? effectiveTypeRaw
+      : "unknown";
+
   const saveData = Boolean(conn?.saveData);
   const rttMs = numOrNull(conn?.rtt);
   const downlinkMbps = numOrNull(conn?.downlink);
   const deviceMemoryGB = numOrNull(nav?.deviceMemory);
   const hardwareConcurrency = numOrNull(nav?.hardwareConcurrency);
 
-  const networkConstrained =
-    saveData ||
-    effectiveType === "slow-2g" ||
-    effectiveType === "2g" ||
-    effectiveType === "3g" ||
-    (effectiveType === "4g" &&
-      ((rttMs != null && rttMs > 350) || (downlinkMbps != null && downlinkMbps < 1.6)));
+  const networkTier = classifyNetworkTier({ effectiveType, saveData, rttMs, downlinkMbps });
+  const deviceTier = classifyDeviceTier({ deviceMemoryGB, hardwareConcurrency });
+  const tier = combineTier(networkTier, deviceTier);
 
-  const deviceConstrained =
-    (deviceMemoryGB != null && deviceMemoryGB <= 4) ||
-    (hardwareConcurrency != null && hardwareConcurrency <= 4);
+  const isNetworkConstrained = TIER_RANK[networkTier] >= TIER_RANK.CONSTRAINED;
+  const isDeviceConstrained = TIER_RANK[deviceTier] >= TIER_RANK.CONSTRAINED;
 
   return {
     effectiveType,
@@ -49,19 +197,349 @@ export function getPerfHints(): PerfHints {
     downlinkMbps,
     deviceMemoryGB,
     hardwareConcurrency,
-    isConstrained: networkConstrained || deviceConstrained,
+    isNetworkConstrained,
+    isDeviceConstrained,
+    isConstrained: isNetworkConstrained || isDeviceConstrained,
+    networkTier,
+    deviceTier,
+    tier,
   };
 }
 
-export function recommendedPollIntervalMs(baseMs: number, hints: PerfHints = getPerfHints()): number {
-  const base = Math.max(4000, Math.round(baseMs));
-  if (!hints.isConstrained) return base;
-  const multiplier = hints.effectiveType === "4g" ? 2 : 3;
-  return clamp(Math.round(base * multiplier), base, 60_000);
+function hintsAreEqual(a: PerfHints, b: PerfHints): boolean {
+  return (
+    a.effectiveType === b.effectiveType &&
+    a.saveData === b.saveData &&
+    a.rttMs === b.rttMs &&
+    a.downlinkMbps === b.downlinkMbps &&
+    a.deviceMemoryGB === b.deviceMemoryGB &&
+    a.hardwareConcurrency === b.hardwareConcurrency &&
+    a.isNetworkConstrained === b.isNetworkConstrained &&
+    a.isDeviceConstrained === b.isDeviceConstrained &&
+    a.networkTier === b.networkTier &&
+    a.deviceTier === b.deviceTier &&
+    a.tier === b.tier
+  );
 }
 
-export function recommendedQuoteFlushIntervalMs(hints: PerfHints = getPerfHints()): number {
-  return hints.isConstrained ? 500 : 250;
+let perfHintsSnapshot: PerfHints = createPerfHints();
+const perfHintListeners = new Set<() => void>();
+let detachNativeListeners: (() => void) | null = null;
+
+function ensureNativeListeners() {
+  if (detachNativeListeners || typeof window === "undefined") return;
+
+  const nav = getNavigatorLike();
+  const conn = nav?.connection || nav?.mozConnection || nav?.webkitConnection;
+  const onChange = () => {
+    refreshPerfHints();
+  };
+
+  conn?.addEventListener?.(NETWORK_CHANGE_EVENT, onChange);
+  window.addEventListener("online", onChange);
+  window.addEventListener("offline", onChange);
+
+  detachNativeListeners = () => {
+    conn?.removeEventListener?.(NETWORK_CHANGE_EVENT, onChange);
+    window.removeEventListener("online", onChange);
+    window.removeEventListener("offline", onChange);
+    detachNativeListeners = null;
+  };
+}
+
+function notifyPerfHintListeners() {
+  for (const listener of perfHintListeners) listener();
+}
+
+export function refreshPerfHints(): PerfHints {
+  const next = createPerfHints();
+  if (!hintsAreEqual(next, perfHintsSnapshot)) {
+    perfHintsSnapshot = next;
+    notifyPerfHintListeners();
+  } else {
+    perfHintsSnapshot = next;
+  }
+  return perfHintsSnapshot;
+}
+
+export function subscribeHints(listener: () => void): () => void {
+  ensureNativeListeners();
+  perfHintListeners.add(listener);
+  return () => {
+    perfHintListeners.delete(listener);
+  };
+}
+
+export function getHintsSnapshot(): PerfHints {
+  ensureNativeListeners();
+  return perfHintsSnapshot;
+}
+
+export function getPerfHints(): PerfHints {
+  ensureNativeListeners();
+  return refreshPerfHints();
+}
+
+export function usePerfHints(): PerfHints {
+  return useSyncExternalStore(subscribeHints, getHintsSnapshot, getHintsSnapshot);
+}
+
+export function getPerformanceTier(hints: PerfHints = getPerfHints()): PerformanceTier {
+  return hints.tier;
+}
+
+export function usePerformanceTier(): PerformanceTier {
+  return usePerfHints().tier;
+}
+
+export function resolvePerformanceSettings(input: unknown): PerformanceSettings {
+  const candidate = input && typeof input === "object" ? (input as Record<string, unknown>) : {};
+
+  const prefetchRaw = String(candidate.prefetchStrategy ?? DEFAULT_PERFORMANCE_SETTINGS.prefetchStrategy)
+    .trim()
+    .toLowerCase();
+  const prefetchStrategy: PrefetchStrategy =
+    prefetchRaw === "none" || prefetchRaw === "critical" || prefetchRaw === "all"
+      ? prefetchRaw
+      : DEFAULT_PERFORMANCE_SETTINGS.prefetchStrategy;
+
+  const restFallbackPollMs = clamp(
+    Math.round(numOrNull(candidate.restFallbackPollMs) ?? DEFAULT_PERFORMANCE_SETTINGS.restFallbackPollMs),
+    100,
+    60_000,
+  );
+  const quoteFlushIntervalMs = clamp(
+    Math.round(numOrNull(candidate.quoteFlushIntervalMs) ?? DEFAULT_PERFORMANCE_SETTINGS.quoteFlushIntervalMs),
+    20,
+    5_000,
+  );
+
+  const defaultPollInstantMs = Math.min(restFallbackPollMs, 200);
+  const defaultPollFastMs = Math.min(restFallbackPollMs, 500);
+  const defaultPollModerateMs = clamp(Math.max(restFallbackPollMs, 1_500), 1_500, 6_000);
+  const defaultPollConstrainedMs = Math.max(Math.round(restFallbackPollMs * 2), 4_000);
+  const defaultPollMinimalMs = Math.max(Math.round(restFallbackPollMs * 3), 6_000);
+  const defaultFlushInstantMs = Math.min(quoteFlushIntervalMs, 50);
+  const defaultFlushFastMs = clamp(Math.round(quoteFlushIntervalMs * 3), 60, 5_000);
+  const defaultFlushModerateMs = clamp(Math.round(quoteFlushIntervalMs * 6), 120, 5_000);
+  const defaultFlushConstrainedMs = clamp(Math.round(quoteFlushIntervalMs * 10), 200, 5_000);
+  const defaultFlushMinimalMs = clamp(Math.round(quoteFlushIntervalMs * 20), 400, 5_000);
+
+  return {
+    restFallbackPollMs,
+    wsPushFrequencyMs: clamp(
+      Math.round(numOrNull(candidate.wsPushFrequencyMs) ?? DEFAULT_PERFORMANCE_SETTINGS.wsPushFrequencyMs),
+      0,
+      1_000,
+    ),
+    quoteFlushIntervalMs,
+    maxWsReconnectAttempts: clamp(
+      Math.round(
+        numOrNull(candidate.maxWsReconnectAttempts) ??
+          DEFAULT_PERFORMANCE_SETTINGS.maxWsReconnectAttempts,
+      ),
+      1,
+      30,
+    ),
+    wsReconnectBaseDelayMs: clamp(
+      Math.round(
+        numOrNull(candidate.wsReconnectBaseDelayMs) ??
+          DEFAULT_PERFORMANCE_SETTINGS.wsReconnectBaseDelayMs,
+      ),
+      100,
+      30_000,
+    ),
+    prefetchStrategy,
+    pollInstantMs: clamp(Math.round(numOrNull(candidate.pollInstantMs) ?? defaultPollInstantMs), 100, 60_000),
+    pollFastMs: clamp(Math.round(numOrNull(candidate.pollFastMs) ?? defaultPollFastMs), 100, 60_000),
+    pollModerateMs: clamp(Math.round(numOrNull(candidate.pollModerateMs) ?? defaultPollModerateMs), 100, 60_000),
+    pollConstrainedMs: clamp(
+      Math.round(numOrNull(candidate.pollConstrainedMs) ?? defaultPollConstrainedMs),
+      100,
+      60_000,
+    ),
+    pollMinimalMs: clamp(Math.round(numOrNull(candidate.pollMinimalMs) ?? defaultPollMinimalMs), 100, 60_000),
+    flushInstantMs: clamp(Math.round(numOrNull(candidate.flushInstantMs) ?? defaultFlushInstantMs), 20, 5_000),
+    flushFastMs: clamp(Math.round(numOrNull(candidate.flushFastMs) ?? defaultFlushFastMs), 20, 5_000),
+    flushModerateMs: clamp(
+      Math.round(numOrNull(candidate.flushModerateMs) ?? defaultFlushModerateMs),
+      20,
+      5_000,
+    ),
+    flushConstrainedMs: clamp(
+      Math.round(numOrNull(candidate.flushConstrainedMs) ?? defaultFlushConstrainedMs),
+      20,
+      5_000,
+    ),
+    flushMinimalMs: clamp(Math.round(numOrNull(candidate.flushMinimalMs) ?? defaultFlushMinimalMs), 20, 5_000),
+  };
+}
+
+export function pollIntervalForTier(tier: PerformanceTier, baseMs: number, settingsInput?: unknown): number {
+  const normalizedTier = normalizeTier(tier);
+  const base = clamp(Math.round(baseMs), 100, 60_000);
+  const settings = resolvePerformanceSettings(settingsInput);
+  if (settingsInput && typeof settingsInput === "object") {
+    switch (normalizedTier) {
+      case "INSTANT":
+        return settings.pollInstantMs;
+      case "FAST":
+        return settings.pollFastMs;
+      case "MODERATE":
+        return settings.pollModerateMs;
+      case "CONSTRAINED":
+        return settings.pollConstrainedMs;
+      case "MINIMAL":
+        return settings.pollMinimalMs;
+    }
+  }
+  switch (normalizedTier) {
+    case "INSTANT":
+      return Math.min(base, 200);
+    case "FAST":
+      return Math.min(base, 500);
+    case "MODERATE":
+      return clamp(Math.max(base, 1_500), 1_500, 6_000);
+    case "CONSTRAINED":
+      return Math.max(Math.round(base * 2), 4_000);
+    case "MINIMAL":
+      return Math.max(Math.round(base * 3), 6_000);
+  }
+}
+
+export function flushIntervalForTier(tier: PerformanceTier, baseMs: number, settingsInput?: unknown): number {
+  const normalizedTier = normalizeTier(tier);
+  const base = clamp(Math.round(baseMs), 20, 5_000);
+  const settings = resolvePerformanceSettings(settingsInput);
+  if (settingsInput && typeof settingsInput === "object") {
+    switch (normalizedTier) {
+      case "INSTANT":
+        return settings.flushInstantMs;
+      case "FAST":
+        return settings.flushFastMs;
+      case "MODERATE":
+        return settings.flushModerateMs;
+      case "CONSTRAINED":
+        return settings.flushConstrainedMs;
+      case "MINIMAL":
+        return settings.flushMinimalMs;
+    }
+  }
+  switch (normalizedTier) {
+    case "INSTANT":
+      return Math.min(base, 50);
+    case "FAST":
+      return clamp(Math.round(base * 3), 60, 5_000);
+    case "MODERATE":
+      return clamp(Math.round(base * 6), 120, 5_000);
+    case "CONSTRAINED":
+      return clamp(Math.round(base * 10), 200, 5_000);
+    case "MINIMAL":
+      return clamp(Math.round(base * 20), 400, 5_000);
+  }
+}
+
+export function tierPollIntervalMs(
+  baseMs: number = DEFAULT_PERFORMANCE_SETTINGS.restFallbackPollMs,
+  hints: PerfHints = getPerfHints(),
+  settingsInput?: unknown,
+): number {
+  const settings = resolvePerformanceSettings(settingsInput);
+  const configuredBase = clamp(Math.round(baseMs || settings.restFallbackPollMs), 100, 60_000);
+  const hasSettingsInput = Boolean(settingsInput && typeof settingsInput === "object");
+  return pollIntervalForTier(hints.networkTier, configuredBase, hasSettingsInput ? settingsInput : undefined);
+}
+
+export function tierFlushIntervalMs(
+  hints: PerfHints = getPerfHints(),
+  settingsInput?: unknown,
+): number {
+  const settings = resolvePerformanceSettings(settingsInput);
+  const hasSettingsInput = Boolean(settingsInput && typeof settingsInput === "object");
+  return flushIntervalForTier(
+    hints.deviceTier,
+    settings.quoteFlushIntervalMs,
+    hasSettingsInput ? settingsInput : undefined,
+  );
+}
+
+export function tierPrefetchPlan(
+  hints: PerfHints = getPerfHints(),
+  settingsInput?: unknown,
+): PrefetchPlan {
+  const settings = resolvePerformanceSettings(settingsInput);
+  if (settings.prefetchStrategy === "none" || hints.saveData || hints.networkTier === "MINIMAL") {
+    return { count: 0, mode: "none", startDelayMs: 0 };
+  }
+
+  if (settings.prefetchStrategy === "critical") {
+    if (hints.networkTier === "CONSTRAINED") return { count: 3, mode: "sequential", startDelayMs: 5_000 };
+    if (hints.networkTier === "MODERATE") return { count: 3, mode: "sequential", startDelayMs: 3_000 };
+    return { count: 3, mode: hints.deviceTier === "INSTANT" ? "parallel" : "sequential", startDelayMs: 0 };
+  }
+
+  if (hints.networkTier === "INSTANT") {
+    return {
+      count: 9,
+      mode: hints.deviceTier === "INSTANT" ? "parallel" : "sequential",
+      startDelayMs: 0,
+    };
+  }
+  if (hints.networkTier === "FAST") return { count: 9, mode: "sequential", startDelayMs: 0 };
+  if (hints.networkTier === "MODERATE") return { count: 6, mode: "sequential", startDelayMs: 3_000 };
+  if (hints.networkTier === "CONSTRAINED") return { count: 3, mode: "sequential", startDelayMs: 5_000 };
+  return { count: 0, mode: "none", startDelayMs: 0 };
+}
+
+export function tierRetryCount(
+  hints: PerfHints = getPerfHints(),
+): number {
+  switch (hints.networkTier) {
+    case "INSTANT":
+    case "FAST":
+      return 1;
+    case "MODERATE":
+      return 2;
+    case "CONSTRAINED":
+    case "MINIMAL":
+      return 3;
+  }
+}
+
+export function tierHydrationTimeoutMs(hints: PerfHints = getPerfHints()): number {
+  switch (hints.deviceTier) {
+    case "INSTANT":
+    case "FAST":
+      return 100;
+    case "MODERATE":
+      return 300;
+    case "CONSTRAINED":
+      return 500;
+    case "MINIMAL":
+      return 800;
+  }
+}
+
+export function wsReconnectAttempts(settingsInput?: unknown): number {
+  return resolvePerformanceSettings(settingsInput).maxWsReconnectAttempts;
+}
+
+export function wsReconnectBaseDelayMs(
+  hints: PerfHints = getPerfHints(),
+  settingsInput?: unknown,
+): number {
+  const base = resolvePerformanceSettings(settingsInput).wsReconnectBaseDelayMs;
+  switch (hints.networkTier) {
+    case "INSTANT":
+      return clamp(Math.round(base * 0.34), 250, 1_500);
+    case "FAST":
+      return clamp(Math.round(base * 0.67), 500, 2_000);
+    case "MODERATE":
+      return clamp(base, 750, 3_000);
+    case "CONSTRAINED":
+    case "MINIMAL":
+      return clamp(Math.round(base * 2), 1_500, 6_000);
+  }
 }
 
 export function computeWsReconnectDelayMs(
@@ -69,13 +547,26 @@ export function computeWsReconnectDelayMs(
   baseMs: number,
   hints: PerfHints = getPerfHints(),
 ): number {
-  const base = Math.max(500, Math.round(baseMs));
-  const exp = Math.min(attempt, 6);
-  const max = hints.isConstrained ? 30_000 : 20_000;
-  const scaledBase = hints.isConstrained ? clamp(base * 2, 500, 10_000) : base;
-  const raw = clamp(Math.round(scaledBase * Math.pow(2, exp)), scaledBase, max);
-  const jitter = 0.2;
-  const withJitter = raw + Math.round(raw * jitter * (Math.random() - 0.5) * 2);
-  return clamp(withJitter, scaledBase, max);
+  const base = clamp(Math.round(baseMs), 250, 10_000);
+  const exp = clamp(Math.trunc(attempt), 0, 6);
+
+  let maxDelay = 20_000;
+  if (hints.networkTier === "INSTANT") maxDelay = 10_000;
+  if (hints.networkTier === "FAST") maxDelay = 15_000;
+  if (hints.networkTier === "CONSTRAINED" || hints.networkTier === "MINIMAL") maxDelay = 30_000;
+
+  const raw = clamp(Math.round(base * Math.pow(2, exp)), base, maxDelay);
+  const jitter = Math.round(raw * 0.2 * (Math.random() * 2 - 1));
+  return clamp(raw + jitter, base, maxDelay);
 }
 
+export function recommendedPollIntervalMs(
+  baseMs: number,
+  hints: PerfHints = getPerfHints(),
+): number {
+  return tierPollIntervalMs(baseMs, hints);
+}
+
+export function recommendedQuoteFlushIntervalMs(hints: PerfHints = getPerfHints()): number {
+  return tierFlushIntervalMs(hints);
+}

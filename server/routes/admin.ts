@@ -32,6 +32,21 @@ import { createNotification, sendKycMailboxMessage } from "../services/messaging
 import { invalidateRememberMeConfigCache } from "../services/rememberMe";
 
 let traderScoutCategoryLiveBusSubscribed = false;
+type GlobalPrefetchStrategy = "all" | "critical" | "none";
+const GLOBAL_PREFETCH_STRATEGIES = new Set<GlobalPrefetchStrategy>(["all", "critical", "none"]);
+const GLOBAL_SETTINGS_UPDATE_MIN_INTERVAL_MS = 500;
+const globalSettingsUpdateMsByAdminId = new Map<number, number>();
+
+function normalizeGlobalPrefetchStrategy(
+  value: unknown,
+  fallback: GlobalPrefetchStrategy = "all",
+): GlobalPrefetchStrategy {
+  const normalized = String(value ?? fallback).trim().toLowerCase();
+  if (GLOBAL_PREFETCH_STRATEGIES.has(normalized as GlobalPrefetchStrategy)) {
+    return normalized as GlobalPrefetchStrategy;
+  }
+  return fallback;
+}
 
 function getParam(value: string | string[]): string {
   return Array.isArray(value) ? value[0] : value;
@@ -2247,6 +2262,22 @@ FROM (
           enableLossLimits: true,
           dailyLossLimitPct: 10,
           lifetimeLossLimitPct: 20,
+          restFallbackPollMs: 500,
+          wsPushFrequencyMs: 0,
+          quoteFlushIntervalMs: 50,
+          maxWsReconnectAttempts: 30,
+          wsReconnectBaseDelayMs: 1500,
+          prefetchStrategy: "all",
+          pollInstantMs: 200,
+          pollFastMs: 500,
+          pollModerateMs: 1500,
+          pollConstrainedMs: 4000,
+          pollMinimalMs: 6000,
+          flushInstantMs: 50,
+          flushFastMs: 150,
+          flushModerateMs: 300,
+          flushConstrainedMs: 500,
+          flushMinimalMs: 1000,
         });
 
         const newSettings = await db.query.globalSettings.findFirst({
@@ -2267,6 +2298,14 @@ FROM (
     try {
       const body = req.body ?? {};
       const ABSOLUTE_MAX_LOTS = 50;
+      const nowMs = Date.now();
+      const actorAdminId = Number(req.session?.userId ?? 0);
+      if (Number.isFinite(actorAdminId) && actorAdminId > 0) {
+        const lastUpdateMs = globalSettingsUpdateMsByAdminId.get(actorAdminId) ?? 0;
+        if (nowMs - lastUpdateMs < GLOBAL_SETTINGS_UPDATE_MIN_INTERVAL_MS) {
+          return res.status(429).json({ message: "Please wait before saving global settings again." });
+        }
+      }
 
       // Safe parsing functions
       const parseNum = (v: any): number | undefined => {
@@ -2295,6 +2334,13 @@ FROM (
         const mm = Number(m[2]);
         if (hh < 0 || hh > 23 || mm < 0 || mm > 59) return undefined;
         return `${m[1]}:${m[2]}`;
+      };
+
+      const parsePrefetchStrategy = (v: any): GlobalPrefetchStrategy | undefined => {
+        if (v === null || v === undefined || v === "") return undefined;
+        const normalized = String(v).trim().toLowerCase();
+        if (!GLOBAL_PREFETCH_STRATEGIES.has(normalized as GlobalPrefetchStrategy)) return undefined;
+        return normalized as GlobalPrefetchStrategy;
       };
 
       const clampInt = (value: unknown, min: number, max: number, fallback: number) => {
@@ -2341,7 +2387,77 @@ FROM (
         // Visual Lot Settings
         lotPresetCards: typeof body.lotPresetCards === "string" ? body.lotPresetCards : undefined,
         lotDropdownMax: parseNum(body.lotDropdownMax),
+        // Performance settings
+        restFallbackPollMs: parseNum(body.restFallbackPollMs),
+        wsPushFrequencyMs: parseNum(body.wsPushFrequencyMs),
+        quoteFlushIntervalMs: parseNum(body.quoteFlushIntervalMs),
+        maxWsReconnectAttempts: parseNum(body.maxWsReconnectAttempts),
+        wsReconnectBaseDelayMs: parseNum(body.wsReconnectBaseDelayMs),
+        prefetchStrategy: parsePrefetchStrategy(body.prefetchStrategy),
+        pollInstantMs: parseNum(body.pollInstantMs),
+        pollFastMs: parseNum(body.pollFastMs),
+        pollModerateMs: parseNum(body.pollModerateMs),
+        pollConstrainedMs: parseNum(body.pollConstrainedMs),
+        pollMinimalMs: parseNum(body.pollMinimalMs),
+        flushInstantMs: parseNum(body.flushInstantMs),
+        flushFastMs: parseNum(body.flushFastMs),
+        flushModerateMs: parseNum(body.flushModerateMs),
+        flushConstrainedMs: parseNum(body.flushConstrainedMs),
+        flushMinimalMs: parseNum(body.flushMinimalMs),
       };
+
+      const ensureNumericInput = (field: string, raw: unknown, parsed: number | undefined) => {
+        if (raw === undefined || raw === null || raw === "") return null;
+        if (parsed === undefined) return `${field} must be numeric`;
+        return null;
+      };
+
+      const numericValidationErrors = [
+        ensureNumericInput("restFallbackPollMs", body.restFallbackPollMs, next.restFallbackPollMs),
+        ensureNumericInput("wsPushFrequencyMs", body.wsPushFrequencyMs, next.wsPushFrequencyMs),
+        ensureNumericInput("quoteFlushIntervalMs", body.quoteFlushIntervalMs, next.quoteFlushIntervalMs),
+        ensureNumericInput("maxWsReconnectAttempts", body.maxWsReconnectAttempts, next.maxWsReconnectAttempts),
+        ensureNumericInput("wsReconnectBaseDelayMs", body.wsReconnectBaseDelayMs, next.wsReconnectBaseDelayMs),
+        ensureNumericInput("pollInstantMs", body.pollInstantMs, next.pollInstantMs),
+        ensureNumericInput("pollFastMs", body.pollFastMs, next.pollFastMs),
+        ensureNumericInput("pollModerateMs", body.pollModerateMs, next.pollModerateMs),
+        ensureNumericInput("pollConstrainedMs", body.pollConstrainedMs, next.pollConstrainedMs),
+        ensureNumericInput("pollMinimalMs", body.pollMinimalMs, next.pollMinimalMs),
+        ensureNumericInput("flushInstantMs", body.flushInstantMs, next.flushInstantMs),
+        ensureNumericInput("flushFastMs", body.flushFastMs, next.flushFastMs),
+        ensureNumericInput("flushModerateMs", body.flushModerateMs, next.flushModerateMs),
+        ensureNumericInput("flushConstrainedMs", body.flushConstrainedMs, next.flushConstrainedMs),
+        ensureNumericInput("flushMinimalMs", body.flushMinimalMs, next.flushMinimalMs),
+      ].filter(Boolean);
+      if (numericValidationErrors.length > 0) {
+        return res.status(400).json({ message: numericValidationErrors[0] });
+      }
+
+      const ensureRange = (field: string, value: number | undefined, min: number, max: number) => {
+        if (value === undefined) return null;
+        if (value < min || value > max) return `${field} must be between ${min} and ${max}`;
+        return null;
+      };
+      const rangeValidationErrors = [
+        ensureRange("restFallbackPollMs", next.restFallbackPollMs, 100, 60_000),
+        ensureRange("wsPushFrequencyMs", next.wsPushFrequencyMs, 0, 1_000),
+        ensureRange("quoteFlushIntervalMs", next.quoteFlushIntervalMs, 20, 5_000),
+        ensureRange("maxWsReconnectAttempts", next.maxWsReconnectAttempts, 1, 30),
+        ensureRange("wsReconnectBaseDelayMs", next.wsReconnectBaseDelayMs, 100, 30_000),
+        ensureRange("pollInstantMs", next.pollInstantMs, 100, 60_000),
+        ensureRange("pollFastMs", next.pollFastMs, 100, 60_000),
+        ensureRange("pollModerateMs", next.pollModerateMs, 100, 60_000),
+        ensureRange("pollConstrainedMs", next.pollConstrainedMs, 100, 60_000),
+        ensureRange("pollMinimalMs", next.pollMinimalMs, 100, 60_000),
+        ensureRange("flushInstantMs", next.flushInstantMs, 20, 5_000),
+        ensureRange("flushFastMs", next.flushFastMs, 20, 5_000),
+        ensureRange("flushModerateMs", next.flushModerateMs, 20, 5_000),
+        ensureRange("flushConstrainedMs", next.flushConstrainedMs, 20, 5_000),
+        ensureRange("flushMinimalMs", next.flushMinimalMs, 20, 5_000),
+      ].filter(Boolean);
+      if (rangeValidationErrors.length > 0) {
+        return res.status(400).json({ message: rangeValidationErrors[0] });
+      }
 
       const nowSec = Math.floor(Date.now() / 1000);
 
@@ -2349,6 +2465,31 @@ FROM (
       const existing = await db.query.globalSettings.findFirst({
         where: eq(globalSettings.id, 1)
       });
+
+      if (body.prefetchStrategy !== undefined && next.prefetchStrategy === undefined) {
+        return res.status(400).json({ message: "prefetchStrategy must be one of: all, critical, none" });
+      }
+
+      const prevPerformance = {
+        restFallbackPollMs: clampInt(existing?.restFallbackPollMs ?? 500, 100, 60_000, 500),
+        wsPushFrequencyMs: clampInt(existing?.wsPushFrequencyMs ?? 0, 0, 1_000, 0),
+        quoteFlushIntervalMs: clampInt(existing?.quoteFlushIntervalMs ?? 50, 20, 5_000, 50),
+        maxWsReconnectAttempts: clampInt(existing?.maxWsReconnectAttempts ?? 30, 1, 30, 30),
+        wsReconnectBaseDelayMs: clampInt(existing?.wsReconnectBaseDelayMs ?? 1500, 100, 30_000, 1500),
+        prefetchStrategy: normalizeGlobalPrefetchStrategy(existing?.prefetchStrategy ?? "all"),
+        pollInstantMs: clampInt(existing?.pollInstantMs ?? 200, 100, 60_000, 200),
+        pollFastMs: clampInt(existing?.pollFastMs ?? 500, 100, 60_000, 500),
+        pollModerateMs: clampInt(existing?.pollModerateMs ?? 1500, 100, 60_000, 1500),
+        pollConstrainedMs: clampInt(existing?.pollConstrainedMs ?? 4000, 100, 60_000, 4000),
+        pollMinimalMs: clampInt(existing?.pollMinimalMs ?? 6000, 100, 60_000, 6000),
+        flushInstantMs: clampInt(existing?.flushInstantMs ?? 50, 20, 5_000, 50),
+        flushFastMs: clampInt(existing?.flushFastMs ?? 150, 20, 5_000, 150),
+        flushModerateMs: clampInt(existing?.flushModerateMs ?? 300, 20, 5_000, 300),
+        flushConstrainedMs: clampInt(existing?.flushConstrainedMs ?? 500, 20, 5_000, 500),
+        flushMinimalMs: clampInt(existing?.flushMinimalMs ?? 1000, 20, 5_000, 1000),
+      };
+
+      let nextPerformance = { ...prevPerformance };
 
       if (existing) {
         const effectiveLotDropdownMax = clampInt(
@@ -2380,6 +2521,118 @@ FROM (
           sanitizePresetCards(presetValues, effectiveLotDropdownMax)
         );
 
+        const effectiveRestFallbackPollMs = clampInt(
+          next.restFallbackPollMs ?? existing.restFallbackPollMs ?? 500,
+          100,
+          60_000,
+          500
+        );
+        const effectiveWsPushFrequencyMs = clampInt(
+          next.wsPushFrequencyMs ?? existing.wsPushFrequencyMs ?? 0,
+          0,
+          1_000,
+          0
+        );
+        const effectiveQuoteFlushIntervalMs = clampInt(
+          next.quoteFlushIntervalMs ?? existing.quoteFlushIntervalMs ?? 50,
+          20,
+          5_000,
+          50
+        );
+        const effectiveMaxWsReconnectAttempts = clampInt(
+          next.maxWsReconnectAttempts ?? existing.maxWsReconnectAttempts ?? 30,
+          1,
+          30,
+          30
+        );
+        const effectiveWsReconnectBaseDelayMs = clampInt(
+          next.wsReconnectBaseDelayMs ?? existing.wsReconnectBaseDelayMs ?? 1500,
+          100,
+          30_000,
+          1500
+        );
+        const effectivePrefetchStrategy = normalizeGlobalPrefetchStrategy(
+          next.prefetchStrategy ?? existing.prefetchStrategy ?? "all"
+        );
+        const effectivePollInstantMs = clampInt(
+          next.pollInstantMs ?? existing.pollInstantMs ?? 200,
+          100,
+          60_000,
+          200
+        );
+        const effectivePollFastMs = clampInt(
+          next.pollFastMs ?? existing.pollFastMs ?? 500,
+          100,
+          60_000,
+          500
+        );
+        const effectivePollModerateMs = clampInt(
+          next.pollModerateMs ?? existing.pollModerateMs ?? 1500,
+          100,
+          60_000,
+          1500
+        );
+        const effectivePollConstrainedMs = clampInt(
+          next.pollConstrainedMs ?? existing.pollConstrainedMs ?? 4000,
+          100,
+          60_000,
+          4000
+        );
+        const effectivePollMinimalMs = clampInt(
+          next.pollMinimalMs ?? existing.pollMinimalMs ?? 6000,
+          100,
+          60_000,
+          6000
+        );
+        const effectiveFlushInstantMs = clampInt(
+          next.flushInstantMs ?? existing.flushInstantMs ?? 50,
+          20,
+          5_000,
+          50
+        );
+        const effectiveFlushFastMs = clampInt(
+          next.flushFastMs ?? existing.flushFastMs ?? 150,
+          20,
+          5_000,
+          150
+        );
+        const effectiveFlushModerateMs = clampInt(
+          next.flushModerateMs ?? existing.flushModerateMs ?? 300,
+          20,
+          5_000,
+          300
+        );
+        const effectiveFlushConstrainedMs = clampInt(
+          next.flushConstrainedMs ?? existing.flushConstrainedMs ?? 500,
+          20,
+          5_000,
+          500
+        );
+        const effectiveFlushMinimalMs = clampInt(
+          next.flushMinimalMs ?? existing.flushMinimalMs ?? 1000,
+          20,
+          5_000,
+          1000
+        );
+        nextPerformance = {
+          restFallbackPollMs: effectiveRestFallbackPollMs,
+          wsPushFrequencyMs: effectiveWsPushFrequencyMs,
+          quoteFlushIntervalMs: effectiveQuoteFlushIntervalMs,
+          maxWsReconnectAttempts: effectiveMaxWsReconnectAttempts,
+          wsReconnectBaseDelayMs: effectiveWsReconnectBaseDelayMs,
+          prefetchStrategy: effectivePrefetchStrategy,
+          pollInstantMs: effectivePollInstantMs,
+          pollFastMs: effectivePollFastMs,
+          pollModerateMs: effectivePollModerateMs,
+          pollConstrainedMs: effectivePollConstrainedMs,
+          pollMinimalMs: effectivePollMinimalMs,
+          flushInstantMs: effectiveFlushInstantMs,
+          flushFastMs: effectiveFlushFastMs,
+          flushModerateMs: effectiveFlushModerateMs,
+          flushConstrainedMs: effectiveFlushConstrainedMs,
+          flushMinimalMs: effectiveFlushMinimalMs,
+        };
+
         await db.update(globalSettings)
           .set({
             defaultLeverage: next.defaultLeverage ?? existing.defaultLeverage,
@@ -2400,12 +2653,44 @@ FROM (
             lifetimeLossLimitPct: next.lifetimeLossLimitPct ?? existing.lifetimeLossLimitPct,
             lotPresetCards: effectiveLotPresetCards,
             lotDropdownMax: effectiveLotDropdownMax,
+            restFallbackPollMs: effectiveRestFallbackPollMs,
+            wsPushFrequencyMs: effectiveWsPushFrequencyMs,
+            quoteFlushIntervalMs: effectiveQuoteFlushIntervalMs,
+            maxWsReconnectAttempts: effectiveMaxWsReconnectAttempts,
+            wsReconnectBaseDelayMs: effectiveWsReconnectBaseDelayMs,
+            prefetchStrategy: effectivePrefetchStrategy,
+            pollInstantMs: effectivePollInstantMs,
+            pollFastMs: effectivePollFastMs,
+            pollModerateMs: effectivePollModerateMs,
+            pollConstrainedMs: effectivePollConstrainedMs,
+            pollMinimalMs: effectivePollMinimalMs,
+            flushInstantMs: effectiveFlushInstantMs,
+            flushFastMs: effectiveFlushFastMs,
+            flushModerateMs: effectiveFlushModerateMs,
+            flushConstrainedMs: effectiveFlushConstrainedMs,
+            flushMinimalMs: effectiveFlushMinimalMs,
             updatedAt: nowSec
           })
           .where(eq(globalSettings.id, 1));
       } else {
         const effectiveLotDropdownMax = clampInt(next.lotDropdownMax ?? ABSOLUTE_MAX_LOTS, 1, ABSOLUTE_MAX_LOTS, ABSOLUTE_MAX_LOTS);
         const effectiveMinPriceDistancePips = clampInt(next.minPriceDistancePips ?? 20, 1, 10_000, 20);
+        const effectiveRestFallbackPollMs = clampInt(next.restFallbackPollMs ?? 500, 100, 60_000, 500);
+        const effectiveWsPushFrequencyMs = clampInt(next.wsPushFrequencyMs ?? 0, 0, 1_000, 0);
+        const effectiveQuoteFlushIntervalMs = clampInt(next.quoteFlushIntervalMs ?? 50, 20, 5_000, 50);
+        const effectiveMaxWsReconnectAttempts = clampInt(next.maxWsReconnectAttempts ?? 30, 1, 30, 30);
+        const effectiveWsReconnectBaseDelayMs = clampInt(next.wsReconnectBaseDelayMs ?? 1500, 100, 30_000, 1500);
+        const effectivePrefetchStrategy = normalizeGlobalPrefetchStrategy(next.prefetchStrategy ?? "all");
+        const effectivePollInstantMs = clampInt(next.pollInstantMs ?? 200, 100, 60_000, 200);
+        const effectivePollFastMs = clampInt(next.pollFastMs ?? 500, 100, 60_000, 500);
+        const effectivePollModerateMs = clampInt(next.pollModerateMs ?? 1500, 100, 60_000, 1500);
+        const effectivePollConstrainedMs = clampInt(next.pollConstrainedMs ?? 4000, 100, 60_000, 4000);
+        const effectivePollMinimalMs = clampInt(next.pollMinimalMs ?? 6000, 100, 60_000, 6000);
+        const effectiveFlushInstantMs = clampInt(next.flushInstantMs ?? 50, 20, 5_000, 50);
+        const effectiveFlushFastMs = clampInt(next.flushFastMs ?? 150, 20, 5_000, 150);
+        const effectiveFlushModerateMs = clampInt(next.flushModerateMs ?? 300, 20, 5_000, 300);
+        const effectiveFlushConstrainedMs = clampInt(next.flushConstrainedMs ?? 500, 20, 5_000, 500);
+        const effectiveFlushMinimalMs = clampInt(next.flushMinimalMs ?? 1000, 20, 5_000, 1000);
 
         let presetValues: number[] = [];
         if (typeof next.lotPresetCards === "string") {
@@ -2419,6 +2704,24 @@ FROM (
         const effectiveLotPresetCards = JSON.stringify(
           sanitizePresetCards(presetValues, effectiveLotDropdownMax)
         );
+        nextPerformance = {
+          restFallbackPollMs: effectiveRestFallbackPollMs,
+          wsPushFrequencyMs: effectiveWsPushFrequencyMs,
+          quoteFlushIntervalMs: effectiveQuoteFlushIntervalMs,
+          maxWsReconnectAttempts: effectiveMaxWsReconnectAttempts,
+          wsReconnectBaseDelayMs: effectiveWsReconnectBaseDelayMs,
+          prefetchStrategy: effectivePrefetchStrategy,
+          pollInstantMs: effectivePollInstantMs,
+          pollFastMs: effectivePollFastMs,
+          pollModerateMs: effectivePollModerateMs,
+          pollConstrainedMs: effectivePollConstrainedMs,
+          pollMinimalMs: effectivePollMinimalMs,
+          flushInstantMs: effectiveFlushInstantMs,
+          flushFastMs: effectiveFlushFastMs,
+          flushModerateMs: effectiveFlushModerateMs,
+          flushConstrainedMs: effectiveFlushConstrainedMs,
+          flushMinimalMs: effectiveFlushMinimalMs,
+        };
 
         await db.insert(globalSettings).values({
           id: 1,
@@ -2440,16 +2743,82 @@ FROM (
           lifetimeLossLimitPct: next.lifetimeLossLimitPct ?? 20,
           lotPresetCards: effectiveLotPresetCards,
           lotDropdownMax: effectiveLotDropdownMax,
+          restFallbackPollMs: effectiveRestFallbackPollMs,
+          wsPushFrequencyMs: effectiveWsPushFrequencyMs,
+          quoteFlushIntervalMs: effectiveQuoteFlushIntervalMs,
+          maxWsReconnectAttempts: effectiveMaxWsReconnectAttempts,
+          wsReconnectBaseDelayMs: effectiveWsReconnectBaseDelayMs,
+          prefetchStrategy: effectivePrefetchStrategy,
+          pollInstantMs: effectivePollInstantMs,
+          pollFastMs: effectivePollFastMs,
+          pollModerateMs: effectivePollModerateMs,
+          pollConstrainedMs: effectivePollConstrainedMs,
+          pollMinimalMs: effectivePollMinimalMs,
+          flushInstantMs: effectiveFlushInstantMs,
+          flushFastMs: effectiveFlushFastMs,
+          flushModerateMs: effectiveFlushModerateMs,
+          flushConstrainedMs: effectiveFlushConstrainedMs,
+          flushMinimalMs: effectiveFlushMinimalMs,
         });
       }
 
       const updated = await db.query.globalSettings.findFirst({
         where: eq(globalSettings.id, 1)
       });
+      if (Number.isFinite(actorAdminId) && actorAdminId > 0) {
+        globalSettingsUpdateMsByAdminId.set(actorAdminId, nowMs);
+      }
+
+      const performanceChanged = (
+        prevPerformance.restFallbackPollMs !== nextPerformance.restFallbackPollMs ||
+        prevPerformance.wsPushFrequencyMs !== nextPerformance.wsPushFrequencyMs ||
+        prevPerformance.quoteFlushIntervalMs !== nextPerformance.quoteFlushIntervalMs ||
+        prevPerformance.maxWsReconnectAttempts !== nextPerformance.maxWsReconnectAttempts ||
+        prevPerformance.wsReconnectBaseDelayMs !== nextPerformance.wsReconnectBaseDelayMs ||
+        prevPerformance.prefetchStrategy !== nextPerformance.prefetchStrategy ||
+        prevPerformance.pollInstantMs !== nextPerformance.pollInstantMs ||
+        prevPerformance.pollFastMs !== nextPerformance.pollFastMs ||
+        prevPerformance.pollModerateMs !== nextPerformance.pollModerateMs ||
+        prevPerformance.pollConstrainedMs !== nextPerformance.pollConstrainedMs ||
+        prevPerformance.pollMinimalMs !== nextPerformance.pollMinimalMs ||
+        prevPerformance.flushInstantMs !== nextPerformance.flushInstantMs ||
+        prevPerformance.flushFastMs !== nextPerformance.flushFastMs ||
+        prevPerformance.flushModerateMs !== nextPerformance.flushModerateMs ||
+        prevPerformance.flushConstrainedMs !== nextPerformance.flushConstrainedMs ||
+        prevPerformance.flushMinimalMs !== nextPerformance.flushMinimalMs
+      );
+      if (performanceChanged) {
+        const auditCtx = buildAuditContext(req);
+        appendIdentityAudit({
+          userId: typeof auditCtx.actorUserId === "number" ? auditCtx.actorUserId : null,
+          category: "admin",
+          type: "GLOBAL_SETTINGS_PERFORMANCE_UPDATED",
+          title: "Global performance settings updated",
+          description: "Updated global performance defaults and tier-level poll/flush settings.",
+          ip: auditCtx.ip,
+          userAgent: auditCtx.userAgent,
+          actorAdminId: typeof auditCtx.actorUserId === "number" ? auditCtx.actorUserId : null,
+          actorType: "ADMIN",
+          actorUserId: typeof auditCtx.actorUserId === "number" ? auditCtx.actorUserId : null,
+          sessionId: auditCtx.sessionId,
+          correlationId: auditCtx.correlationId,
+          data: {
+            previous: prevPerformance,
+            next: nextPerformance,
+          },
+        });
+      }
 
       // Propagate changes (multi-role deployments) + reschedule if scheduler is running locally.
       try {
-        publishLiveEvent({ type: "global-settings:updated", payload: { updatedAt: nowSec } });
+        publishLiveEvent({
+          type: "global-settings:updated",
+          payload: {
+            updatedAt: nowSec,
+            wsPushFrequencyMs: nextPerformance.wsPushFrequencyMs,
+            performanceSettings: nextPerformance,
+          },
+        });
         publishLiveEvent({ type: "autoclose:reschedule", payload: { updatedAt: nowSec } });
       } catch { }
       try {

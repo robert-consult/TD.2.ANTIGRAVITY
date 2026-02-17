@@ -665,6 +665,23 @@ export const globalSettings = pgTable("global_settings", {
   // Visual Lot Settings (UI configuration for trader order form)
   lotPresetCards: text("lot_preset_cards").notNull().default("[1,5,10,25,50]"), // JSON array of lot values for quick-select cards
   lotDropdownMax: integer("lot_dropdown_max").notNull().default(50), // Maximum lot value shown in dropdown
+  // Client performance tuning defaults (adaptive tiers apply multipliers on top of these values)
+  restFallbackPollMs: integer("rest_fallback_poll_ms").notNull().default(500),
+  wsPushFrequencyMs: integer("ws_push_frequency_ms").notNull().default(0),
+  quoteFlushIntervalMs: integer("quote_flush_interval_ms").notNull().default(50),
+  maxWsReconnectAttempts: integer("max_ws_reconnect_attempts").notNull().default(30),
+  wsReconnectBaseDelayMs: integer("ws_reconnect_base_delay_ms").notNull().default(1500),
+  prefetchStrategy: text("prefetch_strategy").notNull().default("all"),
+  pollInstantMs: integer("poll_instant_ms").notNull().default(200),
+  pollFastMs: integer("poll_fast_ms").notNull().default(500),
+  pollModerateMs: integer("poll_moderate_ms").notNull().default(1500),
+  pollConstrainedMs: integer("poll_constrained_ms").notNull().default(4000),
+  pollMinimalMs: integer("poll_minimal_ms").notNull().default(6000),
+  flushInstantMs: integer("flush_instant_ms").notNull().default(50),
+  flushFastMs: integer("flush_fast_ms").notNull().default(150),
+  flushModerateMs: integer("flush_moderate_ms").notNull().default(300),
+  flushConstrainedMs: integer("flush_constrained_ms").notNull().default(500),
+  flushMinimalMs: integer("flush_minimal_ms").notNull().default(1000),
   // Timestamp
   updatedAt: integer("updated_at").default(nowUnix),
 });

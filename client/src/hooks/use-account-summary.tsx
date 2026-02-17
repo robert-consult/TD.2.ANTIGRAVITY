@@ -2,7 +2,8 @@ import { useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "./use-auth";
 import { useLiveUpdates } from "@/live/LiveUpdatesProvider";
-import { recommendedPollIntervalMs } from "@/lib/perfHints";
+import { tierPollIntervalMs, usePerfHints } from "@/lib/perfHints";
+import { usePerformanceSettings } from "@/hooks/use-performance-settings";
 import {
   WS_MSG_ACCOUNT_SNAPSHOT,
   WS_MSG_ACCOUNT_SUBSCRIBE,
@@ -33,8 +34,16 @@ export function useAccountSummary(options: UseAccountSummaryOptions = {}) {
   const queryClient = useQueryClient();
   const { user } = useAuth();
   const enabled = options.enabled ?? true;
+  const perfHints = usePerfHints();
+  const performanceSettings = usePerformanceSettings();
+  const accountPollIntervalMs = tierPollIntervalMs(
+    performanceSettings.restFallbackPollMs,
+    perfHints,
+    performanceSettings,
+  );
 
   const { isConnected: isWsConnected, sendMessage, subscribe } = useLiveUpdates();
+  const wsFallbackRefetchMode = isWsConnected ? false : ("always" as const);
 
   useEffect(() => {
     if (!user || !isWsConnected) return;
@@ -69,7 +78,10 @@ export function useAccountSummary(options: UseAccountSummaryOptions = {}) {
   const query = useQuery<AccountSummary>({
     queryKey: ["/api/account/summary"],
     enabled: enabled && !!user,
-    refetchInterval: isWsConnected ? false : recommendedPollIntervalMs(7000),
+    refetchInterval: isWsConnected ? false : accountPollIntervalMs,
+    staleTime: isWsConnected ? Infinity : 15_000,
+    refetchOnWindowFocus: wsFallbackRefetchMode,
+    refetchOnReconnect: wsFallbackRefetchMode,
   });
 
   const invalidate = () => {

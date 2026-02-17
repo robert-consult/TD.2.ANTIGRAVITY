@@ -4,7 +4,8 @@ import { useToast } from "@/hooks/use-toast";
 import { fetchWithIdentity } from "@/lib/fetchWithIdentity";
 import { useAuth } from "@/hooks/use-auth";
 import { useLiveUpdates } from "@/live/LiveUpdatesProvider";
-import { recommendedPollIntervalMs } from "@/lib/perfHints";
+import { tierPollIntervalMs, usePerfHints } from "@/lib/perfHints";
+import { usePerformanceSettings } from "@/hooks/use-performance-settings";
 import { WS_MSG_TRADES_UPDATE, WS_MSG_TRADES_UPDATED } from "@shared/ws/protocol";
 
 type UsePendingOrdersOptions = {
@@ -16,7 +17,15 @@ export const usePendingOrders = (options: UsePendingOrdersOptions = {}) => {
   const queryClient = useQueryClient();
   const { user } = useAuth();
   const enabled = options.enabled ?? true;
+  const perfHints = usePerfHints();
+  const performanceSettings = usePerformanceSettings();
+  const pendingOrdersPollMs = tierPollIntervalMs(
+    performanceSettings.restFallbackPollMs,
+    perfHints,
+    performanceSettings,
+  );
   const { isConnected: isWsConnected, subscribe } = useLiveUpdates();
+  const wsFallbackRefetchMode = isWsConnected ? false : ("always" as const);
 
   useEffect(() => {
     if (!user) return;
@@ -37,7 +46,10 @@ export const usePendingOrders = (options: UsePendingOrdersOptions = {}) => {
   } = useQuery({
     queryKey: ["/api/trades/pending"],
     enabled: enabled && !!user,
-    refetchInterval: isWsConnected ? false : recommendedPollIntervalMs(10_000),
+    refetchInterval: isWsConnected ? false : pendingOrdersPollMs,
+    staleTime: isWsConnected ? Infinity : 15_000,
+    refetchOnWindowFocus: wsFallbackRefetchMode,
+    refetchOnReconnect: wsFallbackRefetchMode,
   });
 
   const cancelOrder = useMutation({

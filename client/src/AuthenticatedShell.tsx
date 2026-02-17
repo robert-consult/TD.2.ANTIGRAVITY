@@ -10,6 +10,8 @@ import { ConfigSync } from "@/live/ConfigSync";
 import { lazyWithPing } from "@/lib/lazyWithPing";
 import { prefetchAllRoutes } from "@/lib/routePrefetch";
 import { startGriftPing } from "@/lib/griftPing";
+import { usePerfHints } from "@/lib/perfHints";
+import { usePerformanceSettings } from "@/hooks/use-performance-settings";
 
 const NotFound = lazyWithPing(() => import("@/pages/not-found"));
 const Dashboard = lazyWithPing(() => import("@/pages/Dashboard"));
@@ -89,6 +91,8 @@ function AdminRoute() {
 export default function AuthenticatedShell() {
   const { user } = useAuth();
   const [location, navigate] = useLocation();
+  const perfHints = usePerfHints();
+  const perfSettings = usePerformanceSettings();
 
   useEffect(() => {
     const stop = startGriftPing({ intervalMs: 60_000 });
@@ -96,8 +100,10 @@ export default function AuthenticatedShell() {
   }, []);
 
   useEffect(() => {
-    prefetchAllRoutes();
-  }, []);
+    const slowTier = perfHints.tier === "CONSTRAINED" || perfHints.tier === "MINIMAL";
+    const startDelayMs = perfHints.tier === "MINIMAL" ? 10_000 : slowTier ? 7_000 : 0;
+    prefetchAllRoutes({ hints: perfHints, settings: perfSettings, startDelayMs });
+  }, [perfHints, perfSettings]);
 
   useEffect(() => {
     if (location === "/login") {

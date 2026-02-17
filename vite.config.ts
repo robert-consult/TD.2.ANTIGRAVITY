@@ -33,6 +33,7 @@ export default defineConfig({
   },
   root: path.resolve(import.meta.dirname, "client"),
   build: {
+    manifest: true,
     outDir: path.resolve(import.meta.dirname, "dist/public"),
     emptyOutDir: true,
     rollupOptions: {
@@ -43,6 +44,25 @@ export default defineConfig({
       output: {
         entryFileNames: (chunk) =>
           chunk.name === "sw" ? "sw.js" : "assets/[name]-[hash].js",
+        manualChunks: (id) => {
+          const normalizedId = id.replace(/\\/g, "/");
+          if (
+            normalizedId.includes("/src/pages/AdminDashboard") ||
+            normalizedId.includes("/src/components/admin/")
+          ) {
+            return "admin";
+          }
+          if (
+            normalizedId.includes("node_modules/recharts") ||
+            normalizedId.includes("node_modules/d3")
+          ) {
+            return "charts-vendor";
+          }
+          if (normalizedId.includes("node_modules")) {
+            return "vendor";
+          }
+          return undefined;
+        },
       },
     },
   },

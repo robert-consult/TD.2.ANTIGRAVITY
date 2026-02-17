@@ -1,4 +1,10 @@
-import { getPerfHints } from "@/lib/perfHints";
+import {
+  getPerfHints,
+  resolvePerformanceSettings,
+  tierPrefetchPlan,
+  type PerfHints,
+  type PerformanceSettings,
+} from "@/lib/perfHints";
 
 type ChunkImporter = () => Promise<unknown>;
 
@@ -25,6 +31,12 @@ const fallbackDelayMs = 100;
 const prefetchedKeys = new Set<string>();
 const inFlight = new Map<string, Promise<unknown>>();
 let scheduled = false;
+
+type PrefetchAllRoutesOptions = {
+  hints?: PerfHints;
+  settings?: unknown;
+  startDelayMs?: number;
+};
 
 function prefetchEnabled(): boolean {
   const raw = import.meta.env.VITE_ENABLE_PREFETCH;
@@ -75,18 +87,55 @@ function runQueue(targets: ChunkPrefetchTarget[]): void {
   scheduleNext();
 }
 
-export function prefetchAllRoutes(): void {
+function runParallel(targets: ChunkPrefetchTarget[]): void {
+  void Promise.all(targets.map((target) => prefetchChunk(target))).catch(() => undefined);
+}
+
+function resolveTargets(
+  hints: PerfHints,
+  settings: PerformanceSettings,
+): { targets: ChunkPrefetchTarget[]; mode: "parallel" | "sequential"; startDelayMs: number } {
+  const plan = tierPrefetchPlan(hints, settings);
+  if (plan.mode === "none" || plan.count <= 0) {
+    return { targets: [], mode: "sequential", startDelayMs: 0 };
+  }
+
+  const targets = PREFETCH_ORDER.slice(0, Math.min(PREFETCH_ORDER.length, plan.count));
+  return {
+    targets,
+    mode: plan.mode,
+    startDelayMs: plan.startDelayMs,
+  };
+}
+
+export function prefetchAllRoutes(options: PrefetchAllRoutesOptions = {}): void {
   if (!prefetchEnabled() || typeof window === "undefined") return;
   if (scheduled) return;
 
-  const hints = getPerfHints();
+  const hints = options.hints ?? getPerfHints();
   if (hints.saveData) return;
 
-  const severelyConstrained =
-    hints.isConstrained && (hints.effectiveType === "slow-2g" || hints.effectiveType === "2g");
-  const targets = severelyConstrained ? PREFETCH_ORDER.slice(0, 3) : PREFETCH_ORDER;
+  const settings = resolvePerformanceSettings(options.settings);
+  const plan = resolveTargets(hints, settings);
+  if (!plan.targets.length) return;
+
+  const startDelayMs = Math.max(0, Math.round(options.startDelayMs ?? plan.startDelayMs));
   scheduled = true;
-  runQueue(targets);
+
+  const start = () => {
+    if (plan.mode === "parallel") {
+      runParallel(plan.targets);
+      return;
+    }
+    runQueue(plan.targets);
+  };
+
+  if (startDelayMs <= 0) {
+    start();
+    return;
+  }
+
+  window.setTimeout(start, startDelayMs);
 }
 
 export function resetRoutePrefetchForTests(): void {

@@ -449,11 +449,45 @@ export async function registerRoutes(app: Express): Promise<Server> {
         lotPresetCards: globalSettings.lotPresetCards,
         lotDropdownMax: globalSettings.lotDropdownMax,
         minPriceDistancePips: globalSettings.minPriceDistancePips,
+        restFallbackPollMs: globalSettings.restFallbackPollMs,
+        wsPushFrequencyMs: globalSettings.wsPushFrequencyMs,
+        quoteFlushIntervalMs: globalSettings.quoteFlushIntervalMs,
+        maxWsReconnectAttempts: globalSettings.maxWsReconnectAttempts,
+        wsReconnectBaseDelayMs: globalSettings.wsReconnectBaseDelayMs,
+        prefetchStrategy: globalSettings.prefetchStrategy,
+        pollInstantMs: globalSettings.pollInstantMs,
+        pollFastMs: globalSettings.pollFastMs,
+        pollModerateMs: globalSettings.pollModerateMs,
+        pollConstrainedMs: globalSettings.pollConstrainedMs,
+        pollMinimalMs: globalSettings.pollMinimalMs,
+        flushInstantMs: globalSettings.flushInstantMs,
+        flushFastMs: globalSettings.flushFastMs,
+        flushModerateMs: globalSettings.flushModerateMs,
+        flushConstrainedMs: globalSettings.flushConstrainedMs,
+        flushMinimalMs: globalSettings.flushMinimalMs,
         updatedAt: globalSettings.updatedAt,
       }).from(globalSettings).where(eq(globalSettings.id, 1)).limit(1);
 
       const lotDropdownMax = clampInt(settings?.lotDropdownMax, 1, ABSOLUTE_MAX_LOTS, ABSOLUTE_MAX_LOTS);
       const minPriceDistancePips = sanitizeMinPriceDistancePips(settings?.minPriceDistancePips);
+      const restFallbackPollMs = clampInt(settings?.restFallbackPollMs, 100, 60_000, 500);
+      const wsPushFrequencyMs = clampInt(settings?.wsPushFrequencyMs, 0, 1_000, 0);
+      const quoteFlushIntervalMs = clampInt(settings?.quoteFlushIntervalMs, 20, 5_000, 50);
+      const maxWsReconnectAttempts = clampInt(settings?.maxWsReconnectAttempts, 1, 30, 30);
+      const wsReconnectBaseDelayMs = clampInt(settings?.wsReconnectBaseDelayMs, 100, 30_000, 1500);
+      const pollInstantMs = clampInt(settings?.pollInstantMs, 100, 60_000, 200);
+      const pollFastMs = clampInt(settings?.pollFastMs, 100, 60_000, 500);
+      const pollModerateMs = clampInt(settings?.pollModerateMs, 100, 60_000, 1500);
+      const pollConstrainedMs = clampInt(settings?.pollConstrainedMs, 100, 60_000, 4000);
+      const pollMinimalMs = clampInt(settings?.pollMinimalMs, 100, 60_000, 6000);
+      const flushInstantMs = clampInt(settings?.flushInstantMs, 20, 5_000, 50);
+      const flushFastMs = clampInt(settings?.flushFastMs, 20, 5_000, 150);
+      const flushModerateMs = clampInt(settings?.flushModerateMs, 20, 5_000, 300);
+      const flushConstrainedMs = clampInt(settings?.flushConstrainedMs, 20, 5_000, 500);
+      const flushMinimalMs = clampInt(settings?.flushMinimalMs, 20, 5_000, 1000);
+      const prefetchStrategyRaw = String(settings?.prefetchStrategy ?? "all").trim().toLowerCase();
+      const prefetchStrategy =
+        prefetchStrategyRaw === "critical" || prefetchStrategyRaw === "none" ? prefetchStrategyRaw : "all";
 
       const presetsParsed = parsePresetCards(settings?.lotPresetCards, lotDropdownMax);
       const lotPresetCardsArray =
@@ -469,6 +503,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
         lotDropdownMax,
         lotDropdownOptions,
         minPriceDistancePips,
+        restFallbackPollMs,
+        wsPushFrequencyMs,
+        quoteFlushIntervalMs,
+        maxWsReconnectAttempts,
+        wsReconnectBaseDelayMs,
+        prefetchStrategy,
+        pollInstantMs,
+        pollFastMs,
+        pollModerateMs,
+        pollConstrainedMs,
+        pollMinimalMs,
+        flushInstantMs,
+        flushFastMs,
+        flushModerateMs,
+        flushConstrainedMs,
+        flushMinimalMs,
         absoluteMaxLots: ABSOLUTE_MAX_LOTS,
         updatedAt: typeof settings?.updatedAt === "number" ? settings.updatedAt : null,
       });
@@ -5226,10 +5276,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Create HTTP server
   const httpServer = createServer(app);
 
+  const wsMaxPayloadBytes = Math.max(
+    1024,
+    Math.min(1_048_576, Math.trunc(Number(process.env.WS_MAX_MESSAGE_BYTES ?? 65_536) || 65_536)),
+  );
+
   // --- Internal WebSocket server for live updates (quotes + trades) ---
   const wss = new WebSocketServer({
     server: httpServer,
     path: "/ws",
+    maxPayload: wsMaxPayloadBytes,
   });
 
   app.get("/metrics", (_req, res) => {
@@ -5351,6 +5407,43 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const appOrigin = normalizeWsOrigin(process.env.APP_URL);
     if (appOrigin) wsAllowedOrigins.add(appOrigin);
   }
+
+  function clampWsPushFrequencyMs(value: unknown): number {
+    const n = typeof value === "number" ? value : Number(value);
+    if (!Number.isFinite(n)) return 0;
+    return Math.min(1_000, Math.max(0, Math.trunc(n)));
+  }
+
+  let liveWsPushFrequencyMs = 0;
+  const queuedQuoteRowsBySymbol = new Map<string, any>();
+  let queuedQuoteSeq = 0;
+  let queuedQuoteAsOf = 0;
+  let queuedQuoteFlushTimer: ReturnType<typeof setTimeout> | null = null;
+  let queuedQuoteAnonRowId = 0;
+
+  function applyLiveWsPushFrequencyMs(value: unknown) {
+    liveWsPushFrequencyMs = clampWsPushFrequencyMs(value);
+    if (liveWsPushFrequencyMs <= 0 && queuedQuoteFlushTimer) {
+      clearTimeout(queuedQuoteFlushTimer);
+      queuedQuoteFlushTimer = null;
+      flushQueuedQuoteBroadcast();
+    }
+  }
+
+  async function refreshLiveWsPushFrequencyMs() {
+    try {
+      const [row] = await db
+        .select({ wsPushFrequencyMs: globalSettings.wsPushFrequencyMs })
+        .from(globalSettings)
+        .where(eq(globalSettings.id, 1))
+        .limit(1);
+      applyLiveWsPushFrequencyMs(row?.wsPushFrequencyMs);
+    } catch {
+      applyLiveWsPushFrequencyMs(0);
+    }
+  }
+
+  void refreshLiveWsPushFrequencyMs();
 
   // Helper type for WebSocket clients
   type LiveClient = WebSocket & {
@@ -5980,9 +6073,113 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   }, wsPolicyRecheckMs);
 
+  function broadcastQuoteRowsUpdate(rows: any[], seq: number, asOf: number) {
+    if (!Array.isArray(rows) || rows.length === 0) return;
+
+    // Pre-serialize per subscription key to avoid per-socket JSON.stringify work.
+    const groups = new Map<string, LiveClient[]>();
+    for (const ws of wss.clients as Set<LiveClient>) {
+      if (ws.readyState !== WebSocket.OPEN) continue;
+      const client = ws as LiveClient;
+      const key = client.quoteKey ?? computeQuoteKey(client.quoteSymbols);
+      if (!key) continue;
+      const list = groups.get(key);
+      if (list) list.push(client);
+      else groups.set(key, [client]);
+    }
+
+    if (groups.size === 0) return;
+
+    const rowsWithSymbols = rows
+      .map((row: any) => {
+        if (!row?.symbol) return null;
+        return { row, symbol: String(row.symbol).toUpperCase() };
+      })
+      .filter(Boolean) as Array<{ row: any; symbol: string }>;
+
+    for (const [, clients] of groups.entries()) {
+      const symbols = clients[0]?.quoteSymbols;
+      if (!symbols || symbols.size === 0) continue;
+
+      const rowsForGroup: any[] = [];
+      for (const item of rowsWithSymbols) {
+        if (symbols.has(item.symbol)) rowsForGroup.push(item.row);
+      }
+      if (rowsForGroup.length === 0) continue;
+
+      let serialized = "";
+      try {
+        serialized = JSON.stringify({
+          type: WS_MSG_QUOTES_UPDATE,
+          protocolVersion: WS_PROTOCOL_VERSION,
+          seq,
+          asOf,
+          rows: rowsForGroup,
+        });
+      } catch {
+        continue;
+      }
+
+      for (const client of clients) {
+        if (client.readyState !== WebSocket.OPEN) continue;
+        try {
+          client.send(serialized);
+        } catch {
+          // ignore
+        }
+      }
+    }
+  }
+
+  function flushQueuedQuoteBroadcast() {
+    if (queuedQuoteRowsBySymbol.size === 0) {
+      queuedQuoteSeq = 0;
+      queuedQuoteAsOf = 0;
+      return;
+    }
+
+    const rows = Array.from(queuedQuoteRowsBySymbol.values());
+    queuedQuoteRowsBySymbol.clear();
+
+    const seq = queuedQuoteSeq;
+    const asOf = queuedQuoteAsOf || Date.now();
+    queuedQuoteSeq = 0;
+    queuedQuoteAsOf = 0;
+
+    broadcastQuoteRowsUpdate(rows, seq, asOf);
+  }
+
+  function queueQuoteRowsForBroadcast(rows: any[], seq: number, asOf: number) {
+    if (!Array.isArray(rows) || rows.length === 0) return;
+
+    queuedQuoteSeq = Math.max(queuedQuoteSeq, Number.isFinite(seq) ? seq : 0);
+    queuedQuoteAsOf = Math.max(queuedQuoteAsOf, Number.isFinite(asOf) ? asOf : Date.now());
+
+    for (const row of rows) {
+      const symbol = row?.symbol ? String(row.symbol).toUpperCase() : "";
+      const key = symbol || `__anon_${++queuedQuoteAnonRowId}`;
+      queuedQuoteRowsBySymbol.set(key, row);
+    }
+
+    if (queuedQuoteFlushTimer) return;
+    queuedQuoteFlushTimer = setTimeout(() => {
+      queuedQuoteFlushTimer = null;
+      flushQueuedQuoteBroadcast();
+    }, liveWsPushFrequencyMs);
+  }
+
   // Bridge internal live events to WebSocket clients (user-scoped when userId is present)
   onLiveEvent((event) => {
     const ev = event as any;
+    if (ev?.type === "global-settings:updated") {
+      const payloadPushMs = ev?.payload?.wsPushFrequencyMs;
+      if (payloadPushMs !== undefined && payloadPushMs !== null) {
+        applyLiveWsPushFrequencyMs(payloadPushMs);
+      } else {
+        void refreshLiveWsPushFrequencyMs();
+      }
+    }
+
     if (ev?.type === WS_MSG_QUOTE_SUBSCRIPTIONS_UPDATED) {
       const userIds = Array.isArray(ev?.payload?.userIds)
         ? new Set(
@@ -6012,61 +6209,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const asOf = Number(ev.payload?.asOf ?? Date.now());
       applyQuoteUpdate(ev.payload.rows, { seq, asOf });
 
-      // Pre-serialize per subscription key to avoid per-socket JSON.stringify work.
-      const groups = new Map<string, LiveClient[]>();
-      for (const ws of wss.clients as Set<LiveClient>) {
-        if (ws.readyState !== WebSocket.OPEN) continue;
-        const client = ws as LiveClient;
-        const key = client.quoteKey ?? computeQuoteKey(client.quoteSymbols);
-        if (!key) continue;
-        const list = groups.get(key);
-        if (list) list.push(client);
-        else groups.set(key, [client]);
-      }
-
-      if (groups.size === 0) return;
-
-      const rowsWithSymbols = ev.payload.rows
-        .map((row: any) => {
-          if (!row?.symbol) return null;
-          return { row, symbol: String(row.symbol).toUpperCase() };
-        })
-        .filter(Boolean) as Array<{ row: any; symbol: string }>;
-
-      for (const [key, clients] of groups.entries()) {
-        let rowsForGroup: any[] = [];
-        if (key === "*") {
-          rowsForGroup = ev.payload.rows;
-        } else {
-          const symbols = clients[0]?.quoteSymbols;
-          if (!symbols || symbols.size === 0) continue;
-          for (const item of rowsWithSymbols) {
-            if (symbols.has(item.symbol)) rowsForGroup.push(item.row);
-          }
-          if (rowsForGroup.length === 0) continue;
-        }
-
-        let serialized = "";
-        try {
-          serialized = JSON.stringify({
-            type: WS_MSG_QUOTES_UPDATE,
-            protocolVersion: WS_PROTOCOL_VERSION,
-            seq,
-            asOf,
-            rows: rowsForGroup,
-          });
-        } catch {
-          continue;
-        }
-
-        for (const client of clients) {
-          if (client.readyState !== WebSocket.OPEN) continue;
-          try {
-            client.send(serialized);
-          } catch {
-            // ignore
-          }
-        }
+      const rows = ev.payload.rows as any[];
+      if (liveWsPushFrequencyMs > 0) {
+        queueQuoteRowsForBroadcast(rows, seq, asOf);
+      } else {
+        broadcastQuoteRowsUpdate(rows, seq, asOf);
       }
       return;
     }

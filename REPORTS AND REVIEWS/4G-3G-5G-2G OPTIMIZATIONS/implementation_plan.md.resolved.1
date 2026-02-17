@@ -1,0 +1,376 @@
+# Implementation Plan — Adaptive Performance, Security Hardening & Integrity
+
+## Goal
+
+Transform the binary "constrained/unconstrained" performance system into a **5-tier adaptive engine** that meets every user at their capability level — from 2G mobile to desktop on fiber. Simultaneously harden all transport, caching, encryption, and fetch layers against vulnerabilities. Surface all performance knobs in the Admin Control Panel for live tuning with instant propagation.
+
+> [!IMPORTANT]
+> **This is a performance + security refactor.** Every change must be verified against the audit findings in [audit_network_optimization.md](file:///C:/Users/Rb/.gemini/antigravity/brain/e9b3d237-2b09-43b2-8bdb-6bf8baa1b2f6/audit_network_optimization.md). No regressions allowed.
+
+---
+
+## Proposed Changes
+
+### Component 1 — Performance Tier Engine (R1, R2, R3)
+
+#### [MODIFY] [perfHints.ts](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts)
+
+**Goal:** Replace single `isConstrained` boolean with a 5-tier system and reactive hints.
+
+1. **Split flags:** Export `isNetworkConstrained` and `isDeviceConstrained` as independent booleans.
+2. **Add `getPerformanceTier()`** returning `"INSTANT" | "FAST" | "MODERATE" | "CONSTRAINED" | "MINIMAL"`:
+   - **INSTANT**: RTT < 50ms, DL > 10 Mbps, cores ≥ 8, RAM ≥ 8 GB (desktop/laptop/flagship)
+   - **FAST**: RTT < 150ms, DL > 5 Mbps, cores ≥ 4, RAM ≥ 4 GB
+   - **MODERATE**: RTT 150-350ms, DL 1.5-5 Mbps, cores ≥ 4, RAM 2-4 GB
+   - **CONSTRAINED**: RTT > 350ms, DL < 1.5 Mbps, cores 2-4, RAM 2-4 GB
+   - **MINIMAL**: 2G/3G/saveData, cores < 2, RAM < 2 GB
+3. **Expose tier-mapped constants:**
+   - `tierPollIntervalMs(base)` — INSTANT: ≤200ms, FAST: ≤500ms, MODERATE: 1500ms, CONSTRAINED: 2× base, MINIMAL: 3× base
+   - `tierFlushIntervalMs()` — 50 / 150 / 300 / 500 / 1000ms
+   - `tierPrefetchCount()` — 9 parallel / 9 sequential / 6 / 3 / 0
+   - `tierRetryCount()` — 1 / 1 / 2 / 3 / 3
+4. **Make hints reactive:** Subscribe to `navigator.connection.addEventListener('change')`. Expose `subscribeHints(cb)` + `getHintsSnapshot()` for `useSyncExternalStore`.
+5. **Accept admin overrides:** Read admin-configured base intervals from `queryClient.getQueryData(["/api/global-settings"])` and apply as floor/ceiling.
+6. **Backward compat:** Keep `isConstrained` as `isNetworkConstrained || isDeviceConstrained` for any consumers not yet migrated.
+
+**Security checks during this change:**
+- Ensure no `navigator.connection` data is transmitted to the server (fingerprinting risk)
+- Verify tier detection cannot be manipulated to bypass rate limits
+
+---
+
+### Component 2 — WebSocket Reconnection (R4)
+
+#### [MODIFY] [LiveUpdatesProvider.tsx](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/live/LiveUpdatesProvider.tsx)
+
+1. Replace hardcoded `reconnectInterval: 1500` with [computeWsReconnectDelayMs(attempt, baseMs, hints)](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#67-81) from [perfHints.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts)
+2. **Cap reconnect attempts at 30** (was 50)
+3. On tier INSTANT/FAST: shorter base delay (500ms), rapid initial retries
+4. On tier CONSTRAINED/MINIMAL: longer base delay (3000ms), exponential + jitter
+
+**Security checks:**
+- Ensure WS reconnection does not leak auth tokens in URL query params
+- Verify WS [close](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/secureCache.ts#310-320) event handler clears sensitive message buffer
+- Check WS origin validation on server side
+- Verify WS messages are authenticated (session cookie sent with upgrade request)
+
+---
+
+### Component 3 — Polling Hook Updates (R8, R9, R13)
+
+#### [MODIFY] [QuotesProvider.tsx](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/live/QuotesProvider.tsx)
+- Use `isNetworkConstrained` for polling interval
+- Use `isDeviceConstrained` for [recommendedQuoteFlushIntervalMs()](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#63-66)
+- Read admin-configured quote poll interval from global settings
+- Default REST fallback: **500ms** (admin-configurable)
+
+#### [MODIFY] [use-account-summary.tsx](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/hooks/use-account-summary.tsx)
+- Replace [recommendedPollIntervalMs(7000)](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#56-62) with `tierPollIntervalMs(adminConfig.restFallbackMs ?? 500)`
+
+#### [MODIFY] [use-trades.tsx](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/hooks/use-trades.tsx)
+- Replace [recommendedPollIntervalMs(7000)](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#56-62) with `tierPollIntervalMs(adminConfig.restFallbackMs ?? 500)` (lines 58, 70)
+
+#### [MODIFY] [usePendingOrders.ts](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/hooks/usePendingOrders.ts)
+- Replace [recommendedPollIntervalMs(10000)](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#56-62) with `tierPollIntervalMs(adminConfig.restFallbackMs ?? 500)` (line 40)
+
+#### [MODIFY] [queryClient.ts](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/queryClient.ts)
+- Add `retry` and `retryDelay` to `defaultOptions.queries`:
+  ```typescript
+  retry: (failureCount, error) => {
+    if (error instanceof ApiError && error.status === 401) return false;
+    if (error instanceof ApiError && error.status >= 400 && error.status < 500) return false;
+    return failureCount < tierRetryCount();
+  },
+  retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 10000),
+  ```
+
+**Security checks:**
+- Ensure failed auth requests (401/403) never retry (prevents credential brute-force)
+- Verify no sensitive data in query keys logged to console on retry
+- Check that error objects returned from failed requests don't leak server internals
+
+---
+
+### Component 4 — Prefetch & Lazy Loading (R6, R7, R10, R11)
+
+#### [MODIFY] [routePrefetch.ts](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/routePrefetch.ts)
+1. Use `getPerformanceTier()` instead of `isConstrained`
+2. INSTANT: `Promise.all()` all 9 chunks in parallel
+3. FAST: sequential via `requestIdleCallback` (all 9)
+4. MODERATE: top 6 only, deferred 3s after mount
+5. CONSTRAINED: top 3 only, deferred 5s
+6. MINIMAL: no prefetch
+
+#### [MODIFY] [AuthenticatedShell.tsx](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/AuthenticatedShell.tsx)
+- On tier CONSTRAINED/MINIMAL: delay [prefetchAllRoutes()](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/routePrefetch.ts#78-91) by 5-10s (or until initial data queries settle)
+- On tier INSTANT/FAST: call immediately (current behavior)
+
+#### [MODIFY] [queryPersistence.ts](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/queryPersistence.ts)
+- Scale `QUERY_PERSIST_HYDRATE_TIMEOUT_MS` by device tier:
+  - INSTANT/FAST: 100ms
+  - MODERATE: 300ms
+  - CONSTRAINED: 500ms
+  - MINIMAL: 800ms
+
+#### [MODIFY] [vite.config.ts](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/vite.config.ts)
+- Add `manualChunks` to `build.rollupOptions.output`:
+  ```typescript
+  manualChunks(id) {
+    if (id.includes("/pages/Admin") || id.includes("/admin/")) return "admin";
+    if (id.includes("node_modules/recharts") || id.includes("node_modules/d3")) return "charts-vendor";
+    if (id.includes("node_modules")) return "vendor";
+  },
+  ```
+
+**Security checks:**
+- Ensure prefetched chunks are served with correct `Content-Type` and `X-Content-Type-Options: nosniff`
+- Verify lazy-loaded chunks cannot be poisoned via cache (Subresource Integrity or hash validation)
+- Check that prefetch doesn't trigger authenticated API requests before auth is confirmed
+
+---
+
+### Component 5 — Service Worker Enhancement (R6, R12)
+
+#### [MODIFY] [sw.ts](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/sw.ts)
+1. During [install](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/main.tsx#8-26), pre-cache critical route chunks (Dashboard, QuotesScreen, TradeScreen, ChartScreen) — either via a build-generated manifest or by parsing known chunk patterns
+2. Add cache versioning: bump `APP_SHELL_CACHE_NAME` on deploy to bust stale chunks
+3. For "Remember Me" reopens: cached shell + cached chunks + SecureCache hydration = instant render
+
+**Security checks:**
+- [ ] **Cache poisoning:** Ensure SW only caches responses with `200 OK` status, valid `Content-Type`, and from same-origin
+- [ ] **Scope restriction:** SW scope is `/` — verify no sub-path hijacking
+- [ ] **Update propagation:** Ensure `skipWaiting()` + `clients.claim()` don't serve stale security-critical code
+- [ ] **HTTPS enforcement:** SW only registers on secure contexts — verify no mixed content
+- [ ] **Opaque responses:** Never cache opaque (cross-origin no-cors) responses as they can be poisoned
+
+---
+
+### Component 6 — Admin-Configurable Performance (R13)
+
+#### [MODIFY] [admin.ts](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/admin.ts) (Global Settings API)
+- Add performance config fields to the `PUT /api/admin/global-settings` payload:
+  ```typescript
+  restFallbackPollMs: number;       // default: 500
+  wsPushFrequencyMs: number;        // default: 0 (instant)
+  quoteFlushIntervalMs: number;     // default: 50
+  maxWsReconnectAttempts: number;   // default: 30
+  wsReconnectBaseDelayMs: number;   // default: 1500
+  prefetchStrategy: "all" | "critical" | "none"; // default: "all"
+  ```
+- Validate bounds (e.g., restFallbackPollMs ≥ 100, ≤ 60000)
+- Broadcast `global-settings:updated` on save (already implemented at line 2452)
+
+#### [MODIFY] [ConfigSync.tsx](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/live/ConfigSync.tsx)
+- Already handles `global-settings:updated` → invalidates `/api/global-settings` query ✅
+- Ensure [perfHints.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts) consumers re-read the updated config reactively
+
+#### [MODIFY] Admin Dashboard UI (new cards in System Config → Market Data)
+- Add 6 cards for each performance setting with input fields, defaults, and save button
+- Live preview of what each tier's effective interval would be
+
+**Security checks:**
+- [ ] Only `requireAdmin` middleware can modify these settings (already enforced)
+- [ ] Input validation: reject non-numeric, out-of-range, or negative values
+- [ ] Rate-limit admin settings changes (prevent rapid-fire WS flood)
+- [ ] Audit log entry on every performance config change
+
+---
+
+### Component 7 — Secure Cache & Encryption Hardening
+
+#### [AUDIT-IN-PLACE] [secureCache.ts](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/secureCache.ts)
+
+Verify and harden the following during implementation:
+
+- [ ] **PBKDF2 iterations:** Currently 100,000 — verify this meets OWASP 2024 minimum (600,000 for SHA-256). Consider increasing or migrating to Argon2id
+- [ ] **IV reuse:** Each [put()](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/secureCache.ts#192-238) generates a fresh 12-byte IV via `crypto.getRandomValues()` — ✅ correct
+- [ ] **Key derivation scope:** Salt includes `dbName + origin` — verify no two origins share a key
+- [ ] **Max entry size:** 5MB limit prevents DoS via oversized entries — ✅
+- [ ] **Decryption failure:** On failure, entry is deleted (fail-closed) — ✅
+- [ ] **Side-channel:** `Array.from()` on encrypted data creates a copy — verify no timing leaks in comparison ops
+- [ ] **Seed storage:** Seed in `localStorage` survives clear-site-data — ensure logout clears it
+- [ ] **Schema version mismatch:** Old schema entries are silently ignored — verify no data loss path
+
+---
+
+## Security & Integrity Verification Matrix
+
+> [!CAUTION]
+> The implementing agent MUST run every check below after completing each component. Mark ✅ or ❌ with findings.
+
+### Transport Security
+| # | Check | File(s) | How to Verify |
+|---|-------|---------|---------------|
+| S1 | All API calls use HTTPS | [queryClient.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/queryClient.ts), [fetchWithIdentity.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/fetchWithIdentity.ts) | Grep for `http://` in fetch/axios calls — must find zero |
+| S2 | HSTS header present | Server config | `curl -I` production URL, check `Strict-Transport-Security` |
+| S3 | TLS 1.2+ enforced | Server/proxy config | `nmap --script ssl-enum-ciphers` or `ssllabs.com` |
+| S4 | No mixed content | [sw.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/sw.ts), `index.html` | Browser DevTools → Console → filter "mixed content" |
+| S5 | WS upgrades over WSS | [wsUrl.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/wsUrl.ts) | Verify `wss://` protocol in production, `ws://` only in dev |
+
+### Authentication & Session Security
+| # | Check | File(s) | How to Verify |
+|---|-------|---------|---------------|
+| S6 | Session cookies `HttpOnly` + [Secure](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/secureCache.ts#171-367) + `SameSite` | Server session config | `curl` response headers, check `Set-Cookie` flags |
+| S7 | CSRF token on all state-changing requests | [csrf.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/csrf.ts), [queryClient.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/queryClient.ts) | Grep for `attachCsrfHeader` on POST/PUT/PATCH/DELETE |
+| S8 | 401 responses don't retry | [queryClient.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/queryClient.ts) | Unit test: mock 401, verify no retry loop |
+| S9 | Token theft detection clears all caches | [use-auth.tsx](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/hooks/use-auth.tsx) | Test `TOKEN_THEFT_DETECTED` flow → verify [secureClearAll()](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/secureCache.ts#408-412) called |
+| S10 | Remember Me token rotation | Server auth routes | Verify refresh token is single-use (rotated on each use) |
+| S11 | Absence reauth timeout | Server auth routes | Verify idle session expiry triggers `ABSENCE_REAUTH_REQUIRED` |
+
+### Cache & Storage Security
+| # | Check | File(s) | How to Verify |
+|---|-------|---------|---------------|
+| S12 | IndexedDB data encrypted at rest | [secureCache.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/secureCache.ts) | Open DevTools → Application → IndexedDB → verify entries are ciphertext |
+| S13 | Cache cleared on logout | [use-auth.tsx](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/hooks/use-auth.tsx) | Step through logout → verify [secureClearAll()](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/secureCache.ts#408-412) + SW cache purge |
+| S14 | No sensitive data in `localStorage` | All client files | Grep for `localStorage.setItem` — audit each key for PII/secrets |
+| S15 | SW cache doesn't store API responses with PII | [sw.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/sw.ts) | Verify `/api/*` routes are NOT cached by SW (only `/assets/*`) |
+| S16 | Query persistence only caches allowlisted keys | [queryPersistence.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/queryPersistence.ts) | Verify `PERSIST_QUERY_KEYS` doesn't include trade details/PII |
+| S17 | Cached data has TTL enforcement | [queryPersistence.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/queryPersistence.ts) | Verify `QUERY_TTL_MS` entries exist for all persist keys |
+
+### Input Validation & Injection
+| # | Check | File(s) | How to Verify |
+|---|-------|---------|---------------|
+| S18 | Admin config inputs validated server-side | [admin.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/admin.ts) | Send malformed values via curl → verify 400 rejection |
+| S19 | WS message payloads validated | [LiveUpdatesProvider.tsx](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/live/LiveUpdatesProvider.tsx) | Send crafted WS message → verify no XSS/injection |
+| S20 | No [eval()](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/sw.ts#53-75) or `innerHTML` with dynamic data | All client files | Grep for [eval(](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/sw.ts#53-75), `innerHTML`, `dangerouslySetInnerHTML` |
+| S21 | JSON parse errors handled gracefully | [queryClient.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/queryClient.ts), [secureCache.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/secureCache.ts) | Test with malformed JSON responses |
+
+### Permissions & Access Control
+| # | Check | File(s) | How to Verify |
+|---|-------|---------|---------------|
+| S22 | Perf config endpoints require admin | [admin.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/admin.ts) | `curl` without admin session → verify 403 |
+| S23 | WS broadcast doesn't leak admin-only data | Server WS handler | Verify `global-settings:updated` payload contains no secrets |
+| S24 | User-scoped cache isolation | [secureCache.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/secureCache.ts) | Login as User A, cache data → login as User B → verify A's data inaccessible |
+| S25 | Impersonation clears previous user cache | [use-auth.tsx](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/hooks/use-auth.tsx) | Start impersonation → verify [secureClearAll()](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/secureCache.ts#408-412) called on scope change |
+
+### Attack Vectors — Specific Checks
+| # | Vector | Check | Priority |
+|---|--------|-------|----------|
+| A1 | **WS Denial of Service** | Verify server enforces max message size and rate per connection | High |
+| A2 | **Cache timing attack** | Encrypted cache read time shouldn't reveal plaintext length | Medium |
+| A3 | **SW update hijack** | Ensure SW served with `Cache-Control: no-cache` to prevent stale SW | High |
+| A4 | **IndexedDB quota exhaustion** | `MAX_ENTRY_BYTES` (5MB) caps individual entries, but verify total DB size is bounded | Medium |
+| A5 | **Polling amplification** | If admin sets poll to 100ms with 1000 concurrent users, verify server can handle 10k req/s | High |
+| A6 | **CORS misconfiguration** | Verify API returns `Access-Control-Allow-Origin` only for trusted origins | High |
+| A7 | **Prototype pollution** | Verify `JSON.parse()` results are not spread onto prototypes | Medium |
+| A8 | **ReDoS in input validation** | Verify no regex on user input with catastrophic backtracking | Low |
+| A9 | **Clickjacking** | Verify `X-Frame-Options: DENY` or CSP `frame-ancestors 'none'` | Medium |
+| A10 | **Open redirect** | Verify all navigation uses hardcoded paths, no user-controlled redirect targets | Medium |
+
+---
+
+## Verification Plan
+
+### Phase 1 — Unit Tests (Per Component)
+
+For each component, write or update tests covering:
+
+1. **[perfHints.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts)**
+   - Test all 5 tier classifications with mock `navigator.connection` + `navigator.deviceMemory` + `navigator.hardwareConcurrency`
+   - Test reactive re-evaluation on `connection.change` event
+   - Test admin override integration (mock global settings query)
+   - Test backward compat `isConstrained` flag
+
+2. **[LiveUpdatesProvider.tsx](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/live/LiveUpdatesProvider.tsx)**
+   - Test reconnect uses [computeWsReconnectDelayMs](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#67-81) not hardcoded 1500ms
+   - Test reconnect capped at 30 attempts
+   - Test tier-scaled base delay (500ms for INSTANT, 3000ms for MINIMAL)
+
+3. **Polling hooks** ([QuotesProvider](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/live/QuotesProvider.tsx#96-365), `use-trades`, `use-account-summary`, [usePendingOrders](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/hooks/usePendingOrders.ts#14-82))
+   - Test each hook reads admin-configured interval
+   - Test tier multiplier applied correctly
+   - Test WS-up disables polling (existing behavior preserved)
+
+4. **[queryPersistence.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/queryPersistence.ts)**
+   - Test hydration timeout scales with device tier
+   - Test all 7 persist keys hydrate within deadline on fast device
+   - Test partial hydration on slow device (graceful degradation)
+
+5. **[sw.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/sw.ts)**
+   - Test critical chunks pre-cached on install
+   - Test cache versioning busts stale chunks on deploy
+   - Test only 200 OK same-origin responses cached
+
+### Phase 2 — Integration Testing (Cross-Component)
+
+| # | Scenario | Tiers Tested | Expected Behavior |
+|---|----------|-------------|-------------------|
+| I1 | Desktop on fiber | INSTANT | ≤200ms poll, 50ms flush, all 9 chunks pre-fetched in parallel, WS reconnect base 500ms |
+| I2 | Flagship on 5G | INSTANT | Same as desktop |
+| I3 | Mid-range phone on Wi-Fi | FAST | ≤500ms poll, 150ms flush, 9 chunks sequential, WS reconnect base 1000ms |
+| I4 | Mid-range phone on fast 4G | FAST/MODERATE | ≤1500ms poll, 300ms flush, 6 chunks, reconnect base 1500ms |
+| I5 | Mid-range phone on slow 4G | CONSTRAINED | 2× base poll, 500ms flush, 3 chunks (deferred 5s), reconnect base 3000ms |
+| I6 | Low-end phone on 3G | MINIMAL | 3× base poll, 1s flush, 0 prefetch, reconnect base 3000ms cap 30 |
+| I7 | Wi-Fi → 4G transition | INSTANT → MODERATE | Reactive re-evaluation: poll interval increases, flush slows, no page reload |
+| I8 | 4G → Wi-Fi transition | MODERATE → INSTANT | Reactive re-evaluation: poll interval decreases, flush speeds up, no page reload |
+| I9 | Admin changes REST fallback to 300ms | All | All connected clients pick up 300ms within 2 seconds, no reload |
+| I10 | App close → reopen (Remember Me) | All | Shell renders from SW cache < 500ms, cached data hydrated, stale badge shown, background revalidation fires |
+| I11 | WS drops mid-session | All | Reconnect with backoff, polls activate as fallback, reconnect cap at 30 |
+
+### Phase 3 — Security Regression Testing
+
+Run every check from the **Security & Integrity Verification Matrix** above (S1-S25, A1-A10). Document results as ✅/❌ with screenshot evidence where applicable.
+
+**Additional security tests:**
+- [ ] Penetration test: attempt XSS via crafted WS message payload
+- [ ] Penetration test: attempt CSRF bypass on admin settings endpoint
+- [ ] Penetration test: attempt cache poisoning via SW
+- [ ] Load test: simulate 1000 concurrent users at 200ms poll to verify server stability (A5)
+- [ ] Verify no regression in existing CSRF, bot-challenge, and identity header flows
+
+### Phase 4 — Manual Smoke Tests (DevTools Emulation)
+
+1. **No Throttling + 8 cores** → verify INSTANT tier activates, ≤200ms poll
+2. **Fast 4G preset + 4 cores** → verify FAST or MODERATE tier
+3. **Slow 4G preset + 2 cores** → verify CONSTRAINED tier, 3 chunks max prefetch
+4. **Offline → Online** → verify SW serves cached shell, WS reconnects on online
+5. **Admin Panel** → change REST fallback to 1000ms → verify all clients update instantly
+6. **Login → close tab → reopen** → verify instant hydration from cache, stale badge, background refresh
+7. **Logout** → verify [secureClearAll()](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/secureCache.ts#408-412), SW cache purge, `localStorage` cleanup
+
+---
+
+## Files Requiring Changes
+
+| File | Changes | Complexity |
+|------|---------|------------|
+| [perfHints.ts](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts) | R1, R2, R3, R8 — Complete tier system rewrite | 🔴 High |
+| [LiveUpdatesProvider.tsx](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/live/LiveUpdatesProvider.tsx) | R4 — Backoff integration, cap 30 | 🟢 Low |
+| [QuotesProvider.tsx](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/live/QuotesProvider.tsx) | R1, R8 — Network flag for poll, device for flush | 🟡 Medium |
+| [use-account-summary.tsx](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/hooks/use-account-summary.tsx) | R8 — Tier-scaled poll, admin config | 🟢 Low |
+| [use-trades.tsx](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/hooks/use-trades.tsx) | R8 — Tier-scaled poll, admin config | 🟢 Low |
+| [usePendingOrders.ts](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/hooks/usePendingOrders.ts) | R8 — Tier-scaled poll, admin config | 🟢 Low |
+| [routePrefetch.ts](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/routePrefetch.ts) | R7, R11 — Tier-aware scheduling | 🟡 Medium |
+| [queryPersistence.ts](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/queryPersistence.ts) | R5 — Device-adaptive timeout | 🟢 Low |
+| [queryClient.ts](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/queryClient.ts) | R9 — Retry config | 🟢 Low |
+| [sw.ts](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/sw.ts) | R6 — Pre-cache route chunks | 🟡 Medium |
+| [vite.config.ts](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/vite.config.ts) | R10 — `manualChunks` | 🟢 Low |
+| [AuthenticatedShell.tsx](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/AuthenticatedShell.tsx) | R11 — Conditional prefetch delay | 🟢 Low |
+| [admin.ts](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/admin.ts) | R13 — Perf config fields in global settings API | 🟡 Medium |
+| [ConfigSync.tsx](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/live/ConfigSync.tsx) | R13 — Verify propagation (may need no change) | 🟢 Low |
+| Admin Dashboard UI | R13 — Market Data perf config cards | 🟡 Medium |
+| [secureCache.ts](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/secureCache.ts) | S12-S17 — Audit-in-place, potential PBKDF2 iteration bump | 🟡 Medium |
+
+---
+
+## Implementation Order
+
+```mermaid
+graph TD
+    A["1. perfHints.ts<br/>Tier engine + reactive hints"] --> B["2. queryClient.ts<br/>Retry config"]
+    A --> C["3. LiveUpdatesProvider<br/>WS backoff + cap 30"]
+    A --> D["4. Polling hooks<br/>use-trades, use-account-summary,<br/>usePendingOrders, QuotesProvider"]
+    A --> E["5. routePrefetch.ts<br/>Tier-aware scheduling"]
+    A --> F["6. queryPersistence.ts<br/>Adaptive hydration timeout"]
+    B --> G["7. vite.config.ts<br/>manualChunks"]
+    E --> H["8. AuthenticatedShell.tsx<br/>Deferred prefetch"]
+    G --> I["9. sw.ts<br/>Pre-cache chunks"]
+    D --> J["10. admin.ts<br/>Perf config API fields"]
+    J --> K["11. Admin Dashboard UI<br/>Market Data cards"]
+    K --> L["12. Security matrix<br/>S1-S25, A1-A10"]
+    I --> L
+    L --> M["13. Integration tests<br/>I1-I11"]
+    M --> N["14. Manual smoke tests"]
+```
+
+**Critical path:** [perfHints.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts) is the foundation — everything depends on it. Start there.

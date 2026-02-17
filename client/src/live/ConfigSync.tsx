@@ -33,6 +33,27 @@ export function ConfigSync() {
       }
 
       if (message.type === "global-settings:updated") {
+        const payload = (message as { payload?: unknown }).payload;
+        if (payload && typeof payload === "object") {
+          const payloadRecord = payload as Record<string, unknown>;
+          const perf = payloadRecord.performanceSettings;
+          if (perf && typeof perf === "object") {
+            const mergePerformance = (prev: unknown) => {
+              if (!prev || typeof prev !== "object") return prev;
+              const base = prev as Record<string, unknown>;
+              return {
+                ...base,
+                ...(perf as Record<string, unknown>),
+                updatedAt:
+                  typeof payloadRecord.updatedAt === "number"
+                    ? payloadRecord.updatedAt
+                    : (base.updatedAt ?? null),
+              };
+            };
+            queryClient.setQueryData(["/api/global-settings"], mergePerformance);
+            queryClient.setQueryData(["/api/admin/global-settings"], mergePerformance);
+          }
+        }
         queryClient.invalidateQueries({ queryKey: ["/api/global-settings"] });
         queryClient.invalidateQueries({ queryKey: ["/api/admin/global-settings"] });
         return;

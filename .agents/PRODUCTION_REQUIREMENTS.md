@@ -336,3 +336,67 @@ Failure Mode if Missing:
   - Confirm logs include `purgedRememberMeTokens` count for each daily sweep cycle.
   - Run `npm run check` and `npm run e2e` to confirm scheduler integration does not regress auth/admin flows.
 - Failure Mode if Missing: expired token rows accumulate indefinitely, increasing table bloat and reducing operator visibility into maintenance effectiveness.
+
+### PRD-PERF-003
+- ID: `PRD-PERF-003`
+- Date (UTC): `2026-02-16`
+- Scope: `Critical route chunk pre-cache + admin performance control safety bounds`
+- Requirement: Production builds must publish a same-origin Vite manifest for SW-driven critical chunk pre-caching, and admin-updated client performance defaults must be bounded/rate-limited before broadcast to avoid poll/reconnect amplification.
+- Enforcement: `vite.config.ts` (`build.manifest` + `manualChunks`), `client/src/sw.ts` (manifest-driven critical chunk cache), `server/routes/admin.ts` (`/api/admin/global-settings` bounds + save throttling), and `server/routes.ts` (`/api/global-settings` sanitized performance config projection).
+- Validation:
+  - Build production assets and verify `/.vite/manifest.json` resolves and includes route chunk metadata.
+  - Register SW, inspect cache, and confirm critical route chunks are pre-cached with same-origin `200` responses only.
+  - Attempt to save out-of-range performance values via `/api/admin/global-settings` and verify `400` rejection; submit rapid consecutive writes and verify `429` throttling.
+  - Verify clients receive `global-settings:updated` and apply sanitized settings without reload.
+- Failure Mode if Missing: slow-network reopen remains blocked on first chunk fetch, or unsafe admin values trigger request/reconnect amplification that can degrade API/WS stability at scale.
+
+### PRD-PERF-004
+- ID: `PRD-PERF-004`
+- Date (UTC): `2026-02-16`
+- Scope: `WebSocket quote fanout pacing + inbound payload abuse guard`
+- Requirement: Runtime must enforce admin-configured `wsPushFrequencyMs` for quote update fanout pacing, and WebSocket transport must cap inbound message payload size with a bounded `maxPayload` limit.
+- Enforcement: `server/routes.ts` (`refreshLiveWsPushFrequencyMs`, quote fanout queue/flush path for `WS_MSG_QUOTES_UPDATE`, and `WebSocketServer` `maxPayload` configuration via `WS_MAX_MESSAGE_BYTES`).
+- Validation:
+  - Set `/api/admin/global-settings.wsPushFrequencyMs` to a non-zero value and verify quote updates are batched to that cadence while preserving latest-per-symbol values.
+  - Set `wsPushFrequencyMs` back to `0` and verify quote updates return to immediate push behavior without restart.
+  - Send oversized WebSocket frames above `WS_MAX_MESSAGE_BYTES` and verify they are rejected by the WS server transport.
+  - Run `npm run check` and `npm run build` after WS changes.
+- Failure Mode if Missing: configured WS push controls are inert (admin changes have no runtime effect), and oversized inbound WS payloads can trigger avoidable memory/CPU pressure.
+
+### PRD-PERF-005
+- ID: `PRD-PERF-005`
+- Date (UTC): `2026-02-16`
+- Scope: `Admin-tier performance controls editability + zero-refresh propagation`
+- Requirement: Every poll/flush tier value shown in Admin -> System Config -> Market Data must be directly editable, validated, persisted in `global_settings`, and propagated to connected clients immediately on `global-settings:updated` without requiring manual refresh.
+- Enforcement: `shared/schema.pg.ts` (tier poll/flush columns), `db/migrations/0032_global_settings_tier_overrides.sql` (backfill), `server/routes/admin.ts` (validation + persistence + live event payload), `server/routes.ts` (`/api/global-settings` sanitized tier projection), `client/src/pages/AdminDashboard.tsx` (editable tier inputs + save), `client/src/live/ConfigSync.tsx` (WS payload cache-merge + invalidation), and `client/src/lib/perfHints.ts` (runtime consumption of tier overrides).
+- Validation:
+  - Edit all tier poll/flush rows in Admin UI and save; verify values persist after reload and are returned by both `/api/admin/global-settings` and `/api/global-settings`.
+  - Keep a second authenticated client connected, save from admin client, and verify new tier values apply immediately without reload.
+  - Submit out-of-range or non-numeric tier values to `/api/admin/global-settings` and verify `400` rejection.
+  - Run `npm run check`, `npm run build`, `npm run db:migrate:drizzle`, and `npm run db:audit`.
+- Failure Mode if Missing: UI shows non-editable/illusory tier controls and saved performance changes do not take effect in live clients, causing stale runtime behavior and operator mistrust.
+
+### PRD-PERF-006
+- ID: `PRD-PERF-006`
+- Date (UTC): `2026-02-16`
+- Scope: `Admin performance save consistency and overwrite isolation`
+- Requirement: Performance controls must round-trip verify persisted values after save and must not be overwritten by unrelated risk-parameter save flows.
+- Enforcement: `client/src/pages/AdminDashboard.tsx` (`updateMarketPerfMutation` PUT->GET verification + stale-sync guard + schema warning), and `client/src/pages/AdminDashboard.tsx` (`handleSaveRiskParams` payload excludes performance fields).
+- Validation:
+  - Change performance settings, save, and verify UI values remain stable (no immediate reset) and match fresh `/api/admin/global-settings`.
+  - Save risk parameters separately and confirm performance settings remain unchanged.
+  - Run `npm run check` and `npm run build`.
+- Failure Mode if Missing: admins observe successful save toasts but values snap back due stale hydration or are silently clobbered by unrelated settings saves, breaking trust in runtime controls.
+
+### PRD-OPS-002
+- ID: `PRD-OPS-002`
+- Date (UTC): `2026-02-16`
+- Scope: `Single-version listener integrity on API port`
+- Requirement: Port `5000` must not silently load-balance across multiple local processes by default; `reusePort` may only be enabled explicitly via `SERVER_REUSE_PORT=1` in production.
+- Enforcement: `server/index.ts` (`server.listen` options gate `reusePort` behind `NODE_ENV=production` and `SERVER_REUSE_PORT=1`, with startup warning log when enabled).
+- Validation:
+  - Start one server process and verify successful bind on `:5000`.
+  - Attempt a second local server process and verify bind conflict occurs by default (prevents mixed-version split-brain).
+  - Set `NODE_ENV=production SERVER_REUSE_PORT=1` and verify startup log warns that identical code must be running on all listeners.
+  - Run `npm run check` and `npm run build`.
+- Failure Mode if Missing: requests can be distributed across mixed code versions on the same port, causing non-deterministic admin save/read behavior and broken propagation guarantees.

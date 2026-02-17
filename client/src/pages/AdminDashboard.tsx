@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 
 function parseUserAgent(ua: string | null | undefined): string | null {
   if (!ua) return null;
@@ -50,6 +50,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   Dialog,
   DialogContent,
@@ -60,6 +61,7 @@ import {
 } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
+import { PERFORMANCE_TIERS, flushIntervalForTier, pollIntervalForTier } from "@/lib/perfHints";
 
 interface UserSettings {
   userId: number;
@@ -94,7 +96,306 @@ interface GlobalSettings {
   // Visual Lot Settings
   lotPresetCards: string; // JSON array string
   lotDropdownMax: number;
+  // Client performance settings
+  restFallbackPollMs: number;
+  wsPushFrequencyMs: number;
+  quoteFlushIntervalMs: number;
+  maxWsReconnectAttempts: number;
+  wsReconnectBaseDelayMs: number;
+  prefetchStrategy: "all" | "critical" | "none";
+  pollInstantMs: number;
+  pollFastMs: number;
+  pollModerateMs: number;
+  pollConstrainedMs: number;
+  pollMinimalMs: number;
+  flushInstantMs: number;
+  flushFastMs: number;
+  flushModerateMs: number;
+  flushConstrainedMs: number;
+  flushMinimalMs: number;
   updatedAt: number | null;
+}
+
+type MarketPerformanceSettings = Pick<
+  GlobalSettings,
+  "restFallbackPollMs" |
+  "wsPushFrequencyMs" |
+  "quoteFlushIntervalMs" |
+  "maxWsReconnectAttempts" |
+  "wsReconnectBaseDelayMs" |
+  "prefetchStrategy" |
+  "pollInstantMs" |
+  "pollFastMs" |
+  "pollModerateMs" |
+  "pollConstrainedMs" |
+  "pollMinimalMs" |
+  "flushInstantMs" |
+  "flushFastMs" |
+  "flushModerateMs" |
+  "flushConstrainedMs" |
+  "flushMinimalMs"
+>;
+
+const DEFAULT_MARKET_PERFORMANCE_SETTINGS: MarketPerformanceSettings = {
+  restFallbackPollMs: 500,
+  wsPushFrequencyMs: 0,
+  quoteFlushIntervalMs: 50,
+  maxWsReconnectAttempts: 30,
+  wsReconnectBaseDelayMs: 1500,
+  prefetchStrategy: "all",
+  pollInstantMs: 200,
+  pollFastMs: 500,
+  pollModerateMs: 1500,
+  pollConstrainedMs: 4000,
+  pollMinimalMs: 6000,
+  flushInstantMs: 50,
+  flushFastMs: 150,
+  flushModerateMs: 300,
+  flushConstrainedMs: 500,
+  flushMinimalMs: 1000,
+};
+
+type MarketPerformanceNumericKey = Exclude<keyof MarketPerformanceSettings, "prefetchStrategy">;
+type PerformanceTierKey = (typeof PERFORMANCE_TIERS)[number];
+
+const TIER_POLL_SETTING_KEYS: Record<PerformanceTierKey, MarketPerformanceNumericKey> = {
+  INSTANT: "pollInstantMs",
+  FAST: "pollFastMs",
+  MODERATE: "pollModerateMs",
+  CONSTRAINED: "pollConstrainedMs",
+  MINIMAL: "pollMinimalMs",
+};
+
+const TIER_FLUSH_SETTING_KEYS: Record<PerformanceTierKey, MarketPerformanceNumericKey> = {
+  INSTANT: "flushInstantMs",
+  FAST: "flushFastMs",
+  MODERATE: "flushModerateMs",
+  CONSTRAINED: "flushConstrainedMs",
+  MINIMAL: "flushMinimalMs",
+};
+
+const clampIntSetting = (value: unknown, min: number, max: number, fallback: number) => {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(min, Math.min(max, Math.trunc(n)));
+};
+
+function resolveMarketPerformanceSettings(candidate: Partial<GlobalSettings> | null | undefined): MarketPerformanceSettings {
+  const restFallbackPollMs = clampIntSetting(candidate?.restFallbackPollMs, 100, 60_000, 500);
+  const quoteFlushIntervalMs = clampIntSetting(candidate?.quoteFlushIntervalMs, 20, 5_000, 50);
+  const prefetchRaw = String(candidate?.prefetchStrategy ?? "all").trim().toLowerCase();
+  const prefetchStrategy = prefetchRaw === "critical" || prefetchRaw === "none" ? prefetchRaw : "all";
+
+  return {
+    restFallbackPollMs,
+    wsPushFrequencyMs: clampIntSetting(candidate?.wsPushFrequencyMs, 0, 1_000, 0),
+    quoteFlushIntervalMs,
+    maxWsReconnectAttempts: clampIntSetting(candidate?.maxWsReconnectAttempts, 1, 30, 30),
+    wsReconnectBaseDelayMs: clampIntSetting(candidate?.wsReconnectBaseDelayMs, 100, 30_000, 1500),
+    prefetchStrategy: prefetchStrategy as MarketPerformanceSettings["prefetchStrategy"],
+    pollInstantMs: clampIntSetting(
+      candidate?.pollInstantMs,
+      100,
+      60_000,
+      pollIntervalForTier("INSTANT", restFallbackPollMs),
+    ),
+    pollFastMs: clampIntSetting(
+      candidate?.pollFastMs,
+      100,
+      60_000,
+      pollIntervalForTier("FAST", restFallbackPollMs),
+    ),
+    pollModerateMs: clampIntSetting(
+      candidate?.pollModerateMs,
+      100,
+      60_000,
+      pollIntervalForTier("MODERATE", restFallbackPollMs),
+    ),
+    pollConstrainedMs: clampIntSetting(
+      candidate?.pollConstrainedMs,
+      100,
+      60_000,
+      pollIntervalForTier("CONSTRAINED", restFallbackPollMs),
+    ),
+    pollMinimalMs: clampIntSetting(
+      candidate?.pollMinimalMs,
+      100,
+      60_000,
+      pollIntervalForTier("MINIMAL", restFallbackPollMs),
+    ),
+    flushInstantMs: clampIntSetting(
+      candidate?.flushInstantMs,
+      20,
+      5_000,
+      flushIntervalForTier("INSTANT", quoteFlushIntervalMs),
+    ),
+    flushFastMs: clampIntSetting(
+      candidate?.flushFastMs,
+      20,
+      5_000,
+      flushIntervalForTier("FAST", quoteFlushIntervalMs),
+    ),
+    flushModerateMs: clampIntSetting(
+      candidate?.flushModerateMs,
+      20,
+      5_000,
+      flushIntervalForTier("MODERATE", quoteFlushIntervalMs),
+    ),
+    flushConstrainedMs: clampIntSetting(
+      candidate?.flushConstrainedMs,
+      20,
+      5_000,
+      flushIntervalForTier("CONSTRAINED", quoteFlushIntervalMs),
+    ),
+    flushMinimalMs: clampIntSetting(
+      candidate?.flushMinimalMs,
+      20,
+      5_000,
+      flushIntervalForTier("MINIMAL", quoteFlushIntervalMs),
+    ),
+  };
+}
+
+const MARKET_PERFORMANCE_SETTING_KEYS: readonly (keyof MarketPerformanceSettings)[] = [
+  "restFallbackPollMs",
+  "wsPushFrequencyMs",
+  "quoteFlushIntervalMs",
+  "maxWsReconnectAttempts",
+  "wsReconnectBaseDelayMs",
+  "prefetchStrategy",
+  "pollInstantMs",
+  "pollFastMs",
+  "pollModerateMs",
+  "pollConstrainedMs",
+  "pollMinimalMs",
+  "flushInstantMs",
+  "flushFastMs",
+  "flushModerateMs",
+  "flushConstrainedMs",
+  "flushMinimalMs",
+] as const;
+
+function marketPerformanceSettingsEqual(a: MarketPerformanceSettings, b: MarketPerformanceSettings): boolean {
+  for (const key of MARKET_PERFORMANCE_SETTING_KEYS) {
+    if (a[key] !== b[key]) return false;
+  }
+  return true;
+}
+
+const MARKET_PERFORMANCE_FIELD_HELP: Record<
+  keyof MarketPerformanceSettings,
+  { inline: string; tooltip: string }
+> = {
+  restFallbackPollMs: {
+    inline: "Fallback request interval when live WebSocket push is unavailable.",
+    tooltip:
+      "Phone + internet context: lower values keep prices fresher but use more mobile data/battery. Use higher values for weaker 4G/3G or older phones.",
+  },
+  wsPushFrequencyMs: {
+    inline: "Server-side push cadence for quote fanout (0 = immediate push).",
+    tooltip:
+      "Phone + internet context: 0 gives lowest latency on strong Wi-Fi/5G. Increasing this value batches updates to reduce network load on constrained links.",
+  },
+  quoteFlushIntervalMs: {
+    inline: "How often buffered quote updates are flushed to connected clients.",
+    tooltip:
+      "Phone + internet context: lower values feel real-time but increase traffic. Higher values smooth bursts for slower devices and unstable networks.",
+  },
+  maxWsReconnectAttempts: {
+    inline: "How many times clients retry reconnecting after a stream drop.",
+    tooltip:
+      "Phone + internet context: higher retry counts help users on spotty cellular coverage recover without manual refresh.",
+  },
+  wsReconnectBaseDelayMs: {
+    inline: "Initial wait before retrying WS reconnect (uses backoff on each retry).",
+    tooltip:
+      "Phone + internet context: higher delay reduces reconnect storms on poor networks; lower delay restores streaming faster on reliable links.",
+  },
+  prefetchStrategy: {
+    inline: "Initial data warm-up amount sent after app load or reconnect.",
+    tooltip:
+      "Phone + internet context: choose less prefetch for low-bandwidth users, or full prefetch for stronger devices/networks that need instant context.",
+  },
+  pollInstantMs: {
+    inline: "Poll interval for INSTANT profile.",
+    tooltip:
+      "INSTANT profile targets newer phones on strong Wi-Fi/5G. Lower poll intervals provide freshest fallback quotes with higher data usage.",
+  },
+  pollFastMs: {
+    inline: "Poll interval for FAST profile.",
+    tooltip:
+      "FAST profile fits most modern phones on stable 4G/5G. Balance latency against mobile data and battery use.",
+  },
+  pollModerateMs: {
+    inline: "Poll interval for MODERATE profile.",
+    tooltip:
+      "MODERATE profile fits mixed hardware and variable signal quality. Raise values to reduce network/battery pressure.",
+  },
+  pollConstrainedMs: {
+    inline: "Poll interval for CONSTRAINED profile.",
+    tooltip:
+      "CONSTRAINED profile targets weak 4G/3G conditions. Higher values prioritize stability and lower bandwidth usage.",
+  },
+  pollMinimalMs: {
+    inline: "Poll interval for MINIMAL profile.",
+    tooltip:
+      "MINIMAL profile is for very limited connectivity or aggressive data-saving mode. Highest values minimize traffic at the cost of freshness.",
+  },
+  flushInstantMs: {
+    inline: "Flush interval for INSTANT profile.",
+    tooltip:
+      "INSTANT flush should stay low for high-end phones on strong internet where lowest latency is expected.",
+  },
+  flushFastMs: {
+    inline: "Flush interval for FAST profile.",
+    tooltip:
+      "FAST flush is tuned for everyday 4G/5G. Increase to reduce traffic bursts when users report unstable connections.",
+  },
+  flushModerateMs: {
+    inline: "Flush interval for MODERATE profile.",
+    tooltip:
+      "MODERATE flush helps balance timely UI updates against bandwidth for average mobile conditions.",
+  },
+  flushConstrainedMs: {
+    inline: "Flush interval for CONSTRAINED profile.",
+    tooltip:
+      "CONSTRAINED flush should be conservative for weak links to avoid reconnect churn and packet loss pressure.",
+  },
+  flushMinimalMs: {
+    inline: "Flush interval for MINIMAL profile.",
+    tooltip:
+      "MINIMAL flush is for the slowest/least reliable conditions. Higher values favor reliability and battery life.",
+  },
+};
+
+const MARKET_PERFORMANCE_TIER_HELP: Record<PerformanceTierKey, string> = {
+  INSTANT: "Newest phones on strong Wi-Fi/5G.",
+  FAST: "Typical modern phones on good 4G/5G.",
+  MODERATE: "Mixed phones or variable coverage.",
+  CONSTRAINED: "Weak 4G/3G or congested mobile data.",
+  MINIMAL: "Very slow/unstable networks or strict data-saving mode.",
+};
+
+function FieldHintLabel({ label, hint }: { label: string; hint: string }) {
+  return (
+    <div className="flex items-center justify-between gap-2">
+      <Label className="text-sm">{label}</Label>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            className="text-[11px] font-medium text-cyan-300 underline decoration-dotted underline-offset-2 hover:text-cyan-200"
+            aria-label={`${label} hint`}
+          >
+            Hint
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="top" className="max-w-sm text-xs leading-relaxed">
+          {hint}
+        </TooltipContent>
+      </Tooltip>
+    </div>
+  );
 }
 
 interface User {
@@ -1470,6 +1771,12 @@ function SystemConfigTab() {
   const [subTab, setSubTab] = useState("trading");
   const [config, setConfig] = useState<SystemConfigData | null>(null);
   const [configChanged, setConfigChanged] = useState(false);
+  const [marketPerfSettings, setMarketPerfSettings] = useState<MarketPerformanceSettings>(
+    DEFAULT_MARKET_PERFORMANCE_SETTINGS,
+  );
+  const [marketPerfChanged, setMarketPerfChanged] = useState(false);
+  const marketPerfSyncGuardRef = useRef<MarketPerformanceSettings | null>(null);
+  const marketPerfSchemaWarningRef = useRef(false);
   const [healthProviderKey, setHealthProviderKey] = useState<string>("");
   const [confirmDialog, setConfirmDialog] = useState<{ open: boolean; key: string; value: boolean; label: string }>({
     open: false,
@@ -1481,6 +1788,11 @@ function SystemConfigTab() {
   const { data: systemConfig, isLoading } = useQuery<SystemConfigData>({
     queryKey: ["/api/admin/system-config"],
     queryFn: () => axios.get("/api/admin/system-config").then(r => r.data),
+  });
+
+  const { data: globalPerformanceData, isFetchedAfterMount: globalPerformanceFetchedAfterMount } = useQuery<GlobalSettings>({
+    queryKey: ["/api/admin/global-settings"],
+    queryFn: () => axios.get("/api/admin/global-settings").then((r) => r.data),
   });
 
   const { data: providersData } = useQuery<MarketDataProvidersResp>({
@@ -1536,6 +1848,18 @@ function SystemConfigTab() {
     }
   }, [systemConfig]);
 
+  useEffect(() => {
+    if (!globalPerformanceData || !globalPerformanceFetchedAfterMount || marketPerfSchemaWarningRef.current) return;
+    if ("pollInstantMs" in globalPerformanceData && "flushInstantMs" in globalPerformanceData) return;
+    marketPerfSchemaWarningRef.current = true;
+    toast({
+      title: "Performance schema is outdated",
+      description:
+        "Server is missing tier performance fields. Run `npm run db:migrate:drizzle` and restart API for persistent admin performance controls.",
+      variant: "destructive",
+    });
+  }, [globalPerformanceData, globalPerformanceFetchedAfterMount, toast]);
+
   const updateMutation = useMutation({
     mutationFn: (payload: Partial<SystemConfigData>) =>
       axios.put("/api/admin/system-config", payload).then(r => r.data),
@@ -1575,6 +1899,95 @@ function SystemConfigTab() {
       toast({ title: "Error", description: error.response?.data?.message || "Failed to save system configuration", variant: "destructive" });
     },
   });
+
+  const updateMarketPerfMutation = useMutation({
+    mutationFn: async (payload: MarketPerformanceSettings) => {
+      await axios.put("/api/admin/global-settings", payload);
+      const refreshed = await axios.get("/api/admin/global-settings", {
+        params: { _ts: Date.now() },
+      });
+      return {
+        requested: payload,
+        persisted: refreshed.data as GlobalSettings,
+      };
+    },
+    onSuccess: ({ requested, persisted }) => {
+      const requestedSettings = resolveMarketPerformanceSettings(requested);
+      const nextSettings = resolveMarketPerformanceSettings(persisted);
+      marketPerfSyncGuardRef.current = nextSettings;
+      setMarketPerfSettings(nextSettings);
+      queryClient.setQueryData(["/api/admin/global-settings"], persisted);
+      queryClient.setQueryData(["/api/global-settings"], (prev: unknown) => {
+        if (!prev || typeof prev !== "object") {
+          return {
+            ...nextSettings,
+            updatedAt: persisted.updatedAt ?? null,
+          };
+        }
+        const base = prev as Record<string, unknown>;
+        return {
+          ...base,
+          ...nextSettings,
+          updatedAt:
+            typeof persisted.updatedAt === "number"
+              ? persisted.updatedAt
+              : (base.updatedAt ?? null),
+        };
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/global-settings"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/global-settings"] });
+      if (!marketPerformanceSettingsEqual(requestedSettings, nextSettings)) {
+        setMarketPerfChanged(true);
+        toast({
+          title: "Saved with adjustments",
+          description:
+            "One or more values were normalized by the server or overwritten by a concurrent save. Review values and save again if needed.",
+          variant: "destructive",
+        });
+        return;
+      }
+      setMarketPerfChanged(false);
+      toast({ title: "Performance settings saved", description: "Market data performance defaults updated." });
+    },
+    onError: (error: any) => {
+      marketPerfSyncGuardRef.current = null;
+      toast({
+        title: "Error",
+        description: error.response?.data?.message || "Failed to save performance settings",
+        variant: "destructive",
+      });
+    },
+  });
+
+  useEffect(() => {
+    if (!globalPerformanceData || marketPerfChanged || updateMarketPerfMutation.isPending) return;
+    const resolved = resolveMarketPerformanceSettings(globalPerformanceData);
+    const guard = marketPerfSyncGuardRef.current;
+    if (guard && !marketPerformanceSettingsEqual(resolved, guard)) return;
+    marketPerfSyncGuardRef.current = null;
+    setMarketPerfSettings((prev) => (marketPerformanceSettingsEqual(prev, resolved) ? prev : resolved));
+  }, [globalPerformanceData, marketPerfChanged, updateMarketPerfMutation.isPending]);
+
+  const handleMarketPerfSettingChange = <K extends keyof MarketPerformanceSettings>(
+    key: K,
+    value: MarketPerformanceSettings[K],
+  ) => {
+    marketPerfSyncGuardRef.current = null;
+    setMarketPerfSettings((prev) => ({ ...prev, [key]: value }));
+    setMarketPerfChanged(true);
+  };
+
+  const saveMarketPerformanceSettings = () => {
+    updateMarketPerfMutation.mutate({ ...marketPerfSettings });
+  };
+
+  const marketPerfPreviewRows = useMemo(() => {
+    return PERFORMANCE_TIERS.map((tier) => ({
+      tier,
+      pollKey: TIER_POLL_SETTING_KEYS[tier],
+      flushKey: TIER_FLUSH_SETTING_KEYS[tier],
+    }));
+  }, []);
 
   const handleToggleChange = (key: string, value: boolean, label: string) => {
     // Dangerous toggles require confirmation
@@ -1778,6 +2191,221 @@ function SystemConfigTab() {
                     {updateMutation.isPending ? "Saving..." : "Save Changes"}
                   </Button>
                 </div>
+              </CardContent>
+            </Card>
+
+            <Card className="bg-neutral-700 border-gray-600">
+              <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                <div className="min-w-0">
+                  <CardTitle className="text-base">Adaptive Client Performance Controls: Phone + Internet Profiles</CardTitle>
+                  <p className="text-xs text-gray-400 mt-1">
+                    Tune quote delivery by device/network quality. Lower milliseconds mean faster updates, higher
+                    bandwidth/battery usage; higher milliseconds reduce load for slower phones and weaker internet.
+                  </p>
+                  <p className="text-xs text-gray-400 mt-1">
+                    Each tier below maps to a phone + connection profile, from INSTANT (strong Wi-Fi/5G) to MINIMAL
+                    (very constrained network). All values are editable, saved, and live-propagated.
+                  </p>
+                </div>
+                <Button
+                  onClick={saveMarketPerformanceSettings}
+                  disabled={!marketPerfChanged || updateMarketPerfMutation.isPending}
+                  className="bg-blue-600 hover:bg-blue-700 w-full sm:w-auto"
+                >
+                  {updateMarketPerfMutation.isPending ? "Saving..." : "Save Performance"}
+                </Button>
+              </CardHeader>
+              <CardContent className="space-y-5">
+                <TooltipProvider delayDuration={120}>
+                  <div className="rounded-md border border-cyan-700/40 bg-cyan-950/20 p-3 text-xs text-cyan-100/90">
+                    Assign lower-latency tiers to users on newer phones and stronger internet. For slower phones or
+                    weak cellular links, raise intervals to cut bandwidth, battery drain, and reconnect churn.
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div>
+                      <FieldHintLabel
+                        label="REST Fallback Poll (ms)"
+                        hint={MARKET_PERFORMANCE_FIELD_HELP.restFallbackPollMs.tooltip}
+                      />
+                      <p className="text-xs text-gray-400 mt-1">{MARKET_PERFORMANCE_FIELD_HELP.restFallbackPollMs.inline}</p>
+                      <Input
+                        type="number"
+                        min={100}
+                        max={60000}
+                        value={marketPerfSettings.restFallbackPollMs}
+                        onChange={(e) =>
+                          handleMarketPerfSettingChange(
+                            "restFallbackPollMs",
+                            Math.max(100, Math.min(60_000, Number(e.target.value) || 500)),
+                          )}
+                        className="bg-neutral-600 mt-2"
+                        title={MARKET_PERFORMANCE_FIELD_HELP.restFallbackPollMs.tooltip}
+                      />
+                    </div>
+
+                    <div>
+                      <FieldHintLabel
+                        label="WS Push Frequency (ms)"
+                        hint={MARKET_PERFORMANCE_FIELD_HELP.wsPushFrequencyMs.tooltip}
+                      />
+                      <p className="text-xs text-gray-400 mt-1">{MARKET_PERFORMANCE_FIELD_HELP.wsPushFrequencyMs.inline}</p>
+                      <Input
+                        type="number"
+                        min={0}
+                        max={1000}
+                        value={marketPerfSettings.wsPushFrequencyMs}
+                        onChange={(e) =>
+                          handleMarketPerfSettingChange(
+                            "wsPushFrequencyMs",
+                            Math.max(0, Math.min(1_000, Number(e.target.value) || 0)),
+                          )}
+                        className="bg-neutral-600 mt-2"
+                        title={MARKET_PERFORMANCE_FIELD_HELP.wsPushFrequencyMs.tooltip}
+                      />
+                    </div>
+
+                    <div>
+                      <FieldHintLabel
+                        label="Quote Flush Interval (ms)"
+                        hint={MARKET_PERFORMANCE_FIELD_HELP.quoteFlushIntervalMs.tooltip}
+                      />
+                      <p className="text-xs text-gray-400 mt-1">{MARKET_PERFORMANCE_FIELD_HELP.quoteFlushIntervalMs.inline}</p>
+                      <Input
+                        type="number"
+                        min={20}
+                        max={5000}
+                        value={marketPerfSettings.quoteFlushIntervalMs}
+                        onChange={(e) =>
+                          handleMarketPerfSettingChange(
+                            "quoteFlushIntervalMs",
+                            Math.max(20, Math.min(5_000, Number(e.target.value) || 50)),
+                          )}
+                        className="bg-neutral-600 mt-2"
+                        title={MARKET_PERFORMANCE_FIELD_HELP.quoteFlushIntervalMs.tooltip}
+                      />
+                    </div>
+
+                    <div>
+                      <FieldHintLabel
+                        label="Max WS Reconnect Attempts"
+                        hint={MARKET_PERFORMANCE_FIELD_HELP.maxWsReconnectAttempts.tooltip}
+                      />
+                      <p className="text-xs text-gray-400 mt-1">{MARKET_PERFORMANCE_FIELD_HELP.maxWsReconnectAttempts.inline}</p>
+                      <Input
+                        type="number"
+                        min={1}
+                        max={30}
+                        value={marketPerfSettings.maxWsReconnectAttempts}
+                        onChange={(e) =>
+                          handleMarketPerfSettingChange(
+                            "maxWsReconnectAttempts",
+                            Math.max(1, Math.min(30, Number(e.target.value) || 30)),
+                          )}
+                        className="bg-neutral-600 mt-2"
+                        title={MARKET_PERFORMANCE_FIELD_HELP.maxWsReconnectAttempts.tooltip}
+                      />
+                    </div>
+
+                    <div>
+                      <FieldHintLabel
+                        label="WS Reconnect Base Delay (ms)"
+                        hint={MARKET_PERFORMANCE_FIELD_HELP.wsReconnectBaseDelayMs.tooltip}
+                      />
+                      <p className="text-xs text-gray-400 mt-1">{MARKET_PERFORMANCE_FIELD_HELP.wsReconnectBaseDelayMs.inline}</p>
+                      <Input
+                        type="number"
+                        min={100}
+                        max={30000}
+                        value={marketPerfSettings.wsReconnectBaseDelayMs}
+                        onChange={(e) =>
+                          handleMarketPerfSettingChange(
+                            "wsReconnectBaseDelayMs",
+                            Math.max(100, Math.min(30_000, Number(e.target.value) || 1500)),
+                          )}
+                        className="bg-neutral-600 mt-2"
+                        title={MARKET_PERFORMANCE_FIELD_HELP.wsReconnectBaseDelayMs.tooltip}
+                      />
+                    </div>
+
+                    <div>
+                      <FieldHintLabel
+                        label="Prefetch Strategy"
+                        hint={MARKET_PERFORMANCE_FIELD_HELP.prefetchStrategy.tooltip}
+                      />
+                      <p className="text-xs text-gray-400 mt-1">{MARKET_PERFORMANCE_FIELD_HELP.prefetchStrategy.inline}</p>
+                      <Select
+                        value={marketPerfSettings.prefetchStrategy}
+                        onValueChange={(value) =>
+                          handleMarketPerfSettingChange(
+                            "prefetchStrategy",
+                            value as MarketPerformanceSettings["prefetchStrategy"],
+                          )}
+                      >
+                        <SelectTrigger
+                          className="bg-neutral-600 mt-2"
+                          title={MARKET_PERFORMANCE_FIELD_HELP.prefetchStrategy.tooltip}
+                        >
+                          <SelectValue placeholder="Select strategy" />
+                        </SelectTrigger>
+                        <SelectContent className="bg-neutral-700">
+                          <SelectItem value="all">All Chunks</SelectItem>
+                          <SelectItem value="critical">Critical Only</SelectItem>
+                          <SelectItem value="none">None</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+
+                  <div className="rounded-md border border-gray-600 overflow-hidden">
+                    <div className="grid grid-cols-3 bg-neutral-800 px-3 py-2 text-xs font-semibold text-gray-300">
+                      <div>Tier</div>
+                      <div>Tier Poll (ms)</div>
+                      <div>Tier Flush (ms)</div>
+                    </div>
+                    {marketPerfPreviewRows.map((row) => {
+                      const tierHint = MARKET_PERFORMANCE_TIER_HELP[row.tier];
+                      return (
+                        <div key={row.tier} className="grid grid-cols-3 px-3 py-2 text-sm border-t border-gray-700">
+                          <div>
+                            <div>{row.tier}</div>
+                            <p className="text-[11px] text-gray-400 mt-1">{tierHint}</p>
+                          </div>
+                          <div>
+                            <Input
+                              type="number"
+                              min={100}
+                              max={60_000}
+                              value={marketPerfSettings[row.pollKey]}
+                              onChange={(e) =>
+                                handleMarketPerfSettingChange(
+                                  row.pollKey,
+                                  Math.max(100, Math.min(60_000, Number(e.target.value) || 100)),
+                                )}
+                              className="bg-neutral-600 h-8"
+                              title={`${tierHint} Lower poll values improve quote freshness; higher values reduce data and battery usage.`}
+                            />
+                          </div>
+                          <div>
+                            <Input
+                              type="number"
+                              min={20}
+                              max={5_000}
+                              value={marketPerfSettings[row.flushKey]}
+                              onChange={(e) =>
+                                handleMarketPerfSettingChange(
+                                  row.flushKey,
+                                  Math.max(20, Math.min(5_000, Number(e.target.value) || 20)),
+                                )}
+                              className="bg-neutral-600 h-8"
+                              title={`${tierHint} Lower flush values deliver updates faster; higher values reduce burst traffic on weak networks.`}
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </TooltipProvider>
               </CardContent>
             </Card>
 
@@ -2391,6 +3019,22 @@ export default function AdminDashboard() {
     lifetimeLossLimitPct: 20,
     lotPresetCards: "[1,5,10,25,50]",
     lotDropdownMax: 50,
+    restFallbackPollMs: 500,
+    wsPushFrequencyMs: 0,
+    quoteFlushIntervalMs: 50,
+    maxWsReconnectAttempts: 30,
+    wsReconnectBaseDelayMs: 1500,
+    prefetchStrategy: "all",
+    pollInstantMs: 200,
+    pollFastMs: 500,
+    pollModerateMs: 1500,
+    pollConstrainedMs: 4000,
+    pollMinimalMs: 6000,
+    flushInstantMs: 50,
+    flushFastMs: 150,
+    flushModerateMs: 300,
+    flushConstrainedMs: 500,
+    flushMinimalMs: 1000,
     updatedAt: null
   });
   const [riskParamsChanged, setRiskParamsChanged] = useState(false);

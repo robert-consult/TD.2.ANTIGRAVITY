@@ -2117,6 +2117,8 @@ function SystemConfigTab() {
         {/* MARKET DATA & REFRESH */}
         <TabsContent value="market">
           <div className="space-y-4">
+            <MarketDataProvidersCard />
+
             <Card className="bg-neutral-700 border-gray-600">
               <CardHeader>
                 <CardTitle className="text-base">Market Data & Quote Settings</CardTitle>
@@ -2408,8 +2410,6 @@ function SystemConfigTab() {
                 </TooltipProvider>
               </CardContent>
             </Card>
-
-            <MarketDataProvidersCard />
           </div>
         </TabsContent>
 

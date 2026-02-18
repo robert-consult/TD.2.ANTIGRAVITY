@@ -104,6 +104,7 @@ function getNavigatorLike(): NavigatorLike | undefined {
 }
 
 function numOrNull(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
 }
@@ -118,7 +119,8 @@ function normalizeTier(tier: string | null | undefined): PerformanceTier {
   if (normalized === "FAST") return "FAST";
   if (normalized === "MODERATE") return "MODERATE";
   if (normalized === "CONSTRAINED") return "CONSTRAINED";
-  return "MINIMAL";
+  if (normalized === "MINIMAL") return "MINIMAL";
+  return "MODERATE";
 }
 
 function classifyNetworkTier(values: {
@@ -128,17 +130,18 @@ function classifyNetworkTier(values: {
   downlinkMbps: number | null;
 }): PerformanceTier {
   if (values.saveData) return "MINIMAL";
-  if (values.effectiveType === "slow-2g" || values.effectiveType === "2g" || values.effectiveType === "3g") {
+  if (values.effectiveType === "slow-2g" || values.effectiveType === "2g") {
     return "MINIMAL";
   }
+  if (values.effectiveType === "3g") return "CONSTRAINED";
 
   const rtt = values.rttMs;
   const downlink = values.downlinkMbps;
 
-  if (rtt != null && downlink != null && rtt < 50 && downlink > 10) return "INSTANT";
-  if (rtt != null && downlink != null && rtt < 150 && downlink > 5) return "FAST";
+  if (rtt != null && downlink != null && rtt < 50 && downlink >= 10) return "INSTANT";
+  if (rtt != null && downlink != null && rtt <= 150 && downlink >= 5) return "FAST";
   if ((rtt != null && rtt > 350) || (downlink != null && downlink < 1.5)) return "CONSTRAINED";
-  if ((rtt != null && rtt >= 150) || (downlink != null && downlink <= 5)) return "MODERATE";
+  if ((rtt != null && rtt > 150) || (downlink != null && downlink < 5)) return "MODERATE";
 
   if (values.effectiveType === "4g") return "FAST";
   return "MODERATE";
@@ -155,12 +158,20 @@ function classifyDeviceTier(values: {
   if ((memory != null && memory < 2) || (cores != null && cores < 2)) return "MINIMAL";
   if ((memory == null || memory >= 8) && (cores == null || cores >= 8)) return "INSTANT";
   if ((memory == null || memory >= 4) && (cores == null || cores >= 4)) return "FAST";
-  if ((cores != null && cores >= 4) && (memory != null && memory >= 2)) return "MODERATE";
-  if ((memory != null && memory >= 2) || (cores != null && cores >= 2)) return "CONSTRAINED";
-  return "MODERATE";
+  if ((memory != null && memory >= 3) || (cores != null && cores >= 4)) return "MODERATE";
+  return "CONSTRAINED";
 }
 
 function combineTier(networkTier: PerformanceTier, deviceTier: PerformanceTier): PerformanceTier {
+  const networkRank = TIER_RANK[networkTier];
+  const deviceRank = TIER_RANK[deviceTier];
+
+  // Avoid over-throttling fast-network clients solely due to low-end hardware.
+  // Polling and transport decisions are network-bound; for extreme mismatch, keep a MODERATE composite tier.
+  if (networkRank <= TIER_RANK.FAST && deviceRank >= TIER_RANK.CONSTRAINED) {
+    return "MODERATE";
+  }
+
   return TIER_RANK[networkTier] >= TIER_RANK[deviceTier] ? networkTier : deviceTier;
 }
 
@@ -256,8 +267,6 @@ export function refreshPerfHints(): PerfHints {
   if (!hintsAreEqual(next, perfHintsSnapshot)) {
     perfHintsSnapshot = next;
     notifyPerfHintListeners();
-  } else {
-    perfHintsSnapshot = next;
   }
   return perfHintsSnapshot;
 }
@@ -267,16 +276,17 @@ export function subscribeHints(listener: () => void): () => void {
   perfHintListeners.add(listener);
   return () => {
     perfHintListeners.delete(listener);
+    if (!perfHintListeners.size) {
+      detachNativeListeners?.();
+    }
   };
 }
 
 export function getHintsSnapshot(): PerfHints {
-  ensureNativeListeners();
   return perfHintsSnapshot;
 }
 
 export function getPerfHints(): PerfHints {
-  ensureNativeListeners();
   return refreshPerfHints();
 }
 
@@ -375,11 +385,13 @@ export function resolvePerformanceSettings(input: unknown): PerformanceSettings 
   };
 }
 
-export function pollIntervalForTier(tier: PerformanceTier, baseMs: number, settingsInput?: unknown): number {
-  const normalizedTier = normalizeTier(tier);
-  const base = clamp(Math.round(baseMs), 100, 60_000);
-  const settings = resolvePerformanceSettings(settingsInput);
-  if (settingsInput && typeof settingsInput === "object") {
+function pollIntervalForTierInternal(
+  normalizedTier: PerformanceTier,
+  base: number,
+  settings: PerformanceSettings,
+  useOverrides: boolean,
+): number {
+  if (useOverrides) {
     switch (normalizedTier) {
       case "INSTANT":
         return settings.pollInstantMs;
@@ -393,6 +405,7 @@ export function pollIntervalForTier(tier: PerformanceTier, baseMs: number, setti
         return settings.pollMinimalMs;
     }
   }
+
   switch (normalizedTier) {
     case "INSTANT":
       return Math.min(base, 200);
@@ -407,11 +420,13 @@ export function pollIntervalForTier(tier: PerformanceTier, baseMs: number, setti
   }
 }
 
-export function flushIntervalForTier(tier: PerformanceTier, baseMs: number, settingsInput?: unknown): number {
-  const normalizedTier = normalizeTier(tier);
-  const base = clamp(Math.round(baseMs), 20, 5_000);
-  const settings = resolvePerformanceSettings(settingsInput);
-  if (settingsInput && typeof settingsInput === "object") {
+function flushIntervalForTierInternal(
+  normalizedTier: PerformanceTier,
+  base: number,
+  settings: PerformanceSettings,
+  useOverrides: boolean,
+): number {
+  if (useOverrides) {
     switch (normalizedTier) {
       case "INSTANT":
         return settings.flushInstantMs;
@@ -425,6 +440,7 @@ export function flushIntervalForTier(tier: PerformanceTier, baseMs: number, sett
         return settings.flushMinimalMs;
     }
   }
+
   switch (normalizedTier) {
     case "INSTANT":
       return Math.min(base, 50);
@@ -439,27 +455,57 @@ export function flushIntervalForTier(tier: PerformanceTier, baseMs: number, sett
   }
 }
 
+export function pollIntervalForTier(tier: PerformanceTier, baseMs: number, settingsInput?: unknown): number {
+  const normalizedTier = normalizeTier(tier);
+  const base = clamp(Math.round(baseMs), 100, 60_000);
+  const hasSettingsInput = Boolean(settingsInput && typeof settingsInput === "object");
+  const settings = hasSettingsInput
+    ? resolvePerformanceSettings(settingsInput)
+    : DEFAULT_PERFORMANCE_SETTINGS;
+  return pollIntervalForTierInternal(normalizedTier, base, settings, hasSettingsInput);
+}
+
+export function flushIntervalForTier(tier: PerformanceTier, baseMs: number, settingsInput?: unknown): number {
+  const normalizedTier = normalizeTier(tier);
+  const base = clamp(Math.round(baseMs), 20, 5_000);
+  const hasSettingsInput = Boolean(settingsInput && typeof settingsInput === "object");
+  const settings = hasSettingsInput
+    ? resolvePerformanceSettings(settingsInput)
+    : DEFAULT_PERFORMANCE_SETTINGS;
+  return flushIntervalForTierInternal(normalizedTier, base, settings, hasSettingsInput);
+}
+
 export function tierPollIntervalMs(
   baseMs: number = DEFAULT_PERFORMANCE_SETTINGS.restFallbackPollMs,
   hints: PerfHints = getPerfHints(),
   settingsInput?: unknown,
 ): number {
-  const settings = resolvePerformanceSettings(settingsInput);
-  const configuredBase = clamp(Math.round(baseMs || settings.restFallbackPollMs), 100, 60_000);
   const hasSettingsInput = Boolean(settingsInput && typeof settingsInput === "object");
-  return pollIntervalForTier(hints.networkTier, configuredBase, hasSettingsInput ? settingsInput : undefined);
+  const settings = hasSettingsInput
+    ? resolvePerformanceSettings(settingsInput)
+    : DEFAULT_PERFORMANCE_SETTINGS;
+  const configuredBase = clamp(Math.round(baseMs || settings.restFallbackPollMs), 100, 60_000);
+  return pollIntervalForTierInternal(
+    normalizeTier(hints.networkTier),
+    configuredBase,
+    settings,
+    hasSettingsInput,
+  );
 }
 
 export function tierFlushIntervalMs(
   hints: PerfHints = getPerfHints(),
   settingsInput?: unknown,
 ): number {
-  const settings = resolvePerformanceSettings(settingsInput);
   const hasSettingsInput = Boolean(settingsInput && typeof settingsInput === "object");
-  return flushIntervalForTier(
-    hints.deviceTier,
+  const settings = hasSettingsInput
+    ? resolvePerformanceSettings(settingsInput)
+    : DEFAULT_PERFORMANCE_SETTINGS;
+  return flushIntervalForTierInternal(
+    normalizeTier(hints.deviceTier),
     settings.quoteFlushIntervalMs,
-    hasSettingsInput ? settingsInput : undefined,
+    settings,
+    hasSettingsInput,
   );
 }
 

@@ -50,7 +50,11 @@ function isCacheableResponse(response: Response | null | undefined, url: string)
     contentType.includes("text/html") ||
     contentType.includes("javascript") ||
     contentType.includes("text/css") ||
-    contentType.includes("application/json")
+    contentType.includes("application/json") ||
+    contentType.includes("font/") ||
+    contentType.includes("image/") ||
+    contentType.includes("application/wasm") ||
+    contentType.includes("application/octet-stream")
   );
 }
 
@@ -210,7 +214,13 @@ sw.addEventListener("fetch", (event: FetchEvent) => {
         const cache = await caches.open(CACHE_NAME);
         const cached = await cache.match(event.request);
         if (cached) return cached;
-        const response = await fetch(event.request);
+        const response = await fetch(event.request).catch(() => null);
+        if (!response) {
+          return new Response("Asset unavailable offline", {
+            status: 503,
+            statusText: "Offline",
+          });
+        }
         if (isCacheableResponse(response, event.request.url)) {
           await cache.put(event.request, response.clone());
         }

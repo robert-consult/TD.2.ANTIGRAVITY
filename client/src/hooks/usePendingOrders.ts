@@ -16,6 +16,7 @@ export const usePendingOrders = (options: UsePendingOrdersOptions = {}) => {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const { user } = useAuth();
+  const userId = user?.id;
   const enabled = options.enabled ?? true;
   const perfHints = usePerfHints();
   const performanceSettings = usePerformanceSettings();
@@ -28,15 +29,15 @@ export const usePendingOrders = (options: UsePendingOrdersOptions = {}) => {
   const wsFallbackRefetchMode = isWsConnected ? false : ("always" as const);
 
   useEffect(() => {
-    if (!user) return;
+    if (!userId) return;
     return subscribe((message) => {
       if (!message || typeof message !== "object") return;
       if (message.type !== WS_MSG_TRADES_UPDATED && message.type !== WS_MSG_TRADES_UPDATE) return;
       const messageUserId = (message as any).userId;
-      if (messageUserId && user.id && messageUserId !== user.id) return;
+      if (messageUserId && messageUserId !== userId) return;
       queryClient.invalidateQueries({ queryKey: ["/api/trades/pending"] });
     });
-  }, [queryClient, subscribe, user]);
+  }, [queryClient, subscribe, userId]);
 
   const {
     data: pendingOrders,
@@ -45,7 +46,7 @@ export const usePendingOrders = (options: UsePendingOrdersOptions = {}) => {
     refetch,
   } = useQuery({
     queryKey: ["/api/trades/pending"],
-    enabled: enabled && !!user,
+    enabled: enabled && !!userId,
     refetchInterval: isWsConnected ? false : pendingOrdersPollMs,
     staleTime: isWsConnected ? Infinity : 15_000,
     refetchOnWindowFocus: wsFallbackRefetchMode,

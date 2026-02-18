@@ -75,7 +75,7 @@ function toNumber(value: any): number | null {
 }
 
 function calculatePctChange(current: number | null, previous: number | null): number {
-  if (!current || !previous || previous === 0) return 0;
+  if (current == null || previous == null || previous === 0) return 0;
   return ((current - previous) / previous) * 100;
 }
 
@@ -174,6 +174,18 @@ export function QuotesProvider({ children }: { children: ReactNode }) {
     flushTimerRef.current = window.setTimeout(flushNow, quoteFlushMs);
   }, [flushNow, quoteFlushMs]);
 
+  useEffect(() => {
+    if (flushTimerRef.current === null || !pendingFlushRef.current) return;
+    window.clearTimeout(flushTimerRef.current);
+    flushTimerRef.current = window.setTimeout(flushNow, quoteFlushMs);
+    return () => {
+      if (flushTimerRef.current !== null) {
+        window.clearTimeout(flushTimerRef.current);
+        flushTimerRef.current = null;
+      }
+    };
+  }, [flushNow, quoteFlushMs]);
+
   const { data: symbolsData, isLoading: isSymbolsLoading } = useQuery<AllowedSymbolsResponse>({
     queryKey: ["/api/quote-subscriptions/allowed-symbols"],
     enabled: isAuthenticated,
@@ -233,6 +245,7 @@ export function QuotesProvider({ children }: { children: ReactNode }) {
     return (symbols || [])
       .map((s) => String(s.symbol).toUpperCase());
   }, [symbols]);
+  const requestedSymbolsKey = useMemo(() => JSON.stringify(requestedSymbols), [requestedSymbols]);
 
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -264,7 +277,7 @@ export function QuotesProvider({ children }: { children: ReactNode }) {
     }
 
     prevSymbolsRef.current = requestedSymbols;
-  }, [isAuthenticated, isWsConnected, requestedSymbols.join("|"), sendMessage]);
+  }, [isAuthenticated, isWsConnected, requestedSymbolsKey, sendMessage]);
 
   const applyQuoteRows = useCallback(
     (rows: any[], replace: boolean) => {
@@ -333,7 +346,7 @@ export function QuotesProvider({ children }: { children: ReactNode }) {
   }, [applyQuoteRows, isAuthenticated, subscribe]);
 
   const { data: latestQuotesData, isLoading, isError } = useQuery({
-    queryKey: ["/api/quotes/latest", requestedSymbols.join("|")],
+    queryKey: ["/api/quotes/latest", requestedSymbols],
     enabled: isAuthenticated && requestedSymbols.length > 0,
     refetchInterval: isWsConnected ? false : quotePollIntervalMs,
     staleTime: isWsConnected ? Infinity : 15_000,

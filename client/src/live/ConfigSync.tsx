@@ -2,6 +2,7 @@ import { useCallback, useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useLiveUpdates } from "@/live/LiveUpdatesProvider";
 import { useAuth } from "@/hooks/use-auth";
+import { mergeGlobalSettingsPerformance } from "@/lib/globalSettingsPerformance";
 import { WS_MSG_QUOTE_SUBSCRIPTIONS_UPDATED } from "@shared/ws/protocol";
 
 export function ConfigSync() {
@@ -39,16 +40,11 @@ export function ConfigSync() {
           const perf = payloadRecord.performanceSettings;
           if (perf && typeof perf === "object") {
             const mergePerformance = (prev: unknown) => {
-              if (!prev || typeof prev !== "object") return prev;
-              const base = prev as Record<string, unknown>;
-              return {
-                ...base,
-                ...(perf as Record<string, unknown>),
-                updatedAt:
-                  typeof payloadRecord.updatedAt === "number"
-                    ? payloadRecord.updatedAt
-                    : (base.updatedAt ?? null),
-              };
+              return mergeGlobalSettingsPerformance(
+                prev,
+                perf as Record<string, unknown>,
+                payloadRecord.updatedAt,
+              );
             };
             queryClient.setQueryData(["/api/global-settings"], mergePerformance);
             queryClient.setQueryData(["/api/admin/global-settings"], mergePerformance);

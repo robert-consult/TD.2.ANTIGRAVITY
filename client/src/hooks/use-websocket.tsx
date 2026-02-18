@@ -16,6 +16,9 @@ export function useWebSocket(url: string, options: UseWebSocketOptions = {}) {
   const [isConnected, setIsConnected] = useState(false);
   const [error, setError] = useState<Event | null>(null);
   const enabledRef = useRef(true);
+  const reconnectIntervalRef = useRef(3000);
+  const reconnectAttemptsLimitRef = useRef(10);
+  const urlRef = useRef(url);
   const socketRef = useRef<WebSocket | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectAttemptsRef = useRef(0);
@@ -41,6 +44,18 @@ export function useWebSocket(url: string, options: UseWebSocketOptions = {}) {
   useEffect(() => {
     enabledRef.current = enabled;
   }, [enabled]);
+
+  useEffect(() => {
+    reconnectIntervalRef.current = reconnectInterval;
+  }, [reconnectInterval]);
+
+  useEffect(() => {
+    reconnectAttemptsLimitRef.current = reconnectAttempts;
+  }, [reconnectAttempts]);
+
+  useEffect(() => {
+    urlRef.current = url;
+  }, [url]);
 
   useEffect(() => {
     onMessageRef.current = onMessage;
@@ -69,10 +84,11 @@ export function useWebSocket(url: string, options: UseWebSocketOptions = {}) {
   const connect = useCallback(() => {
     if (!enabledRef.current) return;
     clearReconnectTimer();
+    const targetUrl = urlRef.current;
     if (shouldLog) {
-      console.log(`Connecting to WebSocket at: "${url}"`);
+      console.log(`Connecting to WebSocket at: "${targetUrl}"`);
     }
-    const ws = new WebSocket(url);
+    const ws = new WebSocket(targetUrl);
     socketRef.current = ws;
     
     ws.onopen = () => {
@@ -108,10 +124,12 @@ export function useWebSocket(url: string, options: UseWebSocketOptions = {}) {
       if (!enabledRef.current) return;
 
       const attemptsSoFar = reconnectAttemptsRef.current;
-      if (attemptsSoFar >= reconnectAttempts) return;
+      const reconnectLimit = reconnectAttemptsLimitRef.current;
+      if (attemptsSoFar >= reconnectLimit) return;
 
       reconnectAttemptsRef.current = attemptsSoFar + 1;
-      const nextAttemptDelay = computeWsReconnectDelayMs(attemptsSoFar, reconnectInterval);
+      const reconnectBaseDelay = reconnectIntervalRef.current;
+      const nextAttemptDelay = computeWsReconnectDelayMs(attemptsSoFar, reconnectBaseDelay);
       if (shouldLog) {
         console.log(`Will attempt to reconnect in ${nextAttemptDelay}ms`);
       }
@@ -130,7 +148,7 @@ export function useWebSocket(url: string, options: UseWebSocketOptions = {}) {
       
       onErrorRef.current?.(event);
     };
-  }, [clearReconnectTimer, reconnectAttempts, reconnectInterval, shouldLog, url]);
+  }, [clearReconnectTimer, shouldLog]);
   
   // Connect on mount
   useEffect(() => {
@@ -158,7 +176,7 @@ export function useWebSocket(url: string, options: UseWebSocketOptions = {}) {
       }
       socketRef.current = null;
     };
-  }, [clearReconnectTimer, connect, enabled]);
+  }, [clearReconnectTimer, connect, enabled, url]);
   
   // Send message
   const sendMessage = useCallback((data: any) => {

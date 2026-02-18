@@ -100,8 +100,16 @@ export default function AuthenticatedShell() {
   }, []);
 
   useEffect(() => {
-    const slowTier = perfHints.tier === "CONSTRAINED" || perfHints.tier === "MINIMAL";
-    const startDelayMs = perfHints.tier === "MINIMAL" ? 10_000 : slowTier ? 7_000 : 0;
+    const startDelayMs =
+      perfHints.tier === "MINIMAL"
+        ? 10_000
+        : perfHints.tier === "CONSTRAINED"
+          ? 7_000
+          : perfHints.tier === "MODERATE"
+            ? 3_000
+            : perfHints.tier === "FAST"
+              ? 2_000
+              : 1_000;
     prefetchAllRoutes({ hints: perfHints, settings: perfSettings, startDelayMs });
   }, [perfHints, perfSettings]);
 

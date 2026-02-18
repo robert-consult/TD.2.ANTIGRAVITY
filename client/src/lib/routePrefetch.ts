@@ -30,7 +30,8 @@ const fallbackDelayMs = 100;
 
 const prefetchedKeys = new Set<string>();
 const inFlight = new Map<string, Promise<unknown>>();
-let scheduled = false;
+let scheduledPlanKey: string | null = null;
+let scheduledStartTimer: number | null = null;
 
 type PrefetchAllRoutesOptions = {
   hints?: PerfHints;
@@ -108,21 +109,47 @@ function resolveTargets(
   };
 }
 
+function clearScheduledStartTimer(): void {
+  if (!scheduledStartTimer) return;
+  clearTimeout(scheduledStartTimer);
+  scheduledStartTimer = null;
+}
+
+function buildPlanKey(
+  targets: ChunkPrefetchTarget[],
+  mode: "parallel" | "sequential",
+  startDelayMs: number,
+): string {
+  return `${mode}:${startDelayMs}:${targets.map((target) => target.key).join("|")}`;
+}
+
 export function prefetchAllRoutes(options: PrefetchAllRoutesOptions = {}): void {
   if (!prefetchEnabled() || typeof window === "undefined") return;
-  if (scheduled) return;
 
   const hints = options.hints ?? getPerfHints();
-  if (hints.saveData) return;
+  if (hints.saveData) {
+    scheduledPlanKey = null;
+    clearScheduledStartTimer();
+    return;
+  }
 
   const settings = resolvePerformanceSettings(options.settings);
   const plan = resolveTargets(hints, settings);
-  if (!plan.targets.length) return;
+  if (!plan.targets.length) {
+    scheduledPlanKey = null;
+    clearScheduledStartTimer();
+    return;
+  }
 
   const startDelayMs = Math.max(0, Math.round(options.startDelayMs ?? plan.startDelayMs));
-  scheduled = true;
+  const planKey = buildPlanKey(plan.targets, plan.mode, startDelayMs);
+  if (scheduledPlanKey === planKey) return;
+  scheduledPlanKey = planKey;
+  clearScheduledStartTimer();
 
   const start = () => {
+    scheduledStartTimer = null;
+    scheduledPlanKey = null;
     if (plan.mode === "parallel") {
       runParallel(plan.targets);
       return;
@@ -135,11 +162,12 @@ export function prefetchAllRoutes(options: PrefetchAllRoutesOptions = {}): void 
     return;
   }
 
-  window.setTimeout(start, startDelayMs);
+  scheduledStartTimer = window.setTimeout(start, startDelayMs);
 }
 
 export function resetRoutePrefetchForTests(): void {
-  scheduled = false;
+  scheduledPlanKey = null;
+  clearScheduledStartTimer();
   prefetchedKeys.clear();
   inFlight.clear();
 }

@@ -1,0 +1,469 @@
+# Deep Re-Audit & Bug Diagnosis Report
+
+**Date:** 2026-02-17
+**Scope:** All performance-related files (~2,800 lines across 16 files)
+**Method:** Line-by-line code review with edge-case analysis
+
+---
+
+## Bug Severity Key
+
+| Severity | Description |
+|----------|-------------|
+| 🔴 CRITICAL | Will cause incorrect behavior at runtime for a significant % of users |
+| 🟠 HIGH | Causes incorrect behavior in specific edge cases or wastes significant resources |
+| 🟡 MEDIUM | Suboptimal behavior, latent defect, or masked failure |
+| ⚪ LOW | Code smell, missed optimization, or defensive coding gap |
+
+---
+
+## Bug Inventory
+
+### 🔴 BUG-01: [classifyNetworkTier](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#124-146) — 3G Networks Classified as MINIMAL Instead of CONSTRAINED
+
+**File:** [perfHints.ts L131-133](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#L131-L133)
+
+```typescript
+if (values.effectiveType === "slow-2g" || values.effectiveType === "2g" || values.effectiveType === "3g") {
+  return "MINIMAL";  // ← BUG: 3G is NOT the same severity as 2G
+}
+```
+
+**Root cause:** 3G is lumped with `slow-2g` and `2g`, all returning `"MINIMAL"`.
+
+**Actual behavior:** A user on 3G (which can do 1-14 Mbps, 100-500ms RTT) gets the same MINIMAL treatment as a user on 2G (which is ~0.1 Mbps). This means:
+- Poll interval: 6,000ms minimum (3× base)
+- Prefetch: **completely disabled** (count=0, mode=none)
+- WS reconnect delay: 2× base, clamped 1500-6000ms
+- Retry count: 3
+
+**Expected behavior:** 3G should return `"CONSTRAINED"` (poll 4000ms, prefetch 3 sequential with 5s delay, retry 3). `slow-2g` and `2g` should remain `"MINIMAL"`.
+
+**Impact:** Millions of users globally on 3G networks get an overly degraded experience — no prefetching at all and 6s poll minimums when their network could handle 4s polls and 3 prefetch chunks.
+
+**Fix:**
+```diff
+-if (values.effectiveType === "slow-2g" || values.effectiveType === "2g" || values.effectiveType === "3g") {
+-  return "MINIMAL";
++if (values.effectiveType === "slow-2g" || values.effectiveType === "2g") {
++  return "MINIMAL";
++}
++if (values.effectiveType === "3g") {
++  return "CONSTRAINED";
+ }
+```
+
+---
+
+### 🔴 BUG-02: [cacheIndexAndAssets](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/sw.ts#76-94) — Response Body Consumed Before Cache Put
+
+**File:** [sw.ts L76-93](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/sw.ts#L76-L93)
+
+```typescript
+async function cacheIndexAndAssets(cache: Cache): Promise<void> {
+  const htmlResponse = await fetch("/index.html", { cache: "no-store" }).catch(() => null);
+  // ...
+  await cache.put("/index.html", htmlResponse.clone());  // L81: clones and caches ✅
+
+  const html = await htmlResponse.text();  // L83: consumes the ORIGINAL body ⚠️
+  // ...
+  // htmlResponse body is now consumed; but that's OK because we already cloned above.
+}
+```
+
+**Assessment:** On closer review this is actually **not a bug** — `clone()` is called on L81 before [text()](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/hooks/use-auth.tsx#59-71) on L83, and only the clone is put in cache while the original is consumed by [text()](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/hooks/use-auth.tsx#59-71). This pattern is correct. **False positive.**
+
+---
+
+### 🔴 BUG-03: `use-websocket` — [computeWsReconnectDelayMs](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#545-562) Called Without Current Hints
+
+**File:** [use-websocket.tsx L114](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/hooks/use-websocket.tsx#L114)
+
+```typescript
+const nextAttemptDelay = computeWsReconnectDelayMs(attemptsSoFar, reconnectInterval);
+```
+
+**Root cause:** [computeWsReconnectDelayMs](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#545-562) has 3 parameters: [(attempt, baseMs, hints?)](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/secureCache.ts#239-276). When [hints](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#209-224) is omitted, the function calls [getPerfHints()](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#278-282) which always creates a fresh snapshot. This works correctly.
+
+**But:** The `reconnectInterval` value captured in the [connect](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#523-526) closure (L133 deps) is the value from the **initial render** of [LiveUpdatesProvider](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/live/LiveUpdatesProvider.tsx#21-64). When [usePerfHints()](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#283-286) re-evaluates and [wsReconnectBaseDelayMs()](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#527-544) returns a new base delay, the `reconnectInterval` prop changes, causing [connect](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#523-526) to be rebuilt. However, any **active** [onclose](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/hooks/use-websocket.tsx#100-124) handler still holds the **old** [connect](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#523-526) closure — the old `reconnectInterval` is used for the in-flight reconnect attempt.
+
+**Impact:** If network conditions change mid-reconnect-cycle (e.g., user switches from WiFi to 4G), the reconnect delay calculation uses the stale initial interval, not the updated one. The delay is recalculated using old `reconnectInterval` values.
+
+**Severity reclassified:** 🟠 HIGH — Only triggers during active reconnection when network tier also changes simultaneously. Uncommon but real.
+
+---
+
+### 🟠 BUG-04: [classifyDeviceTier](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#147-162) — Unreachable Line 160
+
+**File:** [perfHints.ts L147-161](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#L147-L161)
+
+```typescript
+function classifyDeviceTier(values) {
+  const memory = values.deviceMemoryGB;
+  const cores = values.hardwareConcurrency;
+
+  if (memory == null && cores == null) return "FAST";              // L154
+  if ((memory != null && memory < 2) || (cores != null && cores < 2)) return "MINIMAL";  // L155
+  if ((memory == null || memory >= 8) && (cores == null || cores >= 8)) return "INSTANT"; // L156
+  if ((memory == null || memory >= 4) && (cores == null || cores >= 4)) return "FAST";    // L157
+  if ((cores != null && cores >= 4) && (memory != null && memory >= 2)) return "MODERATE"; // L158
+  if ((memory != null && memory >= 2) || (cores != null && cores >= 2)) return "CONSTRAINED"; // L159
+  return "MODERATE";  // L160 — UNREACHABLE
+}
+```
+
+**Proof:** After L154 excludes [(null, null)](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/secureCache.ts#239-276), and L155 excludes `<2`, all remaining values have at least one non-null metric ≥2. L159 catches `memory >= 2 || cores >= 2`, which covers all remaining cases. L160 is dead code.
+
+**Impact:** Not a runtime bug, but misleading — the fallback `"MODERATE"` is never returned.
+
+---
+
+### 🟠 BUG-05: [refreshPerfHints](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#254-264) — Always Replaces Snapshot Even When Equal
+
+**File:** [perfHints.ts L254-263](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#L254-L263)
+
+```typescript
+export function refreshPerfHints(): PerfHints {
+  const next = createPerfHints();
+  if (!hintsAreEqual(next, perfHintsSnapshot)) {
+    perfHintsSnapshot = next;      // different → replace + notify ✅
+    notifyPerfHintListeners();
+  } else {
+    perfHintsSnapshot = next;      // same → still replace ⚠️
+  }
+  return perfHintsSnapshot;
+}
+```
+
+**Root cause:** The `else` branch replaces the snapshot reference even though values are equal. This means `useSyncExternalStore` sees a new object identity on every call to [getPerfHints()](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#278-282).
+
+**Impact:** [getPerfHints()](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#278-282) is called from:
+- [queryClient.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/queryClient.ts) L148: inside [retry()](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/queryClient.ts#146-150) — called on every failed query retry
+- [queryPersistence.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/queryPersistence.ts) L154: inside [getQueryPersistHydrateTimeoutMs()](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/queryPersistence.ts#152-159)
+- [recommendedPollIntervalMs()](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#563-569) default param
+
+Every call creates a new object. **However**, `useSyncExternalStore` uses the [getHintsSnapshot](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#273-277) function (L273-276) which returns the current `perfHintsSnapshot`. If [getPerfHints()](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#278-282) is not called from within React render (which it isn't — it's only used outside of hooks), the snapshot replacement doesn't trigger extra renders. But it does create unnecessary garbage.
+
+**Fix:**
+```diff
+  } else {
+-   perfHintsSnapshot = next;
++   // No change — keep existing reference.
+  }
+```
+
+---
+
+### 🟠 BUG-06: [QuotesProvider](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/live/QuotesProvider.tsx#97-375) — `scheduleFlush` Captures Stale `quoteFlushMs`
+
+**File:** [QuotesProvider.tsx L171-175](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/live/QuotesProvider.tsx#L171-L175)
+
+```typescript
+const scheduleFlush = useCallback(() => {
+  pendingFlushRef.current = true;
+  if (flushTimerRef.current !== null) return;
+  flushTimerRef.current = window.setTimeout(flushNow, quoteFlushMs);  // ← captures quoteFlushMs
+}, [flushNow, quoteFlushMs]);  // ← recalculated when quoteFlushMs changes
+```
+
+**Root cause:** When `quoteFlushMs` changes (e.g., tier changes → new flush interval), the `scheduleFlush` callback is recreated. But if a flush timer is **already scheduled** from the old closure, it fires with the **old** delay. The guard `if (flushTimerRef.current !== null) return` prevents a new timer from being set with the new interval.
+
+**Scenario:** User on WiFi (INSTANT → 50ms flush). Network degrades to 3G. New `quoteFlushMs` = 1000ms. But the already-scheduled 50ms timer fires first. After it fires, the next `scheduleFlush` call uses the correct 1000ms. The opposite case (slow → fast) is worse: the user waits up to 1000ms for a flush that should now complete in 50ms.
+
+**Impact:** One stale flush interval per tier transition. Low practical impact but correctness issue.
+
+**Fix:** When `quoteFlushMs` changes, cancel the existing timer and reschedule:
+```typescript
+useEffect(() => {
+  if (flushTimerRef.current !== null && pendingFlushRef.current) {
+    window.clearTimeout(flushTimerRef.current);
+    flushTimerRef.current = window.setTimeout(flushNow, quoteFlushMs);
+  }
+}, [quoteFlushMs, flushNow]);
+```
+
+---
+
+### 🟠 BUG-07: [prefetchAllRoutes](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/routePrefetch.ts#111-140) — `scheduled` Flag Never Resets, Blocks Re-Prefetch
+
+**File:** [routePrefetch.ts L113-123](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/routePrefetch.ts#L111-L123)
+
+```typescript
+export function prefetchAllRoutes(options) {
+  if (!prefetchEnabled() || typeof window === "undefined") return;
+  if (scheduled) return;  // ← once true, never false again
+  // ...
+  scheduled = true;
+```
+
+But in [AuthenticatedShell.tsx](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/AuthenticatedShell.tsx):
+```typescript
+useEffect(() => {
+  prefetchAllRoutes({ hints: perfHints, settings: perfSettings, startDelayMs });
+}, [perfHints, perfSettings]);  // ← re-runs every time hints/settings change
+```
+
+**Root cause:** `scheduled = true` is set on first call and never reset. When `perfHints` or `perfSettings` change (e.g., user comes online after being offline, or admin changes settings), the `useEffect` re-runs, calls [prefetchAllRoutes](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/routePrefetch.ts#111-140) again, but the `scheduled` guard blocks it.
+
+**Impact:** If a user starts on a slow network (CONSTRAINED → 3 chunks), then upgrades to fast WiFi (INSTANT → 9 parallel), the remaining 6 chunks are never prefetched. The tier-aware prefetching only applies to the **first** call.
+
+**Fix:** Either (a) track which chunks were already prefetched and only prefetch new ones, or (b) reset `scheduled` when the plan changes materially.
+
+---
+
+### 🟠 BUG-08: [pollIntervalForTier](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#378-409) + [tierPollIntervalMs](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#442-452) — Double [resolvePerformanceSettings](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#295-377) Call
+
+**File:** [perfHints.ts L442-451](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#L442-L451)
+
+```typescript
+export function tierPollIntervalMs(baseMs, hints, settingsInput) {
+  const settings = resolvePerformanceSettings(settingsInput);  // 1st resolve
+  const configuredBase = clamp(Math.round(baseMs || settings.restFallbackPollMs), 100, 60_000);
+  const hasSettingsInput = Boolean(settingsInput && typeof settingsInput === "object");
+  return pollIntervalForTier(hints.networkTier, configuredBase, hasSettingsInput ? settingsInput : undefined);
+  //                                                            ↑ passes raw settingsInput
+}
+
+export function pollIntervalForTier(tier, baseMs, settingsInput) {
+  const normalizedTier = normalizeTier(tier);
+  const base = clamp(Math.round(baseMs), 100, 60_000);
+  const settings = resolvePerformanceSettings(settingsInput);  // 2nd resolve ⚠️
+```
+
+**Root cause:** [resolvePerformanceSettings(settingsInput)](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#295-377) is called twice — once in [tierPollIntervalMs](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#442-452) and once in [pollIntervalForTier](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#378-409). Same for [tierFlushIntervalMs](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#453-465) → [flushIntervalForTier](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#410-441). This is ~50 property accesses + clamps × 2 per call.
+
+**Impact:** Performance waste. Not a correctness bug, but every poll interval computation does double the work. With 4 polling hooks, each calling this on every render, that's 8 unnecessary [resolvePerformanceSettings](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#295-377) calls per render cycle.
+
+---
+
+### 🟡 BUG-09: [classifyNetworkTier](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#124-146) — Asymmetric Boundary Between FAST and MODERATE
+
+**File:** [perfHints.ts L139-141](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#L139-L141)
+
+```typescript
+if (rtt != null && downlink != null && rtt < 150 && downlink > 5) return "FAST";       // L139
+if ((rtt != null && rtt > 350) || (downlink != null && downlink < 1.5)) return "CONSTRAINED"; // L140
+if ((rtt != null && rtt >= 150) || (downlink != null && downlink <= 5)) return "MODERATE";     // L141
+```
+
+**Edge case:** `rtt=150, downlink=6` → 
+- L139: `rtt < 150` false (rtt === 150) → skip
+- L140: `rtt > 350` false → check downlink `< 1.5` false → skip  
+- L141: `rtt >= 150` true → **MODERATE**
+
+But `rtt=149, downlink=6`:
+- L139: `rtt < 150` true AND `downlink > 5` true → **FAST**
+
+**Result:** The boundary is `rtt < 150` for FAST but `rtt >= 150` for MODERATE — exactly on the boundary (rtt=150) is MODERATE. This is technically correct but creates a hard cliff: 149ms → FAST (500ms poll), 150ms → MODERATE (1500ms poll, 3× jump).
+
+**Suggestion:** Consider a graduated overlap zone (e.g., 100-200ms RTT range).
+
+---
+
+### 🟡 BUG-10: `use-performance-settings` — Reads from `/api/global-settings` but PerformanceSettings Fields Don't Exist
+
+**File:** [use-performance-settings.ts L10-19](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/hooks/use-performance-settings.ts#L10-L19)
+
+```typescript
+const query = useQuery({
+  queryKey: ["/api/global-settings"],
+  staleTime: 30_000,
+  refetchOnWindowFocus: false,
+});
+
+return useMemo(() => {
+  if (!query.data) return DEFAULT_PERFORMANCE_SETTINGS;
+  return resolvePerformanceSettings(query.data);  // ← query.data has no perf fields
+}, [query.data]);
+```
+
+**Root cause:** The `/api/global-settings` endpoint currently returns settings like `localeSuffix`, `supportedLanguages`, etc. — none of the [PerformanceSettings](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#7-25) fields (`restFallbackPollMs`, `pollInstantMs`, etc.) exist in the response. [resolvePerformanceSettings()](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#295-377) tolerates missing fields via [numOrNull(candidate.xxx) ?? default](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#106-110), so it always returns defaults.
+
+**Impact:** Currently zero — defaults are correct. But it's misleading because:
+1. Every consumer file imports and passes `performanceSettings` as if it's dynamic
+2. It creates the false impression that admin-configured values are being used
+3. There's a 30s `staleTime` refetch cycle for data that's never read
+
+---
+
+### 🟡 BUG-11: [LiveUpdatesProvider](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/live/LiveUpdatesProvider.tsx#21-64) — `reconnectInterval` and `reconnectAttempts` Change on Every Tier Change, Tearing Down Active WS
+
+**File:** [LiveUpdatesProvider.tsx L25-34](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/live/LiveUpdatesProvider.tsx#L25-L34)
+
+```typescript
+const hints = usePerfHints();                                    // reactive
+const performanceSettings = usePerformanceSettings();             // reactive
+const reconnectInterval = wsReconnectBaseDelayMs(hints, performanceSettings);
+const reconnectAttempts = wsReconnectAttempts(performanceSettings);
+
+const { isConnected, sendMessage } = useWebSocket(wsUrl, {
+  enabled: isAuthenticated,
+  reconnectInterval,    // ← new value every tier change
+  reconnectAttempts,    // ← new value every tier change
+```
+
+And in [use-websocket.tsx](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/hooks/use-websocket.tsx) L161:
+```typescript
+}, [clearReconnectTimer, connect, enabled]);  // connect changes when reconnectInterval changes
+```
+
+**Root cause:** When [usePerfHints()](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#283-286) returns a new tier (e.g., network fluctuation), `reconnectInterval` changes, which changes the [connect](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#523-526) callback (in deps), which triggers the `useEffect` cleanup → `socketRef.current.close()` → `socketRef.current = null` → re-[connect()](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#523-526).
+
+**Impact:** A **healthy, connected** WebSocket gets **torn down and reconnected** every time the performance tier changes. If the user's network fluctuates (e.g., between WiFi and cellular), the WS is repeatedly disconnected and reconnected.
+
+**Fix:** `reconnectInterval` and `reconnectAttempts` should be stored in refs so they don't trigger reconnection:
+```typescript
+// use-websocket.tsx: store in refs, don't put in deps
+const reconnectIntervalRef = useRef(reconnectInterval);
+useEffect(() => { reconnectIntervalRef.current = reconnectInterval; }, [reconnectInterval]);
+```
+
+---
+
+### 🟡 BUG-12: SW `/assets/` Fetch Handler — No Error Handling for Network Failure
+
+**File:** [sw.ts L207-220](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/sw.ts#L207-L220)
+
+```typescript
+if (url.pathname.startsWith("/assets/")) {
+  event.respondWith(
+    (async () => {
+      const cache = await caches.open(CACHE_NAME);
+      const cached = await cache.match(event.request);
+      if (cached) return cached;
+      const response = await fetch(event.request);  // ← No try/catch
+      if (isCacheableResponse(response, event.request.url)) {
+        await cache.put(event.request, response.clone());
+      }
+      return response;
+    })(),
+  );
+```
+
+**Root cause:** If [fetch(event.request)](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#41-46) throws (e.g., user is offline and asset isn't cached), the async IIFE rejects, and `respondWith` receives a rejected promise. The browser shows an ERR_FAILED page.
+
+**Impact:** Offline users who navigate to a page whose JS chunk wasn't pre-cached see a browser error instead of a graceful fallback.
+
+**Fix:**
+```typescript
+const response = await fetch(event.request).catch(() => null);
+if (!response) {
+  return new Response("Asset unavailable offline", { status: 503 });
+}
+```
+
+---
+
+### 🟡 BUG-13: [AuthenticatedShell](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/AuthenticatedShell.tsx#91-140) — [prefetchAllRoutes](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/routePrefetch.ts#111-140) Called Before LiveUpdatesProvider Mounts
+
+**File:** [AuthenticatedShell.tsx L102-106, L114-137](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/AuthenticatedShell.tsx#L91-L140)
+
+```typescript
+export default function AuthenticatedShell() {
+  // ...
+  useEffect(() => {
+    prefetchAllRoutes({ hints: perfHints, settings: perfSettings, startDelayMs });
+  }, [perfHints, perfSettings]);  // L102-106: fires immediately
+
+  return (
+    <LiveUpdatesProvider>     {/* L115: mounts AFTER the effect */}
+      <QuotesProvider>
+```
+
+**Root cause:** The `useEffect` on L102 fires during the commit phase, **before** children render. This means [prefetchAllRoutes](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/routePrefetch.ts#111-140) starts loading route chunks at the same time as the WebSocket connection, symbol fetches, and initial data queries. On slow networks (where `startDelayMs=0` for INSTANT/FAST tiers), this creates a thundering herd of simultaneous network requests.
+
+**Impact:** On INSTANT/FAST tiers (delay=0), route prefetch happens simultaneously with critical data loading, potentially starving the WS connection and initial quote/trade data of bandwidth. The `startDelayMs` mitigation only applies to CONSTRAINED/MINIMAL tiers.
+
+**Suggestion:** For FAST tier, consider adding a small delay (e.g., 2 seconds) so critical data loads first.
+
+---
+
+### ⚪ BUG-14: [normalizeTier](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#115-123) — Defaults to MINIMAL Instead of MODERATE
+
+**File:** [perfHints.ts L115-122](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#L115-L122)
+
+```typescript
+function normalizeTier(tier: string | null | undefined): PerformanceTier {
+  const normalized = String(tier || "").trim().toUpperCase();
+  if (normalized === "INSTANT") return "INSTANT";
+  if (normalized === "FAST") return "FAST";
+  if (normalized === "MODERATE") return "MODERATE";
+  if (normalized === "CONSTRAINED") return "CONSTRAINED";
+  return "MINIMAL";  // ← Defaults to most restrictive tier
+}
+```
+
+**Root cause:** [normalizeTier](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#115-123) is used in [pollIntervalForTier](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#378-409) and [flushIntervalForTier](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#410-441) to sanitize the tier string. If an invalid tier is passed (e.g., typo, null), it defaults to `"MINIMAL"` — the most punishing tier. This is a defensive-pessimistic choice.
+
+**Impact:** Very low. The function is only called with values from [PerformanceTier](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#4-5) type, which TypeScript enforces. But if ever called with bad input (e.g., from admin API), users would get 6s polls.
+
+---
+
+### ⚪ BUG-15: [classifyDeviceTier](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#147-162) — Specific Edge Case: `memory=3, cores=null`
+
+**File:** [perfHints.ts L147-161](file:///wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#L147-L161)
+
+```
+memory=3, cores=null:
+L154: (null && null) → false
+L155: (3<2) false OR (null) false → skip
+L156: (null || 3>=8) → false → skip  
+L157: (null || 3>=4) → false → skip
+L158: (null && 3>=2) → false (cores is null) → skip
+L159: (3>=2) true → CONSTRAINED
+```
+
+**Result:** A device with 3GB RAM but unknown cores is classified as `CONSTRAINED`. This seems overly pessimistic — 3GB is a mid-range phone (most Androids) and should probably be `MODERATE`.
+
+**Impact:** Many Android devices with 3GB RAM that don't expose `hardwareConcurrency` get unnecessarily degraded polling (4s min) and prefetching (3 chunks, 5s delay).
+
+---
+
+## Re-Audit: Updated Findings Status
+
+| Finding | Original Assessment | Updated Assessment | Notes |
+|---------|--------------------|--------------------|-------|
+| F1: Binary isConstrained | ✅ Done | ✅ Confirmed Done | Split into networkTier + deviceTier |
+| F2: No Continuous Scaling | ✅ Done | ✅ Confirmed Done | Full 5-tier with per-function scaling |
+| F3: WS Reconnect Ignores Library | ✅ Done | ⚠️ Done with BUG-03, BUG-11 | WS reconnects but tier changes tear down active connections |
+| F4: Static Snapshot | ✅ Done | ⚠️ Done with BUG-05, BUG-11 | Reactive but snapshot replacement creates unnecessary GC churn |
+| F5: Quote Flush Throttled | ✅ Done | ⚠️ Done with BUG-06 | Stale flush interval for one timer cycle per transition |
+| F6: One-Shot Prefetch | ✅ Done | ⚠️ Done with BUG-07 | Tier-aware but `scheduled` flag blocks re-prefetch |
+| F7: Hardcoded Hydration Timeout | ✅ Done | ✅ Confirmed Done | [tierHydrationTimeoutMs()](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#509-522) works correctly |
+| F8: SW No Chunk Pre-Cache | ✅ Done | ⚠️ Done with BUG-12 | Pre-caches but no offline fallback for uncached assets |
+| F9: Flawed Poll Intervals | ✅ Done | ✅ Confirmed Done | All hooks use [tierPollIntervalMs()](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#442-452) correctly |
+| F10: No manualChunks | ✅ Done | ✅ Confirmed Done | admin + charts-vendor + vendor split |
+| F11: Prefetch Fires on Mount | ✅ Done | ⚠️ Done with BUG-13 | Deferred on slow tiers but thunders on fast |
+| F12: staleTime Infinity + no retry | 🟡 Partial | ✅ Now Done | Tier-aware retry implemented correctly |
+
+---
+
+## Summary by Priority
+
+### Fix Immediately (Production Impact)
+
+| # | Bug | Effort |
+|---|-----|--------|
+| BUG-01 | 3G → MINIMAL instead of CONSTRAINED | 2 lines |
+| BUG-11 | WS torn down on tier change | ~15 lines (move to refs) |
+| BUG-07 | Prefetch `scheduled` flag never resets | ~10 lines |
+
+### Fix Soon (Correctness)
+
+| # | Bug | Effort |
+|---|-----|--------|
+| BUG-06 | Stale flush interval during transition | ~8 lines |
+| BUG-12 | SW asset fetch no offline fallback | ~5 lines |
+| BUG-05 | Snapshot replaced when equal | 1 line |
+| BUG-08 | Double resolvePerformanceSettings | ~10 lines refactor |
+
+### Fix When Convenient (Quality)
+
+| # | Bug | Effort |
+|---|-----|--------|
+| BUG-15 | 3GB device classified CONSTRAINED | Adjust thresholds |
+| BUG-09 | Hard cliff at RTT=150ms | Add hysteresis zone |
+| BUG-13 | Prefetch thunders with WS+data on fast tiers | Add 2s min delay |
+| BUG-14 | normalizeTier defaults to MINIMAL | Change to MODERATE |
+| BUG-04 | Unreachable L160 | Remove dead code |
+| BUG-10 | usePerformanceSettings fetches unused data | Server schema needed |

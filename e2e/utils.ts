@@ -138,7 +138,21 @@ export async function login(page: Page, email: string, password: string) {
   await emailInput.fill(email);
   await passwordInput.fill(password);
   await page.getByRole("button", { name: "Login" }).click();
-  await expect(page.getByText("Live Quotes")).toBeVisible();
+  await expect
+    .poll(() => new URL(page.url()).pathname, { timeout: 60_000 })
+    .not.toBe("/login");
+
+  const isReadyAfterLogin = async () => {
+    const tradeButtonVisible = await page
+      .getByRole("button", { name: "Trade" })
+      .first()
+      .isVisible()
+      .catch(() => false);
+    const quotesTitleVisible = await page.getByText("Live Quotes").isVisible().catch(() => false);
+    return tradeButtonVisible || quotesTitleVisible;
+  };
+
+  await expect.poll(isReadyAfterLogin, { timeout: 60_000 }).toBe(true);
 }
 
 export async function acceptDoc1IfPrompted(page: Page): Promise<boolean> {

@@ -61,6 +61,7 @@ import {
 } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
+import { mergeGlobalSettingsPerformance } from "@/lib/globalSettingsPerformance";
 import { PERFORMANCE_TIERS, flushIntervalForTier, pollIntervalForTier } from "@/lib/perfHints";
 
 interface UserSettings {
@@ -1918,21 +1919,11 @@ function SystemConfigTab() {
       setMarketPerfSettings(nextSettings);
       queryClient.setQueryData(["/api/admin/global-settings"], persisted);
       queryClient.setQueryData(["/api/global-settings"], (prev: unknown) => {
-        if (!prev || typeof prev !== "object") {
-          return {
-            ...nextSettings,
-            updatedAt: persisted.updatedAt ?? null,
-          };
-        }
-        const base = prev as Record<string, unknown>;
-        return {
-          ...base,
-          ...nextSettings,
-          updatedAt:
-            typeof persisted.updatedAt === "number"
-              ? persisted.updatedAt
-              : (base.updatedAt ?? null),
-        };
+        return mergeGlobalSettingsPerformance(
+          prev,
+          nextSettings as Record<string, unknown>,
+          persisted.updatedAt ?? null,
+        );
       });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/global-settings"] });
       queryClient.invalidateQueries({ queryKey: ["/api/global-settings"] });

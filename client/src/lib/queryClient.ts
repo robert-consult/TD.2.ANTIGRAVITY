@@ -136,6 +136,17 @@ function shouldSkipRetry(error: unknown): boolean {
   return false;
 }
 
+function resolveRetryLimit(): number {
+  if (typeof window === "undefined" || typeof navigator === "undefined") {
+    return 0;
+  }
+  try {
+    return tierRetryCount(getPerfHints());
+  } catch {
+    return 1;
+  }
+}
+
 export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
@@ -145,7 +156,7 @@ export const queryClient = new QueryClient({
       staleTime: Infinity,
       retry: (failureCount, error) => {
         if (shouldSkipRetry(error)) return false;
-        return failureCount < tierRetryCount(getPerfHints());
+        return failureCount < resolveRetryLimit();
       },
       retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 10_000),
     },

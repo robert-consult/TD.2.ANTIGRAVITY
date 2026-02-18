@@ -102,6 +102,35 @@ function writeStoredScope(scope: string): void {
   }
 }
 
+function removeStorageKey(key: string): void {
+  if (typeof localStorage === "undefined") return;
+  try {
+    localStorage.removeItem(key);
+  } catch {
+    // ignore storage delete failures
+  }
+}
+
+function rotateStoredSeed(): void {
+  if (typeof localStorage === "undefined") return;
+  try {
+    localStorage.setItem(SEED_STORAGE_KEY, randomSeedHex(32));
+  } catch {
+    // ignore storage write failures
+  }
+}
+
+async function clearServiceWorkerCaches(): Promise<void> {
+  if (typeof caches === "undefined") return;
+  try {
+    const keys = await caches.keys();
+    if (!keys.length) return;
+    await Promise.all(keys.map((key) => caches.delete(key)));
+  } catch {
+    // ignore cache storage failures
+  }
+}
+
 function openDb(dbName: string, dbVersion: number): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(dbName, dbVersion);
@@ -406,8 +435,16 @@ export async function secureDelete(store: StoreNames, key: string): Promise<void
 }
 
 export async function secureClearAll(): Promise<void> {
-  const cache = await getSecureCache();
-  await cache.clearAll();
+  try {
+    const cache = await getSecureCache();
+    await cache.clearAll();
+  } finally {
+    disposeDefaultCache();
+    defaultCacheScope = DEFAULT_SECRET_SCOPE;
+    removeStorageKey(SEED_STORAGE_KEY);
+    removeStorageKey(SCOPE_STORAGE_KEY);
+    await clearServiceWorkerCaches();
+  }
 }
 
 export function getSecureCacheScope(): string {
@@ -423,6 +460,7 @@ export async function setSecureCacheScope(scope: string): Promise<void> {
 
   writeStoredScope(normalized);
   defaultCacheScope = normalized;
+  rotateStoredSeed();
   disposeDefaultCache();
 }
 
@@ -435,5 +473,6 @@ export async function setSecureCacheUserScope(userId?: number | null): Promise<v
 export function resetSecureCacheForTests(): void {
   disposeDefaultCache();
   defaultCacheScope = DEFAULT_SECRET_SCOPE;
-  writeStoredScope(DEFAULT_SECRET_SCOPE);
+  removeStorageKey(SEED_STORAGE_KEY);
+  removeStorageKey(SCOPE_STORAGE_KEY);
 }

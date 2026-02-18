@@ -15,6 +15,10 @@ export function usePerformanceSettings(): PerformanceSettings {
 
   return useMemo(() => {
     if (!query.data) return DEFAULT_PERFORMANCE_SETTINGS;
-    return resolvePerformanceSettings(query.data);
+    const payload =
+      query.data && typeof query.data === "object"
+        ? ((query.data as Record<string, unknown>).performanceSettings ?? query.data)
+        : query.data;
+    return resolvePerformanceSettings(payload);
   }, [query.data]);
 }

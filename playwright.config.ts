@@ -27,7 +27,7 @@ export default defineConfig({
   webServer: {
     command: "npm run start:e2e",
     url: "http://127.0.0.1:5000/ready",
-    reuseExistingServer: false,
+    reuseExistingServer: process.env.PW_REUSE_EXISTING_SERVER === "1",
     timeout: 120_000,
   },
 });

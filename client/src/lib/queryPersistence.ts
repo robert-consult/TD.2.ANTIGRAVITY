@@ -17,7 +17,23 @@ export const PERSIST_QUERY_KEYS = [
   "/api/trades/open",
 ] as const;
 
+type PersistableQueryKey = (typeof PERSIST_QUERY_KEYS)[number];
+
 const PERSIST_QUERY_KEY_SET = new Set<string>(PERSIST_QUERY_KEYS);
+const ESSENTIAL_HYDRATION_KEYS = new Set<PersistableQueryKey>([
+  "/api/auth/current-user",
+  "/api/user",
+  "/api/global-settings",
+]);
+const HYDRATION_QUERY_KEYS: readonly PersistableQueryKey[] = [
+  "/api/auth/current-user",
+  "/api/user",
+  "/api/global-settings",
+  "/api/config/symbols",
+  "/api/quote-subscriptions/allowed-symbols",
+  "/api/account/summary",
+  "/api/trades/open",
+];
 
 const ONE_MINUTE = 60_000;
 const ONE_HOUR = 60 * ONE_MINUTE;
@@ -32,8 +48,6 @@ const QUERY_TTL_MS: Partial<Record<PersistableQueryKey, number>> = {
   "/api/user": ONE_DAY,
   "/api/trades/open": 5 * ONE_MINUTE,
 };
-
-type PersistableQueryKey = (typeof PERSIST_QUERY_KEYS)[number];
 
 type PersistedQueryEntry = {
   schemaVersion: number;
@@ -77,10 +91,14 @@ export class QueryPersistence {
 
   async hydrate(): Promise<void> {
     if (!queryPersistenceEnabled()) return;
-    const deadline = Date.now() + getQueryPersistHydrateTimeoutMs();
+    const hydrateBudgetMs = Math.max(
+      QUERY_PERSIST_HYDRATE_TIMEOUT_MS_DEFAULT,
+      getQueryPersistHydrateTimeoutMs(),
+    );
+    const deadline = Date.now() + hydrateBudgetMs;
 
-    for (const key of PERSIST_QUERY_KEYS) {
-      if (Date.now() > deadline) break;
+    for (const key of HYDRATION_QUERY_KEYS) {
+      if (!ESSENTIAL_HYDRATION_KEYS.has(key) && Date.now() > deadline) break;
       const row = normalizePersistedEntry(await secureGet<PersistedQueryEntry>("query-cache", key));
       if (!row) continue;
       const maxAgeMs = QUERY_TTL_MS[key];

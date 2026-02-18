@@ -47,8 +47,8 @@ function setNavigatorProfile(options: {
   saveData: boolean;
   rtt: number;
   downlink: number;
-  deviceMemoryGB: number;
-  hardwareConcurrency: number;
+  deviceMemoryGB: number | null;
+  hardwareConcurrency: number | null;
 }) {
   mockConnection.effectiveType = options.effectiveType;
   mockConnection.saveData = options.saveData;
@@ -56,11 +56,11 @@ function setNavigatorProfile(options: {
   mockConnection.downlink = options.downlink;
   Object.defineProperty(nav, "deviceMemory", {
     configurable: true,
-    value: options.deviceMemoryGB,
+    value: options.deviceMemoryGB == null ? undefined : options.deviceMemoryGB,
   });
   Object.defineProperty(nav, "hardwareConcurrency", {
     configurable: true,
-    value: options.hardwareConcurrency,
+    value: options.hardwareConcurrency == null ? undefined : options.hardwareConcurrency,
   });
 }
 
@@ -121,6 +121,7 @@ describe("perfHints", () => {
     const hints = refreshPerfHints();
     expect(hints.networkTier).toBe("INSTANT");
     expect(hints.deviceTier).toBe("CONSTRAINED");
+    expect(hints.tier).toBe("MODERATE");
     expect(hints.isNetworkConstrained).toBe(false);
     expect(hints.isDeviceConstrained).toBe(true);
   });
@@ -135,8 +136,54 @@ describe("perfHints", () => {
     emitConnectionChange();
 
     expect(listener).toHaveBeenCalledTimes(1);
-    expect(getPerfHints().networkTier).toBe("MINIMAL");
+    expect(getPerfHints().networkTier).toBe("CONSTRAINED");
     unsubscribe();
+  });
+
+  it("classifies 3g networks as constrained, not minimal", () => {
+    setNavigatorProfile({
+      effectiveType: "3g",
+      saveData: false,
+      rtt: 220,
+      downlink: 3,
+      deviceMemoryGB: 8,
+      hardwareConcurrency: 8,
+    });
+    const hints = refreshPerfHints();
+    expect(hints.networkTier).toBe("CONSTRAINED");
+  });
+
+  it("keeps 150ms RTT links in FAST tier when throughput is healthy", () => {
+    setNavigatorProfile({
+      effectiveType: "4g",
+      saveData: false,
+      rtt: 150,
+      downlink: 6,
+      deviceMemoryGB: 8,
+      hardwareConcurrency: 8,
+    });
+    const hints = refreshPerfHints();
+    expect(hints.networkTier).toBe("FAST");
+  });
+
+  it("treats 3GB devices with unknown core count as MODERATE", () => {
+    setNavigatorProfile({
+      effectiveType: "4g",
+      saveData: false,
+      rtt: 40,
+      downlink: 20,
+      deviceMemoryGB: 3,
+      hardwareConcurrency: null,
+    });
+    const hints = refreshPerfHints();
+    expect(hints.deviceTier).toBe("MODERATE");
+    expect(hints.tier).toBe("MODERATE");
+  });
+
+  it("keeps snapshot identity stable when hints are unchanged", () => {
+    const first = refreshPerfHints();
+    const second = refreshPerfHints();
+    expect(second).toBe(first);
   });
 
   it("maps poll and flush intervals by tier", () => {
@@ -152,6 +199,11 @@ describe("perfHints", () => {
     expect(flushIntervalForTier("FAST", 50)).toBe(150);
     expect(flushIntervalForTier("CONSTRAINED", 50)).toBe(500);
     expect(flushIntervalForTier("MINIMAL", 50)).toBe(1000);
+  });
+
+  it("defaults unknown tiers to MODERATE safeguards", () => {
+    expect(pollIntervalForTier("UNKNOWN" as any, 500)).toBe(1500);
+    expect(flushIntervalForTier("UNKNOWN" as any, 50)).toBe(300);
   });
 
   it("honors explicit admin tier overrides", () => {

@@ -3,6 +3,7 @@ import { acceptDoc1IfPrompted, installTradingViewStub, login, setupSlow4gMidCpuA
 
 const DEMO = { email: "demo@tradingfx.com", password: "demo1234" };
 const ADMIN = { email: "admin@local.test", password: "changeme" };
+const ADMIN_CHUNK_REGEX = /\/assets\/(?:admin|AdminDashboard)-[^/]+\.js(?:\?|$)/i;
 
 test("RUNBOOK: WS connects only when authenticated", async ({ page }) => {
   const wsUrls: string[] = [];
@@ -29,7 +30,7 @@ test("RUNBOOK: trader session does not fetch admin bundle", async ({ page }) => 
   await page.waitForTimeout(1500);
 
   const adminChunkRequests = () =>
-    audit.requests.filter((r) => r.url.includes("/assets/AdminDashboard-") && r.url.includes(".js")).length;
+    audit.requests.filter((r) => ADMIN_CHUNK_REGEX.test(r.url)).length;
   expect(adminChunkRequests()).toBe(0);
 
   // Even when a non-admin tries to hit /admin, we must not lazy-load the admin code.
@@ -46,7 +47,7 @@ test("RUNBOOK: admin bundle loads only on /admin navigation", async ({ page }) =
   await page.waitForTimeout(1500);
 
   const adminChunkRequests = () =>
-    audit.requests.filter((r) => r.url.includes("/assets/AdminDashboard-") && r.url.includes(".js")).length;
+    audit.requests.filter((r) => ADMIN_CHUNK_REGEX.test(r.url)).length;
   expect(adminChunkRequests()).toBe(0);
 
   await page.goto("/admin");

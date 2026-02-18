@@ -1,13 +1,10 @@
-import { beforeAll, describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-let rememberMe: typeof import("./rememberMe");
+vi.mock("@db", () => ({
+  db: {},
+}));
 
-beforeAll(async () => {
-  if (!process.env.DATABASE_URL) {
-    process.env.DATABASE_URL = "postgresql://test:test@127.0.0.1:5432/test";
-  }
-  rememberMe = await import("./rememberMe");
-});
+import * as rememberMe from "./rememberMe";
 
 describe("rememberMe helpers", () => {
   it("encodes and decodes cookie values", () => {

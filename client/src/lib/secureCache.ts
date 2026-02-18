@@ -8,6 +8,7 @@ const STORE_NAMES = ["query-cache", "user-state", "e2ee-keys"] as const;
 const DEFAULT_SECRET_SCOPE = "app";
 const SEED_STORAGE_KEY = "tq.secure-cache.seed.v1";
 const SCOPE_STORAGE_KEY = "tq.secure-cache.scope.v1";
+const OWNED_CACHE_PREFIXES = ["tq-"] as const;
 
 export type StoreNames = (typeof STORE_NAMES)[number];
 
@@ -125,7 +126,11 @@ async function clearServiceWorkerCaches(): Promise<void> {
   try {
     const keys = await caches.keys();
     if (!keys.length) return;
-    await Promise.all(keys.map((key) => caches.delete(key)));
+    const ownedKeys = keys.filter((key) =>
+      OWNED_CACHE_PREFIXES.some((prefix) => key.startsWith(prefix)),
+    );
+    if (!ownedKeys.length) return;
+    await Promise.all(ownedKeys.map((key) => caches.delete(key)));
   } catch {
     // ignore cache storage failures
   }

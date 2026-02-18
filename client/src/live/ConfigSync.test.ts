@@ -61,4 +61,19 @@ describe("mergeGlobalSettingsPerformance", () => {
     expect(next.performanceSettings).toEqual({ restFallbackPollMs: 1200 });
     expect(next.updatedAt).toBe(2000);
   });
+
+  it("drops unknown performance keys from incoming patches", () => {
+    const next = mergeGlobalSettingsPerformance(
+      { performanceSettings: { restFallbackPollMs: 500 } },
+      {
+        restFallbackPollMs: 900,
+        unknownKey: "ignored",
+        "__proto__": { polluted: true },
+      },
+      2000,
+    );
+
+    expect(next.performanceSettings).toEqual({ restFallbackPollMs: 900 });
+    expect((next.performanceSettings as any).unknownKey).toBeUndefined();
+  });
 });

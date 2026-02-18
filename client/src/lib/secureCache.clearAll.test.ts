@@ -26,7 +26,7 @@ describe("secure cache clear/scope hardening", () => {
 
   it("clears secure seed/scope and service-worker caches on secureClearAll", async () => {
     const deleteSpy = vi.fn(async () => true);
-    const keysSpy = vi.fn(async () => ["tq-shell-v-a", "tq-shell-v-b"]);
+    const keysSpy = vi.fn(async () => ["tq-shell-v-a", "workbox-precache-v2", "tq-shell-v-b"]);
     (globalThis as any).caches = {
       keys: keysSpy,
       delete: deleteSpy,
@@ -42,6 +42,7 @@ describe("secure cache clear/scope hardening", () => {
     expect(keysSpy).toHaveBeenCalledTimes(1);
     expect(deleteSpy).toHaveBeenCalledWith("tq-shell-v-a");
     expect(deleteSpy).toHaveBeenCalledWith("tq-shell-v-b");
+    expect(deleteSpy).not.toHaveBeenCalledWith("workbox-precache-v2");
   });
 
   it("rotates the local seed when switching cache scopes", async () => {

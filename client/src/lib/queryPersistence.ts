@@ -20,15 +20,16 @@ export const PERSIST_QUERY_KEYS = [
 type PersistableQueryKey = (typeof PERSIST_QUERY_KEYS)[number];
 
 const PERSIST_QUERY_KEY_SET = new Set<string>(PERSIST_QUERY_KEYS);
-const ESSENTIAL_HYDRATION_KEYS = new Set<PersistableQueryKey>([
+// Keep a single ordered source for hydration priority so essential keys
+// cannot drift behind non-essential keys by mistake.
+const ESSENTIAL_HYDRATION_KEYS_IN_ORDER: readonly PersistableQueryKey[] = [
   "/api/auth/current-user",
   "/api/user",
   "/api/global-settings",
-]);
+];
+const ESSENTIAL_HYDRATION_KEYS = new Set<PersistableQueryKey>(ESSENTIAL_HYDRATION_KEYS_IN_ORDER);
 const HYDRATION_QUERY_KEYS: readonly PersistableQueryKey[] = [
-  "/api/auth/current-user",
-  "/api/user",
-  "/api/global-settings",
+  ...ESSENTIAL_HYDRATION_KEYS_IN_ORDER,
   "/api/config/symbols",
   "/api/quote-subscriptions/allowed-symbols",
   "/api/account/summary",

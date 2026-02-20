@@ -1,0 +1,272 @@
+# Deep System Audit – Verification Report
+## Signup, Login & Legal Compliance
+
+*Verification Pass: 2026-02-19*
+
+---
+
+## 1. Original Bug Fix Status
+
+### ✅ Fully Fixed (11 of 14)
+
+| Bug ID | Description | Fix Evidence |
+|--------|-------------|-------------|
+| **BUG-001** | Login missing `recordLoginAttempt` on non-RememberMe success | Now **unconditional** at [routes.ts:L1000](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\server\routes.ts#L1000) – called for all successful logins |
+| **BUG-002** | Registration grift `eventType: "LOGIN_SUCCESS"` | Changed to `"SIGNUP_SUCCESS"` at [routes.ts:L1430](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\server\routes.ts#L1430) |
+| **BUG-003** | `current-user` hardcoded `legalReacceptBlocked: false` | New [loadLegalReacceptState()](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\server\routes.ts#L1586-L1631) does live `computeDoc1ReacceptStatus()` + `upsertDoc1ReacceptRequirement()` on every call |
+| **BUG-005** | `coverageGate.ts` uses `@ts-nocheck` | **Completely rewritten** — [coverageGate.ts](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\server\legal\coverageGate.ts) now 227 lines, fully typed, clean logic with `checkTermsAvailabilityInternal()` |
+| **BUG-006** | CSRF `SameSite=none` env var breaks double-submit | [csrf.ts:L76-88](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\server\security\csrf.ts#L76-L88) — `none` now rejected with console error, forced to `lax`. Also validated at startup with `process.exit(1)` in [index.ts:L100-103](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\server\index.ts#L100-L103) |
+| **BUG-007** | Jurisdiction guard fails open on error | **Rewritten** — [jurisdictionSessionGuard.ts:L95-103](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\server\middleware\jurisdictionSessionGuard.ts#L95-L103) now fails **closed** with `session.destroy()` + 503 `JURISDICTION_GUARD_ERROR` |
+| **BUG-008** | Email token SHA-256 fallback without HMAC | **Extracted** to [emailVerificationToken.ts](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\server\security\emailVerificationToken.ts) — throws `EMAIL_VERIFY_TOKEN_SECRET_MISSING` if unset, enforces 32-char minimum. Startup validation blocks production without it ([index.ts:L107-118](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\server\index.ts#L107-L118)) |
+| **BUG-010** | Registration rollback race condition | **Fixed** — user creation + legal acceptance now wrapped in **single atomic `db.transaction()`** at [routes.ts:L1231-1257](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\server\routes.ts#L1231-L1257). `recordDoc1Acceptance` accepts `tx` parameter |
+| **BUG-011** | `phoneRequired` hardcoded to `true` | Now reads `Boolean(signupCfg.signupPhoneEnforce)` at [routes.ts:L1191](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\server\routes.ts#L1191) |
+| **BUG-012** | Duplicate `hasGlobal` check in coverageGate | Eliminated in rewrite — single `hasActiveTarget("DOC1", ...)` call at L131, then `checkTermsAvailabilityInternal()` at L147; no duplicated query |
+| **BUG-014** | Impersonation guard audit gap | Impersonation guard now includes full session context via jurisdiction guard integration |
+
+---
+
+### ⚠️ Partially Fixed (2 of 14)
+
+#### BUG-004: Slider Captcha TOCTOU Race → **Partially Fixed**
+
+**What was fixed:** A `sliderConsumeLocks` in-memory map (L13+L92-99 in [captcha.ts](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\server\security\captcha.ts)) now prevents concurrent consumption via a 10-second lock key. The `consumedAtMs` is set and the slider is nullified after use.
+
+**What remains:** The consume-lock is per-process. In a multi-process/cluster deployment (e.g., `SERVER_REUSE_PORT=1`, L390-396 in index.ts), each process has its own `sliderConsumeLocks` Map, so a slider solved on process A could be consumed on process B. This is a low-probability vector but remains architecturally open.
+
+#### BUG-009: Legal Re-accept Stale Between Logins → **Partially Fixed**
+
+**What was fixed:** The `current-user` endpoint now calls `computeDoc1ReacceptStatus()` **live** on every request (L1594), which means the status updates every time the client polls. The `upsertDoc1ReacceptRequirement()` call persists the result.
+
+**What remains:** There is still **no event-driven push mechanism** (e.g., cron job, pub/sub) for when an admin publishes new terms. Users will see the re-acceptance prompt only when their client polls `current-user`, which depends on navigation events or query refetch intervals.
+
+---
+
+### ❌ Still Open (1 of 14)
+
+#### BUG-013: Slider Captcha TTL Mismatch → **Still Open**
+
+```
+SLIDER_CAPTCHA_ISSUE_TTL_MS = 2 * 60 * 1000;   // 2 minutes
+SLIDER_CAPTCHA_VERIFY_TTL_MS = 10 * 60 * 1000;  // 10 minutes
+```
+
+The `issuedAtMs` check was removed from the consumption path (now only `verifiedAtMs` TTL is checked at L77), but the `SLIDER_CAPTCHA_ISSUE_TTL_MS` constant is still exported and used in the slider verification endpoint. If a user takes > 2 minutes to solve the captcha after issuance, the **verification** will fail, even though the intent is for users to have a 10-minute window. The TTL semantics remain confusing between "time to solve" vs "time to submit after solving".
+
+---
+
+## 2. Design Concern Status
+
+| Concern | Status | Notes |
+|---------|--------|-------|
+| **DESIGN-001**: `routes.ts` monolith (6220 lines) | ❌ Still open | Still monolithic |
+| **DESIGN-002**: Grace period duplicated 4× | ❌ Still open | Same 4 occurrences (L975-980, L1649-1654, L1704-1709, L1474-1478) |
+| **DESIGN-003**: Current-user primary/fallback duplication | ❌ Still open | Two ~35-line blocks (L1657-1691 and L1712-1745) |
+| **DESIGN-004**: Bot assessment outside transaction | ⚪ Acceptable | By design — availability over strict atomicity |
+| **DESIGN-005**: No explicit login rate limiter | ❌ Still open | No `express-rate-limit` or equivalent on login endpoint |
+| **DESIGN-006**: Legal acceptance `ledgerSeq` concurrency | ⚪ Mitigated | Now inside transaction (via `tx` parameter), but isolation level not explicitly set to `SERIALIZABLE` |
+
+---
+
+## 3. Newly Discovered Issues
+
+### NEW-001: `index.ts` Uses `@ts-nocheck` Globally
+
+| Attribute | Value |
+|-----------|-------|
+| **Severity** | 🔴 Critical |
+| **File** | [index.ts:L1](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\server\index.ts#L1) |
+
+The server entrypoint file starts with `// @ts-nocheck`, disabling TypeScript checking for the entire 630-line file. This file handles:
+- Environment variable validation (the very thing protecting against missing secrets)
+- Session configuration and express setup
+- Transport security headers (HSTS, HTTPS enforcement)
+- Application initialization and bootstrapping
+
+**Impact:** Any type error in the entrypoint, transport headers, or env validation logic will silently pass compilation. This is the same class of issue as BUG-005 (coverageGate), which was correctly fixed.
+
+---
+
+### NEW-002: SMS OTP Hash Falls Back to Unsecured SHA-256
+
+| Attribute | Value |
+|-----------|-------|
+| **Severity** | 🟠 High |
+| **File** | [verification.ts:L37-43](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\server\routes\verification.ts#L37-L43) |
+
+```typescript
+function hashOtp(code: string): string {
+  const secret = process.env.SMS_OTP_SECRET || process.env.TWILIO_AUTH_TOKEN;
+  if (!secret) {
+    return crypto.createHash("sha256").update(code).digest("hex");  // ⚠️ unsecured
+  }
+  return crypto.createHmac("sha256", secret).update(code).digest("hex");
+}
+```
+
+This is the exact same pattern as BUG-008 (email verification token), which was properly fixed with a dedicated module that throws on missing secret. The OTP hash function silently degrades to plain SHA-256 when both `SMS_OTP_SECRET` and `TWILIO_AUTH_TOKEN` are unset.
+
+**Impact:** OTP codes are 6-digit numeric. A plain SHA-256 of a 6-digit code can be rainbow-tabled trivially (only 1,000,000 possible inputs). With HMAC, the secret prevents offline grinding.
+
+> [!NOTE]
+> The startup validation in `index.ts` (L134-143) does add warnings for missing Twilio config, but only **warnings** — it does not fail-fast like the email verification secret does.
+
+---
+
+### NEW-003: OTP Verification Uses Non-Timing-Safe Comparison
+
+| Attribute | Value |
+|-----------|-------|
+| **Severity** | 🟡 Medium |
+| **File** | [verification.ts:L836](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\server\routes\verification.ts#L836) |
+
+```typescript
+if (hashOtp(code) !== otpRow.otpHash) {
+```
+
+The OTP hash comparison uses JavaScript's `!==` operator, which is vulnerable to timing side-channel attacks. Compare with `cryptoUtils.ts` which correctly uses `crypto.timingSafeEqual()` for HMAC comparisons. For OTP codes (6-digit, small keyspace), the practical risk is lower than for tokens, but the fix is trivial: use `timingSafeEqual`.
+
+---
+
+### NEW-004: `current-user` Calls `recalcAccount()` on Every Request
+
+| Attribute | Value |
+|-----------|-------|
+| **Severity** | 🟡 Medium (Performance) |
+| **File** | [routes.ts:L1637-1638](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\server\routes.ts#L1637-L1638) |
+
+```typescript
+const { recalcAccount } = await import('./recalcAccount');
+await recalcAccount(user.id);
+```
+
+Every `current-user` poll (triggered by TanStack Query refetching) dynamically imports and fully recalculates account metrics. This means:
+1. **Dynamic import on every call** — `import()` is cached by Node.js module system, so the actual import cost is minimal after first call. But the pattern is unusual.
+2. **Full account recalculation** — depending on what `recalcAccount` does (likely equity/margin/PnL), this could be an expensive operation run on every navigation event or polling interval.
+
+**Impact:** Under high concurrency, this could create unnecessary DB load. Consider throttling recalculation (e.g., once per 30 seconds per user).
+
+---
+
+### NEW-005: Login Response Leaks Account Status to Unauthenticated Callers
+
+| Attribute | Value |
+|-----------|-------|
+| **Severity** | 🟡 Medium |
+| **File** | [routes.ts:L796-838](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\server\routes.ts#L796-L838) |
+
+After verifying credentials, the login endpoint returns distinct error messages for different account states:
+- `"Account has been deleted."` with code `ACCOUNT_DELETED` (L807)
+- `"Account is disabled. Please contact support."` (L821)
+- `"Account is frozen. Please contact support."` with `freezeReasonCode` (L835-838)
+
+An attacker who has compromised credentials (e.g., via credential stuffing) can distinguish between deleted, disabled, and frozen accounts. The `freezeReasonCode` is particularly sensitive as it may reveal internal enforcement categorization.
+
+**Recommendation:** Return a uniform error message (e.g., `"Account is unavailable"`) for all non-active account states, or at minimum do not include `freezeReasonCode` in the response body.
+
+---
+
+### NEW-006: `loadLegalReacceptState` Silently Degrades on `computeDoc1ReacceptStatus` Failure
+
+| Attribute | Value |
+|-----------|-------|
+| **Severity** | ⚪ Low |
+| **File** | [routes.ts:L1593-1622](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\server\routes.ts#L1593-L1622) |
+
+The `loadLegalReacceptState` function has a two-tier fallback:
+1. **Try** `computeDoc1ReacceptStatus()` (live computation) — catch → continue
+2. **Try** `getDoc1ReacceptRequirement()` (snapshot from DB) — catch → continue
+
+If both fail, the function returns `{ legalReacceptRequired: false, legalReacceptBlocked: false, ... }` — a "pass" state. This means a DB outage affecting legal tables would allow users to bypass legal re-acceptance prompts entirely.
+
+---
+
+## 4. Edge-Case Observations
+
+### EDGE-001: Session Secret Validation is Correct
+
+The `validateEnvVars()` function in `index.ts` now:
+- Treats missing `SESSION_SECRET` as a **critical error** → `process.exit(1)` (L90-94)
+- Treats `COOKIE_SAMESITE=none` as a **critical error** → `process.exit(1)` (L100-103)
+- Treats missing `LEGAL_TERMS_HMAC_SECRET` as a **critical error** → `process.exit(1)` (L80-86)
+- Treats missing `EMAIL_VERIFY_TOKEN_SECRET` as critical **in production only** (L108-118)
+
+> [!TIP]
+> This is a significant improvement in fail-fast security posture. The server **will not start** without critical security secrets.
+
+### EDGE-002: HSTS Configuration is Robust
+
+Transport security headers (L246-261) include:
+- `X-Content-Type-Options: nosniff`
+- `X-Frame-Options: DENY` (clickjacking protection)
+- `Referrer-Policy: same-origin`
+- `Permissions-Policy: camera=(), microphone=(), geolocation=()`
+- Configurable HSTS with `max-age`, `includeSubDomains`, `preload`
+- TLS enforcement with 426 response for plain HTTP API calls (L263-274)
+
+### EDGE-003: `bcryptjs` Used for Password Hashing (Cost Factor 10)
+
+[storage.ts:L80](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\server\storage.ts#L80) uses `bcrypt.hash(password, 10)`. Cost factor 10 is the minimum recommended value. Under high load or for forward-looking hardening, consider increasing to 12–14.
+
+### EDGE-004: Multi-Process Slider CAPTCHA Isolation Gap
+
+With `SERVER_REUSE_PORT=1` ([index.ts:L390-396](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\server\index.ts#L390-L396)), each process has its own in-memory `sliderConsumeLocks` Map. A slider issued via process A and verified on process A can potentially be submitted against process B (which has no record of the lock). This extends the TOCTOU window from BUG-004. The same applies to the `rememberedNotFoundThrottleCache` in `auth.ts` — IP rate limiting for remember-me tokens is per-process.
+
+### EDGE-005: Trade Ledger Guardrails are Properly Enforced
+
+The `assertTradeLedgerGuardrails()` function ([index.ts:L33-69](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\server\index.ts#L33-L69)) checks for critical PostgreSQL triggers and **exits the process** if any are missing or disabled. This is a strong defense against accidental trade history deletion.
+
+### EDGE-006: `current-user` Leaks Admin Impersonation Metadata
+
+The response from `/api/auth/current-user` includes:
+```json
+{
+  "isImpersonating": true,
+  "realAdminId": 1,
+  "realAdminEmail": "admin@example.com"
+}
+```
+
+These fields are sent to the **impersonated user's client**. If the impersonated user has client-side logging or an XSS vector, the admin's identity is exposed.
+
+---
+
+## 5. Updated Remediation Roadmap
+
+| Priority | ID | Description | Status | Effort |
+|----------|----|-------------|--------|--------|
+| **P0** | ~~BUG-001~~ | Record login attempts unconditionally | ✅ FIXED | — |
+| **P0** | ~~BUG-003~~ | Dynamic legal blocked status | ✅ FIXED | — |
+| **P0** | NEW-001 | Remove `@ts-nocheck` from `index.ts` | ❌ NEW | Medium |
+| **P1** | ~~BUG-005~~ | Remove `@ts-nocheck` from coverageGate | ✅ FIXED | — |
+| **P1** | ~~BUG-006~~ | Reject `SameSite=none` for CSRF | ✅ FIXED | — |
+| **P1** | ~~BUG-007~~ | Fail-closed jurisdiction guard | ✅ FIXED | — |
+| **P1** | ~~BUG-008~~ | Require email verification secret | ✅ FIXED | — |
+| **P1** | NEW-002 | Require SMS OTP secret (like email token) | ❌ NEW | Small |
+| **P2** | ~~BUG-002~~ | Registration grift eventType | ✅ FIXED | — |
+| **P2** | ~~BUG-010~~ | Atomic registration transaction | ✅ FIXED | — |
+| **P2** | BUG-004 | Multi-process slider consume lock | ⚠️ Partial | Medium |
+| **P2** | BUG-009 | Push-update re-acceptance on terms change | ⚠️ Partial | Medium |
+| **P2** | BUG-013 | Slider captcha TTL harmonization | ❌ OPEN | Small |
+| **P2** | NEW-003 | OTP timing-safe comparison | ❌ NEW | 1 line |
+| **P2** | NEW-005 | Login response account status leakage | ❌ NEW | Small |
+| **P3** | ~~BUG-011~~ | phoneRequired from config | ✅ FIXED | — |
+| **P3** | ~~BUG-012~~ | Duplicate coverageGate query | ✅ FIXED | — |
+| **P3** | NEW-004 | Throttle `recalcAccount` polling | ❌ NEW | Medium |
+| **P3** | NEW-006 | Legal state fail-open on DB error | ❌ NEW | Small |
+| **P3** | EDGE-006 | Impersonation metadata exposure | ❌ NEW | Small |
+| **P3** | DESIGN-001 | Extract auth routes from routes.ts | ❌ OPEN | Large |
+| **P3** | DESIGN-002 | DRY grace period computation | ❌ OPEN | Small |
+| **P3** | DESIGN-005 | Add explicit login rate limiter | ❌ OPEN | Small |
+
+---
+
+## 6. Summary Scorecard
+
+| Category | Score |
+|----------|-------|
+| **Original Bugs Fixed** | **11 / 14** (79%) |
+| **Partially Fixed** | 2 / 14 (14%) |
+| **Still Open** | 1 / 14 (7%) |
+| **New Issues Found** | 6 (1 critical, 1 high, 3 medium, 1 low) |
+| **Design Concerns Open** | 3 of 6 |
+| **Overall Security Posture** | **Significantly improved** — fail-fast env validation, atomic transactions, proper HMAC enforcement, fail-closed jurisdiction, dynamic legal state |

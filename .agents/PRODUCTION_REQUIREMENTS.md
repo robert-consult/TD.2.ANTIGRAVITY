@@ -400,3 +400,76 @@ Failure Mode if Missing:
   - Set `NODE_ENV=production SERVER_REUSE_PORT=1` and verify startup log warns that identical code must be running on all listeners.
   - Run `npm run check` and `npm run build`.
 - Failure Mode if Missing: requests can be distributed across mixed code versions on the same port, causing non-deterministic admin save/read behavior and broken propagation guarantees.
+
+### PRD-SEC-007
+- ID: `PRD-SEC-007`
+- Date (UTC): `2026-02-19`
+- Scope: `CSRF double-submit cookie same-site integrity`
+- Requirement: `COOKIE_SAMESITE=none` must never be used for CSRF double-submit cookies; runtime must enforce `lax`/`strict` only and reject insecure startup configuration.
+- Enforcement: `server/security/csrf.ts` (`resolveCookieSameSite` clamps `none` to `lax` with security log) and `server/index.ts` (`validateEnvVars` treats `COOKIE_SAMESITE=none` as critical startup error).
+- Validation:
+  - Start server with `COOKIE_SAMESITE=none` and verify startup aborts with critical env error.
+  - For runtime fallback safety, call `/api/csrf` with `COOKIE_SAMESITE=none` and verify CSRF cookie is emitted with `SameSite=Lax`.
+  - Run `npm run check` and `npm run e2e`.
+- Failure Mode if Missing: cross-site contexts can exfiltrate/send CSRF token cookies, collapsing CSRF protection semantics in session-authenticated flows.
+
+### PRD-AUTH-003
+- ID: `PRD-AUTH-003`
+- Date (UTC): `2026-02-19`
+- Scope: `Email verification token keyed hashing`
+- Requirement: Email verification token hashing must always be HMAC-based with `EMAIL_VERIFY_TOKEN_SECRET` (minimum 32 chars); plain SHA fallback is forbidden.
+- Enforcement: `server/security/emailVerificationToken.ts` (secret validation + HMAC hash), `server/routes.ts`, `server/routes/verification.ts`, and `server/cron/verificationReminders.ts` (all token hash call sites use helper), plus `server/index.ts` production secret validation.
+- Validation:
+  - Unset `EMAIL_VERIFY_TOKEN_SECRET` and trigger email-token generation path; verify request fails with configuration error (no token row written).
+  - Set valid secret and verify token generation + verification succeed in register/profile resend flows.
+  - Run `npm run check` and `npm run e2e`.
+- Failure Mode if Missing: DB-read attackers can replay/forge verification tokens with unsalted SHA derivation, weakening account-verification security boundaries.
+
+### PRD-LEGAL-001
+- ID: `PRD-LEGAL-001`
+- Date (UTC): `2026-02-19`
+- Scope: `Signup + legal acceptance atomicity`
+- Requirement: User creation and mandatory legal acceptance recording must commit in one DB transaction; no account may persist without a corresponding acceptance row.
+- Enforcement: `server/routes.ts` (`/api/auth/register` wraps create-user + `recordDoc1Acceptance` in one transaction), `server/storage.ts` (`createUserInTransaction`), and `server/legal/legalAcceptanceService.ts` (`tx`-aware acceptance insert).
+- Validation:
+  - Force `recordDoc1Acceptance` failure (invalid token/SHA) during signup and verify no user row persists afterward.
+  - Verify successful signup still creates user + legal acceptance and subsequent login works.
+  - Run `npm run check` and `npm run e2e`.
+- Failure Mode if Missing: orphaned accounts can be created without legal acceptance evidence, violating compliance/audit invariants and creating irrecoverable signup states.
+
+### PRD-SEC-008
+- ID: `PRD-SEC-008`
+- Date (UTC): `2026-02-19`
+- Scope: `Login anti-enumeration + explicit brute-force throttling`
+- Requirement: `/api/auth/login` must enforce explicit rate limits (IP and IP+email scopes) and return a uniform account-unavailable response for deleted/disabled/frozen/enforced states without leaking internal status metadata.
+- Enforcement: `server/security/loginRateLimit.ts` (Valkey-backed + local fallback counters), `server/routes.ts` (`/api/auth/login` limiter gate, `Retry-After`, and uniform `ACCOUNT_UNAVAILABLE` response body).
+- Validation:
+  - Repeatedly post invalid login attempts from the same IP and verify `429 LOGIN_RATE_LIMITED` with `Retry-After`.
+  - Verify deleted/disabled/frozen/grift-enforced accounts all return the same external response shape.
+  - Run `npm run check` and `npm run e2e`.
+- Failure Mode if Missing: credential-stuffing attempts can scale unchecked, and compromised credentials leak sensitive internal account state classifications.
+
+### PRD-SEC-009
+- ID: `PRD-SEC-009`
+- Date (UTC): `2026-02-19`
+- Scope: `Legal reacceptance fail-closed semantics + impersonation metadata privacy`
+- Requirement: If live legal reacceptance computation is unavailable and no trusted requirement snapshot can assert blocking status, `/api/auth/current-user` must fail closed (`legalReacceptRequired=true`, `legalReacceptBlocked=true`, reason `LEGAL_STATUS_UNAVAILABLE`), and impersonated sessions must never expose `realAdminId`/`realAdminEmail` to the impersonated client.
+- Enforcement: `server/routes.ts` (`loadLegalReacceptState` fallback policy and current-user payload shaping).
+- Validation:
+  - Simulate legal compute/snapshot failures and verify current-user response blocks trading via legal gate state.
+  - Verify impersonated users receive `isImpersonating` without real admin identity leakage.
+  - Run `npm run check` and `npm run e2e`.
+- Failure Mode if Missing: legal reacceptance can be bypassed during partial outages, and admin identities can leak to impersonated user surfaces.
+
+### PRD-SEC-010
+- ID: `PRD-SEC-010`
+- Date (UTC): `2026-02-19`
+- Scope: `Cluster-safe CAPTCHA single-use + OTP cryptographic integrity`
+- Requirement: Slider CAPTCHA consume must be single-use across multi-process deployments via distributed lock (Valkey `SET NX PX` with local fallback), slider solve/submit TTL semantics must be harmonized to a consistent 10-minute window, and SMS OTP hashing/verification must use keyed HMAC + timing-safe comparison (no plain SHA fallback).
+- Enforcement: `server/security/captcha.ts` (distributed consume lock + TTL constants), `server/routes/captchaSlider.ts` (solve TTL application), `server/security/smsOtpToken.ts` (HMAC + timing-safe compare), and `server/routes/verification.ts` (helper integration).
+- Validation:
+  - Attempt parallel slider-consume submits against the same solved challenge and verify only one succeeds.
+  - Verify slider solve and submit remain valid within the intended 10-minute TTL boundary.
+  - Verify OTP paths fail closed when keyed secret is unavailable/weak and use timing-safe hash comparison.
+  - Run `npm run check` and `npm run e2e`.
+- Failure Mode if Missing: CAPTCHA replay windows remain open across workers, TTL behavior remains inconsistent for real users, and OTP material is exposed to offline grinding/timing leakage risks.

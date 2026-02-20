@@ -1,0 +1,230 @@
+# MISSED THINGS — Deep Audit of DESIGN-001 Plan & Tasks
+
+> **Audit scope:** Full line-by-line scan of [routes.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes.ts) (6272 lines) cross-referenced against [implementation_plan.md](file:///C:/Users/Rb/.gemini/antigravity/brain/1b1a917d-86ef-4dbc-96ec-33a515cd4ef0/implementation_plan.md) and [task.md](file:///C:/Users/Rb/.gemini/antigravity/brain/1b1a917d-86ef-4dbc-96ec-33a515cd4ef0/task.md).  
+> **Result:** ~40 items missed, under-documented, or incorrectly estimated.
+
+---
+
+## Category 1 — Missing Inner Functions (Not Assigned to Any Target File)
+
+These functions exist inside [registerRoutes()](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes.ts#325-6272) but are **not mentioned anywhere** in the implementation plan or task.md. Each needs a target file.
+
+| # | Function | Lines | Purpose | Suggested Target File |
+|---|----------|-------|---------|----------------------|
+| 1 | [loadQuoteSnapshotConfig()](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes.ts#4987-5001) | L4987–5000 | Reads `staleThresholdMs`, `fxRolloverTz`, `fxRolloverTime` from systemConfig | `server/routes/public/quotes.ts` or new `server/lib/quoteSnapshotUtils.ts` |
+| 2 | [loadPrevCloseMap(symbols, sessionDay)](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes.ts#5002-5037) | L5002–5036 | Raw SQL query for `market_daily_close` previous closes with fallback | Same as above |
+| 3 | [buildQuoteView(quote, prevCloseMap, nowMs, staleThresholdMs)](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes.ts#5038-5082) | L5038–5081 | Constructs enriched quote object (spread, pctChange, stale, marketOpen) | Same as above |
+| 4 | [buildQuoteSnapshotResponse(symbols?)](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes.ts#5083-5179) | L5083–5178 | Full snapshot pipeline: hub → Valkey → per-key Valkey → Postgres fallback | Same as above |
+| 5 | [normalizeSymbolsInputRaw(raw)](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes.ts#5180-5189) | L5182–5188 | Comma-split + trim + uppercase for REST query param parsing | Same as above |
+| 6 | [getAllowedQuoteSymbolsForRequest(req)](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes.ts#5190-5195) | L5190–5194 | Resolves allowed symbols set for the current request's session user | Same as above |
+| 7 | [loadLegalReacceptState(userId)](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes.ts#1686-1747) | L1686–1746 | Computes legal re-acceptance status (SHA256 comparison, blocked state) | `server/routes/auth/currentUser.ts` (inner helper) |
+| 8 | [buildCurrentUserPayload(...)](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes.ts#1748-1788) | L1748–1787 | Builds the response object for GET /api/auth/current-user | `server/routes/auth/currentUser.ts` (inner helper) |
+| 9 | [writeDecisionReject(rejectReason, riskLimit, riskObserved)](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes.ts#3248-3269) | L3249–3268 | Inner helper for audit writes during trade open rejections | `server/routes/trader/tradeOpen.ts` (inner helper) |
+
+> [!IMPORTANT]
+> Items 1–6 are **the entire quote snapshot pipeline** (~200 lines). The plan mentions `quotes.ts` in `server/routes/public/` but doesn't enumerate these functions. They use raw SQL via `dbClient.query()` (not Drizzle ORM) which is a security audit point — the plan's checklist says "All DB queries use parameterized Drizzle ORM (no raw SQL string interpolation)" but [loadPrevCloseMap](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes.ts#5002-5037) uses parameterized raw SQL (`$1::text[]`), and [buildQuoteSnapshotResponse](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes.ts#5083-5179) has an inline raw SQL block at L5130–5168.
+
+---
+
+## Category 2 — Missing Route from task.md
+
+| # | Route | Lines | Issue |
+|---|-------|-------|-------|
+| 10 | `PATCH /api/trades/:id/cancel` | L4543–4688 | **Missing from task.md entirely**. The route cancels pending orders and has full audit trail + grift detection. Plan mentions it in passing under `tradeTargets.ts` description but doesn't list it. It needs its own entry in task.md Phase 7, or a dedicated file `server/routes/trader/tradeCancel.ts` |
+
+---
+
+## Category 3 — Missing Type Definition
+
+| # | Item | Lines | Issue |
+|---|------|-------|-------|
+| 11 | [LiveClient](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes.ts#5471-5487) type | L5471–5486 | Custom type extending `WebSocket` with 15 fields (`userId`, `sessionId`, `isAdmin`, `quoteSymbols`, `wantsTrades`, etc.). **Not assigned to any target file** in the plan. Should go in `server/routes/ws/wsContext.ts` or `wsHelpers.ts`. |
+
+---
+
+## Category 4 — Missing Module-Level Constants & Mutable State
+
+These are defined at the top of [registerRoutes()](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes.ts#325-6272) or inside it, but are not enumerated in the plan's "Captured Binding" table:
+
+### Constants (not in plan table)
+
+| # | Constant | Line | Value |
+|---|----------|------|-------|
+| 12 | `EMAIL_VERIFICATION_GRACE_PERIOD_MS` | L202 | `14 * 24 * 60 * 60 * 1000` (14 days) |
+| 13 | `VALID_MOODS` | L4732 | Array of 7 valid mood strings for journal entries |
+| 14 | `wsMaxPayloadBytes` | L5301–5304 | Clamped from env `WS_MAX_MESSAGE_BYTES` |
+| 15 | `wsTransportTlsRequired` | L5394–5399 | Computed from NODE_ENV + env vars |
+| 16 | `wsOriginValidationEnabled` | L5400–5402 | Env toggle |
+| 17 | `wsAllowMissingOrigin` | L5403–5407 | Env toggle |
+| 18 | `wsUserConnectionLimit` | L5408–5411 | Clamped from env `WS_MAX_CONNECTIONS_PER_USER` |
+| 19 | `wsMessageRateLimitPerWindow` | L5412–5415 | Clamped from env `WS_MESSAGE_RATE_LIMIT` |
+| 20 | `wsMessageRateWindowMs` | L5416–5419 | Clamped from env `WS_MESSAGE_RATE_WINDOW_MS` |
+| 21 | `wsAllowedOrigins` | L5420–5431 | `Set<string>` populated from env `WS_ALLOWED_ORIGINS` + `APP_URL` |
+| 22 | `wsPolicyRecheckMs` | L6079 | From env `WS_JURISDICTION_RECHECK_MS` (default 30s) |
+
+> [!NOTE]
+> The plan's `WsHelperDeps` interface at L227–239 captures some of these (items 16–21) but doesn't show where they are initialized or that they are env-parsed with clamping. The clamping logic needs to move with them — not just the values.
+
+### Mutable State Variables (not enumerated individually)
+
+| # | Variable | Line | Purpose |
+|---|----------|------|---------|
+| 23 | `metricTradeCloseRejectedQuoteStaleTotal` | L212 (approx) | Counter for stale-quote close rejections |
+| 24 | `metricTradeTargetsRejectedQuoteStaleTotal` | L213 (approx) | Counter for stale-quote target update rejections |
+| 25 | `metricWsQuotePermissionRefreshTotal` | L214 | Counter for WS quote permission refreshes |
+| 26 | `metricWsQuotePermissionRefreshErrorsTotal` | L215 | Counter for quote permission refresh errors |
+| 27 | `metricWsOriginRejectedTotal` | L216 | Counter for origin-rejected WS connections |
+| 28 | `metricWsUserConnectionLimitRejectedTotal` | L217 | Counter for per-user connection limit rejections |
+| 29 | `metricWsMessageRateLimitedTotal` | L218 | Counter for rate-limited WS messages |
+| 30 | `queuedQuoteAnonRowId` | L5444 | Auto-incrementing ID for anonymous quote rows in batch |
+
+> [!WARNING]
+> The plan mentions "6 metric counters" in the WS Security table (L783) but **7 exist** (items 23–29). Items 23–24 are trade-specific metrics referenced in the metrics endpoint but defined alongside the WS metrics. They need to go in `wsContext.ts` (since the `/metrics` endpoint reads them all together) or a shared `server/lib/metricsState.ts`.
+
+---
+
+## Category 5 — Missing WS Helper Functions (Not Listed in wsHelpers.ts Export List)
+
+The plan's list of `wsHelpers.ts` exports at L148–149 and L243 is missing these functions:
+
+| # | Function | Lines | Purpose |
+|---|----------|-------|---------|
+| 31 | [getWsRequestPrimaryHeader(req, headerName)](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes.ts#5501-5506) | L5501–5505 | Extracts first value from potentially multi-value header |
+| 32 | [expectedWsOriginFromRequest(req)](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes.ts#5507-5515) | L5507–5514 | Constructs expected origin from Host header |
+| 33 | [normIso2(v)](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/legal/termsEngineDb.ts#49-52) | L5562–5565 | Normalizes 2-letter ISO country code |
+| 34 | [readWsHeaderIso2(req)](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes.ts#5567-5570) | L5567–5569 | Reads trusted proxy country from request |
+| 35 | [isWsRequestTransportSecure(req)](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes.ts#5571-5578) | L5571–5577 | Checks if WS connection is over TLS |
+| 36 | [filterQuoteRowsForClient(rows, client)](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes.ts#5722-5727) | L5722–5726 | Filters quote rows to client's subscribed symbols |
+| 37 | [refreshClientAllowedQuoteSymbols(client)](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes.ts#5728-5747) | L5728–5746 | Refreshes a single client's allowed quote symbol set |
+
+> [!NOTE]
+> Item 35 ([isWsRequestTransportSecure](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes.ts#5571-5578)) IS listed in the plan's L243 export list as `isWsRequestAndSocketCompatible` (wrong name). Items 31–34 and 36–37 are completely missing from the plan.
+
+---
+
+## Category 6 — Underestimated Line Counts / Complexity
+
+| # | Item | Plan Estimate | Actual | Correction |
+|---|------|--------------|--------|------------|
+| 38 | `tradeOpen.ts` (POST /api/trades) | ~500 lines | **~790 lines** (L3009–3797) | Plan says "~500 lines" — actually 60% larger. Most complex route in the file. |
+| 39 | `tradeClose.ts` (POST /api/trades/:id/close) | ~400 lines | **~370 lines** (L3832–4204) — close to estimate | Actually accurate, but the grift detection block is ~40 lines that repeat near-identically across open/close/targets/cancel |
+| 40 | Trade cancel route | Not estimated | **~150 lines** (L4543–4688) | Not sized because not mentioned |
+
+---
+
+## Category 7 — Missing Jurisdiction Recheck Interval
+
+| # | Item | Lines | Issue |
+|---|------|-------|-------|
+| 41 | `setInterval` for WS jurisdiction recheck | L6077–6096 | A `setInterval` that periodically re-evaluates [evaluateLoginJurisdiction](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/policy/jurisdictionControl.ts#65-101) for all connected WS clients. **Not mentioned in any target file** in the plan. Should go in `wsConnectionHandler.ts` or `wsLiveEventBridge.ts`. |
+
+---
+
+## Category 8 — Quote Snapshot Raw SQL (Security Audit Point)
+
+| # | Item | Lines | Issue |
+|---|------|-------|-------|
+| 42 | [loadPrevCloseMap()](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes.ts#5002-5037) raw SQL | L5005–5034 | Uses `dbClient.query()` with parameterized SQL (`$1::text[]`, `$2`). This is **safe** (parameterized) but breaks the plan's assertion that "All DB queries use parameterized Drizzle ORM". The plan should acknowledge this exception. |
+| 43 | [buildQuoteSnapshotResponse()](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes.ts#5083-5179) raw SQL | L5130–5168 | Inline raw SQL fallback for quotes table. Also parameterized but not Drizzle. Same caveat. |
+
+---
+
+## Category 9 — Grift Detection Duplication
+
+| # | Item | Issue |
+|---|------|-------|
+| 44 | `GriftAuditContext` construction block | The exact same ~20-line block to construct `griftAuditCtx` is duplicated **4 times** across: trade open (L3747–3767), trade close (L4163–4184), trade targets (L4501–4521), and trade cancel (L4648–4668). The plan says "copy verbatim, no refactor" — but should note this as a **post-decomposition refactor opportunity**: extract a shared `buildGriftAuditContext(req, eventType)` helper. |
+
+---
+
+## Category 10 — Already-Extracted Routers Not Fully Inventoried
+
+The plan says "30 existing sub-files." There are exactly **30 files** in `server/routes/` but L5264–5296 registers **34 router mounts** (some files like `partnerPortal.ts` and `traderTalent.ts` register multiple mount points). The plan should list the exact registration order to prevent mount-order regressions during cleanup.
+
+| Current Registration Order (L5264–5296) |
+|---|
+| 1. `registerAdminRoutes(app)` |
+| 2. `registerMarketRoutes(app)` |
+| 3. `registerMetaRoutes(app)` |
+| 4. `registerMeSessionsRoutes(app)` |
+| 5. `registerAdminSecurityRoutes(app)` |
+| 6. `app.use("/api/i18n", i18nRouter)` |
+| 7. `app.use("/api/instruments", instrumentsRouter)` |
+| 8. `app.use(profileMfaRouter)` — no prefix! |
+| 9. `app.use("/api/verification", verificationRouter)` |
+| 10. `app.use("/api/legal", legalRouter)` |
+| 11. `app.use("/api/admin/legal-docs-v2", adminLegalDocsRouter)` |
+| 12. `app.use("/api/admin/legal-acceptances", adminLegalAcceptancesRouter)` |
+| 13. `app.use("/api/admin/market-data", adminMarketDataRouter)` |
+| 14. `app.use("/api/admin/quote-subscriptions", adminQuoteSubscriptionsRouter)` |
+| 15. `app.use("/api/admin/system-config", adminSystemConfigRouter)` |
+| 16. `app.use("/api/admin/activity", adminActivityRouter)` |
+| 17. `app.use("/api/admin/i18n", adminI18nRouter)` |
+| 18. `app.use("/api/quote-subscriptions", quoteSubscriptionsRouter)` |
+| 19. `app.use("/api/mailbox", mailboxRouter)` |
+| 20. `app.use("/api/notifications", notificationsRouter)` |
+| 21. `app.use("/api/admin/scout", adminScoutRouter)` |
+| 22. `app.use("/api/admin/challenges", adminChallengesRouter)` |
+| 23. `app.use("/api/admin/partners", adminPartnersRouter)` |
+| 24. `app.use("/api/partner", partnerAuthRouter)` |
+| 25. `app.use("/api/partner", partnerPortalRouter)` |
+| 26. `app.use("/api/trader", traderTalentPublicRouter)` |
+| 27. `app.use("/api/trader", traderTalentRouter)` |
+| 28. `registerGriftRoutes(app)` |
+| 29. `app.use("/api/grift", griftPublicRouter)` |
+| 30. `app.use("/api/admin/migration", adminMigrationRouter)` |
+| 31. `app.use("/api/admin/legal-docs", adminLegalRouter)` — legacy |
+
+> [!IMPORTANT]
+> **Item 8** (`profileMfaRouter`) uses `app.use(profileMfaRouter)` with **no path prefix**. This means MFA routes are mounted at the app root — if the MFA router has routes like `/api/profile/mfa/...`, they work, but this is fragile. Worth verifying during decomposition.
+
+---
+
+## Category 11 — Missing `requireEnv` Utility
+
+| # | Item | Lines | Issue |
+|---|------|-------|-------|
+| 45 | `requireEnv(name)` | L191–197 | Utility function that throws if an env var is missing. Used for `SESSION_SECRET`. Not mentioned in the plan. Should go in `server/lib/envUtils.ts` or similar. Already duplicated in other files? Needs dedup check. |
+
+---
+
+## Category 12 — Missing Tasks in task.md
+
+Items that should be added to `task.md` but are currently absent:
+
+| # | Missing Task | Phase |
+|---|-------------|-------|
+| 46 | `server/routes/trader/tradeCancel.ts` — PATCH /api/trades/:id/cancel | Phase 7 |
+| 47 | `server/lib/quoteSnapshotUtils.ts` (or add to `quotes.ts`) — `loadQuoteSnapshotConfig`, `loadPrevCloseMap`, `buildQuoteView`, `buildQuoteSnapshotResponse` | Phase 4 (Public Routes) |
+| 48 | Move `LiveClient` type to `server/routes/ws/wsContext.ts` | Phase 3 |
+| 49 | Move `requireEnv` to shared utility | Phase 1 |
+| 50 | Move `EMAIL_VERIFICATION_GRACE_PERIOD_MS` constant | Phase 1 |
+| 51 | Move `VALID_MOODS` constant to `server/routes/trader/journal.ts` | Phase 7 |
+| 52 | Document the 34-mount registration order for existing routers in Phase 8 | Phase 8 |
+| 53 | Move WS env-parsed config constants (items 14–22) with clamping logic | Phase 3 |
+| 54 | Move WS jurisdiction recheck interval (item 41) | Phase 3 |
+
+---
+
+## Summary Table
+
+| Category | Count | Severity |
+|----------|-------|----------|
+| Missing inner functions (no target file) | 9 | 🔴 High — will break during move |
+| Missing route (task.md) | 1 | 🔴 High — trade cancel dropped |
+| Missing type definition | 1 | 🟡 Medium |
+| Missing constants/state (plan table) | 19 | 🟡 Medium — need target files |
+| Missing WS helper functions (export list) | 7 | 🟡 Medium |
+| Underestimated complexity | 3 | 🟡 Medium — schedule impact |
+| Missing interval (jurisdiction recheck) | 1 | 🟡 Medium |
+| Raw SQL not acknowledged | 2 | 🟢 Low — safe but not Drizzle |
+| Grift duplication (refactor opportunity) | 1 | 🟢 Low — post-move |
+| Router mount order not documented | 1 | 🟡 Medium — regression risk |
+| Missing `requireEnv` utility | 1 | 🟢 Low |
+| Missing tasks in task.md | 9 | 🔴 High — execution gaps |
+| **Total** | **55** | |
+
+---
+
+> [!CAUTION]
+> **The 9 missing inner functions (Category 1) are the highest-risk items.** If the quote snapshot pipeline functions are not assigned a target file before execution begins, Phase 4 (Public Routes) will stall because `quotes.ts` has no spec for the ~200 lines of supporting functions it depends on. Similarly, the trade cancel route (Category 2) will be orphaned if not added to Phase 7.

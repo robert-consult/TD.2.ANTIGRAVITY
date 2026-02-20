@@ -1,4 +1,3 @@
-// @ts-nocheck
 import express, { type Request, Response, NextFunction } from "express";
 import compression from "compression";
 import { registerRoutes } from "./routes";
@@ -71,6 +70,7 @@ async function assertTradeLedgerGuardrails() {
 // Validate required environment variables at startup
 function validateEnvVars() {
   const warnings: string[] = [];
+  const notices: string[] = [];
   const criticalErrors: string[] = [];
   const isProduction = process.env.NODE_ENV === "production";
   const encryptionKeyRaw = String(process.env.ENCRYPTION_KEY ?? "").trim();
@@ -96,12 +96,42 @@ function validateEnvVars() {
     warnings.push("SESSION_SECRET is shorter than 32 chars - rotate to a stronger secret for production.");
   }
 
+  const cookieSameSite = String(process.env.COOKIE_SAMESITE ?? "").trim().toLowerCase();
+  if (cookieSameSite === "none") {
+    criticalErrors.push(
+      "COOKIE_SAMESITE=none is incompatible with CSRF double-submit cookies. Use COOKIE_SAMESITE=lax or strict.",
+    );
+  }
+
   // Email verification token secret (recommended; required for production hardening)
   const emailVerifyTokenSecret = process.env.EMAIL_VERIFY_TOKEN_SECRET;
   if (isProduction && !emailVerifyTokenSecret) {
-    warnings.push("EMAIL_VERIFY_TOKEN_SECRET not configured - email verification token hashing is not keyed.");
+    criticalErrors.push(
+      "EMAIL_VERIFY_TOKEN_SECRET not configured - keyed email verification token hashing is required in production.",
+    );
   } else if (emailVerifyTokenSecret && emailVerifyTokenSecret.length < 32) {
-    warnings.push("EMAIL_VERIFY_TOKEN_SECRET is shorter than 32 chars - rotate to a stronger secret for production.");
+    if (isProduction) {
+      criticalErrors.push("EMAIL_VERIFY_TOKEN_SECRET is shorter than 32 chars - minimum 32 characters required.");
+    } else {
+      warnings.push("EMAIL_VERIFY_TOKEN_SECRET is shorter than 32 chars - rotate to a stronger secret for production.");
+    }
+  }
+
+  const smsOtpSecret = String(process.env.SMS_OTP_SECRET ?? "").trim();
+  const twilioAuthToken = String(process.env.TWILIO_AUTH_TOKEN ?? "").trim();
+  if (smsOtpSecret && smsOtpSecret.length < 32) {
+    if (isProduction) {
+      criticalErrors.push("SMS_OTP_SECRET is shorter than 32 chars - minimum 32 characters required.");
+    } else {
+      warnings.push("SMS_OTP_SECRET is shorter than 32 chars - rotate to a stronger secret for production.");
+    }
+  }
+  if (!smsOtpSecret) {
+    if (!twilioAuthToken) {
+      notices.push("SMS_OTP_SECRET not configured - OTP hashing will rely on TWILIO_AUTH_TOKEN if available.");
+    } else if (twilioAuthToken.length < 32) {
+      notices.push("TWILIO_AUTH_TOKEN is shorter than 32 chars and SMS_OTP_SECRET is unset - OTP hashing endpoint will reject requests.");
+    }
   }
 
   // CRITICAL: At-rest encryption key for mailbox/notification and security secrets.
@@ -132,6 +162,7 @@ function validateEnvVars() {
   
   // Log warnings
   warnings.forEach(w => console.warn(`[ENV WARNING] ${w}`));
+  notices.forEach(n => console.warn(`[ENV NOTICE] ${n}`));
   criticalErrors.forEach(e => console.error(`[ENV CRITICAL] ${e}`));
   
   // Log presence status
@@ -139,6 +170,7 @@ function validateEnvVars() {
   console.log("  - LEGAL_TERMS_HMAC_SECRET:", legalSecret && legalSecret.length >= 32 ? "configured" : "MISSING/TOO SHORT");
   console.log("  - SESSION_SECRET:", sessionSecret ? "configured" : "MISSING");
   console.log("  - EMAIL_VERIFY_TOKEN_SECRET:", emailVerifyTokenSecret ? "configured" : "MISSING");
+  console.log("  - SMS_OTP_SECRET:", process.env.SMS_OTP_SECRET ? "configured" : "MISSING");
   console.log("  - ENCRYPTION_KEY:", encryptionKeyValid ? "configured" : "MISSING/INVALID");
   console.log("  - RESEND_API_KEY:", process.env.RESEND_API_KEY ? "configured" : "MISSING");
   console.log("  - TWILIO_ACCOUNT_SID:", process.env.TWILIO_ACCOUNT_SID ? "configured" : "MISSING");

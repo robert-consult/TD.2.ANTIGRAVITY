@@ -1,0 +1,5 @@
+{
+  "artifactType": "ARTIFACT_TYPE_OTHER",
+  "summary": "Deep research report on Frontend & State Management Bugs specific to React 18+ / TypeScript systems. Covers Stale Closures, Race Conditions, Context Performance, Zombie Children, and StrictMode double-invocations. Includes detection strategies, code patterns, and remediation.",
+  "updatedAt": "2026-02-19T00:53:29.663033300Z"
+}

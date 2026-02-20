@@ -1,0 +1,82 @@
+# Deep System Audit – Re-Audit Verification Report
+## Signup, Login & Legal Compliance
+
+*Re-Audit: 2026-02-19*
+
+---
+
+## 1. Original Bugs – All 14 Verified
+
+### ✅ Fully Fixed (14 of 14)
+
+| Bug | Description | Fix |
+|-----|-------------|-----|
+| BUG-001 | Missing login audit | Unconditional [recordLoginAttempt](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/security/sessionTrail.ts#235-272) at [L1000](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\server\routes.ts#L1000) |
+| BUG-002 | Wrong grift eventType | `"SIGNUP_SUCCESS"` at [L1430](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\server\routes.ts#L1430) |
+| BUG-003 | Stale `legalReacceptBlocked` | Live [computeDoc1ReacceptStatus()](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/legal/legalReacceptanceService.ts#70-73) via [loadLegalReacceptState](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\server\routes.ts#L1683) |
+| BUG-004 | Slider TOCTOU race | **Distributed Valkey lock** via [acquireSliderConsumeLock](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\server\security\captcha.ts#L32-L70), fails-closed in reusePort mode |
+| BUG-005 | coverageGate `@ts-nocheck` | [coverageGate.ts](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\server\legal\coverageGate.ts) completely rewritten, fully typed |
+| BUG-006 | CSRF `SameSite=none` | Rejected by [csrf.ts:L76-88](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\server\security\csrf.ts#L76-L88) + startup `process.exit(1)` in [index.ts:L100-103](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\server\index.ts#L100-L103) |
+| BUG-007 | Jurisdiction guard fails open | Fails **closed** with 503 + `session.destroy()` at [L95-103](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\server\middleware\jurisdictionSessionGuard.ts#L95-L103) |
+| BUG-008 | Email token SHA-256 fallback | [emailVerificationToken.ts](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\server\security\emailVerificationToken.ts) — throws `EMAIL_VERIFY_TOKEN_SECRET_MISSING` if unset |
+| BUG-009 | Legal re-accept stale between logins | Event-driven push on admin terms change via [WS_MSG_LEGAL_DOC1_UPDATED](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\shared\ws\protocol.ts#L23), published in [adminLegalDocs.ts](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\server\routes\adminLegalDocs.ts#L171-L253) and [adminLegal.ts](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\server\routes\adminLegal.ts#L381-L390), consumed in [ConfigSync.tsx](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\client\src\live\ConfigSync.tsx#L80-L85) |
+| BUG-010 | Registration rollback race | Atomic `db.transaction()` at [L1231-1257](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\server\routes.ts#L1231-L1257) |
+| BUG-011 | `phoneRequired` hardcoded | Reads `signupCfg.signupPhoneEnforce` at [L1191](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\server\routes.ts#L1191) |
+| BUG-012 | Duplicate coverageGate query | Eliminated in rewrite |
+| BUG-013 | Slider TTL mismatch | Unified `SLIDER_CAPTCHA_TTL_MS = 10min` at [captcha.ts:L9-11](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\server\security\captcha.ts#L9-L11) |
+| BUG-014 | Impersonation audit gap | Full session context via jurisdiction guard integration |
+
+### ✅ Partially Fixed
+
+None remaining.
+
+---
+
+## 2. Previously Discovered NEW Bugs – All 6 Fixed
+
+| Bug | Description | Fix |
+|-----|-------------|-----|
+| NEW-001 | [index.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/index.ts) `@ts-nocheck` | **Removed**. L1 is now `import express...` |
+| NEW-002 | OTP SHA-256 fallback | [smsOtpToken.ts](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\server\security\smsOtpToken.ts) — throws `SMS_OTP_SECRET_MISSING` if secret \< 32 chars |
+| NEW-003 | OTP non-timing-safe `!==` | Uses [timingSafeHashEqual()](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/security/smsOtpToken.ts#17-25) from [smsOtpToken.ts:L17-24](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\server\security\smsOtpToken.ts#L17-L24) at [verification.ts:L833](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\server\routes\verification.ts#L833) |
+| NEW-004 | `recalcAccount` on every poll | Throttled via [maybeRecalcAccountForCurrentUser()](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes.ts#258-299) with [CURRENT_USER_RECALC_MIN_INTERVAL_MS + in-flight dedup](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\server\routes.ts#L260-L280) |
+| NEW-005 | Login response leaks account state | Unified `unavailableAccountResponse` at [L866-869](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\server\routes.ts#L866-L869); used for deleted (L919), disabled (L933), frozen (L947) |
+| NEW-006 | Legal state fail-open | **Fails-closed**: if both compute + snapshot fail → `legalReacceptBlocked: true, reason: "LEGAL_STATUS_UNAVAILABLE"` at [L1727-1733](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\server\routes.ts#L1727-L1733) |
+
+---
+
+## 3. Design Concern Status
+
+| Concern | Status | Notes |
+|---------|--------|-------|
+| DESIGN-001: [routes.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes.ts) monolith | ❌ Open | Now 6269 lines |
+| DESIGN-002: Grace period duplication | ✅ **FIXED** | Extracted to [computeEmailGracePeriod()](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\server\routes.ts#L244) |
+| DESIGN-003: current-user duplication | ✅ **FIXED** | Refactored to single [buildCurrentUserPayload()](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\server\routes.ts#L1745) |
+| DESIGN-004: Bot assessment atomicity | ⚪ Acceptable | By design |
+| DESIGN-005: No login rate limiter | ✅ **FIXED** | Full [loginRateLimit.ts](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\server\security\loginRateLimit.ts) — IP + IP+email buckets, Valkey-backed, configurable via env |
+| DESIGN-006: Ledger sequence atomicity | ✅ **FIXED** | Legal acceptance writes now use explicit `SERIALIZABLE` isolation + retry on serialization/deadlock conflicts in [legalAcceptanceService.ts](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\server\legal\legalAcceptanceService.ts#L6-L33); signup transaction now runs with `SERIALIZABLE` at [routes.ts](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\server\routes.ts#L1332-L1361) |
+| EDGE-006: Impersonation metadata leak | ✅ **FIXED** | [buildCurrentUserPayload](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes.ts#1745-1785) always returns `realAdminId: null, realAdminEmail: null` |
+
+---
+
+## 4. Remaining Open Items
+
+| Priority | ID | Description | Effort |
+|----------|----|-------------|--------|
+| P3 | DESIGN-001 | Extract auth routes from [routes.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes.ts) (6269 lines) | Large |
+
+---
+
+## 5. Summary Scorecard
+
+| Metric | Previous | Current |
+|--------|----------|---------|
+| Original bugs fixed | 11/14 | **14/14** |
+| Partially fixed | 2/14 | **0/14** |
+| Still open | 1/14 | **0/14** |
+| NEW bugs fixed | 0/6 | **6/6** |
+| Design concerns fixed | 0/6 | **5/6** |
+| Total remaining items | 21 | **1** |
+
+> [!TIP]
+> **Overall security posture: Excellent.** All security-critical bugs are resolved. The system now has: mandatory HMAC-based token hashing with fail-fast startup validation, distributed concurrency protection via Valkey, timing-safe hash comparison, fail-closed error handling, unified error responses preventing enumeration, explicit login rate limiting, throttled account recalculation, event-driven legal re-acceptance push, and `SERIALIZABLE` legal ledger sequencing. The only remaining open item is `DESIGN-001` (`routes.ts` monolith extraction).

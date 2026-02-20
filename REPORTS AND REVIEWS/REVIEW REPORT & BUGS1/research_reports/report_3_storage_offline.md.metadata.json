@@ -1,0 +1,5 @@
+{
+  "artifactType": "ARTIFACT_TYPE_OTHER",
+  "summary": "Deep research report on Storage, Caching, and Offline Risks. Covers Quota Exceeded errors (Critical), Stale-While-Revalidate poisoning (High), LocalStorage blocking (Medium), and Crypto Key persistence. Detailed mitigation strategies for robust offline-first architecture.",
+  "updatedAt": "2026-02-19T00:54:24.843267300Z"
+}

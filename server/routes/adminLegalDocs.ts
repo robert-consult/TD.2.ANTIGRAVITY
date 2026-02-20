@@ -9,6 +9,8 @@ import { appendLegalDocChangeAudit, verifyLegalDocChangeAuditChain } from "../le
 import { assembleDoc1Terms } from "../legal/termsEngineDb";
 import { getCoverageStats, isEnforcementEnabled, setEnforcementEnabled } from "../legal/coverageGate";
 import { REGION_RULES_IN_ORDER, REGIONS } from "../legal/regionRules";
+import { publishLiveEvent } from "../services/liveBus";
+import { WS_MSG_LEGAL_DOC1_UPDATED } from "@shared/ws/protocol";
 
 export const adminLegalDocsRouter = Router();
 adminLegalDocsRouter.use(requireAdmin);
@@ -166,6 +168,17 @@ adminLegalDocsRouter.post("/replace-active", async (req, res) => {
       return { newDoc, audit, oldActiveId };
     });
 
+    publishLiveEvent({
+      type: WS_MSG_LEGAL_DOC1_UPDATED,
+      payload: {
+        docSet: target.docSet,
+        docType: target.docType,
+        jurisdictionType: target.jurisdictionType,
+        jurisdictionKey: target.jurisdictionKey,
+        updatedAt: Date.now(),
+      },
+    });
+
     return res.json({ ok: true, ...result });
   } catch (e: any) {
     return res.status(400).json({ ok: false, error: e?.message || "Replace failed." });
@@ -226,6 +239,17 @@ adminLegalDocsRouter.post("/set-active", async (req, res) => {
       }, tx as any);
 
       return { oldActiveId, newActiveId: Number(documentId), audit };
+    });
+
+    publishLiveEvent({
+      type: WS_MSG_LEGAL_DOC1_UPDATED,
+      payload: {
+        docSet: target.docSet,
+        docType: target.docType,
+        jurisdictionType: target.jurisdictionType,
+        jurisdictionKey: target.jurisdictionKey,
+        updatedAt: Date.now(),
+      },
     });
 
     return res.json({ ok: true, ...result });

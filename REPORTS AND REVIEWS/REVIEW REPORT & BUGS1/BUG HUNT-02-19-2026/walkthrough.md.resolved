@@ -1,0 +1,562 @@
+# Deep System Audit Report
+## Signup, Login & Legal Compliance Systems
+
+---
+
+## 1. System Architecture Map
+
+### 1.1 Component Dependency Graph
+
+```mermaid
+graph TB
+    subgraph CLIENT["Client Layer"]
+        LP["LoginPage.tsx<br/>(1006 lines)"]
+        UA["use-auth.tsx<br/>(418 lines)"]
+        SC["secureCache"]
+    end
+
+    subgraph SERVER_ROUTES["API Routes"]
+        LOGIN["/api/auth/login"]
+        REG["/api/auth/register"]
+        LOGOUT["/api/auth/logout"]
+        CUR["/api/auth/current-user"]
+        VCFG["/api/auth/signup-config"]
+        VMAIL["/api/verification/email/*"]
+        VSMS["/api/verification/sms/*"]
+        LDOC["/api/legal/doc1/*"]
+    end
+    
+    subgraph MIDDLEWARE["Middleware Layer"]
+        AUTH["auth.ts<br/>Session Restore + Remember-Me"]
+        CSRF_MW["csrf.ts<br/>Double-Submit Cookie"]
+        JGUARD["jurisdictionSessionGuard.ts<br/>Live Session Enforcement"]
+        IMPGUARD["impersonationGuard<br/>(in auth.ts)"]
+    end
+    
+    subgraph SECURITY["Security Layer"]
+        CAPTCHA["captcha.ts<br/>Slider / Turnstile / hCaptcha"]
+        BOTGUARD["botGuard.ts<br/>PoW + EWMA Scoring"]
+        STRAIL["sessionTrail.ts<br/>Session CRUD + Login History"]
+    end
+    
+    subgraph LEGAL["Legal Compliance Layer"]
+        TERMS["termsEngineDb.ts<br/>4-Part Key Assembly"]
+        COVGATE["coverageGate.ts<br/>Signup Gating"]
+        ACCEPT["legalAcceptanceService.ts<br/>Hash-Chained Ledger"]
+        REACCEPT["legalReacceptanceService.ts<br/>Drift Detection"]
+        CRYPTO["cryptoUtils.ts<br/>HMAC Tokens"]
+        REGION["regionRules.ts<br/>Jurisdiction Mapping"]
+    end
+    
+    subgraph POLICY["Policy Engine"]
+        JCONTROL["jurisdictionControl.ts<br/>Signup + Login Blocking"]
+    end
+
+    LP --> UA
+    UA --> SC
+    LP -->|"signup config"| VCFG
+    LP -->|"terms resolve"| LDOC
+    LP -->|"register"| REG
+    LP -->|"login"| LOGIN
+    UA -->|"session check"| CUR
+    UA -->|"logout"| LOGOUT
+
+    LOGIN --> AUTH
+    LOGIN --> BOTGUARD
+    LOGIN --> JCONTROL
+    LOGIN --> CAPTCHA
+    LOGIN --> STRAIL
+    LOGIN --> REACCEPT
+    
+    REG --> BOTGUARD
+    REG --> CAPTCHA
+    REG --> COVGATE
+    REG --> CRYPTO
+    REG --> ACCEPT
+    REG --> STRAIL
+    REG --> JCONTROL
+    
+    LOGOUT --> STRAIL
+    CUR --> AUTH
+    CUR --> REACCEPT
+    
+    VMAIL --> AUTH
+    VSMS --> AUTH
+    LDOC --> AUTH
+    LDOC --> TERMS
+    LDOC --> REACCEPT
+    
+    AUTH --> STRAIL
+    JGUARD --> JCONTROL
+    JCONTROL --> REGION
+    COVGATE --> TERMS
+    COVGATE --> REGION
+    TERMS --> CRYPTO
+    TERMS --> REGION
+    ACCEPT --> CRYPTO
+    REACCEPT --> TERMS
+    REACCEPT --> ACCEPT
+```
+
+### 1.2 Request Flow – Login
+
+```mermaid
+sequenceDiagram
+    participant C as LoginPage
+    participant S as /api/auth/login
+    participant BG as botGuard
+    participant JC as jurisdictionControl
+    participant DB as Database
+    participant RM as RememberMe
+    participant GD as GriftDetection
+    participant LR as legalReaccept
+
+    C->>S: POST {email, password, rememberMe}
+    S->>BG: botGuard(req, "LOGIN")
+    BG-->>S: {allowed, score, signals}
+    S->>DB: storage.verifyUser(email, password)
+    DB-->>S: user | null
+    Note over S: Check isDeleted, isDisabled, isFrozen
+    S->>JC: evaluateLoginJurisdiction(ip, user country)
+    JC-->>S: {allowed} | {blocked, reason}
+    S->>DB: persistBotAssessment
+    S->>S: session.regenerate()
+    S->>DB: createUserSession(...)
+    S->>GD: onLoginSuccess + maybeApplyAutoEnforcement
+    GD-->>S: enforcement result
+    S->>DB: query userVerification (email verified?)
+    Note over S: Compute grace period
+    S->>LR: computeDoc1ReacceptStatus(userId)
+    LR-->>S: {required, blocked, sha256s}
+    S->>LR: upsertDoc1ReacceptRequirement("LOGIN")
+    opt rememberMe === true
+        S->>RM: issueRememberMeToken + enforceDeviceLimit
+        S->>C: Set-Cookie: remember-me
+    end
+    S->>C: 200 {user, emailVerified, legalReaccept...}
+```
+
+### 1.3 Request Flow – Registration
+
+```mermaid
+sequenceDiagram
+    participant C as LoginPage
+    participant S as /api/auth/register
+    participant JC as jurisdictionControl
+    participant BG as botGuard
+    participant CAP as captcha
+    participant COV as coverageGate
+    participant TK as cryptoUtils
+    participant ACC as legalAcceptance
+    participant DB as Database
+
+    C->>S: POST {email, username, password, countryIso2, termsToken, combinedSha256, phone}
+    Note over S: Check signupsFrozen → log to signupFreezeAttempts
+    S->>S: Zod validation
+    S->>JC: evaluateSignupJurisdiction(ip, selected)
+    JC-->>S: allowed | blocked
+    S->>BG: botGuard(req, "SIGNUP")
+    BG-->>S: {allowed, score}
+    S->>CAP: Slider or Turnstile/hCaptcha verify
+    S->>COV: checkCoverage(countryIso2)
+    COV-->>S: {allowed, enforced, reason}
+    S->>TK: verifyDoc1TermsToken(termsToken)
+    TK-->>S: {ok, payload} with SHA verification
+    S->>DB: storage.getUserByEmail (uniqueness)
+    S->>S: normalizeSignupPhone(phone, country)
+    S->>DB: storage.createUser(...)
+    S->>ACC: recordDoc1Acceptance(...)
+    Note over S: ⚠️ FAIL-CLOSED: rollback user if acceptance fails
+    S->>DB: initialize userVerification
+    S->>DB: Insert emailVerificationTokens + send email
+    S->>S: session.regenerate()
+    S->>DB: createUserSession(...)
+    S->>C: 201 {user, emailVerified: false, inGracePeriod: true}
+```
+
+---
+
+## 2. File Inventory
+
+| Layer | File | Lines | Purpose |
+|-------|------|-------|---------|
+| **Routes** | [routes.ts](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\server\routes.ts) | 6250 | Master route file – login, register, logout, current-user, waitlist, signup-config |
+| **Routes** | [legal.ts](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\server\routes\legal.ts) | 259 | Doc1 resolve, accept, reaccept, check endpoints |
+| **Routes** | [verification.ts](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\server\routes\verification.ts) | 884 | Email send/verify, SMS start/confirm, status checks |
+| **Middleware** | [auth.ts](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\server\middleware\auth.ts) | 553 | Session restore, remember-me, impersonation guard |
+| **Middleware** | [jurisdictionSessionGuard.ts](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\server\middleware\jurisdictionSessionGuard.ts) | 100 | Live jurisdiction enforcement for active sessions |
+| **Security** | [csrf.ts](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\server\security\csrf.ts) | 173 | Double-submit cookie CSRF protection |
+| **Security** | [captcha.ts](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\server\security\captcha.ts) | 142 | Multi-provider captcha (Slider / Turnstile / hCaptcha) |
+| **Security** | [botGuard.ts](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\server\security\botGuard.ts) | 349 | PoW challenges + EWMA scoring + window penalties |
+| **Security** | [sessionTrail.ts](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\server\security\sessionTrail.ts) | 470 | Session CRUD, login history, device context, geo parsing |
+| **Legal** | [termsEngineDb.ts](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\server\legal\termsEngineDb.ts) | 445 | 4-part key assembly (COUNTRY → REGION → DEFAULT/ROW) |
+| **Legal** | [coverageGate.ts](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\server\legal\coverageGate.ts) | 243 | Signup gating based on terms availability |
+| **Legal** | [legalAcceptanceService.ts](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\server\legal\legalAcceptanceService.ts) | 191 | Hash-chained acceptance ledger (append-only) |
+| **Legal** | [legalReacceptanceService.ts](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\server\legal\legalReacceptanceService.ts) | 185 | Drift detection – re-acceptance when terms change |
+| **Legal** | [cryptoUtils.ts](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\server\legal\cryptoUtils.ts) | 215 | HMAC tokens, timing-safe comparison, hash utilities |
+| **Legal** | [regionRules.ts](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\server\legal\regionRules.ts) | 297 | Country-to-region mapping, OFAC/sanctions lists |
+| **Policy** | [jurisdictionControl.ts](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\server\policy\jurisdictionControl.ts) | 132 | Signup + login jurisdiction evaluation |
+| **Frontend** | [LoginPage.tsx](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\client\src\pages\LoginPage.tsx) | 1006 | Login/register UI with terms loading, captcha, phone |
+| **Frontend** | [use-auth.tsx](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\client\src\hooks\use-auth.tsx) | 418 | Auth context, secure cache, session check, security codes |
+
+---
+
+## 3. Bug & Vulnerability Catalog
+
+### 3.1 Critical Severity
+
+---
+
+#### BUG-001: Login Missing [recordLoginAttempt](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/security/sessionTrail.ts#235-272) on Successful Non-RememberMe Login
+
+| Attribute | Value |
+|-----------|-------|
+| **Severity** | 🔴 Critical |
+| **File** | [routes.ts](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\server\routes.ts#L1036-L1066) |
+| **Lines** | 1036–1066 |
+
+**Description:** The login endpoint only calls [recordLoginAttempt()](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/security/sessionTrail.ts#235-272) inside the `shouldIssueRememberMeToken` branch (L1050-1060). When `rememberMe` is `false` or disabled, **no successful login attempt is recorded**. This creates a gap in the audit trail – the `userLoginHistory` table will have entries for failed logins but not for successful ones without remember-me.
+
+**Impact:** Incomplete audit trail. Forensic analysis cannot distinguish between "no logins" and "logins without remember-me". Grift detection and anomaly algorithms lose visibility into login patterns.
+
+**Expected:** A [recordLoginAttempt({ success: true, eventType: "LOGIN_SUCCESS" })](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/security/sessionTrail.ts#235-272) call should occur unconditionally after successful authentication.
+
+---
+
+#### BUG-002: Registration Uses Wrong `eventType` in Grift Detection
+
+| Attribute | Value |
+|-----------|-------|
+| **Severity** | 🟡 Medium |
+| **File** | [routes.ts](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\server\routes.ts#L1464-L1500) |
+| **Lines** | 1464–1500 |
+
+**Description:** The registration endpoint logs grift context with `eventType: "LOGIN_SUCCESS"` (L1478) instead of `"SIGNUP_SUCCESS"` or `"REGISTRATION_SUCCESS"`. This means the grift detection rules (`onLoginSuccess`) may misclassify registration events as logins, polluting behavioral analysis.
+
+**Impact:** Grift detection models built on `eventType` will coalesce signups and logins, reducing the fidelity of abuse detection.
+
+---
+
+#### BUG-003: `current-user` Endpoint Does Not Recompute `legalReacceptBlocked`
+
+| Attribute | Value |
+|-----------|-------|
+| **Severity** | 🔴 Critical |
+| **File** | [routes.ts](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\server\routes.ts#L1656-L1698) |
+| **Lines** | 1656–1698 |
+
+**Description:** The `/api/auth/current-user` endpoint fetches re-acceptance status from the `legalReacceptRequirements` table (via [getDoc1ReacceptRequirement](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/legal/legalReacceptanceService.ts#44-64)), but **always returns `legalReacceptBlocked: false`** (L1695, L1763). Compare this with the login route (L1018-1034) which computes `legalReacceptBlocked` dynamically via [computeDoc1ReacceptStatus()](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/legal/legalReacceptanceService.ts#70-73).
+
+This means if a user's country becomes restricted **after** login, the `current-user` endpoint will report `legalReacceptBlocked: false` when it should be `true`, allowing the user to continue using the platform without re-accepting (or being blocked).
+
+**Impact:** Users in newly restricted jurisdictions bypass legal blocking until they log out and log back in.
+
+---
+
+#### BUG-004: Slider Captcha Can Be Bypassed Between Login and Signup
+
+| Attribute | Value |
+|-----------|-------|
+| **Severity** | 🟡 Medium |
+| **File** | [captcha.ts](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\server\security\captcha.ts#L59-L81) |
+| **Lines** | 59–81 |
+
+**Description:** The slider captcha's `consumedAt` is set after successful verification (L79), but the check for `consumedAt` (L59-61) nullifies the slider and returns `CAPTCHA_ALREADY_USED`. However, between the slider verification endpoint (which sets `verifiedAtMs`) and the signup/waitlist submission (which checks + sets `consumedAtMs`), **there is a TOCTOU window** where a race condition could allow two simultaneous requests to both read the slider as verified but not yet consumed.
+
+The `issuedAtMs` TTL check (L69-71) uses `SLIDER_CAPTCHA_ISSUE_TTL_MS = 2 minutes`, but the `verifiedAtMs` TTL (L64) uses `SLIDER_CAPTCHA_VERIFY_TTL_MS = 10 minutes`. These are checked independently – the `issuedAtMs` check can fail while `verifiedAtMs` passes if a slider was issued > 2min ago but verified < 10min ago, or vice-versa. The logic should be simplified so both use the same window.
+
+**Impact:** Potential for captcha replay in a narrow race window. Confusing TTL semantics where `issuedAtMs` expiry can orphan a legitimately completed captcha.
+
+---
+
+### 3.2 High Severity
+
+---
+
+#### BUG-005: [coverageGate.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/legal/coverageGate.ts) Uses `@ts-nocheck`
+
+| Attribute | Value |
+|-----------|-------|
+| **Severity** | 🟠 High |
+| **File** | [coverageGate.ts](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\server\legal\coverageGate.ts#L1) |
+| **Lines** | 1 |
+
+**Description:** The entire [coverageGate.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/legal/coverageGate.ts) file starts with `// @ts-nocheck`, disabling all TypeScript type checking. This is a critical compliance file that controls whether users can sign up. Any type errors (e.g., comparing `undefined` to `null`, accessing non-existent properties on DB results) will silently produce incorrect behavior.
+
+**Impact:** Type errors in signup gating logic could silently allow or block signups for the wrong jurisdictions. Loss of compile-time safety in a compliance-critical path.
+
+---
+
+#### BUG-006: CSRF Cookie `httpOnly: false` is Correct but `sameSite` Derives From ENV
+
+| Attribute | Value |
+|-----------|-------|
+| **Severity** | 🟠 High |
+| **File** | [csrf.ts](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\server\security\csrf.ts#L74-L89) |
+| **Lines** | 74–89 |
+
+**Description:** The [resolveCookieSameSite()](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/security/csrf.ts#74-80) function (L74-79) allows `COOKIE_SAMESITE=none` via environment variable. When `sameSite=none`, the CSRF cookie becomes accessible in cross-origin requests. Combined with `httpOnly: false` (required for the double-submit pattern), this means the CSRF token can be read by JavaScript on any origin if the user is tricked into visiting a malicious page that embeds the target domain.
+
+The double-submit cookie pattern assumes `SameSite=Lax` or `Strict`. Setting `SameSite=None` fundamentally breaks the security model because a cross-origin page can both read the cookie (it's not httpOnly) and send it as a header.
+
+**Impact:** If deployed with `COOKIE_SAMESITE=none`, CSRF protection is effectively nullified.
+
+---
+
+#### BUG-007: Jurisdiction Session Guard Fails Open on Error
+
+| Attribute | Value |
+|-----------|-------|
+| **Severity** | 🟠 High |
+| **File** | [jurisdictionSessionGuard.ts](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\server\middleware\jurisdictionSessionGuard.ts#L95-L98) |
+| **Lines** | 95–98 |
+
+**Description:** The [jurisdictionSessionGuard](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/middleware/jurisdictionSessionGuard.ts#10-100) catches all errors and calls `next()` (fail-open):
+```typescript
+} catch (e) {
+  console.error("[Jurisdiction] session guard error:", e);
+  return next(); // fail-open for middleware errors only
+}
+```
+
+While the comment justifies this as "fail-open for middleware errors only", in practice this means **any bug** in the guard (DB connection failure, query error, undefined property access) will allow sanctioned users to continue using the platform.
+
+**Impact:** A transient DB error or a code bug in the guard allows sanctioned users to access the platform during the error window.
+
+---
+
+#### BUG-008: Email Verification Token Uses SHA-256 Fallback Without HMAC
+
+| Attribute | Value |
+|-----------|-------|
+| **Severity** | 🟠 High |
+| **File** | [routes.ts](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\server\routes.ts#L1358-L1361) |
+| **Lines** | 1358–1361 |
+
+**Description:** The registration email verification token hashing falls back to plain SHA-256 when `EMAIL_VERIFY_TOKEN_SECRET` is not set:
+```typescript
+const tokenHash = emailSecret
+  ? crypto.createHmac("sha256", emailSecret).update(token).digest("hex")
+  : crypto.createHash("sha256").update(token).digest("hex");
+```
+
+Plain SHA-256 without a secret key means anyone with read access to the database can verify emails by computing `SHA-256(token)` from the raw token in the verification URL. With HMAC, the secret is required to forge or verify tokens.
+
+**Impact:** If `EMAIL_VERIFY_TOKEN_SECRET` is unset (common in dev, possible in production due to missing configuration), email verification tokens are not properly secured.
+
+---
+
+### 3.3 Medium Severity
+
+---
+
+#### BUG-009: Legal Re-accept Status is Stale Between Login and Next `current-user` Call
+
+| Attribute | Value |
+|-----------|-------|
+| **Severity** | 🟡 Medium |
+| **File** | [routes.ts](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\server\routes.ts#L1656-L1665) |
+
+**Description:** The `current-user` endpoint reads from the `legalReacceptRequirements` table (L1660-1664) which is a materialized snapshot written at login time. If terms change between logins, the user won't see the re-acceptance prompt until the requirement is upserted (which only happens at login via [upsertDoc1ReacceptRequirement](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/legal/legalReacceptanceService.ts#145-185)).
+
+There is no cron job or event-driven mechanism to push-update `legalReacceptRequirements` for all affected users when an admin publishes new terms.
+
+**Impact:** Users who stay logged in will not be prompted to re-accept updated terms until they log out and log back in, creating a compliance gap.
+
+---
+
+#### BUG-010: Race Condition in Registration Rollback
+
+| Attribute | Value |
+|-----------|-------|
+| **Severity** | 🟡 Medium |
+| **File** | [routes.ts](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\server\routes.ts#L1294-L1304) |
+| **Lines** | 1294–1304 |
+
+**Description:** When [recordDoc1Acceptance](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/legal/legalAcceptanceService.ts#22-191) fails, the registration endpoint performs a manual rollback:
+```typescript
+await db.transaction(async (tx) => {
+  try { await tx.delete(signupFingerprints)... } catch {}
+  try { await tx.delete(userAccountEvents)... } catch {}
+  try { await tx.delete(userVerification)... } catch {}
+  try { await tx.delete(emailVerificationTokens)... } catch {}
+  try { await tx.delete(users)... } catch {}
+});
+```
+
+Each inner delete is wrapped in `try/catch {}` that silently swallows errors. If the `users` delete fails (e.g., FK constraint), the user record **persists without a legal acceptance row**, violating the "fail-closed" invariant the code tries to maintain. Also, the comment on L1296-1300 lists specific tables, but there may be other tables with FK references to `users.id` that are not included (e.g., `botRiskAssessments`, which was inserted on L1310).
+
+**Impact:** Orphaned user records without legal acceptance records. The user cannot log in (no acceptance) but the email is "taken", preventing re-registration.
+
+---
+
+#### BUG-011: `phoneRequired` is Hardcoded to `true`
+
+| Attribute | Value |
+|-----------|-------|
+| **Severity** | 🟡 Medium |
+| **File** | [routes.ts](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\server\routes.ts#L1225) |
+| **Lines** | 1225 |
+
+**Description:** `const phoneRequired = true;` is hardcoded rather than reading from `signupCfg` or `systemConfig`. The frontend LoginPage (L365-377) does check `phoneRequired` state that appears to derive from the signup config. This creates an inconsistency: the frontend may show phone as optional while the backend always requires it, or vice versa if the config changes.
+
+**Impact:** If the admin wants to make phone optional via config, the backend will still reject signups without phone numbers.
+
+---
+
+#### BUG-012: Duplicate `hasGlobal` Check in [coverageGate.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/legal/coverageGate.ts)
+
+| Attribute | Value |
+|-----------|-------|
+| **Severity** | ⚪ Low |
+| **File** | [coverageGate.ts](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\server\legal\coverageGate.ts#L147-L178) |
+| **Lines** | 147, 176 |
+
+**Description:** [checkCoverage()](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/legal/coverageGate.ts#111-203) calls [hasActiveTarget("DOC1", "GLOBAL_MASTER", "DEFAULT", "GLOBAL")](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/legal/coverageGate.ts#54-76) at line 147, then calls **exactly the same query** again at line 176 (`hasAnyGlobal`). This is a redundant DB query – since the first check already established that `hasGlobal` is true (the code doesn't reach L176 if it's false), the second check is always true and wastes a DB round-trip.
+
+---
+
+#### BUG-013: Captcha Slider `issuedAtMs` Check is Stricter Than `verifiedAtMs` Check
+
+| Attribute | Value |
+|-----------|-------|
+| **Severity** | 🟡 Medium |
+| **File** | [captcha.ts](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\server\security\captcha.ts#L64-L72) |
+| **Lines** | 64–72 |
+
+**Description:** Two independent TTL checks run sequentially:
+1. `verifiedAtMs` → `SLIDER_CAPTCHA_VERIFY_TTL_MS` (10 min) at L64
+2. `issuedAtMs` → `SLIDER_CAPTCHA_ISSUE_TTL_MS` (2 min) at L69
+
+If a user takes longer than 2 minutes to fill out the form after being issued a slider but completes verification within 10 minutes, the `issuedAtMs` check (L69) will fail the captcha even though the user legitimately solved it. This causes confusing UX where the captcha is solved but the submit fails.
+
+**Expected:** Either remove the `issuedAtMs` check from the consumption path (only check at issuance/verification), or extend `SLIDER_CAPTCHA_ISSUE_TTL_MS` to match `SLIDER_CAPTCHA_VERIFY_TTL_MS`.
+
+---
+
+#### BUG-014: Impersonation Guard Log Does Not Include Route or Method Details
+
+| Attribute | Value |
+|-----------|-------|
+| **Severity** | ⚪ Low |
+| **File** | [auth.ts](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\server\middleware\auth.ts) |
+
+**Description:** When the impersonation guard blocks a write operation, the 403 response includes a generic message but the audit trail (`appendIdentityAudit`) does not capture which specific endpoint or HTTP method was attempted. This makes forensic analysis of impersonation abuse harder.
+
+---
+
+### 3.4 Architectural / Design Concerns
+
+---
+
+#### DESIGN-001: [routes.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes.ts) is 6,250 Lines – Single File Anti-Pattern
+
+The master routes file contains login, register, logout, current-user, waitlist, diagnostics, trading, account management, and admin endpoints all in one file. This violates separation of concerns and makes it difficult to review auth-specific changes without context-switching through unrelated route code.
+
+**Recommendation:** Extract auth routes into a dedicated `server/routes/auth.ts` file, similar to how [legal.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/legal.ts) and [verification.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/verification.ts) are already separated.
+
+---
+
+#### DESIGN-002: Grace Period Computation is Duplicated 4 Times
+
+The 14-day grace period logic for unverified emails is duplicated:
+- Login route (L1010-1016)
+- Current-user primary path (L1648-1654)
+- Current-user fallback path (L1716-1722)
+- Register route (L1522-1526)
+
+Each instance contains the same `createdAt` normalization logic (seconds vs milliseconds heuristic), making it error-prone if the formula needs updating.
+
+**Recommendation:** Extract to a shared utility function like `computeGracePeriod(createdAt: number | string | Date): { inGracePeriod: boolean; gracePeriodEndsAt: number }`.
+
+---
+
+#### DESIGN-003: Current-User Has Full Code Duplication (Primary vs Fallback Path)
+
+The `/api/auth/current-user` endpoint has two complete response blocks: the "primary" path (L1670-1704) inside the `recalcAccount` try block, and a "fallback" path (L1738-1771) that executes when recalc fails. These two blocks are nearly identical (~33 lines each) and must be kept in sync manually.
+
+**Recommendation:** Extract the response builder into a shared function.
+
+---
+
+#### DESIGN-004: Bot Guard Assessment Persisted Without Transaction Atomicity
+
+In both login (L920-923) and registration (L1309-1313), [persistBotAssessmentForUser](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/security/botGuard.ts#50-97) is called outside the main transaction. If it fails, the login/registration still succeeds – this is acceptable for availability but means the bot risk assessment table may have gaps.
+
+---
+
+#### DESIGN-005: No Rate Limiting on Login Endpoint Itself
+
+While [botGuard](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/security/botGuard.ts#265-349) provides scoring and PoW challenges, and the remember-me restoration has rate limiting for invalid tokens, the **login endpoint** does not have explicit per-IP or per-email rate limiting. A high-volume credential stuffing attack would be scored by botGuard but not explicitly blocked at the HTTP layer.
+
+**Mitigation present:** [botGuard](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/security/botGuard.ts#265-349) can reject requests with high scores, which partially addresses this. An explicit rate limiter (e.g., `express-rate-limit`) would add defense-in-depth.
+
+---
+
+#### DESIGN-006: Legal Acceptance Ledger Assumes Sequential `ledgerSeq`
+
+The [recordDoc1Acceptance](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/legal/legalAcceptanceService.ts#22-191) function (in [legalAcceptanceService.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/legal/legalAcceptanceService.ts)) reads the last `ledgerSeq` and increments it within a transaction. Under high concurrency, two simultaneous acceptances could read the same `ledgerSeq` value, causing a unique constraint violation or a broken chain. The transaction isolation level must be `SERIALIZABLE` for this to be correct; the code does not explicitly set isolation level.
+
+---
+
+## 4. Cross-Cutting Concerns
+
+### 4.1 Session Security Summary
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Session regeneration on login | ✅ | `req.session.regenerate()` at L925 |
+| Session regeneration on register | ✅ | At L1438 |
+| Session destruction on logout | ✅ | `req.session.destroy()` at L1609 |
+| Remember-me token rotation | ✅ | Via `tokenRotationEnabled` config |
+| Remember-me theft detection | ✅ | `THEFT_DETECTED` status in auth middleware |
+| Idle timeout | ✅ | `SESSION_IDLE_TTL_MS` in auth middleware |
+| Device limit enforcement | ✅ | `enforceRememberMeDeviceLimit()` at L1044 |
+| Rate limiting on remember-me | ✅ | IP-based in-memory rate limiting |
+| **Rate limiting on login** | ⚠️ | **Only via botGuard scoring**, no explicit rate limiter |
+
+### 4.2 Legal Compliance Summary
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Terms resolution (4-part key) | ✅ | COUNTRY → REGION → DEFAULT/ROW precedence |
+| HMAC-signed terms token | ✅ | Timing-safe comparison in [cryptoUtils.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/legal/cryptoUtils.ts) |
+| Hash-chained acceptance ledger | ✅ | Append-only with ledger hash chain |
+| Coverage gating at signup | ✅ | Via [coverageGate.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/legal/coverageGate.ts) |
+| Re-acceptance on terms change | ⚠️ | Detected at login only, not pushed |
+| Blocked status propagation | ❌ | `current-user` always returns `blocked: false` |
+| SHA-256 integrity verification | ✅ | Full recomputation in [recordDoc1Acceptance](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/legal/legalAcceptanceService.ts#22-191) |
+
+### 4.3 Input Validation Summary
+
+| Endpoint | Validation | Notes |
+|----------|-----------|-------|
+| Login | ✅ Zod schema | `loginSchema.parse()` |
+| Register | ✅ Zod schema | Inline `z.object({...}).parse()` |
+| Email verify | ✅ Token validation | HMAC or SHA-256 hash |
+| SMS start | ✅ Phone normalization | `parsePhoneNumberWithError` from libphonenumber-js |
+| SMS confirm | ✅ OTP hash comparison | [hashOtp(code) !== otpRow.otpHash](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/verification.ts#38-45) |
+| Legal accept | ✅ Token + SHA verification | Full chain verification |
+| Waitlist join | ✅ Zod schema | With consent + captcha |
+
+---
+
+## 5. Prioritized Remediation Roadmap
+
+| Priority | Bug ID | Description | Effort |
+|----------|--------|-------------|--------|
+| P0 | BUG-001 | Record successful login attempts unconditionally | 1 line |
+| P0 | BUG-003 | Compute `legalReacceptBlocked` dynamically in `current-user` | Small |
+| P1 | BUG-005 | Remove `@ts-nocheck` from [coverageGate.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/legal/coverageGate.ts) and fix type errors | Medium |
+| P1 | BUG-006 | Validate `COOKIE_SAMESITE` cannot be `none` if CSRF is enabled | Small |
+| P1 | BUG-007 | Change jurisdiction guard to fail-closed (or circuit-break) | Small |
+| P1 | BUG-008 | Require `EMAIL_VERIFY_TOKEN_SECRET` in production | Small |
+| P2 | BUG-002 | Change registration grift `eventType` to "SIGNUP_SUCCESS" | 1 line |
+| P2 | BUG-009 | Add cron or event to push-update re-acceptance when terms change | Medium |
+| P2 | BUG-010 | Make registration + acceptance atomic in one transaction | Medium |
+| P2 | BUG-013 | Harmonize slider captcha TTLs | Small |
+| P3 | BUG-011 | Read `phoneRequired` from config instead of hardcoding | Small |
+| P3 | BUG-012 | Remove duplicate `hasGlobal` query | 1 line |
+| P3 | DESIGN-001 | Extract auth routes from [routes.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes.ts) | Large (refactor) |
+| P3 | DESIGN-002 | Extract grace period computation to utility | Small |
+| P3 | DESIGN-005 | Add explicit rate limiting to login endpoint | Small |

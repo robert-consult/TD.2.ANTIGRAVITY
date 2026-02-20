@@ -1,0 +1,132 @@
+# System Bug Research Report 4: Security & Cryptography Pitfalls
+
+**Scope:** XSS, CSRF, Supply Chain (NPM), Prototype Pollution (Object.assign/spread), ReDoS (Zod/Regex)  
+**Target Audience:** Security Engineers, Penetration Testers, DevSecOps  
+**Date:** 2026-02-18
+
+---
+
+## 1. Executive Summary
+
+Modern SPAs are often perceived as "secure by default" against XSS due to React's automatic escaping. However, this false sense of security leads to **category-specific vulnerabilities** like `javascript:` URI injection, **prototype pollution** in state management reducers, and **supply chain compromises** via the massive `node_modules` dependency tree.
+
+This report details the high-risk vectors specific to the React/Vite ecosystem that often bypass traditional WAFs (Web Application Firewalls).
+
+---
+
+## 2. Vulnerability Taxonomy: "React-Specific XSS" (URI Injection & JSON)
+
+### 2.1 Description
+React escapes standard HTML content (textContent). It does **not** escape attribute values in all contexts, specifically `href` and `src`.
+
+### 2.2 Manifestation
+- **Scenario:** A user profile allows a "Website" link.
+- **Attack:** User sets website to `javascript:alert(document.cookie)`.
+- **Bug:**
+    ```tsx
+    <a href={user.website}>My Site</a>
+    ```
+- **Result:** When another user clicks the link, the JS executes in their origin context.
+
+### 2.3 Detection
+- **Code Review:** Search for user-controlled data passed to `href`, `src`, or `dangerouslySetInnerHTML`.
+- **ESLint:** `eslint-plugin-react/jsx-no-script-url`.
+- **Payload Testing:** Inject `javascript:console.log('pwned')` into every input field.
+
+### 2.4 Remediation Pattern: Protocol Allowlisting
+**Strict Protocol Check:**
+```typescript
+const isSafeUrl = (url: string) => {
+  try {
+    const protocol = new URL(url).protocol;
+    return ['http:', 'https:', 'mailto:'].includes(protocol);
+  } catch {
+    return false; // Invalid URL
+  }
+};
+
+<a href={isSafeUrl(user.website) ? user.website : '#'}>My Site</a>
+```
+
+---
+
+## 3. Vulnerability Taxonomy: "Prototype Pollution" (The State corrupter)
+
+### 3.1 Description
+Functions that merge objects deeply (recursive merge) can be tricked into modifying `Object.prototype` if keys like `__proto__`, [constructor](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/secureCache.ts#213-220), or `prototype` are not filtered.
+
+### 3.2 Manifestation in React
+- **Scenario:** WebSocket sends a partial update for a user settings object.
+- **Bug:** The reducer merges the update: `cloneDeep(state, update)`.
+- **Attack:** Update payload: `{ "__proto__": { "isAdmin": true } }`.
+- **Result:** Every object in the application now has `isAdmin === true` via prototype inheritance.
+
+### 3.3 Detection
+- **Audit Merge Utilities:** Does your deep merge function block strictly "unsafe" keys?
+- **Tools:** Snyk, npm audit (often flags vulnerable versions of `lodash`, `minimist`, etc.).
+- **Manual Test:** Send `{"__proto__":{"b":2}}`. Check [({}).b](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/secureCache.ts#226-272) in console.
+
+### 3.4 Remediation Pattern: Defensive Merge Implementation
+**Block Unsafe Keys:**
+```typescript
+const UNSAFE_KEYS = ['__proto__', 'constructor', 'prototype'];
+if (UNSAFE_KEYS.includes(key)) return;
+```
+
+**Use Map/Set or null-prototype objects:**
+`const state = Object.create(null);` (No prototype to pollute).
+
+**Freeze Prototype:**
+`Object.freeze(Object.prototype);` (Drastic, breaks some libraries, but effective).
+
+---
+
+## 4. Vulnerability Taxonomy: "Regular Expression Denial of Service" (ReDoS)
+
+### 4.1 Description
+Regex engines in JS are backtracking. A crafted string can cause the engine to take exponential time ([O(2^n)](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#106-111)) to match or fail.
+
+### 4.2 Manifestation
+- **Scenario:** Email validation regex in Zod schema.
+- **Bug:** Regex is `^([a-zA-Z0-9]+)*$`.
+- **Attack:** Send `aaaaaaaaaaaaaaaaaaaaaaaaaaaaa!`.
+- **Result:** The UI thread freezes for 10 seconds while validating the form. If this validation happens on the server (Node.js), the **entire Node process blocks**, causing a DoS for all users.
+
+### 4.3 Detection
+- **Tools:** [safe-regex](https://www.npmjs.com/package/safe-regex), [vuln-regex-detector](https://www.npmjs.com/package/vuln-regex-detector).
+- **Code Review:** Look for nested quantifiers [(a+)+](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/secureCache.ts#226-272) .
+
+### 4.4 Remediation
+- **Use Libraries:** `validator.js` (battle-tested regexes).
+- **Atomic Groups (ES2018):** Not fully supported in all regex engines yet.
+- **Limit Input Length:** Enforce `max(100)` chars *before* running the regex.
+
+---
+
+## 5. Vulnerability Taxonomy: "Supply Chain Compromise" (NPM)
+
+### 5.1 Description
+Modern React apps have 1000+ dependencies. A maintainer of a deep dependency (e.g., `left-pad`) gets hacked or goes rogue. They publish a minor version update containing a cryptominer or credential stealer.
+
+### 5.2 Manifestation
+- **Scenario:** `npm install` runs in CI/CD.
+- **Bug:** It pulls `library-x @ 1.0.1` (malicious) instead of `1.0.0` due to `^1.0.0` in [package.json](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/package.json).
+- **Result:** The build artifact contains code that sends `localStorage` to a C2 server on page load.
+
+### 5.3 Detection
+- **Socket.dev / Snyk:** Monitor dependency health.
+- **Diff Review:** Review [package-lock.json](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/package-lock.json) changes carefully.
+
+### 5.4 Remediation Pattern: Lockfile & CI Hygiene
+**Strict Versioning:**
+Use `npm ci` (Clean Install) in CI environments. It **strictly** respects [package-lock.json](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/package-lock.json) and will fail if the lockfile doesn't match [package.json](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/package.json).
+
+**Pin Dependencies:**
+Remove carets (`^`) and tildes (`~`) from [package.json](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/package.json) for critical packages to prevent auto-updates.
+
+**Script Disable (Defense in Depth):**
+`npm config set ignore-scripts true` prevents `postinstall` scripts from running (a common vector for malware installation).
+
+---
+
+**End of Report 4**

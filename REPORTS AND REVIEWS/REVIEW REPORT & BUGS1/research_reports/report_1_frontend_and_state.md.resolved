@@ -1,0 +1,444 @@
+# System Bug Research Report 1: Frontend & State Management
+
+**Scope:** React 18+, TypeScript 5.x, TanStack Query, Zod  
+**Target Audience:** Senior Safety Engineers, Cybersecurity Teams, Senior Developers  
+**Date:** 2026-02-18
+
+---
+
+## 1. Executive Summary
+
+This report analyzes the specific class of bugs and vulnerabilities inherent to modern React-based Single Page Applications (SPAs). While React's declarative model eliminates many classes of DOM manipulation bugs (e.g., mismatched node removal), it introduces a new taxonomy of issues related to **component lifecycle**, **closure capture**, **referential stability**, and **concurrent rendering**.
+
+For high-frequency trading platforms (like the user's system), "bugs" in this layer often manifest as critical **stale data displays**, **silent order failures**, or **memory leaks** that degrade long-running sessions.
+
+---
+
+## 2. Bug Taxonomy: The "Stale Closure" (The Silent Killer)
+
+### 2.1 description
+In functional React components, every render creates a new scope. Functions defined inside the component capture the variables *of that specific render*. If these functions are passed to long-lived consumers (timers, event listeners, WebSocket subscriptions) without being refreshed, they will forever see the state *at the time of creation*.
+
+### 2.2 Manifestation in Trading Systems
+- **Scenario:** A user changes their "Default Order Size" in settings from 100 to 1000.
+- **Bug:** The WebSocket message handler for "Order Fill" was created on mount and captured `orderSize = 100`.
+- **Result:** When an order fills, the UI calculates profit/loss using the old size (100) instead of the new (1000), showing incorrect P&L to the user despite the backend being correct.
+
+### 2.3 Detection & Auditing
+- **Tooling:** `eslint-plugin-react-hooks` (rule: `exhaustive-deps`) is the primary defense, but it is often ignored or silenced with `// eslint-disable`.
+- **Process:** Grep for `useEffect`, `useCallback`, or `useMemo` where the dependency array is empty `[]` but the function body references props or state.
+- **Red Flag Pattern:**
+    ```typescript
+    useEffect(() => {
+      const handler = () => {
+        console.log(currentPrice); // 🚩 READS OUTER SCOPE VARIABLE
+      };
+      socket.on('message', handler);
+      return () => socket.off('message', handler);
+    }, []); // 🚩 EMPTY DEPS ARRAY BUT USES 'currentPrice'
+    ```
+
+### 2.4 Remediation Pattern
+**Use Refs for Mutable State Access:**
+If a callback must be stable (identity cannot change) but needs fresh data, use a `useRef` to bridge the gap.
+
+```typescript
+const priceRef = useRef(currentPrice);
+priceRef.current = currentPrice; // Update on every render
+
+useEffect(() => {
+  const handler = () => {
+    console.log(priceRef.current); // ✅ ALWAYS FRESH
+  };
+  socket.on('message', handler);
+}, []); // Safe to stay empty if only using refs
+```
+
+---
+
+## 3. Bug Taxonomy: "Race Conditions in Async Effects"
+
+### 3.1 Description
+`useEffect` does not await async functions. If an effect triggers a network request, and dependencies change rapidly (e.g., user typing a symbol "AAPL" -> "AAP"), multiple requests are fired. Responses may arrive out of order. If the "AAP" response arrives *after* "AAPL", the UI will show data for "AAP" while the input says "AAPL".
+
+### 3.2 Manifestation in Trading Systems
+- **Scenario:** Trader quickly switches charts: BTC -> ETH -> SOL.
+- **Bug:** Network is slow. The ETH request finishes *last*.
+- **Result:** Usage indicates "SOL" chart, but the candles displayed are ETH. Trader places a trade thinking they are buying SOL, but the price/indicators are ETH-based.
+
+### 3.3 Issues Arising
+- **Data Integrity:** UI state de-sync from source of truth.
+- **Financial Risk:** Making decisions based on wrong asset data.
+
+### 3.4 Detection
+- **Code Review:** Look for `async` calls inside `useEffect` without a cancellation mechanism (AbortController or boolean flag).
+- **Network Throttling:** Test UI interaction while throttling network to "Slow 3G".
+
+### 3.5 Remediation Pattern
+**Active Flag Pattern:**
+
+```typescript
+useEffect(() => {
+  let active = true;
+  fetchData(symbol).then(data => {
+    if (active) setChartData(data); // ✅ Check before set
+  });
+  return () => { active = false; }; // Cleanup invalidates the 'active' flag
+}, [symbol]);
+```
+
+**AbortController Pattern (Modern):**
+```typescript
+useEffect(() => {
+  const ac = new AbortController();
+  fetch(url, { signal: ac.signal }).then(...);
+  return () => ac.abort();
+}, [symbol]);
+```
+
+---
+
+## 4. Bug Taxonomy: "Context Tearing & Zombie Children"
+
+### 4.1 Description
+In React 18 Concurrent Mode, if a component reads from an external mutable source (like a global variable or non-React state manager) during render, and that source updates *during* the render pass, different parts of the UI tree may render with inconsistent values for the same data.
+
+### 4.2 Manifestation
+- **Scenario:** A high-frequency "Price" store updates 100 times/sec.
+- **Bug:** The Header component renders with Price=100. The Footer renders 5ms later (same render pass) but reads Price=101.
+- **Result:** "Total Portfolio Value" shows different numbers at top vs bottom of screen, confusing the user.
+
+### 4.3 Detection
+- **Tearing**: Hard to detect manually. Requires React internal tools or "stess testing" updates.
+- **Code Review:** Look for components reading directly from `window.globalState` or mutable refs during render phase.
+
+### 4.4 Remediation
+Use `useSyncExternalStore` (React 18+). This hook tells React: "This data comes from outside. If it changes *during* a render, throw away the render and restart."
+
+```typescript
+// ❌ Bad
+const val = myExternalStore.getValue();
+
+// ✅ Good
+const val = useSyncExternalStore(myExternalStore.subscribe, myExternalStore.getSnapshot);
+```
+
+---
+
+## 5. Bug Taxonomy: "Unstable Dependency Loops" (Infinite Refetch)
+
+### 5.1 Description
+A derived object/array is created inside a component body (e.g., `const options = { timeout: 1000 }`). This object is passed to a custom hook or effect. Since `{...} !== {...}` in JS, the effect sees a "new" dependency every render, triggering re-execution, which causes a state update, which triggers a re-render... infinite loop.
+
+### 5.2 Manifestation in Trading Systems
+- **Scenario:** [usePendingOrders({ status: 'OPEN' })](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/hooks/usePendingOrders.ts#15-95).
+- **Bug:** The object `{ status: 'OPEN' }` is new every time.
+- **Result:** The system hammers the `/api/orders` endpoint 60 times a second (DDOSing self), freezing the browser UI and potentially getting the user's IP banned by the backend rate limiter.
+
+### 5.3 Detection
+- **Network Tab:** Look for hundreds of identical requests.
+- **CPU Profiler:** Main thread blocked by "Minor GC" and React Render.
+- **Code Review:** Look for object literals passed directly into hooks.
+
+### 5.4 Remediation
+**Primitive Decomposition:**
+```typescript
+// ❌ Bad
+useOrders({ status: 'OPEN' });
+
+// ✅ Good (accept primitives)
+useOrders('OPEN');
+```
+
+**Deep Compare / Memoization:**
+```typescript
+const options = useMemo(() => ({ status: 'OPEN' }), []);
+useOrders(options);
+```
+
+---
+
+## 6. Bug Taxonomy: "Strict Mode Double-Invocation" (Dev-Only but Confusing)
+
+### 6.1 Description
+In React 18 Strict Mode (Development), components mount -> unmount -> mount immediately. Effects run, clean up, then run again.
+
+### 6.2 Issues Arising
+- **Bug:** Developers write effects that are not symmetric (e.g., [subscribe](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/queryPersistence.ts#117-141) but no `unsubscribe`).
+- **Result:** Use gets *double* WebSocket connections or *duplicate* toaster notifications in Dev, leading them to add "hacks" (like `useRef` guards) that break production behavior.
+
+### 6.3 Remediation
+Ensure *every* effect has a symmetrical cleanup functionality. React Strict Mode is a feature, not a bug—it creates bugs to show you where your logic is flawed.
+
+---
+
+## 7. Bug Taxonomy: "TypeScript Type Narrowing Escape Hatches"
+
+### 7.1 Description
+TypeScript's type system is structural and has well-known escape hatches: `any`, [as](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/secureCache.ts#36-39), `!` (non-null assertion), and `@ts-ignore`. Code that compiles without errors can still crash at runtime if these escape hatches are used to bypass actual type mismatches. In large codebases, 5-10% of all type annotations contain at least one escape hatch.
+
+### 7.2 Manifestation
+- **Scenario:** API response is typed as [Trade](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/hooks/use-trades.tsx#19-220) but the server adds a new nullable field `closedAt: string | null`.
+- **Bug:** Code does `trade.closedAt.split('T')` without null check because the type was cast with `as Trade`.
+- **Result:** `TypeError: Cannot read properties of null` — runtime crash when viewing closed trades.
+
+### 7.3 Sub-Patterns
+
+| Escape Hatch | Risk | Detection |
+|--------------|------|-----------|
+| `as X` (type assertion) | Bypasses structural check entirely | Grep: `as \w+[^=]` excluding `as const` |
+| `!` (non-null assertion) | Tells TS "trust me, not null" — may lie | Grep: `\w+!\.` or `\w+!\[` |
+| `any` | Disables type checking entirely | ESLint: `@typescript-eslint/no-explicit-any` |
+| `@ts-ignore` / `@ts-expect-error` | Suppresses error on next line | Grep: `@ts-ignore` (prefer `@ts-expect-error`) |
+| `as unknown as X` | Double-cast, completely unchecked | Grep: `as unknown as` |
+
+### 7.4 Detection & Tooling
+- **ESLint Rules:** `@typescript-eslint/no-explicit-any`, `@typescript-eslint/no-non-null-assertion`, `@typescript-eslint/consistent-type-assertions`
+- **`strict` mode in [tsconfig.json](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/tsconfig.json):** Enable `strictNullChecks`, `noImplicitAny`, `noUncheckedIndexedAccess`
+- **CI Gate:** Fail builds if `any` count increases (track with `grep -c`)
+
+### 7.5 Remediation
+- Replace `as X` with **type guards** (`if ('field' in obj)`) or **Zod parsing** (`schema.parse(data)`)
+- Replace `!` with **optional chaining** (`obj?.field`) or **nullish coalescing** (`obj ?? default`)
+- Replace `any` with `unknown` + explicit narrowing
+
+```typescript
+// ❌ Unsafe
+const trade = response.data as Trade;
+trade.closedAt.split('T');
+
+// ✅ Safe
+const result = tradeSchema.safeParse(response.data);
+if (!result.success) throw new ValidationError(result.error);
+result.data.closedAt?.split('T');
+```
+
+---
+
+## 8. Bug Taxonomy: "TanStack Query Key Collisions & Stale GC"
+
+### 8.1 Description
+TanStack Query (React Query) uses serialized query keys to cache and deduplicate requests. If two unrelated queries share the same key (collision), they return each other's data. Conversely, if keys are too granular, cache deduplication fails and the same data is fetched multiple times.
+
+### 8.2 Sub-Patterns
+
+#### 8.2.1 Key Collision
+```typescript
+// 🚩 Both resolve to ['trades'] — different endpoints, same cache!
+useQuery({ queryKey: ['trades'], queryFn: () => fetchOpenTrades() });
+useQuery({ queryKey: ['trades'], queryFn: () => fetchClosedTrades() });
+```
+
+#### 8.2.2 Stale Cache After Mutation
+A mutation changes server state, but the related query cache is not invalidated. The UI continues to show the pre-mutation data until the cache's `staleTime` expires.
+
+```typescript
+// 🚩 Mutation succeeds but cache still shows old data
+useMutation({
+  mutationFn: cancelOrder,
+  // Missing: onSuccess: () => queryClient.invalidateQueries(['orders'])
+});
+```
+
+#### 8.2.3 Garbage Collection Race
+Query data is garbage collected after `gcTime` (default 5 minutes for inactive queries). If a component unmounts and remounts within the GC window, the stale data is shown briefly ("flash of stale content"). If it remounts *after* GC, a fresh fetch fires but there's no loading state if `placeholderData` isn't set.
+
+### 8.3 Detection
+- **Query DevTools:** Install `@tanstack/react-query-devtools`. Inspect active queries and their keys.
+- **Key Factory Pattern Audit:** Search for raw string keys `['trades']` vs factory functions `tradeKeys.list(filters)`.
+- **Mutation Audit:** For every `useMutation`, verify there's a corresponding `invalidateQueries` or `setQueryData` in [onSuccess](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/hooks/usePendingOrders.ts#70-78).
+
+### 8.4 Remediation
+**Key Factory Pattern:**
+```typescript
+export const tradeKeys = {
+  all: ['trades'] as const,
+  lists: () => [...tradeKeys.all, 'list'] as const,
+  list: (filters: TradeFilters) => [...tradeKeys.lists(), filters] as const,
+  detail: (id: string) => [...tradeKeys.all, 'detail', id] as const,
+};
+
+// Usage — guaranteed unique
+useQuery({ queryKey: tradeKeys.list({ status: 'OPEN' }), ... });
+useQuery({ queryKey: tradeKeys.list({ status: 'CLOSED' }), ... });
+```
+
+---
+
+## 9. Bug Taxonomy: "Zod Schema Coercion & Validation Pitfalls"
+
+### 9.1 Description
+Zod is a runtime validation library used to validate API responses and form inputs. However, it has subtle behaviors around coercion, default values, and `.passthrough()` vs `.strict()` that can introduce bugs.
+
+### 9.2 Sub-Patterns
+
+#### 9.2.1 Silent Data Stripping
+By default, Zod *strips* unknown keys from objects. If the API adds a new field, Zod silently removes it.
+```typescript
+const schema = z.object({ name: z.string() });
+schema.parse({ name: 'Alice', age: 30 }); // => { name: 'Alice' } — age is gone!
+```
+**Fix:** Use `.passthrough()` for API responses where you want to preserve unknown fields. Use `.strict()` when you want to reject unknown fields.
+
+#### 9.2.2 Coercion vs Validation
+`z.coerce.number()` converts `"123"` to `123` (good), but also converts `""` to `0` and `null` to `0` (bad). In a trading form, an empty price field becomes a "0 price order."
+```typescript
+// 🚩 Empty string → 0 → user places an order at $0
+z.coerce.number().parse(""); // => 0
+```
+**Fix:** Add `.min(0.01)` or use `.pipe()` for multi-step validation.
+
+#### 9.2.3 `.optional()` vs `.nullable()` vs `.nullish()`
+- `.optional()` accepts `undefined` but NOT `null`
+- `.nullable()` accepts `null` but NOT `undefined`
+- `.nullish()` accepts both
+
+Mixing these up causes API response validation to crash on `null` fields that the backend sends legitimately.
+
+### 9.3 Detection
+- **Unit Test:** Parse known API response samples with Zod schemas and compare output fields.
+- **Grep:** `z.coerce` to find all coercion sites.
+- **Integration Test:** Send `null`, `undefined`, `""`, and `0` through every schema field.
+
+---
+
+## 10. Bug Taxonomy: "Memory Leaks in Long-Running Sessions"
+
+### 10.1 Description
+Trading apps often run 8-16 hours continuously. Memory leaks that are invisible in a 5-minute test become catastrophic in all-day sessions. The three main sources are: **detached DOM nodes** (referenced by JS but removed from the tree), **growing data structures** (unbounded arrays/maps), and **uncleared closures** (event handlers retaining old component trees).
+
+### 10.2 Sub-Patterns
+
+#### 10.2.1 Detached DOM Nodes via Refs
+A `useRef` holds a reference to a DOM element. The component unmounts (element removed from DOM), but the ref persists in a parent closure. The GC cannot collect the element or its subtree.
+
+#### 10.2.2 Unbounded Data Accumulation
+A price ticker pushes 10 ticks/second into an array. After 8 hours = 288,000 entries. At 200 bytes each = 57MB. If the array is in React state, each push causes a re-render with a growing virtual DOM diff.
+
+#### 10.2.3 Subscription Accumulation
+Every navigation to a "Quotes" page creates a new WS subscription. If old subscriptions are not cleaned up, the server sends data for all symbols ever viewed. Each incoming message triggers state updates in unmounted components (via closures), wasting CPU.
+
+### 10.3 Detection
+- **Chrome DevTools → Memory → Heap Snapshot:** Take a snapshot, perform actions, take another. Compare "objects allocated between snapshots."
+- **Performance Monitor Panel:** Watch "JS heap size" over time. It should plateau, not grow linearly.
+- **Automated:** Puppeteer script that navigates the app for 30 minutes and asserts heap growth < threshold.
+
+### 10.4 Remediation
+- **Sliding Window:** Keep only the last N entries: `ticks = [...ticks.slice(-1000), newTick]`
+- **WeakRef / WeakMap:** Use `WeakRef` for DOM node references that should not prevent GC.
+- **Effect Cleanup Audit:** Every `useEffect` that subscribes must return an unsubscribe.
+
+---
+
+## 11. Bug Taxonomy: "Missing or Incorrect Error Boundaries"
+
+### 11.1 Description
+React Error Boundaries catch render-phase errors and display fallback UI. Without them, a single crashing component (e.g., a chart lib throwing on malformed data) takes down the **entire application** — the user sees a white screen.
+
+### 11.2 Manifestation
+- **Scenario:** Market data API returns a negative price (data corruption). The chart library throws `RangeError: invalid scale domain`.
+- **Bug:** No error boundary wraps the chart component.
+- **Result:** The entire trading dashboard unmounts. User cannot view positions, cancel orders, or see their balance. They must hard-refresh.
+
+### 11.3 Limitations
+- Error Boundaries only catch errors in **render**, **lifecycle methods**, and **constructors**. They do NOT catch errors in:
+  - Event handlers (`onClick`)
+  - Async code (`setTimeout`, [fetch().then()](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#41-46))
+  - Server-side rendering
+- **Fix for async errors:** Use `try/catch` inside event handlers and set error state manually.
+
+### 11.4 Detection
+- **Grep:** Search for `class.*extends.*Component` with `componentDidCatch` or `getDerivedStateFromError`.
+- **Count:** How many error boundaries exist vs how many "feature areas" the app has? Ratio should be ≥ 1:1.
+- **Crash Test:** Deliberately pass `undefined` data to each major component. Does the app survive?
+
+### 11.5 Remediation
+Wrap every independent feature area with an error boundary:
+```tsx
+<ErrorBoundary fallback={<ErrorFallback />}>
+  <TradingChart symbol={symbol} />
+</ErrorBoundary>
+```
+Use `react-error-boundary` library for functional component support and `onReset` for retry logic.
+
+---
+
+## 12. Bug Taxonomy: "SSR Hydration Mismatch"
+
+### 12.1 Description
+If the app uses Server-Side Rendering (SSR) or Static Site Generation (SSG), the HTML rendered on the server must exactly match the initial React render on the client. Any mismatch causes React to throw a hydration error and fall back to client-side rendering, losing the performance benefit of SSR entirely.
+
+### 12.2 Common Causes
+| Cause | Example |
+|-------|---------|
+| **Date/Time rendering** | Server renders "10:00 AM UTC", client renders "4:00 AM CST" |
+| **`Math.random()` in render** | Server: `id-0.123`, Client: `id-0.456` |
+| **`window`/`document` access in render** | Server: undefined, Client: object |
+| **Browser extensions** | Injecting DOM elements before React hydrates |
+| **Conditional rendering on `typeof window`** | Server skips content, client renders it |
+
+### 12.3 Detection
+- **Console Warning:** React 18 logs `Hydration failed because the initial UI does not match what was rendered on the server`.
+- **Suppressed Mode:** Some frameworks suppress this warning. Enable `onRecoverableError` callback.
+
+### 12.4 Remediation
+- Use `useEffect` for client-only values (dates, random IDs).
+- Use `suppressHydrationWarning` sparingly (only for known-safe mismatches like timestamps).
+- Use `useId()` (React 18+) for generating stable IDs across server/client.
+
+---
+
+## 13. Bug Taxonomy: "Render Waterfall" (Sequential Data Fetching)
+
+### 13.1 Description
+When parent and child components each trigger their own data fetch, and the child's fetch depends on the parent's data, the requests run sequentially (waterfall) instead of in parallel. This multiplies load time.
+
+### 13.2 Manifestation
+```
+[Parent mounts] → fetch('/user')  ────── 500ms ──────→ [Child mounts] → fetch('/trades?user=123')  ── 500ms ──→ [Render]
+Total: 1000ms (serial)     vs     500ms (parallel)
+```
+
+### 13.3 Detection
+- **Network Tab:** Look for sequences of requests where one starts only after another completes.
+- **React DevTools:** Identify components that render `null` or a loader while waiting for a parent query.
+
+### 13.4 Remediation
+- **Prefetching:** Start the child fetch in the parent: `queryClient.prefetchQuery(tradeKeys.list(userId))`.
+- **Parallel Queries:** Use `useQueries` to fire both requests simultaneously.
+- **Route-Level Loaders:** Frameworks like React Router v6 support `loader` functions that fire all queries before rendering components.
+
+---
+
+## 14. Bug Taxonomy: "Uncontrolled Re-Render Cascades"
+
+### 14.1 Description
+A single state change at the top of the tree causes every descendant to re-render, even if they don't use the changed state. In a dashboard with 50+ components, this can cause 200ms+ render frames, making the UI feel sluggish.
+
+### 14.2 Manifestation
+- **Scenario:** Global `ThemeContext` stores `{ theme, setTheme, user, notifications }`.
+- **Bug:** A new notification arrives → `notifications` array updates → entire context value changes → all 50 consumers re-render, even those that only read `theme`.
+
+### 14.3 Detection
+- **React DevTools Profiler:** Use "Highlight updates when components render" setting. Entire page lights up on a single state change.
+- **`why-did-you-render`:** npm package that logs unexpected re-renders with the exact prop/state diff.
+- **Performance Tab:** Long "Render" blocks (>16ms) in the flame chart.
+
+### 14.4 Remediation
+- **Split Contexts:** Separate `ThemeContext` from `NotificationContext`.
+- **Memoize Children:** `React.memo()` on expensive child components.
+- **Selector Pattern:** Use `use-context-selector` library or move to Zustand/Jotai with atomic selectors.
+- **State Colocation:** Move state as close to where it's used as possible.
+
+```typescript
+// ❌ Bad: monolithic context
+const AppContext = createContext({ theme, user, notifications, settings });
+
+// ✅ Good: split contexts by update frequency
+const ThemeContext = createContext(theme);         // Rarely changes
+const NotificationsContext = createContext(notifs); // Changes frequently
+```
+
+---
+
+**End of Report 1**

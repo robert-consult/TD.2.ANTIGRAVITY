@@ -26,6 +26,7 @@ import {
   touchRememberMeToken,
   verifyRememberMeToken,
 } from "../services/rememberMe";
+import { appendIdentityAudit } from "../services/identityAudit";
 
 function normalizeIso2(value: unknown): string | undefined {
   const raw = String(value ?? "").trim().toUpperCase();
@@ -543,6 +544,31 @@ export function impersonationGuard(req: Request, res: Response, next: NextFuncti
     return next();
   }
   
+  try {
+    const realAdminId = Number(req.session.realAdminId ?? 0);
+    appendIdentityAudit({
+      userId: Number(req.session.impersonatedUserId ?? req.session.userId ?? 0) || null,
+      email: req.session.email || null,
+      category: "SECURITY",
+      type: "IMPERSONATION_WRITE_BLOCKED",
+      title: "Write blocked during impersonation",
+      description: `${req.method} ${req.originalUrl || req.path}`,
+      ip: getClientIp(req),
+      userAgent: getUserAgent(req),
+      actorAdminId: realAdminId > 0 ? realAdminId : null,
+      actorType: "ADMIN",
+      actorUserId: realAdminId > 0 ? realAdminId : null,
+      sessionId: req.sessionID,
+      data: {
+        method: req.method,
+        path: req.path,
+        originalUrl: req.originalUrl || req.path,
+      },
+    });
+  } catch (auditErr) {
+    console.error("[Impersonation] Failed to append write-block audit:", auditErr);
+  }
+
   // Block all other write operations during impersonation
   return res.status(403).json({
     message: "Write operations are disabled while viewing as another user",

@@ -1,0 +1,6 @@
+{
+  "artifactType": "ARTIFACT_TYPE_TASK",
+  "summary": "Phase-ordered task checklist for decomposing routes.ts (6272 lines) into modular files. 8 phases: pure utilities, shared context, WS server (7 files), public routes, auth routes, profile routes, trader routes, cleanup.",
+  "updatedAt": "2026-02-20T05:37:30.208535400Z",
+  "version": "5"
+}

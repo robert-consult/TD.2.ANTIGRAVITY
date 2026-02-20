@@ -1,0 +1,5 @@
+{
+  "artifactType": "ARTIFACT_TYPE_IMPLEMENTATION_PLAN",
+  "summary": "Comprehensive plan for decomposing the routes.ts monolith (6272 lines) into a clean, modular, typed, and secure router architecture. Covers folder structure, exact file breakdown, shared context/dependency injection pattern, middleware chain design, WebSocket server extraction, metrics extration, admin-configurable settings inventory, migration strategy, and loading order.",
+  "updatedAt": "2026-02-20T05:36:45.382962900Z"
+}

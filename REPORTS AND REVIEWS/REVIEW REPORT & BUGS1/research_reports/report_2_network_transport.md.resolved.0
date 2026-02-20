@@ -1,0 +1,159 @@
+# System Bug Research Report 2: Network & Transport Vulnerabilities
+
+**Scope:** WebSocket (WSS), HTTP/1.1 vs HTTP/2, Fetch API, AbortController  
+**Target Audience:** Senior Network Engineers, Site Reliability Engineers (SREs), Backend Architects  
+**Date:** 2026-02-18
+
+---
+
+## 1. Executive Summary
+
+In a real-time trading application, the network layer is the nervous system. The primary transport (WebSocket) must guarantee **low latency**, **message integrity**, and **connection resilience**. However, naive implementations often suffer from **thundering herd problems** (DDOSing oneself), **silent data loss** (dropped messages during reconnections), and **race conditions** (out-of-order updates).
+
+This report details the specific network anomalies that can destabilize the platform, often invisible during local development but catastrophic at scale.
+
+---
+
+## 2. Vulnerability Taxonomy: "The Reconnection Storm" (Self-Inflicted DDOS)
+
+### 2.1 Description
+When a server restarts or a network partition heals (e.g., ISP outage resolved), thousands of clients disconnect simultaneously. If all clients attempt to reconnect immediately—or after a fixed timeout (e.g., 1000ms)—the server receives a massive spike of `SYN` packets and TLS handshakes, overwhelming its capacity to accept connections. This causes timeouts, leading clients to retry *again* in sync, perpetuating the outage.
+
+### 2.2 Manifestation
+- **Scenario:** Server deployment triggers a restart.
+- **Bug:** Clients retry every 1s. 10k users = 10k TLS handshakes/sec.
+- **Result:** Load Balancer (ALB/Nginx) 503s. Server CPU spins at 100% processing handshakes, unable to process actual trades. Recovery takes 20+ minutes instead of 10 seconds.
+
+### 2.3 Detection & Auditing
+- **Code Review:** Look for `setTimeout(reconnect, 1000)` without `Math.random()`.
+- **Simulation:** Disconnect 100 test clients, monitor server logs for synchronized connection attempts.
+
+### 2.4 Remediation Pattern: Exponential Backoff with Jitter
+**Mathematical Formula:**
+`delay = min(cap, base * 2 ^ attempt)`
+`jitter = delay * rand(-0.2, 0.2)`
+`totalDelay = delay + jitter`
+
+**Implementation:**
+```typescript
+const attempt = retryCount.current;
+const baseDelay = 1000;
+const cap = 30000;
+const exponential = Math.min(cap, baseDelay * Math.pow(2, attempt));
+const jitter = exponential * (Math.random() * 0.4 - 0.2); // +/- 20%
+const delay = exponential + jitter;
+
+setTimeout(connect, delay);
+```
+*This spreads the load over time, allowing the server to recover gracefully.*
+
+---
+
+## 3. Vulnerability Taxonomy: "Message Ordering & Loss" (The Gap Problem)
+
+### 3.1 Description
+TCP guarantees ordering *within a single connection*. It does **not** guarantee ordering across *reconnections*. If a client disconnects at `t=100` and reconnects at `t=105`, messages sent by the server during `100..105` are lost forever unless an application-level reliability layer exists.
+
+### 3.2 Manifestation in Trading
+- **Scenario:**
+    1. Server sends: `Order Placed` (seq: 50)
+    2. Connection drops.
+    3. Server sends: `Order Filled` (seq: 51) -> LOST
+    4. Client reconnects.
+    5. Server sends: `Position Updated` (seq: 52)
+- **Bug:** Client sees "Order Placed" then "Position Updated". The "Fill" notification is missing.
+- **Result:** UI shows an open order (waiting for fill) but also a new position. The user is confused: "Did it fill? Partial fill? Is this a ghost position?"
+
+### 3.3 Issues Arising
+- **State Corruption:** Client state diverges from server state.
+- **Financial Errors:** User might try to "cancel" the order, but it's already filled.
+
+### 3.4 Remediation Pattern: Application-Level Sequence Numbers (ACK/NACK)
+**Protocol Design:**
+1. Server tags every message with a monotonically increasing `seq`.
+2. Client tracks `last_seen_seq`.
+3. On reconnect, client sends `Hello { last_seen_seq: 50 }`.
+4. Server replays buffer from `seq=51`.
+
+*If (and only if) the server supports replay buffers.* If not, the client **MUST** assume state is stale on every reconnect and fetch a full snapshot (REST or WS snapshot).
+
+**Code Pattern (Snapshot Fallback):**
+```typescript
+socket.on('open', () => {
+  if (isReconnect) {
+    // ⚠️ Assume we missed data. Nuke state and refetch.
+    fetchAllOrders();
+    fetchPortfolio();
+  }
+});
+```
+
+---
+
+## 4. Vulnerability Taxonomy: "Head-of-Line Blocking" (HTTP/1.1 vs HTTP/2)
+
+### 4.1 Description
+Browsers limit concurrent TCP connections per origin (usually 6). If using HTTP/1.1 for REST APIs alongside WS, heavy REST traffic (e.g., loading historical chart data) can block critical order placements.
+
+### 4.2 Manifestation
+- **Scenario:** User loads a dashboard. The app fires 20 parallel requests for "Chart History (1y)".
+- **Bug:** User clicks "Buy". The `POST /order` request is queued behind the 20 large chart downloads.
+- **Result:** The order is delayed by 2 seconds. The price moves. The trade fails or executes at a bad price.
+
+### 4.3 Detection
+- **Network Tab:** Look for "Queueing" or "Stalled" time in the request timing breakdown.
+- **Protocol Check:** Is `h2` enabled?
+
+### 4.4 Remediation
+- **Enable HTTP/2 (h2):** Allows multiplexing requests over a single TCP connection.
+- **Domain Sharding (Legacy):** `api-data.domain.com` vs `api-trade.domain.com`.
+- **Prioritization:** Load critical data first; lazy-load charts.
+
+---
+
+## 5. Bug Taxonomy: "Phantom Writes" (Optimistic UI Rollback Failures)
+
+### 5.1 Description
+To feel fast, apps update the UI *before* the server confirms the action ("Optimistic UI"). If the request fails, the UI must rollback. If the rollback fails or is partial, the UI shows a "phantom" state (e.g., a deleted item that is actually still there).
+
+### 5.2 Manifestation
+- **Scenario:** User cancels an order. UI immediately removes it from the list.
+- **Bug:** Network is offline. The `DELETE` request fails.
+- **Code implementation:** The `.catch()` block shows a toaster "Failed to cancel" but *forgets* to re-add the order to the list.
+- **Result:** User thinks order is cancelled. It executes 5 mins later. User loses money.
+
+### 5.3 Detection
+- **Chaos Engineering:** In intercepts execution, block network requests, click UI actions. Does the state revert perfectly?
+- **Code Review:** Check `onMutate` (React Query) logic. Does it return a rollback context? Does [onError](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/hooks/use-trades.tsx#113-121) use that context?
+
+### 5.4 Remediation Pattern (TanStack Query)
+```typescript
+onMutate: async (newOrder) => {
+  await queryClient.cancelQueries('orders');
+  const previousOrders = queryClient.getQueryData('orders');
+  queryClient.setQueryData('orders', old => [...old, newOrder]);
+  return { previousOrders }; // ⬅️ Save snaphot
+},
+onError: (err, newOrder, context) => {
+  queryClient.setQueryData('orders', context.previousOrders); // ⬅️ Rollback
+}
+```
+
+---
+
+## 6. Vulnerability Taxonomy: "Socket Hijacking" (CSWSH)
+
+### 6.1 Description
+Cross-Site WebSocket Hijacking (CSWSH). Unlike HTTP, WebSockets don't have Same-Origin Policy (SOP) by default in the handshake. If a user visits `evil.com`, that site can initiate a WS connection to `your-trading-site.com`. If you rely *only* on cookies for auth, the browser sends the cookies, the connection succeeds, and `evil.com` can trade on the user's behalf.
+
+### 6.2 Detection
+- **Inspect Handshake:** Does the server check the [Origin](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/secureCache.ts#59-63) header during the HTTP Upgrade?
+- **Test:** Use a tool (like Burp Suite) to connect with a fake `Origin: https://evil.com`. Does it verify 101 Switching Protocols?
+
+### 6.3 Remediation
+- **Check Origin Header:** Server **MUST** validate [Origin](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/secureCache.ts#59-63) matches the expected domain.
+- **Token Auth:** Don't rely on cookies alone. Require a randomized `token` in the protocol (`ws://host?token=xyz`) or the first message.
+
+---
+
+**End of Report 2**

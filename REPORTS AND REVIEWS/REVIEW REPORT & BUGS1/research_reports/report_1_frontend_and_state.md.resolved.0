@@ -1,0 +1,175 @@
+# System Bug Research Report 1: Frontend & State Management
+
+**Scope:** React 18+, TypeScript 5.x, TanStack Query, Zod  
+**Target Audience:** Senior Safety Engineers, Cybersecurity Teams, Senior Developers  
+**Date:** 2026-02-18
+
+---
+
+## 1. Executive Summary
+
+This report analyzes the specific class of bugs and vulnerabilities inherent to modern React-based Single Page Applications (SPAs). While React's declarative model eliminates many classes of DOM manipulation bugs (e.g., mismatched node removal), it introduces a new taxonomy of issues related to **component lifecycle**, **closure capture**, **referential stability**, and **concurrent rendering**.
+
+For high-frequency trading platforms (like the user's system), "bugs" in this layer often manifest as critical **stale data displays**, **silent order failures**, or **memory leaks** that degrade long-running sessions.
+
+---
+
+## 2. Bug Taxonomy: The "Stale Closure" (The Silent Killer)
+
+### 2.1 description
+In functional React components, every render creates a new scope. Functions defined inside the component capture the variables *of that specific render*. If these functions are passed to long-lived consumers (timers, event listeners, WebSocket subscriptions) without being refreshed, they will forever see the state *at the time of creation*.
+
+### 2.2 Manifestation in Trading Systems
+- **Scenario:** A user changes their "Default Order Size" in settings from 100 to 1000.
+- **Bug:** The WebSocket message handler for "Order Fill" was created on mount and captured `orderSize = 100`.
+- **Result:** When an order fills, the UI calculates profit/loss using the old size (100) instead of the new (1000), showing incorrect P&L to the user despite the backend being correct.
+
+### 2.3 Detection & Auditing
+- **Tooling:** `eslint-plugin-react-hooks` (rule: `exhaustive-deps`) is the primary defense, but it is often ignored or silenced with `// eslint-disable`.
+- **Process:** Grep for `useEffect`, `useCallback`, or `useMemo` where the dependency array is empty `[]` but the function body references props or state.
+- **Red Flag Pattern:**
+    ```typescript
+    useEffect(() => {
+      const handler = () => {
+        console.log(currentPrice); // 🚩 READS OUTER SCOPE VARIABLE
+      };
+      socket.on('message', handler);
+      return () => socket.off('message', handler);
+    }, []); // 🚩 EMPTY DEPS ARRAY BUT USES 'currentPrice'
+    ```
+
+### 2.4 Remediation Pattern
+**Use Refs for Mutable State Access:**
+If a callback must be stable (identity cannot change) but needs fresh data, use a `useRef` to bridge the gap.
+
+```typescript
+const priceRef = useRef(currentPrice);
+priceRef.current = currentPrice; // Update on every render
+
+useEffect(() => {
+  const handler = () => {
+    console.log(priceRef.current); // ✅ ALWAYS FRESH
+  };
+  socket.on('message', handler);
+}, []); // Safe to stay empty if only using refs
+```
+
+---
+
+## 3. Bug Taxonomy: "Race Conditions in Async Effects"
+
+### 3.1 Description
+`useEffect` does not await async functions. If an effect triggers a network request, and dependencies change rapidly (e.g., user typing a symbol "AAPL" -> "AAP"), multiple requests are fired. Responses may arrive out of order. If the "AAP" response arrives *after* "AAPL", the UI will show data for "AAP" while the input says "AAPL".
+
+### 3.2 Manifestation in Trading Systems
+- **Scenario:** Trader quickly switches charts: BTC -> ETH -> SOL.
+- **Bug:** Network is slow. The ETH request finishes *last*.
+- **Result:** Usage indicates "SOL" chart, but the candles displayed are ETH. Trader places a trade thinking they are buying SOL, but the price/indicators are ETH-based.
+
+### 3.3 Issues Arising
+- **Data Integrity:** UI state de-sync from source of truth.
+- **Financial Risk:** Making decisions based on wrong asset data.
+
+### 3.4 Detection
+- **Code Review:** Look for `async` calls inside `useEffect` without a cancellation mechanism (AbortController or boolean flag).
+- **Network Throttling:** Test UI interaction while throttling network to "Slow 3G".
+
+### 3.5 Remediation Pattern
+**Active Flag Pattern:**
+
+```typescript
+useEffect(() => {
+  let active = true;
+  fetchData(symbol).then(data => {
+    if (active) setChartData(data); // ✅ Check before set
+  });
+  return () => { active = false; }; // Cleanup invalidates the 'active' flag
+}, [symbol]);
+```
+
+**AbortController Pattern (Modern):**
+```typescript
+useEffect(() => {
+  const ac = new AbortController();
+  fetch(url, { signal: ac.signal }).then(...);
+  return () => ac.abort();
+}, [symbol]);
+```
+
+---
+
+## 4. Bug Taxonomy: "Context Tearing & Zombie Children"
+
+### 4.1 Description
+In React 18 Concurrent Mode, if a component reads from an external mutable source (like a global variable or non-React state manager) during render, and that source updates *during* the render pass, different parts of the UI tree may render with inconsistent values for the same data.
+
+### 4.2 Manifestation
+- **Scenario:** A high-frequency "Price" store updates 100 times/sec.
+- **Bug:** The Header component renders with Price=100. The Footer renders 5ms later (same render pass) but reads Price=101.
+- **Result:** "Total Portfolio Value" shows different numbers at top vs bottom of screen, confusing the user.
+
+### 4.3 Detection
+- **Tearing**: Hard to detect manually. Requires React internal tools or "stess testing" updates.
+- **Code Review:** Look for components reading directly from `window.globalState` or mutable refs during render phase.
+
+### 4.4 Remediation
+Use `useSyncExternalStore` (React 18+). This hook tells React: "This data comes from outside. If it changes *during* a render, throw away the render and restart."
+
+```typescript
+// ❌ Bad
+const val = myExternalStore.getValue();
+
+// ✅ Good
+const val = useSyncExternalStore(myExternalStore.subscribe, myExternalStore.getSnapshot);
+```
+
+---
+
+## 5. Bug Taxonomy: "Unstable Dependency Loops" (Infinite Refetch)
+
+### 5.1 Description
+A derived object/array is created inside a component body (e.g., `const options = { timeout: 1000 }`). This object is passed to a custom hook or effect. Since `{...} !== {...}` in JS, the effect sees a "new" dependency every render, triggering re-execution, which causes a state update, which triggers a re-render... infinite loop.
+
+### 5.2 Manifestation in Trading Systems
+- **Scenario:** [usePendingOrders({ status: 'OPEN' })](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/hooks/usePendingOrders.ts#15-95).
+- **Bug:** The object `{ status: 'OPEN' }` is new every time.
+- **Result:** The system hammers the `/api/orders` endpoint 60 times a second (DDOSing self), freezing the browser UI and potentially getting the user's IP banned by the backend rate limiter.
+
+### 5.3 Detection
+- **Network Tab:** Look for hundreds of identical requests.
+- **CPU Profiler:** Main thread blocked by "Minor GC" and React Render.
+- **Code Review:** Look for object literals passed directly into hooks.
+
+### 5.4 Remediation
+**Primitive Decomposition:**
+```typescript
+// ❌ Bad
+useOrders({ status: 'OPEN' });
+
+// ✅ Good (accept primitives)
+useOrders('OPEN');
+```
+
+**Deep Compare / Memoization:**
+```typescript
+const options = useMemo(() => ({ status: 'OPEN' }), []);
+useOrders(options);
+```
+
+---
+
+## 6. Bug Taxonomy: "Strict Mode Double-Invocation" (Dev-Only but Confusing)
+
+### 6.1 Description
+In React 18 Strict Mode (Development), components mount -> unmount -> mount immediately. Effects run, clean up, then run again.
+
+### 6.2 Issues Arising
+- **Bug:** Developers write effects that are not symmetric (e.g., [subscribe](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/queryPersistence.ts#117-141) but no `unsubscribe`).
+- **Result:** Use gets *double* WebSocket connections or *duplicate* toaster notifications in Dev, leading them to add "hacks" (like `useRef` guards) that break production behavior.
+
+### 6.3 Remediation
+Ensure *every* effect has a symmetrical cleanup functionality. React Strict Mode is a feature, not a bug—it creates bugs to show you where your logic is flawed.
+
+---
+
+**End of Report 1**

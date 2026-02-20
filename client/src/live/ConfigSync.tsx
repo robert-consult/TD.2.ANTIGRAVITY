@@ -3,10 +3,10 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useLiveUpdates } from "@/live/LiveUpdatesProvider";
 import { useAuth } from "@/hooks/use-auth";
 import { mergeGlobalSettingsPerformance } from "@/lib/globalSettingsPerformance";
-import { WS_MSG_QUOTE_SUBSCRIPTIONS_UPDATED } from "@shared/ws/protocol";
+import { WS_MSG_LEGAL_DOC1_UPDATED, WS_MSG_QUOTE_SUBSCRIPTIONS_UPDATED } from "@shared/ws/protocol";
 
 export function ConfigSync() {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, checkAuth } = useAuth();
   const queryClient = useQueryClient();
   const { subscribe } = useLiveUpdates();
 
@@ -77,6 +77,13 @@ export function ConfigSync() {
         return;
       }
 
+      if (message.type === WS_MSG_LEGAL_DOC1_UPDATED) {
+        void checkAuth();
+        queryClient.invalidateQueries({ queryKey: ["/api/legal/doc1/reaccept"] });
+        window.dispatchEvent(new Event("legal:reaccept-required"));
+        return;
+      }
+
       if (message.type === "challenges:updated") {
         invalidateByPrefix("/api/admin/challenges");
         invalidateByPrefix("/api/trader/challenges");
@@ -87,7 +94,7 @@ export function ConfigSync() {
         queryClient.invalidateQueries({ queryKey: ["/api/account/summary"] });
       }
     });
-  }, [invalidateByPrefix, isAuthenticated, queryClient, subscribe]);
+  }, [checkAuth, invalidateByPrefix, isAuthenticated, queryClient, subscribe]);
 
   return null;
 }

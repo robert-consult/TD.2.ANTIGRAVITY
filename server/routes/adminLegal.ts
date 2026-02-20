@@ -4,6 +4,8 @@ import { dbClient } from "@db";
 import { sha256 } from "../legal/cryptoUtils";
 import { getCoverageStats, isEnforcementEnabled, setEnforcementEnabled } from "../legal/coverageGate";
 import { REGIONS } from "../legal/regionRules";
+import { publishLiveEvent } from "../services/liveBus";
+import { WS_MSG_LEGAL_DOC1_UPDATED } from "@shared/ws/protocol";
 
 const router = Router();
 
@@ -375,6 +377,17 @@ router.post("/:id/activate", async (req: Request, res: Response) => {
     `,
     [doc.id, adminId, Math.floor(nowMs / 1000)],
   );
+
+  publishLiveEvent({
+    type: WS_MSG_LEGAL_DOC1_UPDATED,
+    payload: {
+      docSet: String(doc.doc_set || "DOC1"),
+      docType: String(doc.doc_type || ""),
+      jurisdictionType: String(doc.jurisdiction_type || ""),
+      jurisdictionKey: String(doc.jurisdiction_key || ""),
+      updatedAt: Date.now(),
+    },
+  });
 
   res.json({ success: true, message: "Document activated and set as target" });
 });

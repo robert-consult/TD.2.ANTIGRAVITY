@@ -71,10 +71,20 @@ function resolveCookieSecure(): boolean {
   return process.env.NODE_ENV === "production";
 }
 
-function resolveCookieSameSite(): "lax" | "strict" | "none" {
+let warnedAboutInvalidSameSiteNone = false;
+
+function resolveCookieSameSite(): "lax" | "strict" {
   const configured = String(process.env.COOKIE_SAMESITE ?? "").trim().toLowerCase();
   if (configured === "strict") return "strict";
-  if (configured === "none") return "none";
+  if (configured === "none") {
+    if (!warnedAboutInvalidSameSiteNone) {
+      warnedAboutInvalidSameSiteNone = true;
+      console.error(
+        "[Security] COOKIE_SAMESITE=none is not permitted for CSRF double-submit cookies. Falling back to SameSite=lax.",
+      );
+    }
+    return "lax";
+  }
   return "lax";
 }
 

@@ -1,0 +1,248 @@
+# System Bug Research Report 5: Build Tooling & Environment Issues
+
+**Scope:** Vite, Rollup, TypeScript Compilation, Environment Variables (`.env`), Source Maps  
+**Target Audience:** DevOps Engineers, Release Managers  
+**Date:** 2026-02-18
+
+---
+
+## 1. Executive Summary
+
+The build pipeline is the final gate before code reaches production. Bugs in this layer are subtle: they don't crash the build but result in **bloated bundles**, **leaked secrets**, or **runtime crashes on specific devices** (due to missing polyfills).
+
+For a high-performance application, a 1MB vendor bundle is a bug. A leaked `API_SECRET_KEY` in `main.js` is a catastrophic failure.
+
+---
+
+## 2. Bug Taxonomy: "Tree Shaking Failures" (The Bloat)
+
+### 2.1 Description
+Tree shaking (dead code elimination) relies on ES Modules (`import/export`) to statically analyze used exports. Common CommonJS libraries or side-effectful imports break this analysis, causing the *entire* library to be bundled even if only one function is used.
+
+### 2.2 Manifestation
+- **Scenario:** `import { debounce } from 'lodash';`
+- **Bug:** `lodash` is CommonJS. The bundler cannot verify which exports are unused.
+- **Result:** The full 70KB `lodash` library is included in the bundle, instead of the 2KB `debounce` function.
+- **Impact:** Slow TTI (Time to Interactive), wasted bandwidth.
+
+### 2.3 Detection
+- **Tooling:** `rollup-plugin-visualizer` or `vite-bundle-analyzer`.
+- **Manual Audit:** Look for large rectangular blocks in the treemap visualization.
+- **Code Review:** Import statements like `import * as X from 'Y'` often disable granular shaking.
+
+### 2.4 Remediation Pattern: Cherry-Picking & Modern Config
+**Cherry-Pick Imports:**
+```typescript
+import debounce from 'lodash/debounce'; // ✅ Forces single file import
+```
+
+**Use ES Module Alternatives:**
+Switch to `lodash-es` or `date-fns` (modular by design).
+
+**Side Effects Configuration:**
+Check `package.json` for `"sideEffects": false`. If a library claims side effects, the bundler is conservative and keeps everything.
+
+---
+
+## 3. Vulnerability Taxonomy: "Environment Variable Leaks" (Secret Injection)
+
+### 3.1 Description
+Vite and similar tools inline environment variables that start with a prefix (e.g., `VITE_`) into the client bundle at build time. Variables *without* the prefix are typically blocked. However, misconfiguration or explicit definition can leak backend secrets into frontend code.
+
+### 3.2 Manifestation
+- **Scenario:** Developer adds `API_ADMIN_KEY=123` to `.env`.
+- **Bug:** `vite.config.ts` includes `define: { 'process.env': process.env }` for compatibility with an old library.
+- **Result:** **ALL** serverside environment variables (including AWS keys, DB passwords) are inlined into the frontend `main.js` if the library accesses `process.env`.
+
+### 3.3 Detection
+- **Grep the Build:** `grep -r "API_ADMIN_KEY" dist/` after building.
+- **Code Review:** Check `vite.config.ts` `define` section. **NEVER** define `process.env`.
+- **Runtime Check:** Open console on production site and type `process.env`.
+
+### 3.4 Remediation Pattern
+**Strict Prefixing:**
+Only verify/use variables starting with `VITE_` (or `NEXT_PUBLIC_`).
+
+**Pipeline Separation:**
+In CI/CD, do not inject backend secrets (DB_PASS) into the build environment for the *frontend* build step. Separation of concerns.
+
+---
+
+## 4. Vulnerability Taxonomy: "Source Map Exposure" (Intel Leak)
+
+### 4.1 Description
+Source maps allow debugging minified code by mapping it back to TS/source. If deployed to production (publicly accessible), they reveal the **entire source code structure**, **comments**, and potentially **internal endpoints** or **algorithms** (e.g., proprietary trading logic).
+
+### 4.2 Manifestation
+- **Scenario:** `sourcemap: true` in production build config.
+- **Attack:** Attacker adds `.map` to any JS file URL -> downloads full source tree.
+- **Impact:** Intellectual Property theft. Easier to find other vulnerabilities (XSS vectors, logic bugs).
+
+### 4.3 Remediation Pattern
+**Upload Only (Sentry/Datadog):**
+Configure build to generate source maps, verify usage by error tracking tools, then **delete** them from the request path before deploying to CDN/Server.
+
+**Hidden Source Maps:**
+Use `hidden-source-map` (generates the map but strips the `//# sourceMappingURL=` comment). Only developers with the map file can manually associate it.
+
+---
+
+## 5. Bug Taxonomy: "Polyfill Bloat & Missing Features"
+
+### 5.1 Description
+Modern browsers support most features. Tools like `core-js` often inject polyfills for ancient browsers (IE11) based on default `browserslist` config, adding 100KB+ of useless code. Conversely, aggressive targets might miss a polyfill for `ResizeObserver` or `Intl`, crashing the app on Safari 14.
+
+### 5.2 Manifestation
+- **Scenario:** App uses `BigInt` for high-precision math.
+- **Bug:** Target is set to `es2019`. `BigInt` cannot be polyfilled perfectly.
+- **Result:** Older browsers crash with `SyntaxError`. Users on older iPads cannot trade.
+
+### 5.3 Detection
+- **Cross-Browser Testing:** Automated tests on BrowserStack/SauceLabs.
+- **Reference:** Can I Use (caniuse.com) vs `browserslist` config in `package.json`.
+
+---
+
+## 6. Bug Taxonomy: "TypeScript Declaration Emit Mismatches"
+
+### 6.1 Description
+When building a library or shared package, TypeScript emits `.d.ts` declaration files. If `tsconfig.json` uses different settings (paths, `baseUrl`, `moduleResolution`) for the library vs the consuming app, the declarations may reference paths that don't exist in the consumer's resolution context.
+
+### 6.2 Manifestation
+- **Scenario:** Shared package uses `"paths": { "@shared/*": ["./src/*"] }` in tsconfig.
+- **Bug:** Emitted `.d.ts` files contain `import { X } from '@shared/utils'`.
+- **Result:** Consumer app without the same `paths` alias gets `TS2307: Cannot find module '@shared/utils'`.
+
+### 6.3 Detection
+- **Build the shared package:** Check `.d.ts` output for non-standard import paths.
+- **CI:** Consumer app builds fail with `Cannot find module` errors.
+
+### 6.4 Remediation
+- **`declaration: true` + `declarationMap: true`** in shared package tsconfig.
+- **Use `publishConfig` / `exports` in package.json** to remap paths for consumers.
+- **Avoid `paths`** in library tsconfigs; use relative imports.
+
+---
+
+## 7. Bug Taxonomy: "CSS Extraction & Ordering Bugs"
+
+### 7.1 Description
+When using CSS Modules or CSS-in-JS with extraction (e.g., Vite's CSS splitting), the order of CSS rules in the output depends on the import order of JS modules. This is non-deterministic across builds if the bundler processes modules in parallel.
+
+### 7.2 Manifestation
+- **Scenario:** Component A has `.button { color: red }`. Component B has `.button { color: blue }`.
+- **Bug:** In Build 1, A's CSS comes first → buttons are blue. In Build 2, B's CSS comes first → buttons are red.
+- **Result:** Visual inconsistency across deployments. "It looked fine on staging but broke on prod."
+
+### 7.3 Detection
+- **Visual Regression Testing:** Percy, Chromatic, or BackstopJS to detect visual differences between builds.
+- **Diff CSS Output:** Compare `dist/assets/*.css` across two builds of the same commit.
+
+### 7.4 Remediation
+- **Scoped CSS (CSS Modules):** Each class is hashed, eliminating global collisions.
+- **Explicit Load Order:** Import order in `main.tsx` should be deterministic: reset → tokens → components → overrides.
+- **Atomic CSS (Tailwind/UnoCSS):** Utility classes avoid specificity wars entirely.
+
+---
+
+## 8. Bug Taxonomy: "HMR State Persistence Bugs"
+
+### 8.1 Description
+Hot Module Replacement (HMR) in Vite/Webpack replaces changed modules at runtime without a full page reload. React state *inside* unaffected components is preserved. However, if the state depends on the newly replaced module's behavior, the preserved state becomes inconsistent.
+
+### 8.2 Manifestation
+- **Scenario:** Developer changes a validation function from `minPrice = 0` to `minPrice = 1`.
+- **Bug:** HMR hot-swaps the validation function. But the form state still holds `price = 0` (valid under old rules).
+- **Result:** The form submits with `price = 0`, which the new validation would reject — but the check already passed with old code. In development, this causes confusion ("why did my fix not work?").
+
+### 8.3 Detection
+- **Developer Awareness:** Know which state survives HMR and which doesn't.
+- **Test:** After a hot update, verify that UI state is consistent with the new code.
+
+### 8.4 Remediation
+- **Full Reload for Critical Changes:** In Vite config, use `handleHotUpdate` to trigger a full reload if specific files change.
+- **`import.meta.hot.invalidate()`:** Force a full reload from the module itself when needed.
+- **State Initialization:** Re-derive state from props/context after HMR, not from stale memory.
+
+---
+
+## 9. Bug Taxonomy: "Monorepo Dependency Resolution Issues"
+
+### 9.1 Description
+In monorepo setups (pnpm workspaces, Yarn workspaces, Turborepo), packages can accidentally import a dependency that's hoisted to the root `node_modules` but not listed in their own `package.json`. This works locally but fails in CI or when the package is published.
+
+### 9.2 Manifestation
+- **Scenario:** Package `@app/shared` uses `lodash` but doesn't declare it. `lodash` is hoisted from `@app/client`.
+- **Bug:** `@app/shared` builds locally because `lodash` is in the root `node_modules`.
+- **Result:** CI with `--frozen-lockfile` or npm publishing fails: `Module not found: lodash`.
+
+### 9.3 Detection
+- **`pnpm` strict mode:** pnpm doesn't hoist by default, catching these issues early.
+- **`depcheck`:** Tool that scans for unused and undeclared dependencies.
+- **CI with blank cache:** Build from scratch (no hoisted deps) to catch implicit deps.
+
+### 9.4 Remediation
+- **Use `pnpm`:** Strictest resolution by default.
+- **`depcheck` in CI:** Fail builds if undeclared dependencies are found.
+- **Explicit `dependencies` in every package.json:** Even if hoisted, declare it.
+
+---
+
+## 10. Bug Taxonomy: "Docker / WSL Path Normalization Issues"
+
+### 10.1 Description
+When developing on Windows with WSL (as in this project: `\\wsl.localhost\Ubuntu\...`), path handling has multiple failure points: `\` vs `/` separators, case sensitivity differences, and UNC path incompatibilities.
+
+### 10.2 Sub-Patterns
+
+| Issue | Description |
+|-------|-------------|
+| **Path Separators** | Windows uses `\`, Linux uses `/`. Tools may split paths incorrectly. |
+| **Case Sensitivity** | Windows is case-insensitive; Linux is case-sensitive. `import './Utils'` works on Windows but fails in Docker/Linux build. |
+| **UNC Paths** | `\\wsl.localhost\...` is a UNC path. Some tools (e.g., `fs.watch`) don't support UNC paths. |
+| **Line Endings** | `CRLF` on Windows vs `LF` on Linux. Git may convert, breaking shell scripts in Docker. |
+
+### 10.3 Detection
+- **CI vs Local:** If CI builds on Linux fail but local Windows builds succeed, it's a path/case issue.
+- **Grep:** `import.*[A-Z]` in paths — check if the file exists with that exact casing on disk.
+- **`.gitattributes`:** Check if `* text=auto` or `eol=lf` is set.
+
+### 10.4 Remediation
+- **`.gitattributes`:** `* text=auto eol=lf` forces LF line endings.
+- **ESLint:** `import/no-unresolved` with case-sensitive filesystem.
+- **Docker:** Mount the project from the Linux filesystem (`/home/user/project`), not from `/mnt/c/...`.
+- **Path Library:** Always use `path.posix.join()` in build scripts when targeting Linux output.
+
+---
+
+## 11. Bug Taxonomy: "Dynamic Import Failures & Code Splitting Traps"
+
+### 11.1 Description
+`import()` (dynamic import) enables lazy loading of routes and heavy components. However, the dynamically imported chunk must exist at the expected URL. If a deployment changes chunk hashes while users have the old HTML cached, the import fails with a network error.
+
+### 11.2 Manifestation
+- **Scenario:** User loads the app (gets `index.html` v1, which references `chart.abc123.js`).
+- **Deploy v2:** New chunks have different hashes. `chart.abc123.js` is deleted from CDN.
+- **Bug:** User navigates to the Chart page. `import('./chart.abc123.js')` → 404.
+- **Result:** White screen or error boundary triggers. User must hard-refresh.
+
+### 11.3 Detection
+- **Error Monitoring:** Track `ChunkLoadError` or `Loading chunk X failed` errors in Sentry/Datadog.
+- **CDN Config:** Check if old chunks are retained for a grace period after deployment.
+
+### 11.4 Remediation
+- **Retain Old Chunks:** Keep N previous versions of chunks on CDN (at least 24 hours).
+- **Catch & Reload:** Wrap dynamic imports with error handling:
+```typescript
+const LazyChart = lazy(() =>
+  import('./Chart').catch(() => {
+    window.location.reload(); // Force fresh HTML + new chunk references
+    return { default: () => null }; // Satisfy React.lazy type
+  })
+);
+```
+- **Service Worker:** Cache HTML with Network-First strategy so refreshes always get latest.
+
+---
+
+**End of Report 5**

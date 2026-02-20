@@ -20,6 +20,7 @@ export const WS_MSG_PING = "ping";
 export const WS_MSG_PONG = "pong";
 export const WS_MSG_ERROR = "ws:error";
 export const WS_MSG_QUOTE_SUBSCRIPTIONS_UPDATED = "quote-subscriptions:updated";
+export const WS_MSG_LEGAL_DOC1_UPDATED = "legal:doc1-updated";
 
 export function resolveWsUrl(rawBase: string): string {
   const base = String(rawBase ?? "").trim().replace(/\/+$/, "");

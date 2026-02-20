@@ -1,0 +1,248 @@
+# System Bug Research Report 3: Storage, Caching & Offline Risks
+
+**Scope:** IndexedDB (IDB), LocalStorage, Service Worker (SW) Cache API, Origin Storage Quotas  
+**Target Audience:** Frontend Architects, Security Engineers  
+**Date:** 2026-02-18
+
+---
+
+## 1. Executive Summary
+
+Storage in the browser is volatile and resource-constrained. While tools like IndexedDB enable "offline-first" experiences, they introduce complex failure modes: **silent write failures** (quota exceeded), **stale-while-revalidate poisoning** (serving outdated assets forever), and **performance bottlenecks** (main-thread blocking).
+
+For a trading app, storage reliability is paramount—cached charts must load instantly, but *never* show outdated prices disguised as current.
+
+---
+
+## 2. Bug Taxonomy: "Quota Exceeded Checkmate" (Silent Data Loss)
+
+### 2.1 Description
+Browsers enforce storagequotas based on available disk space. If a user's device is full, or the origin exceeds its group limit (e.g., 2GB), writes to IndexedDB or CacheStorage throw a `QuotaExceededError`.
+
+### 2.2 Manifestation in Trading
+- **Scenario:** User has 5 years of tick data cached.
+- **Bug:** User places a trade. The app attempts to store the "Pending Order" in IDB for optimistic updates.
+- **Result:** The write fails. The catch block suppresses the error to keep the UI running. The specific order state is lost locally. If the network also fails, the order disappears from the UI entirely (phantoms).
+
+### 2.3 Detection
+- **Code Review:** Grep for `.put()` or `.add()` calls. Is there a `try/catch`? Does the catch block notify the user or retry?
+- **Telemetry:** Log `navigator.storage.estimate()` failures.
+- **Simulation:** Fill the hard drive (or simulate quota in DevTools) and try to use the app.
+
+### 2.4 Remediation Pattern: LRU Eviction & Robust Handling
+**Strategy:**
+1. Check quota before large writes.
+2. Implement **Least Recently Used (LRU)** eviction for chart data.
+3. If write fails, fallback to in-memory storage (volatile but works for the session).
+
+```typescript
+try {
+  await db.put('orders', order);
+} catch (err) {
+  if (err.name === 'QuotaExceededError') {
+    await pruneOldData(); // ⬅️ Critical: automatic cleanup
+    await db.put('orders', order); // Retry
+  } else {
+    throw err;
+  }
+}
+```
+
+---
+
+## 3. Vulnerability Taxonomy: "The Poisoned Cache" (SW Stale-While-Revalidate)
+
+### 3.1 Description
+Service Workers are powerful but dangerous. A common pattern is `Stale-While-Revalidate`: serve the cached version immediately, fetch the new one in the background, and update the cache.
+
+### 3.2 Manifestation
+- **Scenario:** You deploy a critical security fix to `main.js`.
+- **Bug:** The SW serves the *old* `main.js` from cache. The browser executes it. The background fetch retrieves the *new* `main.js` and puts it in cache.
+- **Result:** The user is **still running the vulnerable code**. They must reload the page *again* to get the fix. If the vulnerability is an XSS exploited on load, they are compromised before the fix applies.
+
+### 3.3 Issues Arising
+- **Zombie Versions:** Users running code that is days or weeks old.
+- **API Drift:** Old frontend code sending requests to a new backend API that has breaking changes.
+
+### 3.4 Remediation Pattern: "Skip Waiting" & Versioned Assets
+**Immediate Claim:**
+In `install` event, call `self.skipWaiting()`. In `activate`, call `self.clients.claim()`. This forces the new SW to take control immediately.
+
+**Prompt to Reload:**
+Listen for `controllerchange` in the main thread. If the SW updates, show a toast: "New version available. Click to reload."
+
+**Cache-Busting (Vite):**
+Ensure filenames have hashes (`main.a1b2c3.js`). Cache these **immutably** (Cache-First). Never cache `index.html` (Network-First).
+
+---
+
+## 4. Performance Bug: "Local Storage Blocking" (Main Thread Hates IO)
+
+### 4.1 Description
+`localStorage` is synchronous and block-based. Reading/writing large strings (e.g., 5MB JSON blobs) freezes the main thread.
+
+### 4.2 Manifestation
+- **Scenario:** Storing a large user settings object or a small dataset in `localStorage`.
+- **Bug:** On every page load, `JSON.parse(localStorage.getItem('data'))` runs.
+- **Result:** TTI (Time to Interactive) delays. Janky scrolling if writes happen during scroll events.
+
+### 4.3 Remediation
+- **Migration:** Move all data > 10KB to IndexedDB (asynchronous).
+- **Compression:** Use `LZString` to compress data before storing (trades CPU for IO, usually worth it).
+
+---
+
+## 5. Security Vulnerability: "Persistent Crypto Keys" (The Unlockable Door)
+
+### 5.1 Description
+Storing raw cryptographic keys (`CryptoKey` objects exportable to JWK/Raw) in IndexedDB or LocalStorage makes them retrievable by any XSS on the origin.
+
+### 5.2 Remediation: origin-specific encryption
+**Web Crypto API (SubtleCrypto):**
+Store keys as `non-extractable` where possible.
+Wrap sensitive keys with a **Key Wrapping Key (KWK)** derived from a user secret (e.g., password) that is *never* stored, only held in memory.
+
+**Session-Bound Scope:**
+Clear sensitive storage on `sessionStorage` limits (tab close) rather than `localStorage`.
+
+---
+
+## 6. Bug Taxonomy: "IndexedDB Transaction Auto-Commit" (The Silent Abort)
+
+### 6.1 Description
+IndexedDB transactions automatically commit when the event loop returns to idle. If you start a transaction, perform an async operation that yields to the event loop (e.g., `await fetch()`), and then try to use the transaction again, it has already committed. The subsequent `put()` or `get()` throws `TransactionInactiveError`.
+
+### 6.2 Manifestation
+```typescript
+// 🚩 Bug: transaction auto-commits during await
+const tx = db.transaction('orders', 'readwrite');
+const store = tx.objectStore('orders');
+const order = await store.get(orderId); // ✅ works
+const enriched = await enrichOrder(order); // ← network call, yields event loop
+await store.put(enriched); // 💥 TransactionInactiveError — tx already committed!
+```
+
+### 6.3 Detection
+- **Error Monitoring:** Look for `TransactionInactiveError` in production logs.
+- **Code Review:** Search for `await` between `db.transaction()` and the last `store.put/get/delete` call.
+- **Rule:** A single IDB transaction should never span an `await` that does IO.
+
+### 6.4 Remediation
+- **Separate transactions:** Read in TX1, do async work, write in TX2.
+- **Batched writes:** Collect all data first, then write in a single synchronous transaction.
+
+```typescript
+// ✅ Two transactions, async work in between
+const order = await db.transaction('orders').objectStore('orders').get(orderId);
+const enriched = await enrichOrder(order); // async work outside TX
+const tx2 = db.transaction('orders', 'readwrite');
+await tx2.objectStore('orders').put(enriched);
+```
+
+---
+
+## 7. Bug Taxonomy: "Service Worker Update Lifecycle Edge Cases"
+
+### 7.1 Description
+Service Workers have a complex lifecycle: `install` → `waiting` → `activate`. The new SW typically waits until all tabs using the old SW are closed. This leads to scenarios where users run an old version for days because they never close all tabs.
+
+### 7.2 Sub-Patterns
+
+| Pattern | Issue |
+|---------|-------|
+| **Eternal Waiting** | New SW installed but stuck in `waiting` because old tabs are open |
+| **Partial Updates** | Some tabs use old SW, some use new — inconsistent behavior |
+| **Registration Race** | If SW registration happens before the app is fully loaded, critical requests are intercepted by the new (empty-cache) SW |
+| **Update on Reload Loop** | `skipWaiting()` + `clients.claim()` causes all tabs to reload, but if they reload in sync, they may trigger another SW update check |
+
+### 7.3 Detection
+- **DevTools → Application → Service Workers:** Check if a SW is "waiting to activate."
+- **Telemetry:** Log the SW version hash on every page load. Compare to current deployed version.
+- **User Reports:** "I'm seeing an old version" complaints.
+
+### 7.4 Remediation
+- **Update Prompt:** Show a non-blocking toast when a new SW is available: "Update available. Click to refresh."
+- **`skipWaiting()` with caution:** Only use if API contracts are backward-compatible. Otherwise, the new SW may fetch assets that don't match the old HTML.
+- **Version Check on Focus:** When the tab gains focus (`visibilitychange`), call `registration.update()`.
+
+---
+
+## 8. Vulnerability Taxonomy: "Storage Partitioning in Third-Party Contexts"
+
+### 8.1 Description
+Modern browsers (Chrome 115+, Firefox 103+) partition storage by top-level site. If your trading app is embedded in an `<iframe>` on a partner site, its `localStorage`, `IndexedDB`, and cookies are isolated from the same domain loaded directly. Cached data, login state, and crypto keys are invisible in the iframe context.
+
+### 8.2 Manifestation
+- **Scenario:** Partner site embeds trading widget in an `<iframe src="trading.com/widget">`.
+- **Bug:** User is logged in on `trading.com` directly, but the widget iframe has no session (different storage partition).
+- **Result:** User must log in again inside the widget. Cached data is not shared.
+
+### 8.3 Detection
+- **Test:** Open the app directly vs in an iframe on a different domain. Compare `localStorage` contents.
+- **Console:** Chrome logs warnings about partitioned storage access.
+
+### 8.4 Remediation
+- **Storage Access API:** `document.requestStorageAccess()` — requires user gesture.
+- **Token Passing:** Pass auth tokens via `postMessage` from the parent frame instead of relying on cookies.
+- **Accept the Partition:** Treat the iframe as a separate app with its own session.
+
+---
+
+## 9. Bug Taxonomy: "Web Locks API Deadlocks"
+
+### 9.1 Description
+The Web Locks API (`navigator.locks.request()`) prevents concurrent access to shared resources (e.g., IndexedDB write operations from multiple tabs). However, if two locks depend on each other, they deadlock — both tabs freeze.
+
+### 9.2 Manifestation
+- **Tab A:** Acquires lock "cache-write", then requests lock "seed-rotate".
+- **Tab B:** Acquires lock "seed-rotate", then requests lock "cache-write".
+- **Result:** Both tabs wait forever.
+
+### 9.3 Detection
+- **Timeout-Based:** Add a `signal: AbortSignal.timeout(5000)` to all lock requests. Log any timeouts.
+- **Code Review:** Map all lock acquisition points. Draw a dependency graph. Look for cycles.
+
+### 9.4 Remediation
+- **Single Lock Granularity:** Use one master lock instead of fine-grained locks.
+- **Lock Ordering Convention:** Always acquire locks in alphabetical order.
+- **Timeout + Retry:** Never block indefinitely:
+```typescript
+const ac = new AbortController();
+setTimeout(() => ac.abort(), 5000);
+await navigator.locks.request('my-lock', { signal: ac.signal }, async () => {
+  // critical section
+});
+```
+
+---
+
+## 10. Bug Taxonomy: "Cache Versioning & Migration Failures"
+
+### 10.1 Description
+When the schema of cached data changes (e.g., a `Trade` object gains a new required field), old cached entries become incompatible with the new code. Without versioning, the new code reads old-format data and crashes or shows incorrect values.
+
+### 10.2 Manifestation
+- **Scenario:** v1 caches `{ symbol: 'BTC', price: 50000 }`. v2 expects `{ symbol: 'BTC', price: 50000, decimals: 2 }`.
+- **Bug:** v2 code does `trade.decimals.toFixed()` → `TypeError: Cannot read properties of undefined`.
+- **Result:** App crashes on startup for returning users (new installs are fine).
+
+### 10.3 Detection
+- **Canary Deployments:** Deploy to a small % of users first. Monitor crash rates.
+- **Schema Validation:** Run cached data through Zod on load. Count validation failures.
+
+### 10.4 Remediation
+- **Version Key:** Store a `cacheVersion` number. On mismatch, clear and refetch.
+- **Migration Functions:** If data is expensive to refetch, write migrations:
+```typescript
+const CACHE_VERSION = 3;
+const stored = await secureGet('cache-version');
+if (stored !== CACHE_VERSION) {
+  await migrateCache(stored, CACHE_VERSION);
+  await secureSet('cache-version', CACHE_VERSION);
+}
+```
+- **Graceful Fallback:** If parsing fails, treat the entry as missing (refetch) instead of crashing.
+
+---
+
+**End of Report 3**

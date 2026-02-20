@@ -1,0 +1,5 @@
+{
+  "artifactType": "ARTIFACT_TYPE_OTHER",
+  "summary": "Deep audit report identifying 55 missed items from the DESIGN-001 routes.ts decomposition plan. Covers: 9 inner functions with no target file (quote snapshot pipeline, legal status helpers, audit helpers), 1 missing route (trade cancel), 1 missing type (LiveClient), 19 undocumented constants/state variables, 7 unlisted WS helper exports, 3 underestimated complexity items, raw SQL exceptions, grift detection duplication, 34-mount router registration order, and 9 tasks missing from task.md.",
+  "updatedAt": "2026-02-20T05:50:19.621722400Z"
+}

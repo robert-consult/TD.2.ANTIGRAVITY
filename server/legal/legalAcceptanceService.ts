@@ -3,6 +3,35 @@ import { legalAcceptances, legalDocuments } from "@shared/schema";
 import { desc, eq } from "drizzle-orm";
 import { sha256, stableStringify, verifyDoc1TermsToken, type Doc1TermsTokenPayload } from "./cryptoUtils";
 
+const LEGAL_ACCEPTANCE_SERIALIZABLE_MAX_RETRIES = (() => {
+  const raw = Number(process.env.LEGAL_ACCEPTANCE_SERIALIZABLE_MAX_RETRIES ?? 3);
+  if (!Number.isFinite(raw)) return 3;
+  return Math.max(1, Math.min(10, Math.trunc(raw)));
+})();
+
+function isRetryableSerializableError(error: unknown): boolean {
+  const code = String((error as { code?: unknown } | null)?.code ?? "");
+  return code === "40001" || code === "40P01";
+}
+
+async function runSerializableAcceptanceWrite<T>(writeFn: (tx: any) => Promise<T>): Promise<T> {
+  for (let attempt = 1; attempt <= LEGAL_ACCEPTANCE_SERIALIZABLE_MAX_RETRIES; attempt += 1) {
+    try {
+      return await db.transaction(writeFn, {
+        isolationLevel: "serializable",
+        accessMode: "read write",
+      });
+    } catch (error) {
+      if (!isRetryableSerializableError(error) || attempt >= LEGAL_ACCEPTANCE_SERIALIZABLE_MAX_RETRIES) {
+        throw error;
+      }
+      const backoffMs = Math.min(120, attempt * 20) + Math.floor(Math.random() * 10);
+      await new Promise((resolve) => setTimeout(resolve, backoffMs));
+    }
+  }
+  throw new Error("LEGAL_ACCEPTANCE_WRITE_FAILED");
+}
+
 export class LegalAcceptanceError extends Error {
   public code: string;
   constructor(code: string, message: string) {
@@ -31,7 +60,9 @@ export async function recordDoc1Acceptance(params: {
   combinedSha256: string;
 
   verifiedPayload?: Doc1TermsTokenPayload;
+  tx?: any;
 }) {
+  const q = params.tx ?? db;
   assertSha256Like(params.combinedSha256);
 
   const verified =
@@ -52,7 +83,7 @@ export async function recordDoc1Acceptance(params: {
     throw new LegalAcceptanceError("COMBINED_SHA_MISMATCH", "Combined SHA mismatch");
   }
 
-  const [globalDoc] = await db
+  const [globalDoc] = await q
     .select()
     .from(legalDocuments)
     .where(eq(legalDocuments.id, verified.global.id))
@@ -65,7 +96,7 @@ export async function recordDoc1Acceptance(params: {
 
   const addendumDoc =
     verified.addendum?.id != null
-      ? (await db
+      ? (await q
           .select()
           .from(legalDocuments)
           .where(eq(legalDocuments.id, verified.addendum.id))
@@ -90,7 +121,7 @@ export async function recordDoc1Acceptance(params: {
   const acceptedAtSec = Math.floor(acceptedAtMs / 1000);
   const regionKey = verified.regionKey ?? null;
 
-  const result = await db.transaction(async (tx) => {
+  const writeAcceptance = async (tx: any) => {
     const [last] = await tx
       .select({
         ledgerSeq: legalAcceptances.ledgerSeq,
@@ -184,7 +215,11 @@ export async function recordDoc1Acceptance(params: {
       ledgerSeq,
       ledgerHash,
     };
-  });
+  };
+
+  const result = params.tx
+    ? await writeAcceptance(params.tx)
+    : await runSerializableAcceptanceWrite(writeAcceptance);
 
   return result;
 }

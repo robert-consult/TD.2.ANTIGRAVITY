@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * Coverage Gate - Controls whether signup is blocked when terms unavailable
  * Uses Drizzle ORM with correct 4-part key structure
@@ -174,22 +173,7 @@ export async function checkCoverage(countryCode: string): Promise<CoverageCheckR
     };
   }
 
-  // Not enforced - check if any documents exist at all before allowing
-  // This prevents signup without any terms when enforcement is off
-  const hasAnyGlobal = await hasActiveTarget("DOC1", "GLOBAL_MASTER", "DEFAULT", "GLOBAL");
-  if (!hasAnyGlobal) {
-    return {
-      allowed: false,
-      reason: "Terms of service are not yet configured. Please check back later.",
-      countryCode: normalized,
-      scopeKey: null,
-      enforced: false,
-      restricted: false,
-      fallbackAvailable: false,
-    };
-  }
-  
-  // Global exists but no addendum - allow with warning (fallback to global only)
+  // Global master exists (checked above), so allow fallback to global-only coverage.
   return {
     allowed: true,
     reason: "Using global terms only. Region-specific terms may be added later.",

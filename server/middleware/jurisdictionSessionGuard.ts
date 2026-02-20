@@ -94,6 +94,12 @@ export async function jurisdictionSessionGuard(req: Request, res: Response, next
     });
   } catch (e) {
     console.error("[Jurisdiction] session guard error:", e);
-    return next(); // fail-open for middleware errors only (policy eval itself fails closed at login/signup)
+    try {
+      req.session.destroy(() => {});
+    } catch {}
+    return res.status(503).json({
+      message: "JURISDICTION_ENFORCEMENT_UNAVAILABLE",
+      code: "JURISDICTION_GUARD_ERROR",
+    });
   }
 }

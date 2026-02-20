@@ -4,6 +4,7 @@ import { db } from "@db";
 import { eq } from "drizzle-orm";
 import { emailVerificationTokens, userEquityDaily, userVerification, users } from "@shared/schema";
 import { appendIdentityAudit } from "../services/identityAudit";
+import { hashEmailVerificationToken } from "../security/emailVerificationToken";
 import { buildDecisionContext } from "../policy/buildDecisionContext";
 import { decidePolicy } from "@shared/policyDecision";
 import { loadPolicyConfig } from "../policy/getPolicyConfig";
@@ -19,9 +20,7 @@ function generateSecureToken(): string {
 }
 
 function hmacToken(input: string): string {
-  const secret = process.env.EMAIL_VERIFY_TOKEN_SECRET;
-  if (!secret) return crypto.createHash("sha256").update(input).digest("hex");
-  return crypto.createHmac("sha256", secret).update(input).digest("hex");
+  return hashEmailVerificationToken(input);
 }
 
 function getDayKey(): string {

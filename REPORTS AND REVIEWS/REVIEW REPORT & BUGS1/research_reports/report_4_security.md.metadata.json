@@ -1,0 +1,5 @@
+{
+  "artifactType": "ARTIFACT_TYPE_OTHER",
+  "summary": "Deep research report on Security & Cryptography Pitfalls. Covers XSS vectors in React (href injection, JSON injection), CSRF in SPAs, Supply Chain Attacks, Prototype Pollution, and ReDoS. Includes specific remediation patterns and tooling (npm audit, Snyk, DOMPurify).",
+  "updatedAt": "2026-02-19T00:54:49.992306600Z"
+}

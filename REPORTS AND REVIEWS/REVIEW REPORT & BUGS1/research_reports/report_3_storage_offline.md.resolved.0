@@ -1,0 +1,110 @@
+# System Bug Research Report 3: Storage, Caching & Offline Risks
+
+**Scope:** IndexedDB (IDB), LocalStorage, Service Worker (SW) Cache API, Origin Storage Quotas  
+**Target Audience:** Frontend Architects, Security Engineers  
+**Date:** 2026-02-18
+
+---
+
+## 1. Executive Summary
+
+Storage in the browser is volatile and resource-constrained. While tools like IndexedDB enable "offline-first" experiences, they introduce complex failure modes: **silent write failures** (quota exceeded), **stale-while-revalidate poisoning** (serving outdated assets forever), and **performance bottlenecks** (main-thread blocking).
+
+For a trading app, storage reliability is paramount—cached charts must load instantly, but *never* show outdated prices disguised as current.
+
+---
+
+## 2. Bug Taxonomy: "Quota Exceeded Checkmate" (Silent Data Loss)
+
+### 2.1 Description
+Browsers enforce storagequotas based on available disk space. If a user's device is full, or the origin exceeds its group limit (e.g., 2GB), writes to IndexedDB or CacheStorage throw a `QuotaExceededError`.
+
+### 2.2 Manifestation in Trading
+- **Scenario:** User has 5 years of tick data cached.
+- **Bug:** User places a trade. The app attempts to store the "Pending Order" in IDB for optimistic updates.
+- **Result:** The write fails. The catch block suppresses the error to keep the UI running. The specific order state is lost locally. If the network also fails, the order disappears from the UI entirely (phantoms).
+
+### 2.3 Detection
+- **Code Review:** Grep for `.put()` or `.add()` calls. Is there a `try/catch`? Does the catch block notify the user or retry?
+- **Telemetry:** Log `navigator.storage.estimate()` failures.
+- **Simulation:** Fill the hard drive (or simulate quota in DevTools) and try to use the app.
+
+### 2.4 Remediation Pattern: LRU Eviction & Robust Handling
+**Strategy:**
+1. Check quota before large writes.
+2. Implement **Least Recently Used (LRU)** eviction for chart data.
+3. If write fails, fallback to in-memory storage (volatile but works for the session).
+
+```typescript
+try {
+  await db.put('orders', order);
+} catch (err) {
+  if (err.name === 'QuotaExceededError') {
+    await pruneOldData(); // ⬅️ Critical: automatic cleanup
+    await db.put('orders', order); // Retry
+  } else {
+    throw err;
+  }
+}
+```
+
+---
+
+## 3. Vulnerability Taxonomy: "The Poisoned Cache" (SW Stale-While-Revalidate)
+
+### 3.1 Description
+Service Workers are powerful but dangerous. A common pattern is `Stale-While-Revalidate`: serve the cached version immediately, fetch the new one in the background, and update the cache.
+
+### 3.2 Manifestation
+- **Scenario:** You deploy a critical security fix to `main.js`.
+- **Bug:** The SW serves the *old* `main.js` from cache. The browser executes it. The background fetch retrieves the *new* `main.js` and puts it in cache.
+- **Result:** The user is **still running the vulnerable code**. They must reload the page *again* to get the fix. If the vulnerability is an XSS exploited on load, they are compromised before the fix applies.
+
+### 3.3 Issues Arising
+- **Zombie Versions:** Users running code that is days or weeks old.
+- **API Drift:** Old frontend code sending requests to a new backend API that has breaking changes.
+
+### 3.4 Remediation Pattern: "Skip Waiting" & Versioned Assets
+**Immediate Claim:**
+In `install` event, call `self.skipWaiting()`. In `activate`, call `self.clients.claim()`. This forces the new SW to take control immediately.
+
+**Prompt to Reload:**
+Listen for `controllerchange` in the main thread. If the SW updates, show a toast: "New version available. Click to reload."
+
+**Cache-Busting (Vite):**
+Ensure filenames have hashes (`main.a1b2c3.js`). Cache these **immutably** (Cache-First). Never cache `index.html` (Network-First).
+
+---
+
+## 4. Performance Bug: "Local Storage Blocking" (Main Thread Hates IO)
+
+### 4.1 Description
+`localStorage` is synchronous and block-based. Reading/writing large strings (e.g., 5MB JSON blobs) freezes the main thread.
+
+### 4.2 Manifestation
+- **Scenario:** Storing a large user settings object or a small dataset in `localStorage`.
+- **Bug:** On every page load, `JSON.parse(localStorage.getItem('data'))` runs.
+- **Result:** TTI (Time to Interactive) delays. Janky scrolling if writes happen during scroll events.
+
+### 4.3 Remediation
+- **Migration:** Move all data > 10KB to IndexedDB (asynchronous).
+- **Compression:** Use `LZString` to compress data before storing (trades CPU for IO, usually worth it).
+
+---
+
+## 5. Security Vulnerability: "Persistent Crypto Keys" (The Unlockable Door)
+
+### 5.1 Description
+Storing raw cryptographic keys (`CryptoKey` objects exportable to JWK/Raw) in IndexedDB or LocalStorage makes them retrievable by any XSS on the origin.
+
+### 5.2 Remediation: origin-specific encryption
+**Web Crypto API (SubtleCrypto):**
+Store keys as `non-extractable` where possible.
+Wrap sensitive keys with a **Key Wrapping Key (KWK)** derived from a user secret (e.g., password) that is *never* stored, only held in memory.
+
+**Session-Bound Scope:**
+Clear sensitive storage on `sessionStorage` limits (tab close) rather than `localStorage`.
+
+---
+
+**End of Report 3**

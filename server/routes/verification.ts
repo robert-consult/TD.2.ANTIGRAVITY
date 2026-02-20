@@ -4,6 +4,8 @@ import { parsePhoneNumberFromString } from "libphonenumber-js";
 import { db } from "../../db";
 import { and, desc, eq } from "drizzle-orm";
 import { userVerification, emailVerificationTokens, smsOtpTokens, users } from "@shared/schema";
+import { hashEmailVerificationToken } from "../security/emailVerificationToken";
+import { hashSmsOtpCode, timingSafeHashEqual } from "../security/smsOtpToken";
 import { buildDecisionContext } from "../policy/buildDecisionContext";
 import { decidePolicy, featureGates } from "../../shared/policyDecision";
 import { loadPolicyConfig } from "../policy/getPolicyConfig";
@@ -21,9 +23,7 @@ function generateSecureToken(): string {
 }
 
 function hmacToken(input: string): string {
-  const secret = process.env.EMAIL_VERIFY_TOKEN_SECRET;
-  if (!secret) return crypto.createHash("sha256").update(input).digest("hex");
-  return crypto.createHmac("sha256", secret).update(input).digest("hex");
+  return hashEmailVerificationToken(input);
 }
 
 const OTP_EXPIRY_MINUTES = 10;
@@ -36,11 +36,7 @@ function generateOtpCode(): string {
 }
 
 function hashOtp(code: string): string {
-  const secret = process.env.SMS_OTP_SECRET || process.env.TWILIO_AUTH_TOKEN;
-  if (!secret) {
-    return crypto.createHash("sha256").update(code).digest("hex");
-  }
-  return crypto.createHmac("sha256", secret).update(code).digest("hex");
+  return hashSmsOtpCode(code);
 }
 
 async function sendSmsOtp(phoneE164: string, code: string): Promise<void> {
@@ -834,7 +830,7 @@ router.post("/sms/confirm", async (req: Request, res: Response) => {
     if (otpExpiresAtSec && otpExpiresAtSec < nowSec) {
       return handleOtpFailure("otp.expired");
     }
-    if (hashOtp(code) !== otpRow.otpHash) {
+    if (!timingSafeHashEqual(hashOtp(code), String(otpRow.otpHash || ""))) {
       return handleOtpFailure("otp.invalid");
     }
 

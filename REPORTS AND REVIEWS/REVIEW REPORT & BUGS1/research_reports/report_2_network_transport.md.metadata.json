@@ -1,0 +1,5 @@
+{
+  "artifactType": "ARTIFACT_TYPE_OTHER",
+  "summary": "Deep research report on Network & Transport Vulnerabilities (WebSocket/HTTP). Covers Reconnection Storms (Critical), Message Ordering/Loss (High), Head-of-Line Blocking, Backpressure, and socket hijacking. Includes mitigation strategies like jittered backoff and sequence numbers.",
+  "updatedAt": "2026-02-19T00:54:00.441457500Z"
+}

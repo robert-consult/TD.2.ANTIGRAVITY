@@ -5,6 +5,8 @@ const ALLOWED_PERFORMANCE_SETTING_KEYS = new Set<string>([
   "maxWsReconnectAttempts",
   "wsReconnectBaseDelayMs",
   "prefetchStrategy",
+  "prefetchMaxConcurrency",
+  "prefetchStartDelayMs",
   "pollInstantMs",
   "pollFastMs",
   "pollModerateMs",

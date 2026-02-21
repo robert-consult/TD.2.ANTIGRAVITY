@@ -473,3 +473,28 @@ Failure Mode if Missing:
   - Verify OTP paths fail closed when keyed secret is unavailable/weak and use timing-safe hash comparison.
   - Run `npm run check` and `npm run e2e`.
 - Failure Mode if Missing: CAPTCHA replay windows remain open across workers, TTL behavior remains inconsistent for real users, and OTP material is exposed to offline grinding/timing leakage risks.
+
+### PRD-PERF-007
+- ID: `PRD-PERF-007`
+- Date (UTC): `2026-02-20`
+- Scope: `Client route-prefetch burst tuning persistence`
+- Requirement: `global_settings` must include persisted prefetch controls (`prefetch_max_concurrency`, `prefetch_start_delay_ms`) and enforce bounded values (`1..6`, `0..15000`) before broadcasting to clients.
+- Enforcement: `db/migrations/0033_global_settings_prefetch_tuning.sql`, `shared/schema.pg.ts`, `server/routes/admin.ts` (`/api/admin/global-settings` validation + persistence), and `server/routes/public/globalSettings.ts` (`/api/global-settings` projection/clamp).
+- Validation:
+  - Run `npm run db:migrate:drizzle` and verify migration `0033_global_settings_prefetch_tuning` is applied.
+  - `GET /api/admin/global-settings` and confirm new fields are present.
+  - `PUT /api/admin/global-settings` with out-of-range prefetch values and verify `400`; submit in-range values and verify persistence plus `global-settings:updated` broadcast payload contains updated performance settings.
+  - `GET /api/global-settings` and verify clamped values are exposed to clients.
+- Failure Mode if Missing: prefetch tuning controls silently fall back to defaults or become non-persistent, causing inconsistent warm-up behavior and loss of operator control for fast-load optimization.
+
+### PRD-DB-001
+- ID: `PRD-DB-001`
+- Date (UTC): `2026-02-21`
+- Scope: `Schema-audit parity for session store + capital defaults`
+- Requirement: Every production schema change must be represented by both a committed SQL migration file and a matching `db/migrations/meta/_journal.json` entry, and runtime Postgres session-store table `session` must be migration-managed and modeled in `shared/schema.pg.ts` so `db:audit` remains deterministic across environments.
+- Enforcement: `db/migrations/0034_default_capital_settings.sql`, `db/migrations/0035_session_store_schema_alignment.sql`, `db/migrations/meta/_journal.json` (entries `0034` + `0035`), and `shared/schema.pg.ts` (`session` table export).
+- Validation:
+  - Run `npm run db:migrate:drizzle` and verify both pending migrations apply.
+  - Run `npm run db:audit` and verify no missing columns on `global_settings` and no extra unmanaged `session` table warning.
+  - Confirm `information_schema.columns` for `global_settings` includes `default_user_starting_balance_usd`, `default_user_starting_equity_usd`, and `default_challenge_virtual_capital_usd`.
+- Failure Mode if Missing: migrations can be silently skipped due journal drift, leading to schema/code mismatch in production (`global_settings` missing columns) and non-deterministic audit output due unmanaged runtime-created `session` table.

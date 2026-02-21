@@ -6,6 +6,7 @@ import {
   refreshPerfHints,
   resolvePerformanceSettings,
   subscribeHints,
+  tierPrefetchPlan,
 } from "@/lib/perfHints";
 
 type ConnectionLike = {
@@ -236,5 +237,44 @@ describe("perfHints", () => {
     expect(resolved.pollConstrainedMs).toBe(4000);
     expect(resolved.flushFastMs).toBe(240);
     expect(resolved.flushConstrainedMs).toBe(800);
+  });
+
+  it("uses immediate bounded-concurrency prefetch by default on healthy links", () => {
+    setNavigatorProfile({
+      effectiveType: "4g",
+      saveData: false,
+      rtt: 40,
+      downlink: 20,
+      deviceMemoryGB: 8,
+      hardwareConcurrency: 8,
+    });
+    const hints = refreshPerfHints();
+    const plan = tierPrefetchPlan(hints, resolvePerformanceSettings({ prefetchStrategy: "all" }));
+    expect(plan.mode).toBe("parallel");
+    expect(plan.startDelayMs).toBe(0);
+    expect(plan.maxConcurrency).toBe(4);
+  });
+
+  it("honors prefetch delay/concurrency admin overrides within safety caps", () => {
+    setNavigatorProfile({
+      effectiveType: "4g",
+      saveData: false,
+      rtt: 40,
+      downlink: 20,
+      deviceMemoryGB: 16,
+      hardwareConcurrency: 12,
+    });
+    const hints = refreshPerfHints();
+    const plan = tierPrefetchPlan(
+      hints,
+      resolvePerformanceSettings({
+        prefetchStrategy: "critical",
+        prefetchMaxConcurrency: 6,
+        prefetchStartDelayMs: 1200,
+      }),
+    );
+    expect(plan.mode).toBe("parallel");
+    expect(plan.maxConcurrency).toBe(6);
+    expect(plan.startDelayMs).toBe(1200);
   });
 });

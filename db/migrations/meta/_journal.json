@@ -232,6 +232,27 @@
       "when": 1776201608000,
       "tag": "0032_global_settings_tier_overrides",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1776600000000,
+      "tag": "0033_global_settings_prefetch_tuning",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1776600001000,
+      "tag": "0034_default_capital_settings",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1776600002000,
+      "tag": "0035_session_store_schema_alignment",
+      "breakpoints": true
     }
   ]
 }

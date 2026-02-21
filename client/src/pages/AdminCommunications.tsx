@@ -59,6 +59,7 @@ type NotificationsSettingsDraft = {
   notificationAccountFreezeEnabled: boolean;
   notificationAccountUnfreezeEnabled: boolean;
   notificationKycUpdatesEnabled: boolean;
+  notificationChallengeEnabled: boolean;
 };
 
 function formatWhen(value: number | null | undefined): string {
@@ -156,6 +157,7 @@ export default function AdminCommunications() {
       notificationAccountFreezeEnabled: Boolean(settings.notificationAccountFreezeEnabled),
       notificationAccountUnfreezeEnabled: Boolean(settings.notificationAccountUnfreezeEnabled),
       notificationKycUpdatesEnabled: Boolean(settings.notificationKycUpdatesEnabled),
+      notificationChallengeEnabled: Boolean(settings.notificationChallengeEnabled),
     });
 
     if (!allowReplyTouched) {
@@ -450,6 +452,7 @@ export default function AdminCommunications() {
         notificationAccountFreezeEnabled: notificationsDraft.notificationAccountFreezeEnabled,
         notificationAccountUnfreezeEnabled: notificationsDraft.notificationAccountUnfreezeEnabled,
         notificationKycUpdatesEnabled: notificationsDraft.notificationKycUpdatesEnabled,
+        notificationChallengeEnabled: notificationsDraft.notificationChallengeEnabled,
       },
       "Notification settings propagated to active sessions.",
     );
@@ -1219,6 +1222,17 @@ export default function AdminCommunications() {
                       onCheckedChange={(checked) =>
                         setNotificationsDraft((prev) =>
                           prev ? { ...prev, notificationKycUpdatesEnabled: Boolean(checked) } : prev,
+                        )
+                      }
+                    />
+                  </label>
+                  <label className="inline-flex items-center justify-between rounded-md border border-gray-700 bg-neutral-900 px-3 py-2 text-sm text-gray-200">
+                    Challenge alerts
+                    <Switch
+                      checked={notificationsDraft.notificationChallengeEnabled}
+                      onCheckedChange={(checked) =>
+                        setNotificationsDraft((prev) =>
+                          prev ? { ...prev, notificationChallengeEnabled: Boolean(checked) } : prev,
                         )
                       }
                     />

@@ -94,6 +94,9 @@ interface GlobalSettings {
   enableLossLimits: boolean;
   dailyLossLimitPct: number;
   lifetimeLossLimitPct: number;
+  defaultUserStartingBalanceUsd: number;
+  defaultUserStartingEquityUsd: number;
+  defaultChallengeVirtualCapitalUsd: number;
   // Visual Lot Settings
   lotPresetCards: string; // JSON array string
   lotDropdownMax: number;
@@ -104,6 +107,8 @@ interface GlobalSettings {
   maxWsReconnectAttempts: number;
   wsReconnectBaseDelayMs: number;
   prefetchStrategy: "all" | "critical" | "none";
+  prefetchMaxConcurrency: number;
+  prefetchStartDelayMs: number;
   pollInstantMs: number;
   pollFastMs: number;
   pollModerateMs: number;
@@ -125,6 +130,8 @@ type MarketPerformanceSettings = Pick<
   "maxWsReconnectAttempts" |
   "wsReconnectBaseDelayMs" |
   "prefetchStrategy" |
+  "prefetchMaxConcurrency" |
+  "prefetchStartDelayMs" |
   "pollInstantMs" |
   "pollFastMs" |
   "pollModerateMs" |
@@ -144,6 +151,8 @@ const DEFAULT_MARKET_PERFORMANCE_SETTINGS: MarketPerformanceSettings = {
   maxWsReconnectAttempts: 30,
   wsReconnectBaseDelayMs: 1500,
   prefetchStrategy: "all",
+  prefetchMaxConcurrency: 4,
+  prefetchStartDelayMs: 0,
   pollInstantMs: 200,
   pollFastMs: 500,
   pollModerateMs: 1500,
@@ -194,6 +203,8 @@ function resolveMarketPerformanceSettings(candidate: Partial<GlobalSettings> | n
     maxWsReconnectAttempts: clampIntSetting(candidate?.maxWsReconnectAttempts, 1, 30, 30),
     wsReconnectBaseDelayMs: clampIntSetting(candidate?.wsReconnectBaseDelayMs, 100, 30_000, 1500),
     prefetchStrategy: prefetchStrategy as MarketPerformanceSettings["prefetchStrategy"],
+    prefetchMaxConcurrency: clampIntSetting(candidate?.prefetchMaxConcurrency, 1, 6, 4),
+    prefetchStartDelayMs: clampIntSetting(candidate?.prefetchStartDelayMs, 0, 15_000, 0),
     pollInstantMs: clampIntSetting(
       candidate?.pollInstantMs,
       100,
@@ -264,6 +275,8 @@ const MARKET_PERFORMANCE_SETTING_KEYS: readonly (keyof MarketPerformanceSettings
   "maxWsReconnectAttempts",
   "wsReconnectBaseDelayMs",
   "prefetchStrategy",
+  "prefetchMaxConcurrency",
+  "prefetchStartDelayMs",
   "pollInstantMs",
   "pollFastMs",
   "pollModerateMs",
@@ -316,6 +329,16 @@ const MARKET_PERFORMANCE_FIELD_HELP: Record<
     inline: "Initial data warm-up amount sent after app load or reconnect.",
     tooltip:
       "Phone + internet context: choose less prefetch for low-bandwidth users, or full prefetch for stronger devices/networks that need instant context.",
+  },
+  prefetchMaxConcurrency: {
+    inline: "Maximum concurrent chunk fetches during prefetch burst.",
+    tooltip:
+      "Higher values warm more routes in parallel, but too high can contend with critical REST/WS traffic on weaker networks.",
+  },
+  prefetchStartDelayMs: {
+    inline: "Delay before starting route prefetch after shell mount.",
+    tooltip:
+      "Use 0 for fastest warm-up. Increase slightly only if startup API calls need more headroom on constrained links.",
   },
   pollInstantMs: {
     inline: "Poll interval for INSTANT profile.",
@@ -397,6 +420,41 @@ function FieldHintLabel({ label, hint }: { label: string; hint: string }) {
       </Tooltip>
     </div>
   );
+}
+
+function parseLocaleCsvInput(raw: string): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const token of String(raw || "").split(",")) {
+    const locale = token.trim();
+    if (!locale) continue;
+    const key = locale.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(locale);
+  }
+  return out;
+}
+
+function resolveI18nAdminConfig(candidate: Partial<I18nAdminConfigData> | null | undefined): I18nAdminConfigData {
+  const defaultLocale = String(candidate?.defaultLocale || "en").trim() || "en";
+  const supportedRaw = Array.isArray(candidate?.supportedLocales) ? candidate.supportedLocales.map(String) : [defaultLocale];
+  const supportedLocales = parseLocaleCsvInput(supportedRaw.join(","));
+  if (!supportedLocales.find((locale) => locale.toLowerCase() === defaultLocale.toLowerCase())) {
+    supportedLocales.unshift(defaultLocale);
+  }
+
+  return {
+    enabled: Boolean(candidate?.enabled ?? true),
+    defaultLocale,
+    supportedLocales,
+    autoTranslate: Boolean(candidate?.autoTranslate ?? true),
+    llmEnabled: Boolean(candidate?.llmEnabled ?? true),
+    llmProvider: String(candidate?.llmProvider || "openai"),
+    llmModel: String(candidate?.llmModel || "gpt-4o-mini"),
+    llmMaxBatchSize: Math.max(1, Math.min(200, Math.trunc(Number(candidate?.llmMaxBatchSize ?? 50) || 50))),
+    llmMaxAttempts: Math.max(1, Math.min(10, Math.trunc(Number(candidate?.llmMaxAttempts ?? 3) || 3))),
+  };
 }
 
 interface User {
@@ -519,6 +577,18 @@ interface SystemConfigData {
   migrationChunkSizeMb: number;
   updatedAt: number | null;
   updatedBy: string | null;
+}
+
+interface I18nAdminConfigData {
+  enabled: boolean;
+  defaultLocale: string;
+  supportedLocales: string[];
+  autoTranslate: boolean;
+  llmEnabled: boolean;
+  llmProvider: string;
+  llmModel: string;
+  llmMaxBatchSize: number;
+  llmMaxAttempts: number;
 }
 
 interface MigrationExportJob {
@@ -1772,6 +1842,9 @@ function SystemConfigTab() {
   const [subTab, setSubTab] = useState("trading");
   const [config, setConfig] = useState<SystemConfigData | null>(null);
   const [configChanged, setConfigChanged] = useState(false);
+  const [i18nConfig, setI18nConfig] = useState<I18nAdminConfigData | null>(null);
+  const [i18nLocalesCsv, setI18nLocalesCsv] = useState("en");
+  const [i18nChanged, setI18nChanged] = useState(false);
   const [marketPerfSettings, setMarketPerfSettings] = useState<MarketPerformanceSettings>(
     DEFAULT_MARKET_PERFORMANCE_SETTINGS,
   );
@@ -1794,6 +1867,11 @@ function SystemConfigTab() {
   const { data: globalPerformanceData, isFetchedAfterMount: globalPerformanceFetchedAfterMount } = useQuery<GlobalSettings>({
     queryKey: ["/api/admin/global-settings"],
     queryFn: () => axios.get("/api/admin/global-settings").then((r) => r.data),
+  });
+
+  const { data: i18nConfigData, isLoading: i18nConfigLoading } = useQuery<I18nAdminConfigData>({
+    queryKey: ["/api/admin/i18n/config"],
+    queryFn: () => axios.get("/api/admin/i18n/config").then((r) => r.data),
   });
 
   const { data: providersData } = useQuery<MarketDataProvidersResp>({
@@ -1848,6 +1926,13 @@ function SystemConfigTab() {
       setConfig(systemConfig);
     }
   }, [systemConfig]);
+
+  useEffect(() => {
+    if (!i18nConfigData || i18nChanged) return;
+    const next = resolveI18nAdminConfig(i18nConfigData);
+    setI18nConfig(next);
+    setI18nLocalesCsv(next.supportedLocales.join(", "));
+  }, [i18nChanged, i18nConfigData]);
 
   useEffect(() => {
     if (!globalPerformanceData || !globalPerformanceFetchedAfterMount || marketPerfSchemaWarningRef.current) return;
@@ -1950,6 +2035,36 @@ function SystemConfigTab() {
     },
   });
 
+  const updateI18nMutation = useMutation({
+    mutationFn: async (payload: {
+      enabled: boolean;
+      defaultLocale: string;
+      supportedLocales: string[];
+      autoTranslate: boolean;
+      llmEnabled: boolean;
+      llmProvider: string;
+      llmModel: string;
+      llmMaxBatchSize: number;
+      llmMaxAttempts: number;
+    }) => axios.put("/api/admin/i18n/config", payload).then((r) => r.data),
+    onSuccess: (data: any) => {
+      const next = resolveI18nAdminConfig(data);
+      setI18nConfig(next);
+      setI18nLocalesCsv(next.supportedLocales.join(", "));
+      setI18nChanged(false);
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/i18n/config"] });
+      queryClient.invalidateQueries({ queryKey: ["i18nConfig"] });
+      toast({ title: "I18n settings saved", description: "Language/system localization settings updated." });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.response?.data?.message || "Failed to save i18n settings",
+        variant: "destructive",
+      });
+    },
+  });
+
   useEffect(() => {
     if (!globalPerformanceData || marketPerfChanged || updateMarketPerfMutation.isPending) return;
     const resolved = resolveMarketPerformanceSettings(globalPerformanceData);
@@ -2002,6 +2117,31 @@ function SystemConfigTab() {
     }
   };
 
+  const handleSaveI18nConfig = () => {
+    if (!i18nConfig) return;
+    const supportedLocales = parseLocaleCsvInput(i18nLocalesCsv);
+    if (supportedLocales.length === 0) {
+      toast({ title: "Invalid locales", description: "Add at least one supported locale.", variant: "destructive" });
+      return;
+    }
+    const defaultLocale = String(i18nConfig.defaultLocale || "").trim() || "en";
+    if (!supportedLocales.find((locale) => locale.toLowerCase() === defaultLocale.toLowerCase())) {
+      supportedLocales.unshift(defaultLocale);
+    }
+
+    updateI18nMutation.mutate({
+      enabled: Boolean(i18nConfig.enabled),
+      defaultLocale,
+      supportedLocales,
+      autoTranslate: Boolean(i18nConfig.autoTranslate),
+      llmEnabled: Boolean(i18nConfig.llmEnabled),
+      llmProvider: String(i18nConfig.llmProvider || "openai").trim() || "openai",
+      llmModel: String(i18nConfig.llmModel || "gpt-4o-mini").trim() || "gpt-4o-mini",
+      llmMaxBatchSize: Math.max(1, Math.min(200, Number(i18nConfig.llmMaxBatchSize) || 50)),
+      llmMaxAttempts: Math.max(1, Math.min(10, Number(i18nConfig.llmMaxAttempts) || 3)),
+    });
+  };
+
   if (isLoading || !config) {
     return (
       <div className="flex items-center justify-center h-40">
@@ -2016,10 +2156,11 @@ function SystemConfigTab() {
       <p className="text-gray-400 text-sm mb-4">Manage platform-wide operational controls, API integration, and performance parameters.</p>
 
       <Tabs value={subTab} onValueChange={setSubTab} className="space-y-4">
-        <TabsList className="bg-neutral-700 w-full h-auto p-1 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-1">
+        <TabsList className="bg-neutral-700 w-full h-auto p-1 grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-1">
           <TabsTrigger value="trading" className="data-[state=active]:bg-neutral-600 text-xs sm:text-sm px-2 py-1.5">Trading Controls</TabsTrigger>
           <TabsTrigger value="market" className="data-[state=active]:bg-neutral-600 text-xs sm:text-sm px-2 py-1.5">Market Data</TabsTrigger>
           <TabsTrigger value="compliance" className="data-[state=active]:bg-neutral-600 text-xs sm:text-sm px-2 py-1.5">Signup Compliance</TabsTrigger>
+          <TabsTrigger value="system" className="data-[state=active]:bg-neutral-600 text-xs sm:text-sm px-2 py-1.5">System Config</TabsTrigger>
           <TabsTrigger value="controls" className="data-[state=active]:bg-neutral-600 text-xs sm:text-sm px-2 py-1.5">Controls</TabsTrigger>
           <TabsTrigger value="migration" className="data-[state=active]:bg-neutral-600 text-xs sm:text-sm px-2 py-1.5">Migration</TabsTrigger>
           <TabsTrigger value="health" className="data-[state=active]:bg-neutral-600 text-xs sm:text-sm px-2 py-1.5">System Health</TabsTrigger>
@@ -2348,6 +2489,48 @@ function SystemConfigTab() {
                         </SelectContent>
                       </Select>
                     </div>
+
+                    <div>
+                      <FieldHintLabel
+                        label="Prefetch Max Concurrency"
+                        hint={MARKET_PERFORMANCE_FIELD_HELP.prefetchMaxConcurrency.tooltip}
+                      />
+                      <p className="text-xs text-gray-400 mt-1">{MARKET_PERFORMANCE_FIELD_HELP.prefetchMaxConcurrency.inline}</p>
+                      <Input
+                        type="number"
+                        min={1}
+                        max={6}
+                        value={marketPerfSettings.prefetchMaxConcurrency}
+                        onChange={(e) =>
+                          handleMarketPerfSettingChange(
+                            "prefetchMaxConcurrency",
+                            Math.max(1, Math.min(6, Number(e.target.value) || 1)),
+                          )}
+                        className="bg-neutral-600 mt-2"
+                        title={MARKET_PERFORMANCE_FIELD_HELP.prefetchMaxConcurrency.tooltip}
+                      />
+                    </div>
+
+                    <div>
+                      <FieldHintLabel
+                        label="Prefetch Start Delay (ms)"
+                        hint={MARKET_PERFORMANCE_FIELD_HELP.prefetchStartDelayMs.tooltip}
+                      />
+                      <p className="text-xs text-gray-400 mt-1">{MARKET_PERFORMANCE_FIELD_HELP.prefetchStartDelayMs.inline}</p>
+                      <Input
+                        type="number"
+                        min={0}
+                        max={15000}
+                        value={marketPerfSettings.prefetchStartDelayMs}
+                        onChange={(e) =>
+                          handleMarketPerfSettingChange(
+                            "prefetchStartDelayMs",
+                            Math.max(0, Math.min(15_000, Number(e.target.value) || 0)),
+                          )}
+                        className="bg-neutral-600 mt-2"
+                        title={MARKET_PERFORMANCE_FIELD_HELP.prefetchStartDelayMs.tooltip}
+                      />
+                    </div>
                   </div>
 
                   <div className="rounded-md border border-gray-600 overflow-hidden">
@@ -2507,6 +2690,155 @@ function SystemConfigTab() {
               />
             )}
           </div>
+        </TabsContent>
+
+        {/* SYSTEM CONFIG */}
+        <TabsContent value="system">
+          {!i18nConfig || i18nConfigLoading ? (
+            <Card className="bg-neutral-700 border-gray-600">
+              <CardContent className="py-6 text-sm text-gray-400">Loading i18n/language settings...</CardContent>
+            </Card>
+          ) : (
+            <div className="space-y-4">
+              <Card className="bg-neutral-700 border-gray-600">
+                <CardHeader>
+                  <CardTitle className="text-base">I18n / Language Controls</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <label className="inline-flex items-center justify-between rounded-md border border-gray-700 bg-neutral-900 px-3 py-2 text-sm text-gray-200">
+                      Enable i18n
+                      <Switch
+                        checked={Boolean(i18nConfig.enabled)}
+                        onCheckedChange={(checked) => {
+                          setI18nConfig((prev) => (prev ? { ...prev, enabled: Boolean(checked) } : prev));
+                          setI18nChanged(true);
+                        }}
+                      />
+                    </label>
+                    <label className="inline-flex items-center justify-between rounded-md border border-gray-700 bg-neutral-900 px-3 py-2 text-sm text-gray-200">
+                      Auto-translate missing strings
+                      <Switch
+                        checked={Boolean(i18nConfig.autoTranslate)}
+                        onCheckedChange={(checked) => {
+                          setI18nConfig((prev) => (prev ? { ...prev, autoTranslate: Boolean(checked) } : prev));
+                          setI18nChanged(true);
+                        }}
+                      />
+                    </label>
+                    <label className="inline-flex items-center justify-between rounded-md border border-gray-700 bg-neutral-900 px-3 py-2 text-sm text-gray-200">
+                      Enable LLM translation worker
+                      <Switch
+                        checked={Boolean(i18nConfig.llmEnabled)}
+                        onCheckedChange={(checked) => {
+                          setI18nConfig((prev) => (prev ? { ...prev, llmEnabled: Boolean(checked) } : prev));
+                          setI18nChanged(true);
+                        }}
+                      />
+                    </label>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div>
+                      <Label className="text-sm">Default Locale</Label>
+                      <Input
+                        value={i18nConfig.defaultLocale}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          setI18nConfig((prev) => (prev ? { ...prev, defaultLocale: value } : prev));
+                          setI18nChanged(true);
+                        }}
+                        className="bg-neutral-600 mt-1"
+                        placeholder="en"
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-sm">Supported Locales (CSV)</Label>
+                      <Input
+                        value={i18nLocalesCsv}
+                        onChange={(e) => {
+                          setI18nLocalesCsv(e.target.value);
+                          setI18nChanged(true);
+                        }}
+                        className="bg-neutral-600 mt-1"
+                        placeholder="en, fr, es"
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-sm">LLM Provider</Label>
+                      <Input
+                        value={i18nConfig.llmProvider}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          setI18nConfig((prev) => (prev ? { ...prev, llmProvider: value } : prev));
+                          setI18nChanged(true);
+                        }}
+                        className="bg-neutral-600 mt-1"
+                        placeholder="openai"
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-sm">LLM Model</Label>
+                      <Input
+                        value={i18nConfig.llmModel}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          setI18nConfig((prev) => (prev ? { ...prev, llmModel: value } : prev));
+                          setI18nChanged(true);
+                        }}
+                        className="bg-neutral-600 mt-1"
+                        placeholder="gpt-4o-mini"
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-sm">LLM Max Batch Size</Label>
+                      <Input
+                        type="number"
+                        min={1}
+                        max={200}
+                        value={Number(i18nConfig.llmMaxBatchSize ?? 50)}
+                        onChange={(e) => {
+                          const value = Math.max(1, Math.min(200, Number(e.target.value) || 50));
+                          setI18nConfig((prev) => (prev ? { ...prev, llmMaxBatchSize: value } : prev));
+                          setI18nChanged(true);
+                        }}
+                        className="bg-neutral-600 mt-1"
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-sm">LLM Max Attempts</Label>
+                      <Input
+                        type="number"
+                        min={1}
+                        max={10}
+                        value={Number(i18nConfig.llmMaxAttempts ?? 3)}
+                        onChange={(e) => {
+                          const value = Math.max(1, Math.min(10, Number(e.target.value) || 3));
+                          setI18nConfig((prev) => (prev ? { ...prev, llmMaxAttempts: value } : prev));
+                          setI18nChanged(true);
+                        }}
+                        className="bg-neutral-600 mt-1"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="text-xs text-gray-400">
+                    Include the default locale in supported locales. Save applies to web/mobile i18n config fetches.
+                  </div>
+
+                  <div className="flex justify-end">
+                    <Button
+                      onClick={handleSaveI18nConfig}
+                      disabled={!i18nChanged || updateI18nMutation.isPending}
+                      className="bg-blue-600 hover:bg-blue-700"
+                    >
+                      {updateI18nMutation.isPending ? "Saving..." : "Save I18n Settings"}
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          )}
         </TabsContent>
 
         {/* CONTROLS */}
@@ -3008,6 +3340,9 @@ export default function AdminDashboard() {
     enableLossLimits: true,
     dailyLossLimitPct: 10,
     lifetimeLossLimitPct: 20,
+    defaultUserStartingBalanceUsd: 1000000,
+    defaultUserStartingEquityUsd: 1000000,
+    defaultChallengeVirtualCapitalUsd: 100000,
     lotPresetCards: "[1,5,10,25,50]",
     lotDropdownMax: 50,
     restFallbackPollMs: 500,
@@ -3016,6 +3351,8 @@ export default function AdminDashboard() {
     maxWsReconnectAttempts: 30,
     wsReconnectBaseDelayMs: 1500,
     prefetchStrategy: "all",
+    prefetchMaxConcurrency: 4,
+    prefetchStartDelayMs: 0,
     pollInstantMs: 200,
     pollFastMs: 500,
     pollModerateMs: 1500,
@@ -3698,6 +4035,9 @@ export default function AdminDashboard() {
       enableLossLimits: riskParams.enableLossLimits,
       dailyLossLimitPct: riskParams.dailyLossLimitPct,
       lifetimeLossLimitPct: riskParams.lifetimeLossLimitPct,
+      defaultUserStartingBalanceUsd: riskParams.defaultUserStartingBalanceUsd,
+      defaultUserStartingEquityUsd: riskParams.defaultUserStartingEquityUsd,
+      defaultChallengeVirtualCapitalUsd: riskParams.defaultChallengeVirtualCapitalUsd,
       lotPresetCards: riskParams.lotPresetCards,
       lotDropdownMax: riskParams.lotDropdownMax,
     });
@@ -5396,6 +5736,67 @@ export default function AdminDashboard() {
                             </div>
                           </div>
                         </div>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="bg-neutral-700 border-gray-600 col-span-1 md:col-span-2">
+                  <CardHeader className="border-b border-gray-600 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                    <div className="min-w-0">
+                      <CardTitle className="text-sm sm:text-base text-cyan-300">Default Capital Settings</CardTitle>
+                      <p className="text-xs text-gray-400">
+                        Global defaults used for new user account capital and challenge virtual capital.
+                      </p>
+                    </div>
+                    {riskParamsChanged && (
+                      <Button
+                        size="sm"
+                        onClick={handleSaveRiskParams}
+                        disabled={globalSettingsMutation.isPending}
+                        className="shrink-0 w-full sm:w-auto text-xs sm:text-sm"
+                      >
+                        {globalSettingsMutation.isPending ? "Saving..." : "Save"}
+                      </Button>
+                    )}
+                  </CardHeader>
+                  <CardContent className="pt-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                      <div>
+                        <Label>Default User Starting Balance (USD)</Label>
+                        <Input
+                          type="number"
+                          min={1}
+                          value={riskParams.defaultUserStartingBalanceUsd}
+                          onChange={(e) =>
+                            handleRiskParamChange("defaultUserStartingBalanceUsd", Math.max(1, Number(e.target.value) || 1))
+                          }
+                          className="bg-neutral-600"
+                        />
+                      </div>
+                      <div>
+                        <Label>Default User Starting Equity (USD)</Label>
+                        <Input
+                          type="number"
+                          min={1}
+                          value={riskParams.defaultUserStartingEquityUsd}
+                          onChange={(e) =>
+                            handleRiskParamChange("defaultUserStartingEquityUsd", Math.max(1, Number(e.target.value) || 1))
+                          }
+                          className="bg-neutral-600"
+                        />
+                      </div>
+                      <div>
+                        <Label>Default Challenge Virtual Capital (USD)</Label>
+                        <Input
+                          type="number"
+                          min={1}
+                          value={riskParams.defaultChallengeVirtualCapitalUsd}
+                          onChange={(e) =>
+                            handleRiskParamChange("defaultChallengeVirtualCapitalUsd", Math.max(1, Number(e.target.value) || 1))
+                          }
+                          className="bg-neutral-600"
+                        />
                       </div>
                     </div>
                   </CardContent>

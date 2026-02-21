@@ -113,6 +113,7 @@ export type CommunicationSettingsRow = {
   notificationAccountFreezeEnabled: boolean;
   notificationAccountUnfreezeEnabled: boolean;
   notificationKycUpdatesEnabled: boolean;
+  notificationChallengeEnabled: boolean;
   updatedAt: number;
   updatedBy: string | null;
 };

@@ -28,6 +28,7 @@ import {
 
 type AnyRow = Record<string, any>;
 type InlineTemplateDraft = { profitTargetPct: string; maxDailyLossPct: string; durationDays: string };
+const LEGACY_DEFAULT_CHALLENGE_VIRTUAL_CAPITAL = 100000;
 
 const EMPTY_DRAFT = {
   name: "",
@@ -39,7 +40,7 @@ const EMPTY_DRAFT = {
   maxDailyLossPct: 0.03,
   maxTotalLossPct: null as number | null,
   durationDays: 30,
-  virtualCapitalUsd: 100000,
+  virtualCapitalUsd: LEGACY_DEFAULT_CHALLENGE_VIRTUAL_CAPITAL,
   capitalMode: "VIRTUAL" as "VIRTUAL" | "SNAPSHOT_EQUITY",
   leverageMultiplier: 1,
   maxRetriesPerTrader: 3,
@@ -395,7 +396,7 @@ function daysLeftLabel(endAtSec: number): string {
   return `${d}d ${h}h`;
 }
 
-function mapDetailToDraft(detail: AnyRow): typeof EMPTY_DRAFT {
+function mapDetailToDraft(detail: AnyRow, defaultChallengeVirtualCapitalUsd = LEGACY_DEFAULT_CHALLENGE_VIRTUAL_CAPITAL): typeof EMPTY_DRAFT {
   const row = detail.row || {};
   const phases = Array.isArray(detail.phases) && detail.phases.length
     ? detail.phases
@@ -423,7 +424,7 @@ function mapDetailToDraft(detail: AnyRow): typeof EMPTY_DRAFT {
     maxDailyLossPct: toNum(row.maxDailyLossPct, 0.03),
     maxTotalLossPct: row.maxTotalLossPct == null ? null : toNum(row.maxTotalLossPct, 0),
     durationDays: Math.max(1, toInt(row.durationDays, 30)),
-    virtualCapitalUsd: Math.max(1, toNum(row.virtualCapitalUsd, 100000)),
+    virtualCapitalUsd: Math.max(1, toNum(row.virtualCapitalUsd, defaultChallengeVirtualCapitalUsd)),
     capitalMode: String(row.capitalMode) === "SNAPSHOT_EQUITY" ? "SNAPSHOT_EQUITY" : "VIRTUAL",
     leverageMultiplier: Math.max(0.1, toNum(row.leverageMultiplier, 1)),
     maxRetriesPerTrader: Math.max(0, toInt(row.maxRetriesPerTrader, 0)),
@@ -472,6 +473,7 @@ export default function ScoutChallengesPanel() {
 
   const [subTab, setSubTab] = useState("templates");
   const [draft, setDraft] = useState({ ...EMPTY_DRAFT });
+  const [virtualCapitalTouched, setVirtualCapitalTouched] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<AnyRow | null>(null);
@@ -507,6 +509,18 @@ export default function ScoutChallengesPanel() {
     enabled: expandedId != null,
     refetchOnWindowFocus: false,
   });
+
+  const globalSettingsQuery = useQuery<any>({
+    queryKey: ["/api/admin/global-settings"],
+    queryFn: () => axios.get("/api/admin/global-settings").then((r) => r.data),
+    refetchOnWindowFocus: false,
+  });
+
+  const defaultChallengeVirtualCapitalUsd = useMemo(() => {
+    const raw = Number(globalSettingsQuery.data?.defaultChallengeVirtualCapitalUsd);
+    if (!Number.isFinite(raw) || raw <= 0) return LEGACY_DEFAULT_CHALLENGE_VIRTUAL_CAPITAL;
+    return raw;
+  }, [globalSettingsQuery.data?.defaultChallengeVirtualCapitalUsd]);
 
   const enrollmentsQuery = useQuery<any>({
     queryKey: ["/api/admin/challenges/enrollments", enrollFilters.challengeId, enrollFilters.status, enrollFilters.phase, enrollFilters.userId],
@@ -626,8 +640,22 @@ export default function ScoutChallengesPanel() {
 
   useEffect(() => {
     if (!editingId || !templateDetailQuery.data?.row) return;
-    setDraft(mapDetailToDraft(templateDetailQuery.data));
-  }, [editingId, templateDetailQuery.data?.row, templateDetailQuery.data?.phases]);
+    setDraft(mapDetailToDraft(templateDetailQuery.data, defaultChallengeVirtualCapitalUsd));
+    setVirtualCapitalTouched(true);
+  }, [editingId, templateDetailQuery.data?.row, templateDetailQuery.data?.phases, defaultChallengeVirtualCapitalUsd]);
+
+  useEffect(() => {
+    if (editingId) return;
+    if (virtualCapitalTouched) return;
+    if (Number(draft.virtualCapitalUsd) !== LEGACY_DEFAULT_CHALLENGE_VIRTUAL_CAPITAL) return;
+    if (defaultChallengeVirtualCapitalUsd === LEGACY_DEFAULT_CHALLENGE_VIRTUAL_CAPITAL) return;
+    setDraft((prev) => ({ ...prev, virtualCapitalUsd: defaultChallengeVirtualCapitalUsd }));
+  }, [
+    draft.virtualCapitalUsd,
+    editingId,
+    virtualCapitalTouched,
+    defaultChallengeVirtualCapitalUsd,
+  ]);
 
   useEffect(() => {
     if (selectedEnrollmentId) return;
@@ -648,7 +676,8 @@ export default function ScoutChallengesPanel() {
   const createTemplateMutation = useMutation({
     mutationFn: (payload: AnyRow) => axios.post("/api/admin/challenges", payload).then((r) => r.data),
     onSuccess: () => {
-      setDraft({ ...EMPTY_DRAFT });
+      setDraft({ ...EMPTY_DRAFT, virtualCapitalUsd: defaultChallengeVirtualCapitalUsd });
+      setVirtualCapitalTouched(false);
       setEditingId(null);
       queryClient.invalidateQueries({ queryKey: ["/api/admin/challenges"] });
       toast({ title: "Challenge template created" });
@@ -1122,7 +1151,16 @@ export default function ScoutChallengesPanel() {
                   <Input type="number" step="0.01" value={draft.maxDailyLossPct} onChange={(e) => setDraft((p) => ({ ...p, maxDailyLossPct: toNum(e.target.value, p.maxDailyLossPct) }))} className="bg-neutral-700 border-neutral-600" placeholder="Max daily loss %" />
                   <Input type="number" step="0.01" value={draft.maxTotalLossPct ?? ""} onChange={(e) => setDraft((p) => ({ ...p, maxTotalLossPct: toOptNum(e.target.value) }))} className="bg-neutral-700 border-neutral-600" placeholder="Max total loss %" />
                   <Input type="number" value={draft.durationDays} onChange={(e) => setDraft((p) => ({ ...p, durationDays: Math.max(1, toInt(e.target.value, p.durationDays)) }))} className="bg-neutral-700 border-neutral-600" placeholder="Duration (days)" />
-                  <Input type="number" value={draft.virtualCapitalUsd} onChange={(e) => setDraft((p) => ({ ...p, virtualCapitalUsd: Math.max(1, toNum(e.target.value, p.virtualCapitalUsd)) }))} className="bg-neutral-700 border-neutral-600" placeholder="Virtual capital USD" />
+                  <Input
+                    type="number"
+                    value={draft.virtualCapitalUsd}
+                    onChange={(e) => {
+                      setVirtualCapitalTouched(true);
+                      setDraft((p) => ({ ...p, virtualCapitalUsd: Math.max(1, toNum(e.target.value, p.virtualCapitalUsd)) }));
+                    }}
+                    className="bg-neutral-700 border-neutral-600"
+                    placeholder="Virtual capital USD"
+                  />
                   <Input type="number" value={draft.featuredOrder} onChange={(e) => setDraft((p) => ({ ...p, featuredOrder: Math.max(0, toInt(e.target.value, p.featuredOrder)) }))} className="bg-neutral-700 border-neutral-600" placeholder="Featured order" />
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-5 gap-2">
@@ -1226,7 +1264,17 @@ export default function ScoutChallengesPanel() {
                   ))}
                 </div>
                 <div className="flex justify-end gap-2">
-                  <Button variant="outline" className="border-neutral-600" onClick={() => { setDraft({ ...EMPTY_DRAFT }); setEditingId(null); }}>Reset</Button>
+                  <Button
+                    variant="outline"
+                    className="border-neutral-600"
+                    onClick={() => {
+                      setDraft({ ...EMPTY_DRAFT, virtualCapitalUsd: defaultChallengeVirtualCapitalUsd });
+                      setVirtualCapitalTouched(false);
+                      setEditingId(null);
+                    }}
+                  >
+                    Reset
+                  </Button>
                   <Button onClick={() => void saveTemplate()} disabled={createTemplateMutation.isPending || updateTemplateMutation.isPending}>{editingId ? "Save" : "Create"}</Button>
                 </div>
               </CardContent>

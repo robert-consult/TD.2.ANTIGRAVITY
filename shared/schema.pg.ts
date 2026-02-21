@@ -1,4 +1,4 @@
-import { pgTable, text, integer, real, primaryKey, serial, boolean, bigint, index, uniqueIndex } from "drizzle-orm/pg-core";
+import { pgTable, text, integer, real, primaryKey, serial, boolean, bigint, index, uniqueIndex, json, timestamp } from "drizzle-orm/pg-core";
 import { createInsertSchema, createSelectSchema } from "drizzle-zod";
 import { z } from "zod";
 import { relations } from "drizzle-orm";
@@ -155,6 +155,19 @@ export const userSessions = pgTable("user_sessions", {
   revokedByUserId: integer("revoked_by_user_id"),
   revokeReason: text("revoke_reason"),
 });
+
+// Express/connect-pg-simple backing table for cookie sessions.
+export const sessionStore = pgTable(
+  "session",
+  {
+    sid: text("sid").primaryKey(),
+    sess: json("sess").notNull(),
+    expire: timestamp("expire").notNull(),
+  },
+  (table) => ({
+    expireIdx: index("IDX_session_expire").on(table.expire),
+  }),
+);
 
 // Persistent remember-me tokens (selector + hashed validator)
 export const rememberMeTokens = pgTable(
@@ -662,6 +675,10 @@ export const globalSettings = pgTable("global_settings", {
   enableLossLimits: boolean("enable_loss_limits").notNull().default(true),
   dailyLossLimitPct: real("daily_loss_limit_pct").notNull().default(10),
   lifetimeLossLimitPct: real("lifetime_loss_limit_pct").notNull().default(20),
+  // Default capital baselines (used for new accounts/challenges)
+  defaultUserStartingBalanceUsd: real("default_user_starting_balance_usd").notNull().default(1000000),
+  defaultUserStartingEquityUsd: real("default_user_starting_equity_usd").notNull().default(1000000),
+  defaultChallengeVirtualCapitalUsd: real("default_challenge_virtual_capital_usd").notNull().default(100000),
   // Visual Lot Settings (UI configuration for trader order form)
   lotPresetCards: text("lot_preset_cards").notNull().default("[1,5,10,25,50]"), // JSON array of lot values for quick-select cards
   lotDropdownMax: integer("lot_dropdown_max").notNull().default(50), // Maximum lot value shown in dropdown
@@ -672,6 +689,8 @@ export const globalSettings = pgTable("global_settings", {
   maxWsReconnectAttempts: integer("max_ws_reconnect_attempts").notNull().default(30),
   wsReconnectBaseDelayMs: integer("ws_reconnect_base_delay_ms").notNull().default(1500),
   prefetchStrategy: text("prefetch_strategy").notNull().default("all"),
+  prefetchMaxConcurrency: integer("prefetch_max_concurrency").notNull().default(4),
+  prefetchStartDelayMs: integer("prefetch_start_delay_ms").notNull().default(0),
   pollInstantMs: integer("poll_instant_ms").notNull().default(200),
   pollFastMs: integer("poll_fast_ms").notNull().default(500),
   pollModerateMs: integer("poll_moderate_ms").notNull().default(1500),

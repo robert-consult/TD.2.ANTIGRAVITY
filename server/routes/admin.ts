@@ -2262,12 +2262,17 @@ FROM (
           enableLossLimits: true,
           dailyLossLimitPct: 10,
           lifetimeLossLimitPct: 20,
+          defaultUserStartingBalanceUsd: 1000000,
+          defaultUserStartingEquityUsd: 1000000,
+          defaultChallengeVirtualCapitalUsd: 100000,
           restFallbackPollMs: 500,
           wsPushFrequencyMs: 0,
           quoteFlushIntervalMs: 50,
           maxWsReconnectAttempts: 30,
           wsReconnectBaseDelayMs: 1500,
           prefetchStrategy: "all",
+          prefetchMaxConcurrency: 4,
+          prefetchStartDelayMs: 0,
           pollInstantMs: 200,
           pollFastMs: 500,
           pollModerateMs: 1500,
@@ -2384,6 +2389,9 @@ FROM (
         enableLossLimits: parseBool(body.enableLossLimits),
         dailyLossLimitPct: parseNum(body.dailyLossLimitPct),
         lifetimeLossLimitPct: parseNum(body.lifetimeLossLimitPct),
+        defaultUserStartingBalanceUsd: parseNum(body.defaultUserStartingBalanceUsd),
+        defaultUserStartingEquityUsd: parseNum(body.defaultUserStartingEquityUsd),
+        defaultChallengeVirtualCapitalUsd: parseNum(body.defaultChallengeVirtualCapitalUsd),
         // Visual Lot Settings
         lotPresetCards: typeof body.lotPresetCards === "string" ? body.lotPresetCards : undefined,
         lotDropdownMax: parseNum(body.lotDropdownMax),
@@ -2394,6 +2402,8 @@ FROM (
         maxWsReconnectAttempts: parseNum(body.maxWsReconnectAttempts),
         wsReconnectBaseDelayMs: parseNum(body.wsReconnectBaseDelayMs),
         prefetchStrategy: parsePrefetchStrategy(body.prefetchStrategy),
+        prefetchMaxConcurrency: parseNum(body.prefetchMaxConcurrency),
+        prefetchStartDelayMs: parseNum(body.prefetchStartDelayMs),
         pollInstantMs: parseNum(body.pollInstantMs),
         pollFastMs: parseNum(body.pollFastMs),
         pollModerateMs: parseNum(body.pollModerateMs),
@@ -2418,6 +2428,8 @@ FROM (
         ensureNumericInput("quoteFlushIntervalMs", body.quoteFlushIntervalMs, next.quoteFlushIntervalMs),
         ensureNumericInput("maxWsReconnectAttempts", body.maxWsReconnectAttempts, next.maxWsReconnectAttempts),
         ensureNumericInput("wsReconnectBaseDelayMs", body.wsReconnectBaseDelayMs, next.wsReconnectBaseDelayMs),
+        ensureNumericInput("prefetchMaxConcurrency", body.prefetchMaxConcurrency, next.prefetchMaxConcurrency),
+        ensureNumericInput("prefetchStartDelayMs", body.prefetchStartDelayMs, next.prefetchStartDelayMs),
         ensureNumericInput("pollInstantMs", body.pollInstantMs, next.pollInstantMs),
         ensureNumericInput("pollFastMs", body.pollFastMs, next.pollFastMs),
         ensureNumericInput("pollModerateMs", body.pollModerateMs, next.pollModerateMs),
@@ -2428,6 +2440,21 @@ FROM (
         ensureNumericInput("flushModerateMs", body.flushModerateMs, next.flushModerateMs),
         ensureNumericInput("flushConstrainedMs", body.flushConstrainedMs, next.flushConstrainedMs),
         ensureNumericInput("flushMinimalMs", body.flushMinimalMs, next.flushMinimalMs),
+        ensureNumericInput(
+          "defaultUserStartingBalanceUsd",
+          body.defaultUserStartingBalanceUsd,
+          next.defaultUserStartingBalanceUsd,
+        ),
+        ensureNumericInput(
+          "defaultUserStartingEquityUsd",
+          body.defaultUserStartingEquityUsd,
+          next.defaultUserStartingEquityUsd,
+        ),
+        ensureNumericInput(
+          "defaultChallengeVirtualCapitalUsd",
+          body.defaultChallengeVirtualCapitalUsd,
+          next.defaultChallengeVirtualCapitalUsd,
+        ),
       ].filter(Boolean);
       if (numericValidationErrors.length > 0) {
         return res.status(400).json({ message: numericValidationErrors[0] });
@@ -2444,6 +2471,8 @@ FROM (
         ensureRange("quoteFlushIntervalMs", next.quoteFlushIntervalMs, 20, 5_000),
         ensureRange("maxWsReconnectAttempts", next.maxWsReconnectAttempts, 1, 30),
         ensureRange("wsReconnectBaseDelayMs", next.wsReconnectBaseDelayMs, 100, 30_000),
+        ensureRange("prefetchMaxConcurrency", next.prefetchMaxConcurrency, 1, 6),
+        ensureRange("prefetchStartDelayMs", next.prefetchStartDelayMs, 0, 15_000),
         ensureRange("pollInstantMs", next.pollInstantMs, 100, 60_000),
         ensureRange("pollFastMs", next.pollFastMs, 100, 60_000),
         ensureRange("pollModerateMs", next.pollModerateMs, 100, 60_000),
@@ -2454,6 +2483,9 @@ FROM (
         ensureRange("flushModerateMs", next.flushModerateMs, 20, 5_000),
         ensureRange("flushConstrainedMs", next.flushConstrainedMs, 20, 5_000),
         ensureRange("flushMinimalMs", next.flushMinimalMs, 20, 5_000),
+        ensureRange("defaultUserStartingBalanceUsd", next.defaultUserStartingBalanceUsd, 1, 1_000_000_000),
+        ensureRange("defaultUserStartingEquityUsd", next.defaultUserStartingEquityUsd, 1, 1_000_000_000),
+        ensureRange("defaultChallengeVirtualCapitalUsd", next.defaultChallengeVirtualCapitalUsd, 1, 1_000_000_000),
       ].filter(Boolean);
       if (rangeValidationErrors.length > 0) {
         return res.status(400).json({ message: rangeValidationErrors[0] });
@@ -2477,6 +2509,8 @@ FROM (
         maxWsReconnectAttempts: clampInt(existing?.maxWsReconnectAttempts ?? 30, 1, 30, 30),
         wsReconnectBaseDelayMs: clampInt(existing?.wsReconnectBaseDelayMs ?? 1500, 100, 30_000, 1500),
         prefetchStrategy: normalizeGlobalPrefetchStrategy(existing?.prefetchStrategy ?? "all"),
+        prefetchMaxConcurrency: clampInt(existing?.prefetchMaxConcurrency ?? 4, 1, 6, 4),
+        prefetchStartDelayMs: clampInt(existing?.prefetchStartDelayMs ?? 0, 0, 15_000, 0),
         pollInstantMs: clampInt(existing?.pollInstantMs ?? 200, 100, 60_000, 200),
         pollFastMs: clampInt(existing?.pollFastMs ?? 500, 100, 60_000, 500),
         pollModerateMs: clampInt(existing?.pollModerateMs ?? 1500, 100, 60_000, 1500),
@@ -2497,6 +2531,31 @@ FROM (
           1,
           ABSOLUTE_MAX_LOTS,
           ABSOLUTE_MAX_LOTS
+        );
+        const effectiveDefaultUserStartingBalanceUsd = Math.max(
+          1,
+          Math.min(
+            1_000_000_000,
+            Number(next.defaultUserStartingBalanceUsd ?? existing.defaultUserStartingBalanceUsd ?? 1_000_000),
+          ),
+        );
+        const effectiveDefaultUserStartingEquityUsd = Math.max(
+          1,
+          Math.min(
+            1_000_000_000,
+            Number(
+              next.defaultUserStartingEquityUsd ??
+                existing.defaultUserStartingEquityUsd ??
+                effectiveDefaultUserStartingBalanceUsd,
+            ),
+          ),
+        );
+        const effectiveDefaultChallengeVirtualCapitalUsd = Math.max(
+          1,
+          Math.min(
+            1_000_000_000,
+            Number(next.defaultChallengeVirtualCapitalUsd ?? existing.defaultChallengeVirtualCapitalUsd ?? 100_000),
+          ),
         );
         const effectiveMinPriceDistancePips = clampInt(
           next.minPriceDistancePips ?? existing.minPriceDistancePips ?? 20,
@@ -2553,6 +2612,18 @@ FROM (
         );
         const effectivePrefetchStrategy = normalizeGlobalPrefetchStrategy(
           next.prefetchStrategy ?? existing.prefetchStrategy ?? "all"
+        );
+        const effectivePrefetchMaxConcurrency = clampInt(
+          next.prefetchMaxConcurrency ?? existing.prefetchMaxConcurrency ?? 4,
+          1,
+          6,
+          4
+        );
+        const effectivePrefetchStartDelayMs = clampInt(
+          next.prefetchStartDelayMs ?? existing.prefetchStartDelayMs ?? 0,
+          0,
+          15_000,
+          0
         );
         const effectivePollInstantMs = clampInt(
           next.pollInstantMs ?? existing.pollInstantMs ?? 200,
@@ -2621,6 +2692,8 @@ FROM (
           maxWsReconnectAttempts: effectiveMaxWsReconnectAttempts,
           wsReconnectBaseDelayMs: effectiveWsReconnectBaseDelayMs,
           prefetchStrategy: effectivePrefetchStrategy,
+          prefetchMaxConcurrency: effectivePrefetchMaxConcurrency,
+          prefetchStartDelayMs: effectivePrefetchStartDelayMs,
           pollInstantMs: effectivePollInstantMs,
           pollFastMs: effectivePollFastMs,
           pollModerateMs: effectivePollModerateMs,
@@ -2651,6 +2724,9 @@ FROM (
             enableLossLimits: next.enableLossLimits ?? existing.enableLossLimits,
             dailyLossLimitPct: next.dailyLossLimitPct ?? existing.dailyLossLimitPct,
             lifetimeLossLimitPct: next.lifetimeLossLimitPct ?? existing.lifetimeLossLimitPct,
+            defaultUserStartingBalanceUsd: effectiveDefaultUserStartingBalanceUsd,
+            defaultUserStartingEquityUsd: effectiveDefaultUserStartingEquityUsd,
+            defaultChallengeVirtualCapitalUsd: effectiveDefaultChallengeVirtualCapitalUsd,
             lotPresetCards: effectiveLotPresetCards,
             lotDropdownMax: effectiveLotDropdownMax,
             restFallbackPollMs: effectiveRestFallbackPollMs,
@@ -2659,6 +2735,8 @@ FROM (
             maxWsReconnectAttempts: effectiveMaxWsReconnectAttempts,
             wsReconnectBaseDelayMs: effectiveWsReconnectBaseDelayMs,
             prefetchStrategy: effectivePrefetchStrategy,
+            prefetchMaxConcurrency: effectivePrefetchMaxConcurrency,
+            prefetchStartDelayMs: effectivePrefetchStartDelayMs,
             pollInstantMs: effectivePollInstantMs,
             pollFastMs: effectivePollFastMs,
             pollModerateMs: effectivePollModerateMs,
@@ -2674,6 +2752,21 @@ FROM (
           .where(eq(globalSettings.id, 1));
       } else {
         const effectiveLotDropdownMax = clampInt(next.lotDropdownMax ?? ABSOLUTE_MAX_LOTS, 1, ABSOLUTE_MAX_LOTS, ABSOLUTE_MAX_LOTS);
+        const effectiveDefaultUserStartingBalanceUsd = Math.max(
+          1,
+          Math.min(1_000_000_000, Number(next.defaultUserStartingBalanceUsd ?? 1_000_000)),
+        );
+        const effectiveDefaultUserStartingEquityUsd = Math.max(
+          1,
+          Math.min(
+            1_000_000_000,
+            Number(next.defaultUserStartingEquityUsd ?? effectiveDefaultUserStartingBalanceUsd),
+          ),
+        );
+        const effectiveDefaultChallengeVirtualCapitalUsd = Math.max(
+          1,
+          Math.min(1_000_000_000, Number(next.defaultChallengeVirtualCapitalUsd ?? 100_000)),
+        );
         const effectiveMinPriceDistancePips = clampInt(next.minPriceDistancePips ?? 20, 1, 10_000, 20);
         const effectiveRestFallbackPollMs = clampInt(next.restFallbackPollMs ?? 500, 100, 60_000, 500);
         const effectiveWsPushFrequencyMs = clampInt(next.wsPushFrequencyMs ?? 0, 0, 1_000, 0);
@@ -2681,6 +2774,8 @@ FROM (
         const effectiveMaxWsReconnectAttempts = clampInt(next.maxWsReconnectAttempts ?? 30, 1, 30, 30);
         const effectiveWsReconnectBaseDelayMs = clampInt(next.wsReconnectBaseDelayMs ?? 1500, 100, 30_000, 1500);
         const effectivePrefetchStrategy = normalizeGlobalPrefetchStrategy(next.prefetchStrategy ?? "all");
+        const effectivePrefetchMaxConcurrency = clampInt(next.prefetchMaxConcurrency ?? 4, 1, 6, 4);
+        const effectivePrefetchStartDelayMs = clampInt(next.prefetchStartDelayMs ?? 0, 0, 15_000, 0);
         const effectivePollInstantMs = clampInt(next.pollInstantMs ?? 200, 100, 60_000, 200);
         const effectivePollFastMs = clampInt(next.pollFastMs ?? 500, 100, 60_000, 500);
         const effectivePollModerateMs = clampInt(next.pollModerateMs ?? 1500, 100, 60_000, 1500);
@@ -2711,6 +2806,8 @@ FROM (
           maxWsReconnectAttempts: effectiveMaxWsReconnectAttempts,
           wsReconnectBaseDelayMs: effectiveWsReconnectBaseDelayMs,
           prefetchStrategy: effectivePrefetchStrategy,
+          prefetchMaxConcurrency: effectivePrefetchMaxConcurrency,
+          prefetchStartDelayMs: effectivePrefetchStartDelayMs,
           pollInstantMs: effectivePollInstantMs,
           pollFastMs: effectivePollFastMs,
           pollModerateMs: effectivePollModerateMs,
@@ -2741,6 +2838,9 @@ FROM (
           enableLossLimits: next.enableLossLimits ?? true,
           dailyLossLimitPct: next.dailyLossLimitPct ?? 10,
           lifetimeLossLimitPct: next.lifetimeLossLimitPct ?? 20,
+          defaultUserStartingBalanceUsd: effectiveDefaultUserStartingBalanceUsd,
+          defaultUserStartingEquityUsd: effectiveDefaultUserStartingEquityUsd,
+          defaultChallengeVirtualCapitalUsd: effectiveDefaultChallengeVirtualCapitalUsd,
           lotPresetCards: effectiveLotPresetCards,
           lotDropdownMax: effectiveLotDropdownMax,
           restFallbackPollMs: effectiveRestFallbackPollMs,
@@ -2749,6 +2849,8 @@ FROM (
           maxWsReconnectAttempts: effectiveMaxWsReconnectAttempts,
           wsReconnectBaseDelayMs: effectiveWsReconnectBaseDelayMs,
           prefetchStrategy: effectivePrefetchStrategy,
+          prefetchMaxConcurrency: effectivePrefetchMaxConcurrency,
+          prefetchStartDelayMs: effectivePrefetchStartDelayMs,
           pollInstantMs: effectivePollInstantMs,
           pollFastMs: effectivePollFastMs,
           pollModerateMs: effectivePollModerateMs,
@@ -2776,6 +2878,8 @@ FROM (
         prevPerformance.maxWsReconnectAttempts !== nextPerformance.maxWsReconnectAttempts ||
         prevPerformance.wsReconnectBaseDelayMs !== nextPerformance.wsReconnectBaseDelayMs ||
         prevPerformance.prefetchStrategy !== nextPerformance.prefetchStrategy ||
+        prevPerformance.prefetchMaxConcurrency !== nextPerformance.prefetchMaxConcurrency ||
+        prevPerformance.prefetchStartDelayMs !== nextPerformance.prefetchStartDelayMs ||
         prevPerformance.pollInstantMs !== nextPerformance.pollInstantMs ||
         prevPerformance.pollFastMs !== nextPerformance.pollFastMs ||
         prevPerformance.pollModerateMs !== nextPerformance.pollModerateMs ||
@@ -3069,7 +3173,7 @@ FROM (
         ...config,
         signupCaptchaEnforce: Boolean(config.signupCaptchaEnforce),
         captchaProvider: config.captchaProvider || "TURNSTILE",
-        signupPhoneEnforce: true,
+        signupPhoneEnforce: Boolean((config as any).signupPhoneEnforce ?? true),
         legalCoverageEnforce: Boolean((config as any).legalCoverageEnforce ?? false),
         jurisdictionRestrictedIso2Csv: String((config as any).jurisdictionRestrictedIso2Csv ?? "KP,IR,CU,SY"),
         jurisdictionRestrictedMessage: String(
@@ -3155,7 +3259,7 @@ FROM (
         fxRolloverTime: typeof body.fxRolloverTime === "string" ? body.fxRolloverTime : undefined,
         signupCaptchaEnforce: body.signupCaptchaEnforce,
         captchaProvider: body.captchaProvider,
-        signupPhoneEnforce: true,
+        signupPhoneEnforce: body.signupPhoneEnforce !== undefined ? Boolean(body.signupPhoneEnforce) : undefined,
         legalCoverageEnforce: body.legalCoverageEnforce,
         jurisdictionRestrictedIso2Csv: restrictedIso2Csv,
         jurisdictionRestrictedMessage: restrictedMessage,
@@ -3297,7 +3401,7 @@ FROM (
             fxRolloverTime: next.fxRolloverTime ?? (existing as any).fxRolloverTime ?? "17:00",
             signupCaptchaEnforce: next.signupCaptchaEnforce ?? existing.signupCaptchaEnforce,
             captchaProvider: next.captchaProvider ?? existing.captchaProvider,
-            signupPhoneEnforce: true,
+            signupPhoneEnforce: next.signupPhoneEnforce ?? (existing as any).signupPhoneEnforce ?? true,
             legalCoverageEnforce: next.legalCoverageEnforce ?? existing.legalCoverageEnforce,
             jurisdictionRestrictedIso2Csv:
               (next as any).jurisdictionRestrictedIso2Csv ?? (existing as any).jurisdictionRestrictedIso2Csv ?? "KP,IR,CU,SY",
@@ -3386,7 +3490,7 @@ FROM (
           fxRolloverTime: next.fxRolloverTime ?? "17:00",
           signupCaptchaEnforce: next.signupCaptchaEnforce ?? true,
           captchaProvider: next.captchaProvider ?? "SLIDER",
-          signupPhoneEnforce: true,
+          signupPhoneEnforce: next.signupPhoneEnforce ?? true,
           legalCoverageEnforce: next.legalCoverageEnforce ?? false,
           jurisdictionRestrictedIso2Csv: (next as any).jurisdictionRestrictedIso2Csv ?? "KP,IR,CU,SY",
           jurisdictionRestrictedMessage:

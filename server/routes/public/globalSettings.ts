@@ -44,6 +44,8 @@ export function registerGlobalSettingsRoute(router: Router) {
           maxWsReconnectAttempts: globalSettings.maxWsReconnectAttempts,
           wsReconnectBaseDelayMs: globalSettings.wsReconnectBaseDelayMs,
           prefetchStrategy: globalSettings.prefetchStrategy,
+          prefetchMaxConcurrency: globalSettings.prefetchMaxConcurrency,
+          prefetchStartDelayMs: globalSettings.prefetchStartDelayMs,
           pollInstantMs: globalSettings.pollInstantMs,
           pollFastMs: globalSettings.pollFastMs,
           pollModerateMs: globalSettings.pollModerateMs,
@@ -67,6 +69,8 @@ export function registerGlobalSettingsRoute(router: Router) {
       const quoteFlushIntervalMs = clampInt(settings?.quoteFlushIntervalMs, 20, 5_000, 50);
       const maxWsReconnectAttempts = clampInt(settings?.maxWsReconnectAttempts, 1, 30, 30);
       const wsReconnectBaseDelayMs = clampInt(settings?.wsReconnectBaseDelayMs, 100, 30_000, 1500);
+      const prefetchMaxConcurrency = clampInt(settings?.prefetchMaxConcurrency, 1, 6, 4);
+      const prefetchStartDelayMs = clampInt(settings?.prefetchStartDelayMs, 0, 15_000, 0);
       const pollInstantMs = clampInt(settings?.pollInstantMs, 100, 60_000, 200);
       const pollFastMs = clampInt(settings?.pollFastMs, 100, 60_000, 500);
       const pollModerateMs = clampInt(settings?.pollModerateMs, 100, 60_000, 1500);
@@ -101,6 +105,8 @@ export function registerGlobalSettingsRoute(router: Router) {
         maxWsReconnectAttempts,
         wsReconnectBaseDelayMs,
         prefetchStrategy,
+        prefetchMaxConcurrency,
+        prefetchStartDelayMs,
         pollInstantMs,
         pollFastMs,
         pollModerateMs,

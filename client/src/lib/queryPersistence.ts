@@ -90,6 +90,26 @@ export class QueryPersistence {
     private readonly queryClient: QueryClient,
   ) { }
 
+  private async loadHydrationEntry(
+    key: PersistableQueryKey,
+    nowMs: number,
+  ): Promise<PersistedQueryEntry | null> {
+    const row = normalizePersistedEntry(await secureGet<PersistedQueryEntry>("query-cache", key));
+    if (!row) return null;
+    const maxAgeMs = QUERY_TTL_MS[key];
+    if (maxAgeMs && nowMs - row.updatedAt > maxAgeMs) {
+      await secureDelete("query-cache", key);
+      return null;
+    }
+    return row;
+  }
+
+  private hydrateEntry(key: PersistableQueryKey, row: PersistedQueryEntry): void {
+    this.queryClient.setQueryData([key], row.data, { updatedAt: row.updatedAt });
+    this.hydratedUpdatedAtByKey.set(key, row.updatedAt);
+    markStaleData(key);
+  }
+
   async hydrate(): Promise<void> {
     if (!queryPersistenceEnabled()) return;
     const hydrateBudgetMs = Math.max(
@@ -98,19 +118,23 @@ export class QueryPersistence {
     );
     const deadline = Date.now() + hydrateBudgetMs;
 
-    for (const key of HYDRATION_QUERY_KEYS) {
-      if (!ESSENTIAL_HYDRATION_KEYS.has(key) && Date.now() > deadline) break;
-      const row = normalizePersistedEntry(await secureGet<PersistedQueryEntry>("query-cache", key));
+    const essentialNowMs = Date.now();
+    const essentialRows = await Promise.all(
+      ESSENTIAL_HYDRATION_KEYS_IN_ORDER.map((key) => this.loadHydrationEntry(key, essentialNowMs)),
+    );
+    for (let i = 0; i < ESSENTIAL_HYDRATION_KEYS_IN_ORDER.length; i += 1) {
+      const key = ESSENTIAL_HYDRATION_KEYS_IN_ORDER[i];
+      const row = essentialRows[i];
       if (!row) continue;
-      const maxAgeMs = QUERY_TTL_MS[key];
-      if (maxAgeMs && Date.now() - row.updatedAt > maxAgeMs) {
-        await secureDelete("query-cache", key);
-        continue;
-      }
+      this.hydrateEntry(key, row);
+    }
 
-      this.queryClient.setQueryData([key], row.data, { updatedAt: row.updatedAt });
-      this.hydratedUpdatedAtByKey.set(key, row.updatedAt);
-      markStaleData(key);
+    for (const key of HYDRATION_QUERY_KEYS) {
+      if (ESSENTIAL_HYDRATION_KEYS.has(key)) continue;
+      if (Date.now() > deadline) break;
+      const row = await this.loadHydrationEntry(key, Date.now());
+      if (!row) continue;
+      this.hydrateEntry(key, row);
     }
   }
 
@@ -178,6 +202,17 @@ export function getQueryPersistHydrateTimeoutMs(): number {
 
 let queryPersistenceInstance: QueryPersistence | null = null;
 let queryPersistenceHydrated = false;
+const queryPersistenceReadyListeners = new Set<(instance: QueryPersistence) => void>();
+
+function notifyQueryPersistenceReady(instance: QueryPersistence): void {
+  for (const listener of Array.from(queryPersistenceReadyListeners)) {
+    try {
+      listener(instance);
+    } catch {
+      // Ignore listener failures to avoid breaking bootstrap.
+    }
+  }
+}
 
 export async function initializeQueryPersistence(queryClient: QueryClient): Promise<QueryPersistence | null> {
   if (!queryPersistenceEnabled()) return null;
@@ -185,8 +220,9 @@ export async function initializeQueryPersistence(queryClient: QueryClient): Prom
     queryPersistenceInstance = new QueryPersistence(queryClient);
   }
   if (!queryPersistenceHydrated) {
-    queryPersistenceHydrated = true;
     await queryPersistenceInstance.hydrate();
+    queryPersistenceHydrated = true;
+    notifyQueryPersistenceReady(queryPersistenceInstance);
   }
   return queryPersistenceInstance;
 }
@@ -195,7 +231,22 @@ export function getQueryPersistence(): QueryPersistence | null {
   return queryPersistenceInstance;
 }
 
+export function subscribeQueryPersistenceReady(
+  listener: (instance: QueryPersistence) => void,
+): () => void {
+  if (queryPersistenceInstance && queryPersistenceHydrated) {
+    listener(queryPersistenceInstance);
+    return () => undefined;
+  }
+
+  queryPersistenceReadyListeners.add(listener);
+  return () => {
+    queryPersistenceReadyListeners.delete(listener);
+  };
+}
+
 export function resetQueryPersistenceForTests(): void {
   queryPersistenceHydrated = false;
   queryPersistenceInstance = null;
+  queryPersistenceReadyListeners.clear();
 }

@@ -1,5 +1,11 @@
 /// <reference lib="webworker" />
 
+import {
+  PREFETCH_MANIFEST_HINT_BY_KEY,
+  SW_BURST_PREFETCH_MESSAGE,
+  SW_INSTALL_PREFETCH_KEYS,
+} from "./lib/prefetchCatalog";
+
 declare const __TQ_BUILD_HASH__: string;
 const sw = self as unknown as ServiceWorkerGlobalScope;
 
@@ -8,12 +14,8 @@ const CACHE_PREFIX = "tq-shell-v";
 const CACHE_NAME = `${CACHE_PREFIX}${BUILD_HASH}`;
 const SHELL_URLS = ["/index.html"];
 const MANIFEST_CANDIDATE_PATHS = ["/.vite/manifest.json", "/manifest.json"] as const;
-const CRITICAL_ROUTE_KEY_HINTS = [
-  "src/pages/Dashboard",
-  "src/pages/QuotesScreen",
-  "src/pages/TradeScreen",
-  "src/pages/ChartScreen",
-] as const;
+const DEFAULT_PREFETCH_CONCURRENCY = 4;
+const MAX_PREFETCH_CONCURRENCY = 6;
 
 type ViteManifestEntry = {
   file?: string;
@@ -22,6 +24,14 @@ type ViteManifestEntry = {
 };
 
 type ViteManifest = Record<string, ViteManifestEntry>;
+
+type BurstPrefetchPayload = {
+  keys: string[];
+  concurrency: number;
+};
+
+let manifestPromise: Promise<ViteManifest | null> | null = null;
+const assetPrefetchInFlight = new Map<string, Promise<void>>();
 
 function isHtmlResponse(response: Response | null | undefined): boolean {
   if (!response) return false;
@@ -65,16 +75,74 @@ function isBypassPath(pathname: string): boolean {
   return false;
 }
 
+function clampConcurrency(value: unknown): number {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return DEFAULT_PREFETCH_CONCURRENCY;
+  return Math.max(1, Math.min(MAX_PREFETCH_CONCURRENCY, Math.trunc(n)));
+}
+
+async function runWithConcurrency<T>(
+  items: readonly T[],
+  concurrency: number,
+  worker: (item: T) => Promise<void>,
+): Promise<void> {
+  if (!items.length) return;
+
+  const limit = Math.max(1, Math.min(Math.trunc(concurrency) || 1, items.length));
+  let cursor = 0;
+
+  const runWorker = async () => {
+    while (true) {
+      const idx = cursor;
+      cursor += 1;
+      if (idx >= items.length) return;
+      await worker(items[idx]);
+    }
+  };
+
+  await Promise.all(Array.from({ length: limit }, () => runWorker()));
+}
+
+function resolveManifestHints(keys: readonly string[] | null | undefined): string[] {
+  const hints = new Set<string>();
+
+  const inputKeys = Array.isArray(keys)
+    ? keys.map((key) => String(key || "").trim()).filter(Boolean)
+    : [];
+
+  const keysToUse = inputKeys.length > 0 ? inputKeys : Array.from(SW_INSTALL_PREFETCH_KEYS);
+  for (const key of keysToUse) {
+    const hint = PREFETCH_MANIFEST_HINT_BY_KEY[key];
+    if (hint) hints.add(hint);
+  }
+
+  return Array.from(hints);
+}
+
 async function cacheAssetIfSafe(cache: Cache, assetPath: string): Promise<void> {
   const normalizedPath = normalizeAssetPath(assetPath);
   if (!normalizedPath) return;
-  try {
-    const response = await fetch(normalizedPath, { cache: "no-store" });
-    if (!isCacheableResponse(response, normalizedPath)) return;
-    await cache.put(normalizedPath, response.clone());
-  } catch {
-    // Ignore single-asset failures during pre-cache.
+
+  const existing = assetPrefetchInFlight.get(normalizedPath);
+  if (existing) {
+    await existing;
+    return;
   }
+
+  const task = (async () => {
+    try {
+      const response = await fetch(normalizedPath, { cache: "no-store" });
+      if (!isCacheableResponse(response, normalizedPath)) return;
+      await cache.put(normalizedPath, response.clone());
+    } catch {
+      // Ignore single-asset failures during pre-cache.
+    }
+  })().finally(() => {
+    assetPrefetchInFlight.delete(normalizedPath);
+  });
+
+  assetPrefetchInFlight.set(normalizedPath, task);
+  await task;
 }
 
 async function cacheIndexAndAssets(cache: Cache): Promise<void> {
@@ -93,12 +161,9 @@ async function cacheIndexAndAssets(cache: Cache): Promise<void> {
     if (candidate) assetPaths.add(candidate);
   }
 
-  await Promise.all(Array.from(assetPaths).map((assetPath) => cacheAssetIfSafe(cache, assetPath)));
-}
-
-function isCriticalManifestKey(key: string): boolean {
-  const normalized = key.replace(/\\/g, "/").replace(/^\/+/, "");
-  return CRITICAL_ROUTE_KEY_HINTS.some((hint) => normalized.includes(hint));
+  await runWithConcurrency(Array.from(assetPaths), DEFAULT_PREFETCH_CONCURRENCY, async (assetPath) => {
+    await cacheAssetIfSafe(cache, assetPath);
+  });
 }
 
 function collectManifestAssetPaths(
@@ -122,6 +187,21 @@ function collectManifestAssetPaths(
   }
 }
 
+function collectManifestAssetsForHints(manifest: ViteManifest, hints: readonly string[]): Set<string> {
+  const keys = Object.keys(manifest).filter((key) => {
+    const normalized = key.replace(/\\/g, "/").replace(/^\/+/, "");
+    return hints.some((hint) => normalized.includes(hint));
+  });
+
+  const visited = new Set<string>();
+  const assets = new Set<string>();
+  for (const key of keys) {
+    collectManifestAssetPaths(manifest, key, visited, assets);
+  }
+
+  return assets;
+}
+
 async function loadBuildManifest(): Promise<ViteManifest | null> {
   for (const manifestPath of MANIFEST_CANDIDATE_PATHS) {
     try {
@@ -137,20 +217,49 @@ async function loadBuildManifest(): Promise<ViteManifest | null> {
   return null;
 }
 
-async function cacheCriticalRouteChunks(cache: Cache): Promise<void> {
-  const manifest = await loadBuildManifest();
+function getManifestOnce(): Promise<ViteManifest | null> {
+  if (!manifestPromise) {
+    manifestPromise = loadBuildManifest().catch(() => null);
+  }
+  return manifestPromise;
+}
+
+async function cacheManifestAssets(cache: Cache, hints: readonly string[], concurrency: number): Promise<void> {
+  const manifest = await getManifestOnce();
   if (!manifest) return;
 
-  const keys = Object.keys(manifest).filter((key) => isCriticalManifestKey(key));
-  if (!keys.length) return;
+  const assets = collectManifestAssetsForHints(manifest, hints);
+  if (!assets.size) return;
 
-  const visited = new Set<string>();
-  const assets = new Set<string>();
-  for (const key of keys) {
-    collectManifestAssetPaths(manifest, key, visited, assets);
-  }
+  await runWithConcurrency(Array.from(assets), concurrency, async (assetPath) => {
+    await cacheAssetIfSafe(cache, assetPath);
+  });
+}
 
-  await Promise.all(Array.from(assets).map((assetPath) => cacheAssetIfSafe(cache, assetPath)));
+async function cacheCriticalRouteChunks(cache: Cache): Promise<void> {
+  const hints = resolveManifestHints(Array.from(SW_INSTALL_PREFETCH_KEYS));
+  await cacheManifestAssets(cache, hints, DEFAULT_PREFETCH_CONCURRENCY);
+}
+
+function parseBurstPrefetchPayload(value: unknown): BurstPrefetchPayload | null {
+  if (!value || typeof value !== "object") return null;
+  const row = value as Record<string, unknown>;
+  const type = String(row.type || "").trim();
+  if (type !== SW_BURST_PREFETCH_MESSAGE) return null;
+
+  const payload = row.payload && typeof row.payload === "object"
+    ? (row.payload as Record<string, unknown>)
+    : {};
+
+  const rawKeys = Array.isArray(payload.keys) ? payload.keys : [];
+  const keys = rawKeys
+    .map((entry) => String(entry || "").trim())
+    .filter(Boolean);
+
+  return {
+    keys,
+    concurrency: clampConcurrency(payload.concurrency),
+  };
 }
 
 async function staleWhileRevalidateNavigation(request: Request): Promise<Response> {
@@ -182,7 +291,9 @@ sw.addEventListener("install", (event: ExtendableEvent) => {
       const cache = await caches.open(CACHE_NAME);
       await cacheIndexAndAssets(cache).catch(() => undefined);
       await cacheCriticalRouteChunks(cache).catch(() => undefined);
-      await Promise.all(SHELL_URLS.map((path) => cacheAssetIfSafe(cache, path)));
+      await runWithConcurrency(SHELL_URLS, DEFAULT_PREFETCH_CONCURRENCY, async (path) => {
+        await cacheAssetIfSafe(cache, path);
+      });
       await sw.skipWaiting();
     })(),
   );
@@ -198,6 +309,19 @@ sw.addEventListener("activate", (event: ExtendableEvent) => {
           .map((key) => caches.delete(key)),
       );
       await sw.clients.claim();
+    })(),
+  );
+});
+
+sw.addEventListener("message", (event: ExtendableMessageEvent) => {
+  const burst = parseBurstPrefetchPayload(event.data);
+  if (!burst) return;
+
+  event.waitUntil(
+    (async () => {
+      const cache = await caches.open(CACHE_NAME);
+      const hints = resolveManifestHints(burst.keys);
+      await cacheManifestAssets(cache, hints, burst.concurrency);
     })(),
   );
 });

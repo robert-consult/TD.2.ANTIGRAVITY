@@ -3,6 +3,8 @@ import type { PerfHints, PerformanceTier } from "@/lib/perfHints";
 import { DEFAULT_PERFORMANCE_SETTINGS } from "@/lib/perfHints";
 import { prefetchAllRoutes, resetRoutePrefetchForTests } from "@/lib/routePrefetch";
 
+let originalServiceWorkerDescriptor: PropertyDescriptor | undefined;
+
 function buildHints(networkTier: PerformanceTier): PerfHints {
   const constrained = networkTier === "CONSTRAINED" || networkTier === "MINIMAL";
   return {
@@ -23,11 +25,18 @@ function buildHints(networkTier: PerformanceTier): PerfHints {
 
 describe("routePrefetch scheduling", () => {
   beforeEach(() => {
+    originalServiceWorkerDescriptor = Object.getOwnPropertyDescriptor(navigator, "serviceWorker");
     vi.useFakeTimers();
     resetRoutePrefetchForTests();
   });
 
   afterEach(() => {
+    if (originalServiceWorkerDescriptor) {
+      Object.defineProperty(navigator, "serviceWorker", originalServiceWorkerDescriptor);
+    } else {
+      // navigator.serviceWorker is configurable in jsdom test runtime.
+      delete (navigator as any).serviceWorker;
+    }
     resetRoutePrefetchForTests();
     vi.useRealTimers();
   });
@@ -94,5 +103,28 @@ describe("routePrefetch scheduling", () => {
 
     expect(setTimeoutSpy).toHaveBeenCalledTimes(2);
     setTimeoutSpy.mockRestore();
+  });
+
+  it("delegates burst prefetch to service worker when controlled", () => {
+    const postMessage = vi.fn();
+    Object.defineProperty(navigator, "serviceWorker", {
+      configurable: true,
+      value: {
+        controller: { postMessage },
+      },
+    });
+
+    prefetchAllRoutes({
+      hints: buildHints("FAST"),
+      settings: DEFAULT_PERFORMANCE_SETTINGS,
+      startDelayMs: 0,
+    });
+
+    expect(postMessage).toHaveBeenCalledTimes(1);
+    expect(postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "prefetch:burst",
+      }),
+    );
   });
 });

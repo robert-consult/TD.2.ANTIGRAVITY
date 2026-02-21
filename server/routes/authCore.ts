@@ -551,7 +551,6 @@ app.post("/api/auth/register", async (req: Request, res: Response) => {
           email,
           username,
           password,
-          balance: "1000000.00",
           countryIso2: countryIso2 ?? null,
           regionKey: regionKey ?? null,
           phone: normalizedPhone.e164 ?? null,

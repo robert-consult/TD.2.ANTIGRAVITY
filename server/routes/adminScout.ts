@@ -26,6 +26,7 @@ import {
   recruitingPipeline,
   scoutMetricsSnapshot,
   scoutWatchlists,
+  globalSettings,
   systemConfig,
   trades,
   users,
@@ -2030,6 +2031,16 @@ adminChallengesRouter.post("/", async (req, res) => {
 
     const data = parsed.data;
     const cfg = await getSystemChallengeConfig();
+    const [globalCfg] = await db
+      .select({ defaultChallengeVirtualCapitalUsd: globalSettings.defaultChallengeVirtualCapitalUsd })
+      .from(globalSettings)
+      .where(eq(globalSettings.id, 1))
+      .limit(1);
+    const defaultChallengeVirtualCapitalRaw = Number(globalCfg?.defaultChallengeVirtualCapitalUsd ?? 100000);
+    const defaultChallengeVirtualCapitalUsd =
+      Number.isFinite(defaultChallengeVirtualCapitalRaw) && defaultChallengeVirtualCapitalRaw > 0
+        ? defaultChallengeVirtualCapitalRaw
+        : 100000;
     const defaultEligibilityGate =
       typeof cfg.challengeDefaultEligibility === "string"
         ? cfg.challengeDefaultEligibility
@@ -2067,7 +2078,7 @@ adminChallengesRouter.post("/", async (req, res) => {
         slug: data.slug ?? null,
         tags: data.tags ?? "",
         iconColor: data.iconColor ?? null,
-        virtualCapitalUsd: data.virtualCapitalUsd ?? 100000,
+        virtualCapitalUsd: data.virtualCapitalUsd ?? defaultChallengeVirtualCapitalUsd,
         capitalMode: data.capitalMode ?? "VIRTUAL",
         leverageMultiplier: data.leverageMultiplier ?? 1,
         maxEnrollments: data.maxEnrollments ?? null,

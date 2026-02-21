@@ -9,7 +9,12 @@ import { installGlobalCsrfFetch } from "./lib/csrf";
 import { I18nProvider } from "@/i18n/I18nProvider";
 import { useI18n } from "@/i18n";
 import { lazyWithPing, useLazyPing } from "@/lib/lazyWithPing";
-import { getQueryPersistence, PERSIST_QUERY_KEYS } from "@/lib/queryPersistence";
+import {
+  getQueryPersistence,
+  PERSIST_QUERY_KEYS,
+  QueryPersistence,
+  subscribeQueryPersistenceReady,
+} from "@/lib/queryPersistence";
 
 installGlobalCsrfFetch();
 installAxiosIdentityHeaders();
@@ -70,13 +75,26 @@ function AppRoutes() {
 
 function App() {
   useEffect(() => {
-    const persistence = getQueryPersistence();
-    if (!persistence) return;
-    const unsubscribe = persistence.subscribe();
-    for (const key of PERSIST_QUERY_KEYS) {
-      queryClient.invalidateQueries({ queryKey: [key] });
-    }
-    return unsubscribe;
+    let persistenceUnsubscribe: (() => void) | null = null;
+
+    const attachPersistence = (persistence: QueryPersistence | null) => {
+      if (!persistence || persistenceUnsubscribe) return;
+      persistenceUnsubscribe = persistence.subscribe();
+      for (const key of PERSIST_QUERY_KEYS) {
+        queryClient.invalidateQueries({ queryKey: [key] });
+      }
+    };
+
+    attachPersistence(getQueryPersistence());
+    const unsubscribeReady = subscribeQueryPersistenceReady((persistence) => {
+      attachPersistence(persistence);
+    });
+
+    return () => {
+      unsubscribeReady();
+      persistenceUnsubscribe?.();
+      persistenceUnsubscribe = null;
+    };
   }, []);
 
   return (

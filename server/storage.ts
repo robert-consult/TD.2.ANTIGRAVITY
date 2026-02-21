@@ -6,6 +6,7 @@ import {
   users,
   trades,
   symbolConfigs,
+  globalSettings,
   userSettings,
   userLoginHistory,
   userAccountEvents,
@@ -69,6 +70,7 @@ type CreateUserInput = {
   password: string;
   isAdmin?: boolean;
   balance?: string;
+  startingEquity?: number;
   countryIso2?: string;
   regionKey?: string;
   country?: string;
@@ -80,6 +82,29 @@ async function insertUserWithTx(tx: any, userData: CreateUserInput): Promise<Use
   const passwordHash = await bcrypt.hash(userData.password, 10);
   const fp = userData.fingerprint;
   const ipHash = fp?.ip ? crypto.createHash('sha256').update(fp.ip).digest('hex') : null;
+
+  const [gs] = await tx
+    .select({
+      defaultUserStartingBalanceUsd: globalSettings.defaultUserStartingBalanceUsd,
+      defaultUserStartingEquityUsd: globalSettings.defaultUserStartingEquityUsd,
+    })
+    .from(globalSettings)
+    .where(eq(globalSettings.id, 1))
+    .limit(1);
+
+  const configuredStartingBalance = Number(gs?.defaultUserStartingBalanceUsd ?? 1_000_000);
+  const configuredStartingEquity = Number(gs?.defaultUserStartingEquityUsd ?? configuredStartingBalance);
+  const resolvedStartingBalance = Number.isFinite(configuredStartingBalance) && configuredStartingBalance > 0
+    ? configuredStartingBalance
+    : 1_000_000;
+  const resolvedStartingEquity = Number.isFinite(configuredStartingEquity) && configuredStartingEquity > 0
+    ? configuredStartingEquity
+    : resolvedStartingBalance;
+  const initialBalance = String(userData.balance ?? resolvedStartingBalance.toFixed(2));
+  const initialStartingEquity =
+    Number.isFinite(Number(userData.startingEquity)) && Number(userData.startingEquity) > 0
+      ? Number(userData.startingEquity)
+      : resolvedStartingEquity;
 
   // Default preferences aligned to signup context
   const tzRaw = String(fp?.identity?.clientTz ?? fp?.geo?.inferredTz ?? "").trim();
@@ -95,7 +120,8 @@ async function insertUserWithTx(tx: any, userData: CreateUserInput): Promise<Use
       username: userData.username,
       passwordHash,
       isAdmin: userData.isAdmin || false,
-      balance: userData.balance || "1000000.00",
+      balance: initialBalance,
+      startingEquity: initialStartingEquity,
       timezone,
       language,
       countryIso2: userData.countryIso2 ?? null,
@@ -167,7 +193,8 @@ async function insertUserWithTx(tx: any, userData: CreateUserInput): Promise<Use
     metadata: JSON.stringify({
       email: user.email,
       username: user.username,
-      initialBalance: userData.balance || "1000000.00",
+      initialBalance,
+      initialStartingEquity,
       signupCountry: fp?.geo?.countryCode ?? null,
       signupCity: fp?.geo?.city ?? null,
     }),

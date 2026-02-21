@@ -66,7 +66,7 @@ function startApp(): Promise<void> {
       import("./index.css"),
     ]);
 
-    await initializeQueryPersistence(queryClient).catch(() => undefined);
+    void initializeQueryPersistence(queryClient).catch(() => undefined);
     createRoot(document.getElementById("root")!).render(<App />);
     clearBootSplash();
   })().catch((error) => {

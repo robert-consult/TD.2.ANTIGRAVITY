@@ -11,6 +11,8 @@ export type PerformanceSettings = {
   maxWsReconnectAttempts: number;
   wsReconnectBaseDelayMs: number;
   prefetchStrategy: PrefetchStrategy;
+  prefetchMaxConcurrency: number;
+  prefetchStartDelayMs: number;
   pollInstantMs: number;
   pollFastMs: number;
   pollModerateMs: number;
@@ -42,6 +44,7 @@ export type PrefetchPlan = {
   count: number;
   mode: "parallel" | "sequential" | "none";
   startDelayMs: number;
+  maxConcurrency: number;
 };
 
 type NavigatorLike = {
@@ -86,6 +89,8 @@ export const DEFAULT_PERFORMANCE_SETTINGS: PerformanceSettings = {
   maxWsReconnectAttempts: 30,
   wsReconnectBaseDelayMs: 1500,
   prefetchStrategy: "all",
+  prefetchMaxConcurrency: 4,
+  prefetchStartDelayMs: 0,
   pollInstantMs: 200,
   pollFastMs: 500,
   pollModerateMs: 1500,
@@ -360,6 +365,22 @@ export function resolvePerformanceSettings(input: unknown): PerformanceSettings 
       30_000,
     ),
     prefetchStrategy,
+    prefetchMaxConcurrency: clamp(
+      Math.round(
+        numOrNull(candidate.prefetchMaxConcurrency) ??
+          DEFAULT_PERFORMANCE_SETTINGS.prefetchMaxConcurrency,
+      ),
+      1,
+      6,
+    ),
+    prefetchStartDelayMs: clamp(
+      Math.round(
+        numOrNull(candidate.prefetchStartDelayMs) ??
+          DEFAULT_PERFORMANCE_SETTINGS.prefetchStartDelayMs,
+      ),
+      0,
+      15_000,
+    ),
     pollInstantMs: clamp(Math.round(numOrNull(candidate.pollInstantMs) ?? defaultPollInstantMs), 100, 60_000),
     pollFastMs: clamp(Math.round(numOrNull(candidate.pollFastMs) ?? defaultPollFastMs), 100, 60_000),
     pollModerateMs: clamp(Math.round(numOrNull(candidate.pollModerateMs) ?? defaultPollModerateMs), 100, 60_000),
@@ -515,26 +536,48 @@ export function tierPrefetchPlan(
 ): PrefetchPlan {
   const settings = resolvePerformanceSettings(settingsInput);
   if (settings.prefetchStrategy === "none" || hints.saveData || hints.networkTier === "MINIMAL") {
-    return { count: 0, mode: "none", startDelayMs: 0 };
+    return { count: 0, mode: "none", startDelayMs: 0, maxConcurrency: 1 };
   }
+
+  const resolveMaxConcurrency = () => {
+    let cap = clamp(settings.prefetchMaxConcurrency, 1, 6);
+
+    if (hints.networkTier === "FAST") cap = Math.min(cap, 4);
+    if (hints.networkTier === "MODERATE") cap = Math.min(cap, 3);
+    if (hints.networkTier === "CONSTRAINED") cap = Math.min(cap, 2);
+
+    if (hints.deviceTier === "MINIMAL") cap = 1;
+    else if (hints.deviceTier === "CONSTRAINED") cap = Math.min(cap, 2);
+
+    return clamp(cap, 1, 6);
+  };
+
+  const maxConcurrency = resolveMaxConcurrency();
+  const mode = maxConcurrency > 1 ? "parallel" : "sequential";
+  const startDelayMs = settings.prefetchStartDelayMs;
 
   if (settings.prefetchStrategy === "critical") {
-    if (hints.networkTier === "CONSTRAINED") return { count: 3, mode: "sequential", startDelayMs: 5_000 };
-    if (hints.networkTier === "MODERATE") return { count: 3, mode: "sequential", startDelayMs: 3_000 };
-    return { count: 3, mode: hints.deviceTier === "INSTANT" ? "parallel" : "sequential", startDelayMs: 0 };
+    if (hints.networkTier === "CONSTRAINED" || hints.deviceTier === "MINIMAL") {
+      return { count: 2, mode, startDelayMs, maxConcurrency };
+    }
+    if (hints.networkTier === "MODERATE" || hints.deviceTier === "CONSTRAINED") {
+      return { count: 3, mode, startDelayMs, maxConcurrency };
+    }
+    return { count: 4, mode, startDelayMs, maxConcurrency };
   }
 
-  if (hints.networkTier === "INSTANT") {
-    return {
-      count: 9,
-      mode: hints.deviceTier === "INSTANT" ? "parallel" : "sequential",
-      startDelayMs: 0,
-    };
+  let count = 9;
+  if (hints.networkTier === "MODERATE") count = 8;
+  if (hints.networkTier === "CONSTRAINED") count = 6;
+
+  if (hints.deviceTier === "MINIMAL") count = Math.min(count, 3);
+  if (hints.deviceTier === "CONSTRAINED") count = Math.min(count, 6);
+
+  if (count <= 0) {
+    return { count: 0, mode: "none", startDelayMs: 0, maxConcurrency: 1 };
   }
-  if (hints.networkTier === "FAST") return { count: 9, mode: "sequential", startDelayMs: 0 };
-  if (hints.networkTier === "MODERATE") return { count: 6, mode: "sequential", startDelayMs: 3_000 };
-  if (hints.networkTier === "CONSTRAINED") return { count: 3, mode: "sequential", startDelayMs: 5_000 };
-  return { count: 0, mode: "none", startDelayMs: 0 };
+
+  return { count, mode, startDelayMs, maxConcurrency };
 }
 
 export function tierRetryCount(

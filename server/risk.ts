@@ -628,7 +628,11 @@ export async function riskMiddleware(req: Request, res: Response, next: NextFunc
       }
     });
 
-    const dailyLossPercent = dailyPnL < 0 ? Math.abs(dailyPnL) / INITIAL_BALANCE_USD * 100 : 0;
+    const baselineBalanceRaw = Number((user as any).startingEquity);
+    const baselineBalance = Number.isFinite(baselineBalanceRaw) && baselineBalanceRaw > 0
+      ? baselineBalanceRaw
+      : INITIAL_BALANCE_USD;
+    const dailyLossPercent = dailyPnL < 0 ? Math.abs(dailyPnL) / baselineBalance * 100 : 0;
 
     if (dailyLossPercent >= limits.dailyLossLimitPct) {
       return res.status(403).json({
@@ -641,7 +645,7 @@ export async function riskMiddleware(req: Request, res: Response, next: NextFunc
 
     // 5. Check lifetime loss limit
     const currentBalance = parseFloat(user.balance);
-    const lifetimeLossPercent = (INITIAL_BALANCE_USD - currentBalance) / INITIAL_BALANCE_USD * 100;
+    const lifetimeLossPercent = (baselineBalance - currentBalance) / baselineBalance * 100;
 
     if (lifetimeLossPercent >= limits.lifetimeLossLimitPct) {
       await storage.disableUserAccount(userId);

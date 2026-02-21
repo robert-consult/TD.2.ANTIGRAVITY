@@ -46,6 +46,15 @@ export function registerGlobalSettingsRoute(router: Router) {
           prefetchStrategy: globalSettings.prefetchStrategy,
           prefetchMaxConcurrency: globalSettings.prefetchMaxConcurrency,
           prefetchStartDelayMs: globalSettings.prefetchStartDelayMs,
+          prefetchFastConcurrencyCap: globalSettings.prefetchFastConcurrencyCap,
+          prefetchModerateConcurrencyCap: globalSettings.prefetchModerateConcurrencyCap,
+          prefetchConstrainedConcurrencyCap: globalSettings.prefetchConstrainedConcurrencyCap,
+          prefetchNetworkFastStartDelayMs: globalSettings.prefetchNetworkFastStartDelayMs,
+          prefetchNetworkModerateStartDelayMs: globalSettings.prefetchNetworkModerateStartDelayMs,
+          prefetchNetworkConstrainedStartDelayMs: globalSettings.prefetchNetworkConstrainedStartDelayMs,
+          prefetchDeviceModerateStartDelayMs: globalSettings.prefetchDeviceModerateStartDelayMs,
+          prefetchDeviceConstrainedStartDelayMs: globalSettings.prefetchDeviceConstrainedStartDelayMs,
+          prefetchDeviceMinimalStartDelayMs: globalSettings.prefetchDeviceMinimalStartDelayMs,
           pollInstantMs: globalSettings.pollInstantMs,
           pollFastMs: globalSettings.pollFastMs,
           pollModerateMs: globalSettings.pollModerateMs,
@@ -71,6 +80,40 @@ export function registerGlobalSettingsRoute(router: Router) {
       const wsReconnectBaseDelayMs = clampInt(settings?.wsReconnectBaseDelayMs, 100, 30_000, 1500);
       const prefetchMaxConcurrency = clampInt(settings?.prefetchMaxConcurrency, 1, 6, 4);
       const prefetchStartDelayMs = clampInt(settings?.prefetchStartDelayMs, 0, 15_000, 0);
+      const prefetchFastConcurrencyCap = clampInt(settings?.prefetchFastConcurrencyCap, 1, 6, 3);
+      const prefetchModerateConcurrencyCap = clampInt(settings?.prefetchModerateConcurrencyCap, 1, 6, 2);
+      const prefetchConstrainedConcurrencyCap = clampInt(settings?.prefetchConstrainedConcurrencyCap, 1, 6, 1);
+      const prefetchNetworkFastStartDelayMs = clampInt(settings?.prefetchNetworkFastStartDelayMs, 0, 15_000, 75);
+      const prefetchNetworkModerateStartDelayMs = clampInt(
+        settings?.prefetchNetworkModerateStartDelayMs,
+        0,
+        15_000,
+        200,
+      );
+      const prefetchNetworkConstrainedStartDelayMs = clampInt(
+        settings?.prefetchNetworkConstrainedStartDelayMs,
+        0,
+        15_000,
+        450,
+      );
+      const prefetchDeviceModerateStartDelayMs = clampInt(
+        settings?.prefetchDeviceModerateStartDelayMs,
+        0,
+        15_000,
+        50,
+      );
+      const prefetchDeviceConstrainedStartDelayMs = clampInt(
+        settings?.prefetchDeviceConstrainedStartDelayMs,
+        0,
+        15_000,
+        150,
+      );
+      const prefetchDeviceMinimalStartDelayMs = clampInt(
+        settings?.prefetchDeviceMinimalStartDelayMs,
+        0,
+        15_000,
+        300,
+      );
       const pollInstantMs = clampInt(settings?.pollInstantMs, 100, 60_000, 200);
       const pollFastMs = clampInt(settings?.pollFastMs, 100, 60_000, 500);
       const pollModerateMs = clampInt(settings?.pollModerateMs, 100, 60_000, 1500);
@@ -107,6 +150,15 @@ export function registerGlobalSettingsRoute(router: Router) {
         prefetchStrategy,
         prefetchMaxConcurrency,
         prefetchStartDelayMs,
+        prefetchFastConcurrencyCap,
+        prefetchModerateConcurrencyCap,
+        prefetchConstrainedConcurrencyCap,
+        prefetchNetworkFastStartDelayMs,
+        prefetchNetworkModerateStartDelayMs,
+        prefetchNetworkConstrainedStartDelayMs,
+        prefetchDeviceModerateStartDelayMs,
+        prefetchDeviceConstrainedStartDelayMs,
+        prefetchDeviceMinimalStartDelayMs,
         pollInstantMs,
         pollFastMs,
         pollModerateMs,

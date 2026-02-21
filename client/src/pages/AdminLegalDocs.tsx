@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { getLegalDocsPrefillOnce, setLegalAcceptancesPrefill, dispatchAdminNavigate } from "../lib/adminDeepLink";
 import { fetchWithIdentity } from "../lib/fetchWithIdentity";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 type Target = {
   docSet: string;
@@ -43,6 +44,49 @@ type PreviewAssembleData = {
   text?: string;
   error?: string;
 };
+
+const LEGAL_DOCS_V2_FIELD_HELP = {
+  docSet: {
+    inline: "Legal document family identifier used by the resolver.",
+    tooltip:
+      "Select the correct document set before editing. Wrong set selection can update the wrong legal stack.",
+  },
+  docType: {
+    inline: "Choose global master or addendum stream.",
+    tooltip:
+      "GLOBAL_MASTER controls baseline terms, while ADDENDUM applies jurisdiction overlays.",
+  },
+  jurisdictionType: {
+    inline: "Resolver scope type: default, country, or region.",
+    tooltip:
+      "This determines how jurisdictionKey is interpreted during legal assembly at signup and acceptance time.",
+  },
+  jurisdictionKey: {
+    inline: "Specific scope key used for the selected jurisdiction type.",
+    tooltip:
+      "Examples: GLOBAL/ROW for defaults, ISO2 for country, region key for regional overlays. Keep keys normalized.",
+  },
+  newVersion: {
+    inline: "Version label for the new immutable revision.",
+    tooltip:
+      "Use semver-style values and increment on any legal text change to preserve acceptance audit traceability.",
+  },
+  note: {
+    inline: "Operational note describing why this revision is created.",
+    tooltip:
+      "Add brief rationale for audit context (policy update, legal review, jurisdiction patch, etc.).",
+  },
+  content: {
+    inline: "Canonical legal markdown text for this revision.",
+    tooltip:
+      "This content is what users accept and what hash/tokens bind to. Review carefully before replacing active.",
+  },
+  previewCountry: {
+    inline: "ISO2 country for resolver preview.",
+    tooltip:
+      "Runs a dry preview of assembled terms and hashes for the selected jurisdiction without mutating active records.",
+  },
+} as const;
 
 const card: React.CSSProperties = {
   background: "#1A1A1A",
@@ -164,6 +208,50 @@ const versionRowActive: React.CSSProperties = {
   ...versionRow,
   background: "rgba(59,130,246,0.1)",
 };
+
+const hintBtn: React.CSSProperties = {
+  background: "transparent",
+  border: "none",
+  color: "#67E8F9",
+  cursor: "pointer",
+  textDecoration: "underline",
+  textDecorationStyle: "dotted",
+  textUnderlineOffset: 2,
+  fontSize: 11,
+  fontWeight: 600,
+  padding: 0,
+};
+
+const hintBanner: React.CSSProperties = {
+  border: "1px solid rgba(8,145,178,0.45)",
+  background: "rgba(8,145,178,0.12)",
+  color: "rgba(207,250,254,0.95)",
+  borderRadius: 8,
+  padding: "10px 12px",
+  fontSize: 12,
+  marginBottom: 12,
+};
+
+function HintLabel(props: { label: string; hint: string; inline: string }) {
+  return (
+    <div style={{ display: "grid", gap: 4 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+        <label style={label}>{props.label}</label>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button type="button" style={hintBtn} aria-label={`${props.label} hint`}>
+              Hint
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="top" className="max-w-sm text-xs leading-relaxed">
+            {props.hint}
+          </TooltipContent>
+        </Tooltip>
+      </div>
+      <div style={{ fontSize: 11, color: "rgba(255,255,255,0.55)" }}>{props.inline}</div>
+    </div>
+  );
+}
 
 export default function AdminLegalDocs() {
   const prefill = useMemo(() => getLegalDocsPrefillOnce(), []);
@@ -380,6 +468,7 @@ export default function AdminLegalDocs() {
   }
 
   return (
+    <TooltipProvider delayDuration={120}>
     <div style={{ padding: 0 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
         <div>
@@ -399,13 +488,21 @@ export default function AdminLegalDocs() {
         )}
       </div>
 
+      <div style={hintBanner}>
+        Legal doc controls include hidden <strong>Hint</strong> explainers for resolver scope, revision governance, and acceptance-audit integrity.
+      </div>
+
       <div style={card}>
         <h3 style={{ fontSize: 14, fontWeight: 600, marginBottom: 12, textTransform: "uppercase", letterSpacing: 1 }}>
           Target Selector
         </h3>
         <div style={row}>
           <div style={col}>
-            <label style={label}>Doc Set</label>
+            <HintLabel
+              label="Doc Set"
+              hint={LEGAL_DOCS_V2_FIELD_HELP.docSet.tooltip}
+              inline={LEGAL_DOCS_V2_FIELD_HELP.docSet.inline}
+            />
             <select style={select} value={docSet} onChange={(e) => setDocSet(e.target.value)}>
               {(targets?.docSets || ["DOC1"]).map((ds) => (
                 <option key={ds} value={ds}>{ds}</option>
@@ -413,7 +510,11 @@ export default function AdminLegalDocs() {
             </select>
           </div>
           <div style={col}>
-            <label style={label}>Doc Type</label>
+            <HintLabel
+              label="Doc Type"
+              hint={LEGAL_DOCS_V2_FIELD_HELP.docType.tooltip}
+              inline={LEGAL_DOCS_V2_FIELD_HELP.docType.inline}
+            />
             <select style={select} value={docType} onChange={(e) => setDocType(e.target.value as Target["docType"])}>
               {(targets?.docTypes || ["GLOBAL_MASTER", "ADDENDUM"]).map((dt) => (
                 <option key={dt} value={dt}>{dt}</option>
@@ -421,7 +522,11 @@ export default function AdminLegalDocs() {
             </select>
           </div>
           <div style={col}>
-            <label style={label}>Jurisdiction Type</label>
+            <HintLabel
+              label="Jurisdiction Type"
+              hint={LEGAL_DOCS_V2_FIELD_HELP.jurisdictionType.tooltip}
+              inline={LEGAL_DOCS_V2_FIELD_HELP.jurisdictionType.inline}
+            />
             <select style={select} value={jurisdictionType} onChange={(e) => setJurisdictionType(e.target.value as Target["jurisdictionType"])}>
               {(targets?.jurisdictionTypes || ["DEFAULT", "COUNTRY", "REGION"]).map((jt) => (
                 <option key={jt} value={jt}>{jt}</option>
@@ -429,16 +534,21 @@ export default function AdminLegalDocs() {
             </select>
           </div>
           <div style={col}>
-            <label style={label}>Jurisdiction Key</label>
+            <HintLabel
+              label="Jurisdiction Key"
+              hint={LEGAL_DOCS_V2_FIELD_HELP.jurisdictionKey.tooltip}
+              inline={LEGAL_DOCS_V2_FIELD_HELP.jurisdictionKey.inline}
+            />
             {jurisdictionType === "COUNTRY" ? (
               <input
                 style={input}
                 value={jurisdictionKey}
                 onChange={(e) => setJurisdictionKey(e.target.value.toUpperCase())}
                 placeholder="e.g., US, GB, DE"
+                title={LEGAL_DOCS_V2_FIELD_HELP.jurisdictionKey.tooltip}
               />
             ) : (
-              <select style={select} value={jurisdictionKey} onChange={(e) => setJurisdictionKey(e.target.value)}>
+              <select style={select} value={jurisdictionKey} onChange={(e) => setJurisdictionKey(e.target.value)} title={LEGAL_DOCS_V2_FIELD_HELP.jurisdictionKey.tooltip}>
                 {getKeyOptions().map((k) => (
                   <option key={k} value={k}>{k}</option>
                 ))}
@@ -542,31 +652,46 @@ export default function AdminLegalDocs() {
         </p>
         <div style={row}>
           <div style={{ ...col, flex: "0 1 200px" }}>
-            <label style={label}>New Version</label>
+            <HintLabel
+              label="New Version"
+              hint={LEGAL_DOCS_V2_FIELD_HELP.newVersion.tooltip}
+              inline={LEGAL_DOCS_V2_FIELD_HELP.newVersion.inline}
+            />
             <input
               style={input}
               value={editorVersion}
               onChange={(e) => setEditorVersion(e.target.value)}
               placeholder="e.g., 2.0.0"
+              title={LEGAL_DOCS_V2_FIELD_HELP.newVersion.tooltip}
             />
           </div>
           <div style={{ ...col, flex: "1 1 300px" }}>
-            <label style={label}>Note (optional)</label>
+            <HintLabel
+              label="Note (optional)"
+              hint={LEGAL_DOCS_V2_FIELD_HELP.note.tooltip}
+              inline={LEGAL_DOCS_V2_FIELD_HELP.note.inline}
+            />
             <input
               style={input}
               value={editorNote}
               onChange={(e) => setEditorNote(e.target.value)}
               placeholder="e.g., Updated for Q1 2025 compliance"
+              title={LEGAL_DOCS_V2_FIELD_HELP.note.tooltip}
             />
           </div>
         </div>
         <div style={{ marginBottom: 12 }}>
-          <label style={label}>Content (min 50 chars)</label>
+          <HintLabel
+            label="Content (min 50 chars)"
+            hint={LEGAL_DOCS_V2_FIELD_HELP.content.tooltip}
+            inline={LEGAL_DOCS_V2_FIELD_HELP.content.inline}
+          />
           <textarea
             style={textarea}
             value={editorContent}
             onChange={(e) => setEditorContent(e.target.value)}
             placeholder="Enter document content here..."
+            title={LEGAL_DOCS_V2_FIELD_HELP.content.tooltip}
           />
         </div>
         {saveError && (
@@ -586,13 +711,18 @@ export default function AdminLegalDocs() {
         </p>
         <div style={{ display: "flex", gap: 12, alignItems: "flex-end", marginBottom: 16 }}>
           <div style={{ flex: "0 1 150px" }}>
-            <label style={label}>Country ISO2</label>
+            <HintLabel
+              label="Country ISO2"
+              hint={LEGAL_DOCS_V2_FIELD_HELP.previewCountry.tooltip}
+              inline={LEGAL_DOCS_V2_FIELD_HELP.previewCountry.inline}
+            />
             <input
               style={input}
               value={previewCountry}
               onChange={(e) => setPreviewCountry(e.target.value.toUpperCase())}
               placeholder="e.g., US, GB"
               maxLength={2}
+              title={LEGAL_DOCS_V2_FIELD_HELP.previewCountry.tooltip}
             />
           </div>
           <button style={primaryBtn} onClick={handlePreviewAssemble} disabled={loadingPreview}>
@@ -672,5 +802,6 @@ export default function AdminLegalDocs() {
         )}
       </div>
     </div>
+    </TooltipProvider>
   );
 }

@@ -5,6 +5,7 @@ import {
   dispatchAdminNavigate,
 } from "../lib/adminDeepLink";
 import { fetchWithIdentity } from "../lib/fetchWithIdentity";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 type ListRow = {
   id: number;
@@ -31,6 +32,54 @@ type ListRow = {
   prevLedgerHash: string;
   ledgerHash: string;
 };
+
+const LEGAL_ACCEPTANCES_FIELD_HELP = {
+  countryIso2: {
+    inline: "Filter ledger rows by acceptance country ISO2.",
+    tooltip:
+      "Use uppercase 2-letter country codes. Useful for jurisdiction-specific investigations and legal coverage audits.",
+  },
+  email: {
+    inline: "Filter by accepted email substring.",
+    tooltip:
+      "Helps locate acceptance records when only partial email context is available.",
+  },
+  userId: {
+    inline: "Filter by exact internal user ID.",
+    tooltip:
+      "Use when reconciling legal events for a specific account across support/compliance systems.",
+  },
+  fromDate: {
+    inline: "Start date filter for acceptance timestamp range.",
+    tooltip:
+      "Inclusive start boundary applied in local-time date selection.",
+  },
+  toDate: {
+    inline: "End date filter for acceptance timestamp range.",
+    tooltip:
+      "Inclusive end-of-day boundary. Useful for audit exports within a review window.",
+  },
+  limit: {
+    inline: "Rows fetched per page.",
+    tooltip:
+      "Higher limits reduce paging steps but can increase render and query payload size.",
+  },
+  validateN: {
+    inline: "How many recent ledger rows to include in chain validation.",
+    tooltip:
+      "Larger values provide deeper coverage but take longer. Use targeted ranges during triage, larger ranges for audits.",
+  },
+  validateLedger: {
+    inline: "Run tamper-evidence validation over a ledger slice.",
+    tooltip:
+      "Validates sequence and hash continuity. Use before reporting potential integrity incidents.",
+  },
+  exportCsv: {
+    inline: "Export filtered acceptance records as CSV.",
+    tooltip:
+      "Applies current filters and is intended for audit/legal review handoffs.",
+  },
+} as const;
 
 export default function AdminLegalAcceptances() {
   const acceptPrefill = useMemo(() => getLegalAcceptancesPrefillOnce(), []);
@@ -241,6 +290,7 @@ export default function AdminLegalAcceptances() {
   const pageCount = Math.max(1, Math.ceil(total / limit));
 
   return (
+    <TooltipProvider delayDuration={120}>
     <div style={{ display: "grid", gap: 16, maxWidth: "100%", overflow: "hidden" }}>
       <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
         <div style={{ minWidth: 0, flex: "1 1 200px" }}>
@@ -251,38 +301,105 @@ export default function AdminLegalAcceptances() {
         </div>
 
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <button style={btn} onClick={() => { setValidateOpen(true); runValidate(); }}>
+          <button
+            style={btn}
+            onClick={() => { setValidateOpen(true); runValidate(); }}
+            title={LEGAL_ACCEPTANCES_FIELD_HELP.validateLedger.tooltip}
+          >
             Validate Ledger
           </button>
-          <button style={btn} onClick={exportCsv}>
+          <button style={btn} onClick={exportCsv} title={LEGAL_ACCEPTANCES_FIELD_HELP.exportCsv.tooltip}>
             Export CSV
           </button>
         </div>
       </div>
 
+      <div style={hintBanner}>
+        Acceptance ledger controls include hidden <strong>Hint</strong> explainers for filters, validation depth, and export governance.
+      </div>
+
       <div style={{ ...card, display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))" }}>
-        <Field label="Country ISO2">
-          <input value={countryIso2} onChange={(e) => { setOffset(0); setCountryIso2(e.target.value.toUpperCase()); }} style={input} placeholder="KE" />
+        <Field
+          label="Country ISO2"
+          hint={LEGAL_ACCEPTANCES_FIELD_HELP.countryIso2.tooltip}
+          inline={LEGAL_ACCEPTANCES_FIELD_HELP.countryIso2.inline}
+        >
+          <input
+            value={countryIso2}
+            onChange={(e) => { setOffset(0); setCountryIso2(e.target.value.toUpperCase()); }}
+            style={input}
+            placeholder="KE"
+            title={LEGAL_ACCEPTANCES_FIELD_HELP.countryIso2.tooltip}
+          />
         </Field>
 
-        <Field label="Email contains">
-          <input value={email} onChange={(e) => { setOffset(0); setEmail(e.target.value); }} style={input} placeholder="gmail" />
+        <Field
+          label="Email contains"
+          hint={LEGAL_ACCEPTANCES_FIELD_HELP.email.tooltip}
+          inline={LEGAL_ACCEPTANCES_FIELD_HELP.email.inline}
+        >
+          <input
+            value={email}
+            onChange={(e) => { setOffset(0); setEmail(e.target.value); }}
+            style={input}
+            placeholder="gmail"
+            title={LEGAL_ACCEPTANCES_FIELD_HELP.email.tooltip}
+          />
         </Field>
 
-        <Field label="User ID">
-          <input value={userId} onChange={(e) => { setOffset(0); setUserId(e.target.value); }} style={input} placeholder="123" />
+        <Field
+          label="User ID"
+          hint={LEGAL_ACCEPTANCES_FIELD_HELP.userId.tooltip}
+          inline={LEGAL_ACCEPTANCES_FIELD_HELP.userId.inline}
+        >
+          <input
+            value={userId}
+            onChange={(e) => { setOffset(0); setUserId(e.target.value); }}
+            style={input}
+            placeholder="123"
+            title={LEGAL_ACCEPTANCES_FIELD_HELP.userId.tooltip}
+          />
         </Field>
 
-        <Field label="From (date)">
-          <input type="date" value={fromDate} onChange={(e) => { setOffset(0); setFromDate(e.target.value); }} style={input} />
+        <Field
+          label="From (date)"
+          hint={LEGAL_ACCEPTANCES_FIELD_HELP.fromDate.tooltip}
+          inline={LEGAL_ACCEPTANCES_FIELD_HELP.fromDate.inline}
+        >
+          <input
+            type="date"
+            value={fromDate}
+            onChange={(e) => { setOffset(0); setFromDate(e.target.value); }}
+            style={input}
+            title={LEGAL_ACCEPTANCES_FIELD_HELP.fromDate.tooltip}
+          />
         </Field>
 
-        <Field label="To (date)">
-          <input type="date" value={toDate} onChange={(e) => { setOffset(0); setToDate(e.target.value); }} style={input} />
+        <Field
+          label="To (date)"
+          hint={LEGAL_ACCEPTANCES_FIELD_HELP.toDate.tooltip}
+          inline={LEGAL_ACCEPTANCES_FIELD_HELP.toDate.inline}
+        >
+          <input
+            type="date"
+            value={toDate}
+            onChange={(e) => { setOffset(0); setToDate(e.target.value); }}
+            style={input}
+            title={LEGAL_ACCEPTANCES_FIELD_HELP.toDate.tooltip}
+          />
         </Field>
 
-        <Field label="Limit">
-          <select value={limit} onChange={(e) => { setOffset(0); setLimit(Number(e.target.value)); }} style={input}>
+        <Field
+          label="Limit"
+          hint={LEGAL_ACCEPTANCES_FIELD_HELP.limit.tooltip}
+          inline={LEGAL_ACCEPTANCES_FIELD_HELP.limit.inline}
+        >
+          <select
+            value={limit}
+            onChange={(e) => { setOffset(0); setLimit(Number(e.target.value)); }}
+            style={input}
+            title={LEGAL_ACCEPTANCES_FIELD_HELP.limit.tooltip}
+          >
             {[25, 50, 100, 200].map((n) => (
               <option key={n} value={n}>{n}</option>
             ))}
@@ -397,8 +514,17 @@ export default function AdminLegalAcceptances() {
       <Modal open={validateOpen} onClose={() => setValidateOpen(false)} title="Validate Acceptance Ledger Chain">
         <div style={{ display: "grid", gap: 12, fontSize: 12 }}>
           <div style={{ display: "flex", gap: 10, alignItems: "flex-end" }}>
-            <Field label="Validate last N rows">
-              <input value={String(validateN)} onChange={(e) => setValidateN(Number(e.target.value || 0))} style={input} />
+            <Field
+              label="Validate last N rows"
+              hint={LEGAL_ACCEPTANCES_FIELD_HELP.validateN.tooltip}
+              inline={LEGAL_ACCEPTANCES_FIELD_HELP.validateN.inline}
+            >
+              <input
+                value={String(validateN)}
+                onChange={(e) => setValidateN(Number(e.target.value || 0))}
+                style={input}
+                title={LEGAL_ACCEPTANCES_FIELD_HELP.validateN.tooltip}
+              />
             </Field>
             <button style={btn} onClick={runValidate}>Run</button>
           </div>
@@ -509,13 +635,29 @@ export default function AdminLegalAcceptances() {
         </div>
       </Modal>
     </div>
+    </TooltipProvider>
   );
 }
 
-function Field(props: { label: string; children: React.ReactNode }) {
+function Field(props: { label: string; hint?: string; inline?: string; children: React.ReactNode }) {
   return (
     <label style={{ display: "grid", gap: 4 }}>
-      <div style={{ fontSize: 12, color: "rgba(255,255,255,0.7)", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px" }}>{props.label}</div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+        <div style={{ fontSize: 12, color: "rgba(255,255,255,0.7)", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px" }}>{props.label}</div>
+        {props.hint ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button type="button" style={hintBtn} aria-label={`${props.label} hint`}>
+                Hint
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="top" className="max-w-sm text-xs leading-relaxed">
+              {props.hint}
+            </TooltipContent>
+          </Tooltip>
+        ) : null}
+      </div>
+      {props.inline ? <div style={{ fontSize: 11, color: "rgba(255,255,255,0.55)" }}>{props.inline}</div> : null}
       {props.children}
     </label>
   );
@@ -585,6 +727,28 @@ const btnSmall: React.CSSProperties = {
   color: "#fff",
   fontSize: 11,
   cursor: "pointer",
+};
+
+const hintBtn: React.CSSProperties = {
+  background: "transparent",
+  border: "none",
+  color: "#67E8F9",
+  cursor: "pointer",
+  textDecoration: "underline",
+  textDecorationStyle: "dotted",
+  textUnderlineOffset: 2,
+  fontSize: 11,
+  fontWeight: 600,
+  padding: 0,
+};
+
+const hintBanner: React.CSSProperties = {
+  border: "1px solid rgba(8,145,178,0.45)",
+  background: "rgba(8,145,178,0.12)",
+  color: "rgba(207,250,254,0.95)",
+  borderRadius: 8,
+  padding: "10px 12px",
+  fontSize: 12,
 };
 
 const th: React.CSSProperties = {

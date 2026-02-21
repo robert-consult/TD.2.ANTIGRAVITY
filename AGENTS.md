@@ -81,6 +81,7 @@ See `@/.agents/release-done.md`.
 
 ## Deep context entrypoints (scan these before making assumptions)
 See `@/.agents/deep-context.md` for “where to look” by domain (auth, trading, quotes, compliance, i18n, mobile, infra).
+For route architecture rules (anti-bloat modularization + index wiring), also see `server/routes/AGENTS.md`.
 
 ## Boundaries (strict)
 - Never commit secrets (including `.env`, DB dumps, prod logs, keystores).

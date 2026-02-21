@@ -498,3 +498,28 @@ Failure Mode if Missing:
   - Run `npm run db:audit` and verify no missing columns on `global_settings` and no extra unmanaged `session` table warning.
   - Confirm `information_schema.columns` for `global_settings` includes `default_user_starting_balance_usd`, `default_user_starting_equity_usd`, and `default_challenge_virtual_capital_usd`.
 - Failure Mode if Missing: migrations can be silently skipped due journal drift, leading to schema/code mismatch in production (`global_settings` missing columns) and non-deterministic audit output due unmanaged runtime-created `session` table.
+
+### PRD-PERF-008
+- ID: `PRD-PERF-008`
+- Date (UTC): `2026-02-21`
+- Scope: `Admin-driven prefetch tier caps + delay floors`
+- Requirement: Tier-specific prefetch controls (`prefetch_*_concurrency_cap`, `prefetch_network_*_start_delay_ms`, `prefetch_device_*_start_delay_ms`) must be persisted, range-bounded, exposed on admin/public global settings, and broadcast through `global-settings:updated` so System Config → Market Data card edits propagate immediately.
+- Enforcement: `db/migrations/0036_global_settings_prefetch_tier_controls.sql`, `shared/schema.pg.ts`, `server/routes/admin.ts` (`/api/admin/global-settings` parse/range clamp + live event payload), `server/routes/public/globalSettings.ts`, `server/routes/publicCore.ts`, and `client/src/lib/globalSettingsPerformance.ts` (live merge allowlist).
+- Validation:
+  - Run `npm run db:migrate:drizzle` and verify migration `0036_global_settings_prefetch_tier_controls` is applied.
+  - Save new tier-cap/delay fields from System Config → Market Data and verify values persist via `GET /api/admin/global-settings`.
+  - Verify `global-settings:updated` websocket payload includes new `performanceSettings` keys and active clients update without reload.
+  - Verify `GET /api/global-settings` returns clamped values for the new fields.
+- Failure Mode if Missing: admin edits to tier prefetch controls either do not persist or do not propagate live, causing stale/incorrect startup warm-up behavior across sessions and nodes.
+
+### PRD-PERF-009
+- ID: `PRD-PERF-009`
+- Date (UTC): `2026-02-21`
+- Scope: `Live performance-patch cache consistency across admin/client consumers`
+- Requirement: `global-settings:updated` performance patches must merge without creating partial cache objects when no prior settings payload exists, and admin/runtime consumers must resolve nested `performanceSettings` overlays so cards/settings reflect live updates immediately.
+- Enforcement: `client/src/live/ConfigSync.tsx` (cache-merge guard for absent prior payload), `client/src/lib/globalSettingsPerformance.ts` (nested performance overlay resolver + allowlist sanitation), and `client/src/pages/AdminDashboard.tsx` / `client/src/hooks/use-performance-settings.ts` (resolver usage for immediate view/runtime updates).
+- Validation:
+  - Connect two authenticated sessions (admin + viewer), save Market Data performance controls from admin, and verify the second session reflects updated card values without page reload.
+  - Emit `global-settings:updated` before `/api/global-settings` has been fetched and verify no partial object replaces the query cache.
+  - Run `npx vitest run client/src/live/ConfigSync.test.ts client/src/hooks/use-performance-settings.test.tsx`.
+- Failure Mode if Missing: live updates can transiently downgrade config cache shape, trigger false schema warnings, or leave admin cards/runtime settings stale until a later refetch.

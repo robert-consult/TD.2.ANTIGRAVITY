@@ -11,6 +11,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useToast } from "@/hooks/use-toast";
 
 type WaitlistRow = {
@@ -63,6 +64,89 @@ function fmtSec(sec?: number | null) {
   } catch {
     return String(sec);
   }
+}
+
+const WAITLIST_CONFIG_FIELD_HELP = {
+  signupFreeze: {
+    inline: "Hard-stop new account registration while allowing existing users to log in.",
+    tooltip:
+      "Enable during legal, infrastructure, or capacity incidents. Pair with a clear freeze banner so users know signup is intentionally paused.",
+  },
+  signupFreezeMessage: {
+    inline: "Banner text displayed on signup while freeze is enabled.",
+    tooltip:
+      "Use a concise operational message and expected next step. Avoid sensitive incident details in public-facing text.",
+  },
+  signupWaitlistEnabled: {
+    inline: "Capture signup intent (name/email + consent) for later invite waves.",
+    tooltip:
+      "Enable when freeze periods may be prolonged and you want structured recovery via invite batches.",
+  },
+  signupWaitlistInviteSender: {
+    inline: "From address shown on invite emails.",
+    tooltip:
+      "Use a verified sender identity/domain with strong deliverability and monitoring to reduce spam-folder placement.",
+  },
+  signupWaitlistInviteSubject: {
+    inline: "Subject line used for waitlist invite emails.",
+    tooltip:
+      "Keep subject explicit and trustworthy; avoid aggressive spam-like wording that harms inbox placement.",
+  },
+  signupWaitlistInviteBodyText: {
+    inline: "Plain-text template used to send invite links.",
+    tooltip:
+      "Supported placeholders: {{name}}, {{email}}, {{signup_link}}. Keep copy short, clear, and legally aligned.",
+  },
+  signupWaitlistAutoInviteOnUnfreeze: {
+    inline: "Automatically send invites when signup freeze is turned off.",
+    tooltip:
+      "Useful for fast recovery, but ensure your batch cap and outbound email capacity are set before enabling.",
+  },
+  signupWaitlistInviteBatchCap: {
+    inline: "Maximum invites sent in one batch run.",
+    tooltip:
+      "Set this to match operational and email-provider throughput limits. Server enforces an upper cap of 500.",
+  },
+  signupWaitlistPolicyVersion: {
+    inline: "Version identifier for the consent/policy text users accept.",
+    tooltip:
+      "Bump the version whenever policy meaning changes so consent records clearly map to the exact legal text.",
+  },
+  signupWaitlistPolicyContent: {
+    inline: "Consent and privacy policy content displayed before waitlist opt-in.",
+    tooltip:
+      "Write in plain language and keep retention/use statements explicit. Changes should follow legal/compliance review.",
+  },
+} as const;
+
+function WaitlistHintLabel({
+  label,
+  hint,
+  labelClassName = "text-base font-medium",
+}: {
+  label: string;
+  hint: string;
+  labelClassName?: string;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-2">
+      <Label className={labelClassName}>{label}</Label>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            className="text-[11px] font-medium text-cyan-300 underline decoration-dotted underline-offset-2 hover:text-cyan-200"
+            aria-label={`${label} hint`}
+          >
+            Hint
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="top" className="max-w-sm text-xs leading-relaxed">
+          {hint}
+        </TooltipContent>
+      </Tooltip>
+    </div>
+  );
 }
 
 export default function SignupFreezeWaitlistCard(props: Props) {
@@ -144,12 +228,16 @@ export default function SignupFreezeWaitlistCard(props: Props) {
         <CardTitle className="text-base">Signup Freeze & Waitlist (Invite Back)</CardTitle>
       </CardHeader>
       <CardContent className="space-y-6">
+        <TooltipProvider delayDuration={120}>
         {/* Controls */}
         <div className="space-y-4">
+          <div className="rounded-md border border-cyan-700/40 bg-cyan-950/20 p-3 text-xs text-cyan-100/90">
+            These signup-capacity controls include hidden <span className="font-medium">Hint</span> explainers for rollout behavior, legal impact, and operational safeguards.
+          </div>
           <div className="flex items-center justify-between py-3 border-b border-gray-600">
             <div>
-              <Label className="text-base font-medium">Freeze signups</Label>
-              <p className="text-xs text-gray-400 mt-1">Hard-stops account registration; existing users can still log in.</p>
+              <WaitlistHintLabel label="Freeze signups" hint={WAITLIST_CONFIG_FIELD_HELP.signupFreeze.tooltip} />
+              <p className="text-xs text-gray-400 mt-1">{WAITLIST_CONFIG_FIELD_HELP.signupFreeze.inline}</p>
             </div>
             <Switch
               checked={Boolean(props.config?.signupFreeze)}
@@ -161,7 +249,8 @@ export default function SignupFreezeWaitlistCard(props: Props) {
           </div>
 
           <div className="space-y-2">
-            <Label className="text-base font-medium">Freeze banner message</Label>
+            <WaitlistHintLabel label="Freeze banner message" hint={WAITLIST_CONFIG_FIELD_HELP.signupFreezeMessage.tooltip} />
+            <p className="text-xs text-gray-400">{WAITLIST_CONFIG_FIELD_HELP.signupFreezeMessage.inline}</p>
             <Textarea
               className="bg-neutral-600 min-h-[80px]"
               value={props.config?.signupFreezeMessage ?? ""}
@@ -175,8 +264,8 @@ export default function SignupFreezeWaitlistCard(props: Props) {
 
           <div className="flex items-center justify-between py-3 border-b border-gray-600">
             <div>
-              <Label className="text-base font-medium">Enable invite waitlist</Label>
-              <p className="text-xs text-gray-400 mt-1">Captures name/email + consent for later invite.</p>
+              <WaitlistHintLabel label="Enable invite waitlist" hint={WAITLIST_CONFIG_FIELD_HELP.signupWaitlistEnabled.tooltip} />
+              <p className="text-xs text-gray-400 mt-1">{WAITLIST_CONFIG_FIELD_HELP.signupWaitlistEnabled.inline}</p>
             </div>
             <Switch
               checked={Boolean(props.config?.signupWaitlistEnabled)}
@@ -189,7 +278,8 @@ export default function SignupFreezeWaitlistCard(props: Props) {
 
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2">
-              <Label className="text-base font-medium">Invite sender</Label>
+              <WaitlistHintLabel label="Invite sender" hint={WAITLIST_CONFIG_FIELD_HELP.signupWaitlistInviteSender.tooltip} />
+              <p className="text-xs text-gray-400">{WAITLIST_CONFIG_FIELD_HELP.signupWaitlistInviteSender.inline}</p>
               <Input
                 className="bg-neutral-600"
                 value={props.config?.signupWaitlistInviteSender ?? ""}
@@ -201,7 +291,8 @@ export default function SignupFreezeWaitlistCard(props: Props) {
               />
             </div>
             <div className="space-y-2">
-              <Label className="text-base font-medium">Invite subject</Label>
+              <WaitlistHintLabel label="Invite subject" hint={WAITLIST_CONFIG_FIELD_HELP.signupWaitlistInviteSubject.tooltip} />
+              <p className="text-xs text-gray-400">{WAITLIST_CONFIG_FIELD_HELP.signupWaitlistInviteSubject.inline}</p>
               <Input
                 className="bg-neutral-600"
                 value={props.config?.signupWaitlistInviteSubject ?? ""}
@@ -214,7 +305,11 @@ export default function SignupFreezeWaitlistCard(props: Props) {
           </div>
 
           <div className="space-y-2">
-            <Label className="text-base font-medium">Invite message template (text)</Label>
+            <WaitlistHintLabel
+              label="Invite message template (text)"
+              hint={WAITLIST_CONFIG_FIELD_HELP.signupWaitlistInviteBodyText.tooltip}
+            />
+            <p className="text-xs text-gray-400">{WAITLIST_CONFIG_FIELD_HELP.signupWaitlistInviteBodyText.inline}</p>
             <p className="text-xs text-gray-400">
               Placeholders: <code className="text-gray-200">{"{{name}}"}</code>,{" "}
               <code className="text-gray-200">{"{{email}}"}</code>,{" "}
@@ -233,8 +328,11 @@ export default function SignupFreezeWaitlistCard(props: Props) {
           <div className="grid gap-4 md:grid-cols-2">
             <div className="flex items-center justify-between py-3 border-b border-gray-600">
               <div>
-                <Label className="text-base font-medium">Auto-invite on unfreeze</Label>
-                <p className="text-xs text-gray-400 mt-1">When turning freeze OFF, invites up to the batch cap.</p>
+                <WaitlistHintLabel
+                  label="Auto-invite on unfreeze"
+                  hint={WAITLIST_CONFIG_FIELD_HELP.signupWaitlistAutoInviteOnUnfreeze.tooltip}
+                />
+                <p className="text-xs text-gray-400 mt-1">{WAITLIST_CONFIG_FIELD_HELP.signupWaitlistAutoInviteOnUnfreeze.inline}</p>
               </div>
               <Switch
                 checked={Boolean(props.config?.signupWaitlistAutoInviteOnUnfreeze)}
@@ -245,7 +343,8 @@ export default function SignupFreezeWaitlistCard(props: Props) {
               />
             </div>
             <div className="space-y-2">
-              <Label className="text-base font-medium">Invite batch cap</Label>
+              <WaitlistHintLabel label="Invite batch cap" hint={WAITLIST_CONFIG_FIELD_HELP.signupWaitlistInviteBatchCap.tooltip} />
+              <p className="text-xs text-gray-400">{WAITLIST_CONFIG_FIELD_HELP.signupWaitlistInviteBatchCap.inline}</p>
               <Input
                 className="bg-neutral-600"
                 type="number"
@@ -266,14 +365,22 @@ export default function SignupFreezeWaitlistCard(props: Props) {
 
           <div className="space-y-3">
             <div>
-              <Label className="text-base font-medium">Waitlist consent policy</Label>
+              <WaitlistHintLabel
+                label="Waitlist consent policy"
+                hint={WAITLIST_CONFIG_FIELD_HELP.signupWaitlistPolicyContent.tooltip}
+              />
               <p className="text-xs text-gray-400 mt-1">
                 This is the communications privacy notice users must accept to join the invite list.
               </p>
             </div>
             <div className="grid gap-4 md:grid-cols-3">
               <div className="md:col-span-1 space-y-2">
-                <Label>Policy version</Label>
+                <WaitlistHintLabel
+                  label="Policy version"
+                  hint={WAITLIST_CONFIG_FIELD_HELP.signupWaitlistPolicyVersion.tooltip}
+                  labelClassName="text-sm font-medium"
+                />
+                <p className="text-xs text-gray-400">{WAITLIST_CONFIG_FIELD_HELP.signupWaitlistPolicyVersion.inline}</p>
                 <Input
                   className="bg-neutral-600"
                   value={props.config?.signupWaitlistPolicyVersion ?? ""}
@@ -284,7 +391,11 @@ export default function SignupFreezeWaitlistCard(props: Props) {
                 />
               </div>
               <div className="md:col-span-3 space-y-2">
-                <Label>Policy content</Label>
+                <WaitlistHintLabel
+                  label="Policy content"
+                  hint={WAITLIST_CONFIG_FIELD_HELP.signupWaitlistPolicyContent.tooltip}
+                  labelClassName="text-sm font-medium"
+                />
                 <Textarea
                   className="bg-neutral-600 min-h-[140px]"
                   value={props.config?.signupWaitlistPolicyContent ?? ""}
@@ -303,6 +414,7 @@ export default function SignupFreezeWaitlistCard(props: Props) {
             </Button>
           </div>
         </div>
+        </TooltipProvider>
 
         {/* Waitlist Table */}
         <div className="border-t border-gray-600 pt-4 space-y-3">

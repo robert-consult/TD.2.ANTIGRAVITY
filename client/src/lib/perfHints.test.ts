@@ -255,6 +255,83 @@ describe("perfHints", () => {
     expect(plan.maxConcurrency).toBe(4);
   });
 
+  it("applies tier-safe prefetch caps and startup delay on FAST links", () => {
+    setNavigatorProfile({
+      effectiveType: "4g",
+      saveData: false,
+      rtt: 120,
+      downlink: 8,
+      deviceMemoryGB: 8,
+      hardwareConcurrency: 8,
+    });
+    const hints = refreshPerfHints();
+    const plan = tierPrefetchPlan(hints, resolvePerformanceSettings({ prefetchStrategy: "all" }));
+    expect(plan.mode).toBe("parallel");
+    expect(plan.maxConcurrency).toBe(3);
+    expect(plan.startDelayMs).toBe(75);
+  });
+
+  it("reduces prefetch pressure further on MODERATE links", () => {
+    setNavigatorProfile({
+      effectiveType: "4g",
+      saveData: false,
+      rtt: 220,
+      downlink: 3.5,
+      deviceMemoryGB: 8,
+      hardwareConcurrency: 8,
+    });
+    const hints = refreshPerfHints();
+    const plan = tierPrefetchPlan(hints, resolvePerformanceSettings({ prefetchStrategy: "all" }));
+    expect(plan.mode).toBe("parallel");
+    expect(plan.maxConcurrency).toBe(2);
+    expect(plan.startDelayMs).toBe(200);
+  });
+
+  it("honors admin-configured FAST cap and FAST delay floor", () => {
+    setNavigatorProfile({
+      effectiveType: "4g",
+      saveData: false,
+      rtt: 120,
+      downlink: 8,
+      deviceMemoryGB: 8,
+      hardwareConcurrency: 8,
+    });
+    const hints = refreshPerfHints();
+    const plan = tierPrefetchPlan(
+      hints,
+      resolvePerformanceSettings({
+        prefetchStrategy: "all",
+        prefetchMaxConcurrency: 6,
+        prefetchFastConcurrencyCap: 2,
+        prefetchNetworkFastStartDelayMs: 180,
+      }),
+    );
+    expect(plan.mode).toBe("parallel");
+    expect(plan.maxConcurrency).toBe(2);
+    expect(plan.startDelayMs).toBe(180);
+  });
+
+  it("honors device delay floors when they exceed network delay", () => {
+    setNavigatorProfile({
+      effectiveType: "4g",
+      saveData: false,
+      rtt: 220,
+      downlink: 3.5,
+      deviceMemoryGB: 3,
+      hardwareConcurrency: 4,
+    });
+    const hints = refreshPerfHints();
+    const plan = tierPrefetchPlan(
+      hints,
+      resolvePerformanceSettings({
+        prefetchStrategy: "all",
+        prefetchNetworkModerateStartDelayMs: 120,
+        prefetchDeviceModerateStartDelayMs: 260,
+      }),
+    );
+    expect(plan.startDelayMs).toBe(260);
+  });
+
   it("honors prefetch delay/concurrency admin overrides within safety caps", () => {
     setNavigatorProfile({
       effectiveType: "4g",

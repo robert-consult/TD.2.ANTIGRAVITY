@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { INSTRUMENT_CATALOG_CATEGORY_TAGS, INSTRUMENT_CATEGORY_LABELS } from "@shared/instruments/categories";
 
 type ProvidersResp = {
@@ -34,6 +35,69 @@ const CATEGORIES = INSTRUMENT_CATALOG_CATEGORY_TAGS.map((key) => ({
   key,
   label: INSTRUMENT_CATEGORY_LABELS[key],
 }));
+
+const CATALOG_DIALOG_FIELD_HELP = {
+  provider: {
+    inline: "Choose which market-data provider catalog to query.",
+    tooltip:
+      "Provider determines which reference rows are returned. Use the same provider strategy you rely on for quote ingestion to avoid symbol drift.",
+  },
+  category: {
+    inline: "Filter reference rows to a specific asset category.",
+    tooltip:
+      "Category filtering reduces noise and helps prevent accidental enablement of unsupported instrument classes.",
+  },
+  pageSize: {
+    inline: "Number of catalog rows shown per page.",
+    tooltip:
+      "Larger pages reduce pagination but can increase render cost and selection mistakes in bulk operations.",
+  },
+  search: {
+    inline: "Lookup by symbol/name/provider symbol from the ingested catalog.",
+    tooltip:
+      "Use targeted searches (e.g., EURUSD, AAPL) before enabling to confirm identity and metadata quality.",
+  },
+  selectRows: {
+    inline: "Select rows to promote into live `symbol_configs`.",
+    tooltip:
+      "Only selected rows are enabled. Review symbol, country, exchange, and provider symbol before promotion.",
+  },
+  enable: {
+    inline: "Enable selected catalog rows for live trading and subscriptions.",
+    tooltip:
+      "Promotion is active immediately. Validate decimals/lot settings afterward in configured symbol editor when needed.",
+  },
+} as const;
+
+function CatalogHintLabel({
+  label,
+  hint,
+  className = "text-sm font-medium",
+}: {
+  label: string;
+  hint: string;
+  className?: string;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-2">
+      <Label className={className}>{label}</Label>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            className="text-[11px] font-medium text-cyan-300 underline decoration-dotted underline-offset-2 hover:text-cyan-200"
+            aria-label={`${label} hint`}
+          >
+            Hint
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="top" className="max-w-sm text-xs leading-relaxed">
+          {hint}
+        </TooltipContent>
+      </Tooltip>
+    </div>
+  );
+}
 
 export function InstrumentCatalogEnableDialog(props: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const { toast } = useToast();
@@ -113,6 +177,7 @@ export function InstrumentCatalogEnableDialog(props: { open: boolean; onOpenChan
   return (
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
       <DialogContent className="bg-neutral-800 text-white border-gray-700 w-[calc(100%-2rem)] max-w-3xl">
+        <TooltipProvider delayDuration={120}>
         <DialogHeader>
           <DialogTitle className="text-base sm:text-lg">Add Instruments From Catalog</DialogTitle>
           <p className="text-xs text-gray-400">
@@ -121,10 +186,13 @@ export function InstrumentCatalogEnableDialog(props: { open: boolean; onOpenChan
         </DialogHeader>
 
         <div className="space-y-3 py-2">
+          <div className="rounded-md border border-cyan-700/40 bg-cyan-950/20 p-3 text-xs text-cyan-100/90">
+            Catalog promotion includes hidden <span className="font-medium">Hint</span> explainers for provider scoping, row vetting, and safe bulk enablement.
+          </div>
           {/* Row 1: Provider, Category, Page Size */}
           <div className="flex flex-wrap gap-3">
             <div className="flex-1 min-w-[140px]">
-              <Label>Provider</Label>
+              <CatalogHintLabel label="Provider" hint={CATALOG_DIALOG_FIELD_HELP.provider.tooltip} />
               <Select
                 value={providerKey}
                 onValueChange={(v) => {
@@ -134,7 +202,7 @@ export function InstrumentCatalogEnableDialog(props: { open: boolean; onOpenChan
                   setSearchNonce((n) => n + 1);
                 }}
               >
-                <SelectTrigger className="bg-neutral-700 mt-1">
+                <SelectTrigger className="bg-neutral-700 mt-1" title={CATALOG_DIALOG_FIELD_HELP.provider.tooltip}>
                   <SelectValue placeholder="Select provider" />
                 </SelectTrigger>
                 <SelectContent className="bg-neutral-800 border-gray-700">
@@ -145,9 +213,10 @@ export function InstrumentCatalogEnableDialog(props: { open: boolean; onOpenChan
                   ))}
                 </SelectContent>
               </Select>
+              <p className="text-xs text-gray-400 mt-1">{CATALOG_DIALOG_FIELD_HELP.provider.inline}</p>
             </div>
             <div className="flex-1 min-w-[120px]">
-              <Label>Category</Label>
+              <CatalogHintLabel label="Category" hint={CATALOG_DIALOG_FIELD_HELP.category.tooltip} />
               <Select
                 value={category}
                 onValueChange={(v) => {
@@ -157,7 +226,7 @@ export function InstrumentCatalogEnableDialog(props: { open: boolean; onOpenChan
                   setSearchNonce((n) => n + 1);
                 }}
               >
-                <SelectTrigger className="bg-neutral-700 mt-1">
+                <SelectTrigger className="bg-neutral-700 mt-1" title={CATALOG_DIALOG_FIELD_HELP.category.tooltip}>
                   <SelectValue placeholder="All categories" />
                 </SelectTrigger>
                 <SelectContent className="bg-neutral-800 border-gray-700">
@@ -169,9 +238,10 @@ export function InstrumentCatalogEnableDialog(props: { open: boolean; onOpenChan
                   ))}
                 </SelectContent>
               </Select>
+              <p className="text-xs text-gray-400 mt-1">{CATALOG_DIALOG_FIELD_HELP.category.inline}</p>
             </div>
             <div className="w-[80px] shrink-0">
-              <Label>Page Size</Label>
+              <CatalogHintLabel label="Page Size" hint={CATALOG_DIALOG_FIELD_HELP.pageSize.tooltip} />
               <Input
                 type="number"
                 value={searchLimit}
@@ -179,14 +249,16 @@ export function InstrumentCatalogEnableDialog(props: { open: boolean; onOpenChan
                 className="bg-neutral-700 mt-1"
                 min={1}
                 max={200}
+                title={CATALOG_DIALOG_FIELD_HELP.pageSize.tooltip}
               />
+              <p className="text-xs text-gray-400 mt-1">{CATALOG_DIALOG_FIELD_HELP.pageSize.inline}</p>
             </div>
           </div>
 
           {/* Row 2: Search input + buttons - fully responsive */}
           <div className="flex flex-col sm:flex-row gap-3">
             <div className="flex-1 min-w-0">
-              <Label htmlFor="catalog-search">Search</Label>
+              <CatalogHintLabel label="Search" hint={CATALOG_DIALOG_FIELD_HELP.search.tooltip} />
               <Input
                 id="catalog-search"
                 value={searchQ}
@@ -200,7 +272,9 @@ export function InstrumentCatalogEnableDialog(props: { open: boolean; onOpenChan
                 }}
                 className="bg-neutral-700 mt-1"
                 placeholder="EURUSD, AAPL, Gold…"
+                title={CATALOG_DIALOG_FIELD_HELP.search.tooltip}
               />
+              <p className="text-xs text-gray-400 mt-1">{CATALOG_DIALOG_FIELD_HELP.search.inline}</p>
             </div>
             <div className="flex items-end justify-end gap-2 shrink-0 flex-wrap">
               <Button
@@ -219,17 +293,19 @@ export function InstrumentCatalogEnableDialog(props: { open: boolean; onOpenChan
                 onClick={() => enableMutation.mutate()}
                 disabled={enableMutation.isPending || selectedIds.size === 0 || !providerKey}
                 className="bg-emerald-600 hover:bg-emerald-700 whitespace-nowrap"
+                title={CATALOG_DIALOG_FIELD_HELP.enable.tooltip}
               >
                 {enableMutation.isPending ? "Enabling…" : `Enable (${selectedIds.size})`}
               </Button>
             </div>
           </div>
 
+          <div className="text-xs text-gray-400">{CATALOG_DIALOG_FIELD_HELP.selectRows.inline}</div>
           <div className="border border-gray-700 rounded bg-neutral-900 overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="text-xs text-gray-300 border-b border-gray-800">
                 <tr>
-                  <th className="p-2 text-left">Select</th>
+                  <th className="p-2 text-left" title={CATALOG_DIALOG_FIELD_HELP.selectRows.tooltip}>Select</th>
                   <th className="p-2 text-left">Symbol</th>
                   <th className="p-2 text-left">Name</th>
                   <th className="p-2 text-left">Country</th>
@@ -311,6 +387,7 @@ export function InstrumentCatalogEnableDialog(props: { open: boolean; onOpenChan
             Close
           </Button>
         </DialogFooter>
+        </TooltipProvider>
       </DialogContent>
     </Dialog>
   );

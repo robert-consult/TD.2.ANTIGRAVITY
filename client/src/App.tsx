@@ -8,7 +8,7 @@ import { installAxiosIdentityHeaders } from "./lib/axiosIdentity";
 import { installGlobalCsrfFetch } from "./lib/csrf";
 import { I18nProvider } from "@/i18n/I18nProvider";
 import { useI18n } from "@/i18n";
-import { lazyWithPing, useLazyPing } from "@/lib/lazyWithPing";
+import { lazyWithPing } from "@/lib/lazyWithPing";
 import {
   getQueryPersistence,
   PERSIST_QUERY_KEYS,
@@ -34,8 +34,6 @@ function FullScreenLoading() {
 function AppRoutes() {
   // Subscribe so i18n bundle/locale changes re-render the app.
   useI18n();
-  // Subscribe so lazy-loaded route chunks can trigger a retry render when they resolve.
-  useLazyPing();
   const { isAuthenticated, loading } = useAuth();
   const [location, navigate] = useLocation();
 

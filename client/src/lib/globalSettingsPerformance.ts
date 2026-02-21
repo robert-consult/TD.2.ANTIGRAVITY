@@ -7,6 +7,15 @@ const ALLOWED_PERFORMANCE_SETTING_KEYS = new Set<string>([
   "prefetchStrategy",
   "prefetchMaxConcurrency",
   "prefetchStartDelayMs",
+  "prefetchFastConcurrencyCap",
+  "prefetchModerateConcurrencyCap",
+  "prefetchConstrainedConcurrencyCap",
+  "prefetchNetworkFastStartDelayMs",
+  "prefetchNetworkModerateStartDelayMs",
+  "prefetchNetworkConstrainedStartDelayMs",
+  "prefetchDeviceModerateStartDelayMs",
+  "prefetchDeviceConstrainedStartDelayMs",
+  "prefetchDeviceMinimalStartDelayMs",
   "pollInstantMs",
   "pollFastMs",
   "pollModerateMs",
@@ -26,6 +35,21 @@ function sanitizePerformancePatch(perf: Record<string, unknown>): Record<string,
     sanitized[key] = value;
   }
   return sanitized;
+}
+
+export function resolveGlobalPerformanceSettingsPayload(payload: unknown): Record<string, unknown> {
+  if (!payload || typeof payload !== "object") return {};
+  const row = payload as Record<string, unknown>;
+  const nestedPerformance =
+    row.performanceSettings && typeof row.performanceSettings === "object"
+      ? sanitizePerformancePatch(row.performanceSettings as Record<string, unknown>)
+      : null;
+
+  if (!nestedPerformance) return row;
+  return {
+    ...row,
+    ...nestedPerformance,
+  };
 }
 
 export function mergeGlobalSettingsPerformance(

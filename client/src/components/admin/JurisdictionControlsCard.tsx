@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useToast } from "@/hooks/use-toast";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
@@ -41,6 +42,74 @@ function normalizeIso2List(raw: string): string[] {
 
 function toCsv(list: string[]): string {
   return list.join(",");
+}
+
+const JURISDICTION_FIELD_HELP = {
+  restrictedIso2Csv: {
+    inline: "Canonical CSV list of restricted ISO2 country codes used by enforcement rules.",
+    tooltip:
+      "Maintain uppercase 2-letter ISO codes only. This list is the source of truth for signup/login blocking decisions.",
+  },
+  addIso2: {
+    inline: "Quick add one ISO2 code to the restricted list.",
+    tooltip:
+      "Use when adding one country at a time to avoid editing CSV manually. Input must be a valid 2-letter ISO code.",
+  },
+  jurisdictionRestrictedMessage: {
+    inline: "Message shown to users blocked by jurisdiction policy.",
+    tooltip:
+      "Keep wording compliance-safe and neutral. Do not expose internal rule logic or sensitive legal strategy details.",
+  },
+  jurisdictionEnforceBySignupCountry: {
+    inline: "Apply restrictions using the country selected during signup.",
+    tooltip:
+      "Reliable against VPN masking but depends on accurate signup-country capture and policy alignment.",
+  },
+  jurisdictionEnforceByIpGeo: {
+    inline: "Apply restrictions using resolved Geo-IP country.",
+    tooltip:
+      "Can block sessions immediately, but VPN/proxy routing may create false positives/negatives.",
+  },
+  jurisdictionBlockSignup: {
+    inline: "Prevent new registrations when jurisdiction policy matches.",
+    tooltip:
+      "Use to stop onboarding from restricted regions while preserving existing account data and audit trails.",
+  },
+  jurisdictionBlockLogin: {
+    inline: "Prevent logins when jurisdiction policy matches.",
+    tooltip:
+      "Use when policy requires active session denial from restricted regions, not just signup prevention.",
+  },
+} as const;
+
+function JurisdictionHintTitle({
+  label,
+  hint,
+  className = "text-sm font-medium",
+}: {
+  label: string;
+  hint: string;
+  className?: string;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-2">
+      <div className={className}>{label}</div>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            className="text-[11px] font-medium text-cyan-300 underline decoration-dotted underline-offset-2 hover:text-cyan-200"
+            aria-label={`${label} hint`}
+          >
+            Hint
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="top" className="max-w-sm text-xs leading-relaxed">
+          {hint}
+        </TooltipContent>
+      </Tooltip>
+    </div>
+  );
 }
 
 export function JurisdictionControlsCard(props: {
@@ -131,14 +200,23 @@ export function JurisdictionControlsCard(props: {
       </CardHeader>
 
       <CardContent className="space-y-6">
+        <TooltipProvider delayDuration={120}>
+        <div className="rounded-md border border-cyan-700/40 bg-cyan-950/20 p-3 text-xs text-cyan-100/90">
+          Jurisdiction controls include hidden <span className="font-medium">Hint</span> explainers for enforcement scope, rollout risks, and policy behavior.
+        </div>
         <div className="space-y-2">
-          <div className="text-sm font-medium">Restricted Countries (ISO2)</div>
+          <JurisdictionHintTitle
+            label="Restricted Countries (ISO2)"
+            hint={JURISDICTION_FIELD_HELP.restrictedIso2Csv.tooltip}
+          />
+          <div className="text-xs text-muted-foreground">{JURISDICTION_FIELD_HELP.restrictedIso2Csv.inline}</div>
 
           <div className="flex gap-2">
             <Input
               value={props.config.jurisdictionRestrictedIso2Csv}
               onChange={(e) => setField({ jurisdictionRestrictedIso2Csv: e.target.value })}
               placeholder="e.g., KP,IR,CU,SY"
+              title={JURISDICTION_FIELD_HELP.restrictedIso2Csv.tooltip}
             />
           </div>
 
@@ -148,11 +226,27 @@ export function JurisdictionControlsCard(props: {
               onChange={(e) => setAddIso2(e.target.value)}
               placeholder="Add ISO2 (e.g., IR)"
               className="max-w-[220px]"
+              title={JURISDICTION_FIELD_HELP.addIso2.tooltip}
             />
             <Button type="button" onClick={addCountry} variant="secondary">
               Add
             </Button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  className="text-[11px] font-medium text-cyan-300 underline decoration-dotted underline-offset-2 hover:text-cyan-200"
+                  aria-label="Add ISO2 hint"
+                >
+                  Hint
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="top" className="max-w-sm text-xs leading-relaxed">
+                {JURISDICTION_FIELD_HELP.addIso2.tooltip}
+              </TooltipContent>
+            </Tooltip>
           </div>
+          <div className="text-xs text-muted-foreground">{JURISDICTION_FIELD_HELP.addIso2.inline}</div>
 
           <div className="flex flex-wrap gap-2 pt-2">
             {restrictedList.length === 0 ? (
@@ -179,11 +273,16 @@ export function JurisdictionControlsCard(props: {
         </div>
 
         <div className="space-y-2">
-          <div className="text-sm font-medium">Block Message</div>
+          <JurisdictionHintTitle
+            label="Block Message"
+            hint={JURISDICTION_FIELD_HELP.jurisdictionRestrictedMessage.tooltip}
+          />
+          <div className="text-xs text-muted-foreground">{JURISDICTION_FIELD_HELP.jurisdictionRestrictedMessage.inline}</div>
           <Textarea
             value={props.config.jurisdictionRestrictedMessage}
             onChange={(e) => setField({ jurisdictionRestrictedMessage: e.target.value })}
             placeholder="Message shown to users who are blocked."
+            title={JURISDICTION_FIELD_HELP.jurisdictionRestrictedMessage.tooltip}
           />
         </div>
 
@@ -193,10 +292,26 @@ export function JurisdictionControlsCard(props: {
               checked={props.config.jurisdictionEnforceBySignupCountry}
               onCheckedChange={(v) => setField({ jurisdictionEnforceBySignupCountry: Boolean(v) })}
             />
-            <span className="text-sm">
-              <span className="font-medium">Enforce by signup-selected country</span>
+            <span className="text-sm w-full">
+              <span className="flex items-center justify-between gap-2">
+                <span className="font-medium">Enforce by signup-selected country</span>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      className="text-[11px] font-medium text-cyan-300 underline decoration-dotted underline-offset-2 hover:text-cyan-200"
+                      aria-label="Enforce by signup-selected country hint"
+                    >
+                      Hint
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="max-w-sm text-xs leading-relaxed">
+                    {JURISDICTION_FIELD_HELP.jurisdictionEnforceBySignupCountry.tooltip}
+                  </TooltipContent>
+                </Tooltip>
+              </span>
               <div className="text-muted-foreground">
-                Uses the country the user selects during signup (stored on the user profile).
+                {JURISDICTION_FIELD_HELP.jurisdictionEnforceBySignupCountry.inline}
               </div>
             </span>
           </label>
@@ -206,10 +321,26 @@ export function JurisdictionControlsCard(props: {
               checked={props.config.jurisdictionEnforceByIpGeo}
               onCheckedChange={(v) => setField({ jurisdictionEnforceByIpGeo: Boolean(v) })}
             />
-            <span className="text-sm">
-              <span className="font-medium">Enforce by IP geolocation</span>
+            <span className="text-sm w-full">
+              <span className="flex items-center justify-between gap-2">
+                <span className="font-medium">Enforce by IP geolocation</span>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      className="text-[11px] font-medium text-cyan-300 underline decoration-dotted underline-offset-2 hover:text-cyan-200"
+                      aria-label="Enforce by IP geolocation hint"
+                    >
+                      Hint
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="max-w-sm text-xs leading-relaxed">
+                    {JURISDICTION_FIELD_HELP.jurisdictionEnforceByIpGeo.tooltip}
+                  </TooltipContent>
+                </Tooltip>
+              </span>
               <div className="text-muted-foreground">
-                Uses Geo-IP country. VPN/proxy can bypass or distort this.
+                {JURISDICTION_FIELD_HELP.jurisdictionEnforceByIpGeo.inline}
               </div>
             </span>
           </label>
@@ -219,9 +350,25 @@ export function JurisdictionControlsCard(props: {
               checked={props.config.jurisdictionBlockSignup}
               onCheckedChange={(v) => setField({ jurisdictionBlockSignup: Boolean(v) })}
             />
-            <span className="text-sm">
-              <span className="font-medium">Block signups</span>
-              <div className="text-muted-foreground">Prevents registration when policy matches.</div>
+            <span className="text-sm w-full">
+              <span className="flex items-center justify-between gap-2">
+                <span className="font-medium">Block signups</span>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      className="text-[11px] font-medium text-cyan-300 underline decoration-dotted underline-offset-2 hover:text-cyan-200"
+                      aria-label="Block signups hint"
+                    >
+                      Hint
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="max-w-sm text-xs leading-relaxed">
+                    {JURISDICTION_FIELD_HELP.jurisdictionBlockSignup.tooltip}
+                  </TooltipContent>
+                </Tooltip>
+              </span>
+              <div className="text-muted-foreground">{JURISDICTION_FIELD_HELP.jurisdictionBlockSignup.inline}</div>
             </span>
           </label>
 
@@ -230,9 +377,25 @@ export function JurisdictionControlsCard(props: {
               checked={props.config.jurisdictionBlockLogin}
               onCheckedChange={(v) => setField({ jurisdictionBlockLogin: Boolean(v) })}
             />
-            <span className="text-sm">
-              <span className="font-medium">Block logins</span>
-              <div className="text-muted-foreground">Prevents login when policy matches.</div>
+            <span className="text-sm w-full">
+              <span className="flex items-center justify-between gap-2">
+                <span className="font-medium">Block logins</span>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      className="text-[11px] font-medium text-cyan-300 underline decoration-dotted underline-offset-2 hover:text-cyan-200"
+                      aria-label="Block logins hint"
+                    >
+                      Hint
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="max-w-sm text-xs leading-relaxed">
+                    {JURISDICTION_FIELD_HELP.jurisdictionBlockLogin.tooltip}
+                  </TooltipContent>
+                </Tooltip>
+              </span>
+              <div className="text-muted-foreground">{JURISDICTION_FIELD_HELP.jurisdictionBlockLogin.inline}</div>
             </span>
           </label>
         </div>
@@ -259,8 +422,8 @@ export function JurisdictionControlsCard(props: {
             Save changes before applying enforcement to active sessions.
           </div>
         )}
+        </TooltipProvider>
       </CardContent>
     </Card>
   );
 }
-

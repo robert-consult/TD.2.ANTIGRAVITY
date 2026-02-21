@@ -2273,6 +2273,15 @@ FROM (
           prefetchStrategy: "all",
           prefetchMaxConcurrency: 4,
           prefetchStartDelayMs: 0,
+          prefetchFastConcurrencyCap: 3,
+          prefetchModerateConcurrencyCap: 2,
+          prefetchConstrainedConcurrencyCap: 1,
+          prefetchNetworkFastStartDelayMs: 75,
+          prefetchNetworkModerateStartDelayMs: 200,
+          prefetchNetworkConstrainedStartDelayMs: 450,
+          prefetchDeviceModerateStartDelayMs: 50,
+          prefetchDeviceConstrainedStartDelayMs: 150,
+          prefetchDeviceMinimalStartDelayMs: 300,
           pollInstantMs: 200,
           pollFastMs: 500,
           pollModerateMs: 1500,
@@ -2404,6 +2413,15 @@ FROM (
         prefetchStrategy: parsePrefetchStrategy(body.prefetchStrategy),
         prefetchMaxConcurrency: parseNum(body.prefetchMaxConcurrency),
         prefetchStartDelayMs: parseNum(body.prefetchStartDelayMs),
+        prefetchFastConcurrencyCap: parseNum(body.prefetchFastConcurrencyCap),
+        prefetchModerateConcurrencyCap: parseNum(body.prefetchModerateConcurrencyCap),
+        prefetchConstrainedConcurrencyCap: parseNum(body.prefetchConstrainedConcurrencyCap),
+        prefetchNetworkFastStartDelayMs: parseNum(body.prefetchNetworkFastStartDelayMs),
+        prefetchNetworkModerateStartDelayMs: parseNum(body.prefetchNetworkModerateStartDelayMs),
+        prefetchNetworkConstrainedStartDelayMs: parseNum(body.prefetchNetworkConstrainedStartDelayMs),
+        prefetchDeviceModerateStartDelayMs: parseNum(body.prefetchDeviceModerateStartDelayMs),
+        prefetchDeviceConstrainedStartDelayMs: parseNum(body.prefetchDeviceConstrainedStartDelayMs),
+        prefetchDeviceMinimalStartDelayMs: parseNum(body.prefetchDeviceMinimalStartDelayMs),
         pollInstantMs: parseNum(body.pollInstantMs),
         pollFastMs: parseNum(body.pollFastMs),
         pollModerateMs: parseNum(body.pollModerateMs),
@@ -2430,6 +2448,47 @@ FROM (
         ensureNumericInput("wsReconnectBaseDelayMs", body.wsReconnectBaseDelayMs, next.wsReconnectBaseDelayMs),
         ensureNumericInput("prefetchMaxConcurrency", body.prefetchMaxConcurrency, next.prefetchMaxConcurrency),
         ensureNumericInput("prefetchStartDelayMs", body.prefetchStartDelayMs, next.prefetchStartDelayMs),
+        ensureNumericInput("prefetchFastConcurrencyCap", body.prefetchFastConcurrencyCap, next.prefetchFastConcurrencyCap),
+        ensureNumericInput(
+          "prefetchModerateConcurrencyCap",
+          body.prefetchModerateConcurrencyCap,
+          next.prefetchModerateConcurrencyCap,
+        ),
+        ensureNumericInput(
+          "prefetchConstrainedConcurrencyCap",
+          body.prefetchConstrainedConcurrencyCap,
+          next.prefetchConstrainedConcurrencyCap,
+        ),
+        ensureNumericInput(
+          "prefetchNetworkFastStartDelayMs",
+          body.prefetchNetworkFastStartDelayMs,
+          next.prefetchNetworkFastStartDelayMs,
+        ),
+        ensureNumericInput(
+          "prefetchNetworkModerateStartDelayMs",
+          body.prefetchNetworkModerateStartDelayMs,
+          next.prefetchNetworkModerateStartDelayMs,
+        ),
+        ensureNumericInput(
+          "prefetchNetworkConstrainedStartDelayMs",
+          body.prefetchNetworkConstrainedStartDelayMs,
+          next.prefetchNetworkConstrainedStartDelayMs,
+        ),
+        ensureNumericInput(
+          "prefetchDeviceModerateStartDelayMs",
+          body.prefetchDeviceModerateStartDelayMs,
+          next.prefetchDeviceModerateStartDelayMs,
+        ),
+        ensureNumericInput(
+          "prefetchDeviceConstrainedStartDelayMs",
+          body.prefetchDeviceConstrainedStartDelayMs,
+          next.prefetchDeviceConstrainedStartDelayMs,
+        ),
+        ensureNumericInput(
+          "prefetchDeviceMinimalStartDelayMs",
+          body.prefetchDeviceMinimalStartDelayMs,
+          next.prefetchDeviceMinimalStartDelayMs,
+        ),
         ensureNumericInput("pollInstantMs", body.pollInstantMs, next.pollInstantMs),
         ensureNumericInput("pollFastMs", body.pollFastMs, next.pollFastMs),
         ensureNumericInput("pollModerateMs", body.pollModerateMs, next.pollModerateMs),
@@ -2473,6 +2532,25 @@ FROM (
         ensureRange("wsReconnectBaseDelayMs", next.wsReconnectBaseDelayMs, 100, 30_000),
         ensureRange("prefetchMaxConcurrency", next.prefetchMaxConcurrency, 1, 6),
         ensureRange("prefetchStartDelayMs", next.prefetchStartDelayMs, 0, 15_000),
+        ensureRange("prefetchFastConcurrencyCap", next.prefetchFastConcurrencyCap, 1, 6),
+        ensureRange("prefetchModerateConcurrencyCap", next.prefetchModerateConcurrencyCap, 1, 6),
+        ensureRange("prefetchConstrainedConcurrencyCap", next.prefetchConstrainedConcurrencyCap, 1, 6),
+        ensureRange("prefetchNetworkFastStartDelayMs", next.prefetchNetworkFastStartDelayMs, 0, 15_000),
+        ensureRange("prefetchNetworkModerateStartDelayMs", next.prefetchNetworkModerateStartDelayMs, 0, 15_000),
+        ensureRange(
+          "prefetchNetworkConstrainedStartDelayMs",
+          next.prefetchNetworkConstrainedStartDelayMs,
+          0,
+          15_000,
+        ),
+        ensureRange("prefetchDeviceModerateStartDelayMs", next.prefetchDeviceModerateStartDelayMs, 0, 15_000),
+        ensureRange(
+          "prefetchDeviceConstrainedStartDelayMs",
+          next.prefetchDeviceConstrainedStartDelayMs,
+          0,
+          15_000,
+        ),
+        ensureRange("prefetchDeviceMinimalStartDelayMs", next.prefetchDeviceMinimalStartDelayMs, 0, 15_000),
         ensureRange("pollInstantMs", next.pollInstantMs, 100, 60_000),
         ensureRange("pollFastMs", next.pollFastMs, 100, 60_000),
         ensureRange("pollModerateMs", next.pollModerateMs, 100, 60_000),
@@ -2511,6 +2589,40 @@ FROM (
         prefetchStrategy: normalizeGlobalPrefetchStrategy(existing?.prefetchStrategy ?? "all"),
         prefetchMaxConcurrency: clampInt(existing?.prefetchMaxConcurrency ?? 4, 1, 6, 4),
         prefetchStartDelayMs: clampInt(existing?.prefetchStartDelayMs ?? 0, 0, 15_000, 0),
+        prefetchFastConcurrencyCap: clampInt(existing?.prefetchFastConcurrencyCap ?? 3, 1, 6, 3),
+        prefetchModerateConcurrencyCap: clampInt(existing?.prefetchModerateConcurrencyCap ?? 2, 1, 6, 2),
+        prefetchConstrainedConcurrencyCap: clampInt(existing?.prefetchConstrainedConcurrencyCap ?? 1, 1, 6, 1),
+        prefetchNetworkFastStartDelayMs: clampInt(existing?.prefetchNetworkFastStartDelayMs ?? 75, 0, 15_000, 75),
+        prefetchNetworkModerateStartDelayMs: clampInt(
+          existing?.prefetchNetworkModerateStartDelayMs ?? 200,
+          0,
+          15_000,
+          200,
+        ),
+        prefetchNetworkConstrainedStartDelayMs: clampInt(
+          existing?.prefetchNetworkConstrainedStartDelayMs ?? 450,
+          0,
+          15_000,
+          450,
+        ),
+        prefetchDeviceModerateStartDelayMs: clampInt(
+          existing?.prefetchDeviceModerateStartDelayMs ?? 50,
+          0,
+          15_000,
+          50,
+        ),
+        prefetchDeviceConstrainedStartDelayMs: clampInt(
+          existing?.prefetchDeviceConstrainedStartDelayMs ?? 150,
+          0,
+          15_000,
+          150,
+        ),
+        prefetchDeviceMinimalStartDelayMs: clampInt(
+          existing?.prefetchDeviceMinimalStartDelayMs ?? 300,
+          0,
+          15_000,
+          300,
+        ),
         pollInstantMs: clampInt(existing?.pollInstantMs ?? 200, 100, 60_000, 200),
         pollFastMs: clampInt(existing?.pollFastMs ?? 500, 100, 60_000, 500),
         pollModerateMs: clampInt(existing?.pollModerateMs ?? 1500, 100, 60_000, 1500),
@@ -2625,6 +2737,60 @@ FROM (
           15_000,
           0
         );
+        const effectivePrefetchFastConcurrencyCap = clampInt(
+          next.prefetchFastConcurrencyCap ?? existing.prefetchFastConcurrencyCap ?? 3,
+          1,
+          6,
+          3
+        );
+        const effectivePrefetchModerateConcurrencyCap = clampInt(
+          next.prefetchModerateConcurrencyCap ?? existing.prefetchModerateConcurrencyCap ?? 2,
+          1,
+          6,
+          2
+        );
+        const effectivePrefetchConstrainedConcurrencyCap = clampInt(
+          next.prefetchConstrainedConcurrencyCap ?? existing.prefetchConstrainedConcurrencyCap ?? 1,
+          1,
+          6,
+          1
+        );
+        const effectivePrefetchNetworkFastStartDelayMs = clampInt(
+          next.prefetchNetworkFastStartDelayMs ?? existing.prefetchNetworkFastStartDelayMs ?? 75,
+          0,
+          15_000,
+          75
+        );
+        const effectivePrefetchNetworkModerateStartDelayMs = clampInt(
+          next.prefetchNetworkModerateStartDelayMs ?? existing.prefetchNetworkModerateStartDelayMs ?? 200,
+          0,
+          15_000,
+          200
+        );
+        const effectivePrefetchNetworkConstrainedStartDelayMs = clampInt(
+          next.prefetchNetworkConstrainedStartDelayMs ?? existing.prefetchNetworkConstrainedStartDelayMs ?? 450,
+          0,
+          15_000,
+          450
+        );
+        const effectivePrefetchDeviceModerateStartDelayMs = clampInt(
+          next.prefetchDeviceModerateStartDelayMs ?? existing.prefetchDeviceModerateStartDelayMs ?? 50,
+          0,
+          15_000,
+          50
+        );
+        const effectivePrefetchDeviceConstrainedStartDelayMs = clampInt(
+          next.prefetchDeviceConstrainedStartDelayMs ?? existing.prefetchDeviceConstrainedStartDelayMs ?? 150,
+          0,
+          15_000,
+          150
+        );
+        const effectivePrefetchDeviceMinimalStartDelayMs = clampInt(
+          next.prefetchDeviceMinimalStartDelayMs ?? existing.prefetchDeviceMinimalStartDelayMs ?? 300,
+          0,
+          15_000,
+          300
+        );
         const effectivePollInstantMs = clampInt(
           next.pollInstantMs ?? existing.pollInstantMs ?? 200,
           100,
@@ -2694,6 +2860,15 @@ FROM (
           prefetchStrategy: effectivePrefetchStrategy,
           prefetchMaxConcurrency: effectivePrefetchMaxConcurrency,
           prefetchStartDelayMs: effectivePrefetchStartDelayMs,
+          prefetchFastConcurrencyCap: effectivePrefetchFastConcurrencyCap,
+          prefetchModerateConcurrencyCap: effectivePrefetchModerateConcurrencyCap,
+          prefetchConstrainedConcurrencyCap: effectivePrefetchConstrainedConcurrencyCap,
+          prefetchNetworkFastStartDelayMs: effectivePrefetchNetworkFastStartDelayMs,
+          prefetchNetworkModerateStartDelayMs: effectivePrefetchNetworkModerateStartDelayMs,
+          prefetchNetworkConstrainedStartDelayMs: effectivePrefetchNetworkConstrainedStartDelayMs,
+          prefetchDeviceModerateStartDelayMs: effectivePrefetchDeviceModerateStartDelayMs,
+          prefetchDeviceConstrainedStartDelayMs: effectivePrefetchDeviceConstrainedStartDelayMs,
+          prefetchDeviceMinimalStartDelayMs: effectivePrefetchDeviceMinimalStartDelayMs,
           pollInstantMs: effectivePollInstantMs,
           pollFastMs: effectivePollFastMs,
           pollModerateMs: effectivePollModerateMs,
@@ -2737,6 +2912,15 @@ FROM (
             prefetchStrategy: effectivePrefetchStrategy,
             prefetchMaxConcurrency: effectivePrefetchMaxConcurrency,
             prefetchStartDelayMs: effectivePrefetchStartDelayMs,
+            prefetchFastConcurrencyCap: effectivePrefetchFastConcurrencyCap,
+            prefetchModerateConcurrencyCap: effectivePrefetchModerateConcurrencyCap,
+            prefetchConstrainedConcurrencyCap: effectivePrefetchConstrainedConcurrencyCap,
+            prefetchNetworkFastStartDelayMs: effectivePrefetchNetworkFastStartDelayMs,
+            prefetchNetworkModerateStartDelayMs: effectivePrefetchNetworkModerateStartDelayMs,
+            prefetchNetworkConstrainedStartDelayMs: effectivePrefetchNetworkConstrainedStartDelayMs,
+            prefetchDeviceModerateStartDelayMs: effectivePrefetchDeviceModerateStartDelayMs,
+            prefetchDeviceConstrainedStartDelayMs: effectivePrefetchDeviceConstrainedStartDelayMs,
+            prefetchDeviceMinimalStartDelayMs: effectivePrefetchDeviceMinimalStartDelayMs,
             pollInstantMs: effectivePollInstantMs,
             pollFastMs: effectivePollFastMs,
             pollModerateMs: effectivePollModerateMs,
@@ -2776,6 +2960,40 @@ FROM (
         const effectivePrefetchStrategy = normalizeGlobalPrefetchStrategy(next.prefetchStrategy ?? "all");
         const effectivePrefetchMaxConcurrency = clampInt(next.prefetchMaxConcurrency ?? 4, 1, 6, 4);
         const effectivePrefetchStartDelayMs = clampInt(next.prefetchStartDelayMs ?? 0, 0, 15_000, 0);
+        const effectivePrefetchFastConcurrencyCap = clampInt(next.prefetchFastConcurrencyCap ?? 3, 1, 6, 3);
+        const effectivePrefetchModerateConcurrencyCap = clampInt(next.prefetchModerateConcurrencyCap ?? 2, 1, 6, 2);
+        const effectivePrefetchConstrainedConcurrencyCap = clampInt(next.prefetchConstrainedConcurrencyCap ?? 1, 1, 6, 1);
+        const effectivePrefetchNetworkFastStartDelayMs = clampInt(next.prefetchNetworkFastStartDelayMs ?? 75, 0, 15_000, 75);
+        const effectivePrefetchNetworkModerateStartDelayMs = clampInt(
+          next.prefetchNetworkModerateStartDelayMs ?? 200,
+          0,
+          15_000,
+          200,
+        );
+        const effectivePrefetchNetworkConstrainedStartDelayMs = clampInt(
+          next.prefetchNetworkConstrainedStartDelayMs ?? 450,
+          0,
+          15_000,
+          450,
+        );
+        const effectivePrefetchDeviceModerateStartDelayMs = clampInt(
+          next.prefetchDeviceModerateStartDelayMs ?? 50,
+          0,
+          15_000,
+          50,
+        );
+        const effectivePrefetchDeviceConstrainedStartDelayMs = clampInt(
+          next.prefetchDeviceConstrainedStartDelayMs ?? 150,
+          0,
+          15_000,
+          150,
+        );
+        const effectivePrefetchDeviceMinimalStartDelayMs = clampInt(
+          next.prefetchDeviceMinimalStartDelayMs ?? 300,
+          0,
+          15_000,
+          300,
+        );
         const effectivePollInstantMs = clampInt(next.pollInstantMs ?? 200, 100, 60_000, 200);
         const effectivePollFastMs = clampInt(next.pollFastMs ?? 500, 100, 60_000, 500);
         const effectivePollModerateMs = clampInt(next.pollModerateMs ?? 1500, 100, 60_000, 1500);
@@ -2808,6 +3026,15 @@ FROM (
           prefetchStrategy: effectivePrefetchStrategy,
           prefetchMaxConcurrency: effectivePrefetchMaxConcurrency,
           prefetchStartDelayMs: effectivePrefetchStartDelayMs,
+          prefetchFastConcurrencyCap: effectivePrefetchFastConcurrencyCap,
+          prefetchModerateConcurrencyCap: effectivePrefetchModerateConcurrencyCap,
+          prefetchConstrainedConcurrencyCap: effectivePrefetchConstrainedConcurrencyCap,
+          prefetchNetworkFastStartDelayMs: effectivePrefetchNetworkFastStartDelayMs,
+          prefetchNetworkModerateStartDelayMs: effectivePrefetchNetworkModerateStartDelayMs,
+          prefetchNetworkConstrainedStartDelayMs: effectivePrefetchNetworkConstrainedStartDelayMs,
+          prefetchDeviceModerateStartDelayMs: effectivePrefetchDeviceModerateStartDelayMs,
+          prefetchDeviceConstrainedStartDelayMs: effectivePrefetchDeviceConstrainedStartDelayMs,
+          prefetchDeviceMinimalStartDelayMs: effectivePrefetchDeviceMinimalStartDelayMs,
           pollInstantMs: effectivePollInstantMs,
           pollFastMs: effectivePollFastMs,
           pollModerateMs: effectivePollModerateMs,
@@ -2851,6 +3078,15 @@ FROM (
           prefetchStrategy: effectivePrefetchStrategy,
           prefetchMaxConcurrency: effectivePrefetchMaxConcurrency,
           prefetchStartDelayMs: effectivePrefetchStartDelayMs,
+          prefetchFastConcurrencyCap: effectivePrefetchFastConcurrencyCap,
+          prefetchModerateConcurrencyCap: effectivePrefetchModerateConcurrencyCap,
+          prefetchConstrainedConcurrencyCap: effectivePrefetchConstrainedConcurrencyCap,
+          prefetchNetworkFastStartDelayMs: effectivePrefetchNetworkFastStartDelayMs,
+          prefetchNetworkModerateStartDelayMs: effectivePrefetchNetworkModerateStartDelayMs,
+          prefetchNetworkConstrainedStartDelayMs: effectivePrefetchNetworkConstrainedStartDelayMs,
+          prefetchDeviceModerateStartDelayMs: effectivePrefetchDeviceModerateStartDelayMs,
+          prefetchDeviceConstrainedStartDelayMs: effectivePrefetchDeviceConstrainedStartDelayMs,
+          prefetchDeviceMinimalStartDelayMs: effectivePrefetchDeviceMinimalStartDelayMs,
           pollInstantMs: effectivePollInstantMs,
           pollFastMs: effectivePollFastMs,
           pollModerateMs: effectivePollModerateMs,
@@ -2880,6 +3116,15 @@ FROM (
         prevPerformance.prefetchStrategy !== nextPerformance.prefetchStrategy ||
         prevPerformance.prefetchMaxConcurrency !== nextPerformance.prefetchMaxConcurrency ||
         prevPerformance.prefetchStartDelayMs !== nextPerformance.prefetchStartDelayMs ||
+        prevPerformance.prefetchFastConcurrencyCap !== nextPerformance.prefetchFastConcurrencyCap ||
+        prevPerformance.prefetchModerateConcurrencyCap !== nextPerformance.prefetchModerateConcurrencyCap ||
+        prevPerformance.prefetchConstrainedConcurrencyCap !== nextPerformance.prefetchConstrainedConcurrencyCap ||
+        prevPerformance.prefetchNetworkFastStartDelayMs !== nextPerformance.prefetchNetworkFastStartDelayMs ||
+        prevPerformance.prefetchNetworkModerateStartDelayMs !== nextPerformance.prefetchNetworkModerateStartDelayMs ||
+        prevPerformance.prefetchNetworkConstrainedStartDelayMs !== nextPerformance.prefetchNetworkConstrainedStartDelayMs ||
+        prevPerformance.prefetchDeviceModerateStartDelayMs !== nextPerformance.prefetchDeviceModerateStartDelayMs ||
+        prevPerformance.prefetchDeviceConstrainedStartDelayMs !== nextPerformance.prefetchDeviceConstrainedStartDelayMs ||
+        prevPerformance.prefetchDeviceMinimalStartDelayMs !== nextPerformance.prefetchDeviceMinimalStartDelayMs ||
         prevPerformance.pollInstantMs !== nextPerformance.pollInstantMs ||
         prevPerformance.pollFastMs !== nextPerformance.pollFastMs ||
         prevPerformance.pollModerateMs !== nextPerformance.pollModerateMs ||
@@ -2898,7 +3143,7 @@ FROM (
           category: "admin",
           type: "GLOBAL_SETTINGS_PERFORMANCE_UPDATED",
           title: "Global performance settings updated",
-          description: "Updated global performance defaults and tier-level poll/flush settings.",
+          description: "Updated global performance defaults, prefetch tier controls, and tier-level poll/flush settings.",
           ip: auditCtx.ip,
           userAgent: auditCtx.userAgent,
           actorAdminId: typeof auditCtx.actorUserId === "number" ? auditCtx.actorUserId : null,

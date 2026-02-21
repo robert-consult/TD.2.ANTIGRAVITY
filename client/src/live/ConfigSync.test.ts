@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { mergeGlobalSettingsPerformance } from "@/lib/globalSettingsPerformance";
+import {
+  mergeGlobalSettingsPerformance,
+  resolveGlobalPerformanceSettingsPayload,
+} from "@/lib/globalSettingsPerformance";
 
 describe("mergeGlobalSettingsPerformance", () => {
   it("merges updates under performanceSettings without polluting the root object", () => {
@@ -14,7 +17,7 @@ describe("mergeGlobalSettingsPerformance", () => {
 
     const next = mergeGlobalSettingsPerformance(
       previous,
-      { restFallbackPollMs: 900, maxWsReconnectAttempts: 12 },
+      { restFallbackPollMs: 900, maxWsReconnectAttempts: 12, prefetchFastConcurrencyCap: 3 },
       2000,
     );
 
@@ -24,6 +27,7 @@ describe("mergeGlobalSettingsPerformance", () => {
       restFallbackPollMs: 900,
       quoteFlushIntervalMs: 50,
       maxWsReconnectAttempts: 12,
+      prefetchFastConcurrencyCap: 3,
     });
     expect(next.updatedAt).toBe(2000);
   });
@@ -75,5 +79,30 @@ describe("mergeGlobalSettingsPerformance", () => {
 
     expect(next.performanceSettings).toEqual({ restFallbackPollMs: 900 });
     expect((next.performanceSettings as any).unknownKey).toBeUndefined();
+  });
+
+  it("resolves nested performance payload values for consumers that read flattened fields", () => {
+    const resolved = resolveGlobalPerformanceSettingsPayload({
+      restFallbackPollMs: 500,
+      performanceSettings: {
+        restFallbackPollMs: 1200,
+        prefetchFastConcurrencyCap: 2,
+      },
+    });
+
+    expect(resolved.restFallbackPollMs).toBe(1200);
+    expect(resolved.prefetchFastConcurrencyCap).toBe(2);
+  });
+
+  it("filters unknown nested performance keys when resolving payloads", () => {
+    const resolved = resolveGlobalPerformanceSettingsPayload({
+      performanceSettings: {
+        restFallbackPollMs: 900,
+        unknownKey: "ignored",
+      },
+    });
+
+    expect(resolved.restFallbackPollMs).toBe(900);
+    expect((resolved as any).unknownKey).toBeUndefined();
   });
 });

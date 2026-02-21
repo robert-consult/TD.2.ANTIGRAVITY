@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { INSTRUMENT_CATALOG_CATEGORY_TAGS, INSTRUMENT_CATEGORY_LABELS } from "@shared/instruments/categories";
 
 type ProvidersResp = {
@@ -60,6 +61,94 @@ const CATEGORIES = INSTRUMENT_CATALOG_CATEGORY_TAGS.map((key) => ({
   key,
   label: INSTRUMENT_CATEGORY_LABELS[key],
 }));
+
+const INGESTOR_FIELD_HELP = {
+  provider: {
+    inline: "Reference-data provider source used for refresh/search/import actions.",
+    tooltip:
+      "Choose the provider whose reference catalog you trust for symbol onboarding. Keep provider selection consistent during a workflow.",
+  },
+  category: {
+    inline: "Asset-class partition for ingestion and catalog browsing.",
+    tooltip:
+      "Narrow to the target category to reduce accidental cross-asset enablement and improve review speed.",
+  },
+  refreshLimit: {
+    inline: "Maximum reference rows requested in one refresh pull.",
+    tooltip:
+      "Higher limits increase ingestion volume and API/database load. Use measured increments for large provider catalogs.",
+  },
+  providerFiltersJson: {
+    inline: "Provider-specific filter payload forwarded to reference endpoint.",
+    tooltip:
+      "JSON keys must match provider API expectations. Invalid structure or unsupported keys can silently reduce result quality.",
+  },
+  refreshReference: {
+    inline: "Pull fresh provider reference rows into `instrument_reference`.",
+    tooltip:
+      "Run before search/enable when provider inventory changed. Verify result counts and spot-check symbol metadata after refresh.",
+  },
+  catalogFile: {
+    inline: "Offline JSON file containing reference rows for bulk import.",
+    tooltip:
+      "Supports raw array or object with rows/instruments. Validate shape and category consistency before import.",
+  },
+  importCatalog: {
+    inline: "Write loaded JSON rows into `instrument_reference`.",
+    tooltip:
+      "Import updates catalog data only; symbols are not tradable until explicitly enabled in browse/promote workflow.",
+  },
+  search: {
+    inline: "Find catalog rows by symbol/name/provider symbol.",
+    tooltip:
+      "Use specific queries before bulk selection to reduce incorrect promotions.",
+  },
+  pageSize: {
+    inline: "Number of browse rows returned per search page.",
+    tooltip:
+      "Larger sizes reduce pagination but increase visual scanning overhead and accidental row selection risk.",
+  },
+  enableSelected: {
+    inline: "Promote selected catalog rows into live symbol configuration.",
+    tooltip:
+      "Promotion activates symbols for downstream workflows. Follow with configured-tab review for spread/lot/precision tuning.",
+  },
+  selectRows: {
+    inline: "Checkboxes control which search rows are promoted.",
+    tooltip:
+      "Review symbol identity, exchange, and provider symbol before selecting rows for enablement.",
+  },
+} as const;
+
+function IngestorHintLabel({
+  label,
+  hint,
+  className = "text-sm font-medium",
+}: {
+  label: string;
+  hint: string;
+  className?: string;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-2">
+      <Label className={className}>{label}</Label>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            className="text-[11px] font-medium text-cyan-300 underline decoration-dotted underline-offset-2 hover:text-cyan-200"
+            aria-label={`${label} hint`}
+          >
+            Hint
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="top" className="max-w-sm text-xs leading-relaxed">
+          {hint}
+        </TooltipContent>
+      </Tooltip>
+    </div>
+  );
+}
 
 export function InstrumentIngestionPanel() {
   const { toast } = useToast();
@@ -206,7 +295,11 @@ export function InstrumentIngestionPanel() {
   const rows = searchData?.rows || [];
 
   return (
+    <TooltipProvider delayDuration={120}>
     <div className="space-y-4">
+      <div className="rounded-md border border-cyan-700/40 bg-cyan-950/20 p-3 text-xs text-cyan-100/90">
+        Ingestion controls include hidden <span className="font-medium">Hint</span> explainers for provider filtering, catalog quality, and safe symbol promotion.
+      </div>
       <Card className="bg-neutral-700 border-gray-600">
         <CardHeader>
           <CardTitle className="text-base">Instrument Ingestion</CardTitle>
@@ -215,9 +308,9 @@ export function InstrumentIngestionPanel() {
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <div>
-              <Label>Provider</Label>
+              <IngestorHintLabel label="Provider" hint={INGESTOR_FIELD_HELP.provider.tooltip} />
               <Select value={providerKey} onValueChange={setProviderKey}>
-                <SelectTrigger className="bg-neutral-600 mt-1">
+                <SelectTrigger className="bg-neutral-600 mt-1" title={INGESTOR_FIELD_HELP.provider.tooltip}>
                   <SelectValue placeholder="Select provider" />
                 </SelectTrigger>
                 <SelectContent className="bg-neutral-800 border-gray-700">
@@ -228,9 +321,10 @@ export function InstrumentIngestionPanel() {
                   ))}
                 </SelectContent>
               </Select>
+              <p className="text-xs text-gray-400 mt-1">{INGESTOR_FIELD_HELP.provider.inline}</p>
             </div>
             <div>
-              <Label>Category</Label>
+              <IngestorHintLabel label="Category" hint={INGESTOR_FIELD_HELP.category.tooltip} />
               <Select
                 value={category}
                 onValueChange={(v) => {
@@ -239,7 +333,7 @@ export function InstrumentIngestionPanel() {
                   setSelectedIds(new Set());
                 }}
               >
-                <SelectTrigger className="bg-neutral-600 mt-1">
+                <SelectTrigger className="bg-neutral-600 mt-1" title={INGESTOR_FIELD_HELP.category.tooltip}>
                   <SelectValue placeholder="Select category" />
                 </SelectTrigger>
                 <SelectContent className="bg-neutral-800 border-gray-700">
@@ -248,9 +342,10 @@ export function InstrumentIngestionPanel() {
                   ))}
                 </SelectContent>
               </Select>
+              <p className="text-xs text-gray-400 mt-1">{INGESTOR_FIELD_HELP.category.inline}</p>
             </div>
             <div>
-              <Label>Refresh Limit</Label>
+              <IngestorHintLabel label="Refresh Limit" hint={INGESTOR_FIELD_HELP.refreshLimit.tooltip} />
               <Input
                 type="number"
                 value={refreshLimit}
@@ -258,20 +353,23 @@ export function InstrumentIngestionPanel() {
                 className="bg-neutral-600 mt-1"
                 min={1}
                 max={50000}
+                title={INGESTOR_FIELD_HELP.refreshLimit.tooltip}
               />
+              <p className="text-xs text-gray-400 mt-1">{INGESTOR_FIELD_HELP.refreshLimit.inline}</p>
             </div>
           </div>
 
           <div>
-            <Label>Provider Filters (JSON)</Label>
+            <IngestorHintLabel label="Provider Filters (JSON)" hint={INGESTOR_FIELD_HELP.providerFiltersJson.tooltip} />
             <textarea
               value={filterJson}
               onChange={(e) => setFilterJson(e.target.value)}
               className="w-full mt-1 p-2 rounded bg-neutral-600 border border-gray-600 font-mono text-xs h-24"
               placeholder='{"country":"United States","exchange":"NASDAQ"}'
+              title={INGESTOR_FIELD_HELP.providerFiltersJson.tooltip}
             />
             <p className="text-xs text-gray-400 mt-1">
-              Sent as query params to the provider reference endpoint. Keys must match the provider API (e.g. `country`, `exchange`, `type` for stocks).
+              {INGESTOR_FIELD_HELP.providerFiltersJson.inline}
             </p>
           </div>
 
@@ -280,10 +378,12 @@ export function InstrumentIngestionPanel() {
               onClick={() => refreshMutation.mutate()}
               disabled={refreshMutation.isPending || !providerKey || !supportsReference}
               className="bg-blue-600 hover:bg-blue-700"
+              title={INGESTOR_FIELD_HELP.refreshReference.tooltip}
             >
               {refreshMutation.isPending ? "Refreshing…" : "Refresh Reference List"}
             </Button>
           </div>
+          <p className="text-xs text-gray-400 -mt-2">{INGESTOR_FIELD_HELP.refreshReference.inline}</p>
           {!supportsReference ? (
             <p className="text-xs text-amber-300">
               Selected provider does not advertise reference-data ingestion support.
@@ -302,16 +402,17 @@ export function InstrumentIngestionPanel() {
         <CardContent className="space-y-3">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <div className="md:col-span-2">
-              <Label htmlFor="instrument-catalog-file">Catalog File</Label>
+              <IngestorHintLabel label="Catalog File" hint={INGESTOR_FIELD_HELP.catalogFile.tooltip} />
               <Input
                 id="instrument-catalog-file"
                 type="file"
                 accept="application/json"
                 onChange={(e) => void onPickImportFile(e.target.files?.[0] ?? null)}
                 className="bg-neutral-600 mt-1"
+                title={INGESTOR_FIELD_HELP.catalogFile.tooltip}
               />
               <p className="text-xs text-gray-400 mt-1">
-                Rows can include `category`, `canonicalSymbol`/`symbol`, `providerSymbol` (optional), and optional metadata fields (name, exchange, country…).
+                {INGESTOR_FIELD_HELP.catalogFile.inline}
               </p>
             </div>
             <div className="flex items-end justify-end">
@@ -319,11 +420,13 @@ export function InstrumentIngestionPanel() {
                 onClick={() => importMutation.mutate()}
                 disabled={importMutation.isPending || !providerKey || !importRows?.length}
                 className="bg-emerald-600 hover:bg-emerald-700"
+                title={INGESTOR_FIELD_HELP.importCatalog.tooltip}
               >
                 {importMutation.isPending ? "Importing…" : `Import${importRows?.length ? ` (${importRows.length})` : ""}`}
               </Button>
             </div>
           </div>
+          <p className="text-xs text-gray-400">{INGESTOR_FIELD_HELP.importCatalog.inline}</p>
           {importFileName && (
             <div className="text-xs text-gray-300">
               Loaded: <span className="font-mono">{importFileName}</span>
@@ -340,11 +443,18 @@ export function InstrumentIngestionPanel() {
         <CardContent className="space-y-3">
           <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
             <div className="md:col-span-2">
-              <Label>Search</Label>
-              <Input value={searchQ} onChange={(e) => setSearchQ(e.target.value)} className="bg-neutral-600 mt-1" placeholder="EURUSD, AAPL, Gold…" />
+              <IngestorHintLabel label="Search" hint={INGESTOR_FIELD_HELP.search.tooltip} />
+              <Input
+                value={searchQ}
+                onChange={(e) => setSearchQ(e.target.value)}
+                className="bg-neutral-600 mt-1"
+                placeholder="EURUSD, AAPL, Gold…"
+                title={INGESTOR_FIELD_HELP.search.tooltip}
+              />
+              <p className="text-xs text-gray-400 mt-1">{INGESTOR_FIELD_HELP.search.inline}</p>
             </div>
             <div>
-              <Label>Page Size</Label>
+              <IngestorHintLabel label="Page Size" hint={INGESTOR_FIELD_HELP.pageSize.tooltip} />
               <Input
                 type="number"
                 value={searchLimit}
@@ -352,7 +462,9 @@ export function InstrumentIngestionPanel() {
                 className="bg-neutral-600 mt-1"
                 min={1}
                 max={200}
+                title={INGESTOR_FIELD_HELP.pageSize.tooltip}
               />
+              <p className="text-xs text-gray-400 mt-1">{INGESTOR_FIELD_HELP.pageSize.inline}</p>
             </div>
             <div className="flex items-end gap-2 justify-end">
               <Button
@@ -371,17 +483,19 @@ export function InstrumentIngestionPanel() {
                 onClick={() => enableMutation.mutate()}
                 disabled={enableMutation.isPending || selectedIds.size === 0 || !providerKey}
                 className="bg-emerald-600 hover:bg-emerald-700"
+                title={INGESTOR_FIELD_HELP.enableSelected.tooltip}
               >
                 {enableMutation.isPending ? "Enabling…" : `Enable (${selectedIds.size})`}
               </Button>
             </div>
           </div>
+          <p className="text-xs text-gray-400 -mt-1">{INGESTOR_FIELD_HELP.enableSelected.inline}</p>
 
           <div className="border border-gray-600 rounded bg-neutral-800 overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="text-xs text-gray-300 border-b border-gray-700">
                 <tr>
-                  <th className="p-2 text-left">Select</th>
+                  <th className="p-2 text-left" title={INGESTOR_FIELD_HELP.selectRows.tooltip}>Select</th>
                   <th className="p-2 text-left">Symbol</th>
                   <th className="p-2 text-left">Name</th>
                   <th className="p-2 text-left">Country</th>
@@ -426,6 +540,7 @@ export function InstrumentIngestionPanel() {
               </tbody>
             </table>
           </div>
+          <p className="text-xs text-gray-400">{INGESTOR_FIELD_HELP.selectRows.inline}</p>
 
           <div className="flex items-center justify-between">
             <div className="text-xs text-gray-400">Offset: {searchOffset}</div>
@@ -459,5 +574,6 @@ export function InstrumentIngestionPanel() {
         </CardContent>
       </Card>
     </div>
+    </TooltipProvider>
   );
 }

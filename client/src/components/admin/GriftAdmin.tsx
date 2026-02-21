@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -357,6 +358,395 @@ function parseJson(raw?: string) {
   }
 }
 
+const GRIFT_FIELD_HELP = {
+  overview: {
+    inline: "Investigate suspicious account behavior, linked identities, and enforcement posture across dedicated analysis subtabs.",
+    tooltip:
+      "Grift Detection spans monitoring, forensics, and enforcement. Use subtab-specific controls deliberately and preserve audit context for high-impact actions.",
+  },
+  dashboard: {
+    inline: "Risk overview with score distributions and top flagged users.",
+    tooltip:
+      "Dashboard aggregates recent detection outputs for triage. Use this as a starting point before drilling into signals or identities.",
+  },
+  signals: {
+    inline: "Review individual detection events and close validated items.",
+    tooltip:
+      "Signals contain granular evidence payloads and state transitions. Close only after investigation confirms disposition.",
+  },
+  flaggedUsers: {
+    inline: "User-level risk scoring summary across windows and open-signal counts.",
+    tooltip:
+      "Flagged users table prioritizes accounts for deeper review. Combine with Signals and Identities for attribution confidence.",
+  },
+  pairs: {
+    inline: "Potential coordinated hedge relationships between user pairs.",
+    tooltip:
+      "Pair detections indicate correlated behavior but are not final proof. Validate with identity/network context before enforcement.",
+  },
+  networks: {
+    inline: "Linked account graph and cluster summaries.",
+    tooltip:
+      "Network clusters show shared infrastructure relationships. Use for escalation and case grouping decisions.",
+  },
+  identities: {
+    inline: "Device/IP/fingerprint correlation explorer with drill-down by linked users.",
+    tooltip:
+      "Identity links expose shared technical artifacts across accounts. Tune filters to reduce noise and isolate strong linkage.",
+  },
+  cases: {
+    inline: "Case inventory for investigation workflow and case-state visibility.",
+    tooltip:
+      "Cases track investigation lifecycle metadata. Use alongside signals and audit logs for decision traceability.",
+  },
+  exports: {
+    inline: "Download detection datasets for offline analysis and reporting.",
+    tooltip:
+      "Exports include potentially sensitive data. Confirm destination handling policy before downloading.",
+  },
+  config: {
+    inline: "Tune detection behavior, scoring, enforcement, retention, and maintenance operations.",
+    tooltip:
+      "Configuration changes affect live risk posture. Apply changes in controlled increments and verify downstream signal behavior.",
+  },
+  audit: {
+    inline: "Tamper-evident audit chain verification and administrative action history.",
+    tooltip:
+      "Audit tab validates hash-chain integrity and preserves admin operation traceability.",
+  },
+  refresh: {
+    inline: "Reload latest data for the active investigative surface.",
+    tooltip:
+      "Refresh pulls current backend state for this panel. Use after actions or when validating a suspected stale snapshot.",
+  },
+  signalsStatusFilter: {
+    inline: "Filter signals by lifecycle state.",
+    tooltip:
+      "Use status filter to isolate unresolved items (OPEN/IN_REVIEW) or validate closure quality.",
+  },
+  signalsRuleFilter: {
+    inline: "Filter signals by detection rule family.",
+    tooltip:
+      "Rule filter narrows analysis to specific detector classes, useful during incident-focused triage.",
+  },
+  closeSignalAction: {
+    inline: "Close an open signal after review completion.",
+    tooltip:
+      "Closing marks the signal disposition and removes it from active queueing. Confirm evidence and ownership before closing.",
+  },
+  kycStatusFilter: {
+    inline: "Scope KYC queue by current workflow status.",
+    tooltip:
+      "Status filter reduces queue noise and helps operators focus on actionable items.",
+  },
+  kycApproveAction: {
+    inline: "Approve submitted KYC package.",
+    tooltip:
+      "Approval advances user compliance status. Ensure documentation and policy criteria are fully satisfied.",
+  },
+  kycRejectAction: {
+    inline: "Reject submitted KYC package.",
+    tooltip:
+      "Rejection should include a defensible reason and be applied only after review of submission quality.",
+  },
+  identitiesLinkType: {
+    inline: "Limit identity search to a specific identifier class.",
+    tooltip:
+      "Narrow by identifier type to increase signal precision (for example device fingerprint vs IP subnet).",
+  },
+  identitiesSearch: {
+    inline: "Search identity values by prefix/hash/IP fragment.",
+    tooltip:
+      "Use focused search terms to isolate suspect identity artifacts quickly in large datasets.",
+  },
+  identitiesMinUsers: {
+    inline: "Minimum linked-user count required for rows to appear.",
+    tooltip:
+      "Higher minimums reduce noise by hiding weak single-user or two-user relationships.",
+  },
+  identitiesLimit: {
+    inline: "Maximum number of identity link rows returned.",
+    tooltip:
+      "Use lower limits for fast triage; increase for broader forensic sweeps.",
+  },
+  identitiesApplyFilters: {
+    inline: "Apply identity filters and refresh result set.",
+    tooltip:
+      "Applies current filter state and resets nested drill-down context.",
+  },
+  identitiesRefreshUsers: {
+    inline: "Refresh linked users for selected identity value.",
+    tooltip:
+      "Use after identity ingestion updates or manual investigation actions.",
+  },
+  identitiesViewUserLinks: {
+    inline: "Open complete identity-link footprint for selected user.",
+    tooltip:
+      "Shows all observed link types for that user with global user counts for each value.",
+  },
+  exportSignals: {
+    inline: "Download full signals dataset as CSV.",
+    tooltip:
+      "Signals export is best for timeline reconstruction and offline scoring analysis.",
+  },
+  exportUsers: {
+    inline: "Download flagged-user dataset as CSV.",
+    tooltip:
+      "Flagged users export supports case prioritization and periodic compliance reporting.",
+  },
+  exportObservations: {
+    inline: "Download observation feed as CSV.",
+    tooltip:
+      "Observations export captures underlying telemetry inputs used by detectors.",
+  },
+  saveConfig: {
+    inline: "Persist pending detection configuration edits.",
+    tooltip:
+      "Saving applies updated risk logic to future evaluations. Coordinate high-impact threshold changes with operations.",
+  },
+  ip2asnRefresh: {
+    inline: "Refresh local ip2asn dataset status snapshot.",
+    tooltip:
+      "Use when validating ingestion freshness, range counts, and cache health.",
+  },
+  ip2asnReimport: {
+    inline: "Rebuild local ip2asn range table from TSV dataset.",
+    tooltip:
+      "Reimport can take time and rebuilds range metadata. Run when dataset mismatch or corruption is suspected.",
+  },
+  ip2asnEnrich: {
+    inline: "Backfill ASN/Org values for recent IP observations.",
+    tooltip:
+      "Enrichment improves network attribution accuracy for signals and identity link analysis.",
+  },
+  checkpoint: {
+    inline: "Issue Postgres CHECKPOINT operation.",
+    tooltip:
+      "Checkpoint flushes WAL and can be I/O intensive. Use during controlled maintenance or incident response.",
+  },
+  vacuumConfirm: {
+    inline: "Safety phrase required before VACUUM can run.",
+    tooltip:
+      "Type VACUUM exactly to unlock the operation and reduce accidental execution risk.",
+  },
+  vacuumRun: {
+    inline: "Run manual VACUUM maintenance.",
+    tooltip:
+      "VACUUM is operationally sensitive and should run in low-traffic maintenance windows.",
+  },
+  auditRefresh: {
+    inline: "Refresh audit log rows and chain-verification result.",
+    tooltip:
+      "Run refresh after admin actions or when investigating integrity alerts.",
+  },
+} as const;
+
+const GRIFT_CONFIG_FIELD_HELP: Record<string, { inline: string; tooltip: string }> = {
+  enabled: {
+    inline: "Master switch for running grift detection logic.",
+    tooltip: "Disable only for controlled maintenance or incident rollback; normal production should stay enabled.",
+  },
+  hedgeRequireDeviceMatch: {
+    inline: "Require device identity match for hedge-pair scoring.",
+    tooltip: "Tightens hedge correlation confidence by demanding shared device evidence.",
+  },
+  hedgeAllowIpMatch: {
+    inline: "Allow shared IP evidence to contribute to hedge scoring.",
+    tooltip: "Useful when device signals are sparse, but IP-only matches can be noisier.",
+  },
+  tierMed: {
+    inline: "Score threshold entering medium risk tier.",
+    tooltip: "Defines first escalation boundary for user risk classification.",
+  },
+  tierHigh: {
+    inline: "Score threshold entering high risk tier.",
+    tooltip: "Crossing this threshold should trigger enhanced review posture.",
+  },
+  tierCritical: {
+    inline: "Score threshold entering critical risk tier.",
+    tooltip: "Critical tier should represent immediate response priority.",
+  },
+  multiAccountWindowDays: {
+    inline: "Lookback window for multi-account correlation checks.",
+    tooltip: "Longer windows improve historical linkage recall but can increase stale noise.",
+  },
+  churnWindowHours: {
+    inline: "Window for IP/UA/device churn pattern detection.",
+    tooltip: "Short windows catch bursts; longer windows capture slower abuse behavior.",
+  },
+  hedgeWindowMinutes: {
+    inline: "Temporal window for coordinated hedge behavior checks.",
+    tooltip: "Defines how closely paired behaviors must align to be considered suspicious.",
+  },
+  concurrentWindowMinutes: {
+    inline: "Window for concurrent-session correlation rules.",
+    tooltip: "Used to identify suspicious simultaneous activity across related accounts.",
+  },
+  geoVelocityMaxHours: {
+    inline: "Maximum hour span when evaluating geo-velocity jumps.",
+    tooltip: "Geo anomalies outside this time span are ignored for velocity scoring.",
+  },
+  ladderingWindowDays: {
+    inline: "Lookback for laddering-sequence analysis.",
+    tooltip: "Controls how far back detector scans for coordinated sequence patterns.",
+  },
+  ipUniqueThreshold: {
+    inline: "Unique-IP count threshold for anomaly triggering.",
+    tooltip: "Lower values increase sensitivity to IP churn and proxy rotation.",
+  },
+  uaUniqueThreshold: {
+    inline: "Unique user-agent threshold for anomaly triggering.",
+    tooltip: "Helps detect scripted client rotation patterns.",
+  },
+  deviceUniqueThreshold: {
+    inline: "Unique device-identifier threshold for anomaly triggering.",
+    tooltip: "Highlights accounts rotating device identities aggressively.",
+  },
+  asnUniqueThreshold: {
+    inline: "Unique ASN threshold for anomaly triggering.",
+    tooltip: "Captures network-provider churn often associated with evasion.",
+  },
+  geoVelocityKmhThreshold: {
+    inline: "Minimum implied travel speed to flag geo-velocity events.",
+    tooltip: "Higher values reduce false positives from borderline location variance.",
+  },
+  geoVelocityMinDistanceKm: {
+    inline: "Minimum distance required before geo-velocity rule can fire.",
+    tooltip: "Prevents tiny geolocation jitter from generating impossible-travel signals.",
+  },
+  clusterMinUsersForIpAsn: {
+    inline: "Minimum users required for shared IP+ASN cluster alerting.",
+    tooltip: "Raises bar for network-cluster alerts to avoid low-confidence pairs.",
+  },
+  ladderingMinSequence: {
+    inline: "Minimum event sequence length to trigger laddering detection.",
+    tooltip: "Higher values require stronger behavioral sequences before signaling.",
+  },
+  scoreMultiAccountDevice: {
+    inline: "Points added for multi-account shared install-ID evidence.",
+    tooltip: "Weight controls contribution of shared install identifiers to total score.",
+  },
+  scoreMultiAccountFingerprint: {
+    inline: "Points added for shared device-fingerprint evidence.",
+    tooltip: "Increase when fingerprint confidence is high in your environment.",
+  },
+  scoreHedgePair: {
+    inline: "Points added for coordinated hedge-pair detections.",
+    tooltip: "Primary weight for paired trading coordination signals.",
+  },
+  scoreIpChurn: {
+    inline: "Points added for suspicious IP churn behavior.",
+    tooltip: "Adjust to tune sensitivity for proxy/VPN hopping patterns.",
+  },
+  scoreUaChurn: {
+    inline: "Points added for unusual user-agent churn.",
+    tooltip: "Useful for scripted client rotation detection.",
+  },
+  scoreDeviceChurn: {
+    inline: "Points added for rapid device-identity churn.",
+    tooltip: "Increase to penalize repeated device identity changes.",
+  },
+  scoreGeoVelocity: {
+    inline: "Points added for geo-velocity anomalies.",
+    tooltip: "Controls severity of impossible-travel-like events in final risk score.",
+  },
+  scoreConcurrentSessions: {
+    inline: "Points added for concurrent-session anomalies.",
+    tooltip: "Weights suspicious overlap in session activity across related accounts.",
+  },
+  scoreAsnVolatility: {
+    inline: "Points added for ASN volatility behavior.",
+    tooltip: "Captures rapid network-provider transitions indicative of evasion.",
+  },
+  scoreSharedIpAsnCluster: {
+    inline: "Points added for shared IP+ASN cluster findings.",
+    tooltip: "Cluster score weight for group-level network linkage anomalies.",
+  },
+  scoreMultiAccountLaddering: {
+    inline: "Points added for multi-account laddering sequences.",
+    tooltip: "Weights coordinated sequential behavior across related accounts.",
+  },
+  mitigationMfa: {
+    inline: "Score reduction applied when MFA mitigation is present.",
+    tooltip: "Positive mitigation lowers effective risk for users with strong MFA posture.",
+  },
+  mitigationKycApproved: {
+    inline: "Score reduction applied for approved KYC status.",
+    tooltip: "Approved KYC can reduce baseline risk when policy allows mitigation.",
+  },
+  enforcementFreezeThreshold: {
+    inline: "Score threshold for freeze-level enforcement.",
+    tooltip: "Users at/above this score become freeze candidates when auto-enforcement is enabled.",
+  },
+  enforcementDisableThreshold: {
+    inline: "Score threshold for disable-level enforcement.",
+    tooltip: "Higher-severity boundary for account disable actions.",
+  },
+  enforcementAutoFreeze: {
+    inline: "Automatically freeze accounts crossing freeze threshold.",
+    tooltip: "Enable only when confidence and response processes are mature.",
+  },
+  enforcementAutoDisable: {
+    inline: "Automatically disable accounts crossing disable threshold.",
+    tooltip: "Most aggressive control; requires strict governance and monitoring.",
+  },
+  retentionObservationsDays: {
+    inline: "Retention duration for observation records.",
+    tooltip: "Longer retention helps forensics but increases storage footprint.",
+  },
+  retentionTradeObservationsDays: {
+    inline: "Retention duration for trade-observation records.",
+    tooltip: "Used for historical strategy-pattern investigations and audits.",
+  },
+  retentionAuthEventsDays: {
+    inline: "Retention duration for auth-event records.",
+    tooltip: "Maintain sufficient depth for account-access investigations and compliance.",
+  },
+  retentionIpAsnCacheDays: {
+    inline: "Retention duration for IP-to-ASN cache entries.",
+    tooltip: "Balance lookup freshness against cache growth and storage costs.",
+  },
+};
+
+function resolveConfigFieldHelp(key: string, label: string) {
+  const found = GRIFT_CONFIG_FIELD_HELP[key];
+  if (found) return found;
+  return {
+    inline: `Configure ${label.toLowerCase()} for detection behavior.`,
+    tooltip: `Adjust ${label} carefully and validate downstream detection outcomes after saving.`,
+  };
+}
+
+function FieldHintLabel({
+  label,
+  hint,
+  labelClassName = "text-sm",
+}: {
+  label: string;
+  hint: string;
+  labelClassName?: string;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-2">
+      <Label className={labelClassName}>{label}</Label>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            className="text-[11px] font-medium text-cyan-300 underline decoration-dotted underline-offset-2 hover:text-cyan-200"
+            aria-label={`${label} hint`}
+          >
+            Hint
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="top" className="max-w-sm text-xs leading-relaxed">
+          {hint}
+        </TooltipContent>
+      </Tooltip>
+    </div>
+  );
+}
+
 function DashboardTab() {
   const { data, isLoading, refetch } = useQuery<GriftOverview>({
     queryKey: ["/api/admin/grift/overview"],
@@ -386,8 +776,15 @@ function DashboardTab() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h3 className="text-lg font-semibold">Grift Detection Overview</h3>
-        <GriftRefreshButton onClick={() => refetch()}>
+        <div>
+          <FieldHintLabel
+            label="Grift Detection Overview"
+            hint={GRIFT_FIELD_HELP.dashboard.tooltip}
+            labelClassName="text-lg font-semibold"
+          />
+          <p className="text-xs text-gray-400 mt-1">{GRIFT_FIELD_HELP.dashboard.inline}</p>
+        </div>
+        <GriftRefreshButton onClick={() => refetch()} title={GRIFT_FIELD_HELP.refresh.tooltip}>
           <RefreshCw className="h-4 w-4 mr-2" />
           Refresh
         </GriftRefreshButton>
@@ -579,11 +976,15 @@ function SignalsTab() {
 
   return (
     <div className="space-y-4">
+      <div>
+        <FieldHintLabel label="Signals" hint={GRIFT_FIELD_HELP.signals.tooltip} labelClassName="text-lg font-semibold" />
+        <p className="text-xs text-gray-400 mt-1">{GRIFT_FIELD_HELP.signals.inline}</p>
+      </div>
       <div className="flex items-center gap-4 flex-wrap">
         <div className="flex items-center gap-2">
-          <Label>Status:</Label>
+          <FieldHintLabel label="Status" hint={GRIFT_FIELD_HELP.signalsStatusFilter.tooltip} labelClassName="text-sm" />
           <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className="w-32 bg-neutral-700 border-neutral-600">
+            <SelectTrigger className="w-32 bg-neutral-700 border-neutral-600" title={GRIFT_FIELD_HELP.signalsStatusFilter.tooltip}>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -597,9 +998,9 @@ function SignalsTab() {
         </div>
 
         <div className="flex items-center gap-2">
-          <Label>Rule:</Label>
+          <FieldHintLabel label="Rule" hint={GRIFT_FIELD_HELP.signalsRuleFilter.tooltip} labelClassName="text-sm" />
           <Select value={ruleFilter} onValueChange={setRuleFilter}>
-            <SelectTrigger className="w-40 bg-neutral-700 border-neutral-600">
+            <SelectTrigger className="w-40 bg-neutral-700 border-neutral-600" title={GRIFT_FIELD_HELP.signalsRuleFilter.tooltip}>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -625,7 +1026,7 @@ function SignalsTab() {
           </Select>
         </div>
 
-        <GriftRefreshButton onClick={() => refetch()}>
+        <GriftRefreshButton onClick={() => refetch()} title={GRIFT_FIELD_HELP.refresh.tooltip}>
           <RefreshCw className="h-4 w-4 mr-2" />
           Refresh
         </GriftRefreshButton>
@@ -697,6 +1098,7 @@ function SignalsTab() {
                                   size="sm"
                                   onClick={() => closeSignalMutation.mutate(signal.id)}
                                   disabled={closeSignalMutation.isPending}
+                                  title={GRIFT_FIELD_HELP.closeSignalAction.tooltip}
                                 >
                                   Close
                                 </Button>
@@ -798,8 +1200,11 @@ function UsersTab() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h3 className="text-lg font-semibold">Flagged Users</h3>
-        <GriftRefreshButton onClick={() => refetch()}>
+        <div>
+          <FieldHintLabel label="Flagged Users" hint={GRIFT_FIELD_HELP.flaggedUsers.tooltip} labelClassName="text-lg font-semibold" />
+          <p className="text-xs text-gray-400 mt-1">{GRIFT_FIELD_HELP.flaggedUsers.inline}</p>
+        </div>
+        <GriftRefreshButton onClick={() => refetch()} title={GRIFT_FIELD_HELP.refresh.tooltip}>
           <RefreshCw className="h-4 w-4 mr-2" />
           Refresh
         </GriftRefreshButton>
@@ -907,12 +1312,15 @@ export function KycQueueTab() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h3 className="text-lg font-semibold">KYC Queue</h3>
+        <div>
+          <FieldHintLabel label="KYC Queue" hint={GRIFT_FIELD_HELP.kycStatusFilter.tooltip} labelClassName="text-lg font-semibold" />
+          <p className="text-xs text-gray-400 mt-1">{GRIFT_FIELD_HELP.kycStatusFilter.inline}</p>
+        </div>
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-2">
-            <Label>Status:</Label>
+            <FieldHintLabel label="Status" hint={GRIFT_FIELD_HELP.kycStatusFilter.tooltip} labelClassName="text-sm" />
             <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-36 bg-neutral-700 border-neutral-600">
+              <SelectTrigger className="w-36 bg-neutral-700 border-neutral-600" title={GRIFT_FIELD_HELP.kycStatusFilter.tooltip}>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -922,7 +1330,7 @@ export function KycQueueTab() {
               </SelectContent>
             </Select>
           </div>
-          <GriftRefreshButton onClick={() => refetch()}>
+          <GriftRefreshButton onClick={() => refetch()} title={GRIFT_FIELD_HELP.refresh.tooltip}>
             <RefreshCw className="h-4 w-4 mr-2" />
             Refresh
           </GriftRefreshButton>
@@ -981,6 +1389,7 @@ export function KycQueueTab() {
                               className="bg-green-600 hover:bg-green-700"
                               onClick={() => reviewMutation.mutate({ userId: item.userId, decision: "APPROVED" })}
                               disabled={reviewMutation.isPending}
+                              title={GRIFT_FIELD_HELP.kycApproveAction.tooltip}
                             >
                               <CheckCircle className="h-3 w-3 mr-1" />
                               Approve
@@ -990,6 +1399,7 @@ export function KycQueueTab() {
                               size="sm"
                               onClick={() => reviewMutation.mutate({ userId: item.userId, decision: "REJECTED", rejectionReason: "Documents did not meet requirements" })}
                               disabled={reviewMutation.isPending}
+                              title={GRIFT_FIELD_HELP.kycRejectAction.tooltip}
                             >
                               <XCircle className="h-3 w-3 mr-1" />
                               Reject
@@ -1025,10 +1435,13 @@ function PairsTab() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h3 className="text-lg font-semibold">Hedge Pair Detections</h3>
+        <div>
+          <FieldHintLabel label="Hedge Pair Detections" hint={GRIFT_FIELD_HELP.pairs.tooltip} labelClassName="text-lg font-semibold" />
+          <p className="text-xs text-gray-400 mt-1">{GRIFT_FIELD_HELP.pairs.inline}</p>
+        </div>
         <div className="flex items-center gap-2">
           <span className="text-sm text-gray-400">Total: {data?.total || 0}</span>
-          <GriftRefreshButton onClick={() => refetch()}>
+          <GriftRefreshButton onClick={() => refetch()} title={GRIFT_FIELD_HELP.refresh.tooltip}>
             <RefreshCw className="h-4 w-4 mr-2" />
             Refresh
           </GriftRefreshButton>
@@ -1103,8 +1516,11 @@ function NetworksTab() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h3 className="text-lg font-semibold">Linked Account Networks</h3>
-        <GriftRefreshButton onClick={() => refetch()}>
+        <div>
+          <FieldHintLabel label="Linked Account Networks" hint={GRIFT_FIELD_HELP.networks.tooltip} labelClassName="text-lg font-semibold" />
+          <p className="text-xs text-gray-400 mt-1">{GRIFT_FIELD_HELP.networks.inline}</p>
+        </div>
+        <GriftRefreshButton onClick={() => refetch()} title={GRIFT_FIELD_HELP.refresh.tooltip}>
           <RefreshCw className="h-4 w-4 mr-2" />
           Refresh
         </GriftRefreshButton>
@@ -1240,8 +1656,11 @@ function IdentitiesTab() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h3 className="text-lg font-semibold">Identity Links</h3>
-        <GriftRefreshButton onClick={() => refetch()}>
+        <div>
+          <FieldHintLabel label="Identity Links" hint={GRIFT_FIELD_HELP.identities.tooltip} labelClassName="text-lg font-semibold" />
+          <p className="text-xs text-gray-400 mt-1">{GRIFT_FIELD_HELP.identities.inline}</p>
+        </div>
+        <GriftRefreshButton onClick={() => refetch()} title={GRIFT_FIELD_HELP.refresh.tooltip}>
           <RefreshCw className="h-4 w-4 mr-2" />
           Refresh
         </GriftRefreshButton>
@@ -1260,9 +1679,9 @@ function IdentitiesTab() {
         <CardContent className="space-y-3">
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <div>
-              <Label className="text-sm">Link Type</Label>
+              <FieldHintLabel label="Link Type" hint={GRIFT_FIELD_HELP.identitiesLinkType.tooltip} labelClassName="text-sm" />
               <Select value={linkType} onValueChange={setLinkType}>
-                <SelectTrigger className="bg-neutral-700 border-neutral-600 mt-1">
+                <SelectTrigger className="bg-neutral-700 border-neutral-600 mt-1" title={GRIFT_FIELD_HELP.identitiesLinkType.tooltip}>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -1279,28 +1698,30 @@ function IdentitiesTab() {
             </div>
 
             <div className="md:col-span-2">
-              <Label className="text-sm">Search</Label>
+              <FieldHintLabel label="Search" hint={GRIFT_FIELD_HELP.identitiesSearch.tooltip} labelClassName="text-sm" />
               <Input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Search link value (prefix/hash/IP)"
                 className="bg-neutral-700 border-neutral-600 mt-1"
+                title={GRIFT_FIELD_HELP.identitiesSearch.tooltip}
               />
             </div>
 
             <div className="grid grid-cols-2 gap-2">
               <div>
-                <Label className="text-sm">Min Users</Label>
+                <FieldHintLabel label="Min Users" hint={GRIFT_FIELD_HELP.identitiesMinUsers.tooltip} labelClassName="text-sm" />
                 <Input
                   type="number"
                   value={minUsers}
                   min={2}
                   onChange={(e) => setMinUsers(Math.max(2, Number(e.target.value) || 2))}
                   className="bg-neutral-700 border-neutral-600 mt-1"
+                  title={GRIFT_FIELD_HELP.identitiesMinUsers.tooltip}
                 />
               </div>
               <div>
-                <Label className="text-sm">Limit</Label>
+                <FieldHintLabel label="Limit" hint={GRIFT_FIELD_HELP.identitiesLimit.tooltip} labelClassName="text-sm" />
                 <Input
                   type="number"
                   value={limit}
@@ -1308,6 +1729,7 @@ function IdentitiesTab() {
                   max={1000}
                   onChange={(e) => setLimit(Math.max(10, Math.min(1000, Number(e.target.value) || 200)))}
                   className="bg-neutral-700 border-neutral-600 mt-1"
+                  title={GRIFT_FIELD_HELP.identitiesLimit.tooltip}
                 />
               </div>
             </div>
@@ -1322,6 +1744,7 @@ function IdentitiesTab() {
                 void refetch();
                 toast({ title: "Identity links refreshed" });
               }}
+              title={GRIFT_FIELD_HELP.identitiesApplyFilters.tooltip}
             >
               <RefreshCw className="h-4 w-4 mr-2" />
               Apply Filters
@@ -1399,6 +1822,7 @@ function IdentitiesTab() {
                                         setSelectedLink(next);
                                         if (isSame) void refetchLinkUsers();
                                       }}
+                                      title={GRIFT_FIELD_HELP.identitiesRefreshUsers.tooltip}
                                     >
                                       <RefreshCw className="h-4 w-4 mr-2" />
                                       Refresh Users
@@ -1431,7 +1855,12 @@ function IdentitiesTab() {
                                             <TableCell className="text-xs text-gray-400">{u.email || "N/A"}</TableCell>
                                             <TableCell className="text-xs text-gray-400">{formatTimestamp(u.last_seen_at)}</TableCell>
                                             <TableCell>
-                                              <Button variant="outline" size="sm" onClick={() => setSelectedUserId(u.id)}>
+                                              <Button
+                                                variant="outline"
+                                                size="sm"
+                                                onClick={() => setSelectedUserId(u.id)}
+                                                title={GRIFT_FIELD_HELP.identitiesViewUserLinks.tooltip}
+                                              >
                                                 View User Links
                                               </Button>
                                             </TableCell>
@@ -1512,8 +1941,11 @@ function CasesTab() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h3 className="text-lg font-semibold">Case Management</h3>
-        <GriftRefreshButton onClick={() => refetch()}>
+        <div>
+          <FieldHintLabel label="Case Management" hint={GRIFT_FIELD_HELP.cases.tooltip} labelClassName="text-lg font-semibold" />
+          <p className="text-xs text-gray-400 mt-1">{GRIFT_FIELD_HELP.cases.inline}</p>
+        </div>
+        <GriftRefreshButton onClick={() => refetch()} title={GRIFT_FIELD_HELP.refresh.tooltip}>
           <RefreshCw className="h-4 w-4 mr-2" />
           Refresh
         </GriftRefreshButton>
@@ -1577,7 +2009,10 @@ function ExportsTab() {
 
   return (
     <div className="space-y-4">
-      <h3 className="text-lg font-semibold">Export Data</h3>
+      <div>
+        <FieldHintLabel label="Export Data" hint={GRIFT_FIELD_HELP.exports.tooltip} labelClassName="text-lg font-semibold" />
+        <p className="text-xs text-gray-400 mt-1">{GRIFT_FIELD_HELP.exports.inline}</p>
+      </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         <Card className="bg-neutral-800 border-neutral-700">
@@ -1593,6 +2028,7 @@ function ExportsTab() {
               variant="outline"
               className="w-full"
               onClick={() => handleExport("signals", "grift_signals.csv")}
+              title={GRIFT_FIELD_HELP.exportSignals.tooltip}
             >
               <Download className="h-4 w-4 mr-2" />
               Export Signals CSV
@@ -1613,6 +2049,7 @@ function ExportsTab() {
               variant="outline"
               className="w-full"
               onClick={() => handleExport("flagged-users", "flagged_users.csv")}
+              title={GRIFT_FIELD_HELP.exportUsers.tooltip}
             >
               <Download className="h-4 w-4 mr-2" />
               Export Users CSV
@@ -1633,6 +2070,7 @@ function ExportsTab() {
               variant="outline"
               className="w-full"
               onClick={() => handleExport("observations", "observations.csv")}
+              title={GRIFT_FIELD_HELP.exportObservations.tooltip}
             >
               <Download className="h-4 w-4 mr-2" />
               Export Observations CSV
@@ -1909,11 +2347,19 @@ function ConfigTab() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h3 className="text-lg font-semibold">Grift Detection Configuration</h3>
+        <div>
+          <FieldHintLabel
+            label="Grift Detection Configuration"
+            hint={GRIFT_FIELD_HELP.config.tooltip}
+            labelClassName="text-lg font-semibold"
+          />
+          <p className="text-xs text-gray-400 mt-1">{GRIFT_FIELD_HELP.config.inline}</p>
+        </div>
         <Button
           onClick={handleSave}
           disabled={!hasChanges || updateMutation.isPending}
           className="bg-blue-600 hover:bg-blue-700"
+          title={GRIFT_FIELD_HELP.saveConfig.tooltip}
         >
           {updateMutation.isPending ? "Saving..." : "Save Changes"}
         </Button>
@@ -1921,17 +2367,20 @@ function ConfigTab() {
 
       <Card className="bg-neutral-800 border-neutral-700">
         <CardHeader>
-          <CardTitle className="text-base flex items-center gap-2">
+          <div className="flex items-center gap-2">
             <Network className="h-5 w-5 text-cyan-400" />
-            IP → ASN/Org Dataset (ip2asn)
-          </CardTitle>
+            <div className="flex-1">
+              <FieldHintLabel label="IP → ASN/Org Dataset (ip2asn)" hint={GRIFT_FIELD_HELP.ip2asnRefresh.tooltip} labelClassName="text-base" />
+            </div>
+          </div>
           <CardDescription>
             Offline ASN/Org enrichment using `attached_assets/ip2asn-combined.tsv` (fallback when proxy headers are absent).
           </CardDescription>
+          <p className="text-xs text-gray-400">{GRIFT_FIELD_HELP.ip2asnRefresh.inline}</p>
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="flex flex-wrap items-center gap-2">
-            <GriftRefreshButton onClick={() => refetchIp2asnStatus()} disabled={ip2asnStatusLoading}>
+            <GriftRefreshButton onClick={() => refetchIp2asnStatus()} disabled={ip2asnStatusLoading} title={GRIFT_FIELD_HELP.ip2asnRefresh.tooltip}>
               <RefreshCw className="h-4 w-4 mr-2" />
               Refresh Status
             </GriftRefreshButton>
@@ -1946,6 +2395,7 @@ function ConfigTab() {
                 if (!ok) return;
                 reimportIp2AsnMutation.mutate();
               }}
+              title={GRIFT_FIELD_HELP.ip2asnReimport.tooltip}
             >
               <Download className="h-4 w-4 mr-2" />
               Reimport TSV
@@ -1955,6 +2405,7 @@ function ConfigTab() {
               size="sm"
               disabled={enrichIp2AsnMutation.isPending}
               onClick={() => enrichIp2AsnMutation.mutate()}
+              title={GRIFT_FIELD_HELP.ip2asnEnrich.tooltip}
             >
               <Activity className="h-4 w-4 mr-2" />
               Enrich Now
@@ -2007,17 +2458,20 @@ function ConfigTab() {
 
       <Card className="bg-neutral-800 border-neutral-700">
         <CardHeader>
-          <CardTitle className="text-base flex items-center gap-2">
+          <div className="flex items-center gap-2">
             <FileText className="h-5 w-5 text-cyan-400" />
-            Database Maintenance (Manual VACUUM)
-          </CardTitle>
+            <div className="flex-1">
+              <FieldHintLabel label="Database Maintenance (Manual VACUUM)" hint={GRIFT_FIELD_HELP.vacuumRun.tooltip} labelClassName="text-base" />
+            </div>
+          </div>
           <CardDescription>
             Postgres VACUUM reclaims table bloat (space reuse) and updates planner stats. Run during low traffic; it can be I/O heavy.
           </CardDescription>
+          <p className="text-xs text-gray-400">{GRIFT_FIELD_HELP.vacuumRun.inline}</p>
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="flex flex-wrap items-center gap-2">
-            <GriftRefreshButton onClick={() => refetchDbStats()} disabled={dbStatsLoading}>
+            <GriftRefreshButton onClick={() => refetchDbStats()} disabled={dbStatsLoading} title={GRIFT_FIELD_HELP.refresh.tooltip}>
               <RefreshCw className="h-4 w-4 mr-2" />
               Refresh Stats
             </GriftRefreshButton>
@@ -2030,6 +2484,7 @@ function ConfigTab() {
                 if (!ok) return;
                 checkpointMutation.mutate();
               }}
+              title={GRIFT_FIELD_HELP.checkpoint.tooltip}
             >
               <Activity className="h-4 w-4 mr-2" />
               CHECKPOINT
@@ -2040,6 +2495,7 @@ function ConfigTab() {
                 onChange={(e) => setVacuumConfirm(e.target.value)}
                 placeholder="Type VACUUM"
                 className="w-36"
+                title={GRIFT_FIELD_HELP.vacuumConfirm.tooltip}
               />
               <Button
                 variant="outline"
@@ -2051,6 +2507,7 @@ function ConfigTab() {
                   if (!ok) return;
                   vacuumMutation.mutate();
                 }}
+                title={GRIFT_FIELD_HELP.vacuumRun.tooltip}
               >
                 <AlertTriangle className="h-4 w-4 mr-2" />
                 Run VACUUM
@@ -2123,35 +2580,41 @@ function ConfigTab() {
       {configGroups.map((group) => (
         <Card key={group.title} className="bg-neutral-800 border-neutral-700">
           <CardHeader>
-            <CardTitle className="text-base">{group.title}</CardTitle>
+            <FieldHintLabel label={group.title} hint={GRIFT_FIELD_HELP.config.tooltip} labelClassName="text-base" />
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {group.fields.map((field) => (
-                <div key={field.key}>
-                  <Label className="text-sm">{field.label}</Label>
-                  {field.type === "boolean" ? (
-                    <div className="flex items-center gap-2 mt-2">
-                      <input
-                        type="checkbox"
-                        checked={!!config[field.key]}
-                        onChange={(e) => handleChange(field.key, e.target.checked)}
-                        className="h-5 w-5"
+              {group.fields.map((field) => {
+                const fieldHelp = resolveConfigFieldHelp(field.key, field.label);
+                return (
+                  <div key={field.key}>
+                    <FieldHintLabel label={field.label} hint={fieldHelp.tooltip} labelClassName="text-sm" />
+                    <p className="text-xs text-gray-400 mt-1">{fieldHelp.inline}</p>
+                    {field.type === "boolean" ? (
+                      <div className="flex items-center gap-2 mt-2">
+                        <input
+                          type="checkbox"
+                          checked={!!config[field.key]}
+                          onChange={(e) => handleChange(field.key, e.target.checked)}
+                          className="h-5 w-5"
+                          title={fieldHelp.tooltip}
+                        />
+                        <span className="text-sm text-gray-400">
+                          {config[field.key] ? "Enabled" : "Disabled"}
+                        </span>
+                      </div>
+                    ) : (
+                      <Input
+                        type="number"
+                        value={config[field.key] as number}
+                        onChange={(e) => handleChange(field.key, parseFloat(e.target.value) || 0)}
+                        className="bg-neutral-700 border-neutral-600 mt-1"
+                        title={fieldHelp.tooltip}
                       />
-                      <span className="text-sm text-gray-400">
-                        {config[field.key] ? "Enabled" : "Disabled"}
-                      </span>
-                    </div>
-                  ) : (
-                    <Input
-                      type="number"
-                      value={config[field.key] as number}
-                      onChange={(e) => handleChange(field.key, parseFloat(e.target.value) || 0)}
-                      className="bg-neutral-700 border-neutral-600 mt-1"
-                    />
-                  )}
-                </div>
-              ))}
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </CardContent>
         </Card>
@@ -2174,9 +2637,12 @@ function AuditTab() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h3 className="text-lg font-semibold">Audit Log</h3>
+        <div>
+          <FieldHintLabel label="Audit Log" hint={GRIFT_FIELD_HELP.audit.tooltip} labelClassName="text-lg font-semibold" />
+          <p className="text-xs text-gray-400 mt-1">{GRIFT_FIELD_HELP.audit.inline}</p>
+        </div>
         <div className="flex items-center gap-2">
-          <GriftRefreshButton onClick={() => { refetchLogs(); refetchVerify(); }}>
+          <GriftRefreshButton onClick={() => { refetchLogs(); refetchVerify(); }} title={GRIFT_FIELD_HELP.auditRefresh.tooltip}>
             <RefreshCw className="h-4 w-4 mr-2" />
             Refresh
           </GriftRefreshButton>
@@ -2185,10 +2651,12 @@ function AuditTab() {
 
       <Card className="bg-neutral-800 border-neutral-700">
         <CardHeader>
-          <CardTitle className="text-base flex items-center gap-2">
+          <div className="flex items-center gap-2">
             <Shield className="h-5 w-5" />
-            Hash Chain Verification
-          </CardTitle>
+            <div className="flex-1">
+              <FieldHintLabel label="Hash Chain Verification" hint={GRIFT_FIELD_HELP.audit.tooltip} labelClassName="text-base" />
+            </div>
+          </div>
         </CardHeader>
         <CardContent>
           {verifyLoading ? (
@@ -2269,96 +2737,105 @@ export default function GriftAdmin() {
   const [activeTab, setActiveTab] = useState("dashboard");
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center gap-2 mb-4">
-        <Shield className="h-6 w-6 text-amber-400" />
-        <h2 className="text-xl font-semibold">Grift Detection System</h2>
+    <TooltipProvider delayDuration={120}>
+      <div className="space-y-4">
+        <div className="flex items-center gap-2 mb-4">
+          <Shield className="h-6 w-6 text-amber-400" />
+          <div>
+            <FieldHintLabel label="Grift Detection System" hint={GRIFT_FIELD_HELP.overview.tooltip} labelClassName="text-xl font-semibold" />
+            <p className="text-xs text-gray-400 mt-1">{GRIFT_FIELD_HELP.overview.inline}</p>
+          </div>
+        </div>
+
+        <div className="rounded-md border border-cyan-700/40 bg-cyan-950/20 p-3 text-xs text-cyan-100/90">
+          Investigation controls include hidden <span className="font-medium">Hint</span> explainers on filters, actions, and risk-configuration fields.
+        </div>
+
+        <Tabs value={activeTab} onValueChange={setActiveTab}>
+          <TabsList className="bg-neutral-700 flex-wrap h-auto gap-1 p-1">
+            <TabsTrigger value="dashboard" className="data-[state=active]:bg-neutral-600 text-xs" title={GRIFT_FIELD_HELP.dashboard.tooltip}>
+              <Activity className="h-3 w-3 mr-1" />
+              Dashboard
+            </TabsTrigger>
+            <TabsTrigger value="signals" className="data-[state=active]:bg-neutral-600 text-xs" title={GRIFT_FIELD_HELP.signals.tooltip}>
+              <AlertTriangle className="h-3 w-3 mr-1" />
+              Signals
+            </TabsTrigger>
+            <TabsTrigger value="users" className="data-[state=active]:bg-neutral-600 text-xs" title={GRIFT_FIELD_HELP.flaggedUsers.tooltip}>
+              <Users className="h-3 w-3 mr-1" />
+              Users
+            </TabsTrigger>
+            <TabsTrigger value="pairs" className="data-[state=active]:bg-neutral-600 text-xs" title={GRIFT_FIELD_HELP.pairs.tooltip}>
+              <Link2 className="h-3 w-3 mr-1" />
+              Pairs
+            </TabsTrigger>
+            <TabsTrigger value="networks" className="data-[state=active]:bg-neutral-600 text-xs" title={GRIFT_FIELD_HELP.networks.tooltip}>
+              <Network className="h-3 w-3 mr-1" />
+              Networks
+            </TabsTrigger>
+            <TabsTrigger value="identities" className="data-[state=active]:bg-neutral-600 text-xs" title={GRIFT_FIELD_HELP.identities.tooltip}>
+              <Fingerprint className="h-3 w-3 mr-1" />
+              Identities
+            </TabsTrigger>
+            <TabsTrigger value="cases" className="data-[state=active]:bg-neutral-600 text-xs" title={GRIFT_FIELD_HELP.cases.tooltip}>
+              <Briefcase className="h-3 w-3 mr-1" />
+              Cases
+            </TabsTrigger>
+            <TabsTrigger value="exports" className="data-[state=active]:bg-neutral-600 text-xs" title={GRIFT_FIELD_HELP.exports.tooltip}>
+              <Download className="h-3 w-3 mr-1" />
+              Exports
+            </TabsTrigger>
+            <TabsTrigger value="config" className="data-[state=active]:bg-neutral-600 text-xs" title={GRIFT_FIELD_HELP.config.tooltip}>
+              <Settings className="h-3 w-3 mr-1" />
+              Config
+            </TabsTrigger>
+            <TabsTrigger value="audit" className="data-[state=active]:bg-neutral-600 text-xs" title={GRIFT_FIELD_HELP.audit.tooltip}>
+              <FileText className="h-3 w-3 mr-1" />
+              Audit
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="dashboard">
+            <DashboardTab />
+          </TabsContent>
+
+          <TabsContent value="signals">
+            <SignalsTab />
+          </TabsContent>
+
+          <TabsContent value="users">
+            <UsersTab />
+          </TabsContent>
+
+          <TabsContent value="pairs">
+            <PairsTab />
+          </TabsContent>
+
+          <TabsContent value="networks">
+            <NetworksTab />
+          </TabsContent>
+
+          <TabsContent value="identities">
+            <IdentitiesTab />
+          </TabsContent>
+
+          <TabsContent value="cases">
+            <CasesTab />
+          </TabsContent>
+
+          <TabsContent value="exports">
+            <ExportsTab />
+          </TabsContent>
+
+          <TabsContent value="config">
+            <ConfigTab />
+          </TabsContent>
+
+          <TabsContent value="audit">
+            <AuditTab />
+          </TabsContent>
+        </Tabs>
       </div>
-
-      <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="bg-neutral-700 flex-wrap h-auto gap-1 p-1">
-          <TabsTrigger value="dashboard" className="data-[state=active]:bg-neutral-600 text-xs">
-            <Activity className="h-3 w-3 mr-1" />
-            Dashboard
-          </TabsTrigger>
-          <TabsTrigger value="signals" className="data-[state=active]:bg-neutral-600 text-xs">
-            <AlertTriangle className="h-3 w-3 mr-1" />
-            Signals
-          </TabsTrigger>
-          <TabsTrigger value="users" className="data-[state=active]:bg-neutral-600 text-xs">
-            <Users className="h-3 w-3 mr-1" />
-            Users
-          </TabsTrigger>
-          <TabsTrigger value="pairs" className="data-[state=active]:bg-neutral-600 text-xs">
-            <Link2 className="h-3 w-3 mr-1" />
-            Pairs
-          </TabsTrigger>
-          <TabsTrigger value="networks" className="data-[state=active]:bg-neutral-600 text-xs">
-            <Network className="h-3 w-3 mr-1" />
-            Networks
-          </TabsTrigger>
-          <TabsTrigger value="identities" className="data-[state=active]:bg-neutral-600 text-xs">
-            <Fingerprint className="h-3 w-3 mr-1" />
-            Identities
-          </TabsTrigger>
-          <TabsTrigger value="cases" className="data-[state=active]:bg-neutral-600 text-xs">
-            <Briefcase className="h-3 w-3 mr-1" />
-            Cases
-          </TabsTrigger>
-          <TabsTrigger value="exports" className="data-[state=active]:bg-neutral-600 text-xs">
-            <Download className="h-3 w-3 mr-1" />
-            Exports
-          </TabsTrigger>
-          <TabsTrigger value="config" className="data-[state=active]:bg-neutral-600 text-xs">
-            <Settings className="h-3 w-3 mr-1" />
-            Config
-          </TabsTrigger>
-          <TabsTrigger value="audit" className="data-[state=active]:bg-neutral-600 text-xs">
-            <FileText className="h-3 w-3 mr-1" />
-            Audit
-          </TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="dashboard">
-          <DashboardTab />
-        </TabsContent>
-
-        <TabsContent value="signals">
-          <SignalsTab />
-        </TabsContent>
-
-        <TabsContent value="users">
-          <UsersTab />
-        </TabsContent>
-
-        <TabsContent value="pairs">
-          <PairsTab />
-        </TabsContent>
-
-        <TabsContent value="networks">
-          <NetworksTab />
-        </TabsContent>
-
-        <TabsContent value="identities">
-          <IdentitiesTab />
-        </TabsContent>
-
-        <TabsContent value="cases">
-          <CasesTab />
-        </TabsContent>
-
-        <TabsContent value="exports">
-          <ExportsTab />
-        </TabsContent>
-
-        <TabsContent value="config">
-          <ConfigTab />
-        </TabsContent>
-
-        <TabsContent value="audit">
-          <AuditTab />
-        </TabsContent>
-      </Tabs>
-    </div>
+    </TooltipProvider>
   );
 }

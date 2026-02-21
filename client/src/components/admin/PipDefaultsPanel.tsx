@@ -5,6 +5,8 @@ import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 type PipDefaultRow = {
   category: string;
@@ -15,6 +17,52 @@ type PipDefaultRow = {
 };
 
 type PipDefaultsResp = { ok: boolean; rows: PipDefaultRow[] };
+
+const PIP_DEFAULTS_FIELD_HELP = {
+  pipDecimals: {
+    inline: "Default pip precision exponent for all symbols in this category.",
+    tooltip:
+      "Used when symbol-level override is absent. Pip size is calculated as 10^-pipDecimals and impacts spread/pips math.",
+  },
+  quoteDecimals: {
+    inline: "Default quote display precision for this category.",
+    tooltip:
+      "Controls quote rounding when no symbol override is set. Keep aligned with market convention for readable prices.",
+  },
+  save: {
+    inline: "Persist category defaults for future symbol onboarding and fallback formatting.",
+    tooltip:
+      "Changes apply to category defaults only. Existing symbol overrides continue to take precedence where configured.",
+  },
+} as const;
+
+function PipDefaultsHintLabel({
+  label,
+  hint,
+}: {
+  label: string;
+  hint: string;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-2">
+      <Label className="text-xs text-gray-400">{label}</Label>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            className="text-[11px] font-medium text-cyan-300 underline decoration-dotted underline-offset-2 hover:text-cyan-200"
+            aria-label={`${label} hint`}
+          >
+            Hint
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="top" className="max-w-sm text-xs leading-relaxed">
+          {hint}
+        </TooltipContent>
+      </Tooltip>
+    </div>
+  );
+}
 
 export function PipDefaultsPanel() {
   const { toast } = useToast();
@@ -50,6 +98,7 @@ export function PipDefaultsPanel() {
   });
 
   return (
+    <TooltipProvider delayDuration={120}>
     <Card className="bg-neutral-700 border-gray-600">
       <CardHeader>
         <CardTitle className="text-base">Pip Defaults</CardTitle>
@@ -58,6 +107,9 @@ export function PipDefaultsPanel() {
         </CardDescription>
       </CardHeader>
       <CardContent>
+        <div className="rounded-md border border-cyan-700/40 bg-cyan-950/20 p-3 text-xs text-cyan-100/90 mb-3">
+          Category precision defaults include hidden <span className="font-medium">Hint</span> explainers for pip math, quote formatting, and override behavior.
+        </div>
         {isLoading ? (
           <div className="text-sm text-gray-300">Loading…</div>
         ) : rows.length === 0 ? (
@@ -72,7 +124,7 @@ export function PipDefaultsPanel() {
                     <span className="font-mono text-sm">{r.category}</span>
                   </div>
                   <div>
-                    <div className="text-xs text-gray-400">pipDecimals</div>
+                    <PipDefaultsHintLabel label="pipDecimals" hint={PIP_DEFAULTS_FIELD_HELP.pipDecimals.tooltip} />
                     <Input
                       type="number"
                       value={v.pipDecimals}
@@ -83,10 +135,12 @@ export function PipDefaultsPanel() {
                       className="bg-neutral-600 mt-1"
                       min={0}
                       max={12}
+                      title={PIP_DEFAULTS_FIELD_HELP.pipDecimals.tooltip}
                     />
+                    <p className="text-xs text-gray-400 mt-1">{PIP_DEFAULTS_FIELD_HELP.pipDecimals.inline}</p>
                   </div>
                   <div>
-                    <div className="text-xs text-gray-400">quoteDecimals</div>
+                    <PipDefaultsHintLabel label="quoteDecimals" hint={PIP_DEFAULTS_FIELD_HELP.quoteDecimals.tooltip} />
                     <Input
                       type="number"
                       value={v.quoteDecimals ?? ""}
@@ -99,13 +153,16 @@ export function PipDefaultsPanel() {
                       min={0}
                       max={12}
                       placeholder="(null)"
+                      title={PIP_DEFAULTS_FIELD_HELP.quoteDecimals.tooltip}
                     />
+                    <p className="text-xs text-gray-400 mt-1">{PIP_DEFAULTS_FIELD_HELP.quoteDecimals.inline}</p>
                   </div>
                   <div className="flex items-end justify-end">
                     <Button
                       onClick={() => saveMutation.mutate(r.category)}
                       disabled={saveMutation.isPending}
                       className="bg-blue-600 hover:bg-blue-700"
+                      title={PIP_DEFAULTS_FIELD_HELP.save.tooltip}
                     >
                       Save
                     </Button>
@@ -117,6 +174,6 @@ export function PipDefaultsPanel() {
         )}
       </CardContent>
     </Card>
+    </TooltipProvider>
   );
 }
-

@@ -13,6 +13,7 @@ Express API, WebSocket server (`/ws`), quote ingestion, trading lifecycle, polic
 ## Key entrypoints
 - App bootstrap: `server/index.ts`
 - Route wiring + `/ws` + `/metrics`: `server/routes.ts`
+- Route architecture guardrails (modularity + index wiring): `server/routes/AGENTS.md`
 - Trading engine: `server/engine/orderEngine.ts`
 - Risk middleware: `server/risk.ts`
 - Session/identity: `server/security/sessionTrail.ts`
@@ -31,4 +32,3 @@ Express API, WebSocket server (`/ws`), quote ingestion, trading lifecycle, polic
 - If you touched DB schema or migrations: `npm run db:migrate:drizzle` + `npm run db:audit`
 - If you touched trading/auth/ws flows: `npm run e2e`
 - If you touched WS hot paths: `npm run loadtest:ws-fanout` (recommended)
-

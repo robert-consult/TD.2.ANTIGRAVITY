@@ -1,0 +1,50 @@
+# Fast Load Implementation Verification Report (Resolved)
+
+This walkthrough is now fully resolved for the prefetch/caching refactor track.
+
+## Status by Original Solution
+
+1. **Solution A - Service Worker burst prefetch off main thread:** `DONE`
+   - `client/src/lib/routePrefetch.ts` delegates burst prefetch through `SW_BURST_PREFETCH_MESSAGE`.
+   - `client/src/sw.ts` handles burst keys with bounded concurrency and in-flight dedupe.
+
+2. **Solution B - Critical route modulepreload links:** `DONE`
+   - Build-time injection now happens in `vite.config.ts` (`critical-route-modulepreload` plugin).
+   - `client/index.html` documents that critical preloads are injected at build time.
+
+3. **Solution C - Tier decoupling (prefetch concurrency/delay):** `DONE`
+   - Tier-specific prefetch concurrency caps and network/device delay floors are persisted in `global_settings`.
+   - Admin controls are exposed under **Admin -> System Configuration -> Market Data** and validated server-side.
+   - Public/admin settings endpoints project/clamp these fields for runtime safety.
+
+4. **Solution D - Lazy loading jank removal + transition wiring:** `DONE`
+   - `client/src/lib/lazyWithPing.ts` now uses `React.lazy` directly (no legacy timeout ping workaround).
+   - `client/src/pages/Dashboard.tsx` uses `useTransition` for tab switches and symbol-driven tab jumps.
+
+5. **Solution E - Hydration split for initial paint:** `DONE`
+   - `client/src/lib/queryPersistence.ts` keeps critical hydration first and defers heavy stores.
+
+## Additional Hardening Completed
+
+- **Live admin propagation reliability fix:** `DONE`
+  - Added nested performance payload resolver in `client/src/lib/globalSettingsPerformance.ts`.
+  - Admin market-performance cards now correctly read live `performanceSettings` overlays (prevents false “schema outdated” and stale card values on multi-session admin updates).
+  - `client/src/live/ConfigSync.tsx` now avoids partial cache-object creation when `/api/global-settings` has not been fetched yet.
+
+## Verification Summary
+
+- Typecheck/build: `npm run check`, `npm run build`
+- Targeted fast-load tests:
+  - `client/src/lib/perfHints.test.ts`
+  - `client/src/lib/routePrefetch.test.ts`
+  - `client/src/live/ConfigSync.test.ts`
+  - `client/src/hooks/use-performance-settings.test.tsx`
+  - `client/src/live/LiveUpdatesProvider.test.tsx`
+  - `client/src/lib/queryPersistence.hydrate.test.ts`
+  - `client/src/lib/queryPersistence.test.ts`
+- Admin sanity: `npm run smoke:admin`
+- Load sanity:
+  - `npm run loadtest:publish-quotes`
+  - `npm run loadtest:ws-fanout`
+
+No remaining partial/not-done items from this walkthrough remain open.

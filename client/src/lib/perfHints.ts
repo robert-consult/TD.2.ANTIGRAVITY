@@ -13,6 +13,15 @@ export type PerformanceSettings = {
   prefetchStrategy: PrefetchStrategy;
   prefetchMaxConcurrency: number;
   prefetchStartDelayMs: number;
+  prefetchFastConcurrencyCap: number;
+  prefetchModerateConcurrencyCap: number;
+  prefetchConstrainedConcurrencyCap: number;
+  prefetchNetworkFastStartDelayMs: number;
+  prefetchNetworkModerateStartDelayMs: number;
+  prefetchNetworkConstrainedStartDelayMs: number;
+  prefetchDeviceModerateStartDelayMs: number;
+  prefetchDeviceConstrainedStartDelayMs: number;
+  prefetchDeviceMinimalStartDelayMs: number;
   pollInstantMs: number;
   pollFastMs: number;
   pollModerateMs: number;
@@ -91,6 +100,15 @@ export const DEFAULT_PERFORMANCE_SETTINGS: PerformanceSettings = {
   prefetchStrategy: "all",
   prefetchMaxConcurrency: 4,
   prefetchStartDelayMs: 0,
+  prefetchFastConcurrencyCap: 3,
+  prefetchModerateConcurrencyCap: 2,
+  prefetchConstrainedConcurrencyCap: 1,
+  prefetchNetworkFastStartDelayMs: 75,
+  prefetchNetworkModerateStartDelayMs: 200,
+  prefetchNetworkConstrainedStartDelayMs: 450,
+  prefetchDeviceModerateStartDelayMs: 50,
+  prefetchDeviceConstrainedStartDelayMs: 150,
+  prefetchDeviceMinimalStartDelayMs: 300,
   pollInstantMs: 200,
   pollFastMs: 500,
   pollModerateMs: 1500,
@@ -381,6 +399,78 @@ export function resolvePerformanceSettings(input: unknown): PerformanceSettings 
       0,
       15_000,
     ),
+    prefetchFastConcurrencyCap: clamp(
+      Math.round(
+        numOrNull(candidate.prefetchFastConcurrencyCap) ??
+          DEFAULT_PERFORMANCE_SETTINGS.prefetchFastConcurrencyCap,
+      ),
+      1,
+      6,
+    ),
+    prefetchModerateConcurrencyCap: clamp(
+      Math.round(
+        numOrNull(candidate.prefetchModerateConcurrencyCap) ??
+          DEFAULT_PERFORMANCE_SETTINGS.prefetchModerateConcurrencyCap,
+      ),
+      1,
+      6,
+    ),
+    prefetchConstrainedConcurrencyCap: clamp(
+      Math.round(
+        numOrNull(candidate.prefetchConstrainedConcurrencyCap) ??
+          DEFAULT_PERFORMANCE_SETTINGS.prefetchConstrainedConcurrencyCap,
+      ),
+      1,
+      6,
+    ),
+    prefetchNetworkFastStartDelayMs: clamp(
+      Math.round(
+        numOrNull(candidate.prefetchNetworkFastStartDelayMs) ??
+          DEFAULT_PERFORMANCE_SETTINGS.prefetchNetworkFastStartDelayMs,
+      ),
+      0,
+      15_000,
+    ),
+    prefetchNetworkModerateStartDelayMs: clamp(
+      Math.round(
+        numOrNull(candidate.prefetchNetworkModerateStartDelayMs) ??
+          DEFAULT_PERFORMANCE_SETTINGS.prefetchNetworkModerateStartDelayMs,
+      ),
+      0,
+      15_000,
+    ),
+    prefetchNetworkConstrainedStartDelayMs: clamp(
+      Math.round(
+        numOrNull(candidate.prefetchNetworkConstrainedStartDelayMs) ??
+          DEFAULT_PERFORMANCE_SETTINGS.prefetchNetworkConstrainedStartDelayMs,
+      ),
+      0,
+      15_000,
+    ),
+    prefetchDeviceModerateStartDelayMs: clamp(
+      Math.round(
+        numOrNull(candidate.prefetchDeviceModerateStartDelayMs) ??
+          DEFAULT_PERFORMANCE_SETTINGS.prefetchDeviceModerateStartDelayMs,
+      ),
+      0,
+      15_000,
+    ),
+    prefetchDeviceConstrainedStartDelayMs: clamp(
+      Math.round(
+        numOrNull(candidate.prefetchDeviceConstrainedStartDelayMs) ??
+          DEFAULT_PERFORMANCE_SETTINGS.prefetchDeviceConstrainedStartDelayMs,
+      ),
+      0,
+      15_000,
+    ),
+    prefetchDeviceMinimalStartDelayMs: clamp(
+      Math.round(
+        numOrNull(candidate.prefetchDeviceMinimalStartDelayMs) ??
+          DEFAULT_PERFORMANCE_SETTINGS.prefetchDeviceMinimalStartDelayMs,
+      ),
+      0,
+      15_000,
+    ),
     pollInstantMs: clamp(Math.round(numOrNull(candidate.pollInstantMs) ?? defaultPollInstantMs), 100, 60_000),
     pollFastMs: clamp(Math.round(numOrNull(candidate.pollFastMs) ?? defaultPollFastMs), 100, 60_000),
     pollModerateMs: clamp(Math.round(numOrNull(candidate.pollModerateMs) ?? defaultPollModerateMs), 100, 60_000),
@@ -542,9 +632,11 @@ export function tierPrefetchPlan(
   const resolveMaxConcurrency = () => {
     let cap = clamp(settings.prefetchMaxConcurrency, 1, 6);
 
-    if (hints.networkTier === "FAST") cap = Math.min(cap, 4);
-    if (hints.networkTier === "MODERATE") cap = Math.min(cap, 3);
-    if (hints.networkTier === "CONSTRAINED") cap = Math.min(cap, 2);
+    // Keep startup prefetch aggressive on strong links, but reserve connection headroom for
+    // initial API + WS setup on weaker tiers.
+    if (hints.networkTier === "FAST") cap = Math.min(cap, settings.prefetchFastConcurrencyCap);
+    if (hints.networkTier === "MODERATE") cap = Math.min(cap, settings.prefetchModerateConcurrencyCap);
+    if (hints.networkTier === "CONSTRAINED") cap = Math.min(cap, settings.prefetchConstrainedConcurrencyCap);
 
     if (hints.deviceTier === "MINIMAL") cap = 1;
     else if (hints.deviceTier === "CONSTRAINED") cap = Math.min(cap, 2);
@@ -552,9 +644,46 @@ export function tierPrefetchPlan(
     return clamp(cap, 1, 6);
   };
 
+  const resolveStartDelayMs = () => {
+    const networkDelayMs = (() => {
+      switch (hints.networkTier) {
+        case "INSTANT":
+          return 0;
+        case "FAST":
+          return settings.prefetchNetworkFastStartDelayMs;
+        case "MODERATE":
+          return settings.prefetchNetworkModerateStartDelayMs;
+        case "CONSTRAINED":
+          return settings.prefetchNetworkConstrainedStartDelayMs;
+        case "MINIMAL":
+          return 0;
+      }
+    })();
+
+    const deviceDelayMs = (() => {
+      switch (hints.deviceTier) {
+        case "INSTANT":
+        case "FAST":
+          return 0;
+        case "MODERATE":
+          return settings.prefetchDeviceModerateStartDelayMs;
+        case "CONSTRAINED":
+          return settings.prefetchDeviceConstrainedStartDelayMs;
+        case "MINIMAL":
+          return settings.prefetchDeviceMinimalStartDelayMs;
+      }
+    })();
+
+    return clamp(
+      Math.max(settings.prefetchStartDelayMs, networkDelayMs, deviceDelayMs),
+      0,
+      15_000,
+    );
+  };
+
   const maxConcurrency = resolveMaxConcurrency();
   const mode = maxConcurrency > 1 ? "parallel" : "sequential";
-  const startDelayMs = settings.prefetchStartDelayMs;
+  const startDelayMs = resolveStartDelayMs();
 
   if (settings.prefetchStrategy === "critical") {
     if (hints.networkTier === "CONSTRAINED" || hints.deviceTier === "MINIMAL") {

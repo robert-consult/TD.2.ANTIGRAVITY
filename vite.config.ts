@@ -1,4 +1,4 @@
-import { defineConfig, type Plugin } from "vite";
+import { defineConfig, type HtmlTagDescriptor, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import path from "path";
 import runtimeErrorOverlay from "@replit/vite-plugin-runtime-error-modal";
@@ -6,6 +6,74 @@ import { autoI18nPlugin } from "./client/vite.plugins/autoI18n";
 
 const buildHash = process.env.BUILD_HASH ?? Date.now().toString(36);
 const DEFAULT_VENDOR_CHUNK_MAX_BYTES = 1_400_000;
+const CRITICAL_ROUTE_MODULE_SUFFIXES = [
+  "/client/src/pages/QuotesScreen.tsx",
+  "/client/src/pages/TradeScreen.tsx",
+  "/client/src/pages/ChartScreen.tsx",
+] as const;
+
+function normalizePath(p: string): string {
+  return p.replace(/\\/g, "/");
+}
+
+function isCriticalRouteModuleId(moduleId: string | null | undefined): boolean {
+  if (!moduleId) return false;
+  const normalized = normalizePath(moduleId);
+  return CRITICAL_ROUTE_MODULE_SUFFIXES.some((suffix) => normalized.endsWith(suffix));
+}
+
+function criticalRouteModulePreloadPlugin(): Plugin {
+  return {
+    name: "critical-route-modulepreload",
+    apply: "build" as const,
+    transformIndexHtml: {
+      order: "post",
+      handler(html, ctx) {
+        const bundle = ctx.bundle;
+        if (!bundle) return html;
+
+        const preloadHrefs = new Set<string>();
+        const visitedFiles = new Set<string>();
+
+        const includeChunkAndImports = (fileName: string) => {
+          if (visitedFiles.has(fileName)) return;
+          visitedFiles.add(fileName);
+          const chunk = bundle[fileName];
+          if (!chunk || chunk.type !== "chunk") return;
+          preloadHrefs.add(`/${chunk.fileName}`);
+          for (const importedFile of chunk.imports || []) {
+            includeChunkAndImports(importedFile);
+          }
+        };
+
+        for (const artifact of Object.values(bundle)) {
+          if (!artifact || artifact.type !== "chunk") continue;
+          if (!isCriticalRouteModuleId(artifact.facadeModuleId)) continue;
+          includeChunkAndImports(artifact.fileName);
+        }
+
+        if (!preloadHrefs.size) return html;
+        const tags: HtmlTagDescriptor[] = Array.from(preloadHrefs)
+          .sort()
+          .filter((href) => !html.includes(`href="${href}"`) && !html.includes(`src="${href}"`))
+          .map((href) => ({
+            tag: "link",
+            attrs: {
+              rel: "modulepreload",
+              href,
+            },
+            injectTo: "head" as const,
+          }));
+
+        if (!tags.length) return html;
+        return {
+          html,
+          tags,
+        };
+      },
+    },
+  };
+}
 
 function resolveVendorChunkMaxBytes(): number {
   const raw = Number(process.env.VITE_VENDOR_CHUNK_MAX_BYTES);
@@ -80,6 +148,7 @@ export default defineConfig({
     autoI18nPlugin(),
     react(),
     runtimeErrorOverlay(),
+    criticalRouteModulePreloadPlugin(),
     vendorChunkGuardPlugin(resolveVendorChunkMaxBytes()),
     ...(process.env.NODE_ENV !== "production" &&
       process.env.REPL_ID !== undefined

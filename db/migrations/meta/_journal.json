@@ -253,6 +253,13 @@
       "when": 1776600002000,
       "tag": "0035_session_store_schema_alignment",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1776600003000,
+      "tag": "0036_global_settings_prefetch_tier_controls",
+      "breakpoints": true
     }
   ]
 }

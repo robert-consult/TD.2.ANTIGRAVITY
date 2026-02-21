@@ -1,4 +1,4 @@
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import { Header } from "@/components/Header";
 import { MobileNavigation, SideNavigation } from "@/components/Navigation";
 import { AppShell } from "@/components/layout/AppShell";
@@ -39,6 +39,7 @@ function DashboardLoadingFallback({ activeTab }: { activeTab: string }) {
 export default function Dashboard() {
   const [activeTab, setActiveTab] = useState("quotes");
   const [selectedSymbol, setSelectedSymbol] = useState("");
+  const [, startTransition] = useTransition();
   const { quotes } = useQuotes();
   const hasHydratedDashboardData = useStaleData("/api/account/summary");
 
@@ -65,6 +66,12 @@ export default function Dashboard() {
     }
   }, [activeSymbols, selectedSymbol]);
 
+  const setActiveTabDeferred = useCallback((nextTab: string) => {
+    startTransition(() => {
+      setActiveTab(nextTab);
+    });
+  }, [startTransition]);
+
   // Find the current price for the selected symbol
   const currentQuote = quotes?.find(
     (quote) => quote.symbol === selectedSymbol
@@ -77,7 +84,7 @@ export default function Dashboard() {
     }
     // If we're not on chart or trade tab, switch to chart when selecting a symbol
     if (activeTab !== "chart" && activeTab !== "trade") {
-      setActiveTab("chart");
+      setActiveTabDeferred("chart");
     }
   };
 
@@ -95,8 +102,8 @@ export default function Dashboard() {
           ) : null}
         </>
       }
-      mobileNav={<MobileNavigation activeTab={activeTab} setActiveTab={setActiveTab} />}
-      sidebar={<SideNavigation activeTab={activeTab} setActiveTab={setActiveTab} />}
+      mobileNav={<MobileNavigation activeTab={activeTab} setActiveTab={setActiveTabDeferred} />}
+      sidebar={<SideNavigation activeTab={activeTab} setActiveTab={setActiveTabDeferred} />}
     >
       <Suspense fallback={<DashboardLoadingFallback activeTab={activeTab} />}>
         {activeTab === "quotes" && <QuotesScreen onSelectSymbol={handleSelectSymbol} />}

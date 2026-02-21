@@ -12,11 +12,106 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useToast } from '@/hooks/use-toast';
 import { FileText, CheckCircle, Globe, Shield, AlertTriangle, Plus, RefreshCw } from 'lucide-react';
 import AdminLegalDocsPage from '@/pages/AdminLegalDocs';
 import AdminLegalAcceptancesPage from '@/pages/AdminLegalAcceptances';
 import { fetchWithIdentity } from '@/lib/fetchWithIdentity';
+
+const LEGACY_DOC_FIELD_HELP = {
+  docType: {
+    inline: "Defines whether this record is a global master, region addendum, or country addendum document.",
+    tooltip:
+      "Choose the type that matches enforcement scope. Wrong type selection can cause incorrect legal resolution at signup.",
+  },
+  scopeKey: {
+    inline: "Jurisdiction routing key used by legal resolution logic.",
+    tooltip:
+      "Examples: DEFAULT/ROW, REGION/EU, COUNTRY/US. Keep scope keys consistent with resolver expectations and policy records.",
+  },
+  version: {
+    inline: "Semantic version string for this legal document revision.",
+    tooltip:
+      "Increment on legal text changes so acceptance records can map to immutable document versions for audit.",
+  },
+  locale: {
+    inline: "Locale code for the document text variant.",
+    tooltip:
+      "Use normalized locale tags like en or en-US. Locale mismatch can cause fallback language behavior during acceptance.",
+  },
+  title: {
+    inline: "Human-readable title shown to users and admins.",
+    tooltip:
+      "Keep titles explicit and stable so legal ops can quickly identify the exact agreement during support/audit workflows.",
+  },
+  body: {
+    inline: "Full markdown body of the legal agreement text.",
+    tooltip:
+      "This is the canonical legal content captured by acceptance records. Draft carefully and validate formatting before activation.",
+  },
+} as const;
+
+const LEGACY_ACCEPTANCES_FIELD_HELP = {
+  validateAcceptance: {
+    inline: "Runs a verification check for the selected acceptance record.",
+    tooltip:
+      "Use when investigating integrity concerns. Validation confirms hash/token continuity for that acceptance event.",
+  },
+} as const;
+
+const LEGAL_COVERAGE_FIELD_HELP = {
+  coverageEnforcement: {
+    inline: "Block signup in jurisdictions that do not have active legal coverage.",
+    tooltip:
+      "Fail-closed control for uncovered jurisdictions. Keep on for strict legal gating; disable only with explicit policy approval.",
+  },
+  restrictedCountriesCsv: {
+    inline: "ISO2 jurisdictions blocked at signup and legal resolution.",
+    tooltip:
+      "Enter uppercase ISO2 values separated by commas/spaces/newlines. This list should align with sanctions/compliance policy.",
+  },
+  restrictedMessage: {
+    inline: "Public-facing message shown when a jurisdiction is restricted.",
+    tooltip:
+      "Use neutral compliance-safe language. Avoid exposing internal decision logic or legal strategy details.",
+  },
+  countryCheckIso2: {
+    inline: "Test a specific ISO2 jurisdiction against current legal coverage and restrictions.",
+    tooltip:
+      "Diagnostic utility to confirm allow/block outcomes before rollout. Useful for QA and incident triage.",
+  },
+} as const;
+
+function LegalFieldHintLabel({
+  label,
+  hint,
+  labelClassName = "text-sm font-medium",
+}: {
+  label: string;
+  hint: string;
+  labelClassName?: string;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-2">
+      <Label className={labelClassName}>{label}</Label>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            className="text-[11px] font-medium text-cyan-300 underline decoration-dotted underline-offset-2 hover:text-cyan-200"
+            aria-label={`${label} hint`}
+          >
+            Hint
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="top" className="max-w-sm text-xs leading-relaxed">
+          {hint}
+        </TooltipContent>
+      </Tooltip>
+    </div>
+  );
+}
 
 export function AdminLegalDocs() {
   const { toast } = useToast();
@@ -39,6 +134,7 @@ export function AdminLegalDocs() {
   });
   
   return (
+    <TooltipProvider delayDuration={120}>
     <div className="space-y-4">
       <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2">
         <div>
@@ -53,9 +149,11 @@ export function AdminLegalDocs() {
               <DialogHeader><DialogTitle>Create Legal Document</DialogTitle></DialogHeader>
               <div className="grid gap-4 py-4">
                 <div className="grid grid-cols-2 gap-4">
-                  <div><Label>Document Type</Label>
+                  <div>
+                    <LegalFieldHintLabel label="Document Type" hint={LEGACY_DOC_FIELD_HELP.docType.tooltip} />
+                    <p className="text-xs text-gray-400 mt-1">{LEGACY_DOC_FIELD_HELP.docType.inline}</p>
                     <Select value={newDoc.docType} onValueChange={v => setNewDoc({...newDoc, docType: v})}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectTrigger title={LEGACY_DOC_FIELD_HELP.docType.tooltip}><SelectValue /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="GLOBAL_MASTER_TERMS">Global Master Terms</SelectItem>
                         <SelectItem value="REGION_ADDENDUM">Region Addendum</SelectItem>
@@ -63,19 +161,69 @@ export function AdminLegalDocs() {
                       </SelectContent>
                     </Select>
                   </div>
-                  <div><Label>Scope Key</Label><Input value={newDoc.scopeKey} onChange={e => setNewDoc({...newDoc, scopeKey: e.target.value})} placeholder="DEFAULT/ROW, REGION/EU, COUNTRY/US" /></div>
+                  <div>
+                    <LegalFieldHintLabel label="Scope Key" hint={LEGACY_DOC_FIELD_HELP.scopeKey.tooltip} />
+                    <p className="text-xs text-gray-400 mt-1">{LEGACY_DOC_FIELD_HELP.scopeKey.inline}</p>
+                    <Input
+                      value={newDoc.scopeKey}
+                      onChange={e => setNewDoc({...newDoc, scopeKey: e.target.value})}
+                      placeholder="DEFAULT/ROW, REGION/EU, COUNTRY/US"
+                      title={LEGACY_DOC_FIELD_HELP.scopeKey.tooltip}
+                    />
+                  </div>
                 </div>
                 <div className="grid grid-cols-2 gap-4">
-                  <div><Label>Version (semver)</Label><Input value={newDoc.version} onChange={e => setNewDoc({...newDoc, version: e.target.value})} placeholder="1.0.0" /></div>
-                  <div><Label>Locale</Label><Input value={newDoc.locale} onChange={e => setNewDoc({...newDoc, locale: e.target.value})} placeholder="en" /></div>
+                  <div>
+                    <LegalFieldHintLabel label="Version (semver)" hint={LEGACY_DOC_FIELD_HELP.version.tooltip} />
+                    <p className="text-xs text-gray-400 mt-1">{LEGACY_DOC_FIELD_HELP.version.inline}</p>
+                    <Input
+                      value={newDoc.version}
+                      onChange={e => setNewDoc({...newDoc, version: e.target.value})}
+                      placeholder="1.0.0"
+                      title={LEGACY_DOC_FIELD_HELP.version.tooltip}
+                    />
+                  </div>
+                  <div>
+                    <LegalFieldHintLabel label="Locale" hint={LEGACY_DOC_FIELD_HELP.locale.tooltip} />
+                    <p className="text-xs text-gray-400 mt-1">{LEGACY_DOC_FIELD_HELP.locale.inline}</p>
+                    <Input
+                      value={newDoc.locale}
+                      onChange={e => setNewDoc({...newDoc, locale: e.target.value})}
+                      placeholder="en"
+                      title={LEGACY_DOC_FIELD_HELP.locale.tooltip}
+                    />
+                  </div>
                 </div>
-                <div><Label>Title</Label><Input value={newDoc.title} onChange={e => setNewDoc({...newDoc, title: e.target.value})} placeholder="TradeQuip Terms of Service" /></div>
-                <div><Label>Body (Markdown)</Label><Textarea value={newDoc.body} onChange={e => setNewDoc({...newDoc, body: e.target.value})} rows={10} placeholder="# Terms of Service..." /></div>
+                <div>
+                  <LegalFieldHintLabel label="Title" hint={LEGACY_DOC_FIELD_HELP.title.tooltip} />
+                  <p className="text-xs text-gray-400 mt-1">{LEGACY_DOC_FIELD_HELP.title.inline}</p>
+                  <Input
+                    value={newDoc.title}
+                    onChange={e => setNewDoc({...newDoc, title: e.target.value})}
+                    placeholder="TradeQuip Terms of Service"
+                    title={LEGACY_DOC_FIELD_HELP.title.tooltip}
+                  />
+                </div>
+                <div>
+                  <LegalFieldHintLabel label="Body (Markdown)" hint={LEGACY_DOC_FIELD_HELP.body.tooltip} />
+                  <p className="text-xs text-gray-400 mt-1">{LEGACY_DOC_FIELD_HELP.body.inline}</p>
+                  <Textarea
+                    value={newDoc.body}
+                    onChange={e => setNewDoc({...newDoc, body: e.target.value})}
+                    rows={10}
+                    placeholder="# Terms of Service..."
+                    title={LEGACY_DOC_FIELD_HELP.body.tooltip}
+                  />
+                </div>
               </div>
               <Button onClick={() => createMutation.mutate(newDoc)} disabled={createMutation.isPending}>Create Document</Button>
             </DialogContent>
           </Dialog>
         </div>
+      </div>
+
+      <div className="rounded-md border border-cyan-700/40 bg-cyan-950/20 p-3 text-xs text-cyan-100/90">
+        Legal document fields include hidden <span className="font-medium">Hint</span> explainers for scope, versioning, and audit integrity.
       </div>
       
       {isLoading ? <p>Loading...</p> : (
@@ -107,6 +255,7 @@ export function AdminLegalDocs() {
         </div>
       )}
     </div>
+    </TooltipProvider>
   );
 }
 
@@ -120,8 +269,12 @@ export function AdminLegalAcceptances() {
   });
   
   return (
+    <TooltipProvider delayDuration={120}>
     <div className="space-y-4">
       <div><h3 className="text-lg font-semibold">Legal Acceptances</h3><p className="text-sm text-muted-foreground">Hash-chained tamper-evident acceptance ledger</p></div>
+      <div className="rounded-md border border-cyan-700/40 bg-cyan-950/20 p-3 text-xs text-cyan-100/90">
+        Acceptance verification controls include hidden <span className="font-medium">Hint</span> explainers for integrity checks and audit diagnostics.
+      </div>
       {isLoading ? <p>Loading...</p> : (
         <div className="overflow-x-auto -mx-2 px-2">
           <Table>
@@ -141,7 +294,33 @@ export function AdminLegalAcceptances() {
                   <TableCell className="whitespace-nowrap">{a.doc_version}</TableCell>
                   <TableCell className="whitespace-nowrap">{new Date(a.accepted_at * 1000).toLocaleString()}</TableCell>
                   <TableCell>{a.terms_token_verified ? <CheckCircle className="w-4 h-4 text-green-500" /> : <AlertTriangle className="w-4 h-4 text-yellow-500" />}</TableCell>
-                  <TableCell><Button size="sm" variant="ghost" onClick={() => validateMutation.mutate(a.id)}><Shield className="w-4 h-4" /></Button></TableCell>
+                  <TableCell>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => validateMutation.mutate(a.id)}
+                        title={LEGACY_ACCEPTANCES_FIELD_HELP.validateAcceptance.tooltip}
+                      >
+                        <Shield className="w-4 h-4" />
+                      </Button>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <button
+                            type="button"
+                            className="text-[11px] font-medium text-cyan-300 underline decoration-dotted underline-offset-2 hover:text-cyan-200"
+                            aria-label="Validate acceptance hint"
+                          >
+                            Hint
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" className="max-w-sm text-xs leading-relaxed">
+                          {LEGACY_ACCEPTANCES_FIELD_HELP.validateAcceptance.tooltip}
+                        </TooltipContent>
+                      </Tooltip>
+                    </div>
+                    <p className="text-xs text-gray-400 mt-1">{LEGACY_ACCEPTANCES_FIELD_HELP.validateAcceptance.inline}</p>
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
@@ -149,6 +328,7 @@ export function AdminLegalAcceptances() {
         </div>
       )}
     </div>
+    </TooltipProvider>
   );
 }
 
@@ -196,8 +376,12 @@ export function AdminLegalCoverage() {
   });
   
   return (
+    <TooltipProvider delayDuration={120}>
     <div className="space-y-6">
       <div><h3 className="text-lg font-semibold">Coverage & Enforcement</h3><p className="text-sm text-muted-foreground">Jurisdiction coverage and signup gate controls</p></div>
+      <div className="rounded-md border border-cyan-700/40 bg-cyan-950/20 p-3 text-xs text-cyan-100/90">
+        Coverage controls include hidden <span className="font-medium">Hint</span> explainers for legal gating behavior and jurisdiction policy impact.
+      </div>
       
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium">Countries Covered</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold">{stats?.totalCountriesCovered || 0}</div></CardContent></Card>
@@ -211,6 +395,14 @@ export function AdminLegalCoverage() {
          </CardHeader>
          <CardContent>
            <div className="flex items-center gap-4">
+             <div className="w-full">
+               <LegalFieldHintLabel
+                 label="Coverage Enforcement"
+                 hint={LEGAL_COVERAGE_FIELD_HELP.coverageEnforcement.tooltip}
+                 labelClassName="text-sm font-medium"
+               />
+               <p className="text-xs text-gray-400 mt-1">{LEGAL_COVERAGE_FIELD_HELP.coverageEnforcement.inline}</p>
+             </div>
              <Switch checked={enforcement?.enforced || false} onCheckedChange={(v) => toggleMutation.mutate(v)} />
              <span>{enforcement?.enforced ? 'Enforcement ON - Signup blocked for uncovered jurisdictions' : 'Enforcement OFF - All users can sign up with fallback terms'}</span>
            </div>
@@ -224,20 +416,27 @@ export function AdminLegalCoverage() {
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="grid gap-2">
-            <Label>Restricted ISO2 (comma/space/newline separated)</Label>
+            <LegalFieldHintLabel
+              label="Restricted ISO2 (comma/space/newline separated)"
+              hint={LEGAL_COVERAGE_FIELD_HELP.restrictedCountriesCsv.tooltip}
+            />
+            <p className="text-xs text-gray-400">{LEGAL_COVERAGE_FIELD_HELP.restrictedCountriesCsv.inline}</p>
             <Textarea
               value={restrictedCountriesCsv}
               onChange={(e) => setRestrictedCountriesCsv(e.target.value)}
               placeholder="KP, IR, CU, SY"
               className="min-h-[72px]"
+              title={LEGAL_COVERAGE_FIELD_HELP.restrictedCountriesCsv.tooltip}
             />
           </div>
           <div className="grid gap-2">
-            <Label>Restriction Message</Label>
+            <LegalFieldHintLabel label="Restriction Message" hint={LEGAL_COVERAGE_FIELD_HELP.restrictedMessage.tooltip} />
+            <p className="text-xs text-gray-400">{LEGAL_COVERAGE_FIELD_HELP.restrictedMessage.inline}</p>
             <Input
               value={restrictedMessage}
               onChange={(e) => setRestrictedMessage(e.target.value)}
               placeholder="This jurisdiction is not supported due to regulatory restrictions."
+              title={LEGAL_COVERAGE_FIELD_HELP.restrictedMessage.tooltip}
             />
           </div>
           <div className="flex items-center gap-2">
@@ -260,11 +459,16 @@ export function AdminLegalCoverage() {
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
+            <div className="w-full sm:max-w-[240px]">
+              <LegalFieldHintLabel label="Country ISO2" hint={LEGAL_COVERAGE_FIELD_HELP.countryCheckIso2.tooltip} />
+              <p className="text-xs text-gray-400 mt-1">{LEGAL_COVERAGE_FIELD_HELP.countryCheckIso2.inline}</p>
+            </div>
             <Input
               value={countryCheckIso2}
               onChange={(e) => setCountryCheckIso2(e.target.value)}
               placeholder="US"
               className="sm:max-w-[120px]"
+              title={LEGAL_COVERAGE_FIELD_HELP.countryCheckIso2.tooltip}
             />
             <Button size="sm" variant="outline" onClick={() => checkMutation.mutate()} disabled={checkMutation.isPending}>
               Check
@@ -288,6 +492,7 @@ export function AdminLegalCoverage() {
         </CardContent>
       </Card>
     </div>
+    </TooltipProvider>
   );
 }
 

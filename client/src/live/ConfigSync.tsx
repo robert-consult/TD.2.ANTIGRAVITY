@@ -40,6 +40,7 @@ export function ConfigSync() {
           const perf = payloadRecord.performanceSettings;
           if (perf && typeof perf === "object") {
             const mergePerformance = (prev: unknown) => {
+              if (!prev || typeof prev !== "object") return prev;
               return mergeGlobalSettingsPerformance(
                 prev,
                 perf as Record<string, unknown>,

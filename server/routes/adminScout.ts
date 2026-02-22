@@ -141,7 +141,7 @@ const watchlistInputSchema = z.object({
   userId: z.number().int().positive(),
   tier: z.enum(["A_LIST", "B_LIST", "INCUBATOR"]).optional(),
   notes: z.string().trim().max(3000).optional().nullable(),
-});
+}).strict();
 
 const pipelineUpdateSchema = z.object({
   stage: pipelineStageSchema.optional(),
@@ -149,7 +149,7 @@ const pipelineUpdateSchema = z.object({
   lastContactedAt: z.number().int().nonnegative().optional().nullable(),
   notes: z.string().trim().max(5000).optional().nullable(),
   isPartnerVisible: z.boolean().optional(),
-});
+}).strict();
 
 const scoutConfigPatchSchema = z.object({
   scoutTabEnabled: z.boolean().optional(),
@@ -167,11 +167,12 @@ const scoutConfigPatchSchema = z.object({
       requestAllocation: partnerGateLevelSchema,
       directContact: partnerGateLevelSchema,
     })
+    .strict()
     .optional(),
   partnerPasswordRotationDays: z.coerce.number().int().min(7).max(365).optional(),
   partnerPasswordReminderLogins: z.coerce.number().int().min(1).max(20).optional(),
   partnerInviteDefaultExpiryDays: z.coerce.number().int().min(1).max(180).optional(),
-});
+}).strict();
 
 const challengeUpsertSchema = z.object({
   name: z.string().trim().min(3).max(120),
@@ -344,7 +345,7 @@ const challengeSettingsPatchSchema = z.object({
   challengeAnomalyDetectionEnabled: z.boolean().optional(),
   challengeManualReviewEnabled: z.boolean().optional(),
   challengeManualReviewSuspiciousThreshold: z.coerce.number().int().min(1).max(100).optional(),
-});
+}).strict();
 
 const challengeBadgeUpsertSchema = z.object({
   key: z.string().trim().min(2).max(120).regex(/^[a-z0-9-_]+$/i),
@@ -437,14 +438,14 @@ const partnerCreateSchema = z.object({
   name: z.string().trim().min(2).max(120),
   ipWhitelist: z.string().trim().max(2000).optional(),
   isActive: z.boolean().optional(),
-});
+}).strict();
 
 const partnerPatchSchema = z.object({
   name: z.string().trim().min(2).max(120).optional(),
   ipWhitelist: z.string().trim().max(2000).optional(),
   isActive: z.boolean().optional(),
   rotateKey: z.boolean().optional(),
-});
+}).strict();
 
 const inquiryRoutingPatchSchema = z
   .object({
@@ -452,6 +453,7 @@ const inquiryRoutingPatchSchema = z
     routeAdminEmails: z.array(z.string().trim().email().max(254)).max(200).optional(),
     viewerAdminEmails: z.array(z.string().trim().email().max(254)).max(200).optional(),
   })
+  .strict()
   .refine((data) => Object.keys(data).length > 0, {
     message: "At least one inquiry routing field is required",
     path: [],
@@ -463,12 +465,12 @@ const partnerInviteSchema = z.object({
   adminNotes: z.string().trim().max(5000).optional().nullable(),
   expiresInDays: z.coerce.number().int().min(1).max(180).optional(),
   autoActivate: z.boolean().optional(),
-});
+}).strict();
 
 const partnerApproveSchema = z.object({
   action: z.enum(["APPROVE", "HOLD", "REVOKE"]),
   adminNotes: z.string().trim().max(5000).optional().nullable(),
-});
+}).strict();
 
 const partnerGatingOverrideSchema = z
   .object({
@@ -477,6 +479,7 @@ const partnerGatingOverrideSchema = z
     requestAllocation: partnerGateLevelSchema.optional(),
     directContact: partnerGateLevelSchema.optional(),
   })
+  .strict()
   .refine((payload) => Object.keys(payload).length > 0, {
     message: "At least one override field is required",
     path: [],
@@ -547,6 +550,69 @@ function normalizeChallengeMailboxCategory(raw: unknown): "SYSTEM" | "SUPPORT" |
     return value;
   }
   return "SYSTEM";
+}
+
+type AdminScopedResource = "challenge" | "prize" | "partner";
+
+const ADMIN_RESOURCE_SCOPE_KEYS: Record<AdminScopedResource, string[]> = {
+  challenge: ["challenges", "challengeIds", "managedChallengeIds"],
+  prize: ["prizes", "prizeIds", "managedPrizeIds"],
+  partner: ["partners", "partnerIds", "managedPartnerIds"],
+};
+
+function parseScopeSet(value: unknown): Set<number> | "ALL" | null {
+  if (value == null) return null;
+  if (value === "*" || value === "ALL") return "ALL";
+  if (!Array.isArray(value)) return null;
+  const out = new Set<number>();
+  for (const raw of value) {
+    const id = Number(raw);
+    if (Number.isInteger(id) && id > 0) out.add(id);
+  }
+  return out;
+}
+
+function resolveScopedIds(req: any, resource: AdminScopedResource): Set<number> | "ALL" | null {
+  const session = (req as any)?.session ?? {};
+  const scopes = session?.adminResourceScopes;
+  const keys = ADMIN_RESOURCE_SCOPE_KEYS[resource];
+
+  for (const key of keys) {
+    const scoped = parseScopeSet(scopes?.[key]);
+    if (scoped) return scoped;
+    const sessionScoped = parseScopeSet(session?.[key]);
+    if (sessionScoped) return sessionScoped;
+  }
+  return null;
+}
+
+function hasGlobalAdminScope(req: any): boolean {
+  const session = (req as any)?.session ?? {};
+  const scopes = session?.adminResourceScopes;
+  if (session?.isSuperAdmin === true) return true;
+  if (scopes?.all === true || scopes?.all === "*" || scopes?.all === "ALL") return true;
+  return false;
+}
+
+function enforceAdminResourceScope(
+  req: any,
+  res: any,
+  resource: AdminScopedResource,
+  resourceId: number,
+): boolean {
+  if (!Number.isInteger(resourceId) || resourceId <= 0) return false;
+  if (hasGlobalAdminScope(req)) return true;
+
+  const scopedIds = resolveScopedIds(req, resource);
+  if (!scopedIds) return true;
+  if (scopedIds === "ALL" || scopedIds.has(resourceId)) return true;
+
+  res.status(403).json({
+    message: "ADMIN_RESOURCE_SCOPE_FORBIDDEN",
+    resource,
+    resourceId,
+  });
+  return false;
 }
 
 async function notifyChallengeTrader(input: {
@@ -2485,6 +2551,7 @@ adminChallengesRouter.post("/:id/duplicate", async (req, res) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ message: "INVALID_CHALLENGE_ID" });
+    if (!enforceAdminResourceScope(req, res, "challenge", id)) return;
 
     const [base] = await db.select().from(challenges).where(eq(challenges.id, id)).limit(1);
     if (!base) return res.status(404).json({ message: "CHALLENGE_NOT_FOUND" });
@@ -2537,6 +2604,7 @@ adminChallengesRouter.put("/:id/archive", async (req, res) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ message: "INVALID_CHALLENGE_ID" });
+    if (!enforceAdminResourceScope(req, res, "challenge", id)) return;
 
     const [updated] = await db
       .update(challenges)
@@ -2563,6 +2631,7 @@ adminChallengesRouter.get("/:id/phases", async (req, res) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ message: "INVALID_CHALLENGE_ID" });
+    if (!enforceAdminResourceScope(req, res, "challenge", id)) return;
     const [challengeRow] = await db.select({ id: challenges.id }).from(challenges).where(eq(challenges.id, id)).limit(1);
     if (!challengeRow) return res.status(404).json({ message: "CHALLENGE_NOT_FOUND" });
     const rows = await db
@@ -2581,6 +2650,7 @@ adminChallengesRouter.post("/:id/phases", async (req, res) => {
   try {
     const challengeId = Number(req.params.id);
     if (!Number.isInteger(challengeId) || challengeId <= 0) return res.status(400).json({ message: "INVALID_CHALLENGE_ID" });
+    if (!enforceAdminResourceScope(req, res, "challenge", challengeId)) return;
     const parsed = challengePhaseUpsertSchema.safeParse(req.body ?? {});
     if (!parsed.success) return res.status(400).json({ message: "INVALID_PAYLOAD", errors: parsed.error.flatten() });
 
@@ -2659,6 +2729,7 @@ adminChallengesRouter.delete("/:id/phases", async (req, res) => {
     if (!Number.isInteger(challengeId) || challengeId <= 0) {
       return res.status(400).json({ message: "INVALID_CHALLENGE_ID" });
     }
+    if (!enforceAdminResourceScope(req, res, "challenge", challengeId)) return;
 
     const [challengeRow] = await db.select({ id: challenges.id }).from(challenges).where(eq(challenges.id, challengeId)).limit(1);
     if (!challengeRow) return res.status(404).json({ message: "CHALLENGE_NOT_FOUND" });
@@ -2680,6 +2751,7 @@ adminChallengesRouter.delete("/:id/phases/:phaseNumber", async (req, res) => {
     const phaseNumber = Number(req.params.phaseNumber);
     if (!Number.isInteger(challengeId) || challengeId <= 0) return res.status(400).json({ message: "INVALID_CHALLENGE_ID" });
     if (!Number.isInteger(phaseNumber) || phaseNumber <= 0) return res.status(400).json({ message: "INVALID_PHASE_NUMBER" });
+    if (!enforceAdminResourceScope(req, res, "challenge", challengeId)) return;
 
     const [deleted] = await db
       .delete(challengePhases)
@@ -3921,6 +3993,7 @@ adminChallengesRouter.put("/prizes/:id/approve", async (req, res) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ message: "INVALID_PRIZE_ID" });
+    if (!enforceAdminResourceScope(req, res, "prize", id)) return;
     if (!enforceChallengeAdminActionRateLimit(req, res, "PRIZE_APPROVE", 40)) return;
     const parsed = challengePrizeApproveSchema.safeParse(req.body ?? {});
     if (!parsed.success) return res.status(400).json({ message: "INVALID_PAYLOAD", errors: parsed.error.flatten() });
@@ -3930,6 +4003,7 @@ adminChallengesRouter.put("/prizes/:id/approve", async (req, res) => {
     const ts = nowSec();
     const [existing] = await db.select().from(challengePrizeAwards).where(eq(challengePrizeAwards.id, id)).limit(1);
     if (!existing) return res.status(404).json({ message: "PRIZE_NOT_FOUND" });
+    if (!enforceAdminResourceScope(req, res, "challenge", Number(existing.challengeId))) return;
 
     const prevHash = existing.eventHash ?? null;
     const eventPayload = JSON.stringify({
@@ -3970,6 +4044,7 @@ adminChallengesRouter.get("/:id", async (req, res) => {
     if (!Number.isInteger(id) || id <= 0) {
       return res.status(400).json({ message: "INVALID_CHALLENGE_ID" });
     }
+    if (!enforceAdminResourceScope(req, res, "challenge", id)) return;
 
     const [challengeRow] = await db.select().from(challenges).where(eq(challenges.id, id)).limit(1);
     if (!challengeRow) {
@@ -4044,6 +4119,7 @@ adminChallengesRouter.put("/:id", async (req, res) => {
     if (!Number.isInteger(id) || id <= 0) {
       return res.status(400).json({ message: "INVALID_CHALLENGE_ID" });
     }
+    if (!enforceAdminResourceScope(req, res, "challenge", id)) return;
 
     const parsed = challengeUpsertSchema.partial().safeParse(req.body);
     if (!parsed.success) {
@@ -4181,6 +4257,7 @@ adminChallengesRouter.put("/:id/phases", async (req, res) => {
     if (!Number.isInteger(id) || id <= 0) {
       return res.status(400).json({ message: "INVALID_CHALLENGE_ID" });
     }
+    if (!enforceAdminResourceScope(req, res, "challenge", id)) return;
 
     const parsed = z
       .object({
@@ -4206,6 +4283,7 @@ adminChallengesRouter.put("/:id/phases", async (req, res) => {
           .min(1)
           .max(3),
       })
+      .strict()
       .safeParse(req.body ?? {});
     if (!parsed.success) {
       return res.status(400).json({ message: "INVALID_PAYLOAD", errors: parsed.error.flatten() });
@@ -4320,6 +4398,7 @@ adminChallengesRouter.delete("/:id", async (req, res) => {
     if (!Number.isInteger(id) || id <= 0) {
       return res.status(400).json({ message: "INVALID_CHALLENGE_ID" });
     }
+    if (!enforceAdminResourceScope(req, res, "challenge", id)) return;
 
     const [deleted] = await db.delete(challenges).where(eq(challenges.id, id)).returning({ id: challenges.id });
     if (!deleted) {
@@ -4574,14 +4653,22 @@ adminPartnersRouter.post("/invite", async (req, res) => {
       });
 
     const deepLink = buildPartnerInviteDeepLink({ username, token: inviteToken });
-    const emailSend = await sendPartnerInviteEmail({
-      to: contactEmail,
-      username,
-      tempPassword,
-      apiKey: apiKey.raw,
-      deepLink,
-      expiresInDays,
-    });
+    let emailSend: { status: (typeof PARTNER_INVITE_EMAIL_STATUSES)[number]; messageId?: string; detail?: string };
+    try {
+      emailSend = await sendPartnerInviteEmail({
+        to: contactEmail,
+        username,
+        tempPassword,
+        apiKey: apiKey.raw,
+        deepLink,
+        expiresInDays,
+      });
+    } catch (error: any) {
+      emailSend = {
+        status: "FAILED",
+        detail: String(error?.message || "INVITE_EMAIL_SEND_FAILED"),
+      };
+    }
 
     await db
       .update(partnerInvites)
@@ -4636,6 +4723,7 @@ adminPartnersRouter.get("/:id/onboarding", async (req, res) => {
     if (!Number.isInteger(id) || id <= 0) {
       return res.status(400).json({ message: "INVALID_PARTNER_ID" });
     }
+    if (!enforceAdminResourceScope(req, res, "partner", id)) return;
 
     const [partnerRow] = await db
       .select({
@@ -4704,6 +4792,7 @@ adminPartnersRouter.put("/:id/approve", async (req, res) => {
     if (!Number.isInteger(id) || id <= 0) {
       return res.status(400).json({ message: "INVALID_PARTNER_ID" });
     }
+    if (!enforceAdminResourceScope(req, res, "partner", id)) return;
 
     const parsed = partnerApproveSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -4762,6 +4851,7 @@ adminPartnersRouter.put("/:id/gating-overrides", async (req, res) => {
     if (!Number.isInteger(id) || id <= 0) {
       return res.status(400).json({ message: "INVALID_PARTNER_ID" });
     }
+    if (!enforceAdminResourceScope(req, res, "partner", id)) return;
 
     const parsed = partnerGatingOverrideSchema.safeParse(req.body ?? {});
     if (!parsed.success) {
@@ -4812,6 +4902,7 @@ adminPartnersRouter.put("/:id", async (req, res) => {
     if (!Number.isInteger(id) || id <= 0) {
       return res.status(400).json({ message: "INVALID_PARTNER_ID" });
     }
+    if (!enforceAdminResourceScope(req, res, "partner", id)) return;
 
     const parsed = partnerPatchSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -4889,6 +4980,7 @@ adminPartnersRouter.delete("/:id", async (req, res) => {
     if (!Number.isInteger(id) || id <= 0) {
       return res.status(400).json({ message: "INVALID_PARTNER_ID" });
     }
+    if (!enforceAdminResourceScope(req, res, "partner", id)) return;
 
     const [updated] = await db
       .update(partners)

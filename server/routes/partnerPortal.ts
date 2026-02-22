@@ -26,7 +26,7 @@ import { listPartnerDataRoomCandidates } from "../scout/scoutService";
 import { forwardPartnerInquiryToAdmins } from "../partner/inquiryBridge";
 import { getCommunicationSettings } from "../services/messaging";
 import { resolvePartnerInquiryRouting } from "../partner/inquiryRouting";
-import { appendIdentityAudit } from "../services/identityAudit";
+import { appendIdentityAudit, appendIdentityAuditAwaitable } from "../services/identityAudit";
 import { buildAuditContext } from "../lib/auditContext";
 import {
   PARTNER_GATE_KEYS,
@@ -283,7 +283,8 @@ const optionalIdentifier = (max = 80) =>
     return normalized.length ? normalized : null;
   }, z.string().max(max).regex(GENERIC_IDENTIFIER_REGEX, "IDENTIFIER_INVALID").nullable());
 
-const partnerPhoneSchema = z.object({
+const partnerPhoneSchema = z
+  .object({
   label: optionalText(80).optional().default(null),
   countryIso2: iso2RequiredSchema,
   numberE164: z.string().trim().regex(E164_PHONE_REGEX, "PHONE_E164_INVALID"),
@@ -291,9 +292,11 @@ const partnerPhoneSchema = z.object({
     const normalized = String(value ?? "").trim();
     return normalized.length ? normalized : null;
   }, z.string().regex(PHONE_EXTENSION_PATTERN, "PHONE_EXTENSION_INVALID").nullable()).optional().default(null),
-});
+  })
+  .strict();
 
-const partnerAddressSchema = z.object({
+const partnerAddressSchema = z
+  .object({
   kind: z.enum(PARTNER_ADDRESS_KIND_OPTIONS).default("HEAD_OFFICE"),
   line1: z.string().trim().min(1).max(160),
   line2: optionalText(160).optional().default(null),
@@ -304,9 +307,11 @@ const partnerAddressSchema = z.object({
     return normalized.length ? normalized : null;
   }, z.string().max(20).nullable()).optional().default(null),
   countryIso2: iso2RequiredSchema,
-});
+  })
+  .strict();
 
-const partnerPointOfContactSchema = z.object({
+const partnerPointOfContactSchema = z
+  .object({
   fullName: z.string().trim().min(1).max(120),
   title: optionalText(120).optional().default(null),
   department: optionalText(120).optional().default(null),
@@ -319,9 +324,11 @@ const partnerPointOfContactSchema = z.object({
   location: optionalText(120).optional().default(null),
   preferredChannel: z.enum(PARTNER_CONTACT_CHANNEL_OPTIONS).nullable().optional().default(null),
   isPrimary: z.boolean().optional().default(false),
-});
+  })
+  .strict();
 
-const partnerInstitutionProfileSchema = z.object({
+const partnerInstitutionProfileSchema = z
+  .object({
   legalEntityName: optionalText(160).optional().default(null),
   tradingName: optionalText(160).optional().default(null),
   entityType: optionalText(80).optional().default(null),
@@ -360,6 +367,7 @@ const partnerInstitutionProfileSchema = z.object({
       legalCounsel: optionalText(120).optional().default(null),
       bankingPartner: optionalText(120).optional().default(null),
     })
+    .strict()
     .default({}),
   regulatory: z
     .object({
@@ -376,6 +384,7 @@ const partnerInstitutionProfileSchema = z.object({
         return normalized.length ? normalized : null;
       }, z.string().regex(LEI_CODE_REGEX, "LEI_INVALID").nullable()).optional().default(null),
     })
+    .strict()
     .default({}),
   operations: z
     .object({
@@ -384,29 +393,37 @@ const partnerInstitutionProfileSchema = z.object({
       businessDays: optionalText(64).optional().default(null),
       businessHours: optionalText(64).optional().default(null),
     })
+    .strict()
     .default({}),
-});
+  })
+  .strict();
 
-const partnerProfileSchema = z.object({
+const partnerProfileSchema = z
+  .object({
   fundName: z.string().trim().min(2).max(120),
   fundLogoUrl: z.string().trim().max(1000).optional().nullable(),
   aumRange: z.string().trim().min(1).max(80),
   hqLocation: z.string().trim().max(120).optional().nullable(),
   strategyTags: z.array(z.string().trim().min(1).max(60)).max(25).default([]),
   institutionProfile: partnerInstitutionProfileSchema.optional(),
-});
+  })
+  .strict();
 
-const partnerLegalSchema = z.object({
+const partnerLegalSchema = z
+  .object({
   kybDocUrl: z.string().trim().min(1).max(1000),
   agreedToAllocation: z.boolean(),
   agreedToNda: z.boolean(),
-});
+  })
+  .strict();
 
-const partnerSimulationPreviewSchema = z.object({
+const partnerSimulationPreviewSchema = z
+  .object({
   userHashId: z.string().trim().min(6).max(64),
   notionalUsd: z.number().positive().max(1_000_000_000),
   horizonDays: z.number().int().min(7).max(365).optional(),
-});
+  })
+  .strict();
 
 function safeJsonParseObject(raw: unknown): Record<string, unknown> {
   if (raw && typeof raw === "object" && !Array.isArray(raw)) return raw as Record<string, unknown>;
@@ -669,21 +686,39 @@ partnerPortalRouter.post("/onboarding/legal", async (req, res) => {
     }
 
     const ts = nowSec();
-    await db
-      .update(partners)
-      .set({
-        kybDocUrl: parsed.data.kybDocUrl,
-        agreementsSignedAt: ts,
-        contactAccessRequestedAt: ts,
-        inviteStatus: state.inviteStatus === "INVITED" ? "ACTIVE" : state.inviteStatus,
-        onboardingStep: state.onboardingStep === "COMPLETED" ? "COMPLETED" : "WAITING_APPROVAL",
-        updatedAt: ts,
-      })
-      .where(eq(partners.id, Number(partner.id)));
+    const auditCtx = buildAuditContext(req);
+    await db.transaction(async (tx) => {
+      await tx
+        .update(partners)
+        .set({
+          kybDocUrl: parsed.data.kybDocUrl,
+          agreementsSignedAt: ts,
+          contactAccessRequestedAt: ts,
+          inviteStatus: state.inviteStatus === "INVITED" ? "ACTIVE" : state.inviteStatus,
+          onboardingStep: state.onboardingStep === "COMPLETED" ? "COMPLETED" : "WAITING_APPROVAL",
+          updatedAt: ts,
+        })
+        .where(eq(partners.id, Number(partner.id)));
 
-    await appendPartnerReadAudit(req, "PARTNER_ONBOARDING_LEGAL_SUBMIT", {
-      partnerId: Number(partner.id),
-      kybDocUrl: parsed.data.kybDocUrl,
+      await appendIdentityAuditAwaitable(
+        {
+          userId: null,
+          category: "RECRUITMENT",
+          type: "PARTNER_ONBOARDING_LEGAL_SUBMIT",
+          actorType: "SYSTEM",
+          actorUserId: null,
+          sessionId: auditCtx.sessionId,
+          correlationId: auditCtx.correlationId,
+          ip: auditCtx.ip,
+          userAgent: auditCtx.userAgent,
+          data: {
+            partnerId: Number(partner.id),
+            partnerName: state.partnerName,
+            kybDocUrl: parsed.data.kybDocUrl,
+          },
+        },
+        tx,
+      );
     });
 
     const nextState = await resolvePartnerOnboardingState(Number(partner.id));
@@ -1308,7 +1343,16 @@ partnerPortalRouter.post("/allocations", requirePartnerGate("requestAllocation")
         createdAt: ts,
         updatedAt: ts,
       })
-      .returning();
+      .returning({
+        id: partnerAllocations.id,
+        userHashId: partnerAllocations.userHashId,
+        capitalUsd: partnerAllocations.capitalUsd,
+        shadowStopPct: partnerAllocations.shadowStopPct,
+        status: partnerAllocations.status,
+        currentPnlUsd: partnerAllocations.currentPnlUsd,
+        createdAt: partnerAllocations.createdAt,
+        updatedAt: partnerAllocations.updatedAt,
+      });
 
     await appendPartnerReadAudit(req, "PARTNER_ALLOCATION_CREATE", {
       allocationId: created.id,
@@ -1356,7 +1400,16 @@ partnerPortalRouter.put("/allocations/:id", requirePartnerGate("requestAllocatio
         updatedAt: nowSec(),
       })
       .where(and(eq(partnerAllocations.id, id), eq(partnerAllocations.partnerId, Number(partner.id))))
-      .returning();
+      .returning({
+        id: partnerAllocations.id,
+        userHashId: partnerAllocations.userHashId,
+        capitalUsd: partnerAllocations.capitalUsd,
+        shadowStopPct: partnerAllocations.shadowStopPct,
+        status: partnerAllocations.status,
+        currentPnlUsd: partnerAllocations.currentPnlUsd,
+        createdAt: partnerAllocations.createdAt,
+        updatedAt: partnerAllocations.updatedAt,
+      });
 
     if (!updated) return res.status(404).json({ message: "ALLOCATION_NOT_FOUND" });
 
@@ -1565,7 +1618,18 @@ partnerPortalRouter.post("/inquiries", async (req, res) => {
         createdAt: ts,
         updatedAt: ts,
       })
-      .returning();
+      .returning({
+        id: partnerInquiries.id,
+        userHashId: partnerInquiries.userHashId,
+        senderName: partnerInquiries.senderName,
+        senderEmail: partnerInquiries.senderEmail,
+        subject: partnerInquiries.subject,
+        body: partnerInquiries.body,
+        status: partnerInquiries.status,
+        mailboxThreadId: partnerInquiries.mailboxThreadId,
+        createdAt: partnerInquiries.createdAt,
+        updatedAt: partnerInquiries.updatedAt,
+      });
 
     await appendPartnerReadAudit(req, "PARTNER_INQUIRY_CREATE", {
       inquiryId: created.id,

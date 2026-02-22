@@ -38,63 +38,69 @@ export type IdentityAuditEvent = {
   data?: Record<string, any> | null;
 };
 
+async function appendIdentityAuditCore(executor: any, evt: IdentityAuditEvent): Promise<void> {
+  const atMs = evt.at ?? Date.now();
+  const atSec = Math.floor(atMs / 1000);
+
+  const [lastRow] = await executor
+    .select({ eventHash: identityAudit.eventHash })
+    .from(identityAudit)
+    .where(evt.userId == null ? isNull(identityAudit.userId) : eq(identityAudit.userId, evt.userId))
+    .orderBy(desc(identityAudit.id))
+    .limit(1);
+
+  const prevHash = lastRow?.eventHash ?? null;
+
+  const payload = {
+    at: atSec,
+    userId: evt.userId ?? null,
+    email: evt.email ?? null,
+    username: evt.username ?? null,
+    category: evt.category,
+    type: evt.type,
+    title: evt.title ?? null,
+    description: evt.description ?? null,
+    ip: evt.ip ?? null,
+    userAgent: evt.userAgent ?? null,
+    actorAdminId: evt.actorAdminId ?? null,
+    actorType: evt.actorType ?? null,
+    actorUserId: evt.actorUserId ?? null,
+    sessionId: evt.sessionId ?? null,
+    correlationId: evt.correlationId ?? null,
+    data: evt.data ?? null,
+    prevHash,
+  };
+
+  const eventHash = sha256Hex(`${prevHash ?? ""}|${stableStringify(payload)}`);
+
+  await executor.insert(identityAudit).values({
+    at: atSec,
+    userId: evt.userId ?? null,
+    email: evt.email ?? null,
+    username: evt.username ?? null,
+    category: evt.category,
+    type: evt.type,
+    title: evt.title ?? null,
+    description: evt.description ?? null,
+    ip: evt.ip ?? null,
+    userAgent: evt.userAgent ?? null,
+    actorAdminId: evt.actorAdminId ?? null,
+    actorType: evt.actorType ?? null,
+    actorUserId: evt.actorUserId ?? null,
+    sessionId: evt.sessionId ?? null,
+    correlationId: evt.correlationId ?? null,
+    dataJson: evt.data ? JSON.stringify(evt.data) : null,
+    prevHash,
+    eventHash,
+  });
+}
+
+export async function appendIdentityAuditAwaitable(evt: IdentityAuditEvent, executor: any = db): Promise<void> {
+  await appendIdentityAuditCore(executor, evt);
+}
+
 export function appendIdentityAudit(evt: IdentityAuditEvent): void {
-  void (async () => {
-    const atMs = evt.at ?? Date.now();
-    const atSec = Math.floor(atMs / 1000);
-
-    const [lastRow] = await db
-      .select({ eventHash: identityAudit.eventHash })
-      .from(identityAudit)
-      .where(evt.userId == null ? isNull(identityAudit.userId) : eq(identityAudit.userId, evt.userId))
-      .orderBy(desc(identityAudit.id))
-      .limit(1);
-
-    const prevHash = lastRow?.eventHash ?? null;
-
-    const payload = {
-      at: atSec,
-      userId: evt.userId ?? null,
-      email: evt.email ?? null,
-      username: evt.username ?? null,
-      category: evt.category,
-      type: evt.type,
-      title: evt.title ?? null,
-      description: evt.description ?? null,
-      ip: evt.ip ?? null,
-      userAgent: evt.userAgent ?? null,
-      actorAdminId: evt.actorAdminId ?? null,
-      actorType: evt.actorType ?? null,
-      actorUserId: evt.actorUserId ?? null,
-      sessionId: evt.sessionId ?? null,
-      correlationId: evt.correlationId ?? null,
-      data: evt.data ?? null,
-      prevHash,
-    };
-
-    const eventHash = sha256Hex(`${prevHash ?? ""}|${stableStringify(payload)}`);
-
-    await db.insert(identityAudit).values({
-      at: atSec,
-      userId: evt.userId ?? null,
-      email: evt.email ?? null,
-      username: evt.username ?? null,
-      category: evt.category,
-      type: evt.type,
-      title: evt.title ?? null,
-      description: evt.description ?? null,
-      ip: evt.ip ?? null,
-      userAgent: evt.userAgent ?? null,
-      actorAdminId: evt.actorAdminId ?? null,
-      actorType: evt.actorType ?? null,
-      actorUserId: evt.actorUserId ?? null,
-      sessionId: evt.sessionId ?? null,
-      correlationId: evt.correlationId ?? null,
-      dataJson: evt.data ? JSON.stringify(evt.data) : null,
-      prevHash,
-      eventHash,
-    });
-  })().catch((err) => {
+  void appendIdentityAuditCore(db, evt).catch((err) => {
     console.error("[IdentityAudit] Failed to append audit event:", err);
   });
 }

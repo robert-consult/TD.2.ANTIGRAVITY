@@ -59,6 +59,7 @@ import { sendWelcomeMailboxMessage } from "../services/messaging";
 import { ensureRequestAuthenticated } from "../middleware/auth";
 import { computeEmailGracePeriod } from "../utils/computeEmailGracePeriod";
 import { maybeRecalcAccountForCurrentUser } from "../services/currentUserRecalc";
+import { applyAdminScopeSession } from "../security/adminScopeSession";
 import crypto from "crypto";
 
 interface AuthCoreDeps {
@@ -222,6 +223,7 @@ app.post("/api/auth/login", async (req: Request, res: Response) => {
     req.session.userId = user.id;
     req.session.email = user.email;
     req.session.isAdmin = user.isAdmin;
+    applyAdminScopeSession(req.session, user);
     req.session.userCountryIso2 = userCountryIso2;
     req.session.ipCountryIso2 = ipCountryIso2;
     req.session.cookie.maxAge = rememberMeConfig.sessionCookieMaxAgeHours * 60 * 60 * 1000;
@@ -717,6 +719,7 @@ app.post("/api/auth/register", async (req: Request, res: Response) => {
     req.session.userId = user.id;
     req.session.email = user.email;
     req.session.isAdmin = Boolean(user.isAdmin);
+    applyAdminScopeSession(req.session, user);
     req.session.userCountryIso2 = user.countryIso2 || undefined;
     req.session.ipCountryIso2 = ipCountryIso2;
     const rememberMeConfig = await getRememberMeConfig();

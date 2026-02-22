@@ -1,6 +1,5 @@
 import { dbClient, db } from "@db";
 import { scoutMetricsSnapshot } from "@shared/schema";
-import { sql } from "drizzle-orm";
 import { classifyStyleCluster, type StyleCluster } from "./styleClassifier";
 
 type CandidateRow = {
@@ -14,6 +13,21 @@ type CandidateRow = {
   avg_mae: number | null;
   avg_mfe: number | null;
 };
+
+const SCOUT_METRICS_QUERY_TIMEOUT_MS = (() => {
+  const raw = Number(process.env.SCOUT_METRICS_QUERY_TIMEOUT_MS ?? 12_000);
+  if (!Number.isFinite(raw)) return 12_000;
+  return Math.max(2_000, Math.min(120_000, Math.trunc(raw)));
+})();
+
+async function queryWithTimeout<T = any>(text: string, values: unknown[]): Promise<T[]> {
+  const out = (await (dbClient as any).query({
+    text,
+    values,
+    statement_timeout: SCOUT_METRICS_QUERY_TIMEOUT_MS,
+  })) as { rows?: T[] };
+  return (out.rows ?? []) as T[];
+}
 
 function mean(values: number[]): number {
   if (!values.length) return 0;
@@ -159,9 +173,12 @@ export async function runCalcScoutMetricsPass(options?: {
     LIMIT $4::int
   `;
 
-  const candidateRows = (
-    await dbClient.query(candidateSql, [cutoffSec, minTrades, targetUserId, maxUsers])
-  ).rows as CandidateRow[];
+  const candidateRows = await queryWithTimeout<CandidateRow>(candidateSql, [
+    cutoffSec,
+    minTrades,
+    targetUserId,
+    maxUsers,
+  ]);
   if (!candidateRows.length) {
     return { processed: 0, updatedAt: nowSec };
   }
@@ -176,9 +193,8 @@ export async function runCalcScoutMetricsPass(options?: {
     const profitFactor = grossLoss > 0 ? grossProfit / grossLoss : grossProfit > 0 ? 99 : null;
     const avgHoldSec = candidate.avg_hold_sec == null ? null : safeNumber(candidate.avg_hold_sec);
 
-    const dailyRows = (
-      await dbClient.query(
-        `
+    const dailyRows = await queryWithTimeout<{ day_key: string; pnl: number }>(
+      `
           WITH closed AS (
             SELECT
               COALESCE(
@@ -203,9 +219,8 @@ export async function runCalcScoutMetricsPass(options?: {
           GROUP BY day_key
           ORDER BY day_key ASC
         `,
-        [userId, cutoffSec],
-      )
-    ).rows as Array<{ day_key: string; pnl: number }>;
+      [userId, cutoffSec],
+    );
 
     const dailyReturns = dailyRows.map((r) => safeNumber(r.pnl) / startingEquity);
     const avgReturn = mean(dailyReturns);

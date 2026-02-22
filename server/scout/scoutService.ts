@@ -1,4 +1,5 @@
-import { dbClient } from "@db";
+import { db } from "@db";
+import { sql } from "drizzle-orm";
 import { anonymizeUserId } from "../partner/anonymizeUser";
 
 export type AdminScoutCandidateQuery = {
@@ -82,6 +83,20 @@ type PagedOut<T> = {
   rows: T[];
 };
 
+const SCOUT_QUERY_TIMEOUT_MS = (() => {
+  const raw = Number(process.env.SCOUT_QUERY_TIMEOUT_MS ?? 8_000);
+  if (!Number.isFinite(raw)) return 8_000;
+  return Math.max(1_000, Math.min(60_000, Math.trunc(raw)));
+})();
+
+async function runScopedScoutQueryRows<T = any>(query: any): Promise<T[]> {
+  return db.transaction(async (tx) => {
+    await tx.execute(sql.raw(`SET LOCAL statement_timeout = ${SCOUT_QUERY_TIMEOUT_MS}`));
+    const out = await tx.execute(query);
+    return ((out as any)?.rows ?? []) as T[];
+  });
+}
+
 function netProfitSqlAlias(alias: string): string {
   return `COALESCE(
     ${alias}.net_profit_usd::numeric,
@@ -105,8 +120,8 @@ function toNum(value: unknown, fallback = 0): number {
 }
 
 export async function listAdminScoutCandidates(params: AdminScoutCandidateQuery): Promise<PagedOut<AdminScoutCandidateResult>> {
-  const netProfitSql = netProfitSqlAlias("t");
-  const sqlText = `
+  const netProfitSql = sql.raw(netProfitSqlAlias("t"));
+  const rows = await runScopedScoutQueryRows<any>(sql`
     WITH trade_rollup AS (
       SELECT
         t.user_id,
@@ -116,7 +131,7 @@ export async function listAdminScoutCandidates(params: AdminScoutCandidateQuery)
       FROM trades t
       WHERE t.status = 'CLOSED'
         AND t.closed_at IS NOT NULL
-        AND t.closed_at >= $8::int
+        AND t.closed_at >= ${params.cutoffSec}::int
       GROUP BY t.user_id
     )
     SELECT
@@ -155,29 +170,21 @@ export async function listAdminScoutCandidates(params: AdminScoutCandidateQuery)
     LEFT JOIN recruiting_pipeline rp ON rp.user_id = u.id
     LEFT JOIN scout_metrics_snapshot sm ON sm.user_id = u.id
     LEFT JOIN trade_rollup tr ON tr.user_id = u.id
-    LEFT JOIN scout_watchlists w ON w.user_id = u.id AND w.admin_id = $1::int
+    LEFT JOIN scout_watchlists w ON w.user_id = u.id AND w.admin_id = ${params.adminId}::int
     WHERE u.is_admin = false
       AND u.is_deleted = false
-      AND ($2::text IS NULL OR u.email ILIKE $2 OR u.username ILIKE $2 OR COALESCE(u.name, '') ILIKE $2)
-      AND ($3::text IS NULL OR COALESCE(rp.stage, 'DETECTED') = $3::text)
-      AND ($4::float8 IS NULL OR COALESCE(sm.sharpe_ratio, -1e9) >= $4::float8)
-      AND ($5::float8 IS NULL OR COALESCE(sm.composite_score, -1e9) >= $5::float8)
+      AND (
+        ${params.q}::text IS NULL
+        OR u.email ILIKE ${params.q}
+        OR u.username ILIKE ${params.q}
+        OR COALESCE(u.name, '') ILIKE ${params.q}
+      )
+      AND (${params.stage}::text IS NULL OR COALESCE(rp.stage, 'DETECTED') = ${params.stage}::text)
+      AND (${params.minSharpe}::float8 IS NULL OR COALESCE(sm.sharpe_ratio, -1e9) >= ${params.minSharpe}::float8)
+      AND (${params.minScore}::float8 IS NULL OR COALESCE(sm.composite_score, -1e9) >= ${params.minScore}::float8)
     ORDER BY COALESCE(sm.composite_score, -1e9) DESC, u.id DESC
-    LIMIT $6::int OFFSET $7::int
-  `;
-
-  const rows = (
-    await dbClient.query(sqlText, [
-      params.adminId,
-      params.q,
-      params.stage,
-      params.minSharpe,
-      params.minScore,
-      params.limit,
-      params.offset,
-      params.cutoffSec,
-    ])
-  ).rows as any[];
+    LIMIT ${params.limit}::int OFFSET ${params.offset}::int
+  `);
 
   const total = rows.length ? Number(rows[0].total_count ?? 0) : 0;
   const hasMore = params.offset + rows.length < total;
@@ -226,8 +233,8 @@ export async function listAdminScoutCandidates(params: AdminScoutCandidateQuery)
 }
 
 export async function listPartnerDataRoomCandidates(params: PartnerDataRoomQuery): Promise<PagedOut<PartnerDataRoomResult>> {
-  const netProfitSql = netProfitSqlAlias("t");
-  const sqlText = `
+  const netProfitSql = sql.raw(netProfitSqlAlias("t"));
+  const rows = await runScopedScoutQueryRows<any>(sql`
     WITH eligible AS (
       SELECT rp.user_id
       FROM recruiting_pipeline rp
@@ -250,7 +257,7 @@ export async function listPartnerDataRoomCandidates(params: PartnerDataRoomQuery
       INNER JOIN eligible e ON e.user_id = t.user_id
       WHERE t.status = 'CLOSED'
         AND t.closed_at IS NOT NULL
-        AND t.closed_at >= $5::int
+        AND t.closed_at >= ${params.cutoffSec}::int
       GROUP BY t.user_id
     )
     SELECT
@@ -274,15 +281,11 @@ export async function listPartnerDataRoomCandidates(params: PartnerDataRoomQuery
     FROM eligible e
     LEFT JOIN scout_metrics_snapshot sm ON sm.user_id = e.user_id
     LEFT JOIN trade_rollup tr ON tr.user_id = e.user_id
-    WHERE ($1::float8 IS NULL OR COALESCE(sm.sharpe_ratio, -1e9) >= $1::float8)
-      AND ($2::float8 IS NULL OR COALESCE(sm.composite_score, -1e9) >= $2::float8)
+    WHERE (${params.minSharpe}::float8 IS NULL OR COALESCE(sm.sharpe_ratio, -1e9) >= ${params.minSharpe}::float8)
+      AND (${params.minScore}::float8 IS NULL OR COALESCE(sm.composite_score, -1e9) >= ${params.minScore}::float8)
     ORDER BY COALESCE(sm.composite_score, -1e9) DESC, e.user_id DESC
-    LIMIT $3::int OFFSET $4::int
-  `;
-
-  const rows = (
-    await dbClient.query(sqlText, [params.minSharpe, params.minScore, params.limit, params.offset, params.cutoffSec])
-  ).rows as any[];
+    LIMIT ${params.limit}::int OFFSET ${params.offset}::int
+  `);
 
   const total = rows.length ? Number(rows[0].total_count ?? 0) : 0;
   const hasMore = params.offset + rows.length < total;

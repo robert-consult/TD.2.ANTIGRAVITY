@@ -3,6 +3,7 @@ import { runCalcScoutMetricsPass } from "../scout/calcScoutMetrics";
 let started = false;
 let running = false;
 let handle: ReturnType<typeof setInterval> | null = null;
+let startupHandle: ReturnType<typeof setTimeout> | null = null;
 
 function parsePositiveInt(name: string, fallback: number): number {
   const raw = String(process.env[name] ?? "").trim();
@@ -39,6 +40,12 @@ export async function runScoutMetricsPassNow() {
   }
 }
 
+function queueScoutMetricsPass(source: "startup" | "interval"): void {
+  void runScoutMetricsPassNow().catch((error) => {
+    console.error(`[ScoutMetrics] ${source} invocation failed:`, error);
+  });
+}
+
 export function startScoutMetricsCron() {
   if (started) return;
   started = true;
@@ -50,17 +57,22 @@ export function startScoutMetricsCron() {
   const intervalMs = INTERVAL_HOURS * 3600 * 1000;
   console.log(`[ScoutMetrics] Starting scheduler: every ${INTERVAL_HOURS}h (delay ${START_DELAY_SEC}s)`);
 
-  setTimeout(() => {
-    void runScoutMetricsPassNow();
+  startupHandle = setTimeout(() => {
+    queueScoutMetricsPass("startup");
   }, START_DELAY_SEC * 1000);
+  (startupHandle as any)?.unref?.();
 
   handle = setInterval(() => {
-    void runScoutMetricsPassNow();
+    queueScoutMetricsPass("interval");
   }, intervalMs);
   (handle as any)?.unref?.();
 }
 
 export function stopScoutMetricsCron() {
+  if (startupHandle) {
+    clearTimeout(startupHandle);
+    startupHandle = null;
+  }
   if (handle) {
     clearInterval(handle);
     handle = null;

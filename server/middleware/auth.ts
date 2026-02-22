@@ -27,6 +27,7 @@ import {
   verifyRememberMeToken,
 } from "../services/rememberMe";
 import { appendIdentityAudit } from "../services/identityAudit";
+import { applyAdminScopeSession } from "../security/adminScopeSession";
 
 function normalizeIso2(value: unknown): string | undefined {
   const raw = String(value ?? "").trim().toUpperCase();
@@ -279,6 +280,7 @@ async function tryRestoreSessionFromRememberMe(
   req.session.userId = user.id;
   req.session.email = user.email;
   req.session.isAdmin = Boolean(user.isAdmin);
+  applyAdminScopeSession(req.session, user);
   req.session.userCountryIso2 = userCountryIso2;
   req.session.ipCountryIso2 = ipCountryIso2;
   req.session.cookie.maxAge = config.sessionCookieMaxAgeHours * 60 * 60 * 1000;
@@ -507,6 +509,8 @@ export function impersonationGuard(req: Request, res: Response, next: NextFuncti
         req.session.userId = realAdminId;
         req.session.email = realAdminEmail;
         req.session.isAdmin = true;
+        req.session.isSuperAdmin = Boolean(req.session.realAdminIsSuperAdmin);
+        req.session.adminResourceScopes = req.session.realAdminResourceScopes ?? { all: "ALL" };
       } else {
         // Cannot restore - destroy session for safety
         req.session.destroy(() => {});
@@ -520,6 +524,8 @@ export function impersonationGuard(req: Request, res: Response, next: NextFuncti
       req.session.isImpersonating = false;
       req.session.realAdminId = undefined;
       req.session.realAdminEmail = undefined;
+      req.session.realAdminIsSuperAdmin = undefined;
+      req.session.realAdminResourceScopes = undefined;
       req.session.impersonatedUserId = undefined;
       req.session.impersonationStartedAt = undefined;
       

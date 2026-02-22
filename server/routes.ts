@@ -50,12 +50,16 @@ declare module "express-session" {
     userId: number;
     email: string;
     isAdmin: boolean;
+    isSuperAdmin?: boolean;
+    adminResourceScopes?: Record<string, unknown>;
     csrfToken?: string;
     userCountryIso2?: string;
     ipCountryIso2?: string;
     isImpersonating?: boolean;
     realAdminId?: number;
     realAdminEmail?: string;
+    realAdminIsSuperAdmin?: boolean;
+    realAdminResourceScopes?: Record<string, unknown>;
     impersonatedUserId?: number;
     impersonationStartedAt?: number;
     captchaSlider?: {

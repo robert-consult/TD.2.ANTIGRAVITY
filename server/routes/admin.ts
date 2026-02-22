@@ -30,6 +30,7 @@ import { TRADER_SEARCH_CATEGORIES } from "@shared/admin/traderSearch";
 import { canonicalizeInstrumentCategory, normalizeInstrumentCategory } from "@shared/instruments/categories";
 import { createNotification, sendKycMailboxMessage } from "../services/messaging";
 import { invalidateRememberMeConfigCache } from "../services/rememberMe";
+import { applyAdminScopeSession } from "../security/adminScopeSession";
 
 let traderScoutCategoryLiveBusSubscribed = false;
 type GlobalPrefetchStrategy = "all" | "critical" | "none";
@@ -516,6 +517,7 @@ export function registerAdminRoutes(app: Express) {
       // Update session if this is the current user
       if (req.session.userId === Number(userId)) {
         req.session.isAdmin = true;
+        applyAdminScopeSession(req.session, { isAdmin: true });
       }
 
       res.json({ success: true, message: "User is now an admin" });
@@ -4745,11 +4747,15 @@ FROM (
       req.session.isImpersonating = true;
       req.session.realAdminId = realAdminId;
       req.session.realAdminEmail = realAdminEmail;
+      req.session.realAdminIsSuperAdmin = Boolean(req.session.isSuperAdmin);
+      req.session.realAdminResourceScopes = req.session.adminResourceScopes ?? undefined;
       req.session.impersonatedUserId = targetUserId;
       req.session.impersonationStartedAt = Date.now(); // TTL tracking
       req.session.userId = targetUserId;
       req.session.email = targetUser.email;
       req.session.isAdmin = false; // Temporarily remove admin flag for safety
+      req.session.isSuperAdmin = false;
+      req.session.adminResourceScopes = undefined;
 
       res.json({
         success: true,
@@ -4799,9 +4805,16 @@ FROM (
       req.session.userId = adminUser.id;
       req.session.email = adminUser.email;
       req.session.isAdmin = true;
+      req.session.isSuperAdmin = Boolean(req.session.realAdminIsSuperAdmin);
+      req.session.adminResourceScopes = req.session.realAdminResourceScopes ?? undefined;
+      if (!req.session.adminResourceScopes) {
+        applyAdminScopeSession(req.session, adminUser);
+      }
       req.session.isImpersonating = false;
       req.session.realAdminId = undefined;
       req.session.realAdminEmail = undefined;
+      req.session.realAdminIsSuperAdmin = undefined;
+      req.session.realAdminResourceScopes = undefined;
       req.session.impersonatedUserId = undefined;
       req.session.impersonationStartedAt = undefined;
 

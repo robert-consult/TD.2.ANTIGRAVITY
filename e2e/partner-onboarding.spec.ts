@@ -118,10 +118,14 @@ test("Partner invite-first onboarding enforces gates and transitions to approved
 
     const inviteEmail = `partner.onboard.${Date.now()}@example.com`;
     const invite = await page.evaluate(async (email) => {
+      const idempotencyKey = `e2e-partner-invite-${Date.now()}-${Math.random().toString(36).slice(2)}`;
       const res = await fetch("/api/admin/partners/invite", {
         method: "POST",
         credentials: "include",
-        headers: { "content-type": "application/json" },
+        headers: {
+          "content-type": "application/json",
+          "x-idempotency-key": idempotencyKey,
+        },
         body: JSON.stringify({
           email,
           fundName: "BlueWater Capital LLC",

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ComponentProps } from "react";
 import axios from "axios";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { z } from "zod";
 import { useAuth } from "@/hooks/use-auth";
 import { useMailboxE2eeBootstrap } from "@/hooks/use-mailbox";
 import { ensureMailboxE2eeKey, encryptTextForMailboxRecipients } from "@/lib/e2ee";
@@ -19,6 +20,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
+import { FeatureErrorBoundary } from "@/components/app/FeatureErrorBoundary";
 import {
   DEFAULT_PARTNER_INSTITUTION_PROFILE,
   E164_PHONE_REGEX,
@@ -254,6 +256,250 @@ type SimulationPreviewResp = {
     };
   };
 };
+
+const partnerGateEvalSchema: z.ZodType<PartnerGateEval> = z.object({
+  allowed: z.boolean(),
+  reason: z.string().nullable(),
+  requiredLevel: z.enum(["INVITED", "IDENTITY", "COMPLIANT", "ADMIN_APPROVED"]),
+  currentLevel: z.enum(["INVITED", "IDENTITY", "COMPLIANT", "ADMIN_APPROVED"]),
+});
+
+const partnerConfigRespSchema: z.ZodType<PartnerConfigResp> = z.object({
+  ok: z.boolean(),
+  config: z
+    .object({
+      partnerPortalEnabled: z.boolean().optional(),
+      partnerAllocationsEnabled: z.boolean().optional(),
+    })
+    .optional(),
+});
+
+const countriesRespSchema: z.ZodType<CountriesResp> = z.object({
+  rows: z.array(
+    z.object({
+      code: z.string(),
+      name: z.string(),
+    }),
+  ),
+});
+
+const dataRoomRowSchema: z.ZodType<DataRoomRow> = z.object({
+  hashId: z.string(),
+  styleCluster: z.string().nullable(),
+  metrics: z.object({
+    sharpeRatio: z.number().nullable(),
+    sortinoRatio: z.number().nullable(),
+    calmarRatio: z.number().nullable(),
+    equityCurveR2: z.number().nullable(),
+    avgMae: z.number().nullable(),
+    avgMfe: z.number().nullable(),
+    compositeScore: z.number().nullable(),
+    calculatedAt: z.number().nullable(),
+  }),
+  performance: z.object({
+    trades: z.number(),
+    netProfit: z.number(),
+    winRate: z.number(),
+  }),
+});
+
+const dataRoomRespSchema: z.ZodType<DataRoomResp> = z.object({
+  ok: z.boolean(),
+  total: z.number(),
+  hasMore: z.boolean(),
+  results: z.array(dataRoomRowSchema),
+});
+
+const tearSheetRespSchema: z.ZodType<TearSheetResp> = z.object({
+  ok: z.boolean(),
+  hashId: z.string(),
+  days: z.number(),
+  summary: z.object({
+    trades: z.number(),
+    netProfit: z.number(),
+    winRate: z.number(),
+  }),
+  metrics: z
+    .object({
+      sharpeRatio: z.number().nullable(),
+      sortinoRatio: z.number().nullable(),
+      calmarRatio: z.number().nullable(),
+      equityCurveR2: z.number().nullable(),
+      avgMae: z.number().nullable(),
+      avgMfe: z.number().nullable(),
+      styleCluster: z.string().nullable(),
+      compositeScore: z.number().nullable(),
+      calculatedAt: z.number().nullable(),
+    })
+    .nullable(),
+  topTrades: z.array(
+    z.object({
+      id: z.number(),
+      symbol: z.string().nullable(),
+      pnlUsd: z.number(),
+      returnPct: z.number().nullable(),
+    }),
+  ),
+  bottomTrades: z.array(
+    z.object({
+      id: z.number(),
+      symbol: z.string().nullable(),
+      pnlUsd: z.number(),
+      returnPct: z.number().nullable(),
+    }),
+  ),
+});
+
+const allocationRespSchema: z.ZodType<AllocationResp> = z.object({
+  ok: z.boolean(),
+  total: z.number(),
+  rows: z.array(
+    z.object({
+      id: z.number(),
+      userHashId: z.string(),
+      capitalUsd: z.number(),
+      shadowStopPct: z.number().nullable(),
+      status: z.enum(["ACTIVE", "STOPPED", "CLOSED"]),
+      currentPnlUsd: z.number().nullable(),
+      createdAt: z.number(),
+      updatedAt: z.number(),
+    }),
+  ),
+});
+
+const inquiryRespSchema: z.ZodType<InquiryResp> = z.object({
+  ok: z.boolean(),
+  total: z.number(),
+  rows: z.array(
+    z.object({
+      id: z.number(),
+      userHashId: z.string().nullable(),
+      senderName: z.string().nullable(),
+      senderEmail: z.string().nullable(),
+      subject: z.string(),
+      body: z.string(),
+      status: z.string(),
+      mailboxThreadId: z.number().nullable(),
+      createdAt: z.number(),
+    }),
+  ),
+});
+
+const inquiryRecipientRespSchema: z.ZodType<InquiryRecipientResp> = z.object({
+  ok: z.boolean(),
+  inboxAlias: z.string(),
+  routeAdminCount: z.number(),
+  viewerAdminCount: z.number(),
+  participantCount: z.number(),
+  missingKeyCount: z.number(),
+  missingKeyAdminIds: z.array(z.number()),
+  rows: z.array(
+    z.object({
+      userId: z.number(),
+      mailboxPublicKey: z.string().nullable(),
+      mailboxPublicKeyAlgo: z.string().nullable(),
+      routeRecipient: z.boolean(),
+      viewerRecipient: z.boolean(),
+    }),
+  ),
+});
+
+const partnerOnboardingRespSchema: z.ZodType<PartnerOnboardingResp> = z.object({
+  ok: z.boolean(),
+  state: z.object({
+    partnerId: z.number(),
+    partnerName: z.string(),
+    contactEmail: z.string().nullable(),
+    contactUsername: z.string().nullable(),
+    inviteStatus: z.string(),
+    onboardingStep: z.enum(["PROFILE", "IDENTITY", "LEGAL", "WAITING_APPROVAL", "COMPLETED"]),
+    inviteExpiresAt: z.number().nullable(),
+    isInviteExpired: z.boolean(),
+    profileData: z.object({
+      fundName: z.string().nullable(),
+      aumRange: z.string().nullable(),
+      hqLocation: z.string().nullable(),
+      strategyTags: z.array(z.string()),
+      institutionProfile: z
+        .custom<PartnerInstitutionProfile | null | undefined>(
+          (value) => value == null || (typeof value === "object" && !Array.isArray(value)),
+        )
+        .optional(),
+    }),
+    fundLogoUrl: z.string().nullable(),
+    kybDocUrl: z.string().nullable(),
+    agreementsSignedAt: z.number().nullable(),
+    contactAccessRequestedAt: z.number().nullable(),
+    approvedAt: z.number().nullable(),
+    adminNotes: z.string().nullable(),
+    loginCount: z.number(),
+    passwordRotatedAt: z.number().nullable(),
+    progressPct: z.number(),
+    gates: z.object({
+      viewDataRoom: z.boolean(),
+      runSimulations: z.boolean(),
+      requestAllocation: z.boolean(),
+      directContact: z.boolean(),
+    }),
+    gateEval: z.object({
+      viewDataRoom: partnerGateEvalSchema,
+      runSimulations: partnerGateEvalSchema,
+      requestAllocation: partnerGateEvalSchema,
+      directContact: partnerGateEvalSchema,
+    }),
+    gateConfig: z.object({
+      viewDataRoom: z.string(),
+      runSimulations: z.string(),
+      requestAllocation: z.string(),
+      directContact: z.string(),
+    }),
+    passwordPolicy: z.object({
+      rotationDays: z.number(),
+      reminderLogins: z.number(),
+    }),
+  }),
+});
+
+const simulationPreviewRespSchema: z.ZodType<SimulationPreviewResp> = z.object({
+  ok: z.boolean(),
+  preview: z.object({
+    userHashId: z.string(),
+    horizonDays: z.number(),
+    inputNotionalUsd: z.number(),
+    historical: z.object({
+      trades: z.number(),
+      netProfitUsd: z.number(),
+      winRate: z.number(),
+      avgReturnPct: z.number(),
+      sharpeRatio: z.number().nullable(),
+      sortinoRatio: z.number().nullable(),
+      calmarRatio: z.number().nullable(),
+      avgMae: z.number().nullable(),
+      compositeScore: z.number().nullable(),
+      calculatedAt: z.number().nullable(),
+    }),
+    scenario: z.object({
+      projectedPnlUsd: z.number(),
+      projectedPnlPct: z.number(),
+      confidence: z.number(),
+      riskBand: z.enum(["LOW", "MEDIUM", "HIGH"]),
+      modelVersion: z.string(),
+    }),
+  }),
+});
+
+const inviteRedeemRespSchema = z.object({
+  ok: z.boolean(),
+  partnerName: z.string(),
+  apiKey: z.string().min(1),
+  warning: z.string().optional(),
+});
+
+function parseApiPayload<T>(schema: z.ZodType<T>, data: unknown, messageCode: string): T {
+  const parsed = schema.safeParse(data);
+  if (parsed.success) return parsed.data;
+  throw new Error(messageCode);
+}
 
 function fmtPct(value: number | null | undefined): string {
   if (value == null || !Number.isFinite(value)) return "-";
@@ -542,7 +788,7 @@ function LockedActionButton({
   );
 }
 
-export default function PartnerPortal() {
+function PartnerPortalContent() {
   const { user } = useAuth();
   useMailboxE2eeBootstrap();
   const queryClient = useQueryClient();
@@ -550,7 +796,9 @@ export default function PartnerPortal() {
 
   const redeemInvite = useMutation({
     mutationFn: async (token: string) =>
-      axios.post("/api/partner/invite/redeem", { token }).then((r) => r.data),
+      axios
+        .post("/api/partner/invite/redeem", { token })
+        .then((r) => parseApiPayload(inviteRedeemRespSchema, r.data, "INVITE_REDEEM_SCHEMA_INVALID")),
     onSuccess: (data) => {
       setPartnerKeyInput(data.apiKey);
       setPartnerKey(data.apiKey);
@@ -559,10 +807,10 @@ export default function PartnerPortal() {
         description: data.warning || "You are now connected.",
       });
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
       toast({
         title: "Invite redemption failed",
-        description: String(error?.response?.data?.message || "Invalid or expired invite token"),
+        description: readApiErrorCode(error) || "Invalid or expired invite token",
         variant: "destructive",
       });
     },
@@ -627,7 +875,10 @@ export default function PartnerPortal() {
 
   const configQuery = useQuery<PartnerConfigResp>({
     queryKey: ["/api/admin/scout/config"],
-    queryFn: () => axios.get("/api/admin/scout/config").then((r) => r.data),
+    queryFn: () =>
+      axios
+        .get("/api/admin/scout/config")
+        .then((r) => parseApiPayload(partnerConfigRespSchema, r.data, "SCOUT_CONFIG_SCHEMA_INVALID")),
     refetchOnWindowFocus: false,
   });
 
@@ -636,7 +887,10 @@ export default function PartnerPortal() {
 
   const countriesQuery = useQuery<CountriesResp>({
     queryKey: ["/api/meta/countries"],
-    queryFn: () => axios.get("/api/meta/countries").then((r) => r.data),
+    queryFn: () =>
+      axios
+        .get("/api/meta/countries")
+        .then((r) => parseApiPayload(countriesRespSchema, r.data, "COUNTRIES_SCHEMA_INVALID")),
     enabled: partnerPortalEnabled,
     staleTime: 15 * 60 * 1000,
     refetchOnWindowFocus: false,
@@ -655,14 +909,20 @@ export default function PartnerPortal() {
 
   const onboardingQuery = useQuery<PartnerOnboardingResp>({
     queryKey: ["/api/partner/onboarding/state", partnerKey],
-    queryFn: () => axios.get("/api/partner/onboarding/state", { headers: partnerHeaders }).then((r) => r.data),
+    queryFn: () =>
+      axios
+        .get("/api/partner/onboarding/state", { headers: partnerHeaders })
+        .then((r) => parseApiPayload(partnerOnboardingRespSchema, r.data, "ONBOARDING_STATE_SCHEMA_INVALID")),
     enabled: keyReady && partnerPortalEnabled,
     refetchOnWindowFocus: false,
   });
 
   const dataRoomQuery = useQuery<DataRoomResp>({
     queryKey: ["/api/partner/data-room", partnerKey],
-    queryFn: () => axios.get("/api/partner/data-room?limit=25", { headers: partnerHeaders }).then((r) => r.data),
+    queryFn: () =>
+      axios
+        .get("/api/partner/data-room?limit=25", { headers: partnerHeaders })
+        .then((r) => parseApiPayload(dataRoomRespSchema, r.data, "DATA_ROOM_SCHEMA_INVALID")),
     enabled: keyReady && partnerPortalEnabled && Boolean(onboardingQuery.data?.state?.gates.viewDataRoom ?? true),
     refetchOnWindowFocus: false,
   });
@@ -688,7 +948,9 @@ export default function PartnerPortal() {
   const tearSheetQuery = useQuery<TearSheetResp>({
     queryKey: ["/api/partner/tear-sheet", partnerKey, selectedHashId],
     queryFn: () =>
-      axios.get(`/api/partner/tear-sheet/${selectedHashId}`, { headers: partnerHeaders }).then((r) => r.data),
+      axios
+        .get(`/api/partner/tear-sheet/${selectedHashId}`, { headers: partnerHeaders })
+        .then((r) => parseApiPayload(tearSheetRespSchema, r.data, "TEAR_SHEET_SCHEMA_INVALID")),
     enabled:
       keyReady &&
       !!selectedHashId &&
@@ -698,7 +960,10 @@ export default function PartnerPortal() {
 
   const allocationsQuery = useQuery<AllocationResp>({
     queryKey: ["/api/partner/allocations", partnerKey],
-    queryFn: () => axios.get("/api/partner/allocations?limit=50", { headers: partnerHeaders }).then((r) => r.data),
+    queryFn: () =>
+      axios
+        .get("/api/partner/allocations?limit=50", { headers: partnerHeaders })
+        .then((r) => parseApiPayload(allocationRespSchema, r.data, "ALLOCATIONS_SCHEMA_INVALID")),
     enabled:
       keyReady &&
       partnerPortalEnabled &&
@@ -709,21 +974,27 @@ export default function PartnerPortal() {
 
   const inquiriesQuery = useQuery<InquiryResp>({
     queryKey: ["/api/partner/inquiries", partnerKey],
-    queryFn: () => axios.get("/api/partner/inquiries?limit=50", { headers: partnerHeaders }).then((r) => r.data),
+    queryFn: () =>
+      axios
+        .get("/api/partner/inquiries?limit=50", { headers: partnerHeaders })
+        .then((r) => parseApiPayload(inquiryRespSchema, r.data, "INQUIRIES_SCHEMA_INVALID")),
     enabled: keyReady && partnerPortalEnabled,
     refetchOnWindowFocus: false,
   });
 
   const inquiryRecipientsQuery = useQuery<InquiryRecipientResp>({
     queryKey: ["/api/partner/inquiries/recipients", partnerKey],
-    queryFn: () => axios.get("/api/partner/inquiries/recipients", { headers: partnerHeaders }).then((r) => r.data),
+    queryFn: () =>
+      axios
+        .get("/api/partner/inquiries/recipients", { headers: partnerHeaders })
+        .then((r) => parseApiPayload(inquiryRecipientRespSchema, r.data, "INQUIRY_RECIPIENTS_SCHEMA_INVALID")),
     enabled: keyReady && partnerPortalEnabled,
     refetchOnWindowFocus: false,
   });
 
   useEffect(() => {
     setInquiryDraft((prev) => {
-      const nextName = prev.senderName || String((user as any)?.name || "").trim();
+      const nextName = prev.senderName || String(user?.name || "").trim();
       const nextEmail =
         prev.senderEmail ||
         String(user?.email || onboardingQuery.data?.state?.contactEmail || "").trim().toLowerCase();
@@ -734,7 +1005,7 @@ export default function PartnerPortal() {
         senderEmail: nextEmail,
       };
     });
-  }, [user?.email, (user as any)?.name, onboardingQuery.data?.state?.contactEmail]);
+  }, [user?.email, user?.name, onboardingQuery.data?.state?.contactEmail]);
 
   useEffect(() => {
     const state = onboardingQuery.data?.state;
@@ -784,10 +1055,10 @@ export default function PartnerPortal() {
       toast({ title: "Profile saved", description: "Simulation gate is now evaluated from your identity state." });
       queryClient.invalidateQueries({ queryKey: ["/api/partner/onboarding/state", partnerKey] });
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
       toast({
         title: "Profile save failed",
-        description: String(error?.response?.data?.message || "Request failed"),
+        description: readApiErrorCode(error) || "Request failed",
         variant: "destructive",
       });
     },
@@ -810,10 +1081,10 @@ export default function PartnerPortal() {
       toast({ title: "Legal package submitted", description: "Partner access is now pending admin approval." });
       queryClient.invalidateQueries({ queryKey: ["/api/partner/onboarding/state", partnerKey] });
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
       toast({
         title: "Legal submission failed",
-        description: String(error?.response?.data?.message || "Request failed"),
+        description: readApiErrorCode(error) || "Request failed",
         variant: "destructive",
       });
     },
@@ -834,10 +1105,10 @@ export default function PartnerPortal() {
       toast({ title: "Contact access requested", description: "Admin review is required before direct contact unlocks." });
       queryClient.invalidateQueries({ queryKey: ["/api/partner/onboarding/state", partnerKey] });
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
       toast({
         title: "Contact access request failed",
-        description: String(error?.response?.data?.message || "Request failed"),
+        description: readApiErrorCode(error) || "Request failed",
         variant: "destructive",
       });
     },
@@ -865,10 +1136,10 @@ export default function PartnerPortal() {
       setAllocationDraft((prev) => ({ ...prev, userHashId: "" }));
       queryClient.invalidateQueries({ queryKey: ["/api/partner/allocations", partnerKey] });
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
       toast({
         title: "Allocation create failed",
-        description: String(error?.response?.data?.message || "Request failed"),
+        description: readApiErrorCode(error) || "Request failed",
         variant: "destructive",
       });
     },
@@ -888,7 +1159,7 @@ export default function PartnerPortal() {
           },
           { headers: partnerHeaders },
         )
-        .then((r) => r.data as SimulationPreviewResp);
+        .then((r) => parseApiPayload(simulationPreviewRespSchema, r.data, "SIMULATION_PREVIEW_SCHEMA_INVALID"));
     },
     onSuccess: (data) => {
       setSimulationPreview(data.preview);
@@ -897,10 +1168,10 @@ export default function PartnerPortal() {
         description: `Risk band: ${data.preview.scenario.riskBand} | confidence ${(data.preview.scenario.confidence * 100).toFixed(0)}%`,
       });
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
       toast({
         title: "Simulation preview failed",
-        description: String(error?.response?.data?.message || "Request failed"),
+        description: readApiErrorCode(error) || "Request failed",
         variant: "destructive",
       });
     },
@@ -914,10 +1185,10 @@ export default function PartnerPortal() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/partner/allocations", partnerKey] });
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
       toast({
         title: "Allocation update failed",
-        description: String(error?.response?.data?.message || "Request failed"),
+        description: readApiErrorCode(error) || "Request failed",
         variant: "destructive",
       });
     },
@@ -984,10 +1255,10 @@ export default function PartnerPortal() {
       }));
       queryClient.invalidateQueries({ queryKey: ["/api/partner/inquiries", partnerKey] });
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
       toast({
         title: "Inquiry submit failed",
-        description: String(error?.response?.data?.message || error?.message || "Request failed"),
+        description: readApiErrorCode(error) || "Request failed",
         variant: "destructive",
       });
     },
@@ -1135,7 +1406,10 @@ export default function PartnerPortal() {
     setActiveTab(miniTab);
   };
 
-  const setInstitutionField = (field: keyof PartnerInstitutionProfile, value: any) => {
+  const setInstitutionField = <K extends keyof PartnerInstitutionProfile>(
+    field: K,
+    value: PartnerInstitutionProfile[K],
+  ) => {
     setInstitutionDraft((prev) => ({ ...prev, [field]: value }));
   };
 
@@ -3012,5 +3286,13 @@ export default function PartnerPortal() {
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+export default function PartnerPortal() {
+  return (
+    <FeatureErrorBoundary featureName="Partner Portal">
+      <PartnerPortalContent />
+    </FeatureErrorBoundary>
   );
 }

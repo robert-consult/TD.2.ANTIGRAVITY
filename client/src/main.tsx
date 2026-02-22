@@ -1,8 +1,27 @@
+import { SW_ACTIVATE_NOW_MESSAGE } from "@/lib/prefetchCatalog";
+
 function swEnabled(): boolean {
   if (import.meta.env.DEV) return false;
   const raw = import.meta.env.VITE_ENABLE_SW;
   if (raw == null) return true;
   return String(raw).trim().toLowerCase() !== "false";
+}
+
+function promptForServiceWorkerUpdate(registration: ServiceWorkerRegistration): void {
+  const waiting = registration.waiting;
+  if (!waiting) return;
+
+  const shouldReload = window.confirm("A new version is available. Reload now to update?");
+  if (!shouldReload) return;
+
+  let reloading = false;
+  const onControllerChange = () => {
+    if (reloading) return;
+    reloading = true;
+    window.location.reload();
+  };
+  navigator.serviceWorker.addEventListener("controllerchange", onControllerChange, { once: true });
+  waiting.postMessage({ type: SW_ACTIVATE_NOW_MESSAGE });
 }
 
 function installServiceWorkerRegistration(): void {
@@ -18,9 +37,25 @@ function installServiceWorkerRegistration(): void {
       return;
     }
 
-    void navigator.serviceWorker.register("/sw.js").catch((error) => {
-      console.warn("[sw] registration failed", error);
-    });
+    void navigator.serviceWorker.register("/sw.js")
+      .then((registration) => {
+        if (registration.waiting) {
+          promptForServiceWorkerUpdate(registration);
+        }
+
+        registration.addEventListener("updatefound", () => {
+          const installing = registration.installing;
+          if (!installing) return;
+          installing.addEventListener("statechange", () => {
+            if (installing.state === "installed" && navigator.serviceWorker.controller) {
+              promptForServiceWorkerUpdate(registration);
+            }
+          });
+        });
+      })
+      .catch((error) => {
+        console.warn("[sw] registration failed", error);
+      });
   });
 }
 

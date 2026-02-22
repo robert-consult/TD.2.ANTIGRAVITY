@@ -496,10 +496,12 @@ function parsePositiveInt(raw: unknown, fallback: number, max: number): number {
   return Math.max(1, Math.min(max, Math.trunc(n)));
 }
 
-function parseOffset(raw: unknown): number {
+const MAX_SCOUT_OFFSET = 10_000;
+
+function parseOffset(raw: unknown, max = MAX_SCOUT_OFFSET): number {
   const n = Number(raw);
   if (!Number.isFinite(n)) return 0;
-  return Math.max(0, Math.trunc(n));
+  return Math.max(0, Math.min(Math.trunc(n), Math.max(0, Math.trunc(max) || MAX_SCOUT_OFFSET)));
 }
 
 function parseOptionalFloat(raw: unknown): number | null {
@@ -921,6 +923,15 @@ const PARTNER_INVITE_WINDOW_MS = 60 * 60 * 1000;
 const challengeActionRateByAdmin = new Map<string, RateLimitEntry>();
 const CHALLENGE_ACTION_WINDOW_MS = 60 * 1000;
 const CHALLENGE_ACTION_LIMIT = 60;
+const IDEMPOTENCY_KEY_HEADER = "x-idempotency-key";
+const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9:_-]{8,128}$/;
+const IDEMPOTENCY_TTL_MS = 10 * 60 * 1000;
+const IDEMPOTENCY_MAX_ENTRIES = 5_000;
+const IDEMPOTENCY_IN_FLIGHT_GRACE_MS = 30 * 1000;
+const adminMutationIdempotencyStore = new Map<
+  string,
+  { fingerprint: string; status: number; payload: unknown; expiresAtMs: number; inFlight: boolean }
+>();
 
 function cleanupRateLimitMap<K>(store: Map<K, RateLimitEntry>) {
   const now = Date.now();
@@ -951,6 +962,102 @@ function consumeRateLimit<K>(
   return { allowed: true, retryAfterSec: 0 };
 }
 
+function cleanupIdempotencyStore() {
+  const now = Date.now();
+  for (const [key, value] of Array.from(adminMutationIdempotencyStore.entries())) {
+    if (value.expiresAtMs <= now) adminMutationIdempotencyStore.delete(key);
+  }
+}
+
+function trimIdempotencyStore() {
+  while (adminMutationIdempotencyStore.size > IDEMPOTENCY_MAX_ENTRIES) {
+    const oldestKey = adminMutationIdempotencyStore.keys().next().value;
+    if (!oldestKey) return;
+    adminMutationIdempotencyStore.delete(oldestKey);
+  }
+}
+
+function buildIdempotencyFingerprint(req: any): string {
+  const method = String(req.method || "").toUpperCase();
+  const routePath = String(req.path || req.originalUrl || "");
+  const bodyRaw = (() => {
+    try {
+      return JSON.stringify(req.body ?? null);
+    } catch {
+      return "UNSERIALIZABLE_BODY";
+    }
+  })();
+  return sha256Hex(`${method}:${routePath}:${bodyRaw}`);
+}
+
+function beginIdempotentMutation(
+  req: any,
+  res: any,
+  scope: string,
+): { storeKey: string; fingerprint: string } | null {
+  cleanupIdempotencyStore();
+
+  const key = String(req.header(IDEMPOTENCY_KEY_HEADER) || "").trim();
+  if (!key) {
+    return res.status(400).json({ message: "IDEMPOTENCY_KEY_REQUIRED" }), null;
+  }
+  if (!IDEMPOTENCY_KEY_PATTERN.test(key)) {
+    return res.status(400).json({ message: "INVALID_IDEMPOTENCY_KEY" }), null;
+  }
+
+  const actorId = Number(req.session?.userId || 0);
+  const storeKey = `${scope}:${actorId}:${key}`;
+  const fingerprint = buildIdempotencyFingerprint(req);
+
+  const existing = adminMutationIdempotencyStore.get(storeKey);
+  if (existing && existing.expiresAtMs > Date.now()) {
+    if (existing.fingerprint !== fingerprint) {
+      return res.status(409).json({ message: "IDEMPOTENCY_KEY_CONFLICT" }), null;
+    }
+    if (existing.inFlight) {
+      return res.status(409).json({ message: "IDEMPOTENCY_KEY_IN_PROGRESS" }), null;
+    }
+    res.setHeader("X-Idempotent-Replay", "1");
+    return res.status(existing.status).json(existing.payload), null;
+  }
+
+  adminMutationIdempotencyStore.delete(storeKey);
+  adminMutationIdempotencyStore.set(storeKey, {
+    fingerprint,
+    status: 0,
+    payload: null,
+    expiresAtMs: Date.now() + IDEMPOTENCY_IN_FLIGHT_GRACE_MS,
+    inFlight: true,
+  });
+  trimIdempotencyStore();
+  return { storeKey, fingerprint };
+}
+
+function commitIdempotentMutation(
+  context: { storeKey: string; fingerprint: string } | null,
+  status: number,
+  payload: unknown,
+) {
+  if (!context) return;
+  adminMutationIdempotencyStore.set(context.storeKey, {
+    fingerprint: context.fingerprint,
+    status,
+    payload,
+    expiresAtMs: Date.now() + IDEMPOTENCY_TTL_MS,
+    inFlight: false,
+  });
+  trimIdempotencyStore();
+}
+
+function releaseIdempotentMutation(context: { storeKey: string; fingerprint: string } | null): void {
+  if (!context) return;
+  const existing = adminMutationIdempotencyStore.get(context.storeKey);
+  if (!existing) return;
+  if (existing.fingerprint !== context.fingerprint) return;
+  if (!existing.inFlight) return;
+  adminMutationIdempotencyStore.delete(context.storeKey);
+}
+
 function enforceChallengeAdminActionRateLimit(
   req: any,
   res: any,
@@ -978,6 +1085,7 @@ const partnerInviteLimiterCleanupHandle = setInterval(() => {
   cleanupRateLimitMap(partnerInviteRateByAdmin);
   cleanupRateLimitMap(partnerInviteRateByIp);
   cleanupRateLimitMap(challengeActionRateByAdmin);
+  cleanupIdempotencyStore();
 }, 5 * 60 * 1000);
 (partnerInviteLimiterCleanupHandle as any)?.unref?.();
 
@@ -1630,6 +1738,7 @@ adminScoutRouter.get("/pipeline/:userId", async (req, res) => {
 });
 
 adminScoutRouter.put("/pipeline/:userId", async (req, res) => {
+  let idempotency: { storeKey: string; fingerprint: string } | null = null;
   try {
     const userId = Number(req.params.userId);
     if (!Number.isInteger(userId) || userId <= 0) {
@@ -1644,6 +1753,9 @@ adminScoutRouter.put("/pipeline/:userId", async (req, res) => {
     if (Object.keys(parsed.data).length === 0) {
       return res.status(400).json({ message: "EMPTY_UPDATE" });
     }
+
+    idempotency = beginIdempotentMutation(req, res, "SCOUT_PIPELINE_UPDATE");
+    if (!idempotency) return;
 
     const updated = await updateRecruitingPipelineForUser({
       userId,
@@ -1667,8 +1779,11 @@ adminScoutRouter.put("/pipeline/:userId", async (req, res) => {
       assignedAdminId: parsed.data.assignedAdminId,
     });
 
-    return res.json({ ok: true, row: updated.row });
+    const payload = { ok: true, row: updated.row };
+    commitIdempotentMutation(idempotency, 200, payload);
+    return res.json(payload);
   } catch (error) {
+    releaseIdempotentMutation(idempotency);
     console.error("[admin-scout] pipeline update error:", error);
     return res.status(500).json({ message: "FAILED_TO_UPDATE_PIPELINE" });
   }
@@ -4272,11 +4387,15 @@ adminPartnersRouter.get("/", async (_req, res) => {
 });
 
 adminPartnersRouter.post("/", async (req, res) => {
+  let idempotency: { storeKey: string; fingerprint: string } | null = null;
   try {
     const parsed = partnerCreateSchema.safeParse(req.body);
     if (!parsed.success) {
       return res.status(400).json({ message: "INVALID_PAYLOAD", errors: parsed.error.flatten() });
     }
+
+    idempotency = beginIdempotentMutation(req, res, "PARTNER_CREATE");
+    if (!idempotency) return;
 
     const { raw, hash, prefix } = buildPartnerApiKey();
     const ts = nowSec();
@@ -4311,13 +4430,16 @@ adminPartnersRouter.post("/", async (req, res) => {
 
     await appendRecruitmentAudit(req, "PARTNER_CREATE", { partnerId: created.id, name: created.name });
 
-    return res.status(201).json({
+    const payload = {
       ok: true,
       row: created,
       apiKey: raw,
       warning: "Store this key now. It will not be shown again.",
-    });
+    };
+    commitIdempotentMutation(idempotency, 201, payload);
+    return res.status(201).json(payload);
   } catch (error: any) {
+    releaseIdempotentMutation(idempotency);
     console.error("[admin-scout] partner create error:", error);
     if (String(error?.message || "").includes("partners_api_key_hash_uidx")) {
       return res.status(409).json({ message: "PARTNER_KEY_CONFLICT_RETRY" });
@@ -4327,11 +4449,15 @@ adminPartnersRouter.post("/", async (req, res) => {
 });
 
 adminPartnersRouter.post("/invite", async (req, res) => {
+  let idempotency: { storeKey: string; fingerprint: string } | null = null;
   try {
     const parsed = partnerInviteSchema.safeParse(req.body);
     if (!parsed.success) {
       return res.status(400).json({ message: "INVALID_PAYLOAD", errors: parsed.error.flatten() });
     }
+
+    idempotency = beginIdempotentMutation(req, res, "PARTNER_INVITE_CREATE");
+    if (!idempotency) return;
 
     const adminId = Number(req.session?.userId || 0);
     const adminEmail = String(req.session?.email || "admin");
@@ -4474,7 +4600,7 @@ adminPartnersRouter.post("/invite", async (req, res) => {
       emailStatus: emailSend.status,
     });
 
-    return res.status(201).json({
+    const payload = {
       ok: true,
       row: created,
       invite: {
@@ -4491,8 +4617,11 @@ adminPartnersRouter.post("/invite", async (req, res) => {
         deepLink,
       },
       warning: "Store these credentials now. API key and temporary password are shown once.",
-    });
+    };
+    commitIdempotentMutation(idempotency, 201, payload);
+    return res.status(201).json(payload);
   } catch (error: any) {
+    releaseIdempotentMutation(idempotency);
     console.error("[admin-scout] partner invite error:", error);
     if (String(error?.message || "").includes("partners_api_key_hash_uidx")) {
       return res.status(409).json({ message: "PARTNER_KEY_CONFLICT_RETRY" });

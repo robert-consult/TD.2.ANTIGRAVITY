@@ -54,14 +54,107 @@ function buildPartnerApiKey(): { raw: string; hash: string; prefix: string } {
   return { raw, hash, prefix };
 }
 
+type RateLimitEntry = { count: number; resetAtMs: number };
+
+const INVITE_REDEEM_WINDOW_MS = 15 * 60 * 1000;
+const INVITE_REDEEM_IP_LIMIT = 5;
+const INVITE_REDEEM_TOKEN_LIMIT = 8;
+const inviteRedeemRateByIp = new Map<string, RateLimitEntry>();
+const inviteRedeemRateByTokenHash = new Map<string, RateLimitEntry>();
+
+const TEAR_SHEET_CACHE_TTL_MS = 10_000;
+const TEAR_SHEET_CACHE_MAX_ENTRIES = 256;
+const tearSheetResponseCache = new Map<string, { expiresAtMs: number; payload: any }>();
+const tearSheetInflight = new Map<string, Promise<any>>();
+
+function cleanupRateLimitMap<K>(store: Map<K, RateLimitEntry>) {
+  const now = Date.now();
+  for (const [key, value] of Array.from(store.entries())) {
+    if (value.resetAtMs <= now) store.delete(key);
+  }
+}
+
+function consumeRateLimit<K>(
+  store: Map<K, RateLimitEntry>,
+  key: K,
+  limit: number,
+  windowMs = INVITE_REDEEM_WINDOW_MS,
+): { allowed: boolean; retryAfterSec: number } {
+  const now = Date.now();
+  const current = store.get(key);
+  if (!current || current.resetAtMs <= now) {
+    store.set(key, { count: 1, resetAtMs: now + windowMs });
+    return { allowed: true, retryAfterSec: 0 };
+  }
+  if (current.count >= limit) {
+    return {
+      allowed: false,
+      retryAfterSec: Math.max(1, Math.ceil((current.resetAtMs - now) / 1000)),
+    };
+  }
+  current.count += 1;
+  return { allowed: true, retryAfterSec: 0 };
+}
+
+function trimTearSheetCache() {
+  while (tearSheetResponseCache.size > TEAR_SHEET_CACHE_MAX_ENTRIES) {
+    const oldestKey = tearSheetResponseCache.keys().next().value;
+    if (!oldestKey) return;
+    tearSheetResponseCache.delete(oldestKey);
+  }
+}
+
+function getCachedTearSheetPayload(cacheKey: string): any | null {
+  const entry = tearSheetResponseCache.get(cacheKey);
+  if (!entry) return null;
+  if (entry.expiresAtMs <= Date.now()) {
+    tearSheetResponseCache.delete(cacheKey);
+    return null;
+  }
+  tearSheetResponseCache.delete(cacheKey);
+  tearSheetResponseCache.set(cacheKey, entry);
+  return entry.payload;
+}
+
+function setCachedTearSheetPayload(cacheKey: string, payload: any): void {
+  tearSheetResponseCache.set(cacheKey, {
+    expiresAtMs: Date.now() + TEAR_SHEET_CACHE_TTL_MS,
+    payload,
+  });
+  trimTearSheetCache();
+}
+
+const partnerPortalLimiterCleanupHandle = setInterval(() => {
+  cleanupRateLimitMap(inviteRedeemRateByIp);
+  cleanupRateLimitMap(inviteRedeemRateByTokenHash);
+}, 5 * 60 * 1000);
+(partnerPortalLimiterCleanupHandle as any)?.unref?.();
+
 partnerAuthRouter.post("/invite/redeem", async (req, res) => {
   try {
+    if (process.env.NODE_ENV === "production" && !isSecurePartnerTransport(req) && !isLoopbackHost(req)) {
+      return res.status(426).json({ message: "PARTNER_HTTPS_REQUIRED" });
+    }
+
+    const ipKey = String(req.ip || "unknown");
+    const ipRate = consumeRateLimit(inviteRedeemRateByIp, ipKey, INVITE_REDEEM_IP_LIMIT);
+    if (!ipRate.allowed) {
+      res.setHeader("Retry-After", String(ipRate.retryAfterSec));
+      return res.status(429).json({ message: "INVITE_REDEEM_RATE_LIMITED", retryAfterSec: ipRate.retryAfterSec });
+    }
+
     const token = String(req.body.token || "").trim();
     if (!token) {
       return res.status(400).json({ message: "TOKEN_REQUIRED" });
     }
 
     const hash = sha256Hex(token);
+    const tokenRate = consumeRateLimit(inviteRedeemRateByTokenHash, hash, INVITE_REDEEM_TOKEN_LIMIT);
+    if (!tokenRate.allowed) {
+      res.setHeader("Retry-After", String(tokenRate.retryAfterSec));
+      return res.status(429).json({ message: "INVITE_REDEEM_RATE_LIMITED", retryAfterSec: tokenRate.retryAfterSec });
+    }
+
     const ts = nowSec();
 
     const [invite] = await db
@@ -681,7 +774,10 @@ partnerPortalRouter.get("/data-room", requirePartnerGate("viewDataRoom"), async 
 });
 
 partnerPortalRouter.get("/tear-sheet/:hashId", requirePartnerGate("viewDataRoom"), async (req, res) => {
+  let inflightCacheKey: string | null = null;
+  let rejectInflightTask: ((error: unknown) => void) | null = null;
   try {
+    const partner = (req as any).partner as { id: number };
     const hashId = String(req.params.hashId || "").trim();
     if (!hashId) return res.status(400).json({ message: "INVALID_HASH_ID" });
 
@@ -693,6 +789,41 @@ partnerPortalRouter.get("/tear-sheet/:hashId", requirePartnerGate("viewDataRoom"
     const daysRaw = Number(req.query.days);
     const days = Number.isFinite(daysRaw) ? Math.max(7, Math.min(365, Math.trunc(daysRaw))) : 180;
     const cutoffSec = nowSec() - days * 86400;
+    const cacheKey = `${Number(partner?.id || 0)}:${hashId}:${days}`;
+    inflightCacheKey = cacheKey;
+
+    const cachedPayload = getCachedTearSheetPayload(cacheKey);
+    if (cachedPayload) {
+      await appendPartnerReadAudit(req, "PARTNER_TEAR_SHEET_READ", {
+        hashId,
+        days,
+        trades: Number(cachedPayload?.summary?.trades ?? 0),
+        cacheHit: true,
+      });
+      return res.json(cachedPayload);
+    }
+
+    const inflightPayload = tearSheetInflight.get(cacheKey);
+    if (inflightPayload) {
+      const payload = await inflightPayload;
+      await appendPartnerReadAudit(req, "PARTNER_TEAR_SHEET_READ", {
+        hashId,
+        days,
+        trades: Number(payload?.summary?.trades ?? 0),
+        deduped: true,
+      });
+      return res.json(payload);
+    }
+
+    let resolveInflight: (payload: any) => void = () => undefined;
+    let rejectInflight: (error: unknown) => void = () => undefined;
+    const task = new Promise<any>((resolve, reject) => {
+      resolveInflight = resolve;
+      rejectInflight = reject;
+    });
+    void task.catch(() => undefined);
+    rejectInflightTask = rejectInflight;
+    tearSheetInflight.set(cacheKey, task);
 
     const netProfitSql = netProfitSqlAlias("t");
 
@@ -875,13 +1006,7 @@ partnerPortalRouter.get("/tear-sheet/:hashId", requirePartnerGate("viewDataRoom"
       LIMIT 50
     `);
 
-    await appendPartnerReadAudit(req, "PARTNER_TEAR_SHEET_READ", {
-      hashId,
-      days,
-      trades: Number(summary.trades ?? 0),
-    });
-
-    return res.json({
+    const payload = {
       ok: true,
       hashId,
       days,
@@ -937,8 +1062,27 @@ partnerPortalRouter.get("/tear-sheet/:hashId", requirePartnerGate("viewDataRoom"
         },
         leaderboardRank: r.leaderboard_rank == null ? null : Number(r.leaderboard_rank),
       })),
+    };
+
+    setCachedTearSheetPayload(cacheKey, payload);
+    resolveInflight(payload);
+    tearSheetInflight.delete(cacheKey);
+    rejectInflightTask = null;
+    inflightCacheKey = null;
+
+    await appendPartnerReadAudit(req, "PARTNER_TEAR_SHEET_READ", {
+      hashId,
+      days,
+      trades: Number(summary.trades ?? 0),
+      cacheHit: false,
     });
+
+    return res.json(payload);
   } catch (error) {
+    rejectInflightTask?.(error);
+    if (inflightCacheKey) {
+      tearSheetInflight.delete(inflightCacheKey);
+    }
     console.error("[partner-portal] tear-sheet error:", error);
     return res.status(500).json({ message: "FAILED_TO_FETCH_TEAR_SHEET" });
   }

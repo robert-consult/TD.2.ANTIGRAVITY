@@ -13,6 +13,7 @@ describe("secure cache clear/scope hardening", () => {
   beforeEach(() => {
     resetSecureCacheForTests();
     localStorage.clear();
+    sessionStorage.clear();
     vi.spyOn(SecureCache.prototype, "init").mockResolvedValue();
     vi.spyOn(SecureCache.prototype, "clearAll").mockResolvedValue();
   });
@@ -21,6 +22,7 @@ describe("secure cache clear/scope hardening", () => {
     vi.restoreAllMocks();
     delete (globalThis as any).caches;
     localStorage.clear();
+    sessionStorage.clear();
     resetSecureCacheForTests();
   });
 
@@ -32,12 +34,12 @@ describe("secure cache clear/scope hardening", () => {
       delete: deleteSpy,
     };
 
-    localStorage.setItem(SEED_STORAGE_KEY, "seed-before");
+    sessionStorage.setItem(SEED_STORAGE_KEY, "seed-before");
     localStorage.setItem(SCOPE_STORAGE_KEY, "user:42");
 
     await secureClearAll();
 
-    expect(localStorage.getItem(SEED_STORAGE_KEY)).toBeNull();
+    expect(sessionStorage.getItem(SEED_STORAGE_KEY)).toBeNull();
     expect(localStorage.getItem(SCOPE_STORAGE_KEY)).toBeNull();
     expect(keysSpy).toHaveBeenCalledTimes(1);
     expect(deleteSpy).toHaveBeenCalledWith("tq-shell-v-a");
@@ -46,11 +48,11 @@ describe("secure cache clear/scope hardening", () => {
   });
 
   it("rotates the local seed when switching cache scopes", async () => {
-    localStorage.setItem(SEED_STORAGE_KEY, "seed-initial");
+    sessionStorage.setItem(SEED_STORAGE_KEY, "seed-initial");
 
     await setSecureCacheScope("user:777");
 
-    const rotatedSeed = localStorage.getItem(SEED_STORAGE_KEY);
+    const rotatedSeed = sessionStorage.getItem(SEED_STORAGE_KEY);
     expect(rotatedSeed).toBeTruthy();
     expect(rotatedSeed).not.toBe("seed-initial");
     expect(localStorage.getItem(SCOPE_STORAGE_KEY)).toBe("user:777");

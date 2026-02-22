@@ -91,7 +91,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       cookie: {
         secure: cookieSecure,
         httpOnly: true,
-        sameSite: (process.env.COOKIE_SAMESITE as "lax" | "strict" | "none") || "lax",
+        sameSite: (process.env.COOKIE_SAMESITE as "lax" | "strict" | "none") || "strict",
         maxAge: 24 * 60 * 60 * 1000,
       },
     }),

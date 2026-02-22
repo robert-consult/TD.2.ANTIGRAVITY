@@ -523,3 +523,87 @@ Failure Mode if Missing:
   - Emit `global-settings:updated` before `/api/global-settings` has been fetched and verify no partial object replaces the query cache.
   - Run `npx vitest run client/src/live/ConfigSync.test.ts client/src/hooks/use-performance-settings.test.tsx`.
 - Failure Mode if Missing: live updates can transiently downgrade config cache shape, trigger false schema warnings, or leave admin cards/runtime settings stale until a later refetch.
+
+### PRD-SEC-011
+- ID: `PRD-SEC-011`
+- Date (UTC): `2026-02-21`
+- Scope: `Partner invite token redemption abuse control`
+- Requirement: `/api/partner/invite/redeem` must enforce production HTTPS transport and per-IP/per-token redeem rate limits with `Retry-After` hints.
+- Enforcement: `server/routes/partnerPortal.ts` (`partnerAuthRouter.post("/invite/redeem")` with `PARTNER_HTTPS_REQUIRED` and `INVITE_REDEEM_RATE_LIMITED` guards + in-memory limiter cleanup).
+- Validation:
+  - Run with `NODE_ENV=production`, call redeem over non-loopback HTTP, and verify `426 PARTNER_HTTPS_REQUIRED`.
+  - Submit repeated redeem attempts above threshold from one IP/token and verify `429 INVITE_REDEEM_RATE_LIMITED` with `Retry-After`.
+  - Submit valid redeem request under threshold and verify normal success path.
+- Failure Mode if Missing: invite-token brute force and hash-compute floods can degrade partner auth endpoints and expose sensitive bootstrap flow to abuse.
+
+### PRD-API-004
+- ID: `PRD-API-004`
+- Date (UTC): `2026-02-21`
+- Scope: `Admin scout/partner critical mutation idempotency`
+- Requirement: Critical admin mutations (`PUT /api/admin/scout/pipeline/:userId`, `POST /api/admin/partners`, `POST /api/admin/partners/invite`) must require `x-idempotency-key` and replay the original response for duplicate keys/payloads.
+- Enforcement: `server/routes/adminScout.ts` (`beginIdempotentMutation`, `commitIdempotentMutation`, replay/conflict handling) and `client/src/components/admin/ScoutWorkbench.tsx` (mutation header emission).
+- Validation:
+  - Call a guarded endpoint without `x-idempotency-key` and verify `400 IDEMPOTENCY_KEY_REQUIRED`.
+  - Repeat the same request with identical key/payload and verify replay response with `X-Idempotent-Replay: 1`.
+  - Reuse the key with a different payload and verify `409 IDEMPOTENCY_KEY_CONFLICT`.
+- Failure Mode if Missing: network retries and duplicate submits can create duplicate partners/invites or apply pipeline updates multiple times.
+
+### PRD-PERF-010
+- ID: `PRD-PERF-010`
+- Date (UTC): `2026-02-21`
+- Scope: `Partner tear-sheet query burst containment`
+- Requirement: `/api/partner/tear-sheet/:hashId` must deduplicate in-flight requests and serve a short-lived cached payload for identical partner/hash/day requests.
+- Enforcement: `server/routes/partnerPortal.ts` (`tearSheetInflight`, `tearSheetResponseCache`, cache TTL and bounded entry cap).
+- Validation:
+  - Send concurrent identical tear-sheet requests and verify only one heavy query path executes while others reuse in-flight/cached payload.
+  - Reissue same request within cache TTL and verify fast cached response path.
+  - Verify cache entries evict beyond max size and expire by TTL.
+- Failure Mode if Missing: request bursts fan out redundant heavy SQL work, causing avoidable Postgres CPU spikes and increased latency.
+
+### PRD-WEB-003
+- ID: `PRD-WEB-003`
+- Date (UTC): `2026-02-21`
+- Scope: `Safe service-worker rollout activation`
+- Requirement: New service workers must not force immediate takeover; activation must be user-triggered (`sw:activate-now`) with client reload orchestration after controller change.
+- Enforcement: `client/src/sw.ts` (remove install-time `skipWaiting`, message-gated activation) and `client/src/main.tsx` (update prompt + `controllerchange` reload flow).
+- Validation:
+  - Register app with active page open, deploy new build, and verify update prompt appears before activation.
+  - Decline prompt and verify active session is not forcibly hijacked.
+  - Accept prompt and verify worker activates and page reloads once.
+- Failure Mode if Missing: active pages can be hijacked mid-session, producing HTML/chunk mismatch crashes during deploy rollouts.
+
+### PRD-WEB-004
+- ID: `PRD-WEB-004`
+- Date (UTC): `2026-02-21`
+- Scope: `Dynamic-import chunk drift recovery`
+- Requirement: Lazy-loaded routes/components must detect chunk-load failures and trigger at most one controlled full reload within cooldown to recover from deploy hash drift.
+- Enforcement: `client/src/lib/lazyWithPing.ts` (`isDynamicImportChunkError`, session-scoped reload marker, guarded `window.location.reload()` path).
+- Validation:
+  - Simulate stale chunk by loading an old page and navigating after deploy; verify one automatic reload attempt occurs.
+  - Trigger repeated chunk-load errors within cooldown and verify no reload loop.
+  - Verify non-chunk runtime errors still surface to boundaries without forced reload.
+- Failure Mode if Missing: users can hit unrecoverable white screens on route transitions after deploy, or enter infinite reload loops if recovery is unbounded.
+
+### PRD-SEC-012
+- ID: `PRD-SEC-012`
+- Date (UTC): `2026-02-21`
+- Scope: `Session cookie SameSite baseline`
+- Requirement: Session cookies must default to `SameSite=Strict` unless an explicit deployment override is set (`COOKIE_SAMESITE=lax`).
+- Enforcement: `server/routes.ts` express-session cookie config default (`sameSite: "strict"`), startup guard in `server/index.ts` forbidding `COOKIE_SAMESITE=none`.
+- Validation:
+  - Start app without `COOKIE_SAMESITE`; inspect `Set-Cookie` for session and verify `SameSite=Strict`.
+  - Set `COOKIE_SAMESITE=lax` and verify explicit override applies.
+  - Set `COOKIE_SAMESITE=none` and verify startup fails.
+- Failure Mode if Missing: deployments can unintentionally run weaker default cookie cross-site behavior, increasing CSRF exposure surface.
+
+### PRD-API-005
+- ID: `PRD-API-005`
+- Date (UTC): `2026-02-21`
+- Scope: `Concurrent idempotency key reservation for admin mutations`
+- Requirement: Admin idempotency enforcement must reserve keys at mutation start and reject concurrent replays of the same key while the original request is still in flight.
+- Enforcement: `server/routes/adminScout.ts` (`beginIdempotentMutation` writes `inFlight` reservation, `commitIdempotentMutation` finalizes replay payload, `releaseIdempotentMutation` clears failed reservations).
+- Validation:
+  - Submit two concurrent identical requests with the same `x-idempotency-key`; verify exactly one executes and the other returns `409 IDEMPOTENCY_KEY_IN_PROGRESS`.
+  - Retry with the same key/payload after completion and verify replay with `X-Idempotent-Replay: 1`.
+  - Force the first request to fail and verify a subsequent retry with the same key can proceed (reservation released).
+- Failure Mode if Missing: duplicate partner mutations can still execute during network retries/races, creating duplicate writes despite idempotency headers.

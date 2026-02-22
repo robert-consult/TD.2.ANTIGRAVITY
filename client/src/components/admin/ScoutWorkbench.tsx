@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import axios from "axios";
+import { z } from "zod";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,6 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { useMailboxE2eeBootstrap } from "@/hooks/use-mailbox";
 import ScoutChallengesPanel from "@/components/admin/ScoutChallengesPanel";
+import { FeatureErrorBoundary } from "@/components/app/FeatureErrorBoundary";
 
 const PIPELINE_STAGES = [
   "DETECTED",
@@ -267,6 +269,329 @@ type CrmDraft = {
   notes: string;
 };
 
+const candidateRowSchema: z.ZodType<CandidateRow> = z.object({
+  userId: z.number(),
+  username: z.string().nullable(),
+  email: z.string().nullable(),
+  name: z.string().nullable(),
+  userTier: z.string().nullable(),
+  kycStatus: z.string().nullable(),
+  stage: z.string(),
+  isPartnerVisible: z.boolean(),
+  performance: z.object({
+    trades: z.number(),
+    netProfit: z.number(),
+    winRate: z.number(),
+  }),
+  metrics: z.object({
+    sharpeRatio: z.number().nullable(),
+    compositeScore: z.number().nullable(),
+    styleCluster: z.string().nullable(),
+  }),
+  watchlist: z
+    .object({
+      id: z.number(),
+      tier: z.string(),
+      notes: z.string().nullable(),
+    })
+    .nullable(),
+});
+
+const watchlistRowSchema: z.ZodType<WatchlistRow> = z.object({
+  id: z.number(),
+  userId: z.number(),
+  tier: z.string(),
+  notes: z.string().nullable(),
+  user: z.object({
+    username: z.string().nullable(),
+    email: z.string().nullable(),
+    name: z.string().nullable(),
+  }),
+  pipeline: z.object({
+    stage: z.string(),
+    isPartnerVisible: z.boolean(),
+  }),
+  metrics: z.object({
+    sharpeRatio: z.number().nullable(),
+    compositeScore: z.number().nullable(),
+    styleCluster: z.string().nullable(),
+  }),
+});
+
+const candidateDetailRowSchema: z.ZodType<CandidateDetailRow> = z.object({
+  userId: z.number(),
+  email: z.string().nullable(),
+  username: z.string().nullable(),
+  name: z.string().nullable(),
+  userTier: z.string().nullable(),
+  kycStatus: z.string().nullable(),
+  createdAt: z.number().nullable(),
+  countryIso2: z.string().nullable(),
+  regionKey: z.string().nullable(),
+  verification: z.object({
+    emailVerifiedAt: z.number().nullable(),
+    smsVerifiedAt: z.number().nullable(),
+    contenderTier: z.string().nullable(),
+  }),
+  pipeline: z.object({
+    stage: z.string(),
+    assignedAdminId: z.number().nullable(),
+    lastContactedAt: z.number().nullable(),
+    notes: z.string().nullable(),
+    isPartnerVisible: z.boolean(),
+    updatedAt: z.number().nullable(),
+  }),
+  watchlist: z
+    .object({
+      id: z.number(),
+      tier: z.string(),
+      notes: z.string().nullable(),
+    })
+    .nullable(),
+  metrics: z.object({
+    sharpeRatio: z.number().nullable(),
+    sortinoRatio: z.number().nullable(),
+    calmarRatio: z.number().nullable(),
+    equityCurveR2: z.number().nullable(),
+    avgMae: z.number().nullable(),
+    avgMfe: z.number().nullable(),
+    styleCluster: z.string().nullable(),
+    compositeScore: z.number().nullable(),
+    calculatedAt: z.number().nullable(),
+  }),
+  performance: z.object({
+    days: z.number(),
+    trades: z.number(),
+    netProfit: z.number(),
+    winRate: z.number(),
+    avgHoldSec: z.number(),
+    grossProfit: z.number(),
+    grossLoss: z.number(),
+    maxDrawdown: z.number(),
+  }),
+  equityCurve: z.array(
+    z.object({
+      day: z.string(),
+      equity: z.number(),
+      pnl: z.number(),
+    }),
+  ),
+  attributionBySymbol: z.array(
+    z.object({
+      symbol: z.string(),
+      category: z.string(),
+      trades: z.number(),
+      netProfit: z.number(),
+      winRate: z.number(),
+    }),
+  ),
+  attributionByHourUtc: z.array(
+    z.object({
+      hourUtc: z.number(),
+      trades: z.number(),
+      netProfit: z.number(),
+      winRate: z.number(),
+    }),
+  ),
+});
+
+const scoutConfigSchema: z.ZodType<ScoutConfig> = z.object({
+  scoutTabEnabled: z.boolean(),
+  partnerPortalEnabled: z.boolean(),
+  traderProProfilesEnabled: z.boolean(),
+  traderCompeteEnabled: z.boolean(),
+  traderCommunityEnabled: z.boolean(),
+  partnerAllocationsEnabled: z.boolean(),
+  partnerGatingConfig: z.object({
+    viewDataRoom: z.enum(PARTNER_GATE_LEVEL_OPTIONS),
+    runSimulations: z.enum(PARTNER_GATE_LEVEL_OPTIONS),
+    requestAllocation: z.enum(PARTNER_GATE_LEVEL_OPTIONS),
+    directContact: z.enum(PARTNER_GATE_LEVEL_OPTIONS),
+  }),
+  partnerPasswordRotationDays: z.number(),
+  partnerPasswordReminderLogins: z.number(),
+  partnerInviteDefaultExpiryDays: z.number(),
+  leaderboardMode: z.enum(LEADERBOARD_MODES),
+  scoutMinSharpeAlert: z.number(),
+});
+
+const partnerRowSchema: z.ZodType<PartnerRow> = z.object({
+  id: z.number(),
+  name: z.string(),
+  api_key_prefix: z.string().nullable(),
+  ip_whitelist: z.string(),
+  is_active: z.boolean(),
+  contact_email: z.string().nullable(),
+  contact_username: z.string().nullable(),
+  invite_status: z.string().nullable(),
+  onboarding_step: z.string().nullable(),
+  invite_expires_at: z.number().nullable(),
+  approved_at: z.number().nullable(),
+  gating_overrides: z.string().nullable(),
+  latest_invite_email_status: z.string().nullable(),
+  allocation_count: z.number(),
+  inquiry_count: z.number(),
+  updated_at: z.number(),
+});
+
+const inquiryRoutingRespSchema: z.ZodType<InquiryRoutingResp> = z.object({
+  ok: z.boolean(),
+  config: z.object({
+    inboxAlias: z.string(),
+    routeAdminEmails: z.array(z.string()),
+    viewerAdminEmails: z.array(z.string()),
+  }),
+  resolved: z.object({
+    routeAdminCount: z.number(),
+    viewerAdminCount: z.number(),
+    participantAdminCount: z.number(),
+    unresolvedRouteEmails: z.array(z.string()),
+    unresolvedViewerEmails: z.array(z.string()),
+    missingKeyAdminIds: z.array(z.number()),
+  }),
+  messaging: z.object({
+    messagingEnabled: z.boolean(),
+    messagingE2eeEnabled: z.boolean(),
+    messagingE2eeRequired: z.boolean(),
+  }),
+  availableAdmins: z.array(
+    z.object({
+      userId: z.number(),
+      email: z.string(),
+      username: z.string().nullable(),
+      name: z.string().nullable(),
+      routeRecipient: z.boolean(),
+      viewerRecipient: z.boolean(),
+      hasMailboxKey: z.boolean(),
+      mailboxPublicKeyUpdatedAt: z.number().nullable(),
+    }),
+  ),
+});
+
+const scoutInquiryListRespSchema: z.ZodType<ScoutInquiryListResp> = z.object({
+  ok: z.boolean(),
+  limit: z.number(),
+  offset: z.number(),
+  total: z.number(),
+  hasMore: z.boolean(),
+  rows: z.array(
+    z.object({
+      id: z.number(),
+      partnerId: z.number(),
+      partnerName: z.string().nullable(),
+      userHashId: z.string().nullable(),
+      senderName: z.string().nullable(),
+      senderEmail: z.string().nullable(),
+      subject: z.string().nullable(),
+      body: z.string().nullable(),
+      status: z.string().nullable(),
+      mailboxThreadId: z.number().nullable(),
+      createdAt: z.number().nullable(),
+      updatedAt: z.number().nullable(),
+    }),
+  ),
+});
+
+const scoutMailboxThreadRespSchema: z.ZodType<ScoutMailboxThreadResp> = z.object({
+  thread: z.object({
+    threadId: z.number(),
+    subject: z.string(),
+  }),
+  messages: z.array(
+    z.object({
+      id: z.number(),
+      senderIsAdmin: z.boolean().nullable(),
+      senderUsername: z.string().nullable(),
+      senderEmail: z.string().nullable(),
+      body: z.string(),
+      createdAt: z.number(),
+    }),
+  ),
+});
+
+const candidatesRespSchema = z.object({
+  results: z.array(candidateRowSchema),
+  total: z.number(),
+});
+
+const watchlistRespSchema = z.object({
+  rows: z.array(watchlistRowSchema),
+});
+
+const candidateDetailRespSchema = z.object({
+  row: candidateDetailRowSchema,
+});
+
+const configRespSchema = z.object({
+  config: scoutConfigSchema,
+});
+
+const partnersRespSchema = z.object({
+  rows: z.array(partnerRowSchema),
+});
+
+const partnerCreateRespSchema = z.object({
+  ok: z.boolean(),
+  apiKey: z.string().optional(),
+});
+
+const partnerInviteRespSchema = z.object({
+  ok: z.boolean(),
+  invite: z
+    .object({
+      emailStatus: z.string().optional(),
+    })
+    .optional(),
+  credentials: z
+    .object({
+      username: z.string().optional(),
+      tempPassword: z.string().optional(),
+      apiKey: z.string().optional(),
+    })
+    .optional(),
+});
+
+const partnerPatchRespSchema = z.object({
+  ok: z.boolean(),
+  apiKey: z.string().optional(),
+});
+
+const genericMutationRespSchema = z.object({
+  ok: z.boolean().optional(),
+});
+
+function parseApiPayload<T>(schema: z.ZodType<T>, data: unknown, messageCode: string): T {
+  const parsed = schema.safeParse(data);
+  if (parsed.success) return parsed.data;
+  throw new Error(messageCode);
+}
+
+function readApiErrorMessage(error: unknown): string | null {
+  if (!error) return null;
+  if (axios.isAxiosError(error)) {
+    const apiMessage = error.response?.data?.message;
+    if (typeof apiMessage === "string" && apiMessage.trim().length > 0) return apiMessage.trim();
+    if (typeof error.message === "string" && error.message.trim().length > 0) return error.message.trim();
+    return null;
+  }
+  if (error instanceof Error && error.message.trim().length > 0) {
+    return error.message.trim();
+  }
+  return null;
+}
+
+function createIdempotencyKey(scope: string): string {
+  const prefix = String(scope || "mutation").trim().toLowerCase().replace(/[^a-z0-9:_-]+/g, "-") || "mutation";
+  try {
+    const uuid = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+    return `${prefix}:${uuid}`;
+  } catch {
+    return `${prefix}:${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  }
+}
+
 function formatPct(value: number | null | undefined): string {
   if (value == null || !Number.isFinite(value)) return "-";
   return `${(value * 100).toFixed(1)}%`;
@@ -327,7 +652,7 @@ function parsePartnerGateDraft(raw: unknown, fallback: PartnerGateDraft): Partne
   };
 }
 
-export default function ScoutWorkbench() {
+function ScoutWorkbenchContent() {
   useMailboxE2eeBootstrap();
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -342,6 +667,7 @@ export default function ScoutWorkbench() {
   const [configDraft, setConfigDraft] = useState<ScoutConfig | null>(null);
   const [inquiryRoutingDraft, setInquiryRoutingDraft] = useState<InquiryRoutingDraft | null>(null);
   const [crmDrafts, setCrmDrafts] = useState<Record<number, CrmDraft>>({});
+  const [crmDirtyByUser, setCrmDirtyByUser] = useState<Record<number, true>>({});
 
   const [newPartner, setNewPartner] = useState({ name: "", ipWhitelist: "" });
   const [lastIssuedKey, setLastIssuedKey] = useState<string | null>(null);
@@ -364,14 +690,17 @@ export default function ScoutWorkbench() {
       if (search.trim()) params.set("q", search.trim());
       if (stageFilter) params.set("stage", stageFilter);
       const res = await axios.get(`/api/admin/scout/candidates?${params.toString()}`);
-      return res.data;
+      return parseApiPayload(candidatesRespSchema, res.data, "SCOUT_CANDIDATES_SCHEMA_INVALID");
     },
     refetchOnWindowFocus: false,
   });
 
   const watchlistQuery = useQuery<{ rows: WatchlistRow[] }>({
     queryKey: ["/api/admin/scout/watchlist"],
-    queryFn: () => axios.get("/api/admin/scout/watchlist").then((r) => r.data),
+    queryFn: () =>
+      axios
+        .get("/api/admin/scout/watchlist")
+        .then((r) => parseApiPayload(watchlistRespSchema, r.data, "SCOUT_WATCHLIST_SCHEMA_INVALID")),
     refetchOnWindowFocus: false,
   });
 
@@ -380,7 +709,7 @@ export default function ScoutWorkbench() {
     queryFn: async () => {
       const id = Number(selectedCandidateId);
       const res = await axios.get(`/api/admin/scout/candidates/${id}?days=180`);
-      return res.data;
+      return parseApiPayload(candidateDetailRespSchema, res.data, "SCOUT_CANDIDATE_DETAIL_SCHEMA_INVALID");
     },
     enabled: selectedCandidateId != null,
     refetchOnWindowFocus: false,
@@ -388,7 +717,10 @@ export default function ScoutWorkbench() {
 
   const configQuery = useQuery<{ config: ScoutConfig }>({
     queryKey: ["/api/admin/scout/config"],
-    queryFn: () => axios.get("/api/admin/scout/config").then((r) => r.data),
+    queryFn: () =>
+      axios
+        .get("/api/admin/scout/config")
+        .then((r) => parseApiPayload(configRespSchema, r.data, "SCOUT_CONFIG_SCHEMA_INVALID")),
     refetchOnWindowFocus: false,
   });
 
@@ -399,13 +731,19 @@ export default function ScoutWorkbench() {
 
   const partnersQuery = useQuery<{ rows: PartnerRow[] }>({
     queryKey: ["/api/admin/partners"],
-    queryFn: () => axios.get("/api/admin/partners").then((r) => r.data),
+    queryFn: () =>
+      axios
+        .get("/api/admin/partners")
+        .then((r) => parseApiPayload(partnersRespSchema, r.data, "SCOUT_PARTNERS_SCHEMA_INVALID")),
     refetchOnWindowFocus: false,
   });
 
   const inquiryRoutingQuery = useQuery<InquiryRoutingResp>({
     queryKey: ["/api/admin/scout/inquiry-routing"],
-    queryFn: () => axios.get("/api/admin/scout/inquiry-routing").then((r) => r.data),
+    queryFn: () =>
+      axios
+        .get("/api/admin/scout/inquiry-routing")
+        .then((r) => parseApiPayload(inquiryRoutingRespSchema, r.data, "SCOUT_INQUIRY_ROUTING_SCHEMA_INVALID")),
     refetchOnWindowFocus: false,
   });
 
@@ -417,7 +755,7 @@ export default function ScoutWorkbench() {
       params.set("offset", "0");
       if (inquiryStatusFilter) params.set("status", inquiryStatusFilter);
       const res = await axios.get(`/api/admin/scout/inquiries?${params.toString()}`);
-      return res.data;
+      return parseApiPayload(scoutInquiryListRespSchema, res.data, "SCOUT_INQUIRIES_SCHEMA_INVALID");
     },
     refetchOnWindowFocus: false,
   });
@@ -427,7 +765,7 @@ export default function ScoutWorkbench() {
     queryFn: async () => {
       const id = Number(selectedInquiryThreadId);
       const res = await axios.get(`/api/mailbox/${id}?limit=120`);
-      return res.data;
+      return parseApiPayload(scoutMailboxThreadRespSchema, res.data, "SCOUT_MAILBOX_THREAD_SCHEMA_INVALID");
     },
     enabled: selectedInquiryThreadId != null,
     refetchOnWindowFocus: false,
@@ -469,16 +807,51 @@ export default function ScoutWorkbench() {
 
   useEffect(() => {
     const rows = watchlistQuery.data?.rows ?? [];
-    const next: Record<number, CrmDraft> = {};
-    for (const row of rows) {
-      next[row.userId] = {
-        stage: row.pipeline.stage,
-        isPartnerVisible: row.pipeline.isPartnerVisible,
-        tier: row.tier,
-        notes: row.notes ?? "",
-      };
-    }
-    setCrmDrafts(next);
+    setCrmDrafts((prev) => {
+      let changed = Object.keys(prev).length !== rows.length;
+      const next: Record<number, CrmDraft> = {};
+      for (const row of rows) {
+        const serverDraft: CrmDraft = {
+          stage: row.pipeline.stage,
+          isPartnerVisible: row.pipeline.isPartnerVisible,
+          tier: row.tier,
+          notes: row.notes ?? "",
+        };
+        const preserved = crmDirtyByUser[row.userId] ? prev[row.userId] : undefined;
+        const candidate = preserved ?? serverDraft;
+        next[row.userId] = candidate;
+
+        const prevDraft = prev[row.userId];
+        if (
+          !prevDraft ||
+          prevDraft.stage !== candidate.stage ||
+          prevDraft.isPartnerVisible !== candidate.isPartnerVisible ||
+          prevDraft.tier !== candidate.tier ||
+          prevDraft.notes !== candidate.notes
+        ) {
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [watchlistQuery.data?.rows, crmDirtyByUser]);
+
+  useEffect(() => {
+    const rows = watchlistQuery.data?.rows ?? [];
+    const allowedUserIds = new Set(rows.map((row) => Number(row.userId)));
+    setCrmDirtyByUser((prev) => {
+      let changed = false;
+      const next: Record<number, true> = {};
+      for (const key of Object.keys(prev)) {
+        const userId = Number(key);
+        if (allowedUserIds.has(userId)) {
+          next[userId] = true;
+        } else {
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
   }, [watchlistQuery.data?.rows]);
 
   useEffect(() => {
@@ -547,7 +920,9 @@ export default function ScoutWorkbench() {
 
   const addWatchlistMutation = useMutation({
     mutationFn: (payload: { userId: number; tier?: string; notes?: string | null }) =>
-      axios.post("/api/admin/scout/watchlist", payload).then((r) => r.data),
+      axios
+        .post("/api/admin/scout/watchlist", payload)
+        .then((r) => parseApiPayload(genericMutationRespSchema, r.data, "SCOUT_WATCHLIST_UPSERT_SCHEMA_INVALID")),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/scout/watchlist"] });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/scout/candidates"] });
@@ -555,7 +930,10 @@ export default function ScoutWorkbench() {
   });
 
   const removeWatchlistMutation = useMutation({
-    mutationFn: (id: number) => axios.delete(`/api/admin/scout/watchlist/${id}`).then((r) => r.data),
+    mutationFn: (id: number) =>
+      axios
+        .delete(`/api/admin/scout/watchlist/${id}`)
+        .then((r) => parseApiPayload(genericMutationRespSchema, r.data, "SCOUT_WATCHLIST_DELETE_SCHEMA_INVALID")),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/scout/watchlist"] });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/scout/candidates"] });
@@ -567,7 +945,12 @@ export default function ScoutWorkbench() {
       userId: number;
       stage: string;
       isPartnerVisible: boolean;
-    }) => axios.put(`/api/admin/scout/pipeline/${payload.userId}`, payload).then((r) => r.data),
+    }) =>
+      axios
+        .put(`/api/admin/scout/pipeline/${payload.userId}`, payload, {
+          headers: { "x-idempotency-key": createIdempotencyKey("scout-pipeline") },
+        })
+        .then((r) => parseApiPayload(genericMutationRespSchema, r.data, "SCOUT_PIPELINE_UPDATE_SCHEMA_INVALID")),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/scout/watchlist"] });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/scout/candidates"] });
@@ -575,39 +958,44 @@ export default function ScoutWorkbench() {
   });
 
   const saveConfigMutation = useMutation({
-    mutationFn: (payload: Partial<ScoutConfig>) => axios.put("/api/admin/scout/config", payload).then((r) => r.data),
+    mutationFn: (payload: Partial<ScoutConfig>) =>
+      axios
+        .put("/api/admin/scout/config", payload)
+        .then((r) => parseApiPayload(genericMutationRespSchema, r.data, "SCOUT_CONFIG_UPDATE_SCHEMA_INVALID")),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/scout/config"] });
       toast({ title: "Scout config saved" });
     },
-    onError: (error: any) => {
-      const fieldErrors = error?.response?.data?.errors?.fieldErrors;
+    onError: (error: unknown) => {
+      const fieldErrors = axios.isAxiosError(error) ? error.response?.data?.errors?.fieldErrors : undefined;
       const firstField = fieldErrors && typeof fieldErrors === "object" ? Object.keys(fieldErrors)[0] : null;
       const firstMessage =
         firstField && Array.isArray(fieldErrors[firstField]) ? String(fieldErrors[firstField][0] || "") : "";
       toast({
         title: "Failed to save scout config",
-        description:
-          firstMessage ||
-          error?.response?.data?.message ||
-          "Unknown error",
+        description: firstMessage || readApiErrorMessage(error) || "Unknown error",
         variant: "destructive",
       });
     },
   });
 
   const createPartnerMutation = useMutation({
-    mutationFn: (payload: typeof newPartner) => axios.post("/api/admin/partners", payload).then((r) => r.data),
+    mutationFn: (payload: typeof newPartner) =>
+      axios
+        .post("/api/admin/partners", payload, {
+          headers: { "x-idempotency-key": createIdempotencyKey("partner-create") },
+        })
+        .then((r) => parseApiPayload(partnerCreateRespSchema, r.data, "SCOUT_PARTNER_CREATE_SCHEMA_INVALID")),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/partners"] });
       setNewPartner({ name: "", ipWhitelist: "" });
       setLastIssuedKey(String(data?.apiKey || ""));
       toast({ title: "Partner created", description: "Copy the API key now." });
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
       toast({
         title: "Failed to create partner",
-        description: error?.response?.data?.message || "Unknown error",
+        description: readApiErrorMessage(error) || "Unknown error",
         variant: "destructive",
       });
     },
@@ -621,8 +1009,10 @@ export default function ScoutWorkbench() {
           fundName: payload.fundName || null,
           adminNotes: payload.adminNotes || null,
           expiresInDays: payload.expiresInDays,
+        }, {
+          headers: { "x-idempotency-key": createIdempotencyKey("partner-invite") },
         })
-        .then((r) => r.data),
+        .then((r) => parseApiPayload(partnerInviteRespSchema, r.data, "SCOUT_PARTNER_INVITE_SCHEMA_INVALID")),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/partners"] });
       setInviteDraft({
@@ -644,10 +1034,10 @@ export default function ScoutWorkbench() {
             : "Partner invite created.",
       });
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
       toast({
         title: "Failed to invite partner",
-        description: error?.response?.data?.message || "Unknown error",
+        description: readApiErrorMessage(error) || "Unknown error",
         variant: "destructive",
       });
     },
@@ -660,15 +1050,15 @@ export default function ScoutWorkbench() {
           action: payload.action,
           adminNotes: payload.adminNotes || null,
         })
-        .then((r) => r.data),
+        .then((r) => parseApiPayload(genericMutationRespSchema, r.data, "SCOUT_PARTNER_APPROVAL_SCHEMA_INVALID")),
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/partners"] });
       toast({ title: `Partner ${variables.action.toLowerCase()} applied` });
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
       toast({
         title: "Failed to update partner approval",
-        description: error?.response?.data?.message || "Unknown error",
+        description: readApiErrorMessage(error) || "Unknown error",
         variant: "destructive",
       });
     },
@@ -676,15 +1066,17 @@ export default function ScoutWorkbench() {
 
   const partnerGateOverrideMutation = useMutation({
     mutationFn: (payload: { id: number; draft: PartnerGateDraft }) =>
-      axios.put(`/api/admin/partners/${payload.id}/gating-overrides`, payload.draft).then((r) => r.data),
+      axios
+        .put(`/api/admin/partners/${payload.id}/gating-overrides`, payload.draft)
+        .then((r) => parseApiPayload(genericMutationRespSchema, r.data, "SCOUT_GATING_OVERRIDE_SCHEMA_INVALID")),
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/partners"] });
       toast({ title: "Partner gating overrides saved", description: `Partner #${variables.id}` });
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
       toast({
         title: "Failed to save gating overrides",
-        description: error?.response?.data?.message || "Unknown error",
+        description: readApiErrorMessage(error) || "Unknown error",
         variant: "destructive",
       });
     },
@@ -692,7 +1084,9 @@ export default function ScoutWorkbench() {
 
   const patchPartnerMutation = useMutation({
     mutationFn: (payload: { id: number; patch: Record<string, unknown> }) =>
-      axios.put(`/api/admin/partners/${payload.id}`, payload.patch).then((r) => r.data),
+      axios
+        .put(`/api/admin/partners/${payload.id}`, payload.patch)
+        .then((r) => parseApiPayload(partnerPatchRespSchema, r.data, "SCOUT_PARTNER_PATCH_SCHEMA_INVALID")),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/partners"] });
       if (data?.apiKey) {
@@ -710,16 +1104,16 @@ export default function ScoutWorkbench() {
           routeAdminEmails: payload.routeAdminEmails,
           viewerAdminEmails: payload.viewerAdminEmails,
         })
-        .then((r) => r.data),
+        .then((r) => parseApiPayload(genericMutationRespSchema, r.data, "SCOUT_INQUIRY_ROUTING_UPDATE_SCHEMA_INVALID")),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/scout/inquiry-routing"] });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/scout/inquiries"] });
       toast({ title: "Inquiry routing saved" });
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
       toast({
         title: "Failed to save inquiry routing",
-        description: error?.response?.data?.message || "Unknown error",
+        description: readApiErrorMessage(error) || "Unknown error",
         variant: "destructive",
       });
     },
@@ -752,14 +1146,26 @@ export default function ScoutWorkbench() {
     };
   }, [candidates, candidatesQuery.data?.total]);
 
+  const markCrmDraftDirty = (userId: number) => {
+    setCrmDirtyByUser((prev) => (prev[userId] ? prev : { ...prev, [userId]: true }));
+  };
+
+  const updateCrmDraft = (userId: number, nextDraft: CrmDraft) => {
+    setCrmDrafts((prev) => ({
+      ...prev,
+      [userId]: nextDraft,
+    }));
+    markCrmDraftDirty(userId);
+  };
+
   const upsertWatchlist = async (userId: number, tier?: string, notes?: string | null) => {
     try {
       await addWatchlistMutation.mutateAsync({ userId, tier, notes: notes ?? null });
       toast({ title: "Watchlist updated" });
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast({
         title: "Watchlist update failed",
-        description: error?.response?.data?.message || "Unknown error",
+        description: readApiErrorMessage(error) || "Unknown error",
         variant: "destructive",
       });
     }
@@ -782,11 +1188,17 @@ export default function ScoutWorkbench() {
           notes: draft.notes,
         }),
       ]);
+      setCrmDirtyByUser((prev) => {
+        if (!prev[row.userId]) return prev;
+        const next = { ...prev };
+        delete next[row.userId];
+        return next;
+      });
       toast({ title: "CRM row saved" });
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast({
         title: "CRM save failed",
-        description: error?.response?.data?.message || "Unknown error",
+        description: readApiErrorMessage(error) || "Unknown error",
         variant: "destructive",
       });
     }
@@ -1099,12 +1511,7 @@ export default function ScoutWorkbench() {
                           <td className="py-2">
                             <select
                               value={draft.stage}
-                              onChange={(e) =>
-                                setCrmDrafts((prev) => ({
-                                  ...prev,
-                                  [row.userId]: { ...draft, stage: e.target.value },
-                                }))
-                              }
+                              onChange={(e) => updateCrmDraft(row.userId, { ...draft, stage: e.target.value })}
                               className="h-9 rounded-md border border-neutral-600 bg-neutral-700 px-2"
                             >
                               {PIPELINE_STAGES.map((stage) => (
@@ -1118,22 +1525,14 @@ export default function ScoutWorkbench() {
                             <Switch
                               checked={draft.isPartnerVisible}
                               onCheckedChange={(checked) =>
-                                setCrmDrafts((prev) => ({
-                                  ...prev,
-                                  [row.userId]: { ...draft, isPartnerVisible: Boolean(checked) },
-                                }))
+                                updateCrmDraft(row.userId, { ...draft, isPartnerVisible: Boolean(checked) })
                               }
                             />
                           </td>
                           <td className="py-2">
                             <select
                               value={draft.tier}
-                              onChange={(e) =>
-                                setCrmDrafts((prev) => ({
-                                  ...prev,
-                                  [row.userId]: { ...draft, tier: e.target.value },
-                                }))
-                              }
+                              onChange={(e) => updateCrmDraft(row.userId, { ...draft, tier: e.target.value })}
                               className="h-9 rounded-md border border-neutral-600 bg-neutral-700 px-2"
                             >
                               <option value="A_LIST">A_LIST</option>
@@ -1144,12 +1543,7 @@ export default function ScoutWorkbench() {
                           <td className="py-2 min-w-[220px]">
                             <Input
                               value={draft.notes}
-                              onChange={(e) =>
-                                setCrmDrafts((prev) => ({
-                                  ...prev,
-                                  [row.userId]: { ...draft, notes: e.target.value },
-                                }))
-                              }
+                              onChange={(e) => updateCrmDraft(row.userId, { ...draft, notes: e.target.value })}
                               className="bg-neutral-700 border-neutral-600"
                               placeholder="Admin notes"
                             />
@@ -2038,5 +2432,13 @@ export default function ScoutWorkbench() {
         </TabsContent>
       </Tabs>
     </div>
+  );
+}
+
+export default function ScoutWorkbench() {
+  return (
+    <FeatureErrorBoundary featureName="Scout Workbench">
+      <ScoutWorkbenchContent />
+    </FeatureErrorBoundary>
   );
 }

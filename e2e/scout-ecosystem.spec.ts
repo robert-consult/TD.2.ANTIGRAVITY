@@ -92,10 +92,14 @@ test("Recruitment ecosystem: scout APIs, challenge flow, and partner key auth", 
     expect(watchlistUpsert.status, JSON.stringify(watchlistUpsert.body)).toBeLessThan(400);
 
     const pipelineUpdate = await adminPage.evaluate(async (userId) => {
+      const idempotencyKey = `e2e-scout-pipeline-${Date.now()}-${Math.random().toString(36).slice(2)}`;
       const res = await fetch(`/api/admin/scout/pipeline/${userId}`, {
         method: "PUT",
         credentials: "include",
-        headers: { "content-type": "application/json" },
+        headers: {
+          "content-type": "application/json",
+          "x-idempotency-key": idempotencyKey,
+        },
         body: JSON.stringify({ stage: "WATCHLIST", isPartnerVisible: false }),
       });
       return { status: res.status, body: await res.json() };
@@ -241,10 +245,14 @@ test("Recruitment ecosystem: scout APIs, challenge flow, and partner key auth", 
     }
 
     const partnerCreate = await adminPage.evaluate(async () => {
+      const idempotencyKey = `e2e-partner-create-${Date.now()}-${Math.random().toString(36).slice(2)}`;
       const res = await fetch("/api/admin/partners", {
         method: "POST",
         credentials: "include",
-        headers: { "content-type": "application/json" },
+        headers: {
+          "content-type": "application/json",
+          "x-idempotency-key": idempotencyKey,
+        },
         body: JSON.stringify({ name: `E2E Partner ${Date.now()}`, ipWhitelist: "" }),
       });
       return { status: res.status, body: await res.json() };

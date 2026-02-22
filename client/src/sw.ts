@@ -1,6 +1,7 @@
 /// <reference lib="webworker" />
 
 import {
+  SW_ACTIVATE_NOW_MESSAGE,
   PREFETCH_MANIFEST_HINT_BY_KEY,
   SW_BURST_PREFETCH_MESSAGE,
   SW_INSTALL_PREFETCH_KEYS,
@@ -294,7 +295,6 @@ sw.addEventListener("install", (event: ExtendableEvent) => {
       await runWithConcurrency(SHELL_URLS, DEFAULT_PREFETCH_CONCURRENCY, async (path) => {
         await cacheAssetIfSafe(cache, path);
       });
-      await sw.skipWaiting();
     })(),
   );
 });
@@ -314,6 +314,14 @@ sw.addEventListener("activate", (event: ExtendableEvent) => {
 });
 
 sw.addEventListener("message", (event: ExtendableMessageEvent) => {
+  if (event.data && typeof event.data === "object") {
+    const messageType = String((event.data as Record<string, unknown>).type || "").trim();
+    if (messageType === SW_ACTIVATE_NOW_MESSAGE) {
+      event.waitUntil(sw.skipWaiting());
+      return;
+    }
+  }
+
   const burst = parseBurstPrefetchPayload(event.data);
   if (!burst) return;
 

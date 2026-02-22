@@ -4,6 +4,7 @@ const ENTRY_VERSION = 1;
 const MAX_ENTRY_BYTES = 5 * 1024 * 1024;
 const PBKDF2_ITERATIONS = 100_000;
 const IV_LENGTH_BYTES = 12;
+const QUOTA_EVICT_FRACTION = 0.2;
 const STORE_NAMES = ["query-cache", "user-state", "e2ee-keys"] as const;
 const DEFAULT_SECRET_SCOPE = "app";
 const SEED_STORAGE_KEY = "tq.secure-cache.seed.v1";
@@ -61,16 +62,26 @@ function resolveOrigin(): string {
   return String(location.origin || "unknown-origin");
 }
 
+let volatileSeed: string | null = null;
+
 function getOrCreateSeed(): string {
-  if (typeof localStorage === "undefined") return `seedless:${resolveOrigin()}`;
+  if (typeof sessionStorage === "undefined") {
+    if (!volatileSeed) {
+      volatileSeed = `volatile:${randomSeedHex(32)}:${resolveOrigin()}`;
+    }
+    return volatileSeed;
+  }
   try {
-    const existing = localStorage.getItem(SEED_STORAGE_KEY);
+    const existing = sessionStorage.getItem(SEED_STORAGE_KEY);
     if (existing) return existing;
     const generated = randomSeedHex(32);
-    localStorage.setItem(SEED_STORAGE_KEY, generated);
+    sessionStorage.setItem(SEED_STORAGE_KEY, generated);
     return generated;
   } catch {
-    return `seedless:${resolveOrigin()}`;
+    if (!volatileSeed) {
+      volatileSeed = `volatile:${randomSeedHex(32)}:${resolveOrigin()}`;
+    }
+    return volatileSeed;
   }
 }
 
@@ -113,11 +124,21 @@ function removeStorageKey(key: string): void {
 }
 
 function rotateStoredSeed(): void {
-  if (typeof localStorage === "undefined") return;
+  volatileSeed = null;
+  if (typeof sessionStorage === "undefined") return;
   try {
-    localStorage.setItem(SEED_STORAGE_KEY, randomSeedHex(32));
+    sessionStorage.setItem(SEED_STORAGE_KEY, randomSeedHex(32));
   } catch {
     // ignore storage write failures
+  }
+}
+
+function removeSessionStorageKey(key: string): void {
+  if (typeof sessionStorage === "undefined") return;
+  try {
+    sessionStorage.removeItem(key);
+  } catch {
+    // ignore storage delete failures
   }
 }
 
@@ -198,6 +219,16 @@ function normalizeCipherEntry(value: unknown): EncryptedEntry | null {
   };
 }
 
+function isQuotaExceededError(error: unknown): boolean {
+  if (!error) return false;
+  if (error instanceof DOMException && error.name === "QuotaExceededError") return true;
+  const row = error as { name?: unknown; message?: unknown };
+  const name = String(row.name ?? "");
+  if (name === "QuotaExceededError") return true;
+  const message = String(row.message ?? "").toLowerCase();
+  return message.includes("quota") && message.includes("exceed");
+}
+
 function secureCacheEnabled(): boolean {
   return envFlagEnabled("VITE_ENABLE_SECURE_CACHE", true);
 }
@@ -258,13 +289,40 @@ export class SecureCache {
         v: ENTRY_VERSION,
         updatedAt: Date.now(),
       };
-
-      const transaction = db.transaction(normalizedStore, "readwrite");
-      transaction.objectStore(normalizedStore).put(row);
-      await waitForTransaction(transaction);
+      await this.writeRow(db, normalizedStore, row);
     } catch (error) {
       if ((error as Error)?.message === "SECURE_CACHE_ENTRY_TOO_LARGE") {
         throw error;
+      }
+      if (isQuotaExceededError(error)) {
+        await this.evictLeastRecentlyUsedEntries(db);
+        try {
+          const retryRow: EncryptedEntry = {
+            key: normalizedKey,
+            iv: [],
+            data: [],
+            v: ENTRY_VERSION,
+            updatedAt: Date.now(),
+          };
+          const json = JSON.stringify(value);
+          const payload = this.encoder.encode(json);
+          const iv = crypto.getRandomValues(new Uint8Array(IV_LENGTH_BYTES));
+          const encryptedBuffer = await crypto.subtle.encrypt(
+            {
+              name: "AES-GCM",
+              iv,
+              tagLength: 128,
+            },
+            encryptionKey,
+            payload,
+          );
+          retryRow.iv = Array.from(iv);
+          retryRow.data = Array.from(new Uint8Array(encryptedBuffer));
+          await this.writeRow(db, normalizedStore, retryRow);
+          return;
+        } catch {
+          // Fall through to fail-open behavior below.
+        }
       }
       // Fail open for UX, fail closed for confidentiality.
     }
@@ -301,6 +359,8 @@ export class SecureCache {
       );
 
       const decryptedJson = this.decoder.decode(decryptedBuffer);
+      row.updatedAt = Date.now();
+      void this.touchRow(db, normalizedStore, row).catch(() => undefined);
       return JSON.parse(decryptedJson) as T;
     } catch {
       await this.delete(normalizedStore, normalizedKey);
@@ -350,6 +410,56 @@ export class SecureCache {
       .catch(() => undefined);
     this.dbPromise = null;
     this.keyPromise = null;
+  }
+
+  private async writeRow(db: IDBDatabase, store: StoreNames, row: EncryptedEntry): Promise<void> {
+    const transaction = db.transaction(store, "readwrite");
+    transaction.objectStore(store).put(row);
+    await waitForTransaction(transaction);
+  }
+
+  private async touchRow(db: IDBDatabase, store: StoreNames, row: EncryptedEntry): Promise<void> {
+    try {
+      await this.writeRow(db, store, row);
+    } catch {
+      // Ignore timestamp-touch failures; reads should not become write-coupled.
+    }
+  }
+
+  private async evictLeastRecentlyUsedEntries(db: IDBDatabase): Promise<void> {
+    for (const storeName of STORE_NAMES) {
+      await this.evictLeastRecentlyUsedFromStore(db, storeName);
+    }
+  }
+
+  private async evictLeastRecentlyUsedFromStore(db: IDBDatabase, store: StoreNames): Promise<void> {
+    try {
+      const readTx = db.transaction(store, "readonly");
+      const getAllReq = readTx.objectStore(store).getAll();
+      const rowsRaw = await requestToPromise(getAllReq);
+      await waitForTransaction(readTx);
+
+      const rows = Array.isArray(rowsRaw)
+        ? rowsRaw
+            .map((entry) => normalizeCipherEntry(entry))
+            .filter((entry): entry is EncryptedEntry => Boolean(entry))
+        : [];
+      if (!rows.length) return;
+
+      const rowsToDelete = [...rows]
+        .sort((a, b) => Number(a.updatedAt || 0) - Number(b.updatedAt || 0))
+        .slice(0, Math.max(1, Math.ceil(rows.length * QUOTA_EVICT_FRACTION)));
+      if (!rowsToDelete.length) return;
+
+      const writeTx = db.transaction(store, "readwrite");
+      const objectStore = writeTx.objectStore(store);
+      for (const row of rowsToDelete) {
+        objectStore.delete(row.key);
+      }
+      await waitForTransaction(writeTx);
+    } catch {
+      // Quota cleanup is best-effort; callers will still fail open if storage remains full.
+    }
   }
 
   private async ensureDb(): Promise<IDBDatabase | null> {
@@ -446,6 +556,8 @@ export async function secureClearAll(): Promise<void> {
   } finally {
     disposeDefaultCache();
     defaultCacheScope = DEFAULT_SECRET_SCOPE;
+    volatileSeed = null;
+    removeSessionStorageKey(SEED_STORAGE_KEY);
     removeStorageKey(SEED_STORAGE_KEY);
     removeStorageKey(SCOPE_STORAGE_KEY);
     await clearServiceWorkerCaches();
@@ -478,6 +590,8 @@ export async function setSecureCacheUserScope(userId?: number | null): Promise<v
 export function resetSecureCacheForTests(): void {
   disposeDefaultCache();
   defaultCacheScope = DEFAULT_SECRET_SCOPE;
+  volatileSeed = null;
+  removeSessionStorageKey(SEED_STORAGE_KEY);
   removeStorageKey(SEED_STORAGE_KEY);
   removeStorageKey(SCOPE_STORAGE_KEY);
 }

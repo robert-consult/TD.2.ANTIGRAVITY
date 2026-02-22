@@ -35,7 +35,7 @@ test("RUNBOOK: import catalog → enable → trader sees symbol", async ({ brows
       },
     ];
 
-    await adminPage.getByLabel("Catalog File").setInputFiles({
+    await adminPage.locator("#instrument-catalog-file").setInputFiles({
       name: "catalog.json",
       mimeType: "application/json",
       buffer: Buffer.from(JSON.stringify(catalog), "utf-8"),
@@ -50,10 +50,11 @@ test("RUNBOOK: import catalog → enable → trader sees symbol", async ({ brows
     await adminPage.getByRole("button", { name: "Add From Catalog" }).click();
 
     const dialog = adminPage.getByRole("dialog");
-    await dialog.getByLabel("Search").fill(symbol);
+    const searchInput = dialog.locator("#catalog-search");
+    await searchInput.fill(symbol);
     await Promise.all([
       adminPage.waitForResponse((r) => r.url().includes("/api/admin/market-data/instruments/reference/search") && r.status() === 200),
-      dialog.getByLabel("Search").press("Enter"),
+      searchInput.press("Enter"),
     ]);
 
     const row = dialog.locator("tr", { hasText: symbol });

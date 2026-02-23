@@ -35,6 +35,8 @@ local updatedAtMs = tonumber(ARGV[3])
 local ttlSec = tonumber(ARGV[4])
 local inputHigh = tonumber(ARGV[5])
 local inputLow = tonumber(ARGV[6])
+local pubSubChannel = ARGV[7]
+local tradeId = tonumber(ARGV[8])
 
 local state = {}
 if existing and #existing > 0 then
@@ -71,6 +73,17 @@ state.updatedAtMs = updatedAtMs
 
 local encoded = cjson.encode(state)
 redis.call("SET", KEYS[1], encoded, "EX", ttlSec)
+
+if pubSubChannel and pubSubChannel ~= "" and tradeId then
+  local pubPayload = {}
+  pubPayload.tradeId = tradeId
+  pubPayload.openPrice = state.openPrice
+  pubPayload.high = state.high
+  pubPayload.low = state.low
+  pubPayload.updatedAtMs = state.updatedAtMs
+  redis.call("PUBLISH", pubSubChannel, cjson.encode(pubPayload))
+end
+
 return encoded
 `;
 
@@ -144,26 +157,7 @@ async function readDurableExcursionState(tradeId: number): Promise<TradeExcursio
   }
 }
 
-async function publishExcursionUpdate(
-  tradeId: number,
-  payload: TradeExcursionState | { cleared: true; updatedAtMs: number },
-): Promise<void> {
-  if (!EXCURSION_DURABLE_ENABLED || !EXCURSION_PUBSUB_ENABLED) return;
-  const v = getValkey();
-  if (!v) return;
 
-  try {
-    await v.publish(
-      EXCURSION_PUBSUB_CHANNEL,
-      JSON.stringify({
-        tradeId,
-        ...payload,
-      }),
-    );
-  } catch {
-    // best-effort pubsub
-  }
-}
 
 async function mergeDurableExcursion(params: {
   tradeId: number;
@@ -206,6 +200,8 @@ async function mergeDurableExcursion(params: {
       String(EXCURSION_TTL_SEC),
       params.intradayHigh == null ? "" : String(params.intradayHigh),
       params.intradayLow == null ? "" : String(params.intradayLow),
+      EXCURSION_PUBSUB_ENABLED ? EXCURSION_PUBSUB_CHANNEL : "",
+      String(params.tradeId),
     );
     const durable = parseDurableState(raw);
     if (!durable) return null;
@@ -225,10 +221,6 @@ async function mergeDurableExcursion(params: {
     };
 
     inMemoryExcursions.set(params.tradeId, merged);
-
-    if (!prior || prior.high !== merged.high || prior.low !== merged.low) {
-      void publishExcursionUpdate(params.tradeId, merged);
-    }
 
     return merged;
   } catch {
@@ -527,11 +519,22 @@ export function clearTradeExcursion(tradeId: number): void {
 
   void (async () => {
     try {
-      await v.del(tradeExcursionKey(tradeId));
-      await publishExcursionUpdate(tradeId, {
-        cleared: true,
-        updatedAtMs: Date.now(),
-      });
+      if (EXCURSION_PUBSUB_ENABLED) {
+        await v.eval(
+          `
+          redis.call("DEL", KEYS[1])
+          redis.call("PUBLISH", ARGV[1], cjson.encode({ tradeId = tonumber(ARGV[2]), cleared = true, updatedAtMs = tonumber(ARGV[3]) }))
+          return 1
+          `,
+          1,
+          tradeExcursionKey(tradeId),
+          EXCURSION_PUBSUB_CHANNEL,
+          String(tradeId),
+          String(Date.now())
+        );
+      } else {
+        await v.del(tradeExcursionKey(tradeId));
+      }
     } catch {
       // best-effort cleanup
     }

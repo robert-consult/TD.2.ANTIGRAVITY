@@ -2,7 +2,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { db } from "@db";
 import { partnerAllocations, partners } from "@shared/schema";
 import { evaluateChallengesTick } from "./challengesV4/challengeEvaluation";
-import { recalcAccount } from "../../recalcAccount";
+import { recalcAccount } from "../recalcAccount";
 
 function safeNum(value: unknown, fallback = 0): number {
   const n = Number(value);

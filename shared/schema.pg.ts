@@ -1868,7 +1868,10 @@ export const tradeAudit = pgTable("trade_audit", {
   eventHash: text("event_hash"), // SHA-256 hash for tamper-evidence
 
   note: text("note"),
-});
+}, (table) => ({
+  tradeIdx: index("trade_audit_trade_idx").on(table.tradeId),
+  tradePrevHashUid: uniqueIndex("trade_audit_trade_prev_hash_uidx").on(table.tradeId, table.prevHash),
+}));
 
 export const tradeAuditRelations = relations(tradeAudit, ({ one }) => ({
   trade: one(trades, {
@@ -1927,7 +1930,10 @@ export const orderIntentAudit = pgTable("order_intent_audit", {
   payloadJson: text("payload_json").notNull(),
   prevHash: text("prev_hash").notNull(),
   eventHash: text("event_hash").notNull(),
-});
+}, (table) => ({
+  corrIdx: index("order_intent_audit_corr_idx").on(table.correlationId),
+  corrPrevHashUid: uniqueIndex("order_intent_audit_corr_prev_hash_uidx").on(table.correlationId, table.prevHash),
+}));
 
 // Login history & IP tracking (with session tracking)
 export const userLoginHistory = pgTable("user_login_history", {

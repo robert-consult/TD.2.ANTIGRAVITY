@@ -13,7 +13,7 @@ import { onLiveEvent, publishLiveEvent } from "../services/liveBus";
 import { applyUserBalanceDelta, releaseUserMargin } from "../services/tradeAtomic";
 import { createNotification } from "../services/messaging";
 import { computeCloseSettlementCosts } from "../services/tradeCosts";
-import { clearTradeExcursion, resolveTradeExcursionForClose } from "../trades/excursionTracking";
+import { clearTradeExcursion, resolveTradeExcursionForCloseDurable } from "../trades/excursionTracking";
 
 // Hardcoded default if missing from schema mapping, ensuring safety priority.
 const MARGIN_STOP_OUT_THRESHOLD = Number(process.env.MARGIN_STOP_OUT_PCT ?? 50);
@@ -121,7 +121,7 @@ async function runMarginCallJob() {
                             const closeSettlementUsd = grossProfitUsd - closeCostSummary.closingChargesUsd;
                             const profit = netProfitUsd.toFixed(2);
 
-                            const excursion = resolveTradeExcursionForClose({
+                            const excursion = await resolveTradeExcursionForCloseDurable({
                                 tradeId: trade.id,
                                 side: trade.type as "BUY" | "SELL",
                                 openPrice,

@@ -122,20 +122,38 @@ function hasPriorBootInSession(): boolean {
   }
 }
 
+function requireManualBootOnFirstLoad(): boolean {
+  const raw = import.meta.env.VITE_REQUIRE_BOOT_CTA;
+  if (raw == null) return false;
+  return String(raw).trim().toLowerCase() === "true";
+}
+
 function scheduleAppStart(): void {
   (window as any).__tqBootNow = () => {
     void startApp();
   };
 
-  // Aggressively prefetch the application chunks immediately while the splash screen is visible!
-  // This maxes out available bandwidth without waiting for the user to click "Open Platform".
-  import("@/lib/routePrefetch").then((mod) => {
-    mod.prefetchAllRoutes({ startDelayMs: 50 }); // Give the main thread 50ms to settle paint.
+  // Warm route chunks + baseline trader shell data immediately while the splash screen is visible.
+  void Promise.all([
+    import("@/lib/routePrefetch"),
+    import("@/lib/startupDataPrefetch"),
+    import("@/lib/queryClient"),
+  ]).then(([routePrefetch, startupPrefetch, { queryClient }]) => {
+    routePrefetch.prefetchAllRoutes({ startDelayMs: 0 });
+    startupPrefetch.prefetchStartupData({
+      queryClient,
+      phase: "public",
+      startDelayMs: 0,
+    });
   }).catch((err) => {
-    console.warn("[boot] proactive prefetch failed to initialize", err);
+    console.warn("[boot] proactive startup prefetch failed to initialize", err);
   });
 
-  if (window.location.pathname === "/" && !hasPriorBootInSession()) {
+  if (
+    window.location.pathname === "/" &&
+    !hasPriorBootInSession() &&
+    requireManualBootOnFirstLoad()
+  ) {
     return;
   }
 

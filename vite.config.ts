@@ -7,9 +7,16 @@ import { autoI18nPlugin } from "./client/vite.plugins/autoI18n";
 const buildHash = process.env.BUILD_HASH ?? Date.now().toString(36);
 const DEFAULT_VENDOR_CHUNK_MAX_BYTES = 1_400_000;
 const CRITICAL_ROUTE_MODULE_SUFFIXES = [
+  "/client/src/pages/Dashboard.tsx",
   "/client/src/pages/QuotesScreen.tsx",
   "/client/src/pages/TradeScreen.tsx",
   "/client/src/pages/ChartScreen.tsx",
+  "/client/src/pages/HistoryScreen.tsx",
+  "/client/src/pages/AccountScreen.tsx",
+  "/client/src/pages/LeaderboardScreen.tsx",
+  "/client/src/pages/JournalPage.tsx",
+  "/client/src/pages/ProfileSettings.tsx",
+  "/client/src/pages/PartnerPortal.tsx",
 ] as const;
 
 function normalizePath(p: string): string {

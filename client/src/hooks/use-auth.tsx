@@ -11,6 +11,7 @@ import {
 } from "@/lib/secureCache";
 import { clearStaleData, markFreshData, markStaleData } from "@/lib/staleData";
 import { useToast } from "@/hooks/use-toast";
+import { prefetchStartupData } from "@/lib/startupDataPrefetch";
 
 interface User {
   id: number;
@@ -165,6 +166,14 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     await secureDelete("user-state", AUTH_CACHE_KEY).catch(() => undefined);
   }, []);
 
+  const warmAuthenticatedStartup = useCallback(() => {
+    prefetchStartupData({
+      queryClient,
+      phase: "authenticated",
+      startDelayMs: 0,
+    });
+  }, [queryClient]);
+
   const alignSecureCacheScope = useCallback(
     async (nextUserId: number | null) => {
       const currentScope = getSecureCacheScope();
@@ -203,6 +212,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       setIsCachedUserStale(false);
       markFreshData(AUTH_STALE_KEY);
       await persistAuthState(nextUser);
+      if (nextUserId) {
+        warmAuthenticatedStartup();
+      }
     } catch (error) {
       const unauthorized = error instanceof ApiError && error.status === 401;
       if (unauthorized) {
@@ -252,7 +264,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     } finally {
       setLoading(false);
     }
-  }, [alignSecureCacheScope, persistAuthState, toast]);
+  }, [alignSecureCacheScope, persistAuthState, toast, warmAuthenticatedStartup]);
 
   const checkAuth = useCallback(async () => {
     await checkAuthInternal();
@@ -278,6 +290,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       markFreshData(AUTH_STALE_KEY);
       await persistAuthState(nextUser);
       queryClient.clear();
+      warmAuthenticatedStartup();
     } catch (error) {
       throw error;
     } finally {
@@ -306,6 +319,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       markFreshData(AUTH_STALE_KEY);
       await persistAuthState(nextUser);
       queryClient.clear();
+      warmAuthenticatedStartup();
     } catch (error) {
       throw error;
     } finally {
@@ -346,6 +360,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         // Refresh user data to get back to admin session
         await checkAuthInternal();
         queryClient.clear();
+        warmAuthenticatedStartup();
       }
     } catch (error) {
       console.error("Stop impersonation error:", error);

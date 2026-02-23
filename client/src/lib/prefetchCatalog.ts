@@ -1,4 +1,5 @@
 export const PREFETCH_ROUTE_KEYS = [
+  "Dashboard",
   "QuotesScreen",
   "TradeScreen",
   "ChartScreen",
@@ -25,14 +26,7 @@ export const PREFETCH_MANIFEST_HINT_BY_KEY: Record<string, string> = {
   PartnerPortal: "src/pages/PartnerPortal",
 };
 
-export const SW_INSTALL_PREFETCH_KEYS = [
-  "Dashboard",
-  "QuotesScreen",
-  "TradeScreen",
-  "ChartScreen",
-  "HistoryScreen",
-  "AccountScreen",
-] as const;
+export const SW_INSTALL_PREFETCH_KEYS = [...PREFETCH_ROUTE_KEYS] as const;
 
 export const SW_BURST_PREFETCH_MESSAGE = "prefetch:burst";
 export const SW_ACTIVATE_NOW_MESSAGE = "sw:activate-now";

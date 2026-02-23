@@ -12,9 +12,12 @@ export const PERSIST_QUERY_KEYS = [
   "/api/global-settings",
   "/api/account/summary",
   "/api/quote-subscriptions/allowed-symbols",
+  "/api/quote-subscriptions/me",
   "/api/auth/current-user",
   "/api/user",
   "/api/trades/open",
+  "/api/trades/pending",
+  "/api/trader/leaderboard-mode",
 ] as const;
 
 type PersistableQueryKey = (typeof PERSIST_QUERY_KEYS)[number];
@@ -32,8 +35,11 @@ const HYDRATION_QUERY_KEYS: readonly PersistableQueryKey[] = [
   ...ESSENTIAL_HYDRATION_KEYS_IN_ORDER,
   "/api/config/symbols",
   "/api/quote-subscriptions/allowed-symbols",
+  "/api/quote-subscriptions/me",
   "/api/account/summary",
   "/api/trades/open",
+  "/api/trades/pending",
+  "/api/trader/leaderboard-mode",
 ];
 
 const ONE_MINUTE = 60_000;
@@ -45,9 +51,12 @@ const QUERY_TTL_MS: Partial<Record<PersistableQueryKey, number>> = {
   "/api/global-settings": ONE_DAY,
   "/api/account/summary": 5 * ONE_MINUTE,
   "/api/quote-subscriptions/allowed-symbols": ONE_DAY,
+  "/api/quote-subscriptions/me": 5 * ONE_MINUTE,
   "/api/auth/current-user": ONE_DAY,
   "/api/user": ONE_DAY,
   "/api/trades/open": 5 * ONE_MINUTE,
+  "/api/trades/pending": 5 * ONE_MINUTE,
+  "/api/trader/leaderboard-mode": ONE_HOUR,
 };
 
 type PersistedQueryEntry = {

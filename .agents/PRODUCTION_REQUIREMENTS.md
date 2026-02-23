@@ -704,3 +704,15 @@ Failure Mode if Missing:
   - Verify route handlers reject invalid/missing session user IDs with 401 before trade mutations/queries.
   - Execute trading route smoke/e2e checks to confirm behavior parity.
 - Failure Mode if Missing: silent type regressions in order-open/close/cancel/history hot paths can bypass compile-time detection and increase runtime defect risk.
+
+### PRD-PERF-011
+- ID: `PRD-PERF-011`
+- Date (UTC): `2026-02-23`
+- Scope: `Startup trader data burst prefetch safety + cache cohesion`
+- Requirement: Client startup API warmup must remain tier-bounded and `saveData`-aware, use an allowlisted trader query-key set, dedupe in-flight prefetches, and integrate with encrypted query persistence without routing `/api/*` through service-worker cache.
+- Enforcement: `client/src/lib/startupDataPrefetch.ts` (tier-plan gating, allowlist, bounded concurrency, in-flight dedupe), `client/src/main.tsx` and `client/src/AuthenticatedShell.tsx` (public/authenticated startup warmup wiring), `client/src/lib/queryPersistence.ts` (persist/hydrate coverage for warmed keys), and `client/src/sw.ts` (`/api/*` and `/ws` bypass guard).
+- Validation:
+  - Run `npx vitest run --pool=threads --maxWorkers=1 client/src/lib/startupDataPrefetch.test.ts client/src/lib/perfHints.test.ts client/src/lib/routePrefetch.test.ts client/src/lib/queryPersistence.test.ts client/src/lib/queryPersistence.hydrate.test.ts client/src/live/ConfigSync.test.ts client/src/hooks/use-performance-settings.test.tsx`.
+  - Verify `saveData` profiles skip startup data burst prefetch and constrained tiers cap warmup scope/concurrency.
+  - Run `npm run check` and `npm run build` to confirm integration/type/build safety.
+- Failure Mode if Missing: startup can trigger duplicate or unbounded request bursts, weak-network clients can lose API/WS headroom, and warmed trader state may not hydrate/persist coherently across reloads.

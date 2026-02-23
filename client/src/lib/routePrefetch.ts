@@ -19,6 +19,7 @@ type ChunkPrefetchTarget = {
 };
 
 const PREFETCH_IMPORTERS: Record<PrefetchRouteKey, ChunkImporter> = {
+  Dashboard: () => import("@/pages/Dashboard"),
   QuotesScreen: () => import("@/pages/QuotesScreen"),
   TradeScreen: () => import("@/pages/TradeScreen"),
   ChartScreen: () => import("@/pages/ChartScreen"),

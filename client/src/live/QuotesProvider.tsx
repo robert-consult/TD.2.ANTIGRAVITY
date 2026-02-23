@@ -94,9 +94,22 @@ function normalizeAllowedSymbolsPayload(value: unknown): AllowedSymbolsResponse 
   };
 }
 
+function toSymbolKey(value: unknown): string {
+  return String(value || "").trim().toUpperCase();
+}
+
+function hasSameSymbolSet(a: readonly SymbolConfig[], b: readonly SymbolConfig[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    if (toSymbolKey(a[i]?.symbol) !== toSymbolKey(b[i]?.symbol)) return false;
+  }
+  return true;
+}
+
 export function QuotesProvider({ children }: { children: ReactNode }) {
   const { isAuthenticated } = useAuth();
   const [quotes, setQuotes] = useState<Quote[]>([]);
+  const [bootstrapSymbols, setBootstrapSymbols] = useState<SymbolConfig[]>(EMPTY_SYMBOLS);
   const quotesRef = useRef<Map<string, Quote>>(new Map());
   const symbolNameMapRef = useRef<Map<string, string>>(new Map());
   const allowedSymbolsRef = useRef<Set<string>>(new Set());
@@ -125,6 +138,8 @@ export function QuotesProvider({ children }: { children: ReactNode }) {
     quotesRef.current = new Map();
     prevSymbolsRef.current = [];
     symbolNameMapRef.current = new Map();
+    allowedSymbolsRef.current = new Set();
+    setBootstrapSymbols(EMPTY_SYMBOLS);
     setQuotes([]);
   }, [isAuthenticated]);
 
@@ -154,6 +169,7 @@ export function QuotesProvider({ children }: { children: ReactNode }) {
 
       symbolNameMapRef.current = nextMap;
       allowedSymbolsRef.current = nextAllowed;
+      setBootstrapSymbols(payload.symbols);
     })();
 
     return () => {
@@ -193,20 +209,25 @@ export function QuotesProvider({ children }: { children: ReactNode }) {
     staleTime: Infinity,
     // Keep permissions fresh even if an upstream WS event is missed.
     refetchInterval: isWsConnected ? 10_000 : 20_000,
-    placeholderData: {
-      symbols: EMPTY_SYMBOLS,
-      effectiveMode: "BASIC_ONLY",
-      supportsCustom: false,
-      includesBaseline: true,
-    },
   });
 
   const symbols = symbolsData?.symbols ?? EMPTY_SYMBOLS;
+  const resolvedSymbols = useMemo(() => {
+    if (symbols.length > 0) return symbols;
+    return bootstrapSymbols;
+  }, [bootstrapSymbols, symbols]);
 
   useEffect(() => {
+    if (!isAuthenticated || !symbolsData) return;
+    const nextSymbols = symbolsData.symbols ?? EMPTY_SYMBOLS;
+    setBootstrapSymbols((prev) => (hasSameSymbolSet(prev, nextSymbols) ? prev : nextSymbols));
+  }, [isAuthenticated, symbolsData]);
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
     const map = new Map<string, string>();
     const allowed = new Set<string>();
-    (symbols || []).forEach((s) => {
+    (resolvedSymbols || []).forEach((s) => {
       const sym = String(s.symbol).toUpperCase();
       if (!sym) return;
       allowed.add(sym);
@@ -216,6 +237,7 @@ export function QuotesProvider({ children }: { children: ReactNode }) {
     allowedSymbolsRef.current = allowed;
 
     if (!allowed.size) {
+      if (isSymbolsLoading && !symbolsData) return;
       quotesRef.current = new Map();
       setQuotes((prev) => (prev.length ? [] : prev));
       return;
@@ -239,12 +261,12 @@ export function QuotesProvider({ children }: { children: ReactNode }) {
       quotesRef.current = next;
       setQuotes(Array.from(next.values()));
     }
-  }, [symbols]);
+  }, [isAuthenticated, isSymbolsLoading, resolvedSymbols, symbolsData]);
 
   const requestedSymbols = useMemo(() => {
-    return (symbols || [])
+    return (resolvedSymbols || [])
       .map((s) => String(s.symbol).toUpperCase());
-  }, [symbols]);
+  }, [resolvedSymbols]);
   const requestedSymbolsKey = useMemo(() => JSON.stringify(requestedSymbols), [requestedSymbols]);
 
   useEffect(() => {
@@ -282,6 +304,7 @@ export function QuotesProvider({ children }: { children: ReactNode }) {
   const applyQuoteRows = useCallback(
     (rows: any[], replace: boolean) => {
       if (!Array.isArray(rows) || rows.length === 0) return;
+      const hadQuotes = quotesRef.current.size > 0;
       const nextMap = replace ? new Map<string, Quote>() : new Map(quotesRef.current);
       const nameMap = symbolNameMapRef.current;
       const allowed = allowedSymbolsRef.current;
@@ -327,6 +350,15 @@ export function QuotesProvider({ children }: { children: ReactNode }) {
       }
 
       quotesRef.current = nextMap;
+      if (replace && !hadQuotes && nextMap.size > 0) {
+        if (flushTimerRef.current !== null) {
+          window.clearTimeout(flushTimerRef.current);
+          flushTimerRef.current = null;
+        }
+        pendingFlushRef.current = false;
+        setQuotes(Array.from(nextMap.values()));
+        return;
+      }
       scheduleFlush();
     },
     [scheduleFlush],

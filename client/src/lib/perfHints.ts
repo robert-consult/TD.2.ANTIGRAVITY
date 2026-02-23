@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import { PREFETCH_ROUTE_KEYS } from "@/lib/prefetchCatalog";
 
 export type NetEffectiveType = "slow-2g" | "2g" | "3g" | "4g" | "unknown";
 export type PerformanceTier = "INSTANT" | "FAST" | "MODERATE" | "CONSTRAINED" | "MINIMAL";
@@ -695,12 +696,15 @@ export function tierPrefetchPlan(
     return { count: 4, mode, startDelayMs, maxConcurrency };
   }
 
-  let count = 9;
-  if (hints.networkTier === "MODERATE") count = 8;
-  if (hints.networkTier === "CONSTRAINED") count = 6;
+  const totalPrefetchTargets: number = PREFETCH_ROUTE_KEYS.length;
+  let count = totalPrefetchTargets;
+  if (hints.networkTier === "MODERATE") count = Math.max(1, totalPrefetchTargets - 1);
+  if (hints.networkTier === "CONSTRAINED") count = Math.max(1, totalPrefetchTargets - 3);
 
   if (hints.deviceTier === "MINIMAL") count = Math.min(count, 3);
-  if (hints.deviceTier === "CONSTRAINED") count = Math.min(count, 6);
+  if (hints.deviceTier === "CONSTRAINED") {
+    count = Math.min(count, Math.max(4, totalPrefetchTargets - 4));
+  }
 
   if (count <= 0) {
     return { count: 0, mode: "none", startDelayMs: 0, maxConcurrency: 1 };

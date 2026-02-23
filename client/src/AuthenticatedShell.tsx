@@ -1,4 +1,5 @@
 import { Suspense, useEffect, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Switch, Route, useLocation } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
 import { VerificationReminderPopup } from "@/components/VerificationReminderPopup";
@@ -12,6 +13,7 @@ import { prefetchAllRoutes } from "@/lib/routePrefetch";
 import { startGriftPing } from "@/lib/griftPing";
 import { usePerfHints } from "@/lib/perfHints";
 import { usePerformanceSettings } from "@/hooks/use-performance-settings";
+import { prefetchStartupData } from "@/lib/startupDataPrefetch";
 
 const NotFound = lazyWithPing(() => import("@/pages/not-found"));
 const Dashboard = lazyWithPing(() => import("@/pages/Dashboard"));
@@ -90,6 +92,7 @@ function AdminRoute() {
 
 export default function AuthenticatedShell() {
   const { user } = useAuth();
+  const queryClient = useQueryClient();
   const [location, navigate] = useLocation();
   const perfHints = usePerfHints();
   const perfSettings = usePerformanceSettings();
@@ -100,8 +103,19 @@ export default function AuthenticatedShell() {
   }, []);
 
   useEffect(() => {
-    prefetchAllRoutes({ hints: perfHints, settings: perfSettings });
+    prefetchAllRoutes({ hints: perfHints, settings: perfSettings, startDelayMs: 0 });
   }, [perfHints, perfSettings]);
+
+  useEffect(() => {
+    if (!user) return;
+    prefetchStartupData({
+      queryClient,
+      phase: "authenticated",
+      hints: perfHints,
+      settings: perfSettings,
+      startDelayMs: 0,
+    });
+  }, [perfHints, perfSettings, queryClient, user?.id]);
 
   useEffect(() => {
     if (location === "/login") {

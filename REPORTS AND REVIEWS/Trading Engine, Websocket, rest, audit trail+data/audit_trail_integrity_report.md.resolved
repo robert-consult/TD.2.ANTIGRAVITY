@@ -1,0 +1,43 @@
+# Trade Audit Trail Integrity & Persistence Report
+
+## Executive Summary
+This report analyzes the Data Capture, Emission, Reception, and Persistence mechanisms of the **Institutional Trade Audit Trail** (`tradeAudit` and `orderIntentAudit`). 
+
+While the data capture is exceptionally detailed and the hash-chain generation algorithms are mathematically sound, the **persistence layer suffers from severe relational design flaws** that expose the system to performance degradation and cryptographic chain-forking via race conditions.
+
+---
+
+## 1. Data Capture (Excellent)
+The data capture mechanisms within [writeTradeAudit](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/lib/auditWriter.ts#130-321) and [writeOrderIntentAudit](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/lib/auditWriter.ts#360-461) are hedge-fund grade. 
+- **TCA (Transaction Cost Analysis):** Accurately captures Slippage (pips), Latency (ms), requested vs fill prices, and spread metrics.
+- **Risk Evidence Snapshotting:** Properly serializes the exact state of risk limits (`riskLimitValue`, `riskObservedValue`) at the exact millisecond of the decision.
+- **Canonical Serialization:** Enforces strict alphabetical JSON key sorting ([canonicalJson](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/lib/auditWriter.ts#14-30)) to guarantee deterministic SHA-256 hashes regardless of object construction order.
+
+## 2. Emission & Reception (Observation)
+- **Current State:** The system is completely DB-bound. Audit events are generated and directly inserted into PostgreSQL synchronously within the Node.js request lifecycle.
+- **Finding:** There is no emission to an external pub/sub queue (like Kafka, Valkey, or RabbitMQ) and no external reception system (like an ELK stack or Snowflake data warehouse).
+- **Recommendation:** If the platform scales significantly, synchronous DB writes of massive audit payloads will bottleneck core trading performance. Consider emitting audit envelopes to a Valkey Stream and persisting to Postgres via a background worker queue.
+
+## 3. Persistence Layer (CRITICAL VULNERABILITIES)
+
+A review of [shared/schema.pg.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/shared/schema.pg.ts) reveals severe missing constraints in both `trade_audit` and `order_intent_audit` tables.
+
+### 3.1 Missing Indexes (Performance Collapse)
+Neither `tradeAudit` nor `orderIntentAudit` have *any* database indexes defined other than their primary keys.
+- [writeTradeAudit](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/lib/auditWriter.ts#130-321) executes: `where: eq(tradeAudit.tradeId, params.tradeId), orderBy: desc(tradeAudit.id)`
+- Without an index on `tradeId`, PostgreSQL is forced to perform a **Sequential Scan** over the entire `trade_audit` table on *every single trade action* to resolve the `prevHash`. As this table grows to millions of rows, order execution latency will spike exponentially.
+
+### 3.2 Missing Unique Constraints (Hash-Chain Forking / Race Conditions)
+Because there are no unique constraints, the system is vulnerable to race conditions that will destroy the cryptographic chain.
+- **The Exploit / Bug:** If two processes (e.g., a manual close request and an [autoClose.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/cron/autoClose.ts) margin call) attempt to write an audit event for the *same* trade at the exact same millisecond:
+  1. Both processes query for the last event and receive the same `prevHash` (e.g., `HashA`).
+  2. Both construct their payloads and generate their new hashes.
+  3. Both execute `INSERT`.
+- **The Result:** The database will happily store two separate rows pointing to `prevHash: HashA`. The hash chain branches into a fork. 
+- **The Fallout:** The [tradeAuditVerification.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/cron/tradeAuditVerification.ts) cron job expects a strict, linear `GENESIS -> A -> B -> C` chain. Upon encountering a fork, the cryptographic verification will fail. If `FAIL_FAST` is enabled, the verification cron will continuously crash the server.
+
+---
+
+## 4. Required Fixes
+1. **Schema Indexes:** Add standard indexes to `tradeAudit.tradeId` and `orderIntentAudit.correlationId` immediately.
+2. **Schema Constraints:** Add a `uniqueIndex` on [(tradeId, prevHash)](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/engine/orderEngine.ts#63-69) for `tradeAudit`, and [(correlationId, prevHash)](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/engine/orderEngine.ts#63-69) for `orderIntentAudit`. This enforces at the Postgres level that a chain can never branch. If a race condition occurs, one transaction will succeed, and the other will throw a constraint violation (allowing the application to retry and fetch the new `prevHash`).

@@ -1,5 +1,7 @@
 let metricTradeCloseRejectedQuoteStaleTotal = 0;
 let metricTradeTargetsRejectedQuoteStaleTotal = 0;
+let metricTradeOpenRejectedQuoteRevalidationTotal = 0;
+let metricTradeCloseRejectedQuoteRevalidationTotal = 0;
 let metricWsQuotePermissionRefreshTotal = 0;
 let metricWsQuotePermissionRefreshErrorsTotal = 0;
 let metricWsOriginRejectedTotal = 0;
@@ -12,6 +14,14 @@ export function incTradeCloseRejectedQuoteStaleTotal() {
 
 export function incTradeTargetsRejectedQuoteStaleTotal() {
   metricTradeTargetsRejectedQuoteStaleTotal += 1;
+}
+
+export function incTradeOpenRejectedQuoteRevalidationTotal() {
+  metricTradeOpenRejectedQuoteRevalidationTotal += 1;
+}
+
+export function incTradeCloseRejectedQuoteRevalidationTotal() {
+  metricTradeCloseRejectedQuoteRevalidationTotal += 1;
 }
 
 export function addWsQuotePermissionRefreshTotal(count: number) {
@@ -38,6 +48,8 @@ export function getRouteMetricSnapshot() {
   return {
     metricTradeCloseRejectedQuoteStaleTotal,
     metricTradeTargetsRejectedQuoteStaleTotal,
+    metricTradeOpenRejectedQuoteRevalidationTotal,
+    metricTradeCloseRejectedQuoteRevalidationTotal,
     metricWsQuotePermissionRefreshTotal,
     metricWsQuotePermissionRefreshErrorsTotal,
     metricWsOriginRejectedTotal,

@@ -12,11 +12,11 @@ import { riskMiddleware, getEffectiveMinHoldSec } from "../../risk";
 import { requirePolicy } from "../../middleware/requirePolicy";
 import { recalcAccount } from "../../recalcAccount";
 import { requiredMargin } from "../../lib/margin";
-import { getExecutionQuote } from "../../services/quoteService";
+import { getExecutionQuote, validateExecutionQuoteAtCommit } from "../../services/quoteService";
 import { applyUserBalanceDelta, releaseUserMargin, reserveUserMargin } from "../../services/tradeAtomic";
 import { realizedPnlUsd } from "../../lib/realizedPnl";
 import { computeCloseSettlementCosts, computeOpenSideCosts } from "../../services/tradeCosts";
-import { clearTradeExcursion, initTradeExcursion, resolveTradeExcursionForClose } from "../../trades/excursionTracking";
+import { clearTradeExcursion, initTradeExcursion, resolveTradeExcursionForCloseDurable } from "../../trades/excursionTracking";
 import { buildAuditContext, type AuditContext } from "../../lib/auditContext";
 import {
   calculateSlippagePips,
@@ -51,6 +51,7 @@ import {
 import { WS_MSG_TRADES_UPDATED } from "@shared/ws/protocol";
 import {
   incTradeCloseRejectedQuoteStaleTotal,
+  incTradeCloseRejectedQuoteRevalidationTotal,
   incTradeTargetsRejectedQuoteStaleTotal,
 } from "../metricsState";
 import type { TraderRouterDeps } from "./types";
@@ -204,7 +205,7 @@ router.post(
       const closePrice = q.execPrice;
       const openPrice = parseFloat(String(trade.openPrice));
       const lots = typeof trade.lots === "string" ? Number(trade.lots) : Number(trade.lots ?? 1);
-      const excursion = resolveTradeExcursionForClose({
+      const excursion = await resolveTradeExcursionForCloseDurable({
         tradeId,
         side: trade.type as "BUY" | "SELL",
         openPrice,
@@ -254,7 +255,18 @@ router.post(
           where id = ${tradeId} and user_id = ${req.session.userId} and status = 'OPEN'
           for update
         `);
-        if (!tradeLock.rows.length) return null;
+        if (!tradeLock.rows.length) return { action: "ALREADY_CLOSED" as const };
+
+        const quoteRevalidation = await validateExecutionQuoteAtCommit({
+          symbol: q.symbol,
+          side: trade.type as "BUY" | "SELL",
+          action: "CLOSE",
+          expectedQuoteTs: q.quoteTs,
+          expectedExecPrice: closePrice,
+        });
+        if (!quoteRevalidation.ok) {
+          return { action: "QUOTE_REVALIDATION_FAILED" as const, quoteRevalidation };
+        }
 
         const userRowRes = await tx.execute(sql`
           select id, leverage
@@ -307,7 +319,7 @@ router.post(
           .returning();
 
         const closedTrade = closedRows[0];
-        if (!closedTrade) return null;
+        if (!closedTrade) return { action: "ALREADY_CLOSED" as const };
 
         await applyUserBalanceDelta(tx, { userId: req.session.userId, deltaUsd: closeSettlementUsd });
         await releaseUserMargin(tx, { userId: req.session.userId, marginUsd: marginToRelease });
@@ -361,10 +373,62 @@ router.post(
           },
         }, { db: tx });
 
-        return closedTrade;
+        return { action: "CLOSED" as const, trade: closedTrade };
       });
 
-      if (!closeResult) {
+      if (closeResult.action === "QUOTE_REVALIDATION_FAILED") {
+        const quoteRevalidation = (closeResult as any).quoteRevalidation ?? {};
+        incTradeCloseRejectedQuoteRevalidationTotal();
+        try {
+          await db.update(trades)
+            .set({
+              correlationId,
+              orderId,
+              positionId,
+              lastActorUserId: req.session.userId,
+              lastActorSessionId: closeAuditCtx.sessionId,
+              lastActorIp: closeAuditCtx.ip,
+              lastActorUserAgent: closeAuditCtx.userAgent,
+              lastActorType: closeAuditCtx.actorType,
+            })
+            .where(eq(trades.id, tradeId));
+
+          await writeTradeAudit({
+            tradeId,
+            eventType: "POSITION_CLOSE_REJECTED",
+            eventCategory: "TRADE",
+            ctx: closeAuditCtx,
+            orderId,
+            positionId,
+            symbol: q.symbol,
+            side: trade.type as string,
+            requestedPrice: closePrice,
+            quoteBid: q.bid,
+            quoteAsk: q.ask,
+            quoteMid: q.mid,
+            quoteSpread: q.spread,
+            quoteTs: q.quoteTs,
+            quoteSource: `revalidation:${q.source}`,
+            riskResult: "REJECT",
+            reasonCode: String(quoteRevalidation.code ?? "QUOTE_REVALIDATION_FAILED"),
+            note: "Rejected manual close due to quote commit revalidation failure",
+            payload: quoteRevalidation,
+          });
+        } catch (auditErr) {
+          console.error("Error writing POSITION_CLOSE_REJECTED revalidation audit:", auditErr);
+        }
+
+        res.setHeader("Retry-After", "1");
+        return res.status(409).json({
+          code: "QUOTE_REVALIDATION_FAILED",
+          reasonCode: String(quoteRevalidation.code ?? "UNKNOWN"),
+          message: "Quote changed during close commit. Please retry with the latest market quote.",
+          details: quoteRevalidation,
+        });
+      }
+
+      if (closeResult.action !== "CLOSED") {
+        clearTradeExcursion(tradeId);
         return res.status(409).json({ message: "Trade is already closed" });
       }
 
@@ -424,7 +488,7 @@ router.post(
         }
       }
 
-      res.json(closeResult);
+      res.json(closeResult.trade);
     } catch (error) {
       console.error("Close trade error:", error);
       res.status(500).json({ message: "Failed to close trade" });

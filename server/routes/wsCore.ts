@@ -146,6 +146,12 @@ app.get("/metrics", (_req, res) => {
       "# HELP trade_targets_rejected_quote_stale_total Target update requests rejected due to stale quotes (market open)",
       "# TYPE trade_targets_rejected_quote_stale_total counter",
       `trade_targets_rejected_quote_stale_total ${metricSnapshot.metricTradeTargetsRejectedQuoteStaleTotal}`,
+      "# HELP trade_open_rejected_quote_revalidation_total Trade open requests rejected due to quote commit revalidation failure",
+      "# TYPE trade_open_rejected_quote_revalidation_total counter",
+      `trade_open_rejected_quote_revalidation_total ${metricSnapshot.metricTradeOpenRejectedQuoteRevalidationTotal}`,
+      "# HELP trade_close_rejected_quote_revalidation_total Trade close requests rejected due to quote commit revalidation failure",
+      "# TYPE trade_close_rejected_quote_revalidation_total counter",
+      `trade_close_rejected_quote_revalidation_total ${metricSnapshot.metricTradeCloseRejectedQuoteRevalidationTotal}`,
       "# HELP ws_quote_permission_refresh_total WebSocket clients whose quote permissions were recalculated",
       "# TYPE ws_quote_permission_refresh_total counter",
       `ws_quote_permission_refresh_total ${metricSnapshot.metricWsQuotePermissionRefreshTotal}`,
@@ -1001,7 +1007,8 @@ onLiveEvent((event) => {
   if (ev?.type === WS_MSG_QUOTES_UPDATE && Array.isArray(ev?.payload?.rows)) {
     const seq = Number(ev.payload?.seq ?? 0);
     const asOf = Number(ev.payload?.asOf ?? Date.now());
-    applyQuoteUpdate(ev.payload.rows, { seq, asOf });
+    const source = typeof ev.payload?.source === "string" ? String(ev.payload.source).trim() : undefined;
+    applyQuoteUpdate(ev.payload.rows, { seq, asOf, source });
 
     const rows = ev.payload.rows as any[];
     if (liveWsPushFrequencyMs > 0) {

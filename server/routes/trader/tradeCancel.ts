@@ -116,6 +116,9 @@ router.patch(
       }
 
       const canceledTrade = await storage.cancelTrade(tradeId);
+      if (canceledTrade) {
+        clearTradeExcursion(tradeId);
+      }
 
       // AUDIT: Write ORDER_CANCELED with full provenance
       if (canceledTrade) {

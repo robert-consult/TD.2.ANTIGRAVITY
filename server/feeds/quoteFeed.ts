@@ -123,6 +123,7 @@ type PersistedValkeyQuoteRow = {
   price: number | null;
   lastApiUpdate: number;
   isStale: boolean;
+  source?: string;
 };
 
 type PersistedValkeyQuoteSnapshot = {
@@ -159,6 +160,7 @@ async function loadPersistedValkeyQuoteRows(symbols: string[]): Promise<Persiste
           price: typeof parsed.price === "number" ? parsed.price : parsed.price == null ? null : Number(parsed.price),
           lastApiUpdate: normalizeEpochMs(parsed.lastApiUpdate, Date.now()),
           isStale: Boolean(parsed.isStale),
+          source: typeof parsed.source === "string" && parsed.source.trim() ? parsed.source.trim() : undefined,
         });
       } catch {
         // ignore malformed entries
@@ -724,6 +726,7 @@ async function buildFallbackQuotes(symbols: string[]) {
       lastUpdated,
       isStale: true,
       consecutiveFailures: consecutiveApiFailures,
+      source: row.source ?? "fallback_cache",
     });
   }
 
@@ -743,6 +746,7 @@ async function buildFallbackQuotes(symbols: string[]) {
           lastUpdated,
           isStale: true,
           consecutiveFailures: consecutiveApiFailures,
+          source: "quotes_db",
         });
       }
     }
@@ -768,9 +772,10 @@ type LiveQuoteRow = {
   price: number | null;
   lastApiUpdate: number;
   isStale: boolean;
+  source?: string;
 };
 
-function toLiveQuoteRows(rows: any[], asOf: number, isStaleDefault: boolean): LiveQuoteRow[] {
+function toLiveQuoteRows(rows: any[], asOf: number, isStaleDefault: boolean, fallbackSource?: string): LiveQuoteRow[] {
   return rows
     .map((q) => {
       if (!q?.symbol) return null;
@@ -785,6 +790,7 @@ function toLiveQuoteRows(rows: any[], asOf: number, isStaleDefault: boolean): Li
             : null;
       const lastApiUpdateRaw = typeof q.lastUpdated === "number" ? q.lastUpdated : typeof q.lastApiUpdate === "number" ? q.lastApiUpdate : asOf;
       const lastApiUpdate = lastApiUpdateRaw < 1e12 ? lastApiUpdateRaw * 1000 : lastApiUpdateRaw;
+      const source = typeof q.source === "string" && q.source.trim() ? q.source.trim() : fallbackSource;
       return {
         symbol,
         bid,
@@ -792,6 +798,7 @@ function toLiveQuoteRows(rows: any[], asOf: number, isStaleDefault: boolean): Li
         price,
         lastApiUpdate,
         isStale: Boolean(q.isStale ?? isStaleDefault),
+        source,
       };
     })
     .filter((row): row is LiveQuoteRow => Boolean(row && row.symbol));
@@ -823,7 +830,7 @@ async function persistSnapshotToValkey(rows: LiveQuoteRow[], meta: { seq: number
 async function publishQuoteUpdate(rows: any[], source: string, isStaleDefault: boolean) {
   const asOf = Date.now();
   const seq = ++quotesSeq;
-  const liveRows = toLiveQuoteRows(rows, asOf, isStaleDefault);
+  const liveRows = toLiveQuoteRows(rows, asOf, isStaleDefault, source);
   if (!liveRows.length) return;
   lastPublishedSource = source;
   lastPublishedAtMs = asOf;
@@ -844,7 +851,7 @@ async function handleQuoteBatch(
   updateSnapshotCache(rows, { markSuccess: options.markSuccess });
 
   // Write to rolling buffer for recovery
-  await writeToRollingBufferBatch(rows);
+  await writeToRollingBufferBatch(rows, source);
 
   await maybePersistDailyClose(rows);
   await maybePersistQuotes(rows, isStaleDefault);
@@ -858,6 +865,7 @@ async function handleQuoteBatch(
       ask: q.ask,
       isStale: Boolean(q.isStale ?? isStaleDefault),
       lastUpdated: q.lastUpdated,
+      source: typeof q.source === "string" && q.source.trim() ? q.source.trim() : source,
     })),
   );
 }
@@ -865,7 +873,7 @@ async function handleQuoteBatch(
 /**
  * Write a batch of quotes to rolling buffers.
  */
-async function writeToRollingBufferBatch(rows: any[]) {
+async function writeToRollingBufferBatch(rows: any[], source: string) {
   const promises = rows.map((q) => {
     if (!q?.symbol) return Promise.resolve(false);
     return writeToRollingBuffer(q.symbol, {
@@ -873,6 +881,7 @@ async function writeToRollingBufferBatch(rows: any[]) {
       ask: typeof q.ask === "number" ? q.ask : null,
       price: typeof q.price === "number" ? q.price : null,
       lastApiUpdate: typeof q.lastUpdated === "number" ? q.lastUpdated : Date.now(),
+      source: typeof q.source === "string" && q.source.trim() ? q.source.trim() : source,
     });
   });
   await Promise.all(promises);

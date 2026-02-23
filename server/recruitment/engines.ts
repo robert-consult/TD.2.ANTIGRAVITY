@@ -2,6 +2,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { db } from "@db";
 import { partnerAllocations, partners } from "@shared/schema";
 import { evaluateChallengesTick } from "./challengesV4/challengeEvaluation";
+import { recalcAccount } from "../../recalcAccount";
 
 function safeNum(value: unknown, fallback = 0): number {
   const n = Number(value);
@@ -32,6 +33,14 @@ type ActiveAllocation = {
 };
 
 async function computeAllocationPnlUsd(userId: number, capitalUsd: number, sinceSec: number): Promise<number> {
+  let floatingPnlUsd = 0;
+  try {
+    const recalc = await recalcAccount(userId, { emit: false });
+    if (recalc) floatingPnlUsd = Number(recalc.floatingPnl) || 0;
+  } catch (e) {
+    console.error("[engines] error running recalcAccount on active allocation user:", e);
+  }
+
   const rows = await db.execute(sql`
     WITH src AS (
       SELECT
@@ -56,7 +65,7 @@ async function computeAllocationPnlUsd(userId: number, capitalUsd: number, since
       LIMIT 1
     )
     SELECT
-      COALESCE((SELECT SUM(net_profit) FROM src), 0)::float8 / NULLIF((SELECT eq FROM start_eq), 0)::float8 AS pnl_pct
+      (COALESCE((SELECT SUM(net_profit) FROM src), 0)::float8 + ${floatingPnlUsd}::float8) / NULLIF((SELECT eq FROM start_eq), 0)::float8 AS pnl_pct
   `);
 
   const pnlPct = safeNum((rows as any)?.rows?.[0]?.pnl_pct);

@@ -22,7 +22,7 @@ import { onLiveEvent, publishLiveEvent } from "../services/liveBus";
 import { applyUserBalanceDelta, releaseUserMargin } from "../services/tradeAtomic";
 import { createNotification } from "../services/messaging";
 import { computeCloseSettlementCosts } from "../services/tradeCosts";
-import { clearTradeExcursion, resolveTradeExcursionForClose } from "../trades/excursionTracking";
+import { clearTradeExcursion, resolveTradeExcursionForCloseDurable } from "../trades/excursionTracking";
 
 const STALE_DEFER_MAX_MIN = Number(process.env.AUTOCLOSE_STALE_DEFER_MAX_MIN ?? 60);
 const ALLOW_STALE_CLOSE = String(process.env.AUTOCLOSE_ALLOW_STALE_CLOSE ?? "true") === "true";
@@ -120,7 +120,7 @@ async function runAutoCloseJob() {
         const netProfitUsd = grossProfitUsd - closeCostSummary.totalCostsUsd;
         const closeSettlementUsd = grossProfitUsd - closeCostSummary.closingChargesUsd;
         const profit = netProfitUsd.toFixed(2);
-        const excursion = resolveTradeExcursionForClose({
+        const excursion = await resolveTradeExcursionForCloseDurable({
           tradeId: trade.id,
           side: trade.type as "BUY" | "SELL",
           openPrice,

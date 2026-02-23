@@ -607,3 +607,40 @@ Failure Mode if Missing:
   - Retry with the same key/payload after completion and verify replay with `X-Idempotent-Replay: 1`.
   - Force the first request to fail and verify a subsequent retry with the same key can proceed (reservation released).
 - Failure Mode if Missing: duplicate partner mutations can still execute during network retries/races, creating duplicate writes despite idempotency headers.
+
+### PRD-TRD-005
+- ID: `PRD-TRD-005`
+- Date (UTC): `2026-02-22`
+- Scope: `Cross-pod trade excursion consistency`
+- Requirement: Intraday trade excursion bounds (`intradayHigh`, `intradayLow`) used for MFE/MAE must be durably merged in Valkey and resolved on close against durable state so horizontal scaling does not fracture risk analytics.
+- Enforcement: `server/trades/excursionTracking.ts` (Valkey max/min merge script + pubsub hydration), `server/engine/orderEngine.ts` (durable close resolver + monotonic DB merge), `server/index.ts` (ingestor-only excursion pubsub initialization).
+- Validation:
+  - Open a trade, stream quotes through one node, and close from a different node; verify persisted close row retains the full excursion bounds and non-regressed MFE/MAE.
+  - Restart an ingestor process mid-trade and verify excursion bounds continue from Valkey state.
+  - Confirm pubsub initialization log appears only on ingestor role and non-ingestor roles log skip.
+- Failure Mode if Missing: multi-node deployments under-report or regress trade excursions, leading to inconsistent analytics and audit drift.
+
+### PRD-MKT-001
+- ID: `PRD-MKT-001`
+- Date (UTC): `2026-02-22`
+- Scope: `Provider-agnostic quote source attribution`
+- Requirement: Quote provenance (`source`) must propagate end-to-end (provider ingest -> Valkey snapshot/per-symbol/rolling buffer -> quote hub -> execution quote selection -> trade audit writes) without hardcoding a single provider identity.
+- Enforcement: `server/feeds/quoteFeed.ts`, `server/services/valkey.ts`, `server/routes/wsCore.ts`, `server/services/quoteHub.ts`, `server/services/quoteService.ts`, and `server/engine/orderEngine.ts`.
+- Validation:
+  - Ingest quotes from two distinct providers/fallback paths and verify `/ws` quote updates expose correct per-row `source`.
+  - Verify execution quote retrieval reports expected source (`quote_hub`, `valkey_cache`, `rolling_buffer`, `prev_close_cache`, optional `quotes_db`) across fallback paths.
+  - Execute/close trades and verify audit `quoteSource`/`closeSource` matches propagated source rather than static legacy defaults.
+- Failure Mode if Missing: provenance is misattributed (for example always reported as one vendor), obscuring latency diagnostics, provider failover analysis, and compliance-grade execution traceability.
+
+### PRD-TRD-006
+- ID: `PRD-TRD-006`
+- Date (UTC): `2026-02-23`
+- Scope: `Execution quote commit-time consistency enforcement`
+- Requirement: Market open/close mutations must revalidate execution quotes inside the commit transaction and reject requests when latest quote state is stale, regressed in timestamp, or drifts beyond configured bounds from the decision-time execution quote.
+- Enforcement: `server/services/quoteService.ts` (`validateExecutionQuoteAtCommit`) and transaction guards in `server/routes/trader/tradeOpen.ts` and `server/routes/trader/tradeClose.ts`; observability counters in `server/routes/metricsState.ts` and `server/routes/wsCore.ts`.
+- Validation:
+  - Force quote age beyond `QUOTE_REVALIDATE_MAX_AGE_MS` and verify `409 QUOTE_REVALIDATION_FAILED` with `Retry-After: 1` on trade open/close.
+  - Simulate quote timestamp regression and verify rejection `reasonCode = QUOTE_TS_REGRESSED`.
+  - Simulate large quote advance drift beyond `QUOTE_REVALIDATE_MAX_EXEC_PRICE_DRIFT_BPS` and verify rejection `reasonCode = QUOTE_PRICE_DRIFT`.
+  - Verify `/metrics` increments `trade_open_rejected_quote_revalidation_total` / `trade_close_rejected_quote_revalidation_total` on failures.
+- Failure Mode if Missing: trade commits can execute against stale or materially changed market snapshots, causing determinism breaks, execution integrity drift, and weaker audit defensibility under provider latency.

@@ -1,6 +1,7 @@
 import Redis from "ioredis";
 
 let client: Redis | null = null;
+let subscriberClient: Redis | null = null;
 
 export function getValkey(): Redis | null {
   const url = process.env.VALKEY_URL;
@@ -18,6 +19,24 @@ export function getValkey(): Redis | null {
   });
 
   return client;
+}
+
+export function getValkeySubscriber(): Redis | null {
+  const url = process.env.VALKEY_URL;
+  if (!url) return null;
+  if (subscriberClient) return subscriberClient;
+
+  subscriberClient = new Redis(url, {
+    enableReadyCheck: true,
+    maxRetriesPerRequest: 1,
+    lazyConnect: true,
+  });
+
+  subscriberClient.on("error", () => {
+    // Silent by design; callers should handle null-ish behavior via wrappers.
+  });
+
+  return subscriberClient;
 }
 
 export async function valkeyIncrWithTtl(key: string, ttlSec: number): Promise<number | null> {
@@ -77,7 +96,7 @@ const ROLLING_BUFFER_WINDOW_MS = 30_000; // 30 seconds of history
  */
 export async function writeToRollingBuffer(
   symbol: string,
-  data: { bid: number | null; ask: number | null; price: number | null; lastApiUpdate: number }
+  data: { bid: number | null; ask: number | null; price: number | null; lastApiUpdate: number; source?: string }
 ): Promise<boolean> {
   const v = getValkey();
   if (!v) return false;
@@ -104,7 +123,7 @@ export async function writeToRollingBuffer(
  */
 export async function getFromRollingBuffer(
   symbol: string
-): Promise<{ bid: number | null; ask: number | null; price: number | null; lastApiUpdate: number } | null> {
+): Promise<{ bid: number | null; ask: number | null; price: number | null; lastApiUpdate: number; source?: string } | null> {
   const v = getValkey();
   if (!v) return null;
   const key = `quote:rolling:${symbol}`;
@@ -123,7 +142,7 @@ export async function getFromRollingBuffer(
 export async function getRollingBufferHistory(
   symbol: string,
   windowMs: number = ROLLING_BUFFER_WINDOW_MS
-): Promise<Array<{ bid: number | null; ask: number | null; price: number | null; lastApiUpdate: number }>> {
+): Promise<Array<{ bid: number | null; ask: number | null; price: number | null; lastApiUpdate: number; source?: string }>> {
   const v = getValkey();
   if (!v) return [];
   const key = `quote:rolling:${symbol}`;
@@ -169,4 +188,3 @@ export async function getCachedPrevClose(symbol: string): Promise<number | null>
     return null;
   }
 }
-

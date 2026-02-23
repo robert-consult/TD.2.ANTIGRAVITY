@@ -9,6 +9,7 @@ import { getActiveTradeConstraintsForUser } from "./recruitment/challengesV4/cha
 import { appendIdentityAudit } from "./services/identityAudit";
 import { appendChallengeEvent } from "./recruitment/challengesV4/challengeEvents";
 import { getSystemChallengeConfig } from "./recruitment/challengesV4/challengeConfig";
+import { recalcAccount } from "./recalcAccount";
 
 /**
  * Risk management middleware for the TradeQuip platform
@@ -422,6 +423,26 @@ export async function riskMiddleware(req: Request, res: Response, next: NextFunc
   const pendingTrades = await storage.getPendingTradesByUserId(userId);
   const activeTrades = [...openTrades, ...pendingTrades];
 
+  // Keep a current account snapshot for loss-limit checks (includes floating PnL support).
+  let currentBalance = Number.parseFloat(String((user as any).balance ?? "0"));
+  if (!Number.isFinite(currentBalance)) currentBalance = 0;
+  let currentEquity = Number((user as any).equity);
+  if (!Number.isFinite(currentEquity)) currentEquity = currentBalance;
+  let floatingPnl = currentEquity - currentBalance;
+
+  if (limits.enableLossLimits && openTrades.length > 0) {
+    try {
+      const refreshed = await recalcAccount(userId);
+      if (refreshed) {
+        currentBalance = Number(refreshed.balance);
+        currentEquity = Number(refreshed.equity);
+        floatingPnl = Number(refreshed.floatingPnl);
+      }
+    } catch (error) {
+      console.error("[risk] failed to refresh account snapshot for loss-limit checks:", error);
+    }
+  }
+
   // Challenge v4 runtime constraints (best-effort hard guard on trade entry).
   const challengeConstraints = await getActiveTradeConstraintsForUser(userId);
   if (challengeConstraints) {
@@ -632,20 +653,23 @@ export async function riskMiddleware(req: Request, res: Response, next: NextFunc
     const baselineBalance = Number.isFinite(baselineBalanceRaw) && baselineBalanceRaw > 0
       ? baselineBalanceRaw
       : INITIAL_BALANCE_USD;
-    const dailyLossPercent = dailyPnL < 0 ? Math.abs(dailyPnL) / baselineBalance * 100 : 0;
+    const effectiveDailyPnl = dailyPnL + floatingPnl;
+    const dailyLossPercent = effectiveDailyPnl < 0 ? Math.abs(effectiveDailyPnl) / baselineBalance * 100 : 0;
 
     if (dailyLossPercent >= limits.dailyLossLimitPct) {
       return res.status(403).json({
         code: "DAILY_LOSS_LIMIT",
         message: `Daily loss limit of ${limits.dailyLossLimitPct}% reached. Try again tomorrow.`,
         dailyLossPercent,
+        dailyRealizedPnl: dailyPnL,
+        floatingPnl,
+        effectiveDailyPnl,
         limit: limits.dailyLossLimitPct,
       });
     }
 
     // 5. Check lifetime loss limit
-    const currentBalance = parseFloat(user.balance);
-    const lifetimeLossPercent = (baselineBalance - currentBalance) / baselineBalance * 100;
+    const lifetimeLossPercent = (baselineBalance - currentEquity) / baselineBalance * 100;
 
     if (lifetimeLossPercent >= limits.lifetimeLossLimitPct) {
       await storage.disableUserAccount(userId);
@@ -653,6 +677,9 @@ export async function riskMiddleware(req: Request, res: Response, next: NextFunc
         code: "LIFETIME_LOSS_LIMIT",
         message: `Lifetime loss limit of ${limits.lifetimeLossLimitPct}% reached. Account has been disabled.`,
         lifetimeLossPercent,
+        balance: currentBalance,
+        equity: currentEquity,
+        floatingPnl,
         limit: limits.lifetimeLossLimitPct,
       });
     }

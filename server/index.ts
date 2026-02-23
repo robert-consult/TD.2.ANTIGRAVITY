@@ -75,7 +75,7 @@ function validateEnvVars() {
   const isProduction = process.env.NODE_ENV === "production";
   const encryptionKeyRaw = String(process.env.ENCRYPTION_KEY ?? "").trim();
   const encryptionKeyValid = /^[a-fA-F0-9]{64}$/.test(encryptionKeyRaw);
-  
+
   // CRITICAL: Legal terms HMAC secret (required for tamper-evident token signing)
   const legalSecret = process.env.LEGAL_TERMS_HMAC_SECRET;
   if (!legalSecret || legalSecret.length < 32) {
@@ -142,12 +142,12 @@ function validateEnvVars() {
     if (isProduction) criticalErrors.push(message);
     else warnings.push(message);
   }
-  
+
   // Critical for email verification
   if (!process.env.RESEND_API_KEY) {
     warnings.push("RESEND_API_KEY not configured - email verification will fail");
   }
-  
+
   // Critical for SMS verification  
   if (!process.env.TWILIO_ACCOUNT_SID) {
     warnings.push("TWILIO_ACCOUNT_SID not configured - SMS verification will fail");
@@ -159,12 +159,12 @@ function validateEnvVars() {
   if (!hasSmsSender) {
     warnings.push("TWILIO_MESSAGING_SERVICE_SID or TWILIO_FROM_NUMBER not configured - SMS verification will fail");
   }
-  
+
   // Log warnings
   warnings.forEach(w => console.warn(`[ENV WARNING] ${w}`));
   notices.forEach(n => console.warn(`[ENV NOTICE] ${n}`));
   criticalErrors.forEach(e => console.error(`[ENV CRITICAL] ${e}`));
-  
+
   // Log presence status
   console.log("Environment validation complete:");
   console.log("  - LEGAL_TERMS_HMAC_SECRET:", legalSecret && legalSecret.length >= 32 ? "configured" : "MISSING/TOO SHORT");
@@ -180,7 +180,7 @@ function validateEnvVars() {
   console.log("  - 1Forge API Key:", process.env.FORGE_KEY ? "configured" : "MISSING");
   console.log("  - DB_DIALECT:", dbDialect);
   console.log("  - DATABASE_URL:", process.env.DATABASE_URL ? "configured" : "MISSING");
-  
+
   // ALWAYS fail fast on critical security errors (both dev and prod)
   if (criticalErrors.length > 0) {
     console.error("[FATAL] Missing CRITICAL security environment variables:");
@@ -188,7 +188,7 @@ function validateEnvVars() {
     console.error("Server startup aborted. These secrets are required for security compliance.");
     process.exit(1);
   }
-  
+
   // In production, fail fast if verification secrets are missing
   if (isProduction && warnings.length > 0) {
     console.error("[FATAL] Missing critical environment variables in production:");
@@ -196,7 +196,7 @@ function validateEnvVars() {
     console.error("Server startup aborted. Please configure required secrets.");
     process.exit(1);
   }
-  
+
   return { warnings };
 }
 
@@ -418,7 +418,7 @@ app.use((req, res, next) => {
     if (reusePortEnabled) {
       log("[Server] reusePort is enabled (SERVER_REUSE_PORT=1). Ensure all listeners run identical code.");
     }
-    
+
     // DEFERRED INITIALIZATION: Run expensive operations AFTER server is listening
     // This ensures health checks pass quickly during deployment
     setImmediate(async () => {
@@ -536,14 +536,25 @@ app.use((req, res, next) => {
         try {
           const { startQuoteFeed } = await import("./feeds/quoteFeed");
           await startQuoteFeed();
+          try {
+            const { initExcursionTrackingPubSub } = await import("./trades/excursionTracking");
+            const initialized = await initExcursionTrackingPubSub();
+            log(`[Trades] Excursion Tracking PubSub ${initialized ? "initialized" : "skipped"}`);
+          } catch (e) {
+            console.warn("[Trades] Excursion Tracking PubSub init failed:", e);
+          }
           const { startAutoCloseScheduler } = await import("./cron/autoClose");
           await startAutoCloseScheduler();
+
+          const { startMarginCallScheduler } = await import("./cron/marginCall");
+          await startMarginCallScheduler();
           log("Price feed and auto-close services initialized");
         } catch (error) {
           console.error("Error initializing feed/cron services:", error);
         }
       } else {
         log("[Role] Skipping quote feed/auto-close (ingestor only).");
+        log("[Role] Skipping excursion tracking pubsub (ingestor only).");
       }
 
       // Initialize admin data views and tables
@@ -641,7 +652,7 @@ app.use((req, res, next) => {
       } else {
         log("[Role] Skipping partner allocation sync cron (worker only).");
       }
-      
+
       log("Deferred initialization complete");
     });
   });

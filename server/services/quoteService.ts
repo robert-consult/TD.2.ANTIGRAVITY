@@ -13,6 +13,18 @@ import { getFromRollingBuffer, getCachedPrevClose } from "./valkey";
 // Quote freshness: 5 minutes default to accommodate 1Forge refresh intervals
 const STALE_AFTER_MS = Number(process.env.QUOTE_STALE_AFTER_MS ?? 300_000);
 const MARKET_HOURS_CACHE_TTL_MS = Number(process.env.MARKET_HOURS_CACHE_TTL_MS ?? 15_000);
+const QUOTE_EXEC_ALLOW_DB_FALLBACK = ["1", "true", "yes", "on"].includes(
+  String(process.env.QUOTE_EXEC_ALLOW_DB_FALLBACK ?? "0").trim().toLowerCase(),
+);
+const QUOTE_REVALIDATE_MAX_AGE_MS = Number(process.env.QUOTE_REVALIDATE_MAX_AGE_MS ?? STALE_AFTER_MS);
+const QUOTE_REVALIDATE_TS_REGRESSION_GRACE_MS = Number(process.env.QUOTE_REVALIDATE_TS_REGRESSION_GRACE_MS ?? 1_000);
+const QUOTE_REVALIDATE_MAX_EXEC_PRICE_DRIFT_BPS = Number(process.env.QUOTE_REVALIDATE_MAX_EXEC_PRICE_DRIFT_BPS ?? 150);
+const QUOTE_REVALIDATE_ALLOW_EXPECTED_QUOTE_FALLBACK = !["0", "false", "off", "no"].includes(
+  String(process.env.QUOTE_REVALIDATE_ALLOW_EXPECTED_QUOTE_FALLBACK ?? "1").trim().toLowerCase(),
+);
+const QUOTE_REVALIDATE_MIN_AGE_MS = 250;
+const QUOTE_REVALIDATE_MAX_AGE_MS_CAP = 1_800_000;
+const QUOTE_REVALIDATE_MAX_DRIFT_BPS_CAP = 10_000;
 
 type MarketHoursConfig = {
   allowWeekendTrading: boolean;
@@ -25,6 +37,11 @@ let marketHoursInflight: Promise<MarketHoursConfig | null> | null = null;
 
 function normalizeSymbol(s: string): string {
   return s.replace("/", "").trim().toUpperCase();
+}
+
+function normalizeSource(raw: unknown, fallback: string): string {
+  const value = typeof raw === "string" ? raw.trim() : String(raw ?? "").trim();
+  return value || fallback;
 }
 
 function toNum(v: any): number | null {
@@ -113,8 +130,81 @@ export type ExecutionQuote = {
   execPrice: number;
 };
 
-// Get a fresh database connection for each query to avoid locking issues
-// Fallback chain: Hub → Valkey Snapshot → Rolling Buffer → DB → prevClose
+type ExecutionSide = "BUY" | "SELL";
+type ExecutionAction = "OPEN" | "CLOSE";
+
+type NormalizedExecutionQuote = {
+  symbol: string;
+  bid: number;
+  ask: number;
+  mid: number;
+  spread: number;
+  quoteTsMs: number;
+  isStale: boolean;
+};
+
+function clampRevalidateAgeMs(value: unknown): number {
+  const n = Number(value);
+  if (!Number.isFinite(n)) {
+    return Math.max(
+      QUOTE_REVALIDATE_MIN_AGE_MS,
+      Math.min(QUOTE_REVALIDATE_MAX_AGE_MS_CAP, Math.max(1, STALE_AFTER_MS)),
+    );
+  }
+  return Math.max(QUOTE_REVALIDATE_MIN_AGE_MS, Math.min(QUOTE_REVALIDATE_MAX_AGE_MS_CAP, Math.trunc(n)));
+}
+
+function clampRevalidateDriftBps(value: unknown): number {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return 0;
+  return Math.max(0, Math.min(QUOTE_REVALIDATE_MAX_DRIFT_BPS_CAP, n));
+}
+
+function quoteTsMsFromRow(row: any, nowMs: number): number {
+  const lastApiRaw =
+    toNum((row as any).lastApiUpdate ?? (row as any).last_api_update) ??
+    toNum((row as any).updatedAt ?? (row as any).updated_at);
+  if (lastApiRaw == null) return nowMs;
+  return lastApiRaw < 1e12 ? lastApiRaw * 1000 : lastApiRaw;
+}
+
+function normalizeQuoteForExecution(symbol: string, row: any, nowMs: number): NormalizedExecutionQuote | null {
+  const bid = toNum(row?.bid);
+  const ask = toNum(row?.ask);
+  const px = toNum(row?.price);
+  const usableBid = bid ?? px;
+  const usableAsk = ask ?? px;
+  if (usableBid == null || usableAsk == null) return null;
+
+  const quoteTsMs = quoteTsMsFromRow(row, nowMs);
+  const ageMs = Math.max(0, nowMs - quoteTsMs);
+  const isStale =
+    Boolean((row as any).isStale ?? (row as any).is_stale) ||
+    quoteTsMs <= 0 ||
+    ageMs > STALE_AFTER_MS;
+
+  return {
+    symbol: normalizeSymbol(symbol),
+    bid: usableBid,
+    ask: usableAsk,
+    mid: (usableBid + usableAsk) / 2,
+    spread: usableAsk - usableBid,
+    quoteTsMs,
+    isStale,
+  };
+}
+
+function computeExecutionPrice(
+  quote: Pick<NormalizedExecutionQuote, "bid" | "ask">,
+  side: ExecutionSide,
+  action: ExecutionAction,
+): number {
+  return action === "OPEN"
+    ? (side === "BUY" ? quote.ask : quote.bid)
+    : (side === "BUY" ? quote.bid : quote.ask);
+}
+
+// Fallback chain: Hub → Valkey Snapshot → Rolling Buffer → prevClose → (optional) DB
 export async function getLatestQuoteRow(symbol: string): Promise<any | null> {
   const sym = normalizeSymbol(symbol);
 
@@ -129,6 +219,7 @@ export async function getLatestQuoteRow(symbol: string): Promise<any | null> {
       lastApiUpdate: hubQuote.lastApiUpdate,
       isStale: hubQuote.isStale,
       prevClose: hubQuote.prevClose,
+      source: normalizeSource((hubQuote as any).source, "quote_hub"),
     };
   }
 
@@ -143,6 +234,7 @@ export async function getLatestQuoteRow(symbol: string): Promise<any | null> {
       price: cached.price,
       lastApiUpdate: cached.lastApiUpdate,
       isStale: cached.isStale,
+      source: normalizeSource((cached as any).source, "valkey_cache"),
     };
   }
 
@@ -156,16 +248,11 @@ export async function getLatestQuoteRow(symbol: string): Promise<any | null> {
       price: rollingQuote.price,
       lastApiUpdate: rollingQuote.lastApiUpdate,
       isStale: true, // Mark as stale since we're falling back
+      source: normalizeSource((rollingQuote as any).source, "rolling_buffer"),
     };
   }
 
-  // 4. Try database
-  const row = await db.query.quotes.findFirst({
-    where: eq(quotes.symbol, sym),
-  });
-  if (row) return row;
-
-  // 5. Last resort: use prevClose as price (better than nothing)
+  // 4. Use prevClose as price (better than nothing for risk-aware execution paths)
   const prevClose = await getCachedPrevClose(sym);
   if (prevClose != null) {
     return {
@@ -176,61 +263,246 @@ export async function getLatestQuoteRow(symbol: string): Promise<any | null> {
       lastApiUpdate: Date.now(),
       isStale: true,
       isPrevCloseFallback: true,
+      source: "prev_close_cache",
     };
+  }
+
+  // 5. Optional last-resort database fallback (off by default to protect hot-path latency)
+  if (QUOTE_EXEC_ALLOW_DB_FALLBACK) {
+    const row = await db.query.quotes.findFirst({
+      where: eq(quotes.symbol, sym),
+    });
+    if (row) {
+      return {
+        ...row,
+        source: normalizeSource((row as any).source, "quotes_db"),
+      };
+    }
   }
 
   return null;
 }
 
-export async function getExecutionQuote(symbol: string, side: "BUY" | "SELL", action: "OPEN" | "CLOSE"): Promise<ExecutionQuote> {
+export async function getExecutionQuote(symbol: string, side: ExecutionSide, action: ExecutionAction): Promise<ExecutionQuote> {
   const sym = normalizeSymbol(symbol);
   const row = await getLatestQuoteRow(sym);
   if (!row) throw new Error(`QUOTE_NOT_FOUND:${sym}`);
-
-  const bid = toNum(row.bid);
-  const ask = toNum(row.ask);
-  const px = toNum(row.price);
-
-  const usableBid = bid ?? px;
-  const usableAsk = ask ?? px;
-  if (usableBid === null || usableAsk === null) throw new Error(`QUOTE_INVALID:${sym}`);
-
-  const mid = (usableBid + usableAsk) / 2;
-  const spread = usableAsk - usableBid;
-
-  // Handle both timestamp formats (seconds or milliseconds)
-  const lastApiRaw = toNum((row as any).lastApiUpdate ?? (row as any).last_api_update) ?? toNum((row as any).updatedAt ?? (row as any).updated_at);
-  const lastApiMs =
-    lastApiRaw === null ? null : (lastApiRaw < 1e12 ? lastApiRaw * 1000 : lastApiRaw);
-
   const now = Date.now();
-  const isStale =
-    Boolean((row as any).isStale ?? (row as any).is_stale) ||
-    lastApiMs === null ||
-    (now - lastApiMs) > STALE_AFTER_MS;
+  const normalized = normalizeQuoteForExecution(sym, row, now);
+  if (!normalized) throw new Error(`QUOTE_INVALID:${sym}`);
 
   const marketOpen = await isMarketOpenForExecution(sym, new Date());
-
-  // Institutional: BUY opens at ask, closes at bid. SELL opens at bid, closes at ask.
-  const execPrice =
-    action === "OPEN"
-      ? (side === "BUY" ? usableAsk : usableBid)
-      : (side === "BUY" ? usableBid : usableAsk);
-
-  const quoteTs = new Date(lastApiMs ?? now);
+  const execPrice = computeExecutionPrice(normalized, side, action);
 
   return {
     symbol: sym,
-    bid: usableBid,
-    ask: usableAsk,
-    mid,
-    spread,
-    quoteTs,
-    source: process.env.QUOTE_SOURCE ?? (process.env.FORGE_KEY ? "1forge" : "quotes_db"),
-    isStale,
+    bid: normalized.bid,
+    ask: normalized.ask,
+    mid: normalized.mid,
+    spread: normalized.spread,
+    quoteTs: new Date(normalized.quoteTsMs),
+    source: normalizeSource((row as any).source, process.env.QUOTE_SOURCE ?? "quote_feed"),
+    isStale: normalized.isStale,
     marketOpen,
     execPrice,
   };
+}
+
+export type ExecutionQuoteCommitValidation = {
+  ok: boolean;
+  code:
+    | "OK"
+    | "QUOTE_NOT_FOUND_AT_COMMIT"
+    | "QUOTE_INVALID_AT_COMMIT"
+    | "QUOTE_STALE_AT_COMMIT"
+    | "QUOTE_TS_REGRESSED"
+    | "QUOTE_PRICE_DRIFT";
+  symbol: string;
+  checkedAtMs: number;
+  expectedQuoteTsMs: number;
+  latestQuoteTsMs: number | null;
+  ageMs: number | null;
+  expectedExecPrice: number;
+  latestExecPrice: number | null;
+  driftAbs: number | null;
+  driftBps: number | null;
+  latestIsStale: boolean;
+  usedExpectedQuoteFallback: boolean;
+};
+
+export async function validateExecutionQuoteAtCommit(params: {
+  symbol: string;
+  side: ExecutionSide;
+  action: ExecutionAction;
+  expectedQuoteTs: Date;
+  expectedExecPrice: number;
+  maxAgeMs?: number;
+  maxExecPriceDriftBps?: number;
+}): Promise<ExecutionQuoteCommitValidation> {
+  const sym = normalizeSymbol(params.symbol);
+  const checkedAtMs = Date.now();
+  const expectedQuoteTsRaw = params.expectedQuoteTs?.getTime?.();
+  const expectedQuoteTsMs = Number.isFinite(expectedQuoteTsRaw) ? Number(expectedQuoteTsRaw) : checkedAtMs;
+  const expectedAgeMs = Math.max(0, checkedAtMs - expectedQuoteTsMs);
+  const maxAgeMs = clampRevalidateAgeMs(
+    Number.isFinite(Number(params.maxAgeMs)) ? params.maxAgeMs : QUOTE_REVALIDATE_MAX_AGE_MS,
+  );
+  const maxExecPriceDriftBps = clampRevalidateDriftBps(
+    Number.isFinite(Number(params.maxExecPriceDriftBps))
+      ? params.maxExecPriceDriftBps
+      : QUOTE_REVALIDATE_MAX_EXEC_PRICE_DRIFT_BPS,
+  );
+  const expectedExecPrice = Number(params.expectedExecPrice);
+
+  const buildResult = (
+    partial: Omit<ExecutionQuoteCommitValidation, "symbol" | "checkedAtMs" | "expectedQuoteTsMs" | "expectedExecPrice">,
+  ): ExecutionQuoteCommitValidation => ({
+    symbol: sym,
+    checkedAtMs,
+    expectedQuoteTsMs,
+    expectedExecPrice,
+    ...partial,
+  });
+
+  if (!Number.isFinite(expectedExecPrice) || expectedExecPrice <= 0) {
+    return buildResult({
+      ok: false,
+      code: "QUOTE_INVALID_AT_COMMIT",
+      latestQuoteTsMs: null,
+      ageMs: null,
+      latestExecPrice: null,
+      driftAbs: null,
+      driftBps: null,
+      latestIsStale: true,
+      usedExpectedQuoteFallback: false,
+    });
+  }
+
+  const row = await getLatestQuoteRow(sym);
+  if (!row) {
+    if (QUOTE_REVALIDATE_ALLOW_EXPECTED_QUOTE_FALLBACK && expectedAgeMs <= maxAgeMs) {
+      return buildResult({
+        ok: true,
+        code: "OK",
+        latestQuoteTsMs: expectedQuoteTsMs,
+        ageMs: expectedAgeMs,
+        latestExecPrice: expectedExecPrice,
+        driftAbs: 0,
+        driftBps: 0,
+        latestIsStale: false,
+        usedExpectedQuoteFallback: true,
+      });
+    }
+    return buildResult({
+      ok: false,
+      code: "QUOTE_NOT_FOUND_AT_COMMIT",
+      latestQuoteTsMs: null,
+      ageMs: null,
+      latestExecPrice: null,
+      driftAbs: null,
+      driftBps: null,
+      latestIsStale: true,
+      usedExpectedQuoteFallback: false,
+    });
+  }
+
+  const normalized = normalizeQuoteForExecution(sym, row, checkedAtMs);
+  if (!normalized) {
+    if (QUOTE_REVALIDATE_ALLOW_EXPECTED_QUOTE_FALLBACK && expectedAgeMs <= maxAgeMs) {
+      return buildResult({
+        ok: true,
+        code: "OK",
+        latestQuoteTsMs: expectedQuoteTsMs,
+        ageMs: expectedAgeMs,
+        latestExecPrice: expectedExecPrice,
+        driftAbs: 0,
+        driftBps: 0,
+        latestIsStale: false,
+        usedExpectedQuoteFallback: true,
+      });
+    }
+    return buildResult({
+      ok: false,
+      code: "QUOTE_INVALID_AT_COMMIT",
+      latestQuoteTsMs: null,
+      ageMs: null,
+      latestExecPrice: null,
+      driftAbs: null,
+      driftBps: null,
+      latestIsStale: true,
+      usedExpectedQuoteFallback: false,
+    });
+  }
+
+  const ageMs = Math.max(0, checkedAtMs - normalized.quoteTsMs);
+  const latestExecPrice = computeExecutionPrice(normalized, params.side, params.action);
+  const driftAbsRaw = Math.abs(latestExecPrice - expectedExecPrice);
+  const driftAbs = Number.isFinite(driftAbsRaw) ? driftAbsRaw : null;
+  const driftBps =
+    Number.isFinite(expectedExecPrice) && expectedExecPrice > 0 && driftAbs != null
+      ? (driftAbs / expectedExecPrice) * 10_000
+      : null;
+
+  if (normalized.isStale || ageMs > maxAgeMs) {
+    return buildResult({
+      ok: false,
+      code: "QUOTE_STALE_AT_COMMIT",
+      latestQuoteTsMs: normalized.quoteTsMs,
+      ageMs,
+      latestExecPrice,
+      driftAbs,
+      driftBps,
+      latestIsStale: normalized.isStale,
+      usedExpectedQuoteFallback: false,
+    });
+  }
+
+  if (normalized.quoteTsMs + QUOTE_REVALIDATE_TS_REGRESSION_GRACE_MS < expectedQuoteTsMs) {
+    return buildResult({
+      ok: false,
+      code: "QUOTE_TS_REGRESSED",
+      latestQuoteTsMs: normalized.quoteTsMs,
+      ageMs,
+      latestExecPrice,
+      driftAbs,
+      driftBps,
+      latestIsStale: normalized.isStale,
+      usedExpectedQuoteFallback: false,
+    });
+  }
+
+  const quoteAdvancedAtCommit = normalized.quoteTsMs > expectedQuoteTsMs + QUOTE_REVALIDATE_TS_REGRESSION_GRACE_MS;
+  if (
+    quoteAdvancedAtCommit &&
+    maxExecPriceDriftBps > 0 &&
+    driftBps != null &&
+    Number.isFinite(driftBps) &&
+    driftBps > maxExecPriceDriftBps
+  ) {
+    return buildResult({
+      ok: false,
+      code: "QUOTE_PRICE_DRIFT",
+      latestQuoteTsMs: normalized.quoteTsMs,
+      ageMs,
+      latestExecPrice,
+      driftAbs,
+      driftBps,
+      latestIsStale: normalized.isStale,
+      usedExpectedQuoteFallback: false,
+    });
+  }
+
+  return buildResult({
+    ok: true,
+    code: "OK",
+    latestQuoteTsMs: normalized.quoteTsMs,
+    ageMs,
+    latestExecPrice,
+    driftAbs,
+    driftBps,
+    latestIsStale: normalized.isStale,
+    usedExpectedQuoteFallback: false,
+  });
 }
 
 // FX conversion (quoteCurrency -> USD) using available pairs in quotes table

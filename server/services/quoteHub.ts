@@ -9,6 +9,7 @@ export type QuoteCore = {
   lastApiUpdate: number;
   isStale: boolean;
   prevClose?: number | null;
+  source?: string;
 };
 
 export type QuoteSnapshot = {
@@ -25,6 +26,11 @@ let lastAsOf = 0;
 
 function normalizeSymbol(symbol: string): string {
   return symbol.replace("/", "").trim().toUpperCase();
+}
+
+function normalizeSource(raw: unknown): string | undefined {
+  const value = typeof raw === "string" ? raw.trim() : String(raw ?? "").trim();
+  return value ? value : undefined;
 }
 
 function toQuoteCore(row: any, asOf: number): QuoteCore | null {
@@ -44,6 +50,13 @@ function toQuoteCore(row: any, asOf: number): QuoteCore | null {
   const lastApiRaw = row.lastApiUpdate ?? row.lastUpdated ?? row.updatedAt ?? asOf;
   const lastUpdated = Number.isFinite(Number(lastUpdatedRaw)) ? Number(lastUpdatedRaw) : asOf;
   const lastApiUpdate = Number.isFinite(Number(lastApiRaw)) ? Number(lastApiRaw) : asOf;
+  const prevCloseRaw = row.prevClose;
+  const prevClose =
+    prevCloseRaw == null
+      ? undefined
+      : Number.isFinite(Number(prevCloseRaw))
+        ? Number(prevCloseRaw)
+        : undefined;
   return {
     symbol,
     bid,
@@ -52,24 +65,40 @@ function toQuoteCore(row: any, asOf: number): QuoteCore | null {
     lastUpdated,
     lastApiUpdate,
     isStale: Boolean(row.isStale),
+    prevClose,
+    source: normalizeSource(row.source),
   };
 }
 
-export function applyQuoteUpdate(rows: Array<Partial<QuoteCore> & { symbol: string }>, meta?: { seq?: number; asOf?: number }) {
+export function applyQuoteUpdate(
+  rows: Array<Partial<QuoteCore> & { symbol: string }>,
+  meta?: { seq?: number; asOf?: number; source?: string },
+) {
   const asOf = Number.isFinite(meta?.asOf) ? Number(meta?.asOf) : Date.now();
+  const fallbackSource = normalizeSource(meta?.source);
   if (Number.isFinite(meta?.seq)) lastSeq = Number(meta?.seq);
   lastAsOf = asOf;
   for (const row of rows) {
     const core = toQuoteCore(row, asOf);
     if (!core) continue;
-    quoteMap.set(core.symbol, core);
+    const existing = quoteMap.get(core.symbol);
+    quoteMap.set(core.symbol, {
+      ...existing,
+      ...core,
+      prevClose: core.prevClose ?? existing?.prevClose,
+      source: core.source ?? existing?.source ?? fallbackSource,
+    });
   }
 }
 
 export async function bootstrapQuoteHub(): Promise<boolean> {
   const snapshot = await valkeyGetJson<QuoteSnapshot>(QUOTE_SNAPSHOT_KEY);
   if (!snapshot?.rows?.length) return false;
-  applyQuoteUpdate(snapshot.rows, { seq: snapshot.seq, asOf: snapshot.asOf });
+  applyQuoteUpdate(snapshot.rows, {
+    seq: snapshot.seq,
+    asOf: snapshot.asOf,
+    source: snapshot.source,
+  });
   return true;
 }
 

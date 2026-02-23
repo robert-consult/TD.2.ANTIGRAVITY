@@ -17,7 +17,12 @@ import { loadPolicyConfig } from "../policy/getPolicyConfig";
 import { applyUserBalanceDelta, releaseUserMargin, reserveUserMargin } from "../services/tradeAtomic";
 import { computeCloseSettlementCosts, computeOpenSideCosts } from "../services/tradeCosts";
 import { createNotification } from "../services/messaging";
-import { clearTradeExcursion, initTradeExcursion, resolveTradeExcursionForClose, trackTradeExcursion } from "../trades/excursionTracking";
+import {
+  clearTradeExcursion,
+  initTradeExcursion,
+  resolveTradeExcursionForCloseDurable,
+  trackTradeExcursion,
+} from "../trades/excursionTracking";
 import { getActiveTradeConstraintsForUser } from "../recruitment/challengesV4/challengeService";
 import { 
   writeTradeAudit, 
@@ -30,7 +35,7 @@ import {
   type AuditContext 
 } from "../lib/auditWriter";
 
-const DEFAULT_QUOTE_SOURCE = process.env.QUOTE_SOURCE ?? (process.env.FORGE_KEY ? "1forge" : "quotes_db");
+const DEFAULT_QUOTE_SOURCE = process.env.QUOTE_SOURCE ?? "quote_feed";
 
 async function getGlobalLimits() {
   const gs = await db.query.globalSettings.findFirst({
@@ -51,6 +56,7 @@ type Quote = {
   ask?: number | null;
   isStale?: boolean;
   lastUpdated?: number;
+  source?: string;
 };
 
 let running = false;
@@ -331,7 +337,7 @@ async function processPendingForSymbol(symbol: string, q: Quote) {
     // Use stored correlationId for correlation continuity (hedge-fund compliance)
     const correlationId = (t as any).correlationId || generateCorrelationId();
     const orderId = (t as any).orderId || generateOrderId();
-    const quoteSource = DEFAULT_QUOTE_SOURCE;
+    const quoteSource = typeof q.source === "string" && q.source.trim() ? q.source.trim() : DEFAULT_QUOTE_SOURCE;
     const tradeProvenance = {
       sessionId: (t as any).lastActorSessionId ?? null,
       ip: (t as any).lastActorIp ?? null,
@@ -819,7 +825,7 @@ async function processStopsForOpenTrades(symbol: string, q: Quote) {
     const lots = Number(t.lots ?? 1);
     const openPx = Number(t.openPrice);
     const quoteTs = q.lastUpdated ? new Date(q.lastUpdated) : new Date();
-    const quoteSource = DEFAULT_QUOTE_SOURCE;
+    const quoteSource = typeof q.source === "string" && q.source.trim() ? q.source.trim() : DEFAULT_QUOTE_SOURCE;
     const tradeProvenance = {
       sessionId: (t as any).lastActorSessionId ?? null,
       ip: (t as any).lastActorIp ?? null,
@@ -850,7 +856,7 @@ async function processStopsForOpenTrades(symbol: string, q: Quote) {
     const netProfitUsd = grossProfitUsd - closeCostSummary.totalCostsUsd;
     const closeSettlementUsd = grossProfitUsd - closeCostSummary.closingChargesUsd;
     const profit = netProfitUsd.toFixed(2);
-    const excursion = resolveTradeExcursionForClose({
+    const excursion = await resolveTradeExcursionForCloseDurable({
       tradeId: t.id,
       side,
       openPrice: openPx,
@@ -867,12 +873,27 @@ async function processStopsForOpenTrades(symbol: string, q: Quote) {
 
     const closeResult = await db.transaction(async (tx) => {
       const tradeLock = await tx.execute(sql`
-        select id
+        select id, intraday_high as "intradayHigh", intraday_low as "intradayLow"
         from trades
         where id = ${t.id} and status = 'OPEN'
         for update
       `);
       if (!tradeLock.rows.length) return { action: "SKIP" as const };
+      const lockedTrade = tradeLock.rows[0] as any;
+      const persistedHigh = n(lockedTrade?.intradayHigh);
+      const persistedLow = n(lockedTrade?.intradayLow);
+      const mergedIntradayHigh =
+        excursion.intradayHigh == null
+          ? persistedHigh
+          : persistedHigh == null
+            ? excursion.intradayHigh
+            : Math.max(excursion.intradayHigh, persistedHigh);
+      const mergedIntradayLow =
+        excursion.intradayLow == null
+          ? persistedLow
+          : persistedLow == null
+            ? excursion.intradayLow
+            : Math.min(excursion.intradayLow, persistedLow);
 
       const userRowRes = await tx.execute(sql`
         select id, leverage
@@ -890,8 +911,8 @@ async function processStopsForOpenTrades(symbol: string, q: Quote) {
           profit,
           grossProfitUsd,
           netProfitUsd,
-          intradayHigh: excursion.intradayHigh,
-          intradayLow: excursion.intradayLow,
+          intradayHigh: mergedIntradayHigh,
+          intradayLow: mergedIntradayLow,
           mae: excursion.mae,
           mfe: excursion.mfe,
           notionalUsd: closeCostSummary.notionalUsd,

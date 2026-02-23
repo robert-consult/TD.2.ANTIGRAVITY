@@ -1,4 +1,5 @@
 import { db } from "@db";
+import { recalcAccount } from "../../recalcAccount";
 import {
   challengeBadgeAwards,
   challengeBadges,
@@ -18,6 +19,7 @@ import {
   recruitingPipeline,
   scoutWatchlists,
   trades,
+  users,
 } from "@shared/schema";
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { createMailboxThreadWithMessage, createNotification } from "../../services/messaging";
@@ -43,7 +45,7 @@ type EvalResult = {
 };
 
 export type PhaseStats = {
-  pnlBasis: "REALIZED_ONLY";
+  pnlBasis: "REALIZED_ONLY" | "REALIZED_PLUS_FLOATING";
   roundingMode: "HALF_AWAY_FROM_ZERO_8DP";
   inputHash: string;
   tradeCount: number;
@@ -339,21 +341,21 @@ async function issueCertificate(args: {
 
     const shareTokenHash = args.isShareable
       ? chainHash(verification.hmac, {
-          kind: "challenge-cert-share",
-          enrollmentId: args.enrollmentId,
-          issuedAt: args.issuedAt,
-        })
+        kind: "challenge-cert-share",
+        enrollmentId: args.enrollmentId,
+        issuedAt: args.issuedAt,
+      })
       : null;
 
     const metricsJson = args.includeMetrics
       ? stableStringify({
-          pnlPct: args.metrics.pnlPct,
-          pnlUsd: args.metrics.totalPnl,
-          tradingDays: args.metrics.tradingDays,
-          maxDailyLossHit: args.metrics.worstDayLossPct,
-          maxTotalLossHit: Math.max(args.metrics.startDdPct, args.metrics.trailingDdPct),
-          peakEquity: args.metrics.peakEquity,
-        })
+        pnlPct: args.metrics.pnlPct,
+        pnlUsd: args.metrics.totalPnl,
+        tradingDays: args.metrics.tradingDays,
+        maxDailyLossHit: args.metrics.worstDayLossPct,
+        maxTotalLossHit: Math.max(args.metrics.startDdPct, args.metrics.trailingDdPct),
+        peakEquity: args.metrics.peakEquity,
+      })
       : "{}";
 
     const inserted = await tx
@@ -1333,11 +1335,11 @@ async function applyCompletionRewards(args: {
     const prizeResult =
       prizeTiming === "ON_COMPLETE"
         ? await recomputePrizeAwards({
-            challenge,
-            cfg,
-            rankedCandidates,
-            now,
-          })
+          challenge,
+          cfg,
+          rankedCandidates,
+          now,
+        })
         : { rankByEnrollmentId: new Map<number, number>(), newlyAwardedEnrollmentIds: new Set<number>() };
 
     const thisRank = prizeResult.rankByEnrollmentId.get(enrollment.id) ?? null;
@@ -1548,7 +1550,7 @@ export async function computePhaseStats(args: {
   const { userId, startAt, endAt, capitalBase } = args;
 
   const q = await db.execute(sql`
-    WITH t AS (
+    WITH closed_t AS (
       SELECT
         tr.id AS id,
         tr.closed_at AS closed_at,
@@ -1568,9 +1570,68 @@ export async function computePhaseStats(args: {
         AND tr.closed_at >= ${startAt}
         AND tr.closed_at <= ${endAt}
     ),
+    user_snapshot AS (
+      SELECT
+        COALESCE(
+          CASE
+            WHEN ${users.balance} IS NULL OR btrim(${users.balance}) = '' THEN 0::float8
+            WHEN ${users.balance} ~ '^-?\\d+(\\.\\d+)?$' THEN ${users.balance}::float8
+            ELSE 0::float8
+          END,
+          0::float8
+        ) AS balance,
+        COALESCE(
+          ${users.equity}::float8,
+          CASE
+            WHEN ${users.balance} IS NULL OR btrim(${users.balance}) = '' THEN 0::float8
+            WHEN ${users.balance} ~ '^-?\\d+(\\.\\d+)?$' THEN ${users.balance}::float8
+            ELSE 0::float8
+          END
+        ) AS equity
+      FROM ${users}
+      WHERE ${users.id} = ${userId}
+      LIMIT 1
+    ),
+    open_positions AS (
+      SELECT COUNT(*)::int AS open_trade_count
+      FROM trades ot
+      WHERE ot.user_id = ${userId}
+        AND ot.status = 'OPEN'
+    ),
+    open_state AS (
+      SELECT
+        op.open_trade_count,
+        CASE
+          WHEN op.open_trade_count > 0 THEN (us.equity - us.balance)
+          ELSE 0::float8
+        END AS floating_pnl
+      FROM open_positions op
+      CROSS JOIN user_snapshot us
+    ),
+    timeline_t AS (
+      SELECT
+        id,
+        closed_at,
+        net_profit,
+        d
+      FROM closed_t
+      UNION ALL
+      SELECT
+        -1 AS id,
+        ${endAt}::bigint AS closed_at,
+        os.floating_pnl AS net_profit,
+        to_timestamp(${endAt})::date AS d
+      FROM open_state os
+      WHERE ABS(os.floating_pnl) > 0.0000001
+    ),
+    closed_daily AS (
+      SELECT d, SUM(net_profit) AS pnl
+      FROM closed_t
+      GROUP BY d
+    ),
     daily AS (
       SELECT d, SUM(net_profit) AS pnl
-      FROM t
+      FROM timeline_t
       GROUP BY d
     ),
     equity AS (
@@ -1580,7 +1641,7 @@ export async function computePhaseStats(args: {
         net_profit,
         ROW_NUMBER() OVER (ORDER BY closed_at, id) AS seq,
         SUM(net_profit) OVER (ORDER BY closed_at, id ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS cum
-      FROM t
+      FROM timeline_t
     ),
     eq2 AS (
       SELECT
@@ -1590,17 +1651,17 @@ export async function computePhaseStats(args: {
       FROM equity
     )
     SELECT
-      COALESCE((SELECT SUM(net_profit) FROM t), 0) AS total_pnl,
-      COALESCE((SELECT COUNT(DISTINCT d)::int FROM daily), 0) AS trading_days,
+      COALESCE((SELECT SUM(net_profit) FROM timeline_t), 0) AS total_pnl,
+      COALESCE((SELECT COUNT(DISTINCT d)::int FROM closed_daily), 0) AS trading_days,
       COALESCE((SELECT MIN(pnl) FROM daily), 0) AS worst_day_pnl,
       COALESCE((SELECT MAX(pnl) FROM daily), 0) AS best_day_pnl,
       COALESCE((SELECT MIN(cum) FROM equity), 0) AS min_cum,
       COALESCE((SELECT MAX(peak_cum) FROM eq2), 0) AS peak_cum,
       COALESCE((SELECT MAX((peak_cum - cum) / NULLIF((${capitalBase} + peak_cum), 0)) FROM eq2), 0) AS trailing_dd,
-      COALESCE((SELECT COUNT(*)::int FROM t), 0) AS trade_count,
-      COALESCE((SELECT MIN(closed_at)::bigint FROM t), 0) AS first_trade_at,
-      COALESCE((SELECT MAX(closed_at)::bigint FROM t), 0) AS last_trade_at,
-      COALESCE((SELECT SUM(ROUND(net_profit * 100000)::bigint) FROM t), 0)::bigint AS pnl_scaled_sum,
+      COALESCE((SELECT COUNT(*)::int FROM closed_t), 0) AS trade_count,
+      COALESCE((SELECT MIN(closed_at)::bigint FROM timeline_t), 0) AS first_trade_at,
+      COALESCE((SELECT MAX(closed_at)::bigint FROM timeline_t), 0) AS last_trade_at,
+      COALESCE((SELECT SUM(ROUND(net_profit * 100000)::bigint) FROM timeline_t), 0)::bigint AS pnl_scaled_sum,
       COALESCE((
         SELECT SUM(
           (
@@ -1619,7 +1680,11 @@ export async function computePhaseStats(args: {
           )::bigint
         )
         FROM equity
-      ), 0)::bigint AS seq_signature_b
+      ), 0)::bigint AS seq_signature_b,
+      COALESCE((SELECT floating_pnl FROM open_state), 0)::float8 AS floating_pnl,
+      COALESCE((SELECT open_trade_count FROM open_state), 0)::int AS open_trade_count,
+      COALESCE((SELECT balance FROM user_snapshot), 0)::float8 AS account_balance,
+      COALESCE((SELECT equity FROM user_snapshot), 0)::float8 AS account_equity
   `);
 
   const row: any = (q as any).rows?.[0] ?? {};
@@ -1632,6 +1697,10 @@ export async function computePhaseStats(args: {
   const peakCum = roundDeterministic(Number(row.peak_cum ?? 0));
   const trailingDd = roundDeterministic(Number(row.trailing_dd ?? 0));
   const tradeCount = Math.max(0, Math.trunc(Number(row.trade_count ?? 0)));
+  const floatingPnl = roundDeterministic(Number(row.floating_pnl ?? 0));
+  const openTradeCount = Math.max(0, Math.trunc(Number(row.open_trade_count ?? 0)));
+  const accountBalance = roundDeterministic(Number(row.account_balance ?? 0));
+  const accountEquity = roundDeterministic(Number(row.account_equity ?? 0));
 
   const pnlPct = roundDeterministic(capitalBase > 0 ? totalPnl / capitalBase : 0);
   const worstDayLossPct = roundDeterministic(capitalBase > 0 ? Math.max(0, -worstDayPnl / capitalBase) : 0);
@@ -1641,13 +1710,17 @@ export async function computePhaseStats(args: {
   const peakEquity = roundDeterministic(capitalBase + peakCum);
 
   const inputHash = chainHash(null, {
-    basis: "REALIZED_ONLY",
+    basis: "REALIZED_PLUS_FLOATING",
     roundingMode: "HALF_AWAY_FROM_ZERO_8DP",
     userId,
     startAt,
     endAt,
     capitalBase: roundDeterministic(capitalBase),
     tradeCount,
+    openTradeCount,
+    floatingPnl,
+    accountBalance,
+    accountEquity,
     firstTradeAt: Math.max(0, Math.trunc(Number(row.first_trade_at ?? 0))),
     lastTradeAt: Math.max(0, Math.trunc(Number(row.last_trade_at ?? 0))),
     pnlScaledSum: String(row.pnl_scaled_sum ?? "0"),
@@ -1656,7 +1729,7 @@ export async function computePhaseStats(args: {
   });
 
   return {
-    pnlBasis: "REALIZED_ONLY",
+    pnlBasis: "REALIZED_PLUS_FLOATING",
     roundingMode: "HALF_AWAY_FROM_ZERO_8DP",
     inputHash,
     tradeCount,
@@ -1775,339 +1848,254 @@ export async function evaluateChallengesTick(options?: { batchSize?: number; run
 
     const now = nowSec();
 
-  const enrolls = await db
-    .select({
-      enrollment: challengeEnrollments,
-      challenge: challenges,
-    })
-    .from(challengeEnrollments)
-    .innerJoin(challenges, eq(challengeEnrollments.challengeId, challenges.id))
-    .where(and(eq(challengeEnrollments.status, "ACTIVE"), eq(challenges.isActive, true)))
-    .orderBy(asc(challengeEnrollments.updatedAt))
-    .limit(batchSize);
+    const enrolls = await db
+      .select({
+        enrollment: challengeEnrollments,
+        challenge: challenges,
+      })
+      .from(challengeEnrollments)
+      .innerJoin(challenges, eq(challengeEnrollments.challengeId, challenges.id))
+      .where(and(eq(challengeEnrollments.status, "ACTIVE"), eq(challenges.isActive, true)))
+      .orderBy(asc(challengeEnrollments.updatedAt))
+      .limit(batchSize);
 
     if (!enrolls.length) {
       await finishRun("SUCCESS", emptyResult);
       return emptyResult;
     }
 
-  const challengeIds = Array.from(new Set(enrolls.map((r) => r.challenge.id)));
-  const challengeById = new Map<number, any>();
-  for (const row of enrolls) challengeById.set(row.challenge.id, row.challenge);
+    const challengeIds = Array.from(new Set(enrolls.map((r) => r.challenge.id)));
+    const challengeById = new Map<number, any>();
+    for (const row of enrolls) challengeById.set(row.challenge.id, row.challenge);
 
-  const phases = await db.select().from(challengePhases).where(inArray(challengePhases.challengeId, challengeIds));
+    const phases = await db.select().from(challengePhases).where(inArray(challengePhases.challengeId, challengeIds));
 
-  let processed = 0;
-  let advanced = 0;
-  let passed = 0;
-  let failed = 0;
-  let warned = 0;
+    let processed = 0;
+    let advanced = 0;
+    let passed = 0;
+    let failed = 0;
+    let warned = 0;
 
-  const touchedChallenges = new Set<number>();
-  const forceLeaderboardRefresh = new Set<number>();
+    const touchedChallenges = new Set<number>();
+    const forceLeaderboardRefresh = new Set<number>();
 
-  for (const r of enrolls) {
-    processed += 1;
+    for (const r of enrolls) {
+      processed += 1;
 
-    const enrollment = r.enrollment as any;
-    const challenge = r.challenge as any;
-    touchedChallenges.add(challenge.id);
+      const enrollment = r.enrollment as any;
+      const challenge = r.challenge as any;
+      touchedChallenges.add(challenge.id);
 
-    try {
-      const currentPhase = Number(enrollment.currentPhase ?? 1);
-      const phase = phases.find((p) => p.challengeId === challenge.id && p.phaseNumber === currentPhase);
-      const phaseRules = phase ?? getPhaseForEnrollment({ ...challenge, phases: [] } as any, currentPhase);
+      try {
+        const currentPhase = Number(enrollment.currentPhase ?? 1);
+        const phase = phases.find((p) => p.challengeId === challenge.id && p.phaseNumber === currentPhase);
+        const phaseRules = phase ?? getPhaseForEnrollment({ ...challenge, phases: [] } as any, currentPhase);
 
-      const phaseStart = Number(enrollment.phaseStartedAt ?? enrollment.enrolledAt ?? now);
-      const durationDays = Number((phaseRules as any).durationDays ?? challenge.durationDays ?? 0);
-      const phaseDeadline = durationDays > 0 ? phaseStart + durationDays * 86400 : null;
-      const evalEnd = phaseDeadline ? Math.min(now, phaseDeadline) : now;
+        const phaseStart = Number(enrollment.phaseStartedAt ?? enrollment.enrolledAt ?? now);
+        const durationDays = Number((phaseRules as any).durationDays ?? challenge.durationDays ?? 0);
+        const phaseDeadline = durationDays > 0 ? phaseStart + durationDays * 86400 : null;
+        const evalEnd = phaseDeadline ? Math.min(now, phaseDeadline) : now;
 
-      const capitalBaseRaw = Number(enrollment.capitalBaseUsed ?? challenge.virtualCapitalUsd ?? 100000);
-      const capitalBase = Number.isFinite(capitalBaseRaw) && capitalBaseRaw > 0 ? capitalBaseRaw : 100000;
+        const capitalBaseRaw = Number(enrollment.capitalBaseUsed ?? challenge.virtualCapitalUsd ?? 100000);
+        const capitalBase = Number.isFinite(capitalBaseRaw) && capitalBaseRaw > 0 ? capitalBaseRaw : 100000;
 
-      const stats = await computePhaseStats({
-        userId: enrollment.userId,
-        startAt: phaseStart,
-        endAt: evalEnd,
-        capitalBase,
-      });
-      await persistPhaseSnapshot({
-        enrollmentId: enrollment.id,
-        challengeId: challenge.id,
-        userId: enrollment.userId,
-        phaseNumber: currentPhase,
-        runId,
-        computedAt: now,
-        stats,
-      });
+        // Force a live floating PnL recalculation before computing stats to ensure drawdowns are accurate
+        await recalcAccount(enrollment.userId).catch(e => console.error("[challengeEval] recalcAccount failed:", e));
 
-      const profitTarget = Number((phaseRules as any).profitTargetPct ?? challenge.profitTargetPct ?? 0);
-      const maxDailyLoss = Number((phaseRules as any).maxDailyLossPct ?? challenge.maxDailyLossPct ?? 1);
-      const maxTotalLoss = Number((phaseRules as any).maxTotalLossPct ?? challenge.maxTotalLossPct ?? 1);
-      const drawdownType = String((phaseRules as any).drawdownType ?? cfg.challengeDefaultDrawdownType ?? "STATIC").toUpperCase();
-      const totalDdHit = drawdownType === "TRAILING" ? stats.trailingDdPct : stats.startDdPct;
-      const minTradingDays = Number((phaseRules as any).minTradingDays ?? challenge.minTradingDays ?? 0);
-      const maxSingleDayProfit =
-        (phaseRules as any).maxSingleDayProfitPct == null ? null : Number((phaseRules as any).maxSingleDayProfitPct);
+        const stats = await computePhaseStats({
+          userId: enrollment.userId,
+          startAt: phaseStart,
+          endAt: evalEnd,
+          capitalBase,
+        });
+        await persistPhaseSnapshot({
+          enrollmentId: enrollment.id,
+          challengeId: challenge.id,
+          userId: enrollment.userId,
+          phaseNumber: currentPhase,
+          runId,
+          computedAt: now,
+          stats,
+        });
 
-      const restricted = parseCsvSet((phaseRules as any).restrictedSymbolsCsv);
-      const restrictedHit = restricted.size
-        ? await hasRestrictedSymbolTrade(enrollment.userId, phaseStart, evalEnd, restricted)
-        : false;
+        const profitTarget = Number((phaseRules as any).profitTargetPct ?? challenge.profitTargetPct ?? 0);
+        const maxDailyLoss = Number((phaseRules as any).maxDailyLossPct ?? challenge.maxDailyLossPct ?? 1);
+        const maxTotalLoss = Number((phaseRules as any).maxTotalLossPct ?? challenge.maxTotalLossPct ?? 1);
+        const drawdownType = String((phaseRules as any).drawdownType ?? cfg.challengeDefaultDrawdownType ?? "STATIC").toUpperCase();
+        const totalDdHit = drawdownType === "TRAILING" ? stats.trailingDdPct : stats.startDdPct;
+        const minTradingDays = Number((phaseRules as any).minTradingDays ?? challenge.minTradingDays ?? 0);
+        const maxSingleDayProfit =
+          (phaseRules as any).maxSingleDayProfitPct == null ? null : Number((phaseRules as any).maxSingleDayProfitPct);
 
-      const dailyBreach = maxDailyLoss > 0 && stats.worstDayLossPct >= maxDailyLoss;
-      const totalBreach = maxTotalLoss > 0 && totalDdHit >= maxTotalLoss;
-      const consistencyBreach = maxSingleDayProfit != null && stats.bestDayProfitPct > maxSingleDayProfit;
+        const restricted = parseCsvSet((phaseRules as any).restrictedSymbolsCsv);
+        const restrictedHit = restricted.size
+          ? await hasRestrictedSymbolTrade(enrollment.userId, phaseStart, evalEnd, restricted)
+          : false;
 
-      const targetHit = profitTarget <= 0 ? true : stats.pnlPct >= profitTarget;
-      const daysOk = minTradingDays <= 0 ? true : stats.tradingDays >= minTradingDays;
-      const timeoutFail = Boolean(phaseDeadline && now > phaseDeadline && !(targetHit && daysOk));
+        const dailyBreach = maxDailyLoss > 0 && stats.worstDayLossPct >= maxDailyLoss;
+        const totalBreach = maxTotalLoss > 0 && totalDdHit >= maxTotalLoss;
+        const consistencyBreach = maxSingleDayProfit != null && stats.bestDayProfitPct > maxSingleDayProfit;
 
-      const nowUpdate: any = {
-        currentPnlPct: stats.pnlPct,
-        tradingDays: stats.tradingDays,
-        maxDailyLossHit: stats.worstDayLossPct,
-        maxTotalLossHit: totalDdHit,
-        peakEquity: stats.peakEquity,
-        updatedAt: now,
-      };
+        const targetHit = profitTarget <= 0 ? true : stats.pnlPct >= profitTarget;
+        const daysOk = minTradingDays <= 0 ? true : stats.tradingDays >= minTradingDays;
+        const timeoutFail = Boolean(phaseDeadline && now > phaseDeadline && !(targetHit && daysOk));
 
-      const ruleBreach = dailyBreach || totalBreach || consistencyBreach || restrictedHit;
-      if (ruleBreach || timeoutFail) {
-        const reason = dailyBreach
-          ? "MAX_DAILY_LOSS_BREACH"
-          : totalBreach
-            ? "MAX_TOTAL_LOSS_BREACH"
-            : consistencyBreach
-              ? "CONSISTENCY_RULE_BREACH"
-              : restrictedHit
-                ? "RESTRICTED_SYMBOL_BREACH"
-                : "DEADLINE_EXPIRED";
-        const breachPolicy = timeoutFail ? "FAIL" : resolveBreachPolicy(challenge, cfg);
+        const nowUpdate: any = {
+          currentPnlPct: stats.pnlPct,
+          tradingDays: stats.tradingDays,
+          maxDailyLossHit: stats.worstDayLossPct,
+          maxTotalLossHit: totalDdHit,
+          peakEquity: stats.peakEquity,
+          updatedAt: now,
+        };
 
-        if (!timeoutFail && breachPolicy === "BREACH_AND_CONTINUE") {
-          await db
-            .update(challengeEnrollments)
-            .set({
-              ...nowUpdate,
-              lastWarningEvent: `CHALLENGE_BREACH_CONTINUE_${reason}`,
-              lastWarningAt: now,
-            })
-            .where(eq(challengeEnrollments.id, enrollment.id));
+        const ruleBreach = dailyBreach || totalBreach || consistencyBreach || restrictedHit;
+        if (ruleBreach || timeoutFail) {
+          const reason = dailyBreach
+            ? "MAX_DAILY_LOSS_BREACH"
+            : totalBreach
+              ? "MAX_TOTAL_LOSS_BREACH"
+              : consistencyBreach
+                ? "CONSISTENCY_RULE_BREACH"
+                : restrictedHit
+                  ? "RESTRICTED_SYMBOL_BREACH"
+                  : "DEADLINE_EXPIRED";
+          const breachPolicy = timeoutFail ? "FAIL" : resolveBreachPolicy(challenge, cfg);
 
-          await appendChallengeEventWithRun(
-            {
-              enrollmentId: enrollment.id,
-              eventType: `CHALLENGE_BREACH_CONTINUE_${reason}`,
-              phaseNumber: currentPhase,
-              details: {
-                pnlInputHash: stats.inputHash,
-                breachPolicy,
-                reason,
-                pnlPct: stats.pnlPct,
-                tradingDays: stats.tradingDays,
-                worstDayLossPct: stats.worstDayLossPct,
-                totalDdHit,
-                bestDayProfitPct: stats.bestDayProfitPct,
+          if (!timeoutFail && breachPolicy === "BREACH_AND_CONTINUE") {
+            await db
+              .update(challengeEnrollments)
+              .set({
+                ...nowUpdate,
+                lastWarningEvent: `CHALLENGE_BREACH_CONTINUE_${reason}`,
+                lastWarningAt: now,
+              })
+              .where(eq(challengeEnrollments.id, enrollment.id));
+
+            await appendChallengeEventWithRun(
+              {
+                enrollmentId: enrollment.id,
+                eventType: `CHALLENGE_BREACH_CONTINUE_${reason}`,
+                phaseNumber: currentPhase,
+                details: {
+                  pnlInputHash: stats.inputHash,
+                  breachPolicy,
+                  reason,
+                  pnlPct: stats.pnlPct,
+                  tradingDays: stats.tradingDays,
+                  worstDayLossPct: stats.worstDayLossPct,
+                  totalDdHit,
+                  bestDayProfitPct: stats.bestDayProfitPct,
+                },
               },
-            },
-            runId,
-          );
-          appendChallengeTransitionAudit({
-            runId,
-            userId: enrollment.userId,
-            challengeId: challenge.id,
-            enrollmentId: enrollment.id,
-            type: "CHALLENGE_BREACH_CONTINUED",
-            data: { reason, phaseNumber: currentPhase, breachPolicy },
-          });
-
-          if (cfg.challengeNotifyOnBreach) {
-            await createNotification({
-              userId: enrollment.userId,
-              type: "CHALLENGE",
-              severity: "WARNING",
-              title: "Challenge rule breached",
-              message: `A breach was recorded in Phase ${currentPhase} of ${challenge.name}, but progression remains active (${reason}).`,
-              sourceEvent: `CHALLENGE_BREACH_CONTINUE_${reason}`,
-            });
-          }
-
-          warned += 1;
-          continue;
-        }
-
-        if (!timeoutFail && breachPolicy === "MANUAL_REVIEW" && cfg.challengeManualReviewEnabled) {
-          await db
-            .update(challengeEnrollments)
-            .set({ ...nowUpdate, status: "REVIEW_REQUIRED", completedAt: now })
-            .where(eq(challengeEnrollments.id, enrollment.id));
-
-          await appendChallengeEventWithRun(
-            {
-              enrollmentId: enrollment.id,
-              eventType: "CHALLENGE_REVIEW_REQUIRED",
-              phaseNumber: currentPhase,
-              details: {
-                pnlInputHash: stats.inputHash,
-                breachPolicy,
-                reason,
-                pnlPct: stats.pnlPct,
-                tradingDays: stats.tradingDays,
-                worstDayLossPct: stats.worstDayLossPct,
-                totalDdHit,
-                bestDayProfitPct: stats.bestDayProfitPct,
-                phaseDeadline,
-              },
-            },
-            runId,
-          );
-          appendChallengeTransitionAudit({
-            runId,
-            userId: enrollment.userId,
-            challengeId: challenge.id,
-            enrollmentId: enrollment.id,
-            type: "CHALLENGE_REVIEW_REQUIRED",
-            data: { reason, phaseNumber: currentPhase, breachPolicy },
-          });
-
-          if (cfg.challengeNotifyOnBreach) {
-            await createNotification({
-              userId: enrollment.userId,
-              type: "CHALLENGE",
-              severity: "WARNING",
-              title: "Challenge under review",
-              message: `Your ${challenge.name} enrollment is now in manual review (${reason}).`,
-              sourceEvent: "CHALLENGE_REVIEW_REQUIRED",
-            });
-            await maybeSendChallengeMailboxMessage({
-              cfg,
+              runId,
+            );
+            appendChallengeTransitionAudit({
+              runId,
               userId: enrollment.userId,
               challengeId: challenge.id,
               enrollmentId: enrollment.id,
-              sourceEvent: "CHALLENGE_REVIEW_REQUIRED",
-              subject: `Manual review required: ${challenge.name}`,
-              body: `Your enrollment was moved to manual review in Phase ${currentPhase} (${reason}).`,
+              type: "CHALLENGE_BREACH_CONTINUED",
+              data: { reason, phaseNumber: currentPhase, breachPolicy },
             });
+
+            if (cfg.challengeNotifyOnBreach) {
+              await createNotification({
+                userId: enrollment.userId,
+                type: "CHALLENGE",
+                severity: "WARNING",
+                title: "Challenge rule breached",
+                message: `A breach was recorded in Phase ${currentPhase} of ${challenge.name}, but progression remains active (${reason}).`,
+                sourceEvent: `CHALLENGE_BREACH_CONTINUE_${reason}`,
+              });
+            }
+
+            warned += 1;
+            continue;
           }
 
-          warned += 1;
-          forceLeaderboardRefresh.add(challenge.id);
-          continue;
-        }
+          if (!timeoutFail && breachPolicy === "MANUAL_REVIEW" && cfg.challengeManualReviewEnabled) {
+            await db
+              .update(challengeEnrollments)
+              .set({ ...nowUpdate, status: "REVIEW_REQUIRED", completedAt: now })
+              .where(eq(challengeEnrollments.id, enrollment.id));
 
-        await db
-          .update(challengeEnrollments)
-          .set({ ...nowUpdate, status: "FAILED", completedAt: now })
-          .where(eq(challengeEnrollments.id, enrollment.id));
+            await appendChallengeEventWithRun(
+              {
+                enrollmentId: enrollment.id,
+                eventType: "CHALLENGE_REVIEW_REQUIRED",
+                phaseNumber: currentPhase,
+                details: {
+                  pnlInputHash: stats.inputHash,
+                  breachPolicy,
+                  reason,
+                  pnlPct: stats.pnlPct,
+                  tradingDays: stats.tradingDays,
+                  worstDayLossPct: stats.worstDayLossPct,
+                  totalDdHit,
+                  bestDayProfitPct: stats.bestDayProfitPct,
+                  phaseDeadline,
+                },
+              },
+              runId,
+            );
+            appendChallengeTransitionAudit({
+              runId,
+              userId: enrollment.userId,
+              challengeId: challenge.id,
+              enrollmentId: enrollment.id,
+              type: "CHALLENGE_REVIEW_REQUIRED",
+              data: { reason, phaseNumber: currentPhase, breachPolicy },
+            });
 
-        await appendChallengeEventWithRun({
-          enrollmentId: enrollment.id,
-          eventType: `CHALLENGE_FAIL_${reason}`,
-          phaseNumber: currentPhase,
-          details: {
-            pnlInputHash: stats.inputHash,
-            breachPolicy,
-            pnlPct: stats.pnlPct,
-            tradingDays: stats.tradingDays,
-            worstDayLossPct: stats.worstDayLossPct,
-            totalDdHit,
-            bestDayProfitPct: stats.bestDayProfitPct,
-            profitTarget,
-            maxDailyLoss,
-            maxTotalLoss,
-            maxSingleDayProfit,
-            restrictedSymbols: restricted.size ? Array.from(restricted).slice(0, 50) : [],
-            phaseDeadline,
-          },
-          pnlSnapshotPct: stats.pnlPct,
-          dailyLossSnapshot: stats.worstDayLossPct,
-          totalDdSnapshot: totalDdHit,
-          tradingDaysSnapshot: stats.tradingDays,
-        }, runId);
-        appendChallengeTransitionAudit({
-          runId,
-          userId: enrollment.userId,
-          challengeId: challenge.id,
-          enrollmentId: enrollment.id,
-          type: "CHALLENGE_FAILED",
-          data: { reason, phaseNumber: currentPhase, breachPolicy },
-        });
+            if (cfg.challengeNotifyOnBreach) {
+              await createNotification({
+                userId: enrollment.userId,
+                type: "CHALLENGE",
+                severity: "WARNING",
+                title: "Challenge under review",
+                message: `Your ${challenge.name} enrollment is now in manual review (${reason}).`,
+                sourceEvent: "CHALLENGE_REVIEW_REQUIRED",
+              });
+              await maybeSendChallengeMailboxMessage({
+                cfg,
+                userId: enrollment.userId,
+                challengeId: challenge.id,
+                enrollmentId: enrollment.id,
+                sourceEvent: "CHALLENGE_REVIEW_REQUIRED",
+                subject: `Manual review required: ${challenge.name}`,
+                body: `Your enrollment was moved to manual review in Phase ${currentPhase} (${reason}).`,
+              });
+            }
 
-        if (cfg.challengeNotifyOnFail || cfg.challengeNotifyOnBreach) {
-          await createNotification({
-            userId: enrollment.userId,
-            type: "CHALLENGE",
-            severity: "WARNING",
-            title: "Challenge failed",
-            message: `You breached a rule in Phase ${currentPhase} of ${challenge.name} (${reason}).`,
-            sourceEvent: `CHALLENGE_FAIL_${reason}`,
-          });
-          await maybeSendChallengeMailboxMessage({
-            cfg,
-            userId: enrollment.userId,
-            challengeId: challenge.id,
-            enrollmentId: enrollment.id,
-            sourceEvent: `CHALLENGE_FAIL_${reason}`,
-            subject: `Challenge failed: ${challenge.name}`,
-            body: `Phase ${currentPhase} failed due to ${reason}. Review your timeline for details.`,
-          });
-        }
+            warned += 1;
+            forceLeaderboardRefresh.add(challenge.id);
+            continue;
+          }
 
-        failed += 1;
-        forceLeaderboardRefresh.add(challenge.id);
-        continue;
-      }
-
-      if (targetHit && daysOk) {
-        await appendChallengeEventWithRun({
-          enrollmentId: enrollment.id,
-          eventType: "CHALLENGE_PHASE_PASS",
-          phaseNumber: currentPhase,
-          details: { pnlInputHash: stats.inputHash, pnlPct: stats.pnlPct, tradingDays: stats.tradingDays },
-          pnlSnapshotPct: stats.pnlPct,
-          dailyLossSnapshot: stats.worstDayLossPct,
-          totalDdSnapshot: totalDdHit,
-          tradingDaysSnapshot: stats.tradingDays,
-        }, runId);
-        appendChallengeTransitionAudit({
-          runId,
-          userId: enrollment.userId,
-          challengeId: challenge.id,
-          enrollmentId: enrollment.id,
-          type: "CHALLENGE_PHASE_PASS",
-          data: { phaseNumber: currentPhase },
-        });
-        await applyCustomRewardsForTrigger({
-          cfg,
-          enrollment,
-          challenge,
-          trigger: "ON_PHASE_PASS",
-          now,
-          runId,
-          phaseNumber: currentPhase,
-        });
-
-        const maxPhase = phases
-          .filter((p) => p.challengeId === challenge.id)
-          .reduce((acc, p) => Math.max(acc, p.phaseNumber), 1);
-
-        if (currentPhase >= maxPhase) {
           await db
             .update(challengeEnrollments)
-            .set({ ...nowUpdate, status: "PASSED", completedAt: now, lastWarningEvent: null, lastWarningAt: null })
+            .set({ ...nowUpdate, status: "FAILED", completedAt: now })
             .where(eq(challengeEnrollments.id, enrollment.id));
 
           await appendChallengeEventWithRun({
             enrollmentId: enrollment.id,
-            eventType: "CHALLENGE_COMPLETE",
+            eventType: `CHALLENGE_FAIL_${reason}`,
             phaseNumber: currentPhase,
             details: {
               pnlInputHash: stats.inputHash,
+              breachPolicy,
               pnlPct: stats.pnlPct,
               tradingDays: stats.tradingDays,
-              maxPhase,
+              worstDayLossPct: stats.worstDayLossPct,
+              totalDdHit,
+              bestDayProfitPct: stats.bestDayProfitPct,
+              profitTarget,
+              maxDailyLoss,
+              maxTotalLoss,
+              maxSingleDayProfit,
+              restrictedSymbols: restricted.size ? Array.from(restricted).slice(0, 50) : [],
+              phaseDeadline,
             },
             pnlSnapshotPct: stats.pnlPct,
             dailyLossSnapshot: stats.worstDayLossPct,
@@ -2119,200 +2107,288 @@ export async function evaluateChallengesTick(options?: { batchSize?: number; run
             userId: enrollment.userId,
             challengeId: challenge.id,
             enrollmentId: enrollment.id,
-            type: "CHALLENGE_COMPLETE",
-            data: { phaseNumber: currentPhase, maxPhase },
+            type: "CHALLENGE_FAILED",
+            data: { reason, phaseNumber: currentPhase, breachPolicy },
           });
 
-          if (cfg.challengeNotifyOnComplete) {
+          if (cfg.challengeNotifyOnFail || cfg.challengeNotifyOnBreach) {
             await createNotification({
               userId: enrollment.userId,
               type: "CHALLENGE",
-              severity: "SUCCESS",
-              title: "Challenge completed",
-              message: `You completed ${challenge.name}.`,
-              sourceEvent: "CHALLENGE_COMPLETE",
+              severity: "WARNING",
+              title: "Challenge failed",
+              message: `You breached a rule in Phase ${currentPhase} of ${challenge.name} (${reason}).`,
+              sourceEvent: `CHALLENGE_FAIL_${reason}`,
             });
             await maybeSendChallengeMailboxMessage({
               cfg,
               userId: enrollment.userId,
               challengeId: challenge.id,
               enrollmentId: enrollment.id,
-              sourceEvent: "CHALLENGE_COMPLETE",
-              subject: `Challenge completed: ${challenge.name}`,
-              body: `Congratulations. You completed ${challenge.name} at phase ${currentPhase}. Rewards are being processed.`,
+              sourceEvent: `CHALLENGE_FAIL_${reason}`,
+              subject: `Challenge failed: ${challenge.name}`,
+              body: `Phase ${currentPhase} failed due to ${reason}. Review your timeline for details.`,
             });
           }
 
-          await applyCompletionRewards({
-            enrollment,
-            challenge,
-            stats,
-            cfg,
-            now,
-            runId,
-          });
-
-          passed += 1;
+          failed += 1;
           forceLeaderboardRefresh.add(challenge.id);
           continue;
         }
 
-        if (cfg.challengeAutoAdvancePhase) {
-          const nextPhase = currentPhase + 1;
-          await db
-            .update(challengeEnrollments)
-            .set({
-              ...nowUpdate,
-              currentPhase: nextPhase,
-              phaseStartedAt: now,
-              lastWarningEvent: null,
-              lastWarningAt: null,
-            })
-            .where(eq(challengeEnrollments.id, enrollment.id));
-
+        if (targetHit && daysOk) {
           await appendChallengeEventWithRun({
             enrollmentId: enrollment.id,
-            eventType: "CHALLENGE_PHASE_ADVANCE",
-            phaseNumber: nextPhase,
-            details: { fromPhase: currentPhase, toPhase: nextPhase },
+            eventType: "CHALLENGE_PHASE_PASS",
+            phaseNumber: currentPhase,
+            details: { pnlInputHash: stats.inputHash, pnlPct: stats.pnlPct, tradingDays: stats.tradingDays },
+            pnlSnapshotPct: stats.pnlPct,
+            dailyLossSnapshot: stats.worstDayLossPct,
+            totalDdSnapshot: totalDdHit,
+            tradingDaysSnapshot: stats.tradingDays,
           }, runId);
           appendChallengeTransitionAudit({
             runId,
             userId: enrollment.userId,
             challengeId: challenge.id,
             enrollmentId: enrollment.id,
-            type: "CHALLENGE_PHASE_ADVANCE",
-            data: { fromPhase: currentPhase, toPhase: nextPhase },
+            type: "CHALLENGE_PHASE_PASS",
+            data: { phaseNumber: currentPhase },
+          });
+          await applyCustomRewardsForTrigger({
+            cfg,
+            enrollment,
+            challenge,
+            trigger: "ON_PHASE_PASS",
+            now,
+            runId,
+            phaseNumber: currentPhase,
           });
 
-          if (cfg.challengeNotifyOnPhasePass) {
-            await createNotification({
+          const maxPhase = phases
+            .filter((p) => p.challengeId === challenge.id)
+            .reduce((acc, p) => Math.max(acc, p.phaseNumber), 1);
+
+          if (currentPhase >= maxPhase) {
+            await db
+              .update(challengeEnrollments)
+              .set({ ...nowUpdate, status: "PASSED", completedAt: now, lastWarningEvent: null, lastWarningAt: null })
+              .where(eq(challengeEnrollments.id, enrollment.id));
+
+            await appendChallengeEventWithRun({
+              enrollmentId: enrollment.id,
+              eventType: "CHALLENGE_COMPLETE",
+              phaseNumber: currentPhase,
+              details: {
+                pnlInputHash: stats.inputHash,
+                pnlPct: stats.pnlPct,
+                tradingDays: stats.tradingDays,
+                maxPhase,
+              },
+              pnlSnapshotPct: stats.pnlPct,
+              dailyLossSnapshot: stats.worstDayLossPct,
+              totalDdSnapshot: totalDdHit,
+              tradingDaysSnapshot: stats.tradingDays,
+            }, runId);
+            appendChallengeTransitionAudit({
+              runId,
               userId: enrollment.userId,
-              type: "CHALLENGE",
-              severity: "SUCCESS",
-              title: "Phase passed",
-              message: `You passed Phase ${currentPhase} of ${challenge.name}.`,
-              sourceEvent: "CHALLENGE_PHASE_PASS",
+              challengeId: challenge.id,
+              enrollmentId: enrollment.id,
+              type: "CHALLENGE_COMPLETE",
+              data: { phaseNumber: currentPhase, maxPhase },
             });
+
+            if (cfg.challengeNotifyOnComplete) {
+              await createNotification({
+                userId: enrollment.userId,
+                type: "CHALLENGE",
+                severity: "SUCCESS",
+                title: "Challenge completed",
+                message: `You completed ${challenge.name}.`,
+                sourceEvent: "CHALLENGE_COMPLETE",
+              });
+              await maybeSendChallengeMailboxMessage({
+                cfg,
+                userId: enrollment.userId,
+                challengeId: challenge.id,
+                enrollmentId: enrollment.id,
+                sourceEvent: "CHALLENGE_COMPLETE",
+                subject: `Challenge completed: ${challenge.name}`,
+                body: `Congratulations. You completed ${challenge.name} at phase ${currentPhase}. Rewards are being processed.`,
+              });
+            }
+
+            await applyCompletionRewards({
+              enrollment,
+              challenge,
+              stats,
+              cfg,
+              now,
+              runId,
+            });
+
+            passed += 1;
+            forceLeaderboardRefresh.add(challenge.id);
+            continue;
           }
 
-          advanced += 1;
-          forceLeaderboardRefresh.add(challenge.id);
-          continue;
+          if (cfg.challengeAutoAdvancePhase) {
+            const nextPhase = currentPhase + 1;
+            await db
+              .update(challengeEnrollments)
+              .set({
+                ...nowUpdate,
+                currentPhase: nextPhase,
+                phaseStartedAt: now,
+                lastWarningEvent: null,
+                lastWarningAt: null,
+              })
+              .where(eq(challengeEnrollments.id, enrollment.id));
+
+            await appendChallengeEventWithRun({
+              enrollmentId: enrollment.id,
+              eventType: "CHALLENGE_PHASE_ADVANCE",
+              phaseNumber: nextPhase,
+              details: { fromPhase: currentPhase, toPhase: nextPhase },
+            }, runId);
+            appendChallengeTransitionAudit({
+              runId,
+              userId: enrollment.userId,
+              challengeId: challenge.id,
+              enrollmentId: enrollment.id,
+              type: "CHALLENGE_PHASE_ADVANCE",
+              data: { fromPhase: currentPhase, toPhase: nextPhase },
+            });
+
+            if (cfg.challengeNotifyOnPhasePass) {
+              await createNotification({
+                userId: enrollment.userId,
+                type: "CHALLENGE",
+                severity: "SUCCESS",
+                title: "Phase passed",
+                message: `You passed Phase ${currentPhase} of ${challenge.name}.`,
+                sourceEvent: "CHALLENGE_PHASE_PASS",
+              });
+            }
+
+            advanced += 1;
+            forceLeaderboardRefresh.add(challenge.id);
+            continue;
+          }
         }
-      }
 
-      const warnDaily = nearLimit(stats.worstDayLossPct, maxDailyLoss, cfg.challengeWarningThresholdPct);
-      const warnTotal = nearLimit(totalDdHit, maxTotalLoss, cfg.challengeWarningThresholdPct);
-      if (warnDaily || warnTotal) {
-        const warningEvent = warnDaily ? "CHALLENGE_WARN_DAILY" : "CHALLENGE_WARN_TOTAL";
-        const lastEvent = String(enrollment.lastWarningEvent ?? "");
+        const warnDaily = nearLimit(stats.worstDayLossPct, maxDailyLoss, cfg.challengeWarningThresholdPct);
+        const warnTotal = nearLimit(totalDdHit, maxTotalLoss, cfg.challengeWarningThresholdPct);
+        if (warnDaily || warnTotal) {
+          const warningEvent = warnDaily ? "CHALLENGE_WARN_DAILY" : "CHALLENGE_WARN_TOTAL";
+          const lastEvent = String(enrollment.lastWarningEvent ?? "");
 
-        if (lastEvent !== warningEvent) {
+          if (lastEvent !== warningEvent) {
+            await db
+              .update(challengeEnrollments)
+              .set({ ...nowUpdate, lastWarningEvent: warningEvent, lastWarningAt: now })
+              .where(eq(challengeEnrollments.id, enrollment.id));
+
+            await appendChallengeEventWithRun({
+              enrollmentId: enrollment.id,
+              eventType: warningEvent,
+              phaseNumber: currentPhase,
+              details: {
+                pnlInputHash: stats.inputHash,
+                maxDailyLoss,
+                maxTotalLoss,
+                totalDdHit,
+                worstDayLossPct: stats.worstDayLossPct,
+              },
+              pnlSnapshotPct: stats.pnlPct,
+              dailyLossSnapshot: stats.worstDayLossPct,
+              totalDdSnapshot: totalDdHit,
+              tradingDaysSnapshot: stats.tradingDays,
+            }, runId);
+
+            if (cfg.challengeNotifyOnPhaseWarning) {
+              await createNotification({
+                userId: enrollment.userId,
+                type: "CHALLENGE",
+                severity: "INFO",
+                title: "Challenge warning",
+                message: `You're close to a risk limit in Phase ${currentPhase} of ${challenge.name}.`,
+                sourceEvent: warningEvent,
+              });
+            }
+
+            warned += 1;
+          } else {
+            await db.update(challengeEnrollments).set(nowUpdate).where(eq(challengeEnrollments.id, enrollment.id));
+          }
+        } else {
           await db
             .update(challengeEnrollments)
-            .set({ ...nowUpdate, lastWarningEvent: warningEvent, lastWarningAt: now })
+            .set({ ...nowUpdate, lastWarningEvent: null, lastWarningAt: null })
             .where(eq(challengeEnrollments.id, enrollment.id));
-
-          await appendChallengeEventWithRun({
-            enrollmentId: enrollment.id,
-            eventType: warningEvent,
-            phaseNumber: currentPhase,
-            details: {
-              pnlInputHash: stats.inputHash,
-              maxDailyLoss,
-              maxTotalLoss,
-              totalDdHit,
-              worstDayLossPct: stats.worstDayLossPct,
-            },
-            pnlSnapshotPct: stats.pnlPct,
-            dailyLossSnapshot: stats.worstDayLossPct,
-            totalDdSnapshot: totalDdHit,
-            tradingDaysSnapshot: stats.tradingDays,
-          }, runId);
-
-          if (cfg.challengeNotifyOnPhaseWarning) {
-            await createNotification({
-              userId: enrollment.userId,
-              type: "CHALLENGE",
-              severity: "INFO",
-              title: "Challenge warning",
-              message: `You're close to a risk limit in Phase ${currentPhase} of ${challenge.name}.`,
-              sourceEvent: warningEvent,
-            });
-          }
-
-          warned += 1;
-        } else {
-          await db.update(challengeEnrollments).set(nowUpdate).where(eq(challengeEnrollments.id, enrollment.id));
         }
-      } else {
-        await db
-          .update(challengeEnrollments)
-          .set({ ...nowUpdate, lastWarningEvent: null, lastWarningAt: null })
-          .where(eq(challengeEnrollments.id, enrollment.id));
+      } catch (error) {
+        console.error("[challenges-v4] evaluation row failed:", {
+          enrollmentId: enrollment.id,
+          challengeId: challenge.id,
+          error,
+        });
       }
-    } catch (error) {
-      console.error("[challenges-v4] evaluation row failed:", {
-        enrollmentId: enrollment.id,
-        challengeId: challenge.id,
-        error,
-      });
     }
-  }
 
-  for (const challengeId of touchedChallenges) {
-    try {
-      const challenge = challengeById.get(challengeId);
-      if (!challenge) continue;
+    for (const challengeId of touchedChallenges) {
+      try {
+        const challenge = challengeById.get(challengeId);
+        if (!challenge) continue;
 
-      const prizeTiming = resolvePrizeAwardTiming(challenge, cfg);
-      if (prizeTiming !== "ON_CHALLENGE_END") continue;
+        const prizeTiming = resolvePrizeAwardTiming(challenge, cfg);
+        if (prizeTiming !== "ON_CHALLENGE_END") continue;
 
-      const endAt = Number(challenge.endAt ?? 0);
-      if (!Number.isFinite(endAt) || endAt <= 0 || now < endAt) continue;
+        const endAt = Number(challenge.endAt ?? 0);
+        if (!Number.isFinite(endAt) || endAt <= 0 || now < endAt) continue;
 
-      const prizeCandidateMode = resolvePrizeCandidateMode(challenge, cfg);
-      const rankedCandidates = await rankPrizeCandidates(challengeId, prizeCandidateMode);
-      const prizeResult = await recomputePrizeAwards({
-        challenge,
-        cfg,
-        rankedCandidates,
-        now,
-      });
-      await notifyPrizeAwardsForChallenge({
-        challenge,
-        cfg,
-        runId,
-        newlyAwardedEnrollmentIds: prizeResult.newlyAwardedEnrollmentIds,
-      });
-    } catch (error) {
-      console.error("[challenges-v4] challenge-end prize processing failed:", {
-        runId,
-        challengeId,
-        error,
-      });
+        const prizeCandidateMode = resolvePrizeCandidateMode(challenge, cfg);
+        const rankedCandidates = await rankPrizeCandidates(challengeId, prizeCandidateMode);
+        const prizeResult = await recomputePrizeAwards({
+          challenge,
+          cfg,
+          rankedCandidates,
+          now,
+        });
+        await notifyPrizeAwardsForChallenge({
+          challenge,
+          cfg,
+          runId,
+          newlyAwardedEnrollmentIds: prizeResult.newlyAwardedEnrollmentIds,
+        });
+      } catch (error) {
+        console.error("[challenges-v4] challenge-end prize processing failed:", {
+          runId,
+          challengeId,
+          error,
+        });
+      }
     }
-  }
 
-  for (const challengeId of touchedChallenges) {
-    try {
-      const challenge = challengeById.get(challengeId);
-      if (!challenge) continue;
+    for (const challengeId of touchedChallenges) {
+      try {
+        const challenge = challengeById.get(challengeId);
+        if (!challenge) continue;
 
-      await maybeRefreshChallengeLeaderboard({
-        challenge,
-        cfg,
-        now,
-        force: forceLeaderboardRefresh.has(challengeId),
-      });
-    } catch (error) {
-      console.error("[challenges-v4] leaderboard refresh failed:", {
-        challengeId,
-        error,
-      });
+        await maybeRefreshChallengeLeaderboard({
+          challenge,
+          cfg,
+          now,
+          force: forceLeaderboardRefresh.has(challengeId),
+        });
+      } catch (error) {
+        console.error("[challenges-v4] leaderboard refresh failed:", {
+          challengeId,
+          error,
+        });
+      }
     }
-  }
 
     const result: EvalResult = { processed, advanced, passed, failed, warned };
     await finishRun("SUCCESS", result);

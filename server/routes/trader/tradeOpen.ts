@@ -12,7 +12,7 @@ import { riskMiddleware, getEffectiveMinHoldSec } from "../../risk";
 import { requirePolicy } from "../../middleware/requirePolicy";
 import { recalcAccount } from "../../recalcAccount";
 import { requiredMargin } from "../../lib/margin";
-import { getExecutionQuote } from "../../services/quoteService";
+import { getExecutionQuote, validateExecutionQuoteAtCommit } from "../../services/quoteService";
 import { applyUserBalanceDelta, releaseUserMargin, reserveUserMargin } from "../../services/tradeAtomic";
 import { realizedPnlUsd } from "../../lib/realizedPnl";
 import { computeCloseSettlementCosts, computeOpenSideCosts } from "../../services/tradeCosts";
@@ -50,8 +50,7 @@ import {
 } from "../../lib/priceUtils";
 import { WS_MSG_TRADES_UPDATED } from "@shared/ws/protocol";
 import {
-  incTradeCloseRejectedQuoteStaleTotal,
-  incTradeTargetsRejectedQuoteStaleTotal,
+  incTradeOpenRejectedQuoteRevalidationTotal,
 } from "../metricsState";
 import type { TraderRouterDeps } from "./types";
 
@@ -550,6 +549,26 @@ router.post(
         }
 
         if (!isPendingOrder) {
+          const quoteRevalidation = await validateExecutionQuoteAtCommit({
+            symbol: symbolConfig.symbol,
+            side: data.type,
+            action: "OPEN",
+            expectedQuoteTs: quoteTs ?? new Date(),
+            expectedExecPrice: entryPrice,
+          });
+          if (!quoteRevalidation.ok) {
+            return {
+              trade: null,
+              rejectReason: "QUOTE_REVALIDATION_FAILED" as const,
+              quoteRevalidation,
+              openLots,
+              pendingLots,
+              currentTotalLots,
+            };
+          }
+        }
+
+        if (!isPendingOrder) {
           const reserve = await reserveUserMargin(tx, { userId: req.session.userId, marginUsd: neededMargin });
           if (!reserve.reserved) {
             return { trade: null, rejectReason: "INSUFFICIENT_MARGIN_AT_COMMIT" as const, openLots, pendingLots, currentTotalLots };
@@ -631,6 +650,35 @@ router.post(
           requestedLots: tradeLots,
           maxLots: effectiveMaxConcurrentLots,
           limit: effectiveMaxConcurrentLots
+        });
+      }
+
+      if (tradeResult.rejectReason === "QUOTE_REVALIDATION_FAILED") {
+        const quoteRevalidation = (tradeResult as any).quoteRevalidation ?? {};
+        incTradeOpenRejectedQuoteRevalidationTotal();
+        await writeDecisionReject(
+          "QUOTE_REVALIDATION_FAILED",
+          {
+            maxAgeMs: Number(process.env.QUOTE_REVALIDATE_MAX_AGE_MS ?? process.env.QUOTE_STALE_AFTER_MS ?? 300000),
+            maxExecPriceDriftBps: Number(process.env.QUOTE_REVALIDATE_MAX_EXEC_PRICE_DRIFT_BPS ?? 150),
+          },
+          {
+            code: quoteRevalidation.code,
+            latestQuoteTsMs: quoteRevalidation.latestQuoteTsMs,
+            expectedQuoteTsMs: quoteRevalidation.expectedQuoteTsMs,
+            ageMs: quoteRevalidation.ageMs,
+            latestExecPrice: quoteRevalidation.latestExecPrice,
+            expectedExecPrice: quoteRevalidation.expectedExecPrice,
+            driftAbs: quoteRevalidation.driftAbs,
+            driftBps: quoteRevalidation.driftBps,
+          },
+        );
+        res.setHeader("Retry-After", "1");
+        return res.status(409).json({
+          code: "QUOTE_REVALIDATION_FAILED",
+          reasonCode: String(quoteRevalidation.code ?? "UNKNOWN"),
+          message: "Quote changed during commit. Please retry with the latest market price.",
+          details: quoteRevalidation,
         });
       }
 

@@ -1,11 +1,12 @@
 import { db } from "@db";
-import { tradeAudit, trades } from "@shared/schema";
+import { tradeAudit, orderIntentAudit, trades } from "@shared/schema";
 import { asc, gt } from "drizzle-orm";
-import { verifyTradeAuditChain } from "../lib/auditWriter";
+import { verifyTradeAuditChain, verifyOrderIntentAuditChain } from "../lib/auditWriter";
 
 let started = false;
 let running = false;
 let auditCursorId = 0;
+let intentCursorId = 0;
 let sweepTradeCursor = 0;
 let intervalHandle: ReturnType<typeof setInterval> | null = null;
 
@@ -47,6 +48,26 @@ async function fetchIncrementalTradeIds(): Promise<{ tradeIds: number[]; nextCur
   return { tradeIds, nextCursorId };
 }
 
+async function fetchIncrementalCorrelationIds(): Promise<{ correlationIds: string[]; nextCursorId: number }> {
+  const rows = await db
+    .select({
+      id: orderIntentAudit.id,
+      correlationId: orderIntentAudit.correlationId,
+    })
+    .from(orderIntentAudit)
+    .where(gt(orderIntentAudit.id, intentCursorId))
+    .orderBy(asc(orderIntentAudit.id))
+    .limit(INCREMENTAL_ROW_BATCH);
+
+  if (!rows.length) {
+    return { correlationIds: [], nextCursorId: intentCursorId };
+  }
+
+  const correlationIds = Array.from(new Set(rows.map((r) => r.correlationId).filter((id) => typeof id === 'string' && id.trim().length > 0)));
+  const nextCursorId = Number(rows[rows.length - 1]?.id ?? intentCursorId);
+  return { correlationIds, nextCursorId };
+}
+
 async function fetchSweepTradeIds(): Promise<number[]> {
   const fetchFromCursor = async (cursor: number) =>
     db
@@ -78,30 +99,51 @@ export async function runTradeAuditVerificationPass(): Promise<void> {
   running = true;
   const startedAt = Date.now();
   try {
-    const { tradeIds: incrementalTradeIds, nextCursorId } = await fetchIncrementalTradeIds();
+    const { tradeIds: incrementalTradeIds, nextCursorId: nextTradeCursor } = await fetchIncrementalTradeIds();
     const sweepTradeIds = await fetchSweepTradeIds();
+    const { correlationIds: incrementalIntentIds, nextCursorId: nextIntentCursor } = await fetchIncrementalCorrelationIds();
 
     const tradeIds = Array.from(new Set([...incrementalTradeIds, ...sweepTradeIds]));
-    if (!tradeIds.length) {
-      console.log("[TradeAuditVerify] No trade IDs available for verification.");
+
+    let allValid = true;
+    const allErrors: string[] = [];
+
+    if (tradeIds.length > 0) {
+      const verification = await verifyTradeAuditChain(tradeIds);
+      auditCursorId = nextTradeCursor;
+      if (!verification.valid) {
+        allValid = false;
+        allErrors.push(...verification.errors);
+      }
+    }
+
+    if (incrementalIntentIds.length > 0) {
+      const intentVerification = await verifyOrderIntentAuditChain(incrementalIntentIds);
+      intentCursorId = nextIntentCursor;
+      if (!intentVerification.valid) {
+        allValid = false;
+        allErrors.push(...intentVerification.errors);
+      }
+    }
+
+    const tookMs = Date.now() - startedAt;
+
+    if (tradeIds.length === 0 && incrementalIntentIds.length === 0) {
+      console.log("[TradeAuditVerify] No new audits available for verification.");
       return;
     }
 
-    const verification = await verifyTradeAuditChain(tradeIds);
-    auditCursorId = nextCursorId;
-
-    const tookMs = Date.now() - startedAt;
-    if (verification.valid) {
+    if (allValid) {
       console.log(
-        `[TradeAuditVerify] PASS verified=${tradeIds.length} incremental=${incrementalTradeIds.length} sweep=${sweepTradeIds.length} took=${tookMs}ms`,
+        `[TradeAuditVerify] PASS tradesVerified=${tradeIds.length} intentsVerified=${incrementalIntentIds.length} took=${tookMs}ms`,
       );
       return;
     }
 
     console.error(
-      `[TradeAuditVerify] FAIL verified=${tradeIds.length} errors=${verification.errors.length} took=${tookMs}ms`,
+      `[TradeAuditVerify] FAIL tradesVerified=${tradeIds.length} intentsVerified=${incrementalIntentIds.length} errors=${allErrors.length} took=${tookMs}ms`,
     );
-    for (const err of verification.errors.slice(0, 10)) {
+    for (const err of allErrors.slice(0, 10)) {
       console.error(`[TradeAuditVerify] ${err}`);
     }
 

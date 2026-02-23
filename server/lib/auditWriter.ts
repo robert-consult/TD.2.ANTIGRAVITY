@@ -65,12 +65,12 @@ export interface TradeAuditParams {
   eventType: string;
   eventCategory?: string;
   ctx: AuditContext;
-  
+
   // IDs
   orderId?: string | null;
   executionId?: string | null;
   positionId?: string | null;
-  
+
   // Economics
   symbol?: string | null;
   side?: string | null;
@@ -78,7 +78,7 @@ export interface TradeAuditParams {
   timeInForce?: string | null;
   qtyLots?: number | null;
   notionalUsd?: number | null;
-  
+
   // Cost & P/L snapshot
   grossProfitUsd?: number | null;
   netProfitUsd?: number | null;
@@ -92,7 +92,7 @@ export interface TradeAuditParams {
   overnightDays?: number | null;
   categorySnapshot?: string | null;
   costModelVersion?: string | null;
-  
+
   // Pricing
   requestedPrice?: number | null;
   triggerPrice?: number | null;
@@ -100,7 +100,7 @@ export interface TradeAuditParams {
   stopPrice?: number | null;
   fillPrice?: number | null;
   avgFillPrice?: number | null;
-  
+
   // Market context
   quoteTs?: number | Date | null;
   quoteSource?: string | null;
@@ -109,20 +109,20 @@ export interface TradeAuditParams {
   quoteMid?: number | null;
   quoteSpread?: number | null;
   spreadPips?: number | null;
-  
+
   // Slippage
   slippage?: number | null;
   slippagePips?: number | null;
   slippageReference?: string | null;
   latencyMs?: number | null;
-  
+
   // Risk evidence
   riskCheckName?: string | null;
   riskLimitValue?: number | null;
   riskObservedValue?: number | null;
   riskResult?: string | null;
   reasonCode?: string | null;
-  
+
   note?: string | null;
   payload?: any;
 }
@@ -181,17 +181,17 @@ export async function writeTradeAudit(
     categorySnapshot: readText(params.categorySnapshot, payloadObj.categorySnapshot),
     costModelVersion: readText(params.costModelVersion, payloadObj.costModelVersion),
   };
-  
+
   try {
     // Get previous hash for this trade's chain
     const lastEvent = await dbLike.query.tradeAudit.findFirst({
       where: eq(tradeAudit.tradeId, params.tradeId),
       orderBy: desc(tradeAudit.id),
     });
-    
+
     const prevHash = (lastEvent as any)?.eventHash ?? "GENESIS";
-    
-    // Build envelope for hashing
+
+    // Build envelope for hashing (excludes prevHash)
     const envelope = {
       tradeId: params.tradeId,
       eventType: params.eventType,
@@ -247,72 +247,100 @@ export async function writeTradeAudit(
       note: params.note ?? null,
       payload: params.payload ?? null,
     };
-    
+
     const payloadJson = canonicalJson(envelope);
-    const eventHash = sha256Hex(prevHash + "\n" + payloadJson);
-    
-    await dbLike.insert(tradeAudit).values({
-      tradeId: params.tradeId,
-      eventType: params.eventType,
-      eventCategory: params.eventCategory ?? "TRADE",
-      eventAt,
-      eventAtMs,
-      correlationId,
-      orderId: params.orderId ?? null,
-      executionId: params.executionId ?? null,
-      positionId: params.positionId ?? null,
-      actorType: params.ctx.actorType,
-      actorUserId: params.ctx.actorUserId ?? null,
-      sessionId: params.ctx.sessionId ?? null,
-      ip: params.ctx.ip ?? null,
-      userAgent: params.ctx.userAgent ?? null,
-      symbol: params.symbol ?? null,
-      side: params.side ?? null,
-      orderType: params.orderType ?? null,
-      timeInForce: params.timeInForce ?? null,
-      qtyLots: params.qtyLots ?? null,
-      notionalUsd: normalizedCostSnapshot.notionalUsd,
-      grossProfitUsd: normalizedCostSnapshot.grossProfitUsd,
-      netProfitUsd: normalizedCostSnapshot.netProfitUsd,
-      totalCostsUsd: normalizedCostSnapshot.totalCostsUsd,
-      openCommissionUsd: normalizedCostSnapshot.openCommissionUsd,
-      closeCommissionUsd: normalizedCostSnapshot.closeCommissionUsd,
-      openOtherFeesUsd: normalizedCostSnapshot.openOtherFeesUsd,
-      closeOtherFeesUsd: normalizedCostSnapshot.closeOtherFeesUsd,
-      financingAccruedUsd: normalizedCostSnapshot.financingAccruedUsd,
-      swapAccruedUsd: normalizedCostSnapshot.swapAccruedUsd,
-      overnightDays: normalizedCostSnapshot.overnightDays,
-      categorySnapshot: normalizedCostSnapshot.categorySnapshot,
-      costModelVersion: normalizedCostSnapshot.costModelVersion,
-      requestedPrice: params.requestedPrice ?? null,
-      triggerPrice: params.triggerPrice ?? null,
-      limitPrice: params.limitPrice ?? null,
-      stopPrice: params.stopPrice ?? null,
-      fillPrice: params.fillPrice ?? null,
-      avgFillPrice: params.avgFillPrice ?? null,
-      quoteTs,
-      quoteSource: params.quoteSource ?? null,
-      quoteBid: params.quoteBid ?? null,
-      quoteAsk: params.quoteAsk ?? null,
-      quoteMid: params.quoteMid ?? null,
-      quoteSpread: params.quoteSpread ?? null,
-      spreadPips: params.spreadPips ?? null,
-      slippage: params.slippage ?? null,
-      slippagePips: params.slippagePips ?? null,
-      slippageReference: params.slippageReference ?? null,
-      latencyMs: params.latencyMs ?? null,
-      riskCheckName: params.riskCheckName ?? null,
-      riskLimitValue: params.riskLimitValue ?? null,
-      riskObservedValue: params.riskObservedValue ?? null,
-      riskResult: params.riskResult ?? null,
-      reasonCode: params.reasonCode ?? null,
-      payloadJson,
-      prevHash,
-      eventHash,
-      note: params.note ?? null,
-    });
-    
-    return { eventHash, prevHash };
+    let finalEventHash = "";
+    let finalPrevHash = "";
+    const MAX_RETRIES = 3;
+
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        // Nested transaction (savepoint) prevents poisoning parent tx on unique constraint violations (23505)
+        const executor = typeof (dbLike as any).transaction === 'function' ? (cb: any) => (dbLike as any).transaction(cb) : (cb: any) => cb(dbLike);
+
+        await executor(async (tx: any) => {
+          const lastEvent = await tx.query.tradeAudit.findFirst({
+            where: eq(tradeAudit.tradeId, params.tradeId),
+            orderBy: desc(tradeAudit.id),
+          });
+
+          finalPrevHash = (lastEvent as any)?.eventHash ?? "GENESIS";
+          finalEventHash = sha256Hex(finalPrevHash + "\n" + payloadJson);
+
+          await tx.insert(tradeAudit).values({
+            tradeId: params.tradeId,
+            eventType: params.eventType,
+            eventCategory: params.eventCategory ?? "TRADE",
+            eventAt,
+            eventAtMs,
+            correlationId,
+            orderId: params.orderId ?? null,
+            executionId: params.executionId ?? null,
+            positionId: params.positionId ?? null,
+            actorType: params.ctx.actorType,
+            actorUserId: params.ctx.actorUserId ?? null,
+            sessionId: params.ctx.sessionId ?? null,
+            ip: params.ctx.ip ?? null,
+            userAgent: params.ctx.userAgent ?? null,
+            symbol: params.symbol ?? null,
+            side: params.side ?? null,
+            orderType: params.orderType ?? null,
+            timeInForce: params.timeInForce ?? null,
+            qtyLots: params.qtyLots ?? null,
+            notionalUsd: normalizedCostSnapshot.notionalUsd,
+            grossProfitUsd: normalizedCostSnapshot.grossProfitUsd,
+            netProfitUsd: normalizedCostSnapshot.netProfitUsd,
+            totalCostsUsd: normalizedCostSnapshot.totalCostsUsd,
+            openCommissionUsd: normalizedCostSnapshot.openCommissionUsd,
+            closeCommissionUsd: normalizedCostSnapshot.closeCommissionUsd,
+            openOtherFeesUsd: normalizedCostSnapshot.openOtherFeesUsd,
+            closeOtherFeesUsd: normalizedCostSnapshot.closeOtherFeesUsd,
+            financingAccruedUsd: normalizedCostSnapshot.financingAccruedUsd,
+            swapAccruedUsd: normalizedCostSnapshot.swapAccruedUsd,
+            overnightDays: normalizedCostSnapshot.overnightDays,
+            categorySnapshot: normalizedCostSnapshot.categorySnapshot,
+            costModelVersion: normalizedCostSnapshot.costModelVersion,
+            requestedPrice: params.requestedPrice ?? null,
+            triggerPrice: params.triggerPrice ?? null,
+            limitPrice: params.limitPrice ?? null,
+            stopPrice: params.stopPrice ?? null,
+            fillPrice: params.fillPrice ?? null,
+            avgFillPrice: params.avgFillPrice ?? null,
+            quoteTs,
+            quoteSource: params.quoteSource ?? null,
+            quoteBid: params.quoteBid ?? null,
+            quoteAsk: params.quoteAsk ?? null,
+            quoteMid: params.quoteMid ?? null,
+            quoteSpread: params.quoteSpread ?? null,
+            spreadPips: params.spreadPips ?? null,
+            slippage: params.slippage ?? null,
+            slippagePips: params.slippagePips ?? null,
+            slippageReference: params.slippageReference ?? null,
+            latencyMs: params.latencyMs ?? null,
+            riskCheckName: params.riskCheckName ?? null,
+            riskLimitValue: params.riskLimitValue ?? null,
+            riskObservedValue: params.riskObservedValue ?? null,
+            riskResult: params.riskResult ?? null,
+            reasonCode: params.reasonCode ?? null,
+            payloadJson,
+            prevHash: finalPrevHash,
+            eventHash: finalEventHash,
+            note: params.note ?? null,
+          });
+        });
+
+        break; // Success
+      } catch (err: any) {
+        if (err.code === '23505' && attempt < MAX_RETRIES) {
+          console.warn(`[AuditWriter] Race condition unique_violation on tradeAudit ${params.tradeId} (attempt ${attempt}/${MAX_RETRIES}). Retrying...`);
+          await new Promise(r => setTimeout(r, attempt * 50));
+          continue;
+        }
+        throw err;
+      }
+    }
+
+    return { eventHash: finalEventHash, prevHash: finalPrevHash };
   } catch (e) {
     console.error("Error writing trade audit:", e);
     throw e;
@@ -324,12 +352,12 @@ export interface OrderIntentParams {
   eventCode: "ORDER_RECEIVED" | "ORDER_VALIDATED" | "RISK_CHECK" | "DECISION";
   ctx: AuditContext;
   userId: number;
-  
+
   // Decision (for DECISION events)
   decision?: "PASS" | "REJECT" | null;
   rejectCheck?: string | null;
   rejectReason?: string | null;
-  
+
   // Economics
   symbol?: string | null;
   side?: string | null;
@@ -341,19 +369,19 @@ export interface OrderIntentParams {
   stopPrice?: number | null;
   takeProfit?: number | null;
   stopLoss?: number | null;
-  
+
   // Quote context
   quoteBid?: number | null;
   quoteAsk?: number | null;
   quoteMid?: number | null;
   quoteTs?: number | Date | null;
   quoteIsStale?: boolean | null;
-  
+
   // Risk evidence
   riskLimit?: any;
   riskObserved?: any;
   riskSnapshot?: any;
-  
+
   payload?: any;
 }
 
@@ -370,17 +398,17 @@ export async function writeOrderIntentAudit(
       ? Math.floor(params.quoteTs)
       : Math.floor(params.quoteTs.getTime() / 1000);
   const dbLike = opts?.db ?? db;
-  
+
   try {
     // Get previous hash for this correlation chain
     const lastEvent = await dbLike.query.orderIntentAudit.findFirst({
       where: eq(orderIntentAudit.correlationId, params.correlationId),
       orderBy: desc(orderIntentAudit.id),
     });
-    
+
     const prevHash = (lastEvent as any)?.eventHash ?? "GENESIS";
-    
-    // Build envelope for hashing
+
+    // Build envelope for hashing (excludes prevHash)
     const envelope = {
       correlationId: params.correlationId,
       eventAtMs,
@@ -412,47 +440,74 @@ export async function writeOrderIntentAudit(
       riskSnapshot: params.riskSnapshot ?? null,
       payload: params.payload ?? null,
     };
-    
+
     const payloadJson = canonicalJson(envelope);
-    const eventHash = sha256Hex(prevHash + "\n" + payloadJson);
-    
-    await dbLike.insert(orderIntentAudit).values({
-      correlationId: params.correlationId,
-      eventAt,
-      eventAtMs,
-      eventCode: params.eventCode,
-      decision: params.decision ?? null,
-      rejectCheck: params.rejectCheck ?? null,
-      rejectReason: params.rejectReason ?? null,
-      actorType: params.ctx.actorType,
-      userId: params.userId,
-      sessionId: params.ctx.sessionId ?? null,
-      ip: params.ctx.ip ?? null,
-      userAgent: params.ctx.userAgent ?? null,
-      symbol: params.symbol ?? null,
-      side: params.side ?? null,
-      orderType: params.orderType ?? null,
-      timeInForce: params.timeInForce ?? null,
-      qtyLots: params.qtyLots ?? null,
-      requestedPrice: params.requestedPrice ?? null,
-      limitPrice: params.limitPrice ?? null,
-      stopPrice: params.stopPrice ?? null,
-      takeProfit: params.takeProfit ?? null,
-      stopLoss: params.stopLoss ?? null,
-      quoteBid: params.quoteBid ?? null,
-      quoteAsk: params.quoteAsk ?? null,
-      quoteMid: params.quoteMid ?? null,
-      quoteTs,
-      quoteIsStale: params.quoteIsStale ?? false,
-      riskLimitJson: params.riskLimit ? JSON.stringify(params.riskLimit) : null,
-      riskObservedJson: params.riskObserved ? JSON.stringify(params.riskObserved) : null,
-      riskSnapshotJson: params.riskSnapshot ? JSON.stringify(params.riskSnapshot) : null,
-      payloadJson,
-      prevHash,
-      eventHash,
-    });
-    
-    return { eventHash, prevHash };
+    let finalEventHash = "";
+    let finalPrevHash = "";
+    const MAX_RETRIES = 3;
+
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        const executor = typeof (dbLike as any).transaction === 'function' ? (cb: any) => (dbLike as any).transaction(cb) : (cb: any) => cb(dbLike);
+
+        await executor(async (tx: any) => {
+          const lastEvent = await tx.query.orderIntentAudit.findFirst({
+            where: eq(orderIntentAudit.correlationId, params.correlationId),
+            orderBy: desc(orderIntentAudit.id),
+          });
+
+          finalPrevHash = (lastEvent as any)?.eventHash ?? "GENESIS";
+          finalEventHash = sha256Hex(finalPrevHash + "\n" + payloadJson);
+
+          await tx.insert(orderIntentAudit).values({
+            correlationId: params.correlationId,
+            eventAt,
+            eventAtMs,
+            eventCode: params.eventCode,
+            decision: params.decision ?? null,
+            rejectCheck: params.rejectCheck ?? null,
+            rejectReason: params.rejectReason ?? null,
+            actorType: params.ctx.actorType,
+            userId: params.userId,
+            sessionId: params.ctx.sessionId ?? null,
+            ip: params.ctx.ip ?? null,
+            userAgent: params.ctx.userAgent ?? null,
+            symbol: params.symbol ?? null,
+            side: params.side ?? null,
+            orderType: params.orderType ?? null,
+            timeInForce: params.timeInForce ?? null,
+            qtyLots: params.qtyLots ?? null,
+            requestedPrice: params.requestedPrice ?? null,
+            limitPrice: params.limitPrice ?? null,
+            stopPrice: params.stopPrice ?? null,
+            takeProfit: params.takeProfit ?? null,
+            stopLoss: params.stopLoss ?? null,
+            quoteBid: params.quoteBid ?? null,
+            quoteAsk: params.quoteAsk ?? null,
+            quoteMid: params.quoteMid ?? null,
+            quoteTs,
+            quoteIsStale: params.quoteIsStale ?? false,
+            riskLimitJson: params.riskLimit ? JSON.stringify(params.riskLimit) : null,
+            riskObservedJson: params.riskObserved ? JSON.stringify(params.riskObserved) : null,
+            riskSnapshotJson: params.riskSnapshot ? JSON.stringify(params.riskSnapshot) : null,
+            payloadJson,
+            prevHash: finalPrevHash,
+            eventHash: finalEventHash,
+          });
+        });
+
+        break; // Success
+      } catch (err: any) {
+        if (err.code === '23505' && attempt < MAX_RETRIES) {
+          console.warn(`[AuditWriter] Race condition unique_violation on orderIntentAudit ${params.correlationId} (attempt ${attempt}/${MAX_RETRIES}). Retrying...`);
+          await new Promise(r => setTimeout(r, attempt * 50));
+          continue;
+        }
+        throw err;
+      }
+    }
+
+    return { eventHash: finalEventHash, prevHash: finalPrevHash };
   } catch (e) {
     console.error("Error writing order intent audit:", e);
     throw e;
@@ -516,6 +571,72 @@ export async function verifyTradeAuditChain(tradeIdOrIds: number | number[]): Pr
     if (actualEventHash !== recomputedHash) {
       errors.push(
         `Trade ${event.tradeId} event ${event.id}: eventHash mismatch (expected ${recomputedHash}, got ${actualEventHash || "EMPTY"})`,
+      );
+    }
+
+    expectedPrevHash = actualEventHash || "GENESIS";
+  }
+
+  return { valid: errors.length === 0, errors };
+}
+
+// Verify order intent audit hash-chain integrity for one or more correlation IDs
+export async function verifyOrderIntentAuditChain(correlationIdOrIds: string | string[]): Promise<{ valid: boolean; errors: string[] }> {
+  const correlationIds = Array.isArray(correlationIdOrIds)
+    ? Array.from(new Set(correlationIdOrIds.filter(id => typeof id === 'string' && id.trim().length > 0)))
+    : [correlationIdOrIds].filter(id => typeof id === 'string' && id.trim().length > 0);
+
+  if (correlationIds.length === 0) {
+    return {
+      valid: false,
+      errors: ["No valid correlation IDs provided for audit-chain verification"],
+    };
+  }
+
+  const events = correlationIds.length === 1
+    ? await db.select({
+      id: orderIntentAudit.id,
+      correlationId: orderIntentAudit.correlationId,
+      prevHash: orderIntentAudit.prevHash,
+      eventHash: orderIntentAudit.eventHash,
+      payloadJson: orderIntentAudit.payloadJson,
+    }).from(orderIntentAudit)
+      .where(eq(orderIntentAudit.correlationId, correlationIds[0]!))
+      .orderBy(asc(orderIntentAudit.id))
+    : await db.select({
+      id: orderIntentAudit.id,
+      correlationId: orderIntentAudit.correlationId,
+      prevHash: orderIntentAudit.prevHash,
+      eventHash: orderIntentAudit.eventHash,
+      payloadJson: orderIntentAudit.payloadJson,
+    }).from(orderIntentAudit)
+      .where(inArray(orderIntentAudit.correlationId, correlationIds))
+      .orderBy(asc(orderIntentAudit.correlationId), asc(orderIntentAudit.id));
+
+  const errors: string[] = [];
+  let currentCorrelationId: string | null = null;
+  let expectedPrevHash = "GENESIS";
+
+  for (const event of events) {
+    if (currentCorrelationId !== event.correlationId) {
+      currentCorrelationId = event.correlationId;
+      expectedPrevHash = "GENESIS";
+    }
+
+    const actualPrevHash = event.prevHash ?? "GENESIS";
+    const actualEventHash = event.eventHash ?? "";
+    const payloadJson = event.payloadJson ?? "";
+
+    if (actualPrevHash !== expectedPrevHash) {
+      errors.push(
+        `Intent ${event.correlationId} event ${event.id}: prevHash mismatch (expected ${expectedPrevHash}, got ${actualPrevHash})`,
+      );
+    }
+
+    const recomputedHash = sha256Hex(`${actualPrevHash}\n${payloadJson}`);
+    if (actualEventHash !== recomputedHash) {
+      errors.push(
+        `Intent ${event.correlationId} event ${event.id}: eventHash mismatch (expected ${recomputedHash}, got ${actualEventHash || "EMPTY"})`,
       );
     }
 

@@ -60,6 +60,12 @@ import {
   DialogTrigger
 } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuCheckboxItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { useToast } from "@/hooks/use-toast";
 import {
   mergeGlobalSettingsPerformance,
@@ -2199,492 +2205,492 @@ curl -f -L -X POST "\$BASE/api/admin/migration/import-jobs" \\
 
   return (
     <TooltipProvider delayDuration={120}>
-    <div className="space-y-6">
-      <div className="rounded-md border border-cyan-700/40 bg-cyan-950/20 p-3 text-xs text-cyan-100/90">
-        Migration controls include hidden <span className="font-medium">Hint</span> explainers for data integrity, chunking behavior, and retention impact.
-      </div>
-      <Card className="bg-neutral-700 border-gray-600">
-        <CardHeader>
-          <CardTitle className="text-base">Migration Export/Import Settings</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex items-center justify-between gap-4">
-            <div className="w-full">
-              <FieldHintLabel
-                label="Chunk exports/imports"
-                hint={MIGRATION_FIELD_HELP.chunkingEnabled.tooltip}
-                labelClassName="text-base font-medium"
-              />
-              <p className="text-xs text-gray-400 mt-1">{MIGRATION_FIELD_HELP.chunkingEnabled.inline}</p>
-            </div>
-            <Switch
-              checked={chunkingEnabledDraft}
-              onCheckedChange={(v) => {
-                setChunkingEnabledDraft(Boolean(v));
-                setChunkSettingsDirty(true);
-              }}
-              disabled={systemConfigQuery.isLoading}
-            />
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
-            <div>
-              <FieldHintLabel label="Chunk size (GB)" hint={MIGRATION_FIELD_HELP.chunkSizeGb.tooltip} labelClassName="text-base font-medium" />
-              <p className="text-xs text-gray-400 mt-1">{MIGRATION_FIELD_HELP.chunkSizeGb.inline}</p>
-              <Input
-                type="number"
-                min={0.25}
-                step={0.25}
-                value={chunkSizeGbDraft}
-                onChange={(e) => {
-                  setChunkSizeGbDraft(e.target.value);
+      <div className="space-y-6">
+        <div className="rounded-md border border-cyan-700/40 bg-cyan-950/20 p-3 text-xs text-cyan-100/90">
+          Migration controls include hidden <span className="font-medium">Hint</span> explainers for data integrity, chunking behavior, and retention impact.
+        </div>
+        <Card className="bg-neutral-700 border-gray-600">
+          <CardHeader>
+            <CardTitle className="text-base">Migration Export/Import Settings</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex items-center justify-between gap-4">
+              <div className="w-full">
+                <FieldHintLabel
+                  label="Chunk exports/imports"
+                  hint={MIGRATION_FIELD_HELP.chunkingEnabled.tooltip}
+                  labelClassName="text-base font-medium"
+                />
+                <p className="text-xs text-gray-400 mt-1">{MIGRATION_FIELD_HELP.chunkingEnabled.inline}</p>
+              </div>
+              <Switch
+                checked={chunkingEnabledDraft}
+                onCheckedChange={(v) => {
+                  setChunkingEnabledDraft(Boolean(v));
                   setChunkSettingsDirty(true);
                 }}
-                className="bg-neutral-600 mt-2"
                 disabled={systemConfigQuery.isLoading}
-                title={MIGRATION_FIELD_HELP.chunkSizeGb.tooltip}
               />
-              <p className="text-xs text-gray-400 mt-1">Stored as MB in DB. Minimum 0.25GB.</p>
-            </div>
-            <div className="md:col-span-2 flex items-center justify-between gap-3">
-              <div className="text-xs text-gray-400">{chunkingSummary}</div>
-              <Button
-                onClick={handleSaveChunkSettings}
-                disabled={systemConfigQuery.isLoading || saveChunkSettingsMutation.isPending || !chunkSettingsDirty}
-              >
-                {saveChunkSettingsMutation.isPending ? "Saving..." : "Save Migration Settings"}
-              </Button>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      <div className="grid gap-6 lg:grid-cols-2">
-        <Card className="bg-neutral-700 border-gray-600">
-          <CardHeader>
-            <CardTitle className="text-base">Export (Backup or Migration)</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div>
-              <FieldHintLabel label="Scope" hint={MIGRATION_FIELD_HELP.exportScope.tooltip} labelClassName="text-base font-medium" />
-              <p className="text-xs text-gray-400 mt-1">{MIGRATION_FIELD_HELP.exportScope.inline}</p>
-              <Select value={exportScope} onValueChange={setExportScope}>
-                <SelectTrigger className="bg-neutral-600 mt-2" title={MIGRATION_FIELD_HELP.exportScope.tooltip}>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="FULL_PLATFORM">Full platform</SelectItem>
-                  <SelectItem value="USER_BUNDLE">Single trader bundle</SelectItem>
-                  <SelectItem value="DELTA">Delta since timestamp</SelectItem>
-                </SelectContent>
-              </Select>
             </div>
 
-            {exportScope === "USER_BUNDLE" && (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
               <div>
-                <FieldHintLabel label="Trader User ID" hint={MIGRATION_FIELD_HELP.exportUserId.tooltip} labelClassName="text-base font-medium" />
-                <p className="text-xs text-gray-400 mt-1">{MIGRATION_FIELD_HELP.exportUserId.inline}</p>
+                <FieldHintLabel label="Chunk size (GB)" hint={MIGRATION_FIELD_HELP.chunkSizeGb.tooltip} labelClassName="text-base font-medium" />
+                <p className="text-xs text-gray-400 mt-1">{MIGRATION_FIELD_HELP.chunkSizeGb.inline}</p>
                 <Input
                   type="number"
-                  value={exportUserId}
-                  onChange={(e) => setExportUserId(e.target.value)}
+                  min={0.25}
+                  step={0.25}
+                  value={chunkSizeGbDraft}
+                  onChange={(e) => {
+                    setChunkSizeGbDraft(e.target.value);
+                    setChunkSettingsDirty(true);
+                  }}
                   className="bg-neutral-600 mt-2"
-                  placeholder="e.g. 123"
-                  title={MIGRATION_FIELD_HELP.exportUserId.tooltip}
+                  disabled={systemConfigQuery.isLoading}
+                  title={MIGRATION_FIELD_HELP.chunkSizeGb.tooltip}
                 />
+                <p className="text-xs text-gray-400 mt-1">Stored as MB in DB. Minimum 0.25GB.</p>
               </div>
-            )}
-
-            {exportScope === "DELTA" && (
-              <div>
-                <FieldHintLabel label="Since (local time)" hint={MIGRATION_FIELD_HELP.exportSince.tooltip} labelClassName="text-base font-medium" />
-                <p className="text-xs text-gray-400 mt-1">{MIGRATION_FIELD_HELP.exportSince.inline}</p>
-                <Input
-                  type="datetime-local"
-                  value={exportSince}
-                  onChange={(e) => setExportSince(e.target.value)}
-                  className="bg-neutral-600 mt-2"
-                  title={MIGRATION_FIELD_HELP.exportSince.tooltip}
-                />
+              <div className="md:col-span-2 flex items-center justify-between gap-3">
+                <div className="text-xs text-gray-400">{chunkingSummary}</div>
+                <Button
+                  onClick={handleSaveChunkSettings}
+                  disabled={systemConfigQuery.isLoading || saveChunkSettingsMutation.isPending || !chunkSettingsDirty}
+                >
+                  {saveChunkSettingsMutation.isPending ? "Saving..." : "Save Migration Settings"}
+                </Button>
               </div>
-            )}
-
-            <div className="flex items-center justify-between gap-3">
-              <div className="text-xs text-gray-400">
-                NDJSON + manifest export. Includes audit trails and hashes.
-              </div>
-              <Button onClick={handleExport} disabled={exportMutation.isPending}>
-                {exportMutation.isPending ? "Creating..." : "Create Export Job"}
-              </Button>
             </div>
+          </CardContent>
+        </Card>
+
+        <div className="grid gap-6 lg:grid-cols-2">
+          <Card className="bg-neutral-700 border-gray-600">
+            <CardHeader>
+              <CardTitle className="text-base">Export (Backup or Migration)</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div>
+                <FieldHintLabel label="Scope" hint={MIGRATION_FIELD_HELP.exportScope.tooltip} labelClassName="text-base font-medium" />
+                <p className="text-xs text-gray-400 mt-1">{MIGRATION_FIELD_HELP.exportScope.inline}</p>
+                <Select value={exportScope} onValueChange={setExportScope}>
+                  <SelectTrigger className="bg-neutral-600 mt-2" title={MIGRATION_FIELD_HELP.exportScope.tooltip}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="FULL_PLATFORM">Full platform</SelectItem>
+                    <SelectItem value="USER_BUNDLE">Single trader bundle</SelectItem>
+                    <SelectItem value="DELTA">Delta since timestamp</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {exportScope === "USER_BUNDLE" && (
+                <div>
+                  <FieldHintLabel label="Trader User ID" hint={MIGRATION_FIELD_HELP.exportUserId.tooltip} labelClassName="text-base font-medium" />
+                  <p className="text-xs text-gray-400 mt-1">{MIGRATION_FIELD_HELP.exportUserId.inline}</p>
+                  <Input
+                    type="number"
+                    value={exportUserId}
+                    onChange={(e) => setExportUserId(e.target.value)}
+                    className="bg-neutral-600 mt-2"
+                    placeholder="e.g. 123"
+                    title={MIGRATION_FIELD_HELP.exportUserId.tooltip}
+                  />
+                </div>
+              )}
+
+              {exportScope === "DELTA" && (
+                <div>
+                  <FieldHintLabel label="Since (local time)" hint={MIGRATION_FIELD_HELP.exportSince.tooltip} labelClassName="text-base font-medium" />
+                  <p className="text-xs text-gray-400 mt-1">{MIGRATION_FIELD_HELP.exportSince.inline}</p>
+                  <Input
+                    type="datetime-local"
+                    value={exportSince}
+                    onChange={(e) => setExportSince(e.target.value)}
+                    className="bg-neutral-600 mt-2"
+                    title={MIGRATION_FIELD_HELP.exportSince.tooltip}
+                  />
+                </div>
+              )}
+
+              <div className="flex items-center justify-between gap-3">
+                <div className="text-xs text-gray-400">
+                  NDJSON + manifest export. Includes audit trails and hashes.
+                </div>
+                <Button onClick={handleExport} disabled={exportMutation.isPending}>
+                  {exportMutation.isPending ? "Creating..." : "Create Export Job"}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="bg-neutral-700 border-gray-600">
+            <CardHeader>
+              <CardTitle className="text-base">Import (Dry Run or Write)</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div>
+                <FieldHintLabel label="Mode" hint={MIGRATION_FIELD_HELP.importMode.tooltip} labelClassName="text-base font-medium" />
+                <p className="text-xs text-gray-400 mt-1">{MIGRATION_FIELD_HELP.importMode.inline}</p>
+                <Select value={importMode} onValueChange={setImportMode}>
+                  <SelectTrigger className="bg-neutral-600 mt-2" title={MIGRATION_FIELD_HELP.importMode.tooltip}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="DRY_RUN">Dry run (validate only)</SelectItem>
+                    <SelectItem value="IMPORT">Import (write data)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div>
+                <FieldHintLabel
+                  label="Manifest (manifest.json)"
+                  hint={MIGRATION_FIELD_HELP.importManifestFile.tooltip}
+                  labelClassName="text-base font-medium"
+                />
+                <p className="text-xs text-gray-400 mt-1">{MIGRATION_FIELD_HELP.importManifestFile.inline}</p>
+                <Input
+                  type="file"
+                  accept=".json,application/json"
+                  className="bg-neutral-600 mt-2"
+                  title={MIGRATION_FIELD_HELP.importManifestFile.tooltip}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0] || null;
+                    setImportManifestFile(file);
+                    setImportDataFiles([]);
+                    if (file) {
+                      parseManifestFile(file);
+                    } else {
+                      setImportManifestMeta(null);
+                    }
+                  }}
+                />
+              </div>
+
+              <div>
+                <FieldHintLabel
+                  label={importManifestMeta?.chunked ? "Data parts (*.ndjson) - select all" : "Data (data.ndjson)"}
+                  hint={MIGRATION_FIELD_HELP.importDataFiles.tooltip}
+                  labelClassName="text-base font-medium"
+                />
+                <p className="text-xs text-gray-400 mt-1">{MIGRATION_FIELD_HELP.importDataFiles.inline}</p>
+                <Input
+                  type="file"
+                  multiple={Boolean(importManifestMeta?.chunked)}
+                  accept=".ndjson,application/x-ndjson"
+                  className="bg-neutral-600 mt-2"
+                  title={MIGRATION_FIELD_HELP.importDataFiles.tooltip}
+                  onChange={(e) => setImportDataFiles(Array.from(e.target.files || []))}
+                />
+                {importManifestMeta?.chunked && (
+                  <div className="text-xs text-gray-400 mt-2 space-y-1">
+                    <div>
+                      Expected parts: {importSelection.expectedCount} | Selected: {importSelection.selectedCount}
+                    </div>
+                    {importSelection.missing.length > 0 && (
+                      <div className="text-amber-300">Missing: {importSelection.missing.join(", ")}</div>
+                    )}
+                    {importSelection.extra.length > 0 && (
+                      <div className="text-amber-300">Extra: {importSelection.extra.join(", ")}</div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <div className="flex items-center justify-between gap-3">
+                <div className="text-xs text-gray-400">
+                  Preserves legacy IDs. Use empty target DB to avoid conflicts.
+                </div>
+                <Button onClick={handleImport} disabled={importMutation.isPending}>
+                  {importMutation.isPending ? "Uploading..." : "Create Import Job"}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        <Card className="bg-neutral-700 border-gray-600">
+          <CardHeader>
+            <CardTitle className="text-base">Export Retention</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+            <div className="space-y-2">
+              <FieldHintLabel
+                label="Purge exports older than (days)"
+                hint={MIGRATION_FIELD_HELP.purgeDays.tooltip}
+                labelClassName="text-base font-medium"
+              />
+              <p className="text-xs text-gray-400 mt-1">{MIGRATION_FIELD_HELP.purgeDays.inline}</p>
+              <Input
+                type="number"
+                min={1}
+                value={purgeDays}
+                onChange={(e) => setPurgeDays(e.target.value)}
+                className="bg-neutral-600 mt-1 w-40"
+                title={MIGRATION_FIELD_HELP.purgeDays.tooltip}
+              />
+              <p className="text-xs text-gray-400">
+                Deletes export files from server storage; job metadata remains.
+              </p>
+            </div>
+            <Button
+              variant="destructive"
+              onClick={handlePurge}
+              disabled={purgeMutation.isPending}
+            >
+              {purgeMutation.isPending ? "Purging..." : "Purge Exports"}
+            </Button>
           </CardContent>
         </Card>
 
         <Card className="bg-neutral-700 border-gray-600">
           <CardHeader>
-            <CardTitle className="text-base">Import (Dry Run or Write)</CardTitle>
+            <CardTitle className="text-base">Recent Export Jobs</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <div>
-              <FieldHintLabel label="Mode" hint={MIGRATION_FIELD_HELP.importMode.tooltip} labelClassName="text-base font-medium" />
-              <p className="text-xs text-gray-400 mt-1">{MIGRATION_FIELD_HELP.importMode.inline}</p>
-              <Select value={importMode} onValueChange={setImportMode}>
-                <SelectTrigger className="bg-neutral-600 mt-2" title={MIGRATION_FIELD_HELP.importMode.tooltip}>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="DRY_RUN">Dry run (validate only)</SelectItem>
-                  <SelectItem value="IMPORT">Import (write data)</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+          <CardContent>
+            {exportJobsQuery.isLoading ? (
+              <div className="text-sm text-gray-400">Loading export jobs...</div>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="text-xs">Job ID</TableHead>
+                    <TableHead className="text-xs">Scope</TableHead>
+                    <TableHead className="text-xs">Status</TableHead>
+                    <TableHead className="text-xs">Rows</TableHead>
+                    <TableHead className="text-xs">Created</TableHead>
+                    <TableHead className="text-xs">Download</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {(exportJobsQuery.data || []).map((job) => {
+                    const manifestChunks = Array.isArray(job.manifest?.chunks) ? job.manifest.chunks : [];
+                    const chunkCount = manifestChunks.length;
+                    const scriptCtx = chunkCount > 0 ? getScriptContext(job) : null;
 
-            <div>
-              <FieldHintLabel
-                label="Manifest (manifest.json)"
-                hint={MIGRATION_FIELD_HELP.importManifestFile.tooltip}
-                labelClassName="text-base font-medium"
-              />
-              <p className="text-xs text-gray-400 mt-1">{MIGRATION_FIELD_HELP.importManifestFile.inline}</p>
-              <Input
-                type="file"
-                accept=".json,application/json"
-                className="bg-neutral-600 mt-2"
-                title={MIGRATION_FIELD_HELP.importManifestFile.tooltip}
-                onChange={(e) => {
-                  const file = e.target.files?.[0] || null;
-                  setImportManifestFile(file);
-                  setImportDataFiles([]);
-                  if (file) {
-                    parseManifestFile(file);
-                  } else {
-                    setImportManifestMeta(null);
-                  }
-                }}
-              />
-            </div>
-
-            <div>
-              <FieldHintLabel
-                label={importManifestMeta?.chunked ? "Data parts (*.ndjson) - select all" : "Data (data.ndjson)"}
-                hint={MIGRATION_FIELD_HELP.importDataFiles.tooltip}
-                labelClassName="text-base font-medium"
-              />
-              <p className="text-xs text-gray-400 mt-1">{MIGRATION_FIELD_HELP.importDataFiles.inline}</p>
-              <Input
-                type="file"
-                multiple={Boolean(importManifestMeta?.chunked)}
-                accept=".ndjson,application/x-ndjson"
-                className="bg-neutral-600 mt-2"
-                title={MIGRATION_FIELD_HELP.importDataFiles.tooltip}
-                onChange={(e) => setImportDataFiles(Array.from(e.target.files || []))}
-              />
-              {importManifestMeta?.chunked && (
-                <div className="text-xs text-gray-400 mt-2 space-y-1">
-                  <div>
-                    Expected parts: {importSelection.expectedCount} | Selected: {importSelection.selectedCount}
-                  </div>
-                  {importSelection.missing.length > 0 && (
-                    <div className="text-amber-300">Missing: {importSelection.missing.join(", ")}</div>
+                    return (
+                      <TableRow key={job.id}>
+                        <TableCell className="text-xs text-gray-200">{job.id}</TableCell>
+                        <TableCell className="text-xs text-gray-300">{job.scope}</TableCell>
+                        <TableCell className="text-xs text-gray-300">{job.status}</TableCell>
+                        <TableCell className="text-xs text-gray-300">{totalRows(job.totals)}</TableCell>
+                        <TableCell className="text-xs text-gray-400">{formatTs(job.createdAt)}</TableCell>
+                        <TableCell className="text-xs">
+                          <div className="flex gap-2">
+                            {job.status === "READY" && (job.dataPath || job.manifestPath) ? (
+                              <>
+                                <Button size="sm" variant="outline" asChild>
+                                  <a href={`/api/admin/migration/export-jobs/${job.id}/manifest`} rel="noreferrer">
+                                    Manifest
+                                  </a>
+                                </Button>
+                                <Button size="sm" variant="outline" asChild>
+                                  <a href={`/api/admin/migration/export-jobs/${job.id}/data`} rel="noreferrer">
+                                    {chunkCount > 1 ? "Part 0" : "Data"}
+                                  </a>
+                                </Button>
+                                {chunkCount > 1 && (
+                                  <Dialog>
+                                    <DialogTrigger asChild>
+                                      <Button size="sm" variant="outline">Parts ({chunkCount})</Button>
+                                    </DialogTrigger>
+                                    <DialogContent className="max-w-lg bg-neutral-800 border-gray-700">
+                                      <DialogHeader>
+                                        <DialogTitle>Export parts ({chunkCount})</DialogTitle>
+                                      </DialogHeader>
+                                      {scriptCtx && (
+                                        <div className="space-y-2">
+                                          <div className="text-xs text-gray-400">
+                                            Generated Linux scripts enforce a hard concurrency cap of 10.
+                                          </div>
+                                          <div className="flex flex-wrap gap-2">
+                                            <Button
+                                              size="sm"
+                                              variant="outline"
+                                              onClick={() =>
+                                                downloadTextFile(
+                                                  `download_${job.id}.sh`,
+                                                  buildDownloadVerifyScript(scriptCtx)
+                                                )
+                                              }
+                                            >
+                                              Download Linux Script (Download + Verify)
+                                            </Button>
+                                            <Button
+                                              size="sm"
+                                              variant="outline"
+                                              onClick={() =>
+                                                downloadTextFile(
+                                                  `download_missing_${job.id}.sh`,
+                                                  buildMissingScript(scriptCtx)
+                                                )
+                                              }
+                                            >
+                                              Download Linux Script (Only Missing/Corrupt Parts)
+                                            </Button>
+                                            <Button
+                                              size="sm"
+                                              variant="outline"
+                                              onClick={() =>
+                                                downloadTextFile(
+                                                  `import_upload_${job.id}.sh`,
+                                                  buildImportScript(scriptCtx)
+                                                )
+                                              }
+                                            >
+                                              Download Linux Script (Import Upload)
+                                            </Button>
+                                          </div>
+                                        </div>
+                                      )}
+                                      <div className="space-y-2 max-h-[60vh] overflow-auto mt-3">
+                                        {manifestChunks.map((c: any) => (
+                                          <div key={String(c?.index ?? c?.file)} className="flex items-center justify-between gap-3">
+                                            <div className="text-xs text-gray-300 truncate">
+                                              {String(c?.file || `Part ${c?.index}`)}
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                              <span className="text-xs text-gray-500">{humanBytes(c?.sizeBytes ?? null)}</span>
+                                              <Button size="sm" variant="outline" asChild>
+                                                <a
+                                                  href={`/api/admin/migration/export-jobs/${job.id}/chunks/${c?.index ?? 0}`}
+                                                  rel="noreferrer"
+                                                >
+                                                  Download
+                                                </a>
+                                              </Button>
+                                            </div>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </DialogContent>
+                                  </Dialog>
+                                )}
+                              </>
+                            ) : (
+                              <span className="text-gray-500">-</span>
+                            )}
+                            {(job.dataPath || job.manifestPath) && (
+                              <Button
+                                size="sm"
+                                variant="destructive"
+                                onClick={() => purgeJobMutation.mutate(job.id)}
+                                disabled={purgeJobMutation.isPending}
+                              >
+                                Purge
+                              </Button>
+                            )}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                  {(exportJobsQuery.data || []).length === 0 && (
+                    <TableRow>
+                      <TableCell colSpan={6} className="text-center text-gray-400 text-sm">
+                        No export jobs yet
+                      </TableCell>
+                    </TableRow>
                   )}
-                  {importSelection.extra.length > 0 && (
-                    <div className="text-amber-300">Extra: {importSelection.extra.join(", ")}</div>
-                  )}
-                </div>
-              )}
-            </div>
-
-            <div className="flex items-center justify-between gap-3">
-              <div className="text-xs text-gray-400">
-                Preserves legacy IDs. Use empty target DB to avoid conflicts.
-              </div>
-              <Button onClick={handleImport} disabled={importMutation.isPending}>
-                {importMutation.isPending ? "Uploading..." : "Create Import Job"}
-              </Button>
-            </div>
+                </TableBody>
+              </Table>
+            )}
           </CardContent>
         </Card>
-      </div>
 
-      <Card className="bg-neutral-700 border-gray-600">
-        <CardHeader>
-          <CardTitle className="text-base">Export Retention</CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-          <div className="space-y-2">
-            <FieldHintLabel
-              label="Purge exports older than (days)"
-              hint={MIGRATION_FIELD_HELP.purgeDays.tooltip}
-              labelClassName="text-base font-medium"
-            />
-            <p className="text-xs text-gray-400 mt-1">{MIGRATION_FIELD_HELP.purgeDays.inline}</p>
-            <Input
-              type="number"
-              min={1}
-              value={purgeDays}
-              onChange={(e) => setPurgeDays(e.target.value)}
-              className="bg-neutral-600 mt-1 w-40"
-              title={MIGRATION_FIELD_HELP.purgeDays.tooltip}
-            />
-            <p className="text-xs text-gray-400">
-              Deletes export files from server storage; job metadata remains.
-            </p>
-          </div>
-          <Button
-            variant="destructive"
-            onClick={handlePurge}
-            disabled={purgeMutation.isPending}
-          >
-            {purgeMutation.isPending ? "Purging..." : "Purge Exports"}
-          </Button>
-        </CardContent>
-      </Card>
-
-      <Card className="bg-neutral-700 border-gray-600">
-        <CardHeader>
-          <CardTitle className="text-base">Recent Export Jobs</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {exportJobsQuery.isLoading ? (
-            <div className="text-sm text-gray-400">Loading export jobs...</div>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="text-xs">Job ID</TableHead>
-                  <TableHead className="text-xs">Scope</TableHead>
-                  <TableHead className="text-xs">Status</TableHead>
-                  <TableHead className="text-xs">Rows</TableHead>
-                  <TableHead className="text-xs">Created</TableHead>
-                  <TableHead className="text-xs">Download</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {(exportJobsQuery.data || []).map((job) => {
-                  const manifestChunks = Array.isArray(job.manifest?.chunks) ? job.manifest.chunks : [];
-                  const chunkCount = manifestChunks.length;
-                  const scriptCtx = chunkCount > 0 ? getScriptContext(job) : null;
-
-                  return (
+        <Card className="bg-neutral-700 border-gray-600">
+          <CardHeader>
+            <CardTitle className="text-base">Recent Import Jobs</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {importJobsQuery.isLoading ? (
+              <div className="text-sm text-gray-400">Loading import jobs...</div>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="text-xs">Job ID</TableHead>
+                    <TableHead className="text-xs">Mode</TableHead>
+                    <TableHead className="text-xs">Status</TableHead>
+                    <TableHead className="text-xs">Rows</TableHead>
+                    <TableHead className="text-xs">Created</TableHead>
+                    <TableHead className="text-xs">Purge</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {(importJobsQuery.data || []).map((job) => (
                     <TableRow key={job.id}>
                       <TableCell className="text-xs text-gray-200">{job.id}</TableCell>
-                      <TableCell className="text-xs text-gray-300">{job.scope}</TableCell>
+                      <TableCell className="text-xs text-gray-300">{job.mode}</TableCell>
                       <TableCell className="text-xs text-gray-300">{job.status}</TableCell>
                       <TableCell className="text-xs text-gray-300">{totalRows(job.totals)}</TableCell>
                       <TableCell className="text-xs text-gray-400">{formatTs(job.createdAt)}</TableCell>
                       <TableCell className="text-xs">
-                        <div className="flex gap-2">
-                          {job.status === "READY" && (job.dataPath || job.manifestPath) ? (
-                            <>
-                              <Button size="sm" variant="outline" asChild>
-                                <a href={`/api/admin/migration/export-jobs/${job.id}/manifest`} rel="noreferrer">
-                                  Manifest
-                                </a>
-                              </Button>
-                              <Button size="sm" variant="outline" asChild>
-                                <a href={`/api/admin/migration/export-jobs/${job.id}/data`} rel="noreferrer">
-                                  {chunkCount > 1 ? "Part 0" : "Data"}
-                                </a>
-                              </Button>
-                              {chunkCount > 1 && (
-                                <Dialog>
-                                  <DialogTrigger asChild>
-                                    <Button size="sm" variant="outline">Parts ({chunkCount})</Button>
-                                  </DialogTrigger>
-                                  <DialogContent className="max-w-lg bg-neutral-800 border-gray-700">
-                                    <DialogHeader>
-                                      <DialogTitle>Export parts ({chunkCount})</DialogTitle>
-                                    </DialogHeader>
-                                    {scriptCtx && (
-                                      <div className="space-y-2">
-                                        <div className="text-xs text-gray-400">
-                                          Generated Linux scripts enforce a hard concurrency cap of 10.
-                                        </div>
-                                        <div className="flex flex-wrap gap-2">
-                                          <Button
-                                            size="sm"
-                                            variant="outline"
-                                            onClick={() =>
-                                              downloadTextFile(
-                                                `download_${job.id}.sh`,
-                                                buildDownloadVerifyScript(scriptCtx)
-                                              )
-                                            }
-                                          >
-                                            Download Linux Script (Download + Verify)
-                                          </Button>
-                                          <Button
-                                            size="sm"
-                                            variant="outline"
-                                            onClick={() =>
-                                              downloadTextFile(
-                                                `download_missing_${job.id}.sh`,
-                                                buildMissingScript(scriptCtx)
-                                              )
-                                            }
-                                          >
-                                            Download Linux Script (Only Missing/Corrupt Parts)
-                                          </Button>
-                                          <Button
-                                            size="sm"
-                                            variant="outline"
-                                            onClick={() =>
-                                              downloadTextFile(
-                                                `import_upload_${job.id}.sh`,
-                                                buildImportScript(scriptCtx)
-                                              )
-                                            }
-                                          >
-                                            Download Linux Script (Import Upload)
-                                          </Button>
-                                        </div>
-                                      </div>
-                                    )}
-                                    <div className="space-y-2 max-h-[60vh] overflow-auto mt-3">
-                                      {manifestChunks.map((c: any) => (
-                                        <div key={String(c?.index ?? c?.file)} className="flex items-center justify-between gap-3">
-                                          <div className="text-xs text-gray-300 truncate">
-                                            {String(c?.file || `Part ${c?.index}`)}
-                                          </div>
-                                          <div className="flex items-center gap-2">
-                                            <span className="text-xs text-gray-500">{humanBytes(c?.sizeBytes ?? null)}</span>
-                                            <Button size="sm" variant="outline" asChild>
-                                              <a
-                                                href={`/api/admin/migration/export-jobs/${job.id}/chunks/${c?.index ?? 0}`}
-                                                rel="noreferrer"
-                                              >
-                                                Download
-                                              </a>
-                                            </Button>
-                                          </div>
-                                        </div>
-                                      ))}
-                                    </div>
-                                  </DialogContent>
-                                </Dialog>
-                              )}
-                            </>
-                          ) : (
-                            <span className="text-gray-500">-</span>
-                          )}
-                          {(job.dataPath || job.manifestPath) && (
-                            <Button
-                              size="sm"
-                              variant="destructive"
-                              onClick={() => purgeJobMutation.mutate(job.id)}
-                              disabled={purgeJobMutation.isPending}
-                            >
-                              Purge
-                            </Button>
-                          )}
-                        </div>
+                        {(job.dataPath || job.manifestPath) ? (
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            onClick={() => importPurgeJobMutation.mutate(job.id)}
+                            disabled={importPurgeJobMutation.isPending}
+                          >
+                            Purge
+                          </Button>
+                        ) : (
+                          <span className="text-gray-500">-</span>
+                        )}
                       </TableCell>
                     </TableRow>
-                  );
-                })}
-                {(exportJobsQuery.data || []).length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={6} className="text-center text-gray-400 text-sm">
-                      No export jobs yet
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
+                  ))}
+                  {(importJobsQuery.data || []).length === 0 && (
+                    <TableRow>
+                      <TableCell colSpan={6} className="text-center text-gray-400 text-sm">
+                        No import jobs yet
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
 
-      <Card className="bg-neutral-700 border-gray-600">
-        <CardHeader>
-          <CardTitle className="text-base">Recent Import Jobs</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {importJobsQuery.isLoading ? (
-            <div className="text-sm text-gray-400">Loading import jobs...</div>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="text-xs">Job ID</TableHead>
-                  <TableHead className="text-xs">Mode</TableHead>
-                  <TableHead className="text-xs">Status</TableHead>
-                  <TableHead className="text-xs">Rows</TableHead>
-                  <TableHead className="text-xs">Created</TableHead>
-                  <TableHead className="text-xs">Purge</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {(importJobsQuery.data || []).map((job) => (
-                  <TableRow key={job.id}>
-                    <TableCell className="text-xs text-gray-200">{job.id}</TableCell>
-                    <TableCell className="text-xs text-gray-300">{job.mode}</TableCell>
-                    <TableCell className="text-xs text-gray-300">{job.status}</TableCell>
-                    <TableCell className="text-xs text-gray-300">{totalRows(job.totals)}</TableCell>
-                    <TableCell className="text-xs text-gray-400">{formatTs(job.createdAt)}</TableCell>
-                    <TableCell className="text-xs">
-                      {(job.dataPath || job.manifestPath) ? (
-                        <Button
-                          size="sm"
-                          variant="destructive"
-                          onClick={() => importPurgeJobMutation.mutate(job.id)}
-                          disabled={importPurgeJobMutation.isPending}
-                        >
-                          Purge
-                        </Button>
-                      ) : (
-                        <span className="text-gray-500">-</span>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                ))}
-                {(importJobsQuery.data || []).length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={6} className="text-center text-gray-400 text-sm">
-                      No import jobs yet
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card className="bg-neutral-700 border-gray-600">
-        <CardHeader>
-          <CardTitle className="text-base">Import Upload Retention</CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-          <div className="space-y-2">
-            <FieldHintLabel
-              label="Purge imports older than (days)"
-              hint={MIGRATION_FIELD_HELP.importPurgeDays.tooltip}
-              labelClassName="text-base font-medium"
-            />
-            <p className="text-xs text-gray-400 mt-1">{MIGRATION_FIELD_HELP.importPurgeDays.inline}</p>
-            <Input
-              type="number"
-              min={1}
-              value={importPurgeDays}
-              onChange={(e) => setImportPurgeDays(e.target.value)}
-              className="bg-neutral-600 mt-1 w-40"
-              title={MIGRATION_FIELD_HELP.importPurgeDays.tooltip}
-            />
-            <p className="text-xs text-gray-400">
-              Deletes uploaded manifest/data files from server storage.
-            </p>
-          </div>
-          <Button
-            variant="destructive"
-            onClick={handleImportPurge}
-            disabled={importPurgeMutation.isPending}
-          >
-            {importPurgeMutation.isPending ? "Purging..." : "Purge Imports"}
-          </Button>
-        </CardContent>
-      </Card>
-    </div>
+        <Card className="bg-neutral-700 border-gray-600">
+          <CardHeader>
+            <CardTitle className="text-base">Import Upload Retention</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+            <div className="space-y-2">
+              <FieldHintLabel
+                label="Purge imports older than (days)"
+                hint={MIGRATION_FIELD_HELP.importPurgeDays.tooltip}
+                labelClassName="text-base font-medium"
+              />
+              <p className="text-xs text-gray-400 mt-1">{MIGRATION_FIELD_HELP.importPurgeDays.inline}</p>
+              <Input
+                type="number"
+                min={1}
+                value={importPurgeDays}
+                onChange={(e) => setImportPurgeDays(e.target.value)}
+                className="bg-neutral-600 mt-1 w-40"
+                title={MIGRATION_FIELD_HELP.importPurgeDays.tooltip}
+              />
+              <p className="text-xs text-gray-400">
+                Deletes uploaded manifest/data files from server storage.
+              </p>
+            </div>
+            <Button
+              variant="destructive"
+              onClick={handleImportPurge}
+              disabled={importPurgeMutation.isPending}
+            >
+              {importPurgeMutation.isPending ? "Purging..." : "Purge Imports"}
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
     </TooltipProvider>
   );
 }
@@ -3146,90 +3152,90 @@ function SystemConfigTab() {
               </CardHeader>
               <CardContent className="space-y-6">
                 <TooltipProvider delayDuration={120}>
-                <div className="rounded-md border border-cyan-700/40 bg-cyan-950/20 p-3 text-xs text-cyan-100/90">
-                  Configure quote fetch cadence and stale-detection guardrails. Use the hidden <span className="font-medium">Hint</span> controls for deeper operational impact notes.
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                  <div>
-                    <FieldHintLabel
-                      label="Client Quote Refresh (ms)"
-                      hint={MARKET_DATA_QUOTE_FIELD_HELP.quoteRefreshMs.tooltip}
-                    />
-                    <p className="text-xs text-gray-400 mt-1">{MARKET_DATA_QUOTE_FIELD_HELP.quoteRefreshMs.inline}</p>
-                    <Input
-                      type="number"
-                      value={config.quoteRefreshMs}
-                      onChange={(e) => {
-                        setConfig(prev => prev ? { ...prev, quoteRefreshMs: Number(e.target.value) } : prev);
-                        setConfigChanged(true);
-                      }}
-                      className="bg-neutral-600 mt-2"
-                      min={100}
-                      title={MARKET_DATA_QUOTE_FIELD_HELP.quoteRefreshMs.tooltip}
-                    />
+                  <div className="rounded-md border border-cyan-700/40 bg-cyan-950/20 p-3 text-xs text-cyan-100/90">
+                    Configure quote fetch cadence and stale-detection guardrails. Use the hidden <span className="font-medium">Hint</span> controls for deeper operational impact notes.
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div>
+                      <FieldHintLabel
+                        label="Client Quote Refresh (ms)"
+                        hint={MARKET_DATA_QUOTE_FIELD_HELP.quoteRefreshMs.tooltip}
+                      />
+                      <p className="text-xs text-gray-400 mt-1">{MARKET_DATA_QUOTE_FIELD_HELP.quoteRefreshMs.inline}</p>
+                      <Input
+                        type="number"
+                        value={config.quoteRefreshMs}
+                        onChange={(e) => {
+                          setConfig(prev => prev ? { ...prev, quoteRefreshMs: Number(e.target.value) } : prev);
+                          setConfigChanged(true);
+                        }}
+                        className="bg-neutral-600 mt-2"
+                        min={100}
+                        title={MARKET_DATA_QUOTE_FIELD_HELP.quoteRefreshMs.tooltip}
+                      />
+                    </div>
+
+                    <div>
+                      <FieldHintLabel
+                        label="Server Feed Poll (ms)"
+                        hint={MARKET_DATA_QUOTE_FIELD_HELP.feedPollMs.tooltip}
+                      />
+                      <p className="text-xs text-gray-400 mt-1">{MARKET_DATA_QUOTE_FIELD_HELP.feedPollMs.inline}</p>
+                      <Input
+                        type="number"
+                        value={config.feedPollMs}
+                        onChange={(e) => {
+                          setConfig(prev => prev ? { ...prev, feedPollMs: Number(e.target.value) } : prev);
+                          setConfigChanged(true);
+                        }}
+                        className="bg-neutral-600 mt-2"
+                        min={100}
+                        title={MARKET_DATA_QUOTE_FIELD_HELP.feedPollMs.tooltip}
+                      />
+                    </div>
+
+                    <div>
+                      <FieldHintLabel
+                        label="Stale Threshold (ms)"
+                        hint={MARKET_DATA_QUOTE_FIELD_HELP.staleThresholdMs.tooltip}
+                      />
+                      <p className="text-xs text-gray-400 mt-1">{MARKET_DATA_QUOTE_FIELD_HELP.staleThresholdMs.inline}</p>
+                      <Input
+                        type="number"
+                        value={config.staleThresholdMs}
+                        onChange={(e) => {
+                          setConfig(prev => prev ? { ...prev, staleThresholdMs: Number(e.target.value) } : prev);
+                          setConfigChanged(true);
+                        }}
+                        className="bg-neutral-600 mt-2"
+                        min={1000}
+                        title={MARKET_DATA_QUOTE_FIELD_HELP.staleThresholdMs.tooltip}
+                      />
+                    </div>
                   </div>
 
-                  <div>
-                    <FieldHintLabel
-                      label="Server Feed Poll (ms)"
-                      hint={MARKET_DATA_QUOTE_FIELD_HELP.feedPollMs.tooltip}
-                    />
-                    <p className="text-xs text-gray-400 mt-1">{MARKET_DATA_QUOTE_FIELD_HELP.feedPollMs.inline}</p>
-                    <Input
-                      type="number"
-                      value={config.feedPollMs}
-                      onChange={(e) => {
-                        setConfig(prev => prev ? { ...prev, feedPollMs: Number(e.target.value) } : prev);
-                        setConfigChanged(true);
-                      }}
-                      className="bg-neutral-600 mt-2"
-                      min={100}
-                      title={MARKET_DATA_QUOTE_FIELD_HELP.feedPollMs.tooltip}
-                    />
+                  <FxRolloverSettings
+                    config={config}
+                    setConfig={setConfig}
+                    setConfigChanged={setConfigChanged}
+                  />
+
+                  <div className="bg-green-900/30 border border-green-700/50 p-4 rounded-lg mt-4">
+                    <p className="text-sm text-green-300">
+                      <strong>Note:</strong> Changes to feed polling rates and stale thresholds take effect immediately
+                      without requiring a server restart.
+                    </p>
                   </div>
 
-                  <div>
-                    <FieldHintLabel
-                      label="Stale Threshold (ms)"
-                      hint={MARKET_DATA_QUOTE_FIELD_HELP.staleThresholdMs.tooltip}
-                    />
-                    <p className="text-xs text-gray-400 mt-1">{MARKET_DATA_QUOTE_FIELD_HELP.staleThresholdMs.inline}</p>
-                    <Input
-                      type="number"
-                      value={config.staleThresholdMs}
-                      onChange={(e) => {
-                        setConfig(prev => prev ? { ...prev, staleThresholdMs: Number(e.target.value) } : prev);
-                        setConfigChanged(true);
-                      }}
-                      className="bg-neutral-600 mt-2"
-                      min={1000}
-                      title={MARKET_DATA_QUOTE_FIELD_HELP.staleThresholdMs.tooltip}
-                    />
+                  <div className="flex justify-end pt-4">
+                    <Button
+                      onClick={handleSave}
+                      disabled={!configChanged || updateMutation.isPending}
+                      className="bg-blue-600 hover:bg-blue-700"
+                    >
+                      {updateMutation.isPending ? "Saving..." : "Save Changes"}
+                    </Button>
                   </div>
-                </div>
-
-                <FxRolloverSettings
-                  config={config}
-                  setConfig={setConfig}
-                  setConfigChanged={setConfigChanged}
-                />
-
-                <div className="bg-green-900/30 border border-green-700/50 p-4 rounded-lg mt-4">
-                  <p className="text-sm text-green-300">
-                    <strong>Note:</strong> Changes to feed polling rates and stale thresholds take effect immediately
-                    without requiring a server restart.
-                  </p>
-                </div>
-
-                <div className="flex justify-end pt-4">
-                  <Button
-                    onClick={handleSave}
-                    disabled={!configChanged || updateMutation.isPending}
-                    className="bg-blue-600 hover:bg-blue-700"
-                  >
-                    {updateMutation.isPending ? "Saving..." : "Save Changes"}
-                  </Button>
-                </div>
                 </TooltipProvider>
               </CardContent>
             </Card>
@@ -4402,101 +4408,99 @@ function SystemConfigTab() {
                 </div>
 
                 {health ? (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="bg-neutral-800 p-4 rounded-lg">
-                    <div className="flex items-center mb-2">
-                      <div
-                        className={`w-3 h-3 rounded-full mr-2 ${
-                          healthProviderKey && health.feedProviderKey && healthProviderKey === health.feedProviderKey
-                            ? (health.feedProviderConnected ? "bg-green-500" : "bg-red-500")
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="bg-neutral-800 p-4 rounded-lg">
+                      <div className="flex items-center mb-2">
+                        <div
+                          className={`w-3 h-3 rounded-full mr-2 ${healthProviderKey && health.feedProviderKey && healthProviderKey === health.feedProviderKey
+                              ? (health.feedProviderConnected ? "bg-green-500" : "bg-red-500")
+                              : healthProviderKey
+                                ? (health.requestedProvider?.configUsable ? "bg-amber-500" : "bg-red-500")
+                                : "bg-gray-500"
+                            }`}
+                        ></div>
+                        <span className="font-medium">Provider Status</span>
+                      </div>
+                      <p
+                        className={`text-lg ${healthProviderKey && health.feedProviderKey && healthProviderKey === health.feedProviderKey
+                            ? (health.feedProviderConnected ? "text-green-400" : "text-red-400")
                             : healthProviderKey
-                              ? (health.requestedProvider?.configUsable ? "bg-amber-500" : "bg-red-500")
-                              : "bg-gray-500"
-                        }`}
-                      ></div>
-                      <span className="font-medium">Provider Status</span>
+                              ? (health.requestedProvider?.configUsable ? "text-amber-300" : "text-red-400")
+                              : "text-gray-400"
+                          }`}
+                      >
+                        {(() => {
+                          if (!healthProviderKey) return "Select a provider";
+                          const selectedIsFeed = Boolean(health.feedProviderKey && healthProviderKey === health.feedProviderKey);
+                          if (selectedIsFeed) return health.feedProviderConnected ? "Connected" : "Disconnected";
+                          if (health.requestedProvider?.error) return String(health.requestedProvider.error);
+                          if (health.requestedProvider?.configUsable) return "Configured (not active)";
+                          if (health.requestedProvider?.missingSecrets?.length) return "Missing API key";
+                          return "Unknown";
+                        })()}
+                      </p>
+                      <p className="text-xs text-gray-400 mt-1">
+                        Selected: <span className="font-mono">{healthProviderKey || "—"}</span>
+                        {health.requestedProvider?.displayName ? (
+                          <>
+                            {" "}
+                            · <span className="truncate">{health.requestedProvider.displayName}</span>
+                          </>
+                        ) : null}
+                      </p>
                     </div>
-                    <p
-                      className={`text-lg ${
-                        healthProviderKey && health.feedProviderKey && healthProviderKey === health.feedProviderKey
-                          ? (health.feedProviderConnected ? "text-green-400" : "text-red-400")
-                          : healthProviderKey
-                            ? (health.requestedProvider?.configUsable ? "text-amber-300" : "text-red-400")
-                            : "text-gray-400"
-                      }`}
-                    >
-                      {(() => {
-                        if (!healthProviderKey) return "Select a provider";
-                        const selectedIsFeed = Boolean(health.feedProviderKey && healthProviderKey === health.feedProviderKey);
-                        if (selectedIsFeed) return health.feedProviderConnected ? "Connected" : "Disconnected";
-                        if (health.requestedProvider?.error) return String(health.requestedProvider.error);
-                        if (health.requestedProvider?.configUsable) return "Configured (not active)";
-                        if (health.requestedProvider?.missingSecrets?.length) return "Missing API key";
-                        return "Unknown";
-                      })()}
-                    </p>
-                    <p className="text-xs text-gray-400 mt-1">
-                      Selected: <span className="font-mono">{healthProviderKey || "—"}</span>
-                      {health.requestedProvider?.displayName ? (
-                        <>
-                          {" "}
-                          · <span className="truncate">{health.requestedProvider.displayName}</span>
-                        </>
-                      ) : null}
-                    </p>
-                  </div>
 
-                  <div className="bg-neutral-800 p-4 rounded-lg">
-                    <div className="font-medium mb-2">Last Provider Success</div>
-                    <p className="text-lg">
-                      {health.lastProviderSuccessAt ? new Date(health.lastProviderSuccessAt).toLocaleString() : 'Never'}
-                    </p>
-                    <p className="text-xs text-gray-400 mt-1">
-                      Provider: <span className="font-mono">{health.lastProviderSuccessKey ?? "—"}</span>
-                    </p>
-                  </div>
+                    <div className="bg-neutral-800 p-4 rounded-lg">
+                      <div className="font-medium mb-2">Last Provider Success</div>
+                      <p className="text-lg">
+                        {health.lastProviderSuccessAt ? new Date(health.lastProviderSuccessAt).toLocaleString() : 'Never'}
+                      </p>
+                      <p className="text-xs text-gray-400 mt-1">
+                        Provider: <span className="font-mono">{health.lastProviderSuccessKey ?? "—"}</span>
+                      </p>
+                    </div>
 
-                  <div className="bg-neutral-800 p-4 rounded-lg">
-                    <div className="font-medium mb-2">Consecutive Failures</div>
-                    <p className={`text-lg ${health.failures > 0 ? 'text-amber-400' : 'text-green-400'}`}>
-                      {health.failures}
-                    </p>
-                  </div>
+                    <div className="bg-neutral-800 p-4 rounded-lg">
+                      <div className="font-medium mb-2">Consecutive Failures</div>
+                      <p className={`text-lg ${health.failures > 0 ? 'text-amber-400' : 'text-green-400'}`}>
+                        {health.failures}
+                      </p>
+                    </div>
 
-                  <div className="bg-neutral-800 p-4 rounded-lg">
-                    <div className="font-medium mb-2">Feed Source</div>
-                    <p className="text-lg font-mono">{health.feedSource ?? "—"}</p>
-                    <p className="text-xs text-gray-400 mt-1">
-                      {health.feedSourceAt ? new Date(health.feedSourceAt).toLocaleString() : "—"}
-                    </p>
-                  </div>
+                    <div className="bg-neutral-800 p-4 rounded-lg">
+                      <div className="font-medium mb-2">Feed Source</div>
+                      <p className="text-lg font-mono">{health.feedSource ?? "—"}</p>
+                      <p className="text-xs text-gray-400 mt-1">
+                        {health.feedSourceAt ? new Date(health.feedSourceAt).toLocaleString() : "—"}
+                      </p>
+                    </div>
 
-                  <div className="bg-neutral-800 p-4 rounded-lg">
-                    <div className="font-medium mb-2">Stale Symbols</div>
-                    <p className={`text-lg ${health.staleCount > 0 ? 'text-amber-400' : 'text-green-400'}`}>
-                      {health.staleCount}
-                    </p>
-                  </div>
+                    <div className="bg-neutral-800 p-4 rounded-lg">
+                      <div className="font-medium mb-2">Stale Symbols</div>
+                      <p className={`text-lg ${health.staleCount > 0 ? 'text-amber-400' : 'text-green-400'}`}>
+                        {health.staleCount}
+                      </p>
+                    </div>
 
-                  <div className="bg-neutral-800 p-4 rounded-lg">
-                    <div className="font-medium mb-2">Quote Cache Size</div>
-                    <p className="text-lg">{health.cacheSize} symbols</p>
-                  </div>
+                    <div className="bg-neutral-800 p-4 rounded-lg">
+                      <div className="font-medium mb-2">Quote Cache Size</div>
+                      <p className="text-lg">{health.cacheSize} symbols</p>
+                    </div>
 
-                  <div className="bg-neutral-800 p-4 rounded-lg">
-                    <div className="font-medium mb-2">Server Time</div>
-                    <p className="text-lg">
-                      {new Date(health.serverTime).toLocaleString()}
-                    </p>
-                  </div>
+                    <div className="bg-neutral-800 p-4 rounded-lg">
+                      <div className="font-medium mb-2">Server Time</div>
+                      <p className="text-lg">
+                        {new Date(health.serverTime).toLocaleString()}
+                      </p>
+                    </div>
 
-                  <div className="bg-neutral-800 p-4 rounded-lg">
-                    <div className="font-medium mb-2">Last Feed Update</div>
-                    <p className="text-lg">
-                      {health.lastSuccess ? new Date(health.lastSuccess).toLocaleString() : "Never"}
-                    </p>
+                    <div className="bg-neutral-800 p-4 rounded-lg">
+                      <div className="font-medium mb-2">Last Feed Update</div>
+                      <p className="text-lg">
+                        {health.lastSuccess ? new Date(health.lastSuccess).toLocaleString() : "Never"}
+                      </p>
+                    </div>
                   </div>
-                </div>
                 ) : (
                   <p className="text-gray-400">Loading health data...</p>
                 )}
@@ -5508,1313 +5512,1313 @@ export default function AdminDashboard() {
 
                 {/* Mini-tabs for filtering */}
                 <div className="flex flex-wrap gap-1.5 sm:gap-2 mb-4 p-1 bg-neutral-700 rounded">
-                <button
-                  onClick={() => { setUserFilterTab("all"); setSelectedUserIds([]); }}
-                  className={`px-2 sm:px-3 py-1 sm:py-1.5 rounded text-xs sm:text-sm transition ${userFilterTab === "all" ? "bg-blue-600 text-white" : "text-gray-300 hover:bg-neutral-600"}`}
-                  title={USER_MANAGEMENT_FIELD_HELP.tabAll.tooltip}
-                >
-                  All ({users.length})
-                </button>
-                <button
-                  onClick={() => { setUserFilterTab("active"); setSelectedUserIds([]); }}
-                  className={`px-2 sm:px-3 py-1 sm:py-1.5 rounded text-xs sm:text-sm transition ${userFilterTab === "active" ? "bg-green-600 text-white" : "text-gray-300 hover:bg-neutral-600"}`}
-                  title={USER_MANAGEMENT_FIELD_HELP.tabActive.tooltip}
-                >
-                  Active ({users.filter(u => !u.isDisabled && !u.isFrozen).length})
-                </button>
-                <button
-                  onClick={() => { setUserFilterTab("disabled"); setSelectedUserIds([]); }}
-                  className={`px-2 sm:px-3 py-1 sm:py-1.5 rounded text-xs sm:text-sm transition ${userFilterTab === "disabled" ? "bg-red-600 text-white" : "text-gray-300 hover:bg-neutral-600"}`}
-                  title={USER_MANAGEMENT_FIELD_HELP.tabDisabled.tooltip}
-                >
-                  Disabled ({users.filter(u => u.isDisabled).length})
-                </button>
-                <button
-                  onClick={() => { setUserFilterTab("frozen"); setSelectedUserIds([]); }}
-                  className={`px-2 sm:px-3 py-1 sm:py-1.5 rounded text-xs sm:text-sm transition ${userFilterTab === "frozen" ? "bg-blue-500 text-white" : "text-gray-300 hover:bg-neutral-600"}`}
-                  title={USER_MANAGEMENT_FIELD_HELP.tabFrozen.tooltip}
-                >
-                  Frozen ({users.filter(u => u.isFrozen && !u.isDisabled).length})
-                </button>
-                <button
-                  onClick={() => { setUserFilterTab("online"); setSelectedUserIds([]); }}
-                  className={`px-2 sm:px-3 py-1 sm:py-1.5 rounded text-xs sm:text-sm transition ${userFilterTab === "online" ? "bg-cyan-600 text-white" : "text-gray-300 hover:bg-neutral-600"}`}
-                  title={USER_MANAGEMENT_FIELD_HELP.tabOnline.tooltip}
-                >
-                  <span className="hidden sm:inline">Online ({onlineData?.onlineCount || 0}) / Offline ({onlineData?.offlineCount || 0})</span>
-                  <span className="sm:hidden">On/Off ({onlineData?.onlineCount || 0}/{onlineData?.offlineCount || 0})</span>
-                </button>
-                <button
-                  onClick={() => { setUserFilterTab("logins"); setSelectedUserIds([]); }}
-                  className={`px-2 sm:px-3 py-1 sm:py-1.5 rounded text-xs sm:text-sm transition ${userFilterTab === "logins" ? "bg-purple-600 text-white" : "text-gray-300 hover:bg-neutral-600"}`}
-                  title={USER_MANAGEMENT_FIELD_HELP.tabLogins.tooltip}
-                >
-                  <span className="hidden sm:inline">Login History</span>
-                  <span className="sm:hidden">Logins</span>
-                </button>
-                <button
-                  onClick={() => { setUserFilterTab("audit"); setSelectedUserIds([]); }}
-                  className={`px-2 sm:px-3 py-1 sm:py-1.5 rounded text-xs sm:text-sm transition ${userFilterTab === "audit" ? "bg-orange-600 text-white" : "text-gray-300 hover:bg-neutral-600"}`}
-                  title={USER_MANAGEMENT_FIELD_HELP.tabAudit.tooltip}
-                >
-                  <span className="hidden sm:inline">Audit Trail</span>
-                  <span className="sm:hidden">Audit</span>
-                </button>
-                <button
-                  onClick={() => { setUserFilterTab("kyc"); setSelectedUserIds([]); }}
-                  className={`px-2 sm:px-3 py-1 sm:py-1.5 rounded text-xs sm:text-sm transition ${userFilterTab === "kyc" ? "bg-teal-600 text-white" : "text-gray-300 hover:bg-neutral-600"}`}
-                  title={USER_MANAGEMENT_FIELD_HELP.tabKyc.tooltip}
-                >
-                  KYC Queue
-                </button>
-                <button
-                  onClick={() => { setUserFilterTab("grift"); setSelectedUserIds([]); }}
-                  className={`px-2 sm:px-3 py-1 sm:py-1.5 rounded text-xs sm:text-sm transition ${userFilterTab === "grift" ? "bg-red-600 text-white" : "text-gray-300 hover:bg-neutral-600"}`}
-                  title={USER_MANAGEMENT_FIELD_HELP.tabGrift.tooltip}
-                >
-                  <span className="hidden sm:inline">Grift Detection ({griftSummary?.openAlerts || 0})</span>
-                  <span className="sm:hidden">Grift ({griftSummary?.openAlerts || 0})</span>
-                </button>
-                <button
-                  onClick={() => { setUserFilterTab("activity"); setSelectedUserIds([]); }}
-                  className={`px-2 sm:px-3 py-1 sm:py-1.5 rounded text-xs sm:text-sm transition ${userFilterTab === "activity" ? "bg-indigo-600 text-white" : "text-gray-300 hover:bg-neutral-600"}`}
-                  title={USER_MANAGEMENT_FIELD_HELP.tabActivity.tooltip}
-                >
-                  Activity
-                </button>
+                  <button
+                    onClick={() => { setUserFilterTab("all"); setSelectedUserIds([]); }}
+                    className={`px-2 sm:px-3 py-1 sm:py-1.5 rounded text-xs sm:text-sm transition ${userFilterTab === "all" ? "bg-blue-600 text-white" : "text-gray-300 hover:bg-neutral-600"}`}
+                    title={USER_MANAGEMENT_FIELD_HELP.tabAll.tooltip}
+                  >
+                    All ({users.length})
+                  </button>
+                  <button
+                    onClick={() => { setUserFilterTab("active"); setSelectedUserIds([]); }}
+                    className={`px-2 sm:px-3 py-1 sm:py-1.5 rounded text-xs sm:text-sm transition ${userFilterTab === "active" ? "bg-green-600 text-white" : "text-gray-300 hover:bg-neutral-600"}`}
+                    title={USER_MANAGEMENT_FIELD_HELP.tabActive.tooltip}
+                  >
+                    Active ({users.filter(u => !u.isDisabled && !u.isFrozen).length})
+                  </button>
+                  <button
+                    onClick={() => { setUserFilterTab("disabled"); setSelectedUserIds([]); }}
+                    className={`px-2 sm:px-3 py-1 sm:py-1.5 rounded text-xs sm:text-sm transition ${userFilterTab === "disabled" ? "bg-red-600 text-white" : "text-gray-300 hover:bg-neutral-600"}`}
+                    title={USER_MANAGEMENT_FIELD_HELP.tabDisabled.tooltip}
+                  >
+                    Disabled ({users.filter(u => u.isDisabled).length})
+                  </button>
+                  <button
+                    onClick={() => { setUserFilterTab("frozen"); setSelectedUserIds([]); }}
+                    className={`px-2 sm:px-3 py-1 sm:py-1.5 rounded text-xs sm:text-sm transition ${userFilterTab === "frozen" ? "bg-blue-500 text-white" : "text-gray-300 hover:bg-neutral-600"}`}
+                    title={USER_MANAGEMENT_FIELD_HELP.tabFrozen.tooltip}
+                  >
+                    Frozen ({users.filter(u => u.isFrozen && !u.isDisabled).length})
+                  </button>
+                  <button
+                    onClick={() => { setUserFilterTab("online"); setSelectedUserIds([]); }}
+                    className={`px-2 sm:px-3 py-1 sm:py-1.5 rounded text-xs sm:text-sm transition ${userFilterTab === "online" ? "bg-cyan-600 text-white" : "text-gray-300 hover:bg-neutral-600"}`}
+                    title={USER_MANAGEMENT_FIELD_HELP.tabOnline.tooltip}
+                  >
+                    <span className="hidden sm:inline">Online ({onlineData?.onlineCount || 0}) / Offline ({onlineData?.offlineCount || 0})</span>
+                    <span className="sm:hidden">On/Off ({onlineData?.onlineCount || 0}/{onlineData?.offlineCount || 0})</span>
+                  </button>
+                  <button
+                    onClick={() => { setUserFilterTab("logins"); setSelectedUserIds([]); }}
+                    className={`px-2 sm:px-3 py-1 sm:py-1.5 rounded text-xs sm:text-sm transition ${userFilterTab === "logins" ? "bg-purple-600 text-white" : "text-gray-300 hover:bg-neutral-600"}`}
+                    title={USER_MANAGEMENT_FIELD_HELP.tabLogins.tooltip}
+                  >
+                    <span className="hidden sm:inline">Login History</span>
+                    <span className="sm:hidden">Logins</span>
+                  </button>
+                  <button
+                    onClick={() => { setUserFilterTab("audit"); setSelectedUserIds([]); }}
+                    className={`px-2 sm:px-3 py-1 sm:py-1.5 rounded text-xs sm:text-sm transition ${userFilterTab === "audit" ? "bg-orange-600 text-white" : "text-gray-300 hover:bg-neutral-600"}`}
+                    title={USER_MANAGEMENT_FIELD_HELP.tabAudit.tooltip}
+                  >
+                    <span className="hidden sm:inline">Audit Trail</span>
+                    <span className="sm:hidden">Audit</span>
+                  </button>
+                  <button
+                    onClick={() => { setUserFilterTab("kyc"); setSelectedUserIds([]); }}
+                    className={`px-2 sm:px-3 py-1 sm:py-1.5 rounded text-xs sm:text-sm transition ${userFilterTab === "kyc" ? "bg-teal-600 text-white" : "text-gray-300 hover:bg-neutral-600"}`}
+                    title={USER_MANAGEMENT_FIELD_HELP.tabKyc.tooltip}
+                  >
+                    KYC Queue
+                  </button>
+                  <button
+                    onClick={() => { setUserFilterTab("grift"); setSelectedUserIds([]); }}
+                    className={`px-2 sm:px-3 py-1 sm:py-1.5 rounded text-xs sm:text-sm transition ${userFilterTab === "grift" ? "bg-red-600 text-white" : "text-gray-300 hover:bg-neutral-600"}`}
+                    title={USER_MANAGEMENT_FIELD_HELP.tabGrift.tooltip}
+                  >
+                    <span className="hidden sm:inline">Grift Detection ({griftSummary?.openAlerts || 0})</span>
+                    <span className="sm:hidden">Grift ({griftSummary?.openAlerts || 0})</span>
+                  </button>
+                  <button
+                    onClick={() => { setUserFilterTab("activity"); setSelectedUserIds([]); }}
+                    className={`px-2 sm:px-3 py-1 sm:py-1.5 rounded text-xs sm:text-sm transition ${userFilterTab === "activity" ? "bg-indigo-600 text-white" : "text-gray-300 hover:bg-neutral-600"}`}
+                    title={USER_MANAGEMENT_FIELD_HELP.tabActivity.tooltip}
+                  >
+                    Activity
+                  </button>
                 </div>
 
                 {userFilterTab !== "logins" && userFilterTab !== "online" && userFilterTab !== "audit" && userFilterTab !== "kyc" && userFilterTab !== "grift" && userFilterTab !== "activity" && selectedUserIds.length > 0 && (
-                <div className="bg-neutral-700 p-3 rounded mb-4 flex items-center gap-4 flex-wrap">
-                  <div className="w-full">
-                    <FieldHintLabel label="Bulk User Actions" hint={USER_MANAGEMENT_FIELD_HELP.bulkActions.tooltip} />
-                    <p className="text-xs text-gray-400 mt-1">{USER_MANAGEMENT_FIELD_HELP.bulkActions.inline}</p>
+                  <div className="bg-neutral-700 p-3 rounded mb-4 flex items-center gap-4 flex-wrap">
+                    <div className="w-full">
+                      <FieldHintLabel label="Bulk User Actions" hint={USER_MANAGEMENT_FIELD_HELP.bulkActions.tooltip} />
+                      <p className="text-xs text-gray-400 mt-1">{USER_MANAGEMENT_FIELD_HELP.bulkActions.inline}</p>
+                    </div>
+                    <span className="text-sm" title={USER_MANAGEMENT_FIELD_HELP.bulkActions.tooltip}>{selectedUserIds.length} user(s) selected</span>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={bulkToggleStatusMutation.isPending}
+                      onClick={() => bulkToggleStatusMutation.mutate({ userIds: selectedUserIds, disabled: true })}
+                      className="bg-amber-600 hover:bg-amber-700 border-0"
+                      title={USER_MANAGEMENT_FIELD_HELP.disableSelectedAction.tooltip}
+                    >
+                      {bulkToggleStatusMutation.isPending ? 'Processing...' : 'Disable Selected'}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={bulkToggleStatusMutation.isPending}
+                      onClick={() => bulkToggleStatusMutation.mutate({ userIds: selectedUserIds, disabled: false })}
+                      className="bg-green-600 hover:bg-green-700 border-0"
+                      title={USER_MANAGEMENT_FIELD_HELP.enableSelectedAction.tooltip}
+                    >
+                      {bulkToggleStatusMutation.isPending ? 'Processing...' : 'Enable Selected'}
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => setSelectedUserIds([])} title={USER_MANAGEMENT_FIELD_HELP.clearSelectionAction.tooltip}>
+                      Clear Selection
+                    </Button>
                   </div>
-                  <span className="text-sm" title={USER_MANAGEMENT_FIELD_HELP.bulkActions.tooltip}>{selectedUserIds.length} user(s) selected</span>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={bulkToggleStatusMutation.isPending}
-                    onClick={() => bulkToggleStatusMutation.mutate({ userIds: selectedUserIds, disabled: true })}
-                    className="bg-amber-600 hover:bg-amber-700 border-0"
-                    title={USER_MANAGEMENT_FIELD_HELP.disableSelectedAction.tooltip}
-                  >
-                    {bulkToggleStatusMutation.isPending ? 'Processing...' : 'Disable Selected'}
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={bulkToggleStatusMutation.isPending}
-                    onClick={() => bulkToggleStatusMutation.mutate({ userIds: selectedUserIds, disabled: false })}
-                    className="bg-green-600 hover:bg-green-700 border-0"
-                    title={USER_MANAGEMENT_FIELD_HELP.enableSelectedAction.tooltip}
-                  >
-                    {bulkToggleStatusMutation.isPending ? 'Processing...' : 'Enable Selected'}
-                  </Button>
-                  <Button size="sm" variant="ghost" onClick={() => setSelectedUserIds([])} title={USER_MANAGEMENT_FIELD_HELP.clearSelectionAction.tooltip}>
-                    Clear Selection
-                  </Button>
-                </div>
-              )}
+                )}
 
-              {userFilterTab === "online" ? (
-                /* Online Users View */
-                <div className="overflow-x-auto">
-                  {isLoadingOnline ? (
-                    <div className="flex items-center justify-center h-40">
-                      <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary"></div>
-                    </div>
-                  ) : (
-                    <>
-                      <div className="rounded-md border border-cyan-700/40 bg-cyan-950/20 p-3 text-xs text-cyan-100/90 mb-4">
-                        <FieldHintLabel label="Online Session View" hint={USER_MANAGEMENT_FIELD_HELP.onlineOverview.tooltip} />
-                        <p className="text-xs text-cyan-100/90 mt-1">{USER_MANAGEMENT_FIELD_HELP.onlineOverview.inline}</p>
+                {userFilterTab === "online" ? (
+                  /* Online Users View */
+                  <div className="overflow-x-auto">
+                    {isLoadingOnline ? (
+                      <div className="flex items-center justify-center h-40">
+                        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary"></div>
                       </div>
-                      <div className="flex gap-4 mb-4">
-                        <div className="bg-green-900/30 border border-green-600/50 rounded-lg p-4 flex-1">
-                          <div className="text-3xl font-bold text-green-400">{onlineData?.onlineCount || 0}</div>
-                          <div className="text-sm text-gray-400">Online Now</div>
+                    ) : (
+                      <>
+                        <div className="rounded-md border border-cyan-700/40 bg-cyan-950/20 p-3 text-xs text-cyan-100/90 mb-4">
+                          <FieldHintLabel label="Online Session View" hint={USER_MANAGEMENT_FIELD_HELP.onlineOverview.tooltip} />
+                          <p className="text-xs text-cyan-100/90 mt-1">{USER_MANAGEMENT_FIELD_HELP.onlineOverview.inline}</p>
                         </div>
-                        <div className="bg-neutral-700/50 rounded-lg p-4 flex-1">
-                          <div className="text-3xl font-bold text-gray-400">{onlineData?.offlineCount || 0}</div>
-                          <div className="text-sm text-gray-400">Offline</div>
+                        <div className="flex gap-4 mb-4">
+                          <div className="bg-green-900/30 border border-green-600/50 rounded-lg p-4 flex-1">
+                            <div className="text-3xl font-bold text-green-400">{onlineData?.onlineCount || 0}</div>
+                            <div className="text-sm text-gray-400">Online Now</div>
+                          </div>
+                          <div className="bg-neutral-700/50 rounded-lg p-4 flex-1">
+                            <div className="text-3xl font-bold text-gray-400">{onlineData?.offlineCount || 0}</div>
+                            <div className="text-sm text-gray-400">Offline</div>
+                          </div>
                         </div>
-                      </div>
-                      <Table className="border-collapse">
-                        <TableHeader>
-                          <TableRow className="border-b border-gray-700">
-                            <TableHead className="py-3 px-4 text-left text-gray-400">User</TableHead>
-                            <TableHead className="py-3 px-4 text-left text-gray-400">IP Address</TableHead>
-                            <TableHead className="py-3 px-4 text-left text-gray-400">Login Time</TableHead>
-                            <TableHead className="py-3 px-4 text-left text-gray-400" title={USER_MANAGEMENT_FIELD_HELP.onlineOverview.tooltip}>Session Duration</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {(!onlineData?.onlineUsers || onlineData.onlineUsers.length === 0) ? (
-                            <TableRow>
-                              <TableCell colSpan={4} className="text-center py-4 text-gray-400">
-                                No users currently online
-                              </TableCell>
+                        <Table className="border-collapse">
+                          <TableHeader>
+                            <TableRow className="border-b border-gray-700">
+                              <TableHead className="py-3 px-4 text-left text-gray-400">User</TableHead>
+                              <TableHead className="py-3 px-4 text-left text-gray-400">IP Address</TableHead>
+                              <TableHead className="py-3 px-4 text-left text-gray-400">Login Time</TableHead>
+                              <TableHead className="py-3 px-4 text-left text-gray-400" title={USER_MANAGEMENT_FIELD_HELP.onlineOverview.tooltip}>Session Duration</TableHead>
                             </TableRow>
-                          ) : (
-                            onlineData.onlineUsers.map((user) => {
-                              const formatDuration = (seconds: number) => {
-                                const hours = Math.floor(seconds / 3600);
-                                const mins = Math.floor((seconds % 3600) / 60);
-                                const secs = seconds % 60;
-                                if (hours > 0) return `${hours}h ${mins}m ${secs}s`;
-                                if (mins > 0) return `${mins}m ${secs}s`;
-                                return `${secs}s`;
-                              };
-
-                              return (
-                                <TableRow key={user.id} className="border-b border-gray-700">
-                                  <TableCell className="py-3 px-4">
-                                    <div>
-                                      <div className="font-medium flex items-center gap-2">
-                                        <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
-                                        {user.email}
-                                      </div>
-                                      <div className="text-xs text-gray-400">
-                                        {user.name || user.username || `User #${user.userId}`}
-                                      </div>
-                                    </div>
-                                  </TableCell>
-                                  <TableCell className="py-3 px-4">
-                                    <span className="font-mono text-sm">{user.ip || 'Unknown'}</span>
-                                  </TableCell>
-                                  <TableCell className="py-3 px-4">
-                                    <span className="text-sm text-gray-400">
-                                      {(() => {
-                                        if (!user.loginTime) return 'N/A';
-                                        const d = new Date(user.loginTime);
-                                        return isNaN(d.getTime()) ? 'Invalid Date' : d.toLocaleString();
-                                      })()}
-                                    </span>
-                                  </TableCell>
-                                  <TableCell className="py-3 px-4">
-                                    <span className="text-sm text-green-400 font-medium">
-                                      {formatDuration(user.sessionDuration)}
-                                    </span>
-                                  </TableCell>
-                                </TableRow>
-                              );
-                            })
-                          )}
-                        </TableBody>
-                      </Table>
-                    </>
-                  )}
-                </div>
-              ) : userFilterTab === "logins" ? (
-                /* Login History View */
-                <div className="overflow-x-auto">
-                  {isLoadingLoginHistory ? (
-                    <div className="flex items-center justify-center h-40">
-                      <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary"></div>
-                    </div>
-                  ) : (
-                    <>
-                      <div className="rounded-md border border-cyan-700/40 bg-cyan-950/20 p-3 text-xs text-cyan-100/90 mb-4">
-                        <FieldHintLabel label="Login Trail" hint={USER_MANAGEMENT_FIELD_HELP.loginTrailOverview.tooltip} />
-                        <p className="text-xs text-cyan-100/90 mt-1">{USER_MANAGEMENT_FIELD_HELP.loginTrailOverview.inline}</p>
-                      </div>
-                      <Table className="border-collapse">
-                      <TableHeader>
-                        <TableRow className="border-b border-gray-700">
-                          <TableHead className="py-3 px-4 text-left text-gray-400">User</TableHead>
-                          <TableHead className="py-3 px-4 text-left text-gray-400">IP Address</TableHead>
-                          <TableHead className="py-3 px-4 text-left text-gray-400">User Agent</TableHead>
-                          <TableHead className="py-3 px-4 text-left text-gray-400" title={USER_MANAGEMENT_FIELD_HELP.loginTrailOverview.tooltip}>Status</TableHead>
-                          <TableHead className="py-3 px-4 text-left text-gray-400">Time</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {allLoginHistory.length === 0 ? (
-                          <TableRow>
-                            <TableCell colSpan={5} className="text-center py-4">
-                              No login history found
-                            </TableCell>
-                          </TableRow>
-                        ) : (
-                          allLoginHistory.map((entry) => {
-                            const ipValue = entry.ipAddress ?? entry.ip ?? entry.ip_address;
-                            const userAgentValue = entry.userAgent ?? entry.user_agent;
-                            return (
-                              <TableRow key={entry.id} className={`border-b border-gray-700 ${!entry.success ? 'bg-red-900/20' : ''}`}>
-                                <TableCell className="py-3 px-4">
-                                  <div>
-                                    <div className="font-medium">{entry.email}</div>
-                                    <div className="text-xs text-gray-400">{entry.username || `User #${entry.userId}`}</div>
-                                  </div>
-                                </TableCell>
-                                <TableCell className="py-3 px-4">
-                                  <span className="font-mono text-sm">{ipValue || 'Unknown'}</span>
-                                </TableCell>
-                                <TableCell className="py-3 px-4">
-                                  <span className="text-xs text-gray-400 max-w-xs truncate block" title={userAgentValue || ''}>
-                                    {userAgentValue ? (userAgentValue.length > 50 ? userAgentValue.substring(0, 50) + '...' : userAgentValue) : 'Unknown'}
-                                  </span>
-                                </TableCell>
-                                <TableCell className="py-3 px-4">
-                                  {entry.success ? (
-                                    <span className="text-xs px-2 py-0.5 rounded bg-green-600 text-white">Success</span>
-                                  ) : (
-                                    <div>
-                                      <span className="text-xs px-2 py-0.5 rounded bg-red-600 text-white">Failed</span>
-                                      {entry.failureReason && (
-                                        <div className="text-xs text-red-400 mt-1">{entry.failureReason}</div>
-                                      )}
-                                    </div>
-                                  )}
-                                </TableCell>
-                                <TableCell className="py-3 px-4">
-                                  <span className="text-sm text-gray-400">
-                                    {(() => {
-                                      if (!entry.createdAt) return 'N/A';
-                                      const ts = entry.createdAt;
-                                      // Handle string ISO dates
-                                      if (typeof ts === 'string') {
-                                        const d = new Date(ts);
-                                        if (!isNaN(d.getTime())) return d.toLocaleString();
-                                        // Try as numeric string
-                                        const num = Number(ts);
-                                        if (!isNaN(num)) {
-                                          const d2 = new Date(num > 1e12 ? num : num * 1000);
-                                          return isNaN(d2.getTime()) ? 'Invalid Date' : d2.toLocaleString();
-                                        }
-                                        return ts;
-                                      }
-                                      // Handle numeric timestamps
-                                      if (typeof ts === 'number') {
-                                        const d = new Date(ts > 1e12 ? ts : ts * 1000);
-                                        return isNaN(d.getTime()) ? 'Invalid Date' : d.toLocaleString();
-                                      }
-                                      return String(ts);
-                                    })()}
-                                  </span>
+                          </TableHeader>
+                          <TableBody>
+                            {(!onlineData?.onlineUsers || onlineData.onlineUsers.length === 0) ? (
+                              <TableRow>
+                                <TableCell colSpan={4} className="text-center py-4 text-gray-400">
+                                  No users currently online
                                 </TableCell>
                               </TableRow>
-                            );
-                          })
-                        )}
-                      </TableBody>
-                      </Table>
-                    </>
-                  )}
-                </div>
-              ) : userFilterTab === "audit" ? (
-                /* Audit Trail View */
-                <div className="overflow-x-auto">
-                  {isLoadingAuditTrail ? (
-                    <div className="flex items-center justify-center h-40">
-                      <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary"></div>
-                    </div>
-                  ) : (
-                    <div className="space-y-4">
-                      <div className="rounded-md border border-cyan-700/40 bg-cyan-950/20 p-3 text-xs text-cyan-100/90">
-                        <FieldHintLabel label="Audit Trail" hint={USER_MANAGEMENT_FIELD_HELP.auditOverview.tooltip} />
-                        <p className="text-xs text-cyan-100/90 mt-1">{USER_MANAGEMENT_FIELD_HELP.auditOverview.inline}</p>
-                      </div>
-                      <div className="flex gap-4 mb-4">
-                        <div className="bg-blue-900/30 border border-blue-600/50 rounded-lg p-4 flex-1">
-                          <div className="text-3xl font-bold text-blue-400">{auditTrailData?.signups?.length || 0}</div>
-                          <div className="text-sm text-gray-400">Recent Signups</div>
-                        </div>
-                        <div className="bg-green-900/30 border border-green-600/50 rounded-lg p-4 flex-1">
-                          <div className="text-3xl font-bold text-green-400">{auditTrailData?.logins?.filter(l => l.success).length || 0}</div>
-                          <div className="text-sm text-gray-400">Successful Logins</div>
-                        </div>
-                        <div className="bg-red-900/30 border border-red-600/50 rounded-lg p-4 flex-1">
-                          <div className="text-3xl font-bold text-red-400">{auditTrailData?.logins?.filter(l => !l.success).length || 0}</div>
-                          <div className="text-sm text-gray-400">Failed Logins</div>
-                        </div>
-                        <div className="bg-orange-900/30 border border-orange-600/50 rounded-lg p-4 flex-1">
-                          <div className="text-3xl font-bold text-orange-400">{auditTrailData?.adminActions?.length || 0}</div>
-                          <div className="text-sm text-gray-400">Admin Actions</div>
-                        </div>
-                      </div>
+                            ) : (
+                              onlineData.onlineUsers.map((user) => {
+                                const formatDuration = (seconds: number) => {
+                                  const hours = Math.floor(seconds / 3600);
+                                  const mins = Math.floor((seconds % 3600) / 60);
+                                  const secs = seconds % 60;
+                                  if (hours > 0) return `${hours}h ${mins}m ${secs}s`;
+                                  if (mins > 0) return `${mins}m ${secs}s`;
+                                  return `${secs}s`;
+                                };
 
-                      {/* Event Type Filter */}
-                      <div className="space-y-2">
-                        <FieldHintLabel label="Event Type Filter" hint={USER_MANAGEMENT_FIELD_HELP.auditEventFilter.tooltip} />
-                        <p className="text-xs text-gray-400">{USER_MANAGEMENT_FIELD_HELP.auditEventFilter.inline}</p>
-                      <div className="flex gap-2 flex-wrap">
-                        {[
-                          { value: "all", label: "All Events", color: "bg-gray-600" },
-                          { value: "signup", label: "Signups", color: "bg-blue-600" },
-                          { value: "login_success", label: "Login Success", color: "bg-green-600" },
-                          { value: "login_fail", label: "Login Fail", color: "bg-red-600" },
-                          { value: "admin", label: "Admin Actions", color: "bg-orange-600" },
-                        ].map(filter => (
-                          <button
-                            key={filter.value}
-                            onClick={() => setAuditEventFilter(filter.value as any)}
-                            className={`px-3 py-1.5 rounded text-sm transition ${auditEventFilter === filter.value
-                              ? `${filter.color} text-white`
-                              : "bg-neutral-700 text-gray-300 hover:bg-neutral-600"
-                              }`}
-                            title={USER_MANAGEMENT_FIELD_HELP.auditEventFilter.tooltip}
-                          >
-                            {filter.label}
-                          </button>
-                        ))}
+                                return (
+                                  <TableRow key={user.id} className="border-b border-gray-700">
+                                    <TableCell className="py-3 px-4">
+                                      <div>
+                                        <div className="font-medium flex items-center gap-2">
+                                          <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
+                                          {user.email}
+                                        </div>
+                                        <div className="text-xs text-gray-400">
+                                          {user.name || user.username || `User #${user.userId}`}
+                                        </div>
+                                      </div>
+                                    </TableCell>
+                                    <TableCell className="py-3 px-4">
+                                      <span className="font-mono text-sm">{user.ip || 'Unknown'}</span>
+                                    </TableCell>
+                                    <TableCell className="py-3 px-4">
+                                      <span className="text-sm text-gray-400">
+                                        {(() => {
+                                          if (!user.loginTime) return 'N/A';
+                                          const d = new Date(user.loginTime);
+                                          return isNaN(d.getTime()) ? 'Invalid Date' : d.toLocaleString();
+                                        })()}
+                                      </span>
+                                    </TableCell>
+                                    <TableCell className="py-3 px-4">
+                                      <span className="text-sm text-green-400 font-medium">
+                                        {formatDuration(user.sessionDuration)}
+                                      </span>
+                                    </TableCell>
+                                  </TableRow>
+                                );
+                              })
+                            )}
+                          </TableBody>
+                        </Table>
+                      </>
+                    )}
+                  </div>
+                ) : userFilterTab === "logins" ? (
+                  /* Login History View */
+                  <div className="overflow-x-auto">
+                    {isLoadingLoginHistory ? (
+                      <div className="flex items-center justify-center h-40">
+                        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary"></div>
                       </div>
+                    ) : (
+                      <>
+                        <div className="rounded-md border border-cyan-700/40 bg-cyan-950/20 p-3 text-xs text-cyan-100/90 mb-4">
+                          <FieldHintLabel label="Login Trail" hint={USER_MANAGEMENT_FIELD_HELP.loginTrailOverview.tooltip} />
+                          <p className="text-xs text-cyan-100/90 mt-1">{USER_MANAGEMENT_FIELD_HELP.loginTrailOverview.inline}</p>
+                        </div>
+                        <Table className="border-collapse">
+                          <TableHeader>
+                            <TableRow className="border-b border-gray-700">
+                              <TableHead className="py-3 px-4 text-left text-gray-400">User</TableHead>
+                              <TableHead className="py-3 px-4 text-left text-gray-400">IP Address</TableHead>
+                              <TableHead className="py-3 px-4 text-left text-gray-400">User Agent</TableHead>
+                              <TableHead className="py-3 px-4 text-left text-gray-400" title={USER_MANAGEMENT_FIELD_HELP.loginTrailOverview.tooltip}>Status</TableHead>
+                              <TableHead className="py-3 px-4 text-left text-gray-400">Time</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {allLoginHistory.length === 0 ? (
+                              <TableRow>
+                                <TableCell colSpan={5} className="text-center py-4">
+                                  No login history found
+                                </TableCell>
+                              </TableRow>
+                            ) : (
+                              allLoginHistory.map((entry) => {
+                                const ipValue = entry.ipAddress ?? entry.ip ?? entry.ip_address;
+                                const userAgentValue = entry.userAgent ?? entry.user_agent;
+                                return (
+                                  <TableRow key={entry.id} className={`border-b border-gray-700 ${!entry.success ? 'bg-red-900/20' : ''}`}>
+                                    <TableCell className="py-3 px-4">
+                                      <div>
+                                        <div className="font-medium">{entry.email}</div>
+                                        <div className="text-xs text-gray-400">{entry.username || `User #${entry.userId}`}</div>
+                                      </div>
+                                    </TableCell>
+                                    <TableCell className="py-3 px-4">
+                                      <span className="font-mono text-sm">{ipValue || 'Unknown'}</span>
+                                    </TableCell>
+                                    <TableCell className="py-3 px-4">
+                                      <span className="text-xs text-gray-400 max-w-xs truncate block" title={userAgentValue || ''}>
+                                        {userAgentValue ? (userAgentValue.length > 50 ? userAgentValue.substring(0, 50) + '...' : userAgentValue) : 'Unknown'}
+                                      </span>
+                                    </TableCell>
+                                    <TableCell className="py-3 px-4">
+                                      {entry.success ? (
+                                        <span className="text-xs px-2 py-0.5 rounded bg-green-600 text-white">Success</span>
+                                      ) : (
+                                        <div>
+                                          <span className="text-xs px-2 py-0.5 rounded bg-red-600 text-white">Failed</span>
+                                          {entry.failureReason && (
+                                            <div className="text-xs text-red-400 mt-1">{entry.failureReason}</div>
+                                          )}
+                                        </div>
+                                      )}
+                                    </TableCell>
+                                    <TableCell className="py-3 px-4">
+                                      <span className="text-sm text-gray-400">
+                                        {(() => {
+                                          if (!entry.createdAt) return 'N/A';
+                                          const ts = entry.createdAt;
+                                          // Handle string ISO dates
+                                          if (typeof ts === 'string') {
+                                            const d = new Date(ts);
+                                            if (!isNaN(d.getTime())) return d.toLocaleString();
+                                            // Try as numeric string
+                                            const num = Number(ts);
+                                            if (!isNaN(num)) {
+                                              const d2 = new Date(num > 1e12 ? num : num * 1000);
+                                              return isNaN(d2.getTime()) ? 'Invalid Date' : d2.toLocaleString();
+                                            }
+                                            return ts;
+                                          }
+                                          // Handle numeric timestamps
+                                          if (typeof ts === 'number') {
+                                            const d = new Date(ts > 1e12 ? ts : ts * 1000);
+                                            return isNaN(d.getTime()) ? 'Invalid Date' : d.toLocaleString();
+                                          }
+                                          return String(ts);
+                                        })()}
+                                      </span>
+                                    </TableCell>
+                                  </TableRow>
+                                );
+                              })
+                            )}
+                          </TableBody>
+                        </Table>
+                      </>
+                    )}
+                  </div>
+                ) : userFilterTab === "audit" ? (
+                  /* Audit Trail View */
+                  <div className="overflow-x-auto">
+                    {isLoadingAuditTrail ? (
+                      <div className="flex items-center justify-center h-40">
+                        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary"></div>
                       </div>
+                    ) : (
+                      <div className="space-y-4">
+                        <div className="rounded-md border border-cyan-700/40 bg-cyan-950/20 p-3 text-xs text-cyan-100/90">
+                          <FieldHintLabel label="Audit Trail" hint={USER_MANAGEMENT_FIELD_HELP.auditOverview.tooltip} />
+                          <p className="text-xs text-cyan-100/90 mt-1">{USER_MANAGEMENT_FIELD_HELP.auditOverview.inline}</p>
+                        </div>
+                        <div className="flex gap-4 mb-4">
+                          <div className="bg-blue-900/30 border border-blue-600/50 rounded-lg p-4 flex-1">
+                            <div className="text-3xl font-bold text-blue-400">{auditTrailData?.signups?.length || 0}</div>
+                            <div className="text-sm text-gray-400">Recent Signups</div>
+                          </div>
+                          <div className="bg-green-900/30 border border-green-600/50 rounded-lg p-4 flex-1">
+                            <div className="text-3xl font-bold text-green-400">{auditTrailData?.logins?.filter(l => l.success).length || 0}</div>
+                            <div className="text-sm text-gray-400">Successful Logins</div>
+                          </div>
+                          <div className="bg-red-900/30 border border-red-600/50 rounded-lg p-4 flex-1">
+                            <div className="text-3xl font-bold text-red-400">{auditTrailData?.logins?.filter(l => !l.success).length || 0}</div>
+                            <div className="text-sm text-gray-400">Failed Logins</div>
+                          </div>
+                          <div className="bg-orange-900/30 border border-orange-600/50 rounded-lg p-4 flex-1">
+                            <div className="text-3xl font-bold text-orange-400">{auditTrailData?.adminActions?.length || 0}</div>
+                            <div className="text-sm text-gray-400">Admin Actions</div>
+                          </div>
+                        </div>
 
-                      <Card className="bg-neutral-700 border-gray-600">
-                        <CardHeader>
-                          <CardTitle className="text-base">Combined Audit Timeline</CardTitle>
-                        </CardHeader>
-                        <CardContent>
-                          <div className="overflow-x-auto">
-                            <Table className="border-collapse min-w-[1000px]">
+                        {/* Event Type Filter */}
+                        <div className="space-y-2">
+                          <FieldHintLabel label="Event Type Filter" hint={USER_MANAGEMENT_FIELD_HELP.auditEventFilter.tooltip} />
+                          <p className="text-xs text-gray-400">{USER_MANAGEMENT_FIELD_HELP.auditEventFilter.inline}</p>
+                          <div className="flex gap-2 flex-wrap">
+                            {[
+                              { value: "all", label: "All Events", color: "bg-gray-600" },
+                              { value: "signup", label: "Signups", color: "bg-blue-600" },
+                              { value: "login_success", label: "Login Success", color: "bg-green-600" },
+                              { value: "login_fail", label: "Login Fail", color: "bg-red-600" },
+                              { value: "admin", label: "Admin Actions", color: "bg-orange-600" },
+                            ].map(filter => (
+                              <button
+                                key={filter.value}
+                                onClick={() => setAuditEventFilter(filter.value as any)}
+                                className={`px-3 py-1.5 rounded text-sm transition ${auditEventFilter === filter.value
+                                  ? `${filter.color} text-white`
+                                  : "bg-neutral-700 text-gray-300 hover:bg-neutral-600"
+                                  }`}
+                                title={USER_MANAGEMENT_FIELD_HELP.auditEventFilter.tooltip}
+                              >
+                                {filter.label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        <Card className="bg-neutral-700 border-gray-600">
+                          <CardHeader>
+                            <CardTitle className="text-base">Combined Audit Timeline</CardTitle>
+                          </CardHeader>
+                          <CardContent>
+                            <div className="overflow-x-auto">
+                              <Table className="border-collapse min-w-[1000px]">
+                                <TableHeader>
+                                  <TableRow className="border-b border-gray-700">
+                                    <TableHead className="py-3 px-3 text-left text-gray-400">Time</TableHead>
+                                    <TableHead className="py-3 px-3 text-left text-gray-400">Event</TableHead>
+                                    <TableHead className="py-3 px-3 text-left text-gray-400">User</TableHead>
+                                    <TableHead className="py-3 px-3 text-left text-gray-400">Details</TableHead>
+                                    <TableHead className="py-3 px-3 text-left text-gray-400">IP</TableHead>
+                                    <TableHead className="py-3 px-3 text-left text-gray-400">Location</TableHead>
+                                    <TableHead className="py-3 px-3 text-left text-gray-400">Timezone</TableHead>
+                                    <TableHead className="py-3 px-3 text-left text-gray-400">Device</TableHead>
+                                  </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                  {(() => {
+                                    let allEvents = [
+                                      ...(auditTrailData?.signups?.map((s: any) => ({
+                                        type: 'SIGNUP' as const,
+                                        time: s.createdAt,
+                                        email: s.email,
+                                        detail: `New user: ${s.username}`,
+                                        id: `signup-${s.id}`,
+                                        ip: s.signupIp || null,
+                                        location: [s.signupCity, s.signupRegion, s.signupCountryCode].filter(Boolean).join(', ') || null,
+                                        coords: s.signupLatitude && s.signupLongitude ? `${Number(s.signupLatitude).toFixed(2)}, ${Number(s.signupLongitude).toFixed(2)}` : null,
+                                        timezone: s.signupClientTz || s.signupInferredTz || null,
+                                        device: [s.signupDeviceType, s.signupBrowser, s.signupOs].filter(Boolean).join(' / ') || parseUserAgent(s.signupUserAgent),
+                                        userAgent: s.signupUserAgent || null,
+                                      })) || []),
+                                      ...(auditTrailData?.logins?.map((l: any) => {
+                                        const loginIp = l.ip ?? l.ipAddress ?? l.ip_address ?? null;
+                                        const loginUa = l.userAgent ?? l.user_agent ?? null;
+                                        return {
+                                          type: l.success ? 'LOGIN_SUCCESS' as const : 'LOGIN_FAIL' as const,
+                                          time: l.createdAt,
+                                          email: l.email,
+                                          detail: l.success ? 'Successful login' : 'Failed login attempt',
+                                          id: `login-${l.id}`,
+                                          ip: loginIp,
+                                          location: [l.city, l.region, l.countryCode].filter(Boolean).join(', ') || null,
+                                          coords: l.latitude && l.longitude ? `${Number(l.latitude).toFixed(2)}, ${Number(l.longitude).toFixed(2)}` : null,
+                                          timezone: l.clientTz || null,
+                                          device: parseUserAgent(loginUa),
+                                          userAgent: loginUa,
+                                        };
+                                      }) || []),
+                                      ...(auditTrailData?.adminActions?.map((a: any) => ({
+                                        type: 'ADMIN_ACTION' as const,
+                                        time: a.createdAt,
+                                        email: `Admin #${a.adminId} → User #${a.userId}`,
+                                        detail: a.actionType,
+                                        id: `admin-${a.id}`,
+                                        ip: a.ip || null,
+                                        location: null,
+                                        coords: null,
+                                        timezone: null,
+                                        device: parseUserAgent(a.userAgent),
+                                        userAgent: a.userAgent || null,
+                                      })) || [])
+                                    ];
+
+                                    // Apply event type filter
+                                    if (auditEventFilter !== "all") {
+                                      allEvents = allEvents.filter(event => {
+                                        if (auditEventFilter === "signup") return event.type === "SIGNUP";
+                                        if (auditEventFilter === "login_success") return event.type === "LOGIN_SUCCESS";
+                                        if (auditEventFilter === "login_fail") return event.type === "LOGIN_FAIL";
+                                        if (auditEventFilter === "admin") return event.type === "ADMIN_ACTION";
+                                        return true;
+                                      });
+                                    }
+
+                                    allEvents = allEvents.sort((a, b) => b.time - a.time).slice(0, 100);
+
+                                    if (allEvents.length === 0) {
+                                      return (
+                                        <TableRow>
+                                          <TableCell colSpan={8} className="text-center py-4 text-gray-400">
+                                            No audit events found
+                                          </TableCell>
+                                        </TableRow>
+                                      );
+                                    }
+
+                                    return allEvents.map((event) => (
+                                      <TableRow key={event.id} className="border-b border-gray-700">
+                                        <TableCell className="py-3 px-3">
+                                          <span className="text-sm text-gray-400 whitespace-nowrap">
+                                            {new Date(event.time * 1000).toLocaleString()}
+                                          </span>
+                                        </TableCell>
+                                        <TableCell className="py-3 px-3">
+                                          <span className={`text-xs px-2 py-0.5 rounded whitespace-nowrap ${event.type === 'SIGNUP' ? 'bg-blue-600 text-white' :
+                                            event.type === 'LOGIN_SUCCESS' ? 'bg-green-600 text-white' :
+                                              event.type === 'LOGIN_FAIL' ? 'bg-red-600 text-white' :
+                                                'bg-orange-600 text-white'
+                                            }`}>
+                                            {event.type.replace('_', ' ')}
+                                          </span>
+                                        </TableCell>
+                                        <TableCell className="py-3 px-3 font-medium text-sm">{event.email}</TableCell>
+                                        <TableCell className="py-3 px-3 text-gray-400 text-sm">{event.detail}</TableCell>
+                                        <TableCell className="py-3 px-3">
+                                          {event.ip ? (
+                                            <span className="text-xs font-mono text-cyan-400" title={event.ip}>
+                                              {event.ip.length > 15 ? event.ip.slice(0, 15) + '...' : event.ip}
+                                            </span>
+                                          ) : (
+                                            <span className="text-xs text-gray-500">-</span>
+                                          )}
+                                        </TableCell>
+                                        <TableCell className="py-3 px-3">
+                                          {event.location ? (
+                                            <div className="text-xs">
+                                              <div className="text-gray-300">{event.location}</div>
+                                              {event.coords && <div className="text-gray-500 text-[10px]">{event.coords}</div>}
+                                            </div>
+                                          ) : (
+                                            <span className="text-xs text-gray-500">-</span>
+                                          )}
+                                        </TableCell>
+                                        <TableCell className="py-3 px-3">
+                                          {event.timezone ? (
+                                            <span className="text-xs text-purple-400">{event.timezone}</span>
+                                          ) : (
+                                            <span className="text-xs text-gray-500">-</span>
+                                          )}
+                                        </TableCell>
+                                        <TableCell className="py-3 px-3">
+                                          {event.device ? (
+                                            <span className="text-xs text-yellow-400" title={event.userAgent || ''}>
+                                              {event.device.length > 30 ? event.device.slice(0, 30) + '...' : event.device}
+                                            </span>
+                                          ) : (
+                                            <span className="text-xs text-gray-500">-</span>
+                                          )}
+                                        </TableCell>
+                                      </TableRow>
+                                    ));
+                                  })()}
+                                </TableBody>
+                              </Table>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      </div>
+                    )}
+                  </div>
+                ) : userFilterTab === "kyc" ? (
+                  /* KYC Queue View */
+                  <div className="overflow-x-auto">
+                    {isLoadingKycQueue ? (
+                      <div className="flex items-center justify-center h-40">
+                        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary"></div>
+                      </div>
+                    ) : (
+                      <div className="space-y-4">
+                        <div className="bg-teal-900/20 border border-teal-600/50 rounded-lg p-4">
+                          <FieldHintLabel
+                            label="Contender Pipeline"
+                            hint={USER_MANAGEMENT_FIELD_HELP.kycOverview.tooltip}
+                            labelClassName="text-lg font-semibold text-teal-400"
+                          />
+                          <p className="text-xs text-gray-300 mt-1">{USER_MANAGEMENT_FIELD_HELP.kycOverview.inline}</p>
+                          <p className="text-sm text-gray-400 mt-2">
+                            Users who meet performance criteria (P1: {policySummary?.policyContenderPath1MinAgeDays ?? 30}+ days, {Math.round((policySummary?.policyContenderPath1MinBalancePct ?? 1.2) * 100)}%+ balance, {policySummary?.policyContenderPath1MinTradesLifetime ?? 30}+ trades)
+                            or (P2: {policySummary?.policyContenderPath2MinAgeDays ?? 90}+ days, {Math.round((policySummary?.policyContenderPath2MinReturnLast90 ?? 0.1) * 100)}%+ last-{path2WindowDays}d return, {policySummary?.policyContenderPath2MinTradesLast90 ?? 20}+ trades, last trade within {policySummary?.policyContenderPath2MaxDaysSinceLastTrade ?? 14} days)
+                            will appear here for KYC/funding consideration.
+                          </p>
+                        </div>
+
+                        <Card className="bg-neutral-700 border-gray-600">
+                          <CardHeader>
+                            <FieldHintLabel
+                              label="Policy Controls"
+                              hint={USER_MANAGEMENT_FIELD_HELP.kycOverview.tooltip}
+                              labelClassName="text-base font-semibold"
+                            />
+                            <p className="text-xs text-gray-400 mt-1">{USER_MANAGEMENT_FIELD_HELP.kycOverview.inline}</p>
+                          </CardHeader>
+                          <CardContent>
+                            {isLoadingPolicyConfig || !policyConfig ? (
+                              <div className="text-sm text-gray-400">Loading policy controls...</div>
+                            ) : (
+                              <div className="space-y-4">
+                                <div className="grid gap-4 md:grid-cols-2">
+                                  <div className="rounded-md border border-green-600/50 p-3">
+                                    <div className="text-sm font-medium text-green-500 mb-3">Path 1 Criteria</div>
+                                    <div className="space-y-4">
+                                      <div className="space-y-2">
+                                        <FieldHintLabel
+                                          label="Min Age (days)"
+                                          hint={USER_MANAGEMENT_FIELD_HELP.kycPath1MinAgeDays.tooltip}
+                                          labelClassName="text-sm text-green-500"
+                                        />
+                                        <p className="text-xs text-gray-400">{USER_MANAGEMENT_FIELD_HELP.kycPath1MinAgeDays.inline}</p>
+                                        <Input
+                                          type="number"
+                                          value={policyConfig.policyContenderPath1MinAgeDays}
+                                          title={USER_MANAGEMENT_FIELD_HELP.kycPath1MinAgeDays.tooltip}
+                                          onChange={(e) => {
+                                            setPolicyConfig({
+                                              ...policyConfig,
+                                              policyContenderPath1MinAgeDays: Number(e.target.value),
+                                            });
+                                            setPolicyConfigChanged(true);
+                                          }}
+                                        />
+                                      </div>
+                                      <div className="space-y-2">
+                                        <FieldHintLabel
+                                          label="Min Trades (lifetime)"
+                                          hint={USER_MANAGEMENT_FIELD_HELP.kycPath1MinTradesLifetime.tooltip}
+                                          labelClassName="text-sm text-green-500"
+                                        />
+                                        <p className="text-xs text-gray-400">{USER_MANAGEMENT_FIELD_HELP.kycPath1MinTradesLifetime.inline}</p>
+                                        <Input
+                                          type="number"
+                                          value={policyConfig.policyContenderPath1MinTradesLifetime}
+                                          title={USER_MANAGEMENT_FIELD_HELP.kycPath1MinTradesLifetime.tooltip}
+                                          onChange={(e) => {
+                                            setPolicyConfig({
+                                              ...policyConfig,
+                                              policyContenderPath1MinTradesLifetime: Number(e.target.value),
+                                            });
+                                            setPolicyConfigChanged(true);
+                                          }}
+                                        />
+                                      </div>
+                                      <div className="space-y-2">
+                                        <FieldHintLabel
+                                          label="Min Balance Multiplier (1.20 = 120%)"
+                                          hint={USER_MANAGEMENT_FIELD_HELP.kycPath1MinBalancePct.tooltip}
+                                          labelClassName="text-sm text-green-500"
+                                        />
+                                        <p className="text-xs text-gray-400">{USER_MANAGEMENT_FIELD_HELP.kycPath1MinBalancePct.inline}</p>
+                                        <Input
+                                          type="number"
+                                          step="0.01"
+                                          value={policyConfig.policyContenderPath1MinBalancePct}
+                                          title={USER_MANAGEMENT_FIELD_HELP.kycPath1MinBalancePct.tooltip}
+                                          onChange={(e) => {
+                                            setPolicyConfig({
+                                              ...policyConfig,
+                                              policyContenderPath1MinBalancePct: Number(e.target.value),
+                                            });
+                                            setPolicyConfigChanged(true);
+                                          }}
+                                        />
+                                      </div>
+                                    </div>
+                                  </div>
+                                  <div className="rounded-md border border-teal-600/50 p-3">
+                                    <div className="text-sm font-medium text-teal-400 mb-3">Path 2 Criteria</div>
+                                    <div className="space-y-4">
+                                      <div className="space-y-2">
+                                        <FieldHintLabel
+                                          label="Min Age (days)"
+                                          hint={USER_MANAGEMENT_FIELD_HELP.kycPath2MinAgeDays.tooltip}
+                                          labelClassName="text-sm text-teal-400"
+                                        />
+                                        <p className="text-xs text-gray-400">{USER_MANAGEMENT_FIELD_HELP.kycPath2MinAgeDays.inline}</p>
+                                        <Input
+                                          type="number"
+                                          value={policyConfig.policyContenderPath2MinAgeDays}
+                                          title={USER_MANAGEMENT_FIELD_HELP.kycPath2MinAgeDays.tooltip}
+                                          onChange={(e) => {
+                                            setPolicyConfig({
+                                              ...policyConfig,
+                                              policyContenderPath2MinAgeDays: Number(e.target.value),
+                                            });
+                                            setPolicyConfigChanged(true);
+                                          }}
+                                        />
+                                      </div>
+                                      <div className="space-y-2">
+                                        <FieldHintLabel
+                                          label={`Min Trades (last ${path2WindowDays}d)`}
+                                          hint={USER_MANAGEMENT_FIELD_HELP.kycPath2MinTradesLast90.tooltip}
+                                          labelClassName="text-sm text-teal-400"
+                                        />
+                                        <p className="text-xs text-gray-400">{USER_MANAGEMENT_FIELD_HELP.kycPath2MinTradesLast90.inline}</p>
+                                        <Input
+                                          type="number"
+                                          value={policyConfig.policyContenderPath2MinTradesLast90}
+                                          title={USER_MANAGEMENT_FIELD_HELP.kycPath2MinTradesLast90.tooltip}
+                                          onChange={(e) => {
+                                            setPolicyConfig({
+                                              ...policyConfig,
+                                              policyContenderPath2MinTradesLast90: Number(e.target.value),
+                                            });
+                                            setPolicyConfigChanged(true);
+                                          }}
+                                        />
+                                      </div>
+                                      <div className="space-y-2">
+                                        <FieldHintLabel
+                                          label="Min Return (0.10 = 10%)"
+                                          hint={USER_MANAGEMENT_FIELD_HELP.kycPath2MinReturnLast90.tooltip}
+                                          labelClassName="text-sm text-teal-400"
+                                        />
+                                        <p className="text-xs text-gray-400">{USER_MANAGEMENT_FIELD_HELP.kycPath2MinReturnLast90.inline}</p>
+                                        <Input
+                                          type="number"
+                                          step="0.01"
+                                          value={policyConfig.policyContenderPath2MinReturnLast90}
+                                          title={USER_MANAGEMENT_FIELD_HELP.kycPath2MinReturnLast90.tooltip}
+                                          onChange={(e) => {
+                                            setPolicyConfig({
+                                              ...policyConfig,
+                                              policyContenderPath2MinReturnLast90: Number(e.target.value),
+                                            });
+                                            setPolicyConfigChanged(true);
+                                          }}
+                                        />
+                                      </div>
+                                      <div className="space-y-2">
+                                        <FieldHintLabel
+                                          label="Max Days Since Last Trade"
+                                          hint={USER_MANAGEMENT_FIELD_HELP.kycPath2MaxDaysSinceLastTrade.tooltip}
+                                          labelClassName="text-sm text-teal-400"
+                                        />
+                                        <p className="text-xs text-gray-400">{USER_MANAGEMENT_FIELD_HELP.kycPath2MaxDaysSinceLastTrade.inline}</p>
+                                        <Input
+                                          type="number"
+                                          value={policyConfig.policyContenderPath2MaxDaysSinceLastTrade}
+                                          title={USER_MANAGEMENT_FIELD_HELP.kycPath2MaxDaysSinceLastTrade.tooltip}
+                                          onChange={(e) => {
+                                            setPolicyConfig({
+                                              ...policyConfig,
+                                              policyContenderPath2MaxDaysSinceLastTrade: Number(e.target.value),
+                                            });
+                                            setPolicyConfigChanged(true);
+                                          }}
+                                        />
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                                <div className="rounded-md border border-gray-600/70 p-3">
+                                  <div className="text-sm font-medium text-gray-200">Messaging and OTP Limits</div>
+                                  <div className="mt-3 grid gap-4 md:grid-cols-2">
+                                    <div className="space-y-2">
+                                      <FieldHintLabel label="Email Resend Cooldown (sec)" hint={USER_MANAGEMENT_FIELD_HELP.kycEmailResendCooldownSec.tooltip} />
+                                      <p className="text-xs text-gray-400">{USER_MANAGEMENT_FIELD_HELP.kycEmailResendCooldownSec.inline}</p>
+                                      <Input
+                                        type="number"
+                                        value={policyConfig.policyEmailResendCooldownSec}
+                                        title={USER_MANAGEMENT_FIELD_HELP.kycEmailResendCooldownSec.tooltip}
+                                        onChange={(e) => {
+                                          setPolicyConfig({
+                                            ...policyConfig,
+                                            policyEmailResendCooldownSec: Number(e.target.value),
+                                          });
+                                          setPolicyConfigChanged(true);
+                                        }}
+                                      />
+                                    </div>
+                                    <div className="space-y-2">
+                                      <FieldHintLabel label="Email Daily Send Cap" hint={USER_MANAGEMENT_FIELD_HELP.kycEmailDailySendCap.tooltip} />
+                                      <p className="text-xs text-gray-400">{USER_MANAGEMENT_FIELD_HELP.kycEmailDailySendCap.inline}</p>
+                                      <Input
+                                        type="number"
+                                        value={policyConfig.policyEmailDailySendCap}
+                                        title={USER_MANAGEMENT_FIELD_HELP.kycEmailDailySendCap.tooltip}
+                                        onChange={(e) => {
+                                          setPolicyConfig({
+                                            ...policyConfig,
+                                            policyEmailDailySendCap: Number(e.target.value),
+                                          });
+                                          setPolicyConfigChanged(true);
+                                        }}
+                                      />
+                                    </div>
+                                    <div className="space-y-2">
+                                      <FieldHintLabel label="SMS Resend Cooldown (sec)" hint={USER_MANAGEMENT_FIELD_HELP.kycSmsResendCooldownSec.tooltip} />
+                                      <p className="text-xs text-gray-400">{USER_MANAGEMENT_FIELD_HELP.kycSmsResendCooldownSec.inline}</p>
+                                      <Input
+                                        type="number"
+                                        value={policyConfig.policySmsResendCooldownSec}
+                                        title={USER_MANAGEMENT_FIELD_HELP.kycSmsResendCooldownSec.tooltip}
+                                        onChange={(e) => {
+                                          setPolicyConfig({
+                                            ...policyConfig,
+                                            policySmsResendCooldownSec: Number(e.target.value),
+                                          });
+                                          setPolicyConfigChanged(true);
+                                        }}
+                                      />
+                                    </div>
+                                    <div className="space-y-2">
+                                      <FieldHintLabel label="SMS Daily Send Cap" hint={USER_MANAGEMENT_FIELD_HELP.kycSmsDailySendCap.tooltip} />
+                                      <p className="text-xs text-gray-400">{USER_MANAGEMENT_FIELD_HELP.kycSmsDailySendCap.inline}</p>
+                                      <Input
+                                        type="number"
+                                        value={policyConfig.policySmsDailySendCap}
+                                        title={USER_MANAGEMENT_FIELD_HELP.kycSmsDailySendCap.tooltip}
+                                        onChange={(e) => {
+                                          setPolicyConfig({
+                                            ...policyConfig,
+                                            policySmsDailySendCap: Number(e.target.value),
+                                          });
+                                          setPolicyConfigChanged(true);
+                                        }}
+                                      />
+                                    </div>
+                                    <div className="space-y-2">
+                                      <FieldHintLabel label="OTP Max Attempts" hint={USER_MANAGEMENT_FIELD_HELP.kycOtpMaxAttempts.tooltip} />
+                                      <p className="text-xs text-gray-400">{USER_MANAGEMENT_FIELD_HELP.kycOtpMaxAttempts.inline}</p>
+                                      <Input
+                                        type="number"
+                                        value={policyConfig.policyOtpMaxAttempts}
+                                        title={USER_MANAGEMENT_FIELD_HELP.kycOtpMaxAttempts.tooltip}
+                                        onChange={(e) => {
+                                          setPolicyConfig({
+                                            ...policyConfig,
+                                            policyOtpMaxAttempts: Number(e.target.value),
+                                          });
+                                          setPolicyConfigChanged(true);
+                                        }}
+                                      />
+                                    </div>
+                                    <div className="space-y-2">
+                                      <FieldHintLabel label="OTP Lock Minutes" hint={USER_MANAGEMENT_FIELD_HELP.kycOtpLockMinutes.tooltip} />
+                                      <p className="text-xs text-gray-400">{USER_MANAGEMENT_FIELD_HELP.kycOtpLockMinutes.inline}</p>
+                                      <Input
+                                        type="number"
+                                        value={policyConfig.policyOtpLockMinutes}
+                                        title={USER_MANAGEMENT_FIELD_HELP.kycOtpLockMinutes.tooltip}
+                                        onChange={(e) => {
+                                          setPolicyConfig({
+                                            ...policyConfig,
+                                            policyOtpLockMinutes: Number(e.target.value),
+                                          });
+                                          setPolicyConfigChanged(true);
+                                        }}
+                                      />
+                                    </div>
+                                  </div>
+                                </div>
+                                <div className="flex items-center justify-between gap-4">
+                                  <div>
+                                    <FieldHintLabel label="Auto-promote Performer" hint={USER_MANAGEMENT_FIELD_HELP.kycAutoPromotePerformer.tooltip} />
+                                    <p className="text-xs text-gray-400 mt-1">{USER_MANAGEMENT_FIELD_HELP.kycAutoPromotePerformer.inline}</p>
+                                  </div>
+                                  <Switch
+                                    checked={Boolean(policyConfig.policyAutoPromotePerformer)}
+                                    title={USER_MANAGEMENT_FIELD_HELP.kycAutoPromotePerformer.tooltip}
+                                    onCheckedChange={(checked) => {
+                                      setPolicyConfig({
+                                        ...policyConfig,
+                                        policyAutoPromotePerformer: checked,
+                                      });
+                                      setPolicyConfigChanged(true);
+                                    }}
+                                  />
+                                </div>
+                                <div className="flex justify-end">
+                                  <Button
+                                    disabled={!policyConfigChanged || policyConfigMutation.isPending}
+                                    onClick={() => policyConfig && policyConfigMutation.mutate(policyConfig)}
+                                    title={USER_MANAGEMENT_FIELD_HELP.kycSaveControls.tooltip}
+                                  >
+                                    {policyConfigMutation.isPending ? "Saving..." : "Save Controls"}
+                                  </Button>
+                                </div>
+                              </div>
+                            )}
+                          </CardContent>
+                        </Card>
+
+                        <Card className="bg-neutral-700 border-gray-600">
+                          <CardHeader>
+                            <FieldHintLabel
+                              label="KYC Candidates Queue"
+                              hint={USER_MANAGEMENT_FIELD_HELP.kycOverview.tooltip}
+                              labelClassName="text-base font-semibold"
+                            />
+                            <p className="text-xs text-gray-400 mt-1">{USER_MANAGEMENT_FIELD_HELP.kycOverview.inline}</p>
+                          </CardHeader>
+                          <CardContent>
+                            <Table className="border-collapse">
                               <TableHeader>
                                 <TableRow className="border-b border-gray-700">
-                                  <TableHead className="py-3 px-3 text-left text-gray-400">Time</TableHead>
-                                  <TableHead className="py-3 px-3 text-left text-gray-400">Event</TableHead>
-                                  <TableHead className="py-3 px-3 text-left text-gray-400">User</TableHead>
-                                  <TableHead className="py-3 px-3 text-left text-gray-400">Details</TableHead>
-                                  <TableHead className="py-3 px-3 text-left text-gray-400">IP</TableHead>
-                                  <TableHead className="py-3 px-3 text-left text-gray-400">Location</TableHead>
-                                  <TableHead className="py-3 px-3 text-left text-gray-400">Timezone</TableHead>
-                                  <TableHead className="py-3 px-3 text-left text-gray-400">Device</TableHead>
+                                  <TableHead className="py-3 px-4 text-left text-gray-400">User</TableHead>
+                                  <TableHead className="py-3 px-4 text-left text-gray-400">Account Age</TableHead>
+                                  <TableHead className="py-3 px-4 text-left text-gray-400">Trades (L/{path2WindowDays}d)</TableHead>
+                                  <TableHead className="py-3 px-4 text-left text-gray-400">Balance %</TableHead>
+                                  <TableHead className="py-3 px-4 text-left text-gray-400">Return {path2WindowDays}d</TableHead>
+                                  <TableHead className="py-3 px-4 text-left text-gray-400">Path</TableHead>
+                                  <TableHead className="py-3 px-4 text-left text-gray-400">Tier</TableHead>
+                                  <TableHead className="py-3 px-4 text-left text-gray-400" title={USER_MANAGEMENT_FIELD_HELP.kycInviteAction.tooltip}>Actions</TableHead>
                                 </TableRow>
                               </TableHeader>
                               <TableBody>
-                                {(() => {
-                                  let allEvents = [
-                                    ...(auditTrailData?.signups?.map((s: any) => ({
-                                      type: 'SIGNUP' as const,
-                                      time: s.createdAt,
-                                      email: s.email,
-                                      detail: `New user: ${s.username}`,
-                                      id: `signup-${s.id}`,
-                                      ip: s.signupIp || null,
-                                      location: [s.signupCity, s.signupRegion, s.signupCountryCode].filter(Boolean).join(', ') || null,
-                                      coords: s.signupLatitude && s.signupLongitude ? `${Number(s.signupLatitude).toFixed(2)}, ${Number(s.signupLongitude).toFixed(2)}` : null,
-                                      timezone: s.signupClientTz || s.signupInferredTz || null,
-                                      device: [s.signupDeviceType, s.signupBrowser, s.signupOs].filter(Boolean).join(' / ') || parseUserAgent(s.signupUserAgent),
-                                      userAgent: s.signupUserAgent || null,
-                                    })) || []),
-                                    ...(auditTrailData?.logins?.map((l: any) => {
-                                      const loginIp = l.ip ?? l.ipAddress ?? l.ip_address ?? null;
-                                      const loginUa = l.userAgent ?? l.user_agent ?? null;
-                                      return {
-                                        type: l.success ? 'LOGIN_SUCCESS' as const : 'LOGIN_FAIL' as const,
-                                        time: l.createdAt,
-                                        email: l.email,
-                                        detail: l.success ? 'Successful login' : 'Failed login attempt',
-                                        id: `login-${l.id}`,
-                                        ip: loginIp,
-                                        location: [l.city, l.region, l.countryCode].filter(Boolean).join(', ') || null,
-                                        coords: l.latitude && l.longitude ? `${Number(l.latitude).toFixed(2)}, ${Number(l.longitude).toFixed(2)}` : null,
-                                        timezone: l.clientTz || null,
-                                        device: parseUserAgent(loginUa),
-                                        userAgent: loginUa,
-                                      };
-                                    }) || []),
-                                    ...(auditTrailData?.adminActions?.map((a: any) => ({
-                                      type: 'ADMIN_ACTION' as const,
-                                      time: a.createdAt,
-                                      email: `Admin #${a.adminId} → User #${a.userId}`,
-                                      detail: a.actionType,
-                                      id: `admin-${a.id}`,
-                                      ip: a.ip || null,
-                                      location: null,
-                                      coords: null,
-                                      timezone: null,
-                                      device: parseUserAgent(a.userAgent),
-                                      userAgent: a.userAgent || null,
-                                    })) || [])
-                                  ];
-
-                                  // Apply event type filter
-                                  if (auditEventFilter !== "all") {
-                                    allEvents = allEvents.filter(event => {
-                                      if (auditEventFilter === "signup") return event.type === "SIGNUP";
-                                      if (auditEventFilter === "login_success") return event.type === "LOGIN_SUCCESS";
-                                      if (auditEventFilter === "login_fail") return event.type === "LOGIN_FAIL";
-                                      if (auditEventFilter === "admin") return event.type === "ADMIN_ACTION";
-                                      return true;
-                                    });
-                                  }
-
-                                  allEvents = allEvents.sort((a, b) => b.time - a.time).slice(0, 100);
-
-                                  if (allEvents.length === 0) {
-                                    return (
-                                      <TableRow>
-                                        <TableCell colSpan={8} className="text-center py-4 text-gray-400">
-                                          No audit events found
-                                        </TableCell>
-                                      </TableRow>
-                                    );
-                                  }
-
-                                  return allEvents.map((event) => (
-                                    <TableRow key={event.id} className="border-b border-gray-700">
-                                      <TableCell className="py-3 px-3">
-                                        <span className="text-sm text-gray-400 whitespace-nowrap">
-                                          {new Date(event.time * 1000).toLocaleString()}
-                                        </span>
-                                      </TableCell>
-                                      <TableCell className="py-3 px-3">
-                                        <span className={`text-xs px-2 py-0.5 rounded whitespace-nowrap ${event.type === 'SIGNUP' ? 'bg-blue-600 text-white' :
-                                          event.type === 'LOGIN_SUCCESS' ? 'bg-green-600 text-white' :
-                                            event.type === 'LOGIN_FAIL' ? 'bg-red-600 text-white' :
-                                              'bg-orange-600 text-white'
-                                          }`}>
-                                          {event.type.replace('_', ' ')}
-                                        </span>
-                                      </TableCell>
-                                      <TableCell className="py-3 px-3 font-medium text-sm">{event.email}</TableCell>
-                                      <TableCell className="py-3 px-3 text-gray-400 text-sm">{event.detail}</TableCell>
-                                      <TableCell className="py-3 px-3">
-                                        {event.ip ? (
-                                          <span className="text-xs font-mono text-cyan-400" title={event.ip}>
-                                            {event.ip.length > 15 ? event.ip.slice(0, 15) + '...' : event.ip}
-                                          </span>
-                                        ) : (
-                                          <span className="text-xs text-gray-500">-</span>
-                                        )}
-                                      </TableCell>
-                                      <TableCell className="py-3 px-3">
-                                        {event.location ? (
-                                          <div className="text-xs">
-                                            <div className="text-gray-300">{event.location}</div>
-                                            {event.coords && <div className="text-gray-500 text-[10px]">{event.coords}</div>}
-                                          </div>
-                                        ) : (
-                                          <span className="text-xs text-gray-500">-</span>
-                                        )}
-                                      </TableCell>
-                                      <TableCell className="py-3 px-3">
-                                        {event.timezone ? (
-                                          <span className="text-xs text-purple-400">{event.timezone}</span>
-                                        ) : (
-                                          <span className="text-xs text-gray-500">-</span>
-                                        )}
-                                      </TableCell>
-                                      <TableCell className="py-3 px-3">
-                                        {event.device ? (
-                                          <span className="text-xs text-yellow-400" title={event.userAgent || ''}>
-                                            {event.device.length > 30 ? event.device.slice(0, 30) + '...' : event.device}
-                                          </span>
-                                        ) : (
-                                          <span className="text-xs text-gray-500">-</span>
-                                        )}
-                                      </TableCell>
-                                    </TableRow>
-                                  ));
-                                })()}
-                              </TableBody>
-                            </Table>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    </div>
-                  )}
-                </div>
-              ) : userFilterTab === "kyc" ? (
-                /* KYC Queue View */
-                <div className="overflow-x-auto">
-                  {isLoadingKycQueue ? (
-                    <div className="flex items-center justify-center h-40">
-                      <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary"></div>
-                    </div>
-                  ) : (
-                    <div className="space-y-4">
-                      <div className="bg-teal-900/20 border border-teal-600/50 rounded-lg p-4">
-                        <FieldHintLabel
-                          label="Contender Pipeline"
-                          hint={USER_MANAGEMENT_FIELD_HELP.kycOverview.tooltip}
-                          labelClassName="text-lg font-semibold text-teal-400"
-                        />
-                        <p className="text-xs text-gray-300 mt-1">{USER_MANAGEMENT_FIELD_HELP.kycOverview.inline}</p>
-                        <p className="text-sm text-gray-400 mt-2">
-                          Users who meet performance criteria (P1: {policySummary?.policyContenderPath1MinAgeDays ?? 30}+ days, {Math.round((policySummary?.policyContenderPath1MinBalancePct ?? 1.2) * 100)}%+ balance, {policySummary?.policyContenderPath1MinTradesLifetime ?? 30}+ trades)
-                          or (P2: {policySummary?.policyContenderPath2MinAgeDays ?? 90}+ days, {Math.round((policySummary?.policyContenderPath2MinReturnLast90 ?? 0.1) * 100)}%+ last-{path2WindowDays}d return, {policySummary?.policyContenderPath2MinTradesLast90 ?? 20}+ trades, last trade within {policySummary?.policyContenderPath2MaxDaysSinceLastTrade ?? 14} days)
-                          will appear here for KYC/funding consideration.
-                        </p>
-                      </div>
-
-                      <Card className="bg-neutral-700 border-gray-600">
-                        <CardHeader>
-                          <FieldHintLabel
-                            label="Policy Controls"
-                            hint={USER_MANAGEMENT_FIELD_HELP.kycOverview.tooltip}
-                            labelClassName="text-base font-semibold"
-                          />
-                          <p className="text-xs text-gray-400 mt-1">{USER_MANAGEMENT_FIELD_HELP.kycOverview.inline}</p>
-                        </CardHeader>
-                        <CardContent>
-                          {isLoadingPolicyConfig || !policyConfig ? (
-                            <div className="text-sm text-gray-400">Loading policy controls...</div>
-                          ) : (
-                            <div className="space-y-4">
-                              <div className="grid gap-4 md:grid-cols-2">
-                                <div className="rounded-md border border-green-600/50 p-3">
-                                  <div className="text-sm font-medium text-green-500 mb-3">Path 1 Criteria</div>
-                                  <div className="space-y-4">
-                                    <div className="space-y-2">
-                                      <FieldHintLabel
-                                        label="Min Age (days)"
-                                        hint={USER_MANAGEMENT_FIELD_HELP.kycPath1MinAgeDays.tooltip}
-                                        labelClassName="text-sm text-green-500"
-                                      />
-                                      <p className="text-xs text-gray-400">{USER_MANAGEMENT_FIELD_HELP.kycPath1MinAgeDays.inline}</p>
-                                      <Input
-                                        type="number"
-                                        value={policyConfig.policyContenderPath1MinAgeDays}
-                                        title={USER_MANAGEMENT_FIELD_HELP.kycPath1MinAgeDays.tooltip}
-                                        onChange={(e) => {
-                                          setPolicyConfig({
-                                            ...policyConfig,
-                                            policyContenderPath1MinAgeDays: Number(e.target.value),
-                                          });
-                                          setPolicyConfigChanged(true);
-                                        }}
-                                      />
-                                    </div>
-                                    <div className="space-y-2">
-                                      <FieldHintLabel
-                                        label="Min Trades (lifetime)"
-                                        hint={USER_MANAGEMENT_FIELD_HELP.kycPath1MinTradesLifetime.tooltip}
-                                        labelClassName="text-sm text-green-500"
-                                      />
-                                      <p className="text-xs text-gray-400">{USER_MANAGEMENT_FIELD_HELP.kycPath1MinTradesLifetime.inline}</p>
-                                      <Input
-                                        type="number"
-                                        value={policyConfig.policyContenderPath1MinTradesLifetime}
-                                        title={USER_MANAGEMENT_FIELD_HELP.kycPath1MinTradesLifetime.tooltip}
-                                        onChange={(e) => {
-                                          setPolicyConfig({
-                                            ...policyConfig,
-                                            policyContenderPath1MinTradesLifetime: Number(e.target.value),
-                                          });
-                                          setPolicyConfigChanged(true);
-                                        }}
-                                      />
-                                    </div>
-                                    <div className="space-y-2">
-                                      <FieldHintLabel
-                                        label="Min Balance Multiplier (1.20 = 120%)"
-                                        hint={USER_MANAGEMENT_FIELD_HELP.kycPath1MinBalancePct.tooltip}
-                                        labelClassName="text-sm text-green-500"
-                                      />
-                                      <p className="text-xs text-gray-400">{USER_MANAGEMENT_FIELD_HELP.kycPath1MinBalancePct.inline}</p>
-                                      <Input
-                                        type="number"
-                                        step="0.01"
-                                        value={policyConfig.policyContenderPath1MinBalancePct}
-                                        title={USER_MANAGEMENT_FIELD_HELP.kycPath1MinBalancePct.tooltip}
-                                        onChange={(e) => {
-                                          setPolicyConfig({
-                                            ...policyConfig,
-                                            policyContenderPath1MinBalancePct: Number(e.target.value),
-                                          });
-                                          setPolicyConfigChanged(true);
-                                        }}
-                                      />
-                                    </div>
-                                  </div>
-                                </div>
-                                <div className="rounded-md border border-teal-600/50 p-3">
-                                  <div className="text-sm font-medium text-teal-400 mb-3">Path 2 Criteria</div>
-                                  <div className="space-y-4">
-                                    <div className="space-y-2">
-                                      <FieldHintLabel
-                                        label="Min Age (days)"
-                                        hint={USER_MANAGEMENT_FIELD_HELP.kycPath2MinAgeDays.tooltip}
-                                        labelClassName="text-sm text-teal-400"
-                                      />
-                                      <p className="text-xs text-gray-400">{USER_MANAGEMENT_FIELD_HELP.kycPath2MinAgeDays.inline}</p>
-                                      <Input
-                                        type="number"
-                                        value={policyConfig.policyContenderPath2MinAgeDays}
-                                        title={USER_MANAGEMENT_FIELD_HELP.kycPath2MinAgeDays.tooltip}
-                                        onChange={(e) => {
-                                          setPolicyConfig({
-                                            ...policyConfig,
-                                            policyContenderPath2MinAgeDays: Number(e.target.value),
-                                          });
-                                          setPolicyConfigChanged(true);
-                                        }}
-                                      />
-                                    </div>
-                                    <div className="space-y-2">
-                                      <FieldHintLabel
-                                        label={`Min Trades (last ${path2WindowDays}d)`}
-                                        hint={USER_MANAGEMENT_FIELD_HELP.kycPath2MinTradesLast90.tooltip}
-                                        labelClassName="text-sm text-teal-400"
-                                      />
-                                      <p className="text-xs text-gray-400">{USER_MANAGEMENT_FIELD_HELP.kycPath2MinTradesLast90.inline}</p>
-                                      <Input
-                                        type="number"
-                                        value={policyConfig.policyContenderPath2MinTradesLast90}
-                                        title={USER_MANAGEMENT_FIELD_HELP.kycPath2MinTradesLast90.tooltip}
-                                        onChange={(e) => {
-                                          setPolicyConfig({
-                                            ...policyConfig,
-                                            policyContenderPath2MinTradesLast90: Number(e.target.value),
-                                          });
-                                          setPolicyConfigChanged(true);
-                                        }}
-                                      />
-                                    </div>
-                                    <div className="space-y-2">
-                                      <FieldHintLabel
-                                        label="Min Return (0.10 = 10%)"
-                                        hint={USER_MANAGEMENT_FIELD_HELP.kycPath2MinReturnLast90.tooltip}
-                                        labelClassName="text-sm text-teal-400"
-                                      />
-                                      <p className="text-xs text-gray-400">{USER_MANAGEMENT_FIELD_HELP.kycPath2MinReturnLast90.inline}</p>
-                                      <Input
-                                        type="number"
-                                        step="0.01"
-                                        value={policyConfig.policyContenderPath2MinReturnLast90}
-                                        title={USER_MANAGEMENT_FIELD_HELP.kycPath2MinReturnLast90.tooltip}
-                                        onChange={(e) => {
-                                          setPolicyConfig({
-                                            ...policyConfig,
-                                            policyContenderPath2MinReturnLast90: Number(e.target.value),
-                                          });
-                                          setPolicyConfigChanged(true);
-                                        }}
-                                      />
-                                    </div>
-                                    <div className="space-y-2">
-                                      <FieldHintLabel
-                                        label="Max Days Since Last Trade"
-                                        hint={USER_MANAGEMENT_FIELD_HELP.kycPath2MaxDaysSinceLastTrade.tooltip}
-                                        labelClassName="text-sm text-teal-400"
-                                      />
-                                      <p className="text-xs text-gray-400">{USER_MANAGEMENT_FIELD_HELP.kycPath2MaxDaysSinceLastTrade.inline}</p>
-                                      <Input
-                                        type="number"
-                                        value={policyConfig.policyContenderPath2MaxDaysSinceLastTrade}
-                                        title={USER_MANAGEMENT_FIELD_HELP.kycPath2MaxDaysSinceLastTrade.tooltip}
-                                        onChange={(e) => {
-                                          setPolicyConfig({
-                                            ...policyConfig,
-                                            policyContenderPath2MaxDaysSinceLastTrade: Number(e.target.value),
-                                          });
-                                          setPolicyConfigChanged(true);
-                                        }}
-                                      />
-                                    </div>
-                                  </div>
-                                </div>
-                              </div>
-                              <div className="rounded-md border border-gray-600/70 p-3">
-                                <div className="text-sm font-medium text-gray-200">Messaging and OTP Limits</div>
-                                <div className="mt-3 grid gap-4 md:grid-cols-2">
-                                  <div className="space-y-2">
-                                    <FieldHintLabel label="Email Resend Cooldown (sec)" hint={USER_MANAGEMENT_FIELD_HELP.kycEmailResendCooldownSec.tooltip} />
-                                    <p className="text-xs text-gray-400">{USER_MANAGEMENT_FIELD_HELP.kycEmailResendCooldownSec.inline}</p>
-                                    <Input
-                                      type="number"
-                                      value={policyConfig.policyEmailResendCooldownSec}
-                                      title={USER_MANAGEMENT_FIELD_HELP.kycEmailResendCooldownSec.tooltip}
-                                      onChange={(e) => {
-                                        setPolicyConfig({
-                                          ...policyConfig,
-                                          policyEmailResendCooldownSec: Number(e.target.value),
-                                        });
-                                        setPolicyConfigChanged(true);
-                                      }}
-                                    />
-                                  </div>
-                                  <div className="space-y-2">
-                                    <FieldHintLabel label="Email Daily Send Cap" hint={USER_MANAGEMENT_FIELD_HELP.kycEmailDailySendCap.tooltip} />
-                                    <p className="text-xs text-gray-400">{USER_MANAGEMENT_FIELD_HELP.kycEmailDailySendCap.inline}</p>
-                                    <Input
-                                      type="number"
-                                      value={policyConfig.policyEmailDailySendCap}
-                                      title={USER_MANAGEMENT_FIELD_HELP.kycEmailDailySendCap.tooltip}
-                                      onChange={(e) => {
-                                        setPolicyConfig({
-                                          ...policyConfig,
-                                          policyEmailDailySendCap: Number(e.target.value),
-                                        });
-                                        setPolicyConfigChanged(true);
-                                      }}
-                                    />
-                                  </div>
-                                  <div className="space-y-2">
-                                    <FieldHintLabel label="SMS Resend Cooldown (sec)" hint={USER_MANAGEMENT_FIELD_HELP.kycSmsResendCooldownSec.tooltip} />
-                                    <p className="text-xs text-gray-400">{USER_MANAGEMENT_FIELD_HELP.kycSmsResendCooldownSec.inline}</p>
-                                    <Input
-                                      type="number"
-                                      value={policyConfig.policySmsResendCooldownSec}
-                                      title={USER_MANAGEMENT_FIELD_HELP.kycSmsResendCooldownSec.tooltip}
-                                      onChange={(e) => {
-                                        setPolicyConfig({
-                                          ...policyConfig,
-                                          policySmsResendCooldownSec: Number(e.target.value),
-                                        });
-                                        setPolicyConfigChanged(true);
-                                      }}
-                                    />
-                                  </div>
-                                  <div className="space-y-2">
-                                    <FieldHintLabel label="SMS Daily Send Cap" hint={USER_MANAGEMENT_FIELD_HELP.kycSmsDailySendCap.tooltip} />
-                                    <p className="text-xs text-gray-400">{USER_MANAGEMENT_FIELD_HELP.kycSmsDailySendCap.inline}</p>
-                                    <Input
-                                      type="number"
-                                      value={policyConfig.policySmsDailySendCap}
-                                      title={USER_MANAGEMENT_FIELD_HELP.kycSmsDailySendCap.tooltip}
-                                      onChange={(e) => {
-                                        setPolicyConfig({
-                                          ...policyConfig,
-                                          policySmsDailySendCap: Number(e.target.value),
-                                        });
-                                        setPolicyConfigChanged(true);
-                                      }}
-                                    />
-                                  </div>
-                                  <div className="space-y-2">
-                                    <FieldHintLabel label="OTP Max Attempts" hint={USER_MANAGEMENT_FIELD_HELP.kycOtpMaxAttempts.tooltip} />
-                                    <p className="text-xs text-gray-400">{USER_MANAGEMENT_FIELD_HELP.kycOtpMaxAttempts.inline}</p>
-                                    <Input
-                                      type="number"
-                                      value={policyConfig.policyOtpMaxAttempts}
-                                      title={USER_MANAGEMENT_FIELD_HELP.kycOtpMaxAttempts.tooltip}
-                                      onChange={(e) => {
-                                        setPolicyConfig({
-                                          ...policyConfig,
-                                          policyOtpMaxAttempts: Number(e.target.value),
-                                        });
-                                        setPolicyConfigChanged(true);
-                                      }}
-                                    />
-                                  </div>
-                                  <div className="space-y-2">
-                                    <FieldHintLabel label="OTP Lock Minutes" hint={USER_MANAGEMENT_FIELD_HELP.kycOtpLockMinutes.tooltip} />
-                                    <p className="text-xs text-gray-400">{USER_MANAGEMENT_FIELD_HELP.kycOtpLockMinutes.inline}</p>
-                                    <Input
-                                      type="number"
-                                      value={policyConfig.policyOtpLockMinutes}
-                                      title={USER_MANAGEMENT_FIELD_HELP.kycOtpLockMinutes.tooltip}
-                                      onChange={(e) => {
-                                        setPolicyConfig({
-                                          ...policyConfig,
-                                          policyOtpLockMinutes: Number(e.target.value),
-                                        });
-                                        setPolicyConfigChanged(true);
-                                      }}
-                                    />
-                                  </div>
-                                </div>
-                              </div>
-                              <div className="flex items-center justify-between gap-4">
-                                <div>
-                                  <FieldHintLabel label="Auto-promote Performer" hint={USER_MANAGEMENT_FIELD_HELP.kycAutoPromotePerformer.tooltip} />
-                                  <p className="text-xs text-gray-400 mt-1">{USER_MANAGEMENT_FIELD_HELP.kycAutoPromotePerformer.inline}</p>
-                                </div>
-                                <Switch
-                                  checked={Boolean(policyConfig.policyAutoPromotePerformer)}
-                                  title={USER_MANAGEMENT_FIELD_HELP.kycAutoPromotePerformer.tooltip}
-                                  onCheckedChange={(checked) => {
-                                    setPolicyConfig({
-                                      ...policyConfig,
-                                      policyAutoPromotePerformer: checked,
-                                    });
-                                    setPolicyConfigChanged(true);
-                                  }}
-                                />
-                              </div>
-                              <div className="flex justify-end">
-                                <Button
-                                  disabled={!policyConfigChanged || policyConfigMutation.isPending}
-                                  onClick={() => policyConfig && policyConfigMutation.mutate(policyConfig)}
-                                  title={USER_MANAGEMENT_FIELD_HELP.kycSaveControls.tooltip}
-                                >
-                                  {policyConfigMutation.isPending ? "Saving..." : "Save Controls"}
-                                </Button>
-                              </div>
-                            </div>
-                          )}
-                        </CardContent>
-                      </Card>
-
-                      <Card className="bg-neutral-700 border-gray-600">
-                        <CardHeader>
-                          <FieldHintLabel
-                            label="KYC Candidates Queue"
-                            hint={USER_MANAGEMENT_FIELD_HELP.kycOverview.tooltip}
-                            labelClassName="text-base font-semibold"
-                          />
-                          <p className="text-xs text-gray-400 mt-1">{USER_MANAGEMENT_FIELD_HELP.kycOverview.inline}</p>
-                        </CardHeader>
-                        <CardContent>
-                          <Table className="border-collapse">
-                            <TableHeader>
-                              <TableRow className="border-b border-gray-700">
-                                <TableHead className="py-3 px-4 text-left text-gray-400">User</TableHead>
-                                <TableHead className="py-3 px-4 text-left text-gray-400">Account Age</TableHead>
-                                <TableHead className="py-3 px-4 text-left text-gray-400">Trades (L/{path2WindowDays}d)</TableHead>
-                                <TableHead className="py-3 px-4 text-left text-gray-400">Balance %</TableHead>
-                                <TableHead className="py-3 px-4 text-left text-gray-400">Return {path2WindowDays}d</TableHead>
-                                <TableHead className="py-3 px-4 text-left text-gray-400">Path</TableHead>
-                                <TableHead className="py-3 px-4 text-left text-gray-400">Tier</TableHead>
-                                <TableHead className="py-3 px-4 text-left text-gray-400" title={USER_MANAGEMENT_FIELD_HELP.kycInviteAction.tooltip}>Actions</TableHead>
-                              </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                              {(!kycCandidates || kycCandidates.length === 0) ? (
-                                <TableRow>
-                                  <TableCell colSpan={8} className="text-center py-8 text-gray-400">
-                                    <div className="space-y-2">
-                                      <div className="text-lg">No KYC candidates yet</div>
-                                      <div className="text-sm">Users will appear here when they meet the contender eligibility criteria</div>
-                                    </div>
-                                  </TableCell>
-                                </TableRow>
-                              ) : (
-                                kycCandidates.map((candidate) => (
-                                  <TableRow key={candidate.userId} className="border-b border-gray-700">
-                                    <TableCell className="py-3 px-4">
-                                      <div>
-                                        <div className="font-medium">{candidate.email}</div>
-                                        <div className="text-xs text-gray-400">@{candidate.username}</div>
-                                      </div>
-                                    </TableCell>
-                                    <TableCell className="py-3 px-4">{candidate.accountAgeDays} days</TableCell>
-                                    <TableCell className="py-3 px-4">{candidate.tradesLifetime} / {candidate.tradesLast90d}</TableCell>
-                                    <TableCell className="py-3 px-4">
-                                      <span className={candidate.balancePctOfStart >= 1 ? "text-green-400" : "text-red-400"}>
-                                        {candidate.balancePctOfStart >= 1 ? "+" : ""}
-                                        {((candidate.balancePctOfStart - 1) * 100).toFixed(2)}%
-                                      </span>
-                                    </TableCell>
-                                    <TableCell className="py-3 px-4">
-                                      {(candidate.returnLast90d * 100).toFixed(2)}%
-                                    </TableCell>
-                                    <TableCell className="py-3 px-4">
-                                      <span className="text-xs px-2 py-0.5 rounded bg-blue-700 text-white">
-                                        {candidate.contenderPath1 ? "P1" : candidate.contenderPath2 ? "P2" : "N/A"}
-                                      </span>
-                                    </TableCell>
-                                    <TableCell className="py-3 px-4">
-                                      <span className="text-xs px-2 py-0.5 rounded bg-gray-600 text-white">
-                                        {candidate.userTier} / {candidate.contenderTier}
-                                      </span>
-                                    </TableCell>
-                                    <TableCell className="py-3 px-4">
-                                      <div className="flex gap-2">
-                                        <Button
-                                          size="sm"
-                                          variant="outline"
-                                          className="text-xs bg-green-700 hover:bg-green-600 border-0"
-                                          onClick={() => inviteKycMutation.mutate({ userId: candidate.userId })}
-                                          disabled={inviteKycMutation.isPending}
-                                          title={USER_MANAGEMENT_FIELD_HELP.kycInviteAction.tooltip}
-                                        >
-                                          Invite KYC
-                                        </Button>
-                                        <Button
-                                          size="sm"
-                                          variant="outline"
-                                          className="text-xs bg-red-700 hover:bg-red-600 border-0"
-                                          onClick={() => updateKycStatusMutation.mutate({ userId: candidate.userId, status: 'REJECTED' })}
-                                          disabled={updateKycStatusMutation.isPending}
-                                          title={USER_MANAGEMENT_FIELD_HELP.kycRejectAction.tooltip}
-                                        >
-                                          Reject
-                                        </Button>
+                                {(!kycCandidates || kycCandidates.length === 0) ? (
+                                  <TableRow>
+                                    <TableCell colSpan={8} className="text-center py-8 text-gray-400">
+                                      <div className="space-y-2">
+                                        <div className="text-lg">No KYC candidates yet</div>
+                                        <div className="text-sm">Users will appear here when they meet the contender eligibility criteria</div>
                                       </div>
                                     </TableCell>
                                   </TableRow>
-                                ))
-                              )}
-                            </TableBody>
-                          </Table>
-                        </CardContent>
-                      </Card>
+                                ) : (
+                                  kycCandidates.map((candidate) => (
+                                    <TableRow key={candidate.userId} className="border-b border-gray-700">
+                                      <TableCell className="py-3 px-4">
+                                        <div>
+                                          <div className="font-medium">{candidate.email}</div>
+                                          <div className="text-xs text-gray-400">@{candidate.username}</div>
+                                        </div>
+                                      </TableCell>
+                                      <TableCell className="py-3 px-4">{candidate.accountAgeDays} days</TableCell>
+                                      <TableCell className="py-3 px-4">{candidate.tradesLifetime} / {candidate.tradesLast90d}</TableCell>
+                                      <TableCell className="py-3 px-4">
+                                        <span className={candidate.balancePctOfStart >= 1 ? "text-green-400" : "text-red-400"}>
+                                          {candidate.balancePctOfStart >= 1 ? "+" : ""}
+                                          {((candidate.balancePctOfStart - 1) * 100).toFixed(2)}%
+                                        </span>
+                                      </TableCell>
+                                      <TableCell className="py-3 px-4">
+                                        {(candidate.returnLast90d * 100).toFixed(2)}%
+                                      </TableCell>
+                                      <TableCell className="py-3 px-4">
+                                        <span className="text-xs px-2 py-0.5 rounded bg-blue-700 text-white">
+                                          {candidate.contenderPath1 ? "P1" : candidate.contenderPath2 ? "P2" : "N/A"}
+                                        </span>
+                                      </TableCell>
+                                      <TableCell className="py-3 px-4">
+                                        <span className="text-xs px-2 py-0.5 rounded bg-gray-600 text-white">
+                                          {candidate.userTier} / {candidate.contenderTier}
+                                        </span>
+                                      </TableCell>
+                                      <TableCell className="py-3 px-4">
+                                        <div className="flex gap-2">
+                                          <Button
+                                            size="sm"
+                                            variant="outline"
+                                            className="text-xs bg-green-700 hover:bg-green-600 border-0"
+                                            onClick={() => inviteKycMutation.mutate({ userId: candidate.userId })}
+                                            disabled={inviteKycMutation.isPending}
+                                            title={USER_MANAGEMENT_FIELD_HELP.kycInviteAction.tooltip}
+                                          >
+                                            Invite KYC
+                                          </Button>
+                                          <Button
+                                            size="sm"
+                                            variant="outline"
+                                            className="text-xs bg-red-700 hover:bg-red-600 border-0"
+                                            onClick={() => updateKycStatusMutation.mutate({ userId: candidate.userId, status: 'REJECTED' })}
+                                            disabled={updateKycStatusMutation.isPending}
+                                            title={USER_MANAGEMENT_FIELD_HELP.kycRejectAction.tooltip}
+                                          >
+                                            Reject
+                                          </Button>
+                                        </div>
+                                      </TableCell>
+                                    </TableRow>
+                                  ))
+                                )}
+                              </TableBody>
+                            </Table>
+                          </CardContent>
+                        </Card>
 
-                      <KycQueueTab />
-                    </div>
-                  )}
-                </div>
-              ) : userFilterTab === "activity" ? (
-                /* Activity View */
-                <div className="overflow-x-auto">
-                  <UserActivityAdmin />
-                </div>
-              ) : userFilterTab === "grift" ? (
-                /* Grift Detection View */
-                <div className="overflow-x-auto">
-                  {(isLoadingGriftSummary || isLoadingGriftUsers || isLoadingGriftAlerts) ? (
-                    <div className="flex items-center justify-center h-40">
-                      <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-red-500"></div>
-                    </div>
-                  ) : (
-                    <GriftAdmin />
-                  )}
-                </div>
-              ) : isLoading ? (
-                <div className="flex items-center justify-center h-40">
-                  <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary"></div>
-                </div>
-              ) : (
-                <>
-                  <div className="rounded-md border border-cyan-700/40 bg-cyan-950/20 p-3 text-xs text-cyan-100/90 mb-3">
-                    <FieldHintLabel label="User List Controls" hint={USER_MANAGEMENT_FIELD_HELP.columnsPicker.tooltip} />
-                    <p className="text-xs text-cyan-100/90 mt-1">{USER_MANAGEMENT_FIELD_HELP.columnsPicker.inline}</p>
+                        <KycQueueTab />
+                      </div>
+                    )}
                   </div>
-                  {/* Column visibility dropdown */}
-                  <div className="flex justify-end mb-2">
-                    <div className="relative group">
-                      <Button variant="outline" size="sm" className="bg-neutral-700 text-xs" title={USER_MANAGEMENT_FIELD_HELP.columnsPicker.tooltip}>
-                        Columns ▾
-                      </Button>
-                      <div className="absolute right-0 mt-1 w-48 bg-neutral-800 border border-gray-600 rounded-md shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 p-2 space-y-1">
-                        {([
-                          { key: 'name', label: 'Names' },
-                          { key: 'phone', label: 'Phone' },
-                          { key: 'username', label: 'Username' },
-                          { key: 'email', label: 'Email' },
-                          { key: 'status', label: 'Status' },
-                          { key: 'balance', label: 'Balance' },
-                          { key: 'leverage', label: 'Leverage' },
-                          { key: 'maxTrades', label: 'Max Trades' },
-                          { key: 'minHold', label: 'Min Hold' },
-                          { key: 'maxHold', label: 'Max Hold' },
-                          { key: 'leaderboard', label: 'Leaderboard' },
-                        ] as { key: UserColumnKey; label: string }[]).map(col => (
-                          <label
-                            key={col.key}
-                            className="flex items-center gap-2 text-xs cursor-pointer hover:bg-neutral-700 p-1 rounded"
-                            title={USER_MANAGEMENT_FIELD_HELP.columnsPicker.tooltip}
-                          >
-                            <Checkbox
+                ) : userFilterTab === "activity" ? (
+                  /* Activity View */
+                  <div className="overflow-x-auto">
+                    <UserActivityAdmin />
+                  </div>
+                ) : userFilterTab === "grift" ? (
+                  /* Grift Detection View */
+                  <div className="overflow-x-auto">
+                    {(isLoadingGriftSummary || isLoadingGriftUsers || isLoadingGriftAlerts) ? (
+                      <div className="flex items-center justify-center h-40">
+                        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-red-500"></div>
+                      </div>
+                    ) : (
+                      <GriftAdmin />
+                    )}
+                  </div>
+                ) : isLoading ? (
+                  <div className="flex items-center justify-center h-40">
+                    <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary"></div>
+                  </div>
+                ) : (
+                  <>
+                    <div className="rounded-md border border-cyan-700/40 bg-cyan-950/20 p-3 text-xs text-cyan-100/90 mb-3">
+                      <FieldHintLabel label="User List Controls" hint={USER_MANAGEMENT_FIELD_HELP.columnsPicker.tooltip} />
+                      <p className="text-xs text-cyan-100/90 mt-1">{USER_MANAGEMENT_FIELD_HELP.columnsPicker.inline}</p>
+                    </div>
+                    {/* Column visibility dropdown */}
+                    <div className="flex justify-end mb-2">
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="outline" size="sm" className="bg-neutral-700 text-xs" title={USER_MANAGEMENT_FIELD_HELP.columnsPicker.tooltip}>
+                            Columns ▾
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-48 bg-neutral-800 border-gray-600">
+                          {([
+                            { key: 'name', label: 'Names' },
+                            { key: 'phone', label: 'Phone' },
+                            { key: 'username', label: 'Username' },
+                            { key: 'email', label: 'Email' },
+                            { key: 'status', label: 'Status' },
+                            { key: 'balance', label: 'Balance' },
+                            { key: 'leverage', label: 'Leverage' },
+                            { key: 'maxTrades', label: 'Max Trades' },
+                            { key: 'minHold', label: 'Min Hold' },
+                            { key: 'maxHold', label: 'Max Hold' },
+                            { key: 'leaderboard', label: 'Leaderboard' },
+                          ] as { key: UserColumnKey; label: string }[]).map(col => (
+                            <DropdownMenuCheckboxItem
+                              key={col.key}
                               checked={visibleColumns[col.key]}
                               onCheckedChange={(checked) => setVisibleColumns(prev => ({ ...prev, [col.key]: !!checked }))}
-                            />
-                            {col.label}
-                          </label>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="overflow-x-auto">
-                    <Table className="border-collapse">
-                      <TableHeader>
-                        <TableRow className="border-b border-gray-700">
-                          <TableHead className="py-3 px-2 w-10">
-                            <Checkbox
-                              checked={selectedUserIds.length > 0 && selectedUserIds.length === filteredUsers.length}
-                              onCheckedChange={(checked) => handleSelectAll(!!checked)}
-                              title={USER_MANAGEMENT_FIELD_HELP.selectAllVisible.tooltip}
-                            />
-                          </TableHead>
-                          {visibleColumns.name && (
-                            <TableHead className="py-2 px-4 text-left text-gray-400">
-                              <div className="space-y-1">
-                                <FieldHintLabel
-                                  label="Names"
-                                  hint={USER_MANAGEMENT_FIELD_HELP.nameFilter.tooltip}
-                                  labelClassName="text-xs font-medium text-gray-300"
-                                />
-                                <Input
-                                  placeholder="Search..."
-                                  value={columnFilters.name}
-                                  onChange={(e) => setColumnFilters(prev => ({ ...prev, name: e.target.value }))}
-                                  className="h-7 text-xs bg-neutral-700 w-full"
-                                  title={USER_MANAGEMENT_FIELD_HELP.nameFilter.tooltip}
-                                />
-                              </div>
-                            </TableHead>
-                          )}
-                          {visibleColumns.phone && (
-                            <TableHead className="py-2 px-4 text-left text-gray-400">
-                              <div className="space-y-1">
-                                <FieldHintLabel
-                                  label="Phone"
-                                  hint={USER_MANAGEMENT_FIELD_HELP.phoneFilter.tooltip}
-                                  labelClassName="text-xs font-medium text-gray-300"
-                                />
-                                <Input
-                                  placeholder="Search..."
-                                  value={columnFilters.phone}
-                                  onChange={(e) => setColumnFilters(prev => ({ ...prev, phone: e.target.value }))}
-                                  className="h-7 text-xs bg-neutral-700 w-full"
-                                  title={USER_MANAGEMENT_FIELD_HELP.phoneFilter.tooltip}
-                                />
-                              </div>
-                            </TableHead>
-                          )}
-                          {visibleColumns.username && (
-                            <TableHead className="py-2 px-4 text-left text-gray-400">
-                              <div className="space-y-1">
-                                <FieldHintLabel
-                                  label="Username"
-                                  hint={USER_MANAGEMENT_FIELD_HELP.usernameFilter.tooltip}
-                                  labelClassName="text-xs font-medium text-gray-300"
-                                />
-                                <Input
-                                  placeholder="Search..."
-                                  value={columnFilters.username}
-                                  onChange={(e) => setColumnFilters(prev => ({ ...prev, username: e.target.value }))}
-                                  className="h-7 text-xs bg-neutral-700 w-full"
-                                  title={USER_MANAGEMENT_FIELD_HELP.usernameFilter.tooltip}
-                                />
-                              </div>
-                            </TableHead>
-                          )}
-                          {visibleColumns.email && (
-                            <TableHead className="py-2 px-4 text-left text-gray-400">
-                              <div className="space-y-1">
-                                <FieldHintLabel
-                                  label="Email"
-                                  hint={USER_MANAGEMENT_FIELD_HELP.emailFilter.tooltip}
-                                  labelClassName="text-xs font-medium text-gray-300"
-                                />
-                                <Input
-                                  placeholder="Search..."
-                                  value={columnFilters.email}
-                                  onChange={(e) => setColumnFilters(prev => ({ ...prev, email: e.target.value }))}
-                                  className="h-7 text-xs bg-neutral-700 w-full"
-                                  title={USER_MANAGEMENT_FIELD_HELP.emailFilter.tooltip}
-                                />
-                              </div>
-                            </TableHead>
-                          )}
-                          {visibleColumns.status && <TableHead className="py-3 px-4 text-left text-gray-400">Status</TableHead>}
-                          {visibleColumns.balance && <TableHead className="py-3 px-4 text-left text-gray-400">Balance</TableHead>}
-                          {visibleColumns.leverage && <TableHead className="py-3 px-4 text-left text-gray-400">Leverage</TableHead>}
-                          {visibleColumns.maxTrades && <TableHead className="py-3 px-4 text-left text-gray-400">Max Trades</TableHead>}
-                          {visibleColumns.minHold && <TableHead className="py-3 px-4 text-left text-gray-400">Min Hold (s)</TableHead>}
-                          {visibleColumns.maxHold && <TableHead className="py-3 px-4 text-left text-gray-400">Max Hold (s)</TableHead>}
-                          {visibleColumns.leaderboard && <TableHead className="py-3 px-4 text-left text-gray-400" title={USER_MANAGEMENT_FIELD_HELP.leaderboardVisibility.tooltip}>Leaderboard</TableHead>}
-                          <TableHead className="py-3 px-4 text-left text-gray-400">
-                            <div className="flex items-center gap-2">
-                              <span>Actions</span>
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <button
-                                    type="button"
-                                    className="text-[11px] font-medium text-cyan-300 underline decoration-dotted underline-offset-2 hover:text-cyan-200"
-                                    aria-label="User row actions hint"
-                                  >
-                                    Hint
-                                  </button>
-                                </TooltipTrigger>
-                                <TooltipContent side="top" className="max-w-sm text-xs leading-relaxed">
-                                  {USER_MANAGEMENT_FIELD_HELP.rowActions.tooltip}
-                                </TooltipContent>
-                              </Tooltip>
-                            </div>
-                          </TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {filteredUsers.length === 0 ? (
-                          <TableRow>
-                            <TableCell colSpan={10} className="text-center py-4">
-                              No users found
-                            </TableCell>
-                          </TableRow>
-                        ) : (
-                          filteredUsers.map((user) => (
-                            <TableRow
-                              key={user.id}
-                              className={`border-b border-gray-700 ${user.isFrozen ? 'bg-blue-900/20' : user.isDisabled ? 'bg-red-900/20' : ''}`}
+                              className="text-xs cursor-pointer focus:bg-neutral-700"
+                              title={USER_MANAGEMENT_FIELD_HELP.columnsPicker.tooltip}
                             >
-                              <TableCell className="py-3 px-2">
-                                <Checkbox
-                                  checked={selectedUserIds.includes(user.id)}
-                                  onCheckedChange={(checked) => handleSelectUser(user.id, !!checked)}
-                                  title={USER_MANAGEMENT_FIELD_HELP.selectAllVisible.tooltip}
-                                />
-                              </TableCell>
-                              {visibleColumns.name && (
-                                <TableCell className="py-3 px-4">
-                                  <span className="text-sm">{user.name || '-'}</span>
-                                </TableCell>
-                              )}
-                              {visibleColumns.phone && (
-                                <TableCell className="py-3 px-4">
-                                  <span className="text-sm">{user.phone || '-'}</span>
-                                </TableCell>
-                              )}
-                              {visibleColumns.username && (
-                                <TableCell className="py-3 px-4">
-                                  <span className="text-sm font-medium">{user.username}</span>
-                                </TableCell>
-                              )}
-                              {visibleColumns.email && (
-                                <TableCell className="py-3 px-4">
-                                  <span className="text-sm">{user.email}</span>
-                                </TableCell>
-                              )}
-                              {visibleColumns.status && (
-                                <TableCell className="py-3 px-4">
-                                  <div className="flex flex-col gap-1">
-                                    {user.isAdmin && (
-                                      <span className="text-xs px-2 py-0.5 rounded bg-purple-600 text-white">Admin</span>
-                                    )}
-                                    {user.isFrozen ? (
-                                      <span className="text-xs px-2 py-0.5 rounded bg-blue-600 text-white">Frozen</span>
-                                    ) : user.isDisabled ? (
-                                      <span className="text-xs px-2 py-0.5 rounded bg-red-600 text-white">Disabled</span>
-                                    ) : (
-                                      <span className="text-xs px-2 py-0.5 rounded bg-green-600 text-white">Active</span>
-                                    )}
-                                  </div>
-                                </TableCell>
-                              )}
-                              {visibleColumns.balance && (
-                                <TableCell className="py-3 px-4">
+                              {col.label}
+                            </DropdownMenuCheckboxItem>
+                          ))}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
+
+                    <div className="overflow-x-auto">
+                      <Table className="border-collapse">
+                        <TableHeader>
+                          <TableRow className="border-b border-gray-700">
+                            <TableHead className="py-3 px-2 w-10">
+                              <Checkbox
+                                checked={selectedUserIds.length > 0 && selectedUserIds.length === filteredUsers.length}
+                                onCheckedChange={(checked) => handleSelectAll(!!checked)}
+                                title={USER_MANAGEMENT_FIELD_HELP.selectAllVisible.tooltip}
+                              />
+                            </TableHead>
+                            {visibleColumns.name && (
+                              <TableHead className="py-2 px-4 text-left text-gray-400">
+                                <div className="space-y-1">
+                                  <FieldHintLabel
+                                    label="Names"
+                                    hint={USER_MANAGEMENT_FIELD_HELP.nameFilter.tooltip}
+                                    labelClassName="text-xs font-medium text-gray-300"
+                                  />
                                   <Input
-                                    type="text"
-                                    defaultValue={user.balance}
-                                    title={USER_MANAGEMENT_FIELD_HELP.balanceEditor.tooltip}
-                                    onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
-                                      if (e.key === 'Enter') {
-                                        updateBalance(user.id, e.currentTarget.value);
-                                      }
-                                    }}
-                                    onBlur={(e) => updateBalance(user.id, e.currentTarget.value)}
-                                    className="w-28 h-8 bg-neutral-700"
+                                    placeholder="Search..."
+                                    value={columnFilters.name}
+                                    onChange={(e) => setColumnFilters(prev => ({ ...prev, name: e.target.value }))}
+                                    className="h-7 text-xs bg-neutral-700 w-full"
+                                    title={USER_MANAGEMENT_FIELD_HELP.nameFilter.tooltip}
+                                  />
+                                </div>
+                              </TableHead>
+                            )}
+                            {visibleColumns.phone && (
+                              <TableHead className="py-2 px-4 text-left text-gray-400">
+                                <div className="space-y-1">
+                                  <FieldHintLabel
+                                    label="Phone"
+                                    hint={USER_MANAGEMENT_FIELD_HELP.phoneFilter.tooltip}
+                                    labelClassName="text-xs font-medium text-gray-300"
+                                  />
+                                  <Input
+                                    placeholder="Search..."
+                                    value={columnFilters.phone}
+                                    onChange={(e) => setColumnFilters(prev => ({ ...prev, phone: e.target.value }))}
+                                    className="h-7 text-xs bg-neutral-700 w-full"
+                                    title={USER_MANAGEMENT_FIELD_HELP.phoneFilter.tooltip}
+                                  />
+                                </div>
+                              </TableHead>
+                            )}
+                            {visibleColumns.username && (
+                              <TableHead className="py-2 px-4 text-left text-gray-400">
+                                <div className="space-y-1">
+                                  <FieldHintLabel
+                                    label="Username"
+                                    hint={USER_MANAGEMENT_FIELD_HELP.usernameFilter.tooltip}
+                                    labelClassName="text-xs font-medium text-gray-300"
+                                  />
+                                  <Input
+                                    placeholder="Search..."
+                                    value={columnFilters.username}
+                                    onChange={(e) => setColumnFilters(prev => ({ ...prev, username: e.target.value }))}
+                                    className="h-7 text-xs bg-neutral-700 w-full"
+                                    title={USER_MANAGEMENT_FIELD_HELP.usernameFilter.tooltip}
+                                  />
+                                </div>
+                              </TableHead>
+                            )}
+                            {visibleColumns.email && (
+                              <TableHead className="py-2 px-4 text-left text-gray-400">
+                                <div className="space-y-1">
+                                  <FieldHintLabel
+                                    label="Email"
+                                    hint={USER_MANAGEMENT_FIELD_HELP.emailFilter.tooltip}
+                                    labelClassName="text-xs font-medium text-gray-300"
+                                  />
+                                  <Input
+                                    placeholder="Search..."
+                                    value={columnFilters.email}
+                                    onChange={(e) => setColumnFilters(prev => ({ ...prev, email: e.target.value }))}
+                                    className="h-7 text-xs bg-neutral-700 w-full"
+                                    title={USER_MANAGEMENT_FIELD_HELP.emailFilter.tooltip}
+                                  />
+                                </div>
+                              </TableHead>
+                            )}
+                            {visibleColumns.status && <TableHead className="py-3 px-4 text-left text-gray-400">Status</TableHead>}
+                            {visibleColumns.balance && <TableHead className="py-3 px-4 text-left text-gray-400">Balance</TableHead>}
+                            {visibleColumns.leverage && <TableHead className="py-3 px-4 text-left text-gray-400">Leverage</TableHead>}
+                            {visibleColumns.maxTrades && <TableHead className="py-3 px-4 text-left text-gray-400">Max Trades</TableHead>}
+                            {visibleColumns.minHold && <TableHead className="py-3 px-4 text-left text-gray-400">Min Hold (s)</TableHead>}
+                            {visibleColumns.maxHold && <TableHead className="py-3 px-4 text-left text-gray-400">Max Hold (s)</TableHead>}
+                            {visibleColumns.leaderboard && <TableHead className="py-3 px-4 text-left text-gray-400" title={USER_MANAGEMENT_FIELD_HELP.leaderboardVisibility.tooltip}>Leaderboard</TableHead>}
+                            <TableHead className="py-3 px-4 text-left text-gray-400">
+                              <div className="flex items-center gap-2">
+                                <span>Actions</span>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <button
+                                      type="button"
+                                      className="text-[11px] font-medium text-cyan-300 underline decoration-dotted underline-offset-2 hover:text-cyan-200"
+                                      aria-label="User row actions hint"
+                                    >
+                                      Hint
+                                    </button>
+                                  </TooltipTrigger>
+                                  <TooltipContent side="top" className="max-w-sm text-xs leading-relaxed">
+                                    {USER_MANAGEMENT_FIELD_HELP.rowActions.tooltip}
+                                  </TooltipContent>
+                                </Tooltip>
+                              </div>
+                            </TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {filteredUsers.length === 0 ? (
+                            <TableRow>
+                              <TableCell colSpan={10} className="text-center py-4">
+                                No users found
+                              </TableCell>
+                            </TableRow>
+                          ) : (
+                            filteredUsers.map((user) => (
+                              <TableRow
+                                key={user.id}
+                                className={`border-b border-gray-700 ${user.isFrozen ? 'bg-blue-900/20' : user.isDisabled ? 'bg-red-900/20' : ''}`}
+                              >
+                                <TableCell className="py-3 px-2">
+                                  <Checkbox
+                                    checked={selectedUserIds.includes(user.id)}
+                                    onCheckedChange={(checked) => handleSelectUser(user.id, !!checked)}
+                                    title={USER_MANAGEMENT_FIELD_HELP.selectAllVisible.tooltip}
                                   />
                                 </TableCell>
-                              )}
-                              {visibleColumns.leverage && (
-                                <TableCell className="py-3 px-4">{user.leverage || 'Default'}</TableCell>
-                              )}
-                              {visibleColumns.maxTrades && (
-                                <TableCell className="py-3 px-4">{user.maxConcurrent || 'Default'}</TableCell>
-                              )}
-                              {visibleColumns.minHold && (
-                                <TableCell className="py-3 px-4">{user.minHoldSec || 'Default'}</TableCell>
-                              )}
-                              {visibleColumns.maxHold && (
-                                <TableCell className="py-3 px-4">{user.maxHoldSec || 'Default'}</TableCell>
-                              )}
-                              {visibleColumns.leaderboard && (
+                                {visibleColumns.name && (
+                                  <TableCell className="py-3 px-4">
+                                    <span className="text-sm">{user.name || '-'}</span>
+                                  </TableCell>
+                                )}
+                                {visibleColumns.phone && (
+                                  <TableCell className="py-3 px-4">
+                                    <span className="text-sm">{user.phone || '-'}</span>
+                                  </TableCell>
+                                )}
+                                {visibleColumns.username && (
+                                  <TableCell className="py-3 px-4">
+                                    <span className="text-sm font-medium">{user.username}</span>
+                                  </TableCell>
+                                )}
+                                {visibleColumns.email && (
+                                  <TableCell className="py-3 px-4">
+                                    <span className="text-sm">{user.email}</span>
+                                  </TableCell>
+                                )}
+                                {visibleColumns.status && (
+                                  <TableCell className="py-3 px-4">
+                                    <div className="flex flex-col gap-1">
+                                      {user.isAdmin && (
+                                        <span className="text-xs px-2 py-0.5 rounded bg-purple-600 text-white">Admin</span>
+                                      )}
+                                      {user.isFrozen ? (
+                                        <span className="text-xs px-2 py-0.5 rounded bg-blue-600 text-white">Frozen</span>
+                                      ) : user.isDisabled ? (
+                                        <span className="text-xs px-2 py-0.5 rounded bg-red-600 text-white">Disabled</span>
+                                      ) : (
+                                        <span className="text-xs px-2 py-0.5 rounded bg-green-600 text-white">Active</span>
+                                      )}
+                                    </div>
+                                  </TableCell>
+                                )}
+                                {visibleColumns.balance && (
+                                  <TableCell className="py-3 px-4">
+                                    <Input
+                                      type="text"
+                                      defaultValue={user.balance}
+                                      title={USER_MANAGEMENT_FIELD_HELP.balanceEditor.tooltip}
+                                      onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
+                                        if (e.key === 'Enter') {
+                                          updateBalance(user.id, e.currentTarget.value);
+                                        }
+                                      }}
+                                      onBlur={(e) => updateBalance(user.id, e.currentTarget.value)}
+                                      className="w-28 h-8 bg-neutral-700"
+                                    />
+                                  </TableCell>
+                                )}
+                                {visibleColumns.leverage && (
+                                  <TableCell className="py-3 px-4">{user.leverage || 'Default'}</TableCell>
+                                )}
+                                {visibleColumns.maxTrades && (
+                                  <TableCell className="py-3 px-4">{user.maxConcurrent || 'Default'}</TableCell>
+                                )}
+                                {visibleColumns.minHold && (
+                                  <TableCell className="py-3 px-4">{user.minHoldSec || 'Default'}</TableCell>
+                                )}
+                                {visibleColumns.maxHold && (
+                                  <TableCell className="py-3 px-4">{user.maxHoldSec || 'Default'}</TableCell>
+                                )}
+                                {visibleColumns.leaderboard && (
+                                  <TableCell className="py-3 px-4">
+                                    <Switch
+                                      checked={user.showOnLeaderboard !== false}
+                                      title={USER_MANAGEMENT_FIELD_HELP.leaderboardVisibility.tooltip}
+                                      onCheckedChange={(checked) => {
+                                        const settings = {
+                                          userId: user.id,
+                                          leverage: user.leverage || 50,
+                                          maxConcurrent: user.maxConcurrent || 5,
+                                          maxConcurrentLots: user.maxConcurrentLots || 50,
+                                          minHoldSec: user.minHoldSec || 60,
+                                          maxHoldSec: user.maxHoldSec || 86400,
+                                          showOnLeaderboard: checked
+                                        };
+                                        mutation.mutate(settings);
+                                      }}
+                                    />
+                                  </TableCell>
+                                )}
                                 <TableCell className="py-3 px-4">
-                                  <Switch
-                                    checked={user.showOnLeaderboard !== false}
-                                    title={USER_MANAGEMENT_FIELD_HELP.leaderboardVisibility.tooltip}
-                                    onCheckedChange={(checked) => {
-                                      const settings = {
-                                        userId: user.id,
-                                        leverage: user.leverage || 50,
-                                        maxConcurrent: user.maxConcurrent || 5,
-                                        maxConcurrentLots: user.maxConcurrentLots || 50,
-                                        minHoldSec: user.minHoldSec || 60,
-                                        maxHoldSec: user.maxHoldSec || 86400,
-                                        showOnLeaderboard: checked
-                                      };
-                                      mutation.mutate(settings);
-                                    }}
-                                  />
-                                </TableCell>
-                              )}
-                              <TableCell className="py-3 px-4">
-                                <div className="flex flex-wrap gap-1">
-                                  <Button
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={() => handleEdit(user)}
-                                    className="bg-neutral-700 hover:bg-neutral-600 h-7 text-xs px-2"
-                                    title={USER_MANAGEMENT_FIELD_HELP.editAction.tooltip}
-                                  >
-                                    Edit
-                                  </Button>
-                                  <Button
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={() => openTimeline(user)}
-                                    className="bg-neutral-700 hover:bg-neutral-600 h-7 text-xs px-2"
-                                    title={USER_MANAGEMENT_FIELD_HELP.timelineAction.tooltip}
-                                  >
-                                    Timeline
-                                  </Button>
-                                  <Button
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={() => openNotes(user)}
-                                    className="bg-neutral-700 hover:bg-neutral-600 h-7 text-xs px-2"
-                                    title={USER_MANAGEMENT_FIELD_HELP.notesAction.tooltip}
-                                  >
-                                    Notes
-                                  </Button>
-                                  {user.isDisabled ? (
-                                    /* Disabled users (including frozen+disabled) only get Enable button */
+                                  <div className="flex flex-wrap gap-1">
                                     <Button
                                       variant="outline"
                                       size="sm"
-                                      onClick={() => toggleUserStatusMutation.mutate({ userId: user.id, disabled: false })}
-                                      disabled={toggleUserStatusMutation.isPending}
-                                      className="bg-green-600 hover:bg-green-700 border-0 h-7 text-xs px-2"
-                                      title={USER_MANAGEMENT_FIELD_HELP.enableAction.tooltip}
+                                      onClick={() => handleEdit(user)}
+                                      className="bg-neutral-700 hover:bg-neutral-600 h-7 text-xs px-2"
+                                      title={USER_MANAGEMENT_FIELD_HELP.editAction.tooltip}
                                     >
-                                      {toggleUserStatusMutation.isPending ? '...' : 'Enable'}
+                                      Edit
                                     </Button>
-                                  ) : user.isFrozen ? (
-                                    /* Frozen only users get Unfreeze + Disable */
-                                    <>
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() => openTimeline(user)}
+                                      className="bg-neutral-700 hover:bg-neutral-600 h-7 text-xs px-2"
+                                      title={USER_MANAGEMENT_FIELD_HELP.timelineAction.tooltip}
+                                    >
+                                      Timeline
+                                    </Button>
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() => openNotes(user)}
+                                      className="bg-neutral-700 hover:bg-neutral-600 h-7 text-xs px-2"
+                                      title={USER_MANAGEMENT_FIELD_HELP.notesAction.tooltip}
+                                    >
+                                      Notes
+                                    </Button>
+                                    {user.isDisabled ? (
+                                      /* Disabled users (including frozen+disabled) only get Enable button */
                                       <Button
                                         variant="outline"
                                         size="sm"
-                                        onClick={() => unfreezeUserMutation.mutate(user.id)}
-                                        disabled={unfreezeUserMutation.isPending}
-                                        className="bg-blue-600 hover:bg-blue-700 border-0 h-7 text-xs px-2"
-                                        title={USER_MANAGEMENT_FIELD_HELP.unfreezeAction.tooltip}
-                                      >
-                                        {unfreezeUserMutation.isPending ? '...' : 'Unfreeze'}
-                                      </Button>
-                                      <Button
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={() => toggleUserStatusMutation.mutate({ userId: user.id, disabled: true })}
+                                        onClick={() => toggleUserStatusMutation.mutate({ userId: user.id, disabled: false })}
                                         disabled={toggleUserStatusMutation.isPending}
-                                        className="bg-red-600 hover:bg-red-700 border-0 h-7 text-xs px-2"
-                                        title={USER_MANAGEMENT_FIELD_HELP.disableAction.tooltip}
+                                        className="bg-green-600 hover:bg-green-700 border-0 h-7 text-xs px-2"
+                                        title={USER_MANAGEMENT_FIELD_HELP.enableAction.tooltip}
                                       >
-                                        {toggleUserStatusMutation.isPending ? '...' : 'Disable'}
+                                        {toggleUserStatusMutation.isPending ? '...' : 'Enable'}
                                       </Button>
-                                    </>
-                                  ) : (
-                                    /* Active users get Freeze + Disable */
-                                    <>
-                                      <Button
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={() => openFreeze(user)}
-                                        className="bg-amber-600 hover:bg-amber-700 border-0 h-7 text-xs px-2"
-                                        title={USER_MANAGEMENT_FIELD_HELP.freezeAction.tooltip}
-                                      >
-                                        Freeze
-                                      </Button>
-                                      <Button
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={() => toggleUserStatusMutation.mutate({ userId: user.id, disabled: true })}
-                                        disabled={toggleUserStatusMutation.isPending}
-                                        className="bg-red-600 hover:bg-red-700 border-0 h-7 text-xs px-2"
-                                        title={USER_MANAGEMENT_FIELD_HELP.disableAction.tooltip}
-                                      >
-                                        {toggleUserStatusMutation.isPending ? '...' : 'Disable'}
-                                      </Button>
-                                    </>
-                                  )}
-                                </div>
-                              </TableCell>
-                            </TableRow>
-                          ))
-                        )}
-                      </TableBody>
-                    </Table>
-                    <p className="text-xs text-gray-400 mt-3">{USER_MANAGEMENT_FIELD_HELP.rowActions.inline}</p>
-                  </div>
-                </>
-              )}
+                                    ) : user.isFrozen ? (
+                                      /* Frozen only users get Unfreeze + Disable */
+                                      <>
+                                        <Button
+                                          variant="outline"
+                                          size="sm"
+                                          onClick={() => unfreezeUserMutation.mutate(user.id)}
+                                          disabled={unfreezeUserMutation.isPending}
+                                          className="bg-blue-600 hover:bg-blue-700 border-0 h-7 text-xs px-2"
+                                          title={USER_MANAGEMENT_FIELD_HELP.unfreezeAction.tooltip}
+                                        >
+                                          {unfreezeUserMutation.isPending ? '...' : 'Unfreeze'}
+                                        </Button>
+                                        <Button
+                                          variant="outline"
+                                          size="sm"
+                                          onClick={() => toggleUserStatusMutation.mutate({ userId: user.id, disabled: true })}
+                                          disabled={toggleUserStatusMutation.isPending}
+                                          className="bg-red-600 hover:bg-red-700 border-0 h-7 text-xs px-2"
+                                          title={USER_MANAGEMENT_FIELD_HELP.disableAction.tooltip}
+                                        >
+                                          {toggleUserStatusMutation.isPending ? '...' : 'Disable'}
+                                        </Button>
+                                      </>
+                                    ) : (
+                                      /* Active users get Freeze + Disable */
+                                      <>
+                                        <Button
+                                          variant="outline"
+                                          size="sm"
+                                          onClick={() => openFreeze(user)}
+                                          className="bg-amber-600 hover:bg-amber-700 border-0 h-7 text-xs px-2"
+                                          title={USER_MANAGEMENT_FIELD_HELP.freezeAction.tooltip}
+                                        >
+                                          Freeze
+                                        </Button>
+                                        <Button
+                                          variant="outline"
+                                          size="sm"
+                                          onClick={() => toggleUserStatusMutation.mutate({ userId: user.id, disabled: true })}
+                                          disabled={toggleUserStatusMutation.isPending}
+                                          className="bg-red-600 hover:bg-red-700 border-0 h-7 text-xs px-2"
+                                          title={USER_MANAGEMENT_FIELD_HELP.disableAction.tooltip}
+                                        >
+                                          {toggleUserStatusMutation.isPending ? '...' : 'Disable'}
+                                        </Button>
+                                      </>
+                                    )}
+                                  </div>
+                                </TableCell>
+                              </TableRow>
+                            ))
+                          )}
+                        </TableBody>
+                      </Table>
+                      <p className="text-xs text-gray-400 mt-3">{USER_MANAGEMENT_FIELD_HELP.rowActions.inline}</p>
+                    </div>
+                  </>
+                )}
               </TooltipProvider>
             </TabsContent>
 
@@ -6943,720 +6947,720 @@ export default function AdminDashboard() {
 
               {/* This would be populated with trade settings controls */}
               <TooltipProvider delayDuration={120}>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
-                <div className="col-span-1 md:col-span-2 rounded-md border border-cyan-900/60 bg-cyan-950/20 p-3">
-                  <p className="text-sm text-cyan-100">
-                    Each field includes a hidden <span className="font-medium">Hint</span> explainer with deeper behavior details, guardrail impact, and operational cautions.
-                  </p>
-                </div>
-                <Card className="bg-neutral-700 border-gray-600 col-span-1 md:col-span-2">
-                  <CardHeader className="border-b border-gray-600 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                    <div className="min-w-0">
-                      <CardTitle className="text-sm sm:text-base text-cyan-300">Default Capital Settings</CardTitle>
-                      <p className="text-xs text-gray-400">
-                        Global defaults used for new user account capital and challenge virtual capital.
-                      </p>
-                    </div>
-                    {riskParamsChanged && (
-                      <Button
-                        size="sm"
-                        onClick={handleSaveRiskParams}
-                        disabled={globalSettingsMutation.isPending}
-                        className="shrink-0 w-full sm:w-auto text-xs sm:text-sm"
-                      >
-                        {globalSettingsMutation.isPending ? "Saving..." : "Save"}
-                      </Button>
-                    )}
-                  </CardHeader>
-                  <CardContent className="pt-4">
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                      <div>
-                        <FieldHintLabel
-                          label="Default User Starting Balance (USD)"
-                          hint={TRADE_SETTINGS_FIELD_HELP.defaultUserStartingBalanceUsd}
-                        />
-                        <Input
-                          type="number"
-                          min={1}
-                          value={riskParams.defaultUserStartingBalanceUsd}
-                          onChange={(e) =>
-                            handleRiskParamChange("defaultUserStartingBalanceUsd", Math.max(1, Number(e.target.value) || 1))
-                          }
-                          className="bg-neutral-600"
-                        />
-                        <p className="text-xs text-gray-400 mt-1">Starting cash balance assigned when a new user account is created</p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+                  <div className="col-span-1 md:col-span-2 rounded-md border border-cyan-900/60 bg-cyan-950/20 p-3">
+                    <p className="text-sm text-cyan-100">
+                      Each field includes a hidden <span className="font-medium">Hint</span> explainer with deeper behavior details, guardrail impact, and operational cautions.
+                    </p>
+                  </div>
+                  <Card className="bg-neutral-700 border-gray-600 col-span-1 md:col-span-2">
+                    <CardHeader className="border-b border-gray-600 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                      <div className="min-w-0">
+                        <CardTitle className="text-sm sm:text-base text-cyan-300">Default Capital Settings</CardTitle>
+                        <p className="text-xs text-gray-400">
+                          Global defaults used for new user account capital and challenge virtual capital.
+                        </p>
                       </div>
-                      <div>
-                        <FieldHintLabel
-                          label="Default User Starting Equity (USD)"
-                          hint={TRADE_SETTINGS_FIELD_HELP.defaultUserStartingEquityUsd}
-                        />
-                        <Input
-                          type="number"
-                          min={1}
-                          value={riskParams.defaultUserStartingEquityUsd}
-                          onChange={(e) =>
-                            handleRiskParamChange("defaultUserStartingEquityUsd", Math.max(1, Number(e.target.value) || 1))
-                          }
-                          className="bg-neutral-600"
-                        />
-                        <p className="text-xs text-gray-400 mt-1">Opening equity baseline used for new user account risk calculations</p>
-                      </div>
-                      <div>
-                        <FieldHintLabel
-                          label="Default Challenge Virtual Capital (USD)"
-                          hint={TRADE_SETTINGS_FIELD_HELP.defaultChallengeVirtualCapitalUsd}
-                        />
-                        <Input
-                          type="number"
-                          min={1}
-                          value={riskParams.defaultChallengeVirtualCapitalUsd}
-                          onChange={(e) =>
-                            handleRiskParamChange("defaultChallengeVirtualCapitalUsd", Math.max(1, Number(e.target.value) || 1))
-                          }
-                          className="bg-neutral-600"
-                        />
-                        <p className="text-xs text-gray-400 mt-1">Prefilled virtual capital for new challenge drafts unless overridden</p>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-
-                <Card className="bg-neutral-700 border-gray-600">
-                  <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                    <div className="min-w-0">
-                      <CardTitle className="text-sm sm:text-base">Market Hours (UTC)</CardTitle>
-                      <p className="text-xs text-gray-400">Configure trading hours in UTC timezone</p>
-                    </div>
-                    {riskParamsChanged && (
-                      <Button
-                        size="sm"
-                        onClick={handleSaveRiskParams}
-                        disabled={globalSettingsMutation.isPending}
-                        className="shrink-0 w-full sm:w-auto text-xs sm:text-sm"
-                      >
-                        {globalSettingsMutation.isPending ? "Saving..." : "Save"}
-                      </Button>
-                    )}
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-4">
-                      <div className="grid grid-cols-2 gap-2">
-                        <div>
-                          <FieldHintLabel
-                            label="Opening Time (UTC)"
-                            hint={TRADE_SETTINGS_FIELD_HELP.marketOpenTime}
-                          />
-                          <Input
-                            type="time"
-                            value={riskParams.marketOpenTime}
-                            onChange={(e) => handleRiskParamChange('marketOpenTime', e.target.value)}
-                            className="bg-neutral-600"
-                          />
-                          <p className="text-xs text-gray-400 mt-1">First UTC time when opening new trades is allowed</p>
-                        </div>
-                        <div>
-                          <FieldHintLabel
-                            label="Closing Time (UTC)"
-                            hint={TRADE_SETTINGS_FIELD_HELP.marketCloseTime}
-                          />
-                          <Input
-                            type="time"
-                            value={riskParams.marketCloseTime}
-                            onChange={(e) => handleRiskParamChange('marketCloseTime', e.target.value)}
-                            className="bg-neutral-600"
-                          />
-                          <p className="text-xs text-gray-400 mt-1">Last UTC time when opening new trades is allowed</p>
-                        </div>
-                      </div>
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="flex items-center space-x-2">
-                          <Checkbox
-                            id="weekend"
-                            checked={riskParams.allowWeekendTrading}
-                            onCheckedChange={(checked) => handleRiskParamChange('allowWeekendTrading', Boolean(checked))}
-                          />
-                          <Label htmlFor="weekend">Allow weekend trading</Label>
-                        </div>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <button
-                              type="button"
-                              className="text-[11px] font-medium text-cyan-300 underline decoration-dotted underline-offset-2 hover:text-cyan-200"
-                              aria-label="Allow weekend trading hint"
-                            >
-                              Hint
-                            </button>
-                          </TooltipTrigger>
-                          <TooltipContent side="top" className="max-w-sm text-xs leading-relaxed">
-                            {TRADE_SETTINGS_FIELD_HELP.allowWeekendTrading}
-                          </TooltipContent>
-                        </Tooltip>
-                      </div>
-                      <p className="text-xs text-gray-400 mt-1">When disabled, opening new trades is restricted to weekdays</p>
-                    </div>
-                  </CardContent>
-                </Card>
-
-                <Card className="bg-neutral-700 border-gray-600">
-                  <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                    <CardTitle className="text-sm sm:text-base min-w-0">Default Risk Parameters</CardTitle>
-                    {riskParamsChanged && (
-                      <Button
-                        size="sm"
-                        onClick={handleSaveRiskParams}
-                        disabled={globalSettingsMutation.isPending}
-                        className="shrink-0 w-full sm:w-auto text-xs sm:text-sm"
-                      >
-                        {globalSettingsMutation.isPending ? "Saving..." : "Save"}
-                      </Button>
-                    )}
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-4">
-                      <div>
-                        <FieldHintLabel
-                          label="Default Leverage"
-                          hint={TRADE_SETTINGS_FIELD_HELP.defaultLeverage}
-                        />
-                        <Input
-                          type="number"
-                          value={riskParams.defaultLeverage}
-                          onChange={(e) => handleRiskParamChange('defaultLeverage', Number(e.target.value))}
-                          className="bg-neutral-600"
-                        />
-                        <p className="text-xs text-gray-400 mt-1">Default leverage applied to new accounts unless an override is set</p>
-                      </div>
-                      <div>
-                        <FieldHintLabel
-                          label="Max Position Size"
-                          hint={TRADE_SETTINGS_FIELD_HELP.maxPositionSize}
-                        />
-                        <Input
-                          type="number"
-                          value={riskParams.maxPositionSize}
-                          onChange={(e) => handleRiskParamChange('maxPositionSize', Number(e.target.value))}
-                          className="bg-neutral-600"
-                        />
-                        <p className="text-xs text-gray-400 mt-1">Largest size allowed for a single open position</p>
-                      </div>
-                      <div>
-                        <FieldHintLabel
-                          label="Maximum Trades Per User"
-                          hint={TRADE_SETTINGS_FIELD_HELP.maxTradesPerUser}
-                        />
-                        <Input
-                          type="number"
-                          value={riskParams.maxTradesPerUser}
-                          onChange={(e) => handleRiskParamChange('maxTradesPerUser', Number(e.target.value))}
-                          className="bg-neutral-600"
-                        />
-                        <p className="text-xs text-gray-400 mt-1">Maximum number of concurrent trades allowed per user</p>
-                      </div>
-                      <div>
-                        <FieldHintLabel
-                          label="Maximum Trades Per Instrument"
-                          hint={TRADE_SETTINGS_FIELD_HELP.maxTradesPerInstrument}
-                        />
-                        <Input
-                          type="number"
-                          value={riskParams.maxTradesPerInstrument}
-                          onChange={(e) => handleRiskParamChange('maxTradesPerInstrument', Number(e.target.value))}
-                          className="bg-neutral-600"
-                        />
-                        <p className="text-xs text-gray-400 mt-1">Maximum number of concurrent trades allowed per instrument</p>
-                      </div>
-                      <div>
-                        <FieldHintLabel
-                          label="Maximum Concurrent Lots Per User"
-                          hint={TRADE_SETTINGS_FIELD_HELP.maxConcurrentLots}
-                        />
-                        <Input
-                          type="number"
-                          value={riskParams.maxConcurrentLots}
-                          onChange={(e) => handleRiskParamChange('maxConcurrentLots', Number(e.target.value))}
-                          className="bg-neutral-600"
-                        />
-                        <p className="text-xs text-gray-400 mt-1">Maximum total lots allowed across all open trades per user</p>
-                      </div>
-                      <div>
-                        <FieldHintLabel
-                          label="Minimum Price Distance (pips)"
-                          hint={TRADE_SETTINGS_FIELD_HELP.minPriceDistancePips}
-                        />
-                        <Input
-                          type="number"
-                          min={1}
-                          step={1}
-                          value={riskParams.minPriceDistancePips}
-                          onChange={(e) => handleRiskParamChange('minPriceDistancePips', Number(e.target.value))}
-                          className="bg-neutral-600"
-                        />
-                        <p className="text-xs text-gray-400 mt-1">Minimum distance enforced for pending orders and TP/SL (open + edits)</p>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-
-                <Card className="bg-neutral-700 border-gray-600 col-span-1 md:col-span-2">
-                  <CardHeader className="border-b border-gray-600">
-                    <CardTitle className="text-sm sm:text-base text-green-400">Trade Auto-Close Settings and Minimum Hold Times</CardTitle>
-                  </CardHeader>
-                  <CardContent className="pt-4">
-                    <div className="space-y-4">
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="flex items-center space-x-2">
-                          <Switch
-                            id="enableAutoClose"
-                            checked={riskParams.enableAutoClose}
-                            onCheckedChange={(checked) => handleRiskParamChange('enableAutoClose', checked)}
-                          />
-                          <Label htmlFor="enableAutoClose" className="text-sm">Enable auto-close for trades</Label>
-                        </div>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <button
-                              type="button"
-                              className="text-[11px] font-medium text-cyan-300 underline decoration-dotted underline-offset-2 hover:text-cyan-200"
-                              aria-label="Enable auto-close for trades hint"
-                            >
-                              Hint
-                            </button>
-                          </TooltipTrigger>
-                          <TooltipContent side="top" className="max-w-sm text-xs leading-relaxed">
-                            {TRADE_SETTINGS_FIELD_HELP.enableAutoClose}
-                          </TooltipContent>
-                        </Tooltip>
-                      </div>
-                      <p className="text-xs text-gray-400 mt-1">When enabled, eligible open trades are closed after the configured hold period</p>
+                      {riskParamsChanged && (
+                        <Button
+                          size="sm"
+                          onClick={handleSaveRiskParams}
+                          disabled={globalSettingsMutation.isPending}
+                          className="shrink-0 w-full sm:w-auto text-xs sm:text-sm"
+                        >
+                          {globalSettingsMutation.isPending ? "Saving..." : "Save"}
+                        </Button>
+                      )}
+                    </CardHeader>
+                    <CardContent className="pt-4">
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                         <div>
                           <FieldHintLabel
-                            label="Auto-close after (days)"
-                            hint={TRADE_SETTINGS_FIELD_HELP.autoCloseAfterDays}
+                            label="Default User Starting Balance (USD)"
+                            hint={TRADE_SETTINGS_FIELD_HELP.defaultUserStartingBalanceUsd}
                           />
                           <Input
                             type="number"
-                            value={riskParams.autoCloseAfterDays}
-                            onChange={(e) => handleRiskParamChange('autoCloseAfterDays', Number(e.target.value))}
-                            className="bg-neutral-600"
-                          />
-                          <p className="text-xs text-gray-400 mt-1">Trades will auto-close after this many days</p>
-                        </div>
-                        <div>
-                          <FieldHintLabel
-                            label="Check frequency (minutes)"
-                            hint={TRADE_SETTINGS_FIELD_HELP.autoCloseCheckFrequencyMinutes}
-                          />
-                          <Input
-                            type="number"
-                            value={riskParams.autoCloseCheckFrequencyMinutes}
-                            onChange={(e) => handleRiskParamChange('autoCloseCheckFrequencyMinutes', Number(e.target.value))}
-                            className="bg-neutral-600"
-                          />
-                          <p className="text-xs text-gray-400 mt-1">How often the system checks for trades to close</p>
-                        </div>
-                        <div>
-                          <FieldHintLabel
-                            label="Minimum Hold Time (seconds)"
-                            hint={TRADE_SETTINGS_FIELD_HELP.minHoldSec}
-                          />
-                          <Input
-                            type="number"
-                            value={riskParams.minHoldSec}
-                            onChange={(e) => handleRiskParamChange('minHoldSec', Number(e.target.value))}
-                            className="bg-neutral-600"
-                          />
-                          <p className="text-xs text-gray-400 mt-1">Global default - users can have overrides</p>
-                        </div>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-
-                <Card className="bg-neutral-700 border-gray-600 col-span-1 md:col-span-2">
-                  <CardHeader className="border-b border-gray-600">
-                    <CardTitle className="text-sm sm:text-base text-orange-400">Loss Limit Controls</CardTitle>
-                  </CardHeader>
-                  <CardContent className="pt-4">
-                    <div className="space-y-4">
-                      <div className="flex items-center justify-between gap-2 mb-4">
-                        <div className="flex items-center space-x-2">
-                          <Switch
-                            id="enableLossLimits"
-                            checked={riskParams.enableLossLimits}
-                            onCheckedChange={(checked) => handleRiskParamChange('enableLossLimits', checked)}
-                          />
-                          <Label htmlFor="enableLossLimits" className="text-sm">Enable loss limit protection</Label>
-                        </div>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <button
-                              type="button"
-                              className="text-[11px] font-medium text-cyan-300 underline decoration-dotted underline-offset-2 hover:text-cyan-200"
-                              aria-label="Enable loss limit protection hint"
-                            >
-                              Hint
-                            </button>
-                          </TooltipTrigger>
-                          <TooltipContent side="top" className="max-w-sm text-xs leading-relaxed">
-                            {TRADE_SETTINGS_FIELD_HELP.enableLossLimits}
-                          </TooltipContent>
-                        </Tooltip>
-                      </div>
-                      <p className="text-xs text-gray-400 mt-1">When enabled, trading is constrained if daily or lifetime loss thresholds are exceeded</p>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        <div>
-                          <FieldHintLabel
-                            label="Daily Loss Limit (%)"
-                            hint={TRADE_SETTINGS_FIELD_HELP.dailyLossLimitPct}
-                          />
-                          <Input
-                            type="number"
-                            value={riskParams.dailyLossLimitPct}
-                            onChange={(e) => handleRiskParamChange('dailyLossLimitPct', Number(e.target.value))}
-                            className="bg-neutral-600"
-                          />
-                          <p className="text-xs text-gray-400 mt-1">Maximum daily loss as percentage of initial balance</p>
-                        </div>
-                        <div>
-                          <FieldHintLabel
-                            label="Lifetime Loss Limit (%)"
-                            hint={TRADE_SETTINGS_FIELD_HELP.lifetimeLossLimitPct}
-                          />
-                          <Input
-                            type="number"
-                            value={riskParams.lifetimeLossLimitPct}
-                            onChange={(e) => handleRiskParamChange('lifetimeLossLimitPct', Number(e.target.value))}
-                            className="bg-neutral-600"
-                          />
-                          <p className="text-xs text-gray-400 mt-1">Maximum lifetime loss before account is disabled</p>
-                        </div>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-
-                <Card className="bg-neutral-700 border-gray-600 col-span-1 md:col-span-2">
-                  <CardHeader className="border-b border-gray-600 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                    <div className="min-w-0">
-                      <CardTitle className="text-sm sm:text-base text-purple-400">Visual Lot Settings</CardTitle>
-                      <p className="text-xs text-gray-400">Configure lot preset quick-select cards and dropdown maximum for the trader order form</p>
-                    </div>
-                    {riskParamsChanged && (
-                      <Button
-                        size="sm"
-                        onClick={handleSaveRiskParams}
-                        disabled={globalSettingsMutation.isPending}
-                        className="shrink-0 w-full sm:w-auto text-xs sm:text-sm"
-                      >
-                        {globalSettingsMutation.isPending ? "Saving..." : "Save"}
-                      </Button>
-                    )}
-                  </CardHeader>
-                  <CardContent className="pt-4">
-                    <div className="space-y-6">
-                      {/* Preset Cards Editor */}
-                      <div>
-                        <FieldHintLabel
-                          label="Lot Preset Cards"
-                          hint={TRADE_SETTINGS_FIELD_HELP.lotPresetCards}
-                        />
-                        <p className="text-xs text-gray-400 mb-3">Quick-select buttons shown to traders on the order form</p>
-                        <p className="text-xs text-gray-400 mb-3">Each value is a lot-size shortcut and should stay within the dropdown maximum</p>
-                        <div className="flex flex-wrap gap-2 mb-3">
-                          {(() => {
-                            try {
-                              const presets: number[] = JSON.parse(riskParams.lotPresetCards || "[]");
-                              return presets.map((value, index) => (
-                                <div key={index} className="flex items-center gap-1 bg-neutral-600 rounded-md px-2 py-1">
-                                  <Input
-                                    type="number"
-                                    value={value}
-                                    onChange={(e) => {
-                                      const newValue = parseInt(e.target.value) || 1;
-                                      const maxAllowed = Math.min(50, riskParams.lotDropdownMax || 50);
-                                      const updated = [...presets];
-                                      updated[index] = Math.max(1, Math.min(maxAllowed, newValue));
-                                      handleRiskParamChange('lotPresetCards', JSON.stringify(updated));
-                                    }}
-                                    className="w-16 h-7 text-xs bg-neutral-700 border-gray-500 text-center"
-                                    min={1}
-                                    max={Math.min(50, riskParams.lotDropdownMax || 50)}
-                                  />
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      const updated = presets.filter((_, i) => i !== index);
-                                      handleRiskParamChange('lotPresetCards', JSON.stringify(updated));
-                                    }}
-                                    className="text-gray-400 hover:text-red-400 px-1"
-                                  >
-                                    ×
-                                  </button>
-                                </div>
-                              ));
-                            } catch {
-                              return <span className="text-red-400 text-xs">Invalid preset data</span>;
+                            min={1}
+                            value={riskParams.defaultUserStartingBalanceUsd}
+                            onChange={(e) =>
+                              handleRiskParamChange("defaultUserStartingBalanceUsd", Math.max(1, Number(e.target.value) || 1))
                             }
-                          })()}
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={() => {
+                            className="bg-neutral-600"
+                          />
+                          <p className="text-xs text-gray-400 mt-1">Starting cash balance assigned when a new user account is created</p>
+                        </div>
+                        <div>
+                          <FieldHintLabel
+                            label="Default User Starting Equity (USD)"
+                            hint={TRADE_SETTINGS_FIELD_HELP.defaultUserStartingEquityUsd}
+                          />
+                          <Input
+                            type="number"
+                            min={1}
+                            value={riskParams.defaultUserStartingEquityUsd}
+                            onChange={(e) =>
+                              handleRiskParamChange("defaultUserStartingEquityUsd", Math.max(1, Number(e.target.value) || 1))
+                            }
+                            className="bg-neutral-600"
+                          />
+                          <p className="text-xs text-gray-400 mt-1">Opening equity baseline used for new user account risk calculations</p>
+                        </div>
+                        <div>
+                          <FieldHintLabel
+                            label="Default Challenge Virtual Capital (USD)"
+                            hint={TRADE_SETTINGS_FIELD_HELP.defaultChallengeVirtualCapitalUsd}
+                          />
+                          <Input
+                            type="number"
+                            min={1}
+                            value={riskParams.defaultChallengeVirtualCapitalUsd}
+                            onChange={(e) =>
+                              handleRiskParamChange("defaultChallengeVirtualCapitalUsd", Math.max(1, Number(e.target.value) || 1))
+                            }
+                            className="bg-neutral-600"
+                          />
+                          <p className="text-xs text-gray-400 mt-1">Prefilled virtual capital for new challenge drafts unless overridden</p>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  <Card className="bg-neutral-700 border-gray-600">
+                    <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                      <div className="min-w-0">
+                        <CardTitle className="text-sm sm:text-base">Market Hours (UTC)</CardTitle>
+                        <p className="text-xs text-gray-400">Configure trading hours in UTC timezone</p>
+                      </div>
+                      {riskParamsChanged && (
+                        <Button
+                          size="sm"
+                          onClick={handleSaveRiskParams}
+                          disabled={globalSettingsMutation.isPending}
+                          className="shrink-0 w-full sm:w-auto text-xs sm:text-sm"
+                        >
+                          {globalSettingsMutation.isPending ? "Saving..." : "Save"}
+                        </Button>
+                      )}
+                    </CardHeader>
+                    <CardContent>
+                      <div className="space-y-4">
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <FieldHintLabel
+                              label="Opening Time (UTC)"
+                              hint={TRADE_SETTINGS_FIELD_HELP.marketOpenTime}
+                            />
+                            <Input
+                              type="time"
+                              value={riskParams.marketOpenTime}
+                              onChange={(e) => handleRiskParamChange('marketOpenTime', e.target.value)}
+                              className="bg-neutral-600"
+                            />
+                            <p className="text-xs text-gray-400 mt-1">First UTC time when opening new trades is allowed</p>
+                          </div>
+                          <div>
+                            <FieldHintLabel
+                              label="Closing Time (UTC)"
+                              hint={TRADE_SETTINGS_FIELD_HELP.marketCloseTime}
+                            />
+                            <Input
+                              type="time"
+                              value={riskParams.marketCloseTime}
+                              onChange={(e) => handleRiskParamChange('marketCloseTime', e.target.value)}
+                              className="bg-neutral-600"
+                            />
+                            <p className="text-xs text-gray-400 mt-1">Last UTC time when opening new trades is allowed</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center space-x-2">
+                            <Checkbox
+                              id="weekend"
+                              checked={riskParams.allowWeekendTrading}
+                              onCheckedChange={(checked) => handleRiskParamChange('allowWeekendTrading', Boolean(checked))}
+                            />
+                            <Label htmlFor="weekend">Allow weekend trading</Label>
+                          </div>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <button
+                                type="button"
+                                className="text-[11px] font-medium text-cyan-300 underline decoration-dotted underline-offset-2 hover:text-cyan-200"
+                                aria-label="Allow weekend trading hint"
+                              >
+                                Hint
+                              </button>
+                            </TooltipTrigger>
+                            <TooltipContent side="top" className="max-w-sm text-xs leading-relaxed">
+                              {TRADE_SETTINGS_FIELD_HELP.allowWeekendTrading}
+                            </TooltipContent>
+                          </Tooltip>
+                        </div>
+                        <p className="text-xs text-gray-400 mt-1">When disabled, opening new trades is restricted to weekdays</p>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  <Card className="bg-neutral-700 border-gray-600">
+                    <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                      <CardTitle className="text-sm sm:text-base min-w-0">Default Risk Parameters</CardTitle>
+                      {riskParamsChanged && (
+                        <Button
+                          size="sm"
+                          onClick={handleSaveRiskParams}
+                          disabled={globalSettingsMutation.isPending}
+                          className="shrink-0 w-full sm:w-auto text-xs sm:text-sm"
+                        >
+                          {globalSettingsMutation.isPending ? "Saving..." : "Save"}
+                        </Button>
+                      )}
+                    </CardHeader>
+                    <CardContent>
+                      <div className="space-y-4">
+                        <div>
+                          <FieldHintLabel
+                            label="Default Leverage"
+                            hint={TRADE_SETTINGS_FIELD_HELP.defaultLeverage}
+                          />
+                          <Input
+                            type="number"
+                            value={riskParams.defaultLeverage}
+                            onChange={(e) => handleRiskParamChange('defaultLeverage', Number(e.target.value))}
+                            className="bg-neutral-600"
+                          />
+                          <p className="text-xs text-gray-400 mt-1">Default leverage applied to new accounts unless an override is set</p>
+                        </div>
+                        <div>
+                          <FieldHintLabel
+                            label="Max Position Size"
+                            hint={TRADE_SETTINGS_FIELD_HELP.maxPositionSize}
+                          />
+                          <Input
+                            type="number"
+                            value={riskParams.maxPositionSize}
+                            onChange={(e) => handleRiskParamChange('maxPositionSize', Number(e.target.value))}
+                            className="bg-neutral-600"
+                          />
+                          <p className="text-xs text-gray-400 mt-1">Largest size allowed for a single open position</p>
+                        </div>
+                        <div>
+                          <FieldHintLabel
+                            label="Maximum Trades Per User"
+                            hint={TRADE_SETTINGS_FIELD_HELP.maxTradesPerUser}
+                          />
+                          <Input
+                            type="number"
+                            value={riskParams.maxTradesPerUser}
+                            onChange={(e) => handleRiskParamChange('maxTradesPerUser', Number(e.target.value))}
+                            className="bg-neutral-600"
+                          />
+                          <p className="text-xs text-gray-400 mt-1">Maximum number of concurrent trades allowed per user</p>
+                        </div>
+                        <div>
+                          <FieldHintLabel
+                            label="Maximum Trades Per Instrument"
+                            hint={TRADE_SETTINGS_FIELD_HELP.maxTradesPerInstrument}
+                          />
+                          <Input
+                            type="number"
+                            value={riskParams.maxTradesPerInstrument}
+                            onChange={(e) => handleRiskParamChange('maxTradesPerInstrument', Number(e.target.value))}
+                            className="bg-neutral-600"
+                          />
+                          <p className="text-xs text-gray-400 mt-1">Maximum number of concurrent trades allowed per instrument</p>
+                        </div>
+                        <div>
+                          <FieldHintLabel
+                            label="Maximum Concurrent Lots Per User"
+                            hint={TRADE_SETTINGS_FIELD_HELP.maxConcurrentLots}
+                          />
+                          <Input
+                            type="number"
+                            value={riskParams.maxConcurrentLots}
+                            onChange={(e) => handleRiskParamChange('maxConcurrentLots', Number(e.target.value))}
+                            className="bg-neutral-600"
+                          />
+                          <p className="text-xs text-gray-400 mt-1">Maximum total lots allowed across all open trades per user</p>
+                        </div>
+                        <div>
+                          <FieldHintLabel
+                            label="Minimum Price Distance (pips)"
+                            hint={TRADE_SETTINGS_FIELD_HELP.minPriceDistancePips}
+                          />
+                          <Input
+                            type="number"
+                            min={1}
+                            step={1}
+                            value={riskParams.minPriceDistancePips}
+                            onChange={(e) => handleRiskParamChange('minPriceDistancePips', Number(e.target.value))}
+                            className="bg-neutral-600"
+                          />
+                          <p className="text-xs text-gray-400 mt-1">Minimum distance enforced for pending orders and TP/SL (open + edits)</p>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  <Card className="bg-neutral-700 border-gray-600 col-span-1 md:col-span-2">
+                    <CardHeader className="border-b border-gray-600">
+                      <CardTitle className="text-sm sm:text-base text-green-400">Trade Auto-Close Settings and Minimum Hold Times</CardTitle>
+                    </CardHeader>
+                    <CardContent className="pt-4">
+                      <div className="space-y-4">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center space-x-2">
+                            <Switch
+                              id="enableAutoClose"
+                              checked={riskParams.enableAutoClose}
+                              onCheckedChange={(checked) => handleRiskParamChange('enableAutoClose', checked)}
+                            />
+                            <Label htmlFor="enableAutoClose" className="text-sm">Enable auto-close for trades</Label>
+                          </div>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <button
+                                type="button"
+                                className="text-[11px] font-medium text-cyan-300 underline decoration-dotted underline-offset-2 hover:text-cyan-200"
+                                aria-label="Enable auto-close for trades hint"
+                              >
+                                Hint
+                              </button>
+                            </TooltipTrigger>
+                            <TooltipContent side="top" className="max-w-sm text-xs leading-relaxed">
+                              {TRADE_SETTINGS_FIELD_HELP.enableAutoClose}
+                            </TooltipContent>
+                          </Tooltip>
+                        </div>
+                        <p className="text-xs text-gray-400 mt-1">When enabled, eligible open trades are closed after the configured hold period</p>
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                          <div>
+                            <FieldHintLabel
+                              label="Auto-close after (days)"
+                              hint={TRADE_SETTINGS_FIELD_HELP.autoCloseAfterDays}
+                            />
+                            <Input
+                              type="number"
+                              value={riskParams.autoCloseAfterDays}
+                              onChange={(e) => handleRiskParamChange('autoCloseAfterDays', Number(e.target.value))}
+                              className="bg-neutral-600"
+                            />
+                            <p className="text-xs text-gray-400 mt-1">Trades will auto-close after this many days</p>
+                          </div>
+                          <div>
+                            <FieldHintLabel
+                              label="Check frequency (minutes)"
+                              hint={TRADE_SETTINGS_FIELD_HELP.autoCloseCheckFrequencyMinutes}
+                            />
+                            <Input
+                              type="number"
+                              value={riskParams.autoCloseCheckFrequencyMinutes}
+                              onChange={(e) => handleRiskParamChange('autoCloseCheckFrequencyMinutes', Number(e.target.value))}
+                              className="bg-neutral-600"
+                            />
+                            <p className="text-xs text-gray-400 mt-1">How often the system checks for trades to close</p>
+                          </div>
+                          <div>
+                            <FieldHintLabel
+                              label="Minimum Hold Time (seconds)"
+                              hint={TRADE_SETTINGS_FIELD_HELP.minHoldSec}
+                            />
+                            <Input
+                              type="number"
+                              value={riskParams.minHoldSec}
+                              onChange={(e) => handleRiskParamChange('minHoldSec', Number(e.target.value))}
+                              className="bg-neutral-600"
+                            />
+                            <p className="text-xs text-gray-400 mt-1">Global default - users can have overrides</p>
+                          </div>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  <Card className="bg-neutral-700 border-gray-600 col-span-1 md:col-span-2">
+                    <CardHeader className="border-b border-gray-600">
+                      <CardTitle className="text-sm sm:text-base text-orange-400">Loss Limit Controls</CardTitle>
+                    </CardHeader>
+                    <CardContent className="pt-4">
+                      <div className="space-y-4">
+                        <div className="flex items-center justify-between gap-2 mb-4">
+                          <div className="flex items-center space-x-2">
+                            <Switch
+                              id="enableLossLimits"
+                              checked={riskParams.enableLossLimits}
+                              onCheckedChange={(checked) => handleRiskParamChange('enableLossLimits', checked)}
+                            />
+                            <Label htmlFor="enableLossLimits" className="text-sm">Enable loss limit protection</Label>
+                          </div>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <button
+                                type="button"
+                                className="text-[11px] font-medium text-cyan-300 underline decoration-dotted underline-offset-2 hover:text-cyan-200"
+                                aria-label="Enable loss limit protection hint"
+                              >
+                                Hint
+                              </button>
+                            </TooltipTrigger>
+                            <TooltipContent side="top" className="max-w-sm text-xs leading-relaxed">
+                              {TRADE_SETTINGS_FIELD_HELP.enableLossLimits}
+                            </TooltipContent>
+                          </Tooltip>
+                        </div>
+                        <p className="text-xs text-gray-400 mt-1">When enabled, trading is constrained if daily or lifetime loss thresholds are exceeded</p>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          <div>
+                            <FieldHintLabel
+                              label="Daily Loss Limit (%)"
+                              hint={TRADE_SETTINGS_FIELD_HELP.dailyLossLimitPct}
+                            />
+                            <Input
+                              type="number"
+                              value={riskParams.dailyLossLimitPct}
+                              onChange={(e) => handleRiskParamChange('dailyLossLimitPct', Number(e.target.value))}
+                              className="bg-neutral-600"
+                            />
+                            <p className="text-xs text-gray-400 mt-1">Maximum daily loss as percentage of initial balance</p>
+                          </div>
+                          <div>
+                            <FieldHintLabel
+                              label="Lifetime Loss Limit (%)"
+                              hint={TRADE_SETTINGS_FIELD_HELP.lifetimeLossLimitPct}
+                            />
+                            <Input
+                              type="number"
+                              value={riskParams.lifetimeLossLimitPct}
+                              onChange={(e) => handleRiskParamChange('lifetimeLossLimitPct', Number(e.target.value))}
+                              className="bg-neutral-600"
+                            />
+                            <p className="text-xs text-gray-400 mt-1">Maximum lifetime loss before account is disabled</p>
+                          </div>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  <Card className="bg-neutral-700 border-gray-600 col-span-1 md:col-span-2">
+                    <CardHeader className="border-b border-gray-600 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                      <div className="min-w-0">
+                        <CardTitle className="text-sm sm:text-base text-purple-400">Visual Lot Settings</CardTitle>
+                        <p className="text-xs text-gray-400">Configure lot preset quick-select cards and dropdown maximum for the trader order form</p>
+                      </div>
+                      {riskParamsChanged && (
+                        <Button
+                          size="sm"
+                          onClick={handleSaveRiskParams}
+                          disabled={globalSettingsMutation.isPending}
+                          className="shrink-0 w-full sm:w-auto text-xs sm:text-sm"
+                        >
+                          {globalSettingsMutation.isPending ? "Saving..." : "Save"}
+                        </Button>
+                      )}
+                    </CardHeader>
+                    <CardContent className="pt-4">
+                      <div className="space-y-6">
+                        {/* Preset Cards Editor */}
+                        <div>
+                          <FieldHintLabel
+                            label="Lot Preset Cards"
+                            hint={TRADE_SETTINGS_FIELD_HELP.lotPresetCards}
+                          />
+                          <p className="text-xs text-gray-400 mb-3">Quick-select buttons shown to traders on the order form</p>
+                          <p className="text-xs text-gray-400 mb-3">Each value is a lot-size shortcut and should stay within the dropdown maximum</p>
+                          <div className="flex flex-wrap gap-2 mb-3">
+                            {(() => {
                               try {
                                 const presets: number[] = JSON.parse(riskParams.lotPresetCards || "[]");
-                                const maxAllowed = Math.min(50, riskParams.lotDropdownMax || 50);
-                                const newValue = presets.length > 0 ? Math.min((presets[presets.length - 1] || 1) * 2, maxAllowed) : 1;
-                                handleRiskParamChange('lotPresetCards', JSON.stringify([...presets, newValue]));
-                              } catch {
-                                handleRiskParamChange('lotPresetCards', JSON.stringify([1]));
-                              }
-                            }}
-                            className="h-7 text-xs bg-neutral-600 hover:bg-neutral-500"
-                          >
-                            + Add
-                          </Button>
-                        </div>
-                      </div>
-
-                      {/* Dropdown Max */}
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        <div>
-                          <FieldHintLabel
-                            label="Dropdown Maximum Lots"
-                            hint={TRADE_SETTINGS_FIELD_HELP.lotDropdownMax}
-                          />
-                          <Input
-                            type="number"
-                            value={riskParams.lotDropdownMax}
-                            onChange={(e) => handleRiskParamChange('lotDropdownMax', Math.max(1, Math.min(50, Number(e.target.value) || 50)))}
-                            className="bg-neutral-600"
-                            min={1}
-                            max={50}
-                          />
-                          <p className="text-xs text-gray-400 mt-1">Maximum lot value shown in the dropdown selector (1-50)</p>
-                        </div>
-                        <div className="flex items-end">
-                          <div className="w-full p-3 bg-neutral-800 rounded-md border border-gray-600">
-                            <p className="text-xs text-gray-400 mb-2">Preview (dropdown options):</p>
-                            <div className="flex flex-wrap gap-1 text-xs">
-                              {(() => {
-                                const max = riskParams.lotDropdownMax || 50;
-                                const options = Array.from({ length: Math.min(max, 50) }, (_v, i) => i + 1);
-                                return options.slice(0, 12).map(n => (
-                                  <span key={n} className="px-1.5 py-0.5 bg-neutral-700 rounded">{n}</span>
+                                return presets.map((value, index) => (
+                                  <div key={index} className="flex items-center gap-1 bg-neutral-600 rounded-md px-2 py-1">
+                                    <Input
+                                      type="number"
+                                      value={value}
+                                      onChange={(e) => {
+                                        const newValue = parseInt(e.target.value) || 1;
+                                        const maxAllowed = Math.min(50, riskParams.lotDropdownMax || 50);
+                                        const updated = [...presets];
+                                        updated[index] = Math.max(1, Math.min(maxAllowed, newValue));
+                                        handleRiskParamChange('lotPresetCards', JSON.stringify(updated));
+                                      }}
+                                      className="w-16 h-7 text-xs bg-neutral-700 border-gray-500 text-center"
+                                      min={1}
+                                      max={Math.min(50, riskParams.lotDropdownMax || 50)}
+                                    />
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const updated = presets.filter((_, i) => i !== index);
+                                        handleRiskParamChange('lotPresetCards', JSON.stringify(updated));
+                                      }}
+                                      className="text-gray-400 hover:text-red-400 px-1"
+                                    >
+                                      ×
+                                    </button>
+                                  </div>
                                 ));
-                              })()}
-                              {riskParams.lotDropdownMax > 12 && <span className="text-gray-500">...</span>}
+                              } catch {
+                                return <span className="text-red-400 text-xs">Invalid preset data</span>;
+                              }
+                            })()}
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                try {
+                                  const presets: number[] = JSON.parse(riskParams.lotPresetCards || "[]");
+                                  const maxAllowed = Math.min(50, riskParams.lotDropdownMax || 50);
+                                  const newValue = presets.length > 0 ? Math.min((presets[presets.length - 1] || 1) * 2, maxAllowed) : 1;
+                                  handleRiskParamChange('lotPresetCards', JSON.stringify([...presets, newValue]));
+                                } catch {
+                                  handleRiskParamChange('lotPresetCards', JSON.stringify([1]));
+                                }
+                              }}
+                              className="h-7 text-xs bg-neutral-600 hover:bg-neutral-500"
+                            >
+                              + Add
+                            </Button>
+                          </div>
+                        </div>
+
+                        {/* Dropdown Max */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          <div>
+                            <FieldHintLabel
+                              label="Dropdown Maximum Lots"
+                              hint={TRADE_SETTINGS_FIELD_HELP.lotDropdownMax}
+                            />
+                            <Input
+                              type="number"
+                              value={riskParams.lotDropdownMax}
+                              onChange={(e) => handleRiskParamChange('lotDropdownMax', Math.max(1, Math.min(50, Number(e.target.value) || 50)))}
+                              className="bg-neutral-600"
+                              min={1}
+                              max={50}
+                            />
+                            <p className="text-xs text-gray-400 mt-1">Maximum lot value shown in the dropdown selector (1-50)</p>
+                          </div>
+                          <div className="flex items-end">
+                            <div className="w-full p-3 bg-neutral-800 rounded-md border border-gray-600">
+                              <p className="text-xs text-gray-400 mb-2">Preview (dropdown options):</p>
+                              <div className="flex flex-wrap gap-1 text-xs">
+                                {(() => {
+                                  const max = riskParams.lotDropdownMax || 50;
+                                  const options = Array.from({ length: Math.min(max, 50) }, (_v, i) => i + 1);
+                                  return options.slice(0, 12).map(n => (
+                                    <span key={n} className="px-1.5 py-0.5 bg-neutral-700 rounded">{n}</span>
+                                  ));
+                                })()}
+                                {riskParams.lotDropdownMax > 12 && <span className="text-gray-500">...</span>}
+                              </div>
                             </div>
                           </div>
                         </div>
                       </div>
-                    </div>
-                  </CardContent>
-                </Card>
+                    </CardContent>
+                  </Card>
 
-              </div>
+                </div>
               </TooltipProvider>
             </TabsContent>
 
             <TabsContent value="instruments" className="p-4">
               <TooltipProvider delayDuration={120}>
-              <Tabs value={instrumentsSubTab} onValueChange={(v) => setInstrumentsSubTab(v as any)} className="space-y-4">
-                <TabsList className="bg-neutral-700 w-full h-auto p-1 grid grid-cols-3 gap-1">
-                  <TabsTrigger value="configured" className="data-[state=active]:bg-neutral-600 text-xs sm:text-sm px-2 py-1.5">Configured</TabsTrigger>
-                  <TabsTrigger value="ingestor" className="data-[state=active]:bg-neutral-600 text-xs sm:text-sm px-2 py-1.5">Ingestor</TabsTrigger>
-                  <TabsTrigger value="quoteSubscriptions" className="data-[state=active]:bg-neutral-600 text-xs sm:text-sm px-2 py-1.5">Quote Subscriptions</TabsTrigger>
-                </TabsList>
+                <Tabs value={instrumentsSubTab} onValueChange={(v) => setInstrumentsSubTab(v as any)} className="space-y-4">
+                  <TabsList className="bg-neutral-700 w-full h-auto p-1 grid grid-cols-3 gap-1">
+                    <TabsTrigger value="configured" className="data-[state=active]:bg-neutral-600 text-xs sm:text-sm px-2 py-1.5">Configured</TabsTrigger>
+                    <TabsTrigger value="ingestor" className="data-[state=active]:bg-neutral-600 text-xs sm:text-sm px-2 py-1.5">Ingestor</TabsTrigger>
+                    <TabsTrigger value="quoteSubscriptions" className="data-[state=active]:bg-neutral-600 text-xs sm:text-sm px-2 py-1.5">Quote Subscriptions</TabsTrigger>
+                  </TabsList>
 
-                <div className="rounded-md border border-cyan-700/40 bg-cyan-950/20 p-3 text-xs text-cyan-100/90">
-                  Instruments controls include hidden <span className="font-medium">Hint</span> explainers for symbol identity, risk-impacting fields, and rollout safety.
-                </div>
-
-                <TabsContent value="configured">
-                  <div className="flex justify-between items-center mb-4">
-                    <div>
-                      <FieldHintLabel
-                        label="Trading Instruments"
-                        hint={INSTRUMENTS_FIELD_HELP.configuredOverview.tooltip}
-                        labelClassName="text-xl font-semibold"
-                      />
-                      <p className="text-xs text-gray-400 mt-1">{INSTRUMENTS_FIELD_HELP.configuredOverview.inline}</p>
-                    </div>
-                    <div className="flex gap-2">
-                      <Button
-                        variant="outline"
-                        className="bg-neutral-700 hover:bg-neutral-600"
-                        onClick={() => setCatalogEnableDialogOpen(true)}
-                        title={INSTRUMENTS_FIELD_HELP.addFromCatalog.tooltip}
-                      >
-                        Add From Catalog
-                      </Button>
-                      <Button
-                        variant="default"
-                        className="bg-green-600 hover:bg-green-700"
-                        onClick={() => setNewSymbolDialogOpen(true)}
-                        title={INSTRUMENTS_FIELD_HELP.addNewInstrument.tooltip}
-                      >
-                        Add New Instrument
-                      </Button>
-                    </div>
+                  <div className="rounded-md border border-cyan-700/40 bg-cyan-950/20 p-3 text-xs text-cyan-100/90">
+                    Instruments controls include hidden <span className="font-medium">Hint</span> explainers for symbol identity, risk-impacting fields, and rollout safety.
                   </div>
 
-                  <p className="text-gray-400 mb-4">Configure the trading instruments available on the platform, including spread settings and lot limits.</p>
-
-                  {isLoadingSymbols ? (
-                    <div className="flex items-center justify-center h-40">
-                      <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary"></div>
-                    </div>
-                  ) : (
-                    <div className="overflow-x-auto">
-                      {/* Active Instruments */}
-                      <div className="mb-6">
-                        <h3 className="text-lg font-semibold mb-2">Active Instruments</h3>
-                        <Table className="border-collapse">
-                          <TableHeader>
-                            <TableRow className="border-b border-gray-700">
-                              <TableHead className="py-3 px-4 text-left text-gray-400">Symbol</TableHead>
-                              <TableHead className="py-3 px-4 text-left text-gray-400">Name</TableHead>
-                              <TableHead className="py-3 px-4 text-left text-gray-400">Base/Quote</TableHead>
-                              <TableHead className="py-3 px-4 text-left text-gray-400">Min Spread (pips)</TableHead>
-                              <TableHead className="py-3 px-4 text-left text-gray-400">Min/Max Lot</TableHead>
-                              <TableHead className="py-3 px-4 text-left text-gray-400">Status</TableHead>
-                              <TableHead className="py-3 px-4 text-left text-gray-400">Actions</TableHead>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {symbols.filter(symbol => symbol.enabled).length === 0 ? (
-                              <TableRow>
-                                <TableCell colSpan={7} className="text-center py-4">
-                                  No active instruments configured
-                                </TableCell>
-                              </TableRow>
-                            ) : (
-                              symbols.filter(symbol => symbol.enabled).map((symbol) => (
-                                <TableRow key={symbol.id} className="border-b border-gray-700">
-                                  <TableCell className="py-3 px-4 font-semibold">{symbol.symbol}</TableCell>
-                                  <TableCell className="py-3 px-4">{symbol.name}</TableCell>
-                                  <TableCell className="py-3 px-4">{symbol.baseCurrency || '-'}/{symbol.quoteCurrency || '-'}</TableCell>
-                                  <TableCell className="py-3 px-4">{symbol.minSpreadPips}</TableCell>
-                                  <TableCell className="py-3 px-4">{symbol.minLot} / {symbol.maxLot} lots</TableCell>
-                                  <TableCell className="py-3 px-4">
-                                    <div className="flex items-center">
-                                      <div className="w-3 h-3 rounded-full mr-2 bg-green-500"></div>
-                                      <span>Active</span>
-                                    </div>
-                                  </TableCell>
-                                  <TableCell className="py-3 px-4">
-                                    <div className="flex space-x-2">
-                                      <Button
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={() => handleEditSymbol(symbol)}
-                                        className="bg-neutral-700 hover:bg-neutral-600"
-                                        title={INSTRUMENTS_FIELD_HELP.editAction.tooltip}
-                                      >
-                                        Edit
-                                      </Button>
-                                      <Button
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={() => confirmDeleteSymbol(symbol.id)}
-                                        className="bg-red-800 hover:bg-red-700 border-red-700"
-                                        title={INSTRUMENTS_FIELD_HELP.removeAction.tooltip}
-                                      >
-                                        Remove
-                                      </Button>
-                                    </div>
-                                  </TableCell>
-                                </TableRow>
-                              ))
-                            )}
-                          </TableBody>
-                        </Table>
-                      </div>
-
-                      {/* Inactive Instruments */}
+                  <TabsContent value="configured">
+                    <div className="flex justify-between items-center mb-4">
                       <div>
-                        <h3 className="text-lg font-semibold mb-2 text-gray-300">Inactive Instruments</h3>
-                        <Table className="border-collapse">
-                          <TableHeader>
-                            <TableRow className="border-b border-gray-700">
-                              <TableHead className="py-3 px-4 text-left text-gray-400">Symbol</TableHead>
-                              <TableHead className="py-3 px-4 text-left text-gray-400">Name</TableHead>
-                              <TableHead className="py-3 px-4 text-left text-gray-400">Base/Quote</TableHead>
-                              <TableHead className="py-3 px-4 text-left text-gray-400">Min Spread (pips)</TableHead>
-                              <TableHead className="py-3 px-4 text-left text-gray-400">Min/Max Lot</TableHead>
-                              <TableHead className="py-3 px-4 text-left text-gray-400">Status</TableHead>
-                              <TableHead className="py-3 px-4 text-left text-gray-400">Actions</TableHead>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {symbols.filter(symbol => !symbol.enabled).length === 0 ? (
-                              <TableRow>
-                                <TableCell colSpan={7} className="text-center py-4 text-gray-400">
-                                  No inactive instruments
-                                </TableCell>
-                              </TableRow>
-                            ) : (
-                              symbols.filter(symbol => !symbol.enabled).map((symbol) => (
-                                <TableRow key={symbol.id} className="border-b border-gray-700 opacity-75">
-                                  <TableCell className="py-3 px-4 font-semibold">{symbol.symbol}</TableCell>
-                                  <TableCell className="py-3 px-4">{symbol.name}</TableCell>
-                                  <TableCell className="py-3 px-4">{symbol.baseCurrency || '-'}/{symbol.quoteCurrency || '-'}</TableCell>
-                                  <TableCell className="py-3 px-4">{symbol.minSpreadPips}</TableCell>
-                                  <TableCell className="py-3 px-4">{symbol.minLot} / {symbol.maxLot} lots</TableCell>
-                                  <TableCell className="py-3 px-4">
-                                    <div className="flex items-center">
-                                      <div className="w-3 h-3 rounded-full mr-2 bg-red-500"></div>
-                                      <span>Inactive</span>
-                                    </div>
-                                  </TableCell>
-                                  <TableCell className="py-3 px-4">
-                                    <div className="flex space-x-2">
-                                      <Button
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={() => handleEditSymbol(symbol)}
-                                        className="bg-neutral-700 hover:bg-neutral-600"
-                                        title={INSTRUMENTS_FIELD_HELP.editAction.tooltip}
-                                      >
-                                        Edit
-                                      </Button>
-                                      <Button
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={() => confirmDeleteSymbol(symbol.id)}
-                                        className="bg-red-800 hover:bg-red-700 border-red-700"
-                                        title={INSTRUMENTS_FIELD_HELP.removeAction.tooltip}
-                                      >
-                                        Remove
-                                      </Button>
-                                    </div>
-                                  </TableCell>
-                                </TableRow>
-                              ))
-                            )}
-                          </TableBody>
-                        </Table>
+                        <FieldHintLabel
+                          label="Trading Instruments"
+                          hint={INSTRUMENTS_FIELD_HELP.configuredOverview.tooltip}
+                          labelClassName="text-xl font-semibold"
+                        />
+                        <p className="text-xs text-gray-400 mt-1">{INSTRUMENTS_FIELD_HELP.configuredOverview.inline}</p>
+                      </div>
+                      <div className="flex gap-2">
+                        <Button
+                          variant="outline"
+                          className="bg-neutral-700 hover:bg-neutral-600"
+                          onClick={() => setCatalogEnableDialogOpen(true)}
+                          title={INSTRUMENTS_FIELD_HELP.addFromCatalog.tooltip}
+                        >
+                          Add From Catalog
+                        </Button>
+                        <Button
+                          variant="default"
+                          className="bg-green-600 hover:bg-green-700"
+                          onClick={() => setNewSymbolDialogOpen(true)}
+                          title={INSTRUMENTS_FIELD_HELP.addNewInstrument.tooltip}
+                        >
+                          Add New Instrument
+                        </Button>
                       </div>
                     </div>
-                  )}
-                </TabsContent>
 
-                <TabsContent value="ingestor">
-                  <div className="space-y-4">
-                    <InstrumentIngestionPanel />
-                    <PipDefaultsPanel />
-                  </div>
-                </TabsContent>
+                    <p className="text-gray-400 mb-4">Configure the trading instruments available on the platform, including spread settings and lot limits.</p>
 
-                <TabsContent value="quoteSubscriptions">
-                  <QuoteSubscriptionsPanel />
-                </TabsContent>
-              </Tabs>
+                    {isLoadingSymbols ? (
+                      <div className="flex items-center justify-center h-40">
+                        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary"></div>
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        {/* Active Instruments */}
+                        <div className="mb-6">
+                          <h3 className="text-lg font-semibold mb-2">Active Instruments</h3>
+                          <Table className="border-collapse">
+                            <TableHeader>
+                              <TableRow className="border-b border-gray-700">
+                                <TableHead className="py-3 px-4 text-left text-gray-400">Symbol</TableHead>
+                                <TableHead className="py-3 px-4 text-left text-gray-400">Name</TableHead>
+                                <TableHead className="py-3 px-4 text-left text-gray-400">Base/Quote</TableHead>
+                                <TableHead className="py-3 px-4 text-left text-gray-400">Min Spread (pips)</TableHead>
+                                <TableHead className="py-3 px-4 text-left text-gray-400">Min/Max Lot</TableHead>
+                                <TableHead className="py-3 px-4 text-left text-gray-400">Status</TableHead>
+                                <TableHead className="py-3 px-4 text-left text-gray-400">Actions</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {symbols.filter(symbol => symbol.enabled).length === 0 ? (
+                                <TableRow>
+                                  <TableCell colSpan={7} className="text-center py-4">
+                                    No active instruments configured
+                                  </TableCell>
+                                </TableRow>
+                              ) : (
+                                symbols.filter(symbol => symbol.enabled).map((symbol) => (
+                                  <TableRow key={symbol.id} className="border-b border-gray-700">
+                                    <TableCell className="py-3 px-4 font-semibold">{symbol.symbol}</TableCell>
+                                    <TableCell className="py-3 px-4">{symbol.name}</TableCell>
+                                    <TableCell className="py-3 px-4">{symbol.baseCurrency || '-'}/{symbol.quoteCurrency || '-'}</TableCell>
+                                    <TableCell className="py-3 px-4">{symbol.minSpreadPips}</TableCell>
+                                    <TableCell className="py-3 px-4">{symbol.minLot} / {symbol.maxLot} lots</TableCell>
+                                    <TableCell className="py-3 px-4">
+                                      <div className="flex items-center">
+                                        <div className="w-3 h-3 rounded-full mr-2 bg-green-500"></div>
+                                        <span>Active</span>
+                                      </div>
+                                    </TableCell>
+                                    <TableCell className="py-3 px-4">
+                                      <div className="flex space-x-2">
+                                        <Button
+                                          variant="outline"
+                                          size="sm"
+                                          onClick={() => handleEditSymbol(symbol)}
+                                          className="bg-neutral-700 hover:bg-neutral-600"
+                                          title={INSTRUMENTS_FIELD_HELP.editAction.tooltip}
+                                        >
+                                          Edit
+                                        </Button>
+                                        <Button
+                                          variant="outline"
+                                          size="sm"
+                                          onClick={() => confirmDeleteSymbol(symbol.id)}
+                                          className="bg-red-800 hover:bg-red-700 border-red-700"
+                                          title={INSTRUMENTS_FIELD_HELP.removeAction.tooltip}
+                                        >
+                                          Remove
+                                        </Button>
+                                      </div>
+                                    </TableCell>
+                                  </TableRow>
+                                ))
+                              )}
+                            </TableBody>
+                          </Table>
+                        </div>
+
+                        {/* Inactive Instruments */}
+                        <div>
+                          <h3 className="text-lg font-semibold mb-2 text-gray-300">Inactive Instruments</h3>
+                          <Table className="border-collapse">
+                            <TableHeader>
+                              <TableRow className="border-b border-gray-700">
+                                <TableHead className="py-3 px-4 text-left text-gray-400">Symbol</TableHead>
+                                <TableHead className="py-3 px-4 text-left text-gray-400">Name</TableHead>
+                                <TableHead className="py-3 px-4 text-left text-gray-400">Base/Quote</TableHead>
+                                <TableHead className="py-3 px-4 text-left text-gray-400">Min Spread (pips)</TableHead>
+                                <TableHead className="py-3 px-4 text-left text-gray-400">Min/Max Lot</TableHead>
+                                <TableHead className="py-3 px-4 text-left text-gray-400">Status</TableHead>
+                                <TableHead className="py-3 px-4 text-left text-gray-400">Actions</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {symbols.filter(symbol => !symbol.enabled).length === 0 ? (
+                                <TableRow>
+                                  <TableCell colSpan={7} className="text-center py-4 text-gray-400">
+                                    No inactive instruments
+                                  </TableCell>
+                                </TableRow>
+                              ) : (
+                                symbols.filter(symbol => !symbol.enabled).map((symbol) => (
+                                  <TableRow key={symbol.id} className="border-b border-gray-700 opacity-75">
+                                    <TableCell className="py-3 px-4 font-semibold">{symbol.symbol}</TableCell>
+                                    <TableCell className="py-3 px-4">{symbol.name}</TableCell>
+                                    <TableCell className="py-3 px-4">{symbol.baseCurrency || '-'}/{symbol.quoteCurrency || '-'}</TableCell>
+                                    <TableCell className="py-3 px-4">{symbol.minSpreadPips}</TableCell>
+                                    <TableCell className="py-3 px-4">{symbol.minLot} / {symbol.maxLot} lots</TableCell>
+                                    <TableCell className="py-3 px-4">
+                                      <div className="flex items-center">
+                                        <div className="w-3 h-3 rounded-full mr-2 bg-red-500"></div>
+                                        <span>Inactive</span>
+                                      </div>
+                                    </TableCell>
+                                    <TableCell className="py-3 px-4">
+                                      <div className="flex space-x-2">
+                                        <Button
+                                          variant="outline"
+                                          size="sm"
+                                          onClick={() => handleEditSymbol(symbol)}
+                                          className="bg-neutral-700 hover:bg-neutral-600"
+                                          title={INSTRUMENTS_FIELD_HELP.editAction.tooltip}
+                                        >
+                                          Edit
+                                        </Button>
+                                        <Button
+                                          variant="outline"
+                                          size="sm"
+                                          onClick={() => confirmDeleteSymbol(symbol.id)}
+                                          className="bg-red-800 hover:bg-red-700 border-red-700"
+                                          title={INSTRUMENTS_FIELD_HELP.removeAction.tooltip}
+                                        >
+                                          Remove
+                                        </Button>
+                                      </div>
+                                    </TableCell>
+                                  </TableRow>
+                                ))
+                              )}
+                            </TableBody>
+                          </Table>
+                        </div>
+                      </div>
+                    )}
+                  </TabsContent>
+
+                  <TabsContent value="ingestor">
+                    <div className="space-y-4">
+                      <InstrumentIngestionPanel />
+                      <PipDefaultsPanel />
+                    </div>
+                  </TabsContent>
+
+                  <TabsContent value="quoteSubscriptions">
+                    <QuoteSubscriptionsPanel />
+                  </TabsContent>
+                </Tabs>
               </TooltipProvider>
             </TabsContent>
 

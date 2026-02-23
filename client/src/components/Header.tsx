@@ -73,7 +73,7 @@ export function Header({ title = "TradeQuip", showBalance = false }: HeaderProps
     }
   };
 
-  const userInitials = user?.username 
+  const userInitials = user?.username
     ? user.username.slice(0, 2).toUpperCase()
     : user?.email?.slice(0, 2).toUpperCase() || "U";
 
@@ -146,11 +146,12 @@ export function Header({ title = "TradeQuip", showBalance = false }: HeaderProps
               </div>
             ) : null}
             <button
-              onClick={() => {
+              onClick={(e) => {
+                e.stopPropagation();
                 window.dispatchEvent(new Event(CLOSE_NOTIFICATIONS_EVENT));
                 setDropdownOpen((prev) => !prev);
               }}
-              className="tq-header-user-trigger flex items-center gap-3 bg-white/[0.03] hover:bg-white/[0.08] border border-white/10 hover:border-white/20 px-2 py-1.5 rounded-full transition-all duration-200 group"
+              className="tq-header-user-trigger flex items-center gap-3 bg-white/[0.03] hover:bg-white/[0.08] border border-white/10 hover:border-white/20 px-2 py-1.5 rounded-full transition-all duration-200 group relative z-[230]"
             >
               <div className="h-8 w-8 rounded-full bg-gradient-to-br from-primary/80 to-primary/40 flex items-center justify-center ring-2 ring-[#1A1A1A]">
                 <span className="text-xs font-semibold text-white">{userInitials}</span>
@@ -161,14 +162,21 @@ export function Header({ title = "TradeQuip", showBalance = false }: HeaderProps
               </div>
               <ChevronDown className={`h-4 w-4 text-gray-400 group-hover:text-gray-300 transition-transform duration-200 ${dropdownOpen ? "rotate-180" : ""}`} />
             </button>
-            
+
             {dropdownOpen && (
               <>
-                <div 
-                  className="tq-overlay-backdrop fixed inset-0 z-[210]" 
-                  onClick={() => setDropdownOpen(false)}
+                <div
+                  className="tq-overlay-backdrop fixed inset-0 z-[210] bg-transparent"
+                  onPointerDown={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setDropdownOpen(false);
+                  }}
                 />
-                <div className="tq-popup-panel tq-header-menu absolute right-0 top-full mt-2 w-64 bg-[#1A1A1A] border border-white/10 rounded-xl shadow-[0_10px_40px_rgba(0,0,0,0.5)] z-[220] overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
+                <div
+                  className="tq-popup-panel tq-header-menu absolute right-0 top-full mt-2 w-64 bg-[#1A1A1A] border border-white/10 rounded-xl shadow-[0_10px_40px_rgba(0,0,0,0.5)] z-[220] overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200"
+                  onPointerDown={(e) => e.stopPropagation()}
+                >
                   <div className="tq-header-menu-profile p-4 border-b border-white/5">
                     <div className="flex items-center gap-3">
                       <div className="h-10 w-10 rounded-full bg-gradient-to-br from-primary/80 to-primary/40 flex items-center justify-center ring-2 ring-white/10">
@@ -200,7 +208,7 @@ export function Header({ title = "TradeQuip", showBalance = false }: HeaderProps
                       </div>
                     ) : null}
                   </div>
-                  
+
                   <div className="p-2">
                     {user.isAdmin ? (
                       <Link
@@ -225,7 +233,7 @@ export function Header({ title = "TradeQuip", showBalance = false }: HeaderProps
 
                     <div className="tq-header-menu-separator h-px bg-white/5 my-2" />
 
-                    <Link 
+                    <Link
                       href="/profile"
                       onClick={() => setDropdownOpen(false)}
                       className="tq-header-menu-item flex items-center gap-3 px-3 py-2.5 text-sm text-gray-300 hover:text-white hover:bg-white/5 rounded-lg transition-colors"
@@ -233,9 +241,9 @@ export function Header({ title = "TradeQuip", showBalance = false }: HeaderProps
                       <Settings className="h-4 w-4" />
                       Profile Settings
                     </Link>
-                    
+
                     <div className="tq-header-menu-separator h-px bg-white/5 my-2" />
-                    
+
                     <button
                       onClick={handleLogout}
                       className="tq-header-menu-item tq-header-menu-item-destructive w-full flex items-center gap-3 px-3 py-2.5 text-sm text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded-lg transition-colors"

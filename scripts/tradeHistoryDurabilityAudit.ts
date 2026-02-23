@@ -5,6 +5,14 @@ function log(message: string) {
   console.log(`[audit:trade-history] ${message}`);
 }
 
+function boolEnv(value: string | undefined, fallback: boolean): boolean {
+  if (value == null) return fallback;
+  const normalized = String(value).trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
+  return fallback;
+}
+
 function safeDatabaseUrl(raw: string | undefined): string {
   if (!raw) return "(missing)";
   try {
@@ -56,7 +64,19 @@ function isLocalServerAddr(addr: string | null | undefined): boolean {
 
 async function main() {
   const dbUrl = process.env.DATABASE_URL ?? "";
+  const strictMode = boolEnv(process.env.TRADE_HISTORY_AUDIT_STRICT, process.env.NODE_ENV === "production");
+  const failOnEmpty = boolEnv(process.env.TRADE_HISTORY_AUDIT_FAIL_ON_EMPTY, strictMode);
+  const failOnSeqSkew = boolEnv(process.env.TRADE_HISTORY_AUDIT_FAIL_ON_SEQ_SKEW, strictMode);
+  const failOnMissingTriggers = boolEnv(process.env.TRADE_HISTORY_AUDIT_FAIL_ON_MISSING_TRIGGERS, strictMode);
+  const failOnLikelyEphemeralStorage = boolEnv(
+    process.env.TRADE_HISTORY_AUDIT_FAIL_ON_EPHEMERAL_STORAGE,
+    strictMode,
+  );
+
   log(`DATABASE_URL=${safeDatabaseUrl(dbUrl)}`);
+  log(
+    `strictMode=${strictMode} failOnEmpty=${failOnEmpty} failOnSeqSkew=${failOnSeqSkew} failOnMissingTriggers=${failOnMissingTriggers} failOnEphemeralStorage=${failOnLikelyEphemeralStorage}`,
+  );
 
   try {
     const info = await queryOne<{
@@ -124,26 +144,37 @@ async function main() {
 
     // Heuristic warnings
     const totalTrades = counts.reduce((sum, r) => sum + Number(r.count || 0), 0);
+    const hardFailures: string[] = [];
     if (totalTrades === 0) {
-      log(
-        "WARN: trades table is empty. If history disappears after a host shutdown, your Postgres storage may be ephemeral or you're pointing at a different DATABASE_URL.",
-      );
+      const msg =
+        "WARN: trades table is empty. If history disappears after a host shutdown, your Postgres storage may be ephemeral or you're pointing at a different DATABASE_URL.";
+      log(msg);
+      if (failOnEmpty) hardFailures.push("EMPTY_TRADES_TABLE");
     } else if (seq?.last_value && Number(seq.last_value) > totalTrades * 10 && Number(seq.last_value) > 100) {
-      log(
-        "WARN: trades_id_seq is far ahead of row count; this often indicates prior DELETE/TRUNCATE/reset events (history may have been wiped).",
-      );
+      const msg =
+        "WARN: trades_id_seq is far ahead of row count; this often indicates prior DELETE/TRUNCATE/reset events (history may have been wiped).";
+      log(msg);
+      if (failOnSeqSkew) hardFailures.push("TRADES_SEQUENCE_SKEW");
     }
 
     if (triggerNames.length < 6) {
-      log(
-        "WARN: trade anti-wipe triggers are missing or incomplete. Run `npm run db:migrate:drizzle` and `npm run db:audit` to restore guardrails.",
-      );
+      const msg =
+        "WARN: trade anti-wipe triggers are missing or incomplete. Run `npm run db:migrate:drizzle` and `npm run db:audit` to restore guardrails.";
+      log(msg);
+      if (failOnMissingTriggers) hardFailures.push("MISSING_ANTIWIPE_TRIGGERS");
     }
 
     if (dataDir && dataDir.startsWith("/var/lib/postgresql")) {
-      log(
-        "WARN: Postgres data directory is under /var/lib/postgresql. On some hosts this is not persisted across shutdown/redeploy. Use a persistent volume/bind mount for PGDATA (e.g. docker compose with a bind-mounted data dir).",
-      );
+      const msg =
+        "WARN: Postgres data directory is under /var/lib/postgresql. On some hosts this is not persisted across shutdown/redeploy. Use a persistent volume/bind mount for PGDATA (e.g. docker compose with a bind-mounted data dir).";
+      log(msg);
+      if (failOnLikelyEphemeralStorage) hardFailures.push("LIKELY_EPHEMERAL_PGDATA");
+    }
+
+    if (hardFailures.length > 0) {
+      log(`FAIL: durability guard(s) triggered: ${hardFailures.join(",")}`);
+      process.exitCode = 1;
+      return;
     }
 
     log("Done.");

@@ -297,21 +297,7 @@
    * Uses CSS Container Queries instead of JavaScript ResizeObserver
    * ═══════════════════════════════════════════════════════════════════════════ */
 
-  /* Container definition - add to any parent that should trigger responsive children */
-  .@container-trade {
-    container-type: inline-size;
-    container-name: trade;
-  }
-
-  .@container-panel {
-    container-type: inline-size;
-    container-name: panel;
-  }
-
-  .@container-card {
-    container-type: inline-size;
-    container-name: card;
-  }
+  /* Container definitions are applied via style/container utility classes in TSX. */
 
   /* Responsive text scaling based on container width */
   .text-cq-xs {
@@ -339,7 +325,7 @@
   }
 
   /* Compact mode triggers - hide/show based on container width */
-  /* Usage: Add @container-trade to parent, then use these on children */
+  /* Usage: Add a named trade container to parent, then use these on children */
 
   /* Hide when container is narrow (< 400px) */
   @container trade (max-width: 400px) {

@@ -1,4 +1,3 @@
-// @ts-nocheck
 import type { Router, NextFunction, Request, Response } from "express";
 import type { SessionData } from "express-session";
 import { z } from "zod";
@@ -67,7 +66,11 @@ router.post(
       : "TRADE_OPEN_OR_INCREASE";
   }),
   async (req: Request, res: Response, next: NextFunction) => {
-    const bg = await botGuard(req, res, { action: "TRADE", userId: (req.session as any).userId });
+    const sessionUserId = Number((req.session as SessionData).userId);
+    const bg = await botGuard(req, res, {
+      action: "TRADE",
+      userId: Number.isInteger(sessionUserId) && sessionUserId > 0 ? sessionUserId : undefined,
+    });
     if (!bg.allowed) return;
     next();
   },
@@ -77,6 +80,11 @@ router.post(
     const auditCtx = buildAuditContext(req);
     auditCtx.correlationId = correlationId;
     const receivedAtMs = Date.now();
+    const session = req.session as SessionData;
+    const userId = Number(session.userId);
+    if (!Number.isInteger(userId) || userId <= 0) {
+      return res.status(401).json({ message: "Not authenticated" });
+    }
 
     try {
       // Handle either lots or size parameter from the request
@@ -90,10 +98,15 @@ router.post(
       // Validate request data
       const data = insertTradeSchema.parse({
         ...req.body,
-        userId: req.session.userId,
+        userId: userId,
         openedAt: Math.floor(Date.now() / 1000),
         lots: orderSize, // Use the unified size parameter
       });
+      const tradeSideRaw = String(data.type ?? req.body.type ?? "").toUpperCase();
+      if (tradeSideRaw !== "BUY" && tradeSideRaw !== "SELL") {
+        return res.status(400).json({ message: "Invalid trade side. Expected BUY or SELL." });
+      }
+      const tradeSide: "BUY" | "SELL" = tradeSideRaw;
 
       // Get current symbol price from our memory-based quotes
       // First, get the symbol config to get the symbol string
@@ -102,7 +115,7 @@ router.post(
         return res.status(404).json({ message: "Symbol configuration not found" });
       }
 
-      const executionQuote = await getExecutionQuote(symbolConfig.symbol, data.type, "OPEN");
+      const executionQuote = await getExecutionQuote(symbolConfig.symbol, tradeSide, "OPEN");
       const quote = {
         symbol: executionQuote.symbol,
         bid: executionQuote.bid,
@@ -123,9 +136,9 @@ router.post(
           correlationId,
           eventCode: "ORDER_RECEIVED",
           ctx: auditCtx,
-          userId: req.session.userId,
+          userId: userId,
           symbol: symbolConfig.symbol,
-          side: data.type,
+          side: tradeSide,
           orderType: orderType ?? "Market",
           qtyLots: orderSize,
           requestedPrice: parseFloat(String(req.body.limitPrice ?? req.body.stopPrice ?? quote.price)),
@@ -152,10 +165,10 @@ router.post(
             correlationId,
             eventCode: "DECISION",
             ctx: auditCtx,
-            userId: req.session.userId,
+            userId: userId,
             decision: "REJECT",
             symbol: symbolConfig.symbol,
-            side: data.type,
+            side: tradeSide,
             orderType: orderType ?? "Market",
             qtyLots: orderSize,
             requestedPrice: parseFloat(String(req.body.limitPrice ?? req.body.stopPrice ?? quote.price)),
@@ -183,7 +196,7 @@ router.post(
       // For a realistic trading experience with spreads
       let entryPrice;
 
-      if (data.type === 'BUY') {
+      if (tradeSide === 'BUY') {
         entryPrice = quote.ask !== undefined ?
           parseFloat(String(quote.ask)) :
           parseFloat(String(quote.price));
@@ -212,10 +225,10 @@ router.post(
             correlationId,
             eventCode: "DECISION",
             ctx: auditCtx,
-            userId: req.session.userId,
+            userId: userId,
             decision: "REJECT",
             symbol: symbolConfig.symbol,
-            side: data.type,
+            side: tradeSide,
             orderType: orderType ?? "Market",
             qtyLots: tradeLots,
             riskLimit: { minLots: 1, maxLots: 50 },
@@ -242,7 +255,7 @@ router.post(
         notionalUsd: positionSize,
         lots: tradeLots,
         size: positionSize,
-        positionSide: data.type,
+        positionSide: tradeSide,
       });
 
       // Enforce global maxPositionSize limit
@@ -256,10 +269,10 @@ router.post(
             correlationId,
             eventCode: "DECISION",
             ctx: auditCtx,
-            userId: req.session.userId,
+            userId: userId,
             decision: "REJECT",
             symbol: symbolConfig.symbol,
-            side: data.type,
+            side: tradeSide,
             orderType: orderType ?? "Market",
             qtyLots: tradeLots,
             riskLimit: { maxPositionSize },
@@ -279,16 +292,16 @@ router.post(
       }
 
       // Ensure the account numbers are fresh
-      await recalcAccount(req.session.userId);
+      await recalcAccount(userId);
 
       // Pull the updated user
-      const updatedUser = await storage.getUserById(req.session.userId);
+      const updatedUser = await storage.getUserById(userId);
       if (!updatedUser) return res.status(404).json({ message: "User not found" });
 
       // Determine order type and status (handle both "LIMIT" and "limit" formats)
       const normalizedOrderType = String(orderType ?? "Market").toUpperCase();
       const isLimitOrder = normalizedOrderType === "LIMIT" || normalizedOrderType === "BUY_LIMIT" || normalizedOrderType === "SELL_LIMIT";
-      const isStopOrder = (normalizedOrderType === "STOP" || normalizedOrderType === "BUY_STOP" || normalizedOrderType === "SELL_STOP") && normalizedOrderType !== "STOPLOSS";
+      const isStopOrder = normalizedOrderType === "STOP" || normalizedOrderType === "BUY_STOP" || normalizedOrderType === "SELL_STOP";
       const isPendingOrder = isLimitOrder || isStopOrder;
 
       const orderId = generateOrderId();
@@ -302,10 +315,10 @@ router.post(
             correlationId,
             eventCode: "DECISION",
             ctx: auditCtx,
-            userId: req.session.userId,
+            userId: userId,
             decision: "REJECT",
             symbol: symbolConfig.symbol,
-            side: data.type,
+            side: tradeSide,
             orderType: orderType ?? "Market",
             qtyLots: tradeLots,
             riskLimit,
@@ -352,13 +365,13 @@ router.post(
           const maxBuyLimit = ask - minDist;
           const minSellLimit = bid + minDist;
           // Use precision-aware comparison for limit orders
-          if (data.type === "BUY" && priceGreaterThan(reqPrice, maxBuyLimit, priceDecimals)) {
+          if (tradeSide === "BUY" && priceGreaterThan(reqPrice, maxBuyLimit, priceDecimals)) {
             await writeDecisionReject("BUY_LIMIT_TOO_CLOSE", { minDistPips: minPriceDistancePips, ask }, { requestedPrice: reqPrice });
             return res.status(400).json({
               message: `BUY LIMIT must be at least ${minPriceDistancePips} pips below current ask (${ask.toFixed(priceDecimals)}). Maximum: ${maxBuyLimit.toFixed(priceDecimals)}`
             });
           }
-          if (data.type === "SELL" && priceLessThan(reqPrice, minSellLimit, priceDecimals)) {
+          if (tradeSide === "SELL" && priceLessThan(reqPrice, minSellLimit, priceDecimals)) {
             await writeDecisionReject("SELL_LIMIT_TOO_CLOSE", { minDistPips: minPriceDistancePips, bid }, { requestedPrice: reqPrice });
             return res.status(400).json({
               message: `SELL LIMIT must be at least ${minPriceDistancePips} pips above current bid (${bid.toFixed(priceDecimals)}). Minimum: ${minSellLimit.toFixed(priceDecimals)}`
@@ -371,13 +384,13 @@ router.post(
           const minBuyStop = ask + minDist;
           const maxSellStop = bid - minDist;
           // Use precision-aware comparison for stop orders
-          if (data.type === "BUY" && priceLessThan(reqPrice, minBuyStop, priceDecimals)) {
+          if (tradeSide === "BUY" && priceLessThan(reqPrice, minBuyStop, priceDecimals)) {
             await writeDecisionReject("BUY_STOP_TOO_CLOSE", { minDistPips: minPriceDistancePips, ask }, { requestedPrice: reqPrice });
             return res.status(400).json({
               message: `BUY STOP must be at least ${minPriceDistancePips} pips above current ask (${ask.toFixed(priceDecimals)}). Minimum: ${minBuyStop.toFixed(priceDecimals)}`
             });
           }
-          if (data.type === "SELL" && priceGreaterThan(reqPrice, maxSellStop, priceDecimals)) {
+          if (tradeSide === "SELL" && priceGreaterThan(reqPrice, maxSellStop, priceDecimals)) {
             await writeDecisionReject("SELL_STOP_TOO_CLOSE", { minDistPips: minPriceDistancePips, bid }, { requestedPrice: reqPrice });
             return res.status(400).json({
               message: `SELL STOP must be at least ${minPriceDistancePips} pips below current bid (${bid.toFixed(priceDecimals)}). Maximum: ${maxSellStop.toFixed(priceDecimals)}`
@@ -393,7 +406,7 @@ router.post(
         const minTpSl = intendedEntry + minDist; // Minimum distance for TP (BUY) or SL (SELL)
         const maxTpSl = intendedEntry - minDist; // Maximum for SL (BUY) or TP (SELL)
 
-        if (data.type === "BUY") {
+        if (tradeSide === "BUY") {
           // BUY TP must be >= entry + minPriceDistancePips
           if (tp !== null && priceLessThan(tp, minTpSl, priceDecimals)) {
             await writeDecisionReject("BUY_TP_TOO_CLOSE", { minDistPips: minPriceDistancePips, intendedEntry }, { tp });
@@ -440,7 +453,7 @@ router.post(
         const minTpSl = entryPrice + minDist;
         const maxTpSl = entryPrice - minDist;
 
-        if (data.type === "BUY") {
+        if (tradeSide === "BUY") {
           if (tp !== null && priceLessThan(tp, minTpSl, priceDecimals)) {
             await writeDecisionReject("BUY_TP_TOO_CLOSE", { minDistPips: minPriceDistancePips, entryPrice }, { tp });
             return res.status(400).json({ message: `BUY TP must be at least ${minPriceDistancePips} pips above entry. Minimum: ${minTpSl.toFixed(priceDecimals)}` });
@@ -470,7 +483,7 @@ router.post(
       const globalDefaultLeverage = Number(gs?.defaultLeverage ?? 50);
 
       // Effective leverage: user override takes precedence over global
-      const challengeTradeConstraints = await getActiveTradeConstraintsForUser(req.session.userId);
+      const challengeTradeConstraints = await getActiveTradeConstraintsForUser(userId);
       const challengeLeverageMultiplier = Math.max(
         0.01,
         Number(challengeTradeConstraints?.leverageMultiplier ?? 1),
@@ -496,10 +509,10 @@ router.post(
             correlationId,
             eventCode: "DECISION",
             ctx: auditCtx,
-            userId: req.session.userId,
+            userId: userId,
             decision: "REJECT",
             symbol: symbolConfig.symbol,
-            side: data.type,
+            side: tradeSide,
             orderType: orderType ?? "Market",
             qtyLots: tradeLots,
             riskLimit: { marginRequired: neededMargin },
@@ -513,7 +526,7 @@ router.post(
       }
 
       // Check max concurrent lots limit (includes both OPEN and PENDING orders)
-      const userSettingsData = await storage.getUserSettingsById(req.session.userId);
+      const userSettingsData = await storage.getUserSettingsById(userId);
       const globalMaxConcurrentLots = Number(gs?.maxConcurrentLots ?? 50);
       // Effective max lots: user override takes precedence over global (can exceed)
       const effectiveMaxConcurrentLots = Number(userSettingsData?.maxConcurrentLots ?? globalMaxConcurrentLots);
@@ -526,18 +539,18 @@ router.post(
         // Serialize trade placement per user to avoid TOC/TOU races on maxConcurrentLots.
         // (Only supported on Postgres; other dialects rely on their transaction semantics.)
         if (isPostgres) {
-          await tx.execute(sql`SELECT ${users.id} FROM ${users} WHERE ${users.id} = ${req.session.userId} FOR UPDATE`);
+          await tx.execute(sql`SELECT ${users.id} FROM ${users} WHERE ${users.id} = ${userId} FOR UPDATE`);
         }
 
         const [openRow] = await tx
           .select({ lots: sql`COALESCE(SUM(${trades.lots}), 0)` })
           .from(trades)
-          .where(and(eq(trades.userId, req.session.userId), eq(trades.status, "OPEN")))
+          .where(and(eq(trades.userId, userId), eq(trades.status, "OPEN")))
           .limit(1);
         const [pendingRow] = await tx
           .select({ lots: sql`COALESCE(SUM(${trades.lots}), 0)` })
           .from(trades)
-          .where(and(eq(trades.userId, req.session.userId), eq(trades.status, "PENDING")))
+          .where(and(eq(trades.userId, userId), eq(trades.status, "PENDING")))
           .limit(1);
 
         const openLots = Number((openRow as any)?.lots ?? 0);
@@ -551,7 +564,7 @@ router.post(
         if (!isPendingOrder) {
           const quoteRevalidation = await validateExecutionQuoteAtCommit({
             symbol: symbolConfig.symbol,
-            side: data.type,
+            side: tradeSide,
             action: "OPEN",
             expectedQuoteTs: quoteTs ?? new Date(),
             expectedExecPrice: entryPrice,
@@ -569,12 +582,12 @@ router.post(
         }
 
         if (!isPendingOrder) {
-          const reserve = await reserveUserMargin(tx, { userId: req.session.userId, marginUsd: neededMargin });
+          const reserve = await reserveUserMargin(tx, { userId: userId, marginUsd: neededMargin });
           if (!reserve.reserved) {
             return { trade: null, rejectReason: "INSUFFICIENT_MARGIN_AT_COMMIT" as const, openLots, pendingLots, currentTotalLots };
           }
           await applyUserBalanceDelta(tx, {
-            userId: req.session.userId,
+            userId: userId,
             deltaUsd: -openCostSummary.totalUsd,
           });
         }
@@ -583,6 +596,8 @@ router.post(
           .insert(trades)
           .values({
             ...data,
+            userId,
+            type: tradeSide,
             openPrice: isPendingOrder ? priceForMargin : entryPrice, // Pending orders use limit/stop price as intended entry
             lots: tradeLots,
             size: positionSize,
@@ -605,7 +620,7 @@ router.post(
             openOtherFeesUsd: isPendingOrder ? 0 : openCostSummary.otherFeesUsd,
             totalCostsUsd: isPendingOrder ? 0 : openCostSummary.totalUsd,
             lastExecutionId: openExecutionId,
-            lastActorUserId: req.session.userId,
+            lastActorUserId: userId,
             lastActorSessionId: auditCtx.sessionId,
             lastActorIp: auditCtx.ip,
             lastActorUserAgent: auditCtx.userAgent,
@@ -614,7 +629,7 @@ router.post(
           .returning();
 
         if (!createdTrade) throw new Error("Failed to create trade");
-        return { trade: createdTrade, rejectReason: null as const, openLots, pendingLots, currentTotalLots };
+        return { trade: createdTrade, rejectReason: null, openLots, pendingLots, currentTotalLots };
       });
 
       const openLots = tradeResult.openLots;
@@ -628,10 +643,10 @@ router.post(
             correlationId,
             eventCode: "DECISION",
             ctx: auditCtx,
-            userId: req.session.userId,
+            userId: userId,
             decision: "REJECT",
             symbol: symbolConfig.symbol,
-            side: data.type,
+            side: tradeSide,
             orderType: orderType ?? "Market",
             qtyLots: tradeLots,
             riskLimit: { maxConcurrentLots: effectiveMaxConcurrentLots },
@@ -699,10 +714,10 @@ router.post(
           correlationId,
           eventCode: "DECISION",
           ctx: auditCtx,
-          userId: req.session.userId,
+          userId: userId,
           decision: "PASS",
           symbol: symbolConfig.symbol,
-          side: data.type,
+          side: tradeSide,
           orderType: orderType ?? "Market",
           qtyLots: tradeLots,
           requestedPrice: isPendingOrder ? priceForMargin : entryPrice,
@@ -740,7 +755,7 @@ router.post(
           orderId,
           positionId,
           symbol: symbolConfig.symbol,
-          side: data.type,
+          side: tradeSide,
           orderType: orderType ?? "Market",
           qtyLots: tradeLots,
           requestedPrice: isPendingOrder ? priceForMargin : entryPrice,
@@ -773,7 +788,7 @@ router.post(
         // For market orders, also write ORDER_FILLED to trade_audit
         if (!isPendingOrder) {
           const spread = quote.ask && quote.bid ? parseFloat(String(quote.ask)) - parseFloat(String(quote.bid)) : 0;
-          const requestedPrice = data.type === "BUY"
+          const requestedPrice = tradeSide === "BUY"
             ? (quote.ask ? parseFloat(String(quote.ask)) : entryPrice)
             : (quote.bid ? parseFloat(String(quote.bid)) : entryPrice);
           const slippagePoints = Math.abs(entryPrice - requestedPrice);
@@ -787,7 +802,7 @@ router.post(
             positionId,
             executionId: openExecutionId ?? undefined,
             symbol: symbolConfig.symbol,
-            side: data.type,
+            side: tradeSide,
             orderType: "Market",
             qtyLots: tradeLots,
             requestedPrice,
@@ -822,7 +837,7 @@ router.post(
 
       // Recalculate margin metrics after order placement (market orders affect margin immediately)
       try {
-        await recalcAccount(req.session.userId, {
+        await recalcAccount(userId, {
           emit: true,
           reason: isPendingOrder ? "PENDING_ORDER_PLACED" : "MARKET_ORDER_PLACED",
         });
@@ -832,7 +847,7 @@ router.post(
 
       // Notify ALL browser sessions for this user that trades changed (multi-device sync)
       // Include userId in payload so clients can filter, but also send to unauth'd clients
-      const targetUserId = req.session.userId;
+      const targetUserId = userId;
       broadcast(
         { type: WS_MSG_TRADES_UPDATED, userId: targetUserId },
         (client) => client.userId === targetUserId || client.userId === undefined
@@ -845,7 +860,7 @@ router.post(
           await withGriftClient(async (griftDb) => {
             const griftAuditCtx: GriftAuditContext = {
               ts: Date.now(),
-              userId: req.session.userId,
+              userId: userId,
               sessionId: req.sessionID,
               deviceId: griftCtx.deviceId ?? undefined,
               deviceIdLegacy: griftCtx.deviceIdLegacy ?? undefined,
@@ -869,7 +884,7 @@ router.post(
               griftDb,
               trade.id,
               symbolConfig.symbol,
-              data.type,
+              tradeSide,
               tradeLots,
               griftAuditCtx
             );
@@ -888,7 +903,7 @@ router.post(
       res.status(201).json(trade);
     } catch (error) {
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ message: "Invalid input data", errors: error.errors });
+        return res.status(400).json({ message: "Invalid input data", errors: error.issues });
       }
       console.error("Create trade error:", error);
       res.status(500).json({ message: "Internal server error" });

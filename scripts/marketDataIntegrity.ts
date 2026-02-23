@@ -16,10 +16,41 @@ function log(message: string) {
   console.log(`[MD-Integrity] ${message}`);
 }
 
-function getCookieFromSetCookie(headerValue: string | null): string {
-  if (!headerValue) return "";
-  return headerValue.split(";")[0] ?? "";
+function extractCookiePair(setCookieValue: string): string {
+  return String(setCookieValue || "").split(";")[0]?.trim() ?? "";
 }
+
+function splitCombinedSetCookieHeader(headerValue: string): string[] {
+  return String(headerValue || "")
+    .split(/,(?=\s*[^;=\s]+=[^;]+)/g)
+    .map((chunk) => chunk.trim())
+    .filter(Boolean);
+}
+
+function getCookieFromResponse(res: Response): string {
+  const sessionCookieName = String(process.env.SESSION_COOKIE_NAME ?? "connect.sid").trim() || "connect.sid";
+  const sessionPrefix = `${sessionCookieName}=`;
+  const selectSessionPair = (pairs: string[]): string =>
+    pairs.find((p) => p.startsWith(sessionPrefix)) ?? "";
+
+  const getSetCookie = (res.headers as any)?.getSetCookie;
+  if (typeof getSetCookie === "function") {
+    const values = getSetCookie.call(res.headers);
+    if (Array.isArray(values) && values.length > 0) {
+      const pairs = values.map(extractCookiePair).filter(Boolean);
+      const sessionPair = selectSessionPair(pairs);
+      if (sessionPair) return sessionPair;
+    }
+  }
+
+  const fallback = res.headers.get("set-cookie");
+  if (!fallback) return "";
+  const pairs = splitCombinedSetCookieHeader(fallback).map(extractCookiePair).filter(Boolean);
+  const sessionPair = selectSessionPair(pairs);
+  if (sessionPair) return sessionPair;
+  return "";
+}
+
 
 async function fetchJson(url: string, options: RequestInit = {}) {
   const res = await fetch(url, options);
@@ -43,16 +74,25 @@ async function loginAdmin(): Promise<string> {
     const text = await res.text();
     throw new Error(`Admin login failed: HTTP ${res.status} ${res.statusText}: ${text}`);
   }
-  const setCookie = res.headers.get("set-cookie");
-  const cookie = getCookieFromSetCookie(setCookie);
-  if (!cookie) throw new Error("Admin login failed: missing session cookie");
+  const cookie = getCookieFromResponse(res);
+  if (!cookie) {
+    const sessionCookieName = String(process.env.SESSION_COOKIE_NAME ?? "connect.sid").trim() || "connect.sid";
+    throw new Error(
+      `Admin login failed: missing ${sessionCookieName} session cookie (check HTTPS/COOKIE_SECURE settings for this environment).`,
+    );
+  }
   return cookie;
 }
 
 async function verifyWebSocketQuotes(symbols: string[], cookie: string) {
   const wsUrl = BASE_URL.replace(/^http/, "ws") + "/ws";
+  const wsOrigin =
+    BASE_URL.startsWith("http://") || BASE_URL.startsWith("https://")
+      ? BASE_URL
+      : `http://${BASE_URL.replace(/^ws/, "")}`;
   return new Promise<void>((resolve, reject) => {
-    const headers = cookie ? { Cookie: cookie } : undefined;
+    const headers: Record<string, string> = { Origin: wsOrigin };
+    if (cookie) headers.Cookie = cookie;
     const ws = new WebSocket(wsUrl, { headers });
     let gotSnapshot = false;
     let gotUpdate = false;

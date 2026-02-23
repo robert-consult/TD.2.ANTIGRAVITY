@@ -1,4 +1,3 @@
-// @ts-nocheck
 import type { Router, NextFunction, Request, Response } from "express";
 import type { SessionData } from "express-session";
 import { z } from "zod";
@@ -69,9 +68,15 @@ router.post(
     next();
   },
   async (req: Request, res: Response) => {
-    const tradeId = parseInt(req.params.id);
+    const tradeIdRaw = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const tradeId = Number.parseInt(String(tradeIdRaw ?? ""), 10);
     if (isNaN(tradeId)) {
       return res.status(400).json({ message: "Invalid trade ID" });
+    }
+    const session = req.session as SessionData;
+    const userId = Number(session.userId);
+    if (!Number.isInteger(userId) || userId <= 0) {
+      return res.status(401).json({ message: "Not authenticated" });
     }
 
     try {
@@ -82,7 +87,7 @@ router.post(
         return res.status(404).json({ message: "Trade not found" });
       }
 
-      if (trade.userId !== req.session.userId) {
+      if (trade.userId !== userId) {
         return res.status(403).json({ message: "Not authorized to close this trade" });
       }
 
@@ -91,7 +96,7 @@ router.post(
       }
 
       // Check minimum hold time enforcement
-      const minHoldSec = await getEffectiveMinHoldSec(req.session.userId);
+      const minHoldSec = await getEffectiveMinHoldSec(userId);
       if (minHoldSec > 0 && trade.openedAt) {
         let openedAtMs: number;
         if (typeof trade.openedAt === 'number') {
@@ -159,7 +164,7 @@ router.post(
               correlationId,
               orderId,
               positionId,
-              lastActorUserId: req.session.userId,
+              lastActorUserId: userId,
               lastActorSessionId: closeAuditCtx.sessionId,
               lastActorIp: closeAuditCtx.ip,
               lastActorUserAgent: closeAuditCtx.userAgent,
@@ -252,7 +257,7 @@ router.post(
         const tradeLock = await tx.execute(sql`
           select id
           from trades
-          where id = ${tradeId} and user_id = ${req.session.userId} and status = 'OPEN'
+          where id = ${tradeId} and user_id = ${userId} and status = 'OPEN'
           for update
         `);
         if (!tradeLock.rows.length) return { action: "ALREADY_CLOSED" as const };
@@ -271,7 +276,7 @@ router.post(
         const userRowRes = await tx.execute(sql`
           select id, leverage
           from users
-          where id = ${req.session.userId}
+          where id = ${userId}
           for update
         `);
         const leverageNow = Number((userRowRes.rows[0] as any)?.leverage ?? 5);
@@ -309,20 +314,20 @@ router.post(
             orderId,
             positionId,
             lastExecutionId: executionId,
-            lastActorUserId: req.session.userId,
+            lastActorUserId: userId,
             lastActorSessionId: closeAuditCtx.sessionId,
             lastActorIp: closeAuditCtx.ip,
             lastActorUserAgent: closeAuditCtx.userAgent,
             lastActorType: closeAuditCtx.actorType,
           })
-          .where(and(eq(trades.id, tradeId), eq(trades.userId, req.session.userId), eq(trades.status, "OPEN")))
+          .where(and(eq(trades.id, tradeId), eq(trades.userId, userId), eq(trades.status, "OPEN")))
           .returning();
 
         const closedTrade = closedRows[0];
         if (!closedTrade) return { action: "ALREADY_CLOSED" as const };
 
-        await applyUserBalanceDelta(tx, { userId: req.session.userId, deltaUsd: closeSettlementUsd });
-        await releaseUserMargin(tx, { userId: req.session.userId, marginUsd: marginToRelease });
+        await applyUserBalanceDelta(tx, { userId, deltaUsd: closeSettlementUsd });
+        await releaseUserMargin(tx, { userId, marginUsd: marginToRelease });
 
         const slippagePoints = 0; // No slippage on manual close
         await writeTradeAudit({
@@ -385,7 +390,7 @@ router.post(
               correlationId,
               orderId,
               positionId,
-              lastActorUserId: req.session.userId,
+              lastActorUserId: userId,
               lastActorSessionId: closeAuditCtx.sessionId,
               lastActorIp: closeAuditCtx.ip,
               lastActorUserAgent: closeAuditCtx.userAgent,
@@ -435,14 +440,14 @@ router.post(
       clearTradeExcursion(tradeId);
 
       try {
-        await recalcAccount(req.session.userId, { emit: true, reason: "TRADE_CLOSED" });
+        await recalcAccount(userId, { emit: true, reason: "TRADE_CLOSED" });
       } catch (accountError) {
         console.error("Failed to update account after closing trade:", accountError);
       }
 
       // Notify ALL browser sessions for this user that trades changed (multi-device sync)
       // Include userId in payload so clients can filter, but also send to unauth'd clients
-      const targetUserId = req.session.userId;
+      const targetUserId = userId;
       broadcast(
         { type: WS_MSG_TRADES_UPDATED, userId: targetUserId },
         (client) => client.userId === targetUserId || client.userId === undefined
@@ -455,7 +460,7 @@ router.post(
           await withGriftClient(async (griftDb) => {
             const griftAuditCtx: GriftAuditContext = {
               ts: Date.now(),
-              userId: req.session.userId,
+              userId,
               sessionId: req.sessionID,
               deviceId: griftCtx.deviceId ?? undefined,
               deviceIdLegacy: griftCtx.deviceIdLegacy ?? undefined,

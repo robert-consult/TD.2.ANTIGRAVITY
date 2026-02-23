@@ -1,4 +1,3 @@
-// @ts-nocheck
 import type { Router, NextFunction, Request, Response } from "express";
 import type { SessionData } from "express-session";
 import { z } from "zod";
@@ -57,10 +56,23 @@ import type { TraderRouterDeps } from "./types";
 
 export function registerTradesRoutes(router: Router, deps: TraderRouterDeps) {
   const { ensureAuth, ensureDoc1TermsAccepted, broadcast } = deps;
+
+const getSessionUserId = (req: Request, res: Response): number | null => {
+  const session = req.session as SessionData;
+  const userId = Number(session.userId);
+  if (!Number.isInteger(userId) || userId <= 0) {
+    res.status(401).json({ message: "Not authenticated" });
+    return null;
+  }
+  return userId;
+};
+
 router.get("/api/trades", ensureAuth, async (req: Request, res: Response) => {
 
   try {
-    const trades = await storage.getTradesByUserId(req.session.userId);
+    const userId = getSessionUserId(req, res);
+    if (userId == null) return;
+    const trades = await storage.getTradesByUserId(userId);
     res.json(trades);
   } catch (error) {
     console.error("Get trades error:", error);
@@ -71,7 +83,9 @@ router.get("/api/trades", ensureAuth, async (req: Request, res: Response) => {
 router.get("/api/trades/history", ensureAuth, async (req: Request, res: Response) => {
 
   try {
-    const trades = await storage.getTradeHistoryByUserId(req.session.userId);
+    const userId = getSessionUserId(req, res);
+    if (userId == null) return;
+    const trades = await storage.getTradeHistoryByUserId(userId);
     res.json(trades);
   } catch (error) {
     console.error("Get trade history error:", error);
@@ -82,7 +96,9 @@ router.get("/api/trades/history", ensureAuth, async (req: Request, res: Response
 router.get("/api/trades/open", ensureAuth, async (req: Request, res: Response) => {
 
   try {
-    const trades = await storage.getOpenTradesByUserId(req.session.userId);
+    const userId = getSessionUserId(req, res);
+    if (userId == null) return;
+    const trades = await storage.getOpenTradesByUserId(userId);
     res.json(trades);
   } catch (error) {
     console.error("Get open trades error:", error);
@@ -91,12 +107,9 @@ router.get("/api/trades/open", ensureAuth, async (req: Request, res: Response) =
 });
 router.get("/api/trades/pending", async (req: Request, res: Response) => {
   try {
-    const session = req.session as SessionData;
-    if (!session.userId) {
-      return res.status(401).json({ message: "Not authenticated" });
-    }
-
-    const pendingTrades = await storage.getPendingTradesByUserId(session.userId);
+    const userId = getSessionUserId(req, res);
+    if (userId == null) return;
+    const pendingTrades = await storage.getPendingTradesByUserId(userId);
     res.json(pendingTrades);
   } catch (error) {
     console.error("Error fetching pending trades:", error);

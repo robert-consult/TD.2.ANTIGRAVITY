@@ -25,7 +25,7 @@ import { computeCloseSettlementCosts } from "../services/tradeCosts";
 import { clearTradeExcursion, resolveTradeExcursionForCloseDurable } from "../trades/excursionTracking";
 
 const STALE_DEFER_MAX_MIN = Number(process.env.AUTOCLOSE_STALE_DEFER_MAX_MIN ?? 60);
-const ALLOW_STALE_CLOSE = String(process.env.AUTOCLOSE_ALLOW_STALE_CLOSE ?? "true") === "true";
+const ALLOW_STALE_CLOSE = String(process.env.AUTOCLOSE_ALLOW_STALE_CLOSE ?? "false") === "true";
 
 async function getAutoCloseSettings() {
   const gs = await db.query.globalSettings.findFirst({

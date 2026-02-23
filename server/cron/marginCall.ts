@@ -86,7 +86,7 @@ async function runMarginCallJob() {
                             }
                             // Even if quote is "stale" from spread source perspective, during a Margin Call we may need to force a close if enabled
                             // Defaulting to only liquidating on fresh pricing to prevent slippage anomalies on API outages.
-                            if (q.isStale && String(process.env.AUTOCLOSE_ALLOW_STALE_CLOSE ?? "true") !== "true") {
+                            if (q.isStale && String(process.env.AUTOCLOSE_ALLOW_STALE_CLOSE ?? "false") !== "true") {
                                 log(`[MarginCall] Deferred stale quote during liquidation for trade=${trade.id}.`);
                                 continue;
                             }

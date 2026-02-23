@@ -644,3 +644,63 @@ Failure Mode if Missing:
   - Simulate large quote advance drift beyond `QUOTE_REVALIDATE_MAX_EXEC_PRICE_DRIFT_BPS` and verify rejection `reasonCode = QUOTE_PRICE_DRIFT`.
   - Verify `/metrics` increments `trade_open_rejected_quote_revalidation_total` / `trade_close_rejected_quote_revalidation_total` on failures.
 - Failure Mode if Missing: trade commits can execute against stale or materially changed market snapshots, causing determinism breaks, execution integrity drift, and weaker audit defensibility under provider latency.
+
+### PRD-OPS-003
+- ID: `PRD-OPS-003`
+- Date (UTC): `2026-02-23`
+- Scope: `Admin session propagation in production-verification scripts`
+- Requirement: Release-gate integrity/smoke scripts that authenticate as admin must parse multi-value `Set-Cookie` responses and forward the actual session cookie (`connect.sid`) for subsequent admin API calls.
+- Enforcement: `scripts/marketDataIntegrity.ts` and `scripts/traderSearchIntegrity.ts` must parse all returned cookies (`headers.getSetCookie()` preferred), select the configured session cookie (`SESSION_COOKIE_NAME` default `connect.sid`), and reject login probes that do not return a session cookie.
+- Validation:
+  - Run `npm run start:e2e`, then execute `ADMIN_EMAIL=admin@local.test ADMIN_PASSWORD=changeme npm run integrity:market-data` and `ADMIN_EMAIL=admin@local.test ADMIN_PASSWORD=changeme npm run smoke:trader-search`.
+  - Confirm login response includes multiple `Set-Cookie` headers (`tq_rm` + `connect.sid`) and scripts forward `connect.sid` in follow-up requests.
+  - Verify admin endpoints no longer fail with immediate `401 Unauthorized` after successful login.
+- Failure Mode if Missing: deployment verification can produce false negatives (post-login `401`s), obscuring real platform regressions and reducing trust in release readiness gates.
+
+### PRD-OPS-004
+- ID: `PRD-OPS-004`
+- Date (UTC): `2026-02-23`
+- Scope: `WS fanout load-test assertion integrity under origin enforcement`
+- Requirement: WS fanout load testing must send an explicit `Origin` header and fail hard when connection/retention/update thresholds are not met (`min-opened`, `max-failed`, `min-open-before-drain`, `min-quote-updates`).
+- Enforcement: `scripts/loadtest/wsFanout.ts` (`origin` support, threshold args, end-of-run assertion gate with non-zero exit on failure).
+- Validation:
+  - Run `npm run loadtest:ws-fanout -- --url ws://127.0.0.1:5000/ws --origin http://127.0.0.1:5000 --min-opened 20 --min-open-before-drain 10`.
+  - Run a negative probe with forbidden origin (`--origin http://evil.example`) and confirm non-zero exit with assertion failure details.
+  - Verify success path prints `assertions passed` only when thresholds are satisfied.
+- Failure Mode if Missing: WS load tests can report false-green success while production origin policy is rejecting/closing sockets, masking capacity and reliability regressions.
+
+### PRD-RISK-001
+- ID: `PRD-RISK-001`
+- Date (UTC): `2026-02-23`
+- Scope: `Automated close-path stale-quote safety defaults`
+- Requirement: System-driven close paths (auto-close and margin-call liquidation) must default to rejecting stale-quote execution unless explicitly overridden by `AUTOCLOSE_ALLOW_STALE_CLOSE=true`.
+- Enforcement: `server/cron/autoClose.ts` and `server/cron/marginCall.ts` default `AUTOCLOSE_ALLOW_STALE_CLOSE` to `false`.
+- Validation:
+  - Start with `AUTOCLOSE_ALLOW_STALE_CLOSE` unset and simulate stale quote inputs; verify scheduler logs deferred/skip behavior instead of executing closes.
+  - Set `AUTOCLOSE_ALLOW_STALE_CLOSE=true` and verify stale-close override path is explicitly opt-in.
+  - Confirm manual close path still enforces stale-quote rejection independently.
+- Failure Mode if Missing: scheduler-driven liquidations can execute on stale prices during feed degradation, weakening execution integrity and audit defensibility.
+
+### PRD-AUD-001
+- ID: `PRD-AUD-001`
+- Date (UTC): `2026-02-23`
+- Scope: `Trade history durability audit release gating`
+- Requirement: `audit:trade-history` must support strict, configurable fail gates so production verification can block on durability hazards (empty trades, sequence skew, missing anti-wipe triggers, likely ephemeral storage).
+- Enforcement: `scripts/tradeHistoryDurabilityAudit.ts` (`TRADE_HISTORY_AUDIT_STRICT`, `TRADE_HISTORY_AUDIT_FAIL_ON_*` guards with non-zero exit on triggered hard failures).
+- Validation:
+  - Run with strict mode enabled and selected fail toggles (for example `TRADE_HISTORY_AUDIT_STRICT=1 TRADE_HISTORY_AUDIT_FAIL_ON_MISSING_TRIGGERS=1 npm run audit:trade-history`).
+  - Confirm triggered guard(s) produce `FAIL: durability guard(s) triggered` and non-zero exit.
+  - Confirm strict mode can be tuned per environment via explicit `TRADE_HISTORY_AUDIT_FAIL_ON_*` overrides.
+- Failure Mode if Missing: durability regressions remain warning-only and can ship without release interruption, weakening institutional audit guarantees.
+
+### PRD-TRD-007
+- ID: `PRD-TRD-007`
+- Date (UTC): `2026-02-23`
+- Scope: `Core trade route compile-time safety coverage`
+- Requirement: Core trade lifecycle route modules (`tradeOpen`, `tradeClose`, `tradeCancel`, `trades`) must remain under TypeScript checks with explicit session-user narrowing and no file-level `@ts-nocheck`.
+- Enforcement: `server/routes/trader/tradeOpen.ts`, `server/routes/trader/tradeClose.ts`, `server/routes/trader/tradeCancel.ts`, `server/routes/trader/trades.ts`.
+- Validation:
+  - Run `npm run check` and confirm these modules type-check without `@ts-nocheck`.
+  - Verify route handlers reject invalid/missing session user IDs with 401 before trade mutations/queries.
+  - Execute trading route smoke/e2e checks to confirm behavior parity.
+- Failure Mode if Missing: silent type regressions in order-open/close/cancel/history hot paths can bypass compile-time detection and increase runtime defect risk.

@@ -4,11 +4,16 @@ import WebSocket from "ws";
 
 type Args = {
   url: string;
+  origin: string | null;
   clients: number;
   durationSec: number;
   rampSec: number;
   symbols: string[];
   serverPid: number | null;
+  minOpened: number;
+  maxFailed: number;
+  minOpenBeforeDrain: number;
+  minQuoteUpdates: number;
 };
 
 function parseArgs(argv: string[]): Args {
@@ -27,9 +32,14 @@ function parseArgs(argv: string[]): Args {
   }
 
   const url = String(args.get("url") ?? "ws://127.0.0.1:5000/ws");
+  const origin = String(args.get("origin") ?? "").trim() || deriveOriginFromWsUrl(url);
   const clients = Number(args.get("clients") ?? 1000);
   const durationSec = Number(args.get("duration-sec") ?? 30);
   const rampSec = Number(args.get("ramp-sec") ?? 10);
+  const minOpened = Number(args.get("min-opened") ?? 1);
+  const maxFailed = Number(args.get("max-failed") ?? clients);
+  const minOpenBeforeDrain = Number(args.get("min-open-before-drain") ?? 1);
+  const minQuoteUpdates = Number(args.get("min-quote-updates") ?? 0);
   const symbolsRaw = String(args.get("symbols") ?? "EURUSD,GBPUSD,USDJPY,AUDUSD");
   const symbols = symbolsRaw
     .split(",")
@@ -42,9 +52,37 @@ function parseArgs(argv: string[]): Args {
   if (!Number.isFinite(clients) || clients <= 0) throw new Error("--clients must be > 0");
   if (!Number.isFinite(durationSec) || durationSec <= 0) throw new Error("--duration-sec must be > 0");
   if (!Number.isFinite(rampSec) || rampSec < 0) throw new Error("--ramp-sec must be >= 0");
+  if (!Number.isFinite(minOpened) || minOpened < 0) throw new Error("--min-opened must be >= 0");
+  if (!Number.isFinite(maxFailed) || maxFailed < 0) throw new Error("--max-failed must be >= 0");
+  if (!Number.isFinite(minOpenBeforeDrain) || minOpenBeforeDrain < 0) throw new Error("--min-open-before-drain must be >= 0");
+  if (!Number.isFinite(minQuoteUpdates) || minQuoteUpdates < 0) throw new Error("--min-quote-updates must be >= 0");
   if (!symbols.length) throw new Error("--symbols must include at least 1 symbol");
 
-  return { url, clients, durationSec, rampSec, symbols, serverPid: serverPid ?? null };
+  return {
+    url,
+    origin,
+    clients,
+    durationSec,
+    rampSec,
+    symbols,
+    serverPid: serverPid ?? null,
+    minOpened: Math.trunc(minOpened),
+    maxFailed: Math.trunc(maxFailed),
+    minOpenBeforeDrain: Math.trunc(minOpenBeforeDrain),
+    minQuoteUpdates: Math.trunc(minQuoteUpdates),
+  };
+}
+
+function deriveOriginFromWsUrl(rawUrl: string): string | null {
+  try {
+    const u = new URL(rawUrl);
+    if (u.protocol === "ws:") return `http://${u.host}`;
+    if (u.protocol === "wss:") return `https://${u.host}`;
+    if (u.protocol === "http:" || u.protocol === "https:") return `${u.protocol}//${u.host}`;
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 function detectServerPid(): number | null {
@@ -105,6 +143,8 @@ async function main() {
   let msgCount = 0;
   let msgBytes = 0;
   let quoteUpdateCount = 0;
+  let quoteSnapshotCount = 0;
+  let peakOpen = 0;
 
   const sockets: WebSocket[] = [];
   const startAt = Date.now();
@@ -114,14 +154,15 @@ async function main() {
   const perTick = spawnTotalMs === 0 ? opts.clients : Math.max(1, Math.floor(opts.clients / (spawnTotalMs / 100)));
 
   console.log(
-    `[wsFanout] url=${opts.url} clients=${opts.clients} durationSec=${opts.durationSec} rampSec=${opts.rampSec} symbols=${opts.symbols.length} cpu=${cpuCount}`,
+    `[wsFanout] url=${opts.url} origin=${opts.origin ?? "(none)"} clients=${opts.clients} durationSec=${opts.durationSec} rampSec=${opts.rampSec} symbols=${opts.symbols.length} cpu=${cpuCount}`,
   );
   if (opts.serverPid) {
     console.log(`[wsFanout] serverPid=${opts.serverPid} rssStart=${serverRssStartKb ? `${serverRssStartKb}KB` : "n/a"}`);
   }
 
   const connectOne = () => {
-    const ws = new WebSocket(opts.url, { perMessageDeflate: false });
+    const headers = opts.origin ? { Origin: opts.origin } : undefined;
+    const ws = new WebSocket(opts.url, { perMessageDeflate: false, headers });
     sockets.push(ws);
     ws.on("open", () => {
       opened++;
@@ -135,6 +176,7 @@ async function main() {
       try {
         const parsed = JSON.parse(typeof data === "string" ? data : data.toString("utf8"));
         if (parsed?.type === "quotes:update") quoteUpdateCount++;
+        if (parsed?.type === "quotes:snapshot") quoteSnapshotCount++;
       } catch {
         // ignore
       }
@@ -163,6 +205,7 @@ async function main() {
     const mps = msgCount / elapsedSec;
     const bps = msgBytes / elapsedSec;
     const openNow = opened - closed;
+    peakOpen = Math.max(peakOpen, openNow);
     console.log(
       `[wsFanout] t=${Math.round(elapsedSec)}s open=${openNow} opened=${opened} failed=${failed} mps=${mps.toFixed(
         1,
@@ -176,6 +219,7 @@ async function main() {
     clearInterval(stopTimer);
     clearInterval(reportTimer);
     clearInterval(spawnTimer);
+    const openBeforeDrain = opened - closed;
     for (const ws of sockets) {
       try {
         ws.close();
@@ -198,7 +242,10 @@ async function main() {
 
       console.log("");
       console.log(`[wsFanout] done elapsed=${elapsedSec.toFixed(1)}s opened=${opened} failed=${failed} closed=${closed}`);
-      console.log(`[wsFanout] recv mps=${mps.toFixed(1)} bps=${fmtBytes(bps)}/s quoteUpdates=${quoteUpdateCount}`);
+      console.log(
+        `[wsFanout] recv mps=${mps.toFixed(1)} bps=${fmtBytes(bps)}/s quoteSnapshots=${quoteSnapshotCount} quoteUpdates=${quoteUpdateCount}`,
+      );
+      console.log(`[wsFanout] openBeforeDrain=${openBeforeDrain} peakOpen=${peakOpen}`);
       console.log(`[wsFanout] extrapolated outbound for 100k ~ ${fmtBytes(approxFor100k)}/s (no WS compression)`);
       if (opts.serverPid) {
         console.log(
@@ -207,6 +254,31 @@ async function main() {
           } perConn=${perConnKb != null ? `${perConnKb.toFixed(2)}KB` : "n/a"}`,
         );
       }
+
+      const failures: string[] = [];
+      if (opened < opts.minOpened) {
+        failures.push(`opened=${opened} below min-opened=${opts.minOpened}`);
+      }
+      if (failed > opts.maxFailed) {
+        failures.push(`failed=${failed} above max-failed=${opts.maxFailed}`);
+      }
+      if (openBeforeDrain < opts.minOpenBeforeDrain) {
+        failures.push(
+          `openBeforeDrain=${openBeforeDrain} below min-open-before-drain=${opts.minOpenBeforeDrain} (connections churned before test end)`,
+        );
+      }
+      if (quoteUpdateCount < opts.minQuoteUpdates) {
+        failures.push(`quoteUpdates=${quoteUpdateCount} below min-quote-updates=${opts.minQuoteUpdates}`);
+      }
+
+      if (failures.length > 0) {
+        console.error("[wsFanout] assertions failed:");
+        for (const f of failures) console.error(`[wsFanout]  - ${f}`);
+        process.exit(1);
+        return;
+      }
+
+      console.log("[wsFanout] assertions passed");
       process.exit(0);
     }, 2000);
   }, 250);
@@ -228,4 +300,3 @@ main().catch((err) => {
   console.error("[wsFanout] fatal:", err);
   process.exit(1);
 });
-

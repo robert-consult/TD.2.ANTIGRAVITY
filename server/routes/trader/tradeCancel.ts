@@ -1,4 +1,3 @@
-// @ts-nocheck
 import type { Router, NextFunction, Request, Response } from "express";
 import type { SessionData } from "express-session";
 import { z } from "zod";
@@ -70,15 +69,23 @@ router.patch(
   async (req: Request, res: Response) => {
     try {
       const session = req.session as SessionData;
+      const userId = Number(session.userId);
+      if (!Number.isInteger(userId) || userId <= 0) {
+        return res.status(401).json({ message: "Not authenticated" });
+      }
 
-      const tradeId = parseInt(req.params.id);
+      const tradeIdRaw = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+      const tradeId = Number.parseInt(String(tradeIdRaw ?? ""), 10);
+      if (Number.isNaN(tradeId)) {
+        return res.status(400).json({ message: "Invalid trade ID" });
+      }
       const trade = await storage.getTradeById(tradeId);
 
       if (!trade) {
         return res.status(404).json({ message: "Trade not found" });
       }
 
-      if (trade.userId !== session.userId) {
+      if (trade.userId !== userId) {
         return res.status(403).json({ message: "Not authorized" });
       }
 
@@ -97,7 +104,7 @@ router.patch(
           correlationId,
           orderId,
           positionId,
-          lastActorUserId: session.userId,
+          lastActorUserId: userId,
           lastActorSessionId: cancelAuditCtx.sessionId,
           lastActorIp: cancelAuditCtx.ip,
           lastActorUserAgent: cancelAuditCtx.userAgent,
@@ -153,7 +160,7 @@ router.patch(
       }
 
       // Notify ALL browser sessions for this user that trades changed (multi-device sync)
-      const targetUserId = session.userId;
+      const targetUserId = userId;
       broadcast(
         { type: WS_MSG_TRADES_UPDATED, userId: targetUserId },
         (client) => client.userId === targetUserId || client.userId === undefined
@@ -166,7 +173,7 @@ router.patch(
           await withGriftClient(async (griftDb) => {
             const griftAuditCtx: GriftAuditContext = {
               ts: Date.now(),
-              userId: session.userId,
+              userId,
               sessionId: req.sessionID,
               deviceId: griftCtx.deviceId ?? undefined,
               deviceIdLegacy: griftCtx.deviceIdLegacy ?? undefined,

@@ -12,6 +12,8 @@ import {
 import { clearStaleData, markFreshData, markStaleData } from "@/lib/staleData";
 import { useToast } from "@/hooks/use-toast";
 import { prefetchStartupData } from "@/lib/startupDataPrefetch";
+import { readStoredLocaleForUser, shouldPreferStoredUserLocale } from "@/i18n/localeStorage";
+import { DEFAULT_LOCALE } from "@shared/locale/preferences";
 
 interface User {
   id: number;
@@ -83,10 +85,6 @@ const AuthContext = createContext<AuthContextType>({
   stopImpersonating: async () => {},
 });
 
-function baseLocale(value?: string | null): string {
-  return String(value || "").trim().toLowerCase().split("-")[0] || "";
-}
-
 const AUTH_CACHE_KEY = "auth.current-user";
 const AUTH_CACHE_SCHEMA_VERSION = 1;
 const AUTH_STALE_KEY = "/api/auth/current-user";
@@ -120,17 +118,11 @@ function normalizeCachedAuthRecord(value: unknown): CachedAuthRecord | null {
 }
 
 function applyStoredLocale(user: User | null): User | null {
-  if (!user || typeof window === "undefined") return user;
-  try {
-    const stored = localStorage.getItem("i18n.locale");
-    if (!stored) return user;
-    const storedBase = baseLocale(stored);
-    const userBase = baseLocale(user.language);
-    if (!userBase || (userBase === "en" && storedBase && storedBase !== "en")) {
-      return { ...user, language: stored };
-    }
-  } catch {
-    // ignore storage failures
+  if (!user) return user;
+  const stored = readStoredLocaleForUser(user.id);
+  if (!stored) return user;
+  if (shouldPreferStoredUserLocale(user.language, stored, DEFAULT_LOCALE)) {
+    return { ...user, language: stored };
   }
   return user;
 }

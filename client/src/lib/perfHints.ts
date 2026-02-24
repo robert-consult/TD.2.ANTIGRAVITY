@@ -91,6 +91,7 @@ const TIER_RANK: Record<PerformanceTier, number> = {
 };
 
 const NETWORK_CHANGE_EVENT = "change";
+export const MAX_PREFETCH_CONCURRENCY = 12;
 
 export const DEFAULT_PERFORMANCE_SETTINGS: PerformanceSettings = {
   restFallbackPollMs: 500,
@@ -390,7 +391,7 @@ export function resolvePerformanceSettings(input: unknown): PerformanceSettings 
           DEFAULT_PERFORMANCE_SETTINGS.prefetchMaxConcurrency,
       ),
       1,
-      6,
+      MAX_PREFETCH_CONCURRENCY,
     ),
     prefetchStartDelayMs: clamp(
       Math.round(
@@ -406,7 +407,7 @@ export function resolvePerformanceSettings(input: unknown): PerformanceSettings 
           DEFAULT_PERFORMANCE_SETTINGS.prefetchFastConcurrencyCap,
       ),
       1,
-      6,
+      MAX_PREFETCH_CONCURRENCY,
     ),
     prefetchModerateConcurrencyCap: clamp(
       Math.round(
@@ -414,7 +415,7 @@ export function resolvePerformanceSettings(input: unknown): PerformanceSettings 
           DEFAULT_PERFORMANCE_SETTINGS.prefetchModerateConcurrencyCap,
       ),
       1,
-      6,
+      MAX_PREFETCH_CONCURRENCY,
     ),
     prefetchConstrainedConcurrencyCap: clamp(
       Math.round(
@@ -422,7 +423,7 @@ export function resolvePerformanceSettings(input: unknown): PerformanceSettings 
           DEFAULT_PERFORMANCE_SETTINGS.prefetchConstrainedConcurrencyCap,
       ),
       1,
-      6,
+      MAX_PREFETCH_CONCURRENCY,
     ),
     prefetchNetworkFastStartDelayMs: clamp(
       Math.round(
@@ -631,7 +632,7 @@ export function tierPrefetchPlan(
   }
 
   const resolveMaxConcurrency = () => {
-    let cap = clamp(settings.prefetchMaxConcurrency, 1, 6);
+    let cap = clamp(settings.prefetchMaxConcurrency, 1, MAX_PREFETCH_CONCURRENCY);
 
     // Keep startup prefetch aggressive on strong links, but reserve connection headroom for
     // initial API + WS setup on weaker tiers.
@@ -642,7 +643,20 @@ export function tierPrefetchPlan(
     if (hints.deviceTier === "MINIMAL") cap = 1;
     else if (hints.deviceTier === "CONSTRAINED") cap = Math.min(cap, 2);
 
-    return clamp(cap, 1, 6);
+    const rttMs = hints.rttMs ?? Number.POSITIVE_INFINITY;
+    const downlinkMbps = hints.downlinkMbps ?? 0;
+    const networkHealthy =
+      TIER_RANK[hints.networkTier] <= TIER_RANK.FAST && Number.isFinite(rttMs) && rttMs <= 150;
+    const deviceHealthy = TIER_RANK[hints.deviceTier] <= TIER_RANK.MODERATE;
+
+    let throughputFloor = 1;
+    if (networkHealthy && deviceHealthy) {
+      if (downlinkMbps >= 100) throughputFloor = 12;
+      else if (downlinkMbps >= 80) throughputFloor = 10;
+      else if (downlinkMbps >= 50) throughputFloor = 8;
+    }
+
+    return clamp(Math.max(cap, throughputFloor), 1, MAX_PREFETCH_CONCURRENCY);
   };
 
   const resolveStartDelayMs = () => {

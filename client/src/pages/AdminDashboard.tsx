@@ -2700,7 +2700,7 @@ function SystemConfigTab() {
   const { toast } = useToast();
   const [subTab, setSubTab] = useState("trading");
   const [config, setConfig] = useState<SystemConfigData | null>(null);
-  const [configChanged, setConfigChanged] = useState(false);
+  const [, setConfigChanged] = useState(false);
   const [i18nConfig, setI18nConfig] = useState<I18nAdminConfigData | null>(null);
   const [i18nLocalesCsv, setI18nLocalesCsv] = useState("en");
   const [i18nChanged, setI18nChanged] = useState(false);
@@ -2780,11 +2780,83 @@ function SystemConfigTab() {
     },
   });
 
+  const sectionChanged = (...keys: (keyof SystemConfigData)[]) => {
+    if (!config || !systemConfig) return false;
+    return keys.some((key) => config[key] !== systemConfig[key]);
+  };
+
+  const isTradingControlsChanged = sectionChanged(
+    "maintenanceMode",
+    "tradingHalt",
+    "closeOnlyMode",
+    "blockOpenOnStaleQuotes",
+    "maintenanceMessage",
+  );
+
+  const isMarketDataSettingsChanged = sectionChanged(
+    "quoteRefreshMs",
+    "feedPollMs",
+    "staleThresholdMs",
+    "fxRolloverTz",
+    "fxRolloverTime",
+  );
+
+  const isSignupComplianceChanged = sectionChanged(
+    "signupCaptchaEnforce",
+    "captchaProvider",
+    "signupPhoneEnforce",
+    "legalCoverageEnforce",
+  );
+
+  const isSignupFreezeWaitlistChanged = sectionChanged(
+    "signupFreeze",
+    "signupFreezeMessage",
+    "signupWaitlistEnabled",
+    "signupWaitlistInviteSender",
+    "signupWaitlistInviteSubject",
+    "signupWaitlistInviteBodyText",
+    "signupWaitlistAutoInviteOnUnfreeze",
+    "signupWaitlistInviteBatchCap",
+    "signupWaitlistPolicyVersion",
+    "signupWaitlistPolicyContent",
+  );
+
+  const isJurisdictionControlsChanged = sectionChanged(
+    "jurisdictionRestrictedIso2Csv",
+    "jurisdictionRestrictedMessage",
+    "jurisdictionEnforceByIpGeo",
+    "jurisdictionEnforceBySignupCountry",
+    "jurisdictionBlockSignup",
+    "jurisdictionBlockLogin",
+  );
+
+  const isSessionAndAccessControlsChanged = sectionChanged(
+    "allowUserTimezoneEdit",
+    "rememberMeEnabled",
+    "rememberMeMaxAgeDays",
+    "rememberMeMaxDevicesPerUser",
+    "rememberMeReauthAfterAbsenceDays",
+    "sessionCookieMaxAgeHours",
+    "sessionIdleTimeoutMinutes",
+    "rememberMeTokenRotationEnabled",
+    "rememberMeTheftAutoRevokeAll",
+    "logoutClearAllDeviceTokens",
+    "scoutTabEnabled",
+  );
+
+  const hasSystemConfigUnsavedChanges =
+    isTradingControlsChanged ||
+    isMarketDataSettingsChanged ||
+    isSignupComplianceChanged ||
+    isSignupFreezeWaitlistChanged ||
+    isJurisdictionControlsChanged ||
+    isSessionAndAccessControlsChanged;
+
   useEffect(() => {
-    if (systemConfig && !configChanged) {
+    if (systemConfig && !hasSystemConfigUnsavedChanges) {
       setConfig(systemConfig);
     }
-  }, [systemConfig]);
+  }, [systemConfig, hasSystemConfigUnsavedChanges]);
 
   useEffect(() => {
     if (!i18nConfigData || i18nChanged) return;
@@ -2820,8 +2892,6 @@ function SystemConfigTab() {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/system-config"] });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/scout/config"] });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/signup-waitlist"] });
-      setConfigChanged(false);
-      toast({ title: "Settings saved", description: "System configuration updated successfully" });
 
       const s = data?.autoInviteSummary;
       if (s) {
@@ -2979,10 +3049,117 @@ function SystemConfigTab() {
     setConfirmDialog({ open: false, key: "", value: false, label: "" });
   };
 
-  const handleSave = () => {
-    if (config) {
-      updateMutation.mutate(config);
-    }
+  const handleSaveSystemConfigSection = (
+    payload: Partial<SystemConfigData>,
+    title: string,
+    description: string,
+  ) => {
+    updateMutation.mutate(payload, {
+      onSuccess: () => {
+        toast({ title, description });
+      },
+    });
+  };
+
+  const handleSaveTradingControls = () => {
+    if (!config) return;
+    handleSaveSystemConfigSection(
+      {
+        maintenanceMode: config.maintenanceMode,
+        tradingHalt: config.tradingHalt,
+        closeOnlyMode: config.closeOnlyMode,
+        blockOpenOnStaleQuotes: config.blockOpenOnStaleQuotes,
+        maintenanceMessage: config.maintenanceMessage,
+      },
+      "Trading Controls Saved",
+      "Safety switch and maintenance controls updated.",
+    );
+  };
+
+  const handleSaveMarketDataSettings = () => {
+    if (!config) return;
+    handleSaveSystemConfigSection(
+      {
+        quoteRefreshMs: config.quoteRefreshMs,
+        feedPollMs: config.feedPollMs,
+        staleThresholdMs: config.staleThresholdMs,
+        fxRolloverTz: config.fxRolloverTz,
+        fxRolloverTime: config.fxRolloverTime,
+      },
+      "Market Data Settings Saved",
+      "Quote cadence and FX rollover defaults updated.",
+    );
+  };
+
+  const handleSaveSignupCompliance = () => {
+    if (!config) return;
+    handleSaveSystemConfigSection(
+      {
+        signupCaptchaEnforce: config.signupCaptchaEnforce,
+        captchaProvider: config.captchaProvider,
+        signupPhoneEnforce: config.signupPhoneEnforce,
+        legalCoverageEnforce: config.legalCoverageEnforce,
+      },
+      "Signup Compliance Saved",
+      "Captcha, phone, and legal gating controls updated.",
+    );
+  };
+
+  const handleSaveSignupFreezeWaitlist = () => {
+    if (!config) return;
+    handleSaveSystemConfigSection(
+      {
+        signupFreeze: config.signupFreeze,
+        signupFreezeMessage: config.signupFreezeMessage,
+        signupWaitlistEnabled: config.signupWaitlistEnabled,
+        signupWaitlistInviteSender: config.signupWaitlistInviteSender,
+        signupWaitlistInviteSubject: config.signupWaitlistInviteSubject,
+        signupWaitlistInviteBodyText: config.signupWaitlistInviteBodyText,
+        signupWaitlistAutoInviteOnUnfreeze: config.signupWaitlistAutoInviteOnUnfreeze,
+        signupWaitlistInviteBatchCap: config.signupWaitlistInviteBatchCap,
+        signupWaitlistPolicyVersion: config.signupWaitlistPolicyVersion,
+        signupWaitlistPolicyContent: config.signupWaitlistPolicyContent,
+      },
+      "Signup Freeze & Waitlist Saved",
+      "Freeze, invite, and waitlist policy settings updated.",
+    );
+  };
+
+  const handleSaveJurisdictionControls = () => {
+    if (!config) return;
+    handleSaveSystemConfigSection(
+      {
+        jurisdictionRestrictedIso2Csv: config.jurisdictionRestrictedIso2Csv,
+        jurisdictionRestrictedMessage: config.jurisdictionRestrictedMessage,
+        jurisdictionEnforceByIpGeo: config.jurisdictionEnforceByIpGeo,
+        jurisdictionEnforceBySignupCountry: config.jurisdictionEnforceBySignupCountry,
+        jurisdictionBlockSignup: config.jurisdictionBlockSignup,
+        jurisdictionBlockLogin: config.jurisdictionBlockLogin,
+      },
+      "Jurisdiction Controls Saved",
+      "Country restriction and enforcement controls updated.",
+    );
+  };
+
+  const handleSaveSessionAndAccessControls = () => {
+    if (!config) return;
+    handleSaveSystemConfigSection(
+      {
+        allowUserTimezoneEdit: config.allowUserTimezoneEdit,
+        rememberMeEnabled: config.rememberMeEnabled,
+        rememberMeMaxAgeDays: config.rememberMeMaxAgeDays,
+        rememberMeMaxDevicesPerUser: config.rememberMeMaxDevicesPerUser,
+        rememberMeReauthAfterAbsenceDays: config.rememberMeReauthAfterAbsenceDays,
+        sessionCookieMaxAgeHours: config.sessionCookieMaxAgeHours,
+        sessionIdleTimeoutMinutes: config.sessionIdleTimeoutMinutes,
+        rememberMeTokenRotationEnabled: config.rememberMeTokenRotationEnabled,
+        rememberMeTheftAutoRevokeAll: config.rememberMeTheftAutoRevokeAll,
+        logoutClearAllDeviceTokens: config.logoutClearAllDeviceTokens,
+        scoutTabEnabled: config.scoutTabEnabled,
+      },
+      "Session & Access Controls Saved",
+      "Regional, session, and Scout access controls updated.",
+    );
   };
 
   const handleSaveI18nConfig = () => {
@@ -3129,8 +3306,8 @@ function SystemConfigTab() {
 
                 <div className="flex justify-end pt-4">
                   <Button
-                    onClick={handleSave}
-                    disabled={!configChanged || updateMutation.isPending}
+                    onClick={handleSaveTradingControls}
+                    disabled={!isTradingControlsChanged || updateMutation.isPending}
                     className="bg-blue-600 hover:bg-blue-700"
                   >
                     {updateMutation.isPending ? "Saving..." : "Save Changes"}
@@ -3229,8 +3406,8 @@ function SystemConfigTab() {
 
                   <div className="flex justify-end pt-4">
                     <Button
-                      onClick={handleSave}
-                      disabled={!configChanged || updateMutation.isPending}
+                      onClick={handleSaveMarketDataSettings}
+                      disabled={!isMarketDataSettingsChanged || updateMutation.isPending}
                       className="bg-blue-600 hover:bg-blue-700"
                     >
                       {updateMutation.isPending ? "Saving..." : "Save Changes"}
@@ -3880,8 +4057,8 @@ function SystemConfigTab() {
 
                   <div className="flex justify-end pt-4">
                     <Button
-                      onClick={handleSave}
-                      disabled={!configChanged || updateMutation.isPending}
+                      onClick={handleSaveSignupCompliance}
+                      disabled={!isSignupComplianceChanged || updateMutation.isPending}
                       className="bg-blue-600 hover:bg-blue-700"
                     >
                       {updateMutation.isPending ? "Saving..." : "Save Changes"}
@@ -3895,9 +4072,9 @@ function SystemConfigTab() {
               config={config}
               setConfig={setConfig}
               setConfigChanged={setConfigChanged}
-              onSave={handleSave}
+              onSave={handleSaveSignupFreezeWaitlist}
               saving={updateMutation.isPending}
-              canSave={configChanged}
+              canSave={isSignupFreezeWaitlistChanged}
             />
 
             {config && (
@@ -3905,8 +4082,8 @@ function SystemConfigTab() {
                 config={config}
                 setConfig={setConfig}
                 setConfigChanged={setConfigChanged}
-                configChanged={configChanged}
-                onSave={handleSave}
+                configChanged={isJurisdictionControlsChanged}
+                onSave={handleSaveJurisdictionControls}
                 saving={updateMutation.isPending}
               />
             )}
@@ -4330,8 +4507,8 @@ function SystemConfigTab() {
 
               <div className="flex justify-end pt-2">
                 <Button
-                  onClick={handleSave}
-                  disabled={!configChanged || updateMutation.isPending}
+                  onClick={handleSaveSessionAndAccessControls}
+                  disabled={!isSessionAndAccessControlsChanged || updateMutation.isPending}
                   className="bg-blue-600 hover:bg-blue-700"
                 >
                   {updateMutation.isPending ? "Saving..." : "Save Settings"}
@@ -4670,7 +4847,6 @@ export default function AdminDashboard() {
     flushMinimalMs: 1000,
     updatedAt: null
   });
-  const [riskParamsChanged, setRiskParamsChanged] = useState(false);
 
   const { data: users = [], isLoading } = useQuery<User[]>({
     queryKey: ["/api/admin/users"],
@@ -4703,16 +4879,67 @@ export default function AdminDashboard() {
     }
   }, [activeTab, scoutTabVisible]);
 
+  const isCapitalSettingsChanged = useMemo(() => {
+    if (!globalSettingsData) return false;
+    return (
+      riskParams.defaultUserStartingBalanceUsd !== globalSettingsData.defaultUserStartingBalanceUsd ||
+      riskParams.defaultUserStartingEquityUsd !== globalSettingsData.defaultUserStartingEquityUsd ||
+      riskParams.defaultChallengeVirtualCapitalUsd !== globalSettingsData.defaultChallengeVirtualCapitalUsd
+    );
+  }, [riskParams, globalSettingsData]);
+
+  const isMarketHoursChanged = useMemo(() => {
+    if (!globalSettingsData) return false;
+    return (
+      riskParams.marketOpenTime !== globalSettingsData.marketOpenTime ||
+      riskParams.marketCloseTime !== globalSettingsData.marketCloseTime ||
+      riskParams.allowWeekendTrading !== globalSettingsData.allowWeekendTrading
+    );
+  }, [riskParams, globalSettingsData]);
+
+  const isDefaultRiskParametersChanged = useMemo(() => {
+    if (!globalSettingsData) return false;
+    return (
+      riskParams.defaultLeverage !== globalSettingsData.defaultLeverage ||
+      riskParams.maxPositionSize !== globalSettingsData.maxPositionSize ||
+      riskParams.maxTradesPerUser !== globalSettingsData.maxTradesPerUser ||
+      riskParams.maxTradesPerInstrument !== globalSettingsData.maxTradesPerInstrument ||
+      riskParams.maxConcurrentLots !== globalSettingsData.maxConcurrentLots ||
+      riskParams.minPriceDistancePips !== globalSettingsData.minPriceDistancePips
+    );
+  }, [riskParams, globalSettingsData]);
+
+  const isOperationalRiskAndLotSettingsChanged = useMemo(() => {
+    if (!globalSettingsData) return false;
+    return (
+      riskParams.enableAutoClose !== globalSettingsData.enableAutoClose ||
+      riskParams.autoCloseAfterDays !== globalSettingsData.autoCloseAfterDays ||
+      riskParams.autoCloseCheckFrequencyMinutes !== globalSettingsData.autoCloseCheckFrequencyMinutes ||
+      riskParams.minHoldSec !== globalSettingsData.minHoldSec ||
+      riskParams.enableLossLimits !== globalSettingsData.enableLossLimits ||
+      riskParams.dailyLossLimitPct !== globalSettingsData.dailyLossLimitPct ||
+      riskParams.lifetimeLossLimitPct !== globalSettingsData.lifetimeLossLimitPct ||
+      riskParams.lotPresetCards !== globalSettingsData.lotPresetCards ||
+      riskParams.lotDropdownMax !== globalSettingsData.lotDropdownMax
+    );
+  }, [riskParams, globalSettingsData]);
+
+  const hasRiskParamsUnsavedChanges =
+    isCapitalSettingsChanged ||
+    isMarketHoursChanged ||
+    isDefaultRiskParametersChanged ||
+    isOperationalRiskAndLotSettingsChanged;
+
   // Sync global settings to local state when data is fetched (only when not editing)
   useEffect(() => {
-    if (globalSettingsData && !riskParamsChanged) {
+    if (globalSettingsData && !hasRiskParamsUnsavedChanges) {
       setRiskParams((prev) => {
         const raw = Number((globalSettingsData as any)?.minPriceDistancePips);
         const minPriceDistancePips = Number.isFinite(raw) ? Math.trunc(raw) : (prev.minPriceDistancePips ?? 20);
         return { ...prev, ...globalSettingsData, minPriceDistancePips };
       });
     }
-  }, [globalSettingsData, riskParamsChanged]);
+  }, [globalSettingsData, hasRiskParamsUnsavedChanges]);
 
   const mutation = useMutation({
     mutationFn: (payload: UserSettings) =>
@@ -5309,8 +5536,7 @@ export default function AdminDashboard() {
       axios.put('/api/admin/global-settings', payload),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/global-settings"] });
-      setRiskParamsChanged(false);
-      toast({ title: "Risk settings saved", description: "Global trading parameters updated successfully" });
+      queryClient.invalidateQueries({ queryKey: ["/api/global-settings"] });
     },
     onError: (error: any) => {
       toast({ title: "Error", description: error.response?.data?.message || "Failed to save risk settings", variant: "destructive" });
@@ -5319,34 +5545,75 @@ export default function AdminDashboard() {
 
   const handleRiskParamChange = (field: keyof GlobalSettings, value: number | string | boolean) => {
     setRiskParams(prev => ({ ...prev, [field]: value }));
-    setRiskParamsChanged(true);
   };
 
-  const handleSaveRiskParams = () => {
-    globalSettingsMutation.mutate({
-      defaultLeverage: riskParams.defaultLeverage,
-      maxPositionSize: riskParams.maxPositionSize,
-      maxTradesPerUser: riskParams.maxTradesPerUser,
-      maxTradesPerInstrument: riskParams.maxTradesPerInstrument,
-      maxConcurrentLots: riskParams.maxConcurrentLots,
-      minPriceDistancePips: riskParams.minPriceDistancePips,
-      marketOpenTime: riskParams.marketOpenTime,
-      marketCloseTime: riskParams.marketCloseTime,
-      allowWeekendTrading: riskParams.allowWeekendTrading,
-      enableAutoClose: riskParams.enableAutoClose,
-      autoCloseAfterDays: riskParams.autoCloseAfterDays,
-      autoCloseCheckFrequencyMinutes: riskParams.autoCloseCheckFrequencyMinutes,
-      minHoldSec: riskParams.minHoldSec,
-      enableLossLimits: riskParams.enableLossLimits,
-      dailyLossLimitPct: riskParams.dailyLossLimitPct,
-      lifetimeLossLimitPct: riskParams.lifetimeLossLimitPct,
-      defaultUserStartingBalanceUsd: riskParams.defaultUserStartingBalanceUsd,
-      defaultUserStartingEquityUsd: riskParams.defaultUserStartingEquityUsd,
-      defaultChallengeVirtualCapitalUsd: riskParams.defaultChallengeVirtualCapitalUsd,
-      lotPresetCards: riskParams.lotPresetCards,
-      lotDropdownMax: riskParams.lotDropdownMax,
+  const handleSaveRiskParams = (
+    payload: Partial<GlobalSettings>,
+    title: string,
+    description: string,
+  ) => {
+    globalSettingsMutation.mutate(payload, {
+      onSuccess: () => {
+        toast({
+          title,
+          description,
+        });
+      },
     });
   };
+
+  const handleSaveCapitalSettings = () =>
+    handleSaveRiskParams(
+      {
+        defaultUserStartingBalanceUsd: riskParams.defaultUserStartingBalanceUsd,
+        defaultUserStartingEquityUsd: riskParams.defaultUserStartingEquityUsd,
+        defaultChallengeVirtualCapitalUsd: riskParams.defaultChallengeVirtualCapitalUsd,
+      },
+      "Capital Settings Saved",
+      "Default account and challenge capital values updated.",
+    );
+
+  const handleSaveMarketHoursSettings = () =>
+    handleSaveRiskParams(
+      {
+        marketOpenTime: riskParams.marketOpenTime,
+        marketCloseTime: riskParams.marketCloseTime,
+        allowWeekendTrading: riskParams.allowWeekendTrading,
+      },
+      "Market Hours Saved",
+      "Trading session window and weekend policy updated.",
+    );
+
+  const handleSaveDefaultRiskSettings = () =>
+    handleSaveRiskParams(
+      {
+        defaultLeverage: riskParams.defaultLeverage,
+        maxPositionSize: riskParams.maxPositionSize,
+        maxTradesPerUser: riskParams.maxTradesPerUser,
+        maxTradesPerInstrument: riskParams.maxTradesPerInstrument,
+        maxConcurrentLots: riskParams.maxConcurrentLots,
+        minPriceDistancePips: riskParams.minPriceDistancePips,
+      },
+      "Risk Parameters Saved",
+      "Default leverage and trade guardrails updated.",
+    );
+
+  const handleSaveOperationalRiskAndLotSettings = () =>
+    handleSaveRiskParams(
+      {
+        enableAutoClose: riskParams.enableAutoClose,
+        autoCloseAfterDays: riskParams.autoCloseAfterDays,
+        autoCloseCheckFrequencyMinutes: riskParams.autoCloseCheckFrequencyMinutes,
+        minHoldSec: riskParams.minHoldSec,
+        enableLossLimits: riskParams.enableLossLimits,
+        dailyLossLimitPct: riskParams.dailyLossLimitPct,
+        lifetimeLossLimitPct: riskParams.lifetimeLossLimitPct,
+        lotPresetCards: riskParams.lotPresetCards,
+        lotDropdownMax: riskParams.lotDropdownMax,
+      },
+      "Operational Risk & Lot Settings Saved",
+      "Auto-close, loss-limit, and lot presentation controls updated.",
+    );
 
   const handleEditSymbol = (symbol: SymbolConfig) => {
     setEditingSymbol(symbol);
@@ -6961,10 +7228,10 @@ export default function AdminDashboard() {
                           Global defaults used for new user account capital and challenge virtual capital.
                         </p>
                       </div>
-                      {riskParamsChanged && (
+                      {isCapitalSettingsChanged && (
                         <Button
                           size="sm"
-                          onClick={handleSaveRiskParams}
+                          onClick={handleSaveCapitalSettings}
                           disabled={globalSettingsMutation.isPending}
                           className="shrink-0 w-full sm:w-auto text-xs sm:text-sm"
                         >
@@ -7032,10 +7299,10 @@ export default function AdminDashboard() {
                         <CardTitle className="text-sm sm:text-base">Market Hours (UTC)</CardTitle>
                         <p className="text-xs text-gray-400">Configure trading hours in UTC timezone</p>
                       </div>
-                      {riskParamsChanged && (
+                      {isMarketHoursChanged && (
                         <Button
                           size="sm"
-                          onClick={handleSaveRiskParams}
+                          onClick={handleSaveMarketHoursSettings}
                           disabled={globalSettingsMutation.isPending}
                           className="shrink-0 w-full sm:w-auto text-xs sm:text-sm"
                         >
@@ -7105,10 +7372,10 @@ export default function AdminDashboard() {
                   <Card className="bg-neutral-700 border-gray-600">
                     <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                       <CardTitle className="text-sm sm:text-base min-w-0">Default Risk Parameters</CardTitle>
-                      {riskParamsChanged && (
+                      {isDefaultRiskParametersChanged && (
                         <Button
                           size="sm"
-                          onClick={handleSaveRiskParams}
+                          onClick={handleSaveDefaultRiskSettings}
                           disabled={globalSettingsMutation.isPending}
                           className="shrink-0 w-full sm:w-auto text-xs sm:text-sm"
                         >
@@ -7347,10 +7614,10 @@ export default function AdminDashboard() {
                         <CardTitle className="text-sm sm:text-base text-purple-400">Visual Lot Settings</CardTitle>
                         <p className="text-xs text-gray-400">Configure lot preset quick-select cards and dropdown maximum for the trader order form</p>
                       </div>
-                      {riskParamsChanged && (
+                      {isOperationalRiskAndLotSettingsChanged && (
                         <Button
                           size="sm"
-                          onClick={handleSaveRiskParams}
+                          onClick={handleSaveOperationalRiskAndLotSettings}
                           disabled={globalSettingsMutation.isPending}
                           className="shrink-0 w-full sm:w-auto text-xs sm:text-sm"
                         >

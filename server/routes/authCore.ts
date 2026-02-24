@@ -3,7 +3,13 @@ import type { Express, NextFunction, Request, Response } from "express";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { db } from "@db";
-import { emailVerificationTokens, loginSchema, signupFreezeAttempts, userVerification } from "@shared/schema";
+import {
+  emailVerificationTokens,
+  loginSchema,
+  signupFreezeAttempts,
+  signupWaitlist,
+  userVerification,
+} from "@shared/schema";
 import type { AuditContext as GriftAuditContext } from "../grift/griftTypes";
 import { storage } from "../storage";
 import { isPostgres } from "@db/config";
@@ -29,6 +35,7 @@ import {
   extractGeoHints,
   getClientIp,
   getUserAgent,
+  parseDevice,
   recordLoginAttempt,
 } from "../security/sessionTrail";
 import { clearLoginRateLimit, enforceLoginRateLimit } from "../security/loginRateLimit";
@@ -43,7 +50,7 @@ import { getSignupPublicConfig, normalizeSignupPhone } from "../services/signupP
 import { verifySignupCaptcha } from "../security/captcha";
 import { checkCoverage } from "../legal/coverageGate";
 import { verifyDoc1TermsToken } from "../legal/cryptoUtils";
-import { recordDoc1Acceptance } from "../legal/legalAcceptanceService";
+import { LegalAcceptanceError, recordDoc1Acceptance } from "../legal/legalAcceptanceService";
 import {
   computeDoc1ReacceptStatus,
   getDoc1ReacceptRequirement,
@@ -438,7 +445,14 @@ app.post("/api/auth/register", async (req: Request, res: Response) => {
       phone: z.string().nullable().optional(),
     });
 
-    const { email, username, password, countryIso2, termsToken, combinedSha256, captchaToken, phone } = schema.parse(req.body);
+    const parsed = schema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({
+        message: "INVALID_REGISTRATION_PAYLOAD",
+        errors: parsed.error.flatten(),
+      });
+    }
+    const { email, username, password, countryIso2, termsToken, combinedSha256, captchaToken, phone } = parsed.data;
     const clientIdentity = extractClientIdentity(req);
 
     // Jurisdiction control (sanctions / restricted countries)

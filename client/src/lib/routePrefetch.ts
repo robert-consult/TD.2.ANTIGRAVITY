@@ -1,5 +1,6 @@
 import {
   getPerfHints,
+  MAX_PREFETCH_CONCURRENCY,
   resolvePerformanceSettings,
   tierPrefetchPlan,
   type PerfHints,
@@ -144,7 +145,7 @@ function dispatchSwBurstPrefetch(targets: ChunkPrefetchTarget[], maxConcurrency:
       type: SW_BURST_PREFETCH_MESSAGE,
       payload: {
         keys,
-        concurrency: Math.max(1, Math.min(6, Math.round(maxConcurrency))),
+        concurrency: Math.max(1, Math.min(MAX_PREFETCH_CONCURRENCY, Math.round(maxConcurrency))),
       },
     });
     return true;

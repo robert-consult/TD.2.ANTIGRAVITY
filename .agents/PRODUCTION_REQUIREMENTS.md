@@ -756,3 +756,27 @@ Failure Mode if Missing:
   - Create an impersonated session with stale `impersonationStartedAt` and verify websocket handshake closes with `IMPERSONATION_EXPIRED` / close code `1008`.
   - Open an impersonated websocket session and verify `identity_audit` records `IMPERSONATION_WS_CONNECTED`; wait past TTL and verify `IMPERSONATION_WS_TTL_EXPIRED`.
 - Failure Mode if Missing: compromised admin sessions can enumerate trader identities at high rate, and impersonated websocket streams can outlive HTTP impersonation policy windows without immutable actor-trace evidence.
+
+### PRD-WEB-005
+- ID: `PRD-WEB-005`
+- Date (UTC): `2026-02-24`
+- Scope: `Client locale preference isolation on shared devices`
+- Requirement: Locale preference cache used for translations must be scoped per authenticated account (`i18n.locale.user.<userId>`) and must never let one account inherit another account's stored locale on the same browser/device.
+- Enforcement: `shared/locale/preferences.ts` (user-locale key prefix), `client/src/i18n/localeStorage.ts` (account-scoped locale reads/writes + fallback policy), `client/src/i18n/I18nProvider.tsx` (user-scoped locale sync/hydration), and `client/src/hooks/use-auth.tsx` (auth hydration reads account-scoped locale only).
+- Validation:
+  - Log in as Account A, set language to Portuguese, log out, then log in as Account B with English preference and verify post-login UI language remains English.
+  - Confirm localStorage contains separate keys per user (`i18n.locale.user.<A>`, `i18n.locale.user.<B>`) and that active locale updates do not overwrite another user's scoped key.
+  - Run `npx vitest run client/src/i18n/localeStorage.test.ts`, `npm run check`, and `npm run build`.
+- Failure Mode if Missing: translation language and profile-adjacent locale behavior can leak across accounts on shared devices, causing incorrect localization and cross-account state bleed.
+
+### PRD-WEB-006
+- ID: `PRD-WEB-006`
+- Date (UTC): `2026-02-24`
+- Scope: `Profile preference mutation liveness under degraded network`
+- Requirement: Client profile preference/language mutations must fail-fast with bounded request timeouts and must not block language-save side effects on i18n bundle prefetch completion.
+- Enforcement: `client/src/pages/ProfileSettings.tsx` (`withTimeout`, bounded mutation timeout constants, non-blocking i18n prefetch in `handleLanguageChange`).
+- Validation:
+  - Simulate a stalled `GET /api/i18n/bundle?locale=<target>` request and verify language selection still triggers `PUT /api/profile/preferences`.
+  - Simulate stalled `PUT /api/profile/preferences` and verify UI exits pending state with timeout toast/error instead of remaining on `Saving...`.
+  - Run `npm run check` and `npm run build`.
+- Failure Mode if Missing: profile screen can remain indefinitely stuck in `Saving...` on transient network/backend stalls, preventing preference updates and requiring manual reload.

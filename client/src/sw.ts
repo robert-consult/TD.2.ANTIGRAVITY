@@ -15,8 +15,8 @@ const CACHE_PREFIX = "tq-shell-v";
 const CACHE_NAME = `${CACHE_PREFIX}${BUILD_HASH}`;
 const SHELL_URLS = ["/index.html"];
 const MANIFEST_CANDIDATE_PATHS = ["/.vite/manifest.json", "/manifest.json"] as const;
-const DEFAULT_PREFETCH_CONCURRENCY = 4;
-const MAX_PREFETCH_CONCURRENCY = 6;
+const DEFAULT_PREFETCH_CONCURRENCY = 6;
+const MAX_PREFETCH_CONCURRENCY = 12;
 
 type ViteManifestEntry = {
   file?: string;

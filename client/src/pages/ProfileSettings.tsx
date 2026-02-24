@@ -21,6 +21,9 @@ import { PhoneNumberInput } from "@/components/PhoneNumberInput";
 import { fetchWithIdentity } from "@/lib/fetchWithIdentity";
 import { useI18n } from "@/i18n";
 
+const PREFERENCE_REQUEST_TIMEOUT_MS = 15_000;
+const I18N_PREFETCH_TIMEOUT_MS = 5_000;
+
 function sanitizeTimezoneLabel(label: string): string {
   const replacements: Array<[string, string]> = [
     ["Â", ""],
@@ -38,6 +41,44 @@ function sanitizeTimezoneLabel(label: string): string {
   }
 
   return normalized.replace(/\s{2,}/g, " ").trim();
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = window.setTimeout(() => {
+      reject(new Error(message));
+    }, timeoutMs);
+
+    void promise.then(
+      (value) => {
+        window.clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        window.clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
+async function readErrorMessage(response: Response, fallback: string): Promise<string> {
+  try {
+    const payload = await response.clone().json();
+    const message = String((payload as { message?: unknown } | null | undefined)?.message || "").trim();
+    if (message) return message;
+  } catch {
+    // Fall through to text fallback.
+  }
+
+  try {
+    const text = (await response.text()).trim();
+    if (text) return text;
+  } catch {
+    // Ignore body read failures.
+  }
+
+  return fallback;
 }
 
 export default function ProfileSettings() {
@@ -241,16 +282,21 @@ export default function ProfileSettings() {
   };
 
   const handleLanguageChange = async (value: string) => {
+    if (languageMutation.isPending) return;
     const normalized = normalizeLanguage(value);
     previousLanguageRef.current = preferences.language;
     previousLocaleRef.current = locale;
     setPreferences((prev) => ({ ...prev, language: normalized }));
 
-    try {
-      await prefetchI18nBundle(normalized);
-    } catch (error) {
+    // Keep prefetch best-effort and non-blocking so language saves cannot hang
+    // when the bundle endpoint is slow/unreachable.
+    void withTimeout(
+      prefetchI18nBundle(normalized),
+      I18N_PREFETCH_TIMEOUT_MS,
+      "i18n bundle prefetch timed out",
+    ).catch((error) => {
       console.warn("[i18n] Prefetch failed:", error);
-    }
+    });
 
     setLocale(normalized);
     updateUser({ language: normalized });
@@ -758,15 +804,18 @@ export default function ProfileSettings() {
   // Update preferences mutation
   const preferencesMutation = useMutation({
     mutationFn: async (data: { timezone?: string; language?: string; country?: string }) => {
-      const response = await fetchWithIdentity("/api/profile/preferences", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify(data),
-      });
+      const response = await withTimeout(
+        fetchWithIdentity("/api/profile/preferences", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify(data),
+        }),
+        PREFERENCE_REQUEST_TIMEOUT_MS,
+        "Saving preferences timed out. Please try again.",
+      );
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.message || "Failed to update preferences");
+        throw new Error(await readErrorMessage(response, "Failed to update preferences"));
       }
       return response.json();
     },
@@ -787,15 +836,18 @@ export default function ProfileSettings() {
   // Separate mutation for language that auto-saves immediately on change
   const languageMutation = useMutation({
     mutationFn: async (language: string) => {
-      const response = await fetchWithIdentity("/api/profile/preferences", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ language }),
-      });
+      const response = await withTimeout(
+        fetchWithIdentity("/api/profile/preferences", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ language }),
+        }),
+        PREFERENCE_REQUEST_TIMEOUT_MS,
+        "Saving language preference timed out. Please try again.",
+      );
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.message || "Failed to update language");
+        throw new Error(await readErrorMessage(response, "Failed to update language"));
       }
       return response.json();
     },
@@ -820,6 +872,7 @@ export default function ProfileSettings() {
 
   const handlePreferencesUpdate = (e: React.FormEvent) => {
     e.preventDefault();
+    if (preferencesMutation.isPending) return;
     const normalizedLanguage = normalizeLanguage(preferences.language);
     const payload: { timezone?: string; language?: string; country?: string } = {
       language: normalizedLanguage,

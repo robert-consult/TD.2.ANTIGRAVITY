@@ -354,4 +354,20 @@ describe("perfHints", () => {
     expect(plan.maxConcurrency).toBe(6);
     expect(plan.startDelayMs).toBe(1200);
   });
+
+  it("boosts prefetch concurrency on very high-throughput links", () => {
+    setNavigatorProfile({
+      effectiveType: "4g",
+      saveData: false,
+      rtt: 35,
+      downlink: 100,
+      deviceMemoryGB: 16,
+      hardwareConcurrency: 12,
+    });
+    const hints = refreshPerfHints();
+    const plan = tierPrefetchPlan(hints, resolvePerformanceSettings({ prefetchStrategy: "all" }));
+    expect(plan.mode).toBe("parallel");
+    expect(plan.startDelayMs).toBe(0);
+    expect(plan.maxConcurrency).toBe(12);
+  });
 });

@@ -1,5 +1,13 @@
 import { SW_ACTIVATE_NOW_MESSAGE } from "@/lib/prefetchCatalog";
 
+type BootWindow = Window & {
+  __tqBootNow?: () => void;
+  __tqOpenPlatform?: () => void;
+};
+
+const BOOT_RECOVERY_TIMEOUT_MS = 12_000;
+const SHELL_CACHE_PREFIX = "tq-shell-v";
+
 function swEnabled(): boolean {
   if (import.meta.env.DEV) return false;
   const raw = import.meta.env.VITE_ENABLE_SW;
@@ -65,6 +73,13 @@ function updateBootStatus(message: string): void {
   node.textContent = message;
 }
 
+function setBootButtonBusy(isBusy: boolean): void {
+  const button = document.getElementById("boot-splash__cta");
+  if (!(button instanceof HTMLButtonElement)) return;
+  button.disabled = isBusy;
+  button.ariaBusy = isBusy ? "true" : "false";
+}
+
 function clearBootSplash(): void {
   requestAnimationFrame(() => {
     document.body.classList.add("is-ready");
@@ -114,6 +129,71 @@ function startApp(): Promise<void> {
   return appStartPromise;
 }
 
+async function clearShellCachesForRecovery(): Promise<void> {
+  if (typeof window === "undefined") return;
+
+  const tasks: Promise<unknown>[] = [];
+  if ("caches" in window) {
+    tasks.push(
+      caches.keys()
+        .then((keys) =>
+          Promise.all(
+            keys
+              .filter((key) => key.startsWith(SHELL_CACHE_PREFIX))
+              .map((key) => caches.delete(key)),
+          ),
+        )
+        .catch(() => undefined),
+    );
+  }
+
+  if ("serviceWorker" in navigator) {
+    tasks.push(
+      navigator.serviceWorker
+        .getRegistrations()
+        .then((registrations) => Promise.all(registrations.map((registration) => registration.unregister())))
+        .catch(() => undefined),
+    );
+  }
+
+  await Promise.allSettled(tasks);
+}
+
+function forceRecoveryReload(): void {
+  const url = new URL(window.location.href);
+  url.searchParams.set("__tq_boot_retry", String(Date.now()));
+  window.location.replace(url.toString());
+}
+
+async function startAppWithTimeout(timeoutMs: number): Promise<void> {
+  let timeoutId: number | null = null;
+  try {
+    await Promise.race([
+      startApp(),
+      new Promise<void>((_, reject) => {
+        timeoutId = window.setTimeout(() => reject(new Error("BOOT_TIMEOUT")), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeoutId != null) window.clearTimeout(timeoutId);
+  }
+}
+
+async function handleOpenPlatformClick(): Promise<void> {
+  setBootButtonBusy(true);
+  updateBootStatus("Opening platform...");
+  try {
+    await startAppWithTimeout(BOOT_RECOVERY_TIMEOUT_MS);
+  } catch (error) {
+    console.warn("[boot] startup retry failed; forcing recovery reload", error);
+    updateBootStatus("Refreshing platform cache...");
+    await clearShellCachesForRecovery();
+    forceRecoveryReload();
+  } finally {
+    setBootButtonBusy(false);
+  }
+}
+
 function hasPriorBootInSession(): boolean {
   try {
     return sessionStorage.getItem(BOOT_READY_SESSION_KEY) === "1";
@@ -129,8 +209,12 @@ function requireManualBootOnFirstLoad(): boolean {
 }
 
 function scheduleAppStart(): void {
-  (window as any).__tqBootNow = () => {
+  const bootWindow = window as BootWindow;
+  bootWindow.__tqBootNow = () => {
     void startApp();
+  };
+  bootWindow.__tqOpenPlatform = () => {
+    void handleOpenPlatformClick();
   };
 
   // Warm route chunks + baseline trader shell data immediately while the splash screen is visible.

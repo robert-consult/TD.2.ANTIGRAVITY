@@ -3,6 +3,13 @@ import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
 import { getCachedBundle, getI18nState, setI18nBundle, setI18nConfig, setI18nLocale, type I18nBundle, type I18nConfig } from "./store";
 import { resolveApiUrl } from "@/lib/appUrl";
+import {
+  readStoredLocale,
+  readStoredLocaleForUser,
+  shouldPreferStoredUserLocale,
+  writeStoredLocale,
+  writeStoredLocaleForUser,
+} from "./localeStorage";
 
 export type I18nContextValue = {
   locale: string;
@@ -73,12 +80,10 @@ function isRtlLocale(locale: string): boolean {
 }
 
 function getInitialLocale(): string {
-  try {
-    const saved = localStorage.getItem("i18n.locale");
-    if (saved) {
-      return normalizeLocale(saved, FALLBACK_CONFIG.supportedLocales, FALLBACK_CONFIG.defaultLocale);
-    }
-  } catch {}
+  const saved = readStoredLocale();
+  if (saved) {
+    return normalizeLocale(saved, FALLBACK_CONFIG.supportedLocales, FALLBACK_CONFIG.defaultLocale);
+  }
 
   const navLang = typeof navigator !== "undefined" ? navigator.language : "en";
   return normalizeLocale(navLang, FALLBACK_CONFIG.supportedLocales, FALLBACK_CONFIG.defaultLocale);
@@ -152,33 +157,28 @@ export function I18nProvider({ children }: { children: React.ReactNode }) {
     if (normalized !== locale) _setLocale(normalized);
   }, [config.defaultLocale, config.supportedLocales.join(","), locale]);
 
-  // Sync locale from user.language whenever a user preference is available.
+  // Sync locale from authenticated user preferences using account-scoped locale storage.
   useEffect(() => {
-    const currentUserLang = user?.language;
-    if (!currentUserLang) return;
+    const currentUserId = Number(user?.id);
+    if (!Number.isInteger(currentUserId) || currentUserId <= 0) return;
 
-    const normalized = normalizeLocale(currentUserLang, config.supportedLocales, config.defaultLocale);
-    let storedLocale: string | null = null;
-    try {
-      storedLocale = localStorage.getItem("i18n.locale");
-    } catch {}
+    const normalized = normalizeLocale(user?.language, config.supportedLocales, config.defaultLocale);
+    const storedLocale = readStoredLocaleForUser(currentUserId);
     const storedNormalized = storedLocale
       ? normalizeLocale(storedLocale, config.supportedLocales, config.defaultLocale)
       : null;
 
-    // If the server reports the default locale but the user previously selected a different locale,
-    // keep the locally chosen language to avoid unwanted resets.
-    if (storedNormalized && storedNormalized !== normalized && normalized === config.defaultLocale) {
-      return;
-    }
+    const resolvedLocale =
+      storedNormalized && shouldPreferStoredUserLocale(normalized, storedNormalized, config.defaultLocale)
+        ? storedNormalized
+        : normalized;
 
-    if (normalized !== locale) {
-      _setLocale(normalized);
+    if (resolvedLocale !== locale) {
+      _setLocale(resolvedLocale);
     }
-    try {
-      localStorage.setItem("i18n.locale", normalized);
-    } catch {}
-  }, [user?.language, config.defaultLocale, config.supportedLocales.join(","), locale]);
+    writeStoredLocale(resolvedLocale);
+    writeStoredLocaleForUser(currentUserId, resolvedLocale);
+  }, [user?.id, user?.language, config.defaultLocale, config.supportedLocales.join(","), locale]);
 
   useEffect(() => {
     setI18nConfig(config);
@@ -186,10 +186,9 @@ export function I18nProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     setI18nLocale(locale);
-    try {
-      localStorage.setItem("i18n.locale", locale);
-    } catch {}
-  }, [locale]);
+    writeStoredLocale(locale);
+    writeStoredLocaleForUser(user?.id, locale);
+  }, [locale, user?.id]);
 
   useEffect(() => {
     document.documentElement.lang = locale;

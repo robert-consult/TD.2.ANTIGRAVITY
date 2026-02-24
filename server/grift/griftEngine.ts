@@ -6,7 +6,6 @@ import { haversineKm, kmh } from "./griftGeo";
 import { normalizeIpKey, resolveAsnOrg } from "./griftIpAsn";
 
 let configCache: { cfg: GriftConfig; fetchedAt: number } | null = null;
-const CONFIG_TTL_MS = 60_000;
 
 function parsePositiveInt(raw: unknown, fallback: number): number {
   const n = typeof raw === "number" ? raw : Number(raw);
@@ -14,8 +13,23 @@ function parsePositiveInt(raw: unknown, fallback: number): number {
   return Math.floor(n);
 }
 
+function parseBoundedPositiveInt(raw: unknown, fallback: number, min: number, max: number): number {
+  const n = parsePositiveInt(raw, fallback);
+  return Math.min(max, Math.max(min, n));
+}
+
+const CONFIG_TTL_MS = parseBoundedPositiveInt(process.env.GRIFT_CONFIG_TTL_MS, 15_000, 5_000, 120_000);
 const MAX_LINKED_EDGE_WRITES_PER_TRIGGER = parsePositiveInt(process.env.GRIFT_MAX_LINKED_EDGE_WRITES_PER_TRIGGER, 50);
 const MAX_EVIDENCE_LINKED_USERS = parsePositiveInt(process.env.GRIFT_MAX_EVIDENCE_LINKED_USERS, 50);
+const MAX_LINKED_EDGE_BATCH_ROWS = parseBoundedPositiveInt(process.env.GRIFT_MAX_LINKED_EDGE_BATCH_ROWS, 200, 10, 1000);
+
+type LinkedEdgeType = "device" | "device_fp" | "ip" | "ip_subnet" | "asn";
+type LinkedEdgeInput = {
+  userIdA: number;
+  userIdB: number;
+  linkType: LinkedEdgeType;
+  linkValue: string;
+};
 
 // Map snake_case DB row to camelCase GriftConfig with default fallbacks for NULL values
 function mapConfigRow(row: any): GriftConfig {
@@ -409,19 +423,65 @@ export async function recordLinkedEdge(
   db: GriftDb,
   userIdA: number,
   userIdB: number,
-  linkType: "device" | "device_fp" | "ip" | "ip_subnet" | "asn",
+  linkType: LinkedEdgeType,
   linkValue: string
 ): Promise<void> {
-  if (userIdA === userIdB) return;
+  await recordLinkedEdgesBatch(db, [{ userIdA, userIdB, linkType, linkValue }]);
+}
+
+function normalizeLinkedEdgeInput(input: LinkedEdgeInput): LinkedEdgeInput | null {
+  if (!Number.isFinite(input.userIdA) || !Number.isFinite(input.userIdB)) return null;
+  if (!input.linkValue) return null;
+
+  const a = Math.trunc(input.userIdA);
+  const b = Math.trunc(input.userIdB);
+  if (a <= 0 || b <= 0 || a === b) return null;
+
+  const [lo, hi] = a < b ? [a, b] : [b, a];
+  return {
+    userIdA: lo,
+    userIdB: hi,
+    linkType: input.linkType,
+    linkValue: input.linkValue,
+  };
+}
+
+async function recordLinkedEdgesBatch(db: GriftDb, edges: LinkedEdgeInput[]): Promise<number> {
+  if (edges.length === 0) return 0;
+
+  const dedupe = new Set<string>();
+  const normalized: LinkedEdgeInput[] = [];
+  for (const edge of edges) {
+    const clean = normalizeLinkedEdgeInput(edge);
+    if (!clean) continue;
+    const key = `${clean.userIdA}|${clean.userIdB}|${clean.linkType}|${clean.linkValue}`;
+    if (dedupe.has(key)) continue;
+    dedupe.add(key);
+    normalized.push(clean);
+  }
+
+  if (normalized.length === 0) return 0;
 
   const now = Date.now();
-  const [lo, hi] = userIdA < userIdB ? [userIdA, userIdB] : [userIdB, userIdA];
+  let recorded = 0;
+  for (let start = 0; start < normalized.length; start += MAX_LINKED_EDGE_BATCH_ROWS) {
+    const batch = normalized.slice(start, start + MAX_LINKED_EDGE_BATCH_ROWS);
+    const valuesSql = batch.map(() => "(?, ?, ?, ?, 1.0, ?, ?)").join(", ");
+    const params: Array<number | string> = [];
+    for (const edge of batch) {
+      params.push(edge.userIdA, edge.userIdB, edge.linkType, edge.linkValue, now, now);
+    }
 
-  await db.prepare(`
-    INSERT INTO grift_linked_account_edges AS edges (user_a, user_b, link_type, link_value, confidence, first_linked_at, last_confirmed_at)
-    VALUES (?, ?, ?, ?, 1.0, ?, ?)
-    ON CONFLICT(user_a, user_b, link_type, link_value) DO UPDATE SET confidence = edges.confidence + 0.1, last_confirmed_at = EXCLUDED.last_confirmed_at
-  `).run(lo, hi, linkType, linkValue, now, now);
+    await db.prepare(`
+      INSERT INTO grift_linked_account_edges AS edges (user_a, user_b, link_type, link_value, confidence, first_linked_at, last_confirmed_at)
+      VALUES ${valuesSql}
+      ON CONFLICT(user_a, user_b, link_type, link_value) DO UPDATE
+      SET confidence = edges.confidence + 0.1, last_confirmed_at = EXCLUDED.last_confirmed_at
+    `).run(...params);
+    recorded += batch.length;
+  }
+
+  return recorded;
 }
 
 // ---------------------------------------------------------------------
@@ -449,9 +509,15 @@ export async function checkMultiAccountDevice(db: GriftDb, ctx: AuditContext): P
     .sort((a, b) => a - b);
 
   const edgeTargets = linkedUserIdsAll.slice(0, MAX_LINKED_EDGE_WRITES_PER_TRIGGER);
-  for (const otherUserId of edgeTargets) {
-    await recordLinkedEdge(db, ctx.userId, otherUserId, "device", ctx.deviceId);
-  }
+  const edgesRecorded = await recordLinkedEdgesBatch(
+    db,
+    edgeTargets.map((otherUserId) => ({
+      userIdA: ctx.userId,
+      userIdB: otherUserId,
+      linkType: "device",
+      linkValue: ctx.deviceId,
+    })),
+  );
 
   const linkedUserIds = linkedUserIdsAll.slice(0, MAX_EVIDENCE_LINKED_USERS);
   return {
@@ -464,7 +530,7 @@ export async function checkMultiAccountDevice(db: GriftDb, ctx: AuditContext): P
       deviceId: ctx.deviceId,
       linkedUsers: linkedUserIds,
       linkedUsersTotal: linkedUserIdsAll.length,
-      edgesRecorded: edgeTargets.length,
+      edgesRecorded,
       truncated: linkedUserIdsAll.length > linkedUserIds.length,
     },
   };
@@ -499,9 +565,15 @@ export async function checkMultiAccountFingerprint(db: GriftDb, ctx: AuditContex
     .sort((a, b) => a - b);
 
   const edgeTargets = linkedUserIdsAll.slice(0, MAX_LINKED_EDGE_WRITES_PER_TRIGGER);
-  for (const otherUserId of edgeTargets) {
-    await recordLinkedEdge(db, ctx.userId, otherUserId, "device_fp", ctx.deviceFp);
-  }
+  const edgesRecorded = await recordLinkedEdgesBatch(
+    db,
+    edgeTargets.map((otherUserId) => ({
+      userIdA: ctx.userId,
+      userIdB: otherUserId,
+      linkType: "device_fp",
+      linkValue: ctx.deviceFp,
+    })),
+  );
 
   const linkedUserIds = linkedUserIdsAll.slice(0, MAX_EVIDENCE_LINKED_USERS);
   return {
@@ -514,7 +586,7 @@ export async function checkMultiAccountFingerprint(db: GriftDb, ctx: AuditContex
       deviceFp: ctx.deviceFp,
       linkedUsers: linkedUserIds,
       linkedUsersTotal: linkedUserIdsAll.length,
-      edgesRecorded: edgeTargets.length,
+      edgesRecorded,
       truncated: linkedUserIdsAll.length > linkedUserIds.length,
       windowDays: cfg.multiAccountWindowDays,
     },
@@ -795,12 +867,12 @@ export async function checkSharedIpAsnCluster(db: GriftDb, ctx: AuditContext): P
     .sort((a, b) => a - b);
 
   const edgeTargets = clusterUserIdsAll.slice(0, MAX_LINKED_EDGE_WRITES_PER_TRIGGER);
+  const batchedEdges: LinkedEdgeInput[] = [];
   for (const memberUserId of edgeTargets) {
-    await recordLinkedEdge(db, ctx.userId, memberUserId, "ip", ctx.ip);
-    if (ctx.asn) {
-      await recordLinkedEdge(db, ctx.userId, memberUserId, "asn", String(ctx.asn));
-    }
+    batchedEdges.push({ userIdA: ctx.userId, userIdB: memberUserId, linkType: "ip", linkValue: ctx.ip });
+    batchedEdges.push({ userIdA: ctx.userId, userIdB: memberUserId, linkType: "asn", linkValue: String(ctx.asn) });
   }
+  const edgesRecorded = await recordLinkedEdgesBatch(db, batchedEdges);
 
   const clusterMembers = clusterUserIdsAll.slice(0, MAX_EVIDENCE_LINKED_USERS);
   return {
@@ -814,7 +886,7 @@ export async function checkSharedIpAsnCluster(db: GriftDb, ctx: AuditContext): P
       clusterSize: cluster.length + 1,
       clusterMembers,
       clusterMembersTotal: clusterUserIdsAll.length,
-      edgesRecorded: edgeTargets.length,
+      edgesRecorded,
       truncated: clusterUserIdsAll.length > clusterMembers.length,
       threshold: cfg.clusterMinUsersForIpAsn,
     },
@@ -976,10 +1048,20 @@ export async function checkHedgePair(
 
   // Strengthen the account-link graph for downstream laddering/network views.
   if (ctx.userId) {
-    if (deviceMatch && ctx.deviceId) await recordLinkedEdge(db, ctx.userId, best.user_id, "device", ctx.deviceId);
-    if (fpMatch && ctx.deviceFp) await recordLinkedEdge(db, ctx.userId, best.user_id, "device_fp", ctx.deviceFp);
-    if (ipMatch && ctx.ip) await recordLinkedEdge(db, ctx.userId, best.user_id, "ip", ctx.ip);
-    if (ctx.asn != null) await recordLinkedEdge(db, ctx.userId, best.user_id, "asn", String(ctx.asn));
+    const edgesToRecord: LinkedEdgeInput[] = [];
+    if (deviceMatch && ctx.deviceId) {
+      edgesToRecord.push({ userIdA: ctx.userId, userIdB: best.user_id, linkType: "device", linkValue: ctx.deviceId });
+    }
+    if (fpMatch && ctx.deviceFp) {
+      edgesToRecord.push({ userIdA: ctx.userId, userIdB: best.user_id, linkType: "device_fp", linkValue: ctx.deviceFp });
+    }
+    if (ipMatch && ctx.ip) {
+      edgesToRecord.push({ userIdA: ctx.userId, userIdB: best.user_id, linkType: "ip", linkValue: ctx.ip });
+    }
+    if (ctx.asn != null) {
+      edgesToRecord.push({ userIdA: ctx.userId, userIdB: best.user_id, linkType: "asn", linkValue: String(ctx.asn) });
+    }
+    await recordLinkedEdgesBatch(db, edgesToRecord);
   }
 
   const points = cfg.scoreHedgePair;

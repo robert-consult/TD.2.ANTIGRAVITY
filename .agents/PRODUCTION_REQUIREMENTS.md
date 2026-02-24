@@ -716,3 +716,16 @@ Failure Mode if Missing:
   - Verify `saveData` profiles skip startup data burst prefetch and constrained tiers cap warmup scope/concurrency.
   - Run `npm run check` and `npm run build` to confirm integration/type/build safety.
 - Failure Mode if Missing: startup can trigger duplicate or unbounded request bursts, weak-network clients can lose API/WS headroom, and warmed trader state may not hydrate/persist coherently across reloads.
+
+### PRD-GRIFT-001
+- ID: `PRD-GRIFT-001`
+- Date (UTC): `2026-02-23`
+- Scope: `Grift correlation scalability controls (config propagation, edge writes, and read-path indexing)`
+- Requirement: Grift runtime must keep config-cache staleness bounded (default 15s, clamped to 5s-120s via `GRIFT_CONFIG_TTL_MS`), write linked-account edges through bounded batched upserts (no per-edge sequential N+1 writes), and ensure Grift correlation indexes from migration `0037_grift_scalability_indexes` are present in production.
+- Enforcement: `server/grift/griftEngine.ts` (`CONFIG_TTL_MS` bounded parsing + `recordLinkedEdgesBatch` with `MAX_LINKED_EDGE_BATCH_ROWS`), `db/migrations/0037_grift_scalability_indexes.sql`, and mirrored index metadata in `shared/schema.pg.ts`.
+- Validation:
+  - Run `npm run db:migrate:drizzle` and confirm migration `0037_grift_scalability_indexes` is applied.
+  - Run `npm run db:audit` and confirm schema parity is `OK`.
+  - Execute Grift detection paths that trigger `MULTI_ACCOUNT_DEVICE`, `MULTI_ACCOUNT_FINGERPRINT`, and `SHARED_IPASN_CLUSTER`; verify edge writes succeed with bounded batch execution and expected `edgesRecorded` evidence values.
+  - Override `GRIFT_CONFIG_TTL_MS` with out-of-range values and confirm runtime clamps to safe bounds (no unbounded staleness / no pathological refresh churn).
+- Failure Mode if Missing: multi-pod config changes propagate too slowly, high-volume correlation events create avoidable DB round-trip amplification, and Grift queries degrade under scale due missing predicate-aligned indexes.

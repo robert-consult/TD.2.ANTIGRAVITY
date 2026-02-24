@@ -2396,17 +2396,25 @@ export const griftUserRisk = pgTable("grift_user_risk", {
 });
 
 // Linked account edges (graph representation)
-export const griftLinkedAccountEdges = pgTable("grift_linked_account_edges", {
-  id: serial("id").primaryKey(),
-  userA: integer("user_a").notNull(),
-  userB: integer("user_b").notNull(),
-  linkType: text("link_type").notNull(), // SHARED_DEVICE | SHARED_IP | etc.
-  linkValue: text("link_value"),
-  confidence: real("confidence").notNull().default(1.0),
-  firstLinkedAt: bigint("first_linked_at", { mode: "number" }).notNull().default(nowUnixMs),
-  lastConfirmedAt: bigint("last_confirmed_at", { mode: "number" }).notNull().default(nowUnixMs),
-  metadataJson: text("metadata_json"),
-});
+export const griftLinkedAccountEdges = pgTable(
+  "grift_linked_account_edges",
+  {
+    id: serial("id").primaryKey(),
+    userA: integer("user_a").notNull(),
+    userB: integer("user_b").notNull(),
+    linkType: text("link_type").notNull(), // SHARED_DEVICE | SHARED_IP | etc.
+    linkValue: text("link_value"),
+    confidence: real("confidence").notNull().default(1.0),
+    firstLinkedAt: bigint("first_linked_at", { mode: "number" }).notNull().default(nowUnixMs),
+    lastConfirmedAt: bigint("last_confirmed_at", { mode: "number" }).notNull().default(nowUnixMs),
+    metadataJson: text("metadata_json"),
+  },
+  (t) => ({
+    uniqueEdge: uniqueIndex("idx_grift_linked_account_edges_unique").on(t.userA, t.userB, t.linkType, t.linkValue),
+    idxUserALastConfirmed: index("idx_grift_linked_account_edges_user_a_last_confirmed_at").on(t.userA, t.lastConfirmedAt),
+    idxUserBLastConfirmed: index("idx_grift_linked_account_edges_user_b_last_confirmed_at").on(t.userB, t.lastConfirmedAt),
+  }),
+);
 
 // Admin-editable grift detection configuration (thresholds and point values)
 export const griftConfig = pgTable("grift_config", {
@@ -2477,6 +2485,7 @@ export const griftDeviceUsers = pgTable(
   },
   (t) => ({
     uniqueDeviceUser: uniqueIndex("idx_grift_device_users_device_user").on(t.deviceId, t.userId),
+    idxDeviceLastSeen: index("idx_grift_device_users_device_last_seen_at").on(t.deviceId, t.lastSeenAt),
   }),
 );
 
@@ -2515,53 +2524,67 @@ export const griftSignals = pgTable("grift_signals", {
 });
 
 // Grift observations (request/session telemetry)
-export const griftObservations = pgTable("grift_observations", {
-  id: serial("id").primaryKey(),
-  userId: integer("user_id").notNull(),
-  eventType: text("event_type").notNull().default("SESSION_PING"),
-  sessionId: text("session_id"),
-  deviceId: text("device_id"),
-  deviceFp: text("device_fp"),
-  deviceInstallId: text("device_install_id"),
-  clientTz: text("client_tz"),
-  clientLang: text("client_lang"),
-  ip: text("ip"),
-  userAgent: text("user_agent"),
-  geoCountry: text("geo_country"),
-  geoRegion: text("geo_region"),
-  geoCity: text("geo_city"),
-  latitude: real("latitude"),
-  longitude: real("longitude"),
-  asn: bigint("asn", { mode: "number" }),
-  org: text("org"),
-  observedAt: bigint("observed_at", { mode: "number" }).notNull().default(nowUnixMs),
-});
+export const griftObservations = pgTable(
+  "grift_observations",
+  {
+    id: serial("id").primaryKey(),
+    userId: integer("user_id").notNull(),
+    eventType: text("event_type").notNull().default("SESSION_PING"),
+    sessionId: text("session_id"),
+    deviceId: text("device_id"),
+    deviceFp: text("device_fp"),
+    deviceInstallId: text("device_install_id"),
+    clientTz: text("client_tz"),
+    clientLang: text("client_lang"),
+    ip: text("ip"),
+    userAgent: text("user_agent"),
+    geoCountry: text("geo_country"),
+    geoRegion: text("geo_region"),
+    geoCity: text("geo_city"),
+    latitude: real("latitude"),
+    longitude: real("longitude"),
+    asn: bigint("asn", { mode: "number" }),
+    org: text("org"),
+    observedAt: bigint("observed_at", { mode: "number" }).notNull().default(nowUnixMs),
+  },
+  (t) => ({
+    idxUserObservedAt: index("idx_grift_observations_user_observed_at").on(t.userId, t.observedAt),
+    idxIpAsnObservedUser: index("idx_grift_observations_ip_asn_observed_user").on(t.ip, t.asn, t.observedAt, t.userId),
+  }),
+);
 
 // Grift trade observations (trade telemetry)
-export const griftTradeObservations = pgTable("grift_trade_observations", {
-  id: serial("id").primaryKey(),
-  tradeId: integer("trade_id").notNull(),
-  userId: integer("user_id").notNull(),
-  sessionId: text("session_id"),
-  deviceId: text("device_id"),
-  deviceFp: text("device_fp"),
-  deviceInstallId: text("device_install_id"),
-  clientTz: text("client_tz"),
-  clientLang: text("client_lang"),
-  ip: text("ip"),
-  userAgent: text("user_agent"),
-  symbol: text("symbol").notNull(),
-  direction: text("direction").notNull(),
-  lots: real("lots").notNull(),
-  geoCountry: text("geo_country"),
-  geoRegion: text("geo_region"),
-  geoCity: text("geo_city"),
-  latitude: real("latitude"),
-  longitude: real("longitude"),
-  asn: bigint("asn", { mode: "number" }),
-  org: text("org"),
-  observedAt: bigint("observed_at", { mode: "number" }).notNull().default(nowUnixMs),
-});
+export const griftTradeObservations = pgTable(
+  "grift_trade_observations",
+  {
+    id: serial("id").primaryKey(),
+    tradeId: integer("trade_id").notNull(),
+    userId: integer("user_id").notNull(),
+    sessionId: text("session_id"),
+    deviceId: text("device_id"),
+    deviceFp: text("device_fp"),
+    deviceInstallId: text("device_install_id"),
+    clientTz: text("client_tz"),
+    clientLang: text("client_lang"),
+    ip: text("ip"),
+    userAgent: text("user_agent"),
+    symbol: text("symbol").notNull(),
+    direction: text("direction").notNull(),
+    lots: real("lots").notNull(),
+    geoCountry: text("geo_country"),
+    geoRegion: text("geo_region"),
+    geoCity: text("geo_city"),
+    latitude: real("latitude"),
+    longitude: real("longitude"),
+    asn: bigint("asn", { mode: "number" }),
+    org: text("org"),
+    observedAt: bigint("observed_at", { mode: "number" }).notNull().default(nowUnixMs),
+  },
+  (t) => ({
+    idxSymbolDirectionObservedAt: index("idx_grift_trade_observations_symbol_direction_observed_at").on(t.symbol, t.direction, t.observedAt),
+    idxUserSymbolDirectionObservedAt: index("idx_grift_trade_observations_user_symbol_direction_observed_at").on(t.userId, t.symbol, t.direction, t.observedAt),
+  }),
+);
 
 // Aggregated grift risk scores
 export const griftUserScores = pgTable("grift_user_scores", {

@@ -13,6 +13,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { formatInstantToLocaleString } from "@shared/time/format";
 import {
   AlertTriangle,
   Users,
@@ -192,12 +193,12 @@ interface GriftCase {
   title: string;
   status: string;
   priority: string;
-  created_by_admin_id: number;
-  assigned_admin_id?: number;
+  created_by_admin_id: number | null;
+  assigned_admin_id?: number | null;
   created_at: number;
   updated_at: number;
-  closed_at?: number;
-  resolution?: string;
+  closed_at?: number | null;
+  resolution?: string | null;
 }
 
 interface GriftConfig {
@@ -324,15 +325,8 @@ function getStatusColor(status: string) {
   }
 }
 
-function formatTimestamp(ts: number) {
-  if (!ts) return "N/A";
-  try {
-    // Handle Unix seconds vs milliseconds - if ts < 1e12, it's seconds
-    const ms = ts < 1e12 ? ts * 1000 : ts;
-    return new Date(ms).toLocaleString();
-  } catch {
-    return String(ts);
-  }
+function formatTimestamp(ts: string | number | Date | null | undefined) {
+  return formatInstantToLocaleString(ts, { fallback: "N/A" });
 }
 
 function formatBytes(bytes: number) {
@@ -748,7 +742,7 @@ function FieldHintLabel({
 }
 
 function DashboardTab() {
-  const { data, isLoading, refetch } = useQuery<GriftOverview>({
+  const { data, isLoading, isRefetching, refetch } = useQuery<GriftOverview>({
     queryKey: ["/api/admin/grift/overview"],
   });
 
@@ -784,8 +778,8 @@ function DashboardTab() {
           />
           <p className="text-xs text-gray-400 mt-1">{GRIFT_FIELD_HELP.dashboard.inline}</p>
         </div>
-        <GriftRefreshButton onClick={() => refetch()} title={GRIFT_FIELD_HELP.refresh.tooltip}>
-          <RefreshCw className="h-4 w-4 mr-2" />
+        <GriftRefreshButton disabled={isLoading || isRefetching} onClick={() => refetch()} title={GRIFT_FIELD_HELP.refresh.tooltip}>
+          <RefreshCw className={`h-4 w-4 mr-2 ${isLoading || isRefetching ? "animate-spin" : ""}`} />
           Refresh
         </GriftRefreshButton>
       </div>
@@ -938,7 +932,7 @@ function SignalsTab() {
   const [ruleFilter, setRuleFilter] = useState("all_rules");
   const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set());
 
-  const { data, isLoading, refetch } = useQuery<{ signals: GriftSignal[] }>({
+  const { data, isLoading, isRefetching, refetch } = useQuery<{ signals: GriftSignal[] }>({
     queryKey: ["/api/admin/grift/signals", statusFilter, ruleFilter],
     queryFn: async () => {
       const params = new URLSearchParams();
@@ -1026,8 +1020,8 @@ function SignalsTab() {
           </Select>
         </div>
 
-        <GriftRefreshButton onClick={() => refetch()} title={GRIFT_FIELD_HELP.refresh.tooltip}>
-          <RefreshCw className="h-4 w-4 mr-2" />
+        <GriftRefreshButton disabled={isLoading || isRefetching} onClick={() => refetch()} title={GRIFT_FIELD_HELP.refresh.tooltip}>
+          <RefreshCw className={`h-4 w-4 mr-2 ${isLoading || isRefetching ? "animate-spin" : ""}`} />
           Refresh
         </GriftRefreshButton>
       </div>
@@ -1191,7 +1185,7 @@ function SignalsTab() {
 }
 
 function UsersTab() {
-  const { data, isLoading, refetch } = useQuery<{ users: FlaggedUser[] }>({
+  const { data, isLoading, isRefetching, refetch } = useQuery<{ users: FlaggedUser[] }>({
     queryKey: ["/api/admin/grift/flagged-users"],
   });
 
@@ -1204,8 +1198,8 @@ function UsersTab() {
           <FieldHintLabel label="Flagged Users" hint={GRIFT_FIELD_HELP.flaggedUsers.tooltip} labelClassName="text-lg font-semibold" />
           <p className="text-xs text-gray-400 mt-1">{GRIFT_FIELD_HELP.flaggedUsers.inline}</p>
         </div>
-        <GriftRefreshButton onClick={() => refetch()} title={GRIFT_FIELD_HELP.refresh.tooltip}>
-          <RefreshCw className="h-4 w-4 mr-2" />
+        <GriftRefreshButton disabled={isLoading || isRefetching} onClick={() => refetch()} title={GRIFT_FIELD_HELP.refresh.tooltip}>
+          <RefreshCw className={`h-4 w-4 mr-2 ${isLoading || isRefetching ? "animate-spin" : ""}`} />
           Refresh
         </GriftRefreshButton>
       </div>
@@ -1274,7 +1268,7 @@ export function KycQueueTab() {
     ? `/api/admin/kyc/queue?status=${statusFilter}`
     : "/api/admin/kyc/queue";
 
-  const { data, isLoading, refetch } = useQuery<KycQueueItem[]>({
+  const { data, isLoading, isRefetching, refetch } = useQuery<KycQueueItem[]>({
     queryKey: [kycQueryUrl],
   });
 
@@ -1330,8 +1324,8 @@ export function KycQueueTab() {
               </SelectContent>
             </Select>
           </div>
-          <GriftRefreshButton onClick={() => refetch()} title={GRIFT_FIELD_HELP.refresh.tooltip}>
-            <RefreshCw className="h-4 w-4 mr-2" />
+          <GriftRefreshButton disabled={isLoading || isRefetching} onClick={() => refetch()} title={GRIFT_FIELD_HELP.refresh.tooltip}>
+            <RefreshCw className={`h-4 w-4 mr-2 ${isLoading || isRefetching ? "animate-spin" : ""}`} />
             Refresh
           </GriftRefreshButton>
         </div>
@@ -1426,7 +1420,7 @@ export function KycQueueTab() {
 }
 
 function PairsTab() {
-  const { data, isLoading, refetch } = useQuery<{ pairs: HedgePair[]; total: number }>({
+  const { data, isLoading, isRefetching, refetch } = useQuery<{ pairs: HedgePair[]; total: number }>({
     queryKey: ["/api/admin/grift/pairs"],
   });
 
@@ -1441,8 +1435,8 @@ function PairsTab() {
         </div>
         <div className="flex items-center gap-2">
           <span className="text-sm text-gray-400">Total: {data?.total || 0}</span>
-          <GriftRefreshButton onClick={() => refetch()} title={GRIFT_FIELD_HELP.refresh.tooltip}>
-            <RefreshCw className="h-4 w-4 mr-2" />
+          <GriftRefreshButton disabled={isLoading || isRefetching} onClick={() => refetch()} title={GRIFT_FIELD_HELP.refresh.tooltip}>
+            <RefreshCw className={`h-4 w-4 mr-2 ${isLoading || isRefetching ? "animate-spin" : ""}`} />
             Refresh
           </GriftRefreshButton>
         </div>
@@ -1509,7 +1503,7 @@ function PairsTab() {
 }
 
 function NetworksTab() {
-  const { data, isLoading, refetch } = useQuery<NetworkData>({
+  const { data, isLoading, isRefetching, refetch } = useQuery<NetworkData>({
     queryKey: ["/api/admin/grift/networks"],
   });
 
@@ -1520,8 +1514,8 @@ function NetworksTab() {
           <FieldHintLabel label="Linked Account Networks" hint={GRIFT_FIELD_HELP.networks.tooltip} labelClassName="text-lg font-semibold" />
           <p className="text-xs text-gray-400 mt-1">{GRIFT_FIELD_HELP.networks.inline}</p>
         </div>
-        <GriftRefreshButton onClick={() => refetch()} title={GRIFT_FIELD_HELP.refresh.tooltip}>
-          <RefreshCw className="h-4 w-4 mr-2" />
+        <GriftRefreshButton disabled={isLoading || isRefetching} onClick={() => refetch()} title={GRIFT_FIELD_HELP.refresh.tooltip}>
+          <RefreshCw className={`h-4 w-4 mr-2 ${isLoading || isRefetching ? "animate-spin" : ""}`} />
           Refresh
         </GriftRefreshButton>
       </div>
@@ -1599,7 +1593,7 @@ function IdentitiesTab() {
   const [selectedLink, setSelectedLink] = useState<{ linkType: string; linkValue: string } | null>(null);
   const [selectedUserId, setSelectedUserId] = useState<number | null>(null);
 
-  const { data, isLoading, refetch } = useQuery<IdentityLinksResponse>({
+  const { data, isLoading, isRefetching, refetch } = useQuery<IdentityLinksResponse>({
     queryKey: ["/api/admin/grift/identity-links", linkType, search, minUsers, limit],
     queryFn: async () => {
       const params = new URLSearchParams();
@@ -1614,7 +1608,7 @@ function IdentitiesTab() {
 
   const links = data?.links || [];
 
-  const { data: linkUsersData, isLoading: linkUsersLoading, refetch: refetchLinkUsers } = useQuery<
+  const { data: linkUsersData, isLoading: linkUsersLoading, isRefetching: isRefetchingLinkUsers, refetch: refetchLinkUsers } = useQuery<
     IdentityLinkUsersResponse
   >({
     queryKey: ["/api/admin/grift/identity-links/users", selectedLink?.linkType, selectedLink?.linkValue],
@@ -1660,8 +1654,8 @@ function IdentitiesTab() {
           <FieldHintLabel label="Identity Links" hint={GRIFT_FIELD_HELP.identities.tooltip} labelClassName="text-lg font-semibold" />
           <p className="text-xs text-gray-400 mt-1">{GRIFT_FIELD_HELP.identities.inline}</p>
         </div>
-        <GriftRefreshButton onClick={() => refetch()} title={GRIFT_FIELD_HELP.refresh.tooltip}>
-          <RefreshCw className="h-4 w-4 mr-2" />
+        <GriftRefreshButton disabled={isLoading || isRefetching} onClick={() => refetch()} title={GRIFT_FIELD_HELP.refresh.tooltip}>
+          <RefreshCw className={`h-4 w-4 mr-2 ${isLoading || isRefetching ? "animate-spin" : ""}`} />
           Refresh
         </GriftRefreshButton>
       </div>
@@ -1737,6 +1731,7 @@ function IdentitiesTab() {
 
           <div className="flex items-center gap-2">
             <GriftRefreshButton
+              disabled={isLoading || isRefetching}
               onClick={() => {
                 setOpenKey(null);
                 setSelectedLink(null);
@@ -1746,7 +1741,7 @@ function IdentitiesTab() {
               }}
               title={GRIFT_FIELD_HELP.identitiesApplyFilters.tooltip}
             >
-              <RefreshCw className="h-4 w-4 mr-2" />
+              <RefreshCw className={`h-4 w-4 mr-2 ${isLoading || isRefetching ? "animate-spin" : ""}`} />
               Apply Filters
             </GriftRefreshButton>
           </div>
@@ -1814,6 +1809,7 @@ function IdentitiesTab() {
                                       </div>
                                     </div>
                                     <GriftRefreshButton
+                                      disabled={linkUsersLoading || isRefetchingLinkUsers}
                                       onClick={() => {
                                         setSelectedUserId(null);
                                         const next = { linkType: link.link_type, linkValue: link.link_value };
@@ -1824,7 +1820,7 @@ function IdentitiesTab() {
                                       }}
                                       title={GRIFT_FIELD_HELP.identitiesRefreshUsers.tooltip}
                                     >
-                                      <RefreshCw className="h-4 w-4 mr-2" />
+                                      <RefreshCw className={`h-4 w-4 mr-2 ${linkUsersLoading || isRefetchingLinkUsers ? "animate-spin" : ""}`} />
                                       Refresh Users
                                     </GriftRefreshButton>
                                   </div>
@@ -1932,7 +1928,7 @@ function IdentitiesTab() {
 }
 
 function CasesTab() {
-  const { data, isLoading, refetch } = useQuery<{ cases: GriftCase[] }>({
+  const { data, isLoading, isRefetching, refetch } = useQuery<{ cases: GriftCase[] }>({
     queryKey: ["/api/admin/grift/cases"],
   });
 
@@ -1945,8 +1941,8 @@ function CasesTab() {
           <FieldHintLabel label="Case Management" hint={GRIFT_FIELD_HELP.cases.tooltip} labelClassName="text-lg font-semibold" />
           <p className="text-xs text-gray-400 mt-1">{GRIFT_FIELD_HELP.cases.inline}</p>
         </div>
-        <GriftRefreshButton onClick={() => refetch()} title={GRIFT_FIELD_HELP.refresh.tooltip}>
-          <RefreshCw className="h-4 w-4 mr-2" />
+        <GriftRefreshButton disabled={isLoading || isRefetching} onClick={() => refetch()} title={GRIFT_FIELD_HELP.refresh.tooltip}>
+          <RefreshCw className={`h-4 w-4 mr-2 ${isLoading || isRefetching ? "animate-spin" : ""}`} />
           Refresh
         </GriftRefreshButton>
       </div>
@@ -1965,14 +1961,18 @@ function CasesTab() {
                   <TableHead>Title</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Priority</TableHead>
+                  <TableHead>Created By</TableHead>
+                  <TableHead>Assigned To</TableHead>
                   <TableHead>Created</TableHead>
                   <TableHead>Updated</TableHead>
+                  <TableHead>Closed</TableHead>
+                  <TableHead>Resolution</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {cases.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="text-center text-gray-400 py-8">
+                    <TableCell colSpan={10} className="text-center text-gray-400 py-8">
                       <Briefcase className="h-8 w-8 mx-auto mb-2 opacity-50" />
                       No cases created yet
                     </TableCell>
@@ -1988,8 +1988,20 @@ function CasesTab() {
                       <TableCell>
                         <Badge className={getTierColor(c.priority)}>{c.priority}</Badge>
                       </TableCell>
+                      <TableCell className="font-mono text-xs text-gray-300">
+                        {c.created_by_admin_id == null ? "N/A" : `#${c.created_by_admin_id}`}
+                      </TableCell>
+                      <TableCell className="font-mono text-xs text-gray-300">
+                        {c.assigned_admin_id == null ? "Unassigned" : `#${c.assigned_admin_id}`}
+                      </TableCell>
                       <TableCell className="text-xs text-gray-400">{formatTimestamp(c.created_at)}</TableCell>
                       <TableCell className="text-xs text-gray-400">{formatTimestamp(c.updated_at)}</TableCell>
+                      <TableCell className="text-xs text-gray-400">{formatTimestamp(c.closed_at)}</TableCell>
+                      <TableCell className="text-xs text-gray-300">
+                        <span className="block max-w-[16rem] truncate" title={c.resolution ?? ""}>
+                          {c.resolution?.trim() ? c.resolution : "N/A"}
+                        </span>
+                      </TableCell>
                     </TableRow>
                   ))
                 )}
@@ -2624,11 +2636,11 @@ function ConfigTab() {
 }
 
 function AuditTab() {
-  const { data: logsData, isLoading: logsLoading, refetch: refetchLogs } = useQuery<{ logs: AuditLogEntry[] }>({
+  const { data: logsData, isLoading: logsLoading, isRefetching: logsRefetching, refetch: refetchLogs } = useQuery<{ logs: AuditLogEntry[] }>({
     queryKey: ["/api/admin/grift/audit-log"],
   });
 
-  const { data: verifyData, isLoading: verifyLoading, refetch: refetchVerify } = useQuery<AuditVerifyResult>({
+  const { data: verifyData, isLoading: verifyLoading, isRefetching: verifyRefetching, refetch: refetchVerify } = useQuery<AuditVerifyResult>({
     queryKey: ["/api/admin/grift/audit-log/verify"],
   });
 
@@ -2642,8 +2654,8 @@ function AuditTab() {
           <p className="text-xs text-gray-400 mt-1">{GRIFT_FIELD_HELP.audit.inline}</p>
         </div>
         <div className="flex items-center gap-2">
-          <GriftRefreshButton onClick={() => { refetchLogs(); refetchVerify(); }} title={GRIFT_FIELD_HELP.auditRefresh.tooltip}>
-            <RefreshCw className="h-4 w-4 mr-2" />
+          <GriftRefreshButton disabled={logsLoading || logsRefetching || verifyLoading || verifyRefetching} onClick={() => { refetchLogs(); refetchVerify(); }} title={GRIFT_FIELD_HELP.auditRefresh.tooltip}>
+            <RefreshCw className={`h-4 w-4 mr-2 ${(logsLoading || logsRefetching || verifyLoading || verifyRefetching) ? "animate-spin" : ""}`} />
             Refresh
           </GriftRefreshButton>
         </div>

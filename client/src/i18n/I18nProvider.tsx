@@ -6,7 +6,7 @@ import { resolveApiUrl } from "@/lib/appUrl";
 import {
   readStoredLocale,
   readStoredLocaleForUser,
-  shouldPreferStoredUserLocale,
+  shouldApplyStoredUserLocaleOverride,
   writeStoredLocale,
   writeStoredLocaleForUser,
 } from "./localeStorage";
@@ -163,13 +163,15 @@ export function I18nProvider({ children }: { children: React.ReactNode }) {
     if (!Number.isInteger(currentUserId) || currentUserId <= 0) return;
 
     const normalized = normalizeLocale(user?.language, config.supportedLocales, config.defaultLocale);
+    const currentLocale = normalizeLocale(locale, config.supportedLocales, config.defaultLocale);
     const storedLocale = readStoredLocaleForUser(currentUserId);
     const storedNormalized = storedLocale
       ? normalizeLocale(storedLocale, config.supportedLocales, config.defaultLocale)
       : null;
 
     const resolvedLocale =
-      storedNormalized && shouldPreferStoredUserLocale(normalized, storedNormalized, config.defaultLocale)
+      storedNormalized &&
+      shouldApplyStoredUserLocaleOverride(normalized, storedNormalized, config.defaultLocale, currentLocale)
         ? storedNormalized
         : normalized;
 

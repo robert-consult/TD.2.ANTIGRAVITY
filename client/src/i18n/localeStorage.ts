@@ -78,3 +78,21 @@ export function shouldPreferStoredUserLocale(
   if (!normalizeLocale(userLocale)) return true;
   return userBase === defaultBase && storedBase !== defaultBase;
 }
+
+/**
+ * Apply stored-locale override only when current UI locale still differs from
+ * the server locale. This avoids flipping back after the user explicitly
+ * chooses the default locale in-session.
+ */
+export function shouldApplyStoredUserLocaleOverride(
+  userLocale: string | null | undefined,
+  storedLocale: string | null | undefined,
+  defaultLocale: string | null | undefined,
+  currentLocale: string | null | undefined,
+): boolean {
+  if (!shouldPreferStoredUserLocale(userLocale, storedLocale, defaultLocale)) {
+    return false;
+  }
+
+  return baseLocale(currentLocale) !== baseLocale(userLocale);
+}

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   readStoredLocale,
   readStoredLocaleForUser,
+  shouldApplyStoredUserLocaleOverride,
   shouldPreferStoredUserLocale,
   writeStoredLocale,
   writeStoredLocaleForUser,
@@ -35,5 +36,11 @@ describe("localeStorage", () => {
     expect(shouldPreferStoredUserLocale(undefined, "pt", "en")).toBe(true);
     expect(shouldPreferStoredUserLocale("pt", "en", "en")).toBe(false);
     expect(shouldPreferStoredUserLocale("en", "", "en")).toBe(false);
+  });
+
+  it("does not override when current locale already matches server locale", () => {
+    expect(shouldApplyStoredUserLocaleOverride("en", "es", "en", "en")).toBe(false);
+    expect(shouldApplyStoredUserLocaleOverride("en", "es", "en", "es")).toBe(true);
+    expect(shouldApplyStoredUserLocaleOverride(undefined, "es", "en", "es")).toBe(true);
   });
 });

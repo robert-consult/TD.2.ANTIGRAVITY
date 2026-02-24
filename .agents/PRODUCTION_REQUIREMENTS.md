@@ -780,3 +780,42 @@ Failure Mode if Missing:
   - Simulate stalled `PUT /api/profile/preferences` and verify UI exits pending state with timeout toast/error instead of remaining on `Saving...`.
   - Run `npm run check` and `npm run build`.
 - Failure Mode if Missing: profile screen can remain indefinitely stuck in `Saving...` on transient network/backend stalls, preventing preference updates and requiring manual reload.
+
+### PRD-ADM-002
+- ID: `PRD-ADM-002`
+- Date (UTC): `2026-02-24`
+- Scope: `Admin global trade-settings consistency + audit traceability`
+- Requirement: `PUT /api/admin/global-settings` must enforce optimistic concurrency for existing rows by requiring a numeric `expectedUpdatedAt` token and rejecting stale/missing tokens with `409`; the route must also emit immutable admin audit entries for risk/default-setting deltas (`GLOBAL_SETTINGS_RISK_UPDATED`) in addition to performance-setting deltas.
+- Enforcement: `server/routes/admin.ts` (global settings update handler token gate + risk/performance audit append).
+- Validation:
+  - Call `GET /api/admin/global-settings`, then `PUT /api/admin/global-settings` with changed capital/risk fields and matching `expectedUpdatedAt`; verify `200` and persisted values.
+  - Repeat `PUT` using an older `expectedUpdatedAt`; verify `409` conflict response.
+  - Verify identity-audit writes include `GLOBAL_SETTINGS_RISK_UPDATED` for risk/default changes and `GLOBAL_SETTINGS_PERFORMANCE_UPDATED` for performance changes.
+  - Run `npm run check` and `npm run build`.
+- Failure Mode if Missing: concurrent admin updates can overwrite each other silently across sessions/nodes, and critical global risk/default changes can occur without attributable, non-repudiable audit evidence.
+
+### PRD-ADM-003
+- ID: `PRD-ADM-003`
+- Date (UTC): `2026-02-24`
+- Scope: `Admin global trade-settings abuse resistance + schema pipeline unification`
+- Requirement: `PUT /api/admin/global-settings` must enforce distributed save throttling (`429` + `Retry-After`) via Valkey key TTLs (with local fallback only for cache outages), and payload handling must use a strict Zod pipeline with no ad-hoc field acceptance (unknown fields rejected, numeric/time coercion bounded, server-side normalization centralized in service functions).
+- Enforcement: `server/security/globalSettingsRateLimit.ts` (Valkey-backed per-admin interval limiter), `server/services/globalSettingsAdmin.ts` (strict parse/normalize/write pipeline), and `server/routes/admin.ts` (rate-limit + parser/service wiring).
+- Validation:
+  - Issue two rapid `PUT /api/admin/global-settings` calls from the same admin session with a valid CSRF token and fresh `expectedUpdatedAt`; verify second call returns `429` and includes `Retry-After`.
+  - Call `PUT /api/admin/global-settings` with stale `expectedUpdatedAt` after throttle window; verify `409`.
+  - Call `PUT /api/admin/global-settings` with unexpected fields; verify `400`.
+  - Update capital defaults + lot card payload and verify persisted values survive a subsequent `GET /api/admin/global-settings`.
+  - Run `npm run check`, `npm run build`, and `npm run e2e`.
+- Failure Mode if Missing: multi-node admin endpoints can be spammed without durable throttling, malformed payloads can bypass schema contracts, and global trade-setting writes become less predictable/auditable under load.
+
+### PRD-ADM-004
+- ID: `PRD-ADM-004`
+- Date (UTC): `2026-02-24`
+- Scope: `Admin trade settings form state integrity`
+- Requirement: Trade Settings UI must hydrate local edit state from persisted `/api/admin/global-settings` data before dirty-state detection and save-button gating are evaluated.
+- Enforcement: `client/src/pages/AdminDashboard.tsx` (`riskParamsHydrated` bootstrap guard around global-settings sync effect for Trade Settings state).
+- Validation:
+  - Open `/admin`, switch to `Trade Settings`, and verify save buttons are hidden on initial load when no edits are made.
+  - Compare displayed Trade Settings values against `GET /api/admin/global-settings`; they must match on first render.
+  - Modify one section and verify only that section becomes dirty until an explicit save.
+- Failure Mode if Missing: UI can initialize from hardcoded defaults, producing false dirty states and risking accidental overwrite of production risk/capital/market settings.

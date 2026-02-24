@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useAuth } from "@/hooks/use-auth";
 import { Link } from "wouter";
 import { Settings, LogOut, ChevronDown, Shield } from "lucide-react";
@@ -19,19 +20,64 @@ type HeaderProps = {
   showBalance?: boolean;
 };
 
+type HeaderMenuPosition = {
+  top: number;
+  left: number;
+  width: number;
+};
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
 export function Header({ title = "TradeQuip", showBalance = false }: HeaderProps) {
   const { user, logout, checkAuth, isCachedUserStale } = useAuth();
   useMailboxE2eeBootstrap();
   const { toast } = useToast();
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [isPromotingAdmin, setIsPromotingAdmin] = useState(false);
+  const [menuPosition, setMenuPosition] = useState<HeaderMenuPosition>({ top: 56, left: 8, width: 320 });
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
   const hasHydratedStaleData = useStaleData(["/api/auth/current-user", "/api/account/summary"]);
+
+  const recalcMenuPosition = useCallback(() => {
+    const trigger = triggerRef.current;
+    if (!trigger) return;
+
+    const rect = trigger.getBoundingClientRect();
+    const vw = window.innerWidth;
+    const horizontalPadding = 8;
+    const width = Math.min(320, Math.max(220, vw - horizontalPadding * 2));
+    const left = clamp(
+      rect.right - width,
+      horizontalPadding,
+      Math.max(horizontalPadding, vw - width - horizontalPadding),
+    );
+    const top = Math.max(8, rect.bottom + 8);
+
+    setMenuPosition({ top, left, width });
+  }, []);
 
   useEffect(() => {
     const handleClose = () => setDropdownOpen(false);
     window.addEventListener(CLOSE_HEADER_MENU_EVENT, handleClose);
     return () => window.removeEventListener(CLOSE_HEADER_MENU_EVENT, handleClose);
   }, []);
+
+  useEffect(() => {
+    if (!dropdownOpen) return;
+
+    recalcMenuPosition();
+    window.addEventListener("resize", recalcMenuPosition);
+    window.addEventListener("orientationchange", recalcMenuPosition);
+    window.addEventListener("scroll", recalcMenuPosition, true);
+
+    return () => {
+      window.removeEventListener("resize", recalcMenuPosition);
+      window.removeEventListener("orientationchange", recalcMenuPosition);
+      window.removeEventListener("scroll", recalcMenuPosition, true);
+    };
+  }, [dropdownOpen, recalcMenuPosition]);
 
   const shortTitle = (() => {
     const trimmed = title.trim();
@@ -146,10 +192,15 @@ export function Header({ title = "TradeQuip", showBalance = false }: HeaderProps
               </div>
             ) : null}
             <button
+              ref={triggerRef}
               onClick={(e) => {
                 e.stopPropagation();
                 window.dispatchEvent(new Event(CLOSE_NOTIFICATIONS_EVENT));
-                setDropdownOpen((prev) => !prev);
+                setDropdownOpen((prev) => {
+                  const next = !prev;
+                  if (next) recalcMenuPosition();
+                  return next;
+                });
               }}
               className="tq-header-user-trigger flex items-center gap-3 bg-white/[0.03] hover:bg-white/[0.08] border border-white/10 hover:border-white/20 px-2 py-1.5 rounded-full transition-all duration-200 group relative z-[230]"
             >
@@ -163,98 +214,108 @@ export function Header({ title = "TradeQuip", showBalance = false }: HeaderProps
               <ChevronDown className={`h-4 w-4 text-gray-400 group-hover:text-gray-300 transition-transform duration-200 ${dropdownOpen ? "rotate-180" : ""}`} />
             </button>
 
-            {dropdownOpen && (
-              <>
-                <div
-                  className="tq-overlay-backdrop fixed inset-0 z-[210] bg-transparent"
-                  onPointerDown={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    setDropdownOpen(false);
-                  }}
-                />
-                <div
-                  className="tq-popup-panel tq-header-menu absolute right-0 top-full mt-2 w-64 bg-[#1A1A1A] border border-white/10 rounded-xl shadow-[0_10px_40px_rgba(0,0,0,0.5)] z-[220] overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200"
-                  onPointerDown={(e) => e.stopPropagation()}
-                >
-                  <div className="tq-header-menu-profile p-4 border-b border-white/5">
-                    <div className="flex items-center gap-3">
-                      <div className="h-10 w-10 rounded-full bg-gradient-to-br from-primary/80 to-primary/40 flex items-center justify-center ring-2 ring-white/10">
-                        <span className="text-sm font-semibold text-white">{userInitials}</span>
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm font-semibold text-white truncate">{user.username || user.email?.split("@")[0]}</span>
-                          <TierBadge tier={((user as any)?.userTier as UserTier) || "CANDIDATE"} size="sm" />
-                        </div>
-                        <div className="text-xs text-gray-500 truncate mt-0.5">{user.email}</div>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2 mt-3">
-                      <span className="flex items-center gap-1.5 text-xs text-green-400">
-                        <span className="h-1.5 w-1.5 bg-green-500 rounded-full animate-pulse"></span>
-                        Online
-                      </span>
-                      <span className="text-gray-600">•</span>
-                      <span className="text-xs text-gray-500">Real-time Data</span>
-                    </div>
-                    {showBalance ? (
-                      <div className="flex items-center justify-between gap-3 mt-3 text-xs">
-                        <span className="text-gray-500">Balance</span>
-                        <span className="inline-flex items-center gap-2 min-w-0">
-                          <span className={`font-mono truncate ${balanceToneClass}`}>{formattedBalance}</span>
-                          {showBalanceStaleBadge ? <StaleDataBadge label="Updating" /> : null}
-                        </span>
-                      </div>
-                    ) : null}
-                  </div>
-
-                  <div className="p-2">
-                    {user.isAdmin ? (
-                      <Link
-                        href="/admin"
-                        onClick={() => setDropdownOpen(false)}
-                        className="tq-header-menu-item flex items-center gap-3 px-3 py-2.5 text-sm text-gray-300 hover:text-white hover:bg-white/5 rounded-lg transition-colors"
-                      >
-                        <Shield className="h-4 w-4" />
-                        Admin Dashboard
-                      </Link>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={promoteToAdmin}
-                        disabled={isPromotingAdmin}
-                        className="tq-header-menu-item w-full flex items-center gap-3 px-3 py-2.5 text-sm text-gray-300 hover:text-white hover:bg-white/5 rounded-lg transition-colors disabled:opacity-50 disabled:pointer-events-none"
-                      >
-                        <Shield className="h-4 w-4" />
-                        {isPromotingAdmin ? "Enabling Admin…" : "Enable Admin Mode"}
-                      </button>
-                    )}
-
-                    <div className="tq-header-menu-separator h-px bg-white/5 my-2" />
-
-                    <Link
-                      href="/profile"
-                      onClick={() => setDropdownOpen(false)}
-                      className="tq-header-menu-item flex items-center gap-3 px-3 py-2.5 text-sm text-gray-300 hover:text-white hover:bg-white/5 rounded-lg transition-colors"
-                    >
-                      <Settings className="h-4 w-4" />
-                      Profile Settings
-                    </Link>
-
-                    <div className="tq-header-menu-separator h-px bg-white/5 my-2" />
-
+            {dropdownOpen && typeof document !== "undefined"
+              ? createPortal(
+                  <>
                     <button
-                      onClick={handleLogout}
-                      className="tq-header-menu-item tq-header-menu-item-destructive w-full flex items-center gap-3 px-3 py-2.5 text-sm text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded-lg transition-colors"
+                      type="button"
+                      aria-label="Close menu"
+                      className="tq-overlay-backdrop fixed inset-0 z-[220] cursor-default"
+                      onPointerDown={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setDropdownOpen(false);
+                      }}
+                    />
+                    <div
+                      className="tq-popup-panel tq-header-menu fixed border border-white/10 rounded-xl shadow-[0_10px_40px_rgba(0,0,0,0.5)] z-[230] overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200"
+                      style={{
+                        top: `${menuPosition.top}px`,
+                        left: `${menuPosition.left}px`,
+                        width: `${menuPosition.width}px`,
+                      }}
+                      onPointerDown={(e) => e.stopPropagation()}
                     >
-                      <LogOut className="h-4 w-4" />
-                      Sign out
-                    </button>
-                  </div>
-                </div>
-              </>
-            )}
+                      <div className="tq-header-menu-profile p-4 border-b border-white/5">
+                        <div className="flex items-center gap-3">
+                          <div className="h-10 w-10 rounded-full bg-gradient-to-br from-primary/80 to-primary/40 flex items-center justify-center ring-2 ring-white/10">
+                            <span className="text-sm font-semibold text-white">{userInitials}</span>
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm font-semibold text-white truncate">{user.username || user.email?.split("@")[0]}</span>
+                              <TierBadge tier={((user as any)?.userTier as UserTier) || "CANDIDATE"} size="sm" />
+                            </div>
+                            <div className="text-xs text-gray-500 truncate mt-0.5">{user.email}</div>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 mt-3">
+                          <span className="flex items-center gap-1.5 text-xs text-green-400">
+                            <span className="h-1.5 w-1.5 bg-green-500 rounded-full animate-pulse"></span>
+                            Online
+                          </span>
+                          <span className="text-gray-600">•</span>
+                          <span className="text-xs text-gray-500">Real-time Data</span>
+                        </div>
+                        {showBalance ? (
+                          <div className="flex items-center justify-between gap-3 mt-3 text-xs">
+                            <span className="text-gray-500">Balance</span>
+                            <span className="inline-flex items-center gap-2 min-w-0">
+                              <span className={`font-mono truncate ${balanceToneClass}`}>{formattedBalance}</span>
+                              {showBalanceStaleBadge ? <StaleDataBadge label="Updating" /> : null}
+                            </span>
+                          </div>
+                        ) : null}
+                      </div>
+
+                      <div className="p-2">
+                        {user.isAdmin ? (
+                          <Link
+                            href="/admin"
+                            onClick={() => setDropdownOpen(false)}
+                            className="tq-header-menu-item flex items-center gap-3 px-3 py-2.5 text-sm text-gray-300 hover:text-white hover:bg-white/5 rounded-lg transition-colors"
+                          >
+                            <Shield className="h-4 w-4" />
+                            Admin Dashboard
+                          </Link>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={promoteToAdmin}
+                            disabled={isPromotingAdmin}
+                            className="tq-header-menu-item w-full flex items-center gap-3 px-3 py-2.5 text-sm text-gray-300 hover:text-white hover:bg-white/5 rounded-lg transition-colors disabled:opacity-50 disabled:pointer-events-none"
+                          >
+                            <Shield className="h-4 w-4" />
+                            {isPromotingAdmin ? "Enabling Admin…" : "Enable Admin Mode"}
+                          </button>
+                        )}
+
+                        <div className="tq-header-menu-separator h-px bg-white/5 my-2" />
+
+                        <Link
+                          href="/profile"
+                          onClick={() => setDropdownOpen(false)}
+                          className="tq-header-menu-item flex items-center gap-3 px-3 py-2.5 text-sm text-gray-300 hover:text-white hover:bg-white/5 rounded-lg transition-colors"
+                        >
+                          <Settings className="h-4 w-4" />
+                          Profile Settings
+                        </Link>
+
+                        <div className="tq-header-menu-separator h-px bg-white/5 my-2" />
+
+                        <button
+                          onClick={handleLogout}
+                          className="tq-header-menu-item tq-header-menu-item-destructive w-full flex items-center gap-3 px-3 py-2.5 text-sm text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded-lg transition-colors"
+                        >
+                          <LogOut className="h-4 w-4" />
+                          Sign out
+                        </button>
+                      </div>
+                    </div>
+                  </>,
+                  document.body,
+                )
+              : null}
           </div>
         )}
       </div>

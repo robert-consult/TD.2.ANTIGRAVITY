@@ -1416,6 +1416,16 @@ interface I18nAdminConfigData {
   llmMaxAttempts: number;
 }
 
+type SystemConfigSaveSection =
+  | "trading"
+  | "marketData"
+  | "signupCompliance"
+  | "signupFreezeWaitlist"
+  | "jurisdiction"
+  | "sessionAndAccess";
+
+type TradeSettingsSaveSection = "capital" | "marketHours" | "defaultRisk" | "operationalRiskAndLot";
+
 interface MigrationExportJob {
   id: string;
   scope: string;
@@ -2710,6 +2720,7 @@ function SystemConfigTab() {
   const [marketPerfChanged, setMarketPerfChanged] = useState(false);
   const marketPerfSyncGuardRef = useRef<MarketPerformanceSettings | null>(null);
   const marketPerfSchemaWarningRef = useRef(false);
+  const [pendingSystemConfigSection, setPendingSystemConfigSection] = useState<SystemConfigSaveSection | null>(null);
   const [healthProviderKey, setHealthProviderKey] = useState<string>("");
   const [confirmDialog, setConfirmDialog] = useState<{ open: boolean; key: string; value: boolean; label: string }>({
     open: false,
@@ -2924,13 +2935,13 @@ function SystemConfigTab() {
   });
 
   const updateMarketPerfMutation = useMutation({
-    mutationFn: async (payload: MarketPerformanceSettings) => {
-      await axios.put("/api/admin/global-settings", payload);
-      const refreshed = await axios.get("/api/admin/global-settings", {
-        params: { _ts: Date.now() },
+    mutationFn: async (payload: { settings: MarketPerformanceSettings; expectedUpdatedAt: number }) => {
+      const refreshed = await axios.put("/api/admin/global-settings", {
+        ...payload.settings,
+        expectedUpdatedAt: payload.expectedUpdatedAt,
       });
       return {
-        requested: payload,
+        requested: payload.settings,
         persisted: refreshed.data as GlobalSettings,
       };
     },
@@ -3022,7 +3033,16 @@ function SystemConfigTab() {
   };
 
   const saveMarketPerformanceSettings = () => {
-    updateMarketPerfMutation.mutate({ ...marketPerfSettings });
+    const expectedUpdatedAt = typeof globalPerformanceData?.updatedAt === "number" ? globalPerformanceData.updatedAt : null;
+    if (expectedUpdatedAt === null) {
+      toast({
+        title: "Settings are stale",
+        description: "Refresh global settings and try saving again.",
+        variant: "destructive",
+      });
+      return;
+    }
+    updateMarketPerfMutation.mutate({ settings: { ...marketPerfSettings }, expectedUpdatedAt });
   };
 
   const marketPerfPreviewRows = useMemo(() => {
@@ -3050,13 +3070,18 @@ function SystemConfigTab() {
   };
 
   const handleSaveSystemConfigSection = (
+    section: SystemConfigSaveSection,
     payload: Partial<SystemConfigData>,
     title: string,
     description: string,
   ) => {
+    setPendingSystemConfigSection(section);
     updateMutation.mutate(payload, {
       onSuccess: () => {
         toast({ title, description });
+      },
+      onSettled: () => {
+        setPendingSystemConfigSection((current) => (current === section ? null : current));
       },
     });
   };
@@ -3064,6 +3089,7 @@ function SystemConfigTab() {
   const handleSaveTradingControls = () => {
     if (!config) return;
     handleSaveSystemConfigSection(
+      "trading",
       {
         maintenanceMode: config.maintenanceMode,
         tradingHalt: config.tradingHalt,
@@ -3079,6 +3105,7 @@ function SystemConfigTab() {
   const handleSaveMarketDataSettings = () => {
     if (!config) return;
     handleSaveSystemConfigSection(
+      "marketData",
       {
         quoteRefreshMs: config.quoteRefreshMs,
         feedPollMs: config.feedPollMs,
@@ -3094,6 +3121,7 @@ function SystemConfigTab() {
   const handleSaveSignupCompliance = () => {
     if (!config) return;
     handleSaveSystemConfigSection(
+      "signupCompliance",
       {
         signupCaptchaEnforce: config.signupCaptchaEnforce,
         captchaProvider: config.captchaProvider,
@@ -3108,6 +3136,7 @@ function SystemConfigTab() {
   const handleSaveSignupFreezeWaitlist = () => {
     if (!config) return;
     handleSaveSystemConfigSection(
+      "signupFreezeWaitlist",
       {
         signupFreeze: config.signupFreeze,
         signupFreezeMessage: config.signupFreezeMessage,
@@ -3128,6 +3157,7 @@ function SystemConfigTab() {
   const handleSaveJurisdictionControls = () => {
     if (!config) return;
     handleSaveSystemConfigSection(
+      "jurisdiction",
       {
         jurisdictionRestrictedIso2Csv: config.jurisdictionRestrictedIso2Csv,
         jurisdictionRestrictedMessage: config.jurisdictionRestrictedMessage,
@@ -3144,6 +3174,7 @@ function SystemConfigTab() {
   const handleSaveSessionAndAccessControls = () => {
     if (!config) return;
     handleSaveSystemConfigSection(
+      "sessionAndAccess",
       {
         allowUserTimezoneEdit: config.allowUserTimezoneEdit,
         rememberMeEnabled: config.rememberMeEnabled,
@@ -3161,6 +3192,13 @@ function SystemConfigTab() {
       "Regional, session, and Scout access controls updated.",
     );
   };
+
+  const isTradingControlsSaving = pendingSystemConfigSection === "trading" && updateMutation.isPending;
+  const isMarketDataSettingsSaving = pendingSystemConfigSection === "marketData" && updateMutation.isPending;
+  const isSignupComplianceSaving = pendingSystemConfigSection === "signupCompliance" && updateMutation.isPending;
+  const isSignupFreezeWaitlistSaving = pendingSystemConfigSection === "signupFreezeWaitlist" && updateMutation.isPending;
+  const isJurisdictionControlsSaving = pendingSystemConfigSection === "jurisdiction" && updateMutation.isPending;
+  const isSessionAndAccessControlsSaving = pendingSystemConfigSection === "sessionAndAccess" && updateMutation.isPending;
 
   const handleSaveI18nConfig = () => {
     if (!i18nConfig) return;
@@ -3310,7 +3348,7 @@ function SystemConfigTab() {
                     disabled={!isTradingControlsChanged || updateMutation.isPending}
                     className="bg-blue-600 hover:bg-blue-700"
                   >
-                    {updateMutation.isPending ? "Saving..." : "Save Changes"}
+                    {isTradingControlsSaving ? "Saving..." : "Save Changes"}
                   </Button>
                 </div>
               </TooltipProvider>
@@ -3410,7 +3448,7 @@ function SystemConfigTab() {
                       disabled={!isMarketDataSettingsChanged || updateMutation.isPending}
                       className="bg-blue-600 hover:bg-blue-700"
                     >
-                      {updateMutation.isPending ? "Saving..." : "Save Changes"}
+                      {isMarketDataSettingsSaving ? "Saving..." : "Save Changes"}
                     </Button>
                   </div>
                 </TooltipProvider>
@@ -4061,7 +4099,7 @@ function SystemConfigTab() {
                       disabled={!isSignupComplianceChanged || updateMutation.isPending}
                       className="bg-blue-600 hover:bg-blue-700"
                     >
-                      {updateMutation.isPending ? "Saving..." : "Save Changes"}
+                      {isSignupComplianceSaving ? "Saving..." : "Save Changes"}
                     </Button>
                   </div>
                 </TooltipProvider>
@@ -4073,7 +4111,7 @@ function SystemConfigTab() {
               setConfig={setConfig}
               setConfigChanged={setConfigChanged}
               onSave={handleSaveSignupFreezeWaitlist}
-              saving={updateMutation.isPending}
+              saving={isSignupFreezeWaitlistSaving}
               canSave={isSignupFreezeWaitlistChanged}
             />
 
@@ -4084,7 +4122,7 @@ function SystemConfigTab() {
                 setConfigChanged={setConfigChanged}
                 configChanged={isJurisdictionControlsChanged}
                 onSave={handleSaveJurisdictionControls}
-                saving={updateMutation.isPending}
+                saving={isJurisdictionControlsSaving}
               />
             )}
           </div>
@@ -4511,7 +4549,7 @@ function SystemConfigTab() {
                   disabled={!isSessionAndAccessControlsChanged || updateMutation.isPending}
                   className="bg-blue-600 hover:bg-blue-700"
                 >
-                  {updateMutation.isPending ? "Saving..." : "Save Settings"}
+                  {isSessionAndAccessControlsSaving ? "Saving..." : "Save Settings"}
                 </Button>
               </div>
             </div>
@@ -4847,6 +4885,8 @@ export default function AdminDashboard() {
     flushMinimalMs: 1000,
     updatedAt: null
   });
+  const [riskParamsHydrated, setRiskParamsHydrated] = useState(false);
+  const [pendingTradeSettingsSection, setPendingTradeSettingsSection] = useState<TradeSettingsSaveSection | null>(null);
 
   const { data: users = [], isLoading } = useQuery<User[]>({
     queryKey: ["/api/admin/users"],
@@ -4930,16 +4970,18 @@ export default function AdminDashboard() {
     isDefaultRiskParametersChanged ||
     isOperationalRiskAndLotSettingsChanged;
 
-  // Sync global settings to local state when data is fetched (only when not editing)
+  // Hydrate once from persisted global settings, then keep local form state in sync only when clean.
   useEffect(() => {
-    if (globalSettingsData && !hasRiskParamsUnsavedChanges) {
+    if (!globalSettingsData) return;
+    if (!riskParamsHydrated || !hasRiskParamsUnsavedChanges) {
       setRiskParams((prev) => {
         const raw = Number((globalSettingsData as any)?.minPriceDistancePips);
         const minPriceDistancePips = Number.isFinite(raw) ? Math.trunc(raw) : (prev.minPriceDistancePips ?? 20);
         return { ...prev, ...globalSettingsData, minPriceDistancePips };
       });
+      setRiskParamsHydrated(true);
     }
-  }, [globalSettingsData, hasRiskParamsUnsavedChanges]);
+  }, [globalSettingsData, hasRiskParamsUnsavedChanges, riskParamsHydrated]);
 
   const mutation = useMutation({
     mutationFn: (payload: UserSettings) =>
@@ -5532,9 +5574,10 @@ export default function AdminDashboard() {
 
   // Global settings mutation
   const globalSettingsMutation = useMutation({
-    mutationFn: (payload: Partial<GlobalSettings>) =>
-      axios.put('/api/admin/global-settings', payload),
-    onSuccess: () => {
+    mutationFn: (payload: Partial<GlobalSettings> & { expectedUpdatedAt: number }) =>
+      axios.put('/api/admin/global-settings', payload).then((r) => r.data as GlobalSettings),
+    onSuccess: (persisted: GlobalSettings) => {
+      queryClient.setQueryData(["/api/admin/global-settings"], persisted);
       queryClient.invalidateQueries({ queryKey: ["/api/admin/global-settings"] });
       queryClient.invalidateQueries({ queryKey: ["/api/global-settings"] });
     },
@@ -5547,23 +5590,97 @@ export default function AdminDashboard() {
     setRiskParams(prev => ({ ...prev, [field]: value }));
   };
 
+  const applyPersistedRiskParams = (section: TradeSettingsSaveSection, persisted: GlobalSettings) => {
+    setRiskParams((prev) => {
+      const nextUpdatedAt = persisted.updatedAt ?? prev.updatedAt;
+      if (section === "capital") {
+        return {
+          ...prev,
+          defaultUserStartingBalanceUsd: persisted.defaultUserStartingBalanceUsd,
+          defaultUserStartingEquityUsd: persisted.defaultUserStartingEquityUsd,
+          defaultChallengeVirtualCapitalUsd: persisted.defaultChallengeVirtualCapitalUsd,
+          updatedAt: nextUpdatedAt,
+        };
+      }
+      if (section === "marketHours") {
+        return {
+          ...prev,
+          marketOpenTime: persisted.marketOpenTime,
+          marketCloseTime: persisted.marketCloseTime,
+          allowWeekendTrading: persisted.allowWeekendTrading,
+          updatedAt: nextUpdatedAt,
+        };
+      }
+      if (section === "defaultRisk") {
+        return {
+          ...prev,
+          defaultLeverage: persisted.defaultLeverage,
+          maxPositionSize: persisted.maxPositionSize,
+          maxTradesPerUser: persisted.maxTradesPerUser,
+          maxTradesPerInstrument: persisted.maxTradesPerInstrument,
+          maxConcurrentLots: persisted.maxConcurrentLots,
+          minPriceDistancePips: persisted.minPriceDistancePips,
+          updatedAt: nextUpdatedAt,
+        };
+      }
+      return {
+        ...prev,
+        enableAutoClose: persisted.enableAutoClose,
+        autoCloseAfterDays: persisted.autoCloseAfterDays,
+        autoCloseCheckFrequencyMinutes: persisted.autoCloseCheckFrequencyMinutes,
+        minHoldSec: persisted.minHoldSec,
+        enableLossLimits: persisted.enableLossLimits,
+        dailyLossLimitPct: persisted.dailyLossLimitPct,
+        lifetimeLossLimitPct: persisted.lifetimeLossLimitPct,
+        lotPresetCards: persisted.lotPresetCards,
+        lotDropdownMax: persisted.lotDropdownMax,
+        updatedAt: nextUpdatedAt,
+      };
+    });
+  };
+
   const handleSaveRiskParams = (
+    section: TradeSettingsSaveSection,
     payload: Partial<GlobalSettings>,
     title: string,
     description: string,
   ) => {
-    globalSettingsMutation.mutate(payload, {
-      onSuccess: () => {
-        toast({
-          title,
-          description,
-        });
+    const expectedUpdatedAt =
+      typeof globalSettingsData?.updatedAt === "number"
+        ? globalSettingsData.updatedAt
+        : typeof riskParams.updatedAt === "number"
+          ? riskParams.updatedAt
+          : null;
+    if (expectedUpdatedAt === null) {
+      toast({
+        title: "Settings are stale",
+        description: "Refresh global settings and try saving again.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setPendingTradeSettingsSection(section);
+    globalSettingsMutation.mutate(
+      { ...payload, expectedUpdatedAt },
+      {
+        onSuccess: (persisted) => {
+          applyPersistedRiskParams(section, persisted);
+          toast({
+            title,
+            description,
+          });
+        },
+        onSettled: () => {
+          setPendingTradeSettingsSection((current) => (current === section ? null : current));
+        },
       },
-    });
+    );
   };
 
   const handleSaveCapitalSettings = () =>
     handleSaveRiskParams(
+      "capital",
       {
         defaultUserStartingBalanceUsd: riskParams.defaultUserStartingBalanceUsd,
         defaultUserStartingEquityUsd: riskParams.defaultUserStartingEquityUsd,
@@ -5575,6 +5692,7 @@ export default function AdminDashboard() {
 
   const handleSaveMarketHoursSettings = () =>
     handleSaveRiskParams(
+      "marketHours",
       {
         marketOpenTime: riskParams.marketOpenTime,
         marketCloseTime: riskParams.marketCloseTime,
@@ -5586,6 +5704,7 @@ export default function AdminDashboard() {
 
   const handleSaveDefaultRiskSettings = () =>
     handleSaveRiskParams(
+      "defaultRisk",
       {
         defaultLeverage: riskParams.defaultLeverage,
         maxPositionSize: riskParams.maxPositionSize,
@@ -5600,6 +5719,7 @@ export default function AdminDashboard() {
 
   const handleSaveOperationalRiskAndLotSettings = () =>
     handleSaveRiskParams(
+      "operationalRiskAndLot",
       {
         enableAutoClose: riskParams.enableAutoClose,
         autoCloseAfterDays: riskParams.autoCloseAfterDays,
@@ -5614,6 +5734,12 @@ export default function AdminDashboard() {
       "Operational Risk & Lot Settings Saved",
       "Auto-close, loss-limit, and lot presentation controls updated.",
     );
+
+  const isCapitalSettingsSaving = pendingTradeSettingsSection === "capital" && globalSettingsMutation.isPending;
+  const isMarketHoursSaving = pendingTradeSettingsSection === "marketHours" && globalSettingsMutation.isPending;
+  const isDefaultRiskSaving = pendingTradeSettingsSection === "defaultRisk" && globalSettingsMutation.isPending;
+  const isOperationalRiskAndLotSaving =
+    pendingTradeSettingsSection === "operationalRiskAndLot" && globalSettingsMutation.isPending;
 
   const handleEditSymbol = (symbol: SymbolConfig) => {
     setEditingSymbol(symbol);
@@ -7235,7 +7361,7 @@ export default function AdminDashboard() {
                           disabled={globalSettingsMutation.isPending}
                           className="shrink-0 w-full sm:w-auto text-xs sm:text-sm"
                         >
-                          {globalSettingsMutation.isPending ? "Saving..." : "Save"}
+                          {isCapitalSettingsSaving ? "Saving..." : "Save"}
                         </Button>
                       )}
                     </CardHeader>
@@ -7306,7 +7432,7 @@ export default function AdminDashboard() {
                           disabled={globalSettingsMutation.isPending}
                           className="shrink-0 w-full sm:w-auto text-xs sm:text-sm"
                         >
-                          {globalSettingsMutation.isPending ? "Saving..." : "Save"}
+                          {isMarketHoursSaving ? "Saving..." : "Save"}
                         </Button>
                       )}
                     </CardHeader>
@@ -7379,7 +7505,7 @@ export default function AdminDashboard() {
                           disabled={globalSettingsMutation.isPending}
                           className="shrink-0 w-full sm:w-auto text-xs sm:text-sm"
                         >
-                          {globalSettingsMutation.isPending ? "Saving..." : "Save"}
+                          {isDefaultRiskSaving ? "Saving..." : "Save"}
                         </Button>
                       )}
                     </CardHeader>
@@ -7621,7 +7747,7 @@ export default function AdminDashboard() {
                           disabled={globalSettingsMutation.isPending}
                           className="shrink-0 w-full sm:w-auto text-xs sm:text-sm"
                         >
-                          {globalSettingsMutation.isPending ? "Saving..." : "Save"}
+                          {isOperationalRiskAndLotSaving ? "Saving..." : "Save"}
                         </Button>
                       )}
                     </CardHeader>

@@ -1,0 +1,28 @@
+# Verification Walkthrough: Trade Settings Fixes
+
+I have audited the repository to verify the fixes outlined in the **Deep Audit Report: Trade Settings Tab** ([audit_report_trade_settings.md.resolved](file:///C:/Users/Rb/.gemini/antigravity/brain/b99f6457-255e-4266-8937-352c40be6be7/audit_report_trade_settings.md.resolved)). 
+
+Here are the verification results for the 5 remediation items:
+
+## 1. Fix DB Constraint Crash: ✅ VERIFIED
+The `PUT /api/admin/global-settings` endpoint in [server/routes/admin.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/admin.ts) has been updated to use `db.update(globalSettings).set(...).where(eq(globalSettings.id, 1))` when the `existing` flag is true, preventing the fatal PostgreSQL `Unique Constraint Violation` upon subsequent saves.
+
+## 2. Fix Audit Logging Gap: ✅ VERIFIED
+The endpoint now correctly emits a `GLOBAL_SETTINGS_RISK_UPDATED` event when critical risk parameters or market hours are mutated, fulfilling the compliance requirements.
+
+## 3. Implement Optimistic Concurrency: ✅ VERIFIED
+Optimistic concurrency control has been correctly implemented. 
+- The frontend ([AdminDashboard.tsx](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/pages/AdminDashboard.tsx/wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/pages/AdminDashboard.tsx)) includes the `expectedUpdatedAt` timestamp in the request payload.
+- The backend ([server/routes/admin.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/admin.ts)) validates this timestamp and correctly rejects the request with a **409 Conflict** if the database state has drifted.
+
+## 4. Refactor Rate Limiter: ❌ FAILED / MISSING
+The transient Node.js `Map` (`globalSettingsUpdateMsByAdminId`) was removed, but it was **not** replaced with a Redis-backed rate limiter as mandated. The endpoint currently allows unrestricted API calls, bypassing spam-delay protections entirely in a multi-node environment.
+
+## 5. Schema Unification & Dejunking: ❌ FAILED / MISSING
+The massive 400+ line procedural controller in [server/routes/admin.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/admin.ts) for the `PUT /api/admin/global-settings` endpoint remains intact. It still relies on verbose, inline parsing functions ([parseNum](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/admin.ts#247-252), [parseBool](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/admin.ts#253-263), [clampInt](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/admin.ts#1127-1132), etc.) and does not use the `insertGlobalSettingsSchema.parse()` pipeline to enforce unified Zod validation.
+
+---
+
+> [!WARNING]
+> Please review the missing implementations.
+> Does the user require these missing items (Rate Limiter & Schema Dejunking) to be implemented before we can proceed, or should we close the task?

@@ -1,7 +1,20 @@
 import { Express, Request, Response } from "express";
 import { storage } from "../storage";
 import { requireAdmin } from "../middleware/auth";
-import { insertUserSettingsSchema, insertSymbolConfigSchema, tradeAudit, orderIntentAudit, globalSettings, systemConfig, marketDataProviders, userAdminNotes, userKycProfiles, userVerification, userPayoutProfiles, signupWaitlist } from "@shared/schema";
+import {
+  insertUserSettingsSchema,
+  insertSymbolConfigSchema,
+  tradeAudit,
+  orderIntentAudit,
+  globalSettings,
+  systemConfig,
+  marketDataProviders,
+  userAdminNotes,
+  userKycProfiles,
+  userVerification,
+  userPayoutProfiles,
+  signupWaitlist,
+} from "@shared/schema";
 import { db, dbClient } from "../../db";
 import { eq, sql, desc, and, gte, inArray, like, or, isNull } from "drizzle-orm";
 import { trades, users, symbolConfigs, userSettings } from "@shared/schema";
@@ -31,12 +44,16 @@ import { canonicalizeInstrumentCategory, normalizeInstrumentCategory } from "@sh
 import { createNotification, sendKycMailboxMessage } from "../services/messaging";
 import { invalidateRememberMeConfigCache } from "../services/rememberMe";
 import { applyAdminScopeSession } from "../security/adminScopeSession";
+import { consumeGlobalSettingsUpdateRateLimit } from "../security/globalSettingsRateLimit";
+import {
+  buildDefaultGlobalSettingsWrite,
+  buildGlobalSettingsPerformanceSnapshot,
+  buildGlobalSettingsRiskSnapshot,
+  parseGlobalSettingsUpdateInput,
+  resolveGlobalSettingsWrite,
+} from "../services/globalSettingsAdmin";
 
 let traderScoutCategoryLiveBusSubscribed = false;
-type GlobalPrefetchStrategy = "all" | "critical" | "none";
-const GLOBAL_PREFETCH_STRATEGIES = new Set<GlobalPrefetchStrategy>(["all", "critical", "none"]);
-const GLOBAL_SETTINGS_UPDATE_MIN_INTERVAL_MS = 500;
-const globalSettingsUpdateMsByAdminId = new Map<number, number>();
 const VIEW_AS_START_RATE_WINDOW_MS = 5 * 60 * 1000;
 const VIEW_AS_START_RATE_LIMIT = 10;
 
@@ -85,17 +102,6 @@ const viewAsStartRateCleanupTimer = setInterval(() => {
   }
 }, 2 * 60 * 1000);
 viewAsStartRateCleanupTimer.unref?.();
-
-function normalizeGlobalPrefetchStrategy(
-  value: unknown,
-  fallback: GlobalPrefetchStrategy = "all",
-): GlobalPrefetchStrategy {
-  const normalized = String(value ?? fallback).trim().toLowerCase();
-  if (GLOBAL_PREFETCH_STRATEGIES.has(normalized as GlobalPrefetchStrategy)) {
-    return normalized as GlobalPrefetchStrategy;
-  }
-  return fallback;
-}
 
 function getParam(value: string | string[]): string {
   return Array.isArray(value) ? value[0] : value;
@@ -2287,65 +2293,22 @@ FROM (
   // GLOBAL SETTINGS ROUTES
 
   // Get global settings
-  app.get("/api/admin/global-settings", requireAdmin, async (req: Request, res: Response) => {
+  app.get("/api/admin/global-settings", requireAdmin, async (_req: Request, res: Response) => {
     try {
       const settings = await db.query.globalSettings.findFirst({
-        where: eq(globalSettings.id, 1)
+        where: eq(globalSettings.id, 1),
       });
 
       // If no settings exist, insert a default row and return it
       if (!settings) {
+        const defaults = buildDefaultGlobalSettingsWrite(Math.floor(Date.now() / 1000));
         await db.insert(globalSettings).values({
           id: 1,
-          defaultLeverage: 50,
-          maxPositionSize: 100000,
-          maxTradesPerUser: 10,
-          maxTradesPerInstrument: 3,
-          maxConcurrentLots: 50,
-          marketOpenTime: "09:00",
-          marketCloseTime: "17:00",
-          allowWeekendTrading: false,
-          enableAutoClose: true,
-          autoCloseAfterDays: 4,
-          autoCloseCheckFrequencyMinutes: 60,
-          minHoldSec: 60,
-          enableLossLimits: true,
-          dailyLossLimitPct: 10,
-          lifetimeLossLimitPct: 20,
-          defaultUserStartingBalanceUsd: 1000000,
-          defaultUserStartingEquityUsd: 1000000,
-          defaultChallengeVirtualCapitalUsd: 100000,
-          restFallbackPollMs: 500,
-          wsPushFrequencyMs: 0,
-          quoteFlushIntervalMs: 50,
-          maxWsReconnectAttempts: 30,
-          wsReconnectBaseDelayMs: 1500,
-          prefetchStrategy: "all",
-          prefetchMaxConcurrency: 4,
-          prefetchStartDelayMs: 0,
-          prefetchFastConcurrencyCap: 3,
-          prefetchModerateConcurrencyCap: 2,
-          prefetchConstrainedConcurrencyCap: 1,
-          prefetchNetworkFastStartDelayMs: 75,
-          prefetchNetworkModerateStartDelayMs: 200,
-          prefetchNetworkConstrainedStartDelayMs: 450,
-          prefetchDeviceModerateStartDelayMs: 50,
-          prefetchDeviceConstrainedStartDelayMs: 150,
-          prefetchDeviceMinimalStartDelayMs: 300,
-          pollInstantMs: 200,
-          pollFastMs: 500,
-          pollModerateMs: 1500,
-          pollConstrainedMs: 4000,
-          pollMinimalMs: 6000,
-          flushInstantMs: 50,
-          flushFastMs: 150,
-          flushModerateMs: 300,
-          flushConstrainedMs: 500,
-          flushMinimalMs: 1000,
+          ...defaults,
         });
 
         const newSettings = await db.query.globalSettings.findFirst({
-          where: eq(globalSettings.id, 1)
+          where: eq(globalSettings.id, 1),
         });
         return res.json(newSettings);
       }
@@ -2357,855 +2320,142 @@ FROM (
     }
   });
 
-  // Update global settings with safe parsing
+  // Update global settings
   app.put("/api/admin/global-settings", requireAdmin, async (req: Request, res: Response) => {
     try {
-      const body = req.body ?? {};
-      const ABSOLUTE_MAX_LOTS = 50;
-      const nowMs = Date.now();
-      const actorAdminId = Number(req.session?.userId ?? 0);
+      const parsedInput = parseGlobalSettingsUpdateInput(req.body ?? {});
+      if (!parsedInput.ok) {
+        return res.status(400).json({ message: parsedInput.message });
+      }
+      const { expectedUpdatedAt, next } = parsedInput;
+
+      const actorAdminId = Number((req.session as any)?.userId ?? 0);
       if (Number.isFinite(actorAdminId) && actorAdminId > 0) {
-        const lastUpdateMs = globalSettingsUpdateMsByAdminId.get(actorAdminId) ?? 0;
-        if (nowMs - lastUpdateMs < GLOBAL_SETTINGS_UPDATE_MIN_INTERVAL_MS) {
-          return res.status(429).json({ message: "Please wait before saving global settings again." });
+        const rate = await consumeGlobalSettingsUpdateRateLimit(actorAdminId);
+        if (!rate.allowed) {
+          const auditCtx = buildAuditContext(req);
+          res.setHeader("Retry-After", String(rate.retryAfterSec));
+          appendIdentityAudit({
+            userId: typeof auditCtx.actorUserId === "number" ? auditCtx.actorUserId : null,
+            category: "admin",
+            type: "GLOBAL_SETTINGS_UPDATE_RATE_LIMITED",
+            title: "Global settings update blocked by rate limit",
+            description: "Admin attempted to update global settings too frequently.",
+            ip: auditCtx.ip,
+            userAgent: auditCtx.userAgent,
+            actorAdminId: typeof auditCtx.actorUserId === "number" ? auditCtx.actorUserId : null,
+            actorType: "ADMIN",
+            actorUserId: typeof auditCtx.actorUserId === "number" ? auditCtx.actorUserId : null,
+            sessionId: auditCtx.sessionId,
+            correlationId: auditCtx.correlationId,
+            data: {
+              retryAfterSec: rate.retryAfterSec,
+            },
+          });
+          return res.status(429).json({
+            message: "Too many global settings updates. Please retry shortly.",
+            retryAfterSec: rate.retryAfterSec,
+          });
         }
-      }
-
-      // Safe parsing functions
-      const parseNum = (v: any): number | undefined => {
-        if (v === null || v === undefined || v === "") return undefined;
-        const n = typeof v === "number" ? v : Number(v);
-        return Number.isFinite(n) ? n : undefined;
-      };
-
-      const parseBool = (v: any): boolean | undefined => {
-        if (v === null || v === undefined) return undefined;
-        if (typeof v === "boolean") return v;
-        if (typeof v === "string") {
-          const s = v.trim().toLowerCase();
-          if (s === "true") return true;
-          if (s === "false") return false;
-        }
-        return undefined;
-      };
-
-      const parseTime = (v: any): string | undefined => {
-        if (v === null || v === undefined || v === "") return undefined;
-        const s = String(v).trim();
-        const m = /^(\d{2}):(\d{2})$/.exec(s);
-        if (!m) return undefined;
-        const hh = Number(m[1]);
-        const mm = Number(m[2]);
-        if (hh < 0 || hh > 23 || mm < 0 || mm > 59) return undefined;
-        return `${m[1]}:${m[2]}`;
-      };
-
-      const parsePrefetchStrategy = (v: any): GlobalPrefetchStrategy | undefined => {
-        if (v === null || v === undefined || v === "") return undefined;
-        const normalized = String(v).trim().toLowerCase();
-        if (!GLOBAL_PREFETCH_STRATEGIES.has(normalized as GlobalPrefetchStrategy)) return undefined;
-        return normalized as GlobalPrefetchStrategy;
-      };
-
-      const clampInt = (value: unknown, min: number, max: number, fallback: number) => {
-        const n = typeof value === "number" ? value : Number(value);
-        if (!Number.isFinite(n)) return fallback;
-        return Math.min(max, Math.max(min, Math.trunc(n)));
-      };
-
-      const parsePresetCards = (raw: string): number[] => {
-        const parsed = JSON.parse(raw);
-        if (!Array.isArray(parsed)) throw new Error("lotPresetCards must be a JSON array");
-        return parsed
-          .map((v) => (typeof v === "number" ? v : Number(v)))
-          .filter((n) => Number.isFinite(n))
-          .map((n) => Math.trunc(n));
-      };
-
-      const sanitizePresetCards = (values: number[], max: number): number[] => {
-        const filtered = values.filter((n) => n >= 1 && n <= max);
-        const unique = Array.from(new Set(filtered));
-        unique.sort((a, b) => a - b);
-        if (unique.length > 0) return unique;
-        const fallback = [1, 5, 10, 25, 50].filter((n) => n <= max);
-        return fallback.length > 0 ? fallback : [1];
-      };
-
-      const next = {
-        defaultLeverage: parseNum(body.defaultLeverage),
-        maxPositionSize: parseNum(body.maxPositionSize),
-        maxTradesPerUser: parseNum(body.maxTradesPerUser),
-        maxTradesPerInstrument: parseNum(body.maxTradesPerInstrument),
-        maxConcurrentLots: parseNum(body.maxConcurrentLots),
-        minPriceDistancePips: parseNum(body.minPriceDistancePips),
-        marketOpenTime: parseTime(body.marketOpenTime),
-        marketCloseTime: parseTime(body.marketCloseTime),
-        allowWeekendTrading: parseBool(body.allowWeekendTrading),
-        enableAutoClose: parseBool(body.enableAutoClose),
-        autoCloseAfterDays: parseNum(body.autoCloseAfterDays),
-        autoCloseCheckFrequencyMinutes: parseNum(body.autoCloseCheckFrequencyMinutes),
-        minHoldSec: parseNum(body.minHoldSec),
-        enableLossLimits: parseBool(body.enableLossLimits),
-        dailyLossLimitPct: parseNum(body.dailyLossLimitPct),
-        lifetimeLossLimitPct: parseNum(body.lifetimeLossLimitPct),
-        defaultUserStartingBalanceUsd: parseNum(body.defaultUserStartingBalanceUsd),
-        defaultUserStartingEquityUsd: parseNum(body.defaultUserStartingEquityUsd),
-        defaultChallengeVirtualCapitalUsd: parseNum(body.defaultChallengeVirtualCapitalUsd),
-        // Visual Lot Settings
-        lotPresetCards: typeof body.lotPresetCards === "string" ? body.lotPresetCards : undefined,
-        lotDropdownMax: parseNum(body.lotDropdownMax),
-        // Performance settings
-        restFallbackPollMs: parseNum(body.restFallbackPollMs),
-        wsPushFrequencyMs: parseNum(body.wsPushFrequencyMs),
-        quoteFlushIntervalMs: parseNum(body.quoteFlushIntervalMs),
-        maxWsReconnectAttempts: parseNum(body.maxWsReconnectAttempts),
-        wsReconnectBaseDelayMs: parseNum(body.wsReconnectBaseDelayMs),
-        prefetchStrategy: parsePrefetchStrategy(body.prefetchStrategy),
-        prefetchMaxConcurrency: parseNum(body.prefetchMaxConcurrency),
-        prefetchStartDelayMs: parseNum(body.prefetchStartDelayMs),
-        prefetchFastConcurrencyCap: parseNum(body.prefetchFastConcurrencyCap),
-        prefetchModerateConcurrencyCap: parseNum(body.prefetchModerateConcurrencyCap),
-        prefetchConstrainedConcurrencyCap: parseNum(body.prefetchConstrainedConcurrencyCap),
-        prefetchNetworkFastStartDelayMs: parseNum(body.prefetchNetworkFastStartDelayMs),
-        prefetchNetworkModerateStartDelayMs: parseNum(body.prefetchNetworkModerateStartDelayMs),
-        prefetchNetworkConstrainedStartDelayMs: parseNum(body.prefetchNetworkConstrainedStartDelayMs),
-        prefetchDeviceModerateStartDelayMs: parseNum(body.prefetchDeviceModerateStartDelayMs),
-        prefetchDeviceConstrainedStartDelayMs: parseNum(body.prefetchDeviceConstrainedStartDelayMs),
-        prefetchDeviceMinimalStartDelayMs: parseNum(body.prefetchDeviceMinimalStartDelayMs),
-        pollInstantMs: parseNum(body.pollInstantMs),
-        pollFastMs: parseNum(body.pollFastMs),
-        pollModerateMs: parseNum(body.pollModerateMs),
-        pollConstrainedMs: parseNum(body.pollConstrainedMs),
-        pollMinimalMs: parseNum(body.pollMinimalMs),
-        flushInstantMs: parseNum(body.flushInstantMs),
-        flushFastMs: parseNum(body.flushFastMs),
-        flushModerateMs: parseNum(body.flushModerateMs),
-        flushConstrainedMs: parseNum(body.flushConstrainedMs),
-        flushMinimalMs: parseNum(body.flushMinimalMs),
-      };
-
-      const ensureNumericInput = (field: string, raw: unknown, parsed: number | undefined) => {
-        if (raw === undefined || raw === null || raw === "") return null;
-        if (parsed === undefined) return `${field} must be numeric`;
-        return null;
-      };
-
-      const numericValidationErrors = [
-        ensureNumericInput("restFallbackPollMs", body.restFallbackPollMs, next.restFallbackPollMs),
-        ensureNumericInput("wsPushFrequencyMs", body.wsPushFrequencyMs, next.wsPushFrequencyMs),
-        ensureNumericInput("quoteFlushIntervalMs", body.quoteFlushIntervalMs, next.quoteFlushIntervalMs),
-        ensureNumericInput("maxWsReconnectAttempts", body.maxWsReconnectAttempts, next.maxWsReconnectAttempts),
-        ensureNumericInput("wsReconnectBaseDelayMs", body.wsReconnectBaseDelayMs, next.wsReconnectBaseDelayMs),
-        ensureNumericInput("prefetchMaxConcurrency", body.prefetchMaxConcurrency, next.prefetchMaxConcurrency),
-        ensureNumericInput("prefetchStartDelayMs", body.prefetchStartDelayMs, next.prefetchStartDelayMs),
-        ensureNumericInput("prefetchFastConcurrencyCap", body.prefetchFastConcurrencyCap, next.prefetchFastConcurrencyCap),
-        ensureNumericInput(
-          "prefetchModerateConcurrencyCap",
-          body.prefetchModerateConcurrencyCap,
-          next.prefetchModerateConcurrencyCap,
-        ),
-        ensureNumericInput(
-          "prefetchConstrainedConcurrencyCap",
-          body.prefetchConstrainedConcurrencyCap,
-          next.prefetchConstrainedConcurrencyCap,
-        ),
-        ensureNumericInput(
-          "prefetchNetworkFastStartDelayMs",
-          body.prefetchNetworkFastStartDelayMs,
-          next.prefetchNetworkFastStartDelayMs,
-        ),
-        ensureNumericInput(
-          "prefetchNetworkModerateStartDelayMs",
-          body.prefetchNetworkModerateStartDelayMs,
-          next.prefetchNetworkModerateStartDelayMs,
-        ),
-        ensureNumericInput(
-          "prefetchNetworkConstrainedStartDelayMs",
-          body.prefetchNetworkConstrainedStartDelayMs,
-          next.prefetchNetworkConstrainedStartDelayMs,
-        ),
-        ensureNumericInput(
-          "prefetchDeviceModerateStartDelayMs",
-          body.prefetchDeviceModerateStartDelayMs,
-          next.prefetchDeviceModerateStartDelayMs,
-        ),
-        ensureNumericInput(
-          "prefetchDeviceConstrainedStartDelayMs",
-          body.prefetchDeviceConstrainedStartDelayMs,
-          next.prefetchDeviceConstrainedStartDelayMs,
-        ),
-        ensureNumericInput(
-          "prefetchDeviceMinimalStartDelayMs",
-          body.prefetchDeviceMinimalStartDelayMs,
-          next.prefetchDeviceMinimalStartDelayMs,
-        ),
-        ensureNumericInput("pollInstantMs", body.pollInstantMs, next.pollInstantMs),
-        ensureNumericInput("pollFastMs", body.pollFastMs, next.pollFastMs),
-        ensureNumericInput("pollModerateMs", body.pollModerateMs, next.pollModerateMs),
-        ensureNumericInput("pollConstrainedMs", body.pollConstrainedMs, next.pollConstrainedMs),
-        ensureNumericInput("pollMinimalMs", body.pollMinimalMs, next.pollMinimalMs),
-        ensureNumericInput("flushInstantMs", body.flushInstantMs, next.flushInstantMs),
-        ensureNumericInput("flushFastMs", body.flushFastMs, next.flushFastMs),
-        ensureNumericInput("flushModerateMs", body.flushModerateMs, next.flushModerateMs),
-        ensureNumericInput("flushConstrainedMs", body.flushConstrainedMs, next.flushConstrainedMs),
-        ensureNumericInput("flushMinimalMs", body.flushMinimalMs, next.flushMinimalMs),
-        ensureNumericInput(
-          "defaultUserStartingBalanceUsd",
-          body.defaultUserStartingBalanceUsd,
-          next.defaultUserStartingBalanceUsd,
-        ),
-        ensureNumericInput(
-          "defaultUserStartingEquityUsd",
-          body.defaultUserStartingEquityUsd,
-          next.defaultUserStartingEquityUsd,
-        ),
-        ensureNumericInput(
-          "defaultChallengeVirtualCapitalUsd",
-          body.defaultChallengeVirtualCapitalUsd,
-          next.defaultChallengeVirtualCapitalUsd,
-        ),
-      ].filter(Boolean);
-      if (numericValidationErrors.length > 0) {
-        return res.status(400).json({ message: numericValidationErrors[0] });
-      }
-
-      const ensureRange = (field: string, value: number | undefined, min: number, max: number) => {
-        if (value === undefined) return null;
-        if (value < min || value > max) return `${field} must be between ${min} and ${max}`;
-        return null;
-      };
-      const rangeValidationErrors = [
-        ensureRange("restFallbackPollMs", next.restFallbackPollMs, 100, 60_000),
-        ensureRange("wsPushFrequencyMs", next.wsPushFrequencyMs, 0, 1_000),
-        ensureRange("quoteFlushIntervalMs", next.quoteFlushIntervalMs, 20, 5_000),
-        ensureRange("maxWsReconnectAttempts", next.maxWsReconnectAttempts, 1, 30),
-        ensureRange("wsReconnectBaseDelayMs", next.wsReconnectBaseDelayMs, 100, 30_000),
-        ensureRange("prefetchMaxConcurrency", next.prefetchMaxConcurrency, 1, 6),
-        ensureRange("prefetchStartDelayMs", next.prefetchStartDelayMs, 0, 15_000),
-        ensureRange("prefetchFastConcurrencyCap", next.prefetchFastConcurrencyCap, 1, 6),
-        ensureRange("prefetchModerateConcurrencyCap", next.prefetchModerateConcurrencyCap, 1, 6),
-        ensureRange("prefetchConstrainedConcurrencyCap", next.prefetchConstrainedConcurrencyCap, 1, 6),
-        ensureRange("prefetchNetworkFastStartDelayMs", next.prefetchNetworkFastStartDelayMs, 0, 15_000),
-        ensureRange("prefetchNetworkModerateStartDelayMs", next.prefetchNetworkModerateStartDelayMs, 0, 15_000),
-        ensureRange(
-          "prefetchNetworkConstrainedStartDelayMs",
-          next.prefetchNetworkConstrainedStartDelayMs,
-          0,
-          15_000,
-        ),
-        ensureRange("prefetchDeviceModerateStartDelayMs", next.prefetchDeviceModerateStartDelayMs, 0, 15_000),
-        ensureRange(
-          "prefetchDeviceConstrainedStartDelayMs",
-          next.prefetchDeviceConstrainedStartDelayMs,
-          0,
-          15_000,
-        ),
-        ensureRange("prefetchDeviceMinimalStartDelayMs", next.prefetchDeviceMinimalStartDelayMs, 0, 15_000),
-        ensureRange("pollInstantMs", next.pollInstantMs, 100, 60_000),
-        ensureRange("pollFastMs", next.pollFastMs, 100, 60_000),
-        ensureRange("pollModerateMs", next.pollModerateMs, 100, 60_000),
-        ensureRange("pollConstrainedMs", next.pollConstrainedMs, 100, 60_000),
-        ensureRange("pollMinimalMs", next.pollMinimalMs, 100, 60_000),
-        ensureRange("flushInstantMs", next.flushInstantMs, 20, 5_000),
-        ensureRange("flushFastMs", next.flushFastMs, 20, 5_000),
-        ensureRange("flushModerateMs", next.flushModerateMs, 20, 5_000),
-        ensureRange("flushConstrainedMs", next.flushConstrainedMs, 20, 5_000),
-        ensureRange("flushMinimalMs", next.flushMinimalMs, 20, 5_000),
-        ensureRange("defaultUserStartingBalanceUsd", next.defaultUserStartingBalanceUsd, 1, 1_000_000_000),
-        ensureRange("defaultUserStartingEquityUsd", next.defaultUserStartingEquityUsd, 1, 1_000_000_000),
-        ensureRange("defaultChallengeVirtualCapitalUsd", next.defaultChallengeVirtualCapitalUsd, 1, 1_000_000_000),
-      ].filter(Boolean);
-      if (rangeValidationErrors.length > 0) {
-        return res.status(400).json({ message: rangeValidationErrors[0] });
       }
 
       const nowSec = Math.floor(Date.now() / 1000);
-
-      // Upsert the global settings (insert or update)
       const existing = await db.query.globalSettings.findFirst({
-        where: eq(globalSettings.id, 1)
+        where: eq(globalSettings.id, 1),
       });
-
-      if (body.prefetchStrategy !== undefined && next.prefetchStrategy === undefined) {
-        return res.status(400).json({ message: "prefetchStrategy must be one of: all, critical, none" });
+      if (existing) {
+        const currentUpdatedAt = typeof existing.updatedAt === "number" ? Math.trunc(existing.updatedAt) : null;
+        if (expectedUpdatedAt === undefined) {
+          return res.status(409).json({
+            message: "Global settings are stale. Refresh before saving.",
+            currentUpdatedAt,
+          });
+        }
+        if (currentUpdatedAt !== expectedUpdatedAt) {
+          return res.status(409).json({
+            message: "Global settings changed by another admin. Refresh and retry.",
+            currentUpdatedAt,
+          });
+        }
       }
 
-      const prevPerformance = {
-        restFallbackPollMs: clampInt(existing?.restFallbackPollMs ?? 500, 100, 60_000, 500),
-        wsPushFrequencyMs: clampInt(existing?.wsPushFrequencyMs ?? 0, 0, 1_000, 0),
-        quoteFlushIntervalMs: clampInt(existing?.quoteFlushIntervalMs ?? 50, 20, 5_000, 50),
-        maxWsReconnectAttempts: clampInt(existing?.maxWsReconnectAttempts ?? 30, 1, 30, 30),
-        wsReconnectBaseDelayMs: clampInt(existing?.wsReconnectBaseDelayMs ?? 1500, 100, 30_000, 1500),
-        prefetchStrategy: normalizeGlobalPrefetchStrategy(existing?.prefetchStrategy ?? "all"),
-        prefetchMaxConcurrency: clampInt(existing?.prefetchMaxConcurrency ?? 4, 1, 6, 4),
-        prefetchStartDelayMs: clampInt(existing?.prefetchStartDelayMs ?? 0, 0, 15_000, 0),
-        prefetchFastConcurrencyCap: clampInt(existing?.prefetchFastConcurrencyCap ?? 3, 1, 6, 3),
-        prefetchModerateConcurrencyCap: clampInt(existing?.prefetchModerateConcurrencyCap ?? 2, 1, 6, 2),
-        prefetchConstrainedConcurrencyCap: clampInt(existing?.prefetchConstrainedConcurrencyCap ?? 1, 1, 6, 1),
-        prefetchNetworkFastStartDelayMs: clampInt(existing?.prefetchNetworkFastStartDelayMs ?? 75, 0, 15_000, 75),
-        prefetchNetworkModerateStartDelayMs: clampInt(
-          existing?.prefetchNetworkModerateStartDelayMs ?? 200,
-          0,
-          15_000,
-          200,
-        ),
-        prefetchNetworkConstrainedStartDelayMs: clampInt(
-          existing?.prefetchNetworkConstrainedStartDelayMs ?? 450,
-          0,
-          15_000,
-          450,
-        ),
-        prefetchDeviceModerateStartDelayMs: clampInt(
-          existing?.prefetchDeviceModerateStartDelayMs ?? 50,
-          0,
-          15_000,
-          50,
-        ),
-        prefetchDeviceConstrainedStartDelayMs: clampInt(
-          existing?.prefetchDeviceConstrainedStartDelayMs ?? 150,
-          0,
-          15_000,
-          150,
-        ),
-        prefetchDeviceMinimalStartDelayMs: clampInt(
-          existing?.prefetchDeviceMinimalStartDelayMs ?? 300,
-          0,
-          15_000,
-          300,
-        ),
-        pollInstantMs: clampInt(existing?.pollInstantMs ?? 200, 100, 60_000, 200),
-        pollFastMs: clampInt(existing?.pollFastMs ?? 500, 100, 60_000, 500),
-        pollModerateMs: clampInt(existing?.pollModerateMs ?? 1500, 100, 60_000, 1500),
-        pollConstrainedMs: clampInt(existing?.pollConstrainedMs ?? 4000, 100, 60_000, 4000),
-        pollMinimalMs: clampInt(existing?.pollMinimalMs ?? 6000, 100, 60_000, 6000),
-        flushInstantMs: clampInt(existing?.flushInstantMs ?? 50, 20, 5_000, 50),
-        flushFastMs: clampInt(existing?.flushFastMs ?? 150, 20, 5_000, 150),
-        flushModerateMs: clampInt(existing?.flushModerateMs ?? 300, 20, 5_000, 300),
-        flushConstrainedMs: clampInt(existing?.flushConstrainedMs ?? 500, 20, 5_000, 500),
-        flushMinimalMs: clampInt(existing?.flushMinimalMs ?? 1000, 20, 5_000, 1000),
-      };
+      const prevRisk = buildGlobalSettingsRiskSnapshot(existing);
+      const prevPerformance = buildGlobalSettingsPerformanceSnapshot(existing);
 
-      let nextPerformance = { ...prevPerformance };
+      let resolvedWrite: ReturnType<typeof resolveGlobalSettingsWrite>;
+      try {
+        resolvedWrite = resolveGlobalSettingsWrite({
+          existing,
+          patch: next,
+          nowSec,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Invalid global settings payload";
+        return res.status(400).json({ message });
+      }
 
       if (existing) {
-        const effectiveLotDropdownMax = clampInt(
-          next.lotDropdownMax ?? existing.lotDropdownMax,
-          1,
-          ABSOLUTE_MAX_LOTS,
-          ABSOLUTE_MAX_LOTS
-        );
-        const effectiveDefaultUserStartingBalanceUsd = Math.max(
-          1,
-          Math.min(
-            1_000_000_000,
-            Number(next.defaultUserStartingBalanceUsd ?? existing.defaultUserStartingBalanceUsd ?? 1_000_000),
-          ),
-        );
-        const effectiveDefaultUserStartingEquityUsd = Math.max(
-          1,
-          Math.min(
-            1_000_000_000,
-            Number(
-              next.defaultUserStartingEquityUsd ??
-                existing.defaultUserStartingEquityUsd ??
-                effectiveDefaultUserStartingBalanceUsd,
-            ),
-          ),
-        );
-        const effectiveDefaultChallengeVirtualCapitalUsd = Math.max(
-          1,
-          Math.min(
-            1_000_000_000,
-            Number(next.defaultChallengeVirtualCapitalUsd ?? existing.defaultChallengeVirtualCapitalUsd ?? 100_000),
-          ),
-        );
-        const effectiveMinPriceDistancePips = clampInt(
-          next.minPriceDistancePips ?? existing.minPriceDistancePips ?? 20,
-          1,
-          10_000,
-          20
-        );
-
-        let presetValues: number[] = [];
-        const rawPresets = next.lotPresetCards ?? existing.lotPresetCards;
-        if (typeof rawPresets === "string") {
-          try {
-            presetValues = parsePresetCards(rawPresets);
-          } catch (e) {
-            if (next.lotPresetCards !== undefined) {
-              return res.status(400).json({ message: "Invalid lotPresetCards JSON array" });
-            }
-            presetValues = [];
-          }
-        }
-        const effectiveLotPresetCards = JSON.stringify(
-          sanitizePresetCards(presetValues, effectiveLotDropdownMax)
-        );
-
-        const effectiveRestFallbackPollMs = clampInt(
-          next.restFallbackPollMs ?? existing.restFallbackPollMs ?? 500,
-          100,
-          60_000,
-          500
-        );
-        const effectiveWsPushFrequencyMs = clampInt(
-          next.wsPushFrequencyMs ?? existing.wsPushFrequencyMs ?? 0,
-          0,
-          1_000,
-          0
-        );
-        const effectiveQuoteFlushIntervalMs = clampInt(
-          next.quoteFlushIntervalMs ?? existing.quoteFlushIntervalMs ?? 50,
-          20,
-          5_000,
-          50
-        );
-        const effectiveMaxWsReconnectAttempts = clampInt(
-          next.maxWsReconnectAttempts ?? existing.maxWsReconnectAttempts ?? 30,
-          1,
-          30,
-          30
-        );
-        const effectiveWsReconnectBaseDelayMs = clampInt(
-          next.wsReconnectBaseDelayMs ?? existing.wsReconnectBaseDelayMs ?? 1500,
-          100,
-          30_000,
-          1500
-        );
-        const effectivePrefetchStrategy = normalizeGlobalPrefetchStrategy(
-          next.prefetchStrategy ?? existing.prefetchStrategy ?? "all"
-        );
-        const effectivePrefetchMaxConcurrency = clampInt(
-          next.prefetchMaxConcurrency ?? existing.prefetchMaxConcurrency ?? 4,
-          1,
-          6,
-          4
-        );
-        const effectivePrefetchStartDelayMs = clampInt(
-          next.prefetchStartDelayMs ?? existing.prefetchStartDelayMs ?? 0,
-          0,
-          15_000,
-          0
-        );
-        const effectivePrefetchFastConcurrencyCap = clampInt(
-          next.prefetchFastConcurrencyCap ?? existing.prefetchFastConcurrencyCap ?? 3,
-          1,
-          6,
-          3
-        );
-        const effectivePrefetchModerateConcurrencyCap = clampInt(
-          next.prefetchModerateConcurrencyCap ?? existing.prefetchModerateConcurrencyCap ?? 2,
-          1,
-          6,
-          2
-        );
-        const effectivePrefetchConstrainedConcurrencyCap = clampInt(
-          next.prefetchConstrainedConcurrencyCap ?? existing.prefetchConstrainedConcurrencyCap ?? 1,
-          1,
-          6,
-          1
-        );
-        const effectivePrefetchNetworkFastStartDelayMs = clampInt(
-          next.prefetchNetworkFastStartDelayMs ?? existing.prefetchNetworkFastStartDelayMs ?? 75,
-          0,
-          15_000,
-          75
-        );
-        const effectivePrefetchNetworkModerateStartDelayMs = clampInt(
-          next.prefetchNetworkModerateStartDelayMs ?? existing.prefetchNetworkModerateStartDelayMs ?? 200,
-          0,
-          15_000,
-          200
-        );
-        const effectivePrefetchNetworkConstrainedStartDelayMs = clampInt(
-          next.prefetchNetworkConstrainedStartDelayMs ?? existing.prefetchNetworkConstrainedStartDelayMs ?? 450,
-          0,
-          15_000,
-          450
-        );
-        const effectivePrefetchDeviceModerateStartDelayMs = clampInt(
-          next.prefetchDeviceModerateStartDelayMs ?? existing.prefetchDeviceModerateStartDelayMs ?? 50,
-          0,
-          15_000,
-          50
-        );
-        const effectivePrefetchDeviceConstrainedStartDelayMs = clampInt(
-          next.prefetchDeviceConstrainedStartDelayMs ?? existing.prefetchDeviceConstrainedStartDelayMs ?? 150,
-          0,
-          15_000,
-          150
-        );
-        const effectivePrefetchDeviceMinimalStartDelayMs = clampInt(
-          next.prefetchDeviceMinimalStartDelayMs ?? existing.prefetchDeviceMinimalStartDelayMs ?? 300,
-          0,
-          15_000,
-          300
-        );
-        const effectivePollInstantMs = clampInt(
-          next.pollInstantMs ?? existing.pollInstantMs ?? 200,
-          100,
-          60_000,
-          200
-        );
-        const effectivePollFastMs = clampInt(
-          next.pollFastMs ?? existing.pollFastMs ?? 500,
-          100,
-          60_000,
-          500
-        );
-        const effectivePollModerateMs = clampInt(
-          next.pollModerateMs ?? existing.pollModerateMs ?? 1500,
-          100,
-          60_000,
-          1500
-        );
-        const effectivePollConstrainedMs = clampInt(
-          next.pollConstrainedMs ?? existing.pollConstrainedMs ?? 4000,
-          100,
-          60_000,
-          4000
-        );
-        const effectivePollMinimalMs = clampInt(
-          next.pollMinimalMs ?? existing.pollMinimalMs ?? 6000,
-          100,
-          60_000,
-          6000
-        );
-        const effectiveFlushInstantMs = clampInt(
-          next.flushInstantMs ?? existing.flushInstantMs ?? 50,
-          20,
-          5_000,
-          50
-        );
-        const effectiveFlushFastMs = clampInt(
-          next.flushFastMs ?? existing.flushFastMs ?? 150,
-          20,
-          5_000,
-          150
-        );
-        const effectiveFlushModerateMs = clampInt(
-          next.flushModerateMs ?? existing.flushModerateMs ?? 300,
-          20,
-          5_000,
-          300
-        );
-        const effectiveFlushConstrainedMs = clampInt(
-          next.flushConstrainedMs ?? existing.flushConstrainedMs ?? 500,
-          20,
-          5_000,
-          500
-        );
-        const effectiveFlushMinimalMs = clampInt(
-          next.flushMinimalMs ?? existing.flushMinimalMs ?? 1000,
-          20,
-          5_000,
-          1000
-        );
-        nextPerformance = {
-          restFallbackPollMs: effectiveRestFallbackPollMs,
-          wsPushFrequencyMs: effectiveWsPushFrequencyMs,
-          quoteFlushIntervalMs: effectiveQuoteFlushIntervalMs,
-          maxWsReconnectAttempts: effectiveMaxWsReconnectAttempts,
-          wsReconnectBaseDelayMs: effectiveWsReconnectBaseDelayMs,
-          prefetchStrategy: effectivePrefetchStrategy,
-          prefetchMaxConcurrency: effectivePrefetchMaxConcurrency,
-          prefetchStartDelayMs: effectivePrefetchStartDelayMs,
-          prefetchFastConcurrencyCap: effectivePrefetchFastConcurrencyCap,
-          prefetchModerateConcurrencyCap: effectivePrefetchModerateConcurrencyCap,
-          prefetchConstrainedConcurrencyCap: effectivePrefetchConstrainedConcurrencyCap,
-          prefetchNetworkFastStartDelayMs: effectivePrefetchNetworkFastStartDelayMs,
-          prefetchNetworkModerateStartDelayMs: effectivePrefetchNetworkModerateStartDelayMs,
-          prefetchNetworkConstrainedStartDelayMs: effectivePrefetchNetworkConstrainedStartDelayMs,
-          prefetchDeviceModerateStartDelayMs: effectivePrefetchDeviceModerateStartDelayMs,
-          prefetchDeviceConstrainedStartDelayMs: effectivePrefetchDeviceConstrainedStartDelayMs,
-          prefetchDeviceMinimalStartDelayMs: effectivePrefetchDeviceMinimalStartDelayMs,
-          pollInstantMs: effectivePollInstantMs,
-          pollFastMs: effectivePollFastMs,
-          pollModerateMs: effectivePollModerateMs,
-          pollConstrainedMs: effectivePollConstrainedMs,
-          pollMinimalMs: effectivePollMinimalMs,
-          flushInstantMs: effectiveFlushInstantMs,
-          flushFastMs: effectiveFlushFastMs,
-          flushModerateMs: effectiveFlushModerateMs,
-          flushConstrainedMs: effectiveFlushConstrainedMs,
-          flushMinimalMs: effectiveFlushMinimalMs,
-        };
-
-        await db.update(globalSettings)
-          .set({
-            defaultLeverage: next.defaultLeverage ?? existing.defaultLeverage,
-            maxPositionSize: next.maxPositionSize ?? existing.maxPositionSize,
-            maxTradesPerUser: next.maxTradesPerUser ?? existing.maxTradesPerUser,
-            maxTradesPerInstrument: next.maxTradesPerInstrument ?? existing.maxTradesPerInstrument,
-            maxConcurrentLots: next.maxConcurrentLots ?? existing.maxConcurrentLots,
-            minPriceDistancePips: effectiveMinPriceDistancePips,
-            marketOpenTime: next.marketOpenTime ?? existing.marketOpenTime,
-            marketCloseTime: next.marketCloseTime ?? existing.marketCloseTime,
-            allowWeekendTrading: next.allowWeekendTrading ?? existing.allowWeekendTrading,
-            enableAutoClose: next.enableAutoClose ?? existing.enableAutoClose,
-            autoCloseAfterDays: next.autoCloseAfterDays ?? existing.autoCloseAfterDays,
-            autoCloseCheckFrequencyMinutes: next.autoCloseCheckFrequencyMinutes ?? existing.autoCloseCheckFrequencyMinutes,
-            minHoldSec: next.minHoldSec ?? existing.minHoldSec,
-            enableLossLimits: next.enableLossLimits ?? existing.enableLossLimits,
-            dailyLossLimitPct: next.dailyLossLimitPct ?? existing.dailyLossLimitPct,
-            lifetimeLossLimitPct: next.lifetimeLossLimitPct ?? existing.lifetimeLossLimitPct,
-            defaultUserStartingBalanceUsd: effectiveDefaultUserStartingBalanceUsd,
-            defaultUserStartingEquityUsd: effectiveDefaultUserStartingEquityUsd,
-            defaultChallengeVirtualCapitalUsd: effectiveDefaultChallengeVirtualCapitalUsd,
-            lotPresetCards: effectiveLotPresetCards,
-            lotDropdownMax: effectiveLotDropdownMax,
-            restFallbackPollMs: effectiveRestFallbackPollMs,
-            wsPushFrequencyMs: effectiveWsPushFrequencyMs,
-            quoteFlushIntervalMs: effectiveQuoteFlushIntervalMs,
-            maxWsReconnectAttempts: effectiveMaxWsReconnectAttempts,
-            wsReconnectBaseDelayMs: effectiveWsReconnectBaseDelayMs,
-            prefetchStrategy: effectivePrefetchStrategy,
-            prefetchMaxConcurrency: effectivePrefetchMaxConcurrency,
-            prefetchStartDelayMs: effectivePrefetchStartDelayMs,
-            prefetchFastConcurrencyCap: effectivePrefetchFastConcurrencyCap,
-            prefetchModerateConcurrencyCap: effectivePrefetchModerateConcurrencyCap,
-            prefetchConstrainedConcurrencyCap: effectivePrefetchConstrainedConcurrencyCap,
-            prefetchNetworkFastStartDelayMs: effectivePrefetchNetworkFastStartDelayMs,
-            prefetchNetworkModerateStartDelayMs: effectivePrefetchNetworkModerateStartDelayMs,
-            prefetchNetworkConstrainedStartDelayMs: effectivePrefetchNetworkConstrainedStartDelayMs,
-            prefetchDeviceModerateStartDelayMs: effectivePrefetchDeviceModerateStartDelayMs,
-            prefetchDeviceConstrainedStartDelayMs: effectivePrefetchDeviceConstrainedStartDelayMs,
-            prefetchDeviceMinimalStartDelayMs: effectivePrefetchDeviceMinimalStartDelayMs,
-            pollInstantMs: effectivePollInstantMs,
-            pollFastMs: effectivePollFastMs,
-            pollModerateMs: effectivePollModerateMs,
-            pollConstrainedMs: effectivePollConstrainedMs,
-            pollMinimalMs: effectivePollMinimalMs,
-            flushInstantMs: effectiveFlushInstantMs,
-            flushFastMs: effectiveFlushFastMs,
-            flushModerateMs: effectiveFlushModerateMs,
-            flushConstrainedMs: effectiveFlushConstrainedMs,
-            flushMinimalMs: effectiveFlushMinimalMs,
-            updatedAt: nowSec
-          })
-          .where(eq(globalSettings.id, 1));
+        await db.update(globalSettings).set(resolvedWrite.write).where(eq(globalSettings.id, 1));
       } else {
-        const effectiveLotDropdownMax = clampInt(next.lotDropdownMax ?? ABSOLUTE_MAX_LOTS, 1, ABSOLUTE_MAX_LOTS, ABSOLUTE_MAX_LOTS);
-        const effectiveDefaultUserStartingBalanceUsd = Math.max(
-          1,
-          Math.min(1_000_000_000, Number(next.defaultUserStartingBalanceUsd ?? 1_000_000)),
-        );
-        const effectiveDefaultUserStartingEquityUsd = Math.max(
-          1,
-          Math.min(
-            1_000_000_000,
-            Number(next.defaultUserStartingEquityUsd ?? effectiveDefaultUserStartingBalanceUsd),
-          ),
-        );
-        const effectiveDefaultChallengeVirtualCapitalUsd = Math.max(
-          1,
-          Math.min(1_000_000_000, Number(next.defaultChallengeVirtualCapitalUsd ?? 100_000)),
-        );
-        const effectiveMinPriceDistancePips = clampInt(next.minPriceDistancePips ?? 20, 1, 10_000, 20);
-        const effectiveRestFallbackPollMs = clampInt(next.restFallbackPollMs ?? 500, 100, 60_000, 500);
-        const effectiveWsPushFrequencyMs = clampInt(next.wsPushFrequencyMs ?? 0, 0, 1_000, 0);
-        const effectiveQuoteFlushIntervalMs = clampInt(next.quoteFlushIntervalMs ?? 50, 20, 5_000, 50);
-        const effectiveMaxWsReconnectAttempts = clampInt(next.maxWsReconnectAttempts ?? 30, 1, 30, 30);
-        const effectiveWsReconnectBaseDelayMs = clampInt(next.wsReconnectBaseDelayMs ?? 1500, 100, 30_000, 1500);
-        const effectivePrefetchStrategy = normalizeGlobalPrefetchStrategy(next.prefetchStrategy ?? "all");
-        const effectivePrefetchMaxConcurrency = clampInt(next.prefetchMaxConcurrency ?? 4, 1, 6, 4);
-        const effectivePrefetchStartDelayMs = clampInt(next.prefetchStartDelayMs ?? 0, 0, 15_000, 0);
-        const effectivePrefetchFastConcurrencyCap = clampInt(next.prefetchFastConcurrencyCap ?? 3, 1, 6, 3);
-        const effectivePrefetchModerateConcurrencyCap = clampInt(next.prefetchModerateConcurrencyCap ?? 2, 1, 6, 2);
-        const effectivePrefetchConstrainedConcurrencyCap = clampInt(next.prefetchConstrainedConcurrencyCap ?? 1, 1, 6, 1);
-        const effectivePrefetchNetworkFastStartDelayMs = clampInt(next.prefetchNetworkFastStartDelayMs ?? 75, 0, 15_000, 75);
-        const effectivePrefetchNetworkModerateStartDelayMs = clampInt(
-          next.prefetchNetworkModerateStartDelayMs ?? 200,
-          0,
-          15_000,
-          200,
-        );
-        const effectivePrefetchNetworkConstrainedStartDelayMs = clampInt(
-          next.prefetchNetworkConstrainedStartDelayMs ?? 450,
-          0,
-          15_000,
-          450,
-        );
-        const effectivePrefetchDeviceModerateStartDelayMs = clampInt(
-          next.prefetchDeviceModerateStartDelayMs ?? 50,
-          0,
-          15_000,
-          50,
-        );
-        const effectivePrefetchDeviceConstrainedStartDelayMs = clampInt(
-          next.prefetchDeviceConstrainedStartDelayMs ?? 150,
-          0,
-          15_000,
-          150,
-        );
-        const effectivePrefetchDeviceMinimalStartDelayMs = clampInt(
-          next.prefetchDeviceMinimalStartDelayMs ?? 300,
-          0,
-          15_000,
-          300,
-        );
-        const effectivePollInstantMs = clampInt(next.pollInstantMs ?? 200, 100, 60_000, 200);
-        const effectivePollFastMs = clampInt(next.pollFastMs ?? 500, 100, 60_000, 500);
-        const effectivePollModerateMs = clampInt(next.pollModerateMs ?? 1500, 100, 60_000, 1500);
-        const effectivePollConstrainedMs = clampInt(next.pollConstrainedMs ?? 4000, 100, 60_000, 4000);
-        const effectivePollMinimalMs = clampInt(next.pollMinimalMs ?? 6000, 100, 60_000, 6000);
-        const effectiveFlushInstantMs = clampInt(next.flushInstantMs ?? 50, 20, 5_000, 50);
-        const effectiveFlushFastMs = clampInt(next.flushFastMs ?? 150, 20, 5_000, 150);
-        const effectiveFlushModerateMs = clampInt(next.flushModerateMs ?? 300, 20, 5_000, 300);
-        const effectiveFlushConstrainedMs = clampInt(next.flushConstrainedMs ?? 500, 20, 5_000, 500);
-        const effectiveFlushMinimalMs = clampInt(next.flushMinimalMs ?? 1000, 20, 5_000, 1000);
-
-        let presetValues: number[] = [];
-        if (typeof next.lotPresetCards === "string") {
-          try {
-            presetValues = parsePresetCards(next.lotPresetCards);
-          } catch {
-            return res.status(400).json({ message: "Invalid lotPresetCards JSON array" });
-          }
-        }
-
-        const effectiveLotPresetCards = JSON.stringify(
-          sanitizePresetCards(presetValues, effectiveLotDropdownMax)
-        );
-        nextPerformance = {
-          restFallbackPollMs: effectiveRestFallbackPollMs,
-          wsPushFrequencyMs: effectiveWsPushFrequencyMs,
-          quoteFlushIntervalMs: effectiveQuoteFlushIntervalMs,
-          maxWsReconnectAttempts: effectiveMaxWsReconnectAttempts,
-          wsReconnectBaseDelayMs: effectiveWsReconnectBaseDelayMs,
-          prefetchStrategy: effectivePrefetchStrategy,
-          prefetchMaxConcurrency: effectivePrefetchMaxConcurrency,
-          prefetchStartDelayMs: effectivePrefetchStartDelayMs,
-          prefetchFastConcurrencyCap: effectivePrefetchFastConcurrencyCap,
-          prefetchModerateConcurrencyCap: effectivePrefetchModerateConcurrencyCap,
-          prefetchConstrainedConcurrencyCap: effectivePrefetchConstrainedConcurrencyCap,
-          prefetchNetworkFastStartDelayMs: effectivePrefetchNetworkFastStartDelayMs,
-          prefetchNetworkModerateStartDelayMs: effectivePrefetchNetworkModerateStartDelayMs,
-          prefetchNetworkConstrainedStartDelayMs: effectivePrefetchNetworkConstrainedStartDelayMs,
-          prefetchDeviceModerateStartDelayMs: effectivePrefetchDeviceModerateStartDelayMs,
-          prefetchDeviceConstrainedStartDelayMs: effectivePrefetchDeviceConstrainedStartDelayMs,
-          prefetchDeviceMinimalStartDelayMs: effectivePrefetchDeviceMinimalStartDelayMs,
-          pollInstantMs: effectivePollInstantMs,
-          pollFastMs: effectivePollFastMs,
-          pollModerateMs: effectivePollModerateMs,
-          pollConstrainedMs: effectivePollConstrainedMs,
-          pollMinimalMs: effectivePollMinimalMs,
-          flushInstantMs: effectiveFlushInstantMs,
-          flushFastMs: effectiveFlushFastMs,
-          flushModerateMs: effectiveFlushModerateMs,
-          flushConstrainedMs: effectiveFlushConstrainedMs,
-          flushMinimalMs: effectiveFlushMinimalMs,
-        };
-
         await db.insert(globalSettings).values({
           id: 1,
-          defaultLeverage: next.defaultLeverage ?? 50,
-          maxPositionSize: next.maxPositionSize ?? 100000,
-          maxTradesPerUser: next.maxTradesPerUser ?? 10,
-          maxTradesPerInstrument: next.maxTradesPerInstrument ?? 3,
-          maxConcurrentLots: next.maxConcurrentLots ?? 50,
-          minPriceDistancePips: effectiveMinPriceDistancePips,
-          marketOpenTime: next.marketOpenTime ?? "09:00",
-          marketCloseTime: next.marketCloseTime ?? "17:00",
-          allowWeekendTrading: next.allowWeekendTrading ?? false,
-          enableAutoClose: next.enableAutoClose ?? true,
-          autoCloseAfterDays: next.autoCloseAfterDays ?? 4,
-          autoCloseCheckFrequencyMinutes: next.autoCloseCheckFrequencyMinutes ?? 60,
-          minHoldSec: next.minHoldSec ?? 60,
-          enableLossLimits: next.enableLossLimits ?? true,
-          dailyLossLimitPct: next.dailyLossLimitPct ?? 10,
-          lifetimeLossLimitPct: next.lifetimeLossLimitPct ?? 20,
-          defaultUserStartingBalanceUsd: effectiveDefaultUserStartingBalanceUsd,
-          defaultUserStartingEquityUsd: effectiveDefaultUserStartingEquityUsd,
-          defaultChallengeVirtualCapitalUsd: effectiveDefaultChallengeVirtualCapitalUsd,
-          lotPresetCards: effectiveLotPresetCards,
-          lotDropdownMax: effectiveLotDropdownMax,
-          restFallbackPollMs: effectiveRestFallbackPollMs,
-          wsPushFrequencyMs: effectiveWsPushFrequencyMs,
-          quoteFlushIntervalMs: effectiveQuoteFlushIntervalMs,
-          maxWsReconnectAttempts: effectiveMaxWsReconnectAttempts,
-          wsReconnectBaseDelayMs: effectiveWsReconnectBaseDelayMs,
-          prefetchStrategy: effectivePrefetchStrategy,
-          prefetchMaxConcurrency: effectivePrefetchMaxConcurrency,
-          prefetchStartDelayMs: effectivePrefetchStartDelayMs,
-          prefetchFastConcurrencyCap: effectivePrefetchFastConcurrencyCap,
-          prefetchModerateConcurrencyCap: effectivePrefetchModerateConcurrencyCap,
-          prefetchConstrainedConcurrencyCap: effectivePrefetchConstrainedConcurrencyCap,
-          prefetchNetworkFastStartDelayMs: effectivePrefetchNetworkFastStartDelayMs,
-          prefetchNetworkModerateStartDelayMs: effectivePrefetchNetworkModerateStartDelayMs,
-          prefetchNetworkConstrainedStartDelayMs: effectivePrefetchNetworkConstrainedStartDelayMs,
-          prefetchDeviceModerateStartDelayMs: effectivePrefetchDeviceModerateStartDelayMs,
-          prefetchDeviceConstrainedStartDelayMs: effectivePrefetchDeviceConstrainedStartDelayMs,
-          prefetchDeviceMinimalStartDelayMs: effectivePrefetchDeviceMinimalStartDelayMs,
-          pollInstantMs: effectivePollInstantMs,
-          pollFastMs: effectivePollFastMs,
-          pollModerateMs: effectivePollModerateMs,
-          pollConstrainedMs: effectivePollConstrainedMs,
-          pollMinimalMs: effectivePollMinimalMs,
-          flushInstantMs: effectiveFlushInstantMs,
-          flushFastMs: effectiveFlushFastMs,
-          flushModerateMs: effectiveFlushModerateMs,
-          flushConstrainedMs: effectiveFlushConstrainedMs,
-          flushMinimalMs: effectiveFlushMinimalMs,
+          ...resolvedWrite.write,
         });
       }
 
       const updated = await db.query.globalSettings.findFirst({
-        where: eq(globalSettings.id, 1)
+        where: eq(globalSettings.id, 1),
       });
-      if (Number.isFinite(actorAdminId) && actorAdminId > 0) {
-        globalSettingsUpdateMsByAdminId.set(actorAdminId, nowMs);
+      if (!updated) {
+        return res.status(500).json({ message: "Failed to load updated global settings." });
       }
 
-      const performanceChanged = (
-        prevPerformance.restFallbackPollMs !== nextPerformance.restFallbackPollMs ||
-        prevPerformance.wsPushFrequencyMs !== nextPerformance.wsPushFrequencyMs ||
-        prevPerformance.quoteFlushIntervalMs !== nextPerformance.quoteFlushIntervalMs ||
-        prevPerformance.maxWsReconnectAttempts !== nextPerformance.maxWsReconnectAttempts ||
-        prevPerformance.wsReconnectBaseDelayMs !== nextPerformance.wsReconnectBaseDelayMs ||
-        prevPerformance.prefetchStrategy !== nextPerformance.prefetchStrategy ||
-        prevPerformance.prefetchMaxConcurrency !== nextPerformance.prefetchMaxConcurrency ||
-        prevPerformance.prefetchStartDelayMs !== nextPerformance.prefetchStartDelayMs ||
-        prevPerformance.prefetchFastConcurrencyCap !== nextPerformance.prefetchFastConcurrencyCap ||
-        prevPerformance.prefetchModerateConcurrencyCap !== nextPerformance.prefetchModerateConcurrencyCap ||
-        prevPerformance.prefetchConstrainedConcurrencyCap !== nextPerformance.prefetchConstrainedConcurrencyCap ||
-        prevPerformance.prefetchNetworkFastStartDelayMs !== nextPerformance.prefetchNetworkFastStartDelayMs ||
-        prevPerformance.prefetchNetworkModerateStartDelayMs !== nextPerformance.prefetchNetworkModerateStartDelayMs ||
-        prevPerformance.prefetchNetworkConstrainedStartDelayMs !== nextPerformance.prefetchNetworkConstrainedStartDelayMs ||
-        prevPerformance.prefetchDeviceModerateStartDelayMs !== nextPerformance.prefetchDeviceModerateStartDelayMs ||
-        prevPerformance.prefetchDeviceConstrainedStartDelayMs !== nextPerformance.prefetchDeviceConstrainedStartDelayMs ||
-        prevPerformance.prefetchDeviceMinimalStartDelayMs !== nextPerformance.prefetchDeviceMinimalStartDelayMs ||
-        prevPerformance.pollInstantMs !== nextPerformance.pollInstantMs ||
-        prevPerformance.pollFastMs !== nextPerformance.pollFastMs ||
-        prevPerformance.pollModerateMs !== nextPerformance.pollModerateMs ||
-        prevPerformance.pollConstrainedMs !== nextPerformance.pollConstrainedMs ||
-        prevPerformance.pollMinimalMs !== nextPerformance.pollMinimalMs ||
-        prevPerformance.flushInstantMs !== nextPerformance.flushInstantMs ||
-        prevPerformance.flushFastMs !== nextPerformance.flushFastMs ||
-        prevPerformance.flushModerateMs !== nextPerformance.flushModerateMs ||
-        prevPerformance.flushConstrainedMs !== nextPerformance.flushConstrainedMs ||
-        prevPerformance.flushMinimalMs !== nextPerformance.flushMinimalMs
-      );
-      if (performanceChanged) {
+      const nextRisk = resolvedWrite.riskSnapshot;
+      const nextPerformance = resolvedWrite.performanceSnapshot;
+      const riskChanged = stableStringify(prevRisk) !== stableStringify(nextRisk);
+      const performanceChanged = stableStringify(prevPerformance) !== stableStringify(nextPerformance);
+      if (riskChanged || performanceChanged) {
         const auditCtx = buildAuditContext(req);
-        appendIdentityAudit({
-          userId: typeof auditCtx.actorUserId === "number" ? auditCtx.actorUserId : null,
-          category: "admin",
-          type: "GLOBAL_SETTINGS_PERFORMANCE_UPDATED",
-          title: "Global performance settings updated",
-          description: "Updated global performance defaults, prefetch tier controls, and tier-level poll/flush settings.",
-          ip: auditCtx.ip,
-          userAgent: auditCtx.userAgent,
-          actorAdminId: typeof auditCtx.actorUserId === "number" ? auditCtx.actorUserId : null,
-          actorType: "ADMIN",
-          actorUserId: typeof auditCtx.actorUserId === "number" ? auditCtx.actorUserId : null,
-          sessionId: auditCtx.sessionId,
-          correlationId: auditCtx.correlationId,
-          data: {
-            previous: prevPerformance,
-            next: nextPerformance,
-          },
-        });
+        if (riskChanged) {
+          appendIdentityAudit({
+            userId: typeof auditCtx.actorUserId === "number" ? auditCtx.actorUserId : null,
+            category: "admin",
+            type: "GLOBAL_SETTINGS_RISK_UPDATED",
+            title: "Global risk settings updated",
+            description: "Updated default capital, risk guardrails, lot settings, and trading session controls.",
+            ip: auditCtx.ip,
+            userAgent: auditCtx.userAgent,
+            actorAdminId: typeof auditCtx.actorUserId === "number" ? auditCtx.actorUserId : null,
+            actorType: "ADMIN",
+            actorUserId: typeof auditCtx.actorUserId === "number" ? auditCtx.actorUserId : null,
+            sessionId: auditCtx.sessionId,
+            correlationId: auditCtx.correlationId,
+            data: {
+              previous: prevRisk,
+              next: nextRisk,
+            },
+          });
+        }
+        if (performanceChanged) {
+          appendIdentityAudit({
+            userId: typeof auditCtx.actorUserId === "number" ? auditCtx.actorUserId : null,
+            category: "admin",
+            type: "GLOBAL_SETTINGS_PERFORMANCE_UPDATED",
+            title: "Global performance settings updated",
+            description: "Updated global performance defaults, prefetch tier controls, and tier-level poll/flush settings.",
+            ip: auditCtx.ip,
+            userAgent: auditCtx.userAgent,
+            actorAdminId: typeof auditCtx.actorUserId === "number" ? auditCtx.actorUserId : null,
+            actorType: "ADMIN",
+            actorUserId: typeof auditCtx.actorUserId === "number" ? auditCtx.actorUserId : null,
+            sessionId: auditCtx.sessionId,
+            correlationId: auditCtx.correlationId,
+            data: {
+              previous: prevPerformance,
+              next: nextPerformance,
+            },
+          });
+        }
       }
 
       // Propagate changes (multi-role deployments) + reschedule if scheduler is running locally.
@@ -3213,12 +2463,15 @@ FROM (
         publishLiveEvent({
           type: "global-settings:updated",
           payload: {
-            updatedAt: nowSec,
+            updatedAt: typeof updated.updatedAt === "number" ? updated.updatedAt : nowSec,
             wsPushFrequencyMs: nextPerformance.wsPushFrequencyMs,
             performanceSettings: nextPerformance,
           },
         });
-        publishLiveEvent({ type: "autoclose:reschedule", payload: { updatedAt: nowSec } });
+        publishLiveEvent({
+          type: "autoclose:reschedule",
+          payload: { updatedAt: typeof updated.updatedAt === "number" ? updated.updatedAt : nowSec },
+        });
       } catch { }
       try {
         await scheduleAutoClose();

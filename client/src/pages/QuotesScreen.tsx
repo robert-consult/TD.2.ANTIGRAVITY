@@ -1,6 +1,6 @@
 import { useQuotes } from "@/hooks/use-quotes";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import SpreadBadge from "@/components/SpreadBadge";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -13,6 +13,10 @@ import { useAuth } from "@/hooks/use-auth";
 interface QuotesScreenProps {
   onSelectSymbol: (symbol: string) => void;
 }
+
+const VIRTUALIZATION_THRESHOLD = 400;
+const VIRTUALIZATION_OVERSCAN_ROWS = 8;
+const DEFAULT_QUOTE_ROW_HEIGHT = 78;
 
 export default function QuotesScreen({ onSelectSymbol }: QuotesScreenProps) {
   const { quotes, isLoading, isConnected, hasStaleData } = useQuotes();
@@ -28,7 +32,12 @@ export default function QuotesScreen({ onSelectSymbol }: QuotesScreenProps) {
     height: 0,
     visible: false,
   });
+  const [virtualScrollTop, setVirtualScrollTop] = useState(0);
+  const [virtualViewportHeight, setVirtualViewportHeight] = useState(0);
+  const [virtualRowHeight, setVirtualRowHeight] = useState(DEFAULT_QUOTE_ROW_HEIGHT);
   const quoteListRef = useRef<HTMLDivElement | null>(null);
+  const quoteScrollRef = useRef<HTMLDivElement | null>(null);
+  const scrollRafRef = useRef<number | null>(null);
 
   const { data: allowedSymbolsData = { symbols: [] } } = useQuery<{ symbols: any[] }>({
     queryKey: ["/api/quote-subscriptions/allowed-symbols"],
@@ -72,31 +81,35 @@ export default function QuotesScreen({ onSelectSymbol }: QuotesScreenProps) {
   }, [supportsCustomUi]);
   
   // Filter and sort quotes
-  const filteredAndSortedQuotes = quotes
-    // Filter by search term (case-insensitive)
-    .filter(quote => 
-      searchTerm === "" || 
-      quote.symbol.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      quote.name.toLowerCase().includes(searchTerm.toLowerCase())
-    )
-    // Sort by selected field and direction
-    .sort((a, b) => {
-      // Handle special case for numeric sorting
-      if (sortField === 'price' || sortField === 'change' || sortField === 'spread') {
-        const aValue = a[sortField as keyof typeof a] || 0;
-        const bValue = b[sortField as keyof typeof b] || 0;
-        return sortDirection === 'asc' 
-          ? Number(aValue) - Number(bValue)
-          : Number(bValue) - Number(aValue);
-      }
-      
-      // Handle string sorting
-      const aValue = String(a[sortField as keyof typeof a] || '');
-      const bValue = String(b[sortField as keyof typeof b] || '');
-      return sortDirection === 'asc'
-        ? aValue.localeCompare(bValue)
-        : bValue.localeCompare(aValue);
-    });
+  const filteredAndSortedQuotes = useMemo(() => {
+    const normalizedSearch = searchTerm.toLowerCase();
+    return quotes
+      .filter((quote) => {
+        if (searchTerm === "") return true;
+        return (
+          quote.symbol.toLowerCase().includes(normalizedSearch) ||
+          quote.name.toLowerCase().includes(normalizedSearch)
+        );
+      })
+      .sort((a, b) => {
+        if (sortField === "price" || sortField === "change" || sortField === "spread") {
+          const aValue = a[sortField as keyof typeof a] || 0;
+          const bValue = b[sortField as keyof typeof b] || 0;
+          return sortDirection === "asc"
+            ? Number(aValue) - Number(bValue)
+            : Number(bValue) - Number(aValue);
+        }
+
+        const aValue = String(a[sortField as keyof typeof a] || "");
+        const bValue = String(b[sortField as keyof typeof b] || "");
+        return sortDirection === "asc"
+          ? aValue.localeCompare(bValue)
+          : bValue.localeCompare(aValue);
+      });
+  }, [quotes, searchTerm, sortDirection, sortField]);
+
+  const shouldVirtualizeQuotes =
+    !isLoading && filteredAndSortedQuotes.length >= VIRTUALIZATION_THRESHOLD;
   
   // Toggle sort when clicking a column header
   const toggleSort = (field: string) => {
@@ -110,7 +123,7 @@ export default function QuotesScreen({ onSelectSymbol }: QuotesScreenProps) {
     }
   };
 
-  const revealQuoteHighlight = (row: HTMLDivElement) => {
+  const revealQuoteHighlight = useCallback((row: HTMLDivElement) => {
     const container = quoteListRef.current;
     if (!container) return;
     const nextTop = row.offsetTop;
@@ -123,11 +136,200 @@ export default function QuotesScreen({ onSelectSymbol }: QuotesScreenProps) {
         visible: true,
       };
     });
-  };
+  }, []);
 
-  const hideQuoteHighlight = () => {
+  const hideQuoteHighlight = useCallback(() => {
     setQuoteHighlight((prev) => (prev.visible ? { ...prev, visible: false } : prev));
-  };
+  }, []);
+
+  useEffect(() => {
+    if (!shouldVirtualizeQuotes) {
+      setVirtualScrollTop(0);
+      setVirtualViewportHeight(0);
+      return;
+    }
+
+    const scrollContainer = quoteScrollRef.current;
+    if (!scrollContainer) return;
+    const updateViewportHeight = () => {
+      setVirtualViewportHeight(scrollContainer.clientHeight);
+    };
+
+    updateViewportHeight();
+    setVirtualScrollTop(scrollContainer.scrollTop);
+
+    const onScroll = () => {
+      hideQuoteHighlight();
+      if (scrollRafRef.current !== null) return;
+      scrollRafRef.current = window.requestAnimationFrame(() => {
+        scrollRafRef.current = null;
+        setVirtualScrollTop(scrollContainer.scrollTop);
+      });
+    };
+
+    scrollContainer.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", updateViewportHeight);
+
+    let resizeObserver: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== "undefined") {
+      resizeObserver = new ResizeObserver(updateViewportHeight);
+      resizeObserver.observe(scrollContainer);
+    }
+
+    return () => {
+      scrollContainer.removeEventListener("scroll", onScroll);
+      window.removeEventListener("resize", updateViewportHeight);
+      resizeObserver?.disconnect();
+      if (scrollRafRef.current !== null) {
+        window.cancelAnimationFrame(scrollRafRef.current);
+        scrollRafRef.current = null;
+      }
+    };
+  }, [hideQuoteHighlight, shouldVirtualizeQuotes]);
+
+  const virtualQuoteWindow = useMemo(() => {
+    if (!shouldVirtualizeQuotes || filteredAndSortedQuotes.length === 0) return null;
+    const rowHeight = Math.max(virtualRowHeight, 1);
+    const viewport = Math.max(virtualViewportHeight, rowHeight * 8);
+    const total = filteredAndSortedQuotes.length;
+    const startIndex = Math.max(
+      0,
+      Math.floor(virtualScrollTop / rowHeight) - VIRTUALIZATION_OVERSCAN_ROWS,
+    );
+    const endIndex = Math.min(
+      total - 1,
+      Math.ceil((virtualScrollTop + viewport) / rowHeight) + VIRTUALIZATION_OVERSCAN_ROWS,
+    );
+
+    return {
+      startIndex,
+      topPadding: startIndex * rowHeight,
+      bottomPadding: Math.max(0, (total - endIndex - 1) * rowHeight),
+      items: filteredAndSortedQuotes.slice(startIndex, endIndex + 1),
+    };
+  }, [
+    filteredAndSortedQuotes,
+    shouldVirtualizeQuotes,
+    virtualRowHeight,
+    virtualScrollTop,
+    virtualViewportHeight,
+  ]);
+
+  const measureVirtualRow = useCallback((row: HTMLDivElement | null) => {
+    if (!row) return;
+    const nextHeight = Math.ceil(row.getBoundingClientRect().height);
+    if (!Number.isFinite(nextHeight) || nextHeight <= 0) return;
+    setVirtualRowHeight((prev) => (Math.abs(prev - nextHeight) > 1 ? nextHeight : prev));
+  }, []);
+
+  const renderQuoteRow = useCallback(
+    (
+      quote: (typeof filteredAndSortedQuotes)[number],
+      options?: {
+        measure?: boolean;
+      },
+    ) => {
+      const cfg = symbolCfgBySymbol.get(quote.symbol);
+      const decimals = getQuoteDecimals({
+        symbol: quote.symbol,
+        category: cfg?.category,
+        quoteCurrency: cfg?.quoteCurrency,
+        pipDecimals: cfg?.pipDecimals,
+        quoteDecimals: cfg?.quoteDecimals,
+      });
+
+      const spreadPips =
+        quote.spread != null
+          ? pointsToPips(quote.spread, {
+              symbol: quote.symbol,
+              category: cfg?.category,
+              quoteCurrency: cfg?.quoteCurrency,
+              pipDecimals: cfg?.pipDecimals,
+              quoteDecimals: cfg?.quoteDecimals,
+            })
+          : null;
+
+      return (
+        <div
+          key={quote.symbol}
+          ref={options?.measure ? measureVirtualRow : undefined}
+          className={`tq-quote-row flex items-center justify-between gap-3 px-gutter py-2.5 hover:bg-neutral-850 transition-colors cursor-pointer ${shouldVirtualizeQuotes ? "border-b border-gray-800" : ""}`}
+          onMouseEnter={(event) => revealQuoteHighlight(event.currentTarget)}
+          onClick={() => onSelectSymbol(quote.symbol)}
+        >
+          <div className="min-w-0 flex flex-col justify-center leading-tight">
+            <div className="font-medium text-[clamp(1.02rem,0.97rem+0.18vw,1.2rem)] tracking-[0.02em] text-white">
+              {quote.symbol}
+            </div>
+            <div className="mt-0.5 text-[clamp(0.69rem,0.66rem+0.14vw,0.8rem)] text-gray-400 truncate max-w-[clamp(8rem,26vw,15rem)] leading-[1.15]">
+              {quote.name}
+            </div>
+          </div>
+
+          <div className="flex items-center gap-4 md:gap-6">
+            <div className="flex flex-col items-end">
+              <div className="font-mono font-medium text-base text-white">
+                {quote.price?.toFixed(decimals)}
+              </div>
+              <div
+                className={`text-sm ${
+                  (quote.percent_change ?? 0) > 0
+                    ? "text-lime-400"
+                    : (quote.percent_change ?? 0) < 0
+                      ? "text-red-500"
+                      : "text-yellow-500"
+                }`}
+              >
+                {(quote.percent_change ?? 0) > 0 ? "+" : ""}
+                {(quote.percent_change ?? 0).toFixed(2)}%
+              </div>
+            </div>
+
+            <div className="hidden md:flex flex-col items-end text-sm gap-1">
+              <div className="flex justify-between gap-3">
+                <span className="text-gray-400 mr-1 font-medium">Bid:</span>
+                <span className="font-mono text-danger-500 font-medium">
+                  {quote.bid?.toFixed(decimals)}
+                </span>
+              </div>
+              <div className="flex justify-between gap-3">
+                <span className="text-gray-400 mr-1 font-medium">Ask:</span>
+                <span className="font-mono text-success-500 font-medium">
+                  {quote.ask?.toFixed(decimals)}
+                </span>
+              </div>
+              {spreadPips !== null && (
+                <div className="flex justify-end mt-1">
+                  <SpreadBadge spread={`${spreadPips.toFixed(1)} pips`} />
+                </div>
+              )}
+            </div>
+
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              className="h-5 w-5 text-gray-600"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <polyline points="9 18 15 12 9 6" />
+            </svg>
+          </div>
+        </div>
+      );
+    },
+    [
+      filteredAndSortedQuotes,
+      measureVirtualRow,
+      onSelectSymbol,
+      revealQuoteHighlight,
+      shouldVirtualizeQuotes,
+      symbolCfgBySymbol,
+    ],
+  );
 
   return (
     <div className="tq-quotes-screen h-full flex flex-col bg-neutral-900">
@@ -240,11 +442,15 @@ export default function QuotesScreen({ onSelectSymbol }: QuotesScreenProps) {
         </div>
       </div>
 
-      <div className="tq-quotes-scroll flex-1 min-h-0 app-scroll" style={{ scrollbarWidth: "thin" }}>
+      <div
+        ref={quoteScrollRef}
+        className="tq-quotes-scroll flex-1 min-h-0 app-scroll"
+        style={{ scrollbarWidth: "thin" }}
+      >
         <div
           ref={quoteListRef}
           onMouseLeave={hideQuoteHighlight}
-          className="tq-quotes-list relative divide-y divide-gray-800"
+          className={`tq-quotes-list relative ${shouldVirtualizeQuotes ? "" : "divide-y divide-gray-800"}`}
         >
           <div
             aria-hidden
@@ -275,100 +481,22 @@ export default function QuotesScreen({ onSelectSymbol }: QuotesScreenProps) {
                 </div>
               ))}
 
-          {!isLoading && filteredAndSortedQuotes.length > 0 &&
-            filteredAndSortedQuotes.map((quote) => {
-              const cfg = symbolCfgBySymbol.get(quote.symbol);
-              const decimals = getQuoteDecimals({
-                symbol: quote.symbol,
-                category: cfg?.category,
-                quoteCurrency: cfg?.quoteCurrency,
-                pipDecimals: cfg?.pipDecimals,
-                quoteDecimals: cfg?.quoteDecimals,
-              });
+          {!isLoading && !shouldVirtualizeQuotes && filteredAndSortedQuotes.length > 0 &&
+            filteredAndSortedQuotes.map((quote) => renderQuoteRow(quote))}
 
-              const spreadPips = quote.spread != null
-                ? pointsToPips(quote.spread, {
-                    symbol: quote.symbol,
-                    category: cfg?.category,
-                    quoteCurrency: cfg?.quoteCurrency,
-                    pipDecimals: cfg?.pipDecimals,
-                    quoteDecimals: cfg?.quoteDecimals,
-                  })
-                : null;
-
-              return (
-                <div
-                  key={quote.symbol}
-                  className="tq-quote-row flex items-center justify-between gap-3 px-gutter py-2.5 hover:bg-neutral-850 transition-colors cursor-pointer"
-                  onMouseEnter={(event) => revealQuoteHighlight(event.currentTarget)}
-                  onClick={() => onSelectSymbol(quote.symbol)}
-                >
-                  <div className="min-w-0 flex flex-col justify-center leading-tight">
-                    <div className="font-medium text-[clamp(1.02rem,0.97rem+0.18vw,1.2rem)] tracking-[0.02em] text-white">
-                      {quote.symbol}
-                    </div>
-                    <div className="mt-0.5 text-[clamp(0.69rem,0.66rem+0.14vw,0.8rem)] text-gray-400 truncate max-w-[clamp(8rem,26vw,15rem)] leading-[1.15]">
-                      {quote.name}
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-4 md:gap-6">
-                    {/* Price and change display */}
-                    <div className="flex flex-col items-end">
-                      <div className="font-mono font-medium text-base text-white">
-                        {quote.price?.toFixed(decimals)}
-                      </div>
-                      <div
-                        className={`text-sm ${
-                          (quote.percent_change ?? 0) > 0
-                            ? "text-lime-400" // Bright green for increases
-                            : (quote.percent_change ?? 0) < 0
-                              ? "text-red-500" // Red for decreases
-                              : "text-yellow-500" // Yellow for unchanged
-                        }`}
-                      >
-                        {(quote.percent_change ?? 0) > 0 ? "+" : ""}
-                        {(quote.percent_change ?? 0).toFixed(2)}%
-                      </div>
-                    </div>
-                    
-                    {/* Bid/Ask/Spread display - Enhanced for Phase-2 */}
-                    <div className="hidden md:flex flex-col items-end text-sm gap-1">
-                      <div className="flex justify-between gap-3">
-                        <span className="text-gray-400 mr-1 font-medium">Bid:</span>
-                        <span className="font-mono text-danger-500 font-medium">
-                          {quote.bid?.toFixed(decimals)}
-                        </span>
-                      </div>
-                      <div className="flex justify-between gap-3">
-                        <span className="text-gray-400 mr-1 font-medium">Ask:</span>
-                        <span className="font-mono text-success-500 font-medium">
-                          {quote.ask?.toFixed(decimals)}
-                        </span>
-                      </div>
-                      {spreadPips !== null && (
-                        <div className="flex justify-end mt-1">
-                          <SpreadBadge spread={`${spreadPips.toFixed(1)} pips`} />
-                        </div>
-                      )}
-                    </div>
-                    
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      className="h-5 w-5 text-gray-600"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <polyline points="9 18 15 12 9 6" />
-                    </svg>
-                  </div>
-                </div>
-              );
-            })}
+          {!isLoading && shouldVirtualizeQuotes && virtualQuoteWindow && (
+            <>
+              {virtualQuoteWindow.topPadding > 0 && (
+                <div aria-hidden style={{ height: `${virtualQuoteWindow.topPadding}px` }} />
+              )}
+              {virtualQuoteWindow.items.map((quote, idx) =>
+                renderQuoteRow(quote, { measure: idx === 0 }),
+              )}
+              {virtualQuoteWindow.bottomPadding > 0 && (
+                <div aria-hidden style={{ height: `${virtualQuoteWindow.bottomPadding}px` }} />
+              )}
+            </>
+          )}
 
           {(!filteredAndSortedQuotes || filteredAndSortedQuotes.length === 0) && !isLoading && (
             <div className="px-gutter py-8 text-center text-gray-500">

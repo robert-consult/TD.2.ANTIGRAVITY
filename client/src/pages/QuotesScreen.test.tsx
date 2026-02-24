@@ -67,6 +67,19 @@ function setQuoteModeState(mode: QuotesStateMock["effectiveMode"], supportsCusto
   });
 }
 
+function buildQuotes(count: number) {
+  return Array.from({ length: count }, (_, index) => ({
+    symbol: `SYM${String(index).padStart(3, "0")}`,
+    name: `Instrument ${index}`,
+    price: 1.2 + index / 1000,
+    change: 0,
+    spread: 0.0002,
+    percent_change: 0,
+    bid: 1.1 + index / 1000,
+    ask: 1.3 + index / 1000,
+  }));
+}
+
 describe("QuotesScreen", () => {
   it("hides customization icons when custom mode is not supported", () => {
     setQuotesState({ supportsCustom: false, effectiveMode: "BASIC_ONLY" });
@@ -124,5 +137,29 @@ describe("QuotesScreen", () => {
     expect(screen.queryByTestId("dialog-add")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Add quote symbol")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Manage quote symbols")).not.toBeInTheDocument();
+  });
+
+  it("virtualizes large quote lists without breaking symbol selection", () => {
+    const onSelectSymbol = vi.fn();
+    setQuotesState({
+      quotes: buildQuotes(500),
+    });
+    setQuoteModeState("BASIC_ONLY", false);
+
+    const { container } = render(<QuotesScreen onSelectSymbol={onSelectSymbol} />);
+
+    const mountedRows = container.querySelectorAll(".tq-quote-row");
+    expect(mountedRows.length).toBeGreaterThan(0);
+    expect(mountedRows.length).toBeLessThan(500);
+    expect(screen.queryByText("SYM499")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("SYM000"));
+    expect(onSelectSymbol).toHaveBeenCalledWith("SYM000");
+
+    fireEvent.change(screen.getByPlaceholderText("Search instruments..."), {
+      target: { value: "SYM499" },
+    });
+    fireEvent.click(screen.getByText("SYM499"));
+    expect(onSelectSymbol).toHaveBeenCalledWith("SYM499");
   });
 });

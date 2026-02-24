@@ -729,3 +729,17 @@ Failure Mode if Missing:
   - Execute Grift detection paths that trigger `MULTI_ACCOUNT_DEVICE`, `MULTI_ACCOUNT_FINGERPRINT`, and `SHARED_IPASN_CLUSTER`; verify edge writes succeed with bounded batch execution and expected `edgesRecorded` evidence values.
   - Override `GRIFT_CONFIG_TTL_MS` with out-of-range values and confirm runtime clamps to safe bounds (no unbounded staleness / no pathological refresh churn).
 - Failure Mode if Missing: multi-pod config changes propagate too slowly, high-volume correlation events create avoidable DB round-trip amplification, and Grift queries degrade under scale due missing predicate-aligned indexes.
+
+### PRD-ACT-001
+- ID: `PRD-ACT-001`
+- Date (UTC): `2026-02-24`
+- Scope: `Admin activity lifecycle (queue/delete/exempt/sweep) abuse and scale safety`
+- Requirement: Admin activity payloads must be bounded (`userIds` max 500), expensive activity operations must be rate-limited, inactivity listing/sweep logic must run with bounded batch/scan limits, and supporting lifecycle indexes must be present in production.
+- Enforcement: `server/routes/adminActivity.ts` (strict Zod payload/query validation + route rate limits), `server/services/accountLifecycle.ts` (bounded scan/batch chunking + transactional row-lock lifecycle mutations), and `db/migrations/0038_activity_lifecycle_indexes.sql` (activity/sweep index set).
+- Validation:
+  - Run `npm run db:migrate:drizzle`.
+  - Run `npm run db:audit`.
+  - Run `npm run audit:activity`.
+  - Submit oversized admin activity payloads (`userIds.length > 500`) and verify `400 INVALID_PAYLOAD`.
+  - Burst `/api/admin/activity/sweep` requests in a 60s window and verify `429 ACTIVITY_SWEEP_RATE_LIMIT`.
+- Failure Mode if Missing: privileged or compromised admin sessions can trigger unbounded CPU/DB workloads (DoS), and lifecycle sweep/list operations degrade predictably as data volume grows.

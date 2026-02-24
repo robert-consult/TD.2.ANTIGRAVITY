@@ -267,6 +267,13 @@
       "when": 1776600004000,
       "tag": "0037_grift_scalability_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1771895199000,
+      "tag": "0038_activity_lifecycle_indexes",
+      "breakpoints": true
     }
   ]
 }

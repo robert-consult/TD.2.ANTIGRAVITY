@@ -743,3 +743,16 @@ Failure Mode if Missing:
   - Submit oversized admin activity payloads (`userIds.length > 500`) and verify `400 INVALID_PAYLOAD`.
   - Burst `/api/admin/activity/sweep` requests in a 60s window and verify `429 ACTIVITY_SWEEP_RATE_LIMIT`.
 - Failure Mode if Missing: privileged or compromised admin sessions can trigger unbounded CPU/DB workloads (DoS), and lifecycle sweep/list operations degrade predictably as data volume grows.
+
+### PRD-SEC-013
+- ID: `PRD-SEC-013`
+- Date (UTC): `2026-02-24`
+- Scope: `Admin impersonation abuse controls + websocket TTL parity`
+- Requirement: `POST /api/admin/view-as/start` must enforce strict request typing (`{ userId: number }`, positive int, no extra fields) and per-admin rate limits (`10` starts / `5` minutes), and impersonated `/ws` sessions must fail closed when impersonation state is malformed or TTL-expired (`15` minutes), with attributable audit events for WS connect and TTL-forced disconnect.
+- Enforcement: `server/routes/admin.ts` (`viewAsStartSchema`, `consumeViewAsStartRateLimit`, `429 VIEW_AS_RATE_LIMITED`), `server/middleware/auth.ts` (`IMPERSONATION_TTL_MS` source of truth), and `server/routes/wsCore.ts` (handshake/interval TTL enforcement + `IMPERSONATION_WS_CONNECTED` and `IMPERSONATION_WS_TTL_EXPIRED` identity-audit events).
+- Validation:
+  - Call `POST /api/admin/view-as/start` with malformed body (for example `{ "userId": "1" }` or extra fields) and verify `400 INVALID_PAYLOAD`.
+  - Burst more than 10 valid start requests within 5 minutes from one admin session and verify `429 VIEW_AS_RATE_LIMITED` with `Retry-After`.
+  - Create an impersonated session with stale `impersonationStartedAt` and verify websocket handshake closes with `IMPERSONATION_EXPIRED` / close code `1008`.
+  - Open an impersonated websocket session and verify `identity_audit` records `IMPERSONATION_WS_CONNECTED`; wait past TTL and verify `IMPERSONATION_WS_TTL_EXPIRED`.
+- Failure Mode if Missing: compromised admin sessions can enumerate trader identities at high rate, and impersonated websocket streams can outlive HTTP impersonation policy windows without immutable actor-trace evidence.

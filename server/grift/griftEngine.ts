@@ -489,6 +489,9 @@ async function recordLinkedEdgesBatch(db: GriftDb, edges: LinkedEdgeInput[]): Pr
 // ---------------------------------------------------------------------
 export async function checkMultiAccountDevice(db: GriftDb, ctx: AuditContext): Promise<RuleTrigger | null> {
   if (!ctx.deviceId || !ctx.userId) return null;
+  const primaryUserId = Number(ctx.userId);
+  if (!Number.isFinite(primaryUserId) || primaryUserId <= 0) return null;
+  const deviceId = String(ctx.deviceId);
   const cfg = await getConfig(db);
 
   const windowMs = cfg.multiAccountWindowDays * 24 * 60 * 60 * 1000;
@@ -497,9 +500,9 @@ export async function checkMultiAccountDevice(db: GriftDb, ctx: AuditContext): P
   const users = await db.prepare(`
     SELECT DISTINCT user_id FROM grift_device_users
     WHERE device_id = ? AND last_seen_at >= ?
-  `).all(ctx.deviceId, cutoff) as { user_id: number }[];
+  `).all(deviceId, cutoff) as { user_id: number }[];
 
-  const otherUsers = users.filter((u) => u.user_id !== ctx.userId);
+  const otherUsers = users.filter((u) => u.user_id !== primaryUserId);
   if (otherUsers.length === 0) return null;
 
   const points = cfg.scoreMultiAccountDevice;
@@ -512,10 +515,10 @@ export async function checkMultiAccountDevice(db: GriftDb, ctx: AuditContext): P
   const edgesRecorded = await recordLinkedEdgesBatch(
     db,
     edgeTargets.map((otherUserId) => ({
-      userIdA: ctx.userId,
+      userIdA: primaryUserId,
       userIdB: otherUserId,
       linkType: "device",
-      linkValue: ctx.deviceId,
+      linkValue: deviceId,
     })),
   );
 
@@ -523,11 +526,11 @@ export async function checkMultiAccountDevice(db: GriftDb, ctx: AuditContext): P
   return {
     ruleCode: "MULTI_ACCOUNT_DEVICE",
     severity: severity(points, cfg),
-    primaryUserId: ctx.userId,
+    primaryUserId,
     secondaryUserId: linkedUserIdsAll[0] ?? otherUsers[0]!.user_id,
     points,
     evidence: {
-      deviceId: ctx.deviceId,
+      deviceId,
       linkedUsers: linkedUserIds,
       linkedUsersTotal: linkedUserIdsAll.length,
       edgesRecorded,
@@ -541,6 +544,9 @@ export async function checkMultiAccountDevice(db: GriftDb, ctx: AuditContext): P
 // ---------------------------------------------------------------------
 export async function checkMultiAccountFingerprint(db: GriftDb, ctx: AuditContext): Promise<RuleTrigger | null> {
   if (!ctx.deviceFp || !ctx.userId) return null;
+  const primaryUserId = Number(ctx.userId);
+  if (!Number.isFinite(primaryUserId) || primaryUserId <= 0) return null;
+  const deviceFp = String(ctx.deviceFp);
   const cfg = await getConfig(db);
 
   const windowMs = cfg.multiAccountWindowDays * 24 * 60 * 60 * 1000;
@@ -553,9 +559,9 @@ export async function checkMultiAccountFingerprint(db: GriftDb, ctx: AuditContex
       WHERE link_type = 'device_fp' AND link_value = ? AND last_seen_at >= ?
     `
     )
-    .all(ctx.deviceFp, cutoff) as { user_id: number }[];
+    .all(deviceFp, cutoff) as { user_id: number }[];
 
-  const otherUsers = users.filter((u) => u.user_id !== ctx.userId);
+  const otherUsers = users.filter((u) => u.user_id !== primaryUserId);
   if (otherUsers.length === 0) return null;
 
   const points = cfg.scoreMultiAccountFingerprint;
@@ -568,10 +574,10 @@ export async function checkMultiAccountFingerprint(db: GriftDb, ctx: AuditContex
   const edgesRecorded = await recordLinkedEdgesBatch(
     db,
     edgeTargets.map((otherUserId) => ({
-      userIdA: ctx.userId,
+      userIdA: primaryUserId,
       userIdB: otherUserId,
       linkType: "device_fp",
-      linkValue: ctx.deviceFp,
+      linkValue: deviceFp,
     })),
   );
 
@@ -579,11 +585,11 @@ export async function checkMultiAccountFingerprint(db: GriftDb, ctx: AuditContex
   return {
     ruleCode: "MULTI_ACCOUNT_FINGERPRINT",
     severity: severity(points, cfg),
-    primaryUserId: ctx.userId,
+    primaryUserId,
     secondaryUserId: linkedUserIdsAll[0] ?? otherUsers[0]!.user_id,
     points,
     evidence: {
-      deviceFp: ctx.deviceFp,
+      deviceFp,
       linkedUsers: linkedUserIds,
       linkedUsersTotal: linkedUserIdsAll.length,
       edgesRecorded,

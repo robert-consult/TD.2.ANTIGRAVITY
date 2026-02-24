@@ -17,11 +17,14 @@ import {
   buildGeoContext,
   extractGeoHints,
   getClientIp,
+  getUserAgent,
   revokeSession,
 } from "../security/sessionTrail";
 import { evaluateLoginJurisdiction } from "../policy/jurisdictionControl";
 import { getTrustedProxyCountryIso2 } from "../security/proxyHeaders";
 import { onLiveEvent } from "../services/liveBus";
+import { appendIdentityAudit } from "../services/identityAudit";
+import { IMPERSONATION_TTL_MS } from "../middleware/auth";
 import { buildQuoteSnapshotResponse } from "./quotesCore";
 import {
   WS_MSG_ACCOUNT_SNAPSHOT,
@@ -59,6 +62,13 @@ export type LiveClient = WebSocket & {
   sessionId?: string;
   isAdmin?: boolean;
   isImpersonating?: boolean;
+  realAdminId?: number;
+  impersonationStartedAtMs?: number;
+  sessionEmail?: string;
+  impersonationTtlCloseIssued?: boolean;
+  clientIp?: string;
+  clientUserAgent?: string;
+  wsOrigin?: string | null;
   ipCountryIso2?: string;
   userCountryIso2?: string;
   allowedQuoteSymbols?: Set<string>;
@@ -451,6 +461,77 @@ function wsCloseUnauthorized(socket: WebSocket, reason: string) {
   } catch { }
 }
 
+function isImpersonationTtlExpired(startedAtMs: unknown, nowMs = Date.now()): boolean {
+  const started = Number(startedAtMs ?? 0);
+  if (!Number.isFinite(started) || started <= 0) return true;
+  return nowMs - started > IMPERSONATION_TTL_MS;
+}
+
+function closeImpersonationTtlExpired(socket: WebSocket, client: LiveClient) {
+  if (client.impersonationTtlCloseIssued) return;
+  client.impersonationTtlCloseIssued = true;
+
+  appendIdentityAudit({
+    userId: typeof client.userId === "number" ? client.userId : null,
+    email: client.sessionEmail ?? null,
+    category: "SECURITY",
+    type: "IMPERSONATION_WS_TTL_EXPIRED",
+    title: "Impersonation websocket session expired",
+    description: "WebSocket connection closed because impersonation TTL elapsed",
+    ip: client.clientIp ?? null,
+    userAgent: client.clientUserAgent ?? null,
+    actorAdminId: typeof client.realAdminId === "number" ? client.realAdminId : null,
+    actorType: "ADMIN",
+    actorUserId: typeof client.realAdminId === "number" ? client.realAdminId : null,
+    sessionId: client.sessionId ?? null,
+    data: {
+      wsPath: "/ws",
+      reason: "IMPERSONATION_TTL_EXPIRED",
+      startedAtMs: client.impersonationStartedAtMs ?? null,
+      ttlMs: IMPERSONATION_TTL_MS,
+      origin: client.wsOrigin ?? null,
+    },
+  });
+
+  wsSendJson(socket, {
+    type: WS_MSG_ERROR,
+    code: "IMPERSONATION_EXPIRED",
+    message: "Impersonation websocket session expired",
+  });
+  try {
+    socket.close(1008, "IMPERSONATION_TTL_EXPIRED");
+  } catch {
+    // ignore close race
+  }
+}
+
+function appendImpersonationWsConnectAudit(client: LiveClient) {
+  if (!client.isImpersonating) return;
+  if (!Number.isFinite(Number(client.realAdminId ?? 0)) || Number(client.realAdminId) <= 0) return;
+  if (!Number.isFinite(Number(client.userId ?? 0)) || Number(client.userId) <= 0) return;
+
+  appendIdentityAudit({
+    userId: Number(client.userId),
+    email: client.sessionEmail ?? null,
+    category: "SECURITY",
+    type: "IMPERSONATION_WS_CONNECTED",
+    title: "Impersonation websocket session opened",
+    description: "Admin established websocket connection while impersonating a trader session",
+    ip: client.clientIp ?? null,
+    userAgent: client.clientUserAgent ?? null,
+    actorAdminId: Number(client.realAdminId),
+    actorType: "ADMIN",
+    actorUserId: Number(client.realAdminId),
+    sessionId: client.sessionId ?? null,
+    data: {
+      wsPath: "/ws",
+      startedAtMs: client.impersonationStartedAtMs ?? null,
+      ttlMs: IMPERSONATION_TTL_MS,
+      origin: client.wsOrigin ?? null,
+    },
+  });
+}
+
 function broadcast(event: any, filter?: (client: LiveClient) => boolean) {
   const payload = JSON.stringify(event);
   for (const client of wss.clients as Set<LiveClient>) {
@@ -717,6 +798,11 @@ wss.on("connection", async (socket, req) => {
 
   // Attach immediately so we don't drop messages sent right after the handshake.
   socket.on("message", (raw) => {
+    if (client.isImpersonating && isImpersonationTtlExpired(client.impersonationStartedAtMs)) {
+      closeImpersonationTtlExpired(socket, client);
+      return;
+    }
+
     if (!consumeWsMessageRate(client)) {
       incWsMessageRateLimitedTotal();
       wsSendJson(socket, {
@@ -744,6 +830,13 @@ wss.on("connection", async (socket, req) => {
   client.sessionId = undefined;
   client.isAdmin = false;
   client.isImpersonating = false;
+  client.realAdminId = undefined;
+  client.impersonationStartedAtMs = undefined;
+  client.sessionEmail = undefined;
+  client.impersonationTtlCloseIssued = false;
+  client.clientIp = undefined;
+  client.clientUserAgent = undefined;
+  client.wsOrigin = normalizeWsOrigin(req?.headers?.origin);
   client.ipCountryIso2 = undefined;
   client.userCountryIso2 = undefined;
   client.allowedQuoteSymbols = new Set();
@@ -758,9 +851,13 @@ wss.on("connection", async (socket, req) => {
   // Resolve IP country once at connect time (proxy headers preferred).
   try {
     const ip = getClientIp(req as any);
+    client.clientIp = ip;
+    client.clientUserAgent = getUserAgent(req as any);
     const geo = buildGeoContext(ip, extractGeoHints(req as any));
     client.ipCountryIso2 = readWsHeaderIso2(req) ?? (geo?.countryCode ? normIso2(geo.countryCode) : undefined);
   } catch {
+    client.clientIp = getClientIp(req as any);
+    client.clientUserAgent = getUserAgent(req as any);
     client.ipCountryIso2 = readWsHeaderIso2(req);
   }
 
@@ -774,6 +871,28 @@ wss.on("connection", async (socket, req) => {
         client.sessionId = String(wsSess.sid);
         client.isAdmin = Boolean(sess?.isAdmin);
         client.isImpersonating = Boolean(sess?.isImpersonating);
+        client.sessionEmail = typeof sess?.email === "string" ? sess.email : undefined;
+        const realAdminId = Number(sess?.realAdminId ?? 0);
+        client.realAdminId = Number.isFinite(realAdminId) && realAdminId > 0 ? realAdminId : undefined;
+        const impersonationStartedAtMs = Number(sess?.impersonationStartedAt ?? 0);
+        client.impersonationStartedAtMs =
+          Number.isFinite(impersonationStartedAtMs) && impersonationStartedAtMs > 0
+            ? impersonationStartedAtMs
+            : undefined;
+
+        if (client.isImpersonating) {
+          const impersonatedUserId = Number(sess?.impersonatedUserId ?? 0);
+          const validImpersonatedUserId =
+            Number.isFinite(impersonatedUserId) && impersonatedUserId > 0 && impersonatedUserId === sessionUserId;
+          if (!client.realAdminId || !client.impersonationStartedAtMs || !validImpersonatedUserId) {
+            wsCloseUnauthorized(socket, "IMPERSONATION_STATE_INVALID");
+            return;
+          }
+          if (isImpersonationTtlExpired(client.impersonationStartedAtMs)) {
+            closeImpersonationTtlExpired(socket, client);
+            return;
+          }
+        }
 
         const [userRow] = await db
           .select({ countryIso2: users.countryIso2, countryLegacy: users.country })
@@ -826,6 +945,8 @@ wss.on("connection", async (socket, req) => {
           }
           return;
         }
+
+        appendImpersonationWsConnectAudit(client);
       }
     }
   } catch (e) {
@@ -855,11 +976,15 @@ wss.on("connection", async (socket, req) => {
 // Periodically re-check the login jurisdiction policy for connected clients.
 // This ensures users are disconnected if an admin enables blocking after they are already connected.
 const wsPolicyRecheckMs = Number(process.env.WS_JURISDICTION_RECHECK_MS ?? 30_000);
-setInterval(() => {
+const wsPolicyRecheckTimer = setInterval(() => {
   for (const ws of wss.clients as Set<LiveClient>) {
     const client = ws as LiveClient;
     if (client.readyState !== WebSocket.OPEN) continue;
     if (!client.userId || !client.sessionId) continue;
+    if (client.isImpersonating && isImpersonationTtlExpired(client.impersonationStartedAtMs)) {
+      closeImpersonationTtlExpired(client, client);
+      continue;
+    }
     if (client.isAdmin && !client.isImpersonating) continue;
 
     const decision = evaluateLoginJurisdiction({
@@ -872,6 +997,7 @@ setInterval(() => {
     }
   }
 }, wsPolicyRecheckMs);
+wsPolicyRecheckTimer.unref?.();
 
 function broadcastQuoteRowsUpdate(rows: any[], seq: number, asOf: number) {
   if (!Array.isArray(rows) || rows.length === 0) return;

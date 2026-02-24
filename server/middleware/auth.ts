@@ -477,7 +477,7 @@ export async function requireAdmin(req: Request, res: Response, next: NextFuncti
 }
 
 // Impersonation TTL in milliseconds (15 minutes)
-const IMPERSONATION_TTL_MS = 15 * 60 * 1000;
+export const IMPERSONATION_TTL_MS = 15 * 60 * 1000;
 
 // Whitelist of routes that are allowed during impersonation
 // Note: When using app.use("/api", guard), req.path is stripped of /api prefix

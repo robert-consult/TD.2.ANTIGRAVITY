@@ -37,6 +37,54 @@ type GlobalPrefetchStrategy = "all" | "critical" | "none";
 const GLOBAL_PREFETCH_STRATEGIES = new Set<GlobalPrefetchStrategy>(["all", "critical", "none"]);
 const GLOBAL_SETTINGS_UPDATE_MIN_INTERVAL_MS = 500;
 const globalSettingsUpdateMsByAdminId = new Map<number, number>();
+const VIEW_AS_START_RATE_WINDOW_MS = 5 * 60 * 1000;
+const VIEW_AS_START_RATE_LIMIT = 10;
+
+type RateLimitEntry = { count: number; resetAtMs: number };
+const viewAsStartRateByAdminId = new Map<number, RateLimitEntry>();
+
+const viewAsStartSchema = z.object({
+  userId: z.number().int().positive(),
+}).strict();
+
+function consumeViewAsStartRateLimit(adminId: number): { allowed: boolean; retryAfterSec: number } {
+  const now = Date.now();
+  const existing = viewAsStartRateByAdminId.get(adminId);
+  if (!existing || existing.resetAtMs <= now) {
+    viewAsStartRateByAdminId.set(adminId, {
+      count: 1,
+      resetAtMs: now + VIEW_AS_START_RATE_WINDOW_MS,
+    });
+    return {
+      allowed: true,
+      retryAfterSec: Math.max(1, Math.ceil(VIEW_AS_START_RATE_WINDOW_MS / 1000)),
+    };
+  }
+
+  if (existing.count >= VIEW_AS_START_RATE_LIMIT) {
+    return {
+      allowed: false,
+      retryAfterSec: Math.max(1, Math.ceil((existing.resetAtMs - now) / 1000)),
+    };
+  }
+
+  existing.count += 1;
+  viewAsStartRateByAdminId.set(adminId, existing);
+  return {
+    allowed: true,
+    retryAfterSec: Math.max(1, Math.ceil((existing.resetAtMs - now) / 1000)),
+  };
+}
+
+const viewAsStartRateCleanupTimer = setInterval(() => {
+  const now = Date.now();
+  for (const [adminId, entry] of viewAsStartRateByAdminId.entries()) {
+    if (entry.resetAtMs <= now) {
+      viewAsStartRateByAdminId.delete(adminId);
+    }
+  }
+}, 2 * 60 * 1000);
+viewAsStartRateCleanupTimer.unref?.();
 
 function normalizeGlobalPrefetchStrategy(
   value: unknown,
@@ -4701,12 +4749,45 @@ FROM (
   // Start impersonating a user
   app.post("/api/admin/view-as/start", requireAdmin, async (req: Request, res: Response) => {
     try {
-      const { userId } = req.body;
-      const targetUserId = parseInt(userId);
-
-      if (isNaN(targetUserId)) {
-        return res.status(400).json({ message: "Invalid user ID" });
+      const realAdminId = Number(req.session.userId ?? 0);
+      if (!Number.isFinite(realAdminId) || realAdminId <= 0) {
+        return res.status(403).json({ message: "Forbidden" });
       }
+
+      const rate = consumeViewAsStartRateLimit(realAdminId);
+      if (!rate.allowed) {
+        res.setHeader("Retry-After", String(rate.retryAfterSec));
+        appendIdentityAudit({
+          userId: null,
+          email: req.session.email || null,
+          category: "SECURITY",
+          type: "IMPERSONATION_START_RATE_LIMITED",
+          title: "View As start blocked by rate limit",
+          description: `POST ${req.originalUrl || req.path}`,
+          ip: req.ip || null,
+          userAgent: req.get("user-agent") || null,
+          actorAdminId: realAdminId,
+          actorType: "ADMIN",
+          actorUserId: realAdminId,
+          sessionId: req.sessionID,
+          data: {
+            limit: VIEW_AS_START_RATE_LIMIT,
+            windowMs: VIEW_AS_START_RATE_WINDOW_MS,
+            retryAfterSec: rate.retryAfterSec,
+          },
+        });
+        return res.status(429).json({
+          message: "VIEW_AS_RATE_LIMITED",
+          code: "VIEW_AS_RATE_LIMITED",
+          retryAfterSec: rate.retryAfterSec,
+        });
+      }
+
+      const parsed = viewAsStartSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Invalid payload", code: "INVALID_PAYLOAD" });
+      }
+      const targetUserId = parsed.data.userId;
 
       // Can't impersonate yourself
       if (targetUserId === req.session.userId) {
@@ -4730,8 +4811,10 @@ FROM (
       }
 
       // Store real admin info before switching
-      const realAdminId = req.session.userId!;
-      const realAdminEmail = req.session.email!;
+      const realAdminEmail = String(req.session.email ?? "").trim();
+      if (!realAdminEmail) {
+        return res.status(401).json({ message: "Unauthorized" });
+      }
 
       // Log the impersonation action
       await storage.logAdminAction({

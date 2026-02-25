@@ -1,0 +1,58 @@
+services:
+  # 1. MinIO - S3 Compatible Object Storage
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: admin
+      MINIO_ROOT_PASSWORD: petascale_password
+      MINIO_PROMETHEUS_AUTH_TYPE: public  # Allows prometheus to scrape without auth
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+
+  # 2. ClickHouse - OLAP Analytics Database
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    ports:
+      - "8123:8123"   # HTTP interface
+      - "9004:9000"   # Native interface (avoid conflict with MinIO on 9000)
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+    environment:
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: petascale_password
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+
+  # 3. Prometheus - System Metrics & Monitoring
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - prometheus_data:/prometheus
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+
+  # 4. Grafana - Observability Dashboards
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=petascale_password
+    volumes:
+      - grafana_data:/var/lib/grafana
+
+volumes:
+  minio_data:
+  clickhouse_data:
+  prometheus_data:
+  grafana_data:

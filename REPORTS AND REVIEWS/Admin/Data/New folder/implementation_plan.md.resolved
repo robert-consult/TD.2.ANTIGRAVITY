@@ -1,0 +1,45 @@
+# Petascale Data Infrastructure Integration Plan
+
+## Executive Summary
+This document outlines the architectural roadmap for integrating the `Petascale-data` stack (ClickHouse, BullMQ, MinIO, Prometheus, Grafana, Pigsty, Valkey, KES) into the existing `TD.2.ANTIGRAVITY` platform. The goal is to support billions of rows for analytics and robust background export orchestration, while comprehensively monitoring the primary `trading-app.db` and the overall system.
+
+## The Toolchain Alignment
+Based on the downloaded repositories in `~/Petascale-data`:
+1.  **Storage Engine**: `minio` + `kes` (S3-compatible object storage with Key Encryption Service for secure, durable export storage).
+2.  **Job Orchestration**: `bullmq` + `valkey` (High-performance, Redis-compatible queueing for async exports and background tasks).
+3.  **Analytics Plane**: `ClickHouse` (Columnar OLAP database for sub-second aggregations on billions of trades).
+4.  **System Observability**: `prometheus` + `grafana` + `minio_monitor` + `pigsty` (Comprehensive metrics and visual monitoring).
+
+## Architecture Options Assessed
+
+### Option A: Separate Analytics/Export Node App (Microservice)
+**Concept**: A dedicated Node.js service entirely separate from the main `TD.2.ANTIGRAVITY` API. It subscribes to a Valkey stream or polls the Postgres DB for changes, ingests them into ClickHouse, and handles all BullMQ export jobs.
+*   **Pros**: Complete resource isolation. Heavy exports or analytics queries will never affect the main trading API's CPU/Event Loop.
+*   **Cons**: Requires setting up new CI/CD pipelines, sharing Prisma/Drizzle schemas across repositories, and managing a separate deployment lifecycle.
+
+### Option B: Integrated Background Services (Recommended)
+**Concept**: The existing `TD.2.ANTIGRAVITY/server` acts as the orchestrator. We add BullMQ worker threads directly into the existing Node application.
+*   **How it works**:
+    1.  **Ingestion**: Core trading routes in `TD.2.ANTIGRAVITY` continue writing to Postgres (`trading-app.db`). A lightweight background job (or Postgres Logical Replication via clickhouse-postgresql engine) streams data to ClickHouse continuously.
+    2.  **Exports**: When an Admin requests an export, the main API enqueues a `bullmq` job into Valkey. An integrated worker process picks it up, streams data from ClickHouse into MinIO, and sets a completion flag in Postgres.
+    3.  **Analytics**: The main API connects to ClickHouse for all Admin Data Tab aggregations, returning results to the frontend via established REST/WS endpoints.
+*   **Pros**: Reuse existing authentication, DB connections, request contexts, and type definitions. Simpler deployment topology.
+*   **Cons**: If workers are not carefully thread-pooled or rate-limited, heavy data processing could theoretically choke the main event loop (mitigated by running BullMQ workers in separate Node `.fork()` processes or strictly managing concurrency).
+
+## Holistic Monitoring Strategy (Beyond Trading Data)
+To monitor the entirely of the `TD.2.ANTIGRAVITY` environment:
+1.  **Pigsty for Postgres**: Deploy `pigsty` to gain deep, visually-rich insights into the `trading-app.db` performance (slow queries, connection limits, bloat, replication lag).
+2.  **Prometheus Scraping**: Configure Prometheus to scrape metrics from:
+    *   The Node.js main app (express-prometheus-middleware).
+    *   MinIO / ClickHouse internal metric endpoints.
+    *   Valkey memory/commands-per-second stats.
+3.  **Grafana Master Dashboards**: Import unified dashboards covering System CPU/RAM, API endpoint latencies, Database Health, and BullMQ queue depths.
+
+## Phased Rollout Plan
+1.  **Phase 1: Spin up Infrastructure (Bare-Metal)**. Deploy Valkey, MinIO (+KES), ClickHouse, and the observability stack via Docker/Podman locally on the server.
+2.  **Phase 2: Data Sync (OLTP -> OLAP)**. Establish the pipeline moving Postgres `trades` and `users` into ClickHouse.
+3.  **Phase 3: BullMQ Orchestration**. Integrate `bullmq` into the `TD.2.ANTIGRAVITY` server. Route all "Export" buttons to enqueue jobs rather than processing synchronously.
+4.  **Phase 4: API Cutover**. Point the Admin Data Tab analytics APIs away from Postgres and towards ClickHouse.
+
+## User Review Required
+Please confirm if **Option B (Integrated Background Services)** is the preferred direction, and if we should proceed with integrating `bullmq` workers and the ClickHouse client into the existing `TD.2.ANTIGRAVITY` server repository as the immediate next step.

@@ -190,56 +190,58 @@ export default function TraderSearchTab({ days }: { days: string }) {
     maxHoldHours,
   ]);
 
-  const exportQueryString = useMemo(() => {
-    const qp = new URLSearchParams();
-    qp.set("days", String(daysInt));
-    qp.set("exportLimit", String(Math.max(1, Math.min(50_000, Math.trunc(clampNumber(exportLimit, 5000))))));
-    if (minTrades.trim()) qp.set("minTrades", String(Math.max(0, Math.trunc(clampNumber(minTrades.trim(), 0)))));
+  const exportFilters = useMemo(() => {
+    const payload: Record<string, unknown> = {
+      days: daysInt,
+      exportLimit: Math.max(1, Math.min(50_000, Math.trunc(clampNumber(exportLimit, 5000)))),
+    };
+
+    if (minTrades.trim()) payload.minTrades = Math.max(0, Math.trunc(clampNumber(minTrades.trim(), 0)));
 
     const qTrim = q.trim();
-    if (qTrim) qp.set("q", qTrim);
-    if (categories.length) qp.set("categories", categories.join(","));
+    if (qTrim) payload.q = qTrim;
+    if (categories.length) payload.categories = categories;
 
     if (minWinRatePct.trim()) {
       const v = clampPct01(minWinRatePct.trim());
-      if (v != null) qp.set("minWinRate", String(v));
+      if (v != null) payload.minWinRate = v;
     }
     if (maxDrawdownPct.trim()) {
       const v = clampPct01(maxDrawdownPct.trim());
-      if (v != null) qp.set("maxDrawdown", String(v));
+      if (v != null) payload.maxDrawdown = v;
     }
     if (minNetProfit.trim()) {
       const v = clampNumber(minNetProfit.trim(), NaN);
-      if (Number.isFinite(v)) qp.set("minNetProfit", String(v));
+      if (Number.isFinite(v)) payload.minNetProfit = v;
     }
     if (maxBestDayPct.trim()) {
       const v = clampPct01(maxBestDayPct.trim());
-      if (v != null) qp.set("maxBestDayPct", String(v));
+      if (v != null) payload.maxBestDayPct = v;
     }
 
     if (minProfitFactor.trim()) {
       const v = clampNumber(minProfitFactor.trim(), NaN);
-      if (Number.isFinite(v) && v >= 0) qp.set("minProfitFactor", String(v));
+      if (Number.isFinite(v) && v >= 0) payload.minProfitFactor = v;
     }
     if (minSlUsagePct.trim()) {
       const v = clampPct01(minSlUsagePct.trim());
-      if (v != null) qp.set("minSlUsage", String(v));
+      if (v != null) payload.minSlUsage = v;
     }
     if (minTpUsagePct.trim()) {
       const v = clampPct01(minTpUsagePct.trim());
-      if (v != null) qp.set("minTpUsage", String(v));
+      if (v != null) payload.minTpUsage = v;
     }
 
     if (minHoldHours.trim()) {
       const v = clampNumber(minHoldHours.trim(), NaN);
-      if (Number.isFinite(v) && v >= 0) qp.set("minHoldSec", String(Math.trunc(v * 3600)));
+      if (Number.isFinite(v) && v >= 0) payload.minHoldSec = Math.trunc(v * 3600);
     }
     if (maxHoldHours.trim()) {
       const v = clampNumber(maxHoldHours.trim(), NaN);
-      if (Number.isFinite(v) && v >= 0) qp.set("maxHoldSec", String(Math.trunc(v * 3600)));
+      if (Number.isFinite(v) && v >= 0) payload.maxHoldSec = Math.trunc(v * 3600);
     }
 
-    return qp.toString();
+    return payload;
   }, [
     daysInt,
     exportLimit,
@@ -258,27 +260,17 @@ export default function TraderSearchTab({ days }: { days: string }) {
   ]);
 
   const exportMutation = useMutation({
-    mutationFn: async (args: { url: string; filename: string }) => {
-      const res = await apiRequest("GET", args.url);
-      const blob = await res.blob();
-      const truncated = String(res.headers.get("x-export-truncated") ?? "") === "1";
-      const exportLimitHeader = res.headers.get("x-export-limit");
-      return { ...args, blob, truncated, exportLimitHeader };
+    mutationFn: async (format: "csv" | "jsonl") => {
+      const res = await apiRequest("POST", "/api/admin/data-exports/trader-scouting", {
+        format,
+        filters: exportFilters,
+      });
+      return res.json() as Promise<{ ok: true; jobId: string; deduped: boolean }>;
     },
-    onSuccess: ({ filename, blob, truncated, exportLimitHeader }) => {
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-
+    onSuccess: ({ jobId, deduped }) => {
       toast({
-        title: truncated ? "Export complete (truncated)" : "Export complete",
-        description: truncated && exportLimitHeader ? `Downloaded first ${exportLimitHeader} rows.` : filename,
-        variant: truncated ? "destructive" : undefined,
+        title: deduped ? "Using existing export job" : "Export job queued",
+        description: `Job ID: ${jobId}`,
       });
     },
     onError: (e: any) => {
@@ -543,12 +535,7 @@ export default function TraderSearchTab({ days }: { days: string }) {
 
               <Button
                 type="button"
-                onClick={() =>
-                  exportMutation.mutate({
-                    url: `/api/admin/trader-scouting/export?format=csv&${exportQueryString}`,
-                    filename: `trader-scout-${daysInt}d-${new Date().toISOString().slice(0, 10)}.csv`,
-                  })
-                }
+                onClick={() => exportMutation.mutate("csv")}
                 disabled={exportMutation.isPending}
                 variant="csv"
                 data-testid="trader-search-export-csv"
@@ -558,12 +545,7 @@ export default function TraderSearchTab({ days }: { days: string }) {
 
               <Button
                 type="button"
-                onClick={() =>
-                  exportMutation.mutate({
-                    url: `/api/admin/trader-scouting/export?format=jsonl&${exportQueryString}`,
-                    filename: `trader-scout-${daysInt}d-${new Date().toISOString().slice(0, 10)}.jsonl`,
-                  })
-                }
+                onClick={() => exportMutation.mutate("jsonl")}
                 disabled={exportMutation.isPending}
                 variant="jsonl"
                 data-testid="trader-search-export-jsonl"

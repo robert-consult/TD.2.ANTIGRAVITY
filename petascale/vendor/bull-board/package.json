@@ -1,0 +1,85 @@
+{
+  "name": "@bull-board/root",
+  "version": "6.20.2",
+  "private": true,
+  "description": "Bull queue UI for inspecting jobs",
+  "keywords": [
+    "bull",
+    "bullmq",
+    "redis",
+    "queue",
+    "monitoring",
+    "dashboard"
+  ],
+  "bugs": {
+    "url": "https://github.com/felixmosh/bull-board/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/felixmosh/bull-board.git"
+  },
+  "license": "MIT",
+  "author": "felixmosh",
+  "contributors": [
+    "Erik Engervall <erik.engervall@gmail.com>",
+    "felixmosh",
+    "Dennis Snijder <dennis@snijder.io>"
+  ],
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "yarn workspaces foreach -A run build",
+    "clean": "yarn workspaces foreach -A run clean",
+    "dev": "concurrently --names \"UI,API\" -c \"bgBlue.bold,bgMagenta.bold\" \"yarn dev:ui\" \"yarn dev:server\"",
+    "dev:docker": "docker-compose up -d",
+    "dev:server": "ts-node-dev --rs example.ts",
+    "dev:ui": "yarn workspace @bull-board/ui run dev",
+    "lint": "oxlint './packages/**/*.{ts,tsx}' . --fix",
+    "prepublishOnly": "yarn build",
+    "release": "release-it --only-version",
+    "test": "yarn workspaces foreach -A run test"
+  },
+  "resolutions": {
+    "@types/react": "17.0.63",
+    "@types/react-dom": "17.0.20"
+  },
+  "devDependencies": {
+    "@release-it-plugins/workspaces": "^5.0.3",
+    "@types/jest": "^30.0.0",
+    "@types/node": "^20.19.33",
+    "auto-changelog": "^2.5.0",
+    "concurrently": "^9.2.1",
+    "jest": "^30.2.0",
+    "oxlint": "^1.43.0",
+    "prettier": "^3.8.1",
+    "release-it": "^19.2.4",
+    "ts-jest": "^29.4.6",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.9.3"
+  },
+  "packageManager": "yarn@4.12.0",
+  "release-it": {
+    "plugins": {
+      "@release-it-plugins/workspaces": true
+    },
+    "npm": false,
+    "git": {
+      "changelog": "npx auto-changelog --stdout --commit-limit false -u --template https://raw.githubusercontent.com/release-it/release-it/master/templates/changelog-compact.hbs"
+    },
+    "hooks": {
+      "before:init": [
+        "yarn",
+        "yarn lint"
+      ],
+      "after:bump": [
+        "yarn build",
+        "yarn test",
+        "npx auto-changelog -p"
+      ]
+    },
+    "github": {
+      "release": true
+    }
+  }
+}

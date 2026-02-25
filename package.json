@@ -54,9 +54,15 @@
     "mobile:android": "cd MOBILE && npx cap open android",
     "mobile:run:android": "cd MOBILE && bash scripts/with-jdk.sh npx cap run android",
     "mobile:tunnel:android": "cd MOBILE && npm run tunnel:android",
-    "mobile:doctor": "cd MOBILE && bash scripts/with-jdk.sh npx cap doctor"
+    "mobile:doctor": "cd MOBILE && bash scripts/with-jdk.sh npx cap doctor",
+    "petascale:sync": "./petascale/sync_local_sources.sh",
+    "petascale:up": "cd petascale && docker compose up -d",
+    "petascale:down": "cd petascale && docker compose down"
   },
   "dependencies": {
+    "@bull-board/api": "^6.20.2",
+    "@bull-board/express": "^6.20.2",
+    "@clickhouse/client": "^1.17.0",
     "@hookform/resolvers": "^5.2.2",
     "@internationalized/date": "^3.10.1",
     "@jridgewell/trace-mapping": "^0.3.31",
@@ -104,6 +110,7 @@
     "@vvo/tzdb": "^6.198.0",
     "axios": "^1.13.5",
     "bcryptjs": "^3.0.3",
+    "bullmq": "^5.70.1",
     "chart.js": "^4.5.1",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
@@ -131,6 +138,7 @@
     "libphonenumber-js": "^1.12.33",
     "lucide-react": "^0.562.0",
     "memoizee": "^0.4.17",
+    "minio": "^8.0.6",
     "multer": "^2.0.2",
     "node-cron": "^4.2.1",
     "openid-client": "^6.8.1",
@@ -201,7 +209,8 @@
   "overrides": {
     "esbuild": "0.27.2",
     "@isaacs/brace-expansion": "5.0.1",
-    "qs": "6.15.0"
+    "qs": "6.15.0",
+    "fast-xml-parser": "5.3.9"
   },
   "optionalDependencies": {
     "bufferutil": "^4.1.0"

@@ -33,6 +33,29 @@ data:
             target_label: namespace
           - source_labels: [__meta_kubernetes_pod_name]
             target_label: pod
+      - job_name: "tradehub-worker"
+        metrics_path: /metrics
+        kubernetes_sd_configs:
+          - role: endpoints
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_service_name, __meta_kubernetes_endpoint_port_name]
+            action: keep
+            regex: tradehub;tradehub-worker;http
+          - source_labels: [__meta_kubernetes_namespace]
+            target_label: namespace
+          - source_labels: [__meta_kubernetes_pod_name]
+            target_label: pod
+      - job_name: "tradehub-minio"
+        metrics_path: /minio/v2/metrics/cluster
+        static_configs:
+          - targets: ["tradehub-minio.tradehub.svc.cluster.local:9000"]
+      - job_name: "tradehub-clickhouse"
+        metrics_path: /metrics
+        static_configs:
+          - targets: ["tradehub-clickhouse.tradehub.svc.cluster.local:8123"]
+      - job_name: "tradehub-valkey-exporter"
+        static_configs:
+          - targets: ["tradehub-valkey-exporter.tradehub.svc.cluster.local:9121"]
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -78,7 +101,19 @@ spec:
           configMap:
             name: tradehub-prometheus-config
         - name: storage
-          emptyDir: {}
+          persistentVolumeClaim:
+            claimName: tradehub-prometheus-pvc
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: tradehub-prometheus-pvc
+  namespace: tradehub
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 20Gi
 ---
 apiVersion: v1
 kind: Service

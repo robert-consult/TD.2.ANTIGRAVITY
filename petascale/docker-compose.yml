@@ -1,58 +1,327 @@
-services:
-  # 1. MinIO - S3 Compatible Object Storage
-  minio:
-    image: minio/minio:latest
-    command: server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER: admin
-      MINIO_ROOT_PASSWORD: petascale_password
-      MINIO_PROMETHEUS_AUTH_TYPE: public  # Allows prometheus to scrape without auth
-    ports:
-      - "9000:9000"
-      - "9001:9001"
-    volumes:
-      - minio_data:/data
+name: tradehub-petascale
 
-  # 2. ClickHouse - OLAP Analytics Database
-  clickhouse:
-    image: clickhouse/clickhouse-server:latest
-    ports:
-      - "8123:8123"   # HTTP interface
-      - "9004:9000"   # Native interface (avoid conflict with MinIO on 9000)
-    volumes:
-      - clickhouse_data:/var/lib/clickhouse
+x-common-restart: &common-restart
+  restart: unless-stopped
+
+services:
+  # 1) PostgreSQL OLTP source-of-truth
+  postgres:
+    image: postgres:16
+    <<: *common-restart
     environment:
-      CLICKHOUSE_USER: default
-      CLICKHOUSE_PASSWORD: petascale_password
+      POSTGRES_DB: ${POSTGRES_DB:-tradehub}
+      POSTGRES_USER: ${POSTGRES_USER:-tradehub}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tradehub_pw_change_me}
+    ports:
+      - "${POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-tradehub} -d ${POSTGRES_DB:-tradehub}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - tradehub
+
+  # 2) Valkey (queue + cache + BullMQ backend)
+  valkey:
+    image: valkey/valkey:8-alpine
+    <<: *common-restart
+    command:
+      - "valkey-server"
+      - "--appendonly"
+      - "yes"
+      - "--requirepass"
+      - "${VALKEY_PASSWORD:-valkey_change_me}"
+    ports:
+      - "${VALKEY_PORT:-6380}:6379"
+    volumes:
+      - valkey_data:/data
+    healthcheck:
+      test: ["CMD", "valkey-cli", "-a", "${VALKEY_PASSWORD:-valkey_change_me}", "PING"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - tradehub
+
+  # 3) ClickHouse OLAP
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.12
+    <<: *common-restart
+    environment:
+      CLICKHOUSE_DB: ${CLICKHOUSE_DATABASE:-tradehub}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-tradehub}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-clickhouse_change_me}
     ulimits:
       nofile:
         soft: 262144
         hard: 262144
-
-  # 3. Prometheus - System Metrics & Monitoring
-  prometheus:
-    image: prom/prometheus:latest
     ports:
-      - "9090:9090"
+      - "${CLICKHOUSE_HTTP_PORT:-8123}:8123"
+      - "${CLICKHOUSE_TCP_PORT:-9004}:9000"
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - ./clickhouse/init:/docker-entrypoint-initdb.d:ro
+    networks:
+      - tradehub
+
+  # 4) MinIO object storage
+  minio:
+    image: minio/minio:RELEASE.2025-11-05T19-17-32Z
+    <<: *common-restart
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minio_admin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minio_change_me_very_strong}
+      MINIO_PROMETHEUS_AUTH_TYPE: ${MINIO_PROMETHEUS_AUTH_TYPE:-public}
+      MINIO_KMS_KES_ENDPOINT: ${MINIO_KMS_KES_ENDPOINT:-https://kes:7373}
+    ports:
+      - "${MINIO_API_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio_data:/data
+    depends_on:
+      - kes
+    networks:
+      - tradehub
+
+  # 5) KES key management (required by package set)
+  kes:
+    image: minio/kes:2025-01-21T17-37-35Z
+    <<: *common-restart
+    command:
+      - /bin/sh
+      - -lc
+      - |
+        mkdir -p /certs /kes/keys
+        if [ ! -f /certs/kes.crt ] || [ ! -f /certs/kes.key ]; then
+          openssl req -x509 -newkey rsa:2048 -nodes \
+            -keyout /certs/kes.key -out /certs/kes.crt -days 3650 \
+            -subj "/CN=kes.local"
+        fi
+        kes server --config /etc/kes/config.yml
+    ports:
+      - "${KES_PORT:-7373}:7373"
+    volumes:
+      - ./kes/config.yml:/etc/kes/config.yml:ro
+      - kes_data:/kes
+    networks:
+      - tradehub
+
+  # 6) Prometheus
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.67.0
+    <<: *common-restart
+    environment:
+      REDIS_ADDR: redis://valkey:6379
+      REDIS_PASSWORD: ${VALKEY_PASSWORD:-valkey_change_me}
+    ports:
+      - "${REDIS_EXPORTER_PORT:-9121}:9121"
+    depends_on:
+      - valkey
+    networks:
+      - tradehub
+
+  # 6) Prometheus
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    <<: *common-restart
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=${PROM_RETENTION:-15d}"
+      - "--web.enable-lifecycle"
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
     volumes:
       - prometheus_data:/prometheus
-      - ./prometheus.yml:/etc/prometheus/prometheus.yml
-    command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus-rules:/etc/prometheus/rules:ro
+    networks:
+      - tradehub
 
-  # 4. Grafana - Observability Dashboards
+  # 7) Grafana
   grafana:
-    image: grafana/grafana:latest
-    ports:
-      - "3000:3000"
+    image: grafana/grafana:11.3.0
+    <<: *common-restart
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=petascale_password
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-grafana_change_me}
+      GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:-http://localhost:3000}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
     volumes:
       - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    networks:
+      - tradehub
+
+  # 8) MinIO monitor package integration
+  minio_monitor:
+    image: python:3.12-slim
+    <<: *common-restart
+    command:
+      - /bin/sh
+      - -lc
+      - |
+        pip install --no-cache-dir minio >/tmp/minio-monitor-install.log 2>&1 || true
+        python /opt/minio_monitor/main.py
+    environment:
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minio_admin}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minio_change_me_very_strong}
+    volumes:
+      - ./vendor/minio_monitor:/opt/minio_monitor:ro
+    depends_on:
+      - minio
+    networks:
+      - tradehub
+
+  # 9) Pigsty package integration (tooling/service shell)
+  pigsty:
+    image: python:3.12-slim
+    <<: *common-restart
+    command:
+      - /bin/sh
+      - -lc
+      - |
+        echo "[pigsty] mounted source at /opt/pigsty"
+        while true; do sleep 3600; done
+    volumes:
+      - ./vendor/pigsty:/opt/pigsty:ro
+    networks:
+      - tradehub
+
+  # 10) Infra-pkg package integration (build helper shell)
+  infra_pkg:
+    image: debian:bookworm-slim
+    <<: *common-restart
+    command:
+      - /bin/sh
+      - -lc
+      - |
+        echo "[infra-pkg] mounted source at /opt/infra-pkg"
+        while true; do sleep 3600; done
+    volumes:
+      - ./vendor/infra-pkg:/opt/infra-pkg:ro
+    networks:
+      - tradehub
+
+  # 11) Headlamp Kubernetes UI
+  headlamp:
+    image: ghcr.io/headlamp-k8s/headlamp:v0.29.2
+    <<: *common-restart
+    ports:
+      - "${HEADLAMP_PORT:-4466}:4466"
+    command:
+      - "-in-cluster"
+    networks:
+      - tradehub
+
+  # 12) Tradehub worker (BullMQ + Bull Board + exports)
+  tradehub-worker:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    <<: *common-restart
+    environment:
+      NODE_ENV: production
+      APP_ROLE: worker
+      PORT: 5000
+      DATABASE_URL: postgres://${POSTGRES_USER:-tradehub}:${POSTGRES_PASSWORD:-tradehub_pw_change_me}@postgres:5432/${POSTGRES_DB:-tradehub}
+      VALKEY_URL: redis://:${VALKEY_PASSWORD:-valkey_change_me}@valkey:6379/0
+      ADMIN_DATA_EXPORT_QUEUE_ENABLED: "1"
+      ADMIN_DATA_EXPORT_QUEUE_CONCURRENCY: ${ADMIN_DATA_EXPORT_QUEUE_CONCURRENCY:-4}
+      ADMIN_DATA_EXPORT_RETENTION_SWEEP_ENABLED: "1"
+      ADMIN_DATA_EXPORT_RETENTION_SWEEP_INTERVAL_SEC: ${ADMIN_DATA_EXPORT_RETENTION_SWEEP_INTERVAL_SEC:-600}
+      ADMIN_DATA_EXPORT_RETENTION_SWEEP_BATCH_LIMIT: ${ADMIN_DATA_EXPORT_RETENTION_SWEEP_BATCH_LIMIT:-200}
+      BULL_BOARD_ENABLED: "1"
+      EXPORT_OBJECT_STORAGE_ENABLED: "1"
+      EXPORT_OBJECT_STORAGE_ENDPOINT: minio
+      EXPORT_OBJECT_STORAGE_PORT: 9000
+      EXPORT_OBJECT_STORAGE_USE_SSL: "0"
+      EXPORT_OBJECT_STORAGE_ACCESS_KEY: ${MINIO_ROOT_USER:-minio_admin}
+      EXPORT_OBJECT_STORAGE_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minio_change_me_very_strong}
+      EXPORT_OBJECT_STORAGE_BUCKET: ${EXPORT_OBJECT_STORAGE_BUCKET:-admin-data-exports}
+      EXPORT_OBJECT_STORAGE_PREFIX: ${EXPORT_OBJECT_STORAGE_PREFIX:-admin-data}
+      EXPORT_LOCAL_LINK_SIGNING_SECRET: ${EXPORT_LOCAL_LINK_SIGNING_SECRET:-replace_me_before_prod_32chars}
+      CLICKHOUSE_ENABLED: "1"
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-tradehub}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-clickhouse_change_me}
+      CLICKHOUSE_DATABASE: ${CLICKHOUSE_DATABASE:-tradehub}
+      CLICKHOUSE_SYNC_ENABLED: "1"
+      CLICKHOUSE_SYNC_INTERVAL_SEC: ${CLICKHOUSE_SYNC_INTERVAL_SEC:-300}
+      CLICKHOUSE_SYNC_BATCH_SIZE: ${CLICKHOUSE_SYNC_BATCH_SIZE:-20000}
+      CLICKHOUSE_SYNC_MAX_LOOPS_PER_TICK: ${CLICKHOUSE_SYNC_MAX_LOOPS_PER_TICK:-4}
+      SESSION_SECRET: ${SESSION_SECRET:-replace_me_before_prod}
+      LEGAL_TERMS_HMAC_SECRET: ${LEGAL_TERMS_HMAC_SECRET:-replace_me_before_prod_32chars}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}
+      EMAIL_VERIFY_TOKEN_SECRET: ${EMAIL_VERIFY_TOKEN_SECRET:-replace_me_before_prod_32chars}
+      SMS_OTP_SECRET: ${SMS_OTP_SECRET:-replace_me_before_prod_32chars}
+      RESEND_API_KEY: ${RESEND_API_KEY:-dummy}
+      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID:-dummy}
+      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:-dummy}
+      TWILIO_FROM_NUMBER: ${TWILIO_FROM_NUMBER:-+10000000000}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
+      minio:
+        condition: service_started
+      clickhouse:
+        condition: service_started
+    ports:
+      - "${TRADEHUB_WORKER_PORT:-5002}:5000"
+    networks:
+      - tradehub
+
+  # 13) Optional API runtime for local all-in-one validation
+  tradehub-api:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    <<: *common-restart
+    environment:
+      NODE_ENV: production
+      APP_ROLE: api,ws
+      PORT: 5000
+      DATABASE_URL: postgres://${POSTGRES_USER:-tradehub}:${POSTGRES_PASSWORD:-tradehub_pw_change_me}@postgres:5432/${POSTGRES_DB:-tradehub}
+      VALKEY_URL: redis://:${VALKEY_PASSWORD:-valkey_change_me}@valkey:6379/0
+      EXPORT_LOCAL_LINK_SIGNING_SECRET: ${EXPORT_LOCAL_LINK_SIGNING_SECRET:-replace_me_before_prod_32chars}
+      SESSION_SECRET: ${SESSION_SECRET:-replace_me_before_prod}
+      LEGAL_TERMS_HMAC_SECRET: ${LEGAL_TERMS_HMAC_SECRET:-replace_me_before_prod_32chars}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}
+      EMAIL_VERIFY_TOKEN_SECRET: ${EMAIL_VERIFY_TOKEN_SECRET:-replace_me_before_prod_32chars}
+      SMS_OTP_SECRET: ${SMS_OTP_SECRET:-replace_me_before_prod_32chars}
+      RESEND_API_KEY: ${RESEND_API_KEY:-dummy}
+      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID:-dummy}
+      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:-dummy}
+      TWILIO_FROM_NUMBER: ${TWILIO_FROM_NUMBER:-+10000000000}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
+    ports:
+      - "${TRADEHUB_API_PORT:-5000}:5000"
+    networks:
+      - tradehub
+
+networks:
+  tradehub:
+    driver: bridge
 
 volumes:
-  minio_data:
+  postgres_data:
+  valkey_data:
   clickhouse_data:
+  minio_data:
+  kes_data:
   prometheus_data:
   grafana_data:

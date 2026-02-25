@@ -7,10 +7,13 @@ import { Download, FileSpreadsheet, Filter, Users, TrendingUp, DollarSign, BarCh
 import MiniDonut from "@/components/MiniDonut";
 import parseDate from "@/utils/parseDate";
 import { LeaderboardTable, LeaderboardEntry, formatCurrency } from "@/components/LeaderboardTable";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import axios from "axios";
 import { fetchWithIdentity } from "@/lib/fetchWithIdentity";
+import { apiRequest } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
 import TraderSearchTab from "@/components/admin/TraderSearchTab";
+import type { AdminDataExportJob, AdminDataExportCreateRequest } from "@shared/admin/dataExports";
 
 interface KPIData {
   totalUsers: number;
@@ -71,6 +74,8 @@ function formatSignedCurrency(value: number): string {
 }
 
 export default function AdminData() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
   const [dateRange, setDateRange] = useState("30"); // days
   const [dataTab, setDataTab] = useState<"stats" | "funnel" | "analytics" | "compliance" | "traderSearch" | "deactivated">("stats");
   const [traderStats, setTraderStats] = useState<any[]>([]);
@@ -106,6 +111,77 @@ export default function AdminData() {
     lockedAccounts: 0,
     pendingKyc: 0,
     totalUsers: 0
+  });
+
+  const exportJobsQuery = useQuery<{ ok: true; jobs: AdminDataExportJob[] }>({
+    queryKey: ["/api/admin/data-exports", "mine"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", "/api/admin/data-exports?limit=50");
+      return res.json();
+    },
+    refetchInterval: (query) => {
+      const jobs = (query.state.data as { ok: true; jobs: AdminDataExportJob[] } | undefined)?.jobs || [];
+      const hasInFlight = jobs.some((j) => j.status === "QUEUED" || j.status === "RUNNING");
+      return hasInFlight ? 3000 : 12_000;
+    },
+  });
+
+  const createExportJobMutation = useMutation({
+    mutationFn: async (payload: AdminDataExportCreateRequest) => {
+      const res = await apiRequest("POST", "/api/admin/data-exports", payload);
+      return res.json() as Promise<{ ok: true; jobId: string; deduped: boolean }>;
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/data-exports", "mine"] });
+      toast({
+        title: data.deduped ? "Using existing export job" : "Export job queued",
+        description: `Job ID: ${data.jobId}`,
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Failed to queue export",
+        description: String(error?.message || error),
+        variant: "destructive",
+      });
+    },
+  });
+
+  const downloadExportJobMutation = useMutation({
+    mutationFn: async (jobId: string) => {
+      const res = await apiRequest("GET", `/api/admin/data-exports/${encodeURIComponent(jobId)}/download-link`);
+      return res.json() as Promise<{ ok: true; jobId: string; url: string; expiresAt: number }>;
+    },
+    onSuccess: (data) => {
+      window.open(data.url, "_blank", "noopener,noreferrer");
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Download link failed",
+        description: String(error?.message || error),
+        variant: "destructive",
+      });
+    },
+  });
+
+  const cancelExportJobMutation = useMutation({
+    mutationFn: async (jobId: string) => {
+      const res = await apiRequest("POST", `/api/admin/data-exports/${encodeURIComponent(jobId)}/cancel`);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/data-exports", "mine"] });
+    },
+  });
+
+  const retryExportJobMutation = useMutation({
+    mutationFn: async (jobId: string) => {
+      const res = await apiRequest("POST", `/api/admin/data-exports/${encodeURIComponent(jobId)}/retry`);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/data-exports", "mine"] });
+    },
   });
   
   // KPI Summary query
@@ -261,44 +337,21 @@ export default function AdminData() {
       return csvContent;
     };
     
-    const fetchAndDownload = async (endpoint: string, filename: string) => {
-      try {
-        const response = await fetchWithIdentity(endpoint);
-        if (response.ok) {
-          const data = await response.json();
-          let csvContent = '';
-          
-          if (type === 'traders') {
-            csvContent = generateTraderCSV();
-          } else {
-            // For trades and daily, use the API data directly
-            if (data.length > 0) {
-              // Extract headers from first object
-              const headers = Object.keys(data[0]);
-              csvContent = headers.join(',') + '\n';
-              
-              // Add rows
-              data.forEach((item: any) => {
-                const row = headers.map(key => escapeCsvValue(item[key]));
-                csvContent += row.join(',') + '\n';
-              });
-            }
-          }
-          
-          downloadString(csvContent, filename);
-        }
-      } catch (error) {
-        console.error(`Error downloading ${type} data:`, error);
-      }
-    };
-    
     if (type === 'traders' && traderStats.length > 0) {
       const csvContent = generateTraderCSV();
       downloadString(csvContent, 'trader_statistics.csv');
     } else if (type === 'trades') {
-      fetchAndDownload('/api/admin/all-trades', 'all_trades.csv');
+      createExportJobMutation.mutate({
+        type: "all_trades",
+        format: "csv",
+        filters: { limit: 100000 },
+      });
     } else if (type === 'daily') {
-      fetchAndDownload('/api/admin/daily-pnl', 'daily_pnl.csv');
+      createExportJobMutation.mutate({
+        type: "daily_pnl",
+        format: "csv",
+        filters: { limitDays: 365 },
+      });
     }
   };
   
@@ -347,38 +400,33 @@ export default function AdminData() {
       })).join('\n');
     };
     
-    const fetchAndDownloadJSONL = async (endpoint: string, filename: string) => {
-      try {
-        const response = await fetchWithIdentity(endpoint);
-        if (response.ok) {
-          const data = await response.json();
-          const jsonlContent = data.map((item: any) => JSON.stringify({
-            ...item,
-            exportedAt: new Date().toISOString(),
-          })).join('\n');
-          downloadString(jsonlContent, filename, 'application/x-ndjson');
-        }
-      } catch (error) {
-        console.error(`Error downloading ${type} JSONL data:`, error);
-      }
-    };
-    
     if (type === 'traders' && traderStats.length > 0) {
       const jsonlContent = generateTraderJSONL();
       downloadString(jsonlContent, 'trader_statistics.jsonl', 'application/x-ndjson');
     } else if (type === 'trades') {
-      fetchAndDownloadJSONL('/api/admin/all-trades', 'all_trades.jsonl');
+      createExportJobMutation.mutate({
+        type: "all_trades",
+        format: "jsonl",
+        filters: { limit: 100000 },
+      });
     } else if (type === 'daily') {
-      fetchAndDownloadJSONL('/api/admin/daily-pnl', 'daily_pnl.jsonl');
+      createExportJobMutation.mutate({
+        type: "daily_pnl",
+        format: "jsonl",
+        filters: { limitDays: 365 },
+      });
     }
   };
 
   const downloadDeactivatedExport = (format: "csv" | "jsonl") => {
-    const params = new URLSearchParams();
-    params.set("format", format);
-    params.set("days", dateRange);
-    params.set("includeTrades", "1");
-    window.open(`/api/admin/deactivated-accounts/export?${params.toString()}`, "_blank");
+    createExportJobMutation.mutate({
+      type: "deactivated_accounts",
+      format,
+      filters: {
+        days: Number(dateRange),
+        includeTrades: true,
+      },
+    });
   };
 
   // Format duration in hours to a readable string
@@ -390,6 +438,13 @@ export default function AdminData() {
     } else {
       return `${Math.round(hours / 24)} days`;
     }
+  };
+
+  const exportJobs = exportJobsQuery.data?.jobs || [];
+
+  const formatTs = (value: number | null) => {
+    if (!value) return "—";
+    return new Date(value * 1000).toLocaleString();
   };
 
   return (
@@ -1080,6 +1135,81 @@ export default function AdminData() {
           )}
         </div>
       ) : null}
+
+      <Card className="bg-neutral-800 border-gray-600">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base text-cyan-300">Background Export Jobs</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {exportJobsQuery.isLoading ? (
+            <div className="text-sm text-gray-400">Loading jobs…</div>
+          ) : exportJobs.length === 0 ? (
+            <div className="text-sm text-gray-400">No jobs yet.</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-gray-300">
+                    <th className="py-2 pr-3">Job</th>
+                    <th className="py-2 pr-3">Type</th>
+                    <th className="py-2 pr-3">Status</th>
+                    <th className="py-2 pr-3">Rows</th>
+                    <th className="py-2 pr-3">Created</th>
+                    <th className="py-2 pr-3">Updated</th>
+                    <th className="py-2 pr-3">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {exportJobs.slice(0, 12).map((job) => (
+                    <tr key={job.id} className="border-t border-neutral-700">
+                      <td className="py-2 pr-3 text-gray-200">{job.id}</td>
+                      <td className="py-2 pr-3 text-gray-300">{job.type}</td>
+                      <td className="py-2 pr-3 text-gray-200">{job.status}</td>
+                      <td className="py-2 pr-3 text-gray-300">{job.rowCount ?? "—"}</td>
+                      <td className="py-2 pr-3 text-gray-400">{formatTs(job.createdAt)}</td>
+                      <td className="py-2 pr-3 text-gray-400">{formatTs(job.updatedAt)}</td>
+                      <td className="py-2 pr-3">
+                        <div className="flex items-center gap-2">
+                          {job.status === "READY" && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="border-cyan-600 text-cyan-200 hover:bg-cyan-900/40"
+                              onClick={() => downloadExportJobMutation.mutate(job.id)}
+                            >
+                              Download
+                            </Button>
+                          )}
+                          {(job.status === "FAILED" || job.status === "CANCELED" || job.status === "EXPIRED") && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="border-amber-600 text-amber-200 hover:bg-amber-900/40"
+                              onClick={() => retryExportJobMutation.mutate(job.id)}
+                            >
+                              Retry
+                            </Button>
+                          )}
+                          {(job.status === "QUEUED" || job.status === "RUNNING") && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="border-red-700 text-red-200 hover:bg-red-900/30"
+                              onClick={() => cancelExportJobMutation.mutate(job.id)}
+                            >
+                              Cancel
+                            </Button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

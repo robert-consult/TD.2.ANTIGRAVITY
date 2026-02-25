@@ -1,0 +1,442 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tradehub-minio-monitor-script
+  namespace: tradehub
+data:
+  monitor.py: |
+    import os
+    import time
+    from minio import Minio
+
+    endpoint = os.getenv("MINIO_ENDPOINT", "tradehub-minio.tradehub.svc.cluster.local:9000")
+    access_key = os.getenv("MINIO_ACCESS_KEY", "")
+    secret_key = os.getenv("MINIO_SECRET_KEY", "")
+    bucket = os.getenv("MINIO_BUCKET", "admin-data-exports")
+
+    client = Minio(endpoint, access_key=access_key, secret_key=secret_key, secure=False)
+    while True:
+      try:
+        exists = client.bucket_exists(bucket)
+        print(f"[minio_monitor] bucket={bucket} exists={exists}", flush=True)
+      except Exception as err:
+        print(f"[minio_monitor] error={err}", flush=True)
+      time.sleep(60)
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: tradehub-clickhouse
+  namespace: tradehub
+spec:
+  serviceName: tradehub-clickhouse
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tradehub-clickhouse
+  template:
+    metadata:
+      labels:
+        app: tradehub-clickhouse
+    spec:
+      containers:
+        - name: clickhouse
+          image: clickhouse/clickhouse-server:24.12
+          ports:
+            - containerPort: 8123
+              name: http
+            - containerPort: 9000
+              name: native
+          env:
+            - name: CLICKHOUSE_DB
+              valueFrom:
+                configMapKeyRef:
+                  name: tradehub-config
+                  key: CLICKHOUSE_DATABASE
+                  optional: true
+            - name: CLICKHOUSE_USER
+              valueFrom:
+                secretKeyRef:
+                  name: tradehub-secrets
+                  key: CLICKHOUSE_USER
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: tradehub-secrets
+                  key: CLICKHOUSE_PASSWORD
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/clickhouse
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "2Gi"
+            limits:
+              cpu: "4"
+              memory: "8Gi"
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 200Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tradehub-clickhouse
+  namespace: tradehub
+spec:
+  selector:
+    app: tradehub-clickhouse
+  ports:
+    - name: http
+      port: 8123
+      targetPort: 8123
+    - name: native
+      port: 9000
+      targetPort: 9000
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: tradehub-minio
+  namespace: tradehub
+spec:
+  serviceName: tradehub-minio
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tradehub-minio
+  template:
+    metadata:
+      labels:
+        app: tradehub-minio
+    spec:
+      containers:
+        - name: minio
+          image: minio/minio:RELEASE.2025-11-05T19-17-32Z
+          args: ["server", "/data", "--console-address", ":9001"]
+          env:
+            - name: MINIO_ROOT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: tradehub-secrets
+                  key: EXPORT_OBJECT_STORAGE_ACCESS_KEY
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: tradehub-secrets
+                  key: EXPORT_OBJECT_STORAGE_SECRET_KEY
+            - name: MINIO_PROMETHEUS_AUTH_TYPE
+              value: "public"
+          ports:
+            - containerPort: 9000
+              name: api
+            - containerPort: 9001
+              name: console
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          resources:
+            requests:
+              cpu: "300m"
+              memory: "512Mi"
+            limits:
+              cpu: "2"
+              memory: "4Gi"
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 500Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tradehub-minio
+  namespace: tradehub
+spec:
+  selector:
+    app: tradehub-minio
+  ports:
+    - name: api
+      port: 9000
+      targetPort: 9000
+    - name: console
+      port: 9001
+      targetPort: 9001
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tradehub-kes-config
+  namespace: tradehub
+data:
+  config.yml: |
+    address: :7373
+    admin:
+      identity: disabled
+    tls:
+      key: /certs/kes.key
+      cert: /certs/kes.crt
+    policy:
+      tradehub:
+        allow:
+          - /v1/key/create/*
+          - /v1/key/generate/*
+          - /v1/key/decrypt/*
+          - /v1/key/encrypt/*
+          - /v1/key/list/*
+          - /v1/key/describe/*
+          - /v1/status
+    keystore:
+      fs:
+        path: /kes/keys
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tradehub-kes
+  namespace: tradehub
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tradehub-kes
+  template:
+    metadata:
+      labels:
+        app: tradehub-kes
+    spec:
+      initContainers:
+        - name: kes-cert-init
+          image: alpine:3.20
+          command:
+            - /bin/sh
+            - -lc
+            - |
+              set -e
+              apk add --no-cache openssl >/dev/null
+              if [ ! -f /certs/kes.crt ] || [ ! -f /certs/kes.key ]; then
+                openssl req -x509 -newkey rsa:2048 -nodes \
+                  -keyout /certs/kes.key -out /certs/kes.crt -days 3650 \
+                  -subj "/CN=tradehub-kes.tradehub.svc.cluster.local"
+              fi
+          volumeMounts:
+            - name: kes-certs
+              mountPath: /certs
+      containers:
+        - name: kes
+          image: minio/kes:2025-01-21T17-37-35Z
+          args: ["server", "--config=/etc/kes/config.yml"]
+          ports:
+            - containerPort: 7373
+              name: api
+          volumeMounts:
+            - name: kes-config
+              mountPath: /etc/kes
+              readOnly: true
+            - name: kes-certs
+              mountPath: /certs
+            - name: kes-data
+              mountPath: /kes
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+      volumes:
+        - name: kes-config
+          configMap:
+            name: tradehub-kes-config
+        - name: kes-certs
+          emptyDir: {}
+        - name: kes-data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tradehub-kes
+  namespace: tradehub
+spec:
+  selector:
+    app: tradehub-kes
+  ports:
+    - name: api
+      port: 7373
+      targetPort: 7373
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tradehub-valkey-exporter
+  namespace: tradehub
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tradehub-valkey-exporter
+  template:
+    metadata:
+      labels:
+        app: tradehub-valkey-exporter
+    spec:
+      containers:
+        - name: exporter
+          image: oliver006/redis_exporter:v1.67.0
+          env:
+            - name: REDIS_ADDR
+              value: redis://valkey.tradehub.svc.cluster.local:6379
+          ports:
+            - containerPort: 9121
+              name: metrics
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tradehub-valkey-exporter
+  namespace: tradehub
+spec:
+  selector:
+    app: tradehub-valkey-exporter
+  ports:
+    - name: metrics
+      port: 9121
+      targetPort: 9121
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tradehub-minio-monitor
+  namespace: tradehub
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tradehub-minio-monitor
+  template:
+    metadata:
+      labels:
+        app: tradehub-minio-monitor
+    spec:
+      containers:
+        - name: minio-monitor
+          image: python:3.12-slim
+          command:
+            - /bin/sh
+            - -lc
+            - |
+              pip install --no-cache-dir minio
+              python /opt/minio_monitor/monitor.py
+          env:
+            - name: MINIO_ENDPOINT
+              value: tradehub-minio.tradehub.svc.cluster.local:9000
+            - name: MINIO_BUCKET
+              valueFrom:
+                configMapKeyRef:
+                  name: tradehub-config
+                  key: EXPORT_OBJECT_STORAGE_BUCKET
+                  optional: true
+            - name: MINIO_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: tradehub-secrets
+                  key: EXPORT_OBJECT_STORAGE_ACCESS_KEY
+            - name: MINIO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: tradehub-secrets
+                  key: EXPORT_OBJECT_STORAGE_SECRET_KEY
+          volumeMounts:
+            - name: script
+              mountPath: /opt/minio_monitor
+      volumes:
+        - name: script
+          configMap:
+            name: tradehub-minio-monitor-script
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tradehub-pigsty
+  namespace: tradehub
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tradehub-pigsty
+  template:
+    metadata:
+      labels:
+        app: tradehub-pigsty
+    spec:
+      containers:
+        - name: pigsty
+          image: python:3.12-slim
+          command: ["/bin/sh", "-lc", "echo pigsty helper ready; sleep infinity"]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tradehub-infra-pkg
+  namespace: tradehub
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tradehub-infra-pkg
+  template:
+    metadata:
+      labels:
+        app: tradehub-infra-pkg
+    spec:
+      containers:
+        - name: infra-pkg
+          image: debian:bookworm-slim
+          command: ["/bin/sh", "-lc", "echo infra-pkg helper ready; sleep infinity"]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tradehub-headlamp
+  namespace: tradehub
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tradehub-headlamp
+  template:
+    metadata:
+      labels:
+        app: tradehub-headlamp
+    spec:
+      containers:
+        - name: headlamp
+          image: ghcr.io/headlamp-k8s/headlamp:v0.29.2
+          args:
+            - -in-cluster
+          ports:
+            - containerPort: 4466
+              name: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tradehub-headlamp
+  namespace: tradehub
+spec:
+  selector:
+    app: tradehub-headlamp
+  ports:
+    - name: http
+      port: 4466
+      targetPort: 4466

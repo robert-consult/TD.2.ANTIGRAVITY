@@ -15,6 +15,11 @@ The API exposes Prometheus-format metrics at:
 Current metrics include:
 - `ws_active_connections`
 - `quotehub_size`, `quotehub_seq`, `quotehub_asof`
+- `admin_data_export_jobs_*` (created/start/success/fail/cancel counters, running gauge)
+- `admin_data_export_queue_*` (waiting/active/delayed/failed/completed gauges)
+- `admin_data_export_last_*` (last duration/success/failure timestamps)
+- `admin_data_export_retention_*` (retention sweeps + expired artifacts)
+- `clickhouse_sync_*` (scheduler liveness, last run/success/failure, rows synced)
 
 Kubernetes scraping is configured in:
 - `k8s/60-monitoring.yaml`
@@ -25,4 +30,3 @@ so operations can detect regressions quickly.
 ## Traces (if you introduce them)
 - Prefer low-cardinality labels; never include PII in attributes.
 - Keep spans around network calls, DB calls, and background jobs.
-

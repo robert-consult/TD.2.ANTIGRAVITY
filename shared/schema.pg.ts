@@ -2071,6 +2071,59 @@ export const auditExportManifest = pgTable(
 
 export const insertAuditExportManifestSchema = createInsertSchema(auditExportManifest);
 
+// Admin DataTab export jobs (durable background exports)
+export const adminDataExportJobs = pgTable(
+  "admin_data_export_jobs",
+  {
+    id: text("id").primaryKey(),
+    type: text("type").notNull(), // trader_scouting | deactivated_accounts | all_trades | daily_pnl
+    format: text("format").notNull(), // csv | jsonl
+    status: text("status").notNull().default("QUEUED"), // QUEUED | RUNNING | READY | FAILED | CANCELED | EXPIRED
+    requestedByAdminId: integer("requested_by_admin_id"),
+    filterHash: text("filter_hash"),
+    filtersJson: text("filters_json").notNull().default("{}"),
+    queueName: text("queue_name").notNull().default("admin-export-v1"),
+    queueJobId: text("queue_job_id"),
+    objectKey: text("object_key"),
+    rowCount: integer("row_count"),
+    bytesWritten: bigint("bytes_written", { mode: "number" }),
+    truncated: boolean("truncated").notNull().default(false),
+    attemptCount: integer("attempt_count").notNull().default(0),
+    maxAttempts: integer("max_attempts").notNull().default(6),
+    error: text("error"),
+    createdAt: integer("created_at").notNull().default(nowUnix),
+    startedAt: integer("started_at"),
+    completedAt: integer("completed_at"),
+    expiresAt: integer("expires_at"),
+    updatedAt: integer("updated_at").notNull().default(nowUnix),
+  },
+  (table) => ({
+    statusCreatedIdx: index("idx_ade_jobs_status_created").on(table.status, table.createdAt),
+    typeCreatedIdx: index("idx_ade_jobs_type_created").on(table.type, table.createdAt),
+    requestedByCreatedIdx: index("idx_ade_jobs_req_created").on(table.requestedByAdminId, table.createdAt),
+    dedupeIdx: index("idx_ade_jobs_filter_hash").on(table.filterHash, table.status, table.createdAt),
+    queueIdx: index("idx_ade_jobs_queue").on(table.queueName, table.queueJobId),
+  }),
+);
+
+export const adminDataExportJobEvents = pgTable(
+  "admin_data_export_job_events",
+  {
+    id: serial("id").primaryKey(),
+    jobId: text("job_id").notNull(),
+    ts: integer("ts").notNull().default(nowUnix),
+    level: text("level").notNull().default("INFO"), // INFO | WARN | ERROR
+    message: text("message").notNull(),
+    contextJson: text("context_json").notNull().default("{}"),
+  },
+  (table) => ({
+    jobTsIdx: index("idx_ade_events_job_ts").on(table.jobId, table.ts),
+  }),
+);
+
+export const insertAdminDataExportJobSchema = createInsertSchema(adminDataExportJobs);
+export const insertAdminDataExportJobEventSchema = createInsertSchema(adminDataExportJobEvents);
+
 // Migration export/import jobs (backup + platform migration)
 export const migrationExportJobs = pgTable("migration_export_jobs", {
   id: text("id").primaryKey(),

@@ -41,10 +41,15 @@ import { recalcAccount } from "../recalcAccount";
 import { onLiveEvent, publishLiveEvent } from "../services/liveBus";
 import { TRADER_SEARCH_CATEGORIES } from "@shared/admin/traderSearch";
 import { canonicalizeInstrumentCategory, normalizeInstrumentCategory } from "@shared/instruments/categories";
+import { adminDataExportCreateRequestSchema } from "@shared/admin/dataExports";
 import { createNotification, sendKycMailboxMessage } from "../services/messaging";
 import { invalidateRememberMeConfigCache } from "../services/rememberMe";
 import { applyAdminScopeSession } from "../security/adminScopeSession";
 import { consumeGlobalSettingsUpdateRateLimit } from "../security/globalSettingsRateLimit";
+import { createAdminDataExportJob } from "../services/adminDataExportRepo";
+import { enqueueAdminDataExportJob } from "../services/adminDataExportQueue";
+import { onAdminExportJobCreated } from "../services/adminDataExportMetrics";
+import { getPetascaleRuntimeConfig } from "../services/petascaleEnv";
 import {
   buildDefaultGlobalSettingsWrite,
   buildGlobalSettingsPerformanceSnapshot,
@@ -105,6 +110,47 @@ viewAsStartRateCleanupTimer.unref?.();
 
 function getParam(value: string | string[]): string {
   return Array.isArray(value) ? value[0] : value;
+}
+
+function getSessionAdminId(req: Request): number | null {
+  const sessionUserId = Number((req as any)?.session?.userId);
+  if (!Number.isFinite(sessionUserId) || sessionUserId <= 0) return null;
+  return sessionUserId;
+}
+
+type LegacyExportType = "trader_scouting" | "deactivated_accounts" | "all_trades" | "daily_pnl";
+
+async function enqueueLegacyAdminDataExportJob(params: {
+  req: Request;
+  type: LegacyExportType;
+  format: "csv" | "jsonl";
+  filters: Record<string, unknown>;
+  dedupeWindowSec?: number;
+}): Promise<{ jobId: string; deduped: boolean; pollUrl: string }> {
+  const requestedByAdminId = getSessionAdminId(params.req);
+  if (!requestedByAdminId) throw new Error("Forbidden");
+
+  const request = adminDataExportCreateRequestSchema.parse({
+    type: params.type,
+    format: params.format,
+    filters: params.filters,
+  });
+
+  const cfg = getPetascaleRuntimeConfig();
+  const created = await createAdminDataExportJob({
+    request,
+    requestedByAdminId,
+    maxAttempts: cfg.queueMaxAttempts,
+    dedupeWindowSec: params.dedupeWindowSec ?? 1800,
+  });
+
+  onAdminExportJobCreated({ deduped: created.deduped });
+  await enqueueAdminDataExportJob({ jobId: created.job.id });
+  return {
+    jobId: created.job.id,
+    deduped: created.deduped,
+    pollUrl: `/api/admin/data-exports/${encodeURIComponent(created.job.id)}`,
+  };
 }
 
 function normalizeProviderKey(raw: unknown): string | null {
@@ -589,50 +635,59 @@ export function registerAdminRoutes(app: Express) {
       const days = parseInt(req.query.days as string) || 30;
       const nowSec = Math.floor(Date.now() / 1000);
       const cutoff = days === 0 ? 0 : nowSec - (days * 24 * 60 * 60);
-
-      // Get all users
-      const allUsers = await storage.listUsersWithSettings();
-      const totalUsers = allUsers.filter((u: any) => !u.isAdmin).length;
-
-      // Get trades for the period
-      const allTrades = await db.select().from(trades);
-      const periodTrades = cutoff === 0
-        ? allTrades
-        : allTrades.filter((t: any) => (t.openedAt || 0) >= cutoff);
-
-      const closedTrades = periodTrades.filter((t: any) => t.status === 'CLOSED');
-      const tradeNetProfit = (trade: any): number => {
-        const net = Number(trade?.netProfitUsd);
-        if (Number.isFinite(net)) return net;
-        const legacy = Number.parseFloat(String(trade?.profit ?? "0"));
-        return Number.isFinite(legacy) ? legacy : 0;
-      };
-
-      // Calculate metrics
-      const activeTraders = new Set(periodTrades.map((t: any) => t.userId)).size;
-      const totalTradesCount = closedTrades.length;
-
-      // Total volume (sum of lots * 100000 for standard lot size)
-      const totalVolume = closedTrades.reduce((sum: number, t: any) => {
-        return sum + (parseFloat(t.lots || '0') * 100000);
-      }, 0);
-
-      // Total P/L
-      const totalPnL = closedTrades.reduce((sum: number, t: any) => {
-        return sum + tradeNetProfit(t);
-      }, 0);
-
-      // Average win rate
-      const winningTrades = closedTrades.filter((t: any) => tradeNetProfit(t) > 0).length;
-      const avgWinRate = totalTradesCount > 0 ? (winningTrades / totalTradesCount) * 100 : 0;
+      const row = await queryOne<any>(
+        `
+          WITH user_counts AS (
+            SELECT COUNT(*)::int AS total_users
+            FROM users u
+            WHERE COALESCE(u.is_admin, FALSE) = FALSE
+          ),
+          period_trades AS (
+            SELECT
+              t.user_id,
+              COALESCE(t.lots, 0)::numeric AS lots,
+              COALESCE(
+                t.net_profit_usd::numeric,
+                CASE
+                  WHEN t.profit IS NULL OR btrim(t.profit) = '' THEN 0::numeric
+                  WHEN t.profit ~ '^-?\\d+(\\.\\d+)?$' THEN t.profit::numeric
+                  ELSE 0::numeric
+                END
+              ) AS net_profit
+            FROM trades t
+            INNER JOIN users u ON u.id = t.user_id
+            WHERE t.status = 'CLOSED'
+              AND COALESCE(u.is_admin, FALSE) = FALSE
+              AND (?::int = 0 OR COALESCE(t.opened_at, 0) >= ?::int)
+          )
+          SELECT
+            uc.total_users AS total_users,
+            COUNT(pt.user_id)::int AS total_trades,
+            COUNT(DISTINCT pt.user_id)::int AS active_traders,
+            COALESCE(ROUND(SUM(pt.lots * 100000::numeric), 0), 0)::numeric AS total_volume,
+            COALESCE(ROUND(SUM(pt.net_profit), 2), 0)::numeric AS total_pnl,
+            COALESCE(
+              ROUND(
+                (SUM(CASE WHEN pt.net_profit > 0 THEN 1 ELSE 0 END)::numeric * 100.0)
+                / NULLIF(COUNT(pt.user_id), 0),
+                1
+              ),
+              0
+            )::numeric AS avg_win_rate
+          FROM user_counts uc
+          LEFT JOIN period_trades pt ON TRUE
+          GROUP BY uc.total_users
+        `,
+        [cutoff, cutoff],
+      );
 
       res.json({
-        totalUsers,
-        activeTraders,
-        totalTrades: totalTradesCount,
-        totalVolume: Math.round(totalVolume),
-        totalPnL: Math.round(totalPnL * 100) / 100,
-        avgWinRate: Math.round(avgWinRate * 10) / 10
+        totalUsers: Number(row?.total_users || 0),
+        activeTraders: Number(row?.active_traders || 0),
+        totalTrades: Number(row?.total_trades || 0),
+        totalVolume: Number(row?.total_volume || 0),
+        totalPnL: Number(row?.total_pnl || 0),
+        avgWinRate: Number(row?.avg_win_rate || 0),
       });
     } catch (error) {
       console.error("Get KPI summary error:", error);
@@ -644,6 +699,8 @@ export function registerAdminRoutes(app: Express) {
   app.get("/api/admin/trader-stats", requireAdmin, async (req: Request, res: Response) => {
     try {
       const days = req.query.days ? parseInt(req.query.days as string) : 30;
+      const limit = Math.max(1, Math.min(50_000, Number.parseInt(String(req.query.limit ?? "5000"), 10) || 5000));
+      const offset = Math.max(0, Math.min(5_000_000, Number.parseInt(String(req.query.offset ?? "0"), 10) || 0));
 
       const params: any[] = [];
       let havingClause = "";
@@ -710,9 +767,15 @@ export function registerAdminRoutes(app: Express) {
         GROUP BY u.id, u.username, u.email, u.starting_equity
         ${havingClause}
         ORDER BY profit DESC
+        LIMIT $${params.length + 1}
+        OFFSET $${params.length + 2}
       `;
+      params.push(limit, offset);
 
       const stats = (await dbClient.query(query, params)).rows;
+      res.setHeader("X-Result-Limit", String(limit));
+      res.setHeader("X-Result-Offset", String(offset));
+      if (stats.length >= limit) res.setHeader("X-Result-Truncated", "1");
       res.json(stats);
     } catch (error) {
       console.error("Error fetching trader statistics:", error);
@@ -1301,8 +1364,6 @@ LIMIT $14::int OFFSET $15::int;
   app.get("/api/admin/trader-scouting/export", requireAdmin, async (req: Request, res: Response) => {
     try {
       const days = parseDaysParam(readQuery(req.query.days), 30);
-      const nowSec = Math.floor(Date.now() / 1000);
-      const cutoffSec = days > 0 ? nowSec - days * 86400 : 0;
 
       const formatRaw = String(readQuery(req.query.format) ?? "csv").trim().toLowerCase();
       const format = formatRaw === "excel" ? "csv" : formatRaw === "ndjson" ? "jsonl" : formatRaw;
@@ -1310,10 +1371,9 @@ LIMIT $14::int OFFSET $15::int;
         return res.status(400).json({ message: "Invalid format (expected csv or jsonl)" });
       }
 
-      const exportLimit = clampInt(req.query.exportLimit, 5000, 1, 50_000);
+      const exportLimit = clampInt(req.query.exportLimit, 5000, 1, 200_000);
 
       const qRaw = (readQuery(req.query.q) || "").trim();
-      const q = qRaw.length ? `%${qRaw.slice(0, 200)}%` : null;
 
       const categoriesRaw = (readQuery(req.query.categories) || readQuery(req.query.assetClasses) || "").trim();
       const categoriesList = categoriesRaw
@@ -1360,30 +1420,29 @@ LIMIT $14::int OFFSET $15::int;
       const minSlUsage = normalizePct01(readQuery(req.query.minSlUsage) ?? readQuery(req.query.minSlUsagePct));
       const minTpUsage = normalizePct01(readQuery(req.query.minTpUsage) ?? readQuery(req.query.minTpUsagePct));
 
-      const { results, hasMore } = await runTraderScoutSearch({
-        cutoffSec,
-        categories: normalizedCategories,
-        q,
-        minHoldSec,
-        maxHoldSec,
+      const filters: Record<string, unknown> = {
+        days,
+        exportLimit,
         minTrades,
-        minWinRate,
-        minNetProfit,
-        maxDrawdown,
-        maxBestDayPct,
-        minProfitFactor,
-        minSlUsage,
-        minTpUsage,
-        limit: exportLimit,
-        offset: 0,
+      };
+      if (qRaw.length) filters.q = qRaw.slice(0, 200);
+      if (normalizedCategories.length) filters.categories = normalizedCategories;
+      if (minWinRate !== null) filters.minWinRate = minWinRate;
+      if (maxDrawdown !== null) filters.maxDrawdown = maxDrawdown;
+      if (minNetProfit !== null) filters.minNetProfit = minNetProfit;
+      if (maxBestDayPct !== null) filters.maxBestDayPct = maxBestDayPct;
+      if (minHoldSec !== null) filters.minHoldSec = Math.max(0, Math.trunc(minHoldSec));
+      if (maxHoldSec !== null) filters.maxHoldSec = Math.max(0, Math.trunc(maxHoldSec));
+      if (minProfitFactor !== null) filters.minProfitFactor = minProfitFactor;
+      if (minSlUsage !== null) filters.minSlUsage = minSlUsage;
+      if (minTpUsage !== null) filters.minTpUsage = minTpUsage;
+
+      const queued = await enqueueLegacyAdminDataExportJob({
+        req,
+        type: "trader_scouting",
+        format,
+        filters,
       });
-
-      res.setHeader("Cache-Control", "no-store");
-      res.setHeader("X-Export-Limit", String(exportLimit));
-      if (hasMore) res.setHeader("X-Export-Truncated", "1");
-
-      const dateTag = new Date().toISOString().slice(0, 10);
-      const baseName = `trader-scout-${days}d-${dateTag}`;
 
       if (req.session?.userId) {
         try {
@@ -1392,10 +1451,11 @@ LIMIT $14::int OFFSET $15::int;
           await appendAuditEntry(griftDb, Number(req.session.userId), "TRADER_SCOUT_EXPORT", "analytics", 1, {
             correlationId: auditCtx.correlationId,
             days,
-            cutoffSec,
             format,
             exportLimit,
-            truncated: hasMore,
+            queued: true,
+            deduped: queued.deduped,
+            jobId: queued.jobId,
             qHash: qRaw ? sha256(qRaw) : null,
             qLen: qRaw.length || 0,
             categories: normalizedCategories,
@@ -1415,77 +1475,14 @@ LIMIT $14::int OFFSET $15::int;
         }
       }
 
-      if (format === "jsonl") {
-        res.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
-        res.setHeader("Content-Disposition", `attachment; filename="${baseName}.jsonl"`);
-        for (const row of results) {
-          res.write(JSON.stringify(row));
-          res.write("\n");
-        }
-        res.end();
-        return;
-      }
-
-      const csvEscape = (value: unknown): string => {
-        if (value === null || value === undefined) return "";
-        const s = typeof value === "string" ? value : typeof value === "number" ? String(value) : JSON.stringify(value);
-        if (/[",\n\r]/.test(s)) return `"${s.replaceAll("\"", "\"\"")}"`;
-        return s;
-      };
-
-      res.setHeader("Content-Type", "text/csv; charset=utf-8");
-      res.setHeader("Content-Disposition", `attachment; filename="${baseName}.csv"`);
-
-      const header = [
-        "userId",
-        "username",
-        "email",
-        "trades",
-        "winRate",
-        "netProfit",
-        "grossProfit",
-        "grossLoss",
-        "profitFactor",
-        "avgHoldSec",
-        "maxHoldSec",
-        "minHoldSec",
-        "maxDrawdown",
-        "bestDayPct",
-        "slUsage",
-        "tpUsage",
-        "assetMix",
-      ].join(",");
-
-      // UTF-8 BOM helps Excel detect encoding correctly.
-      res.write("\uFEFF");
-      res.write(header);
-      res.write("\n");
-
-      for (const row of results) {
-        const line = [
-          csvEscape(row.userId),
-          csvEscape(row.username),
-          csvEscape(row.email),
-          csvEscape(row.trades),
-          csvEscape(row.winRate),
-          csvEscape(row.netProfit),
-          csvEscape(row.grossProfit),
-          csvEscape(row.grossLoss),
-          csvEscape(row.profitFactor),
-          csvEscape(row.avgHoldSec),
-          csvEscape(row.maxHoldSec),
-          csvEscape(row.minHoldSec),
-          csvEscape(row.maxDrawdown),
-          csvEscape(row.bestDayPct),
-          csvEscape(row.slUsage),
-          csvEscape(row.tpUsage),
-          csvEscape(row.assetMix),
-        ].join(",");
-        res.write(line);
-        res.write("\n");
-      }
-
-      res.end();
+      res.status(202).json({
+        ok: true,
+        jobId: queued.jobId,
+        deduped: queued.deduped,
+        status: "QUEUED",
+        pollUrl: queued.pollUrl,
+        hint: "Use /api/admin/data-exports/:jobId and /download-link when ready.",
+      });
     } catch (error) {
       console.error("Trader scouting export error:", error);
       res.status(500).json({ message: "Internal server error" });
@@ -1824,286 +1821,31 @@ FROM (
 
   app.get("/api/admin/deactivated-accounts/export", requireAdmin, async (req: Request, res: Response) => {
     try {
-      const formatRaw = String(req.query.format || "csv").toLowerCase();
-      const format = formatRaw === "jsonl" ? "jsonl" : "csv";
+      const formatRaw = String(req.query.format || "csv").trim().toLowerCase();
+      const format = formatRaw === "excel" ? "csv" : formatRaw === "ndjson" ? "jsonl" : formatRaw;
+      if (format !== "csv" && format !== "jsonl") {
+        return res.status(400).json({ message: "Invalid format (expected csv or jsonl)" });
+      }
       const includeTrades = req.query.includeTrades ? String(req.query.includeTrades) !== "0" : true;
       const days = parseDaysParam(req.query.days, 0);
-      const nowSec = Math.floor(Date.now() / 1000);
-      const cutoff = days > 0 ? nowSec - (days * 24 * 60 * 60) : null;
-
-      const userParams: any[] = [];
-      const userCte = buildDeactivatedAccountsCte(cutoff, userParams);
-      const userSql = `
-        ${userCte}
-        SELECT
-          l."userId" AS "userId",
-          u.username AS username,
-          u.email AS email,
-          l."eventType" AS "eventType",
-          l."reasonCode" AS "reasonCode",
-          l."reasonText" AS "reasonText",
-          l."actionAt" AS "actionAt",
-          COALESCE(ts."profit", 0) AS "profit",
-          COALESCE(ts."closedTrades", 0) AS "trades",
-          CASE
-            WHEN COALESCE(ts."closedTrades", 0) > 0
-              THEN ROUND((COALESCE(ts."winningTrades", 0)::float / ts."closedTrades") * 100, 2)
-            ELSE 0
-          END AS "winRate"
-        FROM latest l
-        JOIN users u ON u.id = l."userId"
-        LEFT JOIN trade_stats ts ON ts."userId" = l."userId"
-        ORDER BY l."actionAt" DESC;
-      `;
-      const userRows = (await dbClient.query(userSql, userParams)).rows as any[];
-
-      const exportUsers = userRows.map((row: any) => ({
-        userId: Number(row.userId),
-        username: row.username ? String(row.username) : null,
-        email: row.email ? String(row.email) : null,
-        actionType: row.eventType === "ACCOUNT_SELF_DELETED" ? "DELETED" : "DEACTIVATED",
-        reasonCode: row.reasonCode ? String(row.reasonCode) : null,
-        reasonText: row.reasonText ? String(row.reasonText) : null,
-        actionAt: row.actionAt ? Number(row.actionAt) : null,
-        profitUsd: Number(row.profit || 0),
-        trades: Number(row.trades || 0),
-        winRatePct: Number(row.winRate || 0),
-      }));
-
-      const userIds = exportUsers.map((row) => row.userId).filter((id) => Number.isFinite(id));
-      const userLookup = new Map(exportUsers.map((row) => [row.userId, row]));
-      const tradesByUser = new Map<number, any[]>();
-
-      if (includeTrades && userIds.length > 0) {
-        const tradesSql = `
-          SELECT
-            t.id AS "tradeId",
-            t.user_id AS "userId",
-            s.symbol AS symbol,
-            t.type AS type,
-            t.status AS status,
-            t.lots AS lots,
-            t.open_price AS "openPrice",
-            t.close_price AS "closePrice",
-            COALESCE(
-              t.net_profit_usd,
-              CASE
-                WHEN t.profit IS NULL OR btrim(t.profit) = '' THEN NULL
-                WHEN t.profit ~ '^-?\\d+(\\.\\d+)?$' THEN t.profit::real
-                ELSE NULL
-              END
-            ) AS profit,
-            t.gross_profit_usd AS "grossProfitUsd",
-            t.net_profit_usd AS "netProfitUsd",
-            t.total_costs_usd AS "totalCostsUsd",
-            t.open_commission_usd AS "openCommissionUsd",
-            t.close_commission_usd AS "closeCommissionUsd",
-            t.open_other_fees_usd AS "openOtherFeesUsd",
-            t.close_other_fees_usd AS "closeOtherFeesUsd",
-            t.financing_accrued_usd AS "financingAccruedUsd",
-            t.swap_accrued_usd AS "swapAccruedUsd",
-            t.overnight_days AS "overnightDays",
-            t.category_snapshot AS "categorySnapshot",
-            t.cost_model_version AS "costModelVersion",
-            t.opened_at AS "openedAt",
-            t.closed_at AS "closedAt"
-          FROM trades t
-          LEFT JOIN symbol_configs s ON s.id = t.symbol_id
-          WHERE t.user_id = ANY($1::int[])
-          ORDER BY t.user_id, t.opened_at DESC;
-        `;
-
-        const tradeRows = (await dbClient.query(tradesSql, [userIds])).rows as any[];
-        for (const row of tradeRows) {
-          const userId = Number(row.userId);
-          if (!tradesByUser.has(userId)) tradesByUser.set(userId, []);
-          tradesByUser.get(userId)!.push(row);
-        }
-      }
-
-      const filename = `deactivated_accounts_${Date.now()}.${format === "jsonl" ? "jsonl" : "csv"}`;
-      if (format === "jsonl") {
-        res.setHeader("Content-Type", "application/x-ndjson");
-      } else {
-        res.setHeader("Content-Type", "text/csv");
-      }
-      res.setHeader("Content-Disposition", `attachment; filename=${filename}`);
-
-      if (format === "jsonl") {
-        const exportedAt = new Date().toISOString();
-        res.write(JSON.stringify({
-          type: "meta",
-          exportedAt,
-          totalUsers: exportUsers.length,
-          totalTrades: Array.from(tradesByUser.values()).reduce((sum, rows) => sum + rows.length, 0),
+      const queued = await enqueueLegacyAdminDataExportJob({
+        req,
+        type: "deactivated_accounts",
+        format,
+        filters: {
+          days,
           includeTrades,
-        }) + "\n");
+        },
+      });
 
-        for (const user of exportUsers) {
-          res.write(JSON.stringify({
-            type: "user",
-            ...user,
-            actionAtIso: user.actionAt ? new Date(user.actionAt * 1000).toISOString() : null,
-            exportedAt,
-          }) + "\n");
-        }
-
-        if (includeTrades) {
-          for (const [userId, trades] of tradesByUser.entries()) {
-            const user = userLookup.get(userId);
-            for (const trade of trades) {
-              res.write(JSON.stringify({
-                type: "trade",
-                userId,
-                username: user?.username ?? null,
-                email: user?.email ?? null,
-                actionType: user?.actionType ?? null,
-                reasonCode: user?.reasonCode ?? null,
-                reasonText: user?.reasonText ?? null,
-                actionAt: user?.actionAt ?? null,
-                tradeId: Number(trade.tradeId),
-                symbol: trade.symbol ? String(trade.symbol) : null,
-                tradeType: trade.type ? String(trade.type) : null,
-                status: trade.status ? String(trade.status) : null,
-                lots: trade.lots != null ? Number(trade.lots) : null,
-                openPrice: trade.openPrice != null ? Number(trade.openPrice) : null,
-                closePrice: trade.closePrice != null ? Number(trade.closePrice) : null,
-                profit: trade.profit != null ? Number(trade.profit) : null,
-                grossProfitUsd: trade.grossProfitUsd != null ? Number(trade.grossProfitUsd) : null,
-                netProfitUsd: trade.netProfitUsd != null ? Number(trade.netProfitUsd) : null,
-                totalCostsUsd: trade.totalCostsUsd != null ? Number(trade.totalCostsUsd) : null,
-                openCommissionUsd: trade.openCommissionUsd != null ? Number(trade.openCommissionUsd) : null,
-                closeCommissionUsd: trade.closeCommissionUsd != null ? Number(trade.closeCommissionUsd) : null,
-                openOtherFeesUsd: trade.openOtherFeesUsd != null ? Number(trade.openOtherFeesUsd) : null,
-                closeOtherFeesUsd: trade.closeOtherFeesUsd != null ? Number(trade.closeOtherFeesUsd) : null,
-                financingAccruedUsd: trade.financingAccruedUsd != null ? Number(trade.financingAccruedUsd) : null,
-                swapAccruedUsd: trade.swapAccruedUsd != null ? Number(trade.swapAccruedUsd) : null,
-                overnightDays: trade.overnightDays != null ? Number(trade.overnightDays) : null,
-                categorySnapshot: trade.categorySnapshot ? String(trade.categorySnapshot) : null,
-                costModelVersion: trade.costModelVersion ? String(trade.costModelVersion) : null,
-                openedAt: trade.openedAt != null ? Number(trade.openedAt) : null,
-                closedAt: trade.closedAt != null ? Number(trade.closedAt) : null,
-                exportedAt,
-              }) + "\n");
-            }
-          }
-        }
-        res.end();
-        return;
-      }
-
-      const csvEscape = (value: any) => {
-        if (value === null || value === undefined) return "";
-        const text = String(value);
-        if (/["\n,]/.test(text)) {
-          return `"${text.replace(/"/g, '""')}"`;
-        }
-        return text;
-      };
-
-      const columns = [
-        "user_id",
-        "username",
-        "email",
-        "action_type",
-        "action_at",
-        "reason_code",
-        "reason_text",
-        "total_profit_usd",
-        "total_trades",
-        "win_rate_pct",
-        "trade_id",
-        "symbol",
-        "trade_type",
-        "trade_status",
-        "lots",
-        "open_price",
-        "close_price",
-        "net_profit_usd",
-        "total_costs_usd",
-        "open_commission_usd",
-        "close_commission_usd",
-        "financing_accrued_usd",
-        "swap_accrued_usd",
-        "overnight_days",
-        "opened_at",
-        "closed_at",
-      ];
-
-      res.write(columns.join(",") + "\n");
-
-      for (const user of exportUsers) {
-        const userTrades = includeTrades ? (tradesByUser.get(user.userId) ?? []) : [];
-        const actionAtIso = user.actionAt ? new Date(user.actionAt * 1000).toISOString() : "";
-
-        if (userTrades.length === 0) {
-          const row = [
-            user.userId,
-            user.username || "",
-            user.email || "",
-            user.actionType,
-            actionAtIso,
-            user.reasonCode || "",
-            user.reasonText || "",
-            user.profitUsd,
-            user.trades,
-            user.winRatePct,
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-          ];
-          res.write(row.map(csvEscape).join(",") + "\n");
-          continue;
-        }
-
-        for (const trade of userTrades) {
-          const row = [
-            user.userId,
-            user.username || "",
-            user.email || "",
-            user.actionType,
-            actionAtIso,
-            user.reasonCode || "",
-            user.reasonText || "",
-            user.profitUsd,
-            user.trades,
-            user.winRatePct,
-            Number(trade.tradeId),
-            trade.symbol || "",
-            trade.type || "",
-            trade.status || "",
-            trade.lots ?? "",
-            trade.openPrice ?? "",
-            trade.closePrice ?? "",
-            trade.netProfitUsd ?? trade.profit ?? "",
-            trade.totalCostsUsd ?? "",
-            trade.openCommissionUsd ?? "",
-            trade.closeCommissionUsd ?? "",
-            trade.financingAccruedUsd ?? "",
-            trade.swapAccruedUsd ?? "",
-            trade.overnightDays ?? "",
-            trade.openedAt ?? "",
-            trade.closedAt ?? "",
-          ];
-          res.write(row.map(csvEscape).join(",") + "\n");
-        }
-      }
-
-      res.end();
+      res.status(202).json({
+        ok: true,
+        jobId: queued.jobId,
+        deduped: queued.deduped,
+        status: "QUEUED",
+        pollUrl: queued.pollUrl,
+        hint: "Use /api/admin/data-exports/:jobId and /download-link when ready.",
+      });
     } catch (error) {
       console.error("Deactivated accounts export error:", error);
       res.status(500).json({ message: "Failed to export deactivated accounts" });
@@ -5041,59 +4783,64 @@ FROM (
       const days = parseInt(req.query.days as string) || 30;
       const nowSec = Math.floor(Date.now() / 1000);
       const cutoff = days === 0 ? 0 : nowSec - (days * 24 * 60 * 60);
-
-      const allUsers = await storage.listUsersWithSettings();
-
-      // Filter by date range
-      const filteredUsers = allUsers.filter((u: any) => {
-        if (u.isAdmin) return false;
-        const createdAt = typeof u.createdAt === 'object'
-          ? Math.floor(u.createdAt.getTime() / 1000)
-          : (u.createdAt || 0);
-        return createdAt >= cutoff;
-      });
-
-      const totalSignups = filteredUsers.length;
-
-      // Count users with completed profiles (has username and phone)
-      const completedProfiles = filteredUsers.filter((u: any) =>
-        u.username && u.phone
-      ).length;
-
-      // Get trading data for funnel calculations
-      let firstTrade = 0;
-      let tenTrades = 0;
-      let profitable = 0;
-
-      for (const user of filteredUsers) {
-        const userTrades = await db.select().from(trades).where(eq(trades.userId, user.id));
-        const closedTrades = userTrades.filter((t: any) => t.status === 'CLOSED');
-
-        if (closedTrades.length > 0) {
-          firstTrade++;
-
-          if (closedTrades.length >= 10) {
-            tenTrades++;
-
-            const totalProfit = closedTrades.reduce((sum: number, t: any) =>
-              sum +
-              (Number.isFinite(Number(t?.netProfitUsd))
-                ? Number(t.netProfitUsd)
-                : Number.parseFloat(String(t?.profit ?? "0")) || 0),
-            0);
-            if (totalProfit > 0) {
-              profitable++;
-            }
-          }
-        }
-      }
+      const row = await queryOne<any>(
+        `
+          WITH filtered_users AS (
+            SELECT
+              u.id,
+              u.username,
+              u.phone,
+              COALESCE(u.created_at, 0) AS created_at
+            FROM users u
+            WHERE COALESCE(u.is_admin, FALSE) = FALSE
+              AND (?::int = 0 OR COALESCE(u.created_at, 0) >= ?::int)
+          ),
+          user_trade_stats AS (
+            SELECT
+              fu.id AS user_id,
+              COUNT(*) FILTER (WHERE t.status = 'CLOSED')::int AS closed_trades,
+              COALESCE(
+                SUM(
+                  CASE
+                    WHEN t.status = 'CLOSED' THEN
+                      COALESCE(
+                        t.net_profit_usd::numeric,
+                        CASE
+                          WHEN t.profit IS NULL OR btrim(t.profit) = '' THEN 0::numeric
+                          WHEN t.profit ~ '^-?\\d+(\\.\\d+)?$' THEN t.profit::numeric
+                          ELSE 0::numeric
+                        END
+                      )
+                    ELSE 0::numeric
+                  END
+                ),
+                0::numeric
+              ) AS total_profit
+            FROM filtered_users fu
+            LEFT JOIN trades t ON t.user_id = fu.id
+            GROUP BY fu.id
+          )
+          SELECT
+            COUNT(*)::int AS total_signups,
+            COUNT(*) FILTER (
+              WHERE NULLIF(btrim(COALESCE(fu.username, '')), '') IS NOT NULL
+                AND NULLIF(btrim(COALESCE(fu.phone, '')), '') IS NOT NULL
+            )::int AS completed_profiles,
+            COUNT(*) FILTER (WHERE uts.closed_trades > 0)::int AS first_trade,
+            COUNT(*) FILTER (WHERE uts.closed_trades >= 10)::int AS ten_trades,
+            COUNT(*) FILTER (WHERE uts.closed_trades >= 10 AND uts.total_profit > 0)::int AS profitable
+          FROM filtered_users fu
+          LEFT JOIN user_trade_stats uts ON uts.user_id = fu.id
+        `,
+        [cutoff, cutoff],
+      );
 
       res.json({
-        totalSignups,
-        completedProfiles,
-        firstTrade,
-        tenTrades,
-        profitable
+        totalSignups: Number(row?.total_signups || 0),
+        completedProfiles: Number(row?.completed_profiles || 0),
+        firstTrade: Number(row?.first_trade || 0),
+        tenTrades: Number(row?.ten_trades || 0),
+        profitable: Number(row?.profitable || 0),
       });
     } catch (error) {
       console.error("Get signup funnel error:", error);
@@ -5106,109 +4853,131 @@ FROM (
     try {
       const days = parseInt(req.query.days as string) || 30;
       const nowSec = Math.floor(Date.now() / 1000);
-
-      // Get all users
-      const allUsers = await storage.listUsersWithSettings();
-      const activeUsers = allUsers.filter((u: any) => !u.isAdmin);
-
-      // Calculate active users in different time periods
       const oneDayAgo = nowSec - (1 * 24 * 60 * 60);
       const sevenDaysAgo = nowSec - (7 * 24 * 60 * 60);
       const thirtyDaysAgo = nowSec - (30 * 24 * 60 * 60);
+      const analyticsCutoff = days > 0 ? nowSec - (days * 24 * 60 * 60) : 0;
+      const row = await queryOne<any>(
+        `
+          WITH non_admin_users AS (
+            SELECT
+              u.id,
+              COALESCE(u.created_at, 0) AS created_at
+            FROM users u
+            WHERE COALESCE(u.is_admin, FALSE) = FALSE
+          ),
+          activity AS (
+            SELECT
+              COUNT(DISTINCT CASE WHEN l.success = TRUE AND COALESCE(l.created_at, 0) >= ?::int THEN l.user_id END)::int AS active_daily,
+              COUNT(DISTINCT CASE WHEN l.success = TRUE AND COALESCE(l.created_at, 0) >= ?::int THEN l.user_id END)::int AS active_weekly,
+              COUNT(DISTINCT CASE WHEN l.success = TRUE AND COALESCE(l.created_at, 0) >= ?::int THEN l.user_id END)::int AS active_monthly,
+              AVG(
+                CASE
+                  WHEN l.success = TRUE
+                    AND l.session_length_sec IS NOT NULL
+                    AND l.session_length_sec >= 0
+                    AND (?::int = 0 OR COALESCE(l.created_at, 0) >= ?::int)
+                  THEN l.session_length_sec::numeric
+                  ELSE NULL
+                END
+              ) AS avg_session_sec
+            FROM user_login_history l
+          ),
+          trade_stats AS (
+            SELECT
+              COUNT(*)::numeric AS closed_trade_count
+            FROM trades t
+            INNER JOIN non_admin_users u ON u.id = t.user_id
+            WHERE t.status = 'CLOSED'
+          ),
+          retention_source AS (
+            SELECT
+              u.id AS user_id,
+              u.created_at,
+              MAX(
+                CASE
+                  WHEN l.success = TRUE AND COALESCE(l.created_at, 0) > u.created_at + (7 * 86400) THEN 1
+                  ELSE 0
+                END
+              ) AS returned_d7,
+              MAX(
+                CASE
+                  WHEN l.success = TRUE AND COALESCE(l.created_at, 0) > u.created_at + (30 * 86400) THEN 1
+                  ELSE 0
+                END
+              ) AS returned_d30
+            FROM non_admin_users u
+            LEFT JOIN user_login_history l ON l.user_id = u.id
+            GROUP BY u.id, u.created_at
+          ),
+          retention AS (
+            SELECT
+              COUNT(*) FILTER (WHERE rs.created_at <= ?::int - (7 * 86400))::int AS eligible_7,
+              COUNT(*) FILTER (WHERE rs.created_at <= ?::int - (30 * 86400))::int AS eligible_30,
+              COALESCE(
+                SUM(
+                  CASE
+                    WHEN rs.created_at <= ?::int - (7 * 86400) AND rs.returned_d7 = 1 THEN 1
+                    ELSE 0
+                  END
+                ),
+                0
+              )::int AS returned_7,
+              COALESCE(
+                SUM(
+                  CASE
+                    WHEN rs.created_at <= ?::int - (30 * 86400) AND rs.returned_d30 = 1 THEN 1
+                    ELSE 0
+                  END
+                ),
+                0
+              )::int AS returned_30
+            FROM retention_source rs
+          )
+          SELECT
+            COALESCE((SELECT COUNT(*)::int FROM non_admin_users), 0) AS total_users,
+            a.active_daily,
+            a.active_weekly,
+            a.active_monthly,
+            COALESCE(a.avg_session_sec, 0)::numeric AS avg_session_sec,
+            COALESCE(ts.closed_trade_count, 0)::numeric AS closed_trade_count,
+            r.eligible_7,
+            r.eligible_30,
+            r.returned_7,
+            r.returned_30
+          FROM activity a
+          CROSS JOIN trade_stats ts
+          CROSS JOIN retention r
+        `,
+        [
+          oneDayAgo,
+          sevenDaysAgo,
+          thirtyDaysAgo,
+          analyticsCutoff,
+          analyticsCutoff,
+          nowSec,
+          nowSec,
+          nowSec,
+          nowSec,
+        ],
+      );
 
-      // Get login history for activity analysis
-      const loginHistory = await storage.getAllLoginHistory(1000);
-
-      const activeDaily = new Set(
-        loginHistory
-          .filter((l: any) => {
-            const createdAt = typeof l.createdAt === 'object'
-              ? Math.floor(l.createdAt.getTime() / 1000)
-              : (l.createdAt || 0);
-            return createdAt >= oneDayAgo && l.success;
-          })
-          .map((l: any) => l.userId)
-      ).size;
-
-      const activeWeekly = new Set(
-        loginHistory
-          .filter((l: any) => {
-            const createdAt = typeof l.createdAt === 'object'
-              ? Math.floor(l.createdAt.getTime() / 1000)
-              : (l.createdAt || 0);
-            return createdAt >= sevenDaysAgo && l.success;
-          })
-          .map((l: any) => l.userId)
-      ).size;
-
-      const activeMonthly = new Set(
-        loginHistory
-          .filter((l: any) => {
-            const createdAt = typeof l.createdAt === 'object'
-              ? Math.floor(l.createdAt.getTime() / 1000)
-              : (l.createdAt || 0);
-            return createdAt >= thirtyDaysAgo && l.success;
-          })
-          .map((l: any) => l.userId)
-      ).size;
-
-      // Calculate average session duration (estimate from login intervals)
-      // This is a rough estimate - real session tracking would be more accurate
-      const avgSessionMinutes = 15; // Placeholder - would need actual session tracking
-
-      // Calculate average trades per active user
-      const allTrades = await db.select().from(trades).where(eq(trades.status, 'CLOSED'));
-      const avgTradesPerUser = activeUsers.length > 0
-        ? allTrades.length / activeUsers.length
-        : 0;
-
-      // Calculate retention (users who logged in again within 7/30 days of signup)
-      let signupsWith7DayReturn = 0;
-      let signupsWith30DayReturn = 0;
-      let eligibleFor7Day = 0;
-      let eligibleFor30Day = 0;
-
-      for (const user of activeUsers) {
-        const userAny = user as any;
-        const createdAt = typeof userAny.createdAt === 'object'
-          ? Math.floor(userAny.createdAt.getTime() / 1000)
-          : (userAny.createdAt || nowSec);
-
-        const accountAgeDays = (nowSec - createdAt) / (24 * 60 * 60);
-
-        if (accountAgeDays >= 7) {
-          eligibleFor7Day++;
-          const userLogins = loginHistory.filter((l: any) => {
-            if (l.userId !== user.id || !l.success) return false;
-            const loginTime = typeof l.createdAt === 'object'
-              ? Math.floor(l.createdAt.getTime() / 1000)
-              : (l.createdAt || 0);
-            return loginTime > createdAt + (7 * 24 * 60 * 60);
-          });
-          if (userLogins.length > 0) signupsWith7DayReturn++;
-        }
-
-        if (accountAgeDays >= 30) {
-          eligibleFor30Day++;
-          const userLogins = loginHistory.filter((l: any) => {
-            if (l.userId !== user.id || !l.success) return false;
-            const loginTime = typeof l.createdAt === 'object'
-              ? Math.floor(l.createdAt.getTime() / 1000)
-              : (l.createdAt || 0);
-            return loginTime > createdAt + (30 * 24 * 60 * 60);
-          });
-          if (userLogins.length > 0) signupsWith30DayReturn++;
-        }
-      }
-
+      const totalUsers = Number(row?.total_users || 0);
+      const avgSessionMinutesRaw = Number(row?.avg_session_sec || 0) / 60;
+      const avgSessionMinutes = Number.isFinite(avgSessionMinutesRaw) ? avgSessionMinutesRaw : 0;
+      const avgTradesPerUser = totalUsers > 0 ? Number(row?.closed_trade_count || 0) / totalUsers : 0;
+      const eligibleFor7Day = Number(row?.eligible_7 || 0);
+      const eligibleFor30Day = Number(row?.eligible_30 || 0);
+      const signupsWith7DayReturn = Number(row?.returned_7 || 0);
+      const signupsWith30DayReturn = Number(row?.returned_30 || 0);
       const retentionD7 = eligibleFor7Day > 0 ? (signupsWith7DayReturn / eligibleFor7Day) * 100 : 0;
       const retentionD30 = eligibleFor30Day > 0 ? (signupsWith30DayReturn / eligibleFor30Day) * 100 : 0;
 
       res.json({
-        activeDaily,
-        activeWeekly,
-        activeMonthly,
-        avgSessionMinutes,
+        activeDaily: Number(row?.active_daily || 0),
+        activeWeekly: Number(row?.active_weekly || 0),
+        activeMonthly: Number(row?.active_monthly || 0),
+        avgSessionMinutes: Math.round(avgSessionMinutes * 10) / 10,
         avgTradesPerUser: Math.round(avgTradesPerUser * 10) / 10,
         retentionD7: Math.round(retentionD7 * 10) / 10,
         retentionD30: Math.round(retentionD30 * 10) / 10

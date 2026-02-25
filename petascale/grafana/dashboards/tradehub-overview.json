@@ -1,0 +1,50 @@
+{
+  "annotations": {"list": []},
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "Admin Export Queue Waiting",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "targets": [{"expr": "admin_data_export_queue_waiting", "refId": "A"}]
+    },
+    {
+      "type": "timeseries",
+      "title": "Admin Export Queue Active",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "targets": [{"expr": "admin_data_export_queue_active", "refId": "A"}]
+    },
+    {
+      "type": "timeseries",
+      "title": "Export Job Success/Fail Rate",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "targets": [
+        {"expr": "rate(admin_data_export_jobs_succeeded_total[5m])", "legendFormat": "success", "refId": "A"},
+        {"expr": "rate(admin_data_export_jobs_failed_total[5m])", "legendFormat": "failed", "refId": "B"}
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "API Latency p95 Proxy",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "targets": [{"expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le))", "refId": "A"}]
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "style": "dark",
+  "tags": ["tradehub", "petascale"],
+  "templating": {"list": []},
+  "time": {"from": "now-6h", "to": "now"},
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Tradehub Petascale Overview",
+  "uid": "tradehub-petascale-overview",
+  "version": 1,
+  "weekStart": ""
+}

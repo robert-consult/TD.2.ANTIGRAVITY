@@ -14,6 +14,7 @@ import { adminLegalAcceptancesRouter } from "./routes/adminLegalAcceptances";
 import { adminMarketDataRouter } from "./routes/adminMarketData";
 import { adminSystemConfigRouter } from "./routes/adminSystemConfig";
 import { adminMigrationRouter } from "./routes/adminMigration";
+import { adminDataExportsRouter } from "./routes/adminDataExports";
 import { adminActivityRouter } from "./routes/adminActivity";
 import { adminQuoteSubscriptionsRouter } from "./routes/adminQuoteSubscriptions";
 import { registerMetaRoutes } from "./routes/meta";
@@ -161,6 +162,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   registerGriftRoutes(app);
   app.use("/api/grift", griftPublicRouter);
   app.use("/api/admin/migration", adminMigrationRouter);
+  app.use("/api/admin/data-exports", adminDataExportsRouter);
   app.use("/api/admin/legal-docs", adminLegalRouter);
 
   const wsRuntime = initWebSocketServer(app, routerCtx);

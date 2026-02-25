@@ -18,6 +18,9 @@ import { maybeIngestBuiltManifest } from "./i18n/service";
 import { dbDialect } from "@db/config";
 import { dbClient } from "@db";
 import { getValkey } from "./services/valkey";
+import { startAdminDataExportWorker } from "./services/adminDataExportQueue";
+import { startClickHouseSyncScheduler } from "./services/clickhouseSync";
+import { startAdminDataExportRetentionScheduler } from "./services/adminDataExportRetention";
 import { withGriftClient } from "./grift/griftDb";
 
 const REQUIRED_TRADE_GUARD_TRIGGERS = [
@@ -514,6 +517,25 @@ app.use((req, res, next) => {
 
       // i18n: ingest built manifest (if present) and start worker
       if (RUN_WORKER_TASKS) {
+        try {
+          startAdminDataExportWorker();
+          console.log("[admin-export] Worker started");
+        } catch (e) {
+          console.warn("[admin-export] Worker failed to start:", e);
+        }
+
+        try {
+          startClickHouseSyncScheduler();
+        } catch (e) {
+          console.warn("[clickhouse-sync] Worker scheduler failed to start:", e);
+        }
+
+        try {
+          startAdminDataExportRetentionScheduler();
+        } catch (e) {
+          console.warn("[admin-export-retention] scheduler failed to start:", e);
+        }
+
         try {
           const ing = await maybeIngestBuiltManifest();
           if ((ing as any)?.ingested) console.log("[i18n] Ingested built manifest:", ing);

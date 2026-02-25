@@ -17,6 +17,13 @@ spec:
         app: tradehub-ingestor
         role: ingestor
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: ingestor
           image: registry.equitywaves.com/tradehub/app:local-20260113-001036
@@ -31,6 +38,11 @@ spec:
                 name: tradehub-config
             - secretRef:
                 name: tradehub-secrets
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: migration-imports
+              mountPath: /app/migration_imports
           resources:
             requests:
               cpu: "200m"
@@ -38,4 +50,14 @@ spec:
             limits:
               cpu: "1"
               memory: "1Gi"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: migration-imports
+          emptyDir: {}
       terminationGracePeriodSeconds: 30

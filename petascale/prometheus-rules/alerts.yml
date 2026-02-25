@@ -1,0 +1,52 @@
+groups:
+  - name: tradehub-petascale
+    interval: 30s
+    rules:
+      - alert: TradehubAdminExportQueueBacklog
+        expr: admin_data_export_queue_waiting > 200
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Admin export queue backlog is growing"
+          description: "Queue waiting jobs > 200 for 5m."
+      - alert: TradehubAdminExportFailureSpike
+        expr: increase(admin_data_export_jobs_failed_total[10m]) > 5
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Admin export failures detected"
+          description: "More than 5 admin export job failures in 10 minutes."
+      - alert: TradehubAdminExportThroughputStalled
+        expr: admin_data_export_queue_waiting > 0 and (time() - admin_data_export_last_success_at) > 1800
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Admin export throughput appears stalled"
+          description: "Queue has waiting jobs and no successful completion for 30 minutes."
+      - alert: TradehubAdminExportRetentionStalled
+        expr: increase(admin_data_export_retention_sweeps_total[2h]) == 0
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Admin export retention sweep is not running"
+          description: "No retention sweep has been recorded in the last 2 hours."
+      - alert: TradehubClickHouseSyncStalled
+        expr: (time() - clickhouse_sync_last_success_at) > 1800 and clickhouse_sync_running == 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "ClickHouse sync is stale"
+          description: "No successful ClickHouse sync observed for 30 minutes."
+      - alert: TradehubMinioStorageUnavailable
+        expr: up{job="minio"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "MinIO scrape target unavailable"
+          description: "MinIO metrics endpoint is down for 2 minutes."

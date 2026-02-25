@@ -1763,47 +1763,39 @@ export const storage = {
   }> {
     const now = Math.floor(Date.now() / 1000);
     const fourteenDaysAgo = now - (14 * 24 * 60 * 60);
-    
-    const allUsers = await db.query.users.findMany();
-    
-    let verifiedWithin14Days = 0;
-    let overdueReverify = 0;
-    let lockedAccounts = 0;
-    let pendingKyc = 0;
-    
-    for (const user of allUsers) {
-      const u = user as any;
-      if (u.isDisabled || u.isFrozen) {
-        lockedAccounts++;
-      }
-      if (u.kycStatus === 'pending') {
-        pendingKyc++;
-      }
-      if (u.kycStatus === 'approved' && u.kycVerifiedAt) {
-        const verifiedAt = typeof u.kycVerifiedAt === 'number' ? u.kycVerifiedAt : 
-          (u.kycVerifiedAt instanceof Date ? Math.floor(u.kycVerifiedAt.getTime() / 1000) : 0);
-        if (verifiedAt >= fourteenDaysAgo) {
-          verifiedWithin14Days++;
-        }
-        if (u.kycExpiresAt) {
-          const expiresAt = typeof u.kycExpiresAt === 'number' ? u.kycExpiresAt : 
-            (u.kycExpiresAt instanceof Date ? Math.floor(u.kycExpiresAt.getTime() / 1000) : 0);
-          if (expiresAt < now) {
-            overdueReverify++;
-          }
-        }
-      }
-      if (u.kycStatus === 'reverify_required') {
-        overdueReverify++;
-      }
-    }
-    
+
+    const { rows } = await dbClient.query(
+      `
+        SELECT
+          COUNT(*) FILTER (
+            WHERE kyc_status = 'approved'
+              AND kyc_verified_at IS NOT NULL
+              AND kyc_verified_at >= $1::int
+          )::int AS verified_within_14_days,
+          COUNT(*) FILTER (
+            WHERE kyc_status = 'reverify_required'
+               OR (kyc_status = 'approved' AND kyc_expires_at IS NOT NULL AND kyc_expires_at < $2::int)
+          )::int AS overdue_reverify,
+          COUNT(*) FILTER (
+            WHERE COALESCE(is_disabled, FALSE) = TRUE
+               OR COALESCE(is_frozen, FALSE) = TRUE
+          )::int AS locked_accounts,
+          COUNT(*) FILTER (
+            WHERE kyc_status = 'pending'
+          )::int AS pending_kyc,
+          COUNT(*)::int AS total_users
+        FROM users
+      `,
+      [fourteenDaysAgo, now],
+    );
+
+    const row = rows?.[0] ?? {};
     return {
-      verifiedWithin14Days,
-      overdueReverify,
-      lockedAccounts,
-      pendingKyc,
-      totalUsers: allUsers.length,
+      verifiedWithin14Days: Number(row.verified_within_14_days || 0),
+      overdueReverify: Number(row.overdue_reverify || 0),
+      lockedAccounts: Number(row.locked_accounts || 0),
+      pendingKyc: Number(row.pending_kyc || 0),
+      totalUsers: Number(row.total_users || 0),
     };
   },
 };

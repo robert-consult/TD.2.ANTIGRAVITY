@@ -274,6 +274,13 @@
       "when": 1771895199000,
       "tag": "0038_activity_lifecycle_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1777000000000,
+      "tag": "0039_admin_data_export_jobs",
+      "breakpoints": true
     }
   ]
 }

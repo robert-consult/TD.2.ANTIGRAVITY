@@ -54,6 +54,8 @@ Use this file to locate the right entrypoints quickly; do not “read the whole 
 
 ### Admin, audit, and “grift” controls
 - Admin routes: `server/routes/admin.ts`, `server/routes/adminSecurity.ts`, `server/routes/adminSystemConfig.ts`
+- Admin background export pipeline: `server/routes/adminDataExports.ts`, `server/services/adminDataExportQueue.ts`, `server/services/adminDataExportBuild.ts`, `server/services/adminDataExportBuildClickhouse.ts`, `server/services/objectStorage.ts`
+- Export lifecycle + OLAP sync: `server/services/adminDataExportRetention.ts`, `server/services/clickhouseSync.ts`, `server/services/clickhouseClient.ts`
 - Activity admin: `server/routes/adminActivity.ts`, `scripts/activityAuditVerify.ts`
 - “Grift” engine + enforcement: `server/grift/griftEngine.ts`, `server/grift/griftAutoEnforcement.ts`, `server/routes/grift.ts`
 - Grift public router: `server/grift/griftPublicRouter.ts`

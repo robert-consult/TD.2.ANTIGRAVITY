@@ -819,3 +819,148 @@ Failure Mode if Missing:
   - Compare displayed Trade Settings values against `GET /api/admin/global-settings`; they must match on first render.
   - Modify one section and verify only that section becomes dirty until an explicit save.
 - Failure Mode if Missing: UI can initialize from hardcoded defaults, producing false dirty states and risking accidental overwrite of production risk/capital/market settings.
+
+### PRD-EXP-001
+- ID: `PRD-EXP-001`
+- Date (UTC): `2026-02-25`
+- Scope: `Admin DataTab export durability and backpressure`
+- Requirement: All heavy Admin DataTab exports must execute asynchronously through BullMQ on Valkey-backed queues (`admin-export-v1`) and must not run as synchronous request-path downloads.
+- Enforcement: `server/routes/adminDataExports.ts` (job create/list/retry/cancel/download-link API), `server/services/adminDataExportQueue.ts` (queue enqueue/worker execution/backoff), `server/index.ts` (`startAdminDataExportWorker()` under `APP_ROLE=worker`), and DB tables/migration `admin_data_export_jobs` + `admin_data_export_job_events` (`shared/schema.pg.ts`, `db/migrations/0039_admin_data_export_jobs.sql`).
+- Validation:
+  - `POST /api/admin/data-exports` returns `jobId` immediately for `trader_scouting`, `deactivated_accounts`, `all_trades`, and `daily_pnl`.
+  - Verify job status transitions `QUEUED -> RUNNING -> READY|FAILED` in `GET /api/admin/data-exports`.
+  - Kill and restart worker process; requeue/retry must continue from durable DB + queue state.
+- Failure Mode if Missing: large exports block Node request threads, trigger timeout/OOM risks at high row counts, and remove operational control over retries/cancelation.
+
+### PRD-EXP-002
+- ID: `PRD-EXP-002`
+- Date (UTC): `2026-02-25`
+- Scope: `Export artifact confidentiality and controlled download`
+- Requirement: Export files must be stored outside API response memory path in object storage (MinIO preferred, local fallback only for bootstrap), and downloads must use short-lived links with admin authorization checks.
+- Enforcement: `server/services/objectStorage.ts` (upload + signed link generation + local fallback resolver), `server/routes/adminDataExports.ts` (`/download-link` authorization + `/files` guarded fallback stream), and `petascale/docker-compose.yml` MinIO/KES wiring.
+- Validation:
+  - Complete an export and verify DB `object_key` is set and artifact is not returned inline by the create API.
+  - `GET /api/admin/data-exports/:jobId/download-link` returns a TTL-bound URL; expired link requests return `410`.
+  - Cross-admin access attempt (different admin user) to another job/link returns `403`.
+- Failure Mode if Missing: export payloads can leak through long-lived direct links or unbounded in-memory transfer paths, increasing exfiltration and service degradation risk.
+
+### PRD-OBS-001
+- ID: `PRD-OBS-001`
+- Date (UTC): `2026-02-25`
+- Scope: `Export pipeline observability and early warning`
+- Requirement: Production telemetry must expose queue/job lifecycle and backlog metrics for admin exports, with alerting on backlog and failure spikes.
+- Enforcement: `server/services/adminDataExportMetrics.ts` (export counters/gauges), `server/routes/wsCore.ts` (`/metrics` export metrics exposition), `petascale/prometheus.yml`, and `petascale/prometheus-rules/alerts.yml`.
+- Validation:
+  - Trigger exports and confirm `/metrics` includes `admin_data_export_*` counters/gauges.
+  - Confirm Prometheus target scrape success for `tradehub-worker` and alert rule load.
+  - Simulate queue backlog and verify `TradehubAdminExportQueueBacklog` alert fires.
+- Failure Mode if Missing: export incidents become invisible until user-facing failures accumulate, reducing recovery speed and increasing operational risk.
+
+### PRD-OLAP-001
+- ID: `PRD-OLAP-001`
+- Date (UTC): `2026-02-25`
+- Scope: `Postgres->ClickHouse replication path for admin analytics/export offload`
+- Requirement: Worker role must run bounded incremental sync (`CLICKHOUSE_SYNC_*`) from OLTP tables (`users`, `trades`, `daily_closes`, `user_account_events`) into ClickHouse admin tables, with schema bootstrap guardrails and watermark persistence (`sync_state`) so replay is idempotent after restarts.
+- Enforcement: `server/services/clickhouseSync.ts` (scheduler + watermark replication), `server/services/clickhouseClient.ts` (command/insert/query helpers), `server/index.ts` (worker startup wiring), and `petascale/clickhouse/init/00-init.sql` (ClickHouse table/view definitions).
+- Validation:
+  - Start worker with ClickHouse enabled and verify logs include `[clickhouse-sync] starting ...`.
+  - Verify `/metrics` exposes `clickhouse_sync_*` series and `clickhouse_sync_last_success_at` updates after ticks.
+  - Query ClickHouse and confirm `admin_users`, `admin_trades`, `admin_daily_closes`, and `admin_user_account_events` receive rows.
+  - Restart worker and confirm sync resumes without duplicate growth from old watermark state.
+- Failure Mode if Missing: analytics/exports continue hammering OLTP paths at scale, sync drift grows silently, and worker restarts trigger brittle catch-up behavior.
+
+### PRD-EXP-003
+- ID: `PRD-EXP-003`
+- Date (UTC): `2026-02-25`
+- Scope: `Export artifact lifecycle enforcement and automatic expiry cleanup`
+- Requirement: Ready export artifacts must be auto-expired and deleted from storage when `expires_at` elapses, with durable status transition to `EXPIRED` and event journaling.
+- Enforcement: `server/services/adminDataExportRetention.ts` (retention scheduler), `server/services/adminDataExportRepo.ts` (`listExpiredAdminDataExportJobs`, `markAdminDataExportJobExpired`), `server/services/objectStorage.ts` (`deleteExportArtifact`), and worker bootstrap in `server/index.ts`.
+- Validation:
+  - Create an export with a short retention window and verify scheduler logs expiry cleanup.
+  - Confirm job status transitions from `READY` to `EXPIRED` and `admin_data_export_job_events` captures cleanup evidence.
+  - Verify artifact path/object no longer exists in local storage or MinIO.
+- Failure Mode if Missing: stale export artifacts persist indefinitely, increasing data-exfiltration window and storage bloat.
+
+### PRD-SEC-014
+- ID: `PRD-SEC-014`
+- Date (UTC): `2026-02-25`
+- Scope: `Admin export download-link integrity and anti-abuse limits`
+- Requirement: Local fallback export download links must be HMAC-signed and validated server-side, and admin export create/download/retry endpoints must enforce bounded per-admin rate limits with `429` and `Retry-After`.
+- Enforcement: `server/services/objectStorage.ts` (`verifyLocalDownloadLink` + signed link generation), `server/routes/adminDataExports.ts` (signature verification + rate-limit guards), `k8s/02-secrets.yaml` and `petascale/docker-compose.yml` (`EXPORT_LOCAL_LINK_SIGNING_SECRET`).
+- Validation:
+  - Request a local fallback download link, tamper `key`/`name`/`exp`/`sig`, and verify request is rejected with `403`.
+  - Burst export-create and export-download requests from one admin session and verify `429` responses with `Retry-After`.
+  - Verify valid signed links still download when within TTL and authorization scope.
+- Failure Mode if Missing: local download URLs become tamperable/replay-prone and admin endpoints remain vulnerable to brute-force or abusive export flooding.
+
+### PRD-EXP-004
+- ID: `PRD-EXP-004`
+- Date (UTC): `2026-02-25`
+- Scope: `Legacy Admin export route compatibility with async pipeline`
+- Requirement: Legacy export endpoints (`/api/admin/trader-scouting/export`, `/api/admin/deactivated-accounts/export`) must only enqueue background export jobs and return job handles (`202`) instead of streaming large payloads.
+- Enforcement: `server/routes/admin.ts` (`enqueueLegacyAdminDataExportJob`, legacy export route handlers), shared schema validation in `@shared/admin/dataExports`.
+- Validation:
+  - Call both legacy export endpoints and verify `202` with `jobId`, `deduped`, and `pollUrl`.
+  - Verify no large response body streaming occurs from these handlers.
+  - Verify created jobs appear in `GET /api/admin/data-exports`.
+- Failure Mode if Missing: old callers can still trigger synchronous large exports, causing request-path blocking and OOM/timeout risk.
+
+### PRD-ANA-001
+- ID: `PRD-ANA-001`
+- Date (UTC): `2026-02-25`
+- Scope: `Admin DataTab request-path bounded analytics`
+- Requirement: DataTab summary endpoints (`/api/admin/kpi-summary`, `/api/admin/signup-funnel`, `/api/admin/user-analytics`, and compliance metrics) must execute bounded SQL aggregates server-side and must not run in-memory full-table loops or N+1 per-user scans.
+- Enforcement: `server/routes/admin.ts` (aggregate SQL rewrites for KPI/funnel/user analytics) and `server/storage.ts` (`getVerificationComplianceMetrics` SQL aggregate query).
+- Validation:
+  - Inspect handlers for removal of `listUsersWithSettings()` + per-user trade/login loops in these endpoints.
+  - Run `npm run check`, `npm run build`, and `npm run smoke:admin` successfully.
+  - Hit endpoints and verify correct JSON shape with numeric aggregates.
+- Failure Mode if Missing: API latency and memory usage scale with row volume, causing collapse under million-user/billion-row datasets.
+
+### PRD-K8S-002
+- ID: `PRD-K8S-002`
+- Date (UTC): `2026-02-25`
+- Scope: `Application pod runtime hardening`
+- Requirement: API/worker/ingestor pods must run non-root with `seccomp` and `readOnlyRootFilesystem`, and writable scratch paths must be explicitly mounted (`/tmp` emptyDir).
+- Enforcement: `k8s/10-api-deployment.yaml`, `k8s/11-ingestor-deployment.yaml`, `k8s/12-worker-deployment.yaml`, and runtime path config in `k8s/01-configmap.yaml` (`ADMIN_DATA_EXPORT_LOCAL_DIR=/tmp/admin-data-exports`).
+- Validation:
+  - `kubectl apply --dry-run=client -f k8s/` passes.
+  - Verify rendered pod specs contain `runAsNonRoot: true`, `readOnlyRootFilesystem: true`, and `/tmp` `emptyDir` mount.
+  - Verify worker export jobs can still produce temporary artifacts in `/tmp`.
+- Failure Mode if Missing: container breakout impact and filesystem tampering risk increase, or export workers fail when scratch storage is unavailable.
+
+### PRD-K8S-003
+- ID: `PRD-K8S-003`
+- Date (UTC): `2026-02-25`
+- Scope: `Ingress abuse controls and service-edge TLS`
+- Requirement: Public ingress must enforce TLS redirect and baseline request throttling/body-size controls to reduce DOS amplification on admin/data endpoints.
+- Enforcement: `k8s/30-ingress.yaml` annotations (`limit-rps`, `limit-connections`, `proxy-body-size`, `ssl-redirect`, `force-ssl-redirect`) and TLS stanza with `tradehub-tls` secret.
+- Validation:
+  - `kubectl apply --dry-run=client -f k8s/` passes.
+  - Inspect ingress annotations and TLS block in rendered manifest.
+  - Confirm plain HTTP requests are redirected at ingress and oversized requests are constrained.
+- Failure Mode if Missing: edge remains vulnerable to burst abuse and unbounded request bodies, increasing DOS and resource exhaustion risk.
+
+### PRD-K8S-004
+- ID: `PRD-K8S-004`
+- Date (UTC): `2026-02-25`
+- Scope: `Intra-cluster service ingress minimization`
+- Requirement: Core petascale services must restrict pod ingress paths to expected namespace/service callers via Kubernetes NetworkPolicy.
+- Enforcement: `k8s/31-network-policies.yaml` (policies for `tradehub-api`, `tradehub-worker`, `tradehub-ingestor`, `tradehub-minio`, `tradehub-clickhouse`).
+- Validation:
+  - `kubectl apply --dry-run=client -f k8s/` passes.
+  - Verify selected pods have corresponding NetworkPolicy resources.
+  - Confirm allowed intra-namespace traffic remains functional for API/worker/prometheus paths.
+- Failure Mode if Missing: lateral movement paths remain broad inside cluster, increasing blast radius after pod compromise.
+
+### PRD-K8S-005
+- ID: `PRD-K8S-005`
+- Date (UTC): `2026-02-25`
+- Scope: `Read-only root filesystem compatibility for migration import runtime path`
+- Requirement: Any pod role running with `readOnlyRootFilesystem: true` must mount a writable path at `/app/migration_imports` (or explicitly redirect migration import storage to another writable mount) because migration service bootstrapping creates that directory at process startup.
+- Enforcement: `k8s/10-api-deployment.yaml`, `k8s/11-ingestor-deployment.yaml`, `k8s/12-worker-deployment.yaml`, and `k8s/13-worker-canary-deployment.yaml` (`migration-imports` `emptyDir` + mountPath `/app/migration_imports`).
+- Validation:
+  - `kubectl apply --dry-run=client -f k8s/10-api-deployment.yaml -f k8s/11-ingestor-deployment.yaml -f k8s/12-worker-deployment.yaml -f k8s/13-worker-canary-deployment.yaml` passes.
+  - Roll out each deployment and verify pods become `Running/Ready` without `ENOENT ... mkdir '/app/migration_imports'`.
+  - Confirm readiness probes remain healthy after restart for API/worker/ingestor roles.
+- Failure Mode if Missing: security hardening (`readOnlyRootFilesystem`) causes crash loops during startup, blocking API cutover and worker/ingestor recovery.

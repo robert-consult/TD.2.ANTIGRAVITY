@@ -11,6 +11,7 @@ import { NotificationBell } from "@/components/NotificationBell";
 import { useMailboxE2eeBootstrap } from "@/hooks/use-mailbox";
 import { StaleDataBadge } from "@/components/StaleDataBadge";
 import { useStaleData } from "@/lib/staleData";
+import { preloadAdminDashboardRoute } from "@/lib/adminRoutePrefetch";
 
 const CLOSE_NOTIFICATIONS_EVENT = "tq:close-notifications";
 const CLOSE_HEADER_MENU_EVENT = "tq:close-header-menu";
@@ -78,6 +79,16 @@ export function Header({ title = "TradeQuip", showBalance = false }: HeaderProps
       window.removeEventListener("scroll", recalcMenuPosition, true);
     };
   }, [dropdownOpen, recalcMenuPosition]);
+
+  const prefetchAdminDashboard = useCallback(() => {
+    if (!user?.isAdmin) return;
+    void preloadAdminDashboardRoute().catch(() => undefined);
+  }, [user?.isAdmin]);
+
+  useEffect(() => {
+    if (!dropdownOpen) return;
+    prefetchAdminDashboard();
+  }, [dropdownOpen, prefetchAdminDashboard]);
 
   const shortTitle = (() => {
     const trimmed = title.trim();
@@ -273,6 +284,9 @@ export function Header({ title = "TradeQuip", showBalance = false }: HeaderProps
                           <Link
                             href="/admin"
                             onClick={() => setDropdownOpen(false)}
+                            onMouseEnter={prefetchAdminDashboard}
+                            onFocus={prefetchAdminDashboard}
+                            onTouchStart={prefetchAdminDashboard}
                             className="tq-header-menu-item flex items-center gap-3 px-3 py-2.5 text-sm text-gray-300 hover:text-white hover:bg-white/5 rounded-lg transition-colors"
                           >
                             <Shield className="h-4 w-4" />

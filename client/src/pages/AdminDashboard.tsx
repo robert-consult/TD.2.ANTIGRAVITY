@@ -67,11 +67,13 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/use-auth";
 import {
   mergeGlobalSettingsPerformance,
   resolveGlobalPerformanceSettingsPayload,
 } from "@/lib/globalSettingsPerformance";
 import { PERFORMANCE_TIERS, flushIntervalForTier, pollIntervalForTier } from "@/lib/perfHints";
+import { useLocation } from "wouter";
 
 interface UserSettings {
   userId: number;
@@ -4757,6 +4759,8 @@ function SystemConfigTab() {
 export default function AdminDashboard() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const { checkAuth } = useAuth();
+  const [, navigate] = useLocation();
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [editForm, setEditForm] = useState<UserSettings>({
     userId: 0,
@@ -5103,7 +5107,12 @@ export default function AdminDashboard() {
     mutationFn: (userId: number) => axios.post(`/api/admin/view-as/start`, { userId }),
     onSuccess: () => {
       toast({ title: "View As started", description: "Now viewing as selected user" });
-      window.location.href = "/"; // Redirect to dashboard as the impersonated user
+      queryClient.clear();
+      navigate("/");
+      void checkAuth().catch((error) => {
+        console.error("Failed to refresh session after View As start:", error);
+        window.location.assign("/");
+      });
     },
     onError: (error: any) => {
       toast({ title: "Error", description: error.response?.data?.message || "Failed to start impersonation", variant: "destructive" });

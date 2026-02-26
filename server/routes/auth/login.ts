@@ -70,6 +70,7 @@ router.post("/api/auth/login", async (req: Request, res: Response) => {
   try {
     const { email, password, rememberMe } = loginSchema.parse(req.body);
     const rememberMeConfig = await getRememberMeConfig();
+    const existingRememberMeCookie = readRememberMeCookie(req);
     const ip = getClientIp(req);
     const userAgent = getUserAgent(req);
     const clientIdentity = extractClientIdentity(req);
@@ -352,8 +353,18 @@ router.post("/api/auth/login", async (req: Request, res: Response) => {
         console.error("Failed to issue remember-me token:", tokenErr);
       }
     } else {
-      clearRememberMeCookie(res);
+      // Avoid emitting an extra Set-Cookie header when no remember-me cookie exists.
+      // Some non-browser clients naively keep only the first Set-Cookie value, which can
+      // cause them to miss the session cookie (`connect.sid`) and treat login as failed.
+      if (existingRememberMeCookie) clearRememberMeCookie(res);
     }
+
+    await new Promise<void>((resolve, reject) => {
+      req.session.save((err) => {
+        if (err) return reject(err);
+        return resolve();
+      });
+    });
 
     res.json({
       id: user.id,

@@ -216,6 +216,18 @@ Failure Mode if Missing:
   - Confirm lockfile resolves `axios@1.13.5` or newer.
 - Failure Mode if Missing: known high-severity dependency vulnerability remains exploitable in production dependency graph.
 
+### PRD-AUTH-004
+- ID: `PRD-AUTH-004`
+- Date (UTC): `2026-02-26`
+- Scope: `Login session persistence`
+- Requirement: `POST /api/auth/login` must only return `200` after the session is persisted to the configured session store, and must not emit an unnecessary remember-me cookie clear (`tq_rm`) when no remember-me cookie is present in the request.
+- Enforcement: `server/routes/auth/login.ts` (explicit `req.session.save()` before `res.json()`; conditional `clearRememberMeCookie()` based on `readRememberMeCookie(req)`).
+- Validation:
+  - Start the server, then run:
+    - `node -e "fetch('http://localhost:5000/api/auth/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({email:'admin@local.test',password:'changeme'})}).then(r=>{const sc=r.headers.get('set-cookie')||'';const c=(sc.split(';')[0]||'').trim();return fetch('http://localhost:5000/api/auth/current-user',{headers:{Cookie:c}})}).then(r=>{console.log(r.status);return r.text()}).then(console.log)"`
+  - Expect `200` and a current-user JSON payload without adding delays/draining the login body first.
+- Failure Mode if Missing: intermittent post-login `401` on immediate follow-up calls (including WS auth) and non-browser clients selecting the wrong cookie when multiple `Set-Cookie` headers are present.
+
 ### PRD-CHL-007
 - ID: `PRD-CHL-007`
 - Date (UTC): `2026-02-15`
@@ -1145,3 +1157,27 @@ Failure Mode if Missing:
   - Run authenticated export smoke (`npm run loadtest:export-pipeline` with `LOADTEST_EXPORT_JOB_COUNT>=2`) and confirm `READY` status and valid download links.
   - Review memory profile during large trader-scouting jobs; confirm no second full in-memory mapped array is created.
 - Failure Mode if Missing: large trader-scouting exports can double in-memory footprint (raw rows + normalized copy), increasing OOM and latency risk under high cardinality datasets.
+
+### PRD-SEC-020
+- ID: `PRD-SEC-020`
+- Date (UTC): `2026-02-26`
+- Scope: `Impersonation escape control availability under compliance gate overlays`
+- Requirement: While an admin is in `View As` mode, the `Exit View As` control must remain visually and interactively above mandatory legal re-acceptance overlays so admins can always terminate impersonation.
+- Enforcement: `client/src/AuthenticatedShell.tsx` (`ImpersonationBanner` fixed top stacking order `z-[260]` above dialog overlays).
+- Validation:
+  - Start admin impersonation (`/api/admin/view-as/start`) for a trader with pending DOC1 re-acceptance.
+  - Confirm legal gate dialog is open and `Exit View As` remains clickable in front.
+  - Click `Exit View As` and verify session returns to admin context and `/admin` route.
+- Failure Mode if Missing: admins can be trapped in impersonation sessions behind compliance modals, requiring disruptive session resets and delaying operational response.
+
+### PRD-PERF-013
+- ID: `PRD-PERF-013`
+- Date (UTC): `2026-02-26`
+- Scope: `Admin route snappiness with strict trader/admin bundle containment`
+- Requirement: Admin route code (`AdminDashboard`) may be preloaded only behind admin-intent signals (admin header menu open/hover/focus/touch), while trader sessions must not prefetch or load admin chunks.
+- Enforcement: `client/src/lib/adminRoutePrefetch.ts` (deduped admin chunk preloader), `client/src/components/Header.tsx` (admin-only intent-triggered prefetch wiring), and runbook guardrails in `e2e/runbook.spec.ts`.
+- Validation:
+  - Login as trader and verify admin chunk requests remain `0` before/after `/admin` navigation attempt.
+  - Login as admin and navigate to `/admin`; verify admin chunk loads and dashboard renders.
+  - Open admin header menu and verify prefetch path does not execute for non-admin sessions.
+- Failure Mode if Missing: admin navigation remains latency-heavy and/or trader sessions can accidentally download privileged admin bundles, increasing bandwidth and containment risk.

@@ -5,6 +5,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { useAuth } from "@/hooks/use-auth";
+import { cn } from "@/lib/utils";
 import { Loader2 } from "lucide-react";
 
 type Doc1ReacceptStatusResponse = {
@@ -35,6 +36,7 @@ export function LegalReacceptGate() {
 
   const [forcedOpen, setForcedOpen] = useState(false);
   const open = Boolean(user && (user.legalReacceptRequired || forcedOpen));
+  const isImpersonating = Boolean(user?.isImpersonating);
 
   const [status, setStatus] = useState<Doc1ReacceptStatusResponse | null>(null);
   const [loading, setLoading] = useState(false);
@@ -148,8 +150,15 @@ export function LegalReacceptGate() {
   if (!open) return null;
 
   return (
-    <Dialog open={open} onOpenChange={() => {}}>
-      <DialogContent className="max-w-3xl max-h-[90vh] flex flex-col">
+    <Dialog open={open} onOpenChange={() => {}} modal={!isImpersonating}>
+      <DialogContent
+        className={cn(
+          "max-w-3xl flex flex-col",
+          isImpersonating
+            ? "top-[calc(50%+1.25rem)] max-h-[calc(100vh-5.5rem)]"
+            : "max-h-[90vh]",
+        )}
+      >
         <DialogHeader>
           <DialogTitle>Updated Terms & Conditions</DialogTitle>
           <DialogDescription>
@@ -161,7 +170,7 @@ export function LegalReacceptGate() {
           <div
             ref={scrollRef}
             onScroll={handleScroll}
-            className="h-[420px] overflow-auto border rounded-md p-4 whitespace-pre-wrap text-sm leading-relaxed bg-muted/30"
+            className="min-h-[240px] max-h-[55vh] overflow-auto border rounded-md p-4 whitespace-pre-wrap text-sm leading-relaxed bg-muted/30"
             style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" }}
           >
             {loading ? (

@@ -51,7 +51,13 @@ function ImpersonationBanner() {
   };
 
   return (
-    <div className="fixed top-0 left-0 right-0 z-50 bg-amber-500 text-black px-gutter py-2 flex items-center justify-between shadow-lg">
+    <div
+      className="fixed top-0 left-0 right-0 z-[320] bg-amber-500 text-black py-2 flex items-center justify-between shadow-lg gap-3"
+      style={{
+        paddingLeft: "max(var(--page-gutter), env(safe-area-inset-left))",
+        paddingRight: "max(var(--page-gutter), env(safe-area-inset-right))",
+      }}
+    >
       <div className="flex items-center gap-2 min-w-0">
         <span className="font-semibold shrink-0">View As Mode:</span>
         <span className="truncate">
@@ -62,7 +68,7 @@ function ImpersonationBanner() {
       <button
         onClick={handleStop}
         disabled={stopping}
-        className="bg-black text-white px-4 py-1 rounded font-medium hover:bg-gray-800 disabled:opacity-50"
+        className="bg-black text-white px-4 py-1 rounded font-medium hover:bg-gray-800 disabled:opacity-50 shrink-0"
       >
         {stopping ? "Exiting..." : "Exit View As"}
       </button>
@@ -131,7 +137,7 @@ export default function AuthenticatedShell() {
         <AccountSummarySync />
         <VerificationReminderPopup />
         <LegalReacceptGate />
-        <div className={user?.isImpersonating ? "pt-10" : ""}>
+        <div className={user?.isImpersonating ? "pt-12" : ""}>
           <Suspense fallback={<FullScreenLoading />}>
             <Switch>
               <Route path="/login" component={Dashboard} />

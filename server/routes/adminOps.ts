@@ -8,12 +8,14 @@ import {
   trades,
   users,
 } from "@shared/schema";
+import { AdminTraderStatsQuerySchema } from "@shared/admin/dataTab";
 import { MarketDataProviderConfigSchema } from "@shared/marketDataProviders";
 import { requireAdmin } from "../middleware/requireAdmin";
 import { storage } from "../storage";
 import { getCacheStats } from "../feeds/quoteFeed";
 import { resolveSecretRef } from "../marketdata/secret";
 import { getActiveProviderSelection } from "../marketdata/providerManager";
+import { observeHttpRequestDuration } from "./metricsState";
 
 function normalizeProviderKey(raw: unknown): string | null {
   const value = String(raw ?? "").trim();
@@ -25,10 +27,9 @@ function normalizeProviderKey(raw: unknown): string | null {
 export const adminOpsRouter = Router();
 
 adminOpsRouter.get("/trader-stats", requireAdmin, async (req, res) => {
+  const startedAt = process.hrtime.bigint();
   try {
-    const days = req.query.days ? parseInt(req.query.days as string, 10) : 30;
-    const limit = Math.max(1, Math.min(50_000, Number.parseInt(String(req.query.limit ?? "5000"), 10) || 5000));
-    const offset = Math.max(0, Math.min(5_000_000, Number.parseInt(String(req.query.offset ?? "0"), 10) || 0));
+    const { days, limit, offset } = AdminTraderStatsQuerySchema.parse(req.query);
 
     const params: any[] = [];
     let havingClause = "";
@@ -108,6 +109,11 @@ adminOpsRouter.get("/trader-stats", requireAdmin, async (req, res) => {
   } catch (error) {
     console.error("Error fetching trader statistics:", error);
     return res.status(500).json({ message: "Internal server error" });
+  } finally {
+    observeHttpRequestDuration(
+      "/api/admin/trader-stats",
+      Number(process.hrtime.bigint() - startedAt) / 1e9,
+    );
   }
 });
 

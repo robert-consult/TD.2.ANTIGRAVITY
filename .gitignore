@@ -10,8 +10,20 @@ test-results/
 playwright-report/
 *.code-workspace
 
+# --- Local env / secrets ---
+.env
+.env.local
+.env.*.local
+
 # --- Database artifacts / dumps ---
 *.db*
 db_backups/
 db/schema*.sql
 db_dump*.sql
+
+# --- Generated exports (may contain PII) ---
+admin_data_exports/
+
+# --- Local TLS/dev certs (never commit private keys) ---
+petascale/kes/certs/*.key
+petascale/kes/certs/*.crt

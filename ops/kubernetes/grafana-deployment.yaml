@@ -1,0 +1,170 @@
+# Grafana OSS Deployment — TradeHub Petascale
+#
+# Deploys Grafana with all 64 dashboards (56 Pigsty + 8 TradeHub) auto-provisioned.
+# 100% free, self-hosted, no paid accounts required.
+#
+# Prerequisites:
+#   kubectl create configmap tradehub-dashboards --from-file=ops/dashboards/ -n tradehub
+#   kubectl create configmap pigsty-pgsql-dashboards --from-file=ops/dashboards/pigsty-pgsql/ -n tradehub
+#   kubectl create configmap pigsty-minio-dashboards --from-file=ops/dashboards/pigsty-minio/ -n tradehub
+#   kubectl create configmap pigsty-node-dashboards --from-file=ops/dashboards/pigsty-node/ -n tradehub
+#   kubectl create configmap pigsty-infra-dashboards --from-file=ops/dashboards/pigsty-infra/ -n tradehub
+#   kubectl create configmap pigsty-redis-dashboards --from-file=ops/dashboards/pigsty-redis/ -n tradehub
+#   kubectl create configmap grafana-provisioning --from-file=ops/grafana-config/provisioning/ -n tradehub
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tradehub-grafana
+  namespace: tradehub
+  labels:
+    app: grafana
+    component: observability
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: grafana
+  template:
+    metadata:
+      labels:
+        app: grafana
+        component: observability
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 472
+        fsGroup: 472
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: grafana
+          image: grafana/grafana-oss:11.4.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3000
+              name: http
+          env:
+            - name: GF_SECURITY_ADMIN_USER
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-admin
+                  key: username
+                  optional: true
+            - name: GF_SECURITY_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-admin
+                  key: password
+                  optional: true
+            - name: GF_ANALYTICS_REPORTING_ENABLED
+              value: "false"
+            - name: GF_ANALYTICS_CHECK_FOR_UPDATES
+              value: "false"
+            - name: GF_USERS_ALLOW_SIGN_UP
+              value: "false"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          volumeMounts:
+            # Auto-provisioning configs
+            - name: dashboard-provisioning
+              mountPath: /etc/grafana/provisioning/dashboards/tradehub.yaml
+              subPath: tradehub.yaml
+              readOnly: true
+            - name: datasource-provisioning
+              mountPath: /etc/grafana/provisioning/datasources/tradehub.yaml
+              subPath: tradehub.yaml
+              readOnly: true
+            # Dashboard JSON files — TradeHub custom
+            - name: dashboards-tradehub
+              mountPath: /var/lib/grafana/dashboards/tradehub
+              readOnly: true
+            # Dashboard JSON files — Pigsty PostgreSQL (22 dashboards)
+            - name: dashboards-pigsty-pgsql
+              mountPath: /var/lib/grafana/dashboards/pigsty-pgsql
+              readOnly: true
+            # Dashboard JSON files — Pigsty MinIO (2 dashboards)
+            - name: dashboards-pigsty-minio
+              mountPath: /var/lib/grafana/dashboards/pigsty-minio
+              readOnly: true
+            # Dashboard JSON files — Pigsty Node (11 dashboards)
+            - name: dashboards-pigsty-node
+              mountPath: /var/lib/grafana/dashboards/pigsty-node
+              readOnly: true
+            # Dashboard JSON files — Pigsty Infrastructure (11 dashboards)
+            - name: dashboards-pigsty-infra
+              mountPath: /var/lib/grafana/dashboards/pigsty-infra
+              readOnly: true
+            # Dashboard JSON files — Pigsty Redis/Valkey (5 dashboards)
+            - name: dashboards-pigsty-redis
+              mountPath: /var/lib/grafana/dashboards/pigsty-redis
+              readOnly: true
+            # Grafana data
+            - name: grafana-data
+              mountPath: /var/lib/grafana
+      volumes:
+        - name: dashboard-provisioning
+          configMap:
+            name: grafana-dashboard-provisioning
+        - name: datasource-provisioning
+          configMap:
+            name: grafana-datasource-provisioning
+        - name: dashboards-tradehub
+          configMap:
+            name: tradehub-dashboards
+        - name: dashboards-pigsty-pgsql
+          configMap:
+            name: pigsty-pgsql-dashboards
+        - name: dashboards-pigsty-minio
+          configMap:
+            name: pigsty-minio-dashboards
+        - name: dashboards-pigsty-node
+          configMap:
+            name: pigsty-node-dashboards
+        - name: dashboards-pigsty-infra
+          configMap:
+            name: pigsty-infra-dashboards
+        - name: dashboards-pigsty-redis
+          configMap:
+            name: pigsty-redis-dashboards
+        - name: grafana-data
+          emptyDir: {}
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tradehub-grafana
+  namespace: tradehub
+  labels:
+    app: grafana
+spec:
+  selector:
+    app: grafana
+  ports:
+    - port: 3000
+      targetPort: 3000
+      protocol: TCP
+      name: http

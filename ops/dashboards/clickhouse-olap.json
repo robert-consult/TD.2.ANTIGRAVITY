@@ -1,0 +1,91 @@
+{
+    "title": "TradeHub — ClickHouse OLAP",
+    "uid": "th-clickhouse",
+    "editable": true,
+    "time": {
+        "from": "now-3h",
+        "to": "now"
+    },
+    "refresh": "30s",
+    "panels": [
+        {
+            "title": "Active Queries",
+            "type": "stat",
+            "gridPos": {
+                "h": 6,
+                "w": 8,
+                "x": 0,
+                "y": 0
+            },
+            "targets": [
+                {
+                    "expr": "ClickHouseMetrics_Query"
+                }
+            ]
+        },
+        {
+            "title": "Query Threads",
+            "type": "timeseries",
+            "gridPos": {
+                "h": 6,
+                "w": 8,
+                "x": 8,
+                "y": 0
+            },
+            "targets": [
+                {
+                    "expr": "ClickHouseMetrics_QueryThread",
+                    "legendFormat": "threads"
+                }
+            ]
+        },
+        {
+            "title": "Disk Used",
+            "type": "timeseries",
+            "gridPos": {
+                "h": 6,
+                "w": 8,
+                "x": 16,
+                "y": 0
+            },
+            "targets": [
+                {
+                    "expr": "ClickHouseAsyncMetrics_DiskUsed_default",
+                    "legendFormat": "bytes"
+                }
+            ]
+        },
+        {
+            "title": "Queries/s",
+            "type": "timeseries",
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 0,
+                "y": 6
+            },
+            "targets": [
+                {
+                    "expr": "rate(ClickHouseProfileEvents_Query[5m])",
+                    "legendFormat": "queries/s"
+                }
+            ]
+        },
+        {
+            "title": "Memory Usage",
+            "type": "timeseries",
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 12,
+                "y": 6
+            },
+            "targets": [
+                {
+                    "expr": "ClickHouseMetrics_MemoryTracking",
+                    "legendFormat": "tracked bytes"
+                }
+            ]
+        }
+    ]
+}

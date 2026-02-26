@@ -1,0 +1,11 @@
+# Prevent accidental secret exfiltration via diffs.
+# These files should never be committed with real values; treat as binary so diffs don't display contents.
+.env binary
+.env.local binary
+.env.*.local binary
+
+# Generated export artifacts may contain PII; never show diffs.
+admin_data_exports/** binary
+
+# Never diff TLS material (even dev/self-signed).
+petascale/kes/certs/* binary

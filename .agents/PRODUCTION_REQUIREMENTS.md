@@ -1181,3 +1181,51 @@ Failure Mode if Missing:
   - Login as admin and navigate to `/admin`; verify admin chunk loads and dashboard renders.
   - Open admin header menu and verify prefetch path does not execute for non-admin sessions.
 - Failure Mode if Missing: admin navigation remains latency-heavy and/or trader sessions can accidentally download privileged admin bundles, increasing bandwidth and containment risk.
+
+### PRD-PETASCALE-001
+- ID: `PRD-PETASCALE-001`
+- Date (UTC): `2026-02-26`
+- Scope: `ClickHouse OLAP analytics offload`
+- Requirement: Production deployment must include a ClickHouse instance (`k8s/70-petascale-infra.yaml`) with the incremental sync worker (`server/services/clickhouseSync.ts`) running under `APP_ROLE=worker`, configured with `CLICKHOUSE_ENABLED=true`, `CLICKHOUSE_URL`, `CLICKHOUSE_DATABASE`, `CLICKHOUSE_USER`, and `CLICKHOUSE_PASSWORD` (and `ALLOW_INSECURE_INTERNAL_TRANSPORT=1` only when explicitly accepting plaintext internal transport).
+- Enforcement: `server/services/clickhouseClient.ts` (client factory), `server/services/clickhouseSync.ts` (sync worker), `k8s/70-petascale-infra.yaml` (StatefulSet), `server/services/petascaleEnv.ts` (env validation).
+- Validation:
+  - `kubectl get statefulset tradehub-clickhouse -n tradehub` and verify `READY 1/1`.
+  - Verify `/metrics` emits `clickhouse_sync_last_success_at` with recent timestamp.
+  - Run `npm run loadtest:admin-data-tab` and verify CH-backed reads succeed when ClickHouse is enabled.
+- Failure Mode if Missing: heavy aggregate/export queries fall back to Postgres request path, causing OOM and timeout at billion-row scale.
+
+### PRD-PETASCALE-002
+- ID: `PRD-PETASCALE-002`
+- Date (UTC): `2026-02-26`
+- Scope: `MinIO object storage for export artifacts`
+- Requirement: Production deployment must include a MinIO instance (or S3-compatible object storage) with server-side encryption enabled (`X-Amz-Server-Side-Encryption: AES256`), configured with `EXPORT_OBJECT_STORAGE_ENABLED=true`, `EXPORT_OBJECT_STORAGE_ENDPOINT`, `EXPORT_OBJECT_STORAGE_PORT`, `EXPORT_OBJECT_STORAGE_USE_SSL`, `EXPORT_OBJECT_STORAGE_ACCESS_KEY`, `EXPORT_OBJECT_STORAGE_SECRET_KEY`, and `EXPORT_OBJECT_STORAGE_BUCKET`.
+- Enforcement: `server/services/objectStorage.ts` (SSE header on `fPutObject`), `server/services/petascaleEnv.ts` (transport validation), `k8s/70-petascale-infra.yaml` (StatefulSet), `k8s/01-configmap.yaml` and `k8s/02-secrets.yaml` (env entries).
+- Validation:
+  - `kubectl get statefulset tradehub-minio -n tradehub` and verify `READY 1/1`.
+  - Run an export job and verify artifact object key has prefix in MinIO bucket.
+  - Verify object metadata includes `X-Amz-Server-Side-Encryption: AES256`.
+- Failure Mode if Missing: export artifacts are stored unencrypted or on local disk with no redundancy, risking data loss and compliance violations.
+
+### PRD-PETASCALE-003
+- ID: `PRD-PETASCALE-003`
+- Date (UTC): `2026-02-26`
+- Scope: `BullMQ export queue on Valkey`
+- Requirement: Production deployment must have `ADMIN_DATA_EXPORT_QUEUE_ENABLED=true` with Valkey connected (`VALKEY_URL`), and the export worker started under `APP_ROLE=worker` via `startAdminDataExportWorker()`.
+- Enforcement: `server/services/adminDataExportQueue.ts` (queue/worker lifecycle), `server/index.ts` (worker startup), `server/services/petascaleEnv.ts` (env validation).
+- Validation:
+  - Submit `POST /api/admin/data-exports` and verify job enters `QUEUED` state.
+  - Verify worker processes job to `READY` state with download link.
+  - Verify `/metrics` emits `admin_data_export_jobs_succeeded_total` incrementing.
+- Failure Mode if Missing: export requests block the Express event loop, causing API timeout and OOM under concurrent admin usage.
+
+### PRD-PETASCALE-004
+- ID: `PRD-PETASCALE-004`
+- Date (UTC): `2026-02-26`
+- Scope: `Shared DataTab Zod validation schemas`
+- Requirement: All Admin DataTab endpoints must validate request parameters through shared Zod schemas in `shared/admin/dataTab.ts` with bounded pagination and range-limited filters (days/limit/offset clamped, structural invalids rejected like `minHoldSec > maxHoldSec`).
+- Enforcement: `shared/admin/dataTab.ts` (Zod schemas), `server/routes/adminDataRollups.ts`, `server/routes/adminOps.ts`, `server/routes/adminTraderScouting.ts` (schema parsing + bounds).
+- Validation:
+  - `npm run check` passes with schema imports.
+  - Submit out-of-range parameters to DataTab endpoints and verify values are bounded (clamped) instead of triggering full scans.
+  - Submit invalid structural parameters (e.g., `minHoldSec > maxHoldSec`) and verify `400` rejection.
+- Failure Mode if Missing: unbounded or malformed admin query parameters can trigger full-table scans, causing Postgres CPU exhaustion.

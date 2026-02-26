@@ -1,0 +1,213 @@
+# TradeHub — Prometheus Alert Rules
+#
+# Production-ready alerting rules for all 60+ real metrics.
+# Mount at /etc/prometheus/rules/tradehub-alerts.yml
+
+groups:
+  # ── Critical Security Alerts ─────────────────────────────────────────────
+  - name: tradehub-security
+    interval: 15s
+    rules:
+      - alert: HighLoginFailureRate
+        expr: rate(login_attempts_total{result="failed"}[5m]) > 0.5
+        for: 2m
+        labels:
+          severity: critical
+          component: auth
+        annotations:
+          summary: "High login failure rate ({{ $value | printf \"%.1f\" }}/s)"
+          description: "Failed logins exceed 0.5/s for >2m. Possible brute force attack."
+
+      - alert: CsrfFailureSpike
+        expr: rate(http_responses_total{status="403",route="/api",reason="csrf"}[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          component: csrf
+        annotations:
+          summary: "CSRF 403 failures spiking ({{ $value | printf \"%.2f\" }}/s)"
+
+      - alert: BotChallengeSpike
+        expr: rate(bot_challenges_issued_total[5m]) > 1
+        for: 5m
+        labels:
+          severity: warning
+          component: bot
+        annotations:
+          summary: "Bot challenge rate elevated ({{ $value | printf \"%.1f\" }}/s)"
+
+      - alert: WsOriginRejectionSpike
+        expr: rate(ws_origin_rejected_total[5m]) > 0.5
+        for: 2m
+        labels:
+          severity: critical
+          component: websocket
+        annotations:
+          summary: "WS origin rejections spiking — possible infiltration attempt"
+
+      - alert: WsRateLimitTriggered
+        expr: rate(ws_message_rate_limited_total[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          component: websocket
+        annotations:
+          summary: "WS clients being rate limited ({{ $value | printf \"%.2f\" }}/s)"
+
+  # ── WebSocket & Connectivity ─────────────────────────────────────────────
+  - name: tradehub-connectivity
+    interval: 15s
+    rules:
+      - alert: NoActiveWsConnections
+        expr: ws_active_connections == 0
+        for: 10m
+        labels:
+          severity: warning
+          component: websocket
+        annotations:
+          summary: "Zero WebSocket connections for >10m"
+
+      - alert: QuoteHubEmpty
+        expr: quotehub_size == 0
+        for: 5m
+        labels:
+          severity: critical
+          component: market-data
+        annotations:
+          summary: "QuoteHub has zero quotes — market data feed may be down"
+
+      - alert: QuoteHubStale
+        expr: (time() * 1000) - quotehub_asof > 300000
+        for: 5m
+        labels:
+          severity: critical
+          component: market-data
+        annotations:
+          summary: "QuoteHub data is >5m stale — provider feed interrupted"
+
+  # ── Trade Rejections ─────────────────────────────────────────────────────
+  - name: tradehub-trades
+    interval: 15s
+    rules:
+      - alert: TradeRejectionSpike
+        expr: >
+          rate(trade_close_rejected_quote_stale_total[5m])
+          + rate(trade_open_rejected_quote_revalidation_total[5m])
+          + rate(trade_close_rejected_quote_revalidation_total[5m])
+          + rate(trade_targets_rejected_quote_stale_total[5m]) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+          component: trading
+        annotations:
+          summary: "Trade rejections exceeding 0.5/s — check quote freshness"
+
+  # ── Export Pipeline Alerts ───────────────────────────────────────────────
+  - name: tradehub-exports
+    interval: 30s
+    rules:
+      - alert: ExportQueueBacklog
+        expr: admin_data_export_queue_waiting > 10
+        for: 5m
+        labels:
+          severity: warning
+          component: exports
+        annotations:
+          summary: "Export queue backlog: {{ $value }} jobs waiting"
+
+      - alert: ExportJobFailures
+        expr: rate(admin_data_export_jobs_failed_total[10m]) > 0
+        for: 5m
+        labels:
+          severity: critical
+          component: exports
+        annotations:
+          summary: "Export jobs failing — check export worker logs"
+
+  # ── ClickHouse Sync Alerts ──────────────────────────────────────────────
+  - name: tradehub-clickhouse
+    interval: 30s
+    rules:
+      - alert: ClickHouseSyncDown
+        expr: clickhouse_sync_running == 0 and time() - clickhouse_sync_last_run_at > 600
+        for: 5m
+        labels:
+          severity: critical
+          component: clickhouse
+        annotations:
+          summary: "ClickHouse sync hasn't run in >10m"
+
+      - alert: ClickHouseSyncSlow
+        expr: clickhouse_sync_last_duration_ms > 30000
+        for: 5m
+        labels:
+          severity: warning
+          component: clickhouse
+        annotations:
+          summary: "ClickHouse sync taking >30s ({{ $value | humanizeDuration }})"
+
+  # ── Messaging ───────────────────────────────────────────────────────────
+  - name: tradehub-messaging
+    interval: 15s
+    rules:
+      - alert: MailboxFanoutBacklog
+        expr: mailbox_fanout_queue_depth > 100
+        for: 5m
+        labels:
+          severity: warning
+          component: messaging
+        annotations:
+          summary: "Mailbox fanout queue depth: {{ $value }}"
+
+      - alert: MailboxFanoutFailures
+        expr: rate(mailbox_fanout_failed_total[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: critical
+          component: messaging
+        annotations:
+          summary: "Mailbox fanout processing failures detected"
+
+  # ── Market Data Provider ────────────────────────────────────────────────
+  - name: tradehub-marketdata
+    interval: 15s
+    rules:
+      - alert: ProviderRateLimitQueueHigh
+        expr: marketdata_provider_ratelimit_queue_length > 50
+        for: 5m
+        labels:
+          severity: warning
+          component: market-data
+        annotations:
+          summary: "Provider {{ $labels.provider_key }} rate limit queue: {{ $value }}"
+
+      - alert: ProviderRequestsRejected
+        expr: rate(marketdata_provider_ratelimit_rejected_total[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: critical
+          component: market-data
+        annotations:
+          summary: "Provider {{ $labels.provider_key }} rejecting requests — feed degraded"
+
+  # ── Rollup Engine ───────────────────────────────────────────────────────
+  - name: tradehub-rollups
+    interval: 30s
+    rules:
+      - alert: RollupRefreshFailing
+        expr: rate(admin_data_rollup_refresh_failed_total[10m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+          component: rollups
+        annotations:
+          summary: "Data rollup refresh failures detected"
+
+      - alert: RollupRefreshSlow
+        expr: admin_data_rollup_refresh_last_duration_ms > 60000
+        for: 5m
+        labels:
+          severity: warning
+          component: rollups
+        annotations:
+          summary: "Rollup refresh taking >60s"

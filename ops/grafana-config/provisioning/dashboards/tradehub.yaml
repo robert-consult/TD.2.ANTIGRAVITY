@@ -1,0 +1,83 @@
+# Grafana Dashboard Auto-Provisioning for TradeHub Petascale
+#
+# This file tells Grafana to auto-load all Pigsty dashboards + custom TradeHub
+# dashboards from the ops/dashboards/ directory tree.
+#
+# Mount this file at:  /etc/grafana/provisioning/dashboards/tradehub.yaml
+# Mount dashboards at: /var/lib/grafana/dashboards/tradehub/
+
+apiVersion: 1
+
+providers:
+  # ── TradeHub Custom Dashboards ────────────────────────────────────────────
+  - name: 'tradehub-custom'
+    orgId: 1
+    folder: 'TradeHub'
+    type: file
+    disableDeletion: false
+    editable: true
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards/tradehub
+      foldersFromFilesStructure: false
+
+  # ── Pigsty PostgreSQL Dashboards (22 dashboards) ─────────────────────────
+  - name: 'pigsty-pgsql'
+    orgId: 1
+    folder: 'PostgreSQL'
+    type: file
+    disableDeletion: false
+    editable: true
+    updateIntervalSeconds: 60
+    options:
+      path: /var/lib/grafana/dashboards/pigsty-pgsql
+      foldersFromFilesStructure: false
+
+  # ── Pigsty MinIO Dashboards (2 dashboards) ───────────────────────────────
+  - name: 'pigsty-minio'
+    orgId: 1
+    folder: 'MinIO'
+    type: file
+    disableDeletion: false
+    editable: true
+    updateIntervalSeconds: 60
+    options:
+      path: /var/lib/grafana/dashboards/pigsty-minio
+      foldersFromFilesStructure: false
+
+  # ── Pigsty Node Dashboards (11 dashboards) ───────────────────────────────
+  - name: 'pigsty-node'
+    orgId: 1
+    folder: 'Bare Metal / Node'
+    type: file
+    disableDeletion: false
+    editable: true
+    updateIntervalSeconds: 60
+    options:
+      path: /var/lib/grafana/dashboards/pigsty-node
+      foldersFromFilesStructure: false
+
+  # ── Pigsty Infrastructure Dashboards (11 dashboards) ─────────────────────
+  - name: 'pigsty-infra'
+    orgId: 1
+    folder: 'Infrastructure'
+    type: file
+    disableDeletion: false
+    editable: true
+    updateIntervalSeconds: 60
+    options:
+      path: /var/lib/grafana/dashboards/pigsty-infra
+      foldersFromFilesStructure: false
+
+  # ── Pigsty Redis/Valkey Dashboards (5 dashboards) ────────────────────────
+  - name: 'pigsty-redis'
+    orgId: 1
+    folder: 'Valkey / Redis'
+    type: file
+    disableDeletion: false
+    editable: true
+    updateIntervalSeconds: 60
+    options:
+      path: /var/lib/grafana/dashboards/pigsty-redis
+      foldersFromFilesStructure: false

@@ -101,6 +101,7 @@ export async function uploadExportArtifact(params: {
     await client.fPutObject(cfg.objectStorageBucket, objectKey, params.sourcePath, {
       "Content-Type": params.contentType,
       "Cache-Control": "private, max-age=0, no-store",
+      "X-Amz-Server-Side-Encryption": "AES256",
     });
     return {
       objectKey,

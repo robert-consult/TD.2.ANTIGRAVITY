@@ -1,0 +1,20 @@
+# Internal TLS Advisory Alerts
+# Fires if internal service endpoints are detected communicating without TLS.
+groups:
+  - name: internal_tls_advisory
+    rules:
+      - alert: InternalTLSNotEnabled
+        expr: max by (service) ((internal_transport_service_enabled{service=~"minio|clickhouse"} == 1) and (internal_transport_tls_enabled{service=~"minio|clickhouse"} == 0)) > 0
+        for: 24h
+        labels: { severity: info, team: infra }
+        annotations:
+          summary: "Internal service running without TLS."
+          description: "TradeHub reports internal MinIO/ClickHouse transport is configured without TLS. See ops/runbooks/RUNBOOK_INTERNAL_TLS.md for enablement steps."
+
+      - alert: ValkeyTLSNotConfigured
+        expr: max by (service) ((internal_transport_service_enabled{service=\"valkey\"} == 1) and (internal_transport_tls_enabled{service=\"valkey\"} == 0)) > 0
+        for: 24h
+        labels: { severity: info, team: infra }
+        annotations:
+          summary: "Valkey is running without TLS."
+          description: "TradeHub reports Valkey transport is configured without TLS. BullMQ queue data and session tokens transit in plaintext within the cluster."

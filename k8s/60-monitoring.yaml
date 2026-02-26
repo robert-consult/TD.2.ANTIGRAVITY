@@ -22,7 +22,22 @@ data:
       evaluation_interval: 15s
     rule_files:
       - /etc/prometheus/alerts-admin-data-slo.yml
+      - /etc/prometheus-ops/*.yaml
     scrape_configs:
+      - job_name: "node-exporter"
+        kubernetes_sd_configs:
+          - role: endpoints
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_service_name, __meta_kubernetes_endpoint_port_name]
+            action: keep
+            regex: tradehub;node-exporter;metrics
+      - job_name: "kube-state-metrics"
+        kubernetes_sd_configs:
+          - role: endpoints
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_service_name, __meta_kubernetes_endpoint_port_name]
+            action: keep
+            regex: tradehub;kube-state-metrics;http-metrics
       - job_name: "tradehub-api"
         metrics_path: /metrics
         kubernetes_sd_configs:
@@ -152,6 +167,8 @@ spec:
               mountPath: /etc/prometheus
             - name: storage
               mountPath: /prometheus
+            - name: ops-config
+              mountPath: /etc/prometheus-ops
           resources:
             requests:
               cpu: "100m"
@@ -163,6 +180,10 @@ spec:
         - name: config
           configMap:
             name: tradehub-prometheus-config
+        - name: ops-config
+          configMap:
+            name: tradehub-prometheus-ops-config
+            optional: true
         - name: storage
           persistentVolumeClaim:
             claimName: tradehub-prometheus-pvc

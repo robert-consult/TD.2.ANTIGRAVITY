@@ -1,0 +1,31 @@
+# Grafana Datasource Auto-Provisioning for TradeHub Petascale
+#
+# Auto-configures Prometheus as the primary datasource.
+# Mount at: /etc/grafana/provisioning/datasources/tradehub.yaml
+
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    uid: ds-prometheus
+    access: proxy
+    url: http://tradehub-prometheus:9090
+    isDefault: true
+    editable: true
+    jsonData:
+      timeInterval: '15s'
+      queryTimeout: '60s'
+      httpMethod: POST
+      exemplarTraceIdDestinations:
+        - name: traceID
+          datasourceUid: ds-tempo
+
+  - name: Alertmanager
+    type: alertmanager
+    uid: ds-alertmanager
+    access: proxy
+    url: http://tradehub-alertmanager:9093
+    editable: true
+    jsonData:
+      implementation: prometheus

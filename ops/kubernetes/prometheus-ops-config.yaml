@@ -1,0 +1,28 @@
+# Prometheus Scrape Config Extension for OPS Deployments
+# This ConfigMap supplements the existing tradehub-prometheus-config in k8s/60-monitoring.yaml
+# by adding scrape targets for the new ops/ infrastructure components.
+#
+# USAGE: Merge these scrape_configs entries into 60-monitoring.yaml's prometheus.yml,
+# or mount this as an additional config volume with --config.file flag.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tradehub-prometheus-ops-config
+  namespace: tradehub
+data:
+  ops-scrape.yml: |
+    scrape_configs:
+      - job_name: "node-exporter"
+        static_configs:
+          - targets: ["node-exporter.tradehub.svc.cluster.local:9100"]
+        relabel_configs:
+          - source_labels: [__address__]
+            target_label: instance
+
+      - job_name: "kube-state-metrics"
+        static_configs:
+          - targets: ["kube-state-metrics.tradehub.svc.cluster.local:8080"]
+
+    rule_files:
+      - /etc/prometheus-ops/petascale-alerts.yaml
+      - /etc/prometheus-ops/internal-tls-alerts.yaml

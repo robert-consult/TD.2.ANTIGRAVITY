@@ -15,6 +15,7 @@ import { getMessagingMetrics } from "../services/messaging";
 import { getAdminExportMetricsSnapshot } from "../services/adminDataExportMetrics";
 import { getAdminDataRollupMetricsSnapshot } from "../services/adminDataRollups";
 import { getClickHouseSyncMetricsSnapshot } from "../services/clickhouseSync";
+import { getPetascaleRuntimeConfig } from "../services/petascaleEnv";
 import { getAllowedSymbolsForUser } from "../services/quoteSubscriptions";
 import {
   buildGeoContext,
@@ -54,6 +55,7 @@ import {
 import {
   addWsQuotePermissionRefreshErrorsTotal,
   addWsQuotePermissionRefreshTotal,
+  getHttpRequestDurationHistogramSnapshot,
   getRouteMetricSnapshot,
   incWsMessageRateLimitedTotal,
   incWsOriginRejectedTotal,
@@ -157,6 +159,52 @@ app.get("/metrics", (req, res) => {
   const rollupMetrics = getAdminDataRollupMetricsSnapshot();
   const clickhouseSyncMetrics = getClickHouseSyncMetricsSnapshot();
   const metricSnapshot = getRouteMetricSnapshot();
+  const httpDurationMetrics = getHttpRequestDurationHistogramSnapshot();
+  const petascaleCfg = getPetascaleRuntimeConfig();
+
+  const valkeyEnabled = Boolean(petascaleCfg.valkeyUrl);
+  const valkeyTlsEnabled = valkeyEnabled && /^rediss:\/\//i.test(petascaleCfg.valkeyUrl ?? "") ? 1 : 0;
+
+  const minioEnabled = Boolean(
+    petascaleCfg.objectStorageEnabled &&
+      petascaleCfg.objectStorageEndpoint &&
+      petascaleCfg.objectStorageAccessKey &&
+      petascaleCfg.objectStorageSecretKey,
+  );
+  const minioTlsEnabled = minioEnabled && petascaleCfg.objectStorageUseSsl ? 1 : 0;
+
+  const clickhouseEnabled = Boolean(petascaleCfg.clickhouseEnabled && petascaleCfg.clickhouseUrl);
+  const clickhouseTlsEnabled =
+    clickhouseEnabled && /^https:\/\//i.test(petascaleCfg.clickhouseUrl ?? "") ? 1 : 0;
+
+  let adminSessions = 0;
+  for (const client of wss.clients as Set<LiveClient>) {
+    if (client.readyState === WebSocket.OPEN && client.isAdmin) {
+      adminSessions++;
+    }
+  }
+
+  const httpDurationLines: string[] = [];
+  if (httpDurationMetrics.series.length) {
+    httpDurationLines.push(
+      "# HELP http_request_duration_seconds Request duration histogram (server-side)",
+      "# TYPE http_request_duration_seconds histogram",
+    );
+    for (const series of httpDurationMetrics.series) {
+      const routeLabel = String(series.route).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+      for (let i = 0; i < httpDurationMetrics.bucketsSec.length; i++) {
+        const bound = httpDurationMetrics.bucketsSec[i];
+        httpDurationLines.push(
+          `http_request_duration_seconds_bucket{route="${routeLabel}",le="${bound}"} ${series.buckets[i]}`,
+        );
+      }
+      httpDurationLines.push(
+        `http_request_duration_seconds_bucket{route="${routeLabel}",le="+Inf"} ${series.count}`,
+        `http_request_duration_seconds_sum{route="${routeLabel}"} ${series.sum}`,
+        `http_request_duration_seconds_count{route="${routeLabel}"} ${series.count}`,
+      );
+    }
+  }
   res.setHeader("Content-Type", "text/plain; version=0.0.4");
   res.send(
     [
@@ -219,6 +267,30 @@ app.get("/metrics", (req, res) => {
       "# HELP ws_message_rate_limited_total WebSocket connections closed for message-rate abuse",
       "# TYPE ws_message_rate_limited_total counter",
       `ws_message_rate_limited_total ${metricSnapshot.metricWsMessageRateLimitedTotal}`,
+      "# HELP login_attempts_total Count of login attempts",
+      "# TYPE login_attempts_total counter",
+      `login_attempts_total{result="failed"} ${metricSnapshot.metricLoginAttemptsFailedTotal}`,
+      `login_attempts_total{result="success"} ${metricSnapshot.metricLoginAttemptsSuccessTotal}`,
+      "# HELP http_responses_total Http responses counted",
+      "# TYPE http_responses_total counter",
+      `http_responses_total{status="403",route="/api",reason="csrf"} ${metricSnapshot.metricHttpResponses403CsrfTotal}`,
+      "# HELP bot_challenges_issued_total Amount of bot Captchas/Pow issued",
+      "# TYPE bot_challenges_issued_total counter",
+      `bot_challenges_issued_total ${metricSnapshot.metricBotChallengesIssuedTotal}`,
+      "# HELP internal_transport_service_enabled Whether a dependency is configured/enabled (0/1)",
+      "# TYPE internal_transport_service_enabled gauge",
+      `internal_transport_service_enabled{service="valkey"} ${valkeyEnabled ? 1 : 0}`,
+      `internal_transport_service_enabled{service="minio"} ${minioEnabled ? 1 : 0}`,
+      `internal_transport_service_enabled{service="clickhouse"} ${clickhouseEnabled ? 1 : 0}`,
+      "# HELP internal_transport_tls_enabled Whether dependency transport uses TLS (0/1)",
+      "# TYPE internal_transport_tls_enabled gauge",
+      `internal_transport_tls_enabled{service="valkey"} ${valkeyTlsEnabled}`,
+      `internal_transport_tls_enabled{service="minio"} ${minioTlsEnabled}`,
+      `internal_transport_tls_enabled{service="clickhouse"} ${clickhouseTlsEnabled}`,
+      ...httpDurationLines,
+      "# HELP admin_active_sessions Active WebSocket sessions owned by admins",
+      "# TYPE admin_active_sessions gauge",
+      `admin_active_sessions ${adminSessions}`,
       "# HELP mailbox_fanout_queue_depth Pending mailbox fanout jobs",
       "# TYPE mailbox_fanout_queue_depth gauge",
       `mailbox_fanout_queue_depth ${messagingMetrics.mailboxFanoutQueueDepth}`,

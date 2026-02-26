@@ -1,0 +1,85 @@
+# Headlamp Plugin Configurations
+# Mounts custom settings to enhance Headlamp's default view for TradeHub petascale ops.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: headlamp-plugins-config
+  namespace: tradehub
+data:
+  # Filter Headlamp's default view to tradehub namespace only
+  config.json: |
+    {
+      "clusters": [
+        {
+          "name": "tradehub-petascale",
+          "server": "https://kubernetes.default.svc",
+          "defaultNamespace": "tradehub"
+        }
+      ],
+      "plugins": {
+        "prometheus": {
+          "enabled": true,
+          "url": "http://tradehub-prometheus.tradehub.svc:9090"
+        }
+      },
+      "externalLinks": [
+        {
+          "label": "Grafana — System Health",
+          "url": "/grafana/d/th-bare-metal",
+          "icon": "dashboard"
+        },
+        {
+          "label": "Grafana — Export Pipeline",
+          "url": "/grafana/d/th-export-pipeline",
+          "icon": "dashboard"
+        },
+        {
+          "label": "Grafana — Cache Health",
+          "url": "/grafana/d/th-cache-health",
+          "icon": "dashboard"
+        },
+        {
+          "label": "MinIO Console",
+          "url": "http://tradehub-minio.tradehub.svc:9001",
+          "icon": "storage"
+        }
+      ]
+    }
+---
+# Patch the existing Headlamp deployment to use the viewer SA and mount plugins
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tradehub-headlamp
+  namespace: tradehub
+spec:
+  template:
+    spec:
+      serviceAccountName: headlamp-viewer
+      containers:
+        - name: headlamp
+          image: ghcr.io/headlamp-k8s/headlamp:v0.29.2
+          args:
+            - -in-cluster
+            - -plugins-dir=/headlamp/plugins
+          ports:
+            - containerPort: 4466
+              name: http
+          volumeMounts:
+            - name: plugins-config
+              mountPath: /headlamp/plugins/config.json
+              subPath: config.json
+              readOnly: true
+          resources:
+            requests: { cpu: "100m", memory: "128Mi" }
+            limits: { cpu: "500m", memory: "512Mi" }
+          securityContext:
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 10001
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+      volumes:
+        - name: plugins-config
+          configMap:
+            name: headlamp-plugins-config

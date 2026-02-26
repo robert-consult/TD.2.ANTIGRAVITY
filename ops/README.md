@@ -22,3 +22,7 @@ Stand-alone scripts, fuzzers, and templates used for neutralizing injection vect
 
 ---
 *No business logic, API mappings, or React components should ever be imported into this tree path.*
+
+## Deployment helpers (optional)
+- Grafana dashboards: `./ops/deploy-grafana.sh`
+- Prometheus OPS alert rules: `./ops/deploy-prometheus-alerts.sh`

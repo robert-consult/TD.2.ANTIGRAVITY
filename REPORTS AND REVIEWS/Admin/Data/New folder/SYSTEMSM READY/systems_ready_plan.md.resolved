@@ -1,0 +1,271 @@
+# Systems Ready Check Implementation Plan (Enhanced & Hardened)
+
+## Goal
+Transform the Before Going Live Checklist into a deterministic, agent-executable framework. All operational modules (dashboards, alerts, chaos tests, runbooks, security fuzzers) live strictly inside `ops/` and `petascale/`, completely segregated from the base application (`server/`, `client/`, `shared/`). This plan is grounded in the actual codebase as verified by deep repo scan.
+
+---
+
+## Existing Repo Security & Observability Baseline (Verified)
+
+Before enhancing, here is what **already exists** and must NOT be duplicated:
+
+| Layer | What Exists | Where |
+|---|---|---|
+| CSRF | Double-submit cookie pattern, token validation, SameSite enforcement | [server/security/csrf.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/security/csrf.ts), [shared/security/csrf.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/shared/security/csrf.ts) |
+| At-Rest Encryption | AES-256-GCM with 32-byte hex key, IV per record | [server/services/crypto.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/services/crypto.ts) |
+| E2EE | Client-side envelope encryption for messaging | [client/src/lib/e2ee.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/e2ee.ts), [server/services/messaging.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/services/messaging.ts) |
+| Rate Limiting | Login (IP+email), admin global settings, mailbox, WS messages, export queue | [server/security/loginRateLimit.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/security/loginRateLimit.ts), [globalSettingsRateLimit.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/security/globalSettingsRateLimit.ts), [adminDataExports.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/adminDataExports.ts) |
+| Bot Protection | Challenge/guard with captcha slider | [server/security/botGuard.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/security/botGuard.ts), [botChallenge.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/security/botChallenge.ts), [captcha.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/security/captcha.ts) |
+| Session Audit | Immutable session trail with device fingerprinting | [server/security/sessionTrail.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/security/sessionTrail.ts) |
+| Log Sanitization | PII stripping from server logs | [server/security/logSanitizer.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/security/logSanitizer.ts) |
+| Pod Security | `runAsNonRoot`, `readOnlyRootFilesystem`, `drop: ALL`, `seccompProfile: RuntimeDefault` | [k8s/10-api-deployment.yaml](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/k8s/10-api-deployment.yaml) (all 3 deployments) |
+| Network Policies | 5 policies isolating API, Worker, Ingestor, MinIO, ClickHouse | [k8s/31-network-policies.yaml](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/k8s/31-network-policies.yaml) |
+| TLS Ingress | Force SSL redirect, body size limit, RPS/connection limits | [k8s/30-ingress.yaml](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/k8s/30-ingress.yaml) |
+| Prometheus | 5 scrape jobs (API, Worker, MinIO, ClickHouse, Valkey), 7 SLO alerts, persistent 20Gi PVC, custom metrics adapter | [k8s/60-monitoring.yaml](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/k8s/60-monitoring.yaml) |
+| Headlamp | Deployed v0.29.2 in-cluster | `k8s/70-petascale-infra.yaml:410-442` |
+| KES | TLS auto-cert init container, MinIO encryption key service | `k8s/70-petascale-infra.yaml:175-276` |
+| Valkey Exporter | redis_exporter v1.67.0 scraping Valkey metrics | `k8s/70-petascale-infra.yaml:278-314` |
+
+---
+
+## WS-A: Security Hardening & Vulnerability Mitigation
+
+### A1. CSRF Total Coverage Verification
+- **Current state:** CSRF double-submit enforced on all `/api` POST/PUT/DELETE via `server/routes.ts:120`.
+- **Gap:** WebSocket upgrade requests bypass CSRF. Verify that [wsCore.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/wsCore.ts) session validation is equivalent.
+- **Action:** `ops/security/csrf-coverage-audit.ts` — Script that enumerates all Express routes from [server/routes.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes.ts) and flags any POST/PUT/DELETE endpoints not behind `enforceCsrf`.
+
+### A2. End-to-End Encryption Audit
+- **Current state:** At-rest AES-256-GCM in [crypto.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/services/crypto.ts), E2EE envelope in `e2ee.ts`.
+- **Gap:** Export artifacts on MinIO are stored unencrypted. ClickHouse data-at-rest relies on disk-level only.
+- **Action:** `ops/security/export-encryption-audit.ts` — Verify that [objectStorage.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/services/objectStorage.ts) passes server-side encryption headers (`x-amz-server-side-encryption`) to MinIO.
+- **Headlamp Enhancement Recommendation:** Add a Headlamp plugin panel showing KES key rotation status and MinIO SSE-KMS configuration. Deploy via `ops/kubernetes/headlamp-kes-plugin.yaml`.
+
+### A3. Secure Transport Verification
+- **Current state:** TLS forced at ingress (`ssl-redirect: true`), `ENCRYPTION_KEY` validated at boot.
+- **Gap:** Internal cluster traffic (API→ClickHouse, API→MinIO, API→Valkey) is plaintext.
+- **Action:** Add to `ops/runbooks/RUNBOOK_INTERNAL_TLS.md` — Document how to enable Valkey TLS (`--tls-port`, `--tls-cert-file`), ClickHouse HTTPS interface, and MinIO `--certs-dir`. Track with `ops/alerts/internal-tls-alerts.yaml`.
+
+### A4. Attack Vector Mitigation Matrix
+Create `ops/security/THREAT_MODEL.md`:
+
+| Vector | Current Defense | Gap | Ops Enhancement |
+|---|---|---|---|
+| CSRF | Double-submit cookie | WS bypass audit needed | `csrf-coverage-audit.ts` |
+| XSS | React escaping, Helmet (if present) | Verify CSP headers | `ops/alerts/csp-violation-alert.yaml` |
+| CSV Injection | `csvEscape` in export workers | Verify `=+-@` prefix nullification | `csv-injection-fuzzer.ts` |
+| SSRF | N/A | MinIO internal endpoints reachable | NetworkPolicy already blocks external |
+| Data Exfiltration | Signed URL TTL, admin auth | Volume-based alerting missing | `SuspiciousExportVolume` alert |
+| DDoS | Ingress RPS 200, connections 100 | No per-endpoint granularity | `ops/alerts/ddos-escalation.yaml` |
+| Brute Force | Login rate limit (IP+email) | Admin panel rate limit gaps | Verify [adminDataExports.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/adminDataExports.ts) limiter |
+| Replay | Session tokens with expiry | WS message replay risk | Session trail in [sessionTrail.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/security/sessionTrail.ts) |
+
+### A5. CSV Injection Fuzzer
+- **File:** `ops/security/csv-injection-fuzzer.ts`
+- **Logic:** Insert test users with names `=cmd|'/C calc'!A0`, `+1+1`, `-1+1`, `@SUM(A1)`. Trigger export via [adminDataExportBuild.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/services/adminDataExportBuild.ts). Download artifact from MinIO. Assert no cell starts with `=`, `+`, `-`, `@` without a leading `'` escape.
+
+---
+
+## WS-B: Observability — Total System Telemetry
+
+### B1. Bare Metal & Node Health Dashboard
+- **File:** `ops/dashboards/bare-metal-health.json`
+- **Metrics:** Node Exporter `node_cpu_seconds_total`, `node_memory_MemAvailable_bytes`, `node_filesystem_avail_bytes`, `node_network_transmit_bytes_total`, `node_disk_io_time_seconds_total`.
+- **Wiring:** Requires deploying `node-exporter` DaemonSet. Add `ops/kubernetes/node-exporter.yaml` and scrape config entry to [60-monitoring.yaml](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/k8s/60-monitoring.yaml).
+
+### B2. Kubernetes Framework Health Dashboard
+- **File:** `ops/dashboards/kubernetes-health.json`
+- **Metrics:** `kube_pod_container_status_restarts_total`, `kube_pod_container_status_terminated_reason{reason="OOMKilled"}`, `kube_deployment_status_replicas_unavailable`, `kube_hpa_status_current_replicas`.
+- **Wiring:** Requires deploying `kube-state-metrics`. Add `ops/kubernetes/kube-state-metrics.yaml` and scrape config.
+
+### B3. Application RED Metrics Dashboard
+- **File:** `ops/dashboards/app-red-metrics.json`
+- **Metrics:** `http_request_duration_seconds_bucket` (already emitted by [wsCore.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/wsCore.ts)), grouped by route, status code.
+- **Panels:** Rate (req/s by route), Errors (4xx/5xx ratio), Duration (p50/p95/p99 histograms).
+- **Filter:** `/api/admin/data-exports/*`, `/api/admin/kpi-summary`, `/api/admin/trader-scouting/*`.
+
+### B4. Export & Analytics Pipeline Dashboard
+- **File:** `ops/dashboards/export-analytics-pipeline.json`
+- **Metrics from [adminDataExportMetrics.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/services/adminDataExportMetrics.ts):** `admin_data_export_queue_waiting`, `admin_data_export_jobs_completed_total`, `admin_data_export_jobs_failed_total`, `admin_data_export_bytes_written_total`, `admin_data_export_last_success_at`.
+- **Metrics from rollups:** `admin_data_rollup_refresh_last_success_at`, `admin_data_rollup_refresh_failed_total`.
+- **Metrics from ClickHouse sync:** `clickhouse_sync_last_success_at`, `clickhouse_sync_running`, `clickhouse_sync_rows_synced_total`.
+- **Panels:** Queue depth timeline, job throughput heatmap, bytes written/min, rollup freshness gauge, CH sync lag.
+
+### B5. Cache & Session Layer Dashboard
+- **File:** `ops/dashboards/cache-session-health.json`
+- **Metrics from Valkey Exporter (port 9121):** `redis_keyspace_hits_total`, `redis_keyspace_misses_total`, `redis_connected_clients`, `redis_used_memory_bytes`, `redis_evicted_keys_total`, `redis_blocked_clients`.
+- **Panels:** Cache hit rate (`hits / (hits+misses) * 100`), memory pressure gauge, eviction rate, connected clients.
+- **Alert:** `CacheHitRateDegraded` — if `rate(redis_keyspace_hits_total[5m]) / (rate(redis_keyspace_hits_total[5m]) + rate(redis_keyspace_misses_total[5m])) < 0.5` for 5m.
+
+### B6. MinIO Object Storage Dashboard
+- **File:** `ops/dashboards/minio-storage.json`
+- **Metrics from MinIO (scrape job `tradehub-minio`):** `minio_cluster_disk_free_bytes`, `minio_bucket_usage_total_bytes`, `minio_s3_requests_total`, `minio_s3_errors_total`.
+- **Panels:** Disk fill forecast, request rate by operation (PUT/GET), error rate, bucket growth over time.
+
+### B7. ClickHouse OLAP Dashboard
+- **File:** `ops/dashboards/clickhouse-olap.json`
+- **Metrics:** `ClickHouseProfileEvents_Query`, `ClickHouseMetrics_QueryThread`, `ClickHouseAsyncMetrics_DiskUsed_default`.
+- **Panels:** Active queries, merge operations, disk utilization, memory usage.
+
+---
+
+## WS-C: Alerting Rules (Consolidated)
+
+### C1. [ops/alerts/petascale-alerts.yaml](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/ops/alerts/petascale-alerts.yaml)
+All Prometheus rules in one file, organized by team:
+
+**Platform Team:**
+- `ExportQueueStarvation`: queue_waiting > 50 AND completions = 0 for 5m
+- `ExportThroughputStalled`: (already in [60-monitoring.yaml](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/k8s/60-monitoring.yaml))
+- `ExportFailuresHigh`: (already in [60-monitoring.yaml](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/k8s/60-monitoring.yaml))
+- `RollupRefreshStale`: (already in [60-monitoring.yaml](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/k8s/60-monitoring.yaml))
+
+**Data Team:**
+- `ClickHouseSyncLagCritical`: sync lag > 30m
+- `ClickHouseDiskFillForecast`: `predict_linear(free_bytes[1h], 86400) < 0`
+
+**Infrastructure Team:**
+- `MinIODiskFillForecast`: `predict_linear(minio_cluster_disk_free_bytes[1h], 86400) < 0`
+- `ValkeyMemoryPressure`: `redis_used_memory_bytes / redis_maxmemory > 0.9` for 5m
+- `CacheHitRateDegraded`: hit rate < 50% for 5m
+- `PodOOMKillSpike`: > 3 OOMKilled in 10m
+- `NodeDiskPressure`: `node_filesystem_avail_bytes / node_filesystem_size_bytes < 0.1`
+
+**Security Team:**
+- `SuspiciousExportVolume`: > 500MB/s export throughput for 5m
+- `CSRFFailureSpike`: `rate(http_responses_total{status="403",route="/api/*"}[5m]) > 10`
+- `BruteForceLoginAttempts`: `rate(login_attempts_total{result="failed"}[5m]) > 50`
+
+### C2. `ops/alerts/internal-tls-alerts.yaml`
+- `InternalTLSNotEnabled`: Advisory alert if internal endpoints are detected without TLS negotiation.
+
+---
+
+## WS-D: Headlamp Deep Integration & Enhancements
+
+### D1. Current State
+Headlamp v0.29.2 is deployed in `k8s/70-petascale-infra.yaml:410-442` with `-in-cluster` mode. Service exposed on port 4466.
+
+### D2. Enhancements for Petascale Deployment
+
+#### `ops/kubernetes/headlamp-ingress.yaml`
+- Expose Headlamp via the existing nginx ingress under `/headlamp` path, protected by admin-only IP allowlist or OAuth proxy.
+- Annotations: `nginx.ingress.kubernetes.io/auth-url` pointing to the app's admin session validation endpoint.
+
+#### `ops/kubernetes/headlamp-rbac.yaml`
+- Create a dedicated `headlamp-viewer` ClusterRole with read-only access to `tradehub` namespace resources (Pods, Services, StatefulSets, PVCs, ConfigMaps).
+- Bind to a `headlamp-sa` ServiceAccount. Headlamp pod should use this SA, not the default.
+- **Principle:** Headlamp operators can VIEW all petascale infrastructure but cannot mutate anything.
+
+#### `ops/kubernetes/headlamp-plugins.yaml`
+- ConfigMap mounting custom Headlamp plugin configurations for:
+  - **Prometheus Integration:** Link Headlamp pod views to Grafana dashboard deep links.
+  - **MinIO Bucket Viewer:** Show export artifact bucket stats inline.
+  - **ClickHouse Health Badge:** Display sync lag and query load inline.
+
+### D3. Headlamp Package Recommendations
+Based on the local `K8s_Headlamp_Web_UI/headlamp` package:
+1. **Build a custom Docker image** from the local source with the above plugins baked in, replacing the upstream `ghcr.io/headlamp-k8s/headlamp:v0.29.2`.
+2. **Add topic-specific resource filters** so Headlamp's default view shows only the `tradehub` namespace resources (ClickHouse StatefulSet, MinIO StatefulSet, Valkey pod, KES deployment, Worker pods, API pods).
+3. **Enable Headlamp's OIDC plugin** for SSO integration with the app's authentication layer, preventing separate credential sprawl.
+
+---
+
+## WS-E: Chaos Engineering & Pre-Flight Validation
+
+### E1. `ops/chaos/billion-row-synthetic.ts`
+- Generate 1,000,000 synthetic trade rows with realistic schema matching [shared/schema.pg.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/shared/schema.pg.ts) `trades` table.
+- Bulk insert into ClickHouse via [clickhouseClient.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/services/clickhouseClient.ts) connection.
+- Query `kpi-summary` equivalent aggregation and assert < 1s response.
+
+### E2. `ops/chaos/valkey-eviction-stress.js`
+- Flood Valkey with 500MB of generic keys.
+- Verify `redis_evicted_keys_total` increments and BullMQ queues remain functional.
+- Assert no export jobs are lost during eviction pressure.
+
+### E3. `ops/chaos/queue-crash-recovery.sh`
+- Enqueue 1,000 export jobs via API.
+- `kubectl delete pod -l role=worker --force` mid-processing.
+- Wait for pod recreation.
+- Assert all jobs eventually complete (no orphans).
+
+### E4. `ops/chaos/pgbouncer-connection-storm.js`
+- Open 10,000 concurrent TCP connections to PgBouncer.
+- Assert PgBouncer rejects gracefully (no Postgres crash, no OOM).
+
+### E5. `ops/chaos/tls-downgrade-test.sh`
+- Attempt to connect to the ingress on port 80 (HTTP).
+- Assert 301/308 redirect to HTTPS.
+- Attempt TLS 1.0/1.1 connection. Assert rejection.
+
+---
+
+## WS-F: Incident Response Runbooks
+
+### F1. `ops/runbooks/RUNBOOK_EXPORT_PIPELINE_STALL.md`
+- Trigger: `ExportQueueStarvation` or `ExportThroughputStalled`
+- Steps: Check worker pod status via Headlamp → `kubectl logs -n tradehub -l role=worker --tail=100` → Check Valkey connectivity → Check MinIO bucket write permissions → Manually advance stalled jobs via [adminDataExportQueue.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/services/adminDataExportQueue.ts) recovery functions.
+
+### F2. `ops/runbooks/RUNBOOK_ANALYTICS_STALENESS.md`
+- Trigger: `RollupRefreshStale` or `ClickHouseSyncLagCritical`
+- Steps: Check [clickhouseSync.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/services/clickhouseSync.ts) high-watermark state → Verify Postgres→CH network path → Manual sync trigger → Full rollup rebuild command.
+
+### F3. `ops/runbooks/RUNBOOK_DDOS_DOS_RESPONSE.md`
+- Trigger: Ingress RPS spike, `BruteForceLoginAttempts`
+- Steps: Check OVH Anti-DDoS dashboard → Tighten [30-ingress.yaml](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/k8s/30-ingress.yaml) `limit-rps` → IP blocklist via ConfigMap → Escalate to OVH support if volumetric.
+
+### F4. `ops/runbooks/RUNBOOK_DATA_EXFILTRATION.md`
+- Trigger: `SuspiciousExportVolume`
+- Steps: Identify admin account from export job audit trail → Freeze account via [adminScopeSession.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/security/adminScopeSession.ts) → Invalidate all active Pre-Signed URLs (MinIO bucket policy update) → Preserve forensic logs.
+
+### F5. `ops/runbooks/RUNBOOK_CACHE_COLLAPSE.md`
+- Trigger: `ValkeyMemoryPressure` or `CacheHitRateDegraded`
+- Steps: Check `redis_used_memory_bytes` → Flush non-critical keys → Verify `maxmemory-policy` is `allkeys-lru` → Scale Valkey memory limit in [k8s/05-valkey.yaml](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/k8s/05-valkey.yaml).
+
+### F6. `ops/runbooks/RUNBOOK_INTERNAL_TLS.md`
+- Reference document for enabling TLS on internal services (Valkey, ClickHouse, MinIO) when moving from dev to production topology.
+
+---
+
+## WS-G: Package Redundancy & Integration Matrix
+
+| Package | Role | Integration Point | Redundancy Check |
+|---|---|---|---|
+| BullMQ | Job queue | [server/services/adminDataExportQueue.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/services/adminDataExportQueue.ts) | Only queue system; no redundancy |
+| Valkey | Queue transport + cache | [server/services/valkey.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/services/valkey.ts) | Exporters wired; no redundancy |
+| ClickHouse | OLAP | [server/services/clickhouseClient.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/services/clickhouseClient.ts) | Only OLAP engine; no redundancy |
+| MinIO | Object storage | [server/services/objectStorage.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/services/objectStorage.ts) | Only object store; no redundancy |
+| KES | Encryption keys for MinIO | `k8s/70-petascale-infra.yaml:175` | MinIO SSE-KMS dependency |
+| Prometheus | Metrics collection | [k8s/60-monitoring.yaml](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/k8s/60-monitoring.yaml) | Only metrics backend |
+| Grafana | Dashboards | `petascale/grafana/` | Only dashboard UI |
+| Headlamp | K8s resource viewer | `k8s/70-petascale-infra.yaml:410` | Only cluster UI |
+| Node Exporter | Bare metal metrics | **NEW** `ops/kubernetes/node-exporter.yaml` | Required for WS-B1 |
+| Kube-State-Metrics | K8s object metrics | **NEW** `ops/kubernetes/kube-state-metrics.yaml` | Required for WS-B2 |
+| Valkey Exporter | Cache metrics | `k8s/70-petascale-infra.yaml:278` | Already deployed |
+| Pigsty | Postgres deep monitoring | `k8s/70-petascale-infra.yaml:367` | Placeholder only; defer |
+| infra-pkg | Packaging utility | `k8s/70-petascale-infra.yaml:387` | Placeholder only; reject |
+| bull-board | Queue admin UI | Not deployed | Optional; route behind `requireAdmin` |
+
+---
+
+## WS-H: Future Upgradeability & Maintainability
+
+1. **Modular `ops/` boundary** ensures all observability/chaos/security assets can be upgraded independently of the app release cycle.
+2. **Grafana dashboard JSONs** are version-controlled, enabling rollback and PR-based review of monitoring changes.
+3. **Prometheus alert rules** in `ops/alerts/` can be hot-reloaded without app restart.
+4. **Headlamp custom image** can be rebuilt from local source when Headlamp upstream releases new features.
+5. **Chaos scripts** serve as regression tests during infrastructure upgrades (K8s version bump, ClickHouse upgrade, MinIO update).
+6. **Capacitor/Native future:** The `ops/` boundary is webapp-infra specific. When Capacitor native builds are introduced, a parallel `ops-mobile/` or `ops-native/` directory should be created for mobile-specific telemetry.
+
+---
+
+## Execution Summary (Agent Directive)
+
+**Total new files to create:** ~25  
+**Files in `ops/dashboards/`:** 7 Grafana JSON models  
+**Files in `ops/alerts/`:** 2 Prometheus YAML rule files  
+**Files in `ops/chaos/`:** 5 scripts (TS/JS/Bash)  
+**Files in `ops/runbooks/`:** 6 incident playbooks  
+**Files in `ops/security/`:** 3 scripts + 1 threat model  
+**Files in `ops/kubernetes/`:** 4 manifests (Node Exporter, KSM, Headlamp RBAC/Ingress)  
+**Core app edits:** ZERO

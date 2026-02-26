@@ -6,6 +6,7 @@ import {
   CSRF_TOKEN_COOKIE_NAME,
   isCsrfSafeMethod,
 } from "@shared/security/csrf";
+import { incHttpResponses403CsrfTotal } from "../routes/metricsState";
 
 const CSRF_SESSION_KEY = "csrfToken";
 const CSRF_TOKEN_MIN_LEN = 32;
@@ -130,6 +131,7 @@ function isSessionScopedRequest(req: Request, sessionCookieName: string): boolea
 }
 
 function csrfFailure(res: Response, reason: "MISSING" | "MISMATCH") {
+  incHttpResponses403CsrfTotal();
   return res.status(403).json({
     message: "CSRF_TOKEN_INVALID",
     code: "CSRF_TOKEN_INVALID",

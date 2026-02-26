@@ -4,6 +4,8 @@ import session from "express-session";
 import http from "node:http";
 import { afterAll, beforeAll, expect, test, vi } from "vitest";
 
+const HOOK_TIMEOUT_MS = 30_000;
+
 vi.mock("@db", () => {
   return {
     db: {
@@ -162,7 +164,7 @@ vi.mock("../../services/rememberMe", () => {
   };
 });
 
-let server: http.Server;
+let server: http.Server | undefined;
 let baseUrl: string;
 
 beforeAll(async () => {
@@ -197,16 +199,17 @@ beforeAll(async () => {
   const addr = server.address();
   if (!addr || typeof addr === "string") throw new Error("Failed to bind test server");
   baseUrl = `http://127.0.0.1:${addr.port}`;
-});
+}, HOOK_TIMEOUT_MS);
 
 afterAll(async () => {
+  if (!server) return;
   await new Promise<void>((resolve, reject) => {
     server.close((err) => {
       if (err) return reject(err);
       resolve();
     });
   });
-});
+}, HOOK_TIMEOUT_MS);
 
 test("login emits connect.sid first and session is immediately usable", async () => {
   const loginRes = await fetch(`${baseUrl}/api/auth/login`, {

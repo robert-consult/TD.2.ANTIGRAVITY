@@ -11,8 +11,10 @@ import {
   IDENTITY_HEADER_DEVICE_INSTALL_ID,
 } from "@shared/identity/headers";
 import { BOT_CHALLENGE_REQUIRED_CODE } from "@shared/security/botChallenge";
+import { incBotChallengesIssuedTotal } from "../routes/metricsState";
 
 type BotConfig = {
+
   botScoreThreshold: number; // default 40
   powEnabled: boolean;
   powEnforceSignup: boolean;
@@ -334,6 +336,8 @@ export async function botGuard(
       cfg.powMaxDifficulty
     );
     const ch = await issueBotChallenge(req, difficulty, cfg.powTtlSec, { valkeyEnabled: cfg.valkeyEnabled });
+
+    incBotChallengesIssuedTotal();
 
     res.status(428).json({
       code: BOT_CHALLENGE_REQUIRED_CODE,

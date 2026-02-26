@@ -1,52 +1,109 @@
 groups:
-  - name: petascale_infrastructure_alerts
+  # ── Platform Team ──────────────────────────────────────────────
+  - name: platform
     rules:
-      - alert: ExportQueueLagTooHigh
-        expr: bullmq_queue_waiting{queue="admin-export-v1"} > 50 AND delta(bullmq_queue_completed{queue="admin-export-v1"}[5m]) == 0
+      - alert: ExportQueueStarvation
+        expr: admin_data_export_queue_waiting > 50 and (increase(admin_data_export_jobs_succeeded_total[5m]) + increase(admin_data_export_jobs_failed_total[5m]) + increase(admin_data_export_jobs_canceled_total[5m]) + increase(admin_data_export_jobs_expired_total[5m]) == 0)
         for: 5m
-        labels:
-          severity: critical
-          team: platform
+        labels: { severity: critical, team: platform }
         annotations:
-          summary: "Admin Export Queue is starving."
-          description: "Queue depth is over 50 jobs with absolutely 0 completions in the last 5 minutes. The worker nodes might be dead or deadlocked doing a heavy ClickHouse scan. Reference RUNBOOK_EXPORT_PIPELINE_INCIDENT.md."
-
-      - alert: ClickHouseSyncLagCritical
-        expr: (sum(pg_stat_user_tables_total_rows) - sum(clickhouse_table_total_rows)) > 100000
-        for: 1m
-        labels:
-          severity: critical
-          team: data
-        annotations:
-          summary: "ClickHouse OLAP replication lagging."
-          description: "The incremental high-watermark sync worker is failing to keep up with Postgres OLTP inserts. Lag exceeds 100,000 rows. Dashboard staleness imminent. Reference RUNBOOK_ANALYTICS_STALENESS.md."
-
-      - alert: MinIODiskFillForecast
-        expr: predict_linear(minio_cluster_disk_free_bytes[1h], 24 * 3600) < 0
-        for: 1h
-        labels:
-          severity: warning
-          team: infra
-        annotations:
-          summary: "MinIO Bare Metal Disks approaching exhaustion."
-          description: "At the current export artifact write rate, the targeted OVH Bare Metal NVMe arrays will run completely out of storage in less than 24 hours. Clear orphaned exports."
+          summary: Export queue is starving.
+          runbook: ops/runbooks/RUNBOOK_EXPORT_PIPELINE_STALL.md
 
       - alert: RouteLatencyBreach
         expr: histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{route=~"/api/admin/.*"}[5m])) by (le)) > 0.5
         for: 2m
-        labels:
-          severity: warning
-          team: api
+        labels: { severity: warning, team: platform }
         annotations:
-          summary: "Admin DataTab 99th percentile latency > 500ms."
-          description: "A fast Rollup operation or Async handler is degraded. Something is blocking the Node.js event pool, violating the heavy-work separation invariant."
+          summary: Admin DataTab p99 latency > 500ms.
 
+  # ── Data Team ──────────────────────────────────────────────────
+  - name: data
+    rules:
+      - alert: ClickHouseSyncStale
+        expr: (time() - clickhouse_sync_last_success_at) > 1800 and clickhouse_sync_running == 0
+        for: 10m
+        labels: { severity: warning, team: data }
+        annotations:
+          summary: ClickHouse sync stale (>30m).
+          runbook: ops/runbooks/RUNBOOK_ANALYTICS_STALENESS.md
+
+      - alert: RollupRefreshStale
+        expr: (time() - admin_data_rollup_refresh_last_success_at) > 3600
+        for: 10m
+        labels: { severity: warning, team: data }
+        annotations:
+          summary: Rollup refresh stale (>1h).
+
+      - alert: ClickHouseDiskFillForecast
+        expr: predict_linear(ClickHouseAsyncMetrics_DiskUsed_default[6h], 86400) > ClickHouseAsyncMetrics_DiskTotal_default
+        for: 1h
+        labels: { severity: warning, team: data }
+        annotations:
+          summary: "ClickHouse disk forecast to fill within 24h."
+
+  # ── Infrastructure Team ────────────────────────────────────────
+  - name: infrastructure
+    rules:
+      - alert: MinIODiskFillForecast
+        expr: predict_linear(minio_cluster_disk_free_bytes[1h], 86400) < 0
+        for: 1h
+        labels: { severity: warning, team: infra }
+        annotations:
+          summary: MinIO disks forecast to fill within 24h.
+
+      - alert: ValkeyMemoryPressure
+        expr: redis_used_memory_bytes / redis_maxmemory > 0.9
+        for: 5m
+        labels: { severity: warning, team: infra }
+        annotations:
+          summary: Valkey memory at >90% capacity.
+          runbook: ops/runbooks/RUNBOOK_CACHE_COLLAPSE.md
+
+      - alert: CacheHitRateDegraded
+        expr: rate(redis_keyspace_hits_total[5m]) / (rate(redis_keyspace_hits_total[5m]) + rate(redis_keyspace_misses_total[5m])) < 0.5
+        for: 5m
+        labels: { severity: warning, team: infra }
+        annotations:
+          summary: Valkey cache hit rate < 50%.
+
+      - alert: PodOOMKillSpike
+        expr: increase(kube_pod_container_status_terminated_reason{reason="OOMKilled", namespace="tradehub"}[10m]) > 3
+        for: 1m
+        labels: { severity: critical, team: infra }
+        annotations:
+          summary: ">3 OOMKilled in tradehub namespace in 10m."
+
+      - alert: NodeDiskPressure
+        expr: node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"} < 0.1
+        for: 5m
+        labels: { severity: critical, team: infra }
+        annotations:
+          summary: "Root filesystem < 10% free on bare metal node."
+
+  # ── Security Team ──────────────────────────────────────────────
+  - name: security
+    rules:
       - alert: SuspiciousExportVolume
         expr: rate(admin_data_export_bytes_written_total[10m]) > 524288000
         for: 5m
-        labels:
-          severity: critical
-          team: security
+        labels: { severity: critical, team: security }
         annotations:
-          summary: "Potential Data Exfiltration Event."
-          description: "Over 500MB of CSV/JSONL data is actively streaming out per second. This triggers the anomaly threshold. A compromised admin account may be downloading the entire user database. Reference RUNBOOK_DATA_EXFIL_ALERT.md."
+          summary: Potential data exfiltration (>500MB/s export rate).
+          runbook: ops/runbooks/RUNBOOK_DATA_EXFILTRATION.md
+
+      - alert: BruteForceLoginAttempts
+        expr: rate(login_attempts_total{result="failed"}[5m]) > 50
+        for: 2m
+        labels: { severity: critical, team: security }
+        annotations:
+          summary: ">50 failed logins/s — possible brute force."
+          runbook: ops/runbooks/RUNBOOK_DDOS_DOS_RESPONSE.md
+
+      - alert: CSRFFailureSpike
+        expr: rate(http_responses_total{status="403",route="/api",reason="csrf"}[5m]) > 10
+        for: 2m
+        labels: { severity: warning, team: security }
+        annotations:
+          summary: "CSRF 403 failures >10/s — possible attack or misconfigured client."
+

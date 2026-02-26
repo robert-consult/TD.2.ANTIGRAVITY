@@ -1,0 +1,32 @@
+# Headlamp Ingress — Admin-Only Access via Nginx
+# Exposes Headlamp under /headlamp path, protected by IP allowlist.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: tradehub-headlamp-ingress
+  namespace: tradehub
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    # Restrict to admin IPs only (update with actual admin CIDR)
+    nginx.ingress.kubernetes.io/whitelist-source-range: "10.0.0.0/8,172.16.0.0/12"
+    nginx.ingress.kubernetes.io/limit-rps: "30"
+    nginx.ingress.kubernetes.io/limit-connections: "10"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - tradehub.example.com
+      secretName: tradehub-tls
+  rules:
+    - host: tradehub.example.com
+      http:
+        paths:
+          - path: /headlamp(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: tradehub-headlamp
+                port:
+                  number: 4466

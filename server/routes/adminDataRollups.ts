@@ -1,5 +1,7 @@
 import { Router } from "express";
 import { requireAdmin } from "../middleware/requireAdmin";
+import { AdminDaysQuerySchema } from "@shared/admin/dataTab";
+import { observeHttpRequestDuration } from "./metricsState";
 import {
   getOrRefreshAdminDataRollup,
   type AdminDataRollupMetricKey,
@@ -7,12 +9,6 @@ import {
 
 export const adminDataRollupsRouter = Router();
 adminDataRollupsRouter.use(requireAdmin);
-
-function parseDays(value: unknown, fallback: number): number {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) return fallback;
-  return Math.max(0, Math.min(365, Math.trunc(parsed)));
-}
 
 function parseMaxAgeSec(): number {
   const parsed = Number(process.env.ADMIN_DATA_ROLLUP_MAX_AGE_SEC ?? 300);
@@ -38,8 +34,9 @@ function writeRollupHeaders(
 }
 
 adminDataRollupsRouter.get("/kpi-summary", async (req, res) => {
+  const startedAt = process.hrtime.bigint();
   try {
-    const windowDays = parseDays(req.query.days, 30);
+    const { days: windowDays } = AdminDaysQuerySchema.parse(req.query);
     const result = await getOrRefreshAdminDataRollup<any>({
       metricKey: "kpi_summary",
       windowDays,
@@ -56,12 +53,18 @@ adminDataRollupsRouter.get("/kpi-summary", async (req, res) => {
   } catch (error) {
     console.error("Get KPI summary rollup error:", error);
     return res.status(500).json({ message: "Failed to fetch KPI summary" });
+  } finally {
+    observeHttpRequestDuration(
+      "/api/admin/kpi-summary",
+      Number(process.hrtime.bigint() - startedAt) / 1e9,
+    );
   }
 });
 
 adminDataRollupsRouter.get("/signup-funnel", async (req, res) => {
+  const startedAt = process.hrtime.bigint();
   try {
-    const windowDays = parseDays(req.query.days, 30);
+    const { days: windowDays } = AdminDaysQuerySchema.parse(req.query);
     const result = await getOrRefreshAdminDataRollup<any>({
       metricKey: "signup_funnel",
       windowDays,
@@ -78,12 +81,18 @@ adminDataRollupsRouter.get("/signup-funnel", async (req, res) => {
   } catch (error) {
     console.error("Get signup funnel rollup error:", error);
     return res.status(500).json({ message: "Failed to fetch signup funnel" });
+  } finally {
+    observeHttpRequestDuration(
+      "/api/admin/signup-funnel",
+      Number(process.hrtime.bigint() - startedAt) / 1e9,
+    );
   }
 });
 
 adminDataRollupsRouter.get("/user-analytics", async (req, res) => {
+  const startedAt = process.hrtime.bigint();
   try {
-    const windowDays = parseDays(req.query.days, 30);
+    const { days: windowDays } = AdminDaysQuerySchema.parse(req.query);
     const result = await getOrRefreshAdminDataRollup<any>({
       metricKey: "user_analytics",
       windowDays,
@@ -100,10 +109,16 @@ adminDataRollupsRouter.get("/user-analytics", async (req, res) => {
   } catch (error) {
     console.error("Get user analytics rollup error:", error);
     return res.status(500).json({ message: "Failed to fetch user analytics" });
+  } finally {
+    observeHttpRequestDuration(
+      "/api/admin/user-analytics",
+      Number(process.hrtime.bigint() - startedAt) / 1e9,
+    );
   }
 });
 
 adminDataRollupsRouter.get("/analytics/compliance", async (_req, res) => {
+  const startedAt = process.hrtime.bigint();
   try {
     const result = await getOrRefreshAdminDataRollup<any>({
       metricKey: "compliance",
@@ -121,12 +136,18 @@ adminDataRollupsRouter.get("/analytics/compliance", async (_req, res) => {
   } catch (error) {
     console.error("Get compliance rollup error:", error);
     return res.status(500).json({ message: "Failed to fetch compliance metrics" });
+  } finally {
+    observeHttpRequestDuration(
+      "/api/admin/analytics/compliance",
+      Number(process.hrtime.bigint() - startedAt) / 1e9,
+    );
   }
 });
 
 adminDataRollupsRouter.get("/deactivated-accounts/summary", async (req, res) => {
+  const startedAt = process.hrtime.bigint();
   try {
-    const windowDays = parseDays(req.query.days, 30);
+    const { days: windowDays } = AdminDaysQuerySchema.parse(req.query);
     const result = await getOrRefreshAdminDataRollup<any>({
       metricKey: "deactivated_summary",
       windowDays,
@@ -143,5 +164,10 @@ adminDataRollupsRouter.get("/deactivated-accounts/summary", async (req, res) => 
   } catch (error) {
     console.error("Get deactivated summary rollup error:", error);
     return res.status(500).json({ message: "Failed to load deactivated account summary" });
+  } finally {
+    observeHttpRequestDuration(
+      "/api/admin/deactivated-accounts/summary",
+      Number(process.hrtime.bigint() - startedAt) / 1e9,
+    );
   }
 });

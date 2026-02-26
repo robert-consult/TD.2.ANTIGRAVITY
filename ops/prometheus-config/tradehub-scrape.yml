@@ -1,0 +1,101 @@
+# TradeHub Petascale — Prometheus Scrape Configuration
+#
+# Production-ready scrape config for all TradeHub services.
+# Scrapes the /metrics endpoint in Prometheus text format.
+#
+# Mount at: /etc/prometheus/prometheus.yml (or append to existing)
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ['alertmanager:9093']
+
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
+scrape_configs:
+  # ── TradeHub App Server (60+ real metrics) ───────────────────────────────
+  # Emits: ws_active_connections, quotehub_size/seq/asof,
+  #        marketdata_provider_ratelimit_*, trade_*_rejected_*,
+  #        ws_origin/connection/rate_limited, login_attempts_total,
+  #        http_responses_total, bot_challenges_issued_total,
+  #        admin_active_sessions, mailbox_fanout_*, admin_data_export_*,
+  #        admin_data_rollup_*, clickhouse_sync_*
+  - job_name: 'tradehub-app'
+    metrics_path: /metrics
+    scrape_interval: 15s
+    static_configs:
+      - targets: ['tradehub-app:3000']
+        labels:
+          service: tradehub
+          component: app-server
+
+  # ── PostgreSQL (via postgres_exporter) ───────────────────────────────────
+  - job_name: 'tradehub-postgres'
+    scrape_interval: 30s
+    static_configs:
+      - targets: ['postgres-exporter:9187']
+        labels:
+          service: tradehub
+          component: postgres
+
+  # ── MinIO (built-in Prometheus metrics) ──────────────────────────────────
+  - job_name: 'tradehub-minio'
+    metrics_path: /minio/v2/metrics/cluster
+    scrape_interval: 30s
+    static_configs:
+      - targets: ['minio:9000']
+        labels:
+          service: tradehub
+          component: minio
+
+  # ── MinIO Node Metrics ───────────────────────────────────────────────────
+  - job_name: 'tradehub-minio-node'
+    metrics_path: /minio/v2/metrics/node
+    scrape_interval: 30s
+    static_configs:
+      - targets: ['minio:9000']
+        labels:
+          service: tradehub
+          component: minio-node
+
+  # ── ClickHouse (built-in Prometheus metrics) ─────────────────────────────
+  - job_name: 'tradehub-clickhouse'
+    metrics_path: /metrics
+    scrape_interval: 30s
+    static_configs:
+      - targets: ['clickhouse:9363']
+        labels:
+          service: tradehub
+          component: clickhouse
+
+  # ── Valkey / Redis (via redis_exporter) ──────────────────────────────────
+  - job_name: 'tradehub-valkey'
+    scrape_interval: 15s
+    static_configs:
+      - targets: ['redis-exporter:9121']
+        labels:
+          service: tradehub
+          component: valkey
+
+  # ── Node Exporter (host-level metrics) ───────────────────────────────────
+  - job_name: 'tradehub-node'
+    scrape_interval: 30s
+    static_configs:
+      - targets: ['node-exporter:9100']
+        labels:
+          service: tradehub
+          component: node
+
+  # ── Grafana self-monitoring ──────────────────────────────────────────────
+  - job_name: 'tradehub-grafana'
+    scrape_interval: 60s
+    static_configs:
+      - targets: ['tradehub-grafana:3000']
+        labels:
+          service: tradehub
+          component: grafana

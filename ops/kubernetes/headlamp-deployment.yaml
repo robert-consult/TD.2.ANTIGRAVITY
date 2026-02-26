@@ -1,0 +1,123 @@
+# TradeHub Headlamp — Zero-Build Deployment
+#
+# Uses the upstream Headlamp image (already cached on your nodes) with the
+# tradehub-ops plugin mounted as a ConfigMap volume. NO Docker build needed,
+# NO external registry access needed, NO paid accounts.
+#
+# Deploy:
+#   kubectl apply -f ops/kubernetes/headlamp-rbac.yaml
+#   kubectl create configmap tradehub-ops-plugin \
+#     --from-file=main.js=ops/headlamp-plugin/dist/main.js \
+#     -n tradehub --dry-run=client -o yaml | kubectl apply -f -
+#   kubectl apply -f ops/kubernetes/headlamp-deployment.yaml
+#   kubectl apply -f ops/kubernetes/headlamp-ingress.yaml
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tradehub-headlamp
+  namespace: tradehub
+  labels:
+    app: headlamp
+    component: ops-dashboard
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: headlamp
+  template:
+    metadata:
+      labels:
+        app: headlamp
+        component: ops-dashboard
+    spec:
+      serviceAccountName: headlamp-viewer
+      automountServiceAccountToken: true
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: headlamp
+          # Use upstream image — no custom build needed
+          image: ghcr.io/headlamp-k8s/headlamp:v0.29.2
+          imagePullPolicy: IfNotPresent
+          args:
+            - -in-cluster
+            - -plugins-dir=/headlamp/plugins
+          ports:
+            - containerPort: 4466
+              name: http
+              protocol: TCP
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 4466
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 4466
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          volumeMounts:
+            # Mount pre-compiled plugin JS from ConfigMap
+            - name: tradehub-ops-plugin
+              mountPath: /headlamp/plugins/tradehub-ops/main.js
+              subPath: main.js
+              readOnly: true
+            # Mount cluster config from existing ConfigMap
+            - name: plugins-config
+              mountPath: /headlamp/plugins/config.json
+              subPath: config.json
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+            - name: headlamp-config
+              mountPath: /headlamp/.config
+      volumes:
+        # Pre-compiled TradeHub Ops plugin (from ops/headlamp-plugin/dist/main.js)
+        - name: tradehub-ops-plugin
+          configMap:
+            name: tradehub-ops-plugin
+        # Existing Headlamp config (cluster, prometheus, grafana links)
+        - name: plugins-config
+          configMap:
+            name: headlamp-plugins-config
+        - name: tmp
+          emptyDir: {}
+        - name: headlamp-config
+          emptyDir: {}
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tradehub-headlamp
+  namespace: tradehub
+  labels:
+    app: headlamp
+spec:
+  selector:
+    app: headlamp
+  ports:
+    - port: 4466
+      targetPort: 4466
+      protocol: TCP
+      name: http

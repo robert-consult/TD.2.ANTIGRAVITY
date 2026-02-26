@@ -62,6 +62,7 @@ import { maybeRecalcAccountForCurrentUser } from "../../services/currentUserReca
 import { applyAdminScopeSession } from "../../security/adminScopeSession";
 import crypto from "crypto";
 import type { AuthRouterDeps } from "./types";
+import { incLoginAttemptsFailedTotal, incLoginAttemptsSuccessTotal } from "../metricsState";
 
 export function registerLoginRoute(router: Router, deps: AuthRouterDeps) {
   const { sessionCookieName } = deps;
@@ -92,6 +93,7 @@ router.post("/api/auth/login", async (req: Request, res: Response) => {
         success: false,
         failureReason: `RATE_LIMITED_${rateDecision.scope}`,
       });
+      incLoginAttemptsFailedTotal();
       res.setHeader("Retry-After", String(rateDecision.retryAfterSec));
       return res.status(429).json({
         message: "Too many login attempts. Please try again later.",
@@ -115,6 +117,7 @@ router.post("/api/auth/login", async (req: Request, res: Response) => {
         success: false,
         failureReason: "Invalid credentials",
       });
+      incLoginAttemptsFailedTotal();
       return res.status(401).json({ message: "Invalid credentials" });
     }
 
@@ -129,6 +132,7 @@ router.post("/api/auth/login", async (req: Request, res: Response) => {
         success: false,
         failureReason: "Account deleted",
       });
+      incLoginAttemptsFailedTotal();
       return res.status(403).json(unavailableAccountResponse);
     }
 
@@ -143,6 +147,7 @@ router.post("/api/auth/login", async (req: Request, res: Response) => {
         success: false,
         failureReason: "Account disabled",
       });
+      incLoginAttemptsFailedTotal();
       return res.status(403).json(unavailableAccountResponse);
     }
 
@@ -157,6 +162,7 @@ router.post("/api/auth/login", async (req: Request, res: Response) => {
         success: false,
         failureReason: "Account frozen",
       });
+      incLoginAttemptsFailedTotal();
       return res.status(403).json(unavailableAccountResponse);
     }
 
@@ -190,6 +196,7 @@ router.post("/api/auth/login", async (req: Request, res: Response) => {
           success: false,
           failureReason: loginJ.reasonCode,
         });
+        incLoginAttemptsFailedTotal();
 
         return res.status(loginJ.httpStatus).json({
           message: loginJ.message,
@@ -317,6 +324,7 @@ router.post("/api/auth/login", async (req: Request, res: Response) => {
       geo: geoContext,
       eventType: "LOGIN_SUCCESS",
     });
+    incLoginAttemptsSuccessTotal();
 
     try {
       await clearLoginRateLimit({ ip, email });

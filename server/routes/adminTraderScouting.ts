@@ -4,6 +4,12 @@ import { dbClient } from "../../db";
 import { requireAdmin } from "../middleware/requireAdmin";
 import { onLiveEvent } from "../services/liveBus";
 import { TRADER_SEARCH_CATEGORIES } from "@shared/admin/traderSearch";
+import {
+  PositiveIntParamSchema,
+  TraderScoutAssetClassesQuerySchema,
+  TraderScoutSearchQuerySchema,
+  TraderScoutTradeExtremesQuerySchema,
+} from "@shared/admin/dataTab";
 import { canonicalizeInstrumentCategory, normalizeInstrumentCategory } from "@shared/instruments/categories";
 import {
   TRADE_NET_PROFIT_SQL,
@@ -14,42 +20,7 @@ import { buildAuditContext } from "../lib/auditContext";
 import { sha256 } from "../legal/cryptoUtils";
 import { appendAuditEntry } from "../grift/griftAdminAudit";
 import { getGriftDb } from "../grift/griftDb";
-
-function parseDaysParam(value: unknown, fallback: number): number {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) return fallback;
-  return Math.max(0, Math.min(365, Math.trunc(parsed)));
-}
-
-function readQuery(value: unknown): string | undefined {
-  if (typeof value === "string") return value;
-  if (Array.isArray(value)) return typeof value[0] === "string" ? value[0] : undefined;
-  return undefined;
-}
-
-function getParam(value: string | string[]): string {
-  return Array.isArray(value) ? value[0] : value;
-}
-
-function clampInt(raw: unknown, fallback: number, min: number, max: number): number {
-  const parsed = Number(readQuery(raw));
-  if (!Number.isFinite(parsed)) return fallback;
-  return Math.max(min, Math.min(max, Math.trunc(parsed)));
-}
-
-function clampFloat(raw: unknown): number | null {
-  const parsed = Number(readQuery(raw));
-  if (!Number.isFinite(parsed)) return null;
-  return parsed;
-}
-
-function normalizePct01(raw: unknown): number | null {
-  const parsed = clampFloat(raw);
-  if (parsed === null) return null;
-  const value = parsed > 1 ? parsed / 100 : parsed;
-  if (!Number.isFinite(value)) return null;
-  return Math.max(0, Math.min(1, value));
-}
+import { observeHttpRequestDuration } from "./metricsState";
 
 const TRADER_SCOUT_CATEGORY_CACHE_TTL_MS = 60_000;
 let traderScoutCategoryLiveBusSubscribed = false;
@@ -193,33 +164,52 @@ export const adminTraderScoutingRouter = Router();
 adminTraderScoutingRouter.use(requireAdmin);
 
 adminTraderScoutingRouter.get("/trader-scouting/categories", async (_req, res) => {
+  const startedAt = process.hrtime.bigint();
   try {
     const allowed = await loadTraderScoutAllowedCategories();
     return res.json({ ok: true, categories: allowed.categories });
   } catch (error) {
     console.error("Trader scouting categories list error:", error);
     return res.status(500).json({ message: "Internal server error" });
+  } finally {
+    observeHttpRequestDuration(
+      "/api/admin/trader-scouting/categories",
+      Number(process.hrtime.bigint() - startedAt) / 1e9,
+    );
   }
 });
 
 adminTraderScoutingRouter.get("/trader-scouting/search", async (req: Request, res) => {
+  const startedAt = process.hrtime.bigint();
   try {
-    const days = parseDaysParam(readQuery(req.query.days), 30);
+    const parsedResult = TraderScoutSearchQuerySchema.safeParse({
+      ...req.query,
+      categories: req.query.categories ?? req.query.assetClasses,
+      minWinRate: req.query.minWinRate ?? req.query.minWinRatePct,
+      maxDrawdown: req.query.maxDrawdown ?? req.query.maxDrawdownPct,
+      minNetProfit: req.query.minNetProfit ?? req.query.minProfit,
+      minSlUsage: req.query.minSlUsage ?? req.query.minSlUsagePct,
+      minTpUsage: req.query.minTpUsage ?? req.query.minTpUsagePct,
+    });
+    if (!parsedResult.success) {
+      return res.status(400).json({
+        message: "Invalid query parameters",
+        issues: parsedResult.error.issues,
+      });
+    }
+
+    const parsed = parsedResult.data;
+
+    const days = parsed.days;
     const nowSec = Math.floor(Date.now() / 1000);
     const cutoffSec = days > 0 ? nowSec - days * 86400 : 0;
 
-    const qRaw = (readQuery(req.query.q) || "").trim();
-    const q = qRaw.length ? `%${qRaw.slice(0, 200)}%` : null;
-
-    const categoriesRaw = (readQuery(req.query.categories) || readQuery(req.query.assetClasses) || "").trim();
-    const categoriesList = categoriesRaw
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
+    const qRaw = (parsed.q ?? "").trim();
+    const q = qRaw ? `%${qRaw}%` : null;
 
     const allowed = await loadTraderScoutAllowedCategories();
     const categories: string[] = [];
-    for (const rawCategory of categoriesList) {
+    for (const rawCategory of parsed.categories ?? []) {
       const normalized = normalizeTraderScoutCategory(rawCategory);
       if (!normalized) {
         return res.status(400).json({ message: `Invalid category: ${rawCategory}`, allowed: allowed.categories });
@@ -233,20 +223,18 @@ adminTraderScoutingRouter.get("/trader-scouting/search", async (req: Request, re
       }
     }
 
-    const minTrades = clampInt(req.query.minTrades, 0, 0, 200_000);
-    const minWinRate = normalizePct01(readQuery(req.query.minWinRate) ?? readQuery(req.query.minWinRatePct));
-    const maxDrawdown = normalizePct01(readQuery(req.query.maxDrawdown) ?? readQuery(req.query.maxDrawdownPct));
-    const maxBestDayPct = normalizePct01(readQuery(req.query.maxBestDayPct));
-    const minNetProfitRaw = clampFloat(readQuery(req.query.minNetProfit) ?? readQuery(req.query.minProfit));
-    const minNetProfit = minNetProfitRaw === null ? null : minNetProfitRaw;
-    const minHoldSec = clampFloat(readQuery(req.query.minHoldSec));
-    const maxHoldSec = clampFloat(readQuery(req.query.maxHoldSec));
-    const minProfitFactorRaw = clampFloat(readQuery(req.query.minProfitFactor));
-    const minProfitFactor = minProfitFactorRaw === null ? null : Math.max(0, minProfitFactorRaw);
-    const minSlUsage = normalizePct01(readQuery(req.query.minSlUsage) ?? readQuery(req.query.minSlUsagePct));
-    const minTpUsage = normalizePct01(readQuery(req.query.minTpUsage) ?? readQuery(req.query.minTpUsagePct));
-    const limit = clampInt(req.query.limit, 25, 1, 200);
-    const offset = clampInt(req.query.offset, 0, 0, 200_000);
+    const minTrades = parsed.minTrades;
+    const minWinRate = parsed.minWinRate ?? null;
+    const maxDrawdown = parsed.maxDrawdown ?? null;
+    const maxBestDayPct = parsed.maxBestDayPct ?? null;
+    const minNetProfit = parsed.minNetProfit ?? null;
+    const minHoldSec = parsed.minHoldSec ?? null;
+    const maxHoldSec = parsed.maxHoldSec ?? null;
+    const minProfitFactor = parsed.minProfitFactor ?? null;
+    const minSlUsage = parsed.minSlUsage ?? null;
+    const minTpUsage = parsed.minTpUsage ?? null;
+    const limit = parsed.limit;
+    const offset = parsed.offset;
 
     const { results, hasMore } = await runTraderScoutSearch({
       cutoffSec,
@@ -293,8 +281,8 @@ adminTraderScoutingRouter.get("/trader-scouting/search", async (req: Request, re
           maxDrawdown,
           minNetProfit,
           maxBestDayPct,
-          minHoldSec: minHoldSec === null ? null : Math.max(0, Math.trunc(minHoldSec)),
-          maxHoldSec: maxHoldSec === null ? null : Math.max(0, Math.trunc(maxHoldSec)),
+          minHoldSec,
+          maxHoldSec,
           minProfitFactor,
           minSlUsage,
           minTpUsage,
@@ -316,20 +304,31 @@ adminTraderScoutingRouter.get("/trader-scouting/search", async (req: Request, re
   } catch (error) {
     console.error("Trader scouting search error:", error);
     return res.status(500).json({ message: "Internal server error" });
+  } finally {
+    observeHttpRequestDuration(
+      "/api/admin/trader-scouting/search",
+      Number(process.hrtime.bigint() - startedAt) / 1e9,
+    );
   }
 });
 
 adminTraderScoutingRouter.get("/trader-scouting/:userId/asset-classes", async (req: Request, res) => {
+  const startedAt = process.hrtime.bigint();
   try {
-    const userId = Number(getParam(req.params.userId));
-    if (!Number.isFinite(userId) || userId <= 0) return res.status(400).json({ message: "Invalid userId" });
+    const userIdResult = PositiveIntParamSchema.safeParse(req.params.userId);
+    if (!userIdResult.success) return res.status(400).json({ message: "Invalid userId" });
+    const userId = userIdResult.data;
 
-    const days = parseDaysParam(readQuery(req.query.days), 30);
+    const parsedDaysResult = TraderScoutAssetClassesQuerySchema.safeParse(req.query);
+    if (!parsedDaysResult.success) {
+      return res.status(400).json({ message: "Invalid query parameters", issues: parsedDaysResult.error.issues });
+    }
+    const { days } = parsedDaysResult.data;
     const nowSec = Math.floor(Date.now() / 1000);
     const cutoffSec = days > 0 ? nowSec - days * 86400 : 0;
     const sqlText = `
-WITH ft AS (
-  SELECT
+	WITH ft AS (
+	  SELECT
     t.user_id,
     t.opened_at,
     t.closed_at,
@@ -385,22 +384,32 @@ ORDER BY net_profit DESC;
   } catch (error) {
     console.error("Trader scouting categories drilldown error:", error);
     return res.status(500).json({ message: "Internal server error" });
+  } finally {
+    observeHttpRequestDuration(
+      "/api/admin/trader-scouting/:userId/asset-classes",
+      Number(process.hrtime.bigint() - startedAt) / 1e9,
+    );
   }
 });
 
 adminTraderScoutingRouter.get("/trader-scouting/:userId/trade-extremes", async (req: Request, res) => {
+  const startedAt = process.hrtime.bigint();
   try {
-    const userId = Number(getParam(req.params.userId));
-    if (!Number.isFinite(userId) || userId <= 0) return res.status(400).json({ message: "Invalid userId" });
+    const userIdResult = PositiveIntParamSchema.safeParse(req.params.userId);
+    if (!userIdResult.success) return res.status(400).json({ message: "Invalid userId" });
+    const userId = userIdResult.data;
 
-    const days = parseDaysParam(readQuery(req.query.days), 30);
+    const parsedQueryResult = TraderScoutTradeExtremesQuerySchema.safeParse(req.query);
+    if (!parsedQueryResult.success) {
+      return res.status(400).json({ message: "Invalid query parameters", issues: parsedQueryResult.error.issues });
+    }
+    const { days, limit } = parsedQueryResult.data;
     const nowSec = Math.floor(Date.now() / 1000);
     const cutoffSec = days > 0 ? nowSec - days * 86400 : 0;
-    const limit = Math.max(1, Math.min(100, Math.trunc(Number(readQuery(req.query.limit)) || 10)));
     const sqlText = `
-WITH ft AS (
-  SELECT
-    t.id,
+	WITH ft AS (
+	  SELECT
+	    t.id,
     sc.symbol,
     t.type,
     t.open_price,
@@ -477,5 +486,10 @@ FROM (
   } catch (error) {
     console.error("Trader scouting trade extremes error:", error);
     return res.status(500).json({ message: "Internal server error" });
+  } finally {
+    observeHttpRequestDuration(
+      "/api/admin/trader-scouting/:userId/trade-extremes",
+      Number(process.hrtime.bigint() - startedAt) / 1e9,
+    );
   }
 });

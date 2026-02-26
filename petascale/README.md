@@ -31,6 +31,7 @@ This populates `petascale/vendor/*` and `petascale/vendor/MANIFEST.txt`.
 
 ```bash
 cd petascale
+./kes/generate-dev-certs.sh
 docker compose up -d
 ```
 

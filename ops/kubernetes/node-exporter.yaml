@@ -1,0 +1,59 @@
+# Node Exporter DaemonSet for Bare Metal Metrics
+# Provides host-level CPU, memory, disk, network metrics to Prometheus.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: node-exporter
+  namespace: tradehub
+  labels:
+    app: node-exporter
+spec:
+  selector:
+    matchLabels:
+      app: node-exporter
+  template:
+    metadata:
+      labels:
+        app: node-exporter
+    spec:
+      hostNetwork: true
+      hostPID: true
+      containers:
+        - name: node-exporter
+          image: prom/node-exporter:v1.8.1
+          args:
+            - --path.rootfs=/host
+            - --collector.filesystem.mount-points-exclude=^/(dev|proc|sys|var/lib/docker/.+|var/lib/kubelet/.+)($|/)
+          ports:
+            - containerPort: 9100
+              hostPort: 9100
+              name: metrics
+          volumeMounts:
+            - name: rootfs
+              mountPath: /host
+              readOnly: true
+          resources:
+            requests: { cpu: "50m", memory: "64Mi" }
+            limits: { cpu: "200m", memory: "128Mi" }
+          securityContext:
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65534
+      tolerations:
+        - operator: Exists
+      volumes:
+        - name: rootfs
+          hostPath: { path: / }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: node-exporter
+  namespace: tradehub
+spec:
+  selector:
+    app: node-exporter
+  ports:
+    - name: metrics
+      port: 9100
+      targetPort: 9100

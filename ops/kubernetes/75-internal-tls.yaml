@@ -1,0 +1,76 @@
+# Internal TLS Automation Manifest
+# This deploys a self-signed ClusterIssuer and automatically provisions
+# TLS certificates for Valkey, ClickHouse, and MinIO components using cert-manager.
+# This implements the RUNBOOK_INTERNAL_TLS.md directive.
+
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: tradehub-internal-ca
+spec:
+  selfSigned: {}
+---
+# Valkey Internal Certificate
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: valkey-internal-tls
+  namespace: tradehub
+spec:
+  secretName: valkey-tls-secret
+  duration: 8760h # 1 year
+  renewBefore: 720h # 30 days
+  issuerRef:
+    name: tradehub-internal-ca
+    kind: ClusterIssuer
+  dnsNames:
+    - "tradehub-valkey"
+    - "tradehub-valkey.tradehub.svc"
+    - "tradehub-valkey.tradehub.svc.cluster.local"
+  usages:
+    - server auth
+    - client auth
+---
+# ClickHouse Internal Certificate
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: clickhouse-internal-tls
+  namespace: tradehub
+spec:
+  secretName: clickhouse-tls-secret
+  duration: 8760h # 1 year
+  renewBefore: 720h # 30 days
+  issuerRef:
+    name: tradehub-internal-ca
+    kind: ClusterIssuer
+  dnsNames:
+    - "tradehub-clickhouse"
+    - "tradehub-clickhouse-0.tradehub-clickhouse.tradehub.svc.cluster.local"
+    - "tradehub-clickhouse.tradehub.svc"
+    - "tradehub-clickhouse.tradehub.svc.cluster.local"
+  usages:
+    - server auth
+    - client auth
+---
+# MinIO Internal Certificate
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: minio-internal-tls
+  namespace: tradehub
+spec:
+  secretName: minio-tls-secret
+  duration: 8760h # 1 year
+  renewBefore: 720h # 30 days
+  issuerRef:
+    name: tradehub-internal-ca
+    kind: ClusterIssuer
+  dnsNames:
+    - "tradehub-minio"
+    - "tradehub-minio-0.tradehub-minio.tradehub.svc.cluster.local"
+    - "tradehub-minio.tradehub.svc"
+    - "tradehub-minio.tradehub.svc.cluster.local"
+  usages:
+    - server auth
+    - client auth

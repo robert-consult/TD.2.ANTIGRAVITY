@@ -109,6 +109,7 @@ Key references:
 ## Environment Notes
 
 - Do not commit secrets (`.env`, dumps, keystores, prod logs).
+- Use `.env.example` as the template for local `.env`.
 - Production startup requires strong secret configuration (see `.agents/PRODUCTION_REQUIREMENTS.md` for exact requirements and validation steps).
 
 ## Additional Docs

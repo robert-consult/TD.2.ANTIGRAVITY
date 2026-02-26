@@ -9,6 +9,7 @@ yarn.lock
 .idea
 *.log
 *.db*
+.tmp
 attached_assets
 migration_exports
 migration_imports

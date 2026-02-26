@@ -964,3 +964,184 @@ Failure Mode if Missing:
   - Roll out each deployment and verify pods become `Running/Ready` without `ENOENT ... mkdir '/app/migration_imports'`.
   - Confirm readiness probes remain healthy after restart for API/worker/ingestor roles.
 - Failure Mode if Missing: security hardening (`readOnlyRootFilesystem`) causes crash loops during startup, blocking API cutover and worker/ingestor recovery.
+
+### PRD-ANA-002
+- ID: `PRD-ANA-002`
+- Date (UTC): `2026-02-25`
+- Scope: `Admin DataTab bounded rollup snapshots on hot analytics endpoints`
+- Requirement: DataTab hot endpoints (`/api/admin/kpi-summary`, `/api/admin/signup-funnel`, `/api/admin/user-analytics`, `/api/admin/analytics/compliance`, `/api/admin/deactivated-accounts/summary`) must be served through a durable Postgres rollup snapshot table (`admin_data_rollups`) with bounded freshness windows so request-path load does not repeatedly execute heavyweight full aggregations.
+- Enforcement: `server/routes/adminDataRollups.ts` (rollup-first route handlers + cache-state headers), `server/services/adminDataRollups.ts` (compute/upsert/read + worker scheduler), `db/migrations/0040_admin_data_rollups.sql`, and `shared/schema.pg.ts` (`adminDataRollups` schema).
+- Validation:
+  - Run `npm run db:migrate:drizzle` and verify `admin_data_rollups` table/index creation.
+  - Hit each hot endpoint and verify response headers include `X-Admin-Rollup-*`.
+  - Verify worker role logs `[admin-data-rollups] scheduler started` and periodic refreshes complete without errors.
+- Failure Mode if Missing: repeated expensive analytics queries stay in request path, increasing latency/CPU and reducing stability under high admin concurrency.
+
+### PRD-SEC-015
+- ID: `PRD-SEC-015`
+- Date (UTC): `2026-02-25`
+- Scope: `Legacy institutional audit export abuse and CSV formula hardening`
+- Requirement: Legacy audit export endpoints (`/api/admin/trade-audit/export/csv`, `/api/admin/order-intent-audit/export/csv`, `/api/admin/trade-audit/export/jsonl`) must enforce strict upper bounds on export row counts and neutralize CSV formula-injection payloads before serialization.
+- Enforcement: `server/routes/admin.ts` (`clampAuditExportLimit`, `neutralizeCsvFormulaRecord`, capped `.limit(...)` usage in audit export handlers).
+- Validation:
+  - Request exports with very large `limit` and verify query cap is applied.
+  - Include formula-leading text values (`=`, `+`, `-`, `@`) in exportable fields and verify CSV output prefixes with `'`.
+  - Confirm existing export manifest hash headers are still emitted.
+- Failure Mode if Missing: privileged endpoints can trigger oversized synchronous exports and CSV artifacts remain vulnerable to spreadsheet formula execution vectors.
+
+### PRD-TEST-003
+- ID: `PRD-TEST-003`
+- Date (UTC): `2026-02-25`
+- Scope: `Admin analytics/export loadtest coverage`
+- Requirement: Repository test tooling must include dedicated load generators for Admin DataTab hot read endpoints and async export pipeline lifecycle.
+- Enforcement: `scripts/loadtest/adminDataTab.ts`, `scripts/loadtest/exportPipeline.ts`, and `package.json` scripts (`loadtest:admin-data-tab`, `loadtest:export-pipeline`).
+- Validation:
+  - Run `npm run loadtest:admin-data-tab` with `LOADTEST_ADMIN_COOKIE` and verify p95/error assertions pass.
+  - Run `npm run loadtest:export-pipeline` with `LOADTEST_ADMIN_COOKIE` and verify queued jobs reach terminal READY state with valid download links.
+- Failure Mode if Missing: scale regressions in admin analytics/export paths are discovered late and are more likely to reach production.
+
+### PRD-TEST-004
+- ID: `PRD-TEST-004`
+- Date (UTC): `2026-02-25`
+- Scope: `CSRF-correct write-path load testing`
+- Requirement: Any loadtest that performs authenticated `POST/PUT/PATCH/DELETE` against `/api/*` must model the full CSRF double-submit contract (session cookie + CSRF cookie + CSRF header), not only bearer/session identity.
+- Enforcement: `scripts/loadtest/exportPipeline.ts` (`fetchCsrfToken` + merged cookie jar propagation in create/poll/download flow).
+- Validation:
+  - Run `npm run loadtest:export-pipeline` with `LOADTEST_ADMIN_COOKIE`.
+  - Confirm job creation succeeds without `CSRF_TOKEN_INVALID` and reaches terminal READY with valid download link checks.
+- Failure Mode if Missing: write-path loadtests produce false negatives (`403 CSRF_TOKEN_INVALID`) and fail to validate real queue/export behavior.
+
+### PRD-AUD-004
+- ID: `PRD-AUD-004`
+- Date (UTC): `2026-02-25`
+- Scope: `Hedge-fund-grade Admin Audit Trail report completeness + linkage`
+- Requirement: `/api/admin/audit-trail` must include deep trade/order audit events with exhaustive forensic fields and explicit linkage maps (correlation ID, session ID, user ID) so audit reports can reconstruct full lifecycle chains across signup/login/admin/identity/trade systems.
+- Enforcement: `server/services/adminAuditTrail.ts` (deep event fetchers + linkage builders), `server/routes/admin.ts` (`/api/admin/audit-trail` response enrichment), and `server/storage.ts` (`getAllLoginHistory` session/device fields).
+- Validation:
+  - Call `/api/admin/audit-trail?limit=200&includeDeepTrade=1&includeLinkage=1` and verify response includes `tradeAuditEvents`, `orderIntentEvents`, and `linkage.byCorrelationId/bySessionId/byUserId`.
+  - Verify trade/order events include chain columns (`prevHash`, `eventHash`) and lifecycle IDs (`correlationId`, `orderId`, `executionId`, `positionId`, `sessionId`).
+  - Verify Admin Dashboard Audit Trail tab renders these events and linkage details without client errors.
+- Failure Mode if Missing: audit operators cannot reliably correlate events across subsystems, reducing forensic confidence and weakening institutional reporting/auditability.
+
+### PRD-AUD-005
+- ID: `PRD-AUD-005`
+- Date (UTC): `2026-02-25`
+- Scope: `Institutional audit export offload and decomposed admin audit routing`
+- Requirement: Institutional audit exports (`/api/admin/trade-audit/export/csv|jsonl`, `/api/admin/order-intent-audit/export/csv|jsonl`) must enqueue durable background jobs instead of synchronous request-path file generation, and deep audit endpoints (`/api/admin/trade-audit`, `/api/admin/order-intent-audit`, `/api/admin/audit-trail`, `/api/admin/export-manifests`) must be served from a dedicated decomposed router mounted before legacy `admin.ts`.
+- Enforcement: `server/routes/adminInstitutionalAudit.ts` (decomposed endpoint implementations + async export queueing), `server/routes.ts` (mount order for `adminInstitutionalAuditRouter` before `registerAdminRoutes`), `shared/admin/dataExports.ts` (new export types/filters), and `server/services/adminDataExportBuild.ts` (trade/order audit artifact builders).
+- Validation:
+  - Request each institutional export path and verify `202` JSON with `jobId` and `pollUrl` is returned, then confirm readiness/download via `/api/admin/data-exports/:jobId`.
+  - Verify `/api/admin/audit-trail?includeDeepTrade=1&includeLinkage=1` still returns deep event/linkage payload from decomposed router.
+  - Run `npm run check`, `npm run build`, and `npm run e2e`.
+- Failure Mode if Missing: large forensic exports block API workers and can trigger latency spikes/OOM under high-volume audit datasets, while monolith route bloat continues to increase regression risk.
+
+### PRD-AUD-006
+- ID: `PRD-AUD-006`
+- Date (UTC): `2026-02-25`
+- Scope: `Admin route decomposition safety against duplicate-path regression`
+- Requirement: Once a `/api/admin/*` path is decomposed into a dedicated router, the legacy `server/routes/admin.ts` handler must not continue to register on the same public path; legacy handlers must be moved behind explicit non-canonical paths (for example `/api/admin/_legacy/*`) or removed to prevent accidental route-order regressions.
+- Enforcement: `server/routes/admin.ts` (`/api/admin/_legacy/*` remap for rollup + institutional audit duplicates) and canonical mounts in `server/routes.ts` (`adminDataRollupsRouter`, `adminInstitutionalAuditRouter` before `registerAdminRoutes`).
+- Validation:
+  - Confirm canonical paths exist only in decomposed routers:
+    - `/api/admin/kpi-summary`, `/api/admin/signup-funnel`, `/api/admin/user-analytics`, `/api/admin/analytics/compliance`, `/api/admin/deactivated-accounts/summary`
+    - `/api/admin/trade-audit`, `/api/admin/order-intent-audit`, `/api/admin/audit-trail`, `/api/admin/export-manifests`, and institutional export queue routes.
+  - Confirm legacy equivalents exist only under `/api/admin/_legacy/*`.
+  - Run `npm run check`, `npm run build`, and route smoke/load tests to verify no behavior regressions.
+- Failure Mode if Missing: future mount-order or refactor changes can silently reactivate stale synchronous handlers on public paths, reintroducing request-path heavy queries/exports and security drift.
+
+### PRD-AUD-007
+- ID: `PRD-AUD-007`
+- Date (UTC): `2026-02-25`
+- Scope: `User Management export scalability + parquet artifact generation`
+- Requirement: User-management exports (full user list and per-user timeline) must run through durable background export jobs (`type=users`, `type=user_timeline`) with format support `csv|jsonl|parquet`; worker runtime must provide writable temp storage sized for the largest configured artifact because export files are built locally before object-storage upload.
+- Enforcement: `shared/admin/dataExports.ts` (new export types/filters/formats), `server/services/adminDataExportBuild.ts` (users/timeline builders + parquet writer + temp-file creation), `server/routes/adminDataExports.ts` (`/users` and `/user-timeline` queue endpoints), and `client/src/pages/AdminDashboard.tsx` (User Management + timeline dialog now queue jobs instead of direct sync downloads).
+- Validation:
+  - `POST /api/admin/data-exports/users` and `POST /api/admin/data-exports/user-timeline` with `format=parquet`, poll until `READY`, then verify download content type/extension and row counts.
+  - Verify Admin Dashboard User Management and timeline export buttons return queued job IDs (no synchronous file response path).
+  - Run `npm run check`, `npm run build`, and `npm run loadtest:export-pipeline`.
+  - In production, confirm worker node `/tmp` free space comfortably exceeds maximum export size plus retry headroom.
+- Failure Mode if Missing: high-volume user exports stay request-path/synchronous and can trigger API latency or memory spikes; parquet jobs can fail with `ENOSPC` under large artifacts, causing export backlog and admin-operability degradation.
+
+### PRD-SEC-016
+- ID: `PRD-SEC-016`
+- Date (UTC): `2026-02-25`
+- Scope: `Metrics endpoint exposure control`
+- Requirement: `/metrics` must not be anonymously readable from public internet in production; it must be restricted to private/loopback sources by default, with optional explicit token-based access (`METRICS_AUTH_TOKEN`) for controlled external scrapers.
+- Enforcement: `server/routes/wsCore.ts` (`canAccessMetrics`, private-IP gate, optional bearer/header token check).
+- Validation:
+  - In production mode, request `/metrics` from non-private source without token and verify `403`.
+  - Request `/metrics` from private cluster source (Prometheus pod/service path) and verify scrape success.
+  - Request `/metrics` with valid `Authorization: Bearer <METRICS_AUTH_TOKEN>` and verify success when token is configured.
+- Failure Mode if Missing: unauthenticated internet users can enumerate internal topology/queue/load telemetry and use it for attack planning or abuse timing.
+
+### PRD-SEC-017
+- ID: `PRD-SEC-017`
+- Date (UTC): `2026-02-25`
+- Scope: `Export queue durability posture and fallback safety`
+- Requirement: In production, in-process export fallback must be an explicit opt-in (`ADMIN_DATA_EXPORT_ALLOW_PROCESS_FALLBACK=1`); otherwise queue unavailability must fail fast and mark jobs failed rather than silently switching to non-durable execution.
+- Enforcement: `server/services/adminDataExportQueue.ts` (`inProcessFallbackAllowed` gate in enqueue/retry/worker startup paths, fail-fast job marking).
+- Validation:
+  - With queue unavailable and fallback disabled, create export and verify job transitions to `FAILED` with queue-unavailable reason.
+  - With fallback explicitly enabled, verify queue-unavailable mode still executes in-process for controlled emergency operation.
+  - Verify normal BullMQ path remains unchanged when queue is healthy.
+- Failure Mode if Missing: production can silently degrade from durable queue semantics to in-process execution, increasing data-loss risk during restarts and complicating failure recovery.
+
+### PRD-SEC-018
+- ID: `PRD-SEC-018`
+- Date (UTC): `2026-02-25`
+- Scope: `Explicit insecure-transport risk acceptance for petascale dependencies`
+- Requirement: Production runtime must reject insecure ClickHouse/Object Storage transport by default; insecure internal HTTP usage requires explicit opt-in (`ALLOW_INSECURE_INTERNAL_TRANSPORT=1`) as an acknowledged risk exception.
+- Enforcement: `server/services/petascaleEnv.ts` (production validation for `CLICKHOUSE_URL` and `EXPORT_OBJECT_STORAGE_USE_SSL`), `k8s/01-configmap.yaml` (explicit opt-in flag when private-cluster HTTP is intentionally used).
+- Validation:
+  - Run with production env and insecure transport + no opt-in flag; verify startup fails with clear transport error.
+  - Set `ALLOW_INSECURE_INTERNAL_TRANSPORT=1`; verify startup succeeds and services connect.
+  - Set secure URLs/TLS and remove opt-in; verify startup succeeds without insecure exception.
+- Failure Mode if Missing: insecure internal transport can remain unintentionally enabled in production, increasing interception and credential exposure risk.
+
+### PRD-SEC-019
+- ID: `PRD-SEC-019`
+- Date (UTC): `2026-02-25`
+- Scope: `Sensitive error/log output redaction`
+- Requirement: External provider error payloads and runtime exception logs must be sanitized before logging to prevent accidental secret/token leakage in operational logs.
+- Enforcement: `server/security/logSanitizer.ts` (redaction/sanitization primitives), `server/i18n/providers/openai.ts`, `server/i18n/worker.ts`, `server/cron/verificationReminders.ts`, and `server/index.ts` (sanitized error logging path).
+- Validation:
+  - Force provider failures and verify logs do not print bearer tokens/API keys/raw secret-like blobs.
+  - Verify error logs remain actionable (status/type/code/message) after sanitization.
+  - Run `npm run check` to confirm sanitizer integration is type-safe.
+- Failure Mode if Missing: secrets and sensitive payloads can leak into central logs, expanding breach blast radius and complicating incident response.
+
+### PRD-OBS-002
+- ID: `PRD-OBS-002`
+- Date (UTC): `2026-02-25`
+- Scope: `Admin data freshness and backlog early-warning SLOs`
+- Requirement: Production Prometheus must evaluate explicit alert rules for export backlog/failure/stall and rollup freshness/failure using app-exposed metrics (`admin_data_export_*`, `admin_data_rollup_*`, `clickhouse_sync_*`), and Prometheus config must load those rule files at startup.
+- Enforcement: `server/services/adminDataRollups.ts` (rollup runtime metrics), `server/routes/wsCore.ts` (`/metrics` publication of rollup/export/clickhouse gauges/counters), `k8s/60-monitoring.yaml` (`rule_files` + `alerts-admin-data-slo.yml` rules), and `petascale/prometheus-rules/alerts.yml` (petascale rule pack parity).
+- Validation:
+  - `kubectl apply --dry-run=client -f k8s/60-monitoring.yaml` passes.
+  - Scrape `/metrics` and verify presence of `admin_data_rollup_refresh_last_success_at`, `admin_data_rollup_refresh_failed_total`, `admin_data_export_queue_waiting`, and `clickhouse_sync_last_success_at`.
+  - Trigger synthetic backlog/failure conditions and confirm corresponding alerts fire.
+- Failure Mode if Missing: export queues and analytics freshness can degrade silently until admin UX breaks, causing delayed incident detection and prolonged backlog recovery.
+
+### PRD-OPS-005
+- ID: `PRD-OPS-005`
+- Date (UTC): `2026-02-25`
+- Scope: `Worker-canary gate before API cutover for export/analytics infrastructure changes`
+- Requirement: Any production rollout that changes admin export queueing, analytics rollups, ClickHouse sync, ingress, or network policies must execute a worker-only canary first, observe queue/export/sync metrics for a full gate window (target 24h), and only then cut over API pods with ingress/network policy changes.
+- Enforcement: `k8s/RUNBOOK_WORKER_CANARY_API_CUTOVER.md`, `scripts/ops/canary_cutover_runbook.sh`, `scripts/ops/observe_rollout_metrics.sh`, `scripts/ops/observe_api_cutover_slo.sh`, and manifests `k8s/13-worker-canary-deployment.yaml`, `k8s/10-api-deployment.yaml`, `k8s/30-ingress.yaml`, `k8s/31-network-policies.yaml`.
+- Validation:
+  - Run `scripts/ops/canary_cutover_runbook.sh --dry-run` to verify command plan.
+  - Run worker canary phase and produce CSV evidence (`worker-canary-24h.csv`) with stable queue backlog/failure/sync metrics.
+  - Execute API cutover phase and produce CSV evidence (`api-cutover-24h.csv`) with healthy probes and bounded restart/error/backlog metrics.
+- Failure Mode if Missing: infrastructure or policy regressions can be introduced directly on API path without early isolation, increasing outage risk, queue backlogs, and delayed incident detection.
+
+### PRD-PERF-012
+- ID: `PRD-PERF-012`
+- Date (UTC): `2026-02-25`
+- Scope: `Trader-scouting export memory profile under large row counts`
+- Requirement: Trader-scouting export generation must not materialize a second full normalized row array before writing artifacts; CSV/JSONL/Parquet writers must stream row-by-row from source result sets.
+- Enforcement: `server/services/adminDataExportBuild.ts` (`buildTraderScoutingExport` uses `createStreamingExportWriter` and bounded row iteration without `normalizedRows = sliced.map(...)` duplication).
+- Validation:
+  - Run `npm run check` and `npm run build`.
+  - Run authenticated export smoke (`npm run loadtest:export-pipeline` with `LOADTEST_EXPORT_JOB_COUNT>=2`) and confirm `READY` status and valid download links.
+  - Review memory profile during large trader-scouting jobs; confirm no second full in-memory mapped array is created.
+- Failure Mode if Missing: large trader-scouting exports can double in-memory footprint (raw rows + normalized copy), increasing OOM and latency risk under high cardinality datasets.

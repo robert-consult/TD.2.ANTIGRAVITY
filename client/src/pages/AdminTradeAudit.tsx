@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Download, Filter, RefreshCw, Search, FileText, ChevronDown, ChevronUp, Shield, AlertTriangle, CheckCircle, XCircle } from "lucide-react";
 import { fetchWithIdentity } from "@/lib/fetchWithIdentity";
+import { useToast } from "@/hooks/use-toast";
 
 interface AuditRecord {
   id: number;
@@ -74,6 +75,7 @@ interface AuditRecord {
 }
 
 export default function AdminTradeAudit() {
+  const { toast } = useToast();
   const sideLabels: Record<string, { label: string }> = {
     BUY: { label: "Buy" },
     SELL: { label: "Sell" },
@@ -93,6 +95,8 @@ export default function AdminTradeAudit() {
   const [searchTerm, setSearchTerm] = useState("");
   const [limit, setLimit] = useState("500");
   const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set());
+  const [exportingFormat, setExportingFormat] = useState<"csv" | "jsonl" | "parquet" | null>(null);
+  const [lastQueuedJobId, setLastQueuedJobId] = useState<string | null>(null);
   const [hideAccountEvents, setHideAccountEvents] = useState(() => {
     try {
       const raw = localStorage.getItem("adminTradeAudit.hideAccountEvents");
@@ -257,64 +261,42 @@ export default function AdminTradeAudit() {
     );
   };
 
-  // Export to CSV with all institutional fields
-  const exportToCsv = () => {
-    const headers = [
-      "ID", "Trade ID", "Event Type", "Event Category", "Event Time", "Event Time (ms)",
-      "Correlation ID", "Order ID", "Execution ID", "Position ID",
-      "Actor Type", "Actor User ID", "Session ID", "IP", "User Agent",
-      "Symbol", "Side", "Order Type", "Time In Force", "Qty (Lots)",
-      "Notional USD", "Gross P/L USD", "Net P/L USD", "Total Costs USD",
-      "Open Comm USD", "Close Comm USD", "Open Fees USD", "Close Fees USD",
-      "Financing USD", "Swap USD", "Overnight Days", "Category Snapshot", "Cost Model Version",
-      "Requested Price", "Trigger Price", "Limit Price", "Stop Price", "Fill Price", "Avg Fill Price",
-      "Slippage", "Slippage (Pips)", "Slippage Reference", "Latency (ms)",
-      "Quote Bid", "Quote Ask", "Quote Mid", "Quote Spread", "Spread (Pips)",
-      "Risk Check", "Risk Limit", "Risk Observed", "Risk Result", "Reason Code",
-      "User", "Note", "Prev Hash", "Event Hash"
-    ];
-    
-    const rows = filteredRecords.map(r => [
-      r.id, r.tradeId, r.eventType, r.eventCategory ?? "", r.eventAt, r.eventAtMs ?? "",
-      r.correlationId ?? "", r.orderId ?? "", r.executionId ?? "", r.positionId ?? "",
-      r.actorType ?? "", r.actorUserId ?? "", r.sessionId ?? "", r.ip ?? "", r.userAgent ?? "",
-      r.symbol ?? "", r.side ?? "", r.orderType ?? "", r.timeInForce ?? "", r.qtyLots ?? "",
-      r.notionalUsd ?? "", r.grossProfitUsd ?? "", r.netProfitUsd ?? "", r.totalCostsUsd ?? "",
-      r.openCommissionUsd ?? "", r.closeCommissionUsd ?? "", r.openOtherFeesUsd ?? "", r.closeOtherFeesUsd ?? "",
-      r.financingAccruedUsd ?? "", r.swapAccruedUsd ?? "", r.overnightDays ?? "", r.categorySnapshot ?? "", r.costModelVersion ?? "",
-      r.requestedPrice ?? "", r.triggerPrice ?? "", r.limitPrice ?? "", r.stopPrice ?? "", r.fillPrice ?? "", r.avgFillPrice ?? "",
-      r.slippage ?? "", r.slippagePips ?? "", r.slippageReference ?? "", r.latencyMs ?? "",
-      r.quoteBid ?? "", r.quoteAsk ?? "", r.quoteMid ?? "", r.quoteSpread ?? "", r.spreadPips ?? "",
-      r.riskCheckName ?? "", r.riskLimitValue ?? "", r.riskObservedValue ?? "", r.riskResult ?? "", r.reasonCode ?? "",
-      r.username ?? "", r.note ?? "", r.prevHash ?? "", r.eventHash ?? ""
-    ]);
-    
-    const csvContent = [
-      headers.join(","),
-      ...rows.map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(","))
-    ].join("\n");
-    
-    const blob = new Blob([csvContent], { type: "text/csv" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `trade-audit-institutional-${new Date().toISOString().split("T")[0]}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
+  const queueInstitutionalExport = async (format: "csv" | "jsonl" | "parquet") => {
+    setExportingFormat(format);
+    try {
+      const params = new URLSearchParams();
+      params.set("limit", String(Math.max(1, Math.min(5_000_000, Number(limit) || 500))));
+      if (eventTypeFilter !== "all" && eventTypeFilter !== "ACCOUNT_EVENTS") {
+        params.set("eventType", eventTypeFilter);
+      }
+      if (riskResultFilter === "PASSED") {
+        params.set("riskResult", "PASS");
+      } else if (riskResultFilter === "REJECTED") {
+        params.set("riskResult", "FAIL");
+      }
+      if (searchTerm.trim().length >= 8) {
+        params.set("correlationId", searchTerm.trim().slice(0, 160));
+      }
 
-  // Export to JSONL for forensic replay
-  const exportToJsonl = () => {
-    const lines = filteredRecords.map(r => JSON.stringify(r));
-    const content = lines.join("\n");
-    
-    const blob = new Blob([content], { type: "application/jsonl" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `trade-audit-raw-${new Date().toISOString().split("T")[0]}.jsonl`;
-    a.click();
-    URL.revokeObjectURL(url);
+      const response = await fetchWithIdentity(`/api/admin/trade-audit/export/${format}?${params.toString()}`);
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok || !body?.jobId) {
+        throw new Error(String(body?.message || `Failed to queue ${format.toUpperCase()} export`));
+      }
+      setLastQueuedJobId(String(body.jobId));
+      toast({
+        title: body.deduped ? "Using existing export job" : "Trade audit export queued",
+        description: `Job ID: ${body.jobId}`,
+      });
+    } catch (error: any) {
+      toast({
+        title: "Export queue failed",
+        description: String(error?.message || error),
+        variant: "destructive",
+      });
+    } finally {
+      setExportingFormat(null);
+    }
   };
 
   const eventTypes = [
@@ -348,7 +330,8 @@ export default function AdminTradeAudit() {
           <Button 
             variant="csv" 
             size="sm" 
-            onClick={exportToCsv}
+            onClick={() => queueInstitutionalExport("csv")}
+            disabled={exportingFormat !== null}
           >
             <Download className="w-4 h-4 mr-1" />
             Export CSV
@@ -356,13 +339,28 @@ export default function AdminTradeAudit() {
           <Button 
             variant="jsonl" 
             size="sm" 
-            onClick={exportToJsonl}
+            onClick={() => queueInstitutionalExport("jsonl")}
+            disabled={exportingFormat !== null}
           >
             <FileText className="w-4 h-4 mr-1" />
             Export JSONL
           </Button>
+          <Button
+            variant="parquet"
+            size="sm"
+            onClick={() => queueInstitutionalExport("parquet")}
+            disabled={exportingFormat !== null}
+          >
+            <FileText className="w-4 h-4 mr-1" />
+            Export Parquet
+          </Button>
         </div>
       </div>
+      {lastQueuedJobId ? (
+        <div className="text-xs text-cyan-300">
+          Background export queued: <span className="font-mono">{lastQueuedJobId}</span>. Track progress in Admin Data export jobs.
+        </div>
+      ) : null}
       
       <Card className="bg-neutral-700 border-gray-600">
         <CardHeader className="py-3">

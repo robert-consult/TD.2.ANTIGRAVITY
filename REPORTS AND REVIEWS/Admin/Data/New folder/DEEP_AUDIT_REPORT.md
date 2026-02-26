@@ -1,72 +1,142 @@
-# Petascale Infrastructure Deep Audit Report
-## Overview
-This report audits the current state of the repository (`TD.2.ANTIGRAVITY`) against the **10-Workstream Petascale Implementation Plan (Option B: Integrated Background Services)**. 
-The objective is to identify exactly what has been built, what was missed, and where critical bottlenecks remain unresolved.
+# Petascale Infrastructure Deep Audit Report (Reconciled)
+## Date
+2026-02-25
+
+## Scope
+This report reconciles:
+- `REPORTS AND REVIEWS/Admin/Data/New folder/implementation_plan.md`
+- current repository implementation in `/home/bcodex/TD.2.ANTIGRAVITY`
+- original scale intent (billions of rows, async exports, deep audit trail, observability, security)
 
 ---
 
-## Workstream Audit Findings
-
-### ❌ WS-01: Admin route decomposition + schema validation
-**Status: INCOMPLETE / MISSED**
-- **Expected:** `server/routes/admin.ts` decomposed into `server/routes/adminData/*`. Hot endpoints mapped to Zod schemas and stripped of heavy scans.
-- **Found:** The `admin.ts` file remains a massive 218KB monolith. The high-risk endpoints (`kpi-summary`, `signup-funnel`, `user-analytics`, `deactivated-accounts/summary`) still perform full table in-memory scans, N+1 queries, and unbounded aggregations inline. `server/routes/adminDataExports.ts` was added for exports, but the core reading routes were left untouched.
-
-### ❌ WS-02: Read-model rollups
-**Status: INCOMPLETE / MISSED**
-- **Expected:** Rollup tables in `shared/schema.pg.ts` and `server/services/adminDataRollups.ts` to power the dashboard endpoints instantly.
-- **Found:** Zero evidence of `adminDataRollups`. `schema.pg.ts` contains no new analytical rollup tables for KPI, Funnel, or Compliance. The Admin DataTab is still querying raw row-level data synchronously.
-
-### ❌ WS-03: Trader search/scouting optimization
-**Status: INCOMPLETE / MISSED**
-- **Expected:** `server/services/traderScoutQuery.ts` extracting the huge SQL block from `admin.ts`.
-- **Found:** `calcScoutMetrics.ts` and `scoutService.ts` exist, but the monolithic `TRADER_SCOUT_SEARCH_SQL` remains deeply embedded in `admin.ts`. Keyset pagination optimizations were not implemented.
-
-### ⚠️ WS-04: Unified async export platform
-**Status: PARTIAL / IN PROGRESS**
-- **Expected:** Job queue, `admin_export_jobs` table, async router `adminDataExports.ts`, and full cutover of legacy exports.
-- **Found:** Extensive scaffold exists (`adminDataExportBuild.ts`, `adminDataExportQueue.ts`, `dataExports.ts`). The router `adminDataExports.ts` is mounted in `routes.ts`. However, schema integration for the export jobs table appears missing in `schema.pg.ts` under expected names. Furthermore, legacy sync exports like `/trader-scouting/export` and `/all-trades` are still functionally exposed in `admin.ts`.
-
-### ✅ WS-05: ClickHouse analytics offload
-**Status: PARTIALLY IMPLEMENTED**
-- **Expected:** `clickhouseClient.ts`, `clickhouseSync.ts`, and Compose manifests.
-- **Found:** `server/services/clickhouseClient.ts` and `clickhouseSync.ts` are present. Bare-metal compose file `petascale/docker-compose.yml` configures the OLAP engine.
-
-### ✅ WS-06: MinIO artifact storage and secure link delivery
-**Status: IMPLEMENTED**
-- **Expected:** `server/services/objectStorage.ts` wired to MinIO.
-- **Found:** `objectStorage.ts` exists and handles the S3-compatible Multipart Uploads and signed URL generation routines needed for async exports.
-
-### ⚠️ WS-07: Observability expansion
-**Status: PARTIAL**
-- **Expected:** `server/observability/metrics.ts`, Grafana dashboards, queue/cache hitrate telemetry.
-- **Found:** `adminDataExportMetrics.ts` created, and `k8s/60-monitoring.yaml` includes Prometheus. `petascale/` contains Grafana configurations. Core `wsCore.ts` remains the main metrics endpoint, but granular app-level business telemetry (snapshot freshness, ClickHouse sync lag) is weak.
-
-### ⚠️ WS-08: Security hardening for export/analytics
-**Status: PARTIAL / MISSING CRITICAL DEFENSES**
-- **Expected:** CSV injection neutering, strict export sizing caps, rate limiting on heavy requests.
-- **Found:** While `adminScopeSession.ts` exists, the legacy exports in `admin.ts` retain weak CSV escaping (`csvEscape` without "=" prefix nullification) and massive 50K row memory caps (`admin.ts:1313`). Rate limiting for new job initialization is present but legacy targets remain exposed.
-
-### ⚠️ WS-09: Kubernetes and runtime hardening
-**Status: PARTIAL**
-- **Expected:** NetworkPolicies, Non-root pod specs, read-only root filesystems, secure TLS ingress.
-- **Found:** `k8s/31-network-policies.yaml` and `70-petascale-infra.yaml` were added. However, deep pod security context lockdown (e.g., `readOnlyRootFilesystem`) was likely not retrofitted into the older `10-api-deployment.yaml`.
-
-### ❌ WS-10: Test/load/failure validation
-**Status: MISSED**
-- **Expected:** Load test scripts for export pipelines, chaos tests, and synthetic billion-row queries.
-- **Found:** The `scripts/loadtest/` directory contains only `publishQuotes.ts` and `wsFanout.ts`. No new scripts for `adminDataTab.ts` or `exportPipeline.ts` were created. Runbooks were not fully realized.
+## Executive Reality Check
+The previous deep audit report was stale. The current branch now includes major implementation that was previously marked missing:
+- DataTab rollup read-model endpoints are live (`server/routes/adminDataRollups.ts`, `server/services/adminDataRollups.ts`, `db/migrations/0040_admin_data_rollups.sql`).
+- Durable async export jobs are live (`shared/schema.pg.ts` `admin_data_export_jobs`, `db/migrations/0039_admin_data_export_jobs.sql`, `server/routes/adminDataExports.ts`, queue/worker/build services).
+- Institutional deep audit routing and export offload are live (`server/routes/adminInstitutionalAudit.ts`).
+- Deep audit export types are implemented end-to-end (`trade_audit`, `order_intent_audit`) including ClickHouse sync/query support.
 
 ---
 
-## Conclusion
+## Workstream Status vs Implementation Plan
 
-The agent executed the heavy foundational plumbing for **MinIO, ClickHouse, and BullMQ (WS-04, 05, 06)** but completely skipped the **Data-Plane Refactoring (WS-01, 02, 03)**. 
+### WS-01 Admin route decomposition + schema validation
+Status: **PARTIAL (improved materially)**
+- Done:
+  - Canonical hot analytics endpoints moved to decomposed router (`server/routes/adminDataRollups.ts`).
+  - Canonical institutional audit endpoints moved to decomposed router (`server/routes/adminInstitutionalAudit.ts`).
+  - Duplicate legacy handlers no longer share public paths; they were isolated to `/api/admin/_legacy/*` in `server/routes/admin.ts`.
+- Remaining:
+  - `server/routes/admin.ts` is still a large monolith and still needs broader decomposition by domain.
 
-Because `admin.ts` was not decomposed and Rollup tables were not created, the entire Admin DataTab remains fundamentally broken at scale. Pushing ClickHouse into the infrastructure achieves nothing if the Express handlers are still running `.filter()` on `db.select().from(trades)` inNode.js memory.
+### WS-02 Read-model rollups
+Status: **IMPLEMENTED**
+- `admin_data_rollups` table and migration are present.
+- API handlers serve cached/recomputed rollups with cache headers.
+- Worker scheduler refreshes rollups out of request path.
 
-**Immediate Action Items:**
-1. Execute **WS-01** & **WS-02**: Decompose `admin.ts` and build Postgres Rollups.
-2. Execute **WS-03**: Optimize the trader scout SQL out of `admin.ts`.
-3. Complete **WS-08**: Patch CSV injection and hard-cap the legacy export routes.
-4. Execute **WS-10**: Write the export pipeline load tests.
+### WS-03 Trader search/scouting optimization
+Status: **PARTIAL**
+- SQL core extracted into `server/services/traderScoutQuery.ts` and reused.
+- Async export cutover for trader scouting is in place.
+- Remaining: keyset pagination and deeper route decomposition for all scouting/admin blocks.
+
+### WS-04 Unified async export platform
+Status: **IMPLEMENTED (with legacy compatibility paths still present)**
+- Durable job/event tables, queueing, retries, cancellation, download links, and retention exist.
+- New audit export types (`trade_audit`, `order_intent_audit`) are fully wired.
+- Legacy compatibility handlers remain under `_legacy` for parity checks.
+
+### WS-05 ClickHouse analytics offload
+Status: **IMPLEMENTED (feature-gated runtime)**
+- ClickHouse client/sync services are present.
+- Admin trade/order audit and export-event OLAP tables + sync loops are present.
+- Runtime currently can run with CH disabled if env is not configured.
+
+### WS-06 MinIO artifact storage and secure links
+Status: **IMPLEMENTED**
+- Object storage abstraction and signed link issuance are present.
+- Export artifacts are not streamed inline on request path.
+
+### WS-07 Observability expansion
+Status: **PARTIAL+**
+- Export pipeline metrics and ClickHouse sync metrics exposed on `/metrics`.
+- Monitoring manifests and stack scaffolding exist.
+- Remaining: deeper business SLO dashboards/alerts for freshness/backlog/error budgets in live cluster.
+
+### WS-08 Security hardening for export/analytics
+Status: **PARTIAL+**
+- CSV formula neutralization and audit export limits are implemented.
+- Job creation/download/retry rate limits exist for async export APIs.
+- Remaining: final cluster-side DDoS and exfil playbook validation in production environment.
+
+### WS-09 Kubernetes/runtime hardening
+Status: **PARTIAL+**
+- Network policies and pod hardening manifests exist.
+- Remaining: production rollout verification (canary + cutover + sustained monitoring) on target OVH cluster.
+
+### WS-10 Test/load/failure validation
+Status: **IMPLEMENTED (local branch scope)**
+- Added dedicated load suites:
+  - `scripts/loadtest/adminDataTab.ts`
+  - `scripts/loadtest/exportPipeline.ts`
+- Existing load suites retained:
+  - `scripts/loadtest/publishQuotes.ts`
+  - `scripts/loadtest/wsFanout.ts`
+
+---
+
+## Prompt Left-Out Items: Current Status
+
+1. Admin monolith decomposition completeness
+- **Still open**: full breakup of `server/routes/admin.ts` by bounded domain routers.
+- **Fixed now**: high-risk duplicate route registration on canonical public paths is removed via `_legacy` isolation.
+
+2. Deep audit trail exhaustive capture and linkage
+- **Implemented** for trade/order audit exports and API linkage map.
+- Canonical column/linkage map documented in `ADMIN_TS_DECOMPOSITION_REAUDIT_MAP.md`.
+
+3. End-to-end and load validation
+- **Completed in this cycle** (see validation section below).
+
+4. 24h canary / production cutover sequence
+- **Not executable locally**. Requires live OVH/Kubernetes environment, real ingress policies, and 24h observation window.
+
+---
+
+## Validation Executed in This Reaudit Cycle
+All commands run from repo root on this branch:
+- `npm run check` ✅
+- `npm run build` ✅
+- `npm run e2e` ✅ (`14 passed`)
+- `npm run loadtest:publish-quotes -- --interval-ms 200 --duration-sec 45 ...` ✅
+- `npm run loadtest:ws-fanout -- --clients 120 --duration-sec 30 ...` ✅
+- `npm run loadtest:admin-data-tab` (authenticated) ✅
+- `npm run loadtest:export-pipeline` (authenticated) ✅
+- `npm run smoke:admin` ✅
+- `npm run db:audit` ✅
+
+Environment warnings observed (non-blocking for this code scope): missing optional production secrets/providers (Twilio/Resend/OpenAI i18n, invalid 1Forge key in local env).
+
+---
+
+## Final Conclusion
+Relative to `implementation_plan.md`, the branch now satisfies the core data-plane goals for:
+- rollup-backed hot analytics endpoints,
+- async/durable export pipeline,
+- deep institutional audit export coverage,
+- and test/load coverage for admin analytics/export flows.
+
+The remaining major engineering debt is **full monolith decomposition of `server/routes/admin.ts`** and **live production rollout/canary verification** in the target OVH environment.
+
+---
+
+## 2026-02-25 Reverification Update
+
+1. `server/routes/adminTraderScouting.ts` was added and mounted ahead of `registerAdminRoutes` in `server/routes.ts`; canonical `/api/admin/trader-scouting/*` endpoints now live outside monolithic `admin.ts`.
+2. `server/routes/admin.ts` was reduced to ~3.5k LOC and trader-scouting-specific helper/query blocks were removed.
+3. A new executable worker-canary/API-cutover runbook was added:
+- `k8s/RUNBOOK_WORKER_CANARY_API_CUTOVER.md`
+- `scripts/ops/canary_cutover_runbook.sh`
+4. Fresh 20-cycle rerun completed successfully (`pass_count=20`) with unit/load/e2e/infra/audit gates included.

@@ -980,6 +980,11 @@ const USER_MANAGEMENT_FIELD_HELP = {
     tooltip:
       "JSONL export preserves structured fields for downstream tooling. Use for audit pipelines and scripted analysis instead of spreadsheet workflows.",
   },
+  exportParquet: {
+    inline: "Export users as columnar Parquet for large-scale analytics and warehouse ingestion.",
+    tooltip:
+      "Parquet is preferred for very large datasets due to compression and columnar scanning efficiency.",
+  },
   miniTabs: {
     inline: "Switch between live account cohorts, trails, KYC pipeline, activity controls, and grift detection.",
     tooltip:
@@ -4807,7 +4812,9 @@ export default function AdminDashboard() {
   });
 
   // Audit trail filter state
-  const [auditEventFilter, setAuditEventFilter] = useState<"all" | "signup" | "login_success" | "login_fail" | "admin">("all");
+  const [auditEventFilter, setAuditEventFilter] = useState<
+    "all" | "signup" | "login_success" | "login_fail" | "admin" | "identity" | "trade_audit" | "order_intent"
+  >("all");
 
   // Symbol management state
   const [editingSymbol, setEditingSymbol] = useState<SymbolConfig | null>(null);
@@ -5203,12 +5210,54 @@ export default function AdminDashboard() {
     setNotesDialogOpen(true);
   };
 
-  const exportUsers = () => {
-    window.open('/api/admin/export/users', '_blank');
+  const queueUserExport = async (format: "csv" | "jsonl" | "parquet") => {
+    try {
+      const response = await axios.post("/api/admin/data-exports/users", {
+        format,
+        filters: {
+          limit: 500_000,
+          includeAdmins: true,
+          includeDeleted: true,
+        },
+      });
+      const jobId = response?.data?.jobId;
+      if (!jobId) throw new Error("Missing job ID");
+      toast({
+        title: response?.data?.deduped ? "Using existing export job" : "User export queued",
+        description: `Job ID: ${jobId}`,
+      });
+    } catch (error: any) {
+      toast({
+        title: "Export queue failed",
+        description: error?.response?.data?.message || error?.message || "Failed to queue user export",
+        variant: "destructive",
+      });
+    }
   };
 
-  const exportUsersJsonl = () => {
-    window.open('/api/admin/export/users/jsonl', '_blank');
+  const queueUserTimelineExport = async (format: "csv" | "jsonl" | "parquet") => {
+    if (!timelineUser?.id) return;
+    try {
+      const response = await axios.post("/api/admin/data-exports/user-timeline", {
+        format,
+        filters: {
+          userId: timelineUser.id,
+          limit: 500_000,
+        },
+      });
+      const jobId = response?.data?.jobId;
+      if (!jobId) throw new Error("Missing job ID");
+      toast({
+        title: response?.data?.deduped ? "Using existing export job" : "Timeline export queued",
+        description: `Job ID: ${jobId}`,
+      });
+    } catch (error: any) {
+      toast({
+        title: "Timeline export queue failed",
+        description: error?.response?.data?.message || error?.message || "Failed to queue timeline export",
+        variant: "destructive",
+      });
+    }
   };
 
   // Login history query for Login History tab
@@ -5221,11 +5270,14 @@ export default function AdminDashboard() {
   // Audit trail query for combined audit events (signups, logins, admin actions)
   const { data: auditTrailData, isLoading: isLoadingAuditTrail } = useQuery<{
     signups: Array<{ id: number; email: string; username: string; createdAt: number }>;
-    logins: Array<{ id: number; email: string; success: boolean; ip: string | null; createdAt: number }>;
-    adminActions: Array<{ id: number; adminId: number; userId: number; actionType: string; createdAt: number; metadata?: string }>;
+    logins: Array<{ id: number; userId?: number | null; email: string; success: boolean; ip: string | null; createdAt: number; sessionId?: string | null }>;
+    adminActions: Array<{ id: number; adminId: number; userId: number; actionType: string; createdAt: number; metadata?: string; metadataJson?: Record<string, unknown> | null }>;
+    identityEvents: Array<{ id: number; at: number; userId?: number | null; email?: string | null; type: string; category?: string | null; sessionId?: string | null; correlationId?: string | null; eventHash?: string | null }>;
+    tradeAuditEvents: Array<{ id: number; eventAtSec?: number | null; eventType: string; correlationId?: string | null; tradeId?: number | null; orderId?: string | null; executionId?: string | null; positionId?: string | null; userEmail?: string | null; username?: string | null; riskResult?: string | null; reasonCode?: string | null; symbol?: string | null; side?: string | null; qtyLots?: number | null; sessionId?: string | null; ip?: string | null; userAgent?: string | null }>;
+    orderIntentEvents: Array<{ id: number; eventAtSec?: number | null; eventCode: string; decision?: string | null; correlationId: string; userId?: number | null; userEmail?: string | null; username?: string | null; rejectCheck?: string | null; rejectReason?: string | null; symbol?: string | null; side?: string | null; qtyLots?: number | null; sessionId?: string | null; ip?: string | null; userAgent?: string | null }>;
   }>({
     queryKey: ["/api/admin/audit-trail"],
-    queryFn: () => axios.get("/api/admin/audit-trail").then(r => r.data),
+    queryFn: () => axios.get("/api/admin/audit-trail?limit=200&includeDeepTrade=1&includeLinkage=1").then(r => r.data),
     enabled: userFilterTab === "audit",
   });
 
@@ -5874,7 +5926,7 @@ export default function AdminDashboard() {
                   </div>
                   <div className="flex gap-2 flex-wrap">
                     <Button
-                      onClick={exportUsers}
+                      onClick={() => queueUserExport("csv")}
                       variant="csv"
                       size="sm"
                       className="text-xs sm:text-sm"
@@ -5883,13 +5935,22 @@ export default function AdminDashboard() {
                       Export CSV
                     </Button>
                     <Button
-                      onClick={exportUsersJsonl}
+                      onClick={() => queueUserExport("jsonl")}
                       variant="jsonl"
                       size="sm"
                       className="text-xs sm:text-sm"
                       title={USER_MANAGEMENT_FIELD_HELP.exportJsonl.tooltip}
                     >
                       Export JSONL
+                    </Button>
+                    <Button
+                      onClick={() => queueUserExport("parquet")}
+                      variant="parquet"
+                      size="sm"
+                      className="text-xs sm:text-sm"
+                      title={USER_MANAGEMENT_FIELD_HELP.exportParquet.tooltip}
+                    >
+                      Export Parquet
                     </Button>
                   </div>
                 </div>
@@ -6213,22 +6274,30 @@ export default function AdminDashboard() {
                           <FieldHintLabel label="Audit Trail" hint={USER_MANAGEMENT_FIELD_HELP.auditOverview.tooltip} />
                           <p className="text-xs text-cyan-100/90 mt-1">{USER_MANAGEMENT_FIELD_HELP.auditOverview.inline}</p>
                         </div>
-                        <div className="flex gap-4 mb-4">
-                          <div className="bg-blue-900/30 border border-blue-600/50 rounded-lg p-4 flex-1">
+                        <div className="grid gap-4 mb-4 grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+                          <div className="bg-blue-900/30 border border-blue-600/50 rounded-lg p-4">
                             <div className="text-3xl font-bold text-blue-400">{auditTrailData?.signups?.length || 0}</div>
                             <div className="text-sm text-gray-400">Recent Signups</div>
                           </div>
-                          <div className="bg-green-900/30 border border-green-600/50 rounded-lg p-4 flex-1">
+                          <div className="bg-green-900/30 border border-green-600/50 rounded-lg p-4">
                             <div className="text-3xl font-bold text-green-400">{auditTrailData?.logins?.filter(l => l.success).length || 0}</div>
                             <div className="text-sm text-gray-400">Successful Logins</div>
                           </div>
-                          <div className="bg-red-900/30 border border-red-600/50 rounded-lg p-4 flex-1">
+                          <div className="bg-red-900/30 border border-red-600/50 rounded-lg p-4">
                             <div className="text-3xl font-bold text-red-400">{auditTrailData?.logins?.filter(l => !l.success).length || 0}</div>
                             <div className="text-sm text-gray-400">Failed Logins</div>
                           </div>
-                          <div className="bg-orange-900/30 border border-orange-600/50 rounded-lg p-4 flex-1">
+                          <div className="bg-orange-900/30 border border-orange-600/50 rounded-lg p-4">
                             <div className="text-3xl font-bold text-orange-400">{auditTrailData?.adminActions?.length || 0}</div>
                             <div className="text-sm text-gray-400">Admin Actions</div>
+                          </div>
+                          <div className="bg-cyan-900/30 border border-cyan-600/50 rounded-lg p-4">
+                            <div className="text-3xl font-bold text-cyan-300">{auditTrailData?.tradeAuditEvents?.length || 0}</div>
+                            <div className="text-sm text-gray-400">Trade Audit Events</div>
+                          </div>
+                          <div className="bg-purple-900/30 border border-purple-600/50 rounded-lg p-4">
+                            <div className="text-3xl font-bold text-purple-300">{auditTrailData?.orderIntentEvents?.length || 0}</div>
+                            <div className="text-sm text-gray-400">Order Intent Events</div>
                           </div>
                         </div>
 
@@ -6243,6 +6312,9 @@ export default function AdminDashboard() {
                               { value: "login_success", label: "Login Success", color: "bg-green-600" },
                               { value: "login_fail", label: "Login Fail", color: "bg-red-600" },
                               { value: "admin", label: "Admin Actions", color: "bg-orange-600" },
+                              { value: "identity", label: "Identity", color: "bg-indigo-600" },
+                              { value: "trade_audit", label: "Trade Audit", color: "bg-cyan-700" },
+                              { value: "order_intent", label: "Order Intent", color: "bg-purple-700" },
                             ].map(filter => (
                               <button
                                 key={filter.value}
@@ -6293,6 +6365,7 @@ export default function AdminDashboard() {
                                         timezone: s.signupClientTz || s.signupInferredTz || null,
                                         device: [s.signupDeviceType, s.signupBrowser, s.signupOs].filter(Boolean).join(' / ') || parseUserAgent(s.signupUserAgent),
                                         userAgent: s.signupUserAgent || null,
+                                        link: null as string | null,
                                       })) || []),
                                       ...(auditTrailData?.logins?.map((l: any) => {
                                         const loginIp = l.ip ?? l.ipAddress ?? l.ip_address ?? null;
@@ -6309,6 +6382,7 @@ export default function AdminDashboard() {
                                           timezone: l.clientTz || null,
                                           device: parseUserAgent(loginUa),
                                           userAgent: loginUa,
+                                          link: null as string | null,
                                         };
                                       }) || []),
                                       ...(auditTrailData?.adminActions?.map((a: any) => ({
@@ -6323,6 +6397,73 @@ export default function AdminDashboard() {
                                         timezone: null,
                                         device: parseUserAgent(a.userAgent),
                                         userAgent: a.userAgent || null,
+                                        link: null as string | null,
+                                      })) || [])
+                                      ,
+                                      ...(auditTrailData?.identityEvents?.map((e: any) => ({
+                                        type: 'IDENTITY_EVENT' as const,
+                                        time: e.at,
+                                        email: e.email || `User #${e.userId ?? "?"}`,
+                                        detail: [e.category, e.type, e.title].filter(Boolean).join(" • "),
+                                        id: `identity-${e.id}`,
+                                        ip: null,
+                                        location: null,
+                                        coords: null,
+                                        timezone: null,
+                                        device: null,
+                                        userAgent: null,
+                                        link: [e.correlationId ? `corr:${e.correlationId}` : null, e.sessionId ? `session:${e.sessionId}` : null].filter(Boolean).join(" | "),
+                                      })) || []),
+                                      ...(auditTrailData?.tradeAuditEvents?.map((t: any) => ({
+                                        type: 'TRADE_AUDIT' as const,
+                                        time: Number(t.eventAtSec || 0),
+                                        email: t.userEmail || t.username || `User #${t.userId ?? t.actorUserId ?? "?"}`,
+                                        detail: [
+                                          t.eventType,
+                                          t.symbol ? `${t.symbol}${t.side ? ` ${t.side}` : ""}` : null,
+                                          t.qtyLots != null ? `${Number(t.qtyLots)} lots` : null,
+                                          t.riskResult ? `risk:${t.riskResult}` : null,
+                                          t.reasonCode ? `reason:${t.reasonCode}` : null,
+                                        ].filter(Boolean).join(" • "),
+                                        id: `trade-audit-${t.id}`,
+                                        ip: t.ip || null,
+                                        location: null,
+                                        coords: null,
+                                        timezone: null,
+                                        device: parseUserAgent(t.userAgent),
+                                        userAgent: t.userAgent || null,
+                                        link: [
+                                          t.tradeId != null ? `trade:${t.tradeId}` : null,
+                                          t.orderId ? `order:${t.orderId}` : null,
+                                          t.executionId ? `exec:${t.executionId}` : null,
+                                          t.positionId ? `pos:${t.positionId}` : null,
+                                          t.correlationId ? `corr:${t.correlationId}` : null,
+                                          t.sessionId ? `session:${t.sessionId}` : null,
+                                        ].filter(Boolean).join(" | "),
+                                      })) || []),
+                                      ...(auditTrailData?.orderIntentEvents?.map((o: any) => ({
+                                        type: 'ORDER_INTENT' as const,
+                                        time: Number(o.eventAtSec || 0),
+                                        email: o.userEmail || o.username || `User #${o.userId ?? "?"}`,
+                                        detail: [
+                                          o.eventCode,
+                                          o.symbol ? `${o.symbol}${o.side ? ` ${o.side}` : ""}` : null,
+                                          o.qtyLots != null ? `${Number(o.qtyLots)} lots` : null,
+                                          o.decision ? `decision:${o.decision}` : null,
+                                          o.rejectCheck ? `check:${o.rejectCheck}` : null,
+                                          o.rejectReason ? `reason:${o.rejectReason}` : null,
+                                        ].filter(Boolean).join(" • "),
+                                        id: `order-intent-${o.id}`,
+                                        ip: o.ip || null,
+                                        location: null,
+                                        coords: null,
+                                        timezone: null,
+                                        device: parseUserAgent(o.userAgent),
+                                        userAgent: o.userAgent || null,
+                                        link: [
+                                          o.correlationId ? `corr:${o.correlationId}` : null,
+                                          o.sessionId ? `session:${o.sessionId}` : null,
+                                        ].filter(Boolean).join(" | "),
                                       })) || [])
                                     ];
 
@@ -6333,11 +6474,17 @@ export default function AdminDashboard() {
                                         if (auditEventFilter === "login_success") return event.type === "LOGIN_SUCCESS";
                                         if (auditEventFilter === "login_fail") return event.type === "LOGIN_FAIL";
                                         if (auditEventFilter === "admin") return event.type === "ADMIN_ACTION";
+                                        if (auditEventFilter === "identity") return event.type === "IDENTITY_EVENT";
+                                        if (auditEventFilter === "trade_audit") return event.type === "TRADE_AUDIT";
+                                        if (auditEventFilter === "order_intent") return event.type === "ORDER_INTENT";
                                         return true;
                                       });
                                     }
 
-                                    allEvents = allEvents.sort((a, b) => b.time - a.time).slice(0, 100);
+                                    allEvents = allEvents
+                                      .filter((event) => Number.isFinite(Number(event.time)) && Number(event.time) > 0)
+                                      .sort((a, b) => b.time - a.time)
+                                      .slice(0, 200);
 
                                     if (allEvents.length === 0) {
                                       return (
@@ -6360,13 +6507,21 @@ export default function AdminDashboard() {
                                           <span className={`text-xs px-2 py-0.5 rounded whitespace-nowrap ${event.type === 'SIGNUP' ? 'bg-blue-600 text-white' :
                                             event.type === 'LOGIN_SUCCESS' ? 'bg-green-600 text-white' :
                                               event.type === 'LOGIN_FAIL' ? 'bg-red-600 text-white' :
-                                                'bg-orange-600 text-white'
+                                                event.type === 'ADMIN_ACTION' ? 'bg-orange-600 text-white' :
+                                                  event.type === 'IDENTITY_EVENT' ? 'bg-indigo-600 text-white' :
+                                                    event.type === 'TRADE_AUDIT' ? 'bg-cyan-700 text-white' :
+                                                      'bg-purple-700 text-white'
                                             }`}>
                                             {event.type.replace('_', ' ')}
                                           </span>
                                         </TableCell>
                                         <TableCell className="py-3 px-3 font-medium text-sm">{event.email}</TableCell>
-                                        <TableCell className="py-3 px-3 text-gray-400 text-sm">{event.detail}</TableCell>
+                                        <TableCell className="py-3 px-3 text-gray-400 text-sm">
+                                          <div>{event.detail}</div>
+                                          {event.link ? (
+                                            <div className="text-[10px] font-mono text-gray-500 mt-1 break-all">{event.link}</div>
+                                          ) : null}
+                                        </TableCell>
                                         <TableCell className="py-3 px-3">
                                           {event.ip ? (
                                             <span className="text-xs font-mono text-cyan-400" title={event.ip}>
@@ -8757,15 +8912,21 @@ export default function AdminDashboard() {
           <DialogFooter>
             <Button
               variant="csv"
-              onClick={() => window.open(`/api/admin/export/users/${timelineUser?.id}/timeline`, '_blank')}
+              onClick={() => queueUserTimelineExport("csv")}
             >
               Export CSV
             </Button>
             <Button
               variant="jsonl"
-              onClick={() => window.open(`/api/admin/export/users/${timelineUser?.id}/timeline/jsonl`, '_blank')}
+              onClick={() => queueUserTimelineExport("jsonl")}
             >
               Export JSONL
+            </Button>
+            <Button
+              variant="parquet"
+              onClick={() => queueUserTimelineExport("parquet")}
+            >
+              Export Parquet
             </Button>
             <Button variant="outline" onClick={() => setTimelineDialogOpen(false)} className="bg-neutral-700">
               Close

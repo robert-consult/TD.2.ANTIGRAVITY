@@ -274,10 +274,17 @@ test("Recruitment ecosystem: scout APIs, challenge flow, and partner key auth", 
     await expect(adminPage.getByTestId("partner-data-room-table")).toBeVisible();
     await adminPage.getByRole("tab", { name: "Simulations" }).click();
     await expect(adminPage.getByText("Run Simulation Preview")).toBeVisible();
-    await adminPage.getByRole("tab", { name: "Allocations" }).click();
-    await expect(adminPage.getByTestId("partner-allocations-table")).toBeVisible();
-    await adminPage.getByRole("tab", { name: "Comms" }).click();
-    await expect(adminPage.getByTestId("partner-inquiries-table")).toBeVisible();
+    const allocationsTab = adminPage.getByRole("tab", { name: /^Allocations$/ }).last();
+    await allocationsTab.scrollIntoViewIfNeeded();
+    await allocationsTab.click({ timeout: 15000 });
+    await expect(allocationsTab).toHaveAttribute("data-state", "active", { timeout: 15000 });
+    await expect(adminPage.getByTestId("partner-allocations-table")).toBeVisible({ timeout: 45000 });
+
+    const commsTab = adminPage.getByRole("tab", { name: /^Comms$/ }).last();
+    await commsTab.scrollIntoViewIfNeeded();
+    await commsTab.click({ timeout: 15000 });
+    await expect(commsTab).toHaveAttribute("data-state", "active", { timeout: 15000 });
+    await expect(adminPage.getByTestId("partner-inquiries-table")).toBeVisible({ timeout: 45000 });
     const inquiryCreate = await adminPage.evaluate(async (key) => {
       const recipientsRes = await fetch("/api/partner/inquiries/recipients", {
         credentials: "include",

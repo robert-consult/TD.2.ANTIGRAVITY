@@ -310,115 +310,35 @@ export default function AdminData() {
     fetchDeactivatedSummary();
   }, [dataTab, dateRange]);
 
-  // Generate and download CSV data
-  const downloadCSV = (type: 'traders' | 'trades' | 'daily') => {
-    const generateTraderCSV = () => {
-      const headers = ['User ID', 'Username', 'Email', 'Total Trades', 'Win Rate (%)', 
-                       'Profit ($)', 'Profit (%)', 'Avg Hold Time (h)', 'Last Trade'];
-      
-      // Create CSV content manually with proper escaping
-      let csvContent = headers.join(',') + '\n';
-      
-      traderStats.forEach(trader => {
-        const row = [
-          trader.user_id,
-          escapeCsvValue(trader.username),
-          escapeCsvValue(trader.email),
-          trader.total_trades,
-          trader.win_rate,
-          trader.profit,
-          trader.profit_percent,
-          trader.avg_hold_time,
-          trader.last_trade_date
-        ];
-        csvContent += row.join(',') + '\n';
+  const queueStatsExport = (type: "traders" | "trades" | "daily", format: "csv" | "jsonl" | "parquet") => {
+    if (type === "traders") {
+      createExportJobMutation.mutate({
+        type: "trader_scouting",
+        format,
+        filters: {
+          days: Number(dateRange),
+        },
       });
-      
-      return csvContent;
-    };
-    
-    if (type === 'traders' && traderStats.length > 0) {
-      const csvContent = generateTraderCSV();
-      downloadString(csvContent, 'trader_statistics.csv');
-    } else if (type === 'trades') {
+      return;
+    }
+
+    if (type === "trades") {
       createExportJobMutation.mutate({
         type: "all_trades",
-        format: "csv",
-        filters: { limit: 100000 },
+        format,
+        filters: { limit: 500_000 },
       });
-    } else if (type === 'daily') {
-      createExportJobMutation.mutate({
-        type: "daily_pnl",
-        format: "csv",
-        filters: { limitDays: 365 },
-      });
+      return;
     }
-  };
-  
-  // Helper function to escape CSV values properly
-  const escapeCsvValue = (value: any): string => {
-    if (value === null || value === undefined) {
-      return '';
-    }
-    
-    const stringValue = String(value);
-    
-    // If the value contains commas, quotes, or newlines, wrap it in quotes and escape any existing quotes
-    if (stringValue.includes(',') || stringValue.includes('"') || stringValue.includes('\n')) {
-      return '"' + stringValue.replace(/"/g, '""') + '"';
-    }
-    
-    return stringValue;
-  };
-  
-  const downloadString = (content: string, filename: string, mimeType: string = 'text/csv;charset=utf-8;') => {
-    const blob = new Blob([content], { type: mimeType });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.setAttribute('href', url);
-    link.setAttribute('download', filename);
-    link.style.visibility = 'hidden';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+
+    createExportJobMutation.mutate({
+      type: "daily_pnl",
+      format,
+      filters: { limitDays: Number(dateRange) > 0 ? Number(dateRange) : 3650 },
+    });
   };
 
-  // Generate and download JSONL data
-  const downloadJSONL = (type: 'traders' | 'trades' | 'daily') => {
-    const generateTraderJSONL = () => {
-      return traderStats.map(trader => JSON.stringify({
-        userId: trader.user_id,
-        username: trader.username,
-        email: trader.email,
-        totalTrades: trader.total_trades,
-        winRate: trader.win_rate,
-        profit: trader.profit,
-        profitPercent: trader.profit_percent,
-        avgHoldTimeHours: trader.avg_hold_time,
-        lastTradeDate: trader.last_trade_date,
-        exportedAt: new Date().toISOString(),
-      })).join('\n');
-    };
-    
-    if (type === 'traders' && traderStats.length > 0) {
-      const jsonlContent = generateTraderJSONL();
-      downloadString(jsonlContent, 'trader_statistics.jsonl', 'application/x-ndjson');
-    } else if (type === 'trades') {
-      createExportJobMutation.mutate({
-        type: "all_trades",
-        format: "jsonl",
-        filters: { limit: 100000 },
-      });
-    } else if (type === 'daily') {
-      createExportJobMutation.mutate({
-        type: "daily_pnl",
-        format: "jsonl",
-        filters: { limitDays: 365 },
-      });
-    }
-  };
-
-  const downloadDeactivatedExport = (format: "csv" | "jsonl") => {
+  const downloadDeactivatedExport = (format: "csv" | "jsonl" | "parquet") => {
     createExportJobMutation.mutate({
       type: "deactivated_accounts",
       format,
@@ -593,16 +513,23 @@ export default function AdminData() {
                   <Button 
                     variant="csv" 
                     size="sm"
-                    onClick={() => downloadCSV('traders')}
+                    onClick={() => queueStatsExport("traders", "csv")}
                   >
                     CSV
                   </Button>
                   <Button 
                     variant="jsonl" 
                     size="sm"
-                    onClick={() => downloadJSONL('traders')}
+                    onClick={() => queueStatsExport("traders", "jsonl")}
                   >
                     JSONL
+                  </Button>
+                  <Button
+                    variant="parquet"
+                    size="sm"
+                    onClick={() => queueStatsExport("traders", "parquet")}
+                  >
+                    Parquet
                   </Button>
                 </div>
               </div>
@@ -612,16 +539,23 @@ export default function AdminData() {
                   <Button 
                     variant="csv" 
                     size="sm"
-                    onClick={() => downloadCSV('trades')}
+                    onClick={() => queueStatsExport("trades", "csv")}
                   >
                     CSV
                   </Button>
                   <Button 
                     variant="jsonl" 
                     size="sm"
-                    onClick={() => downloadJSONL('trades')}
+                    onClick={() => queueStatsExport("trades", "jsonl")}
                   >
                     JSONL
+                  </Button>
+                  <Button
+                    variant="parquet"
+                    size="sm"
+                    onClick={() => queueStatsExport("trades", "parquet")}
+                  >
+                    Parquet
                   </Button>
                 </div>
               </div>
@@ -631,16 +565,23 @@ export default function AdminData() {
                   <Button 
                     variant="csv" 
                     size="sm"
-                    onClick={() => downloadCSV('daily')}
+                    onClick={() => queueStatsExport("daily", "csv")}
                   >
                     CSV
                   </Button>
                   <Button 
                     variant="jsonl" 
                     size="sm"
-                    onClick={() => downloadJSONL('daily')}
+                    onClick={() => queueStatsExport("daily", "jsonl")}
                   >
                     JSONL
+                  </Button>
+                  <Button
+                    variant="parquet"
+                    size="sm"
+                    onClick={() => queueStatsExport("daily", "parquet")}
+                  >
+                    Parquet
                   </Button>
                 </div>
               </div>
@@ -1124,6 +1065,9 @@ export default function AdminData() {
                     </Button>
                     <Button variant="jsonl" size="sm" onClick={() => downloadDeactivatedExport("jsonl")}>
                       Export JSONL
+                    </Button>
+                    <Button variant="parquet" size="sm" onClick={() => downloadDeactivatedExport("parquet")}>
+                      Export Parquet
                     </Button>
                     <span className="text-xs text-gray-400">
                       Includes deactivated accounts and related trades.

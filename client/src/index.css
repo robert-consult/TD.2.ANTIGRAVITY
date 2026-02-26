@@ -70,6 +70,8 @@
     --export-csv-hover: 142 71% 40%;
     --export-jsonl: 271 81% 56%;
     --export-jsonl-hover: 271 81% 48%;
+    --export-parquet: 30 96% 48%;
+    --export-parquet-hover: 30 96% 42%;
 
     /* Fluid layout tokens */
     --page-gutter: clamp(0.75rem, 2vw, 1.5rem);

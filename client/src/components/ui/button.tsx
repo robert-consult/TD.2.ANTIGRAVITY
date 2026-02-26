@@ -20,6 +20,7 @@ const buttonVariants = cva(
         link: "text-primary underline-offset-4 hover:underline",
         csv: "bg-[hsl(var(--export-csv))] text-white border-[hsl(var(--export-csv))] hover:bg-[hsl(var(--export-csv-hover))]",
         jsonl: "bg-[hsl(var(--export-jsonl))] text-white border-[hsl(var(--export-jsonl))] hover:bg-[hsl(var(--export-jsonl-hover))]",
+        parquet: "bg-[hsl(var(--export-parquet))] text-white border-[hsl(var(--export-parquet))] hover:bg-[hsl(var(--export-parquet-hover))]",
       },
       size: {
         default: "h-10 px-4 py-2",

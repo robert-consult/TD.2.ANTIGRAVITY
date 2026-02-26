@@ -60,6 +60,11 @@ function getLocalLinkSigningSecret(): string {
   if (legal.length >= 32) return legal;
   const session = String(process.env.SESSION_SECRET ?? "").trim();
   if (session.length >= 32) return session;
+  if (process.env.NODE_ENV === "production") {
+    throw new Error(
+      "EXPORT_LOCAL_LINK_SIGNING_SECRET (or LEGAL_TERMS_HMAC_SECRET/SESSION_SECRET >= 32 chars) is required in production",
+    );
+  }
   return "dev-local-link-signing-secret-not-for-production";
 }
 

@@ -4,9 +4,11 @@ import {
 } from "@shared/instruments/categories";
 import type {
   DeactivatedAccountsExportFilters,
+  OrderIntentAuditExportFilters,
+  TradeAuditExportFilters,
   TraderScoutingExportFilters,
 } from "@shared/admin/dataExports";
-import { queryClickHouseJson } from "./clickhouseClient";
+import { getClickHouseClient, queryClickHouseJson } from "./clickhouseClient";
 
 function toFiniteNumber(value: unknown, fallback = 0): number {
   const parsed = Number(value);
@@ -220,17 +222,24 @@ export async function queryDeactivatedAccountsFromClickHouse(params: {
   };
 }
 
-export async function queryTraderScoutingFromClickHouse(params: {
+function buildTraderScoutingClickHouseQuery(params: {
   filters: TraderScoutingExportFilters;
   cutoffSec: number;
-  exportLimit: number;
-}): Promise<{ rows: any[]; truncated: boolean } | null> {
+  limitRows?: number | null;
+}): {
+  query: string;
+  queryParams: Record<string, unknown>;
+} {
   const filters = params.filters;
   const categories = normalizeCategories(filters.categories);
   const q = String(filters.q || "").trim().slice(0, 200);
-  const limitRows = Math.max(1, Math.min(200_000, Math.trunc(params.exportLimit + 1)));
+  const limitRows =
+    params.limitRows == null || !Number.isFinite(params.limitRows)
+      ? null
+      : Math.max(1, Math.trunc(params.limitRows));
+  const limitSql = limitRows == null ? "" : "\n      LIMIT {limitRows:UInt64}";
 
-  const rows = await queryClickHouseJson<any>({
+  return {
     query: `
       WITH ft AS (
         SELECT
@@ -409,9 +418,9 @@ export async function queryTraderScoutingFromClickHouse(params: {
       WHERE ({applyMaxDrawdown:UInt8} = 0 OR (isNotNull(d.max_drawdown) AND d.max_drawdown <= {maxDrawdown:Float64}))
         AND ({applyMaxBestDayPct:UInt8} = 0 OR (isNotNull(b.best_day_pct) AND b.best_day_pct <= {maxBestDayPct:Float64}))
       ORDER BY c.net_profit DESC, c.trades DESC, u.id ASC
-      LIMIT {limitRows:UInt32}
+      ${limitSql}
     `,
-    query_params: {
+    queryParams: {
       cutoffSec: Math.max(0, Math.trunc(params.cutoffSec || 0)),
       applyCategories: categories.length ? 1 : 0,
       categories,
@@ -436,12 +445,247 @@ export async function queryTraderScoutingFromClickHouse(params: {
       maxDrawdown: toFiniteNumber(filters.maxDrawdown, 0),
       applyMaxBestDayPct: filters.maxBestDayPct == null ? 0 : 1,
       maxBestDayPct: toFiniteNumber(filters.maxBestDayPct, 0),
-      limitRows: limitRows,
+      ...(limitRows == null ? {} : { limitRows }),
+    },
+  };
+}
+
+export async function queryTraderScoutingFromClickHouse(params: {
+  filters: TraderScoutingExportFilters;
+  cutoffSec: number;
+  exportLimit: number;
+}): Promise<{ rows: any[]; truncated: boolean } | null> {
+  const hardLimit = Math.max(1, Math.trunc(params.exportLimit));
+  const built = buildTraderScoutingClickHouseQuery({
+    filters: params.filters,
+    cutoffSec: params.cutoffSec,
+    limitRows: hardLimit + 1,
+  });
+  const rows = await queryClickHouseJson<any>({
+    query: built.query,
+    query_params: built.queryParams,
+  });
+  if (!rows) return null;
+  const truncated = rows.length > hardLimit;
+  const sliced = truncated ? rows.slice(0, hardLimit) : rows;
+  return { rows: sliced, truncated };
+}
+
+type ClickHouseStreamRow = {
+  json?: <T = any>() => T;
+  text?: string;
+};
+
+export async function streamTraderScoutingFromClickHouse(params: {
+  filters: TraderScoutingExportFilters;
+  cutoffSec: number;
+  limitRows?: number | null;
+}): Promise<AsyncIterable<any> | null> {
+  const ch = getClickHouseClient();
+  if (!ch) return null;
+  const built = buildTraderScoutingClickHouseQuery({
+    filters: params.filters,
+    cutoffSec: params.cutoffSec,
+    limitRows: params.limitRows,
+  });
+  const rs = await ch.query({
+    query: built.query,
+    query_params: built.queryParams,
+    format: "JSONEachRow",
+  });
+  const stream = rs.stream<any>() as AsyncIterable<ClickHouseStreamRow[]>;
+
+  async function* iterate(): AsyncGenerator<any, void, unknown> {
+    try {
+      for await (const batch of stream) {
+        for (const row of batch || []) {
+          if (row && typeof row.json === "function") {
+            yield row.json<any>();
+            continue;
+          }
+          const raw = row && typeof row.text === "string" ? row.text : "";
+          if (raw) {
+            try {
+              yield JSON.parse(raw);
+            } catch {
+              // ignore malformed row payloads from stream fallback parser
+            }
+            continue;
+          }
+          if (row != null) yield row as any;
+        }
+      }
+    } finally {
+      rs.close();
+    }
+  }
+
+  return iterate();
+}
+
+export async function queryTradeAuditFromClickHouse(params: {
+  filters: TradeAuditExportFilters;
+}): Promise<{ rows: any[]; truncated: boolean } | null> {
+  const filters = params.filters;
+  const limitRows = Math.max(1, Math.min(5_000_000, Math.trunc((filters.limit ?? 100_000) + 1)));
+  const rows = await queryClickHouseJson<any>({
+    query: `
+      SELECT
+        id,
+        trade_id AS "tradeId",
+        event_type AS "eventType",
+        event_category AS "eventCategory",
+        event_at AS "eventAt",
+        event_at_ms AS "eventAtMs",
+        correlation_id AS "correlationId",
+        order_id AS "orderId",
+        execution_id AS "executionId",
+        position_id AS "positionId",
+        actor_type AS "actorType",
+        actor_user_id AS "actorUserId",
+        session_id AS "sessionId",
+        ip,
+        user_agent AS "userAgent",
+        symbol,
+        side,
+        order_type AS "orderType",
+        time_in_force AS "timeInForce",
+        qty_lots AS "qtyLots",
+        notional_usd AS "notionalUsd",
+        gross_profit_usd AS "grossProfitUsd",
+        net_profit_usd AS "netProfitUsd",
+        total_costs_usd AS "totalCostsUsd",
+        open_commission_usd AS "openCommissionUsd",
+        close_commission_usd AS "closeCommissionUsd",
+        open_other_fees_usd AS "openOtherFeesUsd",
+        close_other_fees_usd AS "closeOtherFeesUsd",
+        financing_accrued_usd AS "financingAccruedUsd",
+        swap_accrued_usd AS "swapAccruedUsd",
+        overnight_days AS "overnightDays",
+        category_snapshot AS "categorySnapshot",
+        cost_model_version AS "costModelVersion",
+        requested_price AS "requestedPrice",
+        trigger_price AS "triggerPrice",
+        limit_price AS "limitPrice",
+        stop_price AS "stopPrice",
+        fill_price AS "fillPrice",
+        avg_fill_price AS "avgFillPrice",
+        slippage,
+        slippage_pips AS "slippagePips",
+        slippage_reference AS "slippageReference",
+        latency_ms AS "latencyMs",
+        quote_ts AS "quoteTs",
+        quote_source AS "quoteSource",
+        quote_bid AS "quoteBid",
+        quote_ask AS "quoteAsk",
+        quote_mid AS "quoteMid",
+        quote_spread AS "quoteSpread",
+        spread_pips AS "spreadPips",
+        risk_check_name AS "riskCheckName",
+        risk_limit_value AS "riskLimitValue",
+        risk_observed_value AS "riskObservedValue",
+        risk_result AS "riskResult",
+        reason_code AS "reasonCode",
+        payload_json AS "payloadJson",
+        prev_hash AS "prevHash",
+        event_hash AS "eventHash",
+        note,
+        user_id AS "userId",
+        username,
+        user_email AS "userEmail"
+      FROM admin_trade_audit FINAL
+      WHERE ({applyTradeId:UInt8} = 0 OR trade_id = {tradeId:UInt64})
+        AND ({applyEventType:UInt8} = 0 OR event_type = {eventType:String})
+        AND ({applyRiskResult:UInt8} = 0 OR risk_result = {riskResult:String})
+        AND ({applyCorrelation:UInt8} = 0 OR correlation_id = {correlationId:String})
+      ORDER BY event_at DESC, id DESC
+      LIMIT {limitRows:UInt32}
+    `,
+    query_params: {
+      applyTradeId: filters.tradeId == null ? 0 : 1,
+      tradeId: Math.max(0, Math.trunc(toFiniteNumber(filters.tradeId, 0))),
+      applyEventType: filters.eventType ? 1 : 0,
+      eventType: String(filters.eventType || ""),
+      applyRiskResult: filters.riskResult ? 1 : 0,
+      riskResult: String(filters.riskResult || ""),
+      applyCorrelation: filters.correlationId ? 1 : 0,
+      correlationId: String(filters.correlationId || ""),
+      limitRows,
     },
   });
 
   if (!rows) return null;
-  const truncated = rows.length > Math.max(0, Math.trunc(params.exportLimit));
-  const sliced = truncated ? rows.slice(0, params.exportLimit) : rows;
+  const hardLimit = Math.max(1, Math.min(5_000_000, Math.trunc(filters.limit ?? 100_000)));
+  const truncated = rows.length > hardLimit;
+  const sliced = truncated ? rows.slice(0, hardLimit) : rows;
+  return { rows: sliced, truncated };
+}
+
+export async function queryOrderIntentAuditFromClickHouse(params: {
+  filters: OrderIntentAuditExportFilters;
+}): Promise<{ rows: any[]; truncated: boolean } | null> {
+  const filters = params.filters;
+  const limitRows = Math.max(1, Math.min(5_000_000, Math.trunc((filters.limit ?? 100_000) + 1)));
+  const rows = await queryClickHouseJson<any>({
+    query: `
+      SELECT
+        id,
+        correlation_id AS "correlationId",
+        event_at AS "eventAt",
+        event_at_ms AS "eventAtMs",
+        event_code AS "eventCode",
+        decision,
+        reject_check AS "rejectCheck",
+        reject_reason AS "rejectReason",
+        actor_type AS "actorType",
+        user_id AS "userId",
+        session_id AS "sessionId",
+        ip,
+        user_agent AS "userAgent",
+        symbol,
+        side,
+        order_type AS "orderType",
+        time_in_force AS "timeInForce",
+        qty_lots AS "qtyLots",
+        requested_price AS "requestedPrice",
+        limit_price AS "limitPrice",
+        stop_price AS "stopPrice",
+        take_profit AS "takeProfit",
+        stop_loss AS "stopLoss",
+        quote_bid AS "quoteBid",
+        quote_ask AS "quoteAsk",
+        quote_mid AS "quoteMid",
+        quote_ts AS "quoteTs",
+        quote_is_stale AS "quoteIsStale",
+        risk_limit_json AS "riskLimitJson",
+        risk_observed_json AS "riskObservedJson",
+        risk_snapshot_json AS "riskSnapshotJson",
+        payload_json AS "payloadJson",
+        prev_hash AS "prevHash",
+        event_hash AS "eventHash",
+        username,
+        user_email AS "userEmail"
+      FROM admin_order_intent_audit FINAL
+      WHERE ({applyCorrelation:UInt8} = 0 OR correlation_id = {correlationId:String})
+        AND ({applyDecision:UInt8} = 0 OR decision = {decision:String})
+        AND ({applyUserId:UInt8} = 0 OR user_id = {userId:UInt64})
+      ORDER BY event_at DESC, id DESC
+      LIMIT {limitRows:UInt32}
+    `,
+    query_params: {
+      applyCorrelation: filters.correlationId ? 1 : 0,
+      correlationId: String(filters.correlationId || ""),
+      applyDecision: filters.decision ? 1 : 0,
+      decision: String(filters.decision || ""),
+      applyUserId: filters.userId == null ? 0 : 1,
+      userId: Math.max(0, Math.trunc(toFiniteNumber(filters.userId, 0))),
+      limitRows,
+    },
+  });
+
+  if (!rows) return null;
+  const hardLimit = Math.max(1, Math.min(5_000_000, Math.trunc(filters.limit ?? 100_000)));
+  const truncated = rows.length > hardLimit;
+  const sliced = truncated ? rows.slice(0, hardLimit) : rows;
   return { rows: sliced, truncated };
 }

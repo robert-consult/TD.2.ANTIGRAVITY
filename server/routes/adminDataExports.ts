@@ -45,6 +45,18 @@ function canAccessJob(req: any, job: { requestedByAdminId: number | null }): boo
   return job.requestedByAdminId === adminId;
 }
 
+function exportFormatExtension(format: string): string {
+  if (format === "jsonl") return "jsonl";
+  if (format === "parquet") return "parquet";
+  return "csv";
+}
+
+function exportFormatContentType(format: string): string {
+  if (format === "jsonl") return "application/x-ndjson";
+  if (format === "parquet") return "application/vnd.apache.parquet";
+  return "text/csv; charset=utf-8";
+}
+
 type RateLimitEntry = { count: number; resetAtMs: number };
 const createRateByAdminId = new Map<number, RateLimitEntry>();
 const downloadRateByAdminId = new Map<number, RateLimitEntry>();
@@ -128,6 +140,14 @@ async function createAndEnqueueJob(args: {
   return { jobId: created.job.id, deduped: created.deduped };
 }
 
+function requireSuperAdmin(req: any, res: any, next: any): void {
+  if (req?.session?.isSuperAdmin) {
+    next();
+    return;
+  }
+  res.status(403).json({ message: "Forbidden" });
+}
+
 export const adminDataExportsRouter = Router();
 adminDataExportsRouter.use(requireAdmin);
 
@@ -192,7 +212,7 @@ adminDataExportsRouter.get("/files", async (req: any, res) => {
   if (!localPath) return res.status(404).json({ message: "Not a local artifact" });
   if (!fs.existsSync(localPath)) return res.status(404).json({ message: "Artifact file missing" });
 
-  const ext = job.format === "jsonl" ? "jsonl" : "csv";
+  const ext = exportFormatExtension(job.format);
   const fileName = String(req.query.name || `${job.type}-${job.id}.${ext}`);
   if (
     !verifyLocalDownloadLink({
@@ -207,7 +227,7 @@ adminDataExportsRouter.get("/files", async (req: any, res) => {
   res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
   res.setHeader(
     "Content-Type",
-    job.format === "jsonl" ? "application/x-ndjson" : "text/csv; charset=utf-8",
+    exportFormatContentType(job.format),
   );
   return res.sendFile(path.basename(localPath), { root: path.dirname(localPath) });
 });
@@ -296,7 +316,7 @@ adminDataExportsRouter.get("/:jobId/download-link", async (req: any, res) => {
     return res.status(410).json({ message: "Export artifact expired" });
   }
 
-  const extension = job.format === "jsonl" ? "jsonl" : "csv";
+  const extension = exportFormatExtension(job.format);
   const fileName = `${job.type}-${job.id}.${extension}`;
   if (!enforceAdminRateLimit({ res, adminId: getSessionAdminId(req), kind: "download" })) return;
   const link = await getExportDownloadLink({
@@ -336,6 +356,40 @@ adminDataExportsRouter.post("/trader-scouting", async (req: any, res) => {
   }
 });
 
+adminDataExportsRouter.post("/users", async (req: any, res) => {
+  try {
+    const requestedByAdminId = getSessionAdminId(req);
+    if (!requestedByAdminId) return res.status(403).json({ message: "Forbidden" });
+    if (!enforceAdminRateLimit({ res, adminId: requestedByAdminId, kind: "create" })) return;
+    const parsed = adminDataExportCreateRequestSchema.parse({
+      type: "users",
+      format: req.body?.format ?? "csv",
+      filters: req.body?.filters ?? {},
+    });
+    const result = await createAndEnqueueJob({ request: parsed, requestedByAdminId });
+    return res.json({ ok: true, ...result });
+  } catch (err: any) {
+    return res.status(400).json({ message: err?.message || "Failed to create users export job" });
+  }
+});
+
+adminDataExportsRouter.post("/user-timeline", async (req: any, res) => {
+  try {
+    const requestedByAdminId = getSessionAdminId(req);
+    if (!requestedByAdminId) return res.status(403).json({ message: "Forbidden" });
+    if (!enforceAdminRateLimit({ res, adminId: requestedByAdminId, kind: "create" })) return;
+    const parsed = adminDataExportCreateRequestSchema.parse({
+      type: "user_timeline",
+      format: req.body?.format ?? "csv",
+      filters: req.body?.filters ?? {},
+    });
+    const result = await createAndEnqueueJob({ request: parsed, requestedByAdminId });
+    return res.json({ ok: true, ...result });
+  } catch (err: any) {
+    return res.status(400).json({ message: err?.message || "Failed to create user timeline export job" });
+  }
+});
+
 adminDataExportsRouter.post("/deactivated-accounts", async (req: any, res) => {
   try {
     const requestedByAdminId = getSessionAdminId(req);
@@ -353,9 +407,45 @@ adminDataExportsRouter.post("/deactivated-accounts", async (req: any, res) => {
   }
 });
 
-if (String(process.env.BULL_BOARD_ENABLED || "1").trim() !== "0") {
+adminDataExportsRouter.post("/trade-audit", async (req: any, res) => {
+  try {
+    const requestedByAdminId = getSessionAdminId(req);
+    if (!requestedByAdminId) return res.status(403).json({ message: "Forbidden" });
+    if (!enforceAdminRateLimit({ res, adminId: requestedByAdminId, kind: "create" })) return;
+    const parsed = adminDataExportCreateRequestSchema.parse({
+      type: "trade_audit",
+      format: req.body?.format ?? "csv",
+      filters: req.body?.filters ?? {},
+    });
+    const result = await createAndEnqueueJob({ request: parsed, requestedByAdminId });
+    return res.json({ ok: true, ...result });
+  } catch (err: any) {
+    return res.status(400).json({ message: err?.message || "Failed to create trade audit export job" });
+  }
+});
+
+adminDataExportsRouter.post("/order-intent-audit", async (req: any, res) => {
+  try {
+    const requestedByAdminId = getSessionAdminId(req);
+    if (!requestedByAdminId) return res.status(403).json({ message: "Forbidden" });
+    if (!enforceAdminRateLimit({ res, adminId: requestedByAdminId, kind: "create" })) return;
+    const parsed = adminDataExportCreateRequestSchema.parse({
+      type: "order_intent_audit",
+      format: req.body?.format ?? "csv",
+      filters: req.body?.filters ?? {},
+    });
+    const result = await createAndEnqueueJob({ request: parsed, requestedByAdminId });
+    return res.json({ ok: true, ...result });
+  } catch (err: any) {
+    return res.status(400).json({ message: err?.message || "Failed to create order intent audit export job" });
+  }
+});
+
+if (
+  String(process.env.BULL_BOARD_ENABLED ?? (process.env.NODE_ENV === "production" ? "0" : "1")).trim() !== "0"
+) {
   const adapter = getAdminExportBullBoardAdapter();
   if (adapter) {
-    adminDataExportsRouter.use("/queues", adapter.getRouter());
+    adminDataExportsRouter.use("/queues", requireSuperAdmin, adapter.getRouter());
   }
 }

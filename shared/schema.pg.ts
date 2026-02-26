@@ -2077,7 +2077,7 @@ export const adminDataExportJobs = pgTable(
   {
     id: text("id").primaryKey(),
     type: text("type").notNull(), // trader_scouting | deactivated_accounts | all_trades | daily_pnl
-    format: text("format").notNull(), // csv | jsonl
+    format: text("format").notNull(), // csv | jsonl | parquet
     status: text("status").notNull().default("QUEUED"), // QUEUED | RUNNING | READY | FAILED | CANCELED | EXPIRED
     requestedByAdminId: integer("requested_by_admin_id"),
     filterHash: text("filter_hash"),
@@ -2123,6 +2123,25 @@ export const adminDataExportJobEvents = pgTable(
 
 export const insertAdminDataExportJobSchema = createInsertSchema(adminDataExportJobs);
 export const insertAdminDataExportJobEventSchema = createInsertSchema(adminDataExportJobEvents);
+
+// Admin DataTab rollup snapshots (bounded read model for hot dashboard endpoints)
+export const adminDataRollups = pgTable(
+  "admin_data_rollups",
+  {
+    metricKey: text("metric_key").notNull(),
+    windowDays: integer("window_days").notNull().default(0),
+    computedAt: integer("computed_at").notNull().default(nowUnix),
+    dataJson: text("data_json").notNull().default("{}"),
+    source: text("source").notNull().default("sql"),
+    refreshedByRole: text("refreshed_by_role"),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.metricKey, table.windowDays], name: "admin_data_rollups_pk" }),
+    computedIdx: index("idx_admin_data_rollups_computed").on(table.metricKey, table.windowDays, table.computedAt),
+  }),
+);
+
+export const insertAdminDataRollupSchema = createInsertSchema(adminDataRollups);
 
 // Migration export/import jobs (backup + platform migration)
 export const migrationExportJobs = pgTable("migration_export_jobs", {

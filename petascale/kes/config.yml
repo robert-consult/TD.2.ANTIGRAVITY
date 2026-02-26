@@ -16,4 +16,4 @@ policy:
       - /v1/status
 keystore:
   fs:
-    path: /kes/keys
+    path: /kes-data/keys

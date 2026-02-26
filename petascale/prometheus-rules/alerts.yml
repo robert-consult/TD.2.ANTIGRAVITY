@@ -10,6 +10,14 @@ groups:
         annotations:
           summary: "Admin export queue backlog is growing"
           description: "Queue waiting jobs > 200 for 5m."
+      - alert: TradehubAdminExportQueueBacklogCritical
+        expr: admin_data_export_queue_waiting > 1000
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Admin export queue backlog is critical"
+          description: "Queue waiting jobs > 1000 for 10m."
       - alert: TradehubAdminExportFailureSpike
         expr: increase(admin_data_export_jobs_failed_total[10m]) > 5
         for: 2m
@@ -42,6 +50,22 @@ groups:
         annotations:
           summary: "ClickHouse sync is stale"
           description: "No successful ClickHouse sync observed for 30 minutes."
+      - alert: TradehubAdminRollupRefreshStale
+        expr: (time() - admin_data_rollup_refresh_last_success_at) > 3600
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Admin rollup refresh is stale"
+          description: "No successful rollup refresh observed for over 1 hour."
+      - alert: TradehubAdminRollupRefreshFailing
+        expr: increase(admin_data_rollup_refresh_failed_total[30m]) > 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Admin rollup refresh failures detected"
+          description: "One or more rollup refresh runs failed in the last 30 minutes."
       - alert: TradehubMinioStorageUnavailable
         expr: up{job="minio"} == 0
         for: 2m

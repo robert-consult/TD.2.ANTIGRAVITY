@@ -13,6 +13,7 @@ import { applyQuoteUpdate, getQuoteMeta } from "../services/quoteHub";
 import { getProviderRateLimitStats } from "../marketdata/rateLimit";
 import { getMessagingMetrics } from "../services/messaging";
 import { getAdminExportMetricsSnapshot } from "../services/adminDataExportMetrics";
+import { getAdminDataRollupMetricsSnapshot } from "../services/adminDataRollups";
 import { getClickHouseSyncMetricsSnapshot } from "../services/clickhouseSync";
 import { getAllowedSymbolsForUser } from "../services/quoteSubscriptions";
 import {
@@ -58,6 +59,7 @@ import {
   incWsOriginRejectedTotal,
   incWsUserConnectionLimitRejectedTotal,
 } from "./metricsState";
+import { isPrivateOrLoopbackIp } from "@shared/security/requestIdentity";
 
 export type LiveClient = WebSocket & {
   userId?: number;
@@ -111,12 +113,48 @@ const wss = new WebSocketServer({
   maxPayload: wsMaxPayloadBytes,
 });
 
-app.get("/metrics", (_req, res) => {
+function wsEnvFlagEnabled(raw: string | undefined, fallback: boolean): boolean {
+  if (raw === undefined) return fallback;
+  const normalized = String(raw).trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
+  return fallback;
+}
+
+const metricsRequirePrivateAccess = wsEnvFlagEnabled(
+  process.env.METRICS_REQUIRE_PRIVATE,
+  process.env.NODE_ENV === "production",
+);
+const metricsAuthToken = String(process.env.METRICS_AUTH_TOKEN ?? "").trim();
+
+function hasValidMetricsToken(req: Request): boolean {
+  if (!metricsAuthToken) return false;
+  const rawAuth = String(req.headers.authorization ?? "").trim();
+  if (rawAuth.toLowerCase().startsWith("bearer ")) {
+    const presented = rawAuth.slice("Bearer ".length).trim();
+    if (presented === metricsAuthToken) return true;
+  }
+  const headerToken = String(req.headers["x-metrics-token"] ?? "").trim();
+  return Boolean(headerToken && headerToken === metricsAuthToken);
+}
+
+function canAccessMetrics(req: Request): boolean {
+  if (hasValidMetricsToken(req)) return true;
+  if (!metricsRequirePrivateAccess) return true;
+  const clientIp = getClientIp(req as any);
+  return Boolean(clientIp && isPrivateOrLoopbackIp(clientIp));
+}
+
+app.get("/metrics", (req, res) => {
+  if (!canAccessMetrics(req)) {
+    return res.status(403).json({ message: "Forbidden" });
+  }
   const quoteMeta = getQuoteMeta();
   const wsCount = wss.clients ? wss.clients.size : 0;
   const providerRateStats = getProviderRateLimitStats();
   const messagingMetrics = getMessagingMetrics();
   const exportMetrics = getAdminExportMetricsSnapshot();
+  const rollupMetrics = getAdminDataRollupMetricsSnapshot();
   const clickhouseSyncMetrics = getClickHouseSyncMetricsSnapshot();
   const metricSnapshot = getRouteMetricSnapshot();
   res.setHeader("Content-Type", "text/plain; version=0.0.4");
@@ -250,6 +288,33 @@ app.get("/metrics", (_req, res) => {
       "# HELP admin_data_export_retention_expired_total Export artifacts expired by retention sweeps",
       "# TYPE admin_data_export_retention_expired_total counter",
       `admin_data_export_retention_expired_total ${exportMetrics.retentionExpiredTotal}`,
+      "# HELP admin_data_rollup_refresh_running Whether rollup refresh is currently running",
+      "# TYPE admin_data_rollup_refresh_running gauge",
+      `admin_data_rollup_refresh_running ${rollupMetrics.runningGauge}`,
+      "# HELP admin_data_rollup_refresh_last_run_at Last rollup refresh run unix timestamp",
+      "# TYPE admin_data_rollup_refresh_last_run_at gauge",
+      `admin_data_rollup_refresh_last_run_at ${rollupMetrics.lastRunAtSec}`,
+      "# HELP admin_data_rollup_refresh_last_success_at Last successful rollup refresh unix timestamp",
+      "# TYPE admin_data_rollup_refresh_last_success_at gauge",
+      `admin_data_rollup_refresh_last_success_at ${rollupMetrics.lastSuccessAtSec}`,
+      "# HELP admin_data_rollup_refresh_last_failure_at Last failed rollup refresh unix timestamp",
+      "# TYPE admin_data_rollup_refresh_last_failure_at gauge",
+      `admin_data_rollup_refresh_last_failure_at ${rollupMetrics.lastFailureAtSec}`,
+      "# HELP admin_data_rollup_refresh_last_duration_ms Last rollup refresh duration in milliseconds",
+      "# TYPE admin_data_rollup_refresh_last_duration_ms gauge",
+      `admin_data_rollup_refresh_last_duration_ms ${rollupMetrics.lastDurationMs}`,
+      "# HELP admin_data_rollup_refresh_total Total rollup refresh runs",
+      "# TYPE admin_data_rollup_refresh_total counter",
+      `admin_data_rollup_refresh_total ${rollupMetrics.refreshTotal}`,
+      "# HELP admin_data_rollup_refresh_failed_total Total failed rollup refresh runs",
+      "# TYPE admin_data_rollup_refresh_failed_total counter",
+      `admin_data_rollup_refresh_failed_total ${rollupMetrics.refreshFailedTotal}`,
+      "# HELP admin_data_rollup_recompute_total Total rollup recomputations triggered",
+      "# TYPE admin_data_rollup_recompute_total counter",
+      `admin_data_rollup_recompute_total ${rollupMetrics.recomputeTotal}`,
+      "# HELP admin_data_rollup_last_refreshed_metric_count Number of metric/window entries refreshed in last run",
+      "# TYPE admin_data_rollup_last_refreshed_metric_count gauge",
+      `admin_data_rollup_last_refreshed_metric_count ${rollupMetrics.lastRefreshedMetricCount}`,
       "# HELP clickhouse_sync_running Whether ClickHouse sync tick is currently running",
       "# TYPE clickhouse_sync_running gauge",
       `clickhouse_sync_running ${clickhouseSyncMetrics.runningGauge}`,
@@ -283,6 +348,12 @@ app.get("/metrics", (_req, res) => {
       "# HELP clickhouse_sync_last_event_rows Rows synced for admin_user_account_events in last tick",
       "# TYPE clickhouse_sync_last_event_rows gauge",
       `clickhouse_sync_last_event_rows ${clickhouseSyncMetrics.lastSyncedEventRows}`,
+      "# HELP clickhouse_sync_last_trade_audit_rows Rows synced for admin_trade_audit in last tick",
+      "# TYPE clickhouse_sync_last_trade_audit_rows gauge",
+      `clickhouse_sync_last_trade_audit_rows ${clickhouseSyncMetrics.lastSyncedTradeAuditRows}`,
+      "# HELP clickhouse_sync_last_order_intent_rows Rows synced for admin_order_intent_audit in last tick",
+      "# TYPE clickhouse_sync_last_order_intent_rows gauge",
+      `clickhouse_sync_last_order_intent_rows ${clickhouseSyncMetrics.lastSyncedOrderIntentRows}`,
       "",
     ].join("\n"),
   );

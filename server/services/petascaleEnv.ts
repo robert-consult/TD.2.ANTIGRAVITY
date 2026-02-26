@@ -20,6 +20,7 @@ function parseIntBounded(
 }
 
 export type PetascaleRuntimeConfig = {
+  allowInsecureInternalTransport: boolean;
   queueEnabled: boolean;
   queueName: string;
   queueConcurrency: number;
@@ -54,6 +55,7 @@ export function getPetascaleRuntimeConfig(): PetascaleRuntimeConfig {
   if (cached) return cached;
 
   const cfg: PetascaleRuntimeConfig = {
+    allowInsecureInternalTransport: parseBool(process.env.ALLOW_INSECURE_INTERNAL_TRANSPORT, false),
     queueEnabled: parseBool(process.env.ADMIN_DATA_EXPORT_QUEUE_ENABLED, true),
     queueName: String(process.env.ADMIN_DATA_EXPORT_QUEUE_NAME || "admin-export-v1").trim(),
     queueConcurrency: parseIntBounded(process.env.ADMIN_DATA_EXPORT_QUEUE_CONCURRENCY, 2, 1, 32),
@@ -90,6 +92,23 @@ export function getPetascaleRuntimeConfig(): PetascaleRuntimeConfig {
     clickhouseDatabase: String(process.env.CLICKHOUSE_DATABASE || "tradehub").trim(),
     clickhouseRequestTimeoutMs: parseIntBounded(process.env.CLICKHOUSE_REQUEST_TIMEOUT_MS, 120_000, 5000, 600_000),
   };
+
+  const isProduction = process.env.NODE_ENV === "production";
+  if (isProduction && !cfg.allowInsecureInternalTransport) {
+    if (cfg.objectStorageEnabled && cfg.objectStorageEndpoint && !cfg.objectStorageUseSsl) {
+      throw new Error(
+        "EXPORT_OBJECT_STORAGE_USE_SSL must be enabled in production. " +
+          "For private-network exceptions, set ALLOW_INSECURE_INTERNAL_TRANSPORT=1 explicitly.",
+      );
+    }
+
+    if (cfg.clickhouseEnabled && cfg.clickhouseUrl && /^http:\/\//i.test(cfg.clickhouseUrl)) {
+      throw new Error(
+        "CLICKHOUSE_URL must use https:// in production. " +
+          "For private-network exceptions, set ALLOW_INSECURE_INTERNAL_TRANSPORT=1 explicitly.",
+      );
+    }
+  }
 
   cached = cfg;
   return cfg;

@@ -193,8 +193,10 @@ export default function TraderSearchTab({ days }: { days: string }) {
   const exportFilters = useMemo(() => {
     const payload: Record<string, unknown> = {
       days: daysInt,
-      exportLimit: Math.max(1, Math.min(50_000, Math.trunc(clampNumber(exportLimit, 5000)))),
     };
+    if (exportLimit.trim()) {
+      payload.exportLimit = Math.max(1, Math.trunc(clampNumber(exportLimit, 5000)));
+    }
 
     if (minTrades.trim()) payload.minTrades = Math.max(0, Math.trunc(clampNumber(minTrades.trim(), 0)));
 
@@ -260,7 +262,7 @@ export default function TraderSearchTab({ days }: { days: string }) {
   ]);
 
   const exportMutation = useMutation({
-    mutationFn: async (format: "csv" | "jsonl") => {
+    mutationFn: async (format: "csv" | "jsonl" | "parquet") => {
       const res = await apiRequest("POST", "/api/admin/data-exports/trader-scouting", {
         format,
         filters: exportFilters,
@@ -551,6 +553,16 @@ export default function TraderSearchTab({ days }: { days: string }) {
                 data-testid="trader-search-export-jsonl"
               >
                 Export JSONL
+              </Button>
+
+              <Button
+                type="button"
+                onClick={() => exportMutation.mutate("parquet")}
+                disabled={exportMutation.isPending}
+                variant="parquet"
+                data-testid="trader-search-export-parquet"
+              >
+                Export Parquet
               </Button>
             </div>
 

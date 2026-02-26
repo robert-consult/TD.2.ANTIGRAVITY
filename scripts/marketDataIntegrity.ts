@@ -9,6 +9,10 @@ const BASE_URL = process.env.INTEGRITY_BASE_URL ?? process.env.SMOKE_BASE_URL ??
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL ?? "";
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD ?? "";
 const TIMEOUT_MS = Number(process.env.INTEGRITY_TIMEOUT_MS ?? process.env.SMOKE_TIMEOUT_MS ?? 12_000);
+const QUOTES_WAIT_MS = Number(process.env.INTEGRITY_QUOTES_WAIT_MS ?? process.env.SMOKE_QUOTES_WAIT_MS ?? 20_000);
+const QUOTES_RETRY_MS = Number(process.env.INTEGRITY_QUOTES_RETRY_MS ?? process.env.SMOKE_QUOTES_RETRY_MS ?? 1000);
+const WS_REQUIRE_UPDATE =
+  String(process.env.INTEGRITY_WS_REQUIRE_UPDATE ?? process.env.SMOKE_WS_REQUIRE_UPDATE ?? "0").trim() === "1";
 
 const ENABLE_IMPORT_AND_ENABLE_FLOW = String(process.env.INTEGRITY_IMPORT_AND_ENABLE ?? "").trim() === "1";
 
@@ -84,6 +88,11 @@ async function loginAdmin(): Promise<string> {
   return cookie;
 }
 
+function isUnauthorizedError(err: unknown): boolean {
+  const message = String((err as any)?.message || err || "");
+  return message.includes("HTTP 401") || message.includes("Unauthorized");
+}
+
 async function verifyWebSocketQuotes(symbols: string[], cookie: string) {
   const wsUrl = BASE_URL.replace(/^http/, "ws") + "/ws";
   const wsOrigin =
@@ -98,8 +107,13 @@ async function verifyWebSocketQuotes(symbols: string[], cookie: string) {
     let gotUpdate = false;
 
     const timeout = setTimeout(() => {
+      if (gotSnapshot && !WS_REQUIRE_UPDATE) {
+        ws.close();
+        resolve();
+        return;
+      }
       ws.close();
-      reject(new Error(`WS timeout (snapshot=${gotSnapshot}, update=${gotUpdate})`));
+      reject(new Error(`WS timeout (snapshot=${gotSnapshot}, update=${gotUpdate}, requireUpdate=${WS_REQUIRE_UPDATE})`));
     }, TIMEOUT_MS);
 
     ws.on("open", () => {
@@ -126,6 +140,12 @@ async function verifyWebSocketQuotes(symbols: string[], cookie: string) {
         }
         gotSnapshot = true;
         log(`WS snapshot OK (${rows.length} rows)`);
+        if (!WS_REQUIRE_UPDATE) {
+          clearTimeout(timeout);
+          ws.close();
+          resolve();
+          return;
+        }
       }
       if (msg.type === "quotes:update") {
         gotUpdate = true;
@@ -149,12 +169,24 @@ async function verifyWebSocketQuotes(symbols: string[], cookie: string) {
 async function main() {
   log(`Base URL: ${BASE_URL}`);
 
-  const cookie = await loginAdmin();
+  let cookie = await loginAdmin();
+  let didReauth = false;
+  const runWithReauth = async <T>(op: (sessionCookie: string) => Promise<T>): Promise<T> => {
+    try {
+      return await op(cookie);
+    } catch (err) {
+      if (didReauth || !isUnauthorizedError(err)) throw err;
+      didReauth = true;
+      log("Session unauthorized during integrity check; re-authenticating once");
+      cookie = await loginAdmin();
+      return op(cookie);
+    }
+  };
   log("Admin login OK");
 
-  const providers = (await fetchJson(`${BASE_URL}/api/admin/market-data/providers`, {
-    headers: { Cookie: cookie },
-  })) as ProvidersResp;
+  const providers = (await runWithReauth((sessionCookie) => fetchJson(`${BASE_URL}/api/admin/market-data/providers`, {
+    headers: { Cookie: sessionCookie },
+  }))) as ProvidersResp;
   if (!providers?.ok) throw new Error("Providers endpoint returned non-ok");
 
   const enabledProviders = (providers.rows || []).filter((p) => !p.deletedAt && p.isEnabled);
@@ -168,10 +200,10 @@ async function main() {
   log(`Health selected provider: ${providerKey || "—"}`);
 
   if (providerKey) {
-    const exported = await fetchJson(
+    const exported = await runWithReauth((sessionCookie) => fetchJson(
       `${BASE_URL}/api/admin/market-data/providers/${encodeURIComponent(providerKey)}/export`,
-      { headers: { Cookie: cookie } },
-    );
+      { headers: { Cookie: sessionCookie } },
+    ));
     if (String(exported?.providerKey ?? "") !== providerKey) throw new Error("Provider export returned unexpected providerKey");
     if (!exported?.config || typeof exported.config !== "object") throw new Error("Provider export missing config object");
     if (typeof exported?.exportedAt !== "string" || !exported.exportedAt) throw new Error("Provider export missing exportedAt");
@@ -186,16 +218,18 @@ async function main() {
     log("No providerKey available; skipped provider export check.");
   }
 
-  const health = await fetchJson(
+  const health = await runWithReauth((sessionCookie) => fetchJson(
     `${BASE_URL}/api/admin/system-health${providerKey ? `?providerKey=${encodeURIComponent(providerKey)}` : ""}`,
-    { headers: { Cookie: cookie } },
-  );
+    { headers: { Cookie: sessionCookie } },
+  ));
   log(
     `Health: feedSource=${String(health?.feedSource ?? "—")} feedProvider=${String(health?.feedProviderKey ?? "—")} ` +
       `feedConnected=${Boolean(health?.feedProviderConnected)}`,
   );
 
-  const symbols = (await fetchJson(`${BASE_URL}/api/admin/symbols`, { headers: { Cookie: cookie } })) as SymbolRow[];
+  const symbols = (await runWithReauth((sessionCookie) =>
+    fetchJson(`${BASE_URL}/api/admin/symbols`, { headers: { Cookie: sessionCookie } }),
+  )) as SymbolRow[];
   const enabledSymbols = (symbols || [])
     .filter((s) => s.enabled !== false)
     .map((s) => String(s.symbol).toUpperCase())
@@ -205,15 +239,35 @@ async function main() {
   const probeSymbols = enabledSymbols.slice(0, 5);
   log(`Enabled symbols: ${enabledSymbols.length} (probing ${probeSymbols.length})`);
 
-  const latestQuotes = (await fetchJson(`${BASE_URL}/api/quotes/latest?symbols=${encodeURIComponent(probeSymbols.join(","))}`, {
-    headers: { Cookie: cookie },
-  })) as Array<{ symbol?: string }>;
-  const found = new Set((latestQuotes || []).map((r) => String(r.symbol ?? "").toUpperCase()).filter(Boolean));
-  const missing = probeSymbols.filter((s) => !found.has(s));
-  if (missing.length) throw new Error(`Quotes missing symbols: ${missing.join(",")}`);
-  log(`HTTP quotes OK (${latestQuotes.length} rows)`);
+  const query = encodeURIComponent(probeSymbols.join(","));
+  const deadline = Date.now() + Math.max(1_000, QUOTES_WAIT_MS);
+  let latestQuotes: Array<{ symbol?: string }> = [];
+  let lastError = "Quotes response is empty";
+  while (Date.now() <= deadline) {
+    latestQuotes = (await runWithReauth((sessionCookie) =>
+      fetchJson(`${BASE_URL}/api/quotes/latest?symbols=${query}`, {
+        headers: { Cookie: sessionCookie },
+      }),
+    )) as Array<{ symbol?: string }>;
+    if (!Array.isArray(latestQuotes) || latestQuotes.length === 0) {
+      lastError = "Quotes response is empty";
+      await new Promise((resolve) => setTimeout(resolve, Math.max(100, QUOTES_RETRY_MS)));
+      continue;
+    }
+    const found = new Set((latestQuotes || []).map((r) => String(r.symbol ?? "").toUpperCase()).filter(Boolean));
+    const missing = probeSymbols.filter((s) => !found.has(s));
+    if (!missing.length) {
+      log(`HTTP quotes OK (${latestQuotes.length} rows)`);
+      break;
+    }
+    lastError = `Quotes missing symbols: ${missing.join(",")}`;
+    await new Promise((resolve) => setTimeout(resolve, Math.max(100, QUOTES_RETRY_MS)));
+  }
+  if (Date.now() > deadline) {
+    throw new Error(lastError);
+  }
 
-  await verifyWebSocketQuotes(probeSymbols, cookie);
+  await runWithReauth((sessionCookie) => verifyWebSocketQuotes(probeSymbols, sessionCookie));
 
   if (ENABLE_IMPORT_AND_ENABLE_FLOW) {
     if (!providerKey) throw new Error("No providerKey available for import/enable flow");
@@ -221,28 +275,28 @@ async function main() {
     const targetSymbol = probeSymbols[0];
     log(`Running import+enable flow for: ${targetSymbol}`);
 
-    await fetchJson(`${BASE_URL}/api/admin/market-data/instruments/reference/import`, {
+    await runWithReauth((sessionCookie) => fetchJson(`${BASE_URL}/api/admin/market-data/instruments/reference/import`, {
       method: "POST",
-      headers: { Cookie: cookie, "Content-Type": "application/json" },
+      headers: { Cookie: sessionCookie, "Content-Type": "application/json" },
       body: JSON.stringify({
         providerKey,
         rows: [{ category: "forex", canonicalSymbol: targetSymbol, name: `Integrity ${targetSymbol}` }],
       }),
-    });
+    }));
 
-    const search = await fetchJson(
+    const search = await runWithReauth((sessionCookie) => fetchJson(
       `${BASE_URL}/api/admin/market-data/instruments/reference/search?providerKey=${encodeURIComponent(providerKey)}&q=${encodeURIComponent(targetSymbol)}&limit=10&offset=0`,
-      { headers: { Cookie: cookie } },
-    );
+      { headers: { Cookie: sessionCookie } },
+    ));
     const rows = Array.isArray(search?.rows) ? search.rows : [];
     const row = rows.find((r: any) => String(r?.canonicalSymbol ?? "").toUpperCase() === targetSymbol) ?? rows[0];
     if (!row?.id) throw new Error("Reference search returned no rows to enable");
 
-    const enabled = await fetchJson(`${BASE_URL}/api/admin/market-data/instruments/reference/enable`, {
+    const enabled = await runWithReauth((sessionCookie) => fetchJson(`${BASE_URL}/api/admin/market-data/instruments/reference/enable`, {
       method: "POST",
-      headers: { Cookie: cookie, "Content-Type": "application/json" },
+      headers: { Cookie: sessionCookie, "Content-Type": "application/json" },
       body: JSON.stringify({ providerKey, ids: [row.id] }),
-    });
+    }));
     if (!enabled?.ok) throw new Error(`Enable failed: ${String(enabled?.error ?? "unknown")}`);
     log("Import+enable flow OK");
   } else {

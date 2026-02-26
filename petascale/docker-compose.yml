@@ -69,14 +69,13 @@ services:
 
   # 4) MinIO object storage
   minio:
-    image: minio/minio:RELEASE.2025-11-05T19-17-32Z
+    image: minio/minio:latest
     <<: *common-restart
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minio_admin}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minio_change_me_very_strong}
       MINIO_PROMETHEUS_AUTH_TYPE: ${MINIO_PROMETHEUS_AUTH_TYPE:-public}
-      MINIO_KMS_KES_ENDPOINT: ${MINIO_KMS_KES_ENDPOINT:-https://kes:7373}
     ports:
       - "${MINIO_API_PORT:-9000}:9000"
       - "${MINIO_CONSOLE_PORT:-9001}:9001"
@@ -89,24 +88,15 @@ services:
 
   # 5) KES key management (required by package set)
   kes:
-    image: minio/kes:2025-01-21T17-37-35Z
+    image: minio/kes:latest
     <<: *common-restart
-    command:
-      - /bin/sh
-      - -lc
-      - |
-        mkdir -p /certs /kes/keys
-        if [ ! -f /certs/kes.crt ] || [ ! -f /certs/kes.key ]; then
-          openssl req -x509 -newkey rsa:2048 -nodes \
-            -keyout /certs/kes.key -out /certs/kes.crt -days 3650 \
-            -subj "/CN=kes.local"
-        fi
-        kes server --config /etc/kes/config.yml
+    command: server --config /etc/kes/config.yml
     ports:
       - "${KES_PORT:-7373}:7373"
     volumes:
       - ./kes/config.yml:/etc/kes/config.yml:ro
-      - kes_data:/kes
+      - ./kes/certs:/certs:ro
+      - kes_data:/kes-data
     networks:
       - tradehub
 
@@ -169,7 +159,26 @@ services:
       - -lc
       - |
         pip install --no-cache-dir minio >/tmp/minio-monitor-install.log 2>&1 || true
-        python /opt/minio_monitor/main.py
+        python - <<'PY'
+        import os
+        import time
+        from minio import Minio
+
+        endpoint = os.getenv("MINIO_ENDPOINT", "minio:9000")
+        access_key = os.getenv("MINIO_ACCESS_KEY", "minio_admin")
+        secret_key = os.getenv("MINIO_SECRET_KEY", "minio_change_me_very_strong")
+        bucket = os.getenv("MINIO_BUCKET", "admin-data-exports")
+
+        client = Minio(endpoint=endpoint, access_key=access_key, secret_key=secret_key, secure=False)
+
+        while True:
+          try:
+            exists = client.bucket_exists(bucket)
+            print(f"[minio_monitor] bucket={bucket} exists={exists}", flush=True)
+          except Exception as err:
+            print(f"[minio_monitor] error={err}", flush=True)
+          time.sleep(60)
+        PY
     environment:
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minio_admin}
@@ -213,12 +222,10 @@ services:
 
   # 11) Headlamp Kubernetes UI
   headlamp:
-    image: ghcr.io/headlamp-k8s/headlamp:v0.29.2
+    image: ghcr.io/headlamp-k8s/headlamp:latest
     <<: *common-restart
     ports:
       - "${HEADLAMP_PORT:-4466}:4466"
-    command:
-      - "-in-cluster"
     networks:
       - tradehub
 
@@ -231,6 +238,7 @@ services:
     environment:
       NODE_ENV: production
       APP_ROLE: worker
+      ALLOW_INSECURE_INTERNAL_TRANSPORT: "1"
       PORT: 5000
       DATABASE_URL: postgres://${POSTGRES_USER:-tradehub}:${POSTGRES_PASSWORD:-tradehub_pw_change_me}@postgres:5432/${POSTGRES_DB:-tradehub}
       VALKEY_URL: redis://:${VALKEY_PASSWORD:-valkey_change_me}@valkey:6379/0
@@ -258,11 +266,11 @@ services:
       CLICKHOUSE_SYNC_INTERVAL_SEC: ${CLICKHOUSE_SYNC_INTERVAL_SEC:-300}
       CLICKHOUSE_SYNC_BATCH_SIZE: ${CLICKHOUSE_SYNC_BATCH_SIZE:-20000}
       CLICKHOUSE_SYNC_MAX_LOOPS_PER_TICK: ${CLICKHOUSE_SYNC_MAX_LOOPS_PER_TICK:-4}
-      SESSION_SECRET: ${SESSION_SECRET:-replace_me_before_prod}
-      LEGAL_TERMS_HMAC_SECRET: ${LEGAL_TERMS_HMAC_SECRET:-replace_me_before_prod_32chars}
+      SESSION_SECRET: ${SESSION_SECRET:-replace_me_before_prod_32chars_minimum_secret}
+      LEGAL_TERMS_HMAC_SECRET: ${LEGAL_TERMS_HMAC_SECRET:-replace_me_before_prod_32chars_minimum_secret}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}
-      EMAIL_VERIFY_TOKEN_SECRET: ${EMAIL_VERIFY_TOKEN_SECRET:-replace_me_before_prod_32chars}
-      SMS_OTP_SECRET: ${SMS_OTP_SECRET:-replace_me_before_prod_32chars}
+      EMAIL_VERIFY_TOKEN_SECRET: ${EMAIL_VERIFY_TOKEN_SECRET:-replace_me_before_prod_32chars_minimum_secret}
+      SMS_OTP_SECRET: ${SMS_OTP_SECRET:-replace_me_before_prod_32chars_minimum_secret}
       RESEND_API_KEY: ${RESEND_API_KEY:-dummy}
       TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID:-dummy}
       TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:-dummy}
@@ -290,15 +298,16 @@ services:
     environment:
       NODE_ENV: production
       APP_ROLE: api,ws
+      ALLOW_INSECURE_INTERNAL_TRANSPORT: "1"
       PORT: 5000
       DATABASE_URL: postgres://${POSTGRES_USER:-tradehub}:${POSTGRES_PASSWORD:-tradehub_pw_change_me}@postgres:5432/${POSTGRES_DB:-tradehub}
       VALKEY_URL: redis://:${VALKEY_PASSWORD:-valkey_change_me}@valkey:6379/0
       EXPORT_LOCAL_LINK_SIGNING_SECRET: ${EXPORT_LOCAL_LINK_SIGNING_SECRET:-replace_me_before_prod_32chars}
-      SESSION_SECRET: ${SESSION_SECRET:-replace_me_before_prod}
-      LEGAL_TERMS_HMAC_SECRET: ${LEGAL_TERMS_HMAC_SECRET:-replace_me_before_prod_32chars}
+      SESSION_SECRET: ${SESSION_SECRET:-replace_me_before_prod_32chars_minimum_secret}
+      LEGAL_TERMS_HMAC_SECRET: ${LEGAL_TERMS_HMAC_SECRET:-replace_me_before_prod_32chars_minimum_secret}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}
-      EMAIL_VERIFY_TOKEN_SECRET: ${EMAIL_VERIFY_TOKEN_SECRET:-replace_me_before_prod_32chars}
-      SMS_OTP_SECRET: ${SMS_OTP_SECRET:-replace_me_before_prod_32chars}
+      EMAIL_VERIFY_TOKEN_SECRET: ${EMAIL_VERIFY_TOKEN_SECRET:-replace_me_before_prod_32chars_minimum_secret}
+      SMS_OTP_SECRET: ${SMS_OTP_SECRET:-replace_me_before_prod_32chars_minimum_secret}
       RESEND_API_KEY: ${RESEND_API_KEY:-dummy}
       TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID:-dummy}
       TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:-dummy}

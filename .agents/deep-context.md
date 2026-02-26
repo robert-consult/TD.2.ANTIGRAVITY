@@ -54,6 +54,12 @@ Use this file to locate the right entrypoints quickly; do not “read the whole 
 
 ### Admin, audit, and “grift” controls
 - Admin routes: `server/routes/admin.ts`, `server/routes/adminSecurity.ts`, `server/routes/adminSystemConfig.ts`
+- Admin ops/users/kyc route modules (decomposed): `server/routes/adminOps.ts`, `server/routes/adminUsers.ts`, `server/routes/adminKyc.ts`
+- Institutional audit routes (decomposed): `server/routes/adminInstitutionalAudit.ts`
+- Admin DataTab rollup read-model: `server/routes/adminDataRollups.ts`, `server/services/adminDataRollups.ts`
+- Admin trader scouting routes (decomposed): `server/routes/adminTraderScouting.ts`
+- Admin deep audit trail aggregation + linkage mapping: `server/services/adminAuditTrail.ts`
+- Trader scout query module: `server/services/traderScoutQuery.ts`
 - Admin background export pipeline: `server/routes/adminDataExports.ts`, `server/services/adminDataExportQueue.ts`, `server/services/adminDataExportBuild.ts`, `server/services/adminDataExportBuildClickhouse.ts`, `server/services/objectStorage.ts`
 - Export lifecycle + OLAP sync: `server/services/adminDataExportRetention.ts`, `server/services/clickhouseSync.ts`, `server/services/clickhouseClient.ts`
 - Activity admin: `server/routes/adminActivity.ts`, `scripts/activityAuditVerify.ts`
@@ -86,6 +92,7 @@ Use this file to locate the right entrypoints quickly; do not “read the whole 
 ### Infra / deployment
 - Docker infra (local Postgres/Valkey): `docker-compose.infra.yml`
 - k8s manifests: `k8s/` (notably `60-monitoring.yaml` for Prometheus scraping `/metrics`)
+- Canary/cutover operations runbook: `k8s/RUNBOOK_WORKER_CANARY_API_CUTOVER.md`, `scripts/ops/canary_cutover_runbook.sh`
 
 ## Quick “where is X?” commands (preferred)
 - Find API routes: `rg -n \"app\\.(get|post|patch|put|delete)\\(\" server/routes.ts server/routes`

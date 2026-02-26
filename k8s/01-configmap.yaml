@@ -42,4 +42,8 @@ data:
   CLICKHOUSE_SYNC_INTERVAL_SEC: "300"
   CLICKHOUSE_SYNC_BATCH_SIZE: "20000"
   CLICKHOUSE_SYNC_MAX_LOOPS_PER_TICK: "4"
-  BULL_BOARD_ENABLED: "1"
+  # Explicit risk acceptance flag for private-cluster HTTP transport between pods.
+  # Keep at "0" once ClickHouse/MinIO TLS is enabled end-to-end.
+  ALLOW_INSECURE_INTERNAL_TRANSPORT: "1"
+  # Expose queue internals only when explicitly needed for debugging.
+  BULL_BOARD_ENABLED: "0"

@@ -9,7 +9,6 @@ RUN npm ci
 FROM deps AS build
 COPY . .
 RUN npm run build
-RUN npm prune --omit=dev
 
 FROM gcr.io/distroless/nodejs22-debian12:nonroot AS runner
 WORKDIR /app

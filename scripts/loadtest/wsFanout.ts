@@ -14,6 +14,10 @@ type Args = {
   maxFailed: number;
   minOpenBeforeDrain: number;
   minQuoteUpdates: number;
+  authEmail: string;
+  authPassword: string;
+  authEnabled: boolean;
+  sessionCookieName: string;
 };
 
 function parseArgs(argv: string[]): Args {
@@ -40,6 +44,12 @@ function parseArgs(argv: string[]): Args {
   const maxFailed = Number(args.get("max-failed") ?? clients);
   const minOpenBeforeDrain = Number(args.get("min-open-before-drain") ?? 1);
   const minQuoteUpdates = Number(args.get("min-quote-updates") ?? 0);
+  const authEmail = String(args.get("auth-email") ?? process.env.LOADTEST_AUTH_EMAIL ?? "demo@tradingfx.com");
+  const authPassword = String(args.get("auth-password") ?? process.env.LOADTEST_AUTH_PASSWORD ?? "demo1234");
+  const authEnabled = !["1", "true", "yes", "on"].includes(String(args.get("no-auth") ?? "").toLowerCase());
+  const sessionCookieName = String(
+    args.get("session-cookie-name") ?? process.env.SESSION_COOKIE_NAME ?? "connect.sid",
+  ).trim() || "connect.sid";
   const symbolsRaw = String(args.get("symbols") ?? "EURUSD,GBPUSD,USDJPY,AUDUSD");
   const symbols = symbolsRaw
     .split(",")
@@ -70,6 +80,10 @@ function parseArgs(argv: string[]): Args {
     maxFailed: Math.trunc(maxFailed),
     minOpenBeforeDrain: Math.trunc(minOpenBeforeDrain),
     minQuoteUpdates: Math.trunc(minQuoteUpdates),
+    authEmail,
+    authPassword,
+    authEnabled,
+    sessionCookieName,
   };
 }
 
@@ -130,9 +144,75 @@ function fmtBytes(n: number) {
   return `${v.toFixed(i === 0 ? 0 : 2)} ${units[i]}`;
 }
 
+function splitCombinedSetCookieHeader(headerValue: string): string[] {
+  return String(headerValue || "")
+    .split(/,(?=\\s*[^;=\\s]+=[^;]+)/g)
+    .map((chunk) => chunk.trim())
+    .filter(Boolean);
+}
+
+function extractCookiePair(setCookieValue: string): string {
+  return String(setCookieValue || "").split(";")[0]?.trim() ?? "";
+}
+
+function resolveHttpBaseUrlFromWs(wsUrl: string): string {
+  const u = new URL(wsUrl);
+  if (u.protocol === "ws:") return `http://${u.host}`;
+  if (u.protocol === "wss:") return `https://${u.host}`;
+  if (u.protocol === "http:" || u.protocol === "https:") return `${u.protocol}//${u.host}`;
+  throw new Error(`Unsupported URL protocol for loadtest auth: ${u.protocol}`);
+}
+
+async function loginForCookie(opts: {
+  wsUrl: string;
+  email: string;
+  password: string;
+  sessionCookieName: string;
+}): Promise<string> {
+  const baseUrl = resolveHttpBaseUrlFromWs(opts.wsUrl);
+  const res = await fetch(`${baseUrl}/api/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: opts.email, password: opts.password }),
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`login failed: HTTP ${res.status} ${res.statusText} ${body}`.trim());
+  }
+
+  const expectedPrefix = `${opts.sessionCookieName}=`;
+  const getSetCookie = (res.headers as any)?.getSetCookie;
+  if (typeof getSetCookie === "function") {
+    const values = getSetCookie.call(res.headers);
+    if (Array.isArray(values) && values.length > 0) {
+      const pair = values
+        .map(extractCookiePair)
+        .find((value) => value.startsWith(expectedPrefix));
+      if (pair) return pair;
+    }
+  }
+
+  const fallback = res.headers.get("set-cookie");
+  if (!fallback) throw new Error(`login succeeded but no ${opts.sessionCookieName} cookie was returned`);
+  const pair = splitCombinedSetCookieHeader(fallback)
+    .map(extractCookiePair)
+    .find((value) => value.startsWith(expectedPrefix));
+  if (!pair) throw new Error(`login succeeded but ${opts.sessionCookieName} cookie was not found`);
+  return pair;
+}
+
 async function main() {
   const opts = parseArgs(process.argv.slice(2));
   const cpuCount = os.cpus().length;
+  const authCookie =
+    opts.authEnabled
+      ? await loginForCookie({
+          wsUrl: opts.url,
+          email: opts.authEmail,
+          password: opts.authPassword,
+          sessionCookieName: opts.sessionCookieName,
+        })
+      : null;
 
   const serverRssStartKb = opts.serverPid ? readRssKb(opts.serverPid) : null;
 
@@ -154,14 +234,16 @@ async function main() {
   const perTick = spawnTotalMs === 0 ? opts.clients : Math.max(1, Math.floor(opts.clients / (spawnTotalMs / 100)));
 
   console.log(
-    `[wsFanout] url=${opts.url} origin=${opts.origin ?? "(none)"} clients=${opts.clients} durationSec=${opts.durationSec} rampSec=${opts.rampSec} symbols=${opts.symbols.length} cpu=${cpuCount}`,
+    `[wsFanout] url=${opts.url} origin=${opts.origin ?? "(none)"} clients=${opts.clients} durationSec=${opts.durationSec} rampSec=${opts.rampSec} symbols=${opts.symbols.length} cpu=${cpuCount} auth=${authCookie ? "session-cookie" : "none"}`,
   );
   if (opts.serverPid) {
     console.log(`[wsFanout] serverPid=${opts.serverPid} rssStart=${serverRssStartKb ? `${serverRssStartKb}KB` : "n/a"}`);
   }
 
   const connectOne = () => {
-    const headers = opts.origin ? { Origin: opts.origin } : undefined;
+    const headers: Record<string, string> = {};
+    if (opts.origin) headers.Origin = opts.origin;
+    if (authCookie) headers.Cookie = authCookie;
     const ws = new WebSocket(opts.url, { perMessageDeflate: false, headers });
     sockets.push(ws);
     ws.on("open", () => {

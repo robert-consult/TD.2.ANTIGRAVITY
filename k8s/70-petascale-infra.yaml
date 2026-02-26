@@ -117,7 +117,7 @@ spec:
     spec:
       containers:
         - name: minio
-          image: minio/minio:RELEASE.2025-11-05T19-17-32Z
+          image: minio/minio:latest
           args: ["server", "/data", "--console-address", ":9001"]
           env:
             - name: MINIO_ROOT_USER
@@ -197,7 +197,7 @@ data:
           - /v1/status
     keystore:
       fs:
-        path: /kes/keys
+        path: /kes-data/keys
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -233,7 +233,7 @@ spec:
               mountPath: /certs
       containers:
         - name: kes
-          image: minio/kes:2025-01-21T17-37-35Z
+          image: minio/kes:latest
           args: ["server", "--config=/etc/kes/config.yml"]
           ports:
             - containerPort: 7373
@@ -245,7 +245,7 @@ spec:
             - name: kes-certs
               mountPath: /certs
             - name: kes-data
-              mountPath: /kes
+              mountPath: /kes-data
           resources:
             requests:
               cpu: "100m"

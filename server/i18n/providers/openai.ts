@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { applyGlossary } from "../glossary";
+import { sanitizeExternalErrorText } from "../../security/logSanitizer";
 
 type OpenAiTranslateItem = { id: string; text: string };
 
@@ -252,7 +253,10 @@ export async function translateWithOpenAi(params: {
 
   if (!res.ok) {
     const body = await res.text().catch(() => "");
-    throw new Error(`OpenAI error (${res.status}): ${body}`);
+    const safeDetail = sanitizeExternalErrorText(body, 320);
+    throw new Error(
+      safeDetail ? `OpenAI error (${res.status}): ${safeDetail}` : `OpenAI error (${res.status})`,
+    );
   }
 
   const json = (await res.json()) as any;

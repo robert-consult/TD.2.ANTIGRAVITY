@@ -15,6 +15,13 @@ import { adminMarketDataRouter } from "./routes/adminMarketData";
 import { adminSystemConfigRouter } from "./routes/adminSystemConfig";
 import { adminMigrationRouter } from "./routes/adminMigration";
 import { adminDataExportsRouter } from "./routes/adminDataExports";
+import { adminDataRollupsRouter } from "./routes/adminDataRollups";
+import { adminInstitutionalAuditRouter } from "./routes/adminInstitutionalAudit";
+import { adminDataLegacyCompatRouter } from "./routes/adminDataLegacyCompat";
+import { adminTraderScoutingRouter } from "./routes/adminTraderScouting";
+import { adminOpsRouter } from "./routes/adminOps";
+import { adminUsersRouter } from "./routes/adminUsers";
+import { adminKycRouter } from "./routes/adminKyc";
 import { adminActivityRouter } from "./routes/adminActivity";
 import { adminQuoteSubscriptionsRouter } from "./routes/adminQuoteSubscriptions";
 import { registerMetaRoutes } from "./routes/meta";
@@ -131,6 +138,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use(createAuthRouter(routerCtx));
   app.use(createProfileRouter(routerCtx));
   app.use(createTraderRouter(routerCtx));
+  app.use("/api/admin", adminDataRollupsRouter);
+  app.use("/api/admin", adminInstitutionalAuditRouter);
+  app.use("/api/admin", adminTraderScoutingRouter);
+  app.use("/api/admin", adminOpsRouter);
+  app.use("/api/admin", adminUsersRouter);
+  app.use("/api/admin", adminKycRouter);
+  app.use("/api/admin", adminDataLegacyCompatRouter);
 
   registerAdminRoutes(app);
   registerMarketRoutes(app);

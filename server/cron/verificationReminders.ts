@@ -10,6 +10,7 @@ import { decidePolicy } from "@shared/policyDecision";
 import { loadPolicyConfig } from "../policy/getPolicyConfig";
 import { promotePerformerIfEligible } from "../policy/performerPromotion";
 import { buildSystemContext } from "../lib/auditContext";
+import { sanitizeExternalErrorText, summarizeErrorForLog } from "../security/logSanitizer";
 
 const REMINDER_SCHEDULE = "0 9 * * *"; // 9 AM daily
 const VERIFICATION_TOKEN_EXPIRY_HOURS = 24;
@@ -63,16 +64,22 @@ async function sendVerificationEmail(email: string, token: string, kind: "INITIA
       }),
     });
 
-    const responseData = await response.json();
+    const responseText = await response.text();
     if (!response.ok) {
-      console.error("Resend API error:", responseData);
+      console.error("Resend API error:", sanitizeExternalErrorText(responseText, 320));
       return false;
     }
 
-    console.log("Resend API success - Email sent:", { id: responseData.id, to: email });
+    let responseId: string | null = null;
+    try {
+      responseId = String((JSON.parse(responseText) as any)?.id ?? "") || null;
+    } catch {
+      responseId = null;
+    }
+    console.log("Resend API success - Email sent:", { id: responseId });
     return true;
   } catch (error) {
-    console.error("Error sending verification email:", error);
+    console.error("Error sending verification email:", summarizeErrorForLog(error, { includeStack: false }));
     return false;
   }
 }

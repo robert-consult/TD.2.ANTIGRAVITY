@@ -8,6 +8,11 @@ type TraderSearchResponse = {
   results: Array<{ userId: number; username: string | null; email: string | null; trades: number }>;
 };
 
+type AdminAuthSession = {
+  cookie: string;
+  csrfToken: string;
+};
+
 const BASE_URL = process.env.SMOKE_BASE_URL ?? "http://localhost:5000";
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL ?? "admin@local.test";
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD ?? "changeme";
@@ -61,6 +66,69 @@ function getCookieFromResponse(res: Response): string {
   return "";
 }
 
+function parseSetCookiePairs(headers: Headers): string[] {
+  const getter = (headers as any).getSetCookie;
+  if (typeof getter === "function") {
+    const values = getter.call(headers) as string[];
+    return values
+      .map((raw) => raw.split(";")[0]?.trim() || "")
+      .filter(Boolean);
+  }
+
+  const raw = headers.get("set-cookie") || "";
+  if (!raw) return [];
+  return splitCombinedSetCookieHeader(raw).map(extractCookiePair).filter(Boolean);
+}
+
+function mergeCookieHeader(existingCookie: string, setCookiePairs: string[]): string {
+  const jar = new Map<string, string>();
+  for (const part of String(existingCookie || "").split(";")) {
+    const trimmed = part.trim();
+    if (!trimmed) continue;
+    const eq = trimmed.indexOf("=");
+    if (eq <= 0) continue;
+    const key = trimmed.slice(0, eq).trim();
+    const value = trimmed.slice(eq + 1).trim();
+    if (!key || !value) continue;
+    jar.set(key, value);
+  }
+  for (const pair of setCookiePairs) {
+    const trimmed = pair.trim();
+    if (!trimmed) continue;
+    const eq = trimmed.indexOf("=");
+    if (eq <= 0) continue;
+    const key = trimmed.slice(0, eq).trim();
+    const value = trimmed.slice(eq + 1).trim();
+    if (!key || !value) continue;
+    jar.set(key, value);
+  }
+  return Array.from(jar.entries())
+    .map(([key, value]) => `${key}=${value}`)
+    .join("; ");
+}
+
+async function fetchCsrfToken(cookie: string): Promise<AdminAuthSession> {
+  const res = await fetch(`${BASE_URL}/api/csrf`, {
+    method: "GET",
+    headers: {
+      Cookie: cookie,
+      accept: "application/json",
+    },
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`CSRF fetch failed: HTTP ${res.status} ${res.statusText}: ${text}`);
+  }
+  const body = (await res.json().catch(() => ({}))) as { csrfToken?: string };
+  const csrfToken = String(body?.csrfToken || "");
+  if (!csrfToken) throw new Error("CSRF fetch failed: missing csrfToken");
+  const setCookiePairs = parseSetCookiePairs(res.headers);
+  return {
+    csrfToken,
+    cookie: mergeCookieHeader(cookie, setCookiePairs),
+  };
+}
+
 
 async function fetchJson(url: string, options: RequestInit = {}) {
   if (typeof fetch !== "function") throw new Error("Global fetch() not available in this Node runtime");
@@ -78,17 +146,53 @@ async function fetchJson(url: string, options: RequestInit = {}) {
   return payload;
 }
 
-async function fetchText(url: string, options: RequestInit = {}) {
-  if (typeof fetch !== "function") throw new Error("Global fetch() not available in this Node runtime");
-  const res = await fetch(url, options);
-  const text = await res.text();
-  if (!res.ok) {
-    throw new Error(`HTTP ${res.status} ${res.statusText}: ${text}`);
-  }
-  return { res, text };
+function isUnauthorizedError(err: unknown): boolean {
+  const message = String((err as any)?.message || err || "");
+  return message.includes("HTTP 401") || message.includes("Unauthorized");
 }
 
-async function loginAdmin(): Promise<string> {
+async function queueTraderScoutingExport(auth: AdminAuthSession, format: "csv" | "jsonl" | "parquet") {
+  const res = await fetch(`${BASE_URL}/api/admin/data-exports/trader-scouting`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      accept: "application/json",
+      "x-csrf-token": auth.csrfToken,
+      Cookie: auth.cookie,
+    },
+    body: JSON.stringify({
+      format,
+      filters: {
+        days: 30,
+        exportLimit: 5,
+      },
+    }),
+  });
+  const text = await res.text();
+  let payload: any = null;
+  try {
+    payload = text ? JSON.parse(text) : null;
+  } catch {
+    payload = null;
+  }
+  if (!res.ok) {
+    throw new Error(`Queue export failed (${format}): HTTP ${res.status} ${res.statusText}: ${text}`);
+  }
+  if (!payload?.ok || !payload?.jobId) {
+    throw new Error(`Queue export failed (${format}): malformed response ${text}`);
+  }
+  log(`OK export ${format} queued (jobId=${payload.jobId}${payload.deduped ? ", deduped" : ""})`);
+
+  const status = await fetchJson(`${BASE_URL}/api/admin/data-exports/${encodeURIComponent(String(payload.jobId))}`, {
+    headers: { Cookie: auth.cookie },
+  });
+  if (!status?.ok || !status?.job?.status) {
+    throw new Error(`Queue export status check failed (${format}) for jobId=${payload.jobId}`);
+  }
+  log(`OK export ${format} status probe (${status.job.status})`);
+}
+
+async function loginAdmin(): Promise<AdminAuthSession> {
   const res = await fetch(`${BASE_URL}/api/auth/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -105,7 +209,7 @@ async function loginAdmin(): Promise<string> {
       `Admin login failed: missing ${sessionCookieName} session cookie (check HTTPS/COOKIE_SECURE settings for this environment).`,
     );
   }
-  return cookie;
+  return fetchCsrfToken(cookie);
 }
 
 async function requestSearch(cookie: string, query: Record<string, string | number | undefined>) {
@@ -123,28 +227,46 @@ async function requestSearch(cookie: string, query: Record<string, string | numb
 }
 
 async function main() {
-  const cookie = await loginAdmin();
+  let auth = await loginAdmin();
   log(`Logged in as ${maskEmail(ADMIN_EMAIL)}`);
+  let didReauth = false;
+  const runWithReauth = async <T>(op: (session: AdminAuthSession) => Promise<T>): Promise<T> => {
+    try {
+      return await op(auth);
+    } catch (err) {
+      if (didReauth || !isUnauthorizedError(err)) throw err;
+      didReauth = true;
+      log("Session unauthorized during smoke run; re-authenticating once");
+      auth = await loginAdmin();
+      return op(auth);
+    }
+  };
 
   // 1) No optional filters (q/categories/minTrades omitted)
-  const base = await requestSearch(cookie, { days: 30, limit: 5, offset: 0 });
+  const base = await runWithReauth((session) =>
+    requestSearch(session.cookie, { days: 30, limit: 5, offset: 0 }),
+  );
 
   // 2) Single-field filters (ensure each is optional and independently usable)
-  await requestSearch(cookie, { days: 30, q: "demo" });
-  await requestSearch(cookie, { days: 30, categories: "forex" });
-  await requestSearch(cookie, { days: 30, minWinRate: 0.5 });
-  await requestSearch(cookie, { days: 30, maxDrawdown: 0.5 });
-  await requestSearch(cookie, { days: 30, minNetProfit: 0 });
-  await requestSearch(cookie, { days: 30, maxBestDayPct: 0.9 });
-  await requestSearch(cookie, { days: 30, minProfitFactor: 1.0 });
-  await requestSearch(cookie, { days: 30, minSlUsage: 0.0 });
-  await requestSearch(cookie, { days: 30, minTpUsage: 0.0 });
-  await requestSearch(cookie, { days: 30, minHoldSec: 0 });
-  await requestSearch(cookie, { days: 30, maxHoldSec: 365 * 24 * 3600 });
+  await runWithReauth((session) => requestSearch(session.cookie, { days: 30, q: "demo" }));
+  await runWithReauth((session) => requestSearch(session.cookie, { days: 30, categories: "forex" }));
+  await runWithReauth((session) => requestSearch(session.cookie, { days: 30, minWinRate: 0.5 }));
+  await runWithReauth((session) => requestSearch(session.cookie, { days: 30, maxDrawdown: 0.5 }));
+  await runWithReauth((session) => requestSearch(session.cookie, { days: 30, minNetProfit: 0 }));
+  await runWithReauth((session) => requestSearch(session.cookie, { days: 30, maxBestDayPct: 0.9 }));
+  await runWithReauth((session) => requestSearch(session.cookie, { days: 30, minProfitFactor: 1.0 }));
+  await runWithReauth((session) => requestSearch(session.cookie, { days: 30, minSlUsage: 0.0 }));
+  await runWithReauth((session) => requestSearch(session.cookie, { days: 30, minTpUsage: 0.0 }));
+  await runWithReauth((session) => requestSearch(session.cookie, { days: 30, minHoldSec: 0 }));
+  await runWithReauth((session) =>
+    requestSearch(session.cookie, { days: 30, maxHoldSec: 365 * 24 * 3600 }),
+  );
 
   // 3) Invalid category should 400
   try {
-    await requestSearch(cookie, { days: 30, categories: "not_a_category" });
+    await runWithReauth((session) =>
+      requestSearch(session.cookie, { days: 30, categories: "not_a_category" }),
+    );
     throw new Error("Expected invalid category to fail, but it succeeded");
   } catch (err: any) {
     log(`OK invalid category rejected: ${String(err?.message || err)}`);
@@ -155,8 +277,12 @@ async function main() {
   if (userId) {
     const breakdownUrl = `${BASE_URL}/api/admin/trader-scouting/${userId}/asset-classes?days=30`;
     const extremesUrl = `${BASE_URL}/api/admin/trader-scouting/${userId}/trade-extremes?days=30&limit=5`;
-    const breakdown = await fetchJson(breakdownUrl, { headers: { Cookie: cookie } });
-    const extremes = await fetchJson(extremesUrl, { headers: { Cookie: cookie } });
+    const breakdown = await runWithReauth((session) =>
+      fetchJson(breakdownUrl, { headers: { Cookie: session.cookie } }),
+    );
+    const extremes = await runWithReauth((session) =>
+      fetchJson(extremesUrl, { headers: { Cookie: session.cookie } }),
+    );
     if (!breakdown?.ok) throw new Error("Asset-classes drilldown missing ok=true");
     if (!extremes?.ok) throw new Error("Trade-extremes drilldown missing ok=true");
     log(`OK drilldowns for userId=${userId}`);
@@ -164,25 +290,10 @@ async function main() {
     log("No search rows available; skipped drilldown checks");
   }
 
-  // 5) Exports (CSV + JSONL) - small limit to keep smoke fast.
-  const csvUrl = `${BASE_URL}/api/admin/trader-scouting/export?format=csv&days=30&exportLimit=5`;
-  const csv = await fetchText(csvUrl, { headers: { Cookie: cookie } });
-  const csvType = String(csv.res.headers.get("content-type") ?? "");
-  if (!csvType.includes("text/csv")) throw new Error(`Unexpected CSV content-type: ${csvType}`);
-  if (!csv.text.includes("userId,username,email")) throw new Error("CSV export missing expected header row");
-  log(`OK export csv (${csv.res.headers.get("x-export-limit") ?? "?"} limit)`);
-
-  const jsonlUrl = `${BASE_URL}/api/admin/trader-scouting/export?format=jsonl&days=30&exportLimit=5`;
-  const jsonl = await fetchText(jsonlUrl, { headers: { Cookie: cookie } });
-  const jsonlType = String(jsonl.res.headers.get("content-type") ?? "");
-  if (!jsonlType.includes("ndjson")) throw new Error(`Unexpected JSONL content-type: ${jsonlType}`);
-  const lines = jsonl.text.split("\n").map((l) => l.trim()).filter(Boolean);
-  for (const line of lines.slice(0, 3)) {
-    const obj = JSON.parse(line);
-    if (!obj || typeof obj !== "object") throw new Error("JSONL export line is not an object");
-    if (typeof obj.userId !== "number") throw new Error("JSONL export missing userId");
-  }
-  log(`OK export jsonl (${jsonl.res.headers.get("x-export-limit") ?? "?"} limit)`);
+  // 5) Exports (CSV + JSONL + PARQUET) via durable async queue endpoint.
+  await runWithReauth((session) => queueTraderScoutingExport(session, "csv"));
+  await runWithReauth((session) => queueTraderScoutingExport(session, "jsonl"));
+  await runWithReauth((session) => queueTraderScoutingExport(session, "parquet"));
 
   log("Integrity check complete");
 }

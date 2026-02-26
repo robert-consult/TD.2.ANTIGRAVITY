@@ -49,6 +49,11 @@
     "legal:seed:doc2": "dotenv -e .env -- tsx scripts/legalSeedDoc2.ts",
     "loadtest:publish-quotes": "dotenv -e .env -- tsx scripts/loadtest/publishQuotes.ts",
     "loadtest:ws-fanout": "tsx scripts/loadtest/wsFanout.ts",
+    "loadtest:admin-data-tab": "tsx scripts/loadtest/adminDataTab.ts",
+    "loadtest:export-pipeline": "tsx scripts/loadtest/exportPipeline.ts",
+    "audit:petascale-parquet": "bash scripts/verifyPetascaleParquetIntegration.sh",
+    "audit:system:20-cycles": "bash scripts/deepSystemAudit20Cycles.sh",
+    "ops:canary-cutover": "bash scripts/ops/canary_cutover_runbook.sh",
     "mobile:install": "cd MOBILE && npm install",
     "mobile:sync": "npm run build && cd MOBILE && npx cap sync",
     "mobile:android": "cd MOBILE && npx cap open android",
@@ -143,6 +148,7 @@
     "node-cron": "^4.2.1",
     "openid-client": "^6.8.1",
     "p-throttle": "^8.1.0",
+    "parquetjs-lite": "^0.8.7",
     "passport": "^0.7.0",
     "passport-local": "^1.0.0",
     "pg": "^8.16.3",
@@ -210,7 +216,8 @@
     "esbuild": "0.27.2",
     "@isaacs/brace-expansion": "5.0.1",
     "qs": "6.15.0",
-    "fast-xml-parser": "5.3.9"
+    "fast-xml-parser": "5.3.9",
+    "rollup": "4.59.0"
   },
   "optionalDependencies": {
     "bufferutil": "^4.1.0"

@@ -2,6 +2,7 @@ import { withI18nClient } from "./i18nDb";
 import { refreshI18nConfig } from "./config";
 import { getSummary, maybeIngestBuiltManifest } from "./service";
 import { isOpenAiConfigured, translateWithOpenAi } from "./providers/openai";
+import { sanitizeLogText, summarizeErrorForLog } from "../security/logSanitizer";
 
 type PlaceholderToken = string;
 
@@ -249,7 +250,7 @@ export async function runI18nWorkerTick() {
           translatedMap = await translateWithOpenAi({ locale, model: cfg.llmModel, items });
           console.log(`[i18n] Translated ${Object.keys(translatedMap).length} strings for ${locale}`);
         } catch (e: any) {
-          const msg = e?.message || String(e);
+          const msg = sanitizeLogText(e?.message || String(e), 320);
           console.warn(`[i18n] Translation failed for ${locale}: ${msg}`);
           for (const j of localeJobs) {
             const status = j.attempt_count >= cfg.llmMaxAttempts ? "FAILED" : "PENDING";
@@ -347,6 +348,8 @@ export async function runI18nWorkerTick() {
 export function startI18nWorker(intervalMs: number) {
   const ms = Math.max(5_000, intervalMs);
   setInterval(() => {
-    runI18nWorkerTick().catch((e) => console.warn("[i18n] worker tick failed:", e));
+    runI18nWorkerTick().catch((e) =>
+      console.warn("[i18n] worker tick failed:", summarizeErrorForLog(e, { includeStack: false })),
+    );
   }, ms);
 }

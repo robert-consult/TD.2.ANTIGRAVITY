@@ -40,10 +40,23 @@ let workerStarted = false;
 let bullBoardAdapter: ExpressAdapter | null = null;
 let bullBoardInitialized = false;
 
+function envFlagEnabled(value: string | undefined, fallback: boolean): boolean {
+  if (value === undefined) return fallback;
+  const normalized = String(value).trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
+  return fallback;
+}
+
 function getRetentionSec(): number {
   const parsed = Number(process.env.ADMIN_DATA_EXPORT_RETENTION_SEC ?? 7 * 24 * 60 * 60);
   if (!Number.isFinite(parsed)) return 7 * 24 * 60 * 60;
   return Math.max(3600, Math.min(30 * 24 * 60 * 60, Math.trunc(parsed)));
+}
+
+function inProcessFallbackAllowed(): boolean {
+  const fallbackDefault = process.env.NODE_ENV !== "production";
+  return envFlagEnabled(process.env.ADMIN_DATA_EXPORT_ALLOW_PROCESS_FALLBACK, fallbackDefault);
 }
 
 function getQueueConnection(): IORedis | null {
@@ -248,6 +261,20 @@ export async function enqueueAdminDataExportJob(params: { jobId: string }): Prom
   const cfg = getPetascaleRuntimeConfig();
   const q = getQueue();
   if (!q) {
+    if (!inProcessFallbackAllowed()) {
+      const message = "ADMIN_EXPORT_QUEUE_UNAVAILABLE";
+      await markAdminDataExportJobFailed({
+        jobId: params.jobId,
+        error: message,
+        attemptCountDelta: 0,
+      }).catch(() => {});
+      await appendAdminDataExportEvent({
+        jobId: params.jobId,
+        level: "ERROR",
+        message: "Queue unavailable; in-process fallback disabled",
+      }).catch(() => {});
+      throw new Error(message);
+    }
     // Fallback mode keeps exports operational if queue infra is unavailable.
     setImmediate(() => {
       runAdminExportJob(params.jobId).catch((err) => {
@@ -291,6 +318,9 @@ export async function enqueueAdminDataExportJob(params: { jobId: string }): Prom
 export async function retryAdminDataExportJob(jobId: string): Promise<void> {
   const q = getQueue();
   if (!q) {
+    if (!inProcessFallbackAllowed()) {
+      throw new Error("ADMIN_EXPORT_QUEUE_UNAVAILABLE");
+    }
     setImmediate(() => {
       runAdminExportJob(jobId).catch((err) => {
         console.error("[admin-export] retry fallback worker error:", err);
@@ -327,7 +357,11 @@ export function startAdminDataExportWorker(): void {
   const cfg = getPetascaleRuntimeConfig();
   const q = getQueue();
   if (!q) {
-    console.warn("[admin-export] queue disabled or VALKEY_URL missing; running in fallback mode");
+    if (inProcessFallbackAllowed()) {
+      console.warn("[admin-export] queue disabled or VALKEY_URL missing; running in fallback mode");
+      return;
+    }
+    console.error("[admin-export] queue unavailable and in-process fallback disabled");
     return;
   }
 

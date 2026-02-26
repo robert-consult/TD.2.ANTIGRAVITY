@@ -1,13 +1,17 @@
 import { z } from "zod";
 
 export const ADMIN_DATA_EXPORT_TYPES = [
+  "users",
+  "user_timeline",
   "trader_scouting",
   "deactivated_accounts",
   "all_trades",
   "daily_pnl",
+  "trade_audit",
+  "order_intent_audit",
 ] as const;
 
-export const ADMIN_DATA_EXPORT_FORMATS = ["csv", "jsonl"] as const;
+export const ADMIN_DATA_EXPORT_FORMATS = ["csv", "jsonl", "parquet"] as const;
 
 export const ADMIN_DATA_EXPORT_STATUSES = [
   "QUEUED",
@@ -25,7 +29,7 @@ export const adminDataExportStatusSchema = z.enum(ADMIN_DATA_EXPORT_STATUSES);
 export const traderScoutingExportFiltersSchema = z
   .object({
     days: z.number().int().min(0).max(365).default(30),
-    exportLimit: z.number().int().min(1).max(200_000).default(5_000),
+    exportLimit: z.number().int().min(1).optional(),
     q: z.string().trim().max(200).optional(),
     categories: z.array(z.string().trim().min(1).max(64)).max(32).optional(),
     minTrades: z.number().int().min(0).max(200_000).optional(),
@@ -48,6 +52,21 @@ export const deactivatedAccountsExportFiltersSchema = z
   })
   .strict();
 
+export const usersExportFiltersSchema = z
+  .object({
+    limit: z.number().int().min(1).max(5_000_000).default(100_000),
+    includeAdmins: z.boolean().default(true),
+    includeDeleted: z.boolean().default(true),
+  })
+  .strict();
+
+export const userTimelineExportFiltersSchema = z
+  .object({
+    userId: z.number().int().positive(),
+    limit: z.number().int().min(1).max(5_000_000).default(100_000),
+  })
+  .strict();
+
 export const allTradesExportFiltersSchema = z
   .object({
     limit: z.number().int().min(1).max(5_000_000).default(50_000),
@@ -60,11 +79,34 @@ export const dailyPnlExportFiltersSchema = z
   })
   .strict();
 
+export const tradeAuditExportFiltersSchema = z
+  .object({
+    limit: z.number().int().min(1).max(5_000_000).default(100_000),
+    tradeId: z.number().int().positive().optional(),
+    eventType: z.string().trim().min(1).max(96).optional(),
+    riskResult: z.string().trim().min(1).max(64).optional(),
+    correlationId: z.string().trim().min(1).max(160).optional(),
+  })
+  .strict();
+
+export const orderIntentAuditExportFiltersSchema = z
+  .object({
+    limit: z.number().int().min(1).max(5_000_000).default(100_000),
+    correlationId: z.string().trim().min(1).max(160).optional(),
+    decision: z.string().trim().min(1).max(64).optional(),
+    userId: z.number().int().positive().optional(),
+  })
+  .strict();
+
 const exportFilterSchemaByType = {
+  users: usersExportFiltersSchema,
+  user_timeline: userTimelineExportFiltersSchema,
   trader_scouting: traderScoutingExportFiltersSchema,
   deactivated_accounts: deactivatedAccountsExportFiltersSchema,
   all_trades: allTradesExportFiltersSchema,
   daily_pnl: dailyPnlExportFiltersSchema,
+  trade_audit: tradeAuditExportFiltersSchema,
+  order_intent_audit: orderIntentAuditExportFiltersSchema,
 } as const;
 
 export const adminDataExportCreateRequestSchema = z
@@ -131,6 +173,10 @@ export const adminDataExportDownloadLinkResponseSchema = z.object({
 });
 
 export type TraderScoutingExportFilters = z.infer<typeof traderScoutingExportFiltersSchema>;
+export type UsersExportFilters = z.infer<typeof usersExportFiltersSchema>;
+export type UserTimelineExportFilters = z.infer<typeof userTimelineExportFiltersSchema>;
 export type DeactivatedAccountsExportFilters = z.infer<typeof deactivatedAccountsExportFiltersSchema>;
 export type AllTradesExportFilters = z.infer<typeof allTradesExportFiltersSchema>;
 export type DailyPnlExportFilters = z.infer<typeof dailyPnlExportFiltersSchema>;
+export type TradeAuditExportFilters = z.infer<typeof tradeAuditExportFiltersSchema>;
+export type OrderIntentAuditExportFilters = z.infer<typeof orderIntentAuditExportFiltersSchema>;

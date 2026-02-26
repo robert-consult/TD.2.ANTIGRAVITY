@@ -21,7 +21,9 @@ import { getValkey } from "./services/valkey";
 import { startAdminDataExportWorker } from "./services/adminDataExportQueue";
 import { startClickHouseSyncScheduler } from "./services/clickhouseSync";
 import { startAdminDataExportRetentionScheduler } from "./services/adminDataExportRetention";
+import { startAdminDataRollupScheduler } from "./services/adminDataRollups";
 import { withGriftClient } from "./grift/griftDb";
+import { summarizeErrorForLog } from "./security/logSanitizer";
 
 const REQUIRED_TRADE_GUARD_TRIGGERS = [
   "tradequip_no_delete_trades",
@@ -271,6 +273,9 @@ app.use((req, res, next) => {
     res.setHeader("X-Frame-Options", "DENY");
     res.setHeader("Referrer-Policy", "same-origin");
     res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+    res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
+    res.setHeader("Cross-Origin-Resource-Policy", "same-origin");
+    res.setHeader("X-Permitted-Cross-Domain-Policies", "none");
 
     if (transportHstsEnabled && isRequestTransportSecure(req)) {
       const directives = [`max-age=${transportHstsMaxAgeSec}`];
@@ -388,7 +393,13 @@ app.use((req, res, next) => {
     if (!res.headersSent) {
       res.status(status).json({ message: safeMessage });
     }
-    console.error("Express error handler:", err);
+    console.error(
+      "Express error handler:",
+      summarizeErrorForLog(err, {
+        includeStack: !isProd,
+        maxLen: 2000,
+      }),
+    );
   });
 
   // Prevent SPA fallthrough from masking missing API routes.
@@ -534,6 +545,12 @@ app.use((req, res, next) => {
           startAdminDataExportRetentionScheduler();
         } catch (e) {
           console.warn("[admin-export-retention] scheduler failed to start:", e);
+        }
+        try {
+          startAdminDataRollupScheduler();
+          console.log("[admin-data-rollups] scheduler started");
+        } catch (e) {
+          console.warn("[admin-data-rollups] scheduler failed to start:", e);
         }
 
         try {

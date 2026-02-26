@@ -884,6 +884,10 @@ export const storage = {
       success: userLoginHistory.success,
       failureReason: userLoginHistory.failureReason,
       createdAt: userLoginHistory.createdAt,
+      logoutAt: userLoginHistory.logoutAt,
+      sessionLengthSec: userLoginHistory.sessionLengthSec,
+      sessionId: userLoginHistory.sessionId,
+      eventType: userLoginHistory.eventType,
       // Geo-enrichment columns
       countryCode: userLoginHistory.countryCode,
       region: userLoginHistory.region,

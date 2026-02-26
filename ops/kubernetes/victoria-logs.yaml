@@ -1,0 +1,99 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tradehub-victoria-logs
+  namespace: tradehub
+  labels:
+    app: tradehub-victoria-logs
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tradehub-victoria-logs
+  template:
+    metadata:
+      labels:
+        app: tradehub-victoria-logs
+    spec:
+      containers:
+        - name: victoria-logs
+          image: victoriametrics/victoria-logs:latest
+          imagePullPolicy: IfNotPresent
+          args:
+            - -retentionPeriod=14d
+          ports:
+            - containerPort: 9428
+              name: http
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 1
+              memory: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tradehub-victoria-logs
+  namespace: tradehub
+  labels:
+    app: tradehub-victoria-logs
+spec:
+  selector:
+    app: tradehub-victoria-logs
+  ports:
+    - name: http
+      port: 9428
+      targetPort: 9428
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tradehub-static-datasource
+  namespace: tradehub
+  labels:
+    app: tradehub-static-datasource
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tradehub-static-datasource
+  template:
+    metadata:
+      labels:
+        app: tradehub-static-datasource
+    spec:
+      containers:
+        - name: http-echo
+          image: hashicorp/http-echo:1.0
+          imagePullPolicy: IfNotPresent
+          args:
+            - -listen=:5678
+            - -type=application/json
+            - -text={"status":"ok","source":"tradehub-static-datasource"}
+          ports:
+            - containerPort: 5678
+              name: http
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tradehub-static-datasource
+  namespace: tradehub
+  labels:
+    app: tradehub-static-datasource
+spec:
+  selector:
+    app: tradehub-static-datasource
+  ports:
+    - name: http
+      port: 80
+      targetPort: 5678

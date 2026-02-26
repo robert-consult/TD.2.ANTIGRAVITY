@@ -1,28 +1,3 @@
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: tradehub-minio-monitor-script
-  namespace: tradehub
-data:
-  monitor.py: |
-    import os
-    import time
-    from minio import Minio
-
-    endpoint = os.getenv("MINIO_ENDPOINT", "tradehub-minio.tradehub.svc.cluster.local:9000")
-    access_key = os.getenv("MINIO_ACCESS_KEY", "")
-    secret_key = os.getenv("MINIO_SECRET_KEY", "")
-    bucket = os.getenv("MINIO_BUCKET", "admin-data-exports")
-
-    client = Minio(endpoint, access_key=access_key, secret_key=secret_key, secure=False)
-    while True:
-      try:
-        exists = client.bucket_exists(bucket)
-        print(f"[minio_monitor] bucket={bucket} exists={exists}", flush=True)
-      except Exception as err:
-        print(f"[minio_monitor] error={err}", flush=True)
-      time.sleep(60)
----
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -316,57 +291,6 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: tradehub-minio-monitor
-  namespace: tradehub
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: tradehub-minio-monitor
-  template:
-    metadata:
-      labels:
-        app: tradehub-minio-monitor
-    spec:
-      containers:
-        - name: minio-monitor
-          image: python:3.12-slim
-          command:
-            - /bin/sh
-            - -lc
-            - |
-              pip install --no-cache-dir minio
-              python /opt/minio_monitor/monitor.py
-          env:
-            - name: MINIO_ENDPOINT
-              value: tradehub-minio.tradehub.svc.cluster.local:9000
-            - name: MINIO_BUCKET
-              valueFrom:
-                configMapKeyRef:
-                  name: tradehub-config
-                  key: EXPORT_OBJECT_STORAGE_BUCKET
-                  optional: true
-            - name: MINIO_ACCESS_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: tradehub-secrets
-                  key: EXPORT_OBJECT_STORAGE_ACCESS_KEY
-            - name: MINIO_SECRET_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: tradehub-secrets
-                  key: EXPORT_OBJECT_STORAGE_SECRET_KEY
-          volumeMounts:
-            - name: script
-              mountPath: /opt/minio_monitor
-      volumes:
-        - name: script
-          configMap:
-            name: tradehub-minio-monitor-script
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
   name: tradehub-pigsty
   namespace: tradehub
 spec:
@@ -403,40 +327,3 @@ spec:
         - name: infra-pkg
           image: debian:bookworm-slim
           command: ["/bin/sh", "-lc", "echo infra-pkg helper ready; sleep infinity"]
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: tradehub-headlamp
-  namespace: tradehub
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: tradehub-headlamp
-  template:
-    metadata:
-      labels:
-        app: tradehub-headlamp
-    spec:
-      containers:
-        - name: headlamp
-          image: ghcr.io/headlamp-k8s/headlamp:v0.29.2
-          args:
-            - -in-cluster
-          ports:
-            - containerPort: 4466
-              name: http
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: tradehub-headlamp
-  namespace: tradehub
-spec:
-  selector:
-    app: tradehub-headlamp
-  ports:
-    - name: http
-      port: 4466
-      targetPort: 4466

@@ -1,5 +1,5 @@
 {
-  "annotations":{"list":[{"builtIn":1,"datasource":{"type":"grafana","uid":"-- Grafana --"},"enable":true,"hide":true,"iconColor":"#BF6C50","name":"Annotations & Alerts","type":"dashboard"}]},
+  "annotations":{"list":[{"builtIn":1,"datasource":{"type":"datasource","uid":"grafana"},"enable":true,"hide":true,"iconColor":"#BF6C50","name":"Annotations & Alerts","type":"dashboard"}]},
   "author":"Ruohang Feng (rh@vonng.com)",
   "description":"Claude Code Observability",
   "editable":true,

@@ -694,7 +694,7 @@
       "pluginVersion":"12.0.0",
       "targets":[
         {
-          "datasource":{"type":"postgres","uid":"d819469b-9812-4351-b1f6-ed4c555e09ec"},
+          "datasource":{"type":"postgres","uid":"ds-meta"},
           "format":"table",
           "group":[],
           "metricColumn":"none",
@@ -705,7 +705,7 @@
           "timeColumn":"time",
           "where":[{"name":"$__timeFilter","params":[],"type":"macro"}]
         },{
-          "datasource":{"type":"postgres","uid":"d819469b-9812-4351-b1f6-ed4c555e09ec"},
+          "datasource":{"type":"postgres","uid":"ds-meta"},
           "editorMode":"code",
           "format":"table",
           "group":[],

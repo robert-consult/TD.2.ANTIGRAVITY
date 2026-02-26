@@ -1514,7 +1514,7 @@
       "pluginVersion":"2.1.1",
       "targets":[
         {
-          "datasource":{"type":"postgres","uid":"cc8a3615-9c82-44d7-be42-07d8aa1cac68"},
+          "datasource":{"type":"postgres","uid":"ds-meta"},
           "editorMode":"code",
           "expr":"increase(pg_query_exec_time{ins=\"$ins\", datname=\"$datname\"}[1h])",
           "format":"table",
@@ -1533,7 +1533,7 @@
           "timeColumnType":"timestamp",
           "where":[{"name":"$__timeFilter","params":[],"type":"macro"}]
         },{
-          "datasource":{"type":"postgres","uid":"cc8a3615-9c82-44d7-be42-07d8aa1cac68"},
+          "datasource":{"type":"postgres","uid":"ds-meta"},
           "editorMode":"code",
           "expr":"increase(pg_query_exec_time{ins=\"$ins\", datname=\"$datname\"}[1h]) /\n increase(pg_query_calls{ins=\"$ins\", datname=\"$datname\"}[1h])",
           "format":"table",

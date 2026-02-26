@@ -26,6 +26,43 @@ function normalizeProviderKey(raw: unknown): string | null {
 
 export const adminOpsRouter = Router();
 
+const INGRESS_AUTH_RESOURCES = new Set(["headlamp", "bullboard", "minio-monitor", "grafana"]);
+
+function ingressAuthHandler(req: any, res: any) {
+  const resource = String(req.query.resource ?? "").trim().toLowerCase();
+  if (!INGRESS_AUTH_RESOURCES.has(resource)) {
+    return res.status(400).json({ message: "Invalid resource" });
+  }
+
+  const isSuperAdmin = Boolean((req.session as any)?.isSuperAdmin);
+  const isAdmin = Boolean((req.session as any)?.isAdmin);
+
+  // Super admins can access every ops surface. Regular admins are limited to Grafana.
+  const authorized = isSuperAdmin || (resource === "grafana" && isAdmin);
+  if (!authorized) {
+    return res.status(403).json({ message: "Forbidden" });
+  }
+
+  const adminId = Number((req.session as any)?.userId ?? 0);
+  if (Number.isFinite(adminId) && adminId > 0) {
+    res.setHeader("X-TradeHub-Admin-Id", String(adminId));
+  }
+  const adminEmail = String((req.session as any)?.email ?? "").trim();
+  if (adminEmail) {
+    res.setHeader("X-TradeHub-Admin-Email", adminEmail);
+  }
+  res.setHeader("Cache-Control", "no-store");
+  return res.status(200).json({
+    ok: true,
+    resource,
+    authorized: true,
+    scope: isSuperAdmin ? "super_admin" : "admin",
+  });
+}
+
+adminOpsRouter.get("/ingress-auth", requireAdmin, ingressAuthHandler);
+adminOpsRouter.get("/ops/ingress-auth", requireAdmin, ingressAuthHandler);
+
 adminOpsRouter.get("/trader-stats", requireAdmin, async (req, res) => {
   const startedAt = process.hrtime.bigint();
   try {

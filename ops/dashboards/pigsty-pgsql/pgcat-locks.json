@@ -240,7 +240,7 @@
       "pluginVersion":"12.0.0",
       "targets":[
         {
-          "datasource":{"type":"postgres","uid":"cc8a3615-9c82-44d7-be42-07d8aa1cac68"},
+          "datasource":{"type":"postgres","uid":"ds-meta"},
           "editorMode":"code",
           "format":"table",
           "group":[],
@@ -547,7 +547,7 @@
     },
     {"collapsed":false,"gridPos":{"h":1,"w":24,"x":0,"y":18},"id":196,"panels":[],"title":"Activity","type":"row"},
     {
-      "datasource":{"type":"grafana-postgresql-datasource","uid":"${dsn}"},
+      "datasource":{"type":"postgres","uid":"${dsn}"},
       "fieldConfig":{
         "defaults":{
           "custom":{"align":"center","cellOptions":{"type":"auto"},"filterable":false,"inspect":false},
@@ -810,7 +810,7 @@
       "id":220,
       "panels":[
         {
-          "datasource":{"type":"grafana-postgresql-datasource","uid":"${dsn}"},
+          "datasource":{"type":"postgres","uid":"${dsn}"},
           "description":"Get the latest 100 record from monitor.pg_wait_sampling_history.",
           "fieldConfig":{
             "defaults":{
@@ -941,7 +941,7 @@
           "type":"table"
         },
         {
-          "datasource":{"type":"grafana-postgresql-datasource","uid":"${dsn}"},
+          "datasource":{"type":"postgres","uid":"${dsn}"},
           "description":"agg from monitor.pg_wait_sampling_profile by event_type, event",
           "fieldConfig":{
             "defaults":{
@@ -1068,7 +1068,7 @@
           "type":"table"
         },
         {
-          "datasource":{"type":"grafana-postgresql-datasource","uid":"${dsn}"},
+          "datasource":{"type":"postgres","uid":"${dsn}"},
           "description":"agg from monitor.pg_wait_sampling_profile by event_type, event in last one second",
           "fieldConfig":{
             "defaults":{
@@ -1200,7 +1200,7 @@
           "type":"table"
         },
         {
-          "datasource":{"type":"grafana-postgresql-datasource","uid":"${dsn}"},
+          "datasource":{"type":"postgres","uid":"${dsn}"},
           "fieldConfig":{
             "defaults":{"color":{"mode":"palette-classic"},"custom":{"hideFrom":{"legend":false,"tooltip":false,"viz":false}},"mappings":[]},
             "overrides":[
@@ -1220,7 +1220,7 @@
           "pluginVersion":"11.6.0",
           "targets":[
             {
-              "datasource":{"type":"grafana-postgresql-datasource","uid":"pg-meta-1.meta"},
+              "datasource":{"type":"postgres","uid":"ds-meta"},
               "editorMode":"code",
               "format":"time_series",
               "group":[],

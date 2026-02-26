@@ -1,7 +1,7 @@
 {
   "annotations":{
     "list":[
-      {"builtIn":1,"datasource":{"uid":"-- Grafana --"},"enable":true,"hide":true,"iconColor":"rgba(0, 211, 255, 1)","name":"Annotations & Alerts","type":"dashboard"},
+      {"builtIn":1,"datasource":{"uid":"grafana"},"enable":true,"hide":true,"iconColor":"rgba(0, 211, 255, 1)","name":"Annotations & Alerts","type":"dashboard"},
       {"datasource":{"uid":"$datasource"},"enable":true,"expr":"changes(process_start_time_seconds{ ins=~\"$ins\"}[2m]) > 0","hide":false,"iconColor":"#bf1b00","name":"Restarts","showIn":0,"step":"1m","tagKeys":"instance","titleFormat":"Restart"}
     ]
   },

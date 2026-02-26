@@ -1,0 +1,17 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: tradehub
+resources:
+  - prometheus-ops-config.yaml
+  - grafana-provisioning.yaml
+  - grafana-deployment.yaml
+  - kube-state-metrics.yaml
+  - node-exporter.yaml
+  - victoria-logs.yaml
+  - pigsty-meta-bootstrap.yaml
+  - headlamp-rbac.yaml
+  - headlamp-plugins.yaml
+  - headlamp-deployment.yaml
+  - headlamp-ingress.yaml
+  - bull-board-ingress.yaml
+  - minio-monitor-deployment.yaml

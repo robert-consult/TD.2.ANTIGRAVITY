@@ -702,7 +702,7 @@
       "type":"table"
     },
     {
-      "datasource":{"type":"grafana-postgresql-datasource","uid":"ds-meta"},
+      "datasource":{"type":"postgres","uid":"ds-meta"},
       "fieldConfig":{"defaults":{"color":{"mode":"thresholds"},"links":[],"mappings":[],"thresholds":{"mode":"absolute","steps":[{"color":"#346f36cc","value":0}]},"unit":"string"},"overrides":[]},
       "gridPos":{"h":4,"w":20,"x":0,"y":90},
       "id":193,
@@ -847,7 +847,7 @@
       "type":"table"
     },
     {
-      "datasource":{"type":"grafana-postgresql-datasource","uid":"ds-meta"},
+      "datasource":{"type":"postgres","uid":"ds-meta"},
       "description":"PostgreSQL Extension Packages to be installed (global default)\n\nAlias will be translated according to package_map",
       "fieldConfig":{
         "defaults":{"color":{"mode":"thresholds"},"custom":{"align":"left","cellOptions":{"type":"json-view"},"footer":{"reducers":[]},"inspect":false},"mappings":[],"thresholds":{"mode":"absolute","steps":[{"color":"#346f36cc","value":0},{"color":"red","value":80}]}},

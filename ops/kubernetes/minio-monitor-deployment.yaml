@@ -1,0 +1,147 @@
+# MinIO Monitor UI deployment (admin-only).
+# Prerequisites:
+#   kubectl create configmap tradehub-minio-monitor-app \
+#     --from-file=app.py=ops/minio-monitor/app.py -n tradehub --dry-run=client -o yaml | kubectl apply -f -
+#   kubectl create configmap tradehub-minio-monitor-static \
+#     --from-file=index.html=ops/minio-monitor/static/index.html \
+#     --from-file=app.js=ops/minio-monitor/static/app.js \
+#     --from-file=styles.css=ops/minio-monitor/static/styles.css \
+#     -n tradehub --dry-run=client -o yaml | kubectl apply -f -
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tradehub-minio-monitor-ui
+  namespace: tradehub
+  labels:
+    app: tradehub-minio-monitor-ui
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tradehub-minio-monitor-ui
+  template:
+    metadata:
+      labels:
+        app: tradehub-minio-monitor-ui
+    spec:
+      containers:
+        - name: minio-monitor-ui
+          image: python:3.12-slim
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - -lc
+            - |
+              pip install --no-cache-dir fastapi uvicorn minio
+              uvicorn app:app --host 0.0.0.0 --port 8000 --root-path /minio-monitor --app-dir /app
+          ports:
+            - containerPort: 8000
+              name: http
+          env:
+            - name: MINIO_ENDPOINT_URL
+              value: http://tradehub-minio.tradehub.svc.cluster.local:9000
+            - name: MINIO_BUCKET
+              valueFrom:
+                configMapKeyRef:
+                  name: tradehub-config
+                  key: EXPORT_OBJECT_STORAGE_BUCKET
+                  optional: true
+            - name: MINIO_ROOT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: tradehub-secrets
+                  key: EXPORT_OBJECT_STORAGE_ACCESS_KEY
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: tradehub-secrets
+                  key: EXPORT_OBJECT_STORAGE_SECRET_KEY
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          volumeMounts:
+            - name: app-code
+              mountPath: /app/app.py
+              subPath: app.py
+              readOnly: true
+            - name: static-assets
+              mountPath: /app/static/index.html
+              subPath: index.html
+              readOnly: true
+            - name: static-assets
+              mountPath: /app/static/app.js
+              subPath: app.js
+              readOnly: true
+            - name: static-assets
+              mountPath: /app/static/styles.css
+              subPath: styles.css
+              readOnly: true
+      volumes:
+        - name: app-code
+          configMap:
+            name: tradehub-minio-monitor-app
+        - name: static-assets
+          configMap:
+            name: tradehub-minio-monitor-static
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tradehub-minio-monitor-ui
+  namespace: tradehub
+  labels:
+    app: tradehub-minio-monitor-ui
+spec:
+  selector:
+    app: tradehub-minio-monitor-ui
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: tradehub-minio-monitor-ingress
+  namespace: tradehub
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/auth-url: "http://tradehub-api.tradehub.svc.cluster.local/api/admin/ops/ingress-auth?resource=minio-monitor"
+    nginx.ingress.kubernetes.io/auth-response-headers: "X-TradeHub-Admin-Id,X-TradeHub-Admin-Email"
+    nginx.ingress.kubernetes.io/limit-rps: "20"
+    nginx.ingress.kubernetes.io/limit-connections: "8"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - tradehub.example.com
+      secretName: tradehub-tls
+  rules:
+    - host: tradehub.example.com
+      http:
+        paths:
+          - path: /minio-monitor(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: tradehub-minio-monitor-ui
+                port:
+                  number: 8000

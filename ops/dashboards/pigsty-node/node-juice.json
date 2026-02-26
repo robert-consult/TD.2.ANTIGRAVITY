@@ -1144,13 +1144,13 @@
     },
     {"collapsed":false,"gridPos":{"h":1,"w":24,"x":0,"y":35},"id":180,"panels":[],"title":"Logs","type":"row"},
     {
-      "datasource":{"type":"loki","uid":"ds-vlogs"},
+      "datasource":{"type":"victoriametrics-logs-datasource","uid":"ds-vlogs"},
       "description":"JuiceFS service logs from VictoriaLogs",
       "gridPos":{"h":10,"w":24,"x":0,"y":36},
       "id":181,
       "options":{"dedupStrategy":"none","enableInfiniteScrolling":false,"enableLogDetails":true,"prettifyLogMessage":false,"showCommonLabels":false,"showControls":false,"showLogContextToggle":false,"showTime":true,"sortOrder":"Descending","wrapLogMessage":true},
       "pluginVersion":"12.3.1",
-      "targets":[{"datasource":{"type":"loki","uid":"ds-vlogs"},"editorMode":"code","expr":"job:syslog ip:$ip unit:juicefs-$name","queryType":"range","refId":"A"}],
+      "targets":[{"datasource":{"type":"victoriametrics-logs-datasource","uid":"ds-vlogs"},"editorMode":"code","expr":"job:syslog ip:$ip unit:juicefs-$name","queryType":"range","refId":"A"}],
       "title":"JuiceFS Logs",
       "type":"logs"
     }

@@ -45,41 +45,4 @@ data:
         }
       ]
     }
----
-# Patch the existing Headlamp deployment to use the viewer SA and mount plugins
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: tradehub-headlamp
-  namespace: tradehub
-spec:
-  template:
-    spec:
-      serviceAccountName: headlamp-viewer
-      containers:
-        - name: headlamp
-          image: ghcr.io/headlamp-k8s/headlamp:v0.29.2
-          args:
-            - -in-cluster
-            - -plugins-dir=/headlamp/plugins
-          ports:
-            - containerPort: 4466
-              name: http
-          volumeMounts:
-            - name: plugins-config
-              mountPath: /headlamp/plugins/config.json
-              subPath: config.json
-              readOnly: true
-          resources:
-            requests: { cpu: "100m", memory: "128Mi" }
-            limits: { cpu: "500m", memory: "512Mi" }
-          securityContext:
-            readOnlyRootFilesystem: true
-            runAsNonRoot: true
-            runAsUser: 10001
-            allowPrivilegeEscalation: false
-            capabilities: { drop: ["ALL"] }
-      volumes:
-        - name: plugins-config
-          configMap:
-            name: headlamp-plugins-config
+# Headlamp Deployment is defined in ops/kubernetes/headlamp-deployment.yaml.

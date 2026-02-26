@@ -1229,3 +1229,48 @@ Failure Mode if Missing:
   - Submit out-of-range parameters to DataTab endpoints and verify values are bounded (clamped) instead of triggering full scans.
   - Submit invalid structural parameters (e.g., `minHoldSec > maxHoldSec`) and verify `400` rejection.
 - Failure Mode if Missing: unbounded or malformed admin query parameters can trigger full-table scans, causing Postgres CPU exhaustion.
+
+### PRD-OPS-001
+- ID: `PRD-OPS-001`
+- Date (UTC): `2026-02-26`
+- Scope: `Ops ingress auth boundary for admin surfaces`
+- Requirement: Headlamp (`/headlamp`), bull-board (`/api/admin/data-exports/queues`), and MinIO monitor (`/minio-monitor`) ingress paths must call app-session auth gate `GET /api/admin/ops/ingress-auth?resource=...` and deny non-authorized users before upstream routing.
+- Enforcement: `server/routes/adminOps.ts` (`/ingress-auth` resource policy), `ops/kubernetes/headlamp-ingress.yaml`, `ops/kubernetes/bull-board-ingress.yaml`, `ops/kubernetes/minio-monitor-deployment.yaml`.
+- Validation:
+  - `kubectl apply --dry-run=client -k ops/kubernetes`.
+  - Request each ingress path without valid admin session and verify `401/403`.
+  - Request as super-admin session and verify access succeeds.
+- Failure Mode if Missing: admin operations UIs can be exposed to unauthorized users at ingress layer.
+
+### PRD-OBS-001
+- ID: `PRD-OBS-001`
+- Date (UTC): `2026-02-26`
+- Scope: `Prometheus rule integrity and export volume anomaly alerting`
+- Requirement: OPS Prometheus rule files must be parse-clean with `promtool`, and `SuspiciousExportVolume` alert inputs must be emitted as `admin_data_export_bytes_written_total`.
+- Enforcement: `ops/alerts/internal-tls-alerts.yaml` (valid PromQL), `server/services/adminDataExportMetrics.ts` + `server/services/objectStorage.ts` + `server/routes/wsCore.ts` (counter emission).
+- Validation:
+  - `docker run --rm --entrypoint /bin/promtool -v "$PWD/ops/alerts:/alerts:ro" prom/prometheus:v2.54.1 check rules /alerts/internal-tls-alerts.yaml`.
+  - Hit `/metrics` after successful export and verify `admin_data_export_bytes_written_total` exists and increments.
+- Failure Mode if Missing: alert pipelines break at load time or fail to detect abnormal high-volume export behavior.
+
+### PRD-OBS-002
+- ID: `PRD-OBS-002`
+- Date (UTC): `2026-02-26`
+- Scope: `Grafana datasource parity for imported Pigsty dashboards`
+- Requirement: All provisioned dashboards must reference existing datasource UIDs/types (`ds-prometheus`, `ds-vlogs`, `ds-static`, `ds-meta`, `grafana`) and required plugins must be installed at Grafana startup.
+- Enforcement: `ops/grafana-config/provisioning/datasources/tradehub.yaml`, `ops/kubernetes/grafana-provisioning.yaml`, `ops/kubernetes/grafana-deployment.yaml`, normalized dashboard JSON under `ops/dashboards/**`.
+- Validation:
+  - Run dashboard datasource parity audit script (JSON scan) and verify zero unresolved UID/type references.
+  - Start Grafana pod and verify plugin install logs include `victoriametrics-logs-datasource` and `marcusolsson-static-datasource`.
+- Failure Mode if Missing: dashboards import but render with broken panels and missing-query errors.
+
+### PRD-SCM-001
+- ID: `PRD-SCM-001`
+- Date (UTC): `2026-02-26`
+- Scope: `Repository history data artifact hygiene`
+- Requirement: Any accidental commit of `admin_data_exports/**` artifacts must trigger immediate history purge before release branch promotion.
+- Enforcement: release process + Git history rewrite runbook (`git filter-branch ... -- admin_data_exports`) and force-push coordination.
+- Validation:
+  - `git log --all --name-only -- admin_data_exports` returns no tracked artifact paths after rewrite.
+  - Verify downstream clones are reset/re-cloned to rewritten history.
+- Failure Mode if Missing: sensitive export artifacts remain permanently accessible in Git history.

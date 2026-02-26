@@ -256,7 +256,7 @@
       "type":"table"
     },
     {
-      "datasource":{"type":"grafana-postgresql-datasource","uid":"${dsn}"},
+      "datasource":{"type":"postgres","uid":"${dsn}"},
       "fieldConfig":{"defaults":{"color":{"mode":"thresholds"},"mappings":[{"options":{"/.*PostgreSQL.*/":{"color":"red","index":0,"text":"sdfsd"}},"type":"value"}],"thresholds":{"mode":"absolute","steps":[{"color":"#3e668f"}]}},"overrides":[]},
       "gridPos":{"h":1,"w":24,"x":0,"y":7},
       "id":53,
@@ -353,7 +353,7 @@
       "pluginVersion":"12.0.0",
       "targets":[
         {
-          "datasource":{"type":"postgres","uid":"da87a3b4-a8de-4e54-b515-40f3e54d18cc"},
+          "datasource":{"type":"postgres","uid":"ds-meta"},
           "editorMode":"code",
           "format":"table",
           "group":[],
@@ -415,7 +415,7 @@
     },
     {"collapsed":false,"gridPos":{"h":1,"w":24,"x":0,"y":14},"id":96,"panels":[],"title":"Activity","type":"row"},
     {
-      "datasource":{"type":"grafana-postgresql-datasource","uid":"${dsn}"},
+      "datasource":{"type":"postgres","uid":"${dsn}"},
       "fieldConfig":{
         "defaults":{
           "custom":{"align":"center","cellOptions":{"type":"auto"},"filterable":false,"inspect":false},
@@ -930,7 +930,7 @@
       "id":153,
       "panels":[
         {
-          "datasource":{"type":"grafana-postgresql-datasource","uid":"${dsn}"},
+          "datasource":{"type":"postgres","uid":"${dsn}"},
           "description":"Session group by pg_stat_activity.backend_type\n\nSystem Processes Included",
           "fieldConfig":{
             "defaults":{"color":{"mode":"palette-classic"},"custom":{"hideFrom":{"legend":false,"tooltip":false,"viz":false}},"mappings":[]},
@@ -949,7 +949,7 @@
           "pluginVersion":"11.6.0",
           "targets":[
             {
-              "datasource":{"type":"grafana-postgresql-datasource","uid":"pg-meta-1.meta"},
+              "datasource":{"type":"postgres","uid":"ds-meta"},
               "editorMode":"code",
               "format":"time_series",
               "group":[],
@@ -966,7 +966,7 @@
           "title":"Sessions (by Type)",
           "type":"piechart"
         },{
-          "datasource":{"type":"grafana-postgresql-datasource","uid":"${dsn}"},
+          "datasource":{"type":"postgres","uid":"${dsn}"},
           "description":"Session group by pg_stat_activity.state\n\nSystem Processes Included",
           "fieldConfig":{
             "defaults":{"color":{"mode":"palette-classic"},"custom":{"hideFrom":{"legend":false,"tooltip":false,"viz":false}},"mappings":[]},
@@ -982,7 +982,7 @@
           "pluginVersion":"11.6.0",
           "targets":[
             {
-              "datasource":{"type":"grafana-postgresql-datasource","uid":"pg-meta-1.meta"},
+              "datasource":{"type":"postgres","uid":"ds-meta"},
               "editorMode":"code",
               "format":"time_series",
               "group":[],
@@ -999,7 +999,7 @@
           "title":"Sessions (by State)",
           "type":"piechart"
         },{
-          "datasource":{"type":"grafana-postgresql-datasource","uid":"${dsn}"},
+          "datasource":{"type":"postgres","uid":"${dsn}"},
           "description":"Session group by pg_stat_activity.wait_event_type\n\nSystem Processes Included",
           "fieldConfig":{"defaults":{"color":{"mode":"palette-classic"},"custom":{"hideFrom":{"legend":false,"tooltip":false,"viz":false}},"mappings":[]},"overrides":[{"matcher":{"id":"byName","options":"null"},"properties":[{"id":"color","value":{"fixedColor":"#80808080","mode":"fixed"}}]},{"matcher":{"id":"byName","options":"ClientRead"},"properties":[{"id":"color","value":{"fixedColor":"#3e668f","mode":"fixed"}}]}]},
           "gridPos":{"h":8,"w":8,"x":16,"y":123},
@@ -1008,7 +1008,7 @@
           "pluginVersion":"11.6.0",
           "targets":[
             {
-              "datasource":{"type":"grafana-postgresql-datasource","uid":"pg-meta-1.meta"},
+              "datasource":{"type":"postgres","uid":"ds-meta"},
               "editorMode":"code",
               "format":"time_series",
               "group":[],
@@ -1025,7 +1025,7 @@
           "title":"Sessions (by Wait Event)",
           "type":"piechart"
         },{
-          "datasource":{"type":"grafana-postgresql-datasource","uid":"${dsn}"},
+          "datasource":{"type":"postgres","uid":"${dsn}"},
           "description":"Session group by pg_stat_activity.client_addr/client_port\n\nSystem Processes Excluded",
           "fieldConfig":{"defaults":{"color":{"mode":"palette-classic"},"custom":{"hideFrom":{"legend":false,"tooltip":false,"viz":false}},"mappings":[]},"overrides":[{"matcher":{"id":"byName","options":"_system"},"properties":[{"id":"color","value":{"fixedColor":"#3e668f","mode":"fixed"}}]},{"matcher":{"id":"byName","options":"unix socket"},"properties":[{"id":"color","value":{"fixedColor":"#3e668f","mode":"fixed"}}]}]},
           "gridPos":{"h":8,"w":8,"x":0,"y":131},
@@ -1034,7 +1034,7 @@
           "pluginVersion":"11.6.0",
           "targets":[
             {
-              "datasource":{"type":"grafana-postgresql-datasource","uid":"pg-meta-1.meta"},
+              "datasource":{"type":"postgres","uid":"ds-meta"},
               "editorMode":"code",
               "format":"time_series",
               "group":[],
@@ -1051,7 +1051,7 @@
           "title":"Sessions (by Client Addr)",
           "type":"piechart"
         },{
-          "datasource":{"type":"grafana-postgresql-datasource","uid":"${dsn}"},
+          "datasource":{"type":"postgres","uid":"${dsn}"},
           "description":"Session group by pg_stat_activity.usename\n\nSystem Processes Excluded",
           "fieldConfig":{
             "defaults":{"color":{"mode":"palette-classic"},"custom":{"hideFrom":{"legend":false,"tooltip":false,"viz":false}},"mappings":[]},
@@ -1069,7 +1069,7 @@
           "pluginVersion":"11.6.0",
           "targets":[
             {
-              "datasource":{"type":"grafana-postgresql-datasource","uid":"pg-meta-1.meta"},
+              "datasource":{"type":"postgres","uid":"ds-meta"},
               "editorMode":"code",
               "format":"time_series",
               "group":[],
@@ -1086,7 +1086,7 @@
           "title":"Sessions (by User)",
           "type":"piechart"
         },{
-          "datasource":{"type":"grafana-postgresql-datasource","uid":"${dsn}"},
+          "datasource":{"type":"postgres","uid":"${dsn}"},
           "description":"Session group by pg_stat_activity.application_name\n\nSystem Processes Excluded",
           "fieldConfig":{"defaults":{"color":{"mode":"palette-classic"},"custom":{"hideFrom":{"legend":false,"tooltip":false,"viz":false}},"mappings":[{"options":{"match":"empty","result":{"index":1,"text":"unknown"}},"type":"special"}]},"overrides":[{"matcher":{"id":"byName","options":"unknown"},"properties":[{"id":"color","value":{"fixedColor":"#3d668f54","mode":"fixed"}}]}]},
           "gridPos":{"h":8,"w":8,"x":16,"y":131},
@@ -1095,7 +1095,7 @@
           "pluginVersion":"11.6.0",
           "targets":[
             {
-              "datasource":{"type":"grafana-postgresql-datasource","uid":"pg-meta-1.meta"},
+              "datasource":{"type":"postgres","uid":"ds-meta"},
               "editorMode":"code",
               "format":"time_series",
               "group":[],
@@ -1444,7 +1444,7 @@
       "id":90,
       "panels":[
         {
-          "datasource":{"type":"grafana-postgresql-datasource","uid":"${dsn}"},
+          "datasource":{"type":"postgres","uid":"${dsn}"},
           "description":"These settings can only be applied when the server starts",
           "fieldConfig":{"defaults":{"color":{"mode":"thresholds"},"mappings":[],"thresholds":{"mode":"absolute","steps":[{"color":"#3e668f"}]}},"overrides":[]},
           "gridPos":{"h":22,"w":6,"x":0,"y":171},
@@ -1453,7 +1453,7 @@
           "pluginVersion":"11.6.0",
           "targets":[
             {
-              "datasource":{"type":"grafana-postgresql-datasource","uid":"pg-meta-1.meta"},
+              "datasource":{"type":"postgres","uid":"ds-meta"},
               "editorMode":"code",
               "format":"time_series",
               "group":[],
@@ -1471,7 +1471,7 @@
           "type":"stat"
         },
         {
-          "datasource":{"type":"grafana-postgresql-datasource","uid":"${dsn}"},
+          "datasource":{"type":"postgres","uid":"${dsn}"},
           "description":"These settings cannot be changed directly; they reflect internally determined values. Some of them may be adjustable by rebuilding the server with different configuration options, or by changing options supplied to initdb.",
           "fieldConfig":{"defaults":{"color":{"mode":"thresholds"},"mappings":[],"thresholds":{"mode":"absolute","steps":[{"color":"#3e668f"}]}},"overrides":[]},
           "gridPos":{"h":13,"w":6,"x":6,"y":171},
@@ -1480,7 +1480,7 @@
           "pluginVersion":"11.6.0",
           "targets":[
             {
-              "datasource":{"type":"grafana-postgresql-datasource","uid":"pg-meta-1.meta"},
+              "datasource":{"type":"postgres","uid":"ds-meta"},
               "editorMode":"code",
               "format":"time_series",
               "group":[],
@@ -1498,7 +1498,7 @@
           "type":"stat"
         },
         {
-          "datasource":{"type":"grafana-postgresql-datasource","uid":"${dsn}"},
+          "datasource":{"type":"postgres","uid":"${dsn}"},
           "description":"These settings that has non-default values",
           "fieldConfig":{
             "defaults":{"color":{"mode":"thresholds"},"custom":{"align":"auto","cellOptions":{"type":"auto"},"inspect":false},"mappings":[],"thresholds":{"mode":"absolute","steps":[{"color":"#f79f64"}]}},
@@ -1533,7 +1533,7 @@
           "pluginVersion":"11.6.0",
           "targets":[
             {
-              "datasource":{"type":"postgres","uid":"a48cedfc-b0bf-40da-aafb-23f7954b8000"},
+              "datasource":{"type":"postgres","uid":"ds-meta"},
               "editorMode":"code",
               "expr":"",
               "format":"table",
@@ -1572,7 +1572,7 @@
           "type":"stat"
         },
         {
-          "datasource":{"type":"grafana-postgresql-datasource","uid":"${dsn}"},
+          "datasource":{"type":"postgres","uid":"${dsn}"},
           "description":"Archive Command & Primary Info",
           "fieldConfig":{"defaults":{"color":{"mode":"thresholds"},"mappings":[],"thresholds":{"mode":"absolute","steps":[{"color":"#3e668f"}]}},"overrides":[]},
           "gridPos":{"h":2,"w":24,"x":0,"y":193},
@@ -1581,7 +1581,7 @@
           "pluginVersion":"11.6.0",
           "targets":[
             {
-              "datasource":{"type":"grafana-postgresql-datasource","uid":"pg-meta-1.meta"},
+              "datasource":{"type":"postgres","uid":"ds-meta"},
               "editorMode":"code",
               "format":"time_series",
               "group":[],
@@ -1896,7 +1896,7 @@
           "type":"table"
         },
         {
-          "datasource":{"type":"grafana-postgresql-datasource","uid":"${dsn}"},
+          "datasource":{"type":"postgres","uid":"${dsn}"},
           "description":"The pg_stat_wal_receiver view will contain only one row, showing statistics about the WAL receiver from that receiver's connected server.",
           "fieldConfig":{"defaults":{"color":{"mode":"thresholds"},"mappings":[],"thresholds":{"mode":"absolute","steps":[{"color":"#3e668f"}]}},"overrides":[]},
           "gridPos":{"h":14,"w":8,"x":0,"y":214},
@@ -1905,7 +1905,7 @@
           "pluginVersion":"11.6.0",
           "targets":[
             {
-              "datasource":{"type":"grafana-postgresql-datasource","uid":"pg-test-1.test"},
+              "datasource":{"type":"postgres","uid":"ds-meta"},
               "editorMode":"code",
               "format":"table",
               "group":[],
@@ -1924,7 +1924,7 @@
           "type":"stat"
         },
         {
-          "datasource":{"type":"grafana-postgresql-datasource","uid":"${dsn}"},
+          "datasource":{"type":"postgres","uid":"${dsn}"},
           "description":"The pg_stat_wal_receiver view will contain only one row, showing statistics about the WAL receiver from that receiver's connected server.",
           "fieldConfig":{"defaults":{"color":{"mode":"thresholds"},"mappings":[],"thresholds":{"mode":"absolute","steps":[{"color":"#3e668f"}]}},"overrides":[]},
           "gridPos":{"h":14,"w":8,"x":8,"y":214},
@@ -1933,7 +1933,7 @@
           "pluginVersion":"11.6.0",
           "targets":[
             {
-              "datasource":{"type":"grafana-postgresql-datasource","uid":"pg-test-1.test"},
+              "datasource":{"type":"postgres","uid":"ds-meta"},
               "editorMode":"code",
               "format":"table",
               "group":[],
@@ -1989,7 +1989,7 @@
           "transformations":[{"id":"organize","options":{"excludeByName":{},"indexByName":{},"renameByName":{"name":"Name","offset":"Offset","size":"Size"}}}],
           "type":"table"
         },{
-          "datasource":{"type":"grafana-postgresql-datasource","uid":"${dsn}"},
+          "datasource":{"type":"postgres","uid":"${dsn}"},
           "description":"PostgreSQL server's main shared memory segment.",
           "fieldConfig":{
             "defaults":{"color":{"mode":"palette-classic"},"custom":{"hideFrom":{"legend":false,"tooltip":false,"viz":false}},"mappings":[],"unit":"decbytes"},
@@ -2021,7 +2021,7 @@
           "pluginVersion":"11.6.0",
           "targets":[
             {
-              "datasource":{"type":"grafana-postgresql-datasource","uid":"pg-meta-1.meta"},
+              "datasource":{"type":"postgres","uid":"ds-meta"},
               "editorMode":"code",
               "format":"time_series",
               "group":[],
@@ -2039,7 +2039,7 @@
           "transformations":[{"id":"organize","options":{"excludeByName":{},"indexByName":{},"renameByName":{"name":"Name","offset":"Offset","size":"Size"}}}],
           "type":"piechart"
         },{
-          "datasource":{"type":"grafana-postgresql-datasource","uid":"${dsn}"},
+          "datasource":{"type":"postgres","uid":"${dsn}"},
           "description":"PostgreSQL server's main shared memory segment.",
           "fieldConfig":{"defaults":{"color":{"mode":"thresholds"},"mappings":[],"thresholds":{"mode":"absolute","steps":[{"color":"#346f36cc"}]}},"overrides":[]},
           "gridPos":{"h":10,"w":8,"x":0,"y":239},
@@ -2048,7 +2048,7 @@
           "pluginVersion":"2.0.1",
           "targets":[
             {
-              "datasource":{"type":"grafana-postgresql-datasource","uid":"pg-meta-1.meta"},
+              "datasource":{"type":"postgres","uid":"ds-meta"},
               "editorMode":"code",
               "format":"table",
               "group":[],
@@ -2066,7 +2066,7 @@
           "transformations":[{"id":"organize","options":{"excludeByName":{},"indexByName":{},"renameByName":{"name":"Name","offset":"Offset","size":"Size"}}}],
           "type":"marcusolsson-treemap-panel"
         },{
-          "datasource":{"type":"grafana-postgresql-datasource","uid":"${dsn}"},
+          "datasource":{"type":"postgres","uid":"${dsn}"},
           "description":"PostgreSQL accesses certain on-disk information via SLRU (simple least-recently-used) caches. The pg_stat_slru view will contain one row for each tracked SLRU cache, showing statistics about access to cached pages.",
           "fieldConfig":{
             "defaults":{"color":{"mode":"thresholds"},"custom":{"align":"center","cellOptions":{"mode":"gradient","type":"color-background"},"filterable":false,"inspect":false},"mappings":[],"thresholds":{"mode":"absolute","steps":[{"color":"#e3e3e3e0"}]}},
@@ -2078,7 +2078,7 @@
           "pluginVersion":"11.6.0",
           "targets":[
             {
-              "datasource":{"type":"grafana-postgresql-datasource","uid":"pg-meta-1.meta"},
+              "datasource":{"type":"postgres","uid":"ds-meta"},
               "editorMode":"code",
               "format":"table",
               "group":[],
@@ -2106,7 +2106,7 @@
       "id":115,
       "panels":[
         {
-          "datasource":{"type":"grafana-postgresql-datasource","uid":"${dsn}"},
+          "datasource":{"type":"postgres","uid":"${dsn}"},
           "fieldConfig":{"defaults":{"color":{"mode":"thresholds"},"mappings":[],"thresholds":{"mode":"absolute","steps":[{"color":"#3e668f"}]}},"overrides":[]},
           "gridPos":{"h":2,"w":6,"x":0,"y":250},
           "id":155,
@@ -2132,7 +2132,7 @@
           "type":"stat"
         },
         {
-          "datasource":{"type":"grafana-postgresql-datasource","uid":"${dsn}"},
+          "datasource":{"type":"postgres","uid":"${dsn}"},
           "fieldConfig":{"defaults":{"color":{"mode":"thresholds"},"mappings":[],"thresholds":{"mode":"absolute","steps":[{"color":"#3e668f"}]}},"overrides":[]},
           "gridPos":{"h":8,"w":6,"x":6,"y":250},
           "id":126,
@@ -2140,7 +2140,7 @@
           "pluginVersion":"11.6.0",
           "targets":[
             {
-              "datasource":{"type":"grafana-postgresql-datasource","uid":"pg-meta-1.meta"},
+              "datasource":{"type":"postgres","uid":"ds-meta"},
               "editorMode":"code",
               "format":"table",
               "group":[],
@@ -2159,7 +2159,7 @@
           "type":"stat"
         },
         {
-          "datasource":{"type":"grafana-postgresql-datasource","uid":"${dsn}"},
+          "datasource":{"type":"postgres","uid":"${dsn}"},
           "fieldConfig":{"defaults":{"color":{"mode":"thresholds"},"mappings":[],"thresholds":{"mode":"absolute","steps":[{"color":"#3e668f"}]}},"overrides":[]},
           "gridPos":{"h":16,"w":6,"x":12,"y":250},
           "id":119,
@@ -2167,7 +2167,7 @@
           "pluginVersion":"11.6.0",
           "targets":[
             {
-              "datasource":{"type":"grafana-postgresql-datasource","uid":"pg-test-1.test"},
+              "datasource":{"type":"postgres","uid":"ds-meta"},
               "editorMode":"code",
               "format":"table",
               "group":[],
@@ -2185,7 +2185,7 @@
           "type":"stat"
         },
         {
-          "datasource":{"type":"grafana-postgresql-datasource","uid":"${dsn}"},
+          "datasource":{"type":"postgres","uid":"${dsn}"},
           "fieldConfig":{"defaults":{"color":{"mode":"thresholds"},"mappings":[],"thresholds":{"mode":"absolute","steps":[{"color":"#3e668f"}]}},"overrides":[]},
           "gridPos":{"h":16,"w":6,"x":18,"y":250},
           "id":123,
@@ -2193,7 +2193,7 @@
           "pluginVersion":"11.6.0",
           "targets":[
             {
-              "datasource":{"type":"grafana-postgresql-datasource","uid":"pg-test-1.test"},
+              "datasource":{"type":"postgres","uid":"ds-meta"},
               "editorMode":"code",
               "format":"table",
               "group":[],
@@ -2206,7 +2206,7 @@
               "timeColumn":"time",
               "where":[{"name":"$__timeFilter","params":[],"type":"macro"}]
             },{
-              "datasource":{"type":"grafana-postgresql-datasource","uid":"pg-test-1.test"},
+              "datasource":{"type":"postgres","uid":"ds-meta"},
               "editorMode":"code",
               "format":"table",
               "group":[],
@@ -2225,7 +2225,7 @@
           "type":"stat"
         },
         {
-          "datasource":{"type":"grafana-postgresql-datasource","uid":"${dsn}"},
+          "datasource":{"type":"postgres","uid":"${dsn}"},
           "fieldConfig":{"defaults":{"color":{"mode":"thresholds"},"mappings":[],"thresholds":{"mode":"absolute","steps":[{"color":"#3e668f"}]}},"overrides":[{"matcher":{"id":"byName","options":"full_page_writes"},"properties":[{"id":"mappings","value":[{"options":{"false":{"color":"#f79f64","index":0},"true":{"color":"#3e668f","index":1}},"type":"value"}]}]}]},
           "gridPos":{"h":14,"w":6,"x":0,"y":252},
           "id":116,
@@ -2233,7 +2233,7 @@
           "pluginVersion":"11.6.0",
           "targets":[
             {
-              "datasource":{"type":"grafana-postgresql-datasource","uid":"pg-meta-1.meta"},
+              "datasource":{"type":"postgres","uid":"ds-meta"},
               "editorMode":"code",
               "format":"table",
               "group":[],
@@ -2259,7 +2259,7 @@
           "pluginVersion":"11.6.0",
           "targets":[
             {
-              "datasource":{"type":"postgres","uid":"cc8a3615-9c82-44d7-be42-07d8aa1cac68"},
+              "datasource":{"type":"postgres","uid":"ds-meta"},
               "editorMode":"code",
               "format":"table",
               "group":[],

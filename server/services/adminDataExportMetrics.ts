@@ -14,6 +14,7 @@ type ExportMetricsState = {
   queueDelayed: number;
   queueFailed: number;
   queueCompleted: number;
+  bytesWrittenTotal: number;
   lastJobDurationMs: number;
   lastSuccessAtSec: number;
   lastFailureAtSec: number;
@@ -35,6 +36,7 @@ const state: ExportMetricsState = {
   queueDelayed: 0,
   queueFailed: 0,
   queueCompleted: 0,
+  bytesWrittenTotal: 0,
   lastJobDurationMs: 0,
   lastSuccessAtSec: 0,
   lastFailureAtSec: 0,
@@ -95,6 +97,12 @@ export function setAdminExportQueueDepth(params: {
   state.queueDelayed = Math.max(0, Math.trunc(params.delayed || 0));
   state.queueFailed = Math.max(0, Math.trunc(params.failed || 0));
   state.queueCompleted = Math.max(0, Math.trunc(params.completed || 0));
+}
+
+export function onAdminExportBytesWritten(bytesWritten: number): void {
+  const delta = Math.max(0, Math.trunc(Number(bytesWritten) || 0));
+  if (delta <= 0) return;
+  state.bytesWrittenTotal += delta;
 }
 
 export function getAdminExportMetricsSnapshot(): ExportMetricsState {

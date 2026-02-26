@@ -18,6 +18,7 @@ static_dir.mkdir(exist_ok=True)
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
 required_config = ['MINIO_ROOT_USER', 'MINIO_ROOT_PASSWORD', "MINIO_ENDPOINT_URL"]
+metrics_bucket = os.environ.get("MINIO_BUCKET", "cdm-lake")
 
 for var in required_config:
     if var not in os.environ:
@@ -36,11 +37,10 @@ def get_s3_client():
 def get_metrics_files(limit: int = 5):
     """Get the most recent metrics files from MinIO."""
     s3 = get_s3_client()
-    bucket_name = "cdm-lake"
     metrics_prefix = "metrics/"
 
     metrics_files = []
-    for obj in s3.list_objects(bucket_name, prefix=metrics_prefix):
+    for obj in s3.list_objects(metrics_bucket, prefix=metrics_prefix):
         if obj.object_name.endswith('.csv'):
             metrics_files.append({
                 'name': obj.object_name,
@@ -55,9 +55,8 @@ def get_metrics_files(limit: int = 5):
 def read_csv_from_minio(object_name: str):
     """Read and parse a CSV file from MinIO."""
     s3 = get_s3_client()
-    bucket_name = "cdm-lake"
 
-    response = s3.get_object(bucket_name, object_name)
+    response = s3.get_object(metrics_bucket, object_name)
     csv_content = response.read().decode('utf-8')
     response.close()
     response.release_conn()
@@ -70,6 +69,11 @@ def read_csv_from_minio(object_name: str):
 async def index():
     html_path = static_dir / "index.html"
     return HTMLResponse(content=html_path.read_text())
+
+
+@app.get("/healthz")
+async def healthz():
+    return {"ok": True}
 
 
 @app.get("/api/csv")

@@ -29,3 +29,42 @@ datasources:
     editable: true
     jsonData:
       implementation: prometheus
+
+  - name: Grafana Internal
+    type: datasource
+    uid: grafana
+    access: proxy
+    url: http://tradehub-grafana:3000
+    editable: false
+
+  - name: TradeHub VictoriaLogs
+    type: victoriametrics-logs-datasource
+    uid: ds-vlogs
+    access: proxy
+    url: http://tradehub-victoria-logs:9428
+    editable: true
+    jsonData:
+      maxLines: 1000
+
+  - name: TradeHub Static
+    type: marcusolsson-static-datasource
+    uid: ds-static
+    access: proxy
+    editable: true
+    jsonData:
+      endpoint: http://tradehub-static-datasource.tradehub.svc.cluster.local
+
+  - name: TradeHub Metadata Postgres
+    type: postgres
+    uid: ds-meta
+    access: proxy
+    url: pgbouncer.tradehub.svc.cluster.local:6432
+    database: tradehub
+    user: tradehub
+    editable: true
+    secureJsonData:
+      password: "${PGPASSWORD}"
+    jsonData:
+      sslmode: "disable"
+      postgresVersion: 1600
+      timescaledb: false

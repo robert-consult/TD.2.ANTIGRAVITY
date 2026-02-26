@@ -148,6 +148,24 @@ function requireSuperAdmin(req: any, res: any, next: any): void {
   res.status(403).json({ message: "Forbidden" });
 }
 
+const RESERVED_JOB_SEGMENTS = new Set([
+  "files",
+  "queues",
+  "trader-scouting",
+  "users",
+  "user-timeline",
+  "deactivated-accounts",
+  "trade-audit",
+  "order-intent-audit",
+]);
+
+function parseJobIdParam(raw: unknown): string | null {
+  const jobId = String(raw ?? "").trim();
+  if (!jobId) return null;
+  if (RESERVED_JOB_SEGMENTS.has(jobId)) return null;
+  return jobId;
+}
+
 export const adminDataExportsRouter = Router();
 adminDataExportsRouter.use(requireAdmin);
 
@@ -230,113 +248,6 @@ adminDataExportsRouter.get("/files", async (req: any, res) => {
     exportFormatContentType(job.format),
   );
   return res.sendFile(path.basename(localPath), { root: path.dirname(localPath) });
-});
-
-adminDataExportsRouter.get("/:jobId", async (req: any, res) => {
-  const job = await getAdminDataExportJob(String(req.params.jobId || ""));
-  if (!job) return res.status(404).json({ message: "Job not found" });
-  if (!canAccessJob(req, job)) return res.status(403).json({ message: "Forbidden" });
-  return res.json({ ok: true, job });
-});
-
-adminDataExportsRouter.get("/:jobId/events", async (req: any, res) => {
-  const job = await getAdminDataExportJob(String(req.params.jobId || ""));
-  if (!job) return res.status(404).json({ message: "Job not found" });
-  if (!canAccessJob(req, job)) return res.status(403).json({ message: "Forbidden" });
-
-  const limit = Math.max(1, Math.min(1000, Number(req.query.limit || 200)));
-  const events = await listAdminDataExportJobEvents({ jobId: job.id, limit });
-  return res.json({ ok: true, events });
-});
-
-adminDataExportsRouter.post("/:jobId/retry", async (req: any, res) => {
-  const jobId = String(req.params.jobId || "");
-  const job = await getAdminDataExportJob(jobId);
-  if (!job) return res.status(404).json({ message: "Job not found" });
-  if (!canAccessJob(req, job)) return res.status(403).json({ message: "Forbidden" });
-
-  if (!["FAILED", "CANCELED", "EXPIRED"].includes(job.status)) {
-    return res.status(409).json({ message: `Cannot retry job in status ${job.status}` });
-  }
-  if (!enforceAdminRateLimit({ res, adminId: getSessionAdminId(req), kind: "retry" })) return;
-
-  if (job.objectKey) {
-    await deleteExportArtifact(job.objectKey).catch(() => {});
-  }
-  await retryAdminDataExportJobInRepo(jobId).catch(() => {});
-  await appendAdminDataExportEvent({
-    jobId,
-    level: "INFO",
-    message: "Retry requested by admin",
-    context: { adminId: getSessionAdminId(req) },
-  });
-  await retryAdminDataExportJob(jobId);
-  return res.json({ ok: true, jobId });
-});
-
-adminDataExportsRouter.post("/:jobId/cancel", async (req: any, res) => {
-  const jobId = String(req.params.jobId || "");
-  const job = await getAdminDataExportJob(jobId);
-  if (!job) return res.status(404).json({ message: "Job not found" });
-  if (!canAccessJob(req, job)) return res.status(403).json({ message: "Forbidden" });
-
-  await cancelAdminDataExportQueueJob(jobId);
-  await markAdminDataExportJobCanceled(jobId);
-  await appendAdminDataExportEvent({
-    jobId,
-    level: "INFO",
-    message: "Job canceled by admin",
-    context: { adminId: getSessionAdminId(req) },
-  });
-  return res.json({ ok: true, jobId });
-});
-
-adminDataExportsRouter.get("/:jobId/download-link", async (req: any, res) => {
-  const jobId = String(req.params.jobId || "");
-  const job = await getAdminDataExportJob(jobId);
-  if (!job) return res.status(404).json({ message: "Job not found" });
-  if (!canAccessJob(req, job)) return res.status(403).json({ message: "Forbidden" });
-  if (job.status !== "READY" || !job.objectKey) {
-    return res.status(409).json({ message: "Export is not ready" });
-  }
-
-  const now = Math.floor(Date.now() / 1000);
-  if (job.expiresAt && job.expiresAt <= now) {
-    if (job.objectKey) {
-      await deleteExportArtifact(job.objectKey).catch(() => {});
-    }
-    await markAdminDataExportJobExpired(job.id).catch(() => {});
-    onAdminExportJobExpired();
-    await appendAdminDataExportEvent({
-      jobId: job.id,
-      level: "INFO",
-      message: "Download link request rejected because artifact is expired",
-      context: { adminId: getSessionAdminId(req), expiresAt: job.expiresAt },
-    }).catch(() => {});
-    return res.status(410).json({ message: "Export artifact expired" });
-  }
-
-  const extension = exportFormatExtension(job.format);
-  const fileName = `${job.type}-${job.id}.${extension}`;
-  if (!enforceAdminRateLimit({ res, adminId: getSessionAdminId(req), kind: "download" })) return;
-  const link = await getExportDownloadLink({
-    objectKey: job.objectKey,
-    fileName,
-  });
-
-  await appendAdminDataExportEvent({
-    jobId,
-    level: "INFO",
-    message: "Download link issued",
-    context: { adminId: getSessionAdminId(req), expiresAt: link.expiresAt },
-  }).catch(() => {});
-
-  return res.json({
-    ok: true,
-    jobId: job.id,
-    url: link.url,
-    expiresAt: link.expiresAt,
-  });
 });
 
 adminDataExportsRouter.post("/trader-scouting", async (req: any, res) => {
@@ -449,3 +360,122 @@ if (
     adminDataExportsRouter.use("/queues", requireSuperAdmin, adapter.getRouter());
   }
 }
+
+adminDataExportsRouter.get("/:jobId", async (req: any, res) => {
+  const jobId = parseJobIdParam(req.params.jobId);
+  if (!jobId) return res.status(404).json({ message: "Route not found" });
+
+  const job = await getAdminDataExportJob(jobId);
+  if (!job) return res.status(404).json({ message: "Job not found" });
+  if (!canAccessJob(req, job)) return res.status(403).json({ message: "Forbidden" });
+  return res.json({ ok: true, job });
+});
+
+adminDataExportsRouter.get("/:jobId/events", async (req: any, res) => {
+  const jobId = parseJobIdParam(req.params.jobId);
+  if (!jobId) return res.status(404).json({ message: "Route not found" });
+
+  const job = await getAdminDataExportJob(jobId);
+  if (!job) return res.status(404).json({ message: "Job not found" });
+  if (!canAccessJob(req, job)) return res.status(403).json({ message: "Forbidden" });
+
+  const limit = Math.max(1, Math.min(1000, Number(req.query.limit || 200)));
+  const events = await listAdminDataExportJobEvents({ jobId: job.id, limit });
+  return res.json({ ok: true, events });
+});
+
+adminDataExportsRouter.post("/:jobId/retry", async (req: any, res) => {
+  const jobId = parseJobIdParam(req.params.jobId);
+  if (!jobId) return res.status(404).json({ message: "Route not found" });
+
+  const job = await getAdminDataExportJob(jobId);
+  if (!job) return res.status(404).json({ message: "Job not found" });
+  if (!canAccessJob(req, job)) return res.status(403).json({ message: "Forbidden" });
+
+  if (!["FAILED", "CANCELED", "EXPIRED"].includes(job.status)) {
+    return res.status(409).json({ message: `Cannot retry job in status ${job.status}` });
+  }
+  if (!enforceAdminRateLimit({ res, adminId: getSessionAdminId(req), kind: "retry" })) return;
+
+  if (job.objectKey) {
+    await deleteExportArtifact(job.objectKey).catch(() => {});
+  }
+  await retryAdminDataExportJobInRepo(jobId).catch(() => {});
+  await appendAdminDataExportEvent({
+    jobId,
+    level: "INFO",
+    message: "Retry requested by admin",
+    context: { adminId: getSessionAdminId(req) },
+  });
+  await retryAdminDataExportJob(jobId);
+  return res.json({ ok: true, jobId });
+});
+
+adminDataExportsRouter.post("/:jobId/cancel", async (req: any, res) => {
+  const jobId = parseJobIdParam(req.params.jobId);
+  if (!jobId) return res.status(404).json({ message: "Route not found" });
+
+  const job = await getAdminDataExportJob(jobId);
+  if (!job) return res.status(404).json({ message: "Job not found" });
+  if (!canAccessJob(req, job)) return res.status(403).json({ message: "Forbidden" });
+
+  await cancelAdminDataExportQueueJob(jobId);
+  await markAdminDataExportJobCanceled(jobId);
+  await appendAdminDataExportEvent({
+    jobId,
+    level: "INFO",
+    message: "Job canceled by admin",
+    context: { adminId: getSessionAdminId(req) },
+  });
+  return res.json({ ok: true, jobId });
+});
+
+adminDataExportsRouter.get("/:jobId/download-link", async (req: any, res) => {
+  const jobId = parseJobIdParam(req.params.jobId);
+  if (!jobId) return res.status(404).json({ message: "Route not found" });
+
+  const job = await getAdminDataExportJob(jobId);
+  if (!job) return res.status(404).json({ message: "Job not found" });
+  if (!canAccessJob(req, job)) return res.status(403).json({ message: "Forbidden" });
+  if (job.status !== "READY" || !job.objectKey) {
+    return res.status(409).json({ message: "Export is not ready" });
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  if (job.expiresAt && job.expiresAt <= now) {
+    if (job.objectKey) {
+      await deleteExportArtifact(job.objectKey).catch(() => {});
+    }
+    await markAdminDataExportJobExpired(job.id).catch(() => {});
+    onAdminExportJobExpired();
+    await appendAdminDataExportEvent({
+      jobId: job.id,
+      level: "INFO",
+      message: "Download link request rejected because artifact is expired",
+      context: { adminId: getSessionAdminId(req), expiresAt: job.expiresAt },
+    }).catch(() => {});
+    return res.status(410).json({ message: "Export artifact expired" });
+  }
+
+  const extension = exportFormatExtension(job.format);
+  const fileName = `${job.type}-${job.id}.${extension}`;
+  if (!enforceAdminRateLimit({ res, adminId: getSessionAdminId(req), kind: "download" })) return;
+  const link = await getExportDownloadLink({
+    objectKey: job.objectKey,
+    fileName,
+  });
+
+  await appendAdminDataExportEvent({
+    jobId,
+    level: "INFO",
+    message: "Download link issued",
+    context: { adminId: getSessionAdminId(req), expiresAt: link.expiresAt },
+  }).catch(() => {});
+
+  return res.json({
+    ok: true,
+    jobId: job.id,
+    url: link.url,
+    expiresAt: link.expiresAt,
+  });
+});

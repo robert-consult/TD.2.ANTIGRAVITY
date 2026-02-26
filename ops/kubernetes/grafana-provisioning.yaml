@@ -1,118 +1,149 @@
-# Grafana Deployment & Dashboard Provisioning
-#
-# This file automates the deployment of Grafana into the tradehub namespace
-# and dynamically provisions all 8 dashboards located in ops/dashboards/*.json.
-# It uses a shell script initContainer to read the JSONs via an external ConfigMap
-# or volume, but since k8s limits ConfigMap sizes, we'll deploy Grafana with 
-# a sidecar that syncs dashboards, or simply map the dashboards directly via ConfigMap.
-
+# Grafana provisioning ConfigMaps consumed by ops/kubernetes/grafana-deployment.yaml.
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: grafana-dashboards-ds
+  name: grafana-dashboard-provisioning
   namespace: tradehub
 data:
-  dashboards.yaml: |
+  tradehub.yaml: |
     apiVersion: 1
     providers:
-      - name: 'Tradehub Petascale Ops'
-        origId: 1
-        folder: ''
+      - name: 'tradehub-custom'
+        orgId: 1
+        folder: 'TradeHub'
         type: file
         disableDeletion: false
         editable: true
+        updateIntervalSeconds: 30
+        allowUiUpdates: true
         options:
-          path: /var/lib/grafana/dashboards
+          path: /var/lib/grafana/dashboards/tradehub
+          foldersFromFilesStructure: false
+
+      - name: 'pigsty-pgsql'
+        orgId: 1
+        folder: 'PostgreSQL'
+        type: file
+        disableDeletion: false
+        editable: true
+        updateIntervalSeconds: 60
+        options:
+          path: /var/lib/grafana/dashboards/pigsty-pgsql
+          foldersFromFilesStructure: false
+
+      - name: 'pigsty-minio'
+        orgId: 1
+        folder: 'MinIO'
+        type: file
+        disableDeletion: false
+        editable: true
+        updateIntervalSeconds: 60
+        options:
+          path: /var/lib/grafana/dashboards/pigsty-minio
+          foldersFromFilesStructure: false
+
+      - name: 'pigsty-node'
+        orgId: 1
+        folder: 'Bare Metal / Node'
+        type: file
+        disableDeletion: false
+        editable: true
+        updateIntervalSeconds: 60
+        options:
+          path: /var/lib/grafana/dashboards/pigsty-node
+          foldersFromFilesStructure: false
+
+      - name: 'pigsty-infra'
+        orgId: 1
+        folder: 'Infrastructure'
+        type: file
+        disableDeletion: false
+        editable: true
+        updateIntervalSeconds: 60
+        options:
+          path: /var/lib/grafana/dashboards/pigsty-infra
+          foldersFromFilesStructure: false
+
+      - name: 'pigsty-redis'
+        orgId: 1
+        folder: 'Valkey / Redis'
+        type: file
+        disableDeletion: false
+        editable: true
+        updateIntervalSeconds: 60
+        options:
+          path: /var/lib/grafana/dashboards/pigsty-redis
+          foldersFromFilesStructure: false
 ---
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: grafana-datasource
+  name: grafana-datasource-provisioning
   namespace: tradehub
 data:
-  datasource.yaml: |
+  tradehub.yaml: |
     apiVersion: 1
+
     datasources:
       - name: Prometheus
         type: prometheus
+        uid: ds-prometheus
         access: proxy
-        orgId: 1
-        url: http://tradehub-prometheus.tradehub.svc.cluster.local:9090
+        url: http://tradehub-prometheus:9090
         isDefault: true
----
-# NOTE: The actual JSON dashboards (app-red-metrics.json, etc.) 
-# must be applied to the cluster prior to this via:
-# kubectl create configmap grafana-dashboards --from-file=ops/dashboards/ -n tradehub
-# OR deployed as part of the helm chart. Assuming they are mounted via 'grafana-dashboards' ConfigMap.
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: tradehub-grafana
-  namespace: tradehub
-  labels:
-    app: tradehub-grafana
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: tradehub-grafana
-  template:
-    metadata:
-      labels:
-        app: tradehub-grafana
-    spec:
-      containers:
-        - name: grafana
-          image: grafana/grafana:10.4.0
-          env:
-            - name: GF_SECURITY_ADMIN_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: tradehub-secrets
-                  key: GRAFANA_ADMIN_PASSWORD
-                  optional: true
-          ports:
-            - containerPort: 3000
-          volumeMounts:
-            - name: grafana-storage
-              mountPath: /var/lib/grafana
-            - name: grafana-datasources
-              mountPath: /etc/grafana/provisioning/datasources
-            - name: grafana-dashboards-cfg
-              mountPath: /etc/grafana/provisioning/dashboards
-            - name: grafana-dashboards
-              mountPath: /var/lib/grafana/dashboards
-          resources:
-            requests: { cpu: "100m", memory: "256Mi" }
-            limits: { cpu: "500m", memory: "512Mi" }
-          securityContext:
-            readOnlyRootFilesystem: false
-            runAsNonRoot: true
-            runAsUser: 472
-      volumes:
-        - name: grafana-storage
-          emptyDir: {}
-        - name: grafana-datasources
-          configMap:
-            name: grafana-datasource
-        - name: grafana-dashboards-cfg
-          configMap:
-            name: grafana-dashboards-ds
-        - name: grafana-dashboards
-          configMap:
-            name: grafana-dashboards
-            optional: true
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: tradehub-grafana
-  namespace: tradehub
-spec:
-  type: ClusterIP
-  selector:
-    app: tradehub-grafana
-  ports:
-    - name: http
-      port: 3000
-      targetPort: 3000
+        editable: true
+        jsonData:
+          timeInterval: '15s'
+          queryTimeout: '60s'
+          httpMethod: POST
+          exemplarTraceIdDestinations:
+            - name: traceID
+              datasourceUid: ds-tempo
+
+      - name: Alertmanager
+        type: alertmanager
+        uid: ds-alertmanager
+        access: proxy
+        url: http://tradehub-alertmanager:9093
+        editable: true
+        jsonData:
+          implementation: prometheus
+
+      - name: Grafana Internal
+        type: datasource
+        uid: grafana
+        access: proxy
+        url: http://tradehub-grafana:3000
+        editable: false
+
+      - name: TradeHub VictoriaLogs
+        type: victoriametrics-logs-datasource
+        uid: ds-vlogs
+        access: proxy
+        url: http://tradehub-victoria-logs:9428
+        editable: true
+        jsonData:
+          maxLines: 1000
+
+      - name: TradeHub Static
+        type: marcusolsson-static-datasource
+        uid: ds-static
+        access: proxy
+        editable: true
+        jsonData:
+          endpoint: http://tradehub-static-datasource.tradehub.svc.cluster.local
+
+      - name: TradeHub Metadata Postgres
+        type: postgres
+        uid: ds-meta
+        access: proxy
+        url: pgbouncer.tradehub.svc.cluster.local:6432
+        database: tradehub
+        user: tradehub
+        editable: true
+        secureJsonData:
+          password: "${PGPASSWORD}"
+        jsonData:
+          sslmode: "disable"
+          postgresVersion: 1600
+          timescaledb: false

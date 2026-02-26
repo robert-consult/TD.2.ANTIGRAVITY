@@ -1,7 +1,7 @@
 {
   "annotations":{
     "list":[
-      {"builtIn":1,"datasource":{"type":"grafana","uid":"-- Grafana --"},"enable":true,"hide":true,"iconColor":"rgba(0, 211, 255, 1)","name":"Annotations & Alerts","target":{"limit":100,"matchAny":false,"tags":[],"type":"dashboard"},"type":"dashboard"},
+      {"builtIn":1,"datasource":{"type":"datasource","uid":"grafana"},"enable":true,"hide":true,"iconColor":"rgba(0, 211, 255, 1)","name":"Annotations & Alerts","target":{"limit":100,"matchAny":false,"tags":[],"type":"dashboard"},"type":"dashboard"},
       {"datasource":{"type":"prometheus","uid":"$ds"},"enable":true,"expr":"sum(vm_app_version{ins=~\"$ins\"}) by(short_version) unless (sum(vm_app_version{ins=~\"$ins\"} offset $__interval) by(short_version))","hide":true,"iconColor":"blue","name":"version change","textFormat":"{{short_version}}","titleFormat":"Version change"},
       {"datasource":{"type":"prometheus","uid":"ds-prometheus"},"enable":true,"expr":"sum(changes(vm_app_start_timestamp{ins=~\"$ins\"}[$__interval])) by(job)","hide":true,"iconColor":"orange","name":"restarts","textFormat":"{{instance}} restarted"},
       {"datasource":{"type":"prometheus","uid":"${ds}"},"enable":true,"filter":{"exclude":false,"ids":[75]},"hide":false,"iconColor":"#57f26d1c","name":"gc","target":{"expr":"go_memstats_last_gc_time_seconds{ins=~\"$ins\"} * 1000","interval":"","refId":"Anno"},"textFormat":"GC event","useValueForTime":true}

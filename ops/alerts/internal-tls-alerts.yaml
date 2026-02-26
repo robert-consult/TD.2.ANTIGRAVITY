@@ -12,7 +12,7 @@ groups:
           description: "TradeHub reports internal MinIO/ClickHouse transport is configured without TLS. See ops/runbooks/RUNBOOK_INTERNAL_TLS.md for enablement steps."
 
       - alert: ValkeyTLSNotConfigured
-        expr: max by (service) ((internal_transport_service_enabled{service=\"valkey\"} == 1) and (internal_transport_tls_enabled{service=\"valkey\"} == 0)) > 0
+        expr: max by (service) ((internal_transport_service_enabled{service="valkey"} == 1) and (internal_transport_tls_enabled{service="valkey"} == 0)) > 0
         for: 24h
         labels: { severity: info, team: infra }
         annotations:

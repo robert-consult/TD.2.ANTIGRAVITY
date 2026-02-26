@@ -63,6 +63,14 @@ spec:
               value: "false"
             - name: GF_USERS_ALLOW_SIGN_UP
               value: "false"
+            - name: GF_INSTALL_PLUGINS
+              value: "victoriametrics-logs-datasource,marcusolsson-static-datasource"
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: tradehub-secrets
+                  key: POSTGRES_PASSWORD
+                  optional: true
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: false

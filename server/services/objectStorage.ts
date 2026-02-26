@@ -3,6 +3,7 @@ import fs from "fs";
 import path from "path";
 import { Client as MinioClient } from "minio";
 import { getPetascaleRuntimeConfig } from "./petascaleEnv";
+import { onAdminExportBytesWritten } from "./adminDataExportMetrics";
 
 type UploadedArtifact = {
   objectKey: string;
@@ -103,6 +104,7 @@ export async function uploadExportArtifact(params: {
       "Cache-Control": "private, max-age=0, no-store",
       "X-Amz-Server-Side-Encryption": "AES256",
     });
+    onAdminExportBytesWritten(bytesWritten);
     return {
       objectKey,
       bytesWritten,
@@ -115,6 +117,7 @@ export async function uploadExportArtifact(params: {
   const localName = `${params.jobId}-${Date.now()}-${safeName}`;
   const localPath = path.join(cfg.localExportDir, localName);
   fs.copyFileSync(params.sourcePath, localPath);
+  onAdminExportBytesWritten(bytesWritten);
   return {
     objectKey: `local/${localName}`,
     bytesWritten,

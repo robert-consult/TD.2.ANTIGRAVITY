@@ -1,0 +1,1149 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DiasporaVest - Hybrid Premium v2</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <!-- Premium serif (Playfair/Cinzel) with hyper-clean highly legible sans-serifs (Outfit, Inter, Space Grotesk) -->
+    <link
+        href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Playfair+Display:ital,wght@0,600;0,700;1,600&family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;700&family=Cinzel:wght@600&display=swap"
+        rel="stylesheet">
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        :root {
+            /* Hybrid Theme 1: The Rift (Professional Milano base + Afro-Futurist Neon accents) */
+            --bg-page: #F4EFE9;
+            /* Warm Travertine off-white */
+            --bg-surface: #FFFFFF;
+            /* Pure white cards */
+            --text-primary: #2B2726;
+            /* Espresso / Volcanic Rock */
+            --text-secondary: #5A6B51;
+            /* Savanna Olive */
+            --border-color: #E6E1DA;
+
+            --accent-brand: #1A1A1A;
+            --accent-primary: #D48C41;
+            /* Sun-baked amber (Professional CTA) */
+            --accent-vibrant: #C0FF00;
+            /* NEON CHARTREUSE (Radical CTA) */
+            --accent-tenders: #8A2BE2;
+            /* Electric Maasai Purple */
+            --accent-luxury: #10B981;
+            /* Emerald */
+
+            --font-display: 'Playfair Display', serif;
+            --font-ui: 'Outfit', sans-serif;
+            --font-body: 'Inter', sans-serif;
+
+            --radius-sm: 8px;
+            --radius-md: 16px;
+            --radius-lg: 24px;
+
+            --shadow-sm: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+            --shadow-md: 0 10px 25px -5px rgba(0, 0, 0, 0.1);
+            --shadow-float: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+
+            --hero-image: url('https://images.unsplash.com/photo-1628611225249-6c17d7b38dfd?ixlib=rb-4.0.3&auto=format&fit=crop&w=2000&q=80');
+        }
+
+        [data-theme="theme2"] {
+            /* Zillow Luxe (Moderate Hybrid base + Rich Italian textures + Zillow Blue) */
+            --bg-page: #F8FAFC;
+            --bg-surface: #FFFFFF;
+            --text-primary: #0F172A;
+            --text-secondary: #475569;
+            --border-color: #E2E8F0;
+
+            --accent-brand: #020617;
+            --accent-primary: #0284C7;
+            /* Zillow Blue */
+            --accent-vibrant: #F97316;
+            /* Zillow Orange */
+            --accent-tenders: #4338CA;
+            /* Deep Indigo */
+            --accent-luxury: #C5A059;
+            /* Swahili Gold */
+
+            --font-display: 'Playfair Display', serif;
+            --hero-image: url('https://images.unsplash.com/photo-1613490908573-25ac25eeebce?ixlib=rb-4.0.3&auto=format&fit=crop&w=2000&q=80');
+        }
+
+        [data-theme="theme3"] {
+            /* Coastal Tech (Coastal Consulate + Prism accents) - Mod: Forest Green */
+            --bg-page: #FAF9F6;
+            --bg-surface: #FFFFFF;
+            --text-primary: #1A365D;
+            /* Deep Ocean Navy */
+            --text-secondary: #334155;
+            --border-color: #E2E8F0;
+
+            --accent-brand: #0F172A;
+            --accent-primary: #FF5A5F;
+            /* Flamingo Pink */
+            --accent-vibrant: #3C37FF;
+            /* Electric Indigo */
+            --accent-tenders: #2E8B57;
+            /* Sea Green / Forest Muted */
+            --accent-luxury: #C5A059;
+
+            --font-display: 'Cinzel', serif;
+            --hero-image: url('https://images.unsplash.com/photo-1549487281-a7572620c31e?ixlib=rb-4.0.3&auto=format&fit=crop&w=2500&q=80');
+        }
+
+        [data-theme="theme4"] {
+            /* Medici Brutalist (Medici + Brutalism accents) */
+            --bg-page: #FFFFF0;
+            /* Parchment */
+            --bg-surface: #F4F4F4;
+            /* Concrete white */
+            --text-primary: #181A18;
+            --text-secondary: #2C4C3B;
+            /* Highland Cypress */
+            --border-color: #D1D5DB;
+
+            --accent-brand: #050505;
+            --accent-primary: #FF4500;
+            /* Safety Orange */
+            --accent-vibrant: #DFFF00;
+            /* High-Vis Yellow */
+            --accent-tenders: #B85B3F;
+            /* Venetian Rust */
+            --accent-luxury: #D4AF37;
+            /* Muted Gold */
+
+            --font-display: 'Space Grotesk', sans-serif;
+            --hero-image: url('https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?ixlib=rb-4.0.3&auto=format&fit=crop&w=2000&q=80');
+        }
+
+        [data-theme="theme5"] {
+            /* Sunset Oasis (Granite/Sunset + Midnight Oasis) - Mod: Forest Green & Terracotta */
+            --bg-page: #FBFBFA;
+            --bg-surface: #FFFFFF;
+            --text-primary: #222629;
+            --text-secondary: #474B4F;
+            --border-color: #E5E7EB;
+
+            --accent-brand: #001C1A;
+            --accent-primary: #E2725B;
+            /* Terracotta (blend) */
+            --accent-vibrant: #FF007F;
+            /* Hyper Magenta */
+            --accent-tenders: #228B22;
+            /* Forest Green */
+            --accent-luxury: #A49966;
+
+            --font-display: 'Playfair Display', serif;
+            --hero-image: url('https://images.unsplash.com/photo-1512917774080-9991f1c4c750?ixlib=rb-4.0.3&auto=format&fit=crop&w=2000&q=80');
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            transition: background-color 0.4s ease, color 0.4s ease, border-color 0.4s ease, box-shadow 0.4s ease;
+        }
+
+        body {
+            background-color: var(--bg-page);
+            color: var(--text-primary);
+            font-family: var(--font-body);
+            line-height: 1.5;
+            overflow-x: hidden;
+        }
+
+        /* NAVBAR */
+        nav {
+            background: rgba(255, 255, 255, 0.98);
+            backdrop-filter: blur(10px);
+            border-bottom: 1px solid var(--border-color);
+            padding: 1rem 5%;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .logo {
+            font-family: var(--font-display);
+            font-size: 1.8rem;
+            font-weight: 700;
+            color: var(--accent-brand);
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .logo span {
+            color: var(--accent-primary);
+        }
+
+        .nav-center {
+            display: flex;
+            gap: 2.5rem;
+            font-family: var(--font-ui);
+            font-weight: 500;
+        }
+
+        .nav-center a {
+            text-decoration: none;
+            color: var(--text-primary);
+            position: relative;
+        }
+
+        .nav-center a:hover,
+        .nav-center a.active {
+            color: var(--accent-primary);
+        }
+
+        .nav-center a.active::after {
+            content: '';
+            position: absolute;
+            bottom: -5px;
+            left: 0;
+            width: 100%;
+            height: 2px;
+            background: var(--accent-primary);
+        }
+
+        .nav-actions {
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+        }
+
+        .btn-outline {
+            text-decoration: none;
+            color: var(--accent-brand);
+            font-family: var(--font-ui);
+            font-weight: 600;
+            padding: 0.6rem 1.2rem;
+            border-radius: var(--radius-sm);
+        }
+
+        .btn-outline:hover {
+            color: var(--accent-primary);
+            background: var(--bg-page);
+        }
+
+        .btn-solid {
+            background: var(--accent-vibrant);
+            color: var(--text-primary);
+            /* Dark text for bright colors like chartreuse/yellow */
+            text-decoration: none;
+            font-family: var(--font-ui);
+            font-weight: 700;
+            padding: 0.6rem 1.5rem;
+            border-radius: var(--radius-sm);
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        [data-theme="theme2"] .btn-solid,
+        [data-theme="theme3"] .btn-solid,
+        [data-theme="theme5"] .btn-solid {
+            color: #fff;
+            /* Keep white for the darker vibrants */
+        }
+
+        .btn-solid:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 15px rgba(0, 0, 0, 0.2);
+            filter: brightness(1.1);
+        }
+
+        /* HERO & ENHANCED SEARCH WIDGET (BOCA STYLE) */
+        .hero {
+            height: 85vh;
+            min-height: 650px;
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background-image: var(--hero-image);
+            background-size: cover;
+            background-position: center;
+            transition: background-image 0.5s ease-in-out;
+        }
+
+        .hero::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: linear-gradient(180deg, rgba(0, 0, 0, 0.4) 0%, rgba(0, 0, 0, 0.7) 100%);
+        }
+
+        .search-container {
+            position: relative;
+            z-index: 10;
+            width: 100%;
+            max-width: 1000px;
+            padding: 0 2rem;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .search-title {
+            text-align: center;
+            color: #fff;
+            margin-bottom: 2.5rem;
+        }
+
+        .search-title h1 {
+            font-family: var(--font-display);
+            font-size: 4rem;
+            line-height: 1.1;
+            margin-bottom: 1rem;
+            text-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+        }
+
+        .search-title p {
+            font-size: 1.3rem;
+            font-family: var(--font-ui);
+            font-weight: 400;
+            color: rgba(255, 255, 255, 0.9);
+            text-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
+        }
+
+        /* ENHANCED BOCA SEARCH PANEL */
+        .search-widget {
+            width: 100%;
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(20px);
+            border-radius: var(--radius-md);
+            box-shadow: var(--shadow-float);
+            overflow: hidden;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+        }
+
+        .search-tabs {
+            display: flex;
+            border-bottom: 1px solid var(--border-color);
+            background: rgba(248, 250, 252, 0.8);
+        }
+
+        .search-tab {
+            flex: 1;
+            padding: 1.2rem;
+            text-align: center;
+            font-family: var(--font-ui);
+            font-weight: 600;
+            font-size: 1.1rem;
+            cursor: pointer;
+            color: var(--text-secondary);
+            border-bottom: 3px solid transparent;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+        }
+
+        .search-tab.active {
+            background: var(--bg-surface);
+            color: var(--accent-primary);
+            border-bottom-color: var(--accent-primary);
+        }
+
+        .search-tab:nth-child(2).active {
+            color: var(--accent-tenders);
+            border-bottom-color: var(--accent-tenders);
+        }
+
+        .search-wrapper {
+            padding: 2rem;
+        }
+
+        .search-main-row {
+            display: flex;
+            background: #fff;
+            border: 2px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            overflow: hidden;
+            transition: border-color 0.3s, box-shadow 0.3s;
+        }
+
+        .search-main-row:focus-within {
+            border-color: var(--accent-primary);
+            box-shadow: 0 0 0 4px rgba(0, 0, 0, 0.05);
+        }
+
+        .search-input-lg {
+            flex: 1;
+            border: none;
+            padding: 1.2rem 1.5rem;
+            font-family: var(--font-ui);
+            font-size: 1.2rem;
+            color: var(--text-primary);
+            outline: none;
+        }
+
+        .btn-search-lg {
+            background: var(--accent-vibrant);
+            color: var(--text-primary);
+            border: none;
+            padding: 0 2.5rem;
+            font-family: var(--font-ui);
+            font-size: 1.1rem;
+            font-weight: 700;
+            cursor: pointer;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            transition: filter 0.2s;
+        }
+
+        [data-theme="theme2"] .btn-search-lg,
+        [data-theme="theme3"] .btn-search-lg,
+        [data-theme="theme5"] .btn-search-lg {
+            color: #fff;
+        }
+
+        .btn-search-lg:hover {
+            filter: brightness(1.1);
+        }
+
+        /* Sub-filters (Advanced Search toggle feel) */
+        .search-filters-row {
+            display: flex;
+            gap: 1rem;
+            margin-top: 1rem;
+        }
+
+        .filter-select {
+            flex: 1;
+            padding: 0.8rem 1rem;
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            font-family: var(--font-ui);
+            font-size: 0.95rem;
+            color: var(--text-primary);
+            background: #fff;
+            outline: none;
+            cursor: pointer;
+        }
+
+        .filter-select:focus {
+            border-color: var(--accent-primary);
+        }
+
+        /* QUICK INSPIRATION PILLS */
+        .quick-links {
+            margin-top: -2.5rem;
+            position: relative;
+            z-index: 20;
+            display: flex;
+            justify-content: center;
+            gap: 1.5rem;
+            padding: 0 5%;
+        }
+
+        .quick-card {
+            background: var(--bg-surface);
+            padding: 1rem 2rem;
+            border-radius: 50px;
+            box-shadow: var(--shadow-md);
+            display: flex;
+            align-items: center;
+            gap: 0.8rem;
+            font-family: var(--font-ui);
+            font-weight: 600;
+            color: var(--text-primary);
+            text-decoration: none;
+            border: 1px solid var(--border-color);
+        }
+
+        .quick-card:hover {
+            border-color: var(--accent-primary);
+            transform: translateY(-3px);
+            color: var(--accent-primary);
+        }
+
+        /* PREMIUM REAL ESTATE MODULE */
+        .section-re {
+            padding: 6rem 5%;
+        }
+
+        .section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+            margin-bottom: 3rem;
+        }
+
+        .section-header h2 {
+            font-family: var(--font-display);
+            font-size: 2.8rem;
+            color: var(--accent-brand);
+            line-height: 1.2;
+        }
+
+        .section-header p {
+            font-family: var(--font-ui);
+            color: var(--text-secondary);
+            font-size: 1.1rem;
+            margin-top: 0.5rem;
+        }
+
+        .view-all {
+            color: var(--accent-primary);
+            font-family: var(--font-ui);
+            font-weight: 600;
+            text-decoration: none;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .view-all:hover {
+            text-decoration: underline;
+        }
+
+        .grid-re {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+            gap: 2rem;
+        }
+
+        .prop-card {
+            background: var(--bg-surface);
+            border-radius: var(--radius-md);
+            overflow: hidden;
+            border: 1px solid var(--border-color);
+            box-shadow: var(--shadow-sm);
+            position: relative;
+        }
+
+        .prop-card:hover {
+            box-shadow: var(--shadow-float);
+            transform: translateY(-5px);
+            border-color: transparent;
+        }
+
+        .prop-img-wrapper {
+            position: relative;
+            height: 240px;
+            overflow: hidden;
+        }
+
+        .prop-img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transition: transform 0.6s ease;
+        }
+
+        .prop-card:hover .prop-img {
+            transform: scale(1.08);
+        }
+
+        .prop-badge {
+            position: absolute;
+            top: 1rem;
+            left: 1rem;
+            background: var(--accent-primary);
+            color: #fff;
+            padding: 0.4rem 1rem;
+            border-radius: 4px;
+            font-family: var(--font-ui);
+            font-weight: 700;
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+            z-index: 2;
+        }
+
+        .fav-btn {
+            position: absolute;
+            top: 1rem;
+            right: 1rem;
+            background: rgba(255, 255, 255, 0.9);
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-secondary);
+            cursor: pointer;
+            z-index: 2;
+            border: none;
+        }
+
+        .fav-btn:hover {
+            color: #EF4444;
+        }
+
+        .prop-content {
+            padding: 1.5rem;
+        }
+
+        .prop-price {
+            font-family: var(--font-ui);
+            font-size: 1.8rem;
+            font-weight: 700;
+            color: var(--accent-brand);
+            margin-bottom: 0.2rem;
+        }
+
+        .prop-address {
+            color: var(--text-secondary);
+            font-size: 0.95rem;
+            margin-bottom: 1rem;
+        }
+
+        .prop-features {
+            display: flex;
+            gap: 1rem;
+            padding-bottom: 1rem;
+            border-bottom: 1px solid var(--border-color);
+            margin-bottom: 1rem;
+        }
+
+        .feature {
+            display: flex;
+            align-items: center;
+            gap: 0.3rem;
+            font-family: var(--font-ui);
+            font-weight: 600;
+            color: var(--text-primary);
+            font-size: 0.95rem;
+        }
+
+        .feature span {
+            color: var(--text-secondary);
+            font-weight: 400;
+            font-size: 0.85rem;
+        }
+
+        .prop-footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .agent-info {
+            display: flex;
+            align-items: center;
+            gap: 0.8rem;
+        }
+
+        .agent-logo {
+            width: 30px;
+            height: 30px;
+            background: var(--bg-page);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.7rem;
+            font-weight: bold;
+            color: var(--accent-primary);
+        }
+
+        .agent-name {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            font-weight: 500;
+        }
+
+        /* GOVERNMENT SUPPLY CONTRACTS (SEGREGATED) */
+        .section-supply {
+            background: rgba(0, 0, 0, 0.02);
+            /* Slight offset for separation */
+            padding: 6rem 5%;
+            border-top: 1px solid var(--border-color);
+        }
+
+        .supply-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 1.2rem;
+        }
+
+        .supply-row {
+            background: var(--bg-surface);
+            border-radius: var(--radius-sm);
+            padding: 1.8rem 2.5rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-left: 5px solid var(--accent-tenders);
+            box-shadow: var(--shadow-sm);
+            cursor: pointer;
+            transition: transform 0.3s, box-shadow 0.3s;
+        }
+
+        .supply-row:hover {
+            box-shadow: var(--shadow-md);
+            transform: translateX(8px);
+        }
+
+        .supply-info {
+            flex: 1;
+        }
+
+        .supply-info h3 {
+            font-family: var(--font-ui);
+            font-size: 1.4rem;
+            color: var(--accent-brand);
+            margin-bottom: 0.5rem;
+        }
+
+        .supply-meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 2rem;
+            font-size: 0.95rem;
+            color: var(--text-secondary);
+        }
+
+        .supply-meta span {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .supply-value-col {
+            text-align: right;
+            border-left: 1px solid var(--border-color);
+            padding-left: 3rem;
+            margin-left: 2rem;
+        }
+
+        .supply-val {
+            font-family: var(--font-display);
+            font-size: 1.8rem;
+            color: var(--accent-tenders);
+            font-weight: 700;
+            line-height: 1;
+            margin-bottom: 0.3rem;
+        }
+
+        .supply-label {
+            font-family: var(--font-body);
+            font-size: 0.85rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            color: var(--text-secondary);
+            letter-spacing: 1px;
+        }
+
+        .supply-tag {
+            display: inline-block;
+            background: rgba(0, 0, 0, 0.05);
+            padding: 0.2rem 0.6rem;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            margin-top: 0.5rem;
+            color: var(--accent-tenders);
+        }
+
+        /* THEME CONTROLS FIXED */
+        .theme-switcher {
+            position: fixed;
+            bottom: 2rem;
+            right: 2rem;
+            background: var(--bg-surface);
+            padding: 1rem;
+            border-radius: var(--radius-md);
+            box-shadow: var(--shadow-float);
+            display: flex;
+            gap: 0.5rem;
+            z-index: 1000;
+            border: 1px solid var(--border-color);
+        }
+
+        .theme-dot {
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            cursor: pointer;
+            border: 2px solid transparent;
+            transition: transform 0.2s;
+        }
+
+        .theme-dot:hover {
+            transform: scale(1.1);
+        }
+
+        .theme-dot.active {
+            border-color: var(--text-primary);
+        }
+
+        @media (max-width: 992px) {
+            .search-main-row {
+                flex-direction: column;
+            }
+
+            .search-filters-row {
+                flex-direction: column;
+            }
+
+            .supply-row {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 1.5rem;
+            }
+
+            .supply-value-col {
+                text-align: left;
+                border-left: none;
+                padding-left: 0;
+                margin-left: 0;
+                border-top: 1px solid var(--border-color);
+                padding-top: 1rem;
+                width: 100%;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+            }
+
+            .quick-links {
+                flex-wrap: wrap;
+                margin-top: 2rem;
+                position: static;
+            }
+
+            .hero {
+                height: auto;
+                min-height: 700px;
+                padding-top: 4rem;
+                padding-bottom: 2rem;
+            }
+
+            .search-title h1 {
+                font-size: 3rem;
+            }
+        }
+    </style>
+</head>
+
+<body data-theme="theme1">
+
+    <!-- THEME SWITCHER (Mashed up palettes) -->
+    <div class="theme-switcher">
+        <!-- 1. The Rift -->
+        <div class="theme-dot active" style="background: linear-gradient(135deg, #2B2726 50%, #C0FF00 50%);"
+            onclick="setTheme('theme1', this)" title="The Rift (Milano + Cyber-Savanna)"></div>
+        <!-- 2. Zillow Luxe -->
+        <div class="theme-dot" style="background: linear-gradient(135deg, #0F172A 50%, #0284C7 50%);"
+            onclick="setTheme('theme2', this)" title="Zillow Luxe"></div>
+        <!-- 3. Coastal Tech -->
+        <div class="theme-dot" style="background: linear-gradient(135deg, #1A365D 50%, #2E8B57 50%);"
+            onclick="setTheme('theme3', this)" title="Coastal Tech"></div>
+        <!-- 4. Medici Brutalist -->
+        <div class="theme-dot" style="background: linear-gradient(135deg, #2C4C3B 50%, #FF4500 50%);"
+            onclick="setTheme('theme4', this)" title="Medici Brutalist"></div>
+        <!-- 5. Sunset Oasis -->
+        <div class="theme-dot" style="background: linear-gradient(135deg, #222629 50%, #228B22 50%);"
+            onclick="setTheme('theme5', this)" title="Sunset Oasis"></div>
+    </div>
+
+    <!-- NAVBAR -->
+    <nav>
+        <div class="logo">
+            <i data-lucide="compass" style="color: var(--accent-primary);"></i>
+            Diaspora<span>Vest</span>
+        </div>
+        <div class="nav-center">
+            <a href="#" class="active">Real Estate</a>
+            <a href="#">Supply Contracts</a>
+            <a href="#">Design Ideas</a>
+        </div>
+        <div class="nav-actions">
+            <a href="#" class="btn-outline">Sign In</a>
+            <a href="#" class="btn-solid">Portal Access</a>
+        </div>
+    </nav>
+
+    <!-- HERO / ENHANCED BOCA SEARCH -->
+    <section class="hero">
+        <div class="search-container">
+            <div class="search-title">
+                <h1>Secure Your Footprint in Kenya</h1>
+                <p>Curated Real Estate & Verified Government Supply Contracts for the Diaspora.</p>
+            </div>
+
+            <div class="search-widget">
+                <!-- Segregated Tabs -->
+                <div class="search-tabs">
+                    <div class="search-tab active" onclick="switchTab('re')">
+                        <i data-lucide="home"></i> Buy Property
+                    </div>
+                    <div class="search-tab" onclick="switchTab('gov')">
+                        <i data-lucide="file-check-2"></i> Supply Contracts
+                    </div>
+                </div>
+
+                <div class="search-wrapper">
+                    <!-- Real Estate Search Form -->
+                    <div id="search-re">
+                        <div class="search-main-row">
+                            <input type="text" class="search-input-lg"
+                                placeholder="Enter City, Neighborhood, Address, or ZIP...">
+                            <button class="btn-search-lg">
+                                <i data-lucide="search"></i> Search
+                            </button>
+                        </div>
+                        <div class="search-filters-row">
+                            <select class="filter-select">
+                                <option>Property Type</option>
+                                <option>Luxury Villas</option>
+                                <option>Apartments</option>
+                                <option>Commercial</option>
+                            </select>
+                            <select class="filter-select">
+                                <option>Min Price</option>
+                                <option>$100,000</option>
+                                <option>$250,000</option>
+                            </select>
+                            <select class="filter-select">
+                                <option>Max Price</option>
+                                <option>$500,000</option>
+                                <option>$1,000,000+</option>
+                            </select>
+                            <select class="filter-select">
+                                <option>Beds</option>
+                                <option>2+</option>
+                                <option>3+</option>
+                                <option>4+</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Supply Contracts Search Form (Hidden by default) -->
+                    <div id="search-gov" style="display: none;">
+                        <div class="search-main-row" style="border-color: var(--border-color);"
+                            onfocus="this.style.borderColor='var(--accent-tenders)'; this.style.boxShadow='0 0 0 4px rgba(138, 43, 226, 0.1)'"
+                            onblur="this.style.borderColor='var(--border-color)'; this.style.boxShadow='none'">
+                            <input type="text" class="search-input-lg"
+                                placeholder="Search Ministry, Sector, or Keyword (e.g. 'Medical Equipment')...">
+                            <button class="btn-search-lg" style="background: var(--accent-tenders);">
+                                <i data-lucide="search"></i> Find Contracts
+                            </button>
+                        </div>
+                        <div class="search-filters-row">
+                            <select class="filter-select">
+                                <option>Sector</option>
+                                <option>Healthcare</option>
+                                <option>IT & Electronics</option>
+                                <option>Agriculture</option>
+                            </select>
+                            <select class="filter-select">
+                                <option>Value Size</option>
+                                <option>$10k - $50k</option>
+                                <option>$50k - $250k</option>
+                                <option>$250k+</option>
+                            </select>
+                            <select class="filter-select">
+                                <option>Target Margin</option>
+                                <option>10% - 15%</option>
+                                <option>15% - 25%</option>
+                                <option>25%+</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- QUICK INSPIRATION PILLS -->
+    <div class="quick-links">
+        <a href="#" class="quick-card">
+            <i data-lucide="key" style="color: var(--accent-luxury);"></i>
+            Turnkey Villas
+        </a>
+        <a href="#" class="quick-card">
+            <i data-lucide="building" style="color: var(--accent-primary);"></i>
+            Nairobi Apartments
+        </a>
+        <a href="#" class="quick-card">
+            <i data-lucide="briefcase" style="color: var(--accent-tenders);"></i>
+            IT Supply Contracts
+        </a>
+    </div>
+
+    <!-- PREMIUM REAL ESTATE MODULE -->
+    <section class="section-re">
+        <div class="section-header">
+            <div>
+                <h2>Featured Property Listings</h2>
+                <p>Hand-selected properties meeting our diaspora premium standards.</p>
+            </div>
+            <a href="#" class="view-all">View All Properties <i data-lucide="arrow-right"></i></a>
+        </div>
+
+        <div class="grid-re">
+            <!-- Property Card 1 -->
+            <div class="prop-card">
+                <div class="prop-img-wrapper">
+                    <span class="prop-badge">Exclusive</span>
+                    <button class="fav-btn"><i data-lucide="heart"></i></button>
+                    <img src="https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?ixlib=rb-4.0.3&auto=format&fit=crop&w=800&q=80"
+                        alt="Villa" class="prop-img">
+                </div>
+                <div class="prop-content">
+                    <div class="prop-price">$1,250,000</div>
+                    <div class="prop-address">124 Riverside Drive, Lavington</div>
+                    <div class="prop-features">
+                        <div class="feature">5 <span>bds</span></div>
+                        <div class="feature">6 <span>ba</span></div>
+                        <div class="feature">4,200 <span>sqft</span></div>
+                    </div>
+                    <div class="prop-footer">
+                        <div class="agent-info">
+                            <div class="agent-logo">PG</div>
+                            <span class="agent-name">PamGolding Agency</span>
+                        </div>
+                        <i data-lucide="shield-check" style="color: var(--accent-luxury); width: 18px;"></i>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Property Card 2 -->
+            <div class="prop-card">
+                <div class="prop-img-wrapper">
+                    <span class="prop-badge" style="background: var(--text-primary);">Pre-Construction</span>
+                    <button class="fav-btn"><i data-lucide="heart"></i></button>
+                    <img src="https://images.unsplash.com/photo-1512917774080-9991f1c4c750?ixlib=rb-4.0.3&auto=format&fit=crop&w=800&q=80"
+                        alt="Apartment" class="prop-img">
+                </div>
+                <div class="prop-content">
+                    <div class="prop-price">$285,000</div>
+                    <div class="prop-address">The Azure Towers, Westlands</div>
+                    <div class="prop-features">
+                        <div class="feature">3 <span>bds</span></div>
+                        <div class="feature">3 <span>ba</span></div>
+                        <div class="feature">2,100 <span>sqft</span></div>
+                    </div>
+                    <div class="prop-footer">
+                        <div class="agent-info">
+                            <div class="agent-logo">KF</div>
+                            <span class="agent-name">Knight Frank</span>
+                        </div>
+                        <i data-lucide="shield-check" style="color: var(--accent-luxury); width: 18px;"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- GOVERNMENT SUPPLY CONTRACTS (SEGREGATED) -->
+    <section class="section-supply">
+        <div class="section-header">
+            <div>
+                <h2 style="color: var(--accent-tenders);">Government Supply Contracts</h2>
+                <p>Direct LPO funding & execution for vetted state procurement.</p>
+            </div>
+            <a href="#" class="view-all" style="color: var(--accent-tenders);">View All LPOs <i
+                    data-lucide="arrow-right"></i></a>
+        </div>
+
+        <div class="supply-grid">
+            <!-- Supply Row 1 -->
+            <div class="supply-row">
+                <div class="supply-info">
+                    <div class="supply-tag">Electronics & IT</div>
+                    <h3>Ministry of Education: Supply of 500 Laptops</h3>
+                    <div class="supply-meta">
+                        <span><i data-lucide="building-2" style="width: 16px;"></i> MoE Central Procurement</span>
+                        <span><i data-lucide="clock" style="width: 16px;"></i> Delivery Timeline: 30 Days</span>
+                        <span><i data-lucide="check-circle" style="width: 16px; color: var(--accent-luxury);"></i> LPO
+                            Verified</span>
+                    </div>
+                </div>
+                <div class="supply-value-col">
+                    <div class="supply-val">$45,000</div>
+                    <div class="supply-label">Est. Contract Value</div>
+                    <div style="color: var(--accent-luxury); font-weight: 700; margin-top: 5px;">~18% Target Margin
+                    </div>
+                </div>
+            </div>
+
+            <!-- Supply Row 2 -->
+            <div class="supply-row">
+                <div class="supply-info">
+                    <div class="supply-tag">Healthcare & Medical</div>
+                    <h3>KEMSA: Supply of Clinical Diagnostic Equipment</h3>
+                    <div class="supply-meta">
+                        <span><i data-lucide="building-2" style="width: 16px;"></i> Kenya Medical Supplies
+                            Authority</span>
+                        <span><i data-lucide="clock" style="width: 16px;"></i> Delivery Timeline: 45 Days</span>
+                        <span><i data-lucide="check-circle" style="width: 16px; color: var(--accent-luxury);"></i> LPO
+                            Verified</span>
+                    </div>
+                </div>
+                <div class="supply-value-col">
+                    <div class="supply-val">$120,500</div>
+                    <div class="supply-label">Est. Contract Value</div>
+                    <div style="color: var(--accent-luxury); font-weight: 700; margin-top: 5px;">~22% Target Margin
+                    </div>
+                </div>
+            </div>
+
+            <!-- Supply Row 3 -->
+            <div class="supply-row">
+                <div class="supply-info">
+                    <div class="supply-tag">Agriculture</div>
+                    <h3>NCPB: Supply of 10,000 Bags of Fertilizer</h3>
+                    <div class="supply-meta">
+                        <span><i data-lucide="building-2" style="width: 16px;"></i> National Cereals and Produce
+                            Board</span>
+                        <span><i data-lucide="clock" style="width: 16px;"></i> Delivery Timeline: 15 Days</span>
+                        <span><i data-lucide="check-circle" style="width: 16px; color: var(--accent-luxury);"></i> LPO
+                            Verified</span>
+                    </div>
+                </div>
+                <div class="supply-value-col">
+                    <div class="supply-val">$310,000</div>
+                    <div class="supply-label">Est. Contract Value</div>
+                    <div style="color: var(--accent-luxury); font-weight: 700; margin-top: 5px;">~14% Target Margin
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <script>
+        lucide.createIcons();
+
+        function switchTab(tabId) {
+            document.querySelectorAll('.search-tab').forEach(t => t.classList.remove('active'));
+            event.currentTarget.classList.add('active');
+
+            const reForm = document.getElementById('search-re');
+            const govForm = document.getElementById('search-gov');
+
+            // Handle display with a slight fade effect by resetting opacity (CSS transition setup needed for true fade, but hard toggle works for structural shift)
+            if (tabId === 're') {
+                reForm.style.display = 'block';
+                govForm.style.display = 'none';
+            } else {
+                reForm.style.display = 'none';
+                govForm.style.display = 'block';
+            }
+        }
+
+        function setTheme(themeName, btn) {
+            document.body.setAttribute('data-theme', themeName);
+            document.querySelectorAll('.theme-dot').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+        }
+    </script>
+</body>
+
+</html>

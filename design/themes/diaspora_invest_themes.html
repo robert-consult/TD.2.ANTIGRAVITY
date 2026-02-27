@@ -1,0 +1,640 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Radical Creative - DiasporaVest</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;700&family=Inter:wght@400;600&family=Syne:wght@400;700;800&family=Outfit:wght@300;400;600&family=Playfair+Display:ital,wght@0,700;1,700&family=DM+Sans:wght@400;500&family=Anton&family=Roboto+Mono:wght@400;700&family=Cinzel:wght@600;800&family=Montserrat:wght@400;600&display=swap"
+        rel="stylesheet">
+    <style>
+        :root {
+            /* Theme 1: Cyber-Savanna (Afro-Futurism) */
+            --bg-color: #0A0914;
+            --text-primary: #E2E8F0;
+            --text-secondary: #94A3B8;
+            --accent-primary: #C0FF00;
+            /* Neon Chartreuse */
+            --accent-secondary: #8A2BE2;
+            /* Electric Maasai Purple */
+            --card-bg: #1A1829;
+            --font-heading: 'Space Grotesk', sans-serif;
+            --font-body: 'Inter', sans-serif;
+            --hero-overlay: linear-gradient(135deg, rgba(10, 9, 20, 0.95) 0%, rgba(138, 43, 226, 0.6) 100%);
+            --button-text-color: #000;
+        }
+
+        [data-theme="theme2"] {
+            /* Theme 2: Red Earth & Liquid Gold */
+            --bg-color: #4A1511;
+            /* Tsavo Red */
+            --text-primary: #FDF5E6;
+            --text-secondary: #FFDAB9;
+            --accent-primary: #FFD700;
+            /* Liquid Gold */
+            --accent-secondary: #00E5FF;
+            /* Searing Cyan */
+            --card-bg: #360F0C;
+            --font-heading: 'Syne', sans-serif;
+            --font-body: 'Outfit', sans-serif;
+            --hero-overlay: linear-gradient(135deg, rgba(74, 21, 17, 0.95) 0%, rgba(0, 229, 255, 0.4) 100%);
+            --button-text-color: #000;
+        }
+
+        [data-theme="theme3"] {
+            /* Theme 3: Equatorial Prism (High Fashion Neo-Deco) */
+            --bg-color: #E8F3E8;
+            /* Avocado Ice */
+            --text-primary: #04262A;
+            /* Deep Teal */
+            --text-secondary: #1C545D;
+            --accent-primary: #FF5A5F;
+            /* Flamingo Pink */
+            --accent-secondary: #3C37FF;
+            /* Electric Indigo */
+            --card-bg: #FFFFFF;
+            --font-heading: 'Playfair Display', serif;
+            --font-body: 'DM Sans', sans-serif;
+            --hero-overlay: linear-gradient(135deg, rgba(232, 243, 232, 0.9) 0%, rgba(60, 55, 255, 0.4) 100%);
+            --button-text-color: #FFF;
+        }
+
+        [data-theme="theme4"] {
+            /* Theme 4: Monolithic Brutalism (The State Architect) */
+            --bg-color: #8C92AC;
+            /* Raw Concrete */
+            --text-primary: #050505;
+            --text-secondary: #2D3748;
+            --accent-primary: #FF4500;
+            /* Safety Orange */
+            --accent-secondary: #DFFF00;
+            /* High-Vis Yellow */
+            --card-bg: #D1D5DB;
+            --font-heading: 'Anton', sans-serif;
+            --font-body: 'Roboto Mono', monospace;
+            --hero-overlay: linear-gradient(135deg, rgba(140, 146, 172, 0.9) 0%, rgba(223, 255, 0, 0.4) 100%);
+            --button-text-color: #FFF;
+        }
+
+        [data-theme="theme5"] {
+            /* Theme 5: Midnight Oasis (Hidden Wealth) */
+            --bg-color: #001C1A;
+            /* Midnight Green */
+            --text-primary: #B3FFE2;
+            /* Frosted Emerald */
+            --text-secondary: #5EE0B5;
+            --accent-primary: #FF007F;
+            /* Hyper Magenta */
+            --accent-secondary: #00D4FF;
+            /* Bioluminescent Blue */
+            --card-bg: #002B28;
+            --font-heading: 'Cinzel', serif;
+            --font-body: 'Montserrat', sans-serif;
+            --hero-overlay: linear-gradient(135deg, rgba(0, 28, 26, 0.95) 0%, rgba(255, 0, 127, 0.4) 100%);
+            --button-text-color: #FFF;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            transition: background-color 0.5s cubic-bezier(0.4, 0, 0.2, 1),
+                color 0.5s cubic-bezier(0.4, 0, 0.2, 1),
+                border-color 0.5s cubic-bezier(0.4, 0, 0.2, 1),
+                box-shadow 0.5s ease;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-primary);
+            font-family: var(--font-body);
+            line-height: 1.6;
+            overflow-x: hidden;
+        }
+
+        h1,
+        h2,
+        h3,
+        h4 {
+            font-family: var(--font-heading);
+            color: var(--text-primary);
+            margin-bottom: 1rem;
+            text-transform: uppercase;
+            letter-spacing: -0.02em;
+        }
+
+        [data-theme="theme3"] h1,
+        [data-theme="theme3"] h2,
+        [data-theme="theme3"] h3 {
+            text-transform: none;
+            /* Keep Playfair Display elegant */
+        }
+
+        a {
+            text-decoration: none;
+            color: var(--text-primary);
+        }
+
+        /* RADICAL THEME SWITCHER */
+        .theme-switcher {
+            position: fixed;
+            top: 50%;
+            right: 0;
+            transform: translateY(-50%);
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            padding: 2rem 1.5rem;
+            border-left: 2px solid var(--accent-secondary);
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+            gap: 1.2rem;
+            border-radius: 20px 0 0 20px;
+        }
+
+        .theme-switcher::before {
+            content: 'RADICAL PALETTES';
+            position: absolute;
+            top: -20px;
+            right: 15px;
+            font-family: var(--font-body);
+            font-size: 0.7rem;
+            letter-spacing: 2px;
+            color: var(--text-secondary);
+            font-weight: 700;
+            transform: rotate(-90deg);
+            transform-origin: right bottom;
+        }
+
+        .theme-btn {
+            background: transparent;
+            border: 1px solid var(--text-secondary);
+            padding: 0.8rem 1.5rem;
+            cursor: pointer;
+            font-family: var(--font-body);
+            font-weight: 700;
+            color: var(--text-primary);
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            font-size: 0.75rem;
+            position: relative;
+            overflow: hidden;
+            transition: all 0.4s ease;
+        }
+
+        .theme-btn::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: var(--accent-primary);
+            transition: left 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+            z-index: -1;
+        }
+
+        .theme-btn:hover::before,
+        .theme-btn.active::before {
+            left: 0;
+        }
+
+        .theme-btn:hover,
+        .theme-btn.active {
+            color: var(--button-text-color);
+            border-color: var(--accent-primary);
+        }
+
+        /* NAVBAR */
+        nav {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 2rem 5%;
+            position: absolute;
+            width: 100%;
+            top: 0;
+            z-index: 10;
+        }
+
+        .logo {
+            font-family: var(--font-heading);
+            font-size: 2.2rem;
+            font-weight: 800;
+            color: var(--text-primary);
+            mix-blend-mode: difference;
+        }
+
+        .logo span {
+            color: var(--accent-primary);
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 3rem;
+        }
+
+        .nav-links a {
+            color: var(--text-primary);
+            font-weight: 600;
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            position: relative;
+        }
+
+        .nav-links a::after {
+            content: '';
+            position: absolute;
+            width: 0;
+            height: 2px;
+            bottom: -5px;
+            left: 0;
+            background-color: var(--accent-secondary);
+            transition: width 0.3s;
+        }
+
+        .nav-links a:hover::after {
+            width: 100%;
+        }
+
+        .btn-nav {
+            background: var(--accent-primary);
+            color: var(--button-text-color) !important;
+            padding: 0.8rem 2rem;
+            border-radius: 0;
+            font-weight: 800;
+            box-shadow: 4px 4px 0 var(--accent-secondary);
+        }
+
+        .btn-nav:hover::after {
+            width: 0;
+        }
+
+        .btn-nav:hover {
+            transform: translate(2px, 2px);
+            box-shadow: 2px 2px 0 var(--accent-secondary);
+        }
+
+        /* HERO SECTION */
+        .hero {
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: flex-start;
+            padding: 0 5%;
+            position: relative;
+            background-image: url('https://images.unsplash.com/photo-1549487281-a7572620c31e?ixlib=rb-4.0.3&auto=format&fit=crop&w=2500&q=80');
+            background-size: cover;
+            background-position: center;
+        }
+
+        .hero::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: var(--hero-overlay);
+            backdrop-filter: blur(5px);
+            -webkit-backdrop-filter: blur(5px);
+        }
+
+        .hero-content {
+            position: relative;
+            z-index: 1;
+            max-width: 900px;
+        }
+
+        .hero-content h1 {
+            font-size: 6rem;
+            line-height: 0.9;
+            margin-bottom: 2rem;
+            text-shadow: 2px 2px 0 var(--accent-secondary);
+        }
+
+        .hero-content h1 span {
+            color: var(--accent-primary);
+            display: block;
+        }
+
+        .hero-content p {
+            color: var(--text-primary);
+            font-size: 1.5rem;
+            font-weight: 300;
+            margin-bottom: 3rem;
+            max-width: 700px;
+            border-left: 4px solid var(--accent-secondary);
+            padding-left: 1.5rem;
+        }
+
+        .btn-primary {
+            display: inline-block;
+            background: var(--accent-primary);
+            color: var(--button-text-color);
+            padding: 1.2rem 3rem;
+            font-size: 1.2rem;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            position: relative;
+            z-index: 1;
+            overflow: hidden;
+            border: 2px solid var(--accent-primary);
+            box-shadow: 8px 8px 0 var(--accent-secondary);
+            transition: all 0.2s ease;
+        }
+
+        .btn-primary:active {
+            transform: translate(4px, 4px);
+            box-shadow: 4px 4px 0 var(--accent-secondary);
+        }
+
+        /* AVANT-GARDE CARDS */
+        .features {
+            padding: 10rem 5%;
+            background: var(--bg-color);
+        }
+
+        .section-header {
+            margin-bottom: 6rem;
+        }
+
+        .section-header h2 {
+            font-size: 4rem;
+            line-height: 1;
+        }
+
+        .section-header h2 span {
+            color: var(--accent-secondary);
+            font-style: italic;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 4rem;
+        }
+
+        .card {
+            background: var(--card-bg);
+            border: 1px solid var(--accent-secondary);
+            position: relative;
+            padding: 2.5rem;
+            transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+
+        .card::before {
+            content: '';
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            width: 100%;
+            height: 100%;
+            background: var(--accent-primary);
+            z-index: -1;
+            transition: top 0.3s, left 0.3s;
+        }
+
+        .card:hover {
+            transform: translate(-10px, -10px);
+        }
+
+        .card:hover::before {
+            top: 30px;
+            left: 30px;
+        }
+
+        .tag {
+            display: inline-block;
+            background: var(--accent-secondary);
+            color: var(--button-text-color);
+            padding: 0.5rem 1.5rem;
+            font-family: var(--font-heading);
+            font-size: 1rem;
+            font-weight: 800;
+            text-transform: uppercase;
+            margin-bottom: 2rem;
+        }
+
+        .card-title {
+            font-size: 2.2rem;
+            margin-bottom: 1.5rem;
+            color: var(--text-primary);
+        }
+
+        .card-desc {
+            color: var(--text-secondary);
+            font-size: 1.1rem;
+            margin-bottom: 3rem;
+            font-weight: 300;
+        }
+
+        .card-footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+        }
+
+        .price {
+            font-family: var(--font-heading);
+            font-size: 2rem;
+            color: var(--accent-primary);
+            -webkit-text-stroke: 1px var(--text-primary);
+        }
+
+        .btn-text {
+            color: var(--text-primary);
+            font-weight: 800;
+            font-size: 1rem;
+            text-transform: uppercase;
+            border-bottom: 3px solid var(--accent-secondary);
+            padding-bottom: 5px;
+        }
+
+        .btn-text:hover {
+            color: var(--accent-primary);
+            border-color: var(--accent-primary);
+        }
+
+        /* RADICAL BANNER */
+        .cta-banner {
+            background: var(--accent-primary);
+            padding: 8rem 5%;
+            position: relative;
+            overflow: hidden;
+            border-top: 5px solid var(--accent-secondary);
+            border-bottom: 5px solid var(--accent-secondary);
+        }
+
+        .cta-banner::before {
+            content: 'INVEST INVEST INVEST';
+            position: absolute;
+            top: -20px;
+            left: -10px;
+            font-family: var(--font-heading);
+            font-size: 15rem;
+            color: var(--bg-color);
+            opacity: 0.1;
+            white-space: nowrap;
+            font-weight: 800;
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        .cta-content {
+            position: relative;
+            z-index: 2;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .cta-content h2 {
+            color: var(--button-text-color);
+            font-size: 5rem;
+            margin: 0;
+            max-width: 60%;
+        }
+
+        .btn-radical {
+            background: var(--bg-color);
+            color: var(--text-primary);
+            padding: 2rem 4rem;
+            font-size: 1.5rem;
+            font-weight: 800;
+            font-family: var(--font-heading);
+            text-transform: uppercase;
+            border: 2px solid var(--text-primary);
+            box-shadow: 10px 10px 0 var(--accent-secondary);
+            cursor: pointer;
+        }
+
+        .btn-radical:hover {
+            background: var(--accent-secondary);
+            color: var(--button-text-color);
+            box-shadow: 15px 15px 0 var(--bg-color);
+            transform: translate(-5px, -5px);
+        }
+
+        @media screen and (max-width: 1024px) {
+            .hero-content h1 {
+                font-size: 4rem;
+            }
+
+            .theme-switcher {
+                transform: scale(0.8) translateY(-50%);
+                right: -20px;
+            }
+
+            .cta-content {
+                flex-direction: column;
+                text-align: center;
+                gap: 3rem;
+            }
+
+            .cta-content h2 {
+                max-width: 100%;
+                font-size: 3rem;
+            }
+        }
+    </style>
+</head>
+
+<body data-theme="theme1">
+
+    <!-- Radical Theme Switcher -->
+    <div class="theme-switcher">
+        <button class="theme-btn active" onclick="setTheme('theme1', this)">1. Cyber-Savanna</button>
+        <button class="theme-btn" onclick="setTheme('theme2', this)">2. Red Earth & Gold</button>
+        <button class="theme-btn" onclick="setTheme('theme3', this)">3. Equatorial Prism</button>
+        <button class="theme-btn" onclick="setTheme('theme4', this)">4. Brutalism</button>
+        <button class="theme-btn" onclick="setTheme('theme5', this)">5. Midnight</button>
+    </div>
+
+    <!-- Navigation -->
+    <nav>
+        <div class="logo">DIA<span>VEST</span></div>
+        <div class="nav-links">
+            <a href="#">Alpha</a>
+            <a href="#">Tendering</a>
+            <a href="#">The Syndicate</a>
+            <a href="#" class="btn-nav">ENTER PORTAL</a>
+        </div>
+    </nav>
+
+    <!-- Hero -->
+    <section class="hero">
+        <div class="hero-content">
+            <h1>Radical Wealth. <span>Ground Truth.</span></h1>
+            <p>Access high-yield Kenyan real estate and elite government tendering. Stop playing safe. Start securing
+                multi-generational legacy in emerging hyper-markets.</p>
+            <a href="#" class="btn-primary">INITIATE DISCOVERY</a>
+        </div>
+    </section>
+
+    <!-- Features / Opportunities -->
+    <section class="features">
+        <div class="section-header">
+            <h2>Acquisition <span>Targets</span></h2>
+        </div>
+        <div class="grid">
+            <!-- Card 1 -->
+            <div class="card">
+                <div class="tag">REAL ESTATE ALIPHA</div>
+                <h3 class="card-title">Riverside Synthetics</h3>
+                <p class="card-desc">Hyper-modern structures. Diplomatic tier security. Pure concrete and glass
+                    integration in Nairobi's absolute center.</p>
+                <div class="card-footer">
+                    <span class="price">$250K+</span>
+                    <a href="#" class="btn-text">ANALYZE DECK</a>
+                </div>
+            </div>
+            <!-- Card 2 -->
+            <div class="card">
+                <div class="tag">STATE TENDERS</div>
+                <h3 class="card-title">Port Expansion Protocol</h3>
+                <p class="card-desc">Direct backing in deep-water logistics. Federal infrastructure. Predictable
+                    double-digit yields.</p>
+                <div class="card-footer">
+                    <span class="price">12.5% APY</span>
+                    <a href="#" class="btn-text">VIEW BONDS</a>
+                </div>
+            </div>
+            <!-- Card 3 -->
+            <div class="card">
+                <div class="tag">SOVEREIGN LAND</div>
+                <h3 class="card-title">Rift Valley Grid</h3>
+                <p class="card-desc">Undeveloped acreage. Strategic zoning. Secure thousands of hectares for aggressive
+                    land-banking maneuvers.</p>
+                <div class="card-footer">
+                    <span class="price">$80K MIN</span>
+                    <a href="#" class="btn-text">SATELLITE VIEW</a>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Radical CTA -->
+    <section class="cta-banner">
+        <div class="cta-content">
+            <h2>DECODE THE MARKET. SECURE YOUR POSITION.</h2>
+            <button class="btn-radical">ACCESS SYNDICATE</button>
+        </div>
+    </section>
+
+    <script>
+        function setTheme(themeName, btn) {
+            document.body.setAttribute('data-theme', themeName);
+            document.querySelectorAll('.theme-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+        }
+    </script>
+</body>
+
+</html>

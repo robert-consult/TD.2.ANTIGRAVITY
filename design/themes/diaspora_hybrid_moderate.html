@@ -1,0 +1,994 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DiasporaVest - Moderate Premium Hybrid</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <!-- Mixing premium serif (Playfair) with hyper-clean highly legible sans-serifs (Outfit, Inter) -->
+    <link
+        href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Playfair+Display:ital,wght@0,600;0,700;1,600&family=Inter:wght@400;500;600&display=swap"
+        rel="stylesheet">
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        :root {
+            /* Hybrid Base - Clean, Professional & Trustworthy (Iter 1) */
+            --bg-page: #F8FAFC;
+            /* Clean off-white slate */
+            --bg-surface: #FFFFFF;
+            /* Pure white cards */
+            --text-primary: #1E293B;
+            /* Deep slate */
+            --text-secondary: #64748B;
+            /* Medium slate */
+            --border-color: #E2E8F0;
+
+            /* Vibrant Accents (Iter 2) - Houzz/Zillow/Apartments Energy */
+            --accent-brand: #0F172A;
+            /* Very dark navy */
+            --accent-primary: #0284C7;
+            /* Zillow-esque Vibrant Blue */
+            --accent-vibrant: #F97316;
+            /* Vibrant Sunset Orange (CTAs) */
+            --accent-tenders: #6366F1;
+            /* Indigo for Tendering separation */
+            --accent-luxury: #C5A059;
+            /* Swahili Brass / Gold */
+            --accent-success: #10B981;
+            /* Emerald */
+
+            --font-display: 'Playfair Display', serif;
+            --font-ui: 'Outfit', sans-serif;
+            --font-body: 'Inter', sans-serif;
+
+            --radius-sm: 6px;
+            --radius-md: 12px;
+            --radius-lg: 20px;
+
+            --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.05);
+            --shadow-md: 0 10px 25px -5px rgba(0, 0, 0, 0.08);
+            --shadow-float: 0 20px 40px -10px rgba(0, 0, 0, 0.15);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            transition: all 0.3s ease;
+        }
+
+        body {
+            background-color: var(--bg-page);
+            color: var(--text-primary);
+            font-family: var(--font-body);
+            line-height: 1.5;
+            overflow-x: hidden;
+        }
+
+        /* NAVBAR - Houzz/Zillow Style (Clean, White, Sticky) */
+        nav {
+            background: rgba(255, 255, 255, 0.98);
+            backdrop-filter: blur(10px);
+            border-bottom: 1px solid var(--border-color);
+            padding: 1rem 5%;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .logo {
+            font-family: var(--font-display);
+            font-size: 1.8rem;
+            font-weight: 700;
+            color: var(--accent-brand);
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .logo span {
+            color: var(--accent-primary);
+        }
+
+        .nav-center {
+            display: flex;
+            gap: 2.5rem;
+            font-family: var(--font-ui);
+            font-weight: 500;
+        }
+
+        .nav-center a {
+            text-decoration: none;
+            color: var(--text-primary);
+            position: relative;
+        }
+
+        .nav-center a:hover,
+        .nav-center a.active {
+            color: var(--accent-primary);
+        }
+
+        .nav-center a.active::after {
+            content: '';
+            position: absolute;
+            bottom: -5px;
+            left: 0;
+            width: 100%;
+            height: 2px;
+            background: var(--accent-primary);
+        }
+
+        .nav-actions {
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+        }
+
+        .btn-outline {
+            text-decoration: none;
+            color: var(--accent-brand);
+            font-family: var(--font-ui);
+            font-weight: 600;
+            padding: 0.6rem 1.2rem;
+            border-radius: var(--radius-sm);
+        }
+
+        .btn-outline:hover {
+            color: var(--accent-primary);
+            background: #F0F9FF;
+        }
+
+        .btn-solid {
+            background: var(--accent-vibrant);
+            color: #fff;
+            text-decoration: none;
+            font-family: var(--font-ui);
+            font-weight: 600;
+            padding: 0.6rem 1.5rem;
+            border-radius: var(--radius-sm);
+            box-shadow: 0 4px 10px rgba(249, 115, 22, 0.3);
+        }
+
+        .btn-solid:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 15px rgba(249, 115, 22, 0.4);
+            background: #EA580C;
+        }
+
+        /* HERO & SEARCH WIDGET (Boca New Listings / Anna Modern Style) */
+        .hero {
+            height: 80vh;
+            min-height: 600px;
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background-image: url('https://images.unsplash.com/photo-1613490908573-25ac25eeebce?ixlib=rb-4.0.3&auto=format&fit=crop&w=2000&q=80');
+            background-size: cover;
+            background-position: center 70%;
+        }
+
+        .hero::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: linear-gradient(180deg, rgba(15, 23, 42, 0.6) 0%, rgba(15, 23, 42, 0.3) 100%);
+        }
+
+        .search-container {
+            position: relative;
+            z-index: 10;
+            width: 100%;
+            max-width: 900px;
+            padding: 0 2rem;
+        }
+
+        .search-title {
+            text-align: center;
+            color: #fff;
+            margin-bottom: 2rem;
+        }
+
+        .search-title h1 {
+            font-family: var(--font-display);
+            font-size: 3.5rem;
+            margin-bottom: 0.5rem;
+            text-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+        }
+
+        .search-title p {
+            font-size: 1.2rem;
+            font-family: var(--font-ui);
+            font-weight: 400;
+            text-shadow: 0 2px 5px rgba(0, 0, 0, 0.5);
+        }
+
+        /* Segregated Tabs for Real Estate / Tendering */
+        .search-widget {
+            background: var(--bg-surface);
+            border-radius: var(--radius-md);
+            box-shadow: var(--shadow-float);
+            overflow: hidden;
+        }
+
+        .search-tabs {
+            display: flex;
+            border-bottom: 1px solid var(--border-color);
+            background: #F8FAFC;
+        }
+
+        .search-tab {
+            flex: 1;
+            padding: 1.2rem;
+            text-align: center;
+            font-family: var(--font-ui);
+            font-weight: 600;
+            font-size: 1.1rem;
+            cursor: pointer;
+            color: var(--text-secondary);
+            border-bottom: 3px solid transparent;
+        }
+
+        .search-tab.active {
+            background: var(--bg-surface);
+            color: var(--accent-primary);
+            border-bottom-color: var(--accent-primary);
+        }
+
+        .search-tab:nth-child(2).active {
+            color: var(--accent-tenders);
+            border-bottom-color: var(--accent-tenders);
+        }
+
+        /* Boca Listings Input Style */
+        .search-form {
+            padding: 1.5rem 2rem;
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+        }
+
+        .input-group {
+            flex: 1;
+            position: relative;
+        }
+
+        .input-group i {
+            position: absolute;
+            left: 1rem;
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--text-secondary);
+            width: 20px;
+        }
+
+        .search-input,
+        .search-select {
+            width: 100%;
+            padding: 1rem 1rem 1rem 2.8rem;
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            font-family: var(--font-ui);
+            font-size: 1rem;
+            color: var(--text-primary);
+            background: #F8FAFC;
+            transition: border-color 0.2s;
+        }
+
+        .search-input:focus,
+        .search-select:focus {
+            outline: none;
+            border-color: var(--accent-primary);
+            background: #fff;
+            box-shadow: 0 0 0 3px rgba(2, 132, 199, 0.1);
+        }
+
+        .btn-search {
+            background: var(--accent-vibrant);
+            color: #fff;
+            border: none;
+            padding: 1rem 2rem;
+            font-family: var(--font-ui);
+            font-size: 1.1rem;
+            font-weight: 600;
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .btn-search:hover {
+            background: #EA580C;
+        }
+
+        /* Quick Inspiration / Ideas (Houzz Vibe) */
+        .quick-links {
+            margin-top: -3rem;
+            position: relative;
+            z-index: 20;
+            display: flex;
+            justify-content: center;
+            gap: 1.5rem;
+            padding: 0 5%;
+        }
+
+        .quick-card {
+            background: var(--bg-surface);
+            padding: 1rem 2rem;
+            border-radius: 50px;
+            box-shadow: var(--shadow-md);
+            display: flex;
+            align-items: center;
+            gap: 0.8rem;
+            font-family: var(--font-ui);
+            font-weight: 600;
+            color: var(--text-primary);
+            text-decoration: none;
+            border: 1px solid var(--border-color);
+        }
+
+        .quick-card:hover {
+            border-color: var(--accent-primary);
+            transform: translateY(-3px);
+            color: var(--accent-primary);
+        }
+
+        /* PREMIUM REAL ESTATE MODULE (Anna Modern Structure) */
+        .section-re {
+            padding: 6rem 5%;
+        }
+
+        .section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+            margin-bottom: 3rem;
+        }
+
+        .section-header h2 {
+            font-family: var(--font-display);
+            font-size: 2.8rem;
+            color: var(--accent-brand);
+            line-height: 1.2;
+        }
+
+        .section-header p {
+            font-family: var(--font-ui);
+            color: var(--text-secondary);
+            font-size: 1.1rem;
+            margin-top: 0.5rem;
+        }
+
+        .view-all {
+            color: var(--accent-primary);
+            font-family: var(--font-ui);
+            font-weight: 600;
+            text-decoration: none;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .view-all:hover {
+            text-decoration: underline;
+        }
+
+        /* Property Grid (Zillow x Boca Listings Style) */
+        .grid-re {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+            gap: 2rem;
+        }
+
+        .prop-card {
+            background: var(--bg-surface);
+            border-radius: var(--radius-md);
+            overflow: hidden;
+            border: 1px solid var(--border-color);
+            box-shadow: var(--shadow-sm);
+            position: relative;
+        }
+
+        .prop-card:hover {
+            box-shadow: var(--shadow-float);
+            transform: translateY(-5px);
+            border-color: transparent;
+        }
+
+        .prop-img-wrapper {
+            position: relative;
+            height: 240px;
+            overflow: hidden;
+        }
+
+        .prop-img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transition: transform 0.6s ease;
+        }
+
+        .prop-card:hover .prop-img {
+            transform: scale(1.08);
+        }
+
+        .prop-badge {
+            position: absolute;
+            top: 1rem;
+            left: 1rem;
+            background: var(--accent-luxury);
+            color: #fff;
+            padding: 0.3rem 0.8rem;
+            border-radius: 4px;
+            font-family: var(--font-ui);
+            font-weight: 700;
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+            z-index: 2;
+        }
+
+        .fav-btn {
+            position: absolute;
+            top: 1rem;
+            right: 1rem;
+            background: rgba(255, 255, 255, 0.9);
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-secondary);
+            cursor: pointer;
+            z-index: 2;
+            border: none;
+        }
+
+        .fav-btn:hover {
+            color: #EF4444;
+        }
+
+        .prop-content {
+            padding: 1.5rem;
+        }
+
+        .prop-price {
+            font-family: var(--font-ui);
+            font-size: 1.8rem;
+            font-weight: 700;
+            color: var(--accent-brand);
+            margin-bottom: 0.2rem;
+        }
+
+        .prop-address {
+            color: var(--text-secondary);
+            font-size: 0.95rem;
+            margin-bottom: 1rem;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .prop-features {
+            display: flex;
+            gap: 1rem;
+            padding-bottom: 1rem;
+            border-bottom: 1px solid var(--border-color);
+            margin-bottom: 1rem;
+        }
+
+        .feature {
+            display: flex;
+            align-items: center;
+            gap: 0.3rem;
+            font-family: var(--font-ui);
+            font-weight: 600;
+            color: var(--text-primary);
+            font-size: 0.95rem;
+        }
+
+        .feature span {
+            color: var(--text-secondary);
+            font-weight: 400;
+            font-size: 0.85rem;
+        }
+
+        .prop-footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .agent-info {
+            display: flex;
+            align-items: center;
+            gap: 0.8rem;
+        }
+
+        .agent-logo {
+            width: 30px;
+            height: 30px;
+            background: var(--bg-page);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.7rem;
+            font-weight: bold;
+            color: var(--accent-primary);
+        }
+
+        .agent-name {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            font-weight: 500;
+        }
+
+        /* TENDERING MODULE (SEGREGATED) */
+        .section-tenders {
+            background: #F1F5F9;
+            /* Distinct background to separate */
+            padding: 6rem 5%;
+            border-top: 1px solid var(--border-color);
+        }
+
+        .tender-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 1rem;
+        }
+
+        .tender-row {
+            background: var(--bg-surface);
+            border-radius: var(--radius-sm);
+            padding: 1.5rem 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-left: 4px solid var(--accent-tenders);
+            box-shadow: var(--shadow-sm);
+            cursor: pointer;
+        }
+
+        .tender-row:hover {
+            box-shadow: var(--shadow-md);
+            transform: translateX(5px);
+        }
+
+        .tender-info h3 {
+            font-family: var(--font-ui);
+            font-size: 1.3rem;
+            color: var(--text-primary);
+            margin-bottom: 0.3rem;
+        }
+
+        .tender-meta {
+            display: flex;
+            gap: 2rem;
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+        }
+
+        .tender-meta span {
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+        }
+
+        .tender-yield {
+            text-align: right;
+        }
+
+        .yield-val {
+            font-family: var(--font-display);
+            font-size: 1.8rem;
+            color: var(--accent-tenders);
+            font-weight: 700;
+        }
+
+        .yield-label {
+            font-size: 0.8rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            color: var(--text-secondary);
+            letter-spacing: 1px;
+        }
+
+        /* DESIGN IDEAS (Houzz Magazine Feel) */
+        .section-magazine {
+            padding: 6rem 5%;
+            background: var(--bg-surface);
+        }
+
+        .magazine-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 2rem;
+        }
+
+        .mag-card {
+            position: relative;
+            border-radius: var(--radius-lg);
+            overflow: hidden;
+            aspect-ratio: 4/5;
+            cursor: pointer;
+        }
+
+        .mag-card:nth-child(2) {
+            transform: translateY(-2rem);
+            /* masonry offset */
+        }
+
+        .mag-img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transition: transform 0.6s ease;
+        }
+
+        .mag-card:hover .mag-img {
+            transform: scale(1.05);
+        }
+
+        .mag-overlay {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            padding: 2rem;
+            background: linear-gradient(0deg, rgba(0, 0, 0, 0.8) 0%, rgba(0, 0, 0, 0) 100%);
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-end;
+        }
+
+        .mag-overlay h3 {
+            color: #fff;
+            font-family: var(--font-display);
+            font-size: 1.8rem;
+            line-height: 1.2;
+            margin-bottom: 0.5rem;
+        }
+
+        .mag-cat {
+            color: var(--accent-luxury);
+            font-family: var(--font-ui);
+            font-weight: 600;
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        @media (max-width: 992px) {
+            .search-form {
+                flex-direction: column;
+            }
+
+            .magazine-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .mag-card:nth-child(2) {
+                transform: none;
+            }
+
+            .quick-links {
+                flex-wrap: wrap;
+                margin-top: 2rem;
+                position: static;
+            }
+
+            .hero {
+                height: auto;
+                min-height: 700px;
+                padding-top: 4rem;
+                padding-bottom: 2rem;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+    <!-- NAVBAR -->
+    <nav>
+        <div class="logo">
+            <i data-lucide="building-2" style="color: var(--accent-primary);"></i>
+            Diaspora<span>Vest</span>
+        </div>
+        <div class="nav-center">
+            <a href="#" class="active">Buy</a>
+            <a href="#">Tendering</a>
+            <a href="#">Design Ideas</a>
+            <a href="#">Market Insights</a>
+        </div>
+        <div class="nav-actions">
+            <a href="#" class="btn-outline">Sign In</a>
+            <a href="#" class="btn-solid">Post Property</a>
+        </div>
+    </nav>
+
+    <!-- HERO / SEARCH BOCA-STYLE -->
+    <section class="hero">
+        <div class="search-container">
+            <div class="search-title">
+                <h1>Discover Premium Kenyan Real Estate</h1>
+                <p>Curated listings & vetted government tenders for the diaspora investor.</p>
+            </div>
+
+            <div class="search-widget">
+                <!-- Segregated Tabs -->
+                <div class="search-tabs">
+                    <div class="search-tab active" onclick="switchTab('re')">Explore Real Estate</div>
+                    <div class="search-tab" onclick="switchTab('gov')">Government Tenders</div>
+                </div>
+
+                <!-- Real Estate Search Form -->
+                <div class="search-form" id="search-re">
+                    <div class="input-group">
+                        <i data-lucide="map-pin"></i>
+                        <input type="text" class="search-input" placeholder="Neighborhood, City, or Zip">
+                    </div>
+                    <div class="input-group">
+                        <i data-lucide="home"></i>
+                        <select class="search-select">
+                            <option>Property Type</option>
+                            <option>Luxury Villas</option>
+                            <option>Apartments</option>
+                            <option>Commercial Plots</option>
+                        </select>
+                    </div>
+                    <div class="input-group">
+                        <i data-lucide="dollar-sign"></i>
+                        <select class="search-select">
+                            <option>Price Range</option>
+                            <option>$100k - $250k</option>
+                            <option>$250k - $500k</option>
+                            <option>$500k+</option>
+                        </select>
+                    </div>
+                    <button class="btn-search">
+                        <i data-lucide="search"></i> Search
+                    </button>
+                </div>
+
+                <!-- Tendering Search Form (Hidden by default) -->
+                <div class="search-form" id="search-gov" style="display: none;">
+                    <div class="input-group">
+                        <i data-lucide="briefcase"></i>
+                        <input type="text" class="search-input" placeholder="Tender ID or Sector (e.g. Infrastructure)">
+                    </div>
+                    <div class="input-group">
+                        <i data-lucide="bar-chart"></i>
+                        <select class="search-select">
+                            <option>Minimum Yield</option>
+                            <option>8%+</option>
+                            <option>10%+</option>
+                            <option>12%+</option>
+                        </select>
+                    </div>
+                    <button class="btn-search" style="background: var(--accent-tenders);">
+                        <i data-lucide="search"></i> View Tenders
+                    </button>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- QUICK INSPIRATION PILLS (Zillow/Houzz) -->
+    <div class="quick-links">
+        <a href="#" class="quick-card">
+            <i data-lucide="key" style="color: var(--accent-luxury);"></i>
+            Turnkey Villas
+        </a>
+        <a href="#" class="quick-card">
+            <i data-lucide="building" style="color: var(--accent-primary);"></i>
+            Nairobi Apartments
+        </a>
+        <a href="#" class="quick-card">
+            <i data-lucide="trees" style="color: var(--accent-success);"></i>
+            Land & Plots
+        </a>
+    </div>
+
+    <!-- PREMIUM REAL ESTATE (Anna Modern Structure) -->
+    <section class="section-re">
+        <div class="section-header">
+            <div>
+                <h2>Featured Acquisition Targets</h2>
+                <p>Hand-selected properties meeting our diaspora premium standards.</p>
+            </div>
+            <a href="#" class="view-all">View All Listings <i data-lucide="arrow-right"></i></a>
+        </div>
+
+        <div class="grid-re">
+            <!-- Property Card 1 -->
+            <div class="prop-card">
+                <div class="prop-img-wrapper">
+                    <span class="prop-badge">Just Listed</span>
+                    <button class="fav-btn"><i data-lucide="heart"></i></button>
+                    <img src="https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?ixlib=rb-4.0.3&auto=format&fit=crop&w=800&q=80"
+                        alt="Villa" class="prop-img">
+                </div>
+                <div class="prop-content">
+                    <div class="prop-price">$1,250,000</div>
+                    <div class="prop-address">124 Riverside Drive, Nairobi</div>
+                    <div class="prop-features">
+                        <div class="feature">5 <span>bds</span></div>
+                        <div class="feature">6 <span>ba</span></div>
+                        <div class="feature">4,200 <span>sqft</span></div>
+                    </div>
+                    <div class="prop-footer">
+                        <div class="agent-info">
+                            <div class="agent-logo">PM</div>
+                            <span class="agent-name">PamGolding Luxury</span>
+                        </div>
+                        <i data-lucide="shield-check" style="color: var(--accent-success); width: 18px;"></i>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Property Card 2 -->
+            <div class="prop-card">
+                <div class="prop-img-wrapper">
+                    <span class="prop-badge" style="background: var(--text-primary);">Pre-Construction</span>
+                    <button class="fav-btn"><i data-lucide="heart"></i></button>
+                    <img src="https://images.unsplash.com/photo-1512917774080-9991f1c4c750?ixlib=rb-4.0.3&auto=format&fit=crop&w=800&q=80"
+                        alt="Apartment" class="prop-img">
+                </div>
+                <div class="prop-content">
+                    <div class="prop-price">$385,000</div>
+                    <div class="prop-address">The Azure Towers, Westlands</div>
+                    <div class="prop-features">
+                        <div class="feature">3 <span>bds</span></div>
+                        <div class="feature">3 <span>ba</span></div>
+                        <div class="feature">2,100 <span>sqft</span></div>
+                    </div>
+                    <div class="prop-footer">
+                        <div class="agent-info">
+                            <div class="agent-logo">KN</div>
+                            <span class="agent-name">Knight Frank</span>
+                        </div>
+                        <i data-lucide="shield-check" style="color: var(--accent-success); width: 18px;"></i>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Property Card 3 -->
+            <div class="prop-card">
+                <div class="prop-img-wrapper">
+                    <span class="prop-badge" style="background: var(--accent-primary);">Land Bank</span>
+                    <button class="fav-btn"><i data-lucide="heart"></i></button>
+                    <img src="https://images.unsplash.com/photo-1500382017468-9049fed747ef?ixlib=rb-4.0.3&auto=format&fit=crop&w=800&q=80"
+                        alt="Land" class="prop-img">
+                </div>
+                <div class="prop-content">
+                    <div class="prop-price">$120,000</div>
+                    <div class="prop-address">Naivasha Lakeview Estates</div>
+                    <div class="prop-features">
+                        <div class="feature">5.0 <span>Acres</span></div>
+                        <div class="feature">Zoned <span>Residential</span></div>
+                    </div>
+                    <div class="prop-footer">
+                        <div class="agent-info">
+                            <div class="agent-logo">OP</div>
+                            <span class="agent-name">Optiven Group</span>
+                        </div>
+                        <i data-lucide="shield-check" style="color: var(--accent-success); width: 18px;"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- TENDERING SEGREGATION -->
+    <section class="section-tenders">
+        <div class="section-header">
+            <div>
+                <h2 style="color: var(--accent-tenders);">Government Tendering Board</h2>
+                <p>Institutional-grade infrastructure bonds and direct procurement investment pools.</p>
+            </div>
+            <a href="#" class="view-all" style="color: var(--accent-tenders);">View All Contracts <i
+                    data-lucide="arrow-right"></i></a>
+        </div>
+
+        <div class="tender-grid">
+            <div class="tender-row">
+                <div class="tender-info">
+                    <h3>Mombasa Port Logistics Expansion Phase II</h3>
+                    <div class="tender-meta">
+                        <span><i data-lucide="building-2" style="width: 14px;"></i> Kenya Ports Authority</span>
+                        <span><i data-lucide="calendar" style="width: 14px;"></i> Maturation: 5 Years</span>
+                        <span><i data-lucide="shield" style="width: 14px; color: var(--accent-success);"></i> Govt
+                            Guaranteed</span>
+                    </div>
+                </div>
+                <div class="tender-yield">
+                    <div class="yield-val">12.5%</div>
+                    <div class="yield-label">Target APY</div>
+                </div>
+            </div>
+
+            <div class="tender-row">
+                <div class="tender-info">
+                    <h3>Rift Valley Geothermal Grid Extension</h3>
+                    <div class="tender-meta">
+                        <span><i data-lucide="zap" style="width: 14px;"></i> KenGen</span>
+                        <span><i data-lucide="calendar" style="width: 14px;"></i> Maturation: 7 Years</span>
+                        <span><i data-lucide="shield" style="width: 14px; color: var(--accent-success);"></i> Govt
+                            Guaranteed</span>
+                    </div>
+                </div>
+                <div class="tender-yield">
+                    <div class="yield-val">11.2%</div>
+                    <div class="yield-label">Target APY</div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- DESIGN IDEAS (Houzz Style) -->
+    <section class="section-magazine">
+        <div class="section-header" style="justify-content: center; text-align: center; margin-bottom: 4rem;">
+            <div>
+                <h2>Design & Development Ideas</h2>
+                <p>Inspiration for your luxury build from top Kenyan architects.</p>
+            </div>
+        </div>
+
+        <div class="magazine-grid">
+            <div class="mag-card">
+                <img src="https://images.unsplash.com/photo-1600210492486-724fe5c67fb0?ixlib=rb-4.0.3&auto=format&fit=crop&w=600&q=80"
+                    alt="Interior" class="mag-img">
+                <div class="mag-overlay">
+                    <span class="mag-cat">Interior Design</span>
+                    <h3>Swahili Coastal Minimalism</h3>
+                </div>
+            </div>
+            <div class="mag-card">
+                <img src="https://images.unsplash.com/photo-1628611225249-6c17d7b38dfd?ixlib=rb-4.0.3&auto=format&fit=crop&w=600&q=80"
+                    alt="Architecture" class="mag-img">
+                <div class="mag-overlay">
+                    <span class="mag-cat">Architecture</span>
+                    <h3>Integrating Nairobi Skyline</h3>
+                </div>
+            </div>
+            <div class="mag-card">
+                <img src="https://images.unsplash.com/photo-1588880331179-bc9b93a8cb65?ixlib=rb-4.0.3&auto=format&fit=crop&w=600&q=80"
+                    alt="Landscaping" class="mag-img">
+                <div class="mag-overlay">
+                    <span class="mag-cat">Landscaping</span>
+                    <h3>Drought-Resistant Tropical</h3>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <script>
+        // Initialize Lucide Icons
+        lucide.createIcons();
+
+        // Tab Switching Logic for Boca-style Search
+        function switchTab(tabId) {
+            // Update tabs
+            document.querySelectorAll('.search-tab').forEach(tab => tab.classList.remove('active'));
+            event.target.classList.add('active');
+
+            // Update forms
+            document.getElementById('search-re').style.display = tabId === 're' ? 'flex' : 'none';
+            document.getElementById('search-gov').style.display = tabId === 'gov' ? 'flex' : 'none';
+        }
+    </script>
+</body>
+
+</html>

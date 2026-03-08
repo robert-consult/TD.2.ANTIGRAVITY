@@ -1,8 +1,9 @@
+import { toFiniteNumber as sharedToFiniteNumber } from "@shared/scalars";
+
 export type AllocationStatus = "ACTIVE" | "STOPPED" | "CLOSED";
 
 function toFiniteNumber(raw: unknown): number | null {
-  const n = Number(raw);
-  return Number.isFinite(n) ? n : null;
+  return sharedToFiniteNumber(raw);
 }
 
 export function normalizeCapitalUsd(raw: unknown): number | null {

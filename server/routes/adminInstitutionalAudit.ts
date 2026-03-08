@@ -2,6 +2,7 @@ import { Router } from "express";
 import { and, desc, eq, gte } from "drizzle-orm";
 import { db } from "@db";
 import { adminDataExportCreateRequestSchema } from "@shared/admin/dataExports";
+import { clampIntOr, nowSec } from "@shared/scalars";
 import { auditExportManifest, users } from "@shared/schema";
 import { requireAdmin } from "../middleware/requireAdmin";
 import { storage } from "../storage";
@@ -19,12 +20,6 @@ import { getPetascaleRuntimeConfig } from "../services/petascaleEnv";
 function getSessionAdminId(req: any): number | null {
   const id = Number(req?.session?.userId);
   return Number.isFinite(id) && id > 0 ? id : null;
-}
-
-function clampInt(raw: unknown, fallback: number, min: number, max: number): number {
-  const parsed = Number(raw);
-  if (!Number.isFinite(parsed)) return fallback;
-  return Math.max(min, Math.min(max, Math.trunc(parsed)));
 }
 
 function toUnixSec(value: unknown): number | null {
@@ -85,7 +80,7 @@ adminInstitutionalAuditRouter.get("/trade-audit", async (req, res) => {
   try {
     const tradeId = Number(req.query.tradeId);
     const records = await fetchTradeAuditRecords({
-      limit: clampInt(req.query.limit, 1000, 1, 5000),
+      limit: clampIntOr(req.query.limit, 1000, 1, 5000),
       tradeId: Number.isFinite(tradeId) && tradeId > 0 ? Math.trunc(tradeId) : null,
       eventType: cleanText(req.query.eventType, 96) ?? null,
       riskResult: cleanText(req.query.riskResult, 64) ?? null,
@@ -102,7 +97,7 @@ adminInstitutionalAuditRouter.get("/order-intent-audit", async (req, res) => {
   try {
     const userId = Number(req.query.userId);
     const records = await fetchOrderIntentAuditRecords({
-      limit: clampInt(req.query.limit, 500, 1, 5000),
+      limit: clampIntOr(req.query.limit, 500, 1, 5000),
       correlationId: cleanText(req.query.correlationId, 160) ?? null,
       decision: cleanText(req.query.decision, 64) ?? null,
       userId: Number.isFinite(userId) && userId > 0 ? Math.trunc(userId) : null,
@@ -116,13 +111,13 @@ adminInstitutionalAuditRouter.get("/order-intent-audit", async (req, res) => {
 
 adminInstitutionalAuditRouter.get("/audit-trail", async (req, res) => {
   try {
-    const limit = clampInt(req.query.limit, 100, 1, 500);
-    const deepLimit = clampInt(req.query.deepLimit, limit, 1, 5000);
+    const limit = clampIntOr(req.query.limit, 100, 1, 500);
+    const deepLimit = clampIntOr(req.query.deepLimit, limit, 1, 5000);
     const includeDeepTrade = String(req.query.includeDeepTrade ?? "1") !== "0";
     const includeLinkage = String(req.query.includeLinkage ?? "1") !== "0";
     const correlationId = cleanText(req.query.correlationId, 160) ?? null;
 
-    const thirtyDaysAgoSec = Math.floor(Date.now() / 1000) - 30 * 24 * 60 * 60;
+    const thirtyDaysAgoSec = nowSec() - 30 * 24 * 60 * 60;
     const recentSignups = await db
       .select({
         id: users.id,
@@ -301,7 +296,7 @@ adminInstitutionalAuditRouter.get("/audit-trail", async (req, res) => {
 
 adminInstitutionalAuditRouter.get("/export-manifests", async (req, res) => {
   try {
-    const limit = clampInt(req.query.limit, 100, 1, 500);
+    const limit = clampIntOr(req.query.limit, 100, 1, 500);
     const manifests = await db
       .select()
       .from(auditExportManifest)
@@ -321,7 +316,7 @@ adminInstitutionalAuditRouter.get("/trade-audit/export/csv", async (req: any, re
       type: "trade_audit",
       format: "csv",
       filters: {
-        limit: clampInt(req.query.limit, 100_000, 1, 5_000_000),
+        limit: clampIntOr(req.query.limit, 100_000, 1, 5_000_000),
         tradeId: (() => {
           const n = Number(req.query.tradeId);
           return Number.isFinite(n) && n > 0 ? Math.trunc(n) : undefined;
@@ -350,7 +345,7 @@ adminInstitutionalAuditRouter.get("/trade-audit/export/jsonl", async (req: any, 
       type: "trade_audit",
       format: "jsonl",
       filters: {
-        limit: clampInt(req.query.limit, 100_000, 1, 5_000_000),
+        limit: clampIntOr(req.query.limit, 100_000, 1, 5_000_000),
         tradeId: (() => {
           const n = Number(req.query.tradeId);
           return Number.isFinite(n) && n > 0 ? Math.trunc(n) : undefined;
@@ -379,7 +374,7 @@ adminInstitutionalAuditRouter.get("/trade-audit/export/parquet", async (req: any
       type: "trade_audit",
       format: "parquet",
       filters: {
-        limit: clampInt(req.query.limit, 100_000, 1, 5_000_000),
+        limit: clampIntOr(req.query.limit, 100_000, 1, 5_000_000),
         tradeId: (() => {
           const n = Number(req.query.tradeId);
           return Number.isFinite(n) && n > 0 ? Math.trunc(n) : undefined;
@@ -408,7 +403,7 @@ adminInstitutionalAuditRouter.get("/order-intent-audit/export/csv", async (req: 
       type: "order_intent_audit",
       format: "csv",
       filters: {
-        limit: clampInt(req.query.limit, 100_000, 1, 5_000_000),
+        limit: clampIntOr(req.query.limit, 100_000, 1, 5_000_000),
         correlationId: cleanText(req.query.correlationId, 160),
         decision: cleanText(req.query.decision, 64),
         userId: (() => {
@@ -436,7 +431,7 @@ adminInstitutionalAuditRouter.get("/order-intent-audit/export/jsonl", async (req
       type: "order_intent_audit",
       format: "jsonl",
       filters: {
-        limit: clampInt(req.query.limit, 100_000, 1, 5_000_000),
+        limit: clampIntOr(req.query.limit, 100_000, 1, 5_000_000),
         correlationId: cleanText(req.query.correlationId, 160),
         decision: cleanText(req.query.decision, 64),
         userId: (() => {
@@ -464,7 +459,7 @@ adminInstitutionalAuditRouter.get("/order-intent-audit/export/parquet", async (r
       type: "order_intent_audit",
       format: "parquet",
       filters: {
-        limit: clampInt(req.query.limit, 100_000, 1, 5_000_000),
+        limit: clampIntOr(req.query.limit, 100_000, 1, 5_000_000),
         correlationId: cleanText(req.query.correlationId, 160),
         decision: cleanText(req.query.decision, 64),
         userId: (() => {

@@ -1,4 +1,5 @@
 import { db } from "@db";
+import { nowSec } from "@shared/scalars";
 import { eq, sql } from "drizzle-orm";
 import { recruitingPipeline, users } from "@shared/schema";
 import { computeDoc1ReacceptStatus } from "../legal/legalReacceptanceService";
@@ -42,10 +43,6 @@ export type PipelineUpdateResult =
         | "PARTNER_READY_GATING_FAILED";
       reason?: string;
     };
-
-function nowSec(): number {
-  return Math.floor(Date.now() / 1000);
-}
 
 function parseBool(raw: unknown): boolean {
   return raw === true;

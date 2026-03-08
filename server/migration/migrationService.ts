@@ -1,4 +1,3 @@
-// @ts-nocheck
 import fs from "fs";
 import path from "path";
 import crypto from "crypto";
@@ -256,7 +255,7 @@ async function logJob(jobId: string, level: "INFO" | "WARN" | "ERROR", message: 
     level,
     message,
     contextJson: safeJson(context),
-  }).run();
+  });
 }
 
 async function listTables(): Promise<string[]> {
@@ -482,7 +481,7 @@ export async function createExportJob(params: {
     createdAt,
     totalsJson: "{}",
     manifestJson: "{}",
-  }).run();
+  });
 
   await logJob(jobId, "INFO", "Export job queued", params);
 
@@ -504,7 +503,7 @@ async function runExportJob(
     .update(migrationExportJobs)
     .set({ status: "RUNNING", startedAt })
     .where(eq(migrationExportJobs.id, jobId))
-    .run();
+    ;
   await logJob(jobId, "INFO", "Export job started");
 
   ensureDir(EXPORT_DIR);
@@ -686,7 +685,7 @@ async function runExportJob(
         manifestPath,
       })
       .where(eq(migrationExportJobs.id, jobId))
-      .run();
+      ;
 
     await logJob(jobId, "INFO", "Export job completed", {
       totalRows,
@@ -724,7 +723,7 @@ async function runExportJob(
       .update(migrationExportJobs)
       .set({ status: "FAILED", completedAt: nowMs(), error: String(err?.message ?? err) })
       .where(eq(migrationExportJobs.id, jobId))
-      .run();
+      ;
     if (params.requestedByAdminId) {
       try {
         await storage.logAdminAction({
@@ -774,7 +773,7 @@ export async function createImportJob(params: {
     dataPartsJson: JSON.stringify(dataPartsPaths),
     manifestPath: params.manifestPath,
     totalsJson: "{}",
-  }).run();
+  });
 
   await logJob(jobId, "INFO", "Import job queued", { mode: params.mode, idStrategy });
 
@@ -803,7 +802,7 @@ async function runImportJob(
     .update(migrationImportJobs)
     .set({ status: "RUNNING", startedAt })
     .where(eq(migrationImportJobs.id, jobId))
-    .run();
+    ;
   await logJob(jobId, "INFO", "Import job started");
 
   ensureDir(IMPORT_DIR);
@@ -1042,7 +1041,7 @@ async function runImportJob(
         manifestPath: params.manifestPath,
       })
       .where(eq(migrationImportJobs.id, jobId))
-      .run();
+      ;
 
     await logJob(jobId, "INFO", "Import job completed", { totals: counts, tables: Object.keys(counts) });
 
@@ -1076,7 +1075,7 @@ async function runImportJob(
       .update(migrationImportJobs)
       .set({ status: "FAILED", completedAt: nowMs(), error: String(err?.message ?? err) })
       .where(eq(migrationImportJobs.id, jobId))
-      .run();
+      ;
     if (params.requestedByAdminId) {
       try {
         await storage.logAdminAction({
@@ -1123,7 +1122,7 @@ async function verifyTradeAuditIntegrity(jobId: string) {
           status: "FAIL",
           failureReason: "prev_hash mismatch",
           verifiedAt: nowMs(),
-        }).run();
+        });
         return;
       }
       const expectedHash = crypto
@@ -1138,7 +1137,7 @@ async function verifyTradeAuditIntegrity(jobId: string) {
           status: "FAIL",
           failureReason: "event_hash mismatch",
           verifiedAt: nowMs(),
-        }).run();
+        });
         return;
       }
       expectedPrev = row.event_hash;
@@ -1150,7 +1149,7 @@ async function verifyTradeAuditIntegrity(jobId: string) {
       status: "PASS",
       failureReason: null,
       verifiedAt: nowMs(),
-    }).run();
+    });
   } catch (err: any) {
     await db.insert(migrationIntegrityChecks).values({
       jobId,
@@ -1159,7 +1158,7 @@ async function verifyTradeAuditIntegrity(jobId: string) {
       status: "FAIL",
       failureReason: String(err?.message ?? err),
       verifiedAt: nowMs(),
-    }).run();
+    });
   }
 }
 
@@ -1186,7 +1185,7 @@ async function verifyOrderIntentIntegrity(jobId: string) {
           status: "FAIL",
           failureReason: "prev_hash mismatch",
           verifiedAt: nowMs(),
-        }).run();
+        });
         return;
       }
       const expectedHash = crypto
@@ -1201,7 +1200,7 @@ async function verifyOrderIntentIntegrity(jobId: string) {
           status: "FAIL",
           failureReason: "event_hash mismatch",
           verifiedAt: nowMs(),
-        }).run();
+        });
         return;
       }
       expectedPrev = row.event_hash;
@@ -1213,7 +1212,7 @@ async function verifyOrderIntentIntegrity(jobId: string) {
       status: "PASS",
       failureReason: null,
       verifiedAt: nowMs(),
-    }).run();
+    });
   } catch (err: any) {
     await db.insert(migrationIntegrityChecks).values({
       jobId,
@@ -1222,6 +1221,6 @@ async function verifyOrderIntentIntegrity(jobId: string) {
       status: "FAIL",
       failureReason: String(err?.message ?? err),
       verifiedAt: nowMs(),
-    }).run();
+    });
   }
 }

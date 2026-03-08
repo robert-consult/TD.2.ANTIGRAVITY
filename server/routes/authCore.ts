@@ -1,4 +1,3 @@
-// @ts-nocheck
 import type { Express, NextFunction, Request, Response } from "express";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
@@ -391,7 +390,7 @@ app.post("/api/auth/login", async (req: Request, res: Response) => {
     });
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return res.status(400).json({ message: "Invalid input data", errors: error.errors });
+      return res.status(400).json({ message: "Invalid input data", errors: error.issues });
     }
     console.error("Login error:", error);
     res.status(500).json({ message: "Internal server error" });
@@ -568,7 +567,7 @@ app.post("/api/auth/register", async (req: Request, res: Response) => {
           username,
           password,
           countryIso2: countryIso2 ?? null,
-          regionKey: regionKey ?? null,
+          regionKey: regionKey ?? undefined,
           phone: normalizedPhone.e164 ?? null,
           fingerprint: signupFingerprint,
         });
@@ -1014,8 +1013,8 @@ app.get("/api/auth/current-user", async (req: Request, res: Response) => {
         legalRequiredCombinedSha256: legalStatus.legalRequiredCombinedSha256,
         legalLastAcceptedCombinedSha256: legalStatus.legalLastAcceptedCombinedSha256,
         isImpersonating: req.session.isImpersonating || false,
-        realAdminId: null,
-        realAdminEmail: null,
+        realAdminId: req.session.realAdminId ?? null,
+        realAdminEmail: req.session.realAdminEmail ?? null,
       };
     };
 

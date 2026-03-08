@@ -1,4 +1,3 @@
-// @ts-nocheck
 import type { Router, NextFunction, Request, Response } from "express";
 import { z } from "zod";
 import crypto from "crypto";
@@ -106,7 +105,7 @@ router.post("/api/profile/account/deactivate", ensureAuth, async (req: Request, 
       title: "Account deactivated",
       description: "User requested account deactivation",
       reasonCode: normalizedReasonCode,
-      reasonText: normalizedReasonText,
+      reasonText: normalizedReasonText ?? undefined,
       metadata: {
         action: "DEACTIVATE",
         ip,
@@ -144,7 +143,7 @@ router.post("/api/profile/account/deactivate", ensureAuth, async (req: Request, 
     res.json({ success: true, message: "Account deactivated" });
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return res.status(400).json({ message: "Invalid input data", errors: error.errors });
+      return res.status(400).json({ message: "Invalid input data", errors: error.issues });
     }
     console.error("Account deactivation error:", error);
     res.status(500).json({ message: "Failed to deactivate account" });

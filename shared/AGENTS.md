@@ -10,6 +10,7 @@ Shared code used by server and clients:
 - Changes here are cross-cutting: update server + web/mobile callers and tests.
 - Treat schema and policy changes as contract changes: document and verify downstream impacts.
 - Shared-first rule: when feature logic can be common, define it here first, then consume it from `server/`, `client/`, and `NATIVE/`.
+- For audits, decomposition reviews, and maintainability critiques, read `../.agents/audit-decomposition.md` first. Prefer shared-first extraction only when the contract is truly cross-subsystem and stable.
 
 ## Key files
 - DB schema (source of truth): `shared/schema.pg.ts`

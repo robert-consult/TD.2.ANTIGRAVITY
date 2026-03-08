@@ -1,13 +1,10 @@
 import { and, eq } from "drizzle-orm";
 import { db } from "@db";
+import { nowSec } from "@shared/scalars";
 import { systemConfig, users } from "@shared/schema";
 
 const DEFAULT_INQUIRY_INBOX_ALIAS = "inquiries@";
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-function nowSec(): number {
-  return Math.floor(Date.now() / 1000);
-}
 
 function normalizeInboxAlias(value: unknown): string {
   const raw = String(value ?? "").trim();

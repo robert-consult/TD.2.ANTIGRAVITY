@@ -57,13 +57,17 @@ import type { TraderRouterDeps } from "./types";
 
 export function registerTradeCloseRoute(router: Router, deps: TraderRouterDeps) {
   const { ensureAuth, ensureDoc1TermsAccepted, broadcast } = deps;
-router.post(
+  router.post(
   "/api/trades/:id/close",
   ensureAuth,
   ensureDoc1TermsAccepted,
   requirePolicy("TRADE_CLOSE_OR_REDUCE"),
   async (req: Request, res: Response, next: NextFunction) => {
-    const bg = await botGuard(req, res, { action: "TRADE", userId: (req.session as any).userId });
+    const sessionUserId = Number((req.session as SessionData).userId);
+    const bg = await botGuard(req, res, {
+      action: "TRADE",
+      userId: Number.isInteger(sessionUserId) && sessionUserId > 0 ? sessionUserId : undefined,
+    });
     if (!bg.allowed) return;
     next();
   },
@@ -150,9 +154,9 @@ router.post(
       if (q.isStale) {
         const quoteAgeMs = Math.max(0, Date.now() - q.quoteTs.getTime());
         const closeAuditCtx = buildAuditContext(req);
-        const correlationId = (trade as any).correlationId || generateCorrelationId();
-        const orderId = (trade as any).orderId || generateOrderId();
-        const positionId = (trade as any).positionId || generatePositionId();
+        const correlationId = trade.correlationId || generateCorrelationId();
+        const orderId = trade.orderId || generateOrderId();
+        const positionId = trade.positionId || generatePositionId();
 
         closeAuditCtx.correlationId = correlationId;
 
@@ -215,8 +219,8 @@ router.post(
         side: trade.type as "BUY" | "SELL",
         openPrice,
         closePrice,
-        intradayHigh: (trade as any).intradayHigh,
-        intradayLow: (trade as any).intradayLow,
+        intradayHigh: trade.intradayHigh,
+        intradayLow: trade.intradayLow,
       });
 
       // Use proper P/L calculation that handles JPY and cross pairs correctly
@@ -228,16 +232,16 @@ router.post(
         closePrice,
       });
       const closeCostSummary = await computeCloseSettlementCosts({
-        category: (trade as any).categorySnapshot ?? (trade as any).symbol?.category ?? (symbolConfig as any).category,
+        category: trade.categorySnapshot ?? trade.symbol?.category ?? symbolConfig.category,
         positionSide: trade.type as "BUY" | "SELL",
-        notionalUsd: (trade as any).notionalUsd,
-        size: Number((trade as any).size ?? lots * 100000),
+        notionalUsd: trade.notionalUsd,
+        size: Number(trade.size ?? lots * 100000),
         lots,
         openedAt: trade.openedAt,
-        executedAt: (trade as any).executedAt,
+        executedAt: trade.executedAt,
         closedAtMs: q.quoteTs.getTime(),
-        openCommissionUsd: (trade as any).openCommissionUsd,
-        openOtherFeesUsd: (trade as any).openOtherFeesUsd,
+        openCommissionUsd: trade.openCommissionUsd,
+        openOtherFeesUsd: trade.openOtherFeesUsd,
       });
       const grossProfitUsd = pnlUsd;
       const netProfitUsd = grossProfitUsd - closeCostSummary.totalCostsUsd;
@@ -245,9 +249,9 @@ router.post(
 
       // Build audit context for this close request
       const closeAuditCtx = buildAuditContext(req);
-      const correlationId = (trade as any).correlationId || generateCorrelationId();
-      const orderId = (trade as any).orderId || generateOrderId();
-      const positionId = (trade as any).positionId || generatePositionId();
+      const correlationId = trade.correlationId || generateCorrelationId();
+      const orderId = trade.orderId || generateOrderId();
+      const positionId = trade.positionId || generatePositionId();
       const executionId = generateExecutionId();
 
       closeAuditCtx.correlationId = correlationId;
@@ -350,7 +354,7 @@ router.post(
           quoteSpread: q.spread,
           quoteTs: q.quoteTs,
           quoteSource: closeSource,
-          spreadPips: calculateSpreadPips(q.symbol, q.spread, (trade as any).symbol?.pipDecimals),
+          spreadPips: calculateSpreadPips(q.symbol, q.spread, trade.symbol?.pipDecimals),
           slippage: slippagePoints,
           slippagePips: 0,
           slippageReference: "manual_close",

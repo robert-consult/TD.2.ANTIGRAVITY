@@ -14,4 +14,4 @@ Notes:
 ## Non-negotiables
 - Keep tests deterministic (avoid sleeps; prefer explicit waits and stable selectors).
 - Do not require real external credentials (Twilio/Resend) in CI/E2E paths.
-
+- For repo-wide audits, decomposition reviews, and maintainability critiques that touch test coverage or recommendations, read `../.agents/audit-decomposition.md` first.

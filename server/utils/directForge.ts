@@ -1,4 +1,3 @@
-// @ts-nocheck
 // Based on the 1Forge documentation provided in the instructions
 import axios from "axios";
 import { ensureMarketDailyCloseTable } from "./marketDailyClose";
@@ -106,5 +105,3 @@ export async function preloadCache(symbols: string[]): Promise<void> {
   
   console.log("Finished preloading previous close prices");
 }
-// @ts-nocheck
-// @ts-nocheck

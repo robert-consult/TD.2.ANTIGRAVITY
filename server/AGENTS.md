@@ -9,6 +9,7 @@ Express API, WebSocket server (`/ws`), quote ingestion, trading lifecycle, polic
 - **Legal acceptance integrity** must remain tamper-evident (HMAC tokens and DB records).
 - **Audit trails** are append-only and attributable (preserve correlation IDs).
 - **Do not weaken startup secret validation** in `server/index.ts`.
+- For audits, decomposition reviews, and maintainability critiques, read `../.agents/audit-decomposition.md` first. Prioritize hot paths, security, compliance, and ownership seams over raw file size.
 
 ## Key entrypoints
 - App bootstrap: `server/index.ts`

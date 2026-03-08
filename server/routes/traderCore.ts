@@ -1,4 +1,3 @@
-// @ts-nocheck
 import type { Express, NextFunction, Request, Response } from "express";
 import type { SessionData } from "express-session";
 import { z } from "zod";
@@ -53,14 +52,12 @@ import {
   incTradeCloseRejectedQuoteStaleTotal,
   incTradeTargetsRejectedQuoteStaleTotal,
 } from "./metricsState";
-
-export type WsBroadcast = (event: any, filter?: (client: any) => boolean) => void;
-
-interface TraderCoreDeps {
-  ensureAuth: (req: Request, res: Response, next: NextFunction) => Promise<void> | void;
-  ensureDoc1TermsAccepted: (req: Request, res: Response, next: NextFunction) => Promise<void> | void;
-  broadcast: WsBroadcast;
-}
+import type { TraderCoreDeps, WsBroadcast } from "./trader-core/shared";
+import { registerTraderJournalRoutes } from "./trader-core/journal";
+import {
+  registerTraderPrimaryReadRoutes,
+  registerTraderSecondaryReadRoutes,
+} from "./trader-core/reads";
 
 export function registerTraderCoreRoutes(app: Express, deps: TraderCoreDeps) {
   const { ensureAuth, ensureDoc1TermsAccepted, broadcast } = deps;
@@ -87,6 +84,7 @@ app.post(
     const auditCtx = buildAuditContext(req);
     auditCtx.correlationId = correlationId;
     const receivedAtMs = Date.now();
+    const userId = req.session.userId!;
 
     try {
       // Handle either lots or size parameter from the request
@@ -100,10 +98,14 @@ app.post(
       // Validate request data
       const data = insertTradeSchema.parse({
         ...req.body,
-        userId: req.session.userId,
+        userId,
         openedAt: Math.floor(Date.now() / 1000),
         lots: orderSize, // Use the unified size parameter
       });
+      const tradeSide = String(data.type ?? type ?? "").toUpperCase();
+      if (tradeSide !== "BUY" && tradeSide !== "SELL") {
+        return res.status(400).json({ message: "Trade type must be BUY or SELL" });
+      }
 
       // Get current symbol price from our memory-based quotes
       // First, get the symbol config to get the symbol string
@@ -112,7 +114,7 @@ app.post(
         return res.status(404).json({ message: "Symbol configuration not found" });
       }
 
-      const executionQuote = await getExecutionQuote(symbolConfig.symbol, data.type, "OPEN");
+      const executionQuote = await getExecutionQuote(symbolConfig.symbol, tradeSide, "OPEN");
       const quote = {
         symbol: executionQuote.symbol,
         bid: executionQuote.bid,
@@ -133,9 +135,9 @@ app.post(
           correlationId,
           eventCode: "ORDER_RECEIVED",
           ctx: auditCtx,
-          userId: req.session.userId,
+          userId,
           symbol: symbolConfig.symbol,
-          side: data.type,
+          side: tradeSide,
           orderType: orderType ?? "Market",
           qtyLots: orderSize,
           requestedPrice: parseFloat(String(req.body.limitPrice ?? req.body.stopPrice ?? quote.price)),
@@ -162,10 +164,10 @@ app.post(
             correlationId,
             eventCode: "DECISION",
             ctx: auditCtx,
-            userId: req.session.userId,
+            userId,
             decision: "REJECT",
             symbol: symbolConfig.symbol,
-            side: data.type,
+            side: tradeSide,
             orderType: orderType ?? "Market",
             qtyLots: orderSize,
             requestedPrice: parseFloat(String(req.body.limitPrice ?? req.body.stopPrice ?? quote.price)),
@@ -222,10 +224,10 @@ app.post(
             correlationId,
             eventCode: "DECISION",
             ctx: auditCtx,
-            userId: req.session.userId,
+            userId,
             decision: "REJECT",
             symbol: symbolConfig.symbol,
-            side: data.type,
+            side: tradeSide,
             orderType: orderType ?? "Market",
             qtyLots: tradeLots,
             riskLimit: { minLots: 1, maxLots: 50 },
@@ -252,7 +254,7 @@ app.post(
         notionalUsd: positionSize,
         lots: tradeLots,
         size: positionSize,
-        positionSide: data.type,
+        positionSide: tradeSide,
       });
 
       // Enforce global maxPositionSize limit
@@ -266,10 +268,10 @@ app.post(
             correlationId,
             eventCode: "DECISION",
             ctx: auditCtx,
-            userId: req.session.userId,
+            userId,
             decision: "REJECT",
             symbol: symbolConfig.symbol,
-            side: data.type,
+            side: tradeSide,
             orderType: orderType ?? "Market",
             qtyLots: tradeLots,
             riskLimit: { maxPositionSize },
@@ -289,16 +291,16 @@ app.post(
       }
 
       // Ensure the account numbers are fresh
-      await recalcAccount(req.session.userId);
+      await recalcAccount(userId);
 
       // Pull the updated user
-      const updatedUser = await storage.getUserById(req.session.userId);
+      const updatedUser = await storage.getUserById(userId);
       if (!updatedUser) return res.status(404).json({ message: "User not found" });
 
       // Determine order type and status (handle both "LIMIT" and "limit" formats)
       const normalizedOrderType = String(orderType ?? "Market").toUpperCase();
       const isLimitOrder = normalizedOrderType === "LIMIT" || normalizedOrderType === "BUY_LIMIT" || normalizedOrderType === "SELL_LIMIT";
-      const isStopOrder = (normalizedOrderType === "STOP" || normalizedOrderType === "BUY_STOP" || normalizedOrderType === "SELL_STOP") && normalizedOrderType !== "STOPLOSS";
+      const isStopOrder = normalizedOrderType === "STOP" || normalizedOrderType === "BUY_STOP" || normalizedOrderType === "SELL_STOP";
       const isPendingOrder = isLimitOrder || isStopOrder;
 
       const orderId = generateOrderId();
@@ -312,10 +314,10 @@ app.post(
             correlationId,
             eventCode: "DECISION",
             ctx: auditCtx,
-            userId: req.session.userId,
+            userId,
             decision: "REJECT",
             symbol: symbolConfig.symbol,
-            side: data.type,
+            side: tradeSide,
             orderType: orderType ?? "Market",
             qtyLots: tradeLots,
             riskLimit,
@@ -480,7 +482,7 @@ app.post(
       const globalDefaultLeverage = Number(gs?.defaultLeverage ?? 50);
 
       // Effective leverage: user override takes precedence over global
-      const challengeTradeConstraints = await getActiveTradeConstraintsForUser(req.session.userId);
+      const challengeTradeConstraints = await getActiveTradeConstraintsForUser(userId);
       const challengeLeverageMultiplier = Math.max(
         0.01,
         Number(challengeTradeConstraints?.leverageMultiplier ?? 1),
@@ -506,10 +508,10 @@ app.post(
             correlationId,
             eventCode: "DECISION",
             ctx: auditCtx,
-            userId: req.session.userId,
+            userId,
             decision: "REJECT",
             symbol: symbolConfig.symbol,
-            side: data.type,
+            side: tradeSide,
             orderType: orderType ?? "Market",
             qtyLots: tradeLots,
             riskLimit: { marginRequired: neededMargin },
@@ -523,7 +525,7 @@ app.post(
       }
 
       // Check max concurrent lots limit (includes both OPEN and PENDING orders)
-      const userSettingsData = await storage.getUserSettingsById(req.session.userId);
+      const userSettingsData = await storage.getUserSettingsById(userId);
       const globalMaxConcurrentLots = Number(gs?.maxConcurrentLots ?? 50);
       // Effective max lots: user override takes precedence over global (can exceed)
       const effectiveMaxConcurrentLots = Number(userSettingsData?.maxConcurrentLots ?? globalMaxConcurrentLots);
@@ -536,18 +538,18 @@ app.post(
         // Serialize trade placement per user to avoid TOC/TOU races on maxConcurrentLots.
         // (Only supported on Postgres; other dialects rely on their transaction semantics.)
         if (isPostgres) {
-          await tx.execute(sql`SELECT ${users.id} FROM ${users} WHERE ${users.id} = ${req.session.userId} FOR UPDATE`);
+          await tx.execute(sql`SELECT ${users.id} FROM ${users} WHERE ${users.id} = ${userId} FOR UPDATE`);
         }
 
         const [openRow] = await tx
           .select({ lots: sql`COALESCE(SUM(${trades.lots}), 0)` })
           .from(trades)
-          .where(and(eq(trades.userId, req.session.userId), eq(trades.status, "OPEN")))
+          .where(and(eq(trades.userId, userId), eq(trades.status, "OPEN")))
           .limit(1);
         const [pendingRow] = await tx
           .select({ lots: sql`COALESCE(SUM(${trades.lots}), 0)` })
           .from(trades)
-          .where(and(eq(trades.userId, req.session.userId), eq(trades.status, "PENDING")))
+          .where(and(eq(trades.userId, userId), eq(trades.status, "PENDING")))
           .limit(1);
 
         const openLots = Number((openRow as any)?.lots ?? 0);
@@ -559,52 +561,55 @@ app.post(
         }
 
         if (!isPendingOrder) {
-          const reserve = await reserveUserMargin(tx, { userId: req.session.userId, marginUsd: neededMargin });
+          const reserve = await reserveUserMargin(tx, { userId, marginUsd: neededMargin });
           if (!reserve.reserved) {
             return { trade: null, rejectReason: "INSUFFICIENT_MARGIN_AT_COMMIT" as const, openLots, pendingLots, currentTotalLots };
           }
           await applyUserBalanceDelta(tx, {
-            userId: req.session.userId,
+            userId,
             deltaUsd: -openCostSummary.totalUsd,
           });
         }
 
+        const tradeInsert: typeof trades.$inferInsert = {
+          ...data,
+          userId,
+          type: tradeSide,
+          openPrice: isPendingOrder ? priceForMargin : entryPrice,
+          lots: tradeLots,
+          size: positionSize,
+          orderType: orderType ?? "Market",
+          limitPrice: isLimitOrder ? parseFloat(String(limitPrice)) : null,
+          stopPrice: isStopOrder ? parseFloat(String(stopPrice)) : null,
+          status: isPendingOrder ? "PENDING" : "OPEN",
+          executedAt: isPendingOrder ? null : nowSec,
+          intradayHigh: isPendingOrder ? null : entryPrice,
+          intradayLow: isPendingOrder ? null : entryPrice,
+          mae: null,
+          mfe: null,
+          correlationId: correlationId,
+          orderId,
+          positionId,
+          notionalUsd: openCostSummary.notionalUsd,
+          categorySnapshot: openCostSummary.categorySnapshot,
+          costModelVersion: openCostSummary.costModelVersion,
+          openCommissionUsd: isPendingOrder ? 0 : openCostSummary.commissionUsd,
+          openOtherFeesUsd: isPendingOrder ? 0 : openCostSummary.otherFeesUsd,
+          totalCostsUsd: isPendingOrder ? 0 : openCostSummary.totalUsd,
+          lastExecutionId: openExecutionId,
+          lastActorUserId: userId,
+          lastActorSessionId: auditCtx.sessionId,
+          lastActorIp: auditCtx.ip,
+          lastActorUserAgent: auditCtx.userAgent,
+          lastActorType: auditCtx.actorType,
+        };
         const [createdTrade] = await tx
           .insert(trades)
-          .values({
-            ...data,
-            openPrice: isPendingOrder ? priceForMargin : entryPrice, // Pending orders use limit/stop price as intended entry
-            lots: tradeLots,
-            size: positionSize,
-            orderType: orderType ?? "Market",
-            limitPrice: isLimitOrder ? parseFloat(String(limitPrice)) : null,
-            stopPrice: isStopOrder ? parseFloat(String(stopPrice)) : null,
-            status: isPendingOrder ? "PENDING" : "OPEN",
-            executedAt: isPendingOrder ? undefined : nowSec,
-            intradayHigh: isPendingOrder ? null : entryPrice,
-            intradayLow: isPendingOrder ? null : entryPrice,
-            mae: null,
-            mfe: null,
-            correlationId: correlationId,
-            orderId,
-            positionId,
-            notionalUsd: openCostSummary.notionalUsd,
-            categorySnapshot: openCostSummary.categorySnapshot,
-            costModelVersion: openCostSummary.costModelVersion,
-            openCommissionUsd: isPendingOrder ? 0 : openCostSummary.commissionUsd,
-            openOtherFeesUsd: isPendingOrder ? 0 : openCostSummary.otherFeesUsd,
-            totalCostsUsd: isPendingOrder ? 0 : openCostSummary.totalUsd,
-            lastExecutionId: openExecutionId,
-            lastActorUserId: req.session.userId,
-            lastActorSessionId: auditCtx.sessionId,
-            lastActorIp: auditCtx.ip,
-            lastActorUserAgent: auditCtx.userAgent,
-            lastActorType: auditCtx.actorType,
-          })
+          .values(tradeInsert)
           .returning();
 
         if (!createdTrade) throw new Error("Failed to create trade");
-        return { trade: createdTrade, rejectReason: null as const, openLots, pendingLots, currentTotalLots };
+        return { trade: createdTrade, rejectReason: null, openLots, pendingLots, currentTotalLots };
       });
 
       const openLots = tradeResult.openLots;
@@ -618,10 +623,10 @@ app.post(
             correlationId,
             eventCode: "DECISION",
             ctx: auditCtx,
-            userId: req.session.userId,
+            userId,
             decision: "REJECT",
             symbol: symbolConfig.symbol,
-            side: data.type,
+            side: tradeSide,
             orderType: orderType ?? "Market",
             qtyLots: tradeLots,
             riskLimit: { maxConcurrentLots: effectiveMaxConcurrentLots },
@@ -660,10 +665,10 @@ app.post(
           correlationId,
           eventCode: "DECISION",
           ctx: auditCtx,
-          userId: req.session.userId,
+          userId,
           decision: "PASS",
           symbol: symbolConfig.symbol,
-          side: data.type,
+          side: tradeSide,
           orderType: orderType ?? "Market",
           qtyLots: tradeLots,
           requestedPrice: isPendingOrder ? priceForMargin : entryPrice,
@@ -783,7 +788,7 @@ app.post(
 
       // Recalculate margin metrics after order placement (market orders affect margin immediately)
       try {
-        await recalcAccount(req.session.userId, {
+        await recalcAccount(userId, {
           emit: true,
           reason: isPendingOrder ? "PENDING_ORDER_PLACED" : "MARKET_ORDER_PLACED",
         });
@@ -793,7 +798,7 @@ app.post(
 
       // Notify ALL browser sessions for this user that trades changed (multi-device sync)
       // Include userId in payload so clients can filter, but also send to unauth'd clients
-      const targetUserId = req.session.userId;
+      const targetUserId = userId;
       broadcast(
         { type: WS_MSG_TRADES_UPDATED, userId: targetUserId },
         (client) => client.userId === targetUserId || client.userId === undefined
@@ -806,7 +811,7 @@ app.post(
           await withGriftClient(async (griftDb) => {
             const griftAuditCtx: GriftAuditContext = {
               ts: Date.now(),
-              userId: req.session.userId,
+              userId,
               sessionId: req.sessionID,
               deviceId: griftCtx.deviceId ?? undefined,
               deviceIdLegacy: griftCtx.deviceIdLegacy ?? undefined,
@@ -830,7 +835,7 @@ app.post(
               griftDb,
               trade.id,
               symbolConfig.symbol,
-              data.type,
+              tradeSide,
               tradeLots,
               griftAuditCtx
             );
@@ -849,45 +854,14 @@ app.post(
       res.status(201).json(trade);
     } catch (error) {
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ message: "Invalid input data", errors: error.errors });
+        return res.status(400).json({ message: "Invalid input data", errors: error.issues });
       }
       console.error("Create trade error:", error);
       res.status(500).json({ message: "Internal server error" });
     }
   });
 
-app.get("/api/trades", ensureAuth, async (req: Request, res: Response) => {
-
-  try {
-    const trades = await storage.getTradesByUserId(req.session.userId);
-    res.json(trades);
-  } catch (error) {
-    console.error("Get trades error:", error);
-    res.status(500).json({ message: "Failed to fetch trades" });
-  }
-});
-
-app.get("/api/trades/history", ensureAuth, async (req: Request, res: Response) => {
-
-  try {
-    const trades = await storage.getTradeHistoryByUserId(req.session.userId);
-    res.json(trades);
-  } catch (error) {
-    console.error("Get trade history error:", error);
-    res.status(500).json({ message: "Failed to fetch trade history" });
-  }
-});
-
-app.get("/api/trades/open", ensureAuth, async (req: Request, res: Response) => {
-
-  try {
-    const trades = await storage.getOpenTradesByUserId(req.session.userId);
-    res.json(trades);
-  } catch (error) {
-    console.error("Get open trades error:", error);
-    res.status(500).json({ message: "Failed to fetch open trades" });
-  }
-});
+registerTraderPrimaryReadRoutes(app, deps);
 
 app.post(
   "/api/trades/:id/close",
@@ -900,7 +874,9 @@ app.post(
     next();
   },
   async (req: Request, res: Response) => {
-    const tradeId = parseInt(req.params.id);
+    const userId = req.session.userId!;
+    const tradeIdRaw = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const tradeId = parseInt(tradeIdRaw, 10);
     if (isNaN(tradeId)) {
       return res.status(400).json({ message: "Invalid trade ID" });
     }
@@ -913,7 +889,7 @@ app.post(
         return res.status(404).json({ message: "Trade not found" });
       }
 
-      if (trade.userId !== req.session.userId) {
+      if (trade.userId !== userId) {
         return res.status(403).json({ message: "Not authorized to close this trade" });
       }
 
@@ -922,7 +898,7 @@ app.post(
       }
 
       // Check minimum hold time enforcement
-      const minHoldSec = await getEffectiveMinHoldSec(req.session.userId);
+      const minHoldSec = await getEffectiveMinHoldSec(userId);
       if (minHoldSec > 0 && trade.openedAt) {
         let openedAtMs: number;
         if (typeof trade.openedAt === 'number') {
@@ -990,7 +966,7 @@ app.post(
               correlationId,
               orderId,
               positionId,
-              lastActorUserId: req.session.userId,
+              lastActorUserId: userId,
               lastActorSessionId: closeAuditCtx.sessionId,
               lastActorIp: closeAuditCtx.ip,
               lastActorUserAgent: closeAuditCtx.userAgent,
@@ -1083,7 +1059,7 @@ app.post(
         const tradeLock = await tx.execute(sql`
           select id
           from trades
-          where id = ${tradeId} and user_id = ${req.session.userId} and status = 'OPEN'
+          where id = ${tradeId} and user_id = ${userId} and status = 'OPEN'
           for update
         `);
         if (!tradeLock.rows.length) return null;
@@ -1091,7 +1067,7 @@ app.post(
         const userRowRes = await tx.execute(sql`
           select id, leverage
           from users
-          where id = ${req.session.userId}
+          where id = ${userId}
           for update
         `);
         const leverageNow = Number((userRowRes.rows[0] as any)?.leverage ?? 5);
@@ -1129,20 +1105,20 @@ app.post(
             orderId,
             positionId,
             lastExecutionId: executionId,
-            lastActorUserId: req.session.userId,
+            lastActorUserId: userId,
             lastActorSessionId: closeAuditCtx.sessionId,
             lastActorIp: closeAuditCtx.ip,
             lastActorUserAgent: closeAuditCtx.userAgent,
             lastActorType: closeAuditCtx.actorType,
           })
-          .where(and(eq(trades.id, tradeId), eq(trades.userId, req.session.userId), eq(trades.status, "OPEN")))
+          .where(and(eq(trades.id, tradeId), eq(trades.userId, userId), eq(trades.status, "OPEN")))
           .returning();
 
         const closedTrade = closedRows[0];
         if (!closedTrade) return null;
 
-        await applyUserBalanceDelta(tx, { userId: req.session.userId, deltaUsd: closeSettlementUsd });
-        await releaseUserMargin(tx, { userId: req.session.userId, marginUsd: marginToRelease });
+        await applyUserBalanceDelta(tx, { userId, deltaUsd: closeSettlementUsd });
+        await releaseUserMargin(tx, { userId, marginUsd: marginToRelease });
 
         const slippagePoints = 0; // No slippage on manual close
         await writeTradeAudit({
@@ -1203,14 +1179,14 @@ app.post(
       clearTradeExcursion(tradeId);
 
       try {
-        await recalcAccount(req.session.userId, { emit: true, reason: "TRADE_CLOSED" });
+        await recalcAccount(userId, { emit: true, reason: "TRADE_CLOSED" });
       } catch (accountError) {
         console.error("Failed to update account after closing trade:", accountError);
       }
 
       // Notify ALL browser sessions for this user that trades changed (multi-device sync)
       // Include userId in payload so clients can filter, but also send to unauth'd clients
-      const targetUserId = req.session.userId;
+      const targetUserId = userId;
       broadcast(
         { type: WS_MSG_TRADES_UPDATED, userId: targetUserId },
         (client) => client.userId === targetUserId || client.userId === undefined
@@ -1223,7 +1199,7 @@ app.post(
           await withGriftClient(async (griftDb) => {
             const griftAuditCtx: GriftAuditContext = {
               ts: Date.now(),
-              userId: req.session.userId,
+              userId,
               sessionId: req.sessionID,
               deviceId: griftCtx.deviceId ?? undefined,
               deviceIdLegacy: griftCtx.deviceIdLegacy ?? undefined,
@@ -1278,7 +1254,8 @@ app.patch(
     try {
       const session = req.session as SessionData;
 
-      const tradeId = parseInt(req.params.id);
+      const tradeIdRaw = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+      const tradeId = parseInt(tradeIdRaw, 10);
       const { takeProfit, stopLoss } = req.body;
       const tpNext =
         takeProfit === null || takeProfit === undefined || takeProfit === ""
@@ -1615,7 +1592,8 @@ app.patch(
     try {
       const session = req.session as SessionData;
 
-      const tradeId = parseInt(req.params.id);
+      const tradeIdRaw = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+      const tradeId = parseInt(tradeIdRaw, 10);
       const trade = await storage.getTradeById(tradeId);
 
       if (!trade) {
@@ -1747,300 +1725,6 @@ app.patch(
     }
   });
 
-// Get pending trades for current user
-app.get("/api/trades/pending", async (req: Request, res: Response) => {
-  try {
-    const session = req.session as SessionData;
-    if (!session.userId) {
-      return res.status(401).json({ message: "Not authenticated" });
-    }
-
-    const pendingTrades = await storage.getPendingTradesByUserId(session.userId);
-    res.json(pendingTrades);
-  } catch (error) {
-    console.error("Error fetching pending trades:", error);
-    res.status(500).json({ message: "Failed to fetch pending trades" });
-  }
-});
-
-app.get("/api/leaderboard", async (req: Request, res: Response) => {
-  try {
-    const [cfg] = await db
-      .select({ leaderboardMode: systemConfig.leaderboardMode })
-      .from(systemConfig)
-      .where(eq(systemConfig.id, 1))
-      .limit(1);
-
-    const modeRaw = String(cfg?.leaderboardMode || "PUBLIC").toUpperCase();
-    const mode = modeRaw === "TOP_10" || modeRaw === "DISABLED" ? modeRaw : "PUBLIC";
-
-    if (mode === "DISABLED") {
-      return res.json([]);
-    }
-
-    const limit = mode === "TOP_10" ? 10 : 100;
-    const leaderboard = await storage.getLeaderboard(limit);
-    res.json(leaderboard);
-  } catch (error) {
-    console.error("Get leaderboard error:", error);
-    res.status(500).json({ message: "Failed to fetch leaderboard" });
-  }
-});
-
-// ====== TRADER JOURNAL API ======
-
-const VALID_MOODS = ["confident", "calm", "anxious", "frustrated", "fearful", "greedy", "neutral"];
-
-// Get journal entries for current user
-app.get("/api/journal", ensureAuth, async (req: Request, res: Response) => {
-  try {
-    const limit = Math.min(Math.max(1, parseInt(req.query.limit as string) || 200), 500);
-    const entries = await storage.getJournalEntries(req.session.userId!, limit);
-    res.json(entries);
-  } catch (error) {
-    console.error("Get journal error:", error);
-    res.status(500).json({ message: "Failed to fetch journal entries" });
-  }
-});
-
-// Create a new journal entry
-app.post("/api/journal", ensureAuth, async (req: Request, res: Response) => {
-  try {
-    const { tradeId, tradeIds, note, mood, tags, attachmentUrl } = req.body;
-
-    // Validate note
-    const noteClean = String(note || "").trim();
-    if (!noteClean || noteClean.length < 3) {
-      return res.status(400).json({ message: "Note must be at least 3 characters" });
-    }
-    if (noteClean.length > 10000) {
-      return res.status(400).json({ message: "Note too long (max 10,000 characters)" });
-    }
-
-    // Validate mood if provided
-    const moodClean = mood ? String(mood).trim().toLowerCase() : null;
-    if (moodClean && !VALID_MOODS.includes(moodClean)) {
-      return res.status(400).json({ message: `Invalid mood. Valid options: ${VALID_MOODS.join(", ")}` });
-    }
-
-    // Validate tradeIds array if provided - all must belong to user
-    let validatedTradeIds: number[] | null = null;
-    if (tradeIds !== undefined && tradeIds !== null && Array.isArray(tradeIds) && tradeIds.length > 0) {
-      validatedTradeIds = [];
-      for (const tid of tradeIds.slice(0, 20)) { // Limit to 20 trades
-        const tradeIdNum = parseInt(tid);
-        if (isNaN(tradeIdNum)) continue;
-        const trade = await storage.getTradeById(tradeIdNum);
-        if (trade && trade.userId === req.session.userId) {
-          validatedTradeIds.push(tradeIdNum);
-        }
-      }
-      if (validatedTradeIds.length === 0) validatedTradeIds = null;
-    }
-
-    // Legacy: Validate single tradeId if provided (backward compatibility)
-    let validatedTradeId: number | null = null;
-    if (!validatedTradeIds && tradeId !== undefined && tradeId !== null && tradeId !== "") {
-      const tradeIdNum = parseInt(tradeId);
-      if (!isNaN(tradeIdNum)) {
-        const trade = await storage.getTradeById(tradeIdNum);
-        if (trade && trade.userId === req.session.userId) {
-          validatedTradeId = tradeIdNum;
-        }
-      }
-    }
-
-    // Validate tags - must be array of strings
-    let validatedTags: string[] | null = null;
-    if (tags !== undefined && tags !== null) {
-      if (!Array.isArray(tags)) {
-        return res.status(400).json({ message: "Tags must be an array" });
-      }
-      validatedTags = tags
-        .filter((t: any) => typeof t === "string" && t.trim().length > 0)
-        .map((t: string) => t.trim().toLowerCase().slice(0, 50))
-        .slice(0, 20);
-    }
-
-    const entry = await storage.createJournalEntry({
-      userId: req.session.userId!,
-      tradeId: validatedTradeId,
-      tradeIds: validatedTradeIds,
-      note: noteClean,
-      mood: moodClean,
-      tags: validatedTags,
-      attachmentUrl: attachmentUrl ? String(attachmentUrl).slice(0, 2000) : null,
-    });
-
-    res.status(201).json(entry);
-  } catch (error) {
-    console.error("Create journal entry error:", error);
-    res.status(500).json({ message: "Failed to create journal entry" });
-  }
-});
-
-// Update a journal entry (only owner can update - enforced in storage layer via userId WHERE clause)
-app.put("/api/journal/:id", ensureAuth, async (req: Request, res: Response) => {
-  try {
-    const entryId = parseInt(req.params.id);
-    if (isNaN(entryId)) {
-      return res.status(400).json({ message: "Invalid entry ID" });
-    }
-
-    const { note, mood, tags, attachmentUrl, tradeId, tradeIds } = req.body;
-    const noteClean = note !== undefined ? String(note || "").trim() : undefined;
-    const moodClean =
-      mood !== undefined ? (mood ? String(mood).trim().toLowerCase() : null) : undefined;
-
-    // Validate note if provided
-    if (noteClean !== undefined) {
-      if (!noteClean || noteClean.length < 3) {
-        return res.status(400).json({ message: "Note must be at least 3 characters" });
-      }
-      if (noteClean.length > 10000) {
-        return res.status(400).json({ message: "Note too long (max 10,000 characters)" });
-      }
-    }
-
-    // Validate mood if provided
-    if (moodClean !== undefined && moodClean !== null) {
-      if (moodClean && !VALID_MOODS.includes(moodClean)) {
-        return res.status(400).json({ message: `Invalid mood. Valid options: ${VALID_MOODS.join(", ")}` });
-      }
-    }
-
-    let tradeIdsInput: unknown = tradeIds;
-    if (typeof tradeIdsInput === "string") {
-      const trimmed = tradeIdsInput.trim();
-      if (!trimmed) {
-        tradeIdsInput = [];
-      } else {
-        try {
-          tradeIdsInput = JSON.parse(trimmed);
-        } catch {
-          tradeIdsInput = trimmed.split(",").map((v) => v.trim()).filter(Boolean);
-        }
-      }
-    }
-
-    let tagsInput: unknown = tags;
-    if (typeof tagsInput === "string") {
-      const trimmed = tagsInput.trim();
-      if (!trimmed) {
-        tagsInput = [];
-      } else {
-        try {
-          tagsInput = JSON.parse(trimmed);
-        } catch {
-          tagsInput = trimmed.split(",").map((v) => v.trim()).filter(Boolean);
-        }
-      }
-    }
-
-    // Validate tradeIds array if provided - all must belong to user
-    let validatedTradeIds: number[] | null | undefined = undefined;
-    if (tradeIdsInput !== undefined) {
-      if (tradeIdsInput === null || (Array.isArray(tradeIdsInput) && tradeIdsInput.length === 0)) {
-        validatedTradeIds = null;
-      } else if (Array.isArray(tradeIdsInput)) {
-        validatedTradeIds = [];
-        for (const tid of tradeIdsInput.slice(0, 20)) {
-          const tradeIdNum = parseInt(tid);
-          if (isNaN(tradeIdNum)) continue;
-          const trade = await storage.getTradeById(tradeIdNum);
-          if (trade && trade.userId === req.session.userId) {
-            validatedTradeIds.push(tradeIdNum);
-          }
-        }
-        if (validatedTradeIds.length === 0) validatedTradeIds = null;
-      }
-    }
-
-    // Legacy: Validate single tradeId if provided (backward compatibility)
-    let validatedTradeId: number | null | undefined = undefined;
-    if (validatedTradeIds === undefined && tradeId !== undefined) {
-      if (tradeId === null) {
-        validatedTradeId = null;
-      } else {
-        const parsedTradeId = parseInt(tradeId);
-        if (!isNaN(parsedTradeId)) {
-          const trade = await storage.getTradeById(parsedTradeId);
-          if (trade && trade.userId === req.session.userId!) {
-            validatedTradeId = parsedTradeId;
-          }
-        }
-      }
-    }
-
-    // Validate tags if provided
-    let validatedTags: string[] | undefined = undefined;
-    if (tagsInput !== undefined) {
-      if (tagsInput === null) {
-        validatedTags = [];
-      } else if (!Array.isArray(tagsInput)) {
-        return res.status(400).json({ message: "Tags must be an array" });
-      } else {
-        validatedTags = tagsInput
-          .filter((t: any) => typeof t === "string" && t.trim().length > 0)
-          .map((t: string) => t.trim().toLowerCase().slice(0, 50))
-          .slice(0, 20);
-      }
-    }
-
-    // Storage layer ensures only entries belonging to req.session.userId can be updated
-    const updated = await storage.updateJournalEntry(entryId, req.session.userId!, {
-      note: noteClean,
-      mood: moodClean,
-      tags: validatedTags,
-      attachmentUrl: attachmentUrl !== undefined ? (attachmentUrl ? String(attachmentUrl).slice(0, 2000) : null) : undefined,
-      tradeId: validatedTradeId,
-      tradeIds: validatedTradeIds,
-    });
-
-    if (!updated) {
-      return res.status(404).json({ message: "Entry not found or access denied" });
-    }
-
-    res.json(updated);
-  } catch (error) {
-    const body = req.body ?? {};
-    console.error("Update journal entry error:", {
-      entryId: req.params.id,
-      userId: req.session.userId ?? null,
-      bodyKeys: Object.keys(body),
-      noteLen: typeof body.note === "string" ? body.note.trim().length : null,
-      tagsType: Array.isArray(body.tags) ? "array" : body.tags === null ? "null" : typeof body.tags,
-      tradeIdsType: Array.isArray(body.tradeIds) ? "array" : body.tradeIds === null ? "null" : typeof body.tradeIds,
-      error,
-    });
-    const message = "Failed to update journal entry";
-    const detail =
-      process.env.NODE_ENV !== "production"
-        ? (error instanceof Error ? error.message : String(error))
-        : undefined;
-    res.status(500).json(detail ? { message, detail } : { message });
-  }
-});
-
-// Delete a journal entry (only owner can delete - enforced in storage layer via userId WHERE clause)
-app.delete("/api/journal/:id", ensureAuth, async (req: Request, res: Response) => {
-  try {
-    const entryId = parseInt(req.params.id);
-    if (isNaN(entryId)) {
-      return res.status(400).json({ message: "Invalid entry ID" });
-    }
-
-    // Storage layer ensures only entries belonging to req.session.userId can be deleted
-    const deleted = await storage.deleteJournalEntry(entryId, req.session.userId!);
-
-    if (!deleted) {
-      return res.status(404).json({ message: "Entry not found or access denied" });
-    }
-
-    res.json({ success: true });
-  } catch (error) {
-    console.error("Delete journal entry error:", error);
-    res.status(500).json({ message: "Failed to delete journal entry" });
-  }
-});
+registerTraderSecondaryReadRoutes(app);
+registerTraderJournalRoutes(app, deps);
 }

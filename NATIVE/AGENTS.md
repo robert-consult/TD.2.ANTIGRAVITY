@@ -2,6 +2,7 @@
 
 > **Parent references**: 
 > - Root `AGENTS.md` (must read first)
+> - `.agents/audit-decomposition.md` (for repo-wide audits, decomposition reviews, and maintainability critiques)
 > - `.agents/security.md` (applied to mobile API usage)
 > - `.agents/performance.md` (applied to mobile render/network)
 
@@ -52,4 +53,3 @@ This project (`NATIVE/`) and `MOBILE/` are **separate but complementary**:
 ## Required checks before finalizing
 - Tests: `npm test`
 - Lint: `npm run lint`
-

@@ -1,4 +1,3 @@
-// @ts-nocheck
 import type { Router, NextFunction, Request, Response } from "express";
 import type { SessionData } from "express-session";
 import { z } from "zod";
@@ -98,7 +97,8 @@ router.post("/api/journal", ensureAuth, async (req: Request, res: Response) => {
     if (tradeIds !== undefined && tradeIds !== null && Array.isArray(tradeIds) && tradeIds.length > 0) {
       validatedTradeIds = [];
       for (const tid of tradeIds.slice(0, 20)) { // Limit to 20 trades
-        const tradeIdNum = parseInt(tid);
+        const tradeIdRaw = typeof tid === "string" ? tid : String(tid);
+        const tradeIdNum = parseInt(tradeIdRaw, 10);
         if (isNaN(tradeIdNum)) continue;
         const trade = await storage.getTradeById(tradeIdNum);
         if (trade && trade.userId === req.session.userId) {
@@ -152,7 +152,8 @@ router.post("/api/journal", ensureAuth, async (req: Request, res: Response) => {
 // Update a journal entry (only owner can update - enforced in storage layer via userId WHERE clause)
 router.put("/api/journal/:id", ensureAuth, async (req: Request, res: Response) => {
   try {
-    const entryId = parseInt(req.params.id);
+    const entryIdRaw = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const entryId = parseInt(entryIdRaw, 10);
     if (isNaN(entryId)) {
       return res.status(400).json({ message: "Invalid entry ID" });
     }
@@ -232,7 +233,7 @@ router.put("/api/journal/:id", ensureAuth, async (req: Request, res: Response) =
       if (tradeId === null) {
         validatedTradeId = null;
       } else {
-        const parsedTradeId = parseInt(tradeId);
+        const parsedTradeId = parseInt(Array.isArray(tradeId) ? tradeId[0] : String(tradeId), 10);
         if (!isNaN(parsedTradeId)) {
           const trade = await storage.getTradeById(parsedTradeId);
           if (trade && trade.userId === req.session.userId!) {
@@ -295,7 +296,8 @@ router.put("/api/journal/:id", ensureAuth, async (req: Request, res: Response) =
 // Delete a journal entry (only owner can delete - enforced in storage layer via userId WHERE clause)
 router.delete("/api/journal/:id", ensureAuth, async (req: Request, res: Response) => {
   try {
-    const entryId = parseInt(req.params.id);
+    const entryIdRaw = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const entryId = parseInt(entryIdRaw, 10);
     if (isNaN(entryId)) {
       return res.status(400).json({ message: "Invalid entry ID" });
     }

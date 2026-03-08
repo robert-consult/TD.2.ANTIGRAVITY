@@ -1,0 +1,197 @@
+# Deep Repo Audit Report
+
+**Date:** 2026-03-07  
+**Method:** Code-level inspection of every server route handler, cron job, middleware, service, client page, hook, and shared module. Quantitative analysis via grep, wc, and find across the entire repository.
+
+---
+
+## 1. Codebase Metrics
+
+| Metric | Server | Client | Shared | Total |
+|--------|-------:|-------:|-------:|------:|
+| Lines of code | 83,700 | 62,017 | ~5,500 | **~151,000** |
+| Files ([.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/e2e/utils.ts)/[.tsx](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/NATIVE/src/App.tsx)) | 258 | 181 | 30 | **469** |
+| Files > 1,000 LOC | 19 | 17 | 1 | **37** |
+| Files > 2,000 LOC | 6 | 6 | 1 | **13** |
+| Unit/integration tests | 13 | 16 | 0 | **29** |
+| E2E test specs | — | — | — | **8** |
+
+---
+
+## 2. Critical Code-Level Findings
+
+### FINDING-1: `@ts-nocheck` Suppression (42 Files)
+
+**Severity: HIGH** — TypeScript compile-time safety is disabled across 42 server files, including security-critical and money-touching paths.
+
+**Full inventory (42 files):**
+
+| Category | Files | Risk |
+|----------|------:|------|
+| Auth/login/register/logout | 5 | 🔴 Credential handling without type checks |
+| Profile routes (me, update, payout, kyc, sessions, etc.) | 11 | 🟡 User PII + financial data |
+| Trade targets/journal/leaderboard/account/policy | 5 | 🟡 Trade lifecycle adjacent |
+| Admin routes (scout, systemConfig, migration) | 3 | 🟡 Admin privilege paths |
+| Core monoliths (traderCore, traderTalent, partnerPortal, authCore, wsCore) | 5 | 🔴 1,000+ LOC each, financial logic |
+| Utilities (quoteFeed, storage, vite, migration) | 5 | 🟡 Infrastructure |
+| Misc (captchaSlider, grift retention) | 2 | 🟢 Low risk |
+| Other utils (forge*, previousClose, etc.) | 6 | 🟢 Data processing |
+
+**Key concern:** [server/routes/auth/login.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/auth/login.ts), [register.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/auth/register.ts), [logout.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/auth/logout.ts) handle credentials without type safety. [traderCore.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/traderCore.ts) (1,719 LOC) and [partnerPortal.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/partnerPortal.ts) (1,664 LOC) process money with `@ts-nocheck`.
+
+---
+
+### FINDING-2: [clampInt](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/adminScout.ts#541-546) Duplication with Inconsistent Signatures (8 Copies)
+
+**Severity: HIGH** — The same utility function is copy-pasted 8 times with **different argument orders**, creating a latent bug risk.
+
+| File | Signature |
+|------|-----------|
+| [shared/scalars.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/shared/scalars.ts) | [clampInt(raw, fallback, min, max)](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/adminScout.ts#541-546) ✅ canonical |
+| [server/services/adminAuditTrail.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/services/adminAuditTrail.ts) | [clampInt(raw, fallback, min, max)](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/adminScout.ts#541-546) |
+| [server/services/rememberMe.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/services/rememberMe.ts) | [clampInt(value, fallback, min, max)](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/adminScout.ts#541-546) |
+| [server/services/globalSettingsAdmin.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/services/globalSettingsAdmin.ts) | [clampInt(value, min, max, fallback)](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/adminScout.ts#541-546) ⚠️ **different order** |
+| [server/routes/adminInstitutionalAudit.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/adminInstitutionalAudit.ts) | [clampInt(raw, fallback, min, max)](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/adminScout.ts#541-546) |
+| [server/routes/adminScout/support.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/adminScout/support.ts) | [clampInt(value, fallback, min, max)](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/adminScout.ts#541-546) |
+| [server/routes/adminActivity.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/adminActivity.ts) | [clampInt(v, lo, hi, fallback)](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/adminScout.ts#541-546) ⚠️ **different order** |
+| [server/cron/evaluateChallenges.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/cron/evaluateChallenges.ts) | [clampInt(value, fallback, min, max)](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/adminScout.ts#541-546) |
+| [server/grift/griftRetention.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/grift/griftRetention.ts) | [clampInt(value, min, max, fallback)](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/adminScout.ts#541-546) ⚠️ **different order** |
+
+**3 out of 8 copies** have [(value, min, max, fallback)](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/services/adminDataExportBuild.ts#348-353) while the canonical version uses [(raw, fallback, min, max)](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/services/adminDataExportBuild.ts#348-353). Any call site swapping between implementations would silently produce wrong clamping behavior.
+
+---
+
+### FINDING-3: `as any` Cast Density in Critical Paths
+
+**Severity: MEDIUM** — 69 `as any` casts across 4 critical trade lifecycle files ([tradeOpen.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/trader/tradeOpen.ts), [tradeClose.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/trader/tradeClose.ts), [marginCall.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/cron/marginCall.ts), [autoClose.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/cron/autoClose.ts)).
+
+Common patterns:
+- [(trade as any).categorySnapshot](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/services/adminDataExportBuild.ts#348-353) — trade schema type doesn't include all columns
+- [(trade as any).notionalUsd](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/services/adminDataExportBuild.ts#348-353) — same root cause
+- [(symbolConfig as any).category](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/services/adminDataExportBuild.ts#348-353) — SymbolConfig type incomplete
+
+**Root cause:** The Drizzle schema infers types from [schema.pg.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/shared/schema.pg.ts) but many fields added later (cost model columns, excursion columns) aren't in the inferred [Trade](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/traderCore.ts#59-64) type used by route handlers.
+
+---
+
+### FINDING-4: God-File / God-Function Anti-Pattern
+
+**Severity: MEDIUM** — Multiple files exceed architecture-healthy thresholds.
+
+**Server (top 10 by LOC):**
+
+| File | LOC | Concern |
+|------|----:|---------|
+| [adminScout.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/adminScout.ts) | 3,972 | Monolithic route file |
+| [adminDataExportBuild.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/services/adminDataExportBuild.ts) | 2,591 | Complex export logic |
+| [challengeEvaluation.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/recruitment/challengesV4/challengeEvaluation.ts) | 2,405 | Evaluation engine |
+| [traderTalent.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/traderTalent.ts) | 1,902 | @ts-nocheck, single registration function |
+| [messaging.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/services/messaging.ts) | 1,885 | E2EE + fanout + settings |
+| [griftEngine.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/grift/griftEngine.ts) | 1,827 | Acceptable (complex domain) |
+| [storage.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/storage.ts) | 1,806 | Legacy storage layer |
+| [traderCore.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/traderCore.ts) | 1,719 | **Single 1,656-line function** with @ts-nocheck |
+| [admin.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/admin.ts) | 1,692 | Monolithic admin route |
+| [partnerPortal.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/partnerPortal.ts) | 1,664 | @ts-nocheck |
+
+**Client (top 10 by LOC):**
+
+| File | LOC | Concern |
+|------|----:|---------|
+| `AdminDashboardSupport.tsx` | 4,745 | Support component for dashboard |
+| [AdminDashboard.tsx](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/pages/AdminDashboard.tsx) | 4,446 | Main dashboard page |
+| [PartnerPortal.tsx](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/pages/PartnerPortal.tsx) | 3,298 | Partner portal page |
+| `GriftAdmin.tsx` | 2,853 | Grift admin panel |
+| `ScoutChallengesPanel.tsx` | 2,712 | Challenges admin panel |
+| [TradeScreen.tsx](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/pages/TradeScreen.tsx) | 2,460 | Main trading screen |
+| `ScoutWorkbench.tsx` | 2,444 | Scout admin workbench |
+| [ProfileSettings.tsx](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/pages/ProfileSettings.tsx) | 1,868 | User profile |
+
+---
+
+### FINDING-5: Test Coverage Gaps
+
+**Severity: MEDIUM** — 29 test files exist but coverage is structurally unbalanced.
+
+**Covered areas (13 server tests):**
+- Challenges system: `certificatePdf.test.ts`, `certificateCode.test.ts`, `customRewards.test.ts`
+- Auth: `login.session.test.ts`
+- Services: [rememberMe.test.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/services/rememberMe.test.ts)
+- Feeds: `simulationPolicy.test.ts`, `forgeUtils.test.ts`
+- Routes: [quoteSubscriptions.utils.test.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/quoteSubscriptions.utils.test.ts), [adminDataExports.routeOrder.test.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/adminDataExports.routeOrder.test.ts)
+- Lib: `timeInForce.test.ts`, `scalars.test.ts`
+- Security: [proxyHeaders.test.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/security/proxyHeaders.test.ts)
+- Trading rules: `tradingRules.test.ts`
+
+**Covered areas (16 client tests):**
+- Hooks: `use-performance-settings`, `use-lot-settings`, `use-websocket`
+- Lib: `perfHints`, `startupDataPrefetch`, `routePrefetch`, `queryPersistence`, `secureCache`
+- Components: `SymbolSubscriptionDialog`, `OrderForm`
+- Pages: `QuotesScreen`
+- i18n: `localeStorage`
+- Live: `ConfigSync`, `LiveUpdatesProvider`
+
+**NOT covered (critical gaps):**
+- ❌ Trade open/close/cancel route handlers — no unit tests
+- ❌ Margin call / auto-close cron jobs — no unit tests
+- ❌ Policy decision engine — no unit tests
+- ❌ Grift engine — no unit tests
+- ❌ Audit writer / hash chain — no unit tests
+- ❌ Legal compliance engine — no unit tests
+- ❌ Messaging service — no unit tests
+
+---
+
+## 3. Architecture Quality Assessment
+
+### ✅ What's Well-Done
+
+| Area | Assessment |
+|------|-----------|
+| **Trade lifecycle safety** | Transaction-locked with `SELECT FOR UPDATE`, quote revalidation at commit, stale-quote rejection |
+| **Audit trail completeness** | Hash-chained SHA-256, ORDER_RECEIVED → DECISION → ORDER_FILLED/REJECTED events |
+| **Auth/session security** | Token theft detection, rotation, idle timeout, IP rate limiting, impersonation write-blocking |
+| **CSRF protection** | Proper double-submit cookie with triple-check (cookie + header + session) |
+| **Policy enforcement** | Single `decidePolicy()` source of truth, middleware-based with full deny audit trail |
+| **Margin/risk system** | Floating PnL incorporated, stale-close defaults to deny, configurable thresholds |
+| **Cost model** | Full open/close settlement costs with financing, swap, overnight accrual |
+| **Excursion tracking** | Migrated to Valkey/Redis for horizontal scalability |
+| **Clean code hygiene** | 0 TODO/FIXME/HACK comments found in entire codebase |
+
+### ⚠️ Concerns
+
+| Area | Issue |
+|------|-------|
+| **TypeScript safety** | 42 files bypass compiler, 69 `as any` in core trade paths |
+| **Code duplication** | [clampInt](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/adminScout.ts#541-546) 8x with inconsistent signatures; pattern likely exists for others |
+| **File size** | 37 files exceed 1,000 LOC; 13 exceed 2,000 LOC |
+| **Test coverage** | Critical business logic (trade lifecycle, risk, policy, grift) has 0 unit tests |
+| **[traderCore.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/traderCore.ts)** | 1,719-line single function — impossible to unit test, review, or safely modify |
+
+---
+
+## 4. Prioritized Remediation Plan
+
+| Priority | Finding | Effort | Risk if Unfixed |
+|----------|---------|--------|-----------------|
+| **P0** | Fix inconsistent [clampInt](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/adminScout.ts#541-546) signatures — import from [shared/scalars.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/shared/scalars.ts) | 1 hour | Silent wrong clamping in admin/cron paths |
+| **P1** | Remove `@ts-nocheck` from auth files (`login.ts`, [register.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/auth/register.ts), [logout.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/auth/logout.ts)) | 2 hours | Credential and session handling without compile-time type safety |
+| **P1** | Add unit tests for trade open/close/cancel handlers | 1-2 days | Regressions in money-touching code go undetected |
+| **P2** | Fix Drizzle [Trade](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/traderCore.ts#59-64) type to include all columns → eliminate `as any` casts | 4 hours | Type errors masked at runtime |
+| **P2** | Remove `@ts-nocheck` from [traderCore.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/traderCore.ts), [partnerPortal.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/partnerPortal.ts), [traderTalent.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/traderTalent.ts) | 1 day | 5,000+ LOC of financial logic without type checking |
+| **P3** | Decompose [traderCore.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/traderCore.ts) (1,719 LOC single function) | 1 day | Untestable, error-prone |
+| **P3** | Decompose [AdminDashboard.tsx](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/pages/AdminDashboard.tsx) + `AdminDashboardSupport.tsx` (9,191 LOC combined) | 1-2 days | Bundle size, maintainability |
+| **P3** | Add unit tests for policy engine, grift engine, legal engine | 2-3 days | Business rule regressions |
+| **P4** | Consolidate remaining duplicate utility functions | 4 hours | Inconsistent behavior across modules |
+
+---
+
+## 5. Overall Verdict
+
+The codebase implements a **comprehensive, production-grade trading platform** with institutional-level audit trails, sophisticated security controls, and a well-structured risk management system. The core trade lifecycle path is transaction-safe with quote revalidation and comprehensive audit coverage.
+
+**The primary technical debt** is concentrated in three areas:
+1. **TypeScript bypass** (42 `@ts-nocheck` files) weakening compile-time safety on critical paths
+2. **Code duplication** ([clampInt](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/adminScout.ts#541-546) and similar patterns) with inconsistent interfaces
+3. **Structural sprawl** (37 files over 1,000 LOC, 1 function spanning 1,719 lines)
+
+None of these represent active bugs or security vulnerabilities today, but they **increase the probability** of regressions during future development and **reduce confidence** in the correctness of changes.

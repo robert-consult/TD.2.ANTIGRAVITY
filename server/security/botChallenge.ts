@@ -1,5 +1,6 @@
 import type { Request } from "express";
 import { randomUUID } from "crypto";
+import { nowSec } from "@shared/scalars";
 import { sha256Hex } from "../services/crypto";
 import { valkeyGetJson, valkeyIncrWithTtl, valkeySetJson } from "../services/valkey";
 import { IDENTITY_HEADER_DEVICE_FP, IDENTITY_HEADER_DEVICE_INSTALL_ID } from "@shared/identity/headers";
@@ -18,10 +19,6 @@ type ChallengeRecord = {
 
 const memChallenges = new Map<string, ChallengeRecord>();
 const memUsedUntil = new Map<string, number>();
-
-function nowSec() {
-  return Math.floor(Date.now() / 1000);
-}
 
 function getIp(req: Request): string {
   const xf = (req.headers["x-forwarded-for"] as string | undefined) ?? "";

@@ -1,4 +1,5 @@
 import { db } from "@db";
+import { nowSec } from "@shared/scalars";
 import {
   challengeEnrollments,
   challengePhases,
@@ -11,6 +12,8 @@ import {
 } from "@shared/schema";
 import { and, asc, count, desc, eq, gte, inArray, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
 import { getSystemChallengeConfig } from "./challengeConfig";
+
+export { nowSec };
 
 export type ChallengeRow = typeof challenges.$inferSelect;
 export type PhaseRow = typeof challengePhases.$inferSelect;
@@ -27,10 +30,6 @@ export function parseCsvSet(csv?: string | null): Set<string> {
       .filter(Boolean)
       .map((s) => s.toUpperCase()),
   );
-}
-
-export function nowSec(): number {
-  return Math.floor(Date.now() / 1000);
 }
 
 export async function getChallengeWithPhases(challengeId: number): Promise<ChallengeWithPhases | null> {

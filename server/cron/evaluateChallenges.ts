@@ -1,4 +1,5 @@
 import { evaluateChallengeEnrollmentsPass } from "../recruitment/engines";
+import { clampIntOr } from "@shared/scalars";
 import { getSystemChallengeConfig } from "../recruitment/challengesV4/challengeConfig";
 
 let started = false;
@@ -27,18 +28,12 @@ type ChallengeEvalRuntime = {
   source: "DB" | "ENV";
 };
 
-function clampInt(value: unknown, fallback: number, min: number, max: number): number {
-  const n = Number(value);
-  if (!Number.isFinite(n)) return fallback;
-  return Math.max(min, Math.min(max, Math.trunc(n)));
-}
-
 async function resolveRuntime(): Promise<ChallengeEvalRuntime> {
   if (!ENABLED) {
     return {
       enabled: false,
-      intervalMin: clampInt(INTERVAL_FALLBACK_MINUTES, 60, 1, 24 * 60),
-      maxRows: clampInt(MAX_ROWS_FALLBACK, 500, 1, 5000),
+      intervalMin: clampIntOr(INTERVAL_FALLBACK_MINUTES, 60, 1, 24 * 60),
+      maxRows: clampIntOr(MAX_ROWS_FALLBACK, 500, 1, 5000),
       source: "ENV",
     };
   }
@@ -47,15 +42,15 @@ async function resolveRuntime(): Promise<ChallengeEvalRuntime> {
     const cfg = await getSystemChallengeConfig();
     return {
       enabled: Boolean(cfg.challengeEvalEnabled),
-      intervalMin: clampInt(cfg.challengeEvalIntervalMin, INTERVAL_FALLBACK_MINUTES, 1, 24 * 60),
-      maxRows: clampInt(cfg.challengeEvalMaxRows, MAX_ROWS_FALLBACK, 1, 5000),
+      intervalMin: clampIntOr(cfg.challengeEvalIntervalMin, INTERVAL_FALLBACK_MINUTES, 1, 24 * 60),
+      maxRows: clampIntOr(cfg.challengeEvalMaxRows, MAX_ROWS_FALLBACK, 1, 5000),
       source: "DB",
     };
   } catch {
     return {
       enabled: true,
-      intervalMin: clampInt(INTERVAL_FALLBACK_MINUTES, 60, 1, 24 * 60),
-      maxRows: clampInt(MAX_ROWS_FALLBACK, 500, 1, 5000),
+      intervalMin: clampIntOr(INTERVAL_FALLBACK_MINUTES, 60, 1, 24 * 60),
+      maxRows: clampIntOr(MAX_ROWS_FALLBACK, 500, 1, 5000),
       source: "ENV",
     };
   }
@@ -85,7 +80,7 @@ export async function runChallengeEvaluationPassNow(options?: { maxRows?: number
   if (!runtime.enabled) return;
   running = true;
   try {
-    const maxRows = clampInt(options?.maxRows, runtime.maxRows, 1, 5000);
+    const maxRows = clampIntOr(options?.maxRows, runtime.maxRows, 1, 5000);
     const out = await evaluateChallengeEnrollmentsPass({ maxRows });
     console.log(
       `[Challenges] PASS processed=${out.processed} changed=${out.changed} ` +

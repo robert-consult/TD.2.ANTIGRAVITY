@@ -3,6 +3,7 @@ import type { Request } from "express";
 import { z } from "zod";
 import { buildAuditContext } from "../lib/auditContext";
 import type { AccountActionProvenance } from "../lib/accountEventMirror";
+import { saveSession } from "../lib/saveSession";
 import { requireAdmin } from "../middleware/requireAdmin";
 import { appendIdentityAudit } from "../services/identityAudit";
 import { applyAdminScopeSession } from "../security/adminScopeSession";
@@ -567,6 +568,7 @@ adminUsersRouter.post("/view-as/start", requireAdmin, async (req, res) => {
     req.session.isAdmin = false;
     req.session.isSuperAdmin = false;
     req.session.adminResourceScopes = undefined;
+    await saveSession(req.session);
 
     return res.json({
       success: true,
@@ -622,6 +624,7 @@ adminUsersRouter.post("/view-as/stop", async (req, res) => {
     req.session.realAdminResourceScopes = undefined;
     req.session.impersonatedUserId = undefined;
     req.session.impersonationStartedAt = undefined;
+    await saveSession(req.session);
 
     return res.json({
       success: true,

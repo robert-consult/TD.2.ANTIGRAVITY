@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
+import { clampIntOr } from "@shared/scalars";
 import { ApiError } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -68,12 +69,6 @@ function formatWhen(value: number | null | undefined): string {
   const dt = new Date(ms);
   if (Number.isNaN(dt.getTime())) return "";
   return dt.toLocaleString();
-}
-
-function clampInt(value: unknown, fallback: number, min: number, max: number): number {
-  const n = Number(value);
-  if (!Number.isFinite(n)) return fallback;
-  return Math.max(min, Math.min(max, Math.trunc(n)));
 }
 
 export default function AdminCommunications() {
@@ -564,7 +559,7 @@ export default function AdminCommunications() {
                         min={1}
                         max={365}
                         value={activeWithinDays}
-                        onChange={(event) => setActiveWithinDays(clampInt(event.target.value, 7, 1, 365))}
+                        onChange={(event) => setActiveWithinDays(clampIntOr(event.target.value, 7, 1, 365))}
                         className="mt-1 bg-neutral-900 border-gray-700"
                       />
                     </label>
@@ -1003,7 +998,7 @@ export default function AdminCommunications() {
                               prev
                                 ? {
                                     ...prev,
-                                    messagingLargeTargetThreshold: clampInt(event.target.value, prev.messagingLargeTargetThreshold, 1, 20000),
+                                    messagingLargeTargetThreshold: clampIntOr(event.target.value, prev.messagingLargeTargetThreshold, 1, 20000),
                                   }
                                 : prev,
                             )
@@ -1023,7 +1018,7 @@ export default function AdminCommunications() {
                               prev
                                 ? {
                                     ...prev,
-                                    messagingMaxRecipientsPerSend: clampInt(event.target.value, prev.messagingMaxRecipientsPerSend, 1, 200000),
+                                    messagingMaxRecipientsPerSend: clampIntOr(event.target.value, prev.messagingMaxRecipientsPerSend, 1, 200000),
                                   }
                                 : prev,
                             )
@@ -1043,7 +1038,7 @@ export default function AdminCommunications() {
                               prev
                                 ? {
                                     ...prev,
-                                    messagingAsyncFanoutThreshold: clampInt(event.target.value, prev.messagingAsyncFanoutThreshold, 1, 50000),
+                                    messagingAsyncFanoutThreshold: clampIntOr(event.target.value, prev.messagingAsyncFanoutThreshold, 1, 50000),
                                   }
                                 : prev,
                             )
@@ -1063,7 +1058,7 @@ export default function AdminCommunications() {
                               prev
                                 ? {
                                     ...prev,
-                                    messagingFanoutBatchSize: clampInt(event.target.value, prev.messagingFanoutBatchSize, 50, 5000),
+                                    messagingFanoutBatchSize: clampIntOr(event.target.value, prev.messagingFanoutBatchSize, 50, 5000),
                                   }
                                 : prev,
                             )

@@ -1,4 +1,3 @@
-// @ts-nocheck
 import axios from "axios";
 import { ensureMarketDailyCloseTable } from "./marketDailyClose";
 import { cachePrevClose, getCachedPrevClose, getFallbackQuotePrice, normalizePrevCloseSymbol } from "./prevCloseStore";
@@ -104,5 +103,3 @@ export async function preloadCache(symbols: string[]): Promise<void> {
   
   console.log("Finished preloading previous close prices");
 }
-// @ts-nocheck
-// @ts-nocheck

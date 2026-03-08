@@ -6,6 +6,20 @@ plugins {
     id("com.facebook.react.settings")
 }
 
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)
+    repositories {
+        maven {
+            url = uri("$rootDir/../node_modules/@notifee/react-native/android/libs")
+        }
+        google()
+        mavenCentral()
+        maven {
+            url = uri("https://www.jitpack.io")
+        }
+    }
+}
+
 rootProject.name = 'TradeQuipNative'
 
 // Generate autolinking config using `npx @react-native-community/cli config`.

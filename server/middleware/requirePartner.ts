@@ -1,6 +1,7 @@
 import type { NextFunction, Request, Response } from "express";
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "@db";
+import { nowSec } from "@shared/scalars";
 import { partners, systemConfig } from "@shared/schema";
 import { sha256Hex } from "../services/crypto";
 import { getClientIp } from "../security/sessionTrail";
@@ -44,10 +45,6 @@ function isIpAllowed(ipWhitelistCsv: string, requestIpRaw: string | null | undef
   if (list.includes("*")) return true;
   const requestIp = normalizeIp(requestIpRaw);
   return list.includes(requestIp);
-}
-
-function nowSec(): number {
-  return Math.floor(Date.now() / 1000);
 }
 
 function isSecurePartnerTransport(req: Request): boolean {

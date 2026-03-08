@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { db, dbClient } from "@db";
+import { nowSec } from "@shared/scalars";
 import { instrumentReference, marketDataProviders, pipCategoryDefaults, symbolConfigs, systemConfig } from "@shared/schema";
 import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { requireAdmin } from "../middleware/requireAdmin";
@@ -46,10 +47,6 @@ function allowProviderReload(userId: number): boolean {
   kept.push(now);
   providerReloadCallsByUserId.set(userId, kept);
   return true;
-}
-
-function nowSec() {
-  return Math.floor(Date.now() / 1000);
 }
 
 function normalizeProviderKey(raw: unknown): string | null {

@@ -1,4 +1,3 @@
-// @ts-nocheck
 import type { Router, NextFunction, Request, Response } from "express";
 import type { SessionData } from "express-session";
 import { z } from "zod";
@@ -71,7 +70,8 @@ router.patch(
     try {
       const session = req.session as SessionData;
 
-      const tradeId = parseInt(req.params.id);
+      const tradeIdRaw = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+      const tradeId = parseInt(tradeIdRaw, 10);
       const { takeProfit, stopLoss } = req.body;
       const tpNext =
         takeProfit === null || takeProfit === undefined || takeProfit === ""
@@ -108,8 +108,8 @@ router.patch(
 
       // Server-side TP/SL validation using authoritative prices.
       // For PENDING orders, validate relative to intended entry; for OPEN positions, validate relative to the current close-side price (BUY=bid, SELL=ask).
-      let symbolConfig = (trade as any).symbol ? (trade as any).symbol : null;
-      if (!symbolConfig) symbolConfig = await storage.getSymbolConfigById(trade.symbolId);
+      let symbolConfig = trade.symbol ?? null;
+      if (!symbolConfig) symbolConfig = (await storage.getSymbolConfigById(trade.symbolId)) ?? null;
       const symbol = symbolConfig?.symbol ? String(symbolConfig.symbol) : null;
 
       if (!symbol) {

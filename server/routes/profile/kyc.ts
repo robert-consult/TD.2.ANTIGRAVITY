@@ -1,4 +1,3 @@
-// @ts-nocheck
 import type { Router, NextFunction, Request, Response } from "express";
 import { z } from "zod";
 import crypto from "crypto";
@@ -45,6 +44,12 @@ import { promotePerformerIfEligible } from "../../policy/performerPromotion";
 import { defaultPaymentCurrencyForCountry } from "../../utils/paymentCurrency";
 import type { ProfileRouterDeps } from "./types";
 
+function toIsoString(value: number | null | undefined): string | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  const ms = value < 1e12 ? value * 1000 : value;
+  return new Date(ms).toISOString();
+}
+
 export function registerKycRoutes(router: Router, deps: ProfileRouterDeps) {
   const { ensureAuth, sessionCookieName } = deps;
   const SESSION_COOKIE_NAME = sessionCookieName;
@@ -66,9 +71,9 @@ router.get("/api/profile/kyc", ensureAuth, requirePolicy("KYC_VIEW"), async (req
 
     res.json({
       status: kycProfile.status,
-      invitedAt: kycProfile.invitedAt?.toISOString() || null,
-      submittedAt: kycProfile.submittedAt?.toISOString() || null,
-      reviewedAt: kycProfile.reviewedAt?.toISOString() || null,
+      invitedAt: toIsoString(kycProfile.invitedAt),
+      submittedAt: toIsoString(kycProfile.submittedAt),
+      reviewedAt: toIsoString(kycProfile.reviewedAt),
       rejectionReason: kycProfile.rejectionReason,
     });
   } catch (error) {

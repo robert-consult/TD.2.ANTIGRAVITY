@@ -4,8 +4,10 @@
  */
 
 import { db } from "@db";
-import { and, eq, desc, sql } from "drizzle-orm";
+import { and, desc, eq, lte, sql } from "drizzle-orm";
 import { trades, users, userSettings, symbolConfigs, globalSettings } from "@shared/schema";
+import { nowSec as nowUnixSec, toFiniteNumber } from "@shared/scalars";
+import { normalizeTimeInForce } from "@shared/trading/timeInForce";
 import { requiredMargin } from "../lib/margin";
 import { recalcAccount } from "../recalcAccount";
 import { publishLiveEvent } from "../services/liveBus";
@@ -60,12 +62,10 @@ type Quote = {
 };
 
 let running = false;
+let lastPendingExpirySweepSec = 0;
 
 function n(v: any): number | null {
-  // Handle null/undefined explicitly - don't convert to 0
-  if (v === null || v === undefined || v === "") return null;
-  const x = Number(v);
-  return Number.isFinite(x) ? x : null;
+  return toFiniteNumber(v);
 }
 
 function getBidAsk(q: Quote): { bid: number; ask: number; mid: number; spread: number } | null {
@@ -105,8 +105,11 @@ async function auditRejection(params: {
   pipDecimals?: number | null;
   side: string;
   orderType: string;
+  timeInForce?: string | null;
   qtyLots: number;
   requestedPrice: number | null;
+  limitPrice?: number | null;
+  stopPrice?: number | null;
   quoteBid: number;
   quoteAsk: number;
   quoteMid: number;
@@ -116,6 +119,7 @@ async function auditRejection(params: {
   sessionId?: string | null;
   ip?: string | null;
   userAgent?: string | null;
+  latencyMs?: number;
   riskCheckName: string;
   riskLimitValue: number;
   riskObservedValue: number;
@@ -137,8 +141,12 @@ async function auditRejection(params: {
       symbol: params.symbol,
       side: params.side,
       orderType: params.orderType,
+      timeInForce: params.timeInForce ?? null,
       qtyLots: params.qtyLots,
       requestedPrice: params.requestedPrice,
+      limitPrice: params.limitPrice ?? null,
+      stopPrice: params.stopPrice ?? null,
+      latencyMs: params.latencyMs ?? null,
       quoteBid: params.quoteBid,
       quoteAsk: params.quoteAsk,
       quoteMid: params.quoteMid,
@@ -169,8 +177,11 @@ async function auditFill(params: {
   pipDecimals?: number | null;
   side: string;
   orderType: string;
+  timeInForce?: string | null;
   qtyLots: number;
   requestedPrice: number | null;
+  limitPrice?: number | null;
+  stopPrice?: number | null;
   triggerPrice: number;
   fillPrice: number;
   quoteBid: number;
@@ -208,8 +219,11 @@ async function auditFill(params: {
       symbol: params.symbol,
       side: params.side,
       orderType: params.orderType,
+      timeInForce: params.timeInForce ?? null,
       qtyLots: params.qtyLots,
       requestedPrice: params.requestedPrice,
+      limitPrice: params.limitPrice ?? null,
+      stopPrice: params.stopPrice ?? null,
       triggerPrice: params.triggerPrice,
       fillPrice: params.fillPrice,
       avgFillPrice: params.fillPrice,
@@ -302,6 +316,104 @@ async function auditClose(params: {
   }
 }
 
+async function expirePendingOrders(nowSec: number) {
+  const rows = await db
+    .select({ t: trades, u: users, sym: symbolConfigs })
+    .from(trades)
+    .leftJoin(users, eq(trades.userId, users.id))
+    .leftJoin(symbolConfigs, eq(trades.symbolId, symbolConfigs.id))
+    .where(and(eq(trades.status, "PENDING"), lte(trades.expiresAt, nowSec)));
+
+  for (const row of rows) {
+    const t = row.t;
+    const u = row.u;
+    if (!u) continue;
+
+    const symbol = row.sym?.symbol ?? "UNKNOWN";
+    const side = String(t.type ?? "");
+    const orderType = String(t.orderType ?? "Market");
+    const orderTypeLower = orderType.toLowerCase();
+    const correlationId = (t as any).correlationId || generateCorrelationId();
+    const orderId = (t as any).orderId || generateOrderId();
+    const requestedPrice =
+      orderTypeLower.includes("limit") ? n(t.limitPrice)
+      : orderTypeLower.includes("stop") ? n(t.stopPrice)
+      : n(t.openPrice);
+    const limitPrice = n(t.limitPrice);
+    const stopPrice = n(t.stopPrice);
+    const timeInForce = normalizeTimeInForce((t as any).timeInForce, "GTC");
+    const openedAtSec = Number(t.openedAt ?? 0);
+    const latencyMs = Number.isFinite(openedAtSec) && openedAtSec > 0
+      ? Math.max(0, Date.now() - openedAtSec * 1000)
+      : null;
+    const positionId = (t as any).positionId ? String((t as any).positionId) : undefined;
+    const provenance = {
+      sessionId: (t as any).lastActorSessionId ?? null,
+      ip: (t as any).lastActorIp ?? null,
+      userAgent: (t as any).lastActorUserAgent ?? null,
+    };
+
+    const expired = await db.update(trades)
+      .set({
+        status: "CANCELED",
+        closeReason: "EXPIRED_PENDING_ORDER",
+        closedAt: nowSec,
+        correlationId,
+        orderId,
+      })
+      .where(and(eq(trades.id, t.id), eq(trades.status, "PENDING")))
+      .returning({ id: trades.id });
+
+    if (!expired.length) continue;
+
+    try {
+      await writeTradeAudit({
+        tradeId: t.id,
+        eventType: "ORDER_CANCELED",
+        eventCategory: "ORDER",
+        ctx: getSystemAuditContext(correlationId, provenance),
+        orderId,
+        positionId,
+        symbol,
+        side,
+        orderType,
+        timeInForce,
+        qtyLots: Number(t.lots ?? 1),
+        requestedPrice,
+        limitPrice,
+        stopPrice,
+        latencyMs,
+        reasonCode: "EXPIRED_PENDING_ORDER",
+        note: `Pending ${orderType} expired before fill`,
+        payload: {
+          expiresAt: (t as any).expiresAt ?? null,
+          timeInForce,
+        },
+      });
+    } catch (auditErr) {
+      console.error("Error writing pending-order expiry audit:", auditErr);
+    }
+
+    publishLiveEvent({
+      type: "trades:updated",
+      userId: u.id,
+      payload: { reason: "PENDING_ORDER_EXPIRED", tradeId: t.id },
+    });
+    void createNotification({
+      userId: u.id,
+      type: "TRADE",
+      severity: "WARNING",
+      title: "Pending order expired",
+      message: `Pending ${orderType} for ${symbol} expired before execution.`,
+      sourceEvent: `PENDING_ORDER_EXPIRED:${t.id}:${nowSec}`,
+      link: "/",
+      playSound: false,
+    }).catch((err) => {
+      console.error("[notifications] failed to create pending-expiry notification:", err);
+    });
+  }
+}
+
 async function processPendingForSymbol(symbol: string, q: Quote) {
   const policyConfig = await loadPolicyConfig();
   const ba = getBidAsk(q);
@@ -333,6 +445,14 @@ async function processPendingForSymbol(symbol: string, q: Quote) {
     const lots = Number(t.lots ?? 1);
     const quoteTs = q.lastUpdated ? new Date(q.lastUpdated) : new Date();
     const pipDecimals = r.sym?.pipDecimals ?? null;
+    const timeInForce = normalizeTimeInForce((t as any).timeInForce, "GTC");
+    const limitPrice = n(t.limitPrice);
+    const stopPrice = n(t.stopPrice);
+    const openedAtSec = Number(t.openedAt ?? 0);
+    const latencyMs =
+      Number.isFinite(openedAtSec) && openedAtSec > 0
+        ? Math.max(0, Date.now() - openedAtSec * 1000)
+        : undefined;
     
     // Use stored correlationId for correlation continuity (hedge-fund compliance)
     const correlationId = (t as any).correlationId || generateCorrelationId();
@@ -351,8 +471,8 @@ async function processPendingForSymbol(symbol: string, q: Quote) {
     }
 
     const requested =
-      orderTypeLower.includes("limit") ? n(t.limitPrice) :
-      orderTypeLower.includes("stop") ? n(t.stopPrice) :
+      orderTypeLower.includes("limit") ? limitPrice :
+      orderTypeLower.includes("stop") ? stopPrice :
       null;
 
     if (requested === null) {
@@ -367,8 +487,11 @@ async function processPendingForSymbol(symbol: string, q: Quote) {
         pipDecimals,
         side,
         orderType,
+        timeInForce,
         qtyLots: lots,
         requestedPrice: null,
+        limitPrice,
+        stopPrice,
         quoteBid: ba.bid,
         quoteAsk: ba.ask,
         quoteMid: ba.mid,
@@ -376,6 +499,7 @@ async function processPendingForSymbol(symbol: string, q: Quote) {
         quoteTs,
         quoteSource,
         ...tradeProvenance,
+        latencyMs,
         riskCheckName: "ORDER_VALIDATION",
         riskLimitValue: 0,
         riskObservedValue: 0,
@@ -406,8 +530,11 @@ async function processPendingForSymbol(symbol: string, q: Quote) {
         pipDecimals,
         side,
         orderType,
+        timeInForce,
         qtyLots: lots,
         requestedPrice: requested,
+        limitPrice,
+        stopPrice,
         quoteBid: ba.bid,
         quoteAsk: ba.ask,
         quoteMid: ba.mid,
@@ -415,6 +542,7 @@ async function processPendingForSymbol(symbol: string, q: Quote) {
         quoteTs,
         quoteSource,
         ...tradeProvenance,
+        latencyMs,
         riskCheckName: "ORDER_VALIDATION",
         riskLimitValue: 0,
         riskObservedValue: 0,
@@ -472,8 +600,11 @@ async function processPendingForSymbol(symbol: string, q: Quote) {
           pipDecimals,
           side,
           orderType,
+          timeInForce,
           qtyLots: lots,
           requestedPrice: requested,
+          limitPrice,
+          stopPrice,
           quoteBid: ba.bid,
           quoteAsk: ba.ask,
           quoteMid: ba.mid,
@@ -481,6 +612,7 @@ async function processPendingForSymbol(symbol: string, q: Quote) {
           quoteTs,
           quoteSource,
           ...tradeProvenance,
+          latencyMs,
           riskCheckName: "POLICY",
           riskLimitValue: 0,
           riskObservedValue: 0,
@@ -557,8 +689,11 @@ async function processPendingForSymbol(symbol: string, q: Quote) {
           pipDecimals,
           side,
           orderType,
+          timeInForce,
           qtyLots: lots,
           requestedPrice: requested,
+          limitPrice,
+          stopPrice,
           quoteBid: ba.bid,
           quoteAsk: ba.ask,
           quoteMid: ba.mid,
@@ -566,6 +701,7 @@ async function processPendingForSymbol(symbol: string, q: Quote) {
           quoteTs,
           quoteSource,
           ...tradeProvenance,
+          latencyMs,
           riskCheckName: params.riskCheckName,
           riskLimitValue: params.riskLimitValue,
           riskObservedValue: params.riskObservedValue,
@@ -729,8 +865,11 @@ async function processPendingForSymbol(symbol: string, q: Quote) {
         pipDecimals,
         side,
         orderType,
+        timeInForce,
         qtyLots: lots,
         requestedPrice: requested,
+        limitPrice,
+        stopPrice,
         triggerPrice,
         fillPrice,
         quoteBid: ba.bid,
@@ -740,8 +879,10 @@ async function processPendingForSymbol(symbol: string, q: Quote) {
         quoteTs,
         quoteSource,
         ...tradeProvenance,
+        latencyMs,
         note: `orderType=${t.orderType}, openCost=${openCostSummary.totalUsd.toFixed(2)}`,
         payload: {
+          timeInForce,
           costModelVersion: openCostSummary.costModelVersion,
           categorySnapshot: openCostSummary.categorySnapshot,
           notionalUsd: openCostSummary.notionalUsd,
@@ -1027,6 +1168,12 @@ export async function onQuotesUpdated(quotes: Quote[]) {
   if (running) return;
   running = true;
   try {
+    const currentSec = nowUnixSec();
+    if (currentSec - lastPendingExpirySweepSec >= 5) {
+      lastPendingExpirySweepSec = currentSec;
+      await expirePendingOrders(currentSec);
+    }
+
     for (const q of quotes) {
       if (!q?.symbol) continue;
       if (q.isStale) continue;

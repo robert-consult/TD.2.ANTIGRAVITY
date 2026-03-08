@@ -1,4 +1,3 @@
-// @ts-nocheck
 import type { Router, Request, Response } from "express";
 import type { TraderRouterDeps } from "./types";
 
@@ -8,7 +7,7 @@ export function registerAccountSummaryRoute(router: Router, deps: TraderRouterDe
   // Real-time account summary endpoint - returns fresh MT5-style metrics
   router.get("/api/account/summary", ensureAuth, async (req: Request, res: Response) => {
     try {
-      const userId = req.session.userId;
+      const userId = req.session.userId!;
 
       // Import and run recalcAccount to get fresh metrics with stale detection
       const { recalcAccount } = await import("../../recalcAccount");

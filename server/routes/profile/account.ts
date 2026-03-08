@@ -1,4 +1,3 @@
-// @ts-nocheck
 import type { Router, NextFunction, Request, Response } from "express";
 import { z } from "zod";
 import crypto from "crypto";
@@ -50,7 +49,7 @@ export function registerAccountSummaryRoute(router: Router, deps: ProfileRouterD
   const SESSION_COOKIE_NAME = sessionCookieName;
 router.get("/api/account/summary", ensureAuth, async (req: Request, res: Response) => {
   try {
-    const userId = req.session.userId;
+    const userId = req.session.userId!;
 
     // Import and run recalcAccount to get fresh metrics with stale detection
     const { recalcAccount } = await import("../../recalcAccount");

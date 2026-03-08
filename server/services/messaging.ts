@@ -1,6 +1,5 @@
 import { db, dbClient } from "@db";
 import {
-  communicationSettings,
   mailboxMessageAudit,
   mailboxMessages,
   mailboxParticipants,
@@ -15,10 +14,28 @@ import {
   normalizeHexSha256,
   parseAndValidateE2eeEnvelope,
 } from "@shared/e2ee/envelope";
+import { clampIntOr, nowSec } from "@shared/scalars";
 import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { publishLiveEvent } from "./liveBus";
 import { decryptString, encryptString, sha256Hex } from "./crypto";
+import {
+  getCommunicationSettings,
+  invalidateCommunicationSettingsCache,
+  type CommunicationSettingsPatch,
+  type CommunicationSettingsResolved,
+  updateCommunicationSettings,
+} from "./messagingSettings";
 import crypto from "crypto";
+
+export {
+  getCommunicationSettings,
+  invalidateCommunicationSettingsCache,
+  updateCommunicationSettings,
+};
+export type {
+  CommunicationSettingsPatch,
+  CommunicationSettingsResolved,
+};
 
 export type MailboxCategory = "SYSTEM" | "SUPPORT" | "ANNOUNCEMENT" | "CHALLENGES";
 export type NotificationType = "TRADE" | "SYSTEM" | "ACCOUNT" | "SECURITY" | "KYC" | "CHALLENGE";
@@ -31,12 +48,6 @@ const VALID_NOTIFICATION_SEVERITIES = new Set<NotificationSeverity>(["INFO", "SU
 
 const MAX_SUBJECT_LEN = 160;
 const MAX_MESSAGE_LEN = 8000;
-const COMM_SETTINGS_CACHE_TTL_MS = 5000;
-const LARGE_TARGET_THRESHOLD_MIN = 1;
-const LARGE_TARGET_THRESHOLD_MAX = 20000;
-const RECIPIENTS_MAX_HARD_LIMIT = 200000;
-const ASYNC_FANOUT_THRESHOLD_MIN = 1;
-const ASYNC_FANOUT_THRESHOLD_MAX = 50000;
 const FANOUT_BATCH_MIN = 50;
 const FANOUT_BATCH_MAX = 5000;
 
@@ -55,41 +66,6 @@ const E2EE_KEY_ALGO_FALLBACK = E2EE_KEY_ALGO_RSA_OAEP_256_V1;
 const MAILBOX_PUBLIC_KEY_MODULUS_MIN_BITS = 2048;
 const MAILBOX_PUBLIC_KEY_MODULUS_MAX_BITS = 8192;
 
-export type CommunicationSettingsResolved = {
-  id: number;
-  messagingEnabled: boolean;
-  messagingAllowReplyByDefault: boolean;
-  messagingAllowBroadcastReplies: boolean;
-  messagingLargeTargetThreshold: number;
-  messagingMaxRecipientsPerSend: number;
-  messagingAsyncFanoutThreshold: number;
-  messagingFanoutBatchSize: number;
-  messagingAutoWelcomeEnabled: boolean;
-  messagingAccountStatusMailboxEnabled: boolean;
-  messagingKycMailboxEnabled: boolean;
-  messagingE2eeEnabled: boolean;
-  messagingE2eeRequired: boolean;
-  notificationsEnabled: boolean;
-  notificationRealtimeEnabled: boolean;
-  notificationSoundDefaultEnabled: boolean;
-  notificationE2eeEnabled: boolean;
-  notificationE2eeRequired: boolean;
-  notificationTradePendingFillEnabled: boolean;
-  notificationTradeTakeProfitEnabled: boolean;
-  notificationTradeStopLossEnabled: boolean;
-  notificationTradeMaxHoldEnabled: boolean;
-  notificationAccountFreezeEnabled: boolean;
-  notificationAccountUnfreezeEnabled: boolean;
-  notificationKycUpdatesEnabled: boolean;
-  notificationChallengeEnabled: boolean;
-  updatedAt: number;
-  updatedBy: string | null;
-};
-
-export type CommunicationSettingsPatch = Partial<
-  Omit<CommunicationSettingsResolved, "id" | "updatedAt" | "updatedBy">
->;
-
 type BroadcastFanoutJob = {
   threadId: number;
   messageId: number;
@@ -102,224 +78,6 @@ let broadcastFanoutRunning = false;
 let metricMailboxFanoutEnqueuedTotal = 0;
 let metricMailboxFanoutProcessedTotal = 0;
 let metricMailboxFanoutFailedTotal = 0;
-let communicationSettingsCache: CommunicationSettingsResolved | null = null;
-let communicationSettingsCacheAtMs = 0;
-let communicationSettingsLoadPromise: Promise<CommunicationSettingsResolved> | null = null;
-
-function nowSec(): number {
-  return Math.floor(Date.now() / 1000);
-}
-
-function clampInt(value: unknown, fallback: number, min: number, max: number): number {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) return fallback;
-  return Math.max(min, Math.min(max, Math.trunc(parsed)));
-}
-
-function normalizeCommunicationSettings(
-  row: Partial<CommunicationSettingsResolved> | null | undefined,
-): CommunicationSettingsResolved {
-  const maxRecipients = clampInt(
-    row?.messagingMaxRecipientsPerSend,
-    10000,
-    LARGE_TARGET_THRESHOLD_MIN,
-    RECIPIENTS_MAX_HARD_LIMIT,
-  );
-  const largeTargetThreshold = Math.min(
-    maxRecipients,
-    clampInt(
-      row?.messagingLargeTargetThreshold,
-      100,
-      LARGE_TARGET_THRESHOLD_MIN,
-      LARGE_TARGET_THRESHOLD_MAX,
-    ),
-  );
-  const asyncFanoutThreshold = Math.min(
-    maxRecipients,
-    clampInt(
-      row?.messagingAsyncFanoutThreshold,
-      200,
-      ASYNC_FANOUT_THRESHOLD_MIN,
-      ASYNC_FANOUT_THRESHOLD_MAX,
-    ),
-  );
-  const fanoutBatchSize = Math.min(
-    maxRecipients,
-    clampInt(row?.messagingFanoutBatchSize, 500, FANOUT_BATCH_MIN, FANOUT_BATCH_MAX),
-  );
-  const updatedByRaw = typeof row?.updatedBy === "string" ? row.updatedBy.trim() : "";
-  const messagingE2eeEnabled = Boolean(row?.messagingE2eeEnabled ?? false);
-  const notificationE2eeEnabled = Boolean(row?.notificationE2eeEnabled ?? false);
-
-  return {
-    id: 1,
-    messagingEnabled: Boolean(row?.messagingEnabled ?? true),
-    messagingAllowReplyByDefault: Boolean(row?.messagingAllowReplyByDefault ?? false),
-    messagingAllowBroadcastReplies: Boolean(row?.messagingAllowBroadcastReplies ?? false),
-    messagingLargeTargetThreshold: largeTargetThreshold,
-    messagingMaxRecipientsPerSend: maxRecipients,
-    messagingAsyncFanoutThreshold: asyncFanoutThreshold,
-    messagingFanoutBatchSize: fanoutBatchSize,
-    messagingAutoWelcomeEnabled: Boolean(row?.messagingAutoWelcomeEnabled ?? true),
-    messagingAccountStatusMailboxEnabled: Boolean(row?.messagingAccountStatusMailboxEnabled ?? true),
-    messagingKycMailboxEnabled: Boolean(row?.messagingKycMailboxEnabled ?? true),
-    messagingE2eeEnabled,
-    messagingE2eeRequired: messagingE2eeEnabled && Boolean(row?.messagingE2eeRequired ?? false),
-    notificationsEnabled: Boolean(row?.notificationsEnabled ?? true),
-    notificationRealtimeEnabled: Boolean(row?.notificationRealtimeEnabled ?? true),
-    notificationSoundDefaultEnabled: Boolean(row?.notificationSoundDefaultEnabled ?? true),
-    notificationE2eeEnabled,
-    notificationE2eeRequired: notificationE2eeEnabled && Boolean(row?.notificationE2eeRequired ?? false),
-    notificationTradePendingFillEnabled: Boolean(row?.notificationTradePendingFillEnabled ?? true),
-    notificationTradeTakeProfitEnabled: Boolean(row?.notificationTradeTakeProfitEnabled ?? true),
-    notificationTradeStopLossEnabled: Boolean(row?.notificationTradeStopLossEnabled ?? true),
-    notificationTradeMaxHoldEnabled: Boolean(row?.notificationTradeMaxHoldEnabled ?? true),
-    notificationAccountFreezeEnabled: Boolean(row?.notificationAccountFreezeEnabled ?? true),
-    notificationAccountUnfreezeEnabled: Boolean(row?.notificationAccountUnfreezeEnabled ?? true),
-    notificationKycUpdatesEnabled: Boolean(row?.notificationKycUpdatesEnabled ?? true),
-    notificationChallengeEnabled: Boolean(row?.notificationChallengeEnabled ?? true),
-    updatedAt: clampInt(row?.updatedAt, nowSec(), 1, 4_102_444_800),
-    updatedBy: updatedByRaw ? updatedByRaw.slice(0, 160) : null,
-  };
-}
-
-function toCommunicationSettingsWritableValues(settings: CommunicationSettingsResolved) {
-  return {
-    messagingEnabled: settings.messagingEnabled,
-    messagingAllowReplyByDefault: settings.messagingAllowReplyByDefault,
-    messagingAllowBroadcastReplies: settings.messagingAllowBroadcastReplies,
-    messagingLargeTargetThreshold: settings.messagingLargeTargetThreshold,
-    messagingMaxRecipientsPerSend: settings.messagingMaxRecipientsPerSend,
-    messagingAsyncFanoutThreshold: settings.messagingAsyncFanoutThreshold,
-    messagingFanoutBatchSize: settings.messagingFanoutBatchSize,
-    messagingAutoWelcomeEnabled: settings.messagingAutoWelcomeEnabled,
-    messagingAccountStatusMailboxEnabled: settings.messagingAccountStatusMailboxEnabled,
-    messagingKycMailboxEnabled: settings.messagingKycMailboxEnabled,
-    messagingE2eeEnabled: settings.messagingE2eeEnabled,
-    messagingE2eeRequired: settings.messagingE2eeRequired,
-    notificationsEnabled: settings.notificationsEnabled,
-    notificationRealtimeEnabled: settings.notificationRealtimeEnabled,
-    notificationSoundDefaultEnabled: settings.notificationSoundDefaultEnabled,
-    notificationE2eeEnabled: settings.notificationE2eeEnabled,
-    notificationE2eeRequired: settings.notificationE2eeRequired,
-    notificationTradePendingFillEnabled: settings.notificationTradePendingFillEnabled,
-    notificationTradeTakeProfitEnabled: settings.notificationTradeTakeProfitEnabled,
-    notificationTradeStopLossEnabled: settings.notificationTradeStopLossEnabled,
-    notificationTradeMaxHoldEnabled: settings.notificationTradeMaxHoldEnabled,
-    notificationAccountFreezeEnabled: settings.notificationAccountFreezeEnabled,
-    notificationAccountUnfreezeEnabled: settings.notificationAccountUnfreezeEnabled,
-    notificationKycUpdatesEnabled: settings.notificationKycUpdatesEnabled,
-    notificationChallengeEnabled: settings.notificationChallengeEnabled,
-    updatedAt: settings.updatedAt,
-    updatedBy: settings.updatedBy,
-  };
-}
-
-function setCommunicationSettingsCache(settings: CommunicationSettingsResolved) {
-  communicationSettingsCache = settings;
-  communicationSettingsCacheAtMs = Date.now();
-}
-
-async function loadCommunicationSettingsFromDb(): Promise<CommunicationSettingsResolved> {
-  const [existing] = await db
-    .select()
-    .from(communicationSettings)
-    .where(eq(communicationSettings.id, 1))
-    .limit(1);
-
-  if (existing) {
-    return normalizeCommunicationSettings(existing as any);
-  }
-
-  const timestamp = nowSec();
-  const [inserted] = await db
-    .insert(communicationSettings)
-    .values({ id: 1, updatedAt: timestamp })
-    .onConflictDoNothing()
-    .returning();
-
-  if (inserted) {
-    return normalizeCommunicationSettings(inserted as any);
-  }
-
-  const [refetched] = await db
-    .select()
-    .from(communicationSettings)
-    .where(eq(communicationSettings.id, 1))
-    .limit(1);
-  return normalizeCommunicationSettings(refetched as any);
-}
-
-export function invalidateCommunicationSettingsCache() {
-  communicationSettingsCache = null;
-  communicationSettingsCacheAtMs = 0;
-}
-
-export async function getCommunicationSettings(options?: {
-  force?: boolean;
-}): Promise<CommunicationSettingsResolved> {
-  const force = Boolean(options?.force);
-  const isFresh =
-    communicationSettingsCache !== null &&
-    Date.now() - communicationSettingsCacheAtMs < COMM_SETTINGS_CACHE_TTL_MS;
-  if (!force && isFresh && communicationSettingsCache) {
-    return communicationSettingsCache;
-  }
-
-  if (!force && communicationSettingsLoadPromise) {
-    return communicationSettingsLoadPromise;
-  }
-
-  communicationSettingsLoadPromise = (async () => {
-    const loaded = await loadCommunicationSettingsFromDb();
-    setCommunicationSettingsCache(loaded);
-    return loaded;
-  })();
-
-  try {
-    return await communicationSettingsLoadPromise;
-  } finally {
-    communicationSettingsLoadPromise = null;
-  }
-}
-
-export async function updateCommunicationSettings(input: {
-  patch: CommunicationSettingsPatch;
-  updatedBy?: string | null;
-}): Promise<CommunicationSettingsResolved> {
-  const patch = (input.patch ?? {}) as CommunicationSettingsPatch;
-  const current = await getCommunicationSettings({ force: true });
-  const timestamp = nowSec();
-  const updatedByRaw = typeof input.updatedBy === "string" ? input.updatedBy.trim() : "";
-  const next = normalizeCommunicationSettings({
-    ...current,
-    ...patch,
-    updatedAt: timestamp,
-    updatedBy: updatedByRaw ? updatedByRaw : current.updatedBy,
-  });
-  const values = toCommunicationSettingsWritableValues(next);
-
-  const [saved] = await db
-    .insert(communicationSettings)
-    .values({ id: 1, ...values })
-    .onConflictDoUpdate({
-      target: communicationSettings.id,
-      set: values,
-    })
-    .returning();
-
-  const resolved = normalizeCommunicationSettings((saved as any) ?? { id: 1, ...values });
-  setCommunicationSettingsCache(resolved);
-
-  publishLiveEvent({
-    type: "communications:config-updated",
-    payload: {
-      updatedAt: resolved.updatedAt,
-    },
-  });
-
-  return resolved;
-}
 
 function normalizeSubject(value: unknown): string {
   const text = String(value ?? "").trim().replace(/\s+/g, " ");
@@ -861,7 +619,7 @@ async function processBroadcastFanoutQueue() {
       if (!job) continue;
 
       const timestamp = nowSec();
-      const batchSize = clampInt(job.batchSize, 500, FANOUT_BATCH_MIN, FANOUT_BATCH_MAX);
+      const batchSize = clampIntOr(job.batchSize, 500, FANOUT_BATCH_MIN, FANOUT_BATCH_MAX);
       const chunks = chunkArray(job.userIds, batchSize);
       for (const chunk of chunks) {
         if (!chunk.length) continue;

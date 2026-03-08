@@ -1,5 +1,6 @@
 import bcrypt from "bcryptjs";
 import { db, dbClient } from "@db";
+import { nowSec } from "@shared/scalars";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import {
   adminActions,
@@ -39,10 +40,6 @@ function toInt(v: unknown, fallback: number): number {
 function toBool(v: unknown, fallback: boolean): boolean {
   if (v === undefined || v === null) return fallback;
   return Boolean(v);
-}
-
-function nowSec() {
-  return Math.floor(Date.now() / 1000);
 }
 
 const MAX_ACTIVITY_MUTATION_USER_IDS = 500;

@@ -1,4 +1,5 @@
 import { dbClient } from "@db";
+import { nowSec } from "@shared/scalars";
 
 export type AdminDataRollupMetricKey =
   | "kpi_summary"
@@ -77,10 +78,6 @@ const TRADE_NET_PROFIT_SQL = `
     ${LEGACY_TRADE_PROFIT_NUMERIC_SQL}
   )
 `;
-
-function nowSec(): number {
-  return Math.floor(Date.now() / 1000);
-}
 
 function clampDays(raw: number, fallback: number): number {
   if (!Number.isFinite(raw)) return fallback;

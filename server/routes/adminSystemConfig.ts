@@ -3,7 +3,6 @@
  * Provides get/set endpoints for system configuration keys
  */
 
-// @ts-nocheck
 import { Router } from "express";
 import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@db";

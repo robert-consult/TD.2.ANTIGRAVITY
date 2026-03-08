@@ -1,5 +1,6 @@
 import { and, eq } from "drizzle-orm";
 import { db } from "@db";
+import { nowSec } from "@shared/scalars";
 import { partners, systemConfig } from "@shared/schema";
 import {
   DEFAULT_PARTNER_INSTITUTION_PROFILE,
@@ -76,10 +77,6 @@ export type PartnerOnboardingState = {
     reminderLogins: number;
   };
 };
-
-function nowSec(): number {
-  return Math.floor(Date.now() / 1000);
-}
 
 function asRecord(value: unknown): Record<string, unknown> {
   if (!value) return {};

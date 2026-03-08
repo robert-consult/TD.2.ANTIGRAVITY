@@ -1,9 +1,9 @@
-// @ts-nocheck
 import { Router } from "express";
 import { and, eq, sql } from "drizzle-orm";
 import { parsePhoneNumberFromString } from "libphonenumber-js";
 import { z } from "zod";
 import { db, dbClient } from "@db";
+import { nowSec } from "@shared/scalars";
 import {
   partners,
   partnerAllocations,
@@ -161,6 +161,7 @@ partnerAuthRouter.post("/invite/redeem", async (req, res) => {
       .select({
         id: partnerInvites.id,
         partnerId: partnerInvites.partnerId,
+        partnerEmail: partnerInvites.partnerEmail,
         expiresInDays: partnerInvites.expiresInDays,
         invitedAt: partnerInvites.invitedAt,
       })
@@ -241,10 +242,6 @@ partnerAuthRouter.post("/invite/redeem", async (req, res) => {
 
 const partnerPortalRouter = Router();
 partnerPortalRouter.use(requirePartner);
-
-function nowSec(): number {
-  return Math.floor(Date.now() / 1000);
-}
 
 function netProfitSqlAlias(alias: string): string {
   return `COALESCE(
@@ -368,7 +365,14 @@ const partnerInstitutionProfileSchema = z
       bankingPartner: optionalText(120).optional().default(null),
     })
     .strict()
-    .default({}),
+    .default({
+      primeBroker: null,
+      fundAdministrator: null,
+      auditor: null,
+      custodian: null,
+      legalCounsel: null,
+      bankingPartner: null,
+    }),
   regulatory: z
     .object({
       regulatorNames: z.array(z.string().trim().min(1).max(80)).max(20).default([]),
@@ -385,7 +389,17 @@ const partnerInstitutionProfileSchema = z
       }, z.string().regex(LEI_CODE_REGEX, "LEI_INVALID").nullable()).optional().default(null),
     })
     .strict()
-    .default({}),
+    .default({
+      regulatorNames: [],
+      secFileNumber: null,
+      secExemptFileNumber: null,
+      crdNumber: null,
+      cikNumbers: [],
+      nfaId: null,
+      registrationNumber: null,
+      taxId: null,
+      lei: null,
+    }),
   operations: z
     .object({
       inceptionYear: z.number().int().min(1900).max(2100).nullable().optional().default(null),
@@ -394,7 +408,12 @@ const partnerInstitutionProfileSchema = z
       businessHours: optionalText(64).optional().default(null),
     })
     .strict()
-    .default({}),
+    .default({
+      inceptionYear: null,
+      employeeCountRange: null,
+      businessDays: null,
+      businessHours: null,
+    }),
   })
   .strict();
 
@@ -1395,7 +1414,7 @@ partnerPortalRouter.put("/allocations/:id", requirePartnerGate("requestAllocatio
     const [updated] = await db
       .update(partnerAllocations)
       .set({
-        status,
+        status: status ?? undefined,
         shadowStopPct,
         updatedAt: nowSec(),
       })

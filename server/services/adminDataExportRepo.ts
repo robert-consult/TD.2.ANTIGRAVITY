@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import { dbClient } from "@db";
+import { nowSec } from "@shared/scalars";
 import { sha256, stableStringify } from "../legal/cryptoUtils";
 import type {
   AdminDataExportCreateRequest,
@@ -78,10 +79,6 @@ async function queryAll<T = any>(sqlText: string, params: any[] = []): Promise<T
 async function queryOne<T = any>(sqlText: string, params: any[] = []): Promise<T | undefined> {
   const rows = await queryAll<T>(sqlText, params);
   return rows[0];
-}
-
-function nowSec(): number {
-  return Math.floor(Date.now() / 1000);
 }
 
 function makeJobId(): string {

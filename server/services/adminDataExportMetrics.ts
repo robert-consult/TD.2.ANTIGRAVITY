@@ -1,3 +1,5 @@
+import { nowSec } from "@shared/scalars";
+
 type ExportMetricsState = {
   createdTotal: number;
   dedupedTotal: number;
@@ -41,10 +43,6 @@ const state: ExportMetricsState = {
   lastSuccessAtSec: 0,
   lastFailureAtSec: 0,
 };
-
-function nowSec(): number {
-  return Math.floor(Date.now() / 1000);
-}
 
 export function onAdminExportJobCreated(params: { deduped: boolean }): void {
   state.createdTotal += 1;

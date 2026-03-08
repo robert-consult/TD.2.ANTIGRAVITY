@@ -7,6 +7,7 @@ import { format } from "date-fns";
 import { DateRange } from "react-day-picker";
 import { ChevronDown, ChevronUp, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
 import { getQuoteDecimals } from "@shared/pips";
+import { toFiniteNumber } from "@shared/scalars";
 import {
   Sheet,
   SheetContent,
@@ -129,13 +130,6 @@ function toMs(value: unknown): number | null {
   const num = typeof value === "number" ? value : Number(value);
   if (!Number.isFinite(num)) return null;
   return num < 1e12 ? num * 1000 : num;
-}
-
-function toFiniteNumber(value: unknown): number | null {
-  if (value === null || value === undefined) return null;
-  const num = typeof value === "number" ? value : Number(value);
-  if (!Number.isFinite(num)) return null;
-  return num;
 }
 
 function getTradeNetProfitUsd(trade: any): number | null {

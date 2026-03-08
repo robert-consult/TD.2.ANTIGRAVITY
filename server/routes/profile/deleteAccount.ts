@@ -1,4 +1,3 @@
-// @ts-nocheck
 import type { Router, NextFunction, Request, Response } from "express";
 import { z } from "zod";
 import crypto from "crypto";
@@ -110,7 +109,7 @@ router.post("/api/profile/account/delete", ensureAuth, async (req: Request, res:
       title: "Account deleted",
       description: "User requested account deletion",
       reasonCode: normalizedReasonCode,
-      reasonText: normalizedReasonText,
+      reasonText: normalizedReasonText ?? undefined,
       metadata: {
         action: "DELETE",
         ip,
@@ -148,7 +147,7 @@ router.post("/api/profile/account/delete", ensureAuth, async (req: Request, res:
     res.json({ success: true, message: "Account deleted" });
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return res.status(400).json({ message: "Invalid input data", errors: error.errors });
+      return res.status(400).json({ message: "Invalid input data", errors: error.issues });
     }
     console.error("Account deletion error:", error);
     res.status(500).json({ message: "Failed to delete account" });

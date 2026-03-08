@@ -1,4 +1,3 @@
-// @ts-nocheck
 import type { Router, NextFunction, Request, Response } from "express";
 import { z } from "zod";
 import crypto from "crypto";
@@ -60,7 +59,7 @@ router.put("/api/profile/preferences", ensureAuth, async (req: Request, res: Res
     const validationResult = preferencesSchema.safeParse(req.body);
     if (!validationResult.success) {
       return res.status(400).json({
-        message: validationResult.error.errors[0]?.message || "Invalid input"
+        message: validationResult.error.issues[0]?.message || "Invalid input"
       });
     }
 

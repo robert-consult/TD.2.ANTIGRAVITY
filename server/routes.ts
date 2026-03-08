@@ -138,11 +138,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use(createAuthRouter(routerCtx));
   app.use(createProfileRouter(routerCtx));
   app.use(createTraderRouter(routerCtx));
+  app.use("/api/admin", adminUsersRouter);
+  // Keep impersonation routes ahead of admin routers that install requireAdmin globally
+  // so /api/admin/view-as/stop remains reachable while the effective session is non-admin.
   app.use("/api/admin", adminDataRollupsRouter);
   app.use("/api/admin", adminInstitutionalAuditRouter);
   app.use("/api/admin", adminTraderScoutingRouter);
   app.use("/api/admin", adminOpsRouter);
-  app.use("/api/admin", adminUsersRouter);
   app.use("/api/admin", adminKycRouter);
   app.use("/api/admin", adminDataLegacyCompatRouter);
 

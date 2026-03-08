@@ -105,16 +105,16 @@ async function runAutoCloseJob() {
           closePrice,
         });
         const closeCostSummary = await computeCloseSettlementCosts({
-          category: (trade as any).categorySnapshot ?? (symbolConfig as any).category,
+          category: trade.categorySnapshot ?? symbolConfig.category,
           positionSide: trade.type as "BUY" | "SELL",
-          notionalUsd: (trade as any).notionalUsd,
-          size: Number((trade as any).size ?? lots * 100000),
+          notionalUsd: trade.notionalUsd,
+          size: Number(trade.size ?? lots * 100000),
           lots,
-          openedAt: (trade as any).openedAt,
-          executedAt: (trade as any).executedAt,
+          openedAt: trade.openedAt,
+          executedAt: trade.executedAt,
           closedAtMs: q.quoteTs.getTime(),
-          openCommissionUsd: (trade as any).openCommissionUsd,
-          openOtherFeesUsd: (trade as any).openOtherFeesUsd,
+          openCommissionUsd: trade.openCommissionUsd,
+          openOtherFeesUsd: trade.openOtherFeesUsd,
         });
         const grossProfitUsd = pnlUsd;
         const netProfitUsd = grossProfitUsd - closeCostSummary.totalCostsUsd;
@@ -125,8 +125,8 @@ async function runAutoCloseJob() {
           side: trade.type as "BUY" | "SELL",
           openPrice,
           closePrice,
-          intradayHigh: (trade as any).intradayHigh,
-          intradayLow: (trade as any).intradayLow,
+          intradayHigh: trade.intradayHigh,
+          intradayLow: trade.intradayLow,
         });
 
         const closeReasonCode: CloseReasonCode = "MAX_HOLD_TIME";
@@ -150,9 +150,9 @@ async function runAutoCloseJob() {
           const leverageNow = Number((userRowRes.rows[0] as any)?.leverage ?? 5);
           const marginToRelease = requiredMargin(q.symbol, lots, closePrice, leverageNow);
 
-          const correlationId = (trade as any).correlationId || generateCorrelationId();
-          const orderId = (trade as any).orderId || generateOrderId();
-          const positionId = (trade as any).positionId || generatePositionId();
+          const correlationId = trade.correlationId || generateCorrelationId();
+          const orderId = trade.orderId || generateOrderId();
+          const positionId = trade.positionId || generatePositionId();
           const executionId = generateExecutionId();
           const closedAt = Math.floor(Date.now() / 1000);
 

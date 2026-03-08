@@ -8,13 +8,8 @@ import type {
   TradeAuditExportFilters,
   TraderScoutingExportFilters,
 } from "@shared/admin/dataExports";
+import { toFiniteNumberOr } from "@shared/scalars";
 import { getClickHouseClient, queryClickHouseJson } from "./clickhouseClient";
-
-function toFiniteNumber(value: unknown, fallback = 0): number {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) return fallback;
-  return parsed;
-}
 
 function normalizeCategories(raw: string[] | undefined): string[] {
   const out = new Set<string>();
@@ -150,7 +145,7 @@ export async function queryDeactivatedAccountsFromClickHouse(params: {
   const tradesByUser = new Map<number, any[]>();
   if (params.includeTrades && users.length > 0) {
     const userIds = users
-      .map((row) => Math.max(0, Math.trunc(toFiniteNumber(row.user_id, 0))))
+      .map((row) => Math.max(0, Math.trunc(toFiniteNumberOr(row.user_id, 0))))
       .filter((id) => id > 0);
     if (userIds.length > 0) {
       const tradeRows = await queryClickHouseJson<any>({
@@ -184,31 +179,31 @@ export async function queryDeactivatedAccountsFromClickHouse(params: {
 
       if (tradeRows) {
         for (const row of tradeRows) {
-          const userId = Math.max(0, Math.trunc(toFiniteNumber(row.user_id, 0)));
+          const userId = Math.max(0, Math.trunc(toFiniteNumberOr(row.user_id, 0)));
           if (!userId) continue;
           if (!tradesByUser.has(userId)) tradesByUser.set(userId, []);
           tradesByUser.get(userId)!.push({
-            tradeId: toFiniteNumber(row.trade_id, 0),
+            tradeId: toFiniteNumberOr(row.trade_id, 0),
             userId,
             symbol: row.symbol == null ? null : String(row.symbol),
             type: row.type == null ? null : String(row.type),
             status: row.status == null ? null : String(row.status),
-            lots: row.lots == null ? null : toFiniteNumber(row.lots, 0),
-            openPrice: row.open_price == null ? null : toFiniteNumber(row.open_price, 0),
-            closePrice: row.close_price == null ? null : toFiniteNumber(row.close_price, 0),
-            netProfitUsd: row.net_profit_usd == null ? null : toFiniteNumber(row.net_profit_usd, 0),
-            totalCostsUsd: row.total_costs_usd == null ? null : toFiniteNumber(row.total_costs_usd, 0),
+            lots: row.lots == null ? null : toFiniteNumberOr(row.lots, 0),
+            openPrice: row.open_price == null ? null : toFiniteNumberOr(row.open_price, 0),
+            closePrice: row.close_price == null ? null : toFiniteNumberOr(row.close_price, 0),
+            netProfitUsd: row.net_profit_usd == null ? null : toFiniteNumberOr(row.net_profit_usd, 0),
+            totalCostsUsd: row.total_costs_usd == null ? null : toFiniteNumberOr(row.total_costs_usd, 0),
             openCommissionUsd:
-              row.open_commission_usd == null ? null : toFiniteNumber(row.open_commission_usd, 0),
+              row.open_commission_usd == null ? null : toFiniteNumberOr(row.open_commission_usd, 0),
             closeCommissionUsd:
-              row.close_commission_usd == null ? null : toFiniteNumber(row.close_commission_usd, 0),
+              row.close_commission_usd == null ? null : toFiniteNumberOr(row.close_commission_usd, 0),
             financingAccruedUsd:
-              row.financing_accrued_usd == null ? null : toFiniteNumber(row.financing_accrued_usd, 0),
+              row.financing_accrued_usd == null ? null : toFiniteNumberOr(row.financing_accrued_usd, 0),
             swapAccruedUsd:
-              row.swap_accrued_usd == null ? null : toFiniteNumber(row.swap_accrued_usd, 0),
-            overnightDays: row.overnight_days == null ? null : toFiniteNumber(row.overnight_days, 0),
-            openedAt: row.opened_at == null ? null : toFiniteNumber(row.opened_at, 0),
-            closedAt: row.closed_at == null ? null : toFiniteNumber(row.closed_at, 0),
+              row.swap_accrued_usd == null ? null : toFiniteNumberOr(row.swap_accrued_usd, 0),
+            overnightDays: row.overnight_days == null ? null : toFiniteNumberOr(row.overnight_days, 0),
+            openedAt: row.opened_at == null ? null : toFiniteNumberOr(row.opened_at, 0),
+            closedAt: row.closed_at == null ? null : toFiniteNumberOr(row.closed_at, 0),
           });
         }
       }
@@ -428,23 +423,23 @@ function buildTraderScoutingClickHouseQuery(params: {
       searchQ: q,
       minTrades: Math.max(0, Math.trunc(filters.minTrades ?? 0)),
       applyMinWinRate: filters.minWinRate == null ? 0 : 1,
-      minWinRate: toFiniteNumber(filters.minWinRate, 0),
+      minWinRate: toFiniteNumberOr(filters.minWinRate, 0),
       applyMinNetProfit: filters.minNetProfit == null ? 0 : 1,
-      minNetProfit: toFiniteNumber(filters.minNetProfit, 0),
+      minNetProfit: toFiniteNumberOr(filters.minNetProfit, 0),
       applyMinHold: filters.minHoldSec == null ? 0 : 1,
-      minHoldSec: toFiniteNumber(filters.minHoldSec, 0),
+      minHoldSec: toFiniteNumberOr(filters.minHoldSec, 0),
       applyMaxHold: filters.maxHoldSec == null ? 0 : 1,
-      maxHoldSec: toFiniteNumber(filters.maxHoldSec, 0),
+      maxHoldSec: toFiniteNumberOr(filters.maxHoldSec, 0),
       applyMinSlUsage: filters.minSlUsage == null ? 0 : 1,
-      minSlUsage: toFiniteNumber(filters.minSlUsage, 0),
+      minSlUsage: toFiniteNumberOr(filters.minSlUsage, 0),
       applyMinTpUsage: filters.minTpUsage == null ? 0 : 1,
-      minTpUsage: toFiniteNumber(filters.minTpUsage, 0),
+      minTpUsage: toFiniteNumberOr(filters.minTpUsage, 0),
       applyMinProfitFactor: filters.minProfitFactor == null ? 0 : 1,
-      minProfitFactor: toFiniteNumber(filters.minProfitFactor, 0),
+      minProfitFactor: toFiniteNumberOr(filters.minProfitFactor, 0),
       applyMaxDrawdown: filters.maxDrawdown == null ? 0 : 1,
-      maxDrawdown: toFiniteNumber(filters.maxDrawdown, 0),
+      maxDrawdown: toFiniteNumberOr(filters.maxDrawdown, 0),
       applyMaxBestDayPct: filters.maxBestDayPct == null ? 0 : 1,
-      maxBestDayPct: toFiniteNumber(filters.maxBestDayPct, 0),
+      maxBestDayPct: toFiniteNumberOr(filters.maxBestDayPct, 0),
       ...(limitRows == null ? {} : { limitRows }),
     },
   };
@@ -603,7 +598,7 @@ export async function queryTradeAuditFromClickHouse(params: {
     `,
     query_params: {
       applyTradeId: filters.tradeId == null ? 0 : 1,
-      tradeId: Math.max(0, Math.trunc(toFiniteNumber(filters.tradeId, 0))),
+      tradeId: Math.max(0, Math.trunc(toFiniteNumberOr(filters.tradeId, 0))),
       applyEventType: filters.eventType ? 1 : 0,
       eventType: String(filters.eventType || ""),
       applyRiskResult: filters.riskResult ? 1 : 0,
@@ -678,7 +673,7 @@ export async function queryOrderIntentAuditFromClickHouse(params: {
       applyDecision: filters.decision ? 1 : 0,
       decision: String(filters.decision || ""),
       applyUserId: filters.userId == null ? 0 : 1,
-      userId: Math.max(0, Math.trunc(toFiniteNumber(filters.userId, 0))),
+      userId: Math.max(0, Math.trunc(toFiniteNumberOr(filters.userId, 0))),
       limitRows,
     },
   });

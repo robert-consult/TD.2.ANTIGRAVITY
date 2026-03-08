@@ -1,4 +1,3 @@
-// @ts-nocheck
 import type { Router, NextFunction, Request, Response } from "express";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
@@ -243,7 +242,7 @@ router.post("/api/auth/register", async (req: Request, res: Response) => {
           username,
           password,
           countryIso2: countryIso2 ?? null,
-          regionKey: regionKey ?? null,
+          regionKey: regionKey ?? undefined,
           phone: normalizedPhone.e164 ?? null,
           fingerprint: signupFingerprint,
         });

@@ -1,4 +1,3 @@
-// @ts-nocheck
 import type { Router, NextFunction, Request, Response } from "express";
 import { z } from "zod";
 import crypto from "crypto";
@@ -70,6 +69,7 @@ router.get("/api/profile/me", ensureAuth, async (req: Request, res: Response) =>
     });
 
     const settings = await storage.getUserSettingsById(userId);
+    const settingsProfile = settings as Record<string, unknown> | null | undefined;
     const auditCtx = buildAuditContext(req);
     const policyConfig = await loadPolicyConfig();
     const decisionCtx = await buildDecisionContext({
@@ -119,11 +119,11 @@ router.get("/api/profile/me", ensureAuth, async (req: Request, res: Response) =>
       },
 
       settings: {
-        defaultSymbol: settings?.defaultSymbol,
-        defaultLotSize: settings?.defaultLotSize,
-        defaultLeverage: settings?.defaultLeverage,
-        defaultStopLoss: settings?.defaultStopLoss,
-        defaultTakeProfit: settings?.defaultTakeProfit,
+        defaultSymbol: settingsProfile?.defaultSymbol,
+        defaultLotSize: settingsProfile?.defaultLotSize,
+        defaultLeverage: settingsProfile?.defaultLeverage,
+        defaultStopLoss: settingsProfile?.defaultStopLoss,
+        defaultTakeProfit: settingsProfile?.defaultTakeProfit,
       },
 
       featureGates: {

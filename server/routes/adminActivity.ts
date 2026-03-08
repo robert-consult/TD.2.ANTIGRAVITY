@@ -1,6 +1,7 @@
 import type { Request, Response } from "express";
 import { Router } from "express";
 import { db } from "@db";
+import { clampIntOr } from "@shared/scalars";
 import { eq } from "drizzle-orm";
 import { systemConfig } from "@shared/schema";
 import { z } from "zod";
@@ -35,8 +36,7 @@ function toInt(v: unknown, fallback: number) {
 }
 
 function clampInt(v: unknown, lo: number, hi: number, fallback: number) {
-  const n = toInt(v, fallback);
-  return Math.max(lo, Math.min(hi, n));
+  return clampIntOr(v, fallback, lo, hi);
 }
 
 function toBool(v: unknown, fallback: boolean) {

@@ -13,6 +13,7 @@ Primary goals for all route changes:
 1. `AGENTS.md` (repo root)
 2. `server/AGENTS.md`
 3. `server/routes/AGENTS.md` (this file)
+4. `@/.agents/audit-decomposition.md` for route audits, decomposition plans, or maintainability reviews
 
 ## Route Design Standard (mandatory)
 - Organize by domain folder (`public/`, `auth/`, `profile/`, `trader/`, `ws/`, etc.).
@@ -50,6 +51,7 @@ If a route file is added but not wired in the domain `index.ts`, the change is i
 - Do not add new `*Core.ts` monoliths.
 - If a file becomes hard to reason about, split it before adding more logic.
 - Keep mutable process state out of general route files; isolate state in dedicated modules.
+- Do not recommend route decomposition from file size alone. Preserve route parity, mount order, middleware order, and handler cohesion.
 
 ## Verification Before Finalizing
 - `npm run check`
@@ -58,4 +60,3 @@ If a route file is added but not wired in the domain `index.ts`, the change is i
 - If WS hot path changed: `npm run loadtest:ws-fanout` (recommended)
 - Route parity sanity (when doing decomposition moves):
   - Compare method/path list before/after and confirm no unintended additions/removals.
-

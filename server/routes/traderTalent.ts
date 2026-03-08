@@ -1,9 +1,9 @@
-// @ts-nocheck
 import { Router } from "express";
 import { and, asc, desc, eq, sql } from "drizzle-orm";
 import crypto from "crypto";
 import { z } from "zod";
 import { db } from "@db";
+import { nowSec } from "@shared/scalars";
 import {
   challengeBadgeAwards,
   challengeBadges,
@@ -32,13 +32,9 @@ import { appendIdentityAudit } from "../services/identityAudit";
 import { createMailboxThreadWithMessage, createNotification } from "../services/messaging";
 import { appendChallengeEvent } from "../recruitment/challengesV4/challengeEvents";
 import { getSystemChallengeConfig } from "../recruitment/challengesV4/challengeConfig";
-import {
-  computeVerificationCodeHmac,
-  deriveCertificatePublicCode,
-  parseVerificationCodeKeyId,
-} from "../recruitment/challengesV4/certificateCode";
-import { renderChallengeCertificatePdf } from "../recruitment/challengesV4/certificatePdf";
+import { deriveCertificatePublicCode } from "../recruitment/challengesV4/certificateCode";
 import { parseCustomRewardRules, scopedCustomRewardKey } from "../recruitment/challengesV4/customRewards";
+import { registerTraderTalentCertificateRoutes } from "./trader-talent/certificates";
 
 const traderTalentPublicRouter = Router();
 const traderTalentRouter = Router();
@@ -49,10 +45,6 @@ const profileUpdateSchema = z.object({
   strategy: z.string().trim().max(4000).optional().nullable(),
   pinnedTradeIds: z.array(z.number().int().positive()).max(50).optional(),
 });
-
-function nowSec(): number {
-  return Math.floor(Date.now() / 1000);
-}
 
 function toTraderCertificateRow(cert: Record<string, unknown>) {
   const verificationCode = deriveCertificatePublicCode({
@@ -1899,239 +1891,11 @@ traderTalentRouter.get("/challenges/:id/my-rewards", async (req, res) => {
   }
 });
 
-const certificateIdSchema = z.object({ id: z.coerce.number().int().positive() });
-
-async function getOwnedCertificateBundle(userId: number, certificateId: number) {
-  const [cert] = await db
-    .select({
-      id: challengeCertificates.id,
-      userId: challengeCertificates.userId,
-      challengeId: challengeCertificates.challengeId,
-      enrollmentId: challengeCertificates.enrollmentId,
-      templateId: challengeCertificates.templateId,
-      issuedAt: challengeCertificates.issuedAt,
-      isDownloadable: challengeCertificates.isDownloadable,
-      isShareable: challengeCertificates.isShareable,
-      shareTokenHash: challengeCertificates.shareTokenHash,
-      verificationCodeNonce: challengeCertificates.verificationCodeNonce,
-      verificationHmacKeyId: challengeCertificates.verificationHmacKeyId,
-      verificationCodeHmac: challengeCertificates.verificationCodeHmac,
-      metricsJson: challengeCertificates.metricsJson,
-      downloadedAt: challengeCertificates.downloadedAt,
-    })
-    .from(challengeCertificates)
-    .where(eq(challengeCertificates.id, certificateId))
-    .limit(1);
-
-  if (!cert || cert.userId !== userId) return null;
-
-  const [tmpl] = await db
-    .select({
-      id: challengeCertificateTemplates.id,
-      name: challengeCertificateTemplates.name,
-      headerText: challengeCertificateTemplates.headerText,
-      bodyText: challengeCertificateTemplates.bodyText,
-      includeMetrics: challengeCertificateTemplates.includeMetrics,
-      includeVerificationCode: challengeCertificateTemplates.includeVerificationCode,
-      brandColor: challengeCertificateTemplates.brandColor,
-      logoUrl: challengeCertificateTemplates.logoUrl,
-    })
-    .from(challengeCertificateTemplates)
-    .where(eq(challengeCertificateTemplates.id, cert.templateId))
-    .limit(1);
-
-  const [challenge] = await db
-    .select({
-      id: challenges.id,
-      name: challenges.name,
-      slug: challenges.slug,
-    })
-    .from(challenges)
-    .where(eq(challenges.id, cert.challengeId))
-    .limit(1);
-
-  return {
-    cert: toTraderCertificateRow(cert as Record<string, unknown>),
-    tmpl: tmpl ?? null,
-    challenge: challenge ?? null,
-  };
-}
-
-async function handleCertificateDetail(req: any, res: any) {
-  try {
-    const cfg = await getRecruitmentConfig();
-    if (!cfg.traderCompeteEnabled) return res.status(403).json({ message: "TRADER_COMPETE_DISABLED" });
-    if (!cfg.challengeCertificatesEnabled) return res.status(403).json({ message: "CERTIFICATES_DISABLED" });
-
-    const userId = Number(req.session?.userId || 0);
-    const parsed = certificateIdSchema.safeParse({ id: req.params.id });
-    if (!parsed.success) return res.status(400).json({ message: "INVALID_CERTIFICATE_ID" });
-
-    const bundle = await getOwnedCertificateBundle(userId, parsed.data.id);
-    if (!bundle) return res.status(404).json({ message: "CERTIFICATE_NOT_FOUND" });
-
-    return res.json({ ok: true, certificate: bundle.cert, template: bundle.tmpl, challenge: bundle.challenge });
-  } catch (error) {
-    console.error("[trader-talent] certificate get error:", error);
-    return res.status(500).json({ message: "FAILED_TO_FETCH_CERTIFICATE" });
-  }
-}
-
-traderTalentRouter.get("/challenges/certificates/:id", handleCertificateDetail);
-traderTalentRouter.get("/challenges/certificate/:id", handleCertificateDetail);
-
-traderTalentRouter.get("/challenges/certificate/:id/download", async (req, res) => {
-  try {
-    const cfg = await getRecruitmentConfig();
-    const challengeCfg = await getSystemChallengeConfig();
-    if (!cfg.traderCompeteEnabled) return res.status(403).json({ message: "TRADER_COMPETE_DISABLED" });
-    if (!cfg.challengeCertificatesEnabled) return res.status(403).json({ message: "CERTIFICATES_DISABLED" });
-    if (!cfg.challengeCertificatesDownloadable) return res.status(403).json({ message: "CERTIFICATE_DOWNLOAD_DISABLED" });
-
-    const userId = Number(req.session?.userId || 0);
-    const parsed = certificateIdSchema.safeParse({ id: req.params.id });
-    if (!parsed.success) return res.status(400).json({ message: "INVALID_CERTIFICATE_ID" });
-
-    const bundle = await getOwnedCertificateBundle(userId, parsed.data.id);
-    if (!bundle) return res.status(404).json({ message: "CERTIFICATE_NOT_FOUND" });
-    if (!bundle.cert.isDownloadable) return res.status(403).json({ message: "CERTIFICATE_NOT_DOWNLOADABLE" });
-
-    const ts = nowSec();
-    await db
-      .update(challengeCertificates)
-      .set({ downloadedAt: ts })
-      .where(eq(challengeCertificates.id, bundle.cert.id));
-
-    let parsedMetrics: Record<string, unknown> = {};
-    try {
-      parsedMetrics = JSON.parse(String(bundle.cert.metricsJson || "{}")) as Record<string, unknown>;
-    } catch {}
-
-    const issuedIso = new Date(Number(bundle.cert.issuedAt || 0) * 1000).toISOString();
-    const bodyText = String(bundle.tmpl?.bodyText ?? "")
-      .replaceAll("{{challenge_name}}", String(bundle.challenge?.name ?? "Challenge"))
-      .replaceAll("{{completion_date}}", issuedIso.split("T")[0] || issuedIso)
-      .replaceAll("{{certificate_id}}", String(bundle.cert.id))
-      .replaceAll("{{verification_code}}", String(bundle.cert.verificationCode ?? ""));
-    const verificationUrl = `${req.protocol}://${req.get("host")}/api/public/trader/challenges/certificate/${encodeURIComponent(
-      String(bundle.cert.verificationCode ?? ""),
-    )}/verify`;
-    const includeVerificationCode = bundle.tmpl?.includeVerificationCode !== false;
-    const includeMetrics = bundle.tmpl?.includeMetrics !== false;
-    const includeQr =
-      Boolean(challengeCfg.challengeCertificateIncludeQrDefault) &&
-      Boolean(bundle.cert.isShareable) &&
-      includeVerificationCode;
-
-    const pdf = renderChallengeCertificatePdf({
-      certificateId: Number(bundle.cert.id),
-      challengeName: String(bundle.challenge?.name ?? "Unknown Challenge"),
-      templateName: String(bundle.tmpl?.name ?? "Default"),
-      headerText: String(bundle.tmpl?.headerText || "Completion Certificate"),
-      bodyText: bodyText || "This certifies successful completion of the challenge assessment.",
-      issuedIso,
-      brandColor: bundle.tmpl?.brandColor == null ? null : String(bundle.tmpl.brandColor),
-      logoUrl: bundle.tmpl?.logoUrl == null ? null : String(bundle.tmpl.logoUrl),
-      includeMetrics,
-      includeVerificationCode,
-      includeQr,
-      verificationCode: String(bundle.cert.verificationCode ?? ""),
-      verificationUrl,
-      metrics: parsedMetrics,
-    });
-    res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Disposition", `attachment; filename=\"challenge-certificate-${bundle.cert.id}.pdf\"`);
-    res.setHeader("Content-Length", String(pdf.byteLength));
-    return res.status(200).send(pdf);
-  } catch (error) {
-    console.error("[trader-talent] certificate download error:", error);
-    return res.status(500).json({ message: "FAILED_TO_DOWNLOAD_CERTIFICATE" });
-  }
+registerTraderTalentCertificateRoutes(traderTalentRouter, traderTalentPublicRouter, {
+  nowSec,
+  consumeChallengeRateLimit,
+  getRecruitmentConfig,
+  toTraderCertificateRow,
 });
-
-async function handleCertificateVerify(req: any, res: any) {
-  try {
-    const cfg = await getRecruitmentConfig();
-    if (!cfg.challengeCertificatesEnabled) return res.status(403).json({ message: "CERTIFICATES_DISABLED" });
-    if (!cfg.challengeCertificatesShareable) return res.status(403).json({ message: "CERTIFICATE_SHARE_DISABLED" });
-
-    const rate = consumeChallengeRateLimit(`challenge-cert-verify:${req.ip}`, 60, 60_000);
-    if (!rate.allowed) {
-      res.setHeader("Retry-After", String(rate.retryAfterSec));
-      return res.status(429).json({
-        message: "RATE_LIMITED",
-        code: "CHALLENGE_CERT_VERIFY_RATE_LIMIT",
-        retryAfterSec: rate.retryAfterSec,
-      });
-    }
-
-    const legacyCode = String(req.params.code || req.params.verificationCode || "").trim();
-    const code = legacyCode.toUpperCase();
-    if (!legacyCode || legacyCode.length < 16) return res.status(400).json({ message: "INVALID_CODE" });
-
-    const certSelect = {
-      id: challengeCertificates.id,
-      userId: challengeCertificates.userId,
-      challengeId: challengeCertificates.challengeId,
-      enrollmentId: challengeCertificates.enrollmentId,
-      templateId: challengeCertificates.templateId,
-      issuedAt: challengeCertificates.issuedAt,
-      isShareable: challengeCertificates.isShareable,
-      verificationCodeNonce: challengeCertificates.verificationCodeNonce,
-      verificationHmacKeyId: challengeCertificates.verificationHmacKeyId,
-      verificationCodeHmac: challengeCertificates.verificationCodeHmac,
-      metricsJson: challengeCertificates.metricsJson,
-    } as const;
-
-    let cert: any = null;
-    const keyId = parseVerificationCodeKeyId(code);
-    if (keyId) {
-      const codeHmac = computeVerificationCodeHmac(code, keyId);
-      const [row] = await db
-        .select(certSelect)
-        .from(challengeCertificates)
-        .where(and(eq(challengeCertificates.verificationCodeHmac, codeHmac), eq(challengeCertificates.verificationHmacKeyId, keyId)))
-        .limit(1);
-      cert = row ?? null;
-    }
-
-    if (!cert) {
-      const [legacyRow] = await db
-        .select(certSelect)
-        .from(challengeCertificates)
-        .where(eq(challengeCertificates.verificationCodeHmac, legacyCode))
-        .limit(1);
-      cert = legacyRow ?? null;
-    }
-
-    if (!cert) return res.status(404).json({ message: "NOT_FOUND" });
-    if (!cert.isShareable) return res.status(404).json({ message: "NOT_FOUND" });
-
-    const publicCert = toTraderCertificateRow(cert as Record<string, unknown>) as Record<string, unknown>;
-
-    const [u] = await db.select({ username: users.username }).from(users).where(eq(users.id, cert.userId)).limit(1);
-    const [ch] = await db.select({ name: challenges.name }).from(challenges).where(eq(challenges.id, cert.challengeId)).limit(1);
-
-    return res.json({
-      ok: true,
-      certificate: {
-        id: cert.id,
-        issuedAt: cert.issuedAt,
-        challengeId: cert.challengeId,
-        challengeName: ch?.name ?? null,
-        userId: cert.userId,
-        username: u?.username ?? null,
-        verificationCode: publicCert.verificationCode ?? code,
-        metricsJson: cert.metricsJson,
-      },
-    });
-  } catch (error) {
-    console.error("[trader-talent] certificate verify error:", error);
-    return res.status(500).json({ message: "FAILED_TO_VERIFY_CERT" });
-  }
-}
-
-traderTalentPublicRouter.get("/challenges/certificates/verify/:code", handleCertificateVerify);
-traderTalentPublicRouter.get("/challenges/certificate/:verificationCode/verify", handleCertificateVerify);
 
 export { traderTalentRouter, traderTalentPublicRouter };

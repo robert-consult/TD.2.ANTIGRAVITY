@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { db, dbClient } from "@db";
 import { eq, and, or, desc, sql, asc, lt, gt, gte, lte, isNull, inArray } from "drizzle-orm";
 import bcrypt from "bcryptjs";
@@ -64,6 +63,10 @@ export type SignupFingerprintData = {
   regionKeySelected?: string;
 };
 
+export type TradeWithSymbol = Trade & {
+  symbol: SymbolConfig | null;
+};
+
 type CreateUserInput = {
   email: string;
   username: string;
@@ -77,6 +80,16 @@ type CreateUserInput = {
   phone?: string | null;
   fingerprint?: SignupFingerprintData;
 };
+
+function isDateValue(value: unknown): value is Date {
+  return value instanceof Date;
+}
+
+function toDateFromEpochValue(value: unknown): Date {
+  if (isDateValue(value)) return value;
+  const numeric = Number(value ?? 0);
+  return new Date(numeric * 1000);
+}
 
 async function insertUserWithTx(tx: any, userData: CreateUserInput): Promise<User> {
   const passwordHash = await bcrypt.hash(userData.password, 10);
@@ -369,25 +382,27 @@ export const storage = {
   },
 
   // Trade operations
-  async createTrade(data: Omit<InsertTrade, "profit" | "status" | "closedAt">): Promise<Trade> {
+  async createTrade(data: Omit<typeof trades.$inferInsert, "profit" | "status" | "closedAt"> & { type: string }): Promise<Trade> {
     const orderType = data.orderType || "Market";
     // Case-insensitive check for market orders (handles MARKET, Market, market)
     const isMarketOrder = orderType.toLowerCase() === "market";
     const status = isMarketOrder ? "OPEN" : "PENDING";
     const nowSec = Math.floor(Date.now() / 1000);
     
+    const tradeValues: typeof trades.$inferInsert = {
+      ...data,
+      type: data.type,
+      status,
+      executedAt: isMarketOrder ? nowSec : null,
+    };
     const [trade] = await db
       .insert(trades)
-      .values({
-        ...data,
-        status,
-        executedAt: isMarketOrder ? nowSec : undefined,
-      })
+      .values(tradeValues)
       .returning();
     return trade;
   },
 
-  async getTradesByUserId(userId: number): Promise<Trade[]> {
+  async getTradesByUserId(userId: number): Promise<TradeWithSymbol[]> {
     return await db.query.trades.findMany({
       where: eq(trades.userId, userId),
       orderBy: [desc(trades.openedAt)],
@@ -397,7 +412,7 @@ export const storage = {
     });
   },
 
-  async getTradeHistoryByUserId(userId: number): Promise<Trade[]> {
+  async getTradeHistoryByUserId(userId: number): Promise<TradeWithSymbol[]> {
     return await db.query.trades.findMany({
       where: and(
         eq(trades.userId, userId),
@@ -410,7 +425,7 @@ export const storage = {
     });
   },
 
-  async getOpenTradesByUserId(userId: number): Promise<Trade[]> {
+  async getOpenTradesByUserId(userId: number): Promise<TradeWithSymbol[]> {
     return await db.query.trades.findMany({
       where: and(eq(trades.userId, userId), eq(trades.status, "OPEN")),
       orderBy: [desc(trades.openedAt)],
@@ -420,7 +435,7 @@ export const storage = {
     });
   },
 
-  async getPendingTradesByUserId(userId: number): Promise<Trade[]> {
+  async getPendingTradesByUserId(userId: number): Promise<TradeWithSymbol[]> {
     return await db.query.trades.findMany({
       where: and(eq(trades.userId, userId), eq(trades.status, "PENDING")),
       orderBy: [desc(trades.openedAt)],
@@ -430,7 +445,7 @@ export const storage = {
     });
   },
 
-  async getTradeById(id: number): Promise<Trade | undefined> {
+  async getTradeById(id: number): Promise<TradeWithSymbol | undefined> {
     return await db.query.trades.findFirst({
       where: eq(trades.id, id),
       with: {
@@ -762,7 +777,7 @@ export const storage = {
     if (!latestLogin) return null;
     
     const logoutAtSec = Math.floor(Date.now() / 1000);
-    const loginAtSec = latestLogin.createdAt instanceof Date
+    const loginAtSec = isDateValue(latestLogin.createdAt)
       ? Math.floor(latestLogin.createdAt.getTime() / 1000)
       : Math.floor(Number(latestLogin.createdAt) || 0);
     const sessionLengthSec = Math.max(0, logoutAtSec - loginAtSec);
@@ -842,8 +857,8 @@ export const storage = {
     for (const session of activeSessions) {
       if (session.userId && !onlineUserIds.has(session.userId)) {
         onlineUserIds.add(session.userId);
-        const loginTime = session.createdAt instanceof Date 
-          ? session.createdAt 
+        const loginTime = isDateValue(session.createdAt)
+          ? session.createdAt
           : new Date(Number(session.createdAt) * 1000);
         const sessionDuration = Math.round((now - loginTime.getTime()) / 1000);
         
@@ -934,8 +949,8 @@ export const storage = {
     
     // Most recent login
     const lastLogin = logins[0];
-    const lastLoginTime = lastLogin.createdAt instanceof Date 
-      ? lastLogin.createdAt 
+    const lastLoginTime = isDateValue(lastLogin.createdAt)
+      ? lastLogin.createdAt
       : new Date(Number(lastLogin.createdAt) * 1000);
     
     // Find last logout (most recent logoutAt that exists)
@@ -943,7 +958,7 @@ export const storage = {
     let lastLogoutTime: Date | null = null;
     if (loginsWithLogout.length > 0) {
       const lo = loginsWithLogout[0].logoutAt;
-      lastLogoutTime = lo instanceof Date ? lo : new Date(Number(lo) * 1000);
+      lastLogoutTime = isDateValue(lo) ? lo : new Date(Number(lo) * 1000);
     }
     
     // Sum up all session lengths
@@ -991,15 +1006,15 @@ export const storage = {
       const userId = parseInt(userIdStr);
       const logins = loginsByUser[userId];
       const lastLogin = logins[0];
-      const lastLoginTime = lastLogin.createdAt instanceof Date 
-        ? lastLogin.createdAt 
+      const lastLoginTime = isDateValue(lastLogin.createdAt)
+        ? lastLogin.createdAt
         : new Date(Number(lastLogin.createdAt) * 1000);
       
       const loginsWithLogout = logins.filter((l: typeof lastLogin) => l.logoutAt);
       let lastLogoutTime: Date | null = null;
       if (loginsWithLogout.length > 0) {
         const lo = loginsWithLogout[0].logoutAt;
-        lastLogoutTime = lo instanceof Date ? lo : new Date(Number(lo) * 1000);
+        lastLogoutTime = isDateValue(lo) ? lo : new Date(Number(lo) * 1000);
       }
       
       const totalSessionLengthSec = logins.reduce((sum: number, l: typeof lastLogin) => sum + (l.sessionLengthSec || 0), 0);
@@ -1188,8 +1203,8 @@ export const storage = {
 
     // Sort by timestamp descending and limit
     timeline.sort((a, b) => {
-      const aTime = a.timestamp instanceof Date ? a.timestamp.getTime() : Number(a.timestamp) * 1000;
-      const bTime = b.timestamp instanceof Date ? b.timestamp.getTime() : Number(b.timestamp) * 1000;
+      const aTime = isDateValue(a.timestamp) ? a.timestamp.getTime() : Number(a.timestamp) * 1000;
+      const bTime = isDateValue(b.timestamp) ? b.timestamp.getTime() : Number(b.timestamp) * 1000;
       return bTime - aTime;
     });
 
@@ -1699,7 +1714,7 @@ export const storage = {
       deviceType: data.deviceType ?? null,
       browser: data.browser ?? null,
       os: data.os ?? null,
-      expiresAt: data.expiresAt ?? null,
+      expiresAt: data.expiresAt ? Math.floor(toDateFromEpochValue(data.expiresAt).getTime() / 1000) : null,
     }).returning();
     return session;
   },
@@ -1803,4 +1818,3 @@ export const storage = {
     };
   },
 };
-// @ts-nocheck

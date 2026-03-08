@@ -1,4 +1,3 @@
-// @ts-nocheck
 import type { Router, NextFunction, Request, Response } from "express";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
@@ -397,7 +396,7 @@ router.post("/api/auth/login", async (req: Request, res: Response) => {
     });
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return res.status(400).json({ message: "Invalid input data", errors: error.errors });
+      return res.status(400).json({ message: "Invalid input data", errors: error.issues });
     }
     console.error("Login error:", error);
     res.status(500).json({ message: "Internal server error" });

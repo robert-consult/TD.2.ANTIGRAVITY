@@ -1,4 +1,3 @@
-// @ts-nocheck
 import type { Router, NextFunction, Request, Response } from "express";
 import { z } from "zod";
 import crypto from "crypto";
@@ -89,7 +88,7 @@ router.get("/api/profile/sessions", ensureAuth, async (req: Request, res: Respon
 // Terminate specific session (revoke with audit trail)
 router.delete("/api/profile/sessions/:sessionId", ensureAuth, async (req: Request, res: Response) => {
   try {
-    const { sessionId } = req.params;
+    const sessionId = Array.isArray(req.params.sessionId) ? req.params.sessionId[0] : req.params.sessionId;
 
     if (sessionId === req.sessionID) {
       return res.status(400).json({ message: "Cannot terminate current session. Use logout instead." });

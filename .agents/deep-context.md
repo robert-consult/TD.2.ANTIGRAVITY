@@ -7,6 +7,7 @@ Use this file to locate the right entrypoints quickly; do not “read the whole 
 
 ## Start here (always)
 - Repo router: `AGENTS.md`
+- Audit/decomposition policy: `.agents/audit-decomposition.md`
 - Shared-first router: `.agents/shared-services.md`
 - Routes architecture router: `server/routes/AGENTS.md`
 - Structure guide: `PROJECT_STRUCTURE.md`

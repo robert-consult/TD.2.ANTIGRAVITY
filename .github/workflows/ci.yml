@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  pull_request:
+    paths-ignore:
+      - "REPORTS AND REVIEWS/**"
+      - "**/*.md"
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - "REPORTS AND REVIEWS/**"
+      - "**/*.md"
+
+jobs:
+  app-ci:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+      - run: npm ci
+      - run: npm run check
+      - run: npm run build

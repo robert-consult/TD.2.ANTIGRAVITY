@@ -10,6 +10,7 @@ React + Vite frontend for TradeQuip. It consumes `/api/*` and `/ws` and must sta
   - client hooks/pages using the contract
   - E2E coverage where applicable (`e2e/`)
 - Treat `/ws` payload size as a first-class constraint (high fanout).
+- For audits, decomposition reviews, and maintainability critiques, read `../.agents/audit-decomposition.md` first. Protect quote-heavy UI behavior and do not recommend size-only splits that increase render churn or effect complexity.
 
 ## Key entrypoints
 - Routing/pages: `client/src/pages/`, `client/src/App.tsx`
@@ -26,4 +27,3 @@ React + Vite frontend for TradeQuip. It consumes `/api/*` and `/ws` and must sta
 - Typecheck: `npm run check`
 - Build: `npm run build`
 - If you changed trading/auth/ws flows: `npm run e2e`
-

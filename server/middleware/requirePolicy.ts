@@ -14,9 +14,8 @@ export type PolicyActionResolver = PolicyAction | ((req: PolicyEnforcedRequest) 
 
 export function requirePolicy(action: PolicyActionResolver) {
   return async (req: PolicyEnforcedRequest, res: Response, next: NextFunction) => {
-    const userId = (req.session as any)?.userId;
-    
-    if (!userId) {
+    const sessionUserId = Number(req.session?.userId);
+    if (!Number.isInteger(sessionUserId) || sessionUserId <= 0) {
       return res.status(401).json({ message: "Not authenticated" });
     }
 
@@ -26,7 +25,7 @@ export function requirePolicy(action: PolicyActionResolver) {
       const resolvedAction = typeof action === "function" ? action(req) : action;
 
       const ctx = await buildDecisionContext({
-        userId,
+        userId: sessionUserId,
         nowMs: Date.now(),
         request: {
           correlationId: auditCtx.correlationId,
@@ -47,7 +46,7 @@ export function requirePolicy(action: PolicyActionResolver) {
       if (!decision.allowed) {
         try {
           appendIdentityAudit({
-            userId,
+            userId: sessionUserId,
             email: ctx.user.email,
             username: ctx.user.username ?? undefined,
             category: "POLICY",

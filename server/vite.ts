@@ -1,4 +1,3 @@
-// @ts-nocheck
 import express, { type Express } from "express";
 import fs from "fs";
 import path from "path";
@@ -24,7 +23,7 @@ export async function setupVite(app: Express, server: Server) {
   const serverOptions = {
     middlewareMode: true,
     hmr: { server },
-    allowedHosts: true,
+    allowedHosts: true as const,
   };
 
   const vite = await createViteServer({

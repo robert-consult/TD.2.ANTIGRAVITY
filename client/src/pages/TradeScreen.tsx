@@ -1,6 +1,5 @@
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { z } from "zod";
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import parseDate from "../utils/parseDate";
 import { apiRequest } from "@/lib/queryClient";
@@ -11,11 +10,8 @@ import { useTrades } from "@/hooks/use-trades";
 import { useAccountSummary } from "@/hooks/use-account-summary";
 import { usePendingOrders } from "@/hooks/usePendingOrders";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Form, FormControl, FormField, FormItem, FormLabel } from "@/components/ui/form";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Table,
   TableHeader,
@@ -32,31 +28,26 @@ import { getTradeErrorToast } from "@/lib/tradeErrorMessages";
 import { useLiveUpdates } from "@/live/LiveUpdatesProvider";
 import { useLotSettings } from "@/hooks/use-lot-settings";
 import { getPipSize, getQuoteDecimals } from "@shared/pips";
-
-interface TradeScreenProps {
-  selectedSymbol: string;
-  currentPrice?: number;
-}
-
-const tradeFormSchema = z.object({
-  lots: z.string().refine(
-    (val) => !isNaN(Number(val)) && Number(val) >= 1 && Number(val) <= 50 && Number.isInteger(Number(val)), {
-    message: "Lots must be a whole number between 1 and 50",
-  }),
-  takeProfit: z.string().optional(),
-  stopLoss: z.string().optional(),
-  limitPrice: z.string().optional(),
-  stopPrice: z.string().optional(),
-});
-
-type TradeFormValues = z.infer<typeof tradeFormSchema>;
-
-function accountValueToneClass(value: number | null | undefined, baseline: number | null): string {
-  if (!Number.isFinite(Number(value)) || baseline == null) return "text-white";
-  if (Number(value) > baseline) return "text-green-400";
-  if (Number(value) < baseline) return "text-red-400";
-  return "text-white";
-}
+import {
+  MARKET_TIME_IN_FORCE_VALUES,
+  PENDING_TIME_IN_FORCE_VALUES,
+  normalizeTimeInForce,
+} from "@shared/trading/timeInForce";
+import { formatUnixSecondsToLocaleString, unixSecondsToLocalDateTimeInput } from "@shared/time/format";
+import { toFiniteNumber as parseFiniteNumber } from "@shared/scalars";
+import {
+  formatTemplate,
+  getOrderTypeLabel,
+  getPendingOrderLabel,
+  getSideLabel,
+  toastTemplates,
+  TradeActionBar,
+  TradeOrderTab,
+  tradeFormSchema,
+} from "./trade-screen/OrderPanel";
+import type { TradeFormValues } from "./trade-screen/OrderPanel";
+import { accountValueToneClass } from "./trade-screen/types";
+import type { SymbolConfig, Trade, TradeScreenProps } from "./trade-screen/types";
 
 export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScreenProps) {
   const [orderType, setOrderType] = useState<string>("Market");
@@ -718,122 +709,6 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
     };
   }, [activeTab, ordersContainerWidth, isLoadingPending, pendingOrdersCount]);
 
-  const formatTemplate = (template: string, vars: Record<string, string | number | boolean | null | undefined>) =>
-    template.replace(/\{([a-zA-Z0-9_]+)\}/g, (_m, key: string) => {
-      const v = vars?.[key];
-      return v === null || v === undefined ? "" : String(v);
-    });
-
-  const sideLabels: Record<string, { label: string }> = {
-    BUY: { label: "Buy" },
-    SELL: { label: "Sell" },
-  };
-
-  const orderTypeLabels: Record<string, { label: string }> = {
-    market: { label: "Market" },
-    limit: { label: "Limit" },
-    stop: { label: "Stop" },
-    unknown: { label: "Unknown" },
-  };
-
-  const pendingOrderLabels: Record<string, Record<string, { label: string }>> = {
-    BUY: {
-      limit: { label: "Buy Limit" },
-      stop: { label: "Buy Stop" },
-    },
-    SELL: {
-      limit: { label: "Sell Limit" },
-      stop: { label: "Sell Stop" },
-    },
-  };
-  const toastTemplates = {
-    orderPlaced: { text: "Successfully placed a {side} order for {symbol}" },
-    tradeExecutedTitle: { text: "Trade Executed" },
-    tradeErrorTitle: { text: "Trade Error" },
-    missingTradeInfo: { text: "Missing required trade information" },
-    marketPriceMissing: { text: "Current price is not available for market order" },
-    limitPriceMissing: { text: "Please enter a valid limit price" },
-    stopPriceMissing: { text: "Please enter a valid stop price" },
-    invalidOrderType: { text: "Invalid order type" },
-  };
-
-  const getSideLabel = (side: unknown): string => {
-    const key = String(side ?? "").trim().toUpperCase();
-    if (!key) return "—";
-    return sideLabels[key]?.label ?? key;
-  };
-
-  const getOrderTypeLabel = (type: unknown): string => {
-    const raw = String(type ?? "").trim();
-    if (!raw) return orderTypeLabels.unknown.label;
-    const key = raw.toLowerCase();
-    return orderTypeLabels[key]?.label ?? raw;
-  };
-
-  const getPendingOrderLabel = (side: "BUY" | "SELL", type: unknown): string => {
-    const sideKey = String(side ?? "").trim().toUpperCase();
-    const typeKey = String(type ?? "").trim().toLowerCase();
-    const direct = pendingOrderLabels[sideKey]?.[typeKey]?.label;
-    if (direct) return direct;
-    const sideLabel = getSideLabel(sideKey);
-    const typeLabel = getOrderTypeLabel(typeKey);
-    return `${sideLabel} ${typeLabel}`.trim();
-  };
-
-  // Define symbol config type
-  interface SymbolConfig {
-    id: number;
-    symbol: string;
-    name: string;
-    category?: string | null;
-    baseCurrency?: string;
-    quoteCurrency?: string;
-    spread?: number;
-    minSpreadPips: number;
-    pipDecimals?: number | null;
-    quoteDecimals?: number | null;
-    enabled: boolean;
-    minLot: number;
-    maxLot: number;
-  }
-
-  // Define trade type
-  interface Trade {
-    id: number;
-    symbolId: number;
-    userId: number;
-    type: 'BUY' | 'SELL';
-    orderType: string;
-    status: string;
-    size: number;
-    lots: number;
-    openPrice: number;
-    closePrice: number | null;
-    profit: string | null;
-    grossProfitUsd?: number | null;
-    netProfitUsd?: number | null;
-    notionalUsd?: number | null;
-    totalCostsUsd?: number | null;
-    openCommissionUsd?: number | null;
-    closeCommissionUsd?: number | null;
-    openOtherFeesUsd?: number | null;
-    closeOtherFeesUsd?: number | null;
-    financingAccruedUsd?: number | null;
-    swapAccruedUsd?: number | null;
-    overnightDays?: number | null;
-    categorySnapshot?: string | null;
-    costModelVersion?: string | null;
-    takeProfit: number | null;
-    stopLoss: number | null;
-    limitPrice: number | null;
-    stopPrice: number | null;
-    createdAt: Date | string | number;
-    updatedAt: Date | string | number;
-    closedAt: Date | string | number | null;
-    openedAt?: Date | string | number | null;
-    executedAt?: Date | string | number | null;
-  }
-
   // Get selected symbol data
   const { data: symbols = [] } = useQuery<SymbolConfig[]>({
     queryKey: ["/api/config/symbols"],
@@ -890,14 +765,8 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
   // --- App-grade order/target styling + validation (TP/SL wrong-side warnings) ---
   const showTargetValidation = true;
 
-  const toFiniteNumber = (value: unknown): number | null => {
-    if (value === null || value === undefined || value === "") return null;
-    const n = typeof value === "number" ? value : Number(value);
-    return Number.isFinite(n) ? n : null;
-  };
-
   const formatPx = (value: unknown, symbol: string): string => {
-    const n = toFiniteNumber(value);
+    const n = parseFiniteNumber(value);
     if (n === null) return "-";
     const cfg = symbolCfgBySymbol.get(symbol);
     const decimals = getQuoteDecimals({
@@ -963,7 +832,7 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
     side: "BUY" | "SELL",
     entry: number | null
   ) => {
-    const v = toFiniteNumber(rawValue);
+    const v = parseFiniteNumber(rawValue);
     if (v === null) return <span className="text-gray-500">-</span>;
 
     const valid = showTargetValidation ? isTargetValid(side, entry, v, kind) : null;
@@ -1003,6 +872,8 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
       stopLoss: "",
       limitPrice: "",
       stopPrice: "",
+      timeInForce: "GTC",
+      expiresAt: "",
     },
   });
 
@@ -1014,6 +885,8 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
       stopLoss: "",
       limitPrice: "",
       stopPrice: "",
+      timeInForce: "GTC",
+      expiresAt: "",
     });
   }, [selectedSymbol, form]);
 
@@ -1035,6 +908,30 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
     setAutoTp(true);
     setAutoSl(true);
   }, [orderType, pendingSide]);
+
+  const timeInForceValue = normalizeTimeInForce(form.watch("timeInForce"), "GTC");
+
+  useEffect(() => {
+    const allowedValues = orderType === "Market" ? MARKET_TIME_IN_FORCE_VALUES : PENDING_TIME_IN_FORCE_VALUES;
+    const allowed = new Set<string>(allowedValues);
+    if (!allowed.has(timeInForceValue)) {
+      form.setValue("timeInForce", allowedValues[0], { shouldDirty: true, shouldValidate: true });
+    }
+    if (orderType === "Market") {
+      form.setValue("expiresAt", "", { shouldDirty: true, shouldValidate: true });
+    }
+  }, [form, orderType, timeInForceValue]);
+
+  useEffect(() => {
+    if (orderType === "Market" || timeInForceValue !== "GTD") return;
+    const current = String(form.getValues("expiresAt") ?? "").trim();
+    if (current) return;
+    const defaultExpirySec = Math.floor(Date.now() / 1000) + 3600;
+    form.setValue("expiresAt", unixSecondsToLocalDateTimeInput(defaultExpirySec), {
+      shouldDirty: true,
+      shouldValidate: true,
+    });
+  }, [form, orderType, timeInForceValue]);
 
   // Auto-suggest entry/TP/SL prices for pending orders.
   useEffect(() => {
@@ -1135,6 +1032,8 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
       orderType: string;
       lots: number;
       openPrice: number;
+      timeInForce?: string;
+      expiresAt?: string;
       takeProfit?: number;
       stopLoss?: number;
       limitPrice?: number;
@@ -1166,6 +1065,8 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
         stopLoss: "",
         limitPrice: "",
         stopPrice: "",
+        timeInForce: "GTC",
+        expiresAt: "",
       });
       setTradeDirection(null);
 
@@ -1199,6 +1100,17 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
     const lots = Number(values.lots);
     const takeProfit = values.takeProfit ? Number(values.takeProfit) : undefined;
     const stopLoss = values.stopLoss ? Number(values.stopLoss) : undefined;
+    const timeInForce = normalizeTimeInForce(values.timeInForce, "GTC");
+    const expiresAt = String(values.expiresAt ?? "").trim();
+
+    if (orderType !== "Market" && timeInForce === "GTD" && !expiresAt) {
+      toast({
+        title: toastTemplates.tradeErrorTitle.text,
+        description: "Please choose when the GTD pending order should expire.",
+        variant: "destructive",
+      });
+      return;
+    }
 
     // Handle different order types
     let openPrice: number;
@@ -1255,6 +1167,7 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
       type: effectiveDirection,
       lots: Number(values.lots),
       orderType: orderType,
+      timeInForce,
       // Only include openPrice for Market orders (pending orders don't have it yet)
       ...(orderType === "Market" && { openPrice: openPrice }),
     };
@@ -1274,6 +1187,9 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
     }
     if (values.stopLoss) {
       tradeRequest.stopLoss = Number(values.stopLoss);
+    }
+    if (orderType !== "Market" && timeInForce === "GTD" && expiresAt) {
+      tradeRequest.expiresAt = new Date(expiresAt).toISOString();
     }
 
     executeTrade.mutate(tradeRequest);
@@ -1532,282 +1448,23 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
             </TabsTrigger>
           </TabsList>
 
-          {/* Place Order Tab */}
-		          <TabsContent value="place-order" className="p-0 m-0 flex-1 min-h-0">
-		            <div className="flex flex-col lg:flex-row h-full min-h-0">
-		              {/* Order form */}
-		              <div className="w-full flex flex-col h-full min-h-0">
-		                <div className="p-4 flex-1 flex flex-col min-h-0">
-		                  <Form {...form}>
-		                    <form
-                          id="trade-order-form"
-                          onSubmit={form.handleSubmit(onSubmit)}
-                          className="flex flex-col flex-1"
-                        >
-		                      <div className="space-y-5">
-		                      <div className="space-y-2">
-                        <FormLabel>Order Type</FormLabel>
-                        <div className="flex space-x-2">
-                          <Button
-                            type="button"
-                            variant={orderType === "Market" ? "default" : "outline"}
-                            className={`flex-1 py-2 px-4 ${orderType === "Market"
-                              ? "bg-sky-600 hover:bg-sky-700 border border-sky-500 text-white font-medium"
-                              : "bg-neutral-900 border border-gray-800 text-gray-400 hover:bg-neutral-800"
-                              }`}
-                            onClick={() => setOrderType("Market")}
-                          >
-                            {getOrderTypeLabel("Market")}
-                          </Button>
-                          <Button
-                            type="button"
-                            variant={orderType === "Limit" ? "default" : "outline"}
-                            className={`flex-1 py-2 px-4 ${orderType === "Limit"
-                              ? "bg-sky-600 hover:bg-sky-700 border border-sky-500 text-white font-medium"
-                              : "bg-neutral-900 border border-gray-800 text-gray-400 hover:bg-neutral-800"
-                              }`}
-                            onClick={() => setOrderType("Limit")}
-                          >
-                            {getOrderTypeLabel("Limit")}
-                          </Button>
-                          <Button
-                            type="button"
-                            variant={orderType === "Stop" ? "default" : "outline"}
-                            className={`flex-1 py-2 px-4 ${orderType === "Stop"
-                              ? "bg-sky-600 hover:bg-sky-700 border border-sky-500 text-white font-medium"
-                              : "bg-neutral-900 border border-gray-800 text-gray-400 hover:bg-neutral-800"
-                              }`}
-                            onClick={() => setOrderType("Stop")}
-                          >
-                            {getOrderTypeLabel("Stop")}
-                          </Button>
-                        </div>
-                      </div>
-
-                      {/* BUY/SELL side selector for Limit/Stop orders */}
-                      {orderType !== "Market" && (
-                        <div className="flex gap-2 my-3">
-                          <Button
-                            type="button"
-                            variant={pendingSide === "BUY" ? "default" : "outline"}
-                            className={`flex-1 py-2 ${pendingSide === "BUY"
-                              ? "bg-lime-600 hover:bg-lime-700 text-black font-bold"
-                              : "bg-neutral-900 border border-gray-700 text-gray-400"
-                              }`}
-                            onClick={() => setPendingSide("BUY")}
-                          >
-                            {getPendingOrderLabel("BUY", orderType)}
-                          </Button>
-                          <Button
-                            type="button"
-                            variant={pendingSide === "SELL" ? "default" : "outline"}
-                            className={`flex-1 py-2 ${pendingSide === "SELL"
-                              ? "bg-orange-600 hover:bg-orange-700 text-white font-bold"
-                              : "bg-neutral-900 border border-gray-700 text-gray-400"
-                              }`}
-                            onClick={() => setPendingSide("SELL")}
-                          >
-                            {getPendingOrderLabel("SELL", orderType)}
-                          </Button>
-                        </div>
-                      )}
-
-                      <FormField
-                        control={form.control}
-                        name="lots"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Position Size (Lots)</FormLabel>
-                            <div className="relative">
-                              <Select
-                                value={field.value?.toString() || "1"}
-                                onValueChange={(value) => field.onChange(value)}
-                              >
-                                <FormControl>
-                                  <SelectTrigger className="w-full py-2 pl-3 pr-12 bg-neutral-800 border border-gray-700 rounded-md text-white">
-                                    <SelectValue placeholder="1" />
-                                  </SelectTrigger>
-                                </FormControl>
-                                <SelectContent
-                                  className="w-[4.75rem] min-w-[4.75rem] overflow-y-auto bg-neutral-900 border-gray-700"
-                                  style={{
-                                    // Adaptive viewport fit: keeps ~3 rows minimum on short screens,
-                                    // preserves current desktop max window (~8 visible rows).
-                                    maxHeight: "clamp(6.75rem, calc(100dvh - 24rem), 18rem)",
-                                  }}
-                                >
-                                  {lotDropdownOptions.map((lot) => (
-                                    <SelectItem
-                                      key={lot}
-                                      value={lot.toString()}
-                                      className="h-9 text-sm text-white hover:bg-neutral-800"
-                                    >
-                                      {lot}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                              <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
-                                <span className="text-gray-400">Lots</span>
-                              </div>
-                            </div>
-                            <div className="text-xs text-gray-400 mt-1">
-                              1 lot = $100,000 (${Number(field.value || 1) * 100000} total)
-                            </div>
-                            <div className="mt-2 flex flex-wrap gap-1.5 sm:gap-2">
-                              {lotPresetCards.map((preset) => {
-                                const value = preset.toString();
-                                return (
-                                  <Button
-                                    key={value}
-                                    type="button"
-                                    variant="outline"
-                                    className={`h-9 px-1.5 text-[0.7rem] sm:text-xs leading-none grow shrink basis-[18%] sm:basis-[31%] ${field.value === value
-                                      ? "bg-primary-800 text-white font-medium"
-                                      : "bg-neutral-800 text-gray-300"
-                                      }`}
-                                    onClick={() => handleLotsPreset(value)}
-                                  >
-                                    {value}
-                                  </Button>
-                                );
-                              })}
-                            </div>
-                          </FormItem>
-                        )}
-                      />
-
-                      {/* Limit Price (only shown for Limit orders) */}
-                      {orderType === "Limit" && (
-                        <FormField
-                          control={form.control}
-                          name="limitPrice"
-                          render={({ field }) => (
-                            <FormItem className="mb-5">
-                              <FormLabel>Limit Price</FormLabel>
-                              <div className="relative">
-                                <FormControl>
-                                  <Input
-                                    {...field}
-                                    onFocus={() => setAutoEntry(false)}
-                                    onBlur={() => setAutoEntry(false)}
-                                    className="w-full py-2 pl-3 bg-neutral-800 border border-gray-700 rounded-md text-white placeholder:text-slate-400"
-                                    placeholder={
-                                      currentPrice
-                                        ? currentPrice.toFixed(priceDecimals)
-                                        : "0.0000"
-                                    }
-                                  />
-                                </FormControl>
-                              </div>
-                            </FormItem>
-                          )}
-                        />
-                      )}
-
-                      {/* Stop Price (only shown for Stop orders) */}
-                      {orderType === "Stop" && (
-                        <FormField
-                          control={form.control}
-                          name="stopPrice"
-                          render={({ field }) => (
-                            <FormItem className="mb-5">
-                              <FormLabel>Stop Price</FormLabel>
-                              <div className="relative">
-                                <FormControl>
-                                  <Input
-                                    {...field}
-                                    onFocus={() => setAutoEntry(false)}
-                                    onBlur={() => setAutoEntry(false)}
-                                    className="w-full py-2 pl-3 bg-neutral-800 border border-gray-700 rounded-md text-white placeholder:text-slate-400"
-                                    placeholder={
-                                      currentPrice
-                                        ? currentPrice.toFixed(priceDecimals)
-                                        : "0.0000"
-                                    }
-                                  />
-                                </FormControl>
-                              </div>
-                            </FormItem>
-                          )}
-                        />
-                      )}
-
-                      <div className="space-y-2">
-                        <FormLabel>Take Profit / Stop Loss</FormLabel>
-                        <div
-                          className="grid gap-3"
-                          style={{ gridTemplateColumns: "repeat(auto-fit, minmax(min(16rem, 100%), 1fr))" }}
-                        >
-                          <FormField
-                            control={form.control}
-                            name="takeProfit"
-                            render={({ field }) => (
-                              <FormItem>
-                                <div className="relative">
-                                  <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
-                                    <span className="text-xs font-semibold text-success-500">TP</span>
-                                  </div>
-                                  <FormControl>
-                                    <Input
-                                      {...field}
-                                      onFocus={() => setAutoTp(false)}
-                                      onBlur={() => setAutoTp(false)}
-                                      className="w-full py-2 pl-10 pr-3 bg-neutral-800 border border-gray-700 rounded-md text-white placeholder:text-slate-400 focus-visible:ring-2 focus-visible:ring-primary"
-                                      placeholder={
-                                        currentPrice
-                                          ? (
-                                            currentPrice +
-                                            (currentPrice * 0.01)
-                                          ).toFixed(priceDecimals)
-                                          : "0.00"
-                                      }
-                                    />
-                                  </FormControl>
-                                </div>
-                              </FormItem>
-                            )}
-                          />
-                          <FormField
-                            control={form.control}
-                            name="stopLoss"
-                            render={({ field }) => (
-                              <FormItem>
-                                <div className="relative">
-                                  <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
-                                    <span className="text-xs font-semibold text-danger-500">SL</span>
-                                  </div>
-                                  <FormControl>
-                                    <Input
-                                      {...field}
-                                      onFocus={() => setAutoSl(false)}
-                                      onBlur={() => setAutoSl(false)}
-                                      className="w-full py-2 pl-10 pr-3 bg-neutral-800 border border-gray-700 rounded-md text-white placeholder:text-slate-400 focus-visible:ring-2 focus-visible:ring-primary"
-                                      placeholder={
-                                        currentPrice
-                                          ? (
-                                            currentPrice -
-                                            (currentPrice * 0.01)
-                                          ).toFixed(priceDecimals)
-                                          : "0.00"
-                                      }
-                                    />
-                                  </FormControl>
-                                </div>
-                              </FormItem>
-                            )}
-                          />
-                        </div>
-                      </div>
-
-                      </div>
-
-	                    </form>
-	                  </Form>
-	                </div>
-              </div>
-            </div>
-          </TabsContent>
+          <TradeOrderTab
+            form={form}
+            onSubmit={onSubmit}
+            orderType={orderType}
+            setOrderType={setOrderType}
+            pendingSide={pendingSide}
+            setPendingSide={setPendingSide}
+            timeInForceValue={timeInForceValue}
+            lotDropdownOptions={lotDropdownOptions}
+            lotPresetCards={lotPresetCards}
+            handleLotsPreset={handleLotsPreset}
+            priceDecimals={priceDecimals}
+            currentPrice={currentPrice}
+            setAutoEntry={setAutoEntry}
+            setAutoTp={setAutoTp}
+            setAutoSl={setAutoSl}
+          />
 
           {/* Active Positions Tab */}
 		          <TabsContent
@@ -2112,13 +1769,17 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
                                 ? order.stopPrice
                                 : (order.limitPrice ?? order.stopPrice);
 
-                          const entry = toFiniteNumber(orderPrice);
+                          const entry = parseFiniteNumber(orderPrice);
                           const OrderTypeIcon =
                             orderTypeKey === "stop" ? Zap :
                               orderTypeKey === "limit" ? Layers :
                                 null;
                           const helpText = getOrderTypeHelp(orderTypeKey);
                           const orderTypeDisplay = getOrderTypeLabel(orderTypeLabel);
+                          const orderTimeInForce = normalizeTimeInForce(order.timeInForce, "GTC");
+                          const orderExpiryLabel = order.expiresAt
+                            ? formatUnixSecondsToLocaleString(order.expiresAt)
+                            : null;
 
                           return (
                             <Fragment key={order.id}>
@@ -2132,13 +1793,19 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
                                   {getSideLabel(order.type)}
                                 </TableCell>
                                 <TableCell className="whitespace-nowrap">
-                                  <span
-                                    title={helpText}
-                                    className={`inline-flex items-center rounded-md border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${orderTypePillClass(orderTypeLabel)}`}
-                                  >
-                                    {OrderTypeIcon ? <OrderTypeIcon className="h-3 w-3 mr-1" /> : null}
-                                    {orderTypeDisplay}
-                                  </span>
+                                  <div className="flex flex-col gap-1">
+                                    <span
+                                      title={helpText}
+                                      className={`inline-flex items-center rounded-md border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${orderTypePillClass(orderTypeLabel)}`}
+                                    >
+                                      {OrderTypeIcon ? <OrderTypeIcon className="h-3 w-3 mr-1" /> : null}
+                                      {orderTypeDisplay}
+                                    </span>
+                                    <span className="text-[10px] text-gray-400 uppercase tracking-wide">
+                                      {orderTimeInForce}
+                                      {orderExpiryLabel ? ` · ${orderExpiryLabel}` : ""}
+                                    </span>
+                                  </div>
                                 </TableCell>
                                 {orderColumns.size && (
                                   <TableCell className="whitespace-nowrap">{order.lots} lots</TableCell>
@@ -2207,6 +1874,13 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
                                           <div className="text-white font-mono break-all">{formatPx(orderPrice, orderSymbol)}</div>
                                         </div>
                                       )}
+                                      <div className="min-w-0">
+                                        <span className="text-gray-500 text-xs">Time In Force</span>
+                                        <div className="text-white break-all">
+                                          {orderTimeInForce}
+                                          {orderExpiryLabel ? ` · ${orderExpiryLabel}` : ""}
+                                        </div>
+                                      </div>
                                       {!orderColumns.tpSl && (
                                         <>
                                           <div className="min-w-0">
@@ -2258,74 +1932,19 @@ export default function TradeScreen({ selectedSymbol, currentPrice }: TradeScree
 	        </Tabs>
 	      </div>
 
-        {activeTab === "place-order" && (
-          <div
-            className="tq-trade-action-bar shrink-0 border-t border-gray-800 bg-neutral-900 px-3 sm:px-gutter"
-            style={{
-              paddingTop: "clamp(0.5rem, 1cqi, 0.75rem)",
-              paddingBottom: "calc(env(safe-area-inset-bottom) + clamp(0.5rem, 1cqi, 0.75rem))",
-            }}
-          >
-            {orderType !== "Market" ? (
-              <Button
-                type="submit"
-                form="trade-order-form"
-                className={`w-full py-3 px-4 font-bold shadow-md transition-all ${pendingSide === "BUY"
-                  ? "bg-lime-500 hover:bg-lime-600 text-black"
-                  : "bg-orange-500 hover:bg-orange-600 text-white"
-                  }`}
-                disabled={executeTrade.isPending || !currentPrice}
-                onClick={() => setTradeDirection(pendingSide)}
-              >
-                {executeTrade.isPending ? (
-                  <div className="animate-spin mr-2 h-4 w-4 border-t-2 rounded-full inline-block"></div>
-                ) : null}
-                Place {getPendingOrderLabel(pendingSide, orderType)}
-                {(() => {
-                  const entryPrice = orderType === "Limit"
-                    ? form.getValues("limitPrice")
-                    : form.getValues("stopPrice");
-                  return entryPrice ? (
-                    <span className="text-xs block">@ {entryPrice}</span>
-                  ) : null;
-                })()}
-              </Button>
-            ) : (
-              <div className="flex gap-3">
-                <Button
-                  type="submit"
-                  form="trade-order-form"
-                  className="btn-sell flex-1 min-w-0 py-3 px-4 text-white font-bold bg-orange-500 hover:bg-orange-600 shadow-md transition-all uppercase"
-                  disabled={executeTrade.isPending || !currentPrice}
-                  onClick={() => setTradeDirection("SELL")}
-                >
-                  {executeTrade.isPending && tradeDirection === "SELL" ? (
-                    <div className="animate-spin mr-2 h-4 w-4 border-t-2 border-white rounded-full"></div>
-                  ) : null}
-                  {getSideLabel("SELL")}
-                  {bidPrice && (
-                    <span className="text-xs block">@ {bidPrice.toFixed(priceDecimals)}</span>
-                  )}
-                </Button>
-                <Button
-                  type="submit"
-                  form="trade-order-form"
-                  className="btn-buy flex-1 min-w-0 py-3 px-4 text-black font-bold bg-lime-500 hover:bg-lime-600 shadow-md transition-all uppercase"
-                  disabled={executeTrade.isPending || !currentPrice}
-                  onClick={() => setTradeDirection("BUY")}
-                >
-                  {executeTrade.isPending && tradeDirection === "BUY" ? (
-                    <div className="animate-spin mr-2 h-4 w-4 border-t-2 border-black rounded-full"></div>
-                  ) : null}
-                  {getSideLabel("BUY")}
-                  {askPrice && (
-                    <span className="text-xs block">@ {askPrice.toFixed(priceDecimals)}</span>
-                  )}
-                </Button>
-              </div>
-            )}
-          </div>
-        )}
+        <TradeActionBar
+          activeTab={activeTab}
+          orderType={orderType}
+          pendingSide={pendingSide}
+          currentPrice={currentPrice}
+          executeTradePending={executeTrade.isPending}
+          tradeDirection={tradeDirection}
+          setTradeDirection={setTradeDirection}
+          form={form}
+          bidPrice={bidPrice}
+          askPrice={askPrice}
+          priceDecimals={priceDecimals}
+        />
 	
 	      {/* Edit Trade Modal */}
 	      {editingTrade && (

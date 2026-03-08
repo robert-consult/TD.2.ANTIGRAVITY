@@ -1,0 +1,271 @@
+# Gaps Report: Deep Audit vs. Large Files Audit Report v2
+
+> [!CAUTION]
+> **12 critical gaps** were identified between the original report and the current codebase state. The report is significantly stale and contains both factual errors and major omissions.
+
+---
+
+## Summary Verdict
+
+| Category | Report Claim | Actual State | Severity |
+|----------|-------------|--------------|----------|
+| `@ts-nocheck` debt | 50+ server files | **0 server files** — fully resolved | 🟢 Stale (fixed) |
+| [adminScout.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/adminScout.ts) size | 5,010 lines (monolith) | **Already decomposed** into 6 sub-files (212KB combined) | 🟢 Stale (done) |
+| [schema.pg.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/shared/schema.pg.ts) size | 3,178 lines (monolith) | **Already split** into 6 domain schemas (~145KB combined) | 🟢 Stale (done) |
+| Trader routes | Monolith [traderCore.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/traderCore.ts) | **Partially decomposed** into `trader/` (11 files) — but monolith still 74KB | 🟡 Partially done |
+| Grift routes | Monolith [grift.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/grift.ts) | **Partially decomposed** into `grift-admin/` (2 files) — but monolith still 58KB | 🟡 Partially done |
+| AdminDashboard | 9,129 lines (monolith) | **Already decomposed** into `dashboard/` (9 sub-components, 411KB combined) — but shell still 58KB | 🟡 Partially done |
+| `nowSec()` duplication | 16 files | **50+ files** — count was massively understated | 🔴 Understated |
+| `clampInt()` duplication | 10 files | **20 files** — count understated by 2x | 🔴 Understated |
+| `toFiniteNumber()` duplication | 5 files | **14 files** — count understated by 3x | 🔴 Understated |
+| `normalizeChallengeMailboxCategory()` | 3 files | **10 files** — count understated by 3x | 🔴 Understated |
+| Missed large files | 14 files listed | **25+ files > 30KB** unmentioned | 🔴 Major omission |
+| `server/lib/util.ts` recommendation | "Create as dedup target" | **Still not created** — no centralized util exists | 🔴 Unresolved |
+
+---
+
+## Gap 1: `@ts-nocheck` Debt — Claim is Completely Stale
+
+> [!TIP]
+> The report claimed **50+ server files** use `@ts-nocheck`. A full regex search of the entire codebase shows **zero instances** in any [.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/shared/pips.ts) server file.
+
+The only occurrences found in the entire repo:
+| File | Context |
+|------|---------|
+| [db/fixSchema.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/db/fixSchema.ts) | Database migration script (not server runtime) |
+| `REPORTS AND REVIEWS/routes.BACKUP REFERENCE-DO NOT EDIT.ts` | Dead backup file |
+| [client/vite.plugins/autoI18n.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/vite.plugins/autoI18n.ts) | Build tooling regex (detection, not suppression) |
+
+**Verdict:** The `@ts-nocheck` technical debt has been **fully resolved** since the report was written. The report's recommendations around removing `@ts-nocheck` during refactors are moot.
+
+---
+
+## Gap 2: [adminScout.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/adminScout.ts) — Already Decomposed (Report is Stale)
+
+The report recommends splitting [adminScout.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/adminScout.ts) (5,010 lines) into 7 files. **This has already been done.**
+
+| File | Size |
+|------|------|
+| [adminScout.ts](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/adminScout.ts) (index/composer) | 3,770 B |
+| [adminScout/challenges.ts](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/adminScout/challenges.ts) | 52,285 B |
+| [adminScout/challengeAnalytics.ts](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/adminScout/challengeAnalytics.ts) | 55,677 B |
+| [adminScout/candidates.ts](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/adminScout/candidates.ts) | 40,232 B |
+| [adminScout/partners.ts](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/adminScout/partners.ts) | 23,529 B |
+| [adminScout/support.ts](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/adminScout/support.ts) | 22,801 B |
+| [adminScout/validation.ts](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/adminScout/validation.ts) | 17,919 B |
+
+> [!WARNING]
+> However, the decomposed sub-files are themselves now very large — [challengeAnalytics.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/adminScout/challengeAnalytics.ts) (56KB) and [challenges.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/adminScout/challenges.ts) (52KB) are each larger than many of the "large files" originally flagged. The decomposition moved the problem but **did not solve it**.
+
+---
+
+## Gap 3: [schema.pg.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/shared/schema.pg.ts) — Already Decomposed (Report is Stale)
+
+The report lists [schema.pg.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/shared/schema.pg.ts) at 3,178 lines and suggests an optional split. **This has already been done.**
+
+| File | Size |
+|------|------|
+| [schema.pg.ts](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/shared/schema.pg.ts) (barrel re-export) | 7,794 B |
+| [schema.pg.base.ts](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/shared/schema.pg.base.ts) | 50,257 B |
+| [schema.pg.recruitment.ts](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/shared/schema.pg.recruitment.ts) | 37,588 B |
+| [schema.pg.grift.ts](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/shared/schema.pg.grift.ts) | 19,178 B |
+| [schema.pg.audit.ts](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/shared/schema.pg.audit.ts) | 18,805 B |
+| [schema.pg.legal.ts](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/shared/schema.pg.legal.ts) | 11,550 B |
+| [schema.pg.identity.ts](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/shared/schema.pg.identity.ts) | 7,995 B |
+
+---
+
+## Gap 4: AdminDashboard — Partially Decomposed (Report is Stale)
+
+The report's #1 priority was decomposing [AdminDashboard.tsx](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/pages/AdminDashboard.tsx) (9,129 lines). **This has been partially done** — 9 sub-components were extracted:
+
+| File | Size |
+|------|------|
+| [AdminDashboard.tsx](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/pages/AdminDashboard.tsx) (shell) | 57,519 B |
+| [dashboard/AdminUserManagementTab.tsx](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/components/admin/dashboard/AdminUserManagementTab.tsx) | **101,576 B** |
+| [dashboard/SystemConfigTab.tsx](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/components/admin/dashboard/SystemConfigTab.tsx) | **95,055 B** |
+| [dashboard/AdminDashboardSupport.tsx](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/components/admin/dashboard/AdminDashboardSupport.tsx) | 62,990 B |
+| [dashboard/MigrationTab.tsx](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/components/admin/dashboard/MigrationTab.tsx) | 45,779 B |
+| [dashboard/AdminDashboardDialogs.tsx](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/components/admin/dashboard/AdminDashboardDialogs.tsx) | 45,499 B |
+| [dashboard/AdminTradeSettingsTab.tsx](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/components/admin/dashboard/AdminTradeSettingsTab.tsx) | 31,868 B |
+| [dashboard/AdminInstrumentsTab.tsx](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/components/admin/dashboard/AdminInstrumentsTab.tsx) | 11,969 B |
+| [dashboard/SystemHealthPanel.tsx](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/components/admin/dashboard/SystemHealthPanel.tsx) | 9,360 B |
+| [dashboard/AdminViewAsTab.tsx](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/components/admin/dashboard/AdminViewAsTab.tsx) | 7,546 B |
+
+> [!CAUTION]
+> The "shell" is still **57KB** — not a thin shell at all. And the extracted tabs are **themselves god-files**: [AdminUserManagementTab.tsx](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/components/admin/dashboard/AdminUserManagementTab.tsx) (102KB) and [SystemConfigTab.tsx](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/components/admin/dashboard/SystemConfigTab.tsx) (95KB) are each larger than the original monolith was.
+
+---
+
+## Gap 5: Massive Files Completely Omitted from the Report
+
+The report failed to identify these large files (all > 30KB):
+
+### Server — Missed Files
+
+| File | Size | Notes |
+|------|------|-------|
+| [admin.ts](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/admin.ts) | **70KB** | God-file for admin routes |
+| [traderCore.ts](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/traderCore.ts) | **74KB** | Still massive despite partial trader/ decomposition |
+| [traderTalent.ts](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/traderTalent.ts) | **72KB** | Still massive despite partial decomposition |
+| [partnerPortal.ts](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/partnerPortal.ts) | **62KB** | Not mentioned at all |
+| [grift.ts](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/grift.ts) | **58KB** | Understated — still massive |
+| [wsCore.ts](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/wsCore.ts) | **57KB** | WebSocket handler — totally omitted |
+| [storage.ts](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/storage.ts) | **57KB** | Data access layer — totally omitted |
+| [griftEngine.ts](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/grift/griftEngine.ts) | **66KB** | Core grift engine — totally omitted |
+| [challengeEvaluationSupport.ts](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/recruitment/challengesV4/challengeEvaluationSupport.ts) | **59KB** | New god-file created during decomposition |
+| [messaging.ts](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/services/messaging.ts) | **62KB** | Listed at 2,128 lines — actually 62KB |
+| [adminDataExportBuild.ts](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/services/adminDataExportBuild.ts) | **53KB** | Listed at 2,592 lines — actually 53KB |
+| [adminDataExportBuildSupport.ts](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/services/adminDataExportBuildSupport.ts) | **36KB** | New support file — totally omitted |
+| [orderEngine.ts](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/engine/orderEngine.ts) | **41KB** | Trading engine core — totally omitted |
+| [profileCore.ts](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/profileCore.ts) | **44KB** | User profile routes — totally omitted |
+| [authCore.ts](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/authCore.ts) | **39KB** | Authentication routes — totally omitted |
+| [adminMarketData.ts](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/adminMarketData.ts) | **40KB** | Market data admin — totally omitted |
+| [clickhouseSync.ts](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/services/clickhouseSync.ts) | **40KB** | Data sync service — totally omitted |
+| [tradeOpen.ts](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/trader/tradeOpen.ts) | **39KB** | Decomposed sub-file that is itself a god-file |
+| [verification.ts](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/routes/verification.ts) | **31KB** | Verification routes — totally omitted |
+| [risk.ts](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/risk.ts) | **25KB** | Risk management — totally omitted |
+
+### Client — Missed Files
+
+| File | Size | Notes |
+|------|------|-------|
+| [ScoutChallengesPanel.tsx](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/components/admin/ScoutChallengesPanel.tsx) | **105KB** | Reported at 2,712 lines — actually 105KB! |
+| [PartnerPortalTabs.tsx](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/pages/partner-portal/PartnerPortalTabs.tsx) | **92KB** | Totally omitted |
+| [TradeScreen.tsx](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/pages/TradeScreen.tsx) | **88KB** | Reported at 2,340 lines — actually 88KB |
+| [ScoutWorkbench.tsx](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/components/admin/ScoutWorkbench.tsx) | **87KB** | Reported at 2,444 lines — actually 87KB |
+| [ProfileSettings.tsx](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/pages/ProfileSettings.tsx) | **81KB** | Reported at 1,868 lines — actually 81KB |
+| [GriftAdmin.tsx](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/components/admin/GriftAdmin.tsx) | **78KB** | Reported at 2,853 lines — actually 78KB |
+| [PartnerPortal.tsx](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/pages/PartnerPortal.tsx) | **65KB** | Reported at 3,298 lines — actually 65KB |
+| [AdminCommunications.tsx](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/pages/AdminCommunications.tsx) | **62KB** | Reported at 1,259 lines — actually 62KB |
+| [AdminData.tsx](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/pages/AdminData.tsx) | **51KB** | Reported at 1,159 lines — actually 51KB |
+| [HistoryScreen.tsx](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/pages/HistoryScreen.tsx) | **46KB** | Reported at 1,104 lines — actually 46KB |
+| [grift/ConfigTab.tsx](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/components/admin/grift/ConfigTab.tsx) | **48KB** | Totally omitted |
+| [grift/SignalsTab.tsx](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/components/admin/grift/SignalsTab.tsx) | **39KB** | Totally omitted |
+| [grift/DashboardTab.tsx](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/components/admin/grift/DashboardTab.tsx) | **33KB** | Totally omitted |
+| [LoginPage.tsx](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/pages/LoginPage.tsx) | **41KB** | Reported at 1,005 lines — actually 41KB  |
+| [JournalPage.tsx](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/pages/JournalPage.tsx) | **39KB** | Totally omitted |
+| [TraderSearchTab.tsx](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/components/admin/TraderSearchTab.tsx) | **35KB** | Totally omitted |
+| [index.css](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/index.css) | **44KB** | Monolith stylesheet — totally omitted |
+| [EditTradeModal.tsx](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/components/EditTradeModal.tsx) | **30KB** | Totally omitted |
+| [scout-challenges/SettingsTab.tsx](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/components/admin/scout-challenges/SettingsTab.tsx) | **30KB** | Totally omitted |
+
+---
+
+## Gap 6: Utility Duplication Counts are Massively Understated
+
+| Function | Report Count | Actual Count | Understatement |
+|----------|:---:|:---:|:---:|
+| `nowSec()` | 16 | **50+** | **3x** understated |
+| `clampInt()` | 10 | **20** | **2x** understated |
+| `toFiniteNumber()` | 5 | **14** | **3x** understated |
+| `normalizeChallengeMailboxCategory()` | 3 | **10** | **3x** understated |
+
+> [!IMPORTANT]
+> The report's recommendation to create `server/lib/util.ts` was sound, but this **has not been done**. There is no centralized utility file. The `server/lib/` directory exists but contains only domain-specific files (margin, price utils, audit context, etc.) — no dedup target.
+
+---
+
+## Gap 7: Decomposition Created New God-Files
+
+The report didn't anticipate that decomposition would spawn equally large (or larger) sub-files:
+
+| Original File | Decomposed Into | New God-File | Size |
+|--------------|-----------------|--------------|------|
+| `adminScout.ts` | `adminScout/` | `challengeAnalytics.ts` | **56KB** |
+| `adminScout.ts` | `adminScout/` | `challenges.ts` | **52KB** |
+| `adminScout.ts` | `adminScout/` | `candidates.ts` | **40KB** |
+| `challengeEvaluation.ts` | same dir | `challengeEvaluationSupport.ts` | **59KB** |
+| `adminDataExportBuild.ts` | same dir | `adminDataExportBuildSupport.ts` | **36KB** |
+| `AdminDashboard.tsx` | `dashboard/` | `AdminUserManagementTab.tsx` | **102KB** |
+| `AdminDashboard.tsx` | `dashboard/` | `SystemConfigTab.tsx` | **95KB** |
+| `GriftAdmin.tsx` | `grift/` | `ConfigTab.tsx` | **48KB** |
+| `PartnerPortal.tsx` | `partner-portal/` | `PartnerPortalTabs.tsx` | **92KB** |
+
+---
+
+## Gap 8: `server/index.ts` and `storage.ts` — Critical Infrastructure Files Omitted
+
+| File | Size | Role |
+|------|------|------|
+| [server/index.ts](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/index.ts) | **27KB** | Application entry point — routes, middleware, startup logic |
+| [server/storage.ts](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/storage.ts) | **57KB** | Data access layer — queries, CRUD ops for entire app |
+
+The report focused exclusively on route files and React pages but completely ignored infrastructure-level monoliths that are equally problematic.
+
+---
+
+## Gap 9: `roundMoney` Dedup — Report Recommendation Only Partially Relevant
+
+The report recommended extracting `roundMoney` into `server/lib/util.ts`. Current search shows it exists in only **2 files** (`challengeEvaluation.ts` and `challengeEvaluationSupport.ts`) — not a systemic duplication problem.
+
+---
+
+## Gap 10: Report Line Counts vs. Actual Sizes are Contradictory
+
+The report's line counts don't match current file sizes, suggesting the codebase has changed significantly since the audit:
+
+| File | Reported Lines | Current Size | Implies Lines (@ ~30 B/line) |
+|------|--:|---:|--:|
+| `AdminDashboard.tsx` | 9,129 | 57,519 B | ~1,900 |
+| `adminScout.ts` | 5,010 | 3,770 B | ~125 |
+| `schema.pg.ts` | 3,178 | 7,794 B | ~260 |
+| `traderCore.ts` | 2,047 | 74,175 B | ~2,470 |
+| `traderTalent.ts` | 2,138 | 71,942 B | ~2,400 |
+| `messaging.ts` | 2,128 | 62,345 B | ~2,078 |
+
+Some files shrank (decomposition), others **grew significantly** since the audit.
+
+---
+
+## Gap 11: No Analysis of Critical Non-Route Server Files
+
+The report excluded analysis of:
+
+| File | Size | Concern |
+|------|------|---------|
+| [recalcAccount.ts](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/recalcAccount.ts) | 14KB | Account recalculation — critical financial logic |
+| [risk.ts](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/risk.ts) | 25KB | Risk management engine — critical for trading safety |
+| [adminAuditTrail.ts](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/services/adminAuditTrail.ts) | 27KB | Audit trail service — compliance critical |
+| [adminDataRollups.ts](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/services/adminDataRollups.ts) | 24KB | Analytics rollup service |
+| [accountLifecycle.ts](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/services/accountLifecycle.ts) | 28KB | Account lifecycle management |
+| [globalSettingsAdmin.ts](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/services/globalSettingsAdmin.ts) | 18KB | Global settings management |
+| [challengeService.ts](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/recruitment/challengesV4/challengeService.ts) | 17KB | Challenge domain service |
+| [policy/buildDecisionContext.ts](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/policy/buildDecisionContext.ts) | 22KB | Policy decision builder |
+| [auditWriter.ts](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/lib/auditWriter.ts) | 25KB | Audit log writer |
+
+---
+
+## Gap 12: Client-Side Hooks & Utils — No Analysis
+
+The report ignored client-side shared code entirely:
+
+| File | Size | Concern |
+|------|------|---------|
+| [use-mailbox.tsx](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/hooks/use-mailbox.tsx) | 20KB | Complex mailbox state management |
+| [use-auth.tsx](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/hooks/use-auth.tsx) | 13KB | Authentication hook with embedded logic |
+| [sw.ts](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/sw.ts) | 12KB | Service worker — critical for offline/live updates |
+| [main.tsx](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/client/src/main.tsx) | 7KB | App bootstrap — should be thin |
+
+---
+
+## Revised Recommended Execution Order
+
+Given the current state, the report's execution order is **obsolete**. The new priority should be:
+
+```mermaid
+graph TD
+    A["1. Create server/lib/util.ts<br/>(dedup nowSec in 50+ files, clampInt in 20, toFiniteNumber in 14)"]
+    A --> B["2. Decompose traderCore.ts (74KB)<br/>traderTalent.ts (72KB) — still monolithic"]
+    A --> C["3. Decompose grift.ts (58KB)<br/>griftEngine.ts (66KB) — still monolithic"]
+    A --> D["4. Decompose storage.ts (57KB)<br/>wsCore.ts (57KB) — missed by report"]
+    B --> E["5. Decompose admin.ts (70KB)<br/>partnerPortal.ts (62KB) — missed by report"]
+    C --> F["6. Re-decompose AdminUserManagementTab (102KB)<br/>SystemConfigTab (95KB) — new god-files"]
+    D --> G["7. Re-decompose ScoutChallengesPanel (105KB)<br/>PartnerPortalTabs (92KB) — new god-files"]
+    E --> H["8. Decompose challengeEvaluationSupport (59KB)<br/>adminScout sub-files (40-56KB)"]
+    F --> I["9. Remaining client monoliths<br/>(TradeScreen 88KB, ProfileSettings 81KB, etc.)"]
+    G --> I
+```
+
+> [!IMPORTANT]
+> Steps 1-5 are the actual critical path. Steps 6-9 address the **second-generation god-files** created by the decompositions that already happened.

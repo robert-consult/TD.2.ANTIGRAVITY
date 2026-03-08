@@ -1,4 +1,3 @@
-// @ts-nocheck
 import type { Express, NextFunction, Request, Response } from "express";
 import { z } from "zod";
 import crypto from "crypto";
@@ -72,7 +71,7 @@ app.post("/api/profile/update", ensureAuth, async (req: Request, res: Response) 
     const validationResult = profileUpdateSchema.safeParse(req.body);
     if (!validationResult.success) {
       return res.status(400).json({
-        message: validationResult.error.errors[0]?.message || "Invalid input"
+        message: validationResult.error.issues[0]?.message || "Invalid input"
       });
     }
 
@@ -301,7 +300,7 @@ app.post("/api/profile/change-password", ensureAuth, async (req: Request, res: R
     const validationResult = passwordChangeSchema.safeParse(req.body);
     if (!validationResult.success) {
       return res.status(400).json({
-        message: validationResult.error.errors[0]?.message || "Invalid input"
+        message: validationResult.error.issues[0]?.message || "Invalid input"
       });
     }
 
@@ -410,7 +409,7 @@ app.post("/api/profile/account/deactivate", ensureAuth, async (req: Request, res
       title: "Account deactivated",
       description: "User requested account deactivation",
       reasonCode: normalizedReasonCode,
-      reasonText: normalizedReasonText,
+      reasonText: normalizedReasonText ?? undefined,
       metadata: {
         action: "DEACTIVATE",
         ip,
@@ -448,7 +447,7 @@ app.post("/api/profile/account/deactivate", ensureAuth, async (req: Request, res
     res.json({ success: true, message: "Account deactivated" });
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return res.status(400).json({ message: "Invalid input data", errors: error.errors });
+      return res.status(400).json({ message: "Invalid input data", errors: error.issues });
     }
     console.error("Account deactivation error:", error);
     res.status(500).json({ message: "Failed to deactivate account" });
@@ -517,7 +516,7 @@ app.post("/api/profile/account/delete", ensureAuth, async (req: Request, res: Re
       title: "Account deleted",
       description: "User requested account deletion",
       reasonCode: normalizedReasonCode,
-      reasonText: normalizedReasonText,
+      reasonText: normalizedReasonText ?? undefined,
       metadata: {
         action: "DELETE",
         ip,
@@ -555,7 +554,7 @@ app.post("/api/profile/account/delete", ensureAuth, async (req: Request, res: Re
     res.json({ success: true, message: "Account deleted" });
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return res.status(400).json({ message: "Invalid input data", errors: error.errors });
+      return res.status(400).json({ message: "Invalid input data", errors: error.issues });
     }
     console.error("Account deletion error:", error);
     res.status(500).json({ message: "Failed to delete account" });
@@ -585,6 +584,7 @@ app.get("/api/profile/me", ensureAuth, async (req: Request, res: Response) => {
     });
 
     const settings = await storage.getUserSettingsById(userId);
+    const settingsProfile = settings as Record<string, unknown> | null | undefined;
     const auditCtx = buildAuditContext(req);
     const policyConfig = await loadPolicyConfig();
     const decisionCtx = await buildDecisionContext({
@@ -634,11 +634,11 @@ app.get("/api/profile/me", ensureAuth, async (req: Request, res: Response) => {
       },
 
       settings: {
-        defaultSymbol: settings?.defaultSymbol,
-        defaultLotSize: settings?.defaultLotSize,
-        defaultLeverage: settings?.defaultLeverage,
-        defaultStopLoss: settings?.defaultStopLoss,
-        defaultTakeProfit: settings?.defaultTakeProfit,
+        defaultSymbol: settingsProfile?.defaultSymbol,
+        defaultLotSize: settingsProfile?.defaultLotSize,
+        defaultLeverage: settingsProfile?.defaultLeverage,
+        defaultStopLoss: settingsProfile?.defaultStopLoss,
+        defaultTakeProfit: settingsProfile?.defaultTakeProfit,
       },
 
       featureGates: {
@@ -799,7 +799,7 @@ app.get("/api/profile/sessions", ensureAuth, async (req: Request, res: Response)
 // Terminate specific session (revoke with audit trail)
 app.delete("/api/profile/sessions/:sessionId", ensureAuth, async (req: Request, res: Response) => {
   try {
-    const { sessionId } = req.params;
+    const sessionId = Array.isArray(req.params.sessionId) ? req.params.sessionId[0] : req.params.sessionId;
 
     if (sessionId === req.sessionID) {
       return res.status(400).json({ message: "Cannot terminate current session. Use logout instead." });
@@ -854,7 +854,7 @@ app.put("/api/profile/preferences", ensureAuth, async (req: Request, res: Respon
     const validationResult = preferencesSchema.safeParse(req.body);
     if (!validationResult.success) {
       return res.status(400).json({
-        message: validationResult.error.errors[0]?.message || "Invalid input"
+        message: validationResult.error.issues[0]?.message || "Invalid input"
       });
     }
 
@@ -981,9 +981,9 @@ app.get("/api/profile/kyc", ensureAuth, requirePolicy("KYC_VIEW"), async (req: R
 
     res.json({
       status: kycProfile.status,
-      invitedAt: kycProfile.invitedAt?.toISOString() || null,
-      submittedAt: kycProfile.submittedAt?.toISOString() || null,
-      reviewedAt: kycProfile.reviewedAt?.toISOString() || null,
+      invitedAt: typeof kycProfile.invitedAt === "number" ? new Date((kycProfile.invitedAt < 1e12 ? kycProfile.invitedAt * 1000 : kycProfile.invitedAt)).toISOString() : null,
+      submittedAt: typeof kycProfile.submittedAt === "number" ? new Date((kycProfile.submittedAt < 1e12 ? kycProfile.submittedAt * 1000 : kycProfile.submittedAt)).toISOString() : null,
+      reviewedAt: typeof kycProfile.reviewedAt === "number" ? new Date((kycProfile.reviewedAt < 1e12 ? kycProfile.reviewedAt * 1000 : kycProfile.reviewedAt)).toISOString() : null,
       rejectionReason: kycProfile.rejectionReason,
     });
   } catch (error) {
@@ -1123,14 +1123,14 @@ app.get("/api/profile/payout", ensureAuth, requirePolicy("KYC_VIEW"), async (req
 app.put("/api/profile/payout/currency", ensureAuth, requirePolicy("PREFERRED_PAYMENT_CURRENCY_SET"), async (req: Request, res: Response) => {
   try {
     const payoutCurrencySchema = z.object({
-      currency: z.enum(["USD", "EUR", "GBP", "CHF", "JPY"], {
-        errorMap: () => ({ message: "Invalid currency. Must be USD, EUR, GBP, CHF, or JPY" })
+      currency: z.enum(["USD", "EUR", "GBP", "CHF", "JPY"] as const, {
+        message: "Invalid currency. Must be USD, EUR, GBP, CHF, or JPY",
       })
     });
 
     const validationResult = payoutCurrencySchema.safeParse(req.body);
     if (!validationResult.success) {
-      return res.status(400).json({ message: validationResult.error.errors[0]?.message || "Invalid input" });
+      return res.status(400).json({ message: validationResult.error.issues[0]?.message || "Invalid input" });
     }
 
     const { currency } = validationResult.data;
@@ -1163,7 +1163,7 @@ app.put("/api/profile/payout/currency", ensureAuth, requirePolicy("PREFERRED_PAY
 // Real-time account summary endpoint - returns fresh MT5-style metrics
 app.get("/api/account/summary", ensureAuth, async (req: Request, res: Response) => {
   try {
-    const userId = req.session.userId;
+    const userId = req.session.userId!;
 
     // Import and run recalcAccount to get fresh metrics with stale detection
     const { recalcAccount } = await import("../recalcAccount");

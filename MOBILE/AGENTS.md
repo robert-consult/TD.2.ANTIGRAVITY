@@ -7,6 +7,7 @@ Capacitor-based wrapper for the web app, optimized for “remote URL mode” so 
 - Prefer **remote URL mode** (see `MOBILE/README.md` and `CAPACITOR.md`) to avoid cross-origin cookie/CORS complexity.
 - Do not add native plugins that expand permissions without documenting the threat model and review steps.
 - Never commit keystores, signing configs, or generated secrets.
+- For repo-wide audits, decomposition reviews, and maintainability critiques that touch this subtree, read `../.agents/audit-decomposition.md` first.
 
 ## Key files
 - Capacitor config: `MOBILE/capacitor.config.ts`
@@ -16,4 +17,3 @@ Capacitor-based wrapper for the web app, optimized for “remote URL mode” so 
 ## Required checks before finalizing
 - If web build changes must ship to mobile: `cd MOBILE && npm run sync`
 - For Android build sanity (when required): `cd MOBILE && npm run doctor`
-

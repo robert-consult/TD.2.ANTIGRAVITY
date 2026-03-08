@@ -1,4 +1,3 @@
-// @ts-nocheck
 import type { Router, NextFunction, Request, Response } from "express";
 import type { SessionData } from "express-session";
 import { z } from "zod";

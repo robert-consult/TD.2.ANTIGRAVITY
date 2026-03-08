@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { Router } from "express";
 import path from "path";
 import fs from "fs";
@@ -26,6 +25,10 @@ if (!fs.existsSync(IMPORT_DIR)) {
 }
 
 const upload = multer({ dest: IMPORT_DIR });
+const EXPORT_SCOPES = ["FULL_PLATFORM", "USER_BUNDLE", "DELTA"] as const;
+const IMPORT_MODES = ["DRY_RUN", "IMPORT"] as const;
+type ExportScope = (typeof EXPORT_SCOPES)[number];
+type ImportMode = (typeof IMPORT_MODES)[number];
 
 function requireMigrationAdmin(req: any, res: any, next: any) {
   if (!req.session?.userId || !req.session?.isAdmin) {
@@ -149,9 +152,10 @@ adminMigrationRouter.post("/export-jobs", async (req, res) => {
     const userIdRaw = req.body?.userId;
     const sinceTsRaw = req.body?.sinceTs;
 
-    if (!["FULL_PLATFORM", "USER_BUNDLE", "DELTA"].includes(scope)) {
+    if (!EXPORT_SCOPES.includes(scope as ExportScope)) {
       return res.status(400).json({ message: "Invalid scope" });
     }
+    const exportScope = scope as ExportScope;
 
     const userId = userIdRaw !== undefined && userIdRaw !== null ? Number(userIdRaw) : undefined;
     const sinceTs = sinceTsRaw !== undefined && sinceTsRaw !== null ? Number(sinceTsRaw) : undefined;
@@ -164,15 +168,15 @@ adminMigrationRouter.post("/export-jobs", async (req, res) => {
     }
 
     const { jobId } = await createExportJob({
-      scope,
+      scope: exportScope,
       userId: Number.isFinite(userId) ? userId : undefined,
       sinceTs: Number.isFinite(sinceTs) ? sinceTs : undefined,
-      requestedByAdminId: req.session.userId,
+      requestedByAdminId: req.session.userId!,
     });
 
     try {
       await storage.logAdminAction({
-        adminId: req.session.userId,
+        adminId: req.session.userId!,
         userId: userId ?? 0,
         actionType: "MIGRATION_EXPORT_REQUEST",
         metadata: { scope, sinceTs: sinceTs ?? null },
@@ -376,7 +380,7 @@ adminMigrationRouter.post(
       const mode = String(req.body?.mode || "DRY_RUN");
       const idStrategy = String(req.body?.idStrategy || "PRESERVE");
 
-      if (!["DRY_RUN", "IMPORT"].includes(mode)) {
+      if (!IMPORT_MODES.includes(mode as ImportMode)) {
         return res.status(400).json({ message: "Invalid mode" });
       }
       if (idStrategy !== "PRESERVE") {
@@ -398,7 +402,7 @@ adminMigrationRouter.post(
           if (!name) continue;
           byName.set(name, f);
         }
-        const missing = expectedFiles.filter((n) => !byName.has(n));
+        const missing = expectedFiles.filter((n: string) => !byName.has(n));
         if (missing.length) {
           return res.status(400).json({ message: `Missing chunk files: ${missing.join(", ")}` });
         }
@@ -408,23 +412,24 @@ adminMigrationRouter.post(
         if (extras.length) {
           return res.status(400).json({ message: `Unexpected chunk files: ${extras.join(", ")}` });
         }
-        dataPartsPaths = expectedFiles.map((n) => String(byName.get(n).path));
+        dataPartsPaths = expectedFiles.map((n: string) => String(byName.get(n).path));
       } else {
         dataPartsPaths = [String(dataFiles[0].path)];
       }
 
+      const importMode = mode as ImportMode;
       const { jobId } = await createImportJob({
-        mode,
+        mode: importMode,
         idStrategy,
         manifestPath: manifestFile.path,
-        dataPath: dataPartsPaths[0],
+        dataPath: dataPartsPaths[0]!,
         dataPartsPaths,
-        requestedByAdminId: req.session.userId,
+        requestedByAdminId: req.session.userId!,
       });
 
       try {
         await storage.logAdminAction({
-          adminId: req.session.userId,
+          adminId: req.session.userId!,
           userId: 0,
           actionType: "MIGRATION_IMPORT_REQUEST",
           metadata: {
@@ -520,7 +525,7 @@ adminMigrationRouter.delete("/import-jobs/:jobId/files", async (req, res) => {
       status: "PURGED",
     })
     .where(eq(migrationImportJobs.id, jobId))
-    .run();
+    ;
 
   try {
     await db.insert(migrationJobLogs).values({
@@ -529,12 +534,12 @@ adminMigrationRouter.delete("/import-jobs/:jobId/files", async (req, res) => {
       level: "INFO",
       message: "Import files purged",
       contextJson: safeJson({ removed, missing, bytesFreed }),
-    }).run();
+    });
   } catch {}
 
   try {
     await storage.logAdminAction({
-      adminId: req.session.userId,
+      adminId: req.session.userId!,
       userId: 0,
       actionType: "MIGRATION_IMPORT_PURGE",
       metadata: {
@@ -568,7 +573,7 @@ adminMigrationRouter.get("/jobs/:jobId/integrity", async (req, res) => {
       .from(migrationIntegrityChecks)
       .where(eq(migrationIntegrityChecks.jobId, jobId))
       .orderBy(desc(migrationIntegrityChecks.verifiedAt))
-      .all();
+      ;
     return res.json(rows);
   } catch (err: any) {
     return res.status(500).json({ message: err?.message || "Failed to fetch integrity checks" });
@@ -620,7 +625,7 @@ adminMigrationRouter.delete("/export-jobs/:jobId/files", async (req, res) => {
       status: "PURGED",
     })
     .where(eq(migrationExportJobs.id, jobId))
-    .run();
+    ;
 
   try {
     await db.insert(migrationJobLogs).values({
@@ -629,12 +634,12 @@ adminMigrationRouter.delete("/export-jobs/:jobId/files", async (req, res) => {
       level: "INFO",
       message: "Export files purged",
       contextJson: safeJson({ removed, missing, bytesFreed }),
-    }).run();
+    });
   } catch {}
 
   try {
     await storage.logAdminAction({
-      adminId: req.session.userId,
+      adminId: req.session.userId!,
       userId: job.userId ?? 0,
       actionType: "MIGRATION_EXPORT_PURGE",
       metadata: {
@@ -709,13 +714,13 @@ adminMigrationRouter.post("/export-jobs/purge", async (req, res) => {
           .update(migrationExportJobs)
           .set({ dataPath: null, dataPartsJson: null, manifestPath: null, status: "PURGED" })
           .where(eq(migrationExportJobs.id, job.id))
-          .run();
+          ;
       }
     }
 
     try {
       await storage.logAdminAction({
-        adminId: req.session.userId,
+        adminId: req.session.userId!,
         userId: 0,
         actionType: "MIGRATION_EXPORT_PURGE_BULK",
         metadata: { olderThanDays, jobsPurged, filesRemoved, bytesFreed },
@@ -786,7 +791,7 @@ adminMigrationRouter.post("/import-jobs/purge", async (req, res) => {
           .update(migrationImportJobs)
           .set({ dataPath: null, dataPartsJson: null, manifestPath: null, status: "PURGED" })
           .where(eq(migrationImportJobs.id, job.id))
-          .run();
+          ;
       }
     }
 
@@ -830,7 +835,7 @@ adminMigrationRouter.post("/import-jobs/purge", async (req, res) => {
 
     try {
       await storage.logAdminAction({
-        adminId: req.session.userId,
+        adminId: req.session.userId!,
         userId: 0,
         actionType: "MIGRATION_IMPORT_PURGE_BULK",
         metadata: { olderThanDays, jobsPurged, filesRemoved, strayFilesRemoved, bytesFreed },

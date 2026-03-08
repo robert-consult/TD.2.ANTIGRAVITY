@@ -1,4 +1,5 @@
 import { db } from "@db";
+import { nowSec } from "@shared/scalars";
 import { challengeEnrollmentEvents } from "@shared/schema";
 import { desc, eq } from "drizzle-orm";
 import { chainHash, stableStringify } from "./hashChain";
@@ -19,10 +20,6 @@ export type AppendChallengeEventInput = {
   tradingDaysSnapshot?: number | null;
   note?: string | null;
 };
-
-export function nowSec(): number {
-  return Math.floor(Date.now() / 1000);
-}
 
 // Append-only, tamper-evident chain: event_hash = sha256(prev_hash + canonical payload)
 export async function appendChallengeEvent(input: AppendChallengeEventInput, tx: typeof db = db): Promise<void> {

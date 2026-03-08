@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { ensureMarketDailyCloseTable } from "./marketDailyClose";
 import { cachePrevClose, getCachedPrevClose, normalizePrevCloseSymbol } from "./prevCloseStore";
 
@@ -75,5 +74,3 @@ export function preloadCache(symbols: string[]): void {
   // This is now a no-op since we'll populate on first quote
   console.log("Ready to start tracking percentage changes");
 }
-// @ts-nocheck
-// @ts-nocheck

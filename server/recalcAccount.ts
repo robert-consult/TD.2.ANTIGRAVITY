@@ -363,13 +363,13 @@ export async function recalcAccount(
       // Include carry and overnight swap accrual for open positions in floating P/L.
       // Open-side execution costs are already realized at open and reflected in balance.
       const holdingCosts = await computeOpenTradeAccrualCosts({
-        category: (trade as any).categorySnapshot ?? (trade as any).symbol?.category,
+        category: trade.categorySnapshot ?? trade.symbol?.category,
         positionSide: trade.type as 'BUY' | 'SELL',
-        notionalUsd: (trade as any).notionalUsd,
-        size: Number((trade as any).size ?? tradeSize * 100000),
+        notionalUsd: trade.notionalUsd,
+        size: Number(trade.size ?? tradeSize * 100000),
         lots: tradeSize,
         openedAt: trade.openedAt,
-        executedAt: (trade as any).executedAt,
+        executedAt: trade.executedAt,
         asOfMs: Date.now(),
       });
       const netFloating = pnl - holdingCosts.accruedHoldingCostsUsd;

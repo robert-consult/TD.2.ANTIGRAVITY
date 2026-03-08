@@ -2,6 +2,7 @@ import crypto from "crypto";
 import type { Request, Response } from "express";
 import { and, desc, eq, lt, ne } from "drizzle-orm";
 import { db } from "@db";
+import { clampIntOr } from "@shared/scalars";
 import { rememberMeTokens, systemConfig } from "@shared/schema";
 import { sha256Hex } from "./crypto";
 import {
@@ -68,12 +69,6 @@ export type RememberMeVerificationResult =
   | { status: "THEFT_DETECTED"; token: RememberMeTokenRecord; userId: number }
   | { status: "ABSENCE_REAUTH_REQUIRED"; token: RememberMeTokenRecord; userId: number }
   | { status: "VALID"; token: RememberMeTokenRecord; userId: number };
-
-function clampInt(value: unknown, fallback: number, min: number, max: number): number {
-  const n = Number(value);
-  if (!Number.isFinite(n)) return fallback;
-  return Math.max(min, Math.min(max, Math.trunc(n)));
-}
 
 function parseCookieMap(req: Request): Record<string, string> {
   const rawCookieHeader = req.headers.cookie;
@@ -188,9 +183,9 @@ export async function getRememberMeConfig(opts?: { forceRefresh?: boolean }): Pr
 
   const config: RememberMeConfig = {
     enabled: Boolean(row?.rememberMeEnabled ?? DEFAULT_REMEMBER_ME_CONFIG.enabled),
-    maxAgeDays: clampInt(row?.rememberMeMaxAgeDays, DEFAULT_REMEMBER_ME_CONFIG.maxAgeDays, 1, 90),
-    maxDevicesPerUser: clampInt(row?.rememberMeMaxDevicesPerUser, DEFAULT_REMEMBER_ME_CONFIG.maxDevicesPerUser, 1, 25),
-    reauthAfterAbsenceDays: clampInt(
+    maxAgeDays: clampIntOr(row?.rememberMeMaxAgeDays, DEFAULT_REMEMBER_ME_CONFIG.maxAgeDays, 1, 90),
+    maxDevicesPerUser: clampIntOr(row?.rememberMeMaxDevicesPerUser, DEFAULT_REMEMBER_ME_CONFIG.maxDevicesPerUser, 1, 25),
+    reauthAfterAbsenceDays: clampIntOr(
       row?.rememberMeReauthAfterAbsenceDays,
       DEFAULT_REMEMBER_ME_CONFIG.reauthAfterAbsenceDays,
       0,
@@ -202,13 +197,13 @@ export async function getRememberMeConfig(opts?: { forceRefresh?: boolean }): Pr
     theftAutoRevokeAll: Boolean(
       row?.rememberMeTheftAutoRevokeAll ?? DEFAULT_REMEMBER_ME_CONFIG.theftAutoRevokeAll,
     ),
-    sessionCookieMaxAgeHours: clampInt(
+    sessionCookieMaxAgeHours: clampIntOr(
       row?.sessionCookieMaxAgeHours,
       DEFAULT_REMEMBER_ME_CONFIG.sessionCookieMaxAgeHours,
       1,
       24 * 14,
     ),
-    sessionIdleTimeoutMinutes: clampInt(
+    sessionIdleTimeoutMinutes: clampIntOr(
       row?.sessionIdleTimeoutMinutes,
       DEFAULT_REMEMBER_ME_CONFIG.sessionIdleTimeoutMinutes,
       0,

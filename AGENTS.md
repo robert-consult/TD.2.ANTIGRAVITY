@@ -11,8 +11,9 @@ TradeQuip (a.k.a. “tradehub”) is a self-hosted trading platform (web + mobil
 2) If you work inside a subproject directory, also read the nearest `AGENTS.md` in that tree (nearest wins).
 3) If `AGENTS.local.md` exists, read it but **do not commit it**.
 4) Before adding new feature utilities/protocol helpers, scan `@/.agents/shared-services.md` and reuse/extend `shared/` first.
-5) Before finalizing any change, complete the required checklists referenced below.
-6) If you discover any new production/runtime/deployment requirement, update `.agents/PRODUCTION_REQUIREMENTS.md` in the same change.
+5) Before writing audits, decomposition plans, or maintainability recommendations, read `@/.agents/audit-decomposition.md` and verify the live tree.
+6) Before finalizing any change, complete the required checklists referenced below.
+7) If you discover any new production/runtime/deployment requirement, update `.agents/PRODUCTION_REQUIREMENTS.md` in the same change.
 
 ## Production Requirements Ledger (mandatory)
 - Canonical file: `.agents/PRODUCTION_REQUIREMENTS.md`
@@ -81,6 +82,7 @@ See `@/.agents/release-done.md`.
 
 ## Deep context entrypoints (scan these before making assumptions)
 See `@/.agents/deep-context.md` for “where to look” by domain (auth, trading, quotes, compliance, i18n, mobile, infra).
+For audit/decomposition/maintainability review policy, also see `@/.agents/audit-decomposition.md`.
 For route architecture rules (anti-bloat modularization + index wiring), also see `server/routes/AGENTS.md`.
 
 ## Boundaries (strict)

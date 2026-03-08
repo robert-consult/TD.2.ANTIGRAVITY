@@ -56,13 +56,17 @@ import type { TraderRouterDeps } from "./types";
 
 export function registerTradeCancelRoute(router: Router, deps: TraderRouterDeps) {
   const { ensureAuth, ensureDoc1TermsAccepted, broadcast } = deps;
-router.patch(
+  router.patch(
   "/api/trades/:id/cancel",
   ensureAuth,
   ensureDoc1TermsAccepted,
   requirePolicy("TRADE_CANCEL_PENDING"),
   async (req: Request, res: Response, next: NextFunction) => {
-    const bg = await botGuard(req, res, { action: "TRADE", userId: (req.session as any).userId });
+    const sessionUserId = Number((req.session as SessionData).userId);
+    const bg = await botGuard(req, res, {
+      action: "TRADE",
+      userId: Number.isInteger(sessionUserId) && sessionUserId > 0 ? sessionUserId : undefined,
+    });
     if (!bg.allowed) return;
     next();
   },
@@ -95,9 +99,9 @@ router.patch(
 
       // Build audit context
       const cancelAuditCtx = buildAuditContext(req);
-      const correlationId = (trade as any).correlationId || generateCorrelationId();
-      const orderId = (trade as any).orderId || generateOrderId();
-      const positionId = (trade as any).positionId || generatePositionId();
+      const correlationId = trade.correlationId || generateCorrelationId();
+      const orderId = trade.orderId || generateOrderId();
+      const positionId = trade.positionId || generatePositionId();
 
       await db.update(trades)
         .set({
@@ -114,7 +118,7 @@ router.patch(
 
       cancelAuditCtx.correlationId = correlationId;
 
-      const symbol = (trade as any).symbol?.symbol ?? null;
+      const symbol = trade.symbol?.symbol ?? null;
       let q = null;
       if (symbol) {
         try {
@@ -140,6 +144,7 @@ router.patch(
             symbol,
             side: trade.type as string,
             orderType: trade.orderType as string,
+            timeInForce: trade.timeInForce ? String(trade.timeInForce) : null,
             qtyLots: typeof trade.lots === "string" ? Number(trade.lots) : Number(trade.lots ?? 1),
             limitPrice: trade.limitPrice ? parseFloat(String(trade.limitPrice)) : null,
             stopPrice: trade.stopPrice ? parseFloat(String(trade.stopPrice)) : null,
@@ -147,7 +152,7 @@ router.patch(
             quoteAsk: q?.ask ?? null,
             quoteMid: q?.mid ?? null,
             quoteSpread: q?.spread ?? null,
-            spreadPips: q ? calculateSpreadPips(symbol || "", q.spread, (trade as any).symbol?.pipDecimals) : null,
+            spreadPips: q ? calculateSpreadPips(symbol || "", q.spread, trade.symbol?.pipDecimals) : null,
             quoteTs: q?.quoteTs ?? null,
             quoteSource: q?.source ?? null,
             reasonCode: "CANCELED_BY_USER",

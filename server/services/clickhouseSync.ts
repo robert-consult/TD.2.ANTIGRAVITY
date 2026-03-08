@@ -3,6 +3,7 @@ import {
   canonicalizeInstrumentCategory,
   normalizeInstrumentCategory,
 } from "@shared/instruments/categories";
+import { toFiniteNumberOr } from "@shared/scalars";
 import {
   commandClickHouse,
   getClickHouseClient,
@@ -403,9 +404,7 @@ async function queryPostgresRows<T = any>(sqlText: string, params: unknown[] = [
 }
 
 function toFiniteNumber(value: unknown, fallback = 0): number {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) return fallback;
-  return parsed;
+  return toFiniteNumberOr(value, fallback);
 }
 
 function toNullableNumber(value: unknown): number | null {

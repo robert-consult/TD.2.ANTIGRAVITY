@@ -1,3 +1,4 @@
+import { clampIntOr } from "@shared/scalars";
 import type { GriftDb } from "./griftDb";
 import type { GriftConfig } from "./griftTypes";
 
@@ -35,9 +36,7 @@ function daysToMs(days: number) {
 }
 
 function clampInt(value: unknown, min: number, max: number, fallback: number) {
-  const n = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
-  if (!Number.isFinite(n)) return fallback;
-  return Math.max(min, Math.min(max, Math.round(n)));
+  return clampIntOr(value, fallback, min, max, "round");
 }
 
 async function deleteBatchedById(

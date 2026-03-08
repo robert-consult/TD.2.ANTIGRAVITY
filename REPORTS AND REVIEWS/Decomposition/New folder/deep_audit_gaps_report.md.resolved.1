@@ -1,0 +1,269 @@
+# Deep Audit Gaps Report (Revised)
+
+**Verified against current tree on 2026-03-08**  
+**Policy:** [.agents/audit-decomposition.md](file:///\\wsl.localhost\Ubuntu\home\bcodex\TD.2.ANTIGRAVITY\.agents\audit-decomposition.md)  
+**Baseline:** [Prior audit report](file:///C:/Users/Rb/.gemini/antigravity/brain/4494ec7d-b2f9-45e8-a1b6-77fb9bc8b62f/deep_repo_audit_report.md.resolved) (2026-03-07)
+
+---
+
+## Evidence: Required Scans
+
+<details>
+<summary><strong>LOC Scan</strong> — <code>find client server shared ... | wc -l | sort -nr | head -n 40</code></summary>
+
+```
+ 156717 total
+   1959 client/src/pages/TradeScreen.tsx
+   1948 client/src/components/admin/dashboard/SystemConfigTab.tsx
+   1901 server/routes/traderTalent.ts
+   1885 server/services/messaging.ts
+   1872 client/src/components/admin/GriftAdmin.tsx
+   1868 client/src/pages/ProfileSettings.tsx
+   1833 client/src/pages/PartnerPortal.tsx
+   1827 server/grift/griftEngine.ts
+   1820 client/src/components/admin/ScoutChallengesPanel.tsx
+   1816 server/storage.ts
+   1805 client/src/components/admin/ScoutWorkbench.tsx
+   1781 server/recruitment/challengesV4/challengeEvaluationSupport.ts
+   1730 server/routes/traderCore.ts
+   1692 server/routes/admin.ts
+   1686 server/routes/partnerPortal.ts
+   1674 client/src/pages/partner-portal/PartnerPortalTabs.tsx
+   1664 server/routes/grift.ts
+   1618 client/src/components/admin/dashboard/AdminDashboardSupport.tsx
+   1531 server/services/adminDataExportBuild.ts
+   1479 client/src/components/admin/dashboard/AdminUserManagementTab.tsx
+   1412 server/routes/wsCore.ts
+   1411 client/src/pages/AdminDashboard.tsx
+   1327 server/routes/adminScout/challengeAnalytics.ts
+   1293 server/feeds/quoteFeed.ts
+   1284 client/src/components/admin/grift/ConfigTab.tsx
+   1254 client/src/pages/AdminCommunications.tsx
+   1226 server/migration/migrationService.ts
+   1206 server/routes/profileCore.ts
+   1188 server/engine/orderEngine.ts
+   1159 server/routes/adminScout/challenges.ts
+   1159 client/src/pages/AdminData.tsx
+   1139 server/routes/adminScout/candidates.ts
+   1119 server/services/clickhouseSync.ts
+   1102 server/services/adminDataExportBuildSupport.ts
+   1102 client/src/components/admin/dashboard/MigrationTab.tsx
+   1098 client/src/pages/HistoryScreen.tsx
+   1088 server/routes/authCore.ts
+   1005 client/src/pages/LoginPage.tsx
+   1002 server/routes/adminMarketData.ts
+```
+
+</details>
+
+<details>
+<summary><strong>@ts-nocheck Scan</strong></summary>
+
+```
+# grep -rn '@ts-nocheck' client/ server/ shared/ --include='*.ts' --include='*.tsx'
+client/vite.plugins/autoI18n.ts:142:  const m = code.match(/^\s*\/\/\s*@ts-nocheck[^\n]*\n/);
+```
+
+Only hit is a regex in a Vite build plugin that *detects* the directive — not active usage.
+
+</details>
+
+<details>
+<summary><strong>Duplicate Helper Scan</strong></summary>
+
+```
+# grep -rn '^function clampInt\|^export function clampInt\|^function toFiniteNumber\|^export function toFiniteNumber\|^function nowSec\|^export function nowSec' ...
+
+# Canonical (shared/scalars.ts):
+shared/scalars.ts:3:  export function nowSec()
+shared/scalars.ts:7:  export function toFiniteNumber(value): number | null
+shared/scalars.ts:12: export function toFiniteNumberOr(value, fallback = 0): number
+shared/scalars.ts:16: export function clampInt(value, min, max, mode): number | null
+shared/scalars.ts:28: export function clampIntOr(value, fallback, min, max): number
+
+# Local clampInt copies (4):
+server/services/globalSettingsAdmin.ts:211: clampInt(value, min, max, fallback)    — 30+ call sites
+server/routes/adminScout/support.ts:103:   clampInt(value, fallback, min, max)    — 1 call site (exported)
+server/routes/adminActivity.ts:38:         clampInt(v, lo, hi, fallback)          — 7 call sites
+server/grift/griftRetention.ts:38:         clampInt(value, min, max, fallback)    — 2 call sites
+
+# Local toFiniteNumber copies (3):
+server/services/clickhouseSync.ts:406:     toFiniteNumber(value, fallback = 0)    — with-fallback variant
+server/routes/adminScout/support.ts:107:   toFiniteNumber(value, fallback = 0)    — with-fallback variant
+server/partner/allocationEngine.ts:5:      toFiniteNumber(raw): number | null     — null-returning variant
+```
+
+</details>
+
+<details>
+<summary><strong>Import Analysis</strong> — Which files already import from shared/scalars?</summary>
+
+```
+server/services/messagingSettings.ts    → clampIntOr, nowSec
+server/services/adminAuditTrail.ts      → clampIntOr
+server/services/rememberMe.ts           → clampIntOr
+server/services/globalSettingsAdmin.ts   → clampIntOr, nowSec  (also has local clampInt)
+server/services/messaging.ts            → clampIntOr, nowSec
+server/routes/adminInstitutionalAudit.ts → clampIntOr, nowSec
+server/routes/adminScout/support.ts     → clampIntOr, nowSec, toFiniteNumberOr  (also has local copies)
+server/routes/grift-admin/shared.ts     → clampInt, toFiniteNumber
+server/routes/grift-admin/ops.ts        → clampInt
+server/routes/adminActivity.ts          → clampIntOr  (also has local clampInt)
+server/routes/public/globalSettingsPayload.ts → clampIntOr
+server/cron/evaluateChallenges.ts       → clampIntOr
+server/grift/griftRetention.ts          → clampIntOr  (also has local clampInt)
+```
+
+</details>
+
+---
+
+## Categorized Findings
+
+### Stale Claims (disproven by current tree)
+
+| Prior Claim | Current State |
+|-------------|---------------|
+| 42 files have `@ts-nocheck` | **0 active files.** Only reference is a regex in a Vite plugin. Fully resolved. |
+| `adminScout.ts` is 3,972 LOC | **125 LOC.** Decomposed into 6 sub-modules under `server/routes/adminScout/`. |
+| `adminDataExportBuild.ts` is 2,591 LOC | **1,531 LOC.** Split into `adminDataExportBuildSupport.ts` (1,102 LOC). |
+| `challengeEvaluation.ts` is 2,405 LOC | **710 LOC.** Split into `challengeEvaluationSupport.ts` (1,781 LOC). |
+| `AdminDashboard.tsx` is 4,446 LOC | **1,411 LOC.** Decomposed into tab components. |
+| `AdminDashboardSupport.tsx` is 4,745 LOC | **1,618 LOC.** Reduced. |
+| `PartnerPortal.tsx` is 3,298 LOC | **1,833 LOC.** Split into `PartnerPortalTabs.tsx` (1,674 LOC). |
+| 8 `clampInt` copies with 3 inconsistent | **4 copies remain.** 4 were consolidated to use `clampIntOr` from shared. |
+| 69 `as any` casts in trade files | **Mounted route counts are materially lower now:** `tradeOpen.ts` has 3, `tradeClose.ts` has 2, `tradeCancel.ts` has 0. The larger remaining concentration is in `orderEngine.ts` (41). |
+| `traderCore.ts` must be decomposed before trade tests are possible | **False on the live tree.** The app mounts `server/routes/trader/index.ts`, and direct tests now exist for `tradeOpen.ts`, `tradeClose.ts`, and `tradeCancel.ts`. |
+
+---
+
+### Real Issues (verified, actionable)
+
+#### REAL-1: Residual `as any` debt remains in execution-core paths (Correctness Risk)
+
+**Severity: HIGH** — the mounted trader routes were cleaned up substantially, but execution-critical internals still bypass type safety.
+
+**Current concentration:**
+- `tradeOpen.ts`: **3** casts
+- `tradeClose.ts`: **2** casts
+- `tradeCancel.ts`: **0** casts
+- `orderEngine.ts`: **41** casts
+- `autoClose.ts`: **3** casts
+- `marginCall.ts`: **3** casts
+
+**Important correction:** this is **not** a missing-schema-column problem. The shared schema already carries the cited `Trade` and `SymbolConfig` columns. The remaining causes are:
+- relation result typing (for example `storage.getTradeById()` and related helpers),
+- raw SQL row typing (`rows[0] as any`, aggregate rows),
+- transaction result typing (`closeResult as any`, `tradeResult as any`),
+- a few request/body parsing boundaries.
+
+> [!IMPORTANT]
+> Per policy rubric, this remains the top live correctness issue, but the remediation target is **typed row/return-shape cleanup**, not extending `shared/schema.pg.ts` for columns that already exist.
+
+---
+
+#### REAL-2: Direct server-side coverage now exists, but deep execution-path coverage is still thinner than the route/middleware layer
+
+**Severity: MEDIUM** — the prior “zero tests” claim is no longer true, but the deepest transaction-heavy branches still merit more focused coverage over time.
+
+**Current direct coverage now includes:**
+- `shared/policyDecision` decision matrix
+- `server/middleware/requirePolicy`
+- mounted trade routes: `tradeOpen.ts`, `tradeClose.ts`, `tradeCancel.ts`
+- schedulers: `autoClose.ts`, `marginCall.ts`
+- exported order-engine seam: `onQuotesUpdated()` in `orderEngine.ts`
+
+**Current test inventory:**
+- Server: **22** test files
+- Client: **16** test files
+- E2E: **9** specs
+
+**What remains comparatively thinner:**
+- full close-settlement transaction paths,
+- order-engine fill/close flows deeper than the exported entrypoint/sweep behavior,
+- more exhaustive margin-call / auto-close liquidation outcome matrices.
+
+> [!NOTE]
+> The direct-test gap that previously justified urgent action has been materially reduced in the live tree.
+
+---
+
+### No-Action Items (acceptable as-is)
+
+#### `clampInt` Local Copies — No Action Needed
+
+**Prior claim:** 8 inconsistent copies requiring consolidation.  
+**Current state:** 4 local copies remain, all actively used.
+
+Per policy: *"Local wrappers are allowed when semantics differ."* The local copies embed **domain-specific fallback semantics** that the canonical `clampInt` (returns `number | null`) doesn't provide. The shared `clampIntOr` function was added as the bridge, and files that could migrate already have.
+
+| File | Calls | Rationale for keeping local |
+|------|------:|---------------------------|
+| `globalSettingsAdmin.ts` | 30+ | Config normalization — every field needs its own fallback. Already imports `clampIntOr` for other uses. |
+| `adminActivity.ts` | 7 | Admin input clamping with domain fallbacks. Already imports `clampIntOr`. |
+| `griftRetention.ts` | 2 | Retention batch config. Already imports `clampIntOr`. |
+| `adminScout/support.ts` | 1 | Exported for scout module. Already imports `clampIntOr` + `toFiniteNumberOr`. |
+
+The local functions are **stable, tested-by-integration, and express domain intent**. Forcing migration to `clampIntOr` would change the signature at 40+ call sites for no behavioral improvement. The inconsistent parameter ordering is a readability concern, not a correctness bug — each file uses its copy consistently internally.
+
+#### `toFiniteNumber` Local Copies — No Action Needed
+
+3 local copies exist. Two use a with-fallback variant (`clickhouseSync`, `adminScout/support`); one returns `null` (`allocationEngine`). The shared module provides both `toFiniteNumber` (→ `null`) and `toFiniteNumberOr` (→ fallback). These are small, stable adapters — replacing them risks churn with no correctness benefit.
+
+#### Large Files That Are Cohesive — No Action Needed
+
+Per policy: *"A large but cohesive file can be acceptable."*
+
+| File | LOC | Assessment |
+|------|----:|-----------|
+| `griftEngine.ts` | 1,827 | Complex domain, cohesive. Prior audit already marked acceptable. |
+| `messaging.ts` | 1,885 | E2EE + fanout + settings — single domain, complex but cohesive. |
+| `storage.ts` | 1,816 | Legacy storage layer — stable, low churn. |
+| `quoteFeed.ts` | 1,293 | Market data pipeline — cohesive, hot path. |
+| `wsCore.ts` | 1,412 | WebSocket core — cohesive, hot path. Decomposition risks middleware/WS parity. |
+| `TradeScreen.tsx` | 1,959 | Main trading UI page — single responsibility. |
+| `ProfileSettings.tsx` | 1,868 | User profile page — single responsibility. |
+
+#### `traderCore.ts` — No Immediate Action Needed For Testability
+
+`traderCore.ts` remains large, but it is **not** the mounted router and it is **not** a prerequisite for testing the live trade path. The live app mounts `server/routes/trader/index.ts`, and direct tests now cover the mounted trade route modules.
+
+---
+
+### Optional Follow-ups (low priority, no urgency)
+
+| Item | Effort | Rationale |
+|------|--------|-----------|
+| Migrate `adminScout/support.ts` local `clampInt` to use `clampIntOr` | 15 min | Only 1 call site; file already imports shared. Reduces one duplicate definition. |
+| Continue replacing raw SQL / aggregate `as any` rows in `orderEngine.ts`, `autoClose.ts`, `marginCall.ts`, and `storage.ts` | 1-2 days | Highest remaining type-safety payoff is now in execution internals and row-shape helpers. |
+| Decompose `challengeEvaluationSupport.ts` (1,781 LOC) | 2 hrs | New file from decomposition. Inspect cohesion — may contain mixed evaluation + reporting concerns. |
+| Add deeper transaction-path tests for fill/close/liquidation settlement branches | 2-3 days | Route/middleware/scheduler seams now have direct tests; deeper financial settlement matrices remain the next layer. |
+| Add unit tests for grift engine | 2-3 days | Business rule regression safety outside the trade-path work completed here. |
+
+---
+
+## Updated Remediation Priority
+
+Per the policy rubric: correctness → security → compliance → hot paths → cross-domain → size.
+
+| Priority | Item | Effort | Category |
+|----------|------|--------|----------|
+| **P0** | Continue removing raw row / transaction `as any` casts in `orderEngine.ts`, `autoClose.ts`, and `marginCall.ts` | 1-2 days | Correctness |
+| **P1** | Add deeper close/fill/liquidation settlement tests beyond the new route and scheduler seams | 2-3 days | Correctness |
+| **P2** | Extend type cleanup into admin/storage aggregate paths where casts remain but are not trade-hot-path critical | 1 day | Maintainability |
+| **P3** | Inspect `challengeEvaluationSupport.ts` for second-generation cohesion issues | 2 hrs | Maintainability |
+
+---
+
+## Verdict
+
+The codebase has made **substantial progress** since the prior audit:
+- `@ts-nocheck` is **fully resolved** (0/42)
+- God-file decomposition is **largely complete** — the worst offenders were decomposed with clear domain seams
+- `clampInt` duplication was **intentionally handled** — `clampIntOr` bridge exists in shared, local wrappers kept where semantics differ
+- direct server-side coverage now exists for policy decisions, policy enforcement, mounted trade routes, schedulers, and the exported order-engine seam
+
+**The live picture is now narrower and more accurate:**
+1. The remaining type-safety risk is concentrated in execution-core raw row / transaction typing, especially `orderEngine.ts`, not in missing shared schema columns.
+2. The previous “zero coverage” conclusion is no longer true; the remaining gap is **depth**, not the absence of direct tests.
+3. `traderCore.ts` is not the mounted blocker for testing and should not drive current remediation priority by itself.

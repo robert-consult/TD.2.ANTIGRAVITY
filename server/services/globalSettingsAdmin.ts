@@ -1,4 +1,5 @@
 import { insertGlobalSettingsSchema, type GlobalSettings as GlobalSettingsRow } from "@shared/schema";
+import { clampIntOr, nowSec } from "@shared/scalars";
 import { z } from "zod";
 
 const GLOBAL_PREFETCH_STRATEGY_VALUES = ["all", "critical", "none"] as const;
@@ -208,9 +209,7 @@ function normalizeGlobalPrefetchStrategy(
 }
 
 function clampInt(value: unknown, min: number, max: number, fallback: number): number {
-  const n = typeof value === "number" ? value : Number(value);
-  if (!Number.isFinite(n)) return fallback;
-  return Math.min(max, Math.max(min, Math.trunc(n)));
+  return clampIntOr(value, fallback, min, max);
 }
 
 function clampFloat(value: unknown, min: number, max: number, fallback: number): number {
@@ -400,7 +399,7 @@ export function resolveGlobalSettingsWrite(params: {
 
   const normalizedNowSec = Number.isFinite(params.nowSec)
     ? Math.max(0, Math.trunc(params.nowSec))
-    : Math.floor(Date.now() / 1000);
+    : nowSec();
 
   const existingUpdatedAtSec =
     params.existing && typeof params.existing.updatedAt === "number"

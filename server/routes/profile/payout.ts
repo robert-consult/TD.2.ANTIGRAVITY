@@ -1,4 +1,3 @@
-// @ts-nocheck
 import type { Router, NextFunction, Request, Response } from "express";
 import { z } from "zod";
 import crypto from "crypto";
@@ -48,6 +47,7 @@ import type { ProfileRouterDeps } from "./types";
 export function registerPayoutRoutes(router: Router, deps: ProfileRouterDeps) {
   const { ensureAuth, sessionCookieName } = deps;
   const SESSION_COOKIE_NAME = sessionCookieName;
+  const payoutCurrencies = ["USD", "EUR", "GBP", "CHF", "JPY"] as const;
 router.get("/api/profile/payout", ensureAuth, requirePolicy("KYC_VIEW"), async (req: Request, res: Response) => {
   try {
     const user = await storage.getUserById(req.session.userId!);
@@ -83,14 +83,14 @@ router.get("/api/profile/payout", ensureAuth, requirePolicy("KYC_VIEW"), async (
 router.put("/api/profile/payout/currency", ensureAuth, requirePolicy("PREFERRED_PAYMENT_CURRENCY_SET"), async (req: Request, res: Response) => {
   try {
     const payoutCurrencySchema = z.object({
-      currency: z.enum(["USD", "EUR", "GBP", "CHF", "JPY"], {
-        errorMap: () => ({ message: "Invalid currency. Must be USD, EUR, GBP, CHF, or JPY" })
-      })
+      currency: z.enum(payoutCurrencies, {
+        message: "Invalid currency. Must be USD, EUR, GBP, CHF, or JPY",
+      }),
     });
 
     const validationResult = payoutCurrencySchema.safeParse(req.body);
     if (!validationResult.success) {
-      return res.status(400).json({ message: validationResult.error.errors[0]?.message || "Invalid input" });
+      return res.status(400).json({ message: validationResult.error.issues[0]?.message || "Invalid input" });
     }
 
     const { currency } = validationResult.data;

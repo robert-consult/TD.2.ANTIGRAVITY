@@ -1,12 +1,7 @@
 import { db } from "@db";
+import { clampIntOr } from "@shared/scalars";
 import { orderIntentAudit, symbolConfigs, tradeAudit, trades, users } from "@shared/schema";
 import { and, desc, eq } from "drizzle-orm";
-
-function clampInt(raw: unknown, fallback: number, min: number, max: number): number {
-  const parsed = Number(raw);
-  if (!Number.isFinite(parsed)) return fallback;
-  return Math.max(min, Math.min(max, Math.trunc(parsed)));
-}
 
 function parseUnixSec(value: unknown): number | null {
   const n = Number(value);
@@ -56,7 +51,7 @@ export type FetchTradeAuditRecordsParams = {
 };
 
 export async function fetchTradeAuditRecords(params: FetchTradeAuditRecordsParams): Promise<any[]> {
-  const limit = clampInt(params.limit, 200, 1, 5000);
+  const limit = clampIntOr(params.limit, 200, 1, 5000);
   const tradeId = params.tradeId != null ? normalizeInt(params.tradeId) : null;
   const eventType = nonEmptyString(params.eventType);
   const riskResult = nonEmptyString(params.riskResult);
@@ -202,7 +197,7 @@ export type FetchOrderIntentAuditRecordsParams = {
 export async function fetchOrderIntentAuditRecords(
   params: FetchOrderIntentAuditRecordsParams,
 ): Promise<any[]> {
-  const limit = clampInt(params.limit, 200, 1, 5000);
+  const limit = clampIntOr(params.limit, 200, 1, 5000);
   const correlationId = nonEmptyString(params.correlationId);
   const decision = nonEmptyString(params.decision);
   const userId = params.userId != null ? normalizeInt(params.userId) : null;
@@ -695,4 +690,3 @@ export function buildAuditTrailLinkage(params: {
       .sort((a, b) => (b.lastAt || 0) - (a.lastAt || 0)),
   };
 }
-

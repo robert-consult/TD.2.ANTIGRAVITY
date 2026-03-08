@@ -1,4 +1,3 @@
-// @ts-nocheck
 import type { Router, Request, Response } from "express";
 import { decidePolicy, featureGates } from "@shared/policyDecision";
 import { buildAuditContext } from "../../lib/auditContext";
@@ -13,31 +12,41 @@ export function registerPolicySnapshotRoute(router: Router, deps: TraderRouterDe
     try {
       const userId = req.session.userId!;
       const policyConfig = await loadPolicyConfig();
-      const decisionCtx = await buildDecisionContext(userId, buildAuditContext(req), {
-        expectedPathCode: "POLICY_VIEW",
+      const auditCtx = buildAuditContext(req);
+      const decisionCtx = await buildDecisionContext({
+        userId,
+        nowMs: Date.now(),
+        request: {
+          correlationId: auditCtx.correlationId,
+          actorType: auditCtx.actorType,
+          actorUserId: auditCtx.actorUserId,
+          sessionId: auditCtx.sessionId,
+          ip: auditCtx.ip,
+          userAgent: auditCtx.userAgent,
+        },
+        policyConfig,
       });
-
-      const decisions: Record<string, any> = {};
-      for (const pathCode of Object.keys(featureGates)) {
-        decisions[pathCode] = decidePolicy({
-          pathCode,
-          score: decisionCtx.score,
-          accountAgeDays: decisionCtx.accountAgeDays,
-          completedChallengePhaseCount: decisionCtx.completedChallengePhaseCount,
-          profitableDays: decisionCtx.profitableDays,
-          maxConsecutiveLosses: decisionCtx.maxConsecutiveLosses,
-          policyConfig,
-          challengeStatus: decisionCtx.challengeStatus,
-        });
-      }
+      const decisions = {
+        tradeOpenOrIncrease: decidePolicy("TRADE_OPEN_OR_INCREASE", decisionCtx, policyConfig),
+        tradeCloseOrReduce: decidePolicy("TRADE_CLOSE_OR_REDUCE", decisionCtx, policyConfig),
+        tradeCancelPending: decidePolicy("TRADE_CANCEL_PENDING", decisionCtx, policyConfig),
+        tradeModifySltp: decidePolicy("TRADE_MODIFY_SLTP", decisionCtx, policyConfig),
+        viewKyc: decidePolicy("KYC_VIEW", decisionCtx, policyConfig),
+        submitKyc: decidePolicy("KYC_SUBMIT", decisionCtx, policyConfig),
+        setPreferredPaymentCurrency: decidePolicy("PREFERRED_PAYMENT_CURRENCY_SET", decisionCtx, policyConfig),
+        requestPayout: decidePolicy("PAYOUT_REQUEST", decisionCtx, policyConfig),
+      };
+      const gates = featureGates(decisionCtx, policyConfig);
 
       res.json({
-        score: decisionCtx.score,
-        accountAgeDays: decisionCtx.accountAgeDays,
-        completedChallengePhaseCount: decisionCtx.completedChallengePhaseCount,
-        profitableDays: decisionCtx.profitableDays,
-        maxConsecutiveLosses: decisionCtx.maxConsecutiveLosses,
-        challengeStatus: decisionCtx.challengeStatus,
+        accountState: gates.accountState,
+        contenderEligible: gates.contenderEligible,
+        metrics: decisionCtx.metrics,
+        user: {
+          userTier: decisionCtx.user.userTier,
+          contenderTier: decisionCtx.user.contenderTier,
+        },
+        kyc: decisionCtx.kyc,
         decisions,
       });
     } catch (error) {

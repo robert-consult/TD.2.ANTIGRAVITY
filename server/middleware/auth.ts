@@ -27,6 +27,7 @@ import {
   verifyRememberMeToken,
 } from "../services/rememberMe";
 import { appendIdentityAudit } from "../services/identityAudit";
+import { saveSession } from "../lib/saveSession";
 import { applyAdminScopeSession } from "../security/adminScopeSession";
 
 function normalizeIso2(value: unknown): string | undefined {
@@ -529,10 +530,14 @@ export function impersonationGuard(req: Request, res: Response, next: NextFuncti
       req.session.impersonatedUserId = undefined;
       req.session.impersonationStartedAt = undefined;
       
-      return res.status(440).json({ 
-        message: "Impersonation session expired. You have been returned to your admin session.",
-        code: "IMPERSONATION_EXPIRED"
-      });
+      return void saveSession(req.session)
+        .then(() => {
+          res.status(440).json({
+            message: "Impersonation session expired. You have been returned to your admin session.",
+            code: "IMPERSONATION_EXPIRED",
+          });
+        })
+        .catch(next);
     }
   }
   

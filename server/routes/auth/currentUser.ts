@@ -1,4 +1,3 @@
-// @ts-nocheck
 import type { Router, NextFunction, Request, Response } from "express";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
@@ -179,8 +178,8 @@ router.get("/api/auth/current-user", async (req: Request, res: Response) => {
         legalRequiredCombinedSha256: legalStatus.legalRequiredCombinedSha256,
         legalLastAcceptedCombinedSha256: legalStatus.legalLastAcceptedCombinedSha256,
         isImpersonating: req.session.isImpersonating || false,
-        realAdminId: null,
-        realAdminEmail: null,
+        realAdminId: req.session.realAdminId ?? null,
+        realAdminEmail: req.session.realAdminEmail ?? null,
       };
     };
 

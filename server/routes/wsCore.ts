@@ -1,4 +1,3 @@
-// @ts-nocheck
 import type { Express, Request } from "express";
 import type { Store } from "express-session";
 import type { Server } from "http";
@@ -1385,18 +1384,18 @@ onLiveEvent((event) => {
   const userId = ev?.userId;
   if (ev?.type === WS_MSG_TRADES_UPDATED || ev?.type === WS_MSG_TRADES_UPDATE) {
     if (typeof userId === "number") {
-      broadcast(ev, (client) => client.userId === userId && client.wantsTrades);
+      broadcast(ev, (client) => client.userId === userId && Boolean(client.wantsTrades));
     } else {
-      broadcast(ev, (client) => client.wantsTrades);
+      broadcast(ev, (client) => Boolean(client.wantsTrades));
     }
     return;
   }
 
   if (ev?.type === WS_MSG_ACCOUNT_UPDATED || ev?.type === WS_MSG_ACCOUNT_UPDATE) {
     if (typeof userId === "number") {
-      broadcast(ev, (client) => client.userId === userId && client.wantsAccount);
+      broadcast(ev, (client) => client.userId === userId && Boolean(client.wantsAccount));
     } else {
-      broadcast(ev, (client) => client.wantsAccount);
+      broadcast(ev, (client) => Boolean(client.wantsAccount));
     }
     return;
   }

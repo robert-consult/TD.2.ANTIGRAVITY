@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { clampIntOr } from "@shared/scalars";
 import { MIN_PRICE_DISTANCE_PIPS } from "@shared/tradingRules";
 
 const ABSOLUTE_MAX_LOTS = 50;
@@ -13,12 +14,6 @@ type GlobalLotSettingsResponse = {
   minPriceDistancePips?: number | null;
   absoluteMaxLots?: number | null;
 };
-
-function clampInt(value: unknown, min: number, max: number, fallback: number) {
-  const n = typeof value === "number" ? value : Number(value);
-  if (!Number.isFinite(n)) return fallback;
-  return Math.min(max, Math.max(min, Math.trunc(n)));
-}
 
 function parsePresetCards(raw: string | null | undefined, max: number): number[] {
   try {
@@ -50,13 +45,13 @@ export function useLotSettings() {
   });
 
   const lotDropdownMax = useMemo(() => {
-    return clampInt(query.data?.lotDropdownMax, 1, ABSOLUTE_MAX_LOTS, ABSOLUTE_MAX_LOTS);
+    return clampIntOr(query.data?.lotDropdownMax, ABSOLUTE_MAX_LOTS, 1, ABSOLUTE_MAX_LOTS);
   }, [query.data?.lotDropdownMax]);
 
   const lotPresetCards = useMemo(() => {
     const fromServer = Array.isArray(query.data?.lotPresetCardsArray)
       ? query.data?.lotPresetCardsArray
-          .map((n) => clampInt(n, 1, lotDropdownMax, 1))
+          .map((n) => clampIntOr(n, 1, 1, lotDropdownMax))
           .filter((n) => n >= 1 && n <= lotDropdownMax)
       : null;
     if (fromServer && fromServer.length > 0) {
@@ -71,13 +66,13 @@ export function useLotSettings() {
   }, [lotDropdownMax, query.data?.lotPresetCards, query.data?.lotPresetCardsArray]);
 
   const minPriceDistancePips = useMemo(() => {
-    return clampInt(query.data?.minPriceDistancePips, 1, 10_000, DEFAULT_MIN_PRICE_DISTANCE_PIPS);
+    return clampIntOr(query.data?.minPriceDistancePips, DEFAULT_MIN_PRICE_DISTANCE_PIPS, 1, 10_000);
   }, [query.data?.minPriceDistancePips]);
 
   const lotDropdownOptions = useMemo(() => {
     const fromServer = Array.isArray(query.data?.lotDropdownOptions)
       ? query.data?.lotDropdownOptions
-          .map((n) => clampInt(n, 1, lotDropdownMax, 1))
+          .map((n) => clampIntOr(n, 1, 1, lotDropdownMax))
           .filter((n) => n >= 1 && n <= lotDropdownMax)
       : null;
     if (fromServer && fromServer.length > 0) {

@@ -1,4 +1,3 @@
-// @ts-nocheck
 import "dotenv/config";
 import pThrottle from "p-throttle";
 import { db, dbClient } from "@db";
@@ -172,7 +171,17 @@ async function loadPersistedValkeyQuoteRows(symbols: string[]): Promise<Persiste
   }
 }
 
-async function loadPersistedDbQuoteRows(symbols: string[]) {
+type PersistedDbQuoteRow = {
+  symbol: string;
+  price: number | null;
+  bid: number | null;
+  ask: number | null;
+  lastUpdated: number;
+  isStale: boolean;
+  consecutiveFailures: number;
+};
+
+async function loadPersistedDbQuoteRows(symbols: string[]): Promise<PersistedDbQuoteRow[]> {
   if (!symbols.length) return [];
   try {
     const res = await dbClient.query(
@@ -199,7 +208,7 @@ async function loadPersistedDbQuoteRows(symbols: string[]) {
           consecutiveFailures: 0,
         };
       })
-      .filter(Boolean);
+      .filter((row): row is PersistedDbQuoteRow => row !== null);
   } catch {
     return [];
   }
@@ -777,7 +786,7 @@ type LiveQuoteRow = {
 
 function toLiveQuoteRows(rows: any[], asOf: number, isStaleDefault: boolean, fallbackSource?: string): LiveQuoteRow[] {
   return rows
-    .map((q) => {
+    .map<LiveQuoteRow | null>((q) => {
       if (!q?.symbol) return null;
       const symbol = normalizeSymbol(String(q.symbol));
       const bid = typeof q.bid === "number" ? q.bid : null;
@@ -801,7 +810,7 @@ function toLiveQuoteRows(rows: any[], asOf: number, isStaleDefault: boolean, fal
         source,
       };
     })
-    .filter((row): row is LiveQuoteRow => Boolean(row && row.symbol));
+    .filter((row): row is LiveQuoteRow => row !== null && Boolean(row.symbol));
 }
 
 async function persistSnapshotToValkey(rows: LiveQuoteRow[], meta: { seq: number; asOf: number; source: string }) {

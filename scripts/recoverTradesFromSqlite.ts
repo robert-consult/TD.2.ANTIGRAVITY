@@ -1,9 +1,7 @@
-import fs from "node:fs";
-import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { Client } from "pg";
+import { resolveLegacySqliteSource } from "../db/legacySqliteSource";
 
-const SQLITE_DB_PATH = process.env.SQLITE_DB_PATH ?? "trading_app.db";
 const RECOVER_EMAIL = process.env.RECOVER_EMAIL ?? "";
 const APPLY = process.env.RECOVER_APPLY === "1";
 const INCLUDE_OPEN = process.env.RECOVER_INCLUDE_OPEN === "1";
@@ -159,10 +157,9 @@ async function main() {
     die("DATABASE_URL is required for Postgres.");
   }
 
-  const sqlitePath = path.resolve(SQLITE_DB_PATH);
-  if (!fs.existsSync(sqlitePath)) {
-    die(`SQLite DB not found: ${sqlitePath}`);
-  }
+  const sqlitePath = resolveLegacySqliteSource({
+    purpose: "trade recovery from SQLite",
+  }).sqlitePath;
 
   const emailLit = sqliteStringLiteral(RECOVER_EMAIL.trim());
   const sqliteUser = sqliteJson(

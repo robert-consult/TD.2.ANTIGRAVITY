@@ -1,9 +1,7 @@
 import "dotenv/config";
-import fs from "node:fs";
-import path from "node:path";
 import { Client } from "pg";
+import { resolveLegacySqliteSource } from "../db/legacySqliteSource";
 
-const SQLITE_DB_PATH = process.env.SQLITE_DB_PATH ?? "trading_app.db";
 const BATCH_SIZE = Number(process.env.MIGRATE_BATCH_SIZE ?? 1000);
 const DRY_RUN = process.env.MIGRATE_DRY_RUN === "1";
 
@@ -206,17 +204,15 @@ async function upsertTranslationJobs(client: Client, rows: any[]) {
 }
 
 async function main() {
-  const sqlitePath = path.resolve(SQLITE_DB_PATH);
-  if (!fs.existsSync(sqlitePath)) {
-    throw new Error(`SQLite database not found: ${sqlitePath}`);
-  }
+  const sqliteSource = resolveLegacySqliteSource({ purpose: "i18n SQLite -> Postgres migration" });
+  const sqlitePath = sqliteSource.sqlitePath;
 
   const BetterSqlite3 = await loadBetterSqlite3();
   const sqlite = new BetterSqlite3(sqlitePath, { readonly: true });
   const client = new Client({ connectionString: process.env.DATABASE_URL });
   await client.connect();
 
-  log(`SQLite source: ${sqlitePath}`);
+  log(`SQLite source: ${sqlitePath} (${sqliteSource.kind})`);
   log(`Batch size: ${BATCH_SIZE}`);
   log(`Dry run: ${DRY_RUN ? "yes" : "no"}`);
 
@@ -330,4 +326,3 @@ main().catch((err) => {
   log(`FAILED: ${err instanceof Error ? err.message : String(err)}`);
   process.exit(1);
 });
-

@@ -12,7 +12,8 @@ export default defineConfig({
         css: false,
         include: [
             'client/src/**/*.{test,spec}.{js,jsx,ts,tsx}',
-            'server/**/*.{test,spec}.{js,ts}'
+            'server/**/*.{test,spec}.{js,ts}',
+            'db/**/*.{test,spec}.{js,ts}'
         ],
         alias: {
             '@': path.resolve(__dirname, './client/src'),

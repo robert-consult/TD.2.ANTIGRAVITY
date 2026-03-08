@@ -1,8 +1,6 @@
-import fs from "node:fs";
-import path from "node:path";
 import { Client } from "pg";
+import { resolveLegacySqliteSource } from "../db/legacySqliteSource";
 
-const SQLITE_DB_PATH = process.env.SQLITE_DB_PATH ?? "trading_app.db";
 const BATCH_SIZE = Number(process.env.MIGRATE_BATCH_SIZE ?? 500);
 const DRY_RUN = process.env.MIGRATE_DRY_RUN === "1";
 
@@ -182,10 +180,8 @@ async function resetSequence(client: Client, table: string) {
 }
 
 async function main() {
-  const sqlitePath = path.resolve(SQLITE_DB_PATH);
-  if (!fs.existsSync(sqlitePath)) {
-    throw new Error(`SQLite database not found: ${sqlitePath}`);
-  }
+  const sqliteSource = resolveLegacySqliteSource({ purpose: "SQLite -> Postgres migration" });
+  const sqlitePath = sqliteSource.sqlitePath;
 
   const BetterSqlite3 = await loadBetterSqlite3();
   const sqlite = new BetterSqlite3(sqlitePath, { readonly: true });
@@ -200,7 +196,7 @@ async function main() {
   const tables = [...ordered, ...extras.sort()];
 
   log(`SQLite: ${sqliteTables.size} tables, Postgres: ${postgresTables.size} tables`);
-  log(`Migrating ${tables.length} table(s) from ${sqlitePath}`);
+  log(`Migrating ${tables.length} table(s) from ${sqlitePath} (${sqliteSource.kind})`);
 
   for (const table of tables) {
     const pgColumns = await getPostgresColumns(client, table);
@@ -282,4 +278,3 @@ main().catch((err) => {
   console.error(`[sqlite->pg] FAIL: ${err instanceof Error ? err.message : String(err)}`);
   process.exit(1);
 });
-

@@ -1,0 +1,224 @@
+# Webapp Deep-Context Critique
+
+**Verified against current tree on 2026-03-09**
+
+This critique audits the live webapp tree, not just `walkthrough.md.resolved.0`. It follows the policy in [.agents/audit-decomposition.md](/home/bcodex/TD.2.ANTIGRAVITY/.agents/audit-decomposition.md) and the web UI constraints in [client/AGENTS.md](/home/bcodex/TD.2.ANTIGRAVITY/client/AGENTS.md): risk and behavior preservation come before raw file size.
+
+## Scope and Evidence
+
+Primary scans used:
+
+```bash
+find client server shared -type f \( -name '*.ts' -o -name '*.tsx' \) -print0 | xargs -0 wc -l | sort -nr | head -n 40
+rg -n "^function clampInt\\(|^export function clampInt\\(|^function toFiniteNumber\\(|^export function toFiniteNumber\\(|^function normalizeChallengeMailboxCategory\\(|^export function normalizeChallengeMailboxCategory\\(" client server shared
+rg -n "TradeScreen|ProfileSettings|SystemConfigTab|PartnerPortal|GriftAdmin|ScoutChallengesPanel|ScoutWorkbench" client/src e2e -g '*.{test,spec,tsx,ts}'
+rg -n "routePrefetch|perfHints|use-performance-settings|ConfigSync|LiveUpdatesProvider|global-settings:updated|system-config:updated" client/src -g '*.{ts,tsx}'
+```
+
+Current large-file context relevant to the webapp:
+
+| File | Current LOC |
+|---|---:|
+| `client/src/pages/TradeScreen.tsx` | 1,959 |
+| `client/src/components/admin/dashboard/SystemConfigTab.tsx` | 1,948 |
+| `client/src/pages/ProfileSettings.tsx` | 1,868 |
+| `client/src/pages/PartnerPortal.tsx` | 1,833 |
+| `client/src/components/admin/GriftAdmin.tsx` | 1,872 |
+| `client/src/components/admin/ScoutChallengesPanel.tsx` | 1,820 |
+| `client/src/components/admin/ScoutWorkbench.tsx` | 1,805 |
+
+## Summary Verdict
+
+The underlying decomposition progress is mostly real, but the prior walkthrough remains too LOC-led and not deep-context-aware enough for the webapp.
+
+The main repo-level takeaway is:
+
+- **Do not start another size-first refactor wave in the client.**
+- **The highest-value webapp follow-up is targeted test coverage for large workflow screens, especially admin/system settings and profile flows.**
+- **Any future decomposition of `TradeScreen.tsx` must preserve WS, query invalidation, resize, and mobile-collapse behavior that is already tightly coupled and partially covered by E2E.**
+
+## Stale or Weak Claims in the Prior Walkthrough
+
+### 1. Duplicate-helper evidence is incomplete
+
+The prior walkthrough says only 5 local helper copies remain. The current tree still has at least 8 non-shared definitions across:
+
+- [server/partner/allocationEngine.ts](/home/bcodex/TD.2.ANTIGRAVITY/server/partner/allocationEngine.ts)
+- [server/grift/griftRetention.ts](/home/bcodex/TD.2.ANTIGRAVITY/server/grift/griftRetention.ts)
+- [server/routes/adminScout/support.ts](/home/bcodex/TD.2.ANTIGRAVITY/server/routes/adminScout/support.ts)
+- [server/routes/adminActivity.ts](/home/bcodex/TD.2.ANTIGRAVITY/server/routes/adminActivity.ts)
+- [server/services/clickhouseSync.ts](/home/bcodex/TD.2.ANTIGRAVITY/server/services/clickhouseSync.ts)
+- [server/services/globalSettingsAdmin.ts](/home/bcodex/TD.2.ANTIGRAVITY/server/services/globalSettingsAdmin.ts)
+- [server/routes/traderTalent.ts](/home/bcodex/TD.2.ANTIGRAVITY/server/routes/traderTalent.ts)
+- [server/recruitment/challengesV4/challengeEvaluationSupport.ts](/home/bcodex/TD.2.ANTIGRAVITY/server/recruitment/challengesV4/challengeEvaluationSupport.ts)
+
+This does not automatically mean more dedup is required. Some wrappers are domain-shaped and allowed by policy. The problem is the report treats an imprecise count as settled verification.
+
+### 2. The report says it follows policy without providing policy-grade evidence
+
+The repo policy requires:
+
+- exact verification date
+- explicit current-tree scan evidence
+- separation of stale claims, real issues, no-action items, and optional follow-ups
+- validation commands for any recommended action
+
+The prior walkthrough gives a date, but not the actual command evidence or the required issue categories. That makes it useful as a status memo, not as a fully defensible audit.
+
+### 3. The trader-route discussion is framed around the legacy parent file
+
+The live mounted trader path is composed through:
+
+- [server/routes.ts](/home/bcodex/TD.2.ANTIGRAVITY/server/routes.ts)
+- [server/routes/trader/index.ts](/home/bcodex/TD.2.ANTIGRAVITY/server/routes/trader/index.ts)
+
+So treating `traderCore.ts` as the main proof target is stale. A route decomposition critique should verify mounted method/path surface and middleware order, not just parent-file shrinkage.
+
+## Real Webapp Issues
+
+### 1. `SystemConfigTab.tsx` is a real maintainability hotspot, but the gap is testability more than file size
+
+File: [SystemConfigTab.tsx](/home/bcodex/TD.2.ANTIGRAVITY/client/src/components/admin/dashboard/SystemConfigTab.tsx)
+
+Why it matters:
+
+- It drives admin writes that affect global performance, market-data provider state, compliance controls, and system behavior.
+- It mutates both `/api/admin/system-config` and `/api/admin/global-settings`.
+- It performs cache writes via `queryClient.setQueryData` and invalidations that must remain compatible with [ConfigSync.tsx](/home/bcodex/TD.2.ANTIGRAVITY/client/src/live/ConfigSync.tsx) and [globalSettingsPerformance.ts](/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/globalSettingsPerformance.ts).
+
+What is already good:
+
+- Lower-level merge behavior is covered by [ConfigSync.test.ts](/home/bcodex/TD.2.ANTIGRAVITY/client/src/live/ConfigSync.test.ts).
+- Performance-settings resolution is covered by [use-performance-settings.test.tsx](/home/bcodex/TD.2.ANTIGRAVITY/client/src/hooks/use-performance-settings.test.tsx).
+
+What is still missing:
+
+- No direct component/UI tests were found for `SystemConfigTab.tsx`.
+- No E2E coverage was found for admin performance settings save flows, schema-warning behavior, or provider-probe UI behavior.
+
+Best-practice conclusion:
+
+- **Action needed:** add targeted UI-level coverage before recommending another split.
+- **Not justified:** splitting the file again only because it is 1,948 lines.
+
+### 2. `ProfileSettings.tsx` is under-audited and more important than the prior walkthrough suggests
+
+File: [ProfileSettings.tsx](/home/bcodex/TD.2.ANTIGRAVITY/client/src/pages/ProfileSettings.tsx)
+
+Why it matters:
+
+- It is one of the largest current client pages at 1,868 LOC.
+- It combines profile updates, password changes, MFA setup/disable, sessions view, login history, preferences, locale switching, and account deactivation/deletion.
+- It contains many mutation paths and security-sensitive user actions.
+
+What is missing:
+
+- No direct page/component tests were found for `ProfileSettings.tsx`.
+- No dedicated E2E spec was found for profile settings, MFA, or account-action UI.
+
+Best-practice conclusion:
+
+- **Action needed:** this page deserves targeted test coverage sooner than another decomposition pass on already-covered trade/admin pages.
+- **Tangential suggestion issue:** any audit backlog that monitors `SystemConfigTab.tsx` and `TradeScreen.tsx` by size but omits `ProfileSettings.tsx` is incomplete.
+
+### 3. Admin/scout/partner workflow screens remain mutation-dense and should be judged by churn and test seams, not LOC
+
+Files:
+
+- [PartnerPortal.tsx](/home/bcodex/TD.2.ANTIGRAVITY/client/src/pages/PartnerPortal.tsx)
+- [ScoutWorkbench.tsx](/home/bcodex/TD.2.ANTIGRAVITY/client/src/components/admin/ScoutWorkbench.tsx)
+- [ScoutChallengesPanel.tsx](/home/bcodex/TD.2.ANTIGRAVITY/client/src/components/admin/ScoutChallengesPanel.tsx)
+- [GriftAdmin.tsx](/home/bcodex/TD.2.ANTIGRAVITY/client/src/components/admin/GriftAdmin.tsx)
+
+Deep-context read:
+
+- These screens are not quote-hot-path UI, but they are heavy in query/mutation orchestration and invalidation fan-out.
+- `PartnerPortal` already has meaningful E2E coverage in [partner-onboarding.spec.ts](/home/bcodex/TD.2.ANTIGRAVITY/e2e/partner-onboarding.spec.ts).
+- Scout/admin ecosystem behavior already has meaningful E2E coverage in [scout-ecosystem.spec.ts](/home/bcodex/TD.2.ANTIGRAVITY/e2e/scout-ecosystem.spec.ts).
+
+Best-practice conclusion:
+
+- **No immediate decomposition mandate.**
+- **Real maintainability risk:** if these screens keep changing, feature-hook or domain-service extraction is the next justified move because it would improve test seams around mutation/invalidation logic.
+- **Lower priority than `SystemConfigTab` and `ProfileSettings` test gaps.**
+
+## No-Action Items
+
+### 1. `TradeScreen.tsx` is not a valid size-only refactor target right now
+
+File: [TradeScreen.tsx](/home/bcodex/TD.2.ANTIGRAVITY/client/src/pages/TradeScreen.tsx)
+
+Why a naive split would be risky:
+
+- It sits on top of [useTrades.tsx](/home/bcodex/TD.2.ANTIGRAVITY/client/src/hooks/use-trades.tsx), [usePendingOrders.ts](/home/bcodex/TD.2.ANTIGRAVITY/client/src/hooks/usePendingOrders.ts), [use-account-summary.tsx](/home/bcodex/TD.2.ANTIGRAVITY/client/src/hooks/use-account-summary.tsx), [use-quotes.tsx](/home/bcodex/TD.2.ANTIGRAVITY/client/src/hooks/use-quotes.tsx), and [LiveUpdatesProvider.tsx](/home/bcodex/TD.2.ANTIGRAVITY/client/src/live/LiveUpdatesProvider.tsx).
+- It contains mobile header-collapse logic, ResizeObserver-driven responsive table behavior, and order-entry orchestration already partially decomposed into [OrderPanel.tsx](/home/bcodex/TD.2.ANTIGRAVITY/client/src/pages/trade-screen/OrderPanel.tsx).
+- It already has behavior coverage through [trade-ui-stability.spec.ts](/home/bcodex/TD.2.ANTIGRAVITY/e2e/trade-ui-stability.spec.ts), [trade-history.spec.ts](/home/bcodex/TD.2.ANTIGRAVITY/e2e/trade-history.spec.ts), and parts of [runbook.spec.ts](/home/bcodex/TD.2.ANTIGRAVITY/e2e/runbook.spec.ts).
+
+Best-practice conclusion:
+
+- **No action needed from this audit** beyond preserving current seams.
+- If future churn concentrates in either header-collapse or table-responsiveness logic, then a seam-based extraction is reasonable.
+
+### 2. Suggestions to make the webapp “faster” by adding more eager prefetch or broader polling would be low-quality advice
+
+Why:
+
+- The app already has tier-aware prefetch and startup shaping in [routePrefetch.ts](/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/routePrefetch.ts), [startupDataPrefetch.ts](/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/startupDataPrefetch.ts), and [perfHints.ts](/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.ts).
+- Admin performance propagation already flows through [AuthenticatedShell.tsx](/home/bcodex/TD.2.ANTIGRAVITY/client/src/AuthenticatedShell.tsx), [ConfigSync.tsx](/home/bcodex/TD.2.ANTIGRAVITY/client/src/live/ConfigSync.tsx), and [use-performance-settings.ts](/home/bcodex/TD.2.ANTIGRAVITY/client/src/hooks/use-performance-settings.ts).
+- This infrastructure is covered by [routePrefetch.test.ts](/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/routePrefetch.test.ts), [perfHints.test.ts](/home/bcodex/TD.2.ANTIGRAVITY/client/src/lib/perfHints.test.ts), [use-performance-settings.test.tsx](/home/bcodex/TD.2.ANTIGRAVITY/client/src/hooks/use-performance-settings.test.tsx), and [ConfigSync.test.ts](/home/bcodex/TD.2.ANTIGRAVITY/client/src/live/ConfigSync.test.ts).
+
+Best-practice conclusion:
+
+- **No action needed.**
+- Any suggestion to increase prefetch breadth or polling aggressiveness without tier-aware proof would be a regression risk, not an optimization.
+
+### 3. Suggestions to preload or broadly share admin code outside `/admin` are explicitly counter to current architecture
+
+Evidence:
+
+- Admin routes are lazily loaded from [AuthenticatedShell.tsx](/home/bcodex/TD.2.ANTIGRAVITY/client/src/AuthenticatedShell.tsx).
+- [runbook.spec.ts](/home/bcodex/TD.2.ANTIGRAVITY/e2e/runbook.spec.ts) already verifies that trader sessions do not fetch the admin bundle until `/admin` is visited.
+
+Best-practice conclusion:
+
+- **No action needed.**
+- Any audit suggestion that weakens this isolation is bad guidance.
+
+## Optional Follow-Ups
+
+### 1. Add direct webapp tests where the current tree is broad but under-covered
+
+Highest-value candidates:
+
+- `SystemConfigTab.tsx`
+  - save flow for `system-config`
+  - save flow for nested `performanceSettings`
+  - schema-warning branch when tier performance fields are missing
+  - provider-probe UI feedback
+
+- `ProfileSettings.tsx`
+  - MFA setup/disable happy paths and failure states
+  - preference save behavior for locale/timezone/country lock rules
+  - session/account-action confirmation flows
+
+### 2. If churn rises, extract domain hooks before more view splitting
+
+Best candidates for future extraction:
+
+- `SystemConfigTab.tsx`: feature hooks for section save state and admin health/provider interactions
+- `ProfileSettings.tsx`: hooks for MFA, preferences, and account-action workflows
+- `PartnerPortal.tsx` / `ScoutChallengesPanel.tsx`: hooks/services for query invalidation and mutation orchestration
+
+This would improve test seams more than another round of pure JSX breakup.
+
+## Final Recommendation
+
+For the webapp, the prior walkthrough should **not** be used as a refactor queue by itself.
+
+The correct queue is:
+
+1. Add targeted tests for `SystemConfigTab.tsx` and `ProfileSettings.tsx`.
+2. Treat `TradeScreen.tsx` as a behavior-sensitive hot path, not a size-only cleanup target.
+3. Only decompose the remaining admin/partner/scout pages when churn identifies a stable domain seam.
+
+That is the best-practice path for maintainability without regressing live updates, performance tiers, admin bundle isolation, or trade UI behavior.

@@ -1,0 +1,179 @@
+# Large Files Decomposition — Completion Verification
+
+**Verified against current tree on 2026-03-08**
+
+Following the [.agents/audit-decomposition.md](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/.agents/audit-decomposition.md) policy, all claims are verified via live-tree scans (`wc -l`, `grep`, directory listings).
+
+---
+
+## Summary Verdict
+
+| # | Decomposition Item | Report LOC | Current LOC | Status |
+|---|---|---:|---:|---|
+| 1 | **Utility dedup** → [shared/scalars.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/shared/scalars.ts) | 16+ copies | Canonical created, **5 local copies remain** | 🟡 Partial |
+| 2 | **adminScout.ts** → 6 sub-files | 5,010 | directory with 6 files | ✅ Done |
+| 3 | **traderCore.ts** → trader sub-routes | 2,047 | 1,730 + 14 extracted files | ✅ Done |
+| 4 | **grift.ts** → grift domain files | 2,171 | 1,664 + 12 extracted files | ✅ Done |
+| 5 | **challengeEvaluation.ts** → rewards/leaderboard/progression | 2,406 | 710 + `challengeEvaluationSupport.ts` (1,781) | ✅ Done |
+| 6 | **adminDataExportBuild.ts** → export writers/domain | 2,592 | 1,531 + `Support.ts` (1,102) + 5 sibling files | ✅ Done |
+| 7 | **messaging.ts** → settings extracted | 2,128 | 1,885 + `messagingSettings.ts` | 🟡 Partial |
+| 8 | **AdminDashboard.tsx** → tab components | 9,129 | 1,411 + 9 extracted components | ✅ Done |
+| 9 | **Client files** (PartnerPortal, GriftAdmin, etc.) | 2,340–3,298 | 1,805–1,959 + extracted sub-components | ✅ Done |
+| 10 | **schema.pg.ts** → domain modules | 3,178 | 111 (barrel re-export) | ✅ Done |
+
+---
+
+## Detailed Evidence
+
+### Step 1: Utility Dedup — [shared/scalars.ts](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/shared/scalars.ts)
+
+**Canonical shared module created** at [shared/scalars.ts](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/shared/scalars.ts) exporting: `nowSec`, `toFiniteNumber`, `toFiniteNumberOr`, `clampInt`, `clampIntOr`.
+
+**Also created:** [shared/challenges/mailbox.ts](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/shared/challenges/mailbox.ts) exporting `normalizeChallengeMailboxCategory`.
+
+**Import adoption:** 34 imports use `shared/` paths; only 2 non-shared imports remain.
+
+> [!WARNING]
+> **5 local function copies still exist** (not just imports — actual `function` definitions):
+> - `clampInt` in `globalSettingsAdmin.ts`, `adminActivity.ts`, `griftRetention.ts`, `adminScout/support.ts`
+> - `toFiniteNumber` in `clickhouseSync.ts`, `adminScout/support.ts`, `allocationEngine.ts`
+> - `normalizeChallengeMailboxCategory` in `challengeEvaluationSupport.ts`, `traderTalent.ts`
+
+Per [.agents/audit-decomposition.md](file://wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/.agents/audit-decomposition.md) rule: *"local wrappers are allowed when semantics differ"* — some of these have different signatures (e.g., `allocationEngine.toFiniteNumber` returns `number | null` vs the shared version). Each would need a case-by-case review.
+
+---
+
+### Step 2: adminScout.ts Decomposition
+
+Decomposed into `server/routes/adminScout/` with **6 files**:
+
+| File | Lines |
+|---|---:|
+| `challengeAnalytics.ts` | 1,327 |
+| `challenges.ts` | 1,159 |
+| `candidates.ts` | 1,139 |
+| `partners.ts` | ~530 |
+| `support.ts` | ~520 |
+| `validation.ts` | ~410 |
+
+The original report recommended 7 files (including `index.ts`, `pipeline.ts`, `badges.ts`, `scope.ts`). The actual split uses different seams — `challengeAnalytics.ts` and `candidates.ts` weren't in the plan but exist and make domain sense.
+
+---
+
+### Step 3: traderCore.ts Decomposition
+
+Decomposed from **2,047 → 1,730 lines** with **14 files** in `server/routes/trader/`:
+
+| File | Purpose |
+|---|---|
+| `tradeOpen.ts` | Opening trades |
+| `tradeClose.ts` | Closing trades |
+| `tradeCancel.ts` | Cancelling trades |
+| `tradeTargets.ts` | TP/SL targets |
+| `journal.ts` | Trade journal |
+| `account.ts` | Account queries |
+| `leaderboard.ts` | Leaderboard |
+| `policy.ts` | Trade policies |
+| `trades.ts` | Trade listings |
+| `index.ts` | Sub-router composer |
+| `types.ts` | Shared types |
+| 3 test files | `tradeOpen.test.ts`, `tradeClose.test.ts`, `tradeCancel.test.ts` |
+
+---
+
+### Step 4: grift.ts Decomposition
+
+Decomposed from **2,171 → 1,664 lines** with **12 domain files** in `server/grift/`:
+
+`griftEngine.ts` (1,827), `griftAdminAudit.ts`, `griftAutoEnforcement.ts`, `griftDb.ts`, `griftDefaults.ts`, `griftGeo.ts`, `griftIp2AsnDataset.ts`, `griftIpAsn.ts`, `griftPublicRouter.ts`, `griftRetention.ts`, `griftScheduler.ts`, `griftTypes.ts`
+
+Additionally: `server/routes/grift-admin/` with `ops.ts` and `shared.ts`.
+
+---
+
+### Step 5: challengeEvaluation.ts Decomposition
+
+Split from **2,406 → 710 lines** + [challengeEvaluationSupport.ts](file:///\\wsl.localhost/Ubuntu/home/bcodex/TD.2.ANTIGRAVITY/server/recruitment/challengesV4/challengeEvaluationSupport.ts) at **1,781 lines**.
+
+The original plan proposed 4 files. The actual split uses a 2-file model. `challengeEvaluationSupport.ts` at 1,781 lines is itself a near-threshold file.
+
+---
+
+### Step 6: adminDataExportBuild.ts Decomposition
+
+Split from **2,592 → 1,531 lines** plus sibling files:
+
+| File | Lines |
+|---|---:|
+| `adminDataExportBuild.ts` | 1,531 |
+| `adminDataExportBuildSupport.ts` | 1,102 |
+| `adminDataExportBuildClickhouse.ts` | ~560 |
+| `adminDataExportMetrics.ts` | ~80 |
+| `adminDataExportQueue.ts` | ~350 |
+| `adminDataExportRepo.ts` | ~340 |
+| `adminDataExportRetention.ts` | ~100 |
+
+---
+
+### Step 7: messaging.ts Decomposition
+
+Split from **2,128 → 1,885 lines** + `messagingSettings.ts` extracted.
+
+> [!NOTE]
+> The original plan recommended 4 files (`messagingEncryption.ts`, `messagingFanout.ts`, `messagingSettings.ts`, `messaging.ts`). Only `messagingSettings.ts` was extracted. The core file remains at **1,885 lines** but below the 2,000-line threshold.
+
+---
+
+### Step 8: AdminDashboard.tsx Decomposition
+
+Dramatically reduced from **9,129 → 1,411 lines**. Extracted into `client/src/components/admin/dashboard/`:
+
+| Component | Lines |
+|---|---:|
+| `SystemConfigTab.tsx` | 1,948 |
+| `AdminDashboardSupport.tsx` | 1,618 |
+| `AdminUserManagementTab.tsx` | 1,479 |
+| `AdminDashboardDialogs.tsx` | ~980 |
+| `MigrationTab.tsx` | 1,102 |
+| `AdminTradeSettingsTab.tsx` | ~770 |
+| `AdminViewAsTab.tsx` | ~170 |
+| `AdminInstrumentsTab.tsx` | ~270 |
+| `SystemHealthPanel.tsx` | ~220 |
+
+---
+
+### Step 9: Client-side Large Files
+
+| File | Report LOC | Current LOC | Change |
+|---|---:|---:|---|
+| `PartnerPortal.tsx` | 3,298 | 1,833 | -44% |
+| `GriftAdmin.tsx` | 2,853 | 1,872 | -34% (+ 3 extracted tabs) |
+| `ScoutChallengesPanel.tsx` | 2,712 | 1,820 | -33% |
+| `ScoutWorkbench.tsx` | 2,444 | 1,805 | -26% |
+| `TradeScreen.tsx` | 2,340 | 1,959 | -16% |
+
+`GriftAdmin.tsx` extracted into `client/src/components/admin/grift/`: `ConfigTab.tsx`, `DashboardTab.tsx`, `SignalsTab.tsx`.
+
+---
+
+### Step 10: schema.pg.ts Decomposition
+
+Reduced from **3,178 → 111 lines** (barrel re-export). Schema tables moved into domain-specific shared modules.
+
+---
+
+## @ts-nocheck Elimination
+
+**Fully resolved.** Zero `@ts-nocheck` directives found in `client/`, `server/`, or `shared/`. The only match is in `client/vite.plugins/autoI18n.ts:142` which is a *regex pattern* detecting `@ts-nocheck`, not a suppression.
+
+---
+
+## Remaining Items / Follow-ups
+
+| Item | Status | Notes |
+|---|---|---|
+| Local utility function copies | 🟡 Open | 5 local `function` definitions remain alongside shared canonical |
+| `challengeEvaluationSupport.ts` size | 🟡 Monitor | 1,781 lines — near threshold |
+| `SystemConfigTab.tsx` size | 🟡 Monitor | 1,948 lines — near threshold, second-generation file |
+| `messaging.ts` further decomposition | 🟡 Optional | 1,885 lines — below 2k threshold |
+| Admin monolith backlog | 🟡 Tracked | 10 more bounded routers planned per `ADMIN_TS_DECOMPOSITION_REAUDIT_MAP.md` |

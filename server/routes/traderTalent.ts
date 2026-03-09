@@ -3,6 +3,7 @@ import { and, asc, desc, eq, sql } from "drizzle-orm";
 import crypto from "crypto";
 import { z } from "zod";
 import { db } from "@db";
+import { normalizeChallengeMailboxCategory } from "@shared/challenges/mailbox";
 import { nowSec } from "@shared/scalars";
 import {
   challengeBadgeAwards,
@@ -170,14 +171,6 @@ async function getRecruitmentConfig() {
     challengeProgressionEnabled: Boolean(cfg?.challengeProgressionEnabled ?? true),
     challengeCustomRewardsEnabled: Boolean(cfg?.challengeCustomRewardsEnabled ?? true),
   };
-}
-
-function normalizeChallengeMailboxCategory(raw: unknown): "SYSTEM" | "SUPPORT" | "ANNOUNCEMENT" | "CHALLENGES" {
-  const value = String(raw ?? "").trim().toUpperCase();
-  if (value === "SYSTEM" || value === "SUPPORT" || value === "ANNOUNCEMENT" || value === "CHALLENGES") {
-    return value;
-  }
-  return "SYSTEM";
 }
 
 async function sendChallengeMailboxMessage(input: {

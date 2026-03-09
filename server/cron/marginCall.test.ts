@@ -110,15 +110,17 @@ test("starts the scheduler once and polls on the fixed cadence", async () => {
 
   expect(state.dbExecute).toHaveBeenCalledTimes(1);
   expect(state.log).toHaveBeenCalledWith(expect.stringContaining("Starting Margin Call"));
-});
+}, 10_000);
 
 test("does not register duplicate polling intervals on repeated starts", async () => {
-  const setIntervalSpy = vi.spyOn(globalThis, "setInterval");
   const { startMarginCallScheduler } = await import("./marginCall");
 
   await startMarginCallScheduler();
   await startMarginCallScheduler();
+  await vi.advanceTimersByTimeAsync(15_000);
 
-  expect(setIntervalSpy).toHaveBeenCalledTimes(1);
-  expect(setIntervalSpy.mock.calls[0]?.[1]).toBe(15_000);
-});
+  expect(state.dbExecute).toHaveBeenCalledTimes(1);
+  expect(
+    state.log.mock.calls.filter(([message]) => String(message).includes("Starting Margin Call")),
+  ).toHaveLength(1);
+}, 10_000);

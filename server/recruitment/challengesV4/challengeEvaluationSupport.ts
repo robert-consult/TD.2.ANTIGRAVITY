@@ -1,4 +1,5 @@
 import { db } from "@db";
+import { normalizeChallengeMailboxCategory } from "@shared/challenges/mailbox";
 import { recalcAccount } from "../../recalcAccount";
 import {
   challengeBadgeAwards,
@@ -129,13 +130,7 @@ export function appendChallengeTransitionAudit(input: {
   });
 }
 
-export function normalizeChallengeMailboxCategory(raw: unknown): "SYSTEM" | "SUPPORT" | "ANNOUNCEMENT" | "CHALLENGES" {
-  const value = String(raw ?? "").trim().toUpperCase();
-  if (value === "SYSTEM" || value === "SUPPORT" || value === "ANNOUNCEMENT" || value === "CHALLENGES") {
-    return value;
-  }
-  return "SYSTEM";
-}
+export { normalizeChallengeMailboxCategory } from "@shared/challenges/mailbox";
 
 export async function maybeSendChallengeMailboxMessage(args: {
   cfg: SystemChallengeConfig;
@@ -1778,4 +1773,3 @@ export async function persistPhaseSnapshot(args: {
     })
     .onConflictDoNothing();
 }
-

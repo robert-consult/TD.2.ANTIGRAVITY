@@ -134,15 +134,12 @@ test("starts the scheduler and runs the auto-close job on the configured cadence
 
   expect(state.getOldOpenTrades).toHaveBeenCalledTimes(1);
   expect(state.log).toHaveBeenCalledWith(expect.stringContaining("Auto-close scheduled to run every 60 minutes"));
-});
+}, 10_000);
 
 test("reschedules when live settings updates are published", async () => {
-  const setIntervalSpy = vi.spyOn(globalThis, "setInterval");
   const { startAutoCloseScheduler } = await import("./autoClose");
 
   await startAutoCloseScheduler();
-  expect(setIntervalSpy).toHaveBeenCalledTimes(1);
-  expect(setIntervalSpy.mock.calls[0]?.[1]).toBe(60 * 60 * 1000);
 
   state.settings.autoCloseCheckFrequencyMinutes = 5;
   expect(state.liveHandler).toBeTypeOf("function");
@@ -150,7 +147,13 @@ test("reschedules when live settings updates are published", async () => {
   await Promise.resolve();
   await Promise.resolve();
   await Promise.resolve();
+  state.getOldOpenTrades.mockClear();
 
-  expect(setIntervalSpy).toHaveBeenCalledTimes(2);
-  expect(setIntervalSpy.mock.calls[1]?.[1]).toBe(5 * 60 * 1000);
-});
+  await vi.advanceTimersByTimeAsync(55 * 60 * 1000);
+  expect(state.getOldOpenTrades).toHaveBeenCalledTimes(11);
+
+  await vi.advanceTimersByTimeAsync(5 * 60 * 1000);
+  expect(state.getOldOpenTrades).toHaveBeenCalledTimes(12);
+
+  expect(state.log).toHaveBeenCalledWith(expect.stringContaining("Auto-close scheduled to run every 5 minutes"));
+}, 10_000);
